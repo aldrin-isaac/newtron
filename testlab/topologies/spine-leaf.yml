@@ -1,0 +1,69 @@
+name: spine-leaf
+
+defaults:
+  image: vrnetlab/cisco_sonic:ngdp-202411
+  username: cisco
+  password: cisco123
+  platform: vs-platform
+  site: lab-site
+  hwsku: "cisco-8101-p4-32x100-vs"
+  ntp_server_1: "10.100.0.1"
+  ntp_server_2: "10.100.0.2"
+  syslog_server: "10.100.0.3"
+
+network:
+  as_number: 65000
+  underlay_as_base: 65100
+  region: lab-region
+
+nodes:
+  spine1:
+    role: spine
+    loopback_ip: "10.0.0.1"
+    variables:
+      cluster_id: "10.0.0.1"
+  spine2:
+    role: spine
+    loopback_ip: "10.0.0.2"
+    image: vrnetlab/cisco_sonic:ngdp-202411
+    variables:
+      cluster_id: "10.0.0.2"
+  leaf1:
+    role: leaf
+    loopback_ip: "10.0.0.11"
+    variables:
+      vtep_name: vtep1
+      spine1_ip: "10.0.0.1"
+      spine2_ip: "10.0.0.2"
+  leaf2:
+    role: leaf
+    loopback_ip: "10.0.0.12"
+    image: vrnetlab/cisco_sonic:ngdp-202411
+    variables:
+      vtep_name: vtep1
+      spine1_ip: "10.0.0.1"
+      spine2_ip: "10.0.0.2"
+  server1:
+    role: server
+    image: nicolaka/netshoot:latest
+  server2:
+    role: server
+    image: nicolaka/netshoot:latest
+
+links:
+  - endpoints: ["spine1:Ethernet0", "leaf1:Ethernet0"]
+  - endpoints: ["spine1:Ethernet1", "leaf2:Ethernet0"]
+  - endpoints: ["spine2:Ethernet0", "leaf1:Ethernet1"]
+  - endpoints: ["spine2:Ethernet1", "leaf2:Ethernet1"]
+  - endpoints: ["leaf1:Ethernet2", "server1:eth1"]
+  - endpoints: ["leaf2:Ethernet2", "server2:eth1"]
+
+role_defaults:
+  spine:
+    - sonic-baseline
+    - sonic-evpn-spine
+  leaf:
+    - sonic-baseline
+    - sonic-evpn-leaf
+    - sonic-acl-copp
+    - sonic-qos-8q

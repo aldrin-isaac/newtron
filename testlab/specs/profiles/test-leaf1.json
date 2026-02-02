@@ -1,0 +1,6 @@
+{
+  "loopback_ip": "10.0.0.10",
+  "mgmt_ip": "172.17.0.3",
+  "platform": "test-platform",
+  "site": "test-site"
+}

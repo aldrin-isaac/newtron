@@ -1,0 +1,10 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: newtron-test-redis
+    command: redis-server --databases 16 --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

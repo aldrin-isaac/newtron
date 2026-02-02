@@ -1,0 +1,28 @@
+{
+  "name": "sonic-evpn-leaf",
+  "description": "EVPN leaf switch baseline configuration",
+  "version": "1.0",
+  "variables": ["vtep_name", "loopback_ip"],
+  "config_db": {
+    "VXLAN_TUNNEL": {
+      "{{vtep_name}}": {
+        "src_ip": "{{loopback_ip}}"
+      }
+    },
+    "VXLAN_EVPN_NVO": {
+      "nvo1": {
+        "source_vtep": "{{vtep_name}}"
+      }
+    },
+    "SAG_GLOBAL": {
+      "IPv4": {
+        "gwmac": "00:00:00:01:02:03"
+      }
+    }
+  },
+  "notes": [
+    "This configlet sets up a leaf switch for EVPN/VXLAN fabric",
+    "Establishes iBGP peering with spine switches for EVPN",
+    "Enables symmetric IRB with SAG (Static Anycast Gateway)"
+  ]
+}

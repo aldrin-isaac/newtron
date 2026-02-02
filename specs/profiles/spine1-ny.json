@@ -1,0 +1,7 @@
+{
+  "mgmt_ip": "172.17.190.31",
+  "loopback_ip": "10.0.0.2",
+  "site": "ny",
+  "platform": "accton-as7726-32x",
+  "is_route_reflector": true
+}

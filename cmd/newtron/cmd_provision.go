@@ -1,0 +1,130 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"sort"
+
+	"github.com/spf13/cobra"
+
+	"github.com/newtron-network/newtron/pkg/network"
+)
+
+var provisionCmd = &cobra.Command{
+	Use:   "provision",
+	Short: "Provision device(s) from topology.json",
+	Long: `Provision one or more SONiC devices from the topology specification.
+
+The topology provisioner generates a complete CONFIG_DB for each device
+offline from the topology.json and service definitions, then delivers
+it atomically to the device.
+
+Without -d: provisions ALL devices in topology.json
+With -d:    provisions the specified device only
+Without -x: dry-run (shows generated config summary)
+With -x:    execute (deliver config + save + reload)
+
+Examples:
+  newtron -S specs provision                  # Dry-run all devices
+  newtron -S specs provision -d leaf1         # Dry-run specific device
+  newtron -S specs provision -x              # Execute all devices
+  newtron -S specs provision -d leaf1 -xs    # Execute + save for one device`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if !net.HasTopology() {
+			return fmt.Errorf("no topology.json found in spec directory %s", specDir)
+		}
+
+		tp, err := network.NewTopologyProvisioner(net)
+		if err != nil {
+			return err
+		}
+
+		// Get device list
+		var deviceNames []string
+		if deviceName != "" {
+			deviceNames = []string{deviceName}
+		} else {
+			deviceNames = net.GetTopology().DeviceNames()
+		}
+
+		if len(deviceNames) == 0 {
+			fmt.Println("No devices found in topology.")
+			return nil
+		}
+
+		fmt.Printf("Provisioning %d device(s) from topology.json\n\n", len(deviceNames))
+
+		for _, name := range deviceNames {
+			fmt.Printf("=== %s ===\n", bold(name))
+
+			// Generate composite (always — for both dry-run and execute)
+			composite, err := tp.GenerateDeviceComposite(name)
+			if err != nil {
+				fmt.Printf("  %s: %v\n\n", red("ERROR"), err)
+				continue
+			}
+
+			// Show summary
+			fmt.Printf("  Entries: %d\n", composite.EntryCount())
+			tables := make([]string, 0, len(composite.Tables))
+			for table := range composite.Tables {
+				tables = append(tables, table)
+			}
+			sort.Strings(tables)
+			for _, table := range tables {
+				fmt.Printf("    %s: %d keys\n", table, len(composite.Tables[table]))
+			}
+
+			if !executeMode {
+				fmt.Println()
+				continue
+			}
+
+			// Execute: connect, deliver, save, reload
+			ctx := context.Background()
+			fmt.Print("  Delivering... ")
+
+			result, err := tp.ProvisionDevice(ctx, name)
+			if err != nil {
+				fmt.Printf("%s: %v\n\n", red("FAILED"), err)
+				continue
+			}
+			fmt.Printf("%s (%d entries applied)\n", green("OK"), result.Applied)
+
+			// Save and reload if requested
+			if saveMode {
+				dev, err := net.ConnectDevice(ctx, name)
+				if err != nil {
+					fmt.Printf("  Save: %s (could not connect: %v)\n", red("FAILED"), err)
+				} else {
+					fmt.Print("  Saving config... ")
+					if err := dev.SaveConfig(ctx); err != nil {
+						fmt.Printf("%s: %v\n", red("FAILED"), err)
+					} else {
+						fmt.Println(green("saved"))
+					}
+
+					fmt.Print("  Reloading config... ")
+					if err := dev.ReloadConfig(ctx); err != nil {
+						fmt.Printf("%s: %v\n", red("FAILED"), err)
+					} else {
+						fmt.Println(green("reloaded"))
+					}
+					dev.Disconnect()
+				}
+			}
+
+			fmt.Println()
+		}
+
+		if !executeMode {
+			printDryRunNotice()
+		}
+
+		return nil
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(provisionCmd)
+}

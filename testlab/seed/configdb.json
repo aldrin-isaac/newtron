@@ -1,0 +1,229 @@
+{
+  "DEVICE_METADATA": {
+    "localhost": {
+      "hostname": "test-leaf1",
+      "bgp_asn": "13908",
+      "mac": "00:11:22:33:44:55",
+      "platform": "x86_64-accton_as7726_32x",
+      "type": "LeafRouter"
+    }
+  },
+  "PORT": {
+    "Ethernet0": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/0",
+      "index": "0",
+      "lanes": "25,26,27,28",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet1": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/1",
+      "index": "1",
+      "lanes": "29,30,31,32",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet2": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/2",
+      "index": "2",
+      "lanes": "33,34,35,36",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet3": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/3",
+      "index": "3",
+      "lanes": "37,38,39,40",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet4": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/4",
+      "index": "4",
+      "lanes": "41,42,43,44",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet5": {
+      "admin_status": "up",
+      "alias": "fortyGigE0/5",
+      "index": "5",
+      "lanes": "45,46,47,48",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet6": {
+      "admin_status": "down",
+      "alias": "fortyGigE0/6",
+      "index": "6",
+      "lanes": "49,50,51,52",
+      "mtu": "9100",
+      "speed": "40000"
+    },
+    "Ethernet7": {
+      "admin_status": "down",
+      "alias": "fortyGigE0/7",
+      "index": "7",
+      "lanes": "53,54,55,56",
+      "mtu": "9100",
+      "speed": "40000"
+    }
+  },
+  "PORTCHANNEL": {
+    "PortChannel100": {
+      "admin_status": "up",
+      "mtu": "9100",
+      "min_links": "1",
+      "fallback": "true",
+      "fast_rate": "false"
+    }
+  },
+  "PORTCHANNEL_MEMBER": {
+    "PortChannel100|Ethernet4": {},
+    "PortChannel100|Ethernet5": {}
+  },
+  "VLAN": {
+    "Vlan100": {
+      "vlanid": "100",
+      "description": "Servers",
+      "admin_status": "up"
+    },
+    "Vlan200": {
+      "vlanid": "200",
+      "description": "Storage",
+      "admin_status": "up"
+    }
+  },
+  "VLAN_MEMBER": {
+    "Vlan100|Ethernet2": {
+      "tagging_mode": "untagged"
+    },
+    "Vlan100|Ethernet3": {
+      "tagging_mode": "tagged"
+    },
+    "Vlan200|PortChannel100": {
+      "tagging_mode": "tagged"
+    }
+  },
+  "VLAN_INTERFACE": {
+    "Vlan100": {
+      "vrf_name": "Vrf_CUST1"
+    },
+    "Vlan100|10.1.100.1/24": {}
+  },
+  "VRF": {
+    "Vrf_CUST1": {
+      "vni": "10001"
+    }
+  },
+  "INTERFACE": {
+    "Ethernet0": {},
+    "Ethernet1": {
+      "vrf_name": "Vrf_CUST1"
+    },
+    "Ethernet1|10.1.1.1/30": {}
+  },
+  "LOOPBACK_INTERFACE": {
+    "Loopback0": {},
+    "Loopback0|10.0.0.10/32": {}
+  },
+  "VXLAN_TUNNEL": {
+    "vtep1": {
+      "src_ip": "10.0.0.10"
+    }
+  },
+  "VXLAN_EVPN_NVO": {
+    "nvo1": {
+      "source_vtep": "vtep1"
+    }
+  },
+  "VXLAN_TUNNEL_MAP": {
+    "vtep1|map_10100_Vlan100": {
+      "vlan": "Vlan100",
+      "vni": "10100"
+    },
+    "vtep1|map_10001_Vrf_CUST1": {
+      "vrf": "Vrf_CUST1",
+      "vni": "10001"
+    }
+  },
+  "SUPPRESS_VLAN_NEIGH": {
+    "Vlan100": {
+      "suppress": "on"
+    }
+  },
+  "BGP_GLOBALS": {
+    "default": {
+      "local_asn": "13908",
+      "router_id": "10.0.0.10"
+    }
+  },
+  "BGP_NEIGHBOR": {
+    "10.0.0.1": {
+      "asn": "13908",
+      "name": "spine1-ny",
+      "local_addr": "10.0.0.10",
+      "admin_status": "up",
+      "holdtime": "180",
+      "keepalive": "60"
+    },
+    "10.0.0.2": {
+      "asn": "13908",
+      "name": "spine2-ny",
+      "local_addr": "10.0.0.10",
+      "admin_status": "up",
+      "holdtime": "180",
+      "keepalive": "60"
+    }
+  },
+  "BGP_NEIGHBOR_AF": {
+    "10.0.0.1|l2vpn_evpn": {
+      "activate": "true"
+    },
+    "10.0.0.2|l2vpn_evpn": {
+      "activate": "true"
+    }
+  },
+  "ACL_TABLE": {
+    "customer-l3-in": {
+      "policy_desc": "Ingress filter for customer-l3",
+      "type": "L3",
+      "stage": "ingress",
+      "ports": "Ethernet1"
+    },
+    "customer-l3-out": {
+      "policy_desc": "Egress filter for customer-l3",
+      "type": "L3",
+      "stage": "egress",
+      "ports": "Ethernet1"
+    }
+  },
+  "ACL_RULE": {
+    "customer-l3-in|RULE_100": {
+      "PRIORITY": "100",
+      "PACKET_ACTION": "DROP",
+      "SRC_IP": "0.0.0.0/8"
+    },
+    "customer-l3-in|RULE_9999": {
+      "PRIORITY": "9999",
+      "PACKET_ACTION": "FORWARD"
+    }
+  },
+  "NEWTRON_SERVICE_BINDING": {
+    "Ethernet1": {
+      "service_name": "customer-l3",
+      "ip_address": "10.1.1.1/30",
+      "vrf_name": "Vrf_CUST1",
+      "ipvpn": "customer-vpn",
+      "ingress_acl": "customer-l3-in",
+      "egress_acl": "customer-l3-out",
+      "applied_at": "2024-01-01T00:00:00Z",
+      "applied_by": "testuser"
+    }
+  }
+}

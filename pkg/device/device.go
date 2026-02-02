@@ -1,0 +1,728 @@
+package device
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/util"
+)
+
+// Device represents a SONiC switch
+type Device struct {
+	Name     string
+	Profile  *spec.ResolvedProfile
+	ConfigDB *ConfigDB
+	StateDB  *StateDB
+	State    *DeviceState
+
+	// v3: Platform configuration from device's platform.json
+	PlatformConfig *SonicPlatformConfig
+
+	// Redis connections
+	client      *ConfigDBClient
+	stateClient *StateDBClient
+	tunnel      *SSHTunnel // SSH tunnel for Redis access (nil if direct)
+	connected   bool
+	locked      bool
+	lockFiles   []string
+
+	// Mutex for thread safety
+	mu sync.RWMutex
+}
+
+// DeviceState holds the current operational state of the device
+type DeviceState struct {
+	Interfaces   map[string]*InterfaceState
+	PortChannels map[string]*PortChannelState
+	VLANs        map[int]*VLANState
+	VRFs         map[string]*VRFState
+	BGP          *BGPState
+	EVPN         *EVPNState
+}
+
+// InterfaceState represents interface operational state
+type InterfaceState struct {
+	Name        string
+	AdminStatus string
+	OperStatus  string
+	Speed       string
+	MTU         int
+	VRF         string
+	IPAddresses []string
+	Service     string
+	IngressACL  string
+	EgressACL   string
+	LAGMember   string // Parent LAG if member
+}
+
+// PortChannelState represents LAG operational state
+type PortChannelState struct {
+	Name          string
+	AdminStatus   string
+	OperStatus    string
+	Members       []string
+	ActiveMembers []string
+}
+
+// VLANState represents VLAN operational state
+type VLANState struct {
+	ID         int
+	Name       string
+	OperStatus string
+	Ports      []string
+	SVIStatus  string
+	L2VNI      int
+}
+
+// VRFState represents VRF operational state
+type VRFState struct {
+	Name       string
+	State      string
+	Interfaces []string
+	L3VNI      int
+	RouteCount int
+}
+
+// BGPState represents BGP operational state
+type BGPState struct {
+	LocalAS   int
+	RouterID  string
+	Neighbors map[string]*BGPNeighborState
+}
+
+// BGPNeighborState represents BGP neighbor state
+type BGPNeighborState struct {
+	Address  string
+	RemoteAS int
+	State    string
+	PfxRcvd  int
+	PfxSent  int
+	Uptime   string
+}
+
+// EVPNState represents EVPN operational state
+type EVPNState struct {
+	VTEPState   string
+	RemoteVTEPs []string
+	VNICount    int
+	Type2Routes int
+	Type5Routes int
+}
+
+// NewDevice creates a new device instance
+func NewDevice(name string, profile *spec.ResolvedProfile) *Device {
+	return &Device{
+		Name:    name,
+		Profile: profile,
+		State: &DeviceState{
+			Interfaces:   make(map[string]*InterfaceState),
+			PortChannels: make(map[string]*PortChannelState),
+			VLANs:        make(map[int]*VLANState),
+			VRFs:         make(map[string]*VRFState),
+		},
+	}
+}
+
+// Connect establishes connection to the device's config_db via Redis
+func (d *Device) Connect(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.connected {
+		return nil
+	}
+
+	var addr string
+	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
+		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass)
+		if err != nil {
+			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
+		}
+		d.tunnel = tun
+		addr = tun.LocalAddr()
+	} else {
+		addr = fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
+	}
+
+	// Connect to CONFIG_DB (DB 4)
+	d.client = NewConfigDBClient(addr)
+	if err := d.client.Connect(); err != nil {
+		return fmt.Errorf("connecting to config_db on %s: %w", d.Name, err)
+	}
+
+	// Load config_db
+	var err error
+	d.ConfigDB, err = d.client.GetAll()
+	if err != nil {
+		d.client.Close()
+		return fmt.Errorf("loading config_db from %s: %w", d.Name, err)
+	}
+
+	// Connect to STATE_DB (DB 6)
+	d.stateClient = NewStateDBClient(addr)
+	if err := d.stateClient.Connect(); err != nil {
+		// State DB connection failure is non-fatal - log warning and continue
+		util.WithDevice(d.Name).Warnf("Failed to connect to state_db: %v", err)
+	} else {
+		// Load state_db
+		d.StateDB, err = d.stateClient.GetAll()
+		if err != nil {
+			util.WithDevice(d.Name).Warnf("Failed to load state_db: %v", err)
+		} else {
+			// Populate device state from state_db + config_db
+			PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
+		}
+	}
+
+	d.connected = true
+	util.WithDevice(d.Name).Info("Connected")
+
+	return nil
+}
+
+// Disconnect closes the connection
+func (d *Device) Disconnect() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected {
+		return nil
+	}
+
+	if d.locked {
+		if err := d.unlock(); err != nil {
+			util.WithDevice(d.Name).Warnf("Failed to release lock: %v", err)
+		}
+	}
+
+	if d.client != nil {
+		d.client.Close()
+	}
+
+	if d.stateClient != nil {
+		d.stateClient.Close()
+	}
+
+	if d.tunnel != nil {
+		d.tunnel.Close()
+		d.tunnel = nil
+	}
+
+	d.connected = false
+	util.WithDevice(d.Name).Info("Disconnected")
+
+	return nil
+}
+
+// IsConnected returns true if connected to the device
+func (d *Device) IsConnected() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.connected
+}
+
+// RequireConnected returns an error if not connected
+func (d *Device) RequireConnected() error {
+	if !d.IsConnected() {
+		return util.NewPreconditionError("operation", d.Name, "device must be connected", "")
+	}
+	return nil
+}
+
+// RequireLocked returns an error if not locked
+func (d *Device) RequireLocked() error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return util.NewPreconditionError("operation", d.Name, "device must be connected", "")
+	}
+	if !d.locked {
+		return util.NewPreconditionError("operation", d.Name, "device must be locked for changes", "use Lock() first")
+	}
+	return nil
+}
+
+// Lock acquires an exclusive lock on the device for configuration changes
+func (d *Device) Lock(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected {
+		return util.ErrNotConnected
+	}
+
+	if d.locked {
+		return nil // Already locked
+	}
+
+	// Implement lock file logic here
+	d.locked = true
+	util.WithDevice(d.Name).Debug("Lock acquired")
+
+	return nil
+}
+
+// Unlock releases the device lock
+func (d *Device) Unlock() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	return d.unlock()
+}
+
+func (d *Device) unlock() error {
+	if !d.locked {
+		return nil
+	}
+
+	// Implement unlock logic here
+	d.locked = false
+	util.WithDevice(d.Name).Debug("Lock released")
+
+	return nil
+}
+
+// IsLocked returns true if the device is locked
+func (d *Device) IsLocked() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.locked
+}
+
+// Reload reloads the config_db and state_db from the device
+func (d *Device) Reload(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected {
+		return util.ErrNotConnected
+	}
+
+	var err error
+	d.ConfigDB, err = d.client.GetAll()
+	if err != nil {
+		return fmt.Errorf("reloading config_db: %w", err)
+	}
+
+	// Reload state_db if connected
+	if d.stateClient != nil {
+		d.StateDB, err = d.stateClient.GetAll()
+		if err != nil {
+			util.WithDevice(d.Name).Warnf("Failed to reload state_db: %v", err)
+		} else {
+			// Re-populate device state
+			PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
+		}
+	}
+
+	return nil
+}
+
+// GetInterface returns interface state by name.
+func (d *Device) GetInterface(name string) (*InterfaceState, error) {
+	if err := d.RequireConnected(); err != nil {
+		return nil, err
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	intf, ok := d.State.Interfaces[name]
+	if !ok {
+		return nil, fmt.Errorf("interface %s not found", name)
+	}
+	return intf, nil
+}
+
+// GetPortChannel returns LAG state by name.
+func (d *Device) GetPortChannel(name string) (*PortChannelState, error) {
+	if err := d.RequireConnected(); err != nil {
+		return nil, err
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	pc, ok := d.State.PortChannels[name]
+	if !ok {
+		return nil, fmt.Errorf("port channel %s not found", name)
+	}
+	return pc, nil
+}
+
+// GetVLAN returns VLAN state by ID
+func (d *Device) GetVLAN(id int) (*VLANState, error) {
+	if err := d.RequireConnected(); err != nil {
+		return nil, err
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	vlan, ok := d.State.VLANs[id]
+	if !ok {
+		return nil, fmt.Errorf("VLAN %d not found", id)
+	}
+	return vlan, nil
+}
+
+// GetVRF returns VRF state by name
+func (d *Device) GetVRF(name string) (*VRFState, error) {
+	if err := d.RequireConnected(); err != nil {
+		return nil, err
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	vrf, ok := d.State.VRFs[name]
+	if !ok {
+		return nil, fmt.Errorf("VRF %s not found", name)
+	}
+	return vrf, nil
+}
+
+// InterfaceExists checks if an interface exists.
+func (d *Device) InterfaceExists(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Check PORT table
+	if _, ok := d.ConfigDB.Port[name]; ok {
+		return true
+	}
+	// Check PORTCHANNEL table
+	if _, ok := d.ConfigDB.PortChannel[name]; ok {
+		return true
+	}
+	// Check VLAN_INTERFACE
+	for key := range d.ConfigDB.VLANInterface {
+		if key == name || key == fmt.Sprintf("%s|", name) {
+			return true
+		}
+	}
+	return false
+}
+
+// VLANExists checks if a VLAN exists
+func (d *Device) VLANExists(id int) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	key := fmt.Sprintf("Vlan%d", id)
+	_, ok := d.ConfigDB.VLAN[key]
+	return ok
+}
+
+// VRFExists checks if a VRF exists
+func (d *Device) VRFExists(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	_, ok := d.ConfigDB.VRF[name]
+	return ok
+}
+
+// PortChannelExists checks if a PortChannel exists
+func (d *Device) PortChannelExists(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	_, ok := d.ConfigDB.PortChannel[name]
+	return ok
+}
+
+// InterfaceHasService checks if an interface has a service bound
+func (d *Device) InterfaceHasService(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if intf, ok := d.State.Interfaces[name]; ok {
+		return intf.Service != ""
+	}
+	return false
+}
+
+// InterfaceIsLAGMember checks if an interface is a LAG member.
+func (d *Device) InterfaceIsLAGMember(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	for key := range d.ConfigDB.PortChannelMember {
+		// Key format: PortChannel100|Ethernet0
+		if len(key) > len(name) && key[len(key)-len(name):] == name {
+			return true
+		}
+	}
+	return false
+}
+
+// GetInterfaceLAG returns the LAG that an interface belongs to.
+func (d *Device) GetInterfaceLAG(name string) string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	for key := range d.ConfigDB.PortChannelMember {
+		if len(key) > len(name)+1 {
+			parts := splitKey(key)
+			if len(parts) == 2 && parts[1] == name {
+				return parts[0]
+			}
+		}
+	}
+	return ""
+}
+
+func splitKey(key string) []string {
+	for i := range key {
+		if key[i] == '|' {
+			return []string{key[:i], key[i+1:]}
+		}
+	}
+	return []string{key}
+}
+
+// VTEPExists checks if a VTEP is configured
+func (d *Device) VTEPExists() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	return len(d.ConfigDB.VXLANTunnel) > 0
+}
+
+// BGPConfigured checks if BGP is configured.
+// Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
+// DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
+func (d *Device) BGPConfigured() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if len(d.ConfigDB.BGPNeighbor) > 0 {
+		return true
+	}
+	if meta, ok := d.ConfigDB.DeviceMetadata["localhost"]; ok {
+		if asn, ok := meta["bgp_asn"]; ok && asn != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ACLTableExists checks if an ACL table exists
+func (d *Device) ACLTableExists(name string) bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	_, ok := d.ConfigDB.ACLTable[name]
+	return ok
+}
+
+// Client returns the underlying ConfigDB client for direct access
+func (d *Device) Client() *ConfigDBClient {
+	return d.client
+}
+
+// ApplyChanges writes a set of changes to config_db via Redis
+func (d *Device) ApplyChanges(changes []ConfigChange) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected {
+		return util.ErrNotConnected
+	}
+	if !d.locked {
+		return fmt.Errorf("device must be locked for changes")
+	}
+
+	for _, change := range changes {
+		var err error
+		switch change.Type {
+		case ChangeTypeAdd, ChangeTypeModify:
+			err = d.client.Set(change.Table, change.Key, change.Fields)
+		case ChangeTypeDelete:
+			err = d.client.Delete(change.Table, change.Key)
+		}
+		if err != nil {
+			return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
+		}
+	}
+
+	// Reload config_db to reflect changes
+	var err error
+	d.ConfigDB, err = d.client.GetAll()
+	if err != nil {
+		util.WithDevice(d.Name).Warnf("Failed to reload config_db after changes: %v", err)
+	}
+
+	return nil
+}
+
+// ConfigChange represents a single configuration change
+type ConfigChange struct {
+	Table  string
+	Key    string
+	Type   ChangeType
+	Fields map[string]string
+}
+
+// ChangeType represents the type of configuration change
+type ChangeType string
+
+const (
+	ChangeTypeAdd    ChangeType = "add"
+	ChangeTypeModify ChangeType = "modify"
+	ChangeTypeDelete ChangeType = "delete"
+)
+
+// StateClient returns the underlying StateDB client for direct access
+func (d *Device) StateClient() *StateDBClient {
+	return d.stateClient
+}
+
+// RefreshState reloads only the state_db (not config_db)
+func (d *Device) RefreshState(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected {
+		return util.ErrNotConnected
+	}
+
+	if d.stateClient == nil {
+		return fmt.Errorf("state_db client not connected")
+	}
+
+	var err error
+	d.StateDB, err = d.stateClient.GetAll()
+	if err != nil {
+		return fmt.Errorf("refreshing state_db: %w", err)
+	}
+
+	// Re-populate device state
+	PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
+	return nil
+}
+
+// GetInterfaceOperState returns the operational state of an interface.
+func (d *Device) GetInterfaceOperState(name string) (string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.StateDB == nil {
+		return "", fmt.Errorf("state_db not loaded")
+	}
+
+	if state, ok := d.StateDB.PortTable[name]; ok {
+		return state.OperStatus, nil
+	}
+	return "", fmt.Errorf("interface %s not found in state_db", name)
+}
+
+// GetBGPNeighborOperState returns the operational state of a BGP neighbor
+func (d *Device) GetBGPNeighborOperState(neighbor string) (*BGPNeighborState, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.State == nil || d.State.BGP == nil {
+		return nil, fmt.Errorf("BGP state not loaded")
+	}
+
+	if state, ok := d.State.BGP.Neighbors[neighbor]; ok {
+		return state, nil
+	}
+	return nil, fmt.Errorf("BGP neighbor %s not found", neighbor)
+}
+
+// GetPortChannelOperState returns the operational state of a PortChannel
+func (d *Device) GetPortChannelOperState(name string) (*PortChannelState, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.State == nil {
+		return nil, fmt.Errorf("state not loaded")
+	}
+
+	if state, ok := d.State.PortChannels[name]; ok {
+		return state, nil
+	}
+	return nil, fmt.Errorf("PortChannel %s not found", name)
+}
+
+// GetVRFOperState returns the operational state of a VRF
+func (d *Device) GetVRFOperState(name string) (*VRFState, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.State == nil {
+		return nil, fmt.Errorf("state not loaded")
+	}
+
+	if state, ok := d.State.VRFs[name]; ok {
+		return state, nil
+	}
+	return nil, fmt.Errorf("VRF %s not found", name)
+}
+
+// GetEVPNState returns the EVPN operational state
+func (d *Device) GetEVPNState() *EVPNState {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.State == nil {
+		return nil
+	}
+	return d.State.EVPN
+}
+
+// HasStateDB returns true if state_db is available
+func (d *Device) HasStateDB() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.StateDB != nil
+}
+
+// ReloadConfig triggers a config reload on the SONiC device by executing
+// `sudo config reload -y` via SSH. This causes SONiC to re-read CONFIG_DB
+// and apply any changes (e.g., new BGP neighbors added by frrcfgd).
+// Requires an active SSH tunnel (SSHUser/SSHPass in profile).
+func (d *Device) ReloadConfig(ctx context.Context) error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	if d.tunnel == nil {
+		return fmt.Errorf("config reload requires SSH connection (no SSH credentials configured)")
+	}
+
+	output, err := d.tunnel.ExecCommand("sudo config reload -y")
+	if err != nil {
+		return fmt.Errorf("config reload failed: %w (output: %s)", err, output)
+	}
+	return nil
+}
+
+// SaveConfig persists the running CONFIG_DB to disk by executing `sudo config save -y`
+// on the SONiC device via SSH. Requires an active SSH tunnel (SSHUser/SSHPass in profile).
+// Returns error if no SSH tunnel is available (direct Redis connection).
+func (d *Device) SaveConfig(ctx context.Context) error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	if d.tunnel == nil {
+		return fmt.Errorf("config save requires SSH connection (no SSH credentials configured)")
+	}
+
+	output, err := d.tunnel.ExecCommand("sudo config save -y")
+	if err != nil {
+		return fmt.Errorf("config save failed: %w (output: %s)", err, output)
+	}
+	return nil
+}

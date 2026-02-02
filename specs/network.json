@@ -1,0 +1,199 @@
+{
+  "version": "1.0",
+  "lock_dir": "/var/run/newtron",
+  "super_users": ["neteng", "admin"],
+  "user_groups": {
+    "neteng": ["alice", "bob", "charlie"],
+    "netops": ["diana", "eve"],
+    "readonly": ["frank"]
+  },
+  "permissions": {
+    "all": ["neteng"],
+    "service.apply": ["neteng", "netops"],
+    "service.remove": ["neteng"],
+    "service.view": ["neteng", "netops", "readonly"],
+    "interface.view": ["neteng", "netops", "readonly"],
+    "lag.create": ["neteng"],
+    "lag.modify": ["neteng", "netops"],
+    "lag.view": ["neteng", "netops", "readonly"],
+    "vlan.create": ["neteng"],
+    "vlan.modify": ["neteng", "netops"],
+    "vlan.view": ["neteng", "netops", "readonly"],
+    "acl.modify": ["neteng"],
+    "evpn.modify": ["neteng"],
+    "baseline.apply": ["neteng"],
+    "health.check": ["neteng", "netops", "readonly"],
+    "audit.view": ["neteng", "netops"]
+  },
+  "generic_alias": {
+    "ce-asnum": "65100"
+  },
+  "regions": {
+    "amer-wan": {
+      "as_number": 13908,
+      "as_name": "amer",
+      "affinity": "east"
+    },
+    "emea-wan": {
+      "as_number": 33181,
+      "as_name": "emea",
+      "affinity": "west"
+    }
+  },
+  "prefix_lists": {
+    "rfc1918": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+    "mgmt-servers": ["10.100.0.0/24", "10.100.1.0/24"],
+    "bogons": ["0.0.0.0/8", "127.0.0.0/8", "224.0.0.0/4"],
+    "ospf-multicast": ["224.0.0.5/32", "224.0.0.6/32"]
+  },
+  "filter_specs": {
+    "customer-edge-in": {
+      "description": "Ingress filter for customer edge interfaces",
+      "type": "L3",
+      "rules": [
+        {"seq": 100, "src_prefix_list": "bogons", "action": "deny", "log": true},
+        {"seq": 200, "src_prefix_list": "rfc1918", "action": "deny"},
+        {"seq": 9999, "action": "permit"}
+      ]
+    },
+    "customer-edge-out": {
+      "description": "Egress filter for customer edge interfaces",
+      "type": "L3",
+      "rules": [
+        {"seq": 100, "dst_prefix_list": "mgmt-servers", "action": "deny"},
+        {"seq": 9999, "action": "permit"}
+      ]
+    },
+    "transit-protect": {
+      "description": "Control plane protection for transit interfaces",
+      "type": "L3",
+      "rules": [
+        {"seq": 100, "protocol": "vrrp", "dst_ip": "224.0.0.18/32", "action": "permit", "cos": "cs7"},
+        {"seq": 110, "protocol": "tcp", "dst_port": "179", "action": "permit", "cos": "cs7"},
+        {"seq": 120, "protocol": "udp", "dst_port": "3784-3785", "action": "permit", "cos": "cs7"},
+        {"seq": 200, "protocol": "icmp", "action": "permit", "cos": "cs2"},
+        {"seq": 300, "protocol": "tcp", "dst_port": "22", "action": "permit", "cos": "cs6"},
+        {"seq": 9999, "action": "deny", "log": true}
+      ]
+    }
+  },
+  "policers": {
+    "network-control-5m": {"bandwidth": "5m", "burst": "625k"},
+    "term-specific-64k": {"bandwidth": "64k", "burst": "8k"},
+    "term-specific-15m": {"bandwidth": "15m", "burst": "3m"},
+    "customer-rate-limit": {"bandwidth": "100m", "burst": "10m", "action": "drop"}
+  },
+
+  "ipvpn": {
+    "customer-vpn": {
+      "description": "Customer L3VPN with per-interface VRF",
+      "l3_vni": 10001,
+      "import_rt": ["65100:1"],
+      "export_rt": ["65100:1"]
+    },
+    "server-vpn": {
+      "description": "Server/datacenter shared VRF",
+      "l3_vni": 10100,
+      "import_rt": ["65100:100"],
+      "export_rt": ["65100:100"]
+    },
+    "tenant-vpn": {
+      "description": "Multi-tenant isolated VRF",
+      "l3_vni": 20001,
+      "import_rt": ["65100:200"],
+      "export_rt": ["65100:200"]
+    }
+  },
+
+  "macvpn": {
+    "servers-vlan100": {
+      "description": "Server VLAN 100",
+      "vlan": 100,
+      "l2_vni": 10100,
+      "arp_suppression": true
+    },
+    "storage-vlan200": {
+      "description": "Storage VLAN 200",
+      "vlan": 200,
+      "l2_vni": 10200,
+      "arp_suppression": true
+    },
+    "tenant-vlan300": {
+      "description": "Tenant VLAN 300",
+      "vlan": 300,
+      "l2_vni": 10300,
+      "arp_suppression": false
+    }
+  },
+
+  "services": {
+    "customer-l3": {
+      "description": "L3 routed customer interface with per-interface VRF",
+      "service_type": "l3",
+      "vrf_type": "interface",
+      "ipvpn": "customer-vpn",
+      "ingress_filter": "customer-edge-in",
+      "egress_filter": "customer-edge-out",
+      "qos_profile": "customer",
+      "permissions": {
+        "all": ["neteng"],
+        "service.apply": ["neteng", "netops"]
+      }
+    },
+    "server-irb": {
+      "description": "Server VLAN with shared VRF for inter-VLAN routing",
+      "service_type": "irb",
+      "vrf_type": "shared",
+      "ipvpn": "server-vpn",
+      "macvpn": "servers-vlan100",
+      "anycast_gateway": "10.1.100.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "qos_profile": "datacenter",
+      "trust_dscp": true
+    },
+    "storage-irb": {
+      "description": "Storage VLAN with shared VRF",
+      "service_type": "irb",
+      "vrf_type": "shared",
+      "ipvpn": "server-vpn",
+      "macvpn": "storage-vlan200",
+      "anycast_gateway": "10.1.200.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "qos_profile": "datacenter",
+      "trust_dscp": true
+    },
+    "tenant-isolated": {
+      "description": "Tenant VLAN with per-interface VRF isolation",
+      "service_type": "irb",
+      "vrf_type": "interface",
+      "ipvpn": "tenant-vpn",
+      "macvpn": "tenant-vlan300",
+      "anycast_gateway": "10.1.30.1/24",
+      "anycast_mac": "00:00:00:01:02:03"
+    },
+    "l2-extend": {
+      "description": "L2 VLAN extension only (no routing)",
+      "service_type": "l2",
+      "macvpn": "servers-vlan100"
+    },
+    "transit": {
+      "description": "Transit interface (global routing table, no VPN)",
+      "service_type": "l3",
+      "ingress_filter": "transit-protect",
+      "permissions": {
+        "all": ["neteng"]
+      }
+    }
+  },
+
+  "qos_profiles": {
+    "customer": {
+      "scheduler_map": "8q",
+      "trust_dscp": false
+    },
+    "datacenter": {
+      "scheduler_map": "8q",
+      "trust_dscp": true
+    }
+  }
+}

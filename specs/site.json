@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "sites": {
+    "ny": {
+      "region": "amer-wan",
+      "route_reflectors": ["spine1-ny", "spine2-ny"]
+    },
+    "nj": {
+      "region": "amer-wan",
+      "route_reflectors": ["spine1-nj", "spine2-nj"]
+    },
+    "lon": {
+      "region": "emea-wan",
+      "route_reflectors": ["spine1-lon", "spine2-lon"]
+    }
+  }
+}

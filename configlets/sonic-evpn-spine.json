@@ -1,0 +1,11 @@
+{
+  "name": "sonic-evpn-spine",
+  "description": "EVPN spine switch baseline configuration (Route Reflector)",
+  "version": "1.0",
+  "variables": [],
+  "config_db": {},
+  "notes": [
+    "Spine BGP configuration is managed entirely via FRR (frr_split_config_enabled)",
+    "No BGP tables in CONFIG_DB - all BGP config pushed via frr.conf"
+  ]
+}

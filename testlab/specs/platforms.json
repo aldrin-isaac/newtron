@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "platforms": {
+    "test-platform": {
+      "hwsku": "Accton-AS7726-32X",
+      "description": "Test platform for integration tests",
+      "port_count": 32,
+      "default_speed": "40000"
+    }
+  }
+}

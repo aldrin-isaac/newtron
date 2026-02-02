@@ -1,0 +1,20 @@
+# Build artifacts
+/labgen
+/newtron
+/test_acl
+/test_derive
+testlab/labgen
+
+# Generated lab artifacts
+testlab/.generated/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# IDE / editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

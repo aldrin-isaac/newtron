@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "platforms": {
+    "accton-as7726-32x": {
+      "hwsku": "Accton-AS7726-32X",
+      "description": "Accton AS7726-32X 100G switch",
+      "port_count": 32,
+      "default_speed": "100G",
+      "breakouts": ["4x25G", "4x10G", "2x50G"]
+    },
+    "accton-as7326-56x": {
+      "hwsku": "Accton-AS7326-56X",
+      "description": "Accton AS7326-56X 25G switch",
+      "port_count": 56,
+      "default_speed": "25G",
+      "breakouts": ["4x10G"]
+    },
+    "dell-s5248f-on": {
+      "hwsku": "DellEMC-S5248f-P-25G-DPB",
+      "description": "Dell S5248F-ON 25G switch",
+      "port_count": 48,
+      "default_speed": "25G",
+      "breakouts": ["4x10G"]
+    },
+    "dell-z9332f-on": {
+      "hwsku": "DellEMC-Z9332f-O32",
+      "description": "Dell Z9332F-ON 400G switch",
+      "port_count": 32,
+      "default_speed": "400G",
+      "breakouts": ["4x100G", "2x200G"]
+    },
+    "arista-7050cx3-32s": {
+      "hwsku": "Arista-7050CX3-32S-C32",
+      "description": "Arista 7050CX3-32S 100G switch",
+      "port_count": 32,
+      "default_speed": "100G",
+      "breakouts": ["4x25G", "4x10G"]
+    }
+  }
+}

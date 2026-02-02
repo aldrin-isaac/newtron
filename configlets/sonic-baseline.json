@@ -1,0 +1,49 @@
+{
+  "name": "sonic-baseline",
+  "description": "Base SONiC configuration for all switches",
+  "version": "1.0",
+  "variables": ["device_name", "hwsku", "platform", "loopback_ip", "ntp_server_1", "ntp_server_2", "syslog_server"],
+  "config_db": {
+    "DEVICE_METADATA": {
+      "localhost": {
+        "bgp_asn": "{{as_number}}",
+        "docker_routing_config_mode": "split",
+        "frr_split_config_enabled": "true",
+        "frr_mgmt_framework_config": "false",
+        "hostname": "{{device_name}}",
+        "hwsku": "{{hwsku}}",
+        "platform": "{{platform}}",
+        "type": "LeafRouter"
+      }
+    },
+    "LOOPBACK_INTERFACE": {
+      "Loopback0": {},
+      "Loopback0|{{loopback_ip}}/32": {}
+    },
+    "NTP_SERVER": {
+      "{{ntp_server_1}}": {},
+      "{{ntp_server_2}}": {}
+    },
+    "SYSLOG_SERVER": {
+      "{{syslog_server}}": {}
+    },
+    "FEATURE": {
+      "bgp": {"state": "enabled"},
+      "database": {"state": "enabled"},
+      "lldp": {"state": "enabled"},
+      "mgmt-framework": {"state": "enabled"},
+      "pmon": {"state": "enabled"},
+      "radv": {"state": "disabled"},
+      "snmp": {"state": "enabled"},
+      "swss": {"state": "enabled"},
+      "syncd": {"state": "enabled"},
+      "teamd": {"state": "enabled"},
+      "telemetry": {"state": "enabled"}
+    },
+    "MGMT_VRF_CONFIG": {
+      "vrf_global": {
+        "mgmtVrfEnabled": "true"
+      }
+    }
+  }
+}
