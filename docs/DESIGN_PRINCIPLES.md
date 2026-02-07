@@ -265,7 +265,7 @@ func getTunnel(host, user, pass string) (*SSHTunnel, error) {
         t.Close() // Dead tunnel, recreate
     }
 
-    t, err := NewSSHTunnel(host, user, pass)
+    t, err := NewSSHTunnel(host, user, pass, port)
     if err != nil {
         return nil, err
     }
@@ -641,7 +641,7 @@ addr = fmt.Sprintf("%s:6379", mgmtIP)
 
 // GOOD: use SSH tunnel when available
 if profile.SSHUser != "" {
-    tunnel := NewSSHTunnel(mgmtIP, profile.SSHUser, profile.SSHPass)
+    tunnel := NewSSHTunnel(mgmtIP, profile.SSHUser, profile.SSHPass, profile.SSHPort)
     addr = tunnel.LocalAddr()
 } else {
     addr = fmt.Sprintf("%s:6379", mgmtIP) // direct (integration tests)

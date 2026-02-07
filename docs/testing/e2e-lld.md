@@ -286,9 +286,9 @@ type SSHTunnel struct {
 **Creation flow:**
 
 ```go
-func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error) {
-    // 1. Dial SSH on host:22 with password auth
-    sshClient, err := ssh.Dial("tcp", host+":22", config)
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
+    // 1. Dial SSH on host:port (default 22) with password auth
+    sshClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
 
     // 2. Listen on a random local port
     listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -312,7 +312,7 @@ func (t *SSHTunnel) forward(local net.Conn) {
 
 **Lifecycle:**
 
-- `NewSSHTunnel(host, user, pass)` -- Creates tunnel, returns local address
+- `NewSSHTunnel(host, user, pass, port)` -- Creates tunnel, returns local address
 - `tunnel.LocalAddr()` -- Returns `"127.0.0.1:<port>"` for Redis client
 - `tunnel.Close()` -- Closes listener, SSH connection, waits for goroutines
 
@@ -343,7 +343,7 @@ var (
    if tun, ok := labTunnels[nodeName]; ok {
        return tun.LocalAddr()  // reuse existing tunnel
    }
-   tun, err := device.NewSSHTunnel(nodeIP, user, pass)
+   tun, err := device.NewSSHTunnel(nodeIP, user, pass, sshPort)
    labTunnels[nodeName] = tun
    return tun.LocalAddr()      // e.g., "127.0.0.1:54321"
    ```

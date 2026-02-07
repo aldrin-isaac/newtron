@@ -6,7 +6,7 @@
 
 | Area | Change |
 |------|--------|
-| **SSH Tunnel** | Added `pkg/device/tunnel.go` — SSHTunnel struct, NewSSHTunnel, LocalAddr, Close; SSH port-forwarding to Redis when SSHUser+SSHPass present |
+| **SSH Tunnel** | Added `pkg/device/tunnel.go` — SSHTunnel struct, NewSSHTunnel(host, user, pass, port), LocalAddr, Close; SSH port-forwarding to Redis when SSHUser+SSHPass present |
 | **StateDB Client** | Added `pkg/device/statedb.go` — StateDB struct with 13 state tables, StateDBClient methods (GetPortState, GetBGPNeighborState, etc.) |
 | **Device Struct** | Added `tunnel *SSHTunnel`, `stateClient *StateDBClient`, `StateDB *StateDB`, `mu sync.RWMutex` fields |
 | **ResolvedProfile** | Added `SSHUser` and `SSHPass` fields for SSH tunnel credentials |
@@ -1305,9 +1305,10 @@ type SSHTunnel struct {
     wg        sync.WaitGroup
 }
 
-// NewSSHTunnel dials SSH on host:22 and opens a local listener on a random port.
+// NewSSHTunnel dials SSH on host:port and opens a local listener on a random port.
 // Connections to the local port are forwarded to 127.0.0.1:6379 inside the SSH host.
-func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error)
+// If port is 0, defaults to 22.
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error)
 
 // LocalAddr returns the local address (e.g. "127.0.0.1:54321") that forwards
 // to Redis inside the SSH host.
@@ -1320,7 +1321,7 @@ func (t *SSHTunnel) Close() error
 
 **How it works:**
 
-1. `ssh.Dial("tcp", host+":22", config)` establishes the SSH connection with password auth
+1. `ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)` establishes the SSH connection with password auth
 2. `net.Listen("tcp", "127.0.0.1:0")` opens a local listener on a random available port
 3. A background goroutine (`acceptLoop`) accepts incoming local connections
 4. Each accepted connection is forwarded via `sshClient.Dial("tcp", "127.0.0.1:6379")`
@@ -1330,7 +1331,10 @@ func (t *SSHTunnel) Close() error
 **Security note:** `HostKeyCallback: ssh.InsecureIgnoreHostKey()` is used because this is a lab/test environment only. SONiC-VS VMs regenerate host keys on each boot.
 
 ```go
-func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error) {
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
+    if port == 0 {
+        port = 22
+    }
     config := &ssh.ClientConfig{
         User: user,
         Auth: []ssh.AuthMethod{
@@ -1339,7 +1343,7 @@ func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error) {
         HostKeyCallback: ssh.InsecureIgnoreHostKey(),
     }
 
-    sshClient, err := ssh.Dial("tcp", host+":22", config)
+    sshClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
     if err != nil {
         return nil, fmt.Errorf("SSH dial %s: %w", host, err)
     }
@@ -1577,7 +1581,7 @@ func (d *Device) Connect(ctx context.Context) error {
 
     var addr string
     if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
-        tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass)
+        tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
         if err != nil {
             return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
         }

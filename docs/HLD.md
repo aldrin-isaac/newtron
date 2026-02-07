@@ -1,4 +1,4 @@
-# Newtron High-Level Design (HLD) v4
+# Newtron High-Level Design (HLD) v5
 
 ### What Changed
 
@@ -50,6 +50,19 @@
 
 **Lines:** ~1340 (v3) → ~1560 (v4) | All v3 sections preserved and expanded.
 
+#### v5
+
+| Area | Change |
+|------|--------|
+| **Verification Architecture** | New §4.9: architectural principle ("if a tool changes state, it must verify the intended effect"), VerifyChangeSet for CONFIG_DB diff, GetRoute/GetRouteASIC for routing state observation, verification summary table |
+| **Execution Modes** | New §12.5: `--verify` flag for post-execution CONFIG_DB verification; standalone `newtron verify` command for checking already-provisioned devices |
+| **Verification Strategy** | Rewritten §13: four-tier strategy with explicit ownership — Tier 1-3 owned by newtron (CONFIG_DB assertion, APP_DB/ASIC_DB observation, health checks), Tier 4 owned by newtest (cross-device, data plane) |
+| **Device Layer** | Added AppDBClient (Redis DB 0) and AsicDBClient (Redis DB 1) alongside existing ConfigDBClient (DB 4) and StateDBClient (DB 6) |
+| **Design Decisions** | New §17.14: Built-in verification primitives over external test assertions — ChangeSet-based verification is universal across all operations; routing state observations return data not verdicts |
+| **Glossary** | Added APP_DB (DB 0), VerifyChangeSet, GetRoute, GetRouteASIC terms; updated ChangeSet definition to include verification contract role |
+
+**Lines:** ~1560 (v4) → ~1700 (v5) | All v4 sections preserved; verification architecture added.
+
 ---
 
 ## 1. Executive Summary
@@ -66,6 +79,7 @@ Newtron is a network automation CLI tool for managing SONiC-based network switch
 - **Composite Mode**: Offline composite config generation with atomic delivery (overwrite or merge)
 - **Topology Provisioning**: Automated device provisioning from topology.json specs — full-device overwrite or per-interface service application
 - **Platform-Validated Port Creation**: PORT entries validated against SONiC's on-device `platform.json`
+- **Built-In Verification**: ChangeSet-based CONFIG_DB verification, routing state observation via APP_DB/ASIC_DB, health checks — single-device primitives that orchestrators compose for fabric-wide assertions
 - **Safety-First**: Dry-run by default with explicit execution flag
 - **Airtight Validation**: Comprehensive precondition checking prevents misconfigurations
 - **Audit Trail**: All changes logged with user, timestamp, and device context
@@ -379,6 +393,8 @@ Low-level connection management for SONiC switches.
 - `ConfigDBClient`: Redis client wrapper for CONFIG_DB (Redis DB 4)
 - `StateDB`: SONiC state_db structure (PortTable, LAGTable, BGPNeighborTable, etc.)
 - `StateDBClient`: Redis client wrapper for STATE_DB (Redis DB 6)
+- `AppDBClient` (v5): Redis client wrapper for APP_DB (Redis DB 0) — routing state from FRR/fpmsyncd
+- `AsicDBClient` (v5): Redis client wrapper for ASIC_DB (Redis DB 1) — SAI objects from orchagent
 - `SSHTunnel`: SSH port-forward tunnel for Redis access through port 22
 - `PlatformConfig` (v3): Parsed representation of SONiC's `platform.json`, cached on device; provides port definitions, lane assignments, supported speeds, and breakout modes for port validation
 - `CompositeBuilder` (v3): Builder for offline composite CONFIG_DB generation (in `pkg/network/composite.go`)
@@ -673,6 +689,115 @@ This mode is used for incremental changes to a running device — adding a servi
 - `params` holds service-specific parameters (e.g., `peer_as`)
 - `links` section is optional, used for validation (both ends must be defined)
 
+### 4.9 Verification Architecture
+
+#### 4.9.1 Principles
+
+**If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect.** Verification is not a separate concern from provisioning — it is the completion of provisioning. An operation that cannot confirm its own result is half an operation. The caller should not need a second tool to find out if the first tool worked.
+
+This is why newtron owns verification for everything it changes:
+- newtron writes CONFIG_DB entries → newtron verifies they landed (`VerifyChangeSet`)
+- newtron configures BGP and redistribution → newtron can read the resulting routes from APP_DB (`GetRoute`) to confirm the intended local effect
+- newtron sets up EVPN/VXLAN → newtron can check ASIC_DB (`GetRouteASIC`) to confirm orchagent programmed the route
+
+Orchestrators like newtest then build on newtron's self-verification: they use newtron to confirm each device's local state, and add the cross-device layer that newtron cannot see (did the route propagate to the neighbor).
+
+**For cross-device observations**: newtron returns structured data, not verdicts. If a check requires knowing what another device should have, it belongs in the orchestrator.
+
+#### 4.9.2 ChangeSet Verification
+
+Every mutating operation (`ApplyService`, `CreateVLAN`, `SetupRouteReflector`, `DeliverComposite`, etc.) returns a `ChangeSet` — a list of CONFIG_DB entries that were written. The ChangeSet is the operation's own contract for what the device state should look like after execution.
+
+`VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly:
+
+```go
+// VerifyChangeSet re-reads CONFIG_DB and confirms every entry in the
+// ChangeSet was applied. Returns a VerificationResult listing any
+// missing or mismatched entries.
+func (d *Device) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
+```
+
+This works for all operations — disaggregated (`CreateVLAN`) or composite (`DeliverComposite`) — because they all produce ChangeSets.
+
+```go
+// VerificationResult reports ChangeSet verification outcome.
+type VerificationResult struct {
+    Passed   int                // entries that matched
+    Failed   int                // entries missing or mismatched
+    Errors   []VerificationError // details of each failure
+}
+
+type VerificationError struct {
+    Table    string
+    Key      string
+    Field    string
+    Expected string
+    Actual   string // "" if missing
+}
+```
+
+#### 4.9.3 Routing State Observation
+
+newtron provides read access to a device's routing tables. These are observation primitives — they return structured data, not pass/fail verdicts.
+
+**APP_DB (Redis DB 0)** — routes installed by FRR via `fpmsyncd`:
+
+```go
+// RouteEntry represents a route read from a device's routing table.
+type RouteEntry struct {
+    Prefix   string    // "10.1.0.0/31"
+    VRF      string    // "default", "Vrf-customer"
+    Protocol string    // "bgp", "connected", "static"
+    NextHops []NextHop
+    Source   RouteSource // AppDB or AsicDB
+}
+
+type NextHop struct {
+    IP        string // "10.0.0.1" (or "0.0.0.0" for connected)
+    Interface string // "Ethernet0", "Vlan500"
+}
+
+// GetRoute reads a route from APP_DB (Redis DB 0).
+// Returns nil if the prefix is not present (not an error — route
+// may not have converged yet).
+func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+```
+
+**ASIC_DB (Redis DB 1)** — routes programmed in the ASIC by `orchagent`:
+
+```go
+// GetRouteASIC reads a route from ASIC_DB by resolving the SAI
+// object chain (SAI_ROUTE_ENTRY → SAI_NEXT_HOP_GROUP → SAI_NEXT_HOP).
+// Returns nil if not programmed in ASIC.
+func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+```
+
+APP_DB tells you what FRR computed. ASIC_DB tells you what the hardware (or ASIC simulator) actually installed. The gap between them is `orchagent` processing.
+
+These primitives are building blocks for external orchestrators (newtest) that have topology-wide context. For example, newtest can connect to spine1 via newtron and call `GetRoute("default", "10.1.0.0/31")` to confirm that leaf1's connected subnet arrived via BGP with the expected next-hop. newtron provides the read; newtest knows what to expect.
+
+#### 4.9.4 Health Checks
+
+The existing `RunHealthChecks()` method (§4.4) provides operational status: BGP sessions Established, interfaces oper-up, LAG members active, VXLAN tunnels healthy. These are local device observations that complement ChangeSet verification and routing state queries.
+
+#### 4.9.5 What newtron Does NOT Verify
+
+newtron operates on a single device. It cannot verify:
+- **Route propagation** — "did leaf1's route arrive at spine1?" (requires connecting to spine1)
+- **Fabric convergence** — "do all devices agree on routing state?" (requires connecting to all devices)
+- **Data-plane forwarding** — "can traffic flow between VMs?" (requires multi-device packet injection)
+
+These require topology-wide context and belong in the orchestrator (newtest).
+
+#### 4.9.6 Verification Summary
+
+| Capability | Method | Database | Returns |
+|-----------|--------|----------|---------|
+| CONFIG_DB writes landed | `VerifyChangeSet(cs)` | CONFIG_DB (DB 4) | Pass/fail with diff |
+| Route installed by FRR | `GetRoute(vrf, prefix)` | APP_DB (DB 0) | RouteEntry or nil |
+| Route programmed in ASIC | `GetRouteASIC(vrf, prefix)` | ASIC_DB (DB 1) | RouteEntry or nil |
+| Operational health | `RunHealthChecks()` | STATE_DB (DB 6) | Health report |
+
 ## 5. Device Connection Architecture
 
 ### 5.1 Connection Flow
@@ -689,7 +814,7 @@ When `Device.Connect()` is called, the connection path depends on whether SSH cr
                 |                  |
                 v                  v
     NewSSHTunnel(host,         addr = "<MgmtIP>:6379"
-      user, pass)              (direct Redis)
+      user, pass, port)        (direct Redis)
     addr = tunnel.LocalAddr()
     ("127.0.0.1:<random>")
                 \                /
@@ -730,7 +855,7 @@ The `SSHTunnel` struct (`pkg/device/tunnel.go`) implements a TCP port forwarder 
            +----------------------------+         +-------------------------+
 ```
 
-1. `NewSSHTunnel(host, user, pass)` dials `host:22` with password auth
+1. `NewSSHTunnel(host, user, pass, port)` dials `host:port` (default 22) with password auth
 2. Opens `net.Listen("tcp", "127.0.0.1:0")` to get a random local port
 3. Starts `acceptLoop()` goroutine that accepts local connections
 4. Each accepted connection spawns `forward()` which calls `sshClient.Dial("tcp", "127.0.0.1:6379")` and runs two `io.Copy` goroutines for bidirectional data transfer
@@ -1090,74 +1215,86 @@ All operations logged with:
 | ProvisionDevice | No (build) + Yes (deliver) | Yes (for delivery) | Yes (pipeline) |
 | ProvisionInterface | Yes | Yes (reads + writes) | Per-entry |
 
-## 13. Three-Tier Verification Strategy
+### 12.5 Verify (`--verify` flag) (v5)
 
-Newtron's E2E tests employ a three-tier verification strategy that accounts for the limitations of SONiC Virtual Switch (SONiC-VS). Each tier has different pass/fail semantics:
+The `--verify` flag can be appended to any execute-mode operation. After writing changes, newtron reconnects (fresh CONFIG_DB read) and runs `VerifyChangeSet` against the ChangeSet that was just applied:
 
-### 13.1 Tier 1: CONFIG_DB Verification (Hard Fail)
+```
+newtron -d leaf1 interface Ethernet2 apply-service customer-l3 -x --verify
+newtron provision -S specs/ -d leaf1 -x --verify
+```
+
+Standalone verification against an already-provisioned device:
+
+```
+newtron verify -S specs/ -d leaf1
+```
+
+The standalone `verify` command loads the topology spec, rebuilds the expected CompositeConfig for the device, connects, and diffs against the live CONFIG_DB.
+
+| Mode | Online? | Device Required? | What It Checks |
+|------|---------|-----------------|----------------|
+| `--verify` (with `-x`) | Yes | Yes (re-reads CONFIG_DB) | ChangeSet entries landed |
+| `verify` (standalone) | Yes | Yes (reads CONFIG_DB) | Full device state matches topology spec |
+
+## 13. Verification Strategy
+
+Newtron provides built-in verification primitives for single-device state. The architectural principle:
+
+> **newtron exposes single-device state as structured data — not verdicts. The only assertion newtron makes is about its own writes.**
+>
+> When adding verification to newtron, return data, not judgments. If a check requires knowing what another device should have, it belongs in the orchestrator (newtest).
+
+Verification spans four tiers across two owners:
+
+### 13.1 Tier 1: CONFIG_DB Verification — newtron (Hard Fail)
 
 **What it checks**: Operations wrote the correct entries to CONFIG_DB (Redis DB 4).
 
 **Why it's reliable**: CONFIG_DB is under Newtron's direct control. When Newtron writes `VLAN|Vlan500` to Redis, it is either there or it is not. There is no intermediate processing layer.
 
-**Assertion pattern**: After executing an operation, a **fresh device connection** reads CONFIG_DB and asserts exact field values:
-```go
-testutil.AssertConfigDBEntry(t, nodeName, "VLAN_MEMBER", "Vlan502|"+port, map[string]string{
-    "tagging_mode": "tagged",
-})
-```
+**newtron primitive**: `Device.VerifyChangeSet(cs)` — re-reads CONFIG_DB through a fresh connection, diffs against the ChangeSet. Returns `VerificationResult` with pass count, fail count, and per-entry errors.
 
-**Failure mode**: Hard fail (`t.Fatal`). If CONFIG_DB does not contain what was written, it is a bug in Newtron.
+This works for every operation (disaggregated or composite) because they all produce ChangeSets. It is the only assertion newtron makes — checking its own writes.
 
-### 13.2 Tier 2: ASIC_DB Verification (Topology-Dependent)
+**Failure mode**: Hard fail. If CONFIG_DB does not contain what was written, it is a bug in Newtron.
 
-**What it checks**: SONiC's `orchagent` has processed CONFIG_DB entries and programmed them into ASIC_DB (Redis DB 1).
+### 13.2 Tier 2: APP_DB / Routing State — newtron (Observation Only)
 
-**Why it varies**: `orchagent` reads CONFIG_DB, resolves dependencies, and writes ASIC_DB entries. Simple topologies (e.g. creating a VLAN) converge reliably on SONiC-VS because there are few dependencies. Complex topologies (e.g. IRB with VXLAN tunnel maps, VRF, and SVI) may not converge because `orchagent` on SONiC-VS uses the NGDP ASIC simulator which may not fully process all SAI objects.
+**What it checks**: Routes installed by FRR via `fpmsyncd` into APP_DB (Redis DB 0).
 
-**Assertion pattern**: Poll ASIC_DB with a timeout, checking for expected SAI objects:
-```go
-asicCtx, asicCancel := context.WithTimeout(ctx, 30*time.Second)
-if err := testutil.WaitForASICVLAN(asicCtx, t, name, 700); err != nil {
-    t.Fatalf("Step 7: FAIL - %v", err)  // simple VLAN: hard fail
-}
-```
+**newtron primitives**: `Device.GetRoute(vrf, prefix)` and `Device.GetRouteASIC(vrf, prefix)` return structured `RouteEntry` data (prefix, protocol, next-hops) — or nil if the route is not present. These are observation methods, not assertions. newtron does not know whether a given route is "correct" — that depends on what other devices are advertising, which requires topology-wide context.
 
-For complex topologies, ASIC_DB convergence failure triggers a skip (soft fail):
-```go
-if err := testutil.WaitForASICVLAN(asicCtx, t, name, 800); err != nil {
-    t.Skip("ASIC convergence for IRB topology not supported on virtual switch")
-}
-```
+**How orchestrators use it**: newtest connects to a remote device via newtron and calls `GetRoute` to check that an expected route arrived. For example, after provisioning leaf1, newtest connects to spine1 and verifies that leaf1's connected subnet appears in spine1's APP_DB with the expected next-hop. newtron provides the read; newtest knows what to expect.
 
-**Failure modes**:
-| Topology | Failure Mode |
-|----------|-------------|
-| Simple VLAN | Hard fail (`t.Fatal`) - convergence is expected |
-| IRB with VXLAN | Soft fail (`t.Skip`) - convergence is topology-dependent on VS |
+**ASIC_DB (Redis DB 1)**: `GetRouteASIC` resolves the SAI object chain (`SAI_ROUTE_ENTRY` → `SAI_NEXT_HOP_GROUP` → `SAI_NEXT_HOP`) to confirm the ASIC actually programmed the route. The gap between APP_DB and ASIC_DB is `orchagent` processing. On SONiC-VS with the NGDP simulator, complex routes (VXLAN, ECMP) may not make it to ASIC_DB.
 
-### 13.3 Tier 3: Data-Plane Verification (Always Soft Fail on VS)
+### 13.3 Tier 3: Operational State — newtron (Observation Only)
 
-**What it checks**: Actual packet forwarding between server containers through the SONiC fabric.
+**What it checks**: BGP session state, interface oper-status, LAG health, VXLAN/EVPN state via STATE_DB (Redis DB 6).
 
-**Why it always soft-fails on VS**: The NGDP ASIC emulator in SONiC-VS does not forward packets through VXLAN tunnels. Ping between servers will fail regardless of whether CONFIG_DB and ASIC_DB are correct. On real hardware, this tier would be a hard fail.
+**newtron primitive**: `Device.RunHealthChecks()` returns a health report with per-subsystem status (ok, warning, critical). This is local device health — not fabric correctness.
 
-**Assertion pattern**: Attempt ping, skip on failure with diagnostic output:
-```go
-if !testutil.ServerPing(t, "server1", "10.70.0.2", 5) {
-    t.Skip("VXLAN data-plane forwarding not supported on virtual switch")
-}
-```
+**SONiC-VS behavior**: BGP sessions establish reliably. Interface oper-status works for simple topologies. EVPN/VXLAN health depends on `orchagent` convergence.
 
-On ping failure, diagnostics are automatically collected (`ip addr`, `ip route`, `arp -n`) and logged.
+### 13.4 Tier 4: Cross-Device and Data-Plane Verification — newtest
 
-### 13.4 Tier Summary
+**What it checks**: Route propagation across devices, fabric-wide convergence, actual packet forwarding.
 
-| Tier | What | SONiC-VS Behavior | Failure Mode |
-|------|------|-------------------|-------------|
-| CONFIG_DB | Redis entries | Always works | Hard fail |
-| ASIC_DB | orchagent convergence | Simple: works; Complex: may not | Topology-dependent |
-| Data plane | Packet forwarding | Never works (NGDP) | Soft fail (skip) |
+**Why it belongs in newtest, not newtron**: These checks require connecting to multiple devices and correlating their state. newtron operates on a single device and has no concept of "the fabric." newtest owns the topology and can connect to any device.
+
+**Cross-device route verification**: newtest uses newtron's `GetRoute` primitive on multiple devices. For example: connect to spine1, call `GetRoute("default", "10.1.0.0/31")`, assert the next-hop matches leaf1's interface IP from the topology spec.
+
+**Data-plane verification**: Ping between VMs through the SONiC fabric. The NGDP ASIC emulator in SONiC-VS does not forward packets through VXLAN tunnels, so data-plane tests soft-fail on VS. On real hardware or VPP images, this tier would be a hard fail.
+
+### 13.5 Tier Summary
+
+| Tier | What | Owner | newtron Method | Failure Mode |
+|------|------|-------|---------------|-------------|
+| CONFIG_DB | Redis entries match ChangeSet | **newtron** | `VerifyChangeSet(cs)` | Hard fail (assertion) |
+| APP_DB / ASIC_DB | Routes installed by FRR / ASIC | **newtron** | `GetRoute()`, `GetRouteASIC()` | Observation (data, not verdict) |
+| Operational state | BGP sessions, interface health | **newtron** | `RunHealthChecks()` | Observation (health report) |
+| Cross-device / data plane | Route propagation, ping | **newtest** | Composes newtron primitives | Topology-dependent |
 
 ## 14. Lab Architecture
 
@@ -1403,6 +1540,16 @@ The system maintains this separation to enable:
 
 **Rationale**: Full-device provisioning is an offline operation that builds the entire CONFIG_DB without connecting to the device, then delivers it atomically. This is ideal for initial provisioning and lab setup where the device starts from a clean state. Per-interface provisioning connects to a running device, validates preconditions, and applies a single service — this is the safe path for incremental changes on production devices where you need dependency checking and conflict detection. Combining both into one mode would either sacrifice the offline capability of full-device provisioning or skip the safety checks of per-interface provisioning.
 
+### 17.14 Built-In Verification Primitives over External Test Assertions
+
+**Decision**: Verification methods (`VerifyChangeSet`, `GetRoute`, `GetRouteASIC`) live on the `Device` object rather than in test helpers or external tools.
+
+**Rationale**: If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect. The caller should not need a second tool to find out if the first tool worked. newtron writes CONFIG_DB, configures BGP, sets up EVPN — so newtron must be able to confirm these changes produced the intended local effects (entries landed, routes appeared, ASIC programmed).
+
+The ChangeSet-based approach is universal: it works for disaggregated operations (`CreateVLAN`, `AddBGPNeighbor`) and composite operations (`DeliverComposite`) alike, because they all produce ChangeSets. No per-operation verify methods are needed.
+
+Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron configured BGP redistribution, so newtron can read APP_DB to confirm the route appeared locally. This is still single-device self-verification — confirming the intended effect of newtron's own change. Cross-device assertions (did the route reach the neighbor) require topology-wide context and belong in the orchestrator (newtest).
+
 ---
 
 ## Appendix A: Glossary
@@ -1480,9 +1627,10 @@ The system maintains this separation to enable:
 
 | DB Number | Name | Purpose |
 |-----------|------|---------|
-| 1 | ASIC_DB | SAI objects programmed by orchagent (read by E2E tests for convergence checks) |
+| 0 | APP_DB | Routes installed by FRR/fpmsyncd (read by Newtron via `GetRoute`) |
+| 1 | ASIC_DB | SAI objects programmed by orchagent (read by Newtron via `GetRouteASIC`) |
 | 4 | CONFIG_DB | Device configuration (read/write by Newtron) |
-| 6 | STATE_DB | Operational state (read-only by Newtron) |
+| 6 | STATE_DB | Operational state (read-only by Newtron via `RunHealthChecks`) |
 
 ### Operations
 
@@ -1490,7 +1638,10 @@ The system maintains this separation to enable:
 |------|------------|
 | **Dry-Run** | Preview mode (default). Shows what would change without applying. |
 | **Execute (`-x`)** | Apply mode. Actually writes changes to device config_db. |
-| **ChangeSet** | Collection of pending changes to be previewed or applied. |
+| **ChangeSet** | Collection of pending changes to be previewed or applied. Also serves as the verification contract — `VerifyChangeSet` diffs the ChangeSet against live CONFIG_DB. |
+| **VerifyChangeSet** | Re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly. The only assertion newtron makes. |
+| **GetRoute** | Reads a route from APP_DB (DB 0) and returns structured data (prefix, protocol, next-hops). Observation primitive — returns data, not a verdict. |
+| **GetRouteASIC** | Reads a route from ASIC_DB (DB 1) by resolving SAI object chain. Confirms the ASIC programmed the route. |
 | **Audit Log** | Record of all executed changes with user, timestamp, and details. |
 | **Device Lock** | Exclusive lock acquired before mutating operations. Prevents concurrent modifications. |
 | **Baseline Reset** | Pre-test cleanup that deletes stale CONFIG_DB entries from previous test runs on all SONiC nodes. |
