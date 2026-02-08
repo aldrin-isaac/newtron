@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/operations"
+	"github.com/newtron-network/newtron/pkg/network"
 )
 
 func TestEvent_New(t *testing.T) {
@@ -31,8 +31,8 @@ func TestEvent_New(t *testing.T) {
 }
 
 func TestEvent_Chaining(t *testing.T) {
-	changes := []operations.Change{
-		{Table: "VRF", Key: "test", Operation: operations.ChangeAdd},
+	changes := []network.Change{
+		{Table: "VRF", Key: "test", Type: network.ChangeAdd},
 	}
 
 	event := NewEvent("alice", "leaf1-ny", "service.apply").

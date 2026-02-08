@@ -23,6 +23,7 @@ newtron/
 ├── cmd/
 │   ├── newtron/                     # CLI application
 │   │   ├── main.go                  # Entry point, root command, context flags
+│   │   ├── cmd_verbs.go             # Symmetric read/write verb commands (set, get, add-member, etc.)
 │   │   ├── cmd_service.go           # Service subcommands
 │   │   ├── cmd_interface.go         # Interface subcommands
 │   │   ├── cmd_lag.go               # LAG subcommands
@@ -34,8 +35,10 @@ newtron/
 │   │   ├── cmd_baseline.go          # Baseline subcommands
 │   │   ├── cmd_audit.go             # Audit subcommands
 │   │   ├── cmd_settings.go          # Settings management
-│   │   ├── cmd_state.go             # State DB access
-│   │   └── interactive.go           # Interactive menu mode
+│   │   ├── cmd_state.go             # State DB queries (bgp, evpn, lag, vrf)
+│   │   ├── cmd_provision.go         # Topology provisioning commands
+│   │   ├── interactive.go           # Interactive menu mode
+│   │   └── shell.go                 # Interactive shell with readline
 ├── pkg/
 │   ├── network/                     # OO hierarchy + spec->config translation
 │   │   ├── network.go               # Top-level Network object (owns specs)
@@ -69,16 +72,21 @@ newtron/
 │   │   ├── acl.go
 │   │   ├── policy.go
 │   │   └── qos.go
-│   ├── operations/                  # Legacy/shared operation utilities
-│   │   └── precondition.go          # Precondition checking utilities
+│   ├── operations/                  # Precondition checking utilities
+│   │   └── precondition.go          # PreconditionChecker, DependencyChecker
 │   ├── health/                      # Health checks
 │   │   └── checker.go
 │   ├── audit/                       # Audit logging
-│   │   ├── event.go                 # Event types
+│   │   ├── event.go                 # Event types (uses network.Change)
 │   │   └── logger.go                # Logger implementation
 │   ├── auth/                        # Authorization
 │   │   ├── permission.go            # Permission definitions
 │   │   └── checker.go               # Permission checking
+│   ├── settings/                    # CLI user settings persistence
+│   │   └── settings.go              # DefaultNetwork, DefaultDevice, SpecDir
+│   ├── configlet/                   # Baseline configuration templates
+│   │   ├── configlet.go             # Configlet struct, loading, listing
+│   │   └── resolve.go               # Template variable resolution
 │   └── util/                        # Utilities
 │       ├── errors.go                # Custom error types
 │       ├── ip.go                    # IP address utilities
@@ -3752,3 +3760,13 @@ Section numbers below refer to the version when the change was made and may not 
 | **ChangeSet.Rollback()** | Documented inverse operations — add→delete, modify→restore, delete→recreate (§3.6) |
 | **Composite Merge Conflict** | Documented conflict rules — same key/different values = error (§5.2) |
 | **Error Sentinels** | Added `ErrDeviceLocked`, `ErrNotConnected` (§10.1) |
+
+#### v7
+
+| Area | Change |
+|------|--------|
+| **Operations Cleanup** | Removed legacy operation wrapper files (`interface.go`, `service.go`, `vlan.go`, `lag.go`, `acl.go`, `evpn.go`) from `pkg/operations/`. Renamed `operation.go` to `precondition.go`, retaining only `PreconditionChecker` and `DependencyChecker`. Removed `Operation` interface, `BaseOperation`, `ChangeSet`, `Change`, and `applyPreview` bridge — all operations are now methods on `network.Device` and `network.Interface` (§5) |
+| **Audit Change Type** | `audit.Event.Changes` now uses `network.Change` (typed `map[string]string` values) instead of `operations.Change` (untyped `interface{}` values). Eliminates circular dependency path |
+| **Package Structure** | Added `pkg/settings/` (CLI user settings persistence) and `pkg/configlet/` (baseline template loading and variable resolution) to §2 |
+| **CLI Files** | Added `cmd_verbs.go` (symmetric read/write operations), `cmd_provision.go` (topology provisioning), `shell.go` (interactive shell) to §2 |
+| **Code-LLD Reconciliation** | Systematic package-by-package comparison; all findings documented in this changelog |
