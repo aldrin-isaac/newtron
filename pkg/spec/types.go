@@ -258,6 +258,24 @@ type PlatformSpec struct {
 	PortCount    int      `json:"port_count"`
 	DefaultSpeed string   `json:"default_speed"`
 	Breakouts    []string `json:"breakouts,omitempty"` // Supported breakout modes
+
+	// newtlab VM fields
+	VMImage              string         `json:"vm_image,omitempty"`
+	VMMemory             int            `json:"vm_memory,omitempty"`
+	VMCPUs               int            `json:"vm_cpus,omitempty"`
+	VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
+	VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
+	VMInterfaceMapCustom map[string]int `json:"vm_interface_map_custom,omitempty"` // SONiC name → QEMU NIC index (for "custom" map type)
+	VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
+	VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
+	VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
+	Dataplane            string         `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
+}
+
+// VMCredentials holds default SSH credentials for a VM platform.
+type VMCredentials struct {
+	User string `json:"user"`
+	Pass string `json:"pass"`
 }
 
 // ============================================================================
@@ -292,6 +310,13 @@ type DeviceProfile struct {
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPass string `json:"ssh_pass,omitempty"`
 	SSHPort int    `json:"ssh_port,omitempty"` // 0 means default (22)
+
+	// OPTIONAL - newtlab per-device overrides
+	ConsolePort int    `json:"console_port,omitempty"`
+	VMMemory    int    `json:"vm_memory,omitempty"`
+	VMCPUs      int    `json:"vm_cpus,omitempty"`
+	VMImage     string `json:"vm_image,omitempty"`
+	VMHost      string `json:"vm_host,omitempty"`
 
 	// OPTIONAL - eBGP underlay ASN (unique per device)
 	UnderlayASN int `json:"underlay_asn,omitempty"`
@@ -333,6 +358,9 @@ type ResolvedProfile struct {
 	SSHUser string
 	SSHPass string
 	SSHPort int // 0 means default (22)
+
+	// newtlab runtime (written by newtlab, read by newtron)
+	ConsolePort int
 
 	// eBGP underlay ASN (unique per device; 0 means use ASNumber for iBGP-only)
 	UnderlayASN int
@@ -378,6 +406,15 @@ type TopologySpecFile struct {
 	Description string                     `json:"description,omitempty"`
 	Devices     map[string]*TopologyDevice `json:"devices"`
 	Links       []*TopologyLink            `json:"links,omitempty"`
+	NewtLab     *NewtLabConfig             `json:"newtlab,omitempty"`
+}
+
+// NewtLabConfig holds newtlab orchestration settings from topology.json.
+type NewtLabConfig struct {
+	LinkPortBase    int               `json:"link_port_base,omitempty"`
+	ConsolePortBase int               `json:"console_port_base,omitempty"`
+	SSHPortBase     int               `json:"ssh_port_base,omitempty"`
+	Hosts           map[string]string `json:"hosts,omitempty"`
 }
 
 // TopologyDevice defines a device's configuration within a topology.

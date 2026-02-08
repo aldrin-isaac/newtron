@@ -181,6 +181,9 @@ func (l *Loader) ResolveProfile(deviceName string) (*ResolvedProfile, error) {
 	resolved.SSHPass = profile.SSHPass
 	resolved.SSHPort = profile.SSHPort
 
+	// newtlab runtime
+	resolved.ConsolePort = profile.ConsolePort
+
 	// eBGP underlay ASN
 	resolved.UnderlayASN = profile.UnderlayASN
 
