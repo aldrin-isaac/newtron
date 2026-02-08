@@ -140,7 +140,7 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	defer dev.Disconnect()
 
 	// Lock for writing
-	if err := dev.Lock(ctx); err != nil {
+	if err := dev.Lock(); err != nil {
 		return nil, fmt.Errorf("locking device: %w", err)
 	}
 	defer dev.Unlock()
@@ -175,7 +175,7 @@ func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceNam
 	}
 
 	// Lock for writing
-	if err := dev.Lock(ctx); err != nil {
+	if err := dev.Lock(); err != nil {
 		return nil, fmt.Errorf("locking device: %w", err)
 	}
 

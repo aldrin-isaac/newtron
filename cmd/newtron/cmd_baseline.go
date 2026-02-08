@@ -125,7 +125,7 @@ Examples:
 		}
 		defer dev.Disconnect()
 
-		if err := dev.Lock(ctx); err != nil {
+		if err := dev.Lock(); err != nil {
 			return fmt.Errorf("locking device: %w", err)
 		}
 		defer dev.Unlock()

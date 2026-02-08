@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-redis/redis/v8"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // StateDB mirrors SONiC's state_db structure (Redis DB 6)
@@ -505,6 +508,94 @@ func (c *StateDBClient) GetTransceiverStatus(port string) (*TransceiverStatusEnt
 		TxPower:     vals["tx_power"],
 		RxPower:     vals["rx_power"],
 	}, nil
+}
+
+// ============================================================================
+// Distributed Locking — device-lld §2.3
+// ============================================================================
+
+// acquireLockScript is a Lua script for atomic lock acquisition in STATE_DB.
+// Returns 1 on success, 0 if already locked by another holder.
+var acquireLockScript = redis.NewScript(`
+local key = KEYS[1]
+if redis.call("EXISTS", key) == 1 then
+	return 0
+end
+redis.call("HSET", key, "holder", ARGV[1], "acquired", ARGV[2], "ttl", ARGV[3])
+redis.call("EXPIRE", key, tonumber(ARGV[3]))
+return 1
+`)
+
+// releaseLockScript is a Lua script for atomic lock release with holder verification.
+// Returns 1 on success, 0 if holder mismatch, -1 if key doesn't exist.
+var releaseLockScript = redis.NewScript(`
+local key = KEYS[1]
+if redis.call("EXISTS", key) == 0 then
+	return -1
+end
+local current = redis.call("HGET", key, "holder")
+if current ~= ARGV[1] then
+	return 0
+end
+redis.call("DEL", key)
+return 1
+`)
+
+// AcquireLock acquires a distributed lock for the given device in STATE_DB.
+// The lock is stored as NEWTRON_LOCK|<device> with holder, acquired time, and TTL.
+// Returns util.ErrDeviceLocked if the device is already locked by another holder.
+func (c *StateDBClient) AcquireLock(device, holder string, ttlSeconds int) error {
+	key := fmt.Sprintf("NEWTRON_LOCK|%s", device)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	result, err := acquireLockScript.Run(c.ctx, c.client, []string{key},
+		holder, now, fmt.Sprintf("%d", ttlSeconds)).Int()
+	if err != nil {
+		return fmt.Errorf("acquiring lock for %s: %w", device, err)
+	}
+	if result == 0 {
+		return util.ErrDeviceLocked
+	}
+	return nil
+}
+
+// ReleaseLock releases the distributed lock for the given device in STATE_DB.
+// Returns an error if the holder does not match the current lock holder.
+func (c *StateDBClient) ReleaseLock(device, holder string) error {
+	key := fmt.Sprintf("NEWTRON_LOCK|%s", device)
+
+	result, err := releaseLockScript.Run(c.ctx, c.client, []string{key}, holder).Int()
+	if err != nil {
+		return fmt.Errorf("releasing lock for %s: %w", device, err)
+	}
+	switch result {
+	case 0:
+		return fmt.Errorf("lock holder mismatch for %s", device)
+	case -1:
+		return nil // Lock doesn't exist, treat as success
+	}
+	return nil
+}
+
+// GetLockHolder returns the current lock holder and acquisition time for the device.
+// Returns ("", zero, nil) if no lock is held.
+func (c *StateDBClient) GetLockHolder(device string) (string, time.Time, error) {
+	key := fmt.Sprintf("NEWTRON_LOCK|%s", device)
+
+	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("getting lock holder for %s: %w", device, err)
+	}
+	if len(vals) == 0 {
+		return "", time.Time{}, nil
+	}
+
+	holder := vals["holder"]
+	acquired := time.Time{}
+	if ts, ok := vals["acquired"]; ok {
+		acquired, _ = time.Parse(time.RFC3339, ts)
+	}
+	return holder, acquired, nil
 }
 
 // PopulateDeviceState fills DeviceState from StateDB data

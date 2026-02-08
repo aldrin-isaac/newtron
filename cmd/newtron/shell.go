@@ -246,7 +246,7 @@ func (s *Shell) cmdApplyService(args []string) {
 
 	ctx := context.Background()
 
-	if err := s.dev.Lock(ctx); err != nil {
+	if err := s.dev.Lock(); err != nil {
 		fmt.Printf("Error locking device: %v\n", err)
 		return
 	}
@@ -285,7 +285,7 @@ func (s *Shell) cmdRemoveService() {
 
 	ctx := context.Background()
 
-	if err := s.dev.Lock(ctx); err != nil {
+	if err := s.dev.Lock(); err != nil {
 		fmt.Printf("Error locking device: %v\n", err)
 		return
 	}
@@ -396,8 +396,7 @@ func (s *Shell) cmdComposite(args []string) {
 			fmt.Println("Cancelled.")
 			return
 		}
-		ctx := context.Background()
-		if err := s.dev.Lock(ctx); err != nil {
+		if err := s.dev.Lock(); err != nil {
 			fmt.Printf("Error locking device: %v\n", err)
 			return
 		}

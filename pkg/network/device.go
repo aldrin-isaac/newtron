@@ -3,10 +3,13 @@ package network
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/user"
 	"sync"
+	"time"
 
-	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/device"
+	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -174,8 +177,10 @@ func (d *Device) IsConnected() bool {
 	return d.connected
 }
 
-// Lock acquires exclusive lock for configuration changes.
-func (d *Device) Lock(ctx context.Context) error {
+// Lock acquires a distributed lock for configuration changes.
+// Constructs a holder identity from the current user and hostname,
+// and acquires the lock with a default TTL of 3600 seconds.
+func (d *Device) Lock() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -186,12 +191,35 @@ func (d *Device) Lock(ctx context.Context) error {
 		return nil
 	}
 
-	if err := d.conn.Lock(ctx); err != nil {
+	holder := lockHolder()
+	if err := d.conn.Lock(holder, 3600); err != nil {
 		return err
 	}
 
 	d.locked = true
 	return nil
+}
+
+// LockHolder returns the current lock holder and acquisition time.
+// Returns ("", zero, nil) if no lock is held.
+func (d *Device) LockHolder() (string, time.Time, error) {
+	if !d.connected {
+		return "", time.Time{}, fmt.Errorf("device not connected")
+	}
+	return d.conn.LockHolder()
+}
+
+// lockHolder constructs a holder identity string: "user@hostname".
+func lockHolder() string {
+	username := "unknown"
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+	hostname := "unknown"
+	if h, err := os.Hostname(); err == nil {
+		hostname = h
+	}
+	return fmt.Sprintf("%s@%s", username, hostname)
 }
 
 // Unlock releases the lock.

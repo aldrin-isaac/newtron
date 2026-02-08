@@ -150,7 +150,7 @@ func serviceMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 
 			// Perform the actual operation
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -198,7 +198,7 @@ func serviceMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			intf = strings.TrimSpace(intf)
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -381,7 +381,7 @@ func lagMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			}
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -425,7 +425,7 @@ func lagMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			member = strings.TrimSpace(member)
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -467,7 +467,7 @@ func lagMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			member = strings.TrimSpace(member)
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -553,7 +553,7 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			desc = strings.TrimSpace(desc)
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -604,7 +604,7 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			tagged := taggedStr == "y" || taggedStr == "yes"
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -891,7 +891,7 @@ func bgpMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 				continue
 			}
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -944,7 +944,7 @@ func bgpMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			evpn := evpnStr == "y" || evpnStr == "yes"
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}
@@ -982,7 +982,7 @@ func bgpMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			neighborIP = strings.TrimSpace(neighborIP)
 
 			ctx := context.Background()
-			if err := dev.Lock(ctx); err != nil {
+			if err := dev.Lock(); err != nil {
 				fmt.Println(red("Failed to lock device: " + err.Error()))
 				continue
 			}

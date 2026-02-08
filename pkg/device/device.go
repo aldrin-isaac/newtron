@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -28,7 +29,7 @@ type Device struct {
 	tunnel      *SSHTunnel    // SSH tunnel for Redis access (nil if direct)
 	connected   bool
 	locked      bool
-	lockFiles   []string
+	lockHolder  string // holder identity for distributed lock
 
 	// Mutex for thread safety
 	mu sync.RWMutex
@@ -269,8 +270,9 @@ func (d *Device) RequireLocked() error {
 	return nil
 }
 
-// Lock acquires an exclusive lock on the device for configuration changes
-func (d *Device) Lock(ctx context.Context) error {
+// Lock acquires a distributed lock on the device via STATE_DB.
+// The holder string identifies who holds the lock; ttlSeconds controls expiry.
+func (d *Device) Lock(holder string, ttlSeconds int) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -282,14 +284,20 @@ func (d *Device) Lock(ctx context.Context) error {
 		return nil // Already locked
 	}
 
-	// Implement lock file logic here
+	if d.stateClient != nil {
+		if err := d.stateClient.AcquireLock(d.Name, holder, ttlSeconds); err != nil {
+			return err
+		}
+	}
+
 	d.locked = true
-	util.WithDevice(d.Name).Debug("Lock acquired")
+	d.lockHolder = holder
+	util.WithDevice(d.Name).Debugf("Lock acquired by %s", holder)
 
 	return nil
 }
 
-// Unlock releases the device lock
+// Unlock releases the device lock via STATE_DB.
 func (d *Device) Unlock() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -302,11 +310,29 @@ func (d *Device) unlock() error {
 		return nil
 	}
 
-	// Implement unlock logic here
+	if d.stateClient != nil && d.lockHolder != "" {
+		if err := d.stateClient.ReleaseLock(d.Name, d.lockHolder); err != nil {
+			util.WithDevice(d.Name).Warnf("Failed to release lock: %v", err)
+		}
+	}
+
 	d.locked = false
+	d.lockHolder = ""
 	util.WithDevice(d.Name).Debug("Lock released")
 
 	return nil
+}
+
+// LockHolder returns the current lock holder and acquisition time.
+// Returns ("", zero, nil) if no lock is held.
+func (d *Device) LockHolder() (string, time.Time, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.stateClient == nil {
+		return "", time.Time{}, fmt.Errorf("state_db client not connected")
+	}
+	return d.stateClient.GetLockHolder(d.Name)
 }
 
 // IsLocked returns true if the device is locked

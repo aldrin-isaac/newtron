@@ -221,7 +221,7 @@ Examples:
 		}
 
 		// Lock device for changes
-		if err := dev.Lock(ctx); err != nil {
+		if err := dev.Lock(); err != nil {
 			return fmt.Errorf("locking device: %w", err)
 		}
 		defer dev.Unlock()
@@ -327,7 +327,7 @@ Examples:
 		}
 
 		// Lock device
-		if err := dev.Lock(ctx); err != nil {
+		if err := dev.Lock(); err != nil {
 			return fmt.Errorf("locking device: %w", err)
 		}
 		defer dev.Unlock()

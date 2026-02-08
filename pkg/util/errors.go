@@ -19,6 +19,7 @@ var (
 	ErrValidationFailed   = errors.New("validation failed")
 	ErrInUse              = errors.New("resource in use")
 	ErrDependencyMissing  = errors.New("required dependency missing")
+	ErrDeviceLocked       = errors.New("device is locked by another process")
 )
 
 // PreconditionError represents a failed precondition check with context
