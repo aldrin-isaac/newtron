@@ -10,7 +10,7 @@
 | **StateDB** | Added StateDB (Redis DB 6) as a read-only operational state source alongside ConfigDB (DB 4); non-fatal connection failure semantics |
 | **Config Persistence** | Added documentation of runtime-vs-persistent config model; `config save -y` operator responsibility |
 | **Verification Strategy** | Added three-tier verification: CONFIG_DB hard fail, ASIC_DB topology-dependent, data-plane soft fail |
-| **Lab Architecture** | Added labgen pipeline overview (topology YAML → config_db.json, frr.conf, clab.yml, specs) |
+| **Lab Architecture** | Added lab pipeline overview (topology YAML → specs) |
 | **Testing Architecture** | Added unit/integration/E2E tier documentation with build tag separation |
 | **Security Model** | Added SSH transport security, InsecureIgnoreHostKey for labs, permission levels |
 | **Design Decisions** | Added six numbered decisions with rationale (SSH tunnel, dry-run default, build tags, preconditions, fresh connections, non-fatal StateDB) |
@@ -33,7 +33,7 @@
 | **SiteSpec** | Added `cluster_id` field for BGP route reflector cluster ID |
 | **Execution Modes** | Added composite mode alongside dry-run and execute |
 | **Design Decisions** | Added five new decisions: frrcfgd over bgpcfgd/split, composite merge restrictions, platform.json validation, redistribution defaults, single SetupRouteReflector |
-| **Lab Architecture** | `frr.conf` no longer generated; port creation replaces labgen PORT logic; composite replaces sequential configlet merge |
+| **Lab Architecture** | `frr.conf` no longer generated; port creation replaces legacy PORT logic; composite replaces sequential configlet merge |
 
 **Lines:** 1019 (v2) → ~1340 (v3) | All v2 sections preserved and expanded.
 
@@ -68,7 +68,7 @@
 | Area | Change |
 |------|--------|
 | **Per-Operation Distributed Locking** | Locking moved from caller responsibility to per-operation: each mutating operation (ApplyService, RemoveService, etc.) acquires a distributed Redis STATE_DB lock with TTL, applies changes, verifies, and releases. Callers no longer need to lock/unlock explicitly. |
-| **ApplyService/RemoveService/RefreshService Signatures** | Simplified signatures: `(ctx, serviceName, ipAddr string, dryRun bool)` replacing `ApplyServiceOpts` struct. Added `RemoveService` (reverse with DependencyChecker) and `RefreshService` (spec diff + delta apply). |
+| **ApplyService/RemoveService/RefreshService Signatures** | Simplified signatures: `ApplyService(ctx, serviceName, ipAddr string, dryRun bool)`, `RemoveService(ctx, dryRun bool)`, `RefreshService(ctx, dryRun bool)` — replacing `ApplyServiceOpts` struct. RemoveService reads the existing binding; RefreshService diffs current config against current spec. |
 | **Execution Model** | Updated §4.5 to document Lock → Apply → Verify → Unlock pattern inside execute mode. Disconnect releases lock as safety net. |
 
 **Lines:** ~1700 (v5) → ~1730 (v6) | All v5 sections preserved; locking and signature updates.
@@ -577,7 +577,7 @@ Redistribution follows opinionated defaults:
 
 #### 4.7.1 Concept
 
-Composite mode generates a composite CONFIG_DB configuration offline (without connecting to a device), then delivers it to the device as a single atomic operation once the device is up. This replaces the configlet-based baseline approach from labgen with a newtron-native mechanism.
+Composite mode generates a composite CONFIG_DB configuration offline (without connecting to a device), then delivers it to the device as a single atomic operation once the device is up. This replaces the configlet-based baseline approach with a newtron-native mechanism.
 
 #### 4.7.2 Two Delivery Modes
 
@@ -1121,7 +1121,7 @@ The `SiteSpec` struct gains a `cluster_id` field for BGP route reflector cluster
 |-------|-------------|
 | `cluster_id` | BGP RR cluster-id. If not set, defaults to the spine's loopback IP. |
 
-`SetupRouteReflector` reads `cluster_id` from SiteSpec. If not set, it falls back to the current labgen behavior (spine loopback IP).
+`SetupRouteReflector` reads `cluster_id` from SiteSpec. If not set, it defaults to the spine's loopback IP.
 
 ### 9.5 Spec Inheritance
 
@@ -1323,149 +1323,25 @@ This works for every operation (disaggregated or composite) because they all pro
 
 ## 14. Lab Architecture
 
-### 14.1 Overview
-
-The `testlab/` directory contains everything needed to run Newtron against virtual SONiC devices using containerlab.
-
-### 14.2 Lab Generation Pipeline
-
-The `labgen` tool (`pkg/labgen`) generates all artifacts from a single topology YAML file:
-
-```
-  topology YAML                    Generated Artifacts
-  (testlab/topologies/)            (testlab/.generated/)
-
-+---------------------+           +-- spine-leaf.clab.yml    (containerlab topology)
-| spine-leaf.yml      |           +-- specs/
-|  - nodes            | -------->  |   +-- network.json       (Newtron specs)
-|  - links            |   labgen   |   +-- site.json
-|  - role_defaults    |            |   +-- platforms.json
-|  - defaults         |            |   +-- profiles/
-+---------------------+            |       +-- leaf1.json     (with ssh_user/ssh_pass)
-                                   |       +-- leaf2.json
-  configlets/                      |       +-- spine1.json
-  (templates per role)             |       +-- spine2.json
-                                   +-- leaf1/
-                                   |   +-- config_db.json     (baseline SONiC config)
-                                   |   +-- frr.conf           (FRR routing config)
-                                   +-- leaf2/
-                                   |   +-- config_db.json
-                                   |   +-- frr.conf
-                                   +-- spine1/
-                                   |   +-- config_db.json
-                                   |   +-- frr.conf
-                                   +-- spine2/
-                                       +-- config_db.json
-                                       +-- frr.conf
-```
-
-### 14.3 Topology YAML
-
-A topology file defines nodes, links, and role defaults:
-
-```yaml
-name: spine-leaf
-defaults:
-  image: vrnetlab/cisco_sonic:ngdp-202411
-  username: cisco
-  password: cisco123
-  platform: vs-platform
-nodes:
-  spine1:
-    role: spine
-    loopback_ip: "10.0.0.1"
-  leaf1:
-    role: leaf
-    loopback_ip: "10.0.0.11"
-  server1:
-    role: server
-    image: nicolaka/netshoot:latest
-links:
-  - endpoints: ["spine1:Ethernet0", "leaf1:Ethernet0"]
-  - endpoints: ["leaf1:Ethernet2", "server1:eth1"]
-role_defaults:
-  spine:
-    - sonic-baseline
-    - sonic-evpn-spine
-  leaf:
-    - sonic-baseline
-    - sonic-evpn-leaf
-```
-
-### 14.4 Node Types
-
-| Role | Implementation | Purpose |
-|------|---------------|---------|
-| `spine` | vrnetlab QEMU VM running SONiC-VS | Route reflector, BGP underlay |
-| `leaf` | vrnetlab QEMU VM running SONiC-VS | ToR switch with VTEP, services |
-| `server` | Linux container (nicolaka/netshoot) | End-host for data-plane testing |
-
-**vrnetlab**: SONiC-VS images are run inside QEMU, wrapped in Docker containers by vrnetlab. The QEMU VM exposes SSH on port 22 (mapped to the container's management IP). Redis runs inside the VM on `127.0.0.1:6379` and is not port-forwarded.
-
-### 14.5 Generated Artifacts
-
-- **`config_db.json`**: Per-device baseline configuration assembled from configlet templates. Applied by the `role_defaults` list. Contains port configuration, BGP neighbors, VXLAN tunnel, ACLs, etc.
-- **`*.clab.yml`**: Containerlab topology file that defines nodes, images, links, and bind-mounts for config files.
-- **`specs/`**: Newtron specification files generated from the topology, including device profiles with `ssh_user`/`ssh_pass` fields populated from topology defaults.
-
-**v3 changes to lab generation:**
-- **`frr.conf` no longer generated**: BGP configuration is now managed entirely through CONFIG_DB via frrcfgd. The FRR management framework translates CONFIG_DB BGP tables to FRR configuration at runtime.
-- **Port creation replaces labgen PORT logic**: Port entries are now created through newtron's port creation operations (validated against `platform.json`) instead of being hardcoded in labgen config_db.json templates.
-- **Composite replaces sequential configlet merge**: Instead of merging individual configlet templates into config_db.json, the lab generator can use CompositeBuilder to construct a composite config offline, then deliver it atomically via `DeliverComposite` in overwrite mode.
+Lab environments use **vmlab** for VM orchestration (see `docs/vmlab/`).
 
 ## 15. Testing Architecture
 
 ### 15.1 Test Tiers
 
-Newtron uses Go build tags to separate three test tiers:
-
-| Tier | Build Tag | Redis Source | SONiC Devices | Purpose |
-|------|-----------|-------------|---------------|---------|
-| Unit | (none) | None | None | Pure logic: IP derivation, spec parsing, ACL expansion |
-| Integration | `-tags integration` | Standalone container | None | Redis read/write: ConfigDB loading, StateDB queries, operations |
-| E2E | `-tags e2e` | SSH-tunneled (in-device) | Full containerlab lab | End-to-end: operations against real SONiC-VS devices |
+| Tier | How | Purpose |
+|------|-----|---------|
+| Unit | `go test ./...` | Pure logic: IP derivation, spec parsing, ACL expansion |
+| E2E | newtest framework | Full stack: vmlab VMs, SSH tunnel, real SONiC |
 
 ### 15.2 Unit Tests
 
 Run with `go test ./...` (no build tags). Test pure functions and struct logic without any external dependencies. Examples: IP address derivation, prefix list expansion, spec inheritance resolution, ACL rule generation.
 
-### 15.3 Integration Tests
+### 15.3 E2E Tests (newtest)
 
-Run with `go test -tags integration ./...`. Require a standalone Redis container (`newtron-test-redis`) started via `docker-compose`:
-
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: newtron-test-redis
-    command: redis-server --databases 16 --save ""
-```
-
-Integration tests discover the container's IP via `docker inspect`, connect directly to `<ip>:6379` (no SSH), and seed Redis with JSON fixture files (`testlab/seed/configdb.json`, `testlab/seed/statedb.json`). The `testutil` package provides `SetupConfigDB(t)`, `SetupStateDB(t)`, and `SetupBothDBs(t)` helpers that flush and re-seed the relevant databases before each test.
-
-The `TestProfile()` fixture function creates a `ResolvedProfile` pointing at the test Redis IP with no `SSHUser`/`SSHPass`, so `Device.Connect()` takes the direct-Redis path.
-
-### 15.4 E2E Tests
-
-Run with `go test -tags e2e ./test/e2e/`. Require a running containerlab topology (`make lab-start`).
-
-**Key patterns**:
-
-- **SSH-tunneled Redis**: E2E tests connect through the normal `Network -> Device -> Connect` path, which establishes SSH tunnels. Device profiles in `.generated/specs/profiles/` include `ssh_user`/`ssh_pass` from the topology defaults.
-
-- **Shared SSH tunnel pool**: The testutil package maintains a pool of SSH tunnels (`labTunnels` map) indexed by node name, reused across tests to avoid repeated tunnel setup. Tunnels are closed by `CloseLabTunnels()` in `TestMain` after all tests complete.
-
-- **Fresh connections for verification**: After executing an operation, E2E tests create a **new** `LabConnectedDevice(t, nodeName)` to read CONFIG_DB. This ensures verification reads the actual Redis state, not a cached in-memory copy.
-
-- **Device access**: Mutating operations use `LabDevice(t, nodeName)` which connects and registers cleanup to disconnect. Per-operation locking is handled internally by each operation in execute mode.
-
-- **Baseline reset**: `TestMain` calls `ResetLabBaseline()` before running any tests. This SSHes into every SONiC node and deletes known stale CONFIG_DB keys from previous test runs, preventing `vxlanmgrd`/`orchagent` crashes.
-
-- **Three-tier assertion strategy**: Tests use CONFIG_DB assertions (hard fail), ASIC_DB polling (topology-dependent), and data-plane ping (soft fail). See Section 13.
-
-- **Test cleanup**: Each test registers cleanup functions via `t.Cleanup()` that either use reverse operations (e.g., `DeleteVLANOp`) via fresh connections, or raw Redis DEL commands for entries without dedicated reverse operations.
-
-- **Test tracking and reporting**: `testutil.Track(t, category, nodes)` records test outcomes. `TestMain` writes an E2E report to `testlab/.generated/e2e-report.md` after the suite completes.
+E2E testing uses the newtest framework (see `docs/newtest/`). Patterns and SONiC-specific
+learnings from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.md`.
 
 ## 16. Summary: Spec vs Config
 
@@ -1501,9 +1377,9 @@ The system maintains this separation to enable:
 
 ### 17.3 Go Build Tags for Test Isolation
 
-**Decision**: Use `//go:build integration` and `//go:build e2e` build tags to separate test tiers.
+**Decision**: Unit tests run with `go test ./...` (no dependencies). E2E tests use the newtest framework with vmlab VMs.
 
-**Rationale**: Unit tests must run instantly with zero infrastructure. Integration tests need only a Redis container. E2E tests need a full containerlab topology with QEMU VMs (minutes to start, gigabytes of RAM). Build tags ensure `go test ./...` runs only fast unit tests by default, while CI pipelines can selectively enable heavier tiers.
+**Rationale**: Unit tests must run instantly with zero infrastructure. E2E tests need QEMU VMs (minutes to start, gigabytes of RAM). This separation ensures `go test ./...` runs only fast unit tests by default.
 
 ### 17.4 Precondition Checking Before Execution
 

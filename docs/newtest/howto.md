@@ -515,7 +515,7 @@ device and asserts the expected prefix, protocol, and next-hops:
 # Verify underlay route: leaf1's connected subnet arrived at spine1
 - name: check-underlay
   action: verify-route
-  device: spine1
+  devices: [spine1]
   prefix: "10.1.0.0/31"
   vrf: default
   expect:
@@ -527,7 +527,7 @@ device and asserts the expected prefix, protocol, and next-hops:
 # Verify ASIC programmed the route (not just FRR)
 - name: check-asic
   action: verify-route
-  device: leaf1
+  devices: [leaf1]
   prefix: "10.0.0.1/32"
   vrf: default
   expect:

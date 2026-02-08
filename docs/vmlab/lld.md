@@ -32,7 +32,7 @@ type PlatformSpec struct {
     VMCPUFeatures  string         `json:"vm_cpu_features,omitempty"`
     VMCredentials  *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout  int            `json:"vm_boot_timeout,omitempty"`
-    Dataplane      bool           `json:"dataplane,omitempty"`
+    Dataplane      string         `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.
@@ -53,7 +53,7 @@ type VMCredentials struct {
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
 | `vm_credentials` | *VMCredentials | nil | Default SSH login |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for SSH |
-| `dataplane` | bool | false | Whether image has a dataplane (VPP, MEMORY) |
+| `dataplane` | string | `""` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
 
 ### 1.2 DeviceProfile — vmlab Fields
 
@@ -500,25 +500,33 @@ NIC 0 is always management — data NICs start at index 1.
 
 ```go
 // ResolveNICIndex returns the QEMU NIC index for a SONiC interface name
-// using the given interface map scheme.
+// using the given interface map scheme. When interfaceMap is "custom",
+// the customMap parameter is used for direct lookup; otherwise it is ignored.
 //
 // Examples (stride-4):
-//   ResolveNICIndex("stride-4", "Ethernet0")  → 1
-//   ResolveNICIndex("stride-4", "Ethernet4")  → 2
-//   ResolveNICIndex("stride-4", "Ethernet8")  → 3
+//   ResolveNICIndex("stride-4", "Ethernet0", nil)  → 1
+//   ResolveNICIndex("stride-4", "Ethernet4", nil)  → 2
+//   ResolveNICIndex("stride-4", "Ethernet8", nil)  → 3
 //
 // Examples (sequential):
-//   ResolveNICIndex("sequential", "Ethernet0") → 1
-//   ResolveNICIndex("sequential", "Ethernet1") → 2
-func ResolveNICIndex(interfaceMap, interfaceName string) (int, error)
+//   ResolveNICIndex("sequential", "Ethernet0", nil) → 1
+//   ResolveNICIndex("sequential", "Ethernet1", nil) → 2
+//
+// Examples (custom):
+//   ResolveNICIndex("custom", "Ethernet0", map[string]int{"Ethernet0": 3}) → 3
+func ResolveNICIndex(interfaceMap, interfaceName string, customMap map[string]int) (int, error)
 
 // ResolveInterfaceName returns the SONiC interface name for a QEMU NIC index.
-// Inverse of ResolveNICIndex.
+// Inverse of ResolveNICIndex. When interfaceMap is "custom", the customMap
+// parameter is used for reverse lookup; otherwise it is ignored.
 //
 // Examples (stride-4):
-//   ResolveInterfaceName("stride-4", 1) → "Ethernet0"
-//   ResolveInterfaceName("stride-4", 2) → "Ethernet4"
-func ResolveInterfaceName(interfaceMap string, nicIndex int) string
+//   ResolveInterfaceName("stride-4", 1, nil) → "Ethernet0"
+//   ResolveInterfaceName("stride-4", 2, nil) → "Ethernet4"
+//
+// Examples (custom):
+//   ResolveInterfaceName("custom", 3, map[string]int{"Ethernet0": 3}) → "Ethernet0"
+func ResolveInterfaceName(interfaceMap string, nicIndex int, customMap map[string]int) string
 ```
 
 ### 6.3 Parsing
@@ -734,7 +742,12 @@ func (l *Lab) Deploy() error {
     }
 
     // 8. Build and start QEMU commands
-    //    Start listen-side nodes first, then connect-side nodes
+    //    Start listen-side nodes first, then connect-side nodes.
+    //
+    //    sortedListenFirst(nodes, links) returns sorted node names where
+    //    A-side nodes come first. For each link, A-side is listen, Z-side
+    //    is connect. Nodes appearing only as Z-side start after all A-side
+    //    nodes. Within each group, sorted alphabetically.
     for _, name := range sortedListenFirst(l.Nodes, l.Links) {
         pid := StartNode(l.Nodes[name], l.StateDir)
         l.State.Nodes[name] = &NodeState{PID: pid, Status: "running", ...}
@@ -765,6 +778,27 @@ func (l *Lab) Deploy() error {
 }
 ```
 
+**`resolveVMLabConfig`** fills defaults for nil or zero-value fields:
+
+```go
+// resolveVMLabConfig returns a VMLabConfig with defaults applied.
+// Takes the optional *spec.VMLabConfig from topology.json (may be nil).
+func resolveVMLabConfig(cfg *spec.VMLabConfig) *VMLabConfig {
+    resolved := &VMLabConfig{
+        LinkPortBase:    20000,
+        ConsolePortBase: 30000,
+        SSHPortBase:     40000,
+    }
+    if cfg != nil {
+        if cfg.LinkPortBase != 0    { resolved.LinkPortBase = cfg.LinkPortBase }
+        if cfg.ConsolePortBase != 0 { resolved.ConsolePortBase = cfg.ConsolePortBase }
+        if cfg.SSHPortBase != 0     { resolved.SSHPortBase = cfg.SSHPortBase }
+        resolved.Hosts = cfg.Hosts
+    }
+    return resolved
+}
+```
+
 **Start order:** Nodes with listen-side NICs start before nodes with
 connect-side NICs. Within each group, nodes start in sorted name order.
 This ensures socket listeners are ready before connectors attempt to dial.
@@ -785,8 +819,10 @@ Step-by-step pseudocode for `Lab.Destroy()`:
 
 ```go
 func (l *Lab) Destroy() error {
-    // 1. Load state
+    // 1. Load state — also recover SpecDir from persisted state so that
+    //    profile restoration can find the original spec files.
     state := LoadState(l.Name)
+    l.SpecDir = state.SpecDir
 
     // Continue-on-error: collect all failures rather than stopping at the first.
     // This ensures maximum cleanup — a failed process kill should not prevent

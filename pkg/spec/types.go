@@ -292,7 +292,7 @@ type DeviceProfile struct {
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPass string `json:"ssh_pass,omitempty"`
 
-	// OPTIONAL - eBGP underlay ASN (unique per device, from labgen)
+	// OPTIONAL - eBGP underlay ASN (unique per device)
 	UnderlayASN int `json:"underlay_asn,omitempty"`
 }
 

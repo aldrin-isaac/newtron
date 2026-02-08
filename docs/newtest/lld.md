@@ -140,7 +140,7 @@ const (
 | `verify-config-db` | newtron | `ConfigDBClient.Get*()` |
 | `verify-state-db` | newtron | `StateDBClient.Get*()` |
 | `verify-bgp` | newtron | `Device.RunHealthChecks("bgp")` |
-| `verify-health` | newtron | `Device.RunHealthChecks("")` |
+| `verify-health` | newtron | `Device.RunHealthChecks()` |
 | `verify-route` | newtron | `Device.GetRoute()` / `GetRouteASIC()` |
 | `verify-ping` | **newtest native** | SSH ping |
 | `apply-service` | newtron | `Interface.ApplyService()` |
@@ -553,6 +553,8 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 
 ## 5. Step Executors (`pkg/newtest/steps.go`)
 
+> **Convention:** Throughout executor code, `dev` refers to `*network.Device` obtained via `r.Network.GetDevice(name)`. To access device-layer methods (ConfigDBClient, GetRoute, VerifyChangeSet), use `dev.Underlying()` which returns `*device.Device`. Methods on `network.Device` that delegate to the device layer (e.g., `RunHealthChecks`, `GetRoute`, `GetRouteASIC`, `VerifyChangeSet`) are called directly on `dev`.
+
 ### 5.1 Executor Interface
 
 ```go
@@ -580,13 +582,15 @@ func (r *Runner) resolveDevices(step *Step) []string {
 // hasDataplane checks if the scenario platform supports dataplane forwarding.
 // Used by verifyPingExecutor to skip on platforms without dataplane (e.g., sonic-vs).
 func (r *Runner) hasDataplane() bool {
-    platforms := r.Network.GetPlatforms()
     platformName := r.scenario.Platform
     if r.opts.Platform != "" {
         platformName = r.opts.Platform
     }
-    p := platforms.Platforms[platformName]
-    return p != nil && p.Dataplane != ""
+    p, err := r.Network.GetPlatform(platformName)
+    if err != nil {
+        return false
+    }
+    return p.Dataplane != ""
 }
 
 // StepOutput is the return value from every executor.
@@ -686,7 +690,7 @@ func (e *verifyConfigDBExecutor) Execute(ctx context.Context, r *Runner, step *S
 **Mode 1: `expect.MinEntries`** — count keys matching table
 
 ```go
-keys := dev.ConfigDB.GetTableKeys(step.Table)
+keys := dev.Underlying().ConfigDB.GetTableKeys(step.Table)
 if len(keys) >= *step.Expect.MinEntries {
     // StatusPassed
 } else {
@@ -697,7 +701,7 @@ if len(keys) >= *step.Expect.MinEntries {
 **Mode 2: `expect.Exists`** — check if table/key exists
 
 ```go
-entry := dev.ConfigDB.GetEntry(step.Table, step.Key)
+entry := dev.Underlying().ConfigDB.GetEntry(step.Table, step.Key)
 exists := entry != nil
 if exists == *step.Expect.Exists {
     // StatusPassed
@@ -709,7 +713,7 @@ if exists == *step.Expect.Exists {
 **Mode 3: `expect.Fields`** — read table/key, compare each field value
 
 ```go
-entry := dev.ConfigDB.GetEntry(step.Table, step.Key)
+entry := dev.Underlying().ConfigDB.GetEntry(step.Table, step.Key)
 for field, expected := range step.Expect.Fields {
     actual := entry[field]
     if actual != expected {
@@ -732,7 +736,7 @@ func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *St
 
 1. Resolve devices via `r.resolveDevices(step)`
 2. For each device, poll until timeout:
-   - Call `dev.Conn().StateDBClient().GetEntry(step.Table, step.Key)`
+   - Call `dev.Underlying().StateDBClient().GetEntry(step.Table, step.Key)`
      (returns `map[string]string` — the generic accessor added to
      StateDBClient in device LLD §2.3)
    - Compare each field in `step.Expect.Fields` against the returned map
@@ -754,14 +758,18 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 
 1. Resolve devices
 2. For each device, poll until `step.Expect.Timeout` (default 120s):
-   - Call `dev.RunHealthChecks(ctx, "bgp")`
-   - Returns `[]HealthCheckResult` (see newtron LLD §5.3)
-   - Check if all BGP check results have `Status == "pass"`
-   - When `step.Expect.State` is set (e.g. `"Established"`), also reads
-     `StateDBClient.GetBGPNeighborState(vrf, neighborIP)` for each
+   - **Health check first (fast fail):** Call `dev.RunHealthChecks(ctx, "bgp")`.
+     Returns `[]HealthCheckResult` (see newtron LLD §5.2).
+     Check if all BGP check results have `Status == "pass"`.
+   - **State check second (if configured):** When `step.Expect.State` is set
+     (e.g. `"Established"`), additionally reads STATE_DB per-neighbor state via
+     `dev.Underlying().StateDBClient().GetBGPNeighborState(vrf, neighborIP)` for each
      BGP_NEIGHBOR key in CONFIG_DB. Compares the `State` field (e.g.,
-     `"Established"`, `"Active"`) against `step.Expect.State`. VRF is
-     "default" unless the neighbor's `vrf_name` says otherwise.
+     `"Established"`, `"Active"`) against `step.Expect.State`. VRF is extracted
+     from the BGP_NEIGHBOR key prefix (e.g., `"default|10.0.0.2"` → vrf=`"default"`).
+   - **Both must pass.** Health check runs first because it's faster and catches
+     gross failures (daemon not running, no neighbors). State check runs second
+     for per-neighbor granularity.
    - If all pass → `StatusPassed`
    - Sleep `step.Expect.PollInterval` (default 5s) and retry
 3. On timeout → `StatusFailed`
@@ -774,13 +782,13 @@ type verifyHealthExecutor struct{}
 func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
 ```
 
-**Wraps:** `Device.RunHealthChecks("")` (see newtron LLD §5.2)
+**Wraps:** `Device.RunHealthChecks()` — no filter, runs all checks (see newtron LLD §5.2)
 
 **Flow:**
 
 1. Resolve devices
 2. For each device:
-   - Call `dev.RunHealthChecks(ctx, "")` — runs all 5 check types
+   - Call `dev.RunHealthChecks(ctx)` — runs all 5 check types
      (interfaces, BGP, EVPN, LAG, VXLAN)
    - Returns `[]HealthCheckResult`
    - When `step.Expect.Overall == "ok"`: all checks must have `Status == "pass"`
@@ -805,8 +813,13 @@ Single-device action: parser validates `len(step.Devices) == 1`.
 
 ```go
 func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-    deviceName := step.Devices.Resolve(allDevices)[0] // validated single by parser
-    dev := r.Network.GetDevice(deviceName)
+    deviceName := step.Devices.Resolve(r.allDeviceNames())[0] // validated single by parser
+    dev, err := r.Network.GetDevice(deviceName)
+    if err != nil {
+        return &StepOutput{Result: &StepResult{
+            Status: StatusError, Device: deviceName, Message: err.Error(),
+        }}
+    }
     timeout := step.Expect.Timeout       // default 60s
     interval := step.Expect.PollInterval // default 5s
     deadline := time.Now().Add(timeout)
@@ -908,12 +921,40 @@ Single-device action: parser validates `len(step.Devices) == 1`.
 2. Resolve source device: `r.resolveDevices(step)[0]`
 3. Resolve target IP from `step.Target`:
    - If `step.Target` is a valid IP, use it directly
-   - Otherwise, treat it as a device name and resolve to its loopback IP
-     from the resolved profile: `r.Network.GetDevice(step.Target).Conn().Profile.LoopbackIP`
+   - Otherwise, treat it as a device name and resolve to its loopback IP:
+     ```go
+     targetDev, err := r.Network.GetDevice(step.Target)
+     if err != nil {
+         return &StepOutput{Result: &StepResult{
+             Status: StatusError, Message: fmt.Sprintf("target device %q: %s", step.Target, err),
+         }}
+     }
+     targetIP := targetDev.Underlying().Profile.LoopbackIP
+     ```
 4. SSH to source device using the separate command SSH session (not the Redis
    tunnel). Opens a new `ssh.Session` on the device's existing tunnel SSH
-   client (`dev.Conn().SSHClient()`) and runs:
-   `ping -c <count> -W 5 <target_ip>`
+   client (`dev.Underlying().SSHClient()`) and runs:
+   ```go
+   session, err := dev.Underlying().SSHClient().NewSession()
+   if err != nil {
+       return &StepOutput{Result: &StepResult{
+           Status: StatusError, Device: deviceName,
+           Message: fmt.Sprintf("SSH session: %s", err),
+       }}
+   }
+   defer session.Close()
+
+   output, err := session.CombinedOutput(fmt.Sprintf("ping -c %d -W 5 %s", step.Count, targetIP))
+   if err != nil {
+       // ping returns exit code 1 on partial loss — check output, not just error
+       if len(output) == 0 {
+           return &StepOutput{Result: &StepResult{
+               Status: StatusError, Device: deviceName,
+               Message: fmt.Sprintf("ping command failed: %s", err),
+           }}
+       }
+   }
+   ```
 5. Parse ping output: match `(\d+)% packet loss` from stdout and compute
    success rate as `1.0 - (loss / 100.0)`
 6. Compare against `step.Expect.SuccessRate` (default 1.0)
@@ -936,7 +977,16 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 2. For each device:
    - Get interface from `r.Network.GetDevice(name).GetInterface(step.Interface)`
    - Extract `ipAddr` from `step.Params["ip"]` if present
-   - Call `iface.ApplyService(ctx, step.Service, ipAddr, false)` (execute mode)
+   - Call `iface.ApplyService(ctx, step.Service, ipAddr, false)` (execute mode):
+     ```go
+     cs, err := iface.ApplyService(ctx, step.Service, ipAddr, false)
+     if err != nil {
+         return &StepOutput{Result: &StepResult{
+             Status: StatusError, Device: name,
+             Message: fmt.Sprintf("apply-service %s: %s", step.Service, err),
+         }}
+     }
+     ```
    - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
 3. Return per-device results with ChangeSets
 
@@ -955,7 +1005,16 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 1. Resolve devices
 2. For each device:
    - Get interface from `r.Network.GetDevice(name).GetInterface(step.Interface)`
-   - Call `iface.RemoveService(ctx, false)` (execute mode)
+   - Call `iface.RemoveService(ctx, false)` (execute mode):
+     ```go
+     cs, err := iface.RemoveService(ctx, false)
+     if err != nil {
+         return &StepOutput{Result: &StepResult{
+             Status: StatusError, Device: name,
+             Message: fmt.Sprintf("remove-service: %s", err),
+         }}
+     }
+     ```
    - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
 3. Return per-device results with ChangeSets
 
@@ -974,7 +1033,16 @@ func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *St
 1. Resolve devices
 2. For each device:
    - Convert `step.Vars` (map) to `[]string` (`"key=value"` format)
-   - Call `dev.ApplyBaseline(ctx, step.Configlet, vars)`
+   - Call `dev.ApplyBaseline(ctx, step.Configlet, vars)`:
+     ```go
+     cs, err := dev.ApplyBaseline(ctx, step.Configlet, vars, false)
+     if err != nil {
+         return &StepOutput{Result: &StepResult{
+             Status: StatusError, Device: name,
+             Message: fmt.Sprintf("apply-baseline %s: %s", step.Configlet, err),
+         }}
+     }
+     ```
    - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
 3. Return per-device results with ChangeSets
 
@@ -1050,35 +1118,14 @@ func DestroyTopology(lab *vmlab.Lab) error {
 
 ### 6.3 Platform Capability Check
 
-```go
-// hasDataplane checks if the scenario's platform supports data plane forwarding.
-// Reads PlatformSpec.Dataplane from the loaded platform spec.
-//
-// When false, verify-ping steps return StatusSkipped instead of executing.
-//
-// See vmlab LLD §1.1 (PlatformSpec.Dataplane field).
-func (r *Runner) hasDataplane(platformName string) bool {
-    if r.Network == nil {
-        return false
-    }
-    platforms := r.Network.GetPlatforms()
-    if platforms == nil {
-        return false
-    }
-    p, ok := platforms.Platforms[platformName]
-    if !ok {
-        return false
-    }
-    return p.Dataplane
-}
-```
+`hasDataplane()` is defined in §5.1. It takes no arguments and reads the scenario's platform from `r.scenario.Platform` (overridden by `r.opts.Platform` if set). Returns true when `PlatformSpec.Dataplane != ""`.
 
 **Platform dataplane values** (from `platforms.json`):
 
 | Platform | Dataplane | verify-ping |
 |----------|-----------|-------------|
-| `sonic-vpp` | `true` | Executes |
-| `sonic-vs` | `false` | Skipped |
+| `sonic-vpp` | `"vpp"` | Executes |
+| `sonic-vs` | `""` | Skipped |
 
 ---
 

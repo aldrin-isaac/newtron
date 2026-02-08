@@ -1,7 +1,0 @@
-{
-  "mgmt_ip": "10.0.0.100",
-  "loopback_ip": "10.0.0.1",
-  "site": "test-site",
-  "platform": "test-platform",
-  "is_route_reflector": true
-}

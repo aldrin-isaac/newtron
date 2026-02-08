@@ -9,10 +9,10 @@ For the architectural principles behind newtron, vmlab, and newtest, see [Design
 | **Connection Architecture** | Added new Section 2 explaining SSH tunnels — why they are needed (port 6379 not forwarded), SSH credentials in profiles, Connect() flow |
 | **StateDB Queries** | Added new Section 13 for operational state access via STATE_DB (DB 6) |
 | **Config Persistence** | Added new Section 16 warning that Redis changes are runtime-only; `config save -y` required |
-| **Lab Environment** | Added new Section 17 with labgen build, lab-start lifecycle, topology switching |
+| **Lab Environment** | Added new Section 17 with lab-start lifecycle, topology switching |
 | **Device Profiles** | Added `ssh_user`/`ssh_pass` optional fields to profile documentation |
 | **Service Management** | Added NEWTRON_SERVICE_BINDING tracking step to ApplyService flow |
-| **Build Lab Tools** | Added Section 1.3 with `make labgen` and `make build` instructions |
+| **Build Lab Tools** | Added Section 1.3 with `make build` instructions |
 | **Host Key Verification** | Added InsecureIgnoreHostKey note for lab environments |
 
 **Lines:** 1699 (v1) → 2599 (v2) | All v1 sections preserved and renumbered.
@@ -93,12 +93,9 @@ newtron --help
 
 ### 1.3 Build Lab Tools
 
-If you plan to use the containerlab-based test environment:
+If you plan to use lab environments:
 
 ```bash
-# Build the labgen tool (generates containerlab topologies from YAML)
-make labgen
-
 # Build everything
 make build
 ```
@@ -125,7 +122,7 @@ Without SSH credentials (integration testing with direct Redis):
 
 ### 2.2 Why SSH Tunnels?
 
-Redis inside SONiC listens on `127.0.0.1:6379` and has no authentication. In containerlab environments using QEMU/SLiRP networking (SONiC-VS / vrnetlab), **port 6379 is not forwarded** by the QEMU user-mode networking stack. Only port 22 (SSH) is accessible from the management network.
+Redis inside SONiC listens on `127.0.0.1:6379` and has no authentication. In QEMU/SLiRP networking environments (SONiC-VS), **port 6379 is not forwarded** by the QEMU user-mode networking stack. Only port 22 (SSH) is accessible from the management network.
 
 The SSH tunnel solves this by:
 
@@ -228,7 +225,7 @@ sudo mkdir -p /etc/newtron/configlets
         └── sonic-baseline.json
 ```
 
-For lab environments, specs are auto-generated at `testlab/.generated/specs/` (see [Section 17: Lab Environment](#17-lab-environment)).
+For lab environments, vmlab generates specs per topology (see `docs/vmlab/`).
 
 ### 3.2 Network Specification (`network.json`)
 
@@ -1944,141 +1941,25 @@ This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any uns
 
 ## 17. Lab Environment
 
-Newtron includes a containerlab-based lab environment for testing and development.
+Lab environments for newtron use **vmlab** (see `docs/vmlab/`). vmlab orchestrates
+SONiC-VS QEMU VMs without requiring root or Docker. E2E testing uses the **newtest**
+framework (see `docs/newtest/`).
 
-### 17.1 Overview
-
-The lab uses:
-
-- **containerlab** to orchestrate SONiC-VS (virtual SONiC) containers
-- **labgen** (`cmd/labgen/`) to generate topology files, startup configs, and newtron specs
-- **setup.sh** (`testlab/setup.sh`) to manage the lab lifecycle
-
-### 17.2 Start the Lab
+### 17.1 Running Tests
 
 ```bash
-# Build labgen and start the default spine-leaf topology
-make lab-start
-
-# Start a specific topology
-make lab-start TOPO=spine-leaf
-```
-
-The `lab-start` process:
-
-1. Builds the `labgen` binary
-2. Generates lab artifacts in `testlab/.generated/`:
-   - Per-node `config_db.json` startup configs
-   - Per-node `frr.conf` FRR/BGP configs
-   - `<topo>.clab.yml` containerlab topology
-   - `specs/` directory with newtron specifications
-3. Deploys the containerlab topology
-4. Waits for SONiC containers to become healthy
-5. Waits for Redis to be ready on all nodes (via SSH)
-6. Applies unique system MACs (restarts swss)
-7. Pushes FRR configuration to all nodes
-8. Bridges QEMU NICs to ASIC simulator ports
-9. **Patches profiles** with real management IPs and SSH credentials
-
-### 17.3 Stop and Check Lab Status
-
-```bash
-# Stop the running lab
-make lab-stop
-
-# Check lab status (shows nodes, IPs, Redis connectivity)
-make lab-status
-```
-
-### 17.4 Profile Patching
-
-After containerlab deploys the topology, the `lab_patch_profiles` function updates each device profile with:
-
-1. **Real management IP:** The Docker container IP assigned by containerlab
-2. **SSH credentials:** Username and password from the containerlab YAML `env` section
-
-This is necessary because the profile `mgmt_ip` in the generated specs initially contains a placeholder. The patching step replaces it with the actual container IP.
-
-Example of a patched profile at `testlab/.generated/specs/profiles/leaf1.json`:
-
-```json
-{
-  "mgmt_ip": "172.20.20.3",
-  "loopback_ip": "10.0.0.1",
-  "site": "dc1",
-  "platform": "accton-as7726-32x",
-  "ssh_user": "cisco",
-  "ssh_pass": "cisco123"
-}
-```
-
-### 17.5 Generated Spec Directory
-
-All lab specifications are generated at:
-
-```
-testlab/.generated/specs/
-  network.json
-  site.json
-  platforms.json
-  profiles/
-    leaf1.json
-    leaf2.json
-    spine1.json
-    ...
-```
-
-When running newtron against the lab, point specs to this directory:
-
-```bash
-newtron -s testlab/.generated/specs -d leaf1 -i Eth0 show
-```
-
-### 17.6 Redis Access in the Lab
-
-In the containerlab environment, Redis port 6379 is **not forwarded** by QEMU SLiRP networking. All Redis access goes through SSH tunnels:
-
-```
-newtron --> SSH to container:22 --> forward to 127.0.0.1:6379 (inside container)
-```
-
-The `lab_status` command verifies Redis connectivity via SSH for all SONiC nodes.
-
-### 17.7 Running Tests Against the Lab
-
-```bash
-# Run E2E tests (requires running lab)
-make test-e2e
-
-# Full lifecycle: start lab, run tests, stop lab
-make test-e2e-full
-
 # Run unit tests (no lab required)
 make test
-
-# Run integration tests (uses local Docker Redis container)
-make test-integration
 ```
 
-### 17.8 Integration Test Redis (No Lab Required)
+### 17.2 Redis Access
 
-For integration tests that do not need a full containerlab topology, newtron provides a simpler Redis setup:
+Redis inside SONiC listens on `127.0.0.1:6379` and is not directly accessible.
+newtron uses SSH tunnels when `ssh_user`/`ssh_pass` are set in the device profile:
 
-```bash
-# Start a standalone Redis container
-make redis-start
-
-# Seed it with test data
-make redis-seed
-
-# Run integration tests
-make test-integration
-
-# Stop Redis
-make redis-stop
 ```
-
-The seed data lives in `testlab/seed/configdb.json` and `testlab/seed/statedb.json`.
+newtron --> SSH to device:22 --> forward to 127.0.0.1:6379 (inside device)
+```
 
 ---
 
@@ -2093,7 +1974,7 @@ newtron -d leaf1-dc1 show
 # Error: redis connection failed: dial tcp 192.168.1.10:6379: connect: connection refused
 ```
 
-**Diagnosis:** Port 6379 is not accessible. In containerlab/QEMU environments, Redis port is NOT forwarded by SLiRP networking. Only SSH (port 22) is forwarded.
+**Diagnosis:** Port 6379 is not accessible. In QEMU environments, Redis port is NOT forwarded by SLiRP networking. Only SSH (port 22) is forwarded.
 
 **Solutions:**
 
@@ -2426,7 +2307,7 @@ Operations are methods on the objects they operate on:
 // Lock is acquired/released automatically per-operation in execute mode
 intf, _ := dev.GetInterface("Ethernet0")
 
-changeSet, err := intf.ApplyService(ctx, "customer-l3", "10.1.1.1/30", false /* dryRun */)
+changeSet, err := intf.ApplyService(ctx, "customer-l3", network.ApplyServiceOpts{IPAddr: "10.1.1.1/30"})
 if err != nil {
     log.Fatal(err) // includes ErrDeviceLocked if another process has the lock
 }
@@ -2511,25 +2392,8 @@ if !changeSet.IsEmpty() {
 dev.Disconnect()
 ```
 
-For E2E tests using shared SSH tunnels, use the test utility:
-
-```go
-// In TestMain:
-func TestMain(m *testing.M) {
-    // Reset baseline (clean stale CONFIG_DB entries)
-    if err := testutil.ResetLabBaseline(); err != nil {
-        fmt.Fprintf(os.Stderr, "baseline reset: %v\n", err)
-    }
-
-    code := m.Run()
-
-    // Close all shared SSH tunnels
-    testutil.CloseLabTunnels()
-    os.Exit(code)
-}
-```
-
-The `CloseLabTunnels()` function iterates over all cached SSH tunnels and calls `Close()` on each, which stops the local listener, closes the SSH connection, and waits for forwarding goroutines to finish.
+E2E testing uses the newtest framework. See `docs/newtest/e2e-learnings.md` for
+SONiC-specific patterns (convergence timing, cleanup ordering, vxlanmgrd pitfalls).
 
 ### 19.9 Design Benefits
 
@@ -2853,7 +2717,4 @@ The following documents provide additional detail on specific topics:
 | [lld.md](lld.md) | Low-Level Design -- package structure, data flow, object model details |
 | [device-lld.md](device-lld.md) | Device Layer LLD -- SSH tunnels, Redis clients, state access |
 | [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | Core design principles and philosophy |
-| [SONIC_VS_PITFALLS.md](../SONIC_VS_PITFALLS.md) | Known issues and workarounds for SONiC Virtual Switch (VS) |
-| [NGDP_DEBUGGING.md](../NGDP_DEBUGGING.md) | Debugging the NGDP ASIC simulator (data plane bridging, NIC issues) |
-| [LEARNINGS.md](../LEARNINGS.md) | Lessons learned during development (SONiC quirks, testing strategies, design evolution) |
-| [VERIFICATION_TOOLKIT.md](../VERIFICATION_TOOLKIT.md) | Tools and techniques for verifying configuration correctness |
+| [e2e-learnings.md](../newtest/e2e-learnings.md) | SONiC-VS reference and E2E testing patterns |

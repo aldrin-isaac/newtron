@@ -1,9 +1,0 @@
-{
-  "version": "1.0",
-  "sites": {
-    "test-site": {
-      "region": "test-region",
-      "route_reflectors": ["test-spine1"]
-    }
-  }
-}

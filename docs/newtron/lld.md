@@ -36,8 +36,6 @@ newtron/
 │   │   ├── cmd_settings.go          # Settings management
 │   │   ├── cmd_state.go             # State DB access
 │   │   └── interactive.go           # Interactive menu mode
-│   └── labgen/                      # Lab topology generator CLI
-│       └── main.go                  # Generates clab YAML + specs from templates
 ├── pkg/
 │   ├── network/                     # OO hierarchy + spec->config translation
 │   │   ├── network.go               # Top-level Network object (owns specs)
@@ -96,10 +94,9 @@ newtron/
 │   ├── platforms.json               # Hardware platform definitions
 │   └── profiles/                    # Per-device profiles
 ├── configlets/                      # Baseline templates
-├── testlab/                         # Lab topology definitions
 │   ├── images/                      # SONiC-VS images
 │   │   └── common/                  # Shared image config
-│   └── topologies/                  # Topology templates for labgen
+│   └── topologies/                  # Topology definitions
 └── docs/                            # Documentation
 ```
 
@@ -109,15 +106,13 @@ newtron/
 |------|---------|
 | `pkg/device/tunnel.go` | SSH tunnel for Redis access through QEMU VMs |
 | `pkg/device/statedb.go` | STATE_DB (Redis DB 6) operational state access |
-| `cmd/labgen/main.go` | Lab topology generator CLI |
-| `internal/testutil/lab.go` | E2E test infrastructure: SSH tunnel pool, node discovery |
 
 **Platform and pipeline files:**
 
 | File | Purpose |
 |------|---------|
 | `pkg/device/platform.go` | SonicPlatformConfig struct, platform.json parsing via SSH, port validation, GeneratePlatformSpec |
-| `pkg/device/pipeline.go` | Redis MULTI/EXEC pipeline client for atomic batch writes (PipelineSet, PipelineDelete, ReplaceAll) |
+| `pkg/device/pipeline.go` | Redis MULTI/EXEC pipeline client for atomic batch writes (PipelineSet, ReplaceAll) |
 | `pkg/network/composite.go` | CompositeBuilder, CompositeConfig, CompositeMode types; offline composite CONFIG_DB generation and delivery |
 
 **Topology files:**
@@ -136,7 +131,7 @@ These types define **declarative intent** - what you want, not how to achieve it
 // NetworkSpecFile - Global network specification file (declarative)
 type NetworkSpecFile struct {
     Version      string                       `json:"version"`
-    LockTTL      int                          `json:"lock_ttl"`       // seconds, default 3600
+    LockDir      string                       `json:"lock_dir"`       // lock directory path
     SuperUsers   []string                     `json:"super_users"`
     UserGroups   map[string][]string          `json:"user_groups"`
     Permissions  map[string][]string          `json:"permissions"`
@@ -162,8 +157,8 @@ type NetworkSpecFile struct {
 // IPVPNSpec defines IP-VPN parameters for L3 routing (Type-5 routes).
 // Referenced by services via the "ipvpn" field.
 //
-// For vrf_type "shared": VRF name = ipvpn definition name
-// For vrf_type "interface": VRF name = {service}-{interface}
+// For vrf_type "shared": VRF name = {serviceName}
+// For vrf_type "interface": VRF name = {serviceName}-{shortenedIntf}
 type IPVPNSpec struct {
     Description string   `json:"description,omitempty"`
     L3VNI       int      `json:"l3_vni"`
@@ -217,13 +212,13 @@ type SiteSpec struct {
 // into a reusable template that can be applied to interfaces.
 //
 // Service Types:
-//   - "l3":  L3 routed interface (requires ipvpn, optional vrf_type)
+//   - "l3":  L3 routed interface (optional ipvpn and vrf_type; without ipvpn, uses global routing table)
 //   - "l2":  L2 bridged interface (requires macvpn)
 //   - "irb": Integrated routing and bridging (requires both ipvpn and macvpn)
 //
 // VRF Instantiation (vrf_type):
-//   - "interface": Creates per-interface VRF named {service}-{interface}
-//   - "shared":    Uses shared VRF named after the ipvpn definition
+//   - "interface": Creates per-interface VRF named {serviceName}-{shortenedIntf}
+//   - "shared":    Uses shared VRF named {serviceName}
 //   - (omitted):   No VRF, uses global routing table (for l3 without EVPN)
 type ServiceSpec struct {
     Description string `json:"description"`
@@ -366,6 +361,8 @@ type DeviceProfile struct {
 
     // OPTIONAL - device-specific
     Platform        string              `json:"platform,omitempty"`
+    MAC             string              `json:"mac,omitempty"`
+    UnderlayASN     int                 `json:"underlay_asn,omitempty"`
     VLANPortMapping map[int][]string    `json:"vlan_port_mapping,omitempty"`
     GenericAlias    map[string]string   `json:"generic_alias,omitempty"`
     PrefixLists     map[string][]string `json:"prefix_lists,omitempty"`
@@ -426,8 +423,8 @@ const (
 
 // VRFType constants
 const (
-    VRFTypeInterface = "interface" // Per-interface VRF: {service}-{interface}
-    VRFTypeShared    = "shared"    // Shared VRF: name = ipvpn definition name
+    VRFTypeInterface = "interface" // Per-interface VRF: {serviceName}-{shortenedIntf}
+    VRFTypeShared    = "shared"    // Shared VRF: {serviceName}
 )
 
 // TopologySpecFile represents the topology specification file (topology.json).
@@ -469,21 +466,23 @@ type PlatformSpecFile struct {
 // Core fields are read by newtron; VM fields are read by vmlab (see vmlab LLD §1.1).
 type PlatformSpec struct {
     // Core (read by newtron)
-    HwSKU        string `json:"hwsku"`
-    Description  string `json:"description,omitempty"`
-    PortCount    int    `json:"port_count"`
-    DefaultSpeed string `json:"default_speed"`
-    Dataplane    string `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
+    HwSKU        string   `json:"hwsku"`
+    Description  string   `json:"description,omitempty"`
+    PortCount    int      `json:"port_count"`
+    DefaultSpeed string   `json:"default_speed"`
+    Breakouts    []string `json:"breakouts,omitempty"`
+    Dataplane    string   `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
 
     // VM (read by vmlab — see vmlab LLD §1.1 for full field docs)
-    VMImage        string            `json:"vm_image,omitempty"`
-    VMMemory       int               `json:"vm_memory,omitempty"`
-    VMCPUs         int               `json:"vm_cpus,omitempty"`
-    VMNICDriver    string            `json:"vm_nic_driver,omitempty"`
-    VMInterfaceMap string            `json:"vm_interface_map,omitempty"`
-    VMCPUFeatures  string            `json:"vm_cpu_features,omitempty"`
-    VMCredentials  *VMCredentials    `json:"vm_credentials,omitempty"`
-    VMBootTimeout  int               `json:"vm_boot_timeout,omitempty"`
+    VMImage              string            `json:"vm_image,omitempty"`
+    VMMemory             int               `json:"vm_memory,omitempty"`
+    VMCPUs               int               `json:"vm_cpus,omitempty"`
+    VMNICDriver          string            `json:"vm_nic_driver,omitempty"`
+    VMInterfaceMap       string            `json:"vm_interface_map,omitempty"`
+    VMInterfaceMapCustom map[string]int    `json:"vm_interface_map_custom,omitempty"` // SONiC name → QEMU NIC index (for "custom" map type)
+    VMCPUFeatures        string            `json:"vm_cpu_features,omitempty"`
+    VMCredentials        *VMCredentials    `json:"vm_credentials,omitempty"`
+    VMBootTimeout        int               `json:"vm_boot_timeout,omitempty"`
 }
 
 // VMCredentials holds default login credentials for a platform's VMs.
@@ -570,15 +569,12 @@ type Device struct {
 
 // Lock acquires a distributed lock for this device via a Redis STATE_DB entry
 // on the device itself (NEWTRON_LOCK|<deviceName>). Uses SET NX + EX for atomic
-// acquisition with automatic TTL-based expiry. TTL comes from Network.spec.LockTTL.
+// acquisition with automatic TTL-based expiry. Lock directory comes from Network.spec.LockDir.
 // Not re-entrant — returns util.ErrDeviceLocked on contention.
 func (d *Device) Lock() error {
-    ttl := d.network.spec.LockTTL
-    if ttl == 0 {
-        ttl = 3600 // default 1 hour
-    }
+    lockDir := d.network.spec.LockDir
     holder := fmt.Sprintf("%s@%s", currentUser(), hostname())
-    return d.conn.Lock(holder, ttl)
+    return d.conn.Lock(holder, lockDir)
 }
 
 // Unlock releases the distributed lock by deleting the NEWTRON_LOCK entry
@@ -594,9 +590,21 @@ func (d *Device) IsLocked() bool {
 
 // LockHolder returns the current lock holder string (e.g. "aldrin@workstation1")
 // and acquisition time, or empty string if unlocked. Reads STATE_DB on the device.
+// Status: not yet implemented. Depends on StateDBClient.GetLockHolder (device-lld §2.3).
 func (d *Device) LockHolder() (holder string, acquired time.Time, err error) {
     return d.conn.LockHolder()
 }
+
+// IsConnected returns true if this device has an active connection.
+func (d *Device) IsConnected() bool { return d.connected }
+
+// SetConnected sets the connected state. Test helper only.
+// Status: not yet implemented.
+func (d *Device) SetConnected(v bool) { d.connected = v }
+
+// SetLocked sets the locked state. Test helper only.
+// Status: not yet implemented.
+func (d *Device) SetLocked(v bool) { d.locked = v }
 
 // --- Device accessors and bridging ---
 
@@ -609,16 +617,16 @@ func (d *Device) Network() *Network { return d.network }
 // ASNumber returns the device's AS number from the resolved profile.
 func (d *Device) ASNumber() int { return d.resolved.ASNumber }
 
-// Conn returns the low-level device.Device for Redis operations.
+// Underlying returns the low-level device.Device for Redis operations.
 // Panics if not connected (use Connect() first).
-func (d *Device) Conn() *device.Device { return d.conn }
+func (d *Device) Underlying() *device.Device { return d.conn }
 
 // GetInterface returns an Interface by name from the device's interface map.
 // Returns error if the interface name is not in the topology or CONFIG_DB.
 func (d *Device) GetInterface(name string) (*Interface, error)
 
 // InterfaceNames returns sorted names of all interfaces on this device.
-func (d *Device) InterfaceNames() []string
+func (d *Device) ListInterfaces() []string
 
 // Connect establishes the connection to the device:
 //   1. Creates device.Device with the resolved profile
@@ -671,8 +679,8 @@ func (i *Interface) HasService() bool { return i.serviceName != "" }
 // ServiceName returns the bound service name, or "" if none.
 func (i *Interface) ServiceName() string { return i.serviceName }
 
-// IP returns the first IP address on this interface, or "" if none.
-func (i *Interface) IP() string
+// IPAddresses returns all IP addresses on this interface.
+func (i *Interface) IPAddresses() []string
 ```
 
 **Interface population from CONFIG_DB:**
@@ -698,7 +706,7 @@ During `Device.Connect()`, interfaces are populated by scanning CONFIG_DB tables
 
 ```go
 // Interface can access Network-level specs through parent chain
-func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string) (*ChangeSet, error) {
+func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
     // Access Network through Device parent
     svc, err := i.Device().Network().GetService(serviceName)
     if err != nil {
@@ -750,10 +758,16 @@ func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error)
 // GetTopologyInterface returns a topology interface for a given device and interface name.
 func (n *Network) GetTopologyInterface(device, intf string) (*spec.TopologyInterface, error)
 
+// --- Device connection ---
+
+// ConnectDevice retrieves a device by name, calls Connect() on it, and returns it.
+// Convenience method used by CLI helpers — equivalent to GetDevice + dev.Connect.
+func (n *Network) ConnectDevice(ctx context.Context, name string) (*Device, error)
+
 // --- Device and spec accessors ---
 
 // DeviceNames returns sorted names of all loaded devices.
-func (n *Network) DeviceNames() []string
+func (n *Network) ListDevices() []string
 
 // GetDevice returns a network.Device by name, or error if not found.
 func (n *Network) GetDevice(name string) (*Device, error)
@@ -774,8 +788,8 @@ func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error)
 // GetQoSProfile returns a QoS profile by name. Returns error if not found.
 func (n *Network) GetQoSProfile(name string) (*model.QoSProfile, error)
 
-// GetPlatforms returns the platform spec file.
-func (n *Network) GetPlatforms() *spec.PlatformSpecFile
+// GetPlatform returns a platform spec by name, or error if not found.
+func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
 ```
 
 **Network Constructor (`pkg/network/network.go`):**
@@ -812,16 +826,20 @@ type Loader struct {
 // NewLoader creates a Loader for the given spec directory.
 func NewLoader(specDir string) *Loader
 
-// LoadAll loads all spec files and returns the parsed results.
+// Load loads all spec files from the spec directory.
 // Profiles are loaded from specDir/profiles/*.json; each file stem is the device name.
-func (l *Loader) LoadAll() (
-    network *NetworkSpecFile,
-    sites *SiteSpecFile,
-    platforms *PlatformSpecFile,
-    profiles map[string]*DeviceProfile,
-    topology *TopologySpecFile, // nil if topology.json absent
-    err error,
-)
+// After Load(), use getter methods to access the parsed results.
+func (l *Loader) Load() error
+
+// Getter methods (available after Load):
+func (l *Loader) GetNetwork() *NetworkSpecFile
+func (l *Loader) GetSite() *SiteSpecFile
+func (l *Loader) GetPlatforms() *PlatformSpecFile
+func (l *Loader) GetTopology() *TopologySpecFile // nil if topology.json absent
+func (l *Loader) GetService(name string) (*ServiceSpec, error)
+func (l *Loader) GetFilterSpec(name string) (*FilterSpec, error)
+func (l *Loader) GetPrefixList(name string) ([]string, error)
+func (l *Loader) GetPolicer(name string) (*PolicerSpec, error)
 
 // loadTopologySpec loads topology.json from the spec directory.
 // Returns (nil, nil) if topology.json does not exist — topology is optional.
@@ -888,11 +906,15 @@ type Device struct {
 // The lock key is NEWTRON_LOCK|<deviceName>; the value contains the holder
 // identity and timestamp. TTL provides automatic expiry if the client crashes.
 // Returns ErrDeviceLocked (including current holder) if another process holds the lock.
+//
+// Delegation: Lock stores the holder in d.lockHolder and calls
+// d.stateClient.AcquireLock(d.Name, holder, ttlSeconds). The holder string
+// is used by Unlock() without requiring the caller to pass it again.
 func (d *Device) Lock(holder string, ttlSeconds int) error
 
 // Unlock releases the distributed lock by deleting the NEWTRON_LOCK entry
 // from STATE_DB. Only succeeds if the current process holds the lock
-// (compares holder string). Returns error if not locked.
+// (compares d.lockHolder). Returns error if not locked.
 func (d *Device) Unlock() error
 
 // IsLocked returns true if this process holds the lock on this device.
@@ -1032,8 +1054,8 @@ type ConfigDB struct {
     // v3: Extended BGP tables (frrcfgd — FRR management framework)
     BGPPeerGroup          map[string]BGPPeerGroupEntry         `json:"BGP_PEER_GROUP,omitempty"`
     BGPPeerGroupAF        map[string]BGPPeerGroupAFEntry       `json:"BGP_PEER_GROUP_AF,omitempty"`
-    BGPGlobalsAFNetwork   map[string]BGPGlobalsAFNetworkEntry  `json:"BGP_GLOBALS_AF_NETWORK,omitempty"`
-    BGPGlobalsAFAggAddr   map[string]BGPGlobalsAFAggAddrEntry  `json:"BGP_GLOBALS_AF_AGGREGATE_ADDR,omitempty"`
+    BGPGlobalsAFNet    map[string]BGPGlobalsAFNetEntry  `json:"BGP_GLOBALS_AF_NETWORK,omitempty"`
+    BGPGlobalsAFAgg    map[string]BGPGlobalsAFAggEntry  `json:"BGP_GLOBALS_AF_AGGREGATE_ADDR,omitempty"`
     RouteRedistribute     map[string]RouteRedistributeEntry    `json:"ROUTE_REDISTRIBUTE,omitempty"`
     RouteMap              map[string]RouteMapEntry             `json:"ROUTE_MAP,omitempty"`
     PrefixSet             map[string]PrefixSetEntry            `json:"PREFIX_SET,omitempty"`
@@ -1104,22 +1126,23 @@ type BGPEVPNVNIEntry struct {
 }
 
 // BGPNeighborEntry represents a BGP neighbor
-// Key format: "neighbor_ip" (e.g., "10.0.0.2")
+// Key format: "vrf|neighbor_ip" (e.g., "default|10.0.0.2", "Vrf_CUST1|10.0.0.2")
 // v3: added peer_group, ebgp_multihop, password fields
 type BGPNeighborEntry struct {
-    ASN          string `json:"asn,omitempty"`
-    LocalASN     string `json:"local_asn,omitempty"`
-    LocalAddr    string `json:"local_addr,omitempty"`
-    Description  string `json:"description,omitempty"`
-    AdminStatus  string `json:"admin_status,omitempty"`
+    LocalAddr     string `json:"local_addr,omitempty"`
+    Name          string `json:"name,omitempty"`
+    ASN           string `json:"asn,omitempty"`
+    HoldTime      string `json:"holdtime,omitempty"`
+    KeepaliveTime string `json:"keepalive,omitempty"`
+    AdminStatus   string `json:"admin_status,omitempty"`
     // v3 additions:
-    PeerGroup    string `json:"peer_group,omitempty"`      // assign to peer group template
-    EBGPMultihop string `json:"ebgp_multihop,omitempty"`   // TTL for multihop eBGP
-    Password     string `json:"password,omitempty"`         // MD5 authentication
+    PeerGroup    string `json:"peer_group,omitempty"`
+    EBGPMultihop string `json:"ebgp_multihop,omitempty"`
+    Password     string `json:"password,omitempty"`
 }
 
 // BGPNeighborAFEntry represents per-neighbor address-family settings
-// Key format: "neighbor_ip|address_family" (e.g., "10.0.0.2|l2vpn_evpn")
+// Key format: "vrf|neighbor_ip|address_family" (e.g., "default|10.0.0.2|l2vpn_evpn")
 type BGPNeighborAFEntry struct {
     Activate             string `json:"activate,omitempty"`
     RouteReflectorClient string `json:"route_reflector_client,omitempty"`
@@ -1201,7 +1224,7 @@ type PolicerEntry struct {
 
 ```go
 // RouteRedistributeEntry represents route redistribution config
-// Key format: "vrf|src_protocol|address_family" (e.g., "default|connected|ipv4")
+// Key format: "vrf|src_protocol|dst_protocol|address_family" (e.g., "default|connected|bgp|ipv4")
 type RouteRedistributeEntry struct {
     RouteMap string `json:"route_map,omitempty"` // optional route-map filter
 }
@@ -1209,24 +1232,26 @@ type RouteRedistributeEntry struct {
 // RouteMapEntry represents a route-map rule
 // Key format: "map_name|seq" (e.g., "ALLOW_LOOPBACK|10")
 type RouteMapEntry struct {
-    Action        string `json:"action"`                     // permit, deny
-    MatchPrefix   string `json:"match_prefix,omitempty"`     // prefix-set reference
-    MatchCommunity string `json:"match_community,omitempty"` // community-set reference
-    MatchASPath   string `json:"match_as_path,omitempty"`    // as-path-set reference
-    SetLocalPref  string `json:"set_local_pref,omitempty"`   // set local-preference
-    SetCommunity  string `json:"set_community,omitempty"`    // set community
-    SetMED        string `json:"set_med,omitempty"`          // set MED
+    Action         string `json:"route_operation"`              // permit, deny
+    MatchPrefixSet string `json:"match_prefix_set,omitempty"`   // prefix-set reference
+    MatchCommunity string `json:"match_community,omitempty"`    // community-set reference
+    MatchASPath    string `json:"match_as_path,omitempty"`      // as-path-set reference
+    MatchNextHop   string `json:"match_next_hop,omitempty"`     // next-hop match
+    SetLocalPref   string `json:"set_local_pref,omitempty"`     // set local-preference
+    SetCommunity   string `json:"set_community,omitempty"`      // set community
+    SetMED         string `json:"set_med,omitempty"`            // set MED
+    SetNextHop     string `json:"set_next_hop,omitempty"`       // set next-hop
 }
 
 // BGPPeerGroupEntry represents a BGP peer group template
 // Key format: "peer_group_name" (e.g., "SPINE_PEERS")
 type BGPPeerGroupEntry struct {
-    ASN          string `json:"asn,omitempty"`
-    LocalASN     string `json:"local_asn,omitempty"`
-    Description  string `json:"description,omitempty"`
-    AdminStatus  string `json:"admin_status,omitempty"`
-    EBGPMultihop string `json:"ebgp_multihop,omitempty"`
-    Password     string `json:"password,omitempty"`
+    ASN         string `json:"asn,omitempty"`
+    LocalAddr   string `json:"local_addr,omitempty"`
+    AdminStatus string `json:"admin_status,omitempty"`
+    HoldTime    string `json:"holdtime,omitempty"`
+    Keepalive   string `json:"keepalive,omitempty"`
+    Password    string `json:"password,omitempty"`
 }
 
 // BGPPeerGroupAFEntry represents per-AF settings for a peer group
@@ -1237,22 +1262,18 @@ type BGPPeerGroupAFEntry struct {
     NextHopSelf          string `json:"next_hop_self,omitempty"`
     RouteMapIn           string `json:"route_map_in,omitempty"`
     RouteMapOut          string `json:"route_map_out,omitempty"`
-    PrefixListIn         string `json:"prefix_list_in,omitempty"`
-    PrefixListOut        string `json:"prefix_list_out,omitempty"`
-    AllowasIn            string `json:"allowas_in,omitempty"`
-    DefaultOriginate     string `json:"default_originate,omitempty"`
-    AddpathTxAllPaths    string `json:"addpath_tx_all_paths,omitempty"`
+    SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
 }
 
-// BGPGlobalsAFNetworkEntry represents a BGP network statement
+// BGPGlobalsAFNetEntry represents a BGP network statement
 // Key format: "vrf|address_family|prefix" (e.g., "default|ipv4_unicast|10.0.0.0/24")
-type BGPGlobalsAFNetworkEntry struct {
-    RouteMap string `json:"route_map,omitempty"` // optional route-map
+type BGPGlobalsAFNetEntry struct {
+    Policy string `json:"policy,omitempty"` // Optional route-map
 }
 
-// BGPGlobalsAFAggAddrEntry represents a BGP aggregate-address
+// BGPGlobalsAFAggEntry represents a BGP aggregate-address
 // Key format: "vrf|address_family|prefix" (e.g., "default|ipv4_unicast|10.0.0.0/8")
-type BGPGlobalsAFAggAddrEntry struct {
+type BGPGlobalsAFAggEntry struct {
     SummaryOnly string `json:"summary_only,omitempty"`
     ASSet       string `json:"as_set,omitempty"`
 }
@@ -1260,25 +1281,23 @@ type BGPGlobalsAFAggAddrEntry struct {
 // PrefixSetEntry represents an IP prefix list entry
 // Key format: "set_name|seq" (e.g., "LOOPBACKS|10")
 type PrefixSetEntry struct {
-    Action      string `json:"action"`                   // permit, deny
-    Prefix      string `json:"prefix"`                   // IP prefix (e.g., "10.0.0.0/8")
-    MaskLenLow  string `json:"mask_len_low,omitempty"`   // min mask length (ge)
-    MaskLenHigh string `json:"mask_len_high,omitempty"`  // max mask length (le)
+    IPPrefix     string `json:"ip_prefix"`                  // IP prefix (e.g., "10.0.0.0/8")
+    Action       string `json:"action"`                     // permit, deny
+    MaskLenRange string `json:"masklength_range,omitempty"` // e.g., "24..32"
 }
 
 // CommunitySetEntry represents a BGP community list
 // Key format: "set_name" (e.g., "CUSTOMER_COMMUNITIES")
 type CommunitySetEntry struct {
-    Action    string `json:"action"`              // permit, deny
-    Community string `json:"community"`           // community value(s)
-    MatchMode string `json:"match_mode,omitempty"` // any, all, exact
+    SetType         string `json:"set_type,omitempty"`          // standard, expanded
+    MatchAction     string `json:"match_action,omitempty"`
+    CommunityMember string `json:"community_member,omitempty"`  // Comma-separated communities
 }
 
 // ASPathSetEntry represents an AS-path regex filter
 // Key format: "set_name" (e.g., "SHORT_PATHS")
 type ASPathSetEntry struct {
-    Action  string `json:"action"`   // permit, deny
-    ASPath  string `json:"as_path"`  // regex pattern
+    ASPathMember string `json:"as_path_member,omitempty"` // Regex pattern
 }
 ```
 
@@ -1291,6 +1310,7 @@ type PortEntry struct {
     AdminStatus string `json:"admin_status,omitempty"` // "up", "down"
     MTU         string `json:"mtu,omitempty"`          // "9100"
     Speed       string `json:"speed,omitempty"`        // "100000" (Mbps)
+    Autoneg     string `json:"autoneg,omitempty"`      // "on", "off"
     FEC         string `json:"fec,omitempty"`          // "rs", "fc", "none"
     Lanes       string `json:"lanes,omitempty"`        // "0,1,2,3"
     Alias       string `json:"alias,omitempty"`        // "Eth1/1"
@@ -1303,6 +1323,7 @@ type PortEntry struct {
 type VLANEntry struct {
     VlanID      string `json:"vlanid"`                   // "100"
     Description string `json:"description,omitempty"`
+    AdminStatus string `json:"admin_status,omitempty"`   // "up", "down"
     DHCPServers string `json:"dhcp_servers,omitempty"`   // comma-separated
     MTU         string `json:"mtu,omitempty"`
 }
@@ -1317,7 +1338,10 @@ type VLANMemberEntry struct {
 // Key format: "Ethernet0" (base entry with VRF) or "Ethernet0|10.1.1.1/30" (IP binding)
 // IP binding entries have no fields — they use the NULL:NULL sentinel convention.
 type InterfaceEntry struct {
-    VRFName string `json:"vrf_name,omitempty"` // VRF binding (base entry only)
+    VRFName     string `json:"vrf_name,omitempty"`  // VRF binding (base entry only)
+    NATZone     string `json:"nat_zone,omitempty"`  // NAT zone identifier
+    ProxyArp    string `json:"proxy_arp,omitempty"` // "enabled", "disabled"
+    MPLSEnabled string `json:"mpls,omitempty"`      // "enable", "disable"
 }
 
 // PortChannelEntry represents a LAG in CONFIG_DB.
@@ -1326,12 +1350,14 @@ type PortChannelEntry struct {
     AdminStatus string `json:"admin_status,omitempty"` // "up", "down"
     MTU         string `json:"mtu,omitempty"`
     MinLinks    string `json:"min_links,omitempty"`
-    Fallback    string `json:"fallback,omitempty"`    // "true", "false"
-    FastRate    string `json:"fast_rate,omitempty"`   // "true", "false"
+    Fallback    string `json:"fallback,omitempty"`     // "true", "false"
+    FastRate    string `json:"fast_rate,omitempty"`    // "true", "false"
+    LACPKey     string `json:"lacp_key,omitempty"`     // LACP aggregation key
+    Description string `json:"description,omitempty"`
 }
 
 // VRFEntry represents a VRF in CONFIG_DB.
-// Key format: "Vrf_CUST1", "Vrf_customer-l3_Ethernet0"
+// Key format: "customer-l3-Eth0", "customer-l3"
 type VRFEntry struct {
     VNI string `json:"vni,omitempty"` // L3VNI (e.g., "10001")
 }
@@ -1357,16 +1383,16 @@ type EVPNNVOEntry struct {
 }
 
 // ACLTableEntry represents an ACL table in CONFIG_DB.
-// Key format: "CUSTOMER-L3-IN", "CUSTOMER-L3-OUT"
+// Key format: "customer-l3-in", "customer-l3-out"
 type ACLTableEntry struct {
     Type        string `json:"type"`                  // "L3", "L3V6", "MIRROR"
     Stage       string `json:"stage"`                 // "ingress", "egress"
-    Description string `json:"description,omitempty"`
+    PolicyDesc  string `json:"policy_desc,omitempty"`
     Ports       string `json:"ports"`                 // Comma-separated: "Ethernet0,Ethernet4"
 }
 
 // ACLRuleEntry represents a single ACL rule in CONFIG_DB.
-// Key format: "CUSTOMER-L3-IN|RULE_10" (table_name|rule_name)
+// Key format: "customer-l3-in|RULE_10" (table_name|rule_name)
 type ACLRuleEntry struct {
     Priority    string `json:"PRIORITY"`
     PacketAction string `json:"PACKET_ACTION"`          // "FORWARD", "DROP"
@@ -1406,13 +1432,13 @@ type ACLTableTypeEntry struct {
 | SUPPRESS_VLAN_NEIGH | `Vlan100` | ARP suppression per VLAN |
 | SAG | varies | Static anycast gateway per interface |
 | SAG_GLOBAL | `global` | Global SAG MAC address |
-| BGP_NEIGHBOR | `10.0.0.2` | BGP neighbor config |
-| BGP_NEIGHBOR_AF | `10.0.0.2\|l2vpn_evpn` | Per-neighbor address family |
+| BGP_NEIGHBOR | `default\|10.0.0.2` | BGP neighbor config |
+| BGP_NEIGHBOR_AF | `default\|10.0.0.2\|l2vpn_evpn` | Per-neighbor address family |
 | BGP_GLOBALS | `default` or VRF name | Global BGP settings per VRF |
 | BGP_GLOBALS_AF | `default\|l2vpn_evpn` | BGP address family settings |
 | BGP_EVPN_VNI | `Vrf_CUST1\|10001` | Per-VNI EVPN settings |
-| ACL_TABLE | `CUSTOMER-IN` | ACL table config |
-| ACL_RULE | `CUSTOMER-IN\|RULE_1` | ACL rule config |
+| ACL_TABLE | `customer-l3-in` | ACL table config |
+| ACL_RULE | `customer-l3-in\|RULE_1` | ACL rule config |
 | SCHEDULER | `scheduler.0` | QoS scheduler |
 | QUEUE | `Ethernet0\|0` | Queue binding |
 | WRED_PROFILE | `WRED_GREEN` | WRED drop profile |
@@ -1455,12 +1481,23 @@ func NewConfigDBClient(addr string) *ConfigDBClient {
 
 func (c *ConfigDBClient) Connect() error
 func (c *ConfigDBClient) Close() error
+
+// GetAll reads the entire CONFIG_DB into a typed ConfigDB struct.
+//
+// Algorithm:
+//   1. KEYS * in DB 4 (acceptable for lab tool; SCAN would be premature)
+//   2. For each key, split on first "|" → table name + entry key
+//   3. HGETALL per key → field map
+//   4. Switch on table name to dispatch into the corresponding typed
+//      map in ConfigDB (e.g., "PORT" → configDB.Port[key] = PortEntry{...})
+//   5. Unknown tables are stored in configDB.Extra[table][key]
+//   6. Return the populated ConfigDB
 func (c *ConfigDBClient) GetAll() (*ConfigDB, error)
 func (c *ConfigDBClient) Get(table, key string) (map[string]string, error)
 func (c *ConfigDBClient) Exists(table, key string) (bool, error)
 
 // GetTableKeys returns all keys in a table via KEYS command.
-// E.g., GetTableKeys("BGP_NEIGHBOR") returns ["10.0.0.1", "10.0.0.2"].
+// E.g., GetTableKeys("BGP_NEIGHBOR") returns ["default|10.0.0.1", "default|10.0.0.2"].
 func (c *ConfigDBClient) GetTableKeys(table string) ([]string, error)
 
 // GetEntry is an alias for Get — returns (fields, error) for a table|key.
@@ -1494,16 +1531,24 @@ type TableKey struct {
     Key   string
 }
 
-// PipelineSet writes multiple entries atomically via Redis MULTI/EXEC pipeline.
-// Used by composite delivery for atomic multi-entry writes.
-func (c *ConfigDBClient) PipelineSet(changes []TableChange) error
-
-// PipelineDelete deletes multiple entries atomically via Redis MULTI/EXEC pipeline.
-func (c *ConfigDBClient) PipelineDelete(keys []TableKey) error
+// PipelineSet writes and deletes multiple entries atomically via Redis MULTI/EXEC pipeline.
+// sets are applied as HSET commands; dels are applied as DEL commands.
+// Used by composite delivery and ChangeSet.Apply for atomic multi-entry writes.
+func (c *ConfigDBClient) PipelineSet(sets []TableChange, dels []TableKey) error
 
 // ReplaceAll flushes CONFIG_DB and writes the entire config atomically.
 // Used by composite overwrite mode.
-// Executes: FLUSHDB + pipeline of all HSET commands in a single MULTI/EXEC.
+//
+// Algorithm:
+//   1. MULTI
+//   2. FLUSHDB — clear all existing CONFIG_DB entries
+//   3. Iterate ConfigDB struct fields via reflection on json tags:
+//      for each non-nil map field (e.g., Port, VLAN, VRF, BGPNeighbor...),
+//      for each entry in the map, HSET "TABLE|key" with field values
+//   4. EXEC — atomic commit of flush + all writes
+//
+// The entire operation is a single MULTI/EXEC transaction, so CONFIG_DB
+// is never in a partially-written state.
 func (c *ConfigDBClient) ReplaceAll(config *ConfigDB) error
 ```
 
@@ -1555,10 +1600,11 @@ func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key
 //
 // On full success, cs.AppliedCount = len(cs.Changes).
 //
-// The `d` parameter is the low-level device.Device (accessed via network.Device.Conn()).
+// The `d` parameter is the low-level device.Device (accessed via network.Device.Underlying()).
 func (cs *ChangeSet) Apply(d *device.Device) error
 
-// Rollback applies the inverse of each applied change in reverse order
+// Rollback applies the inverse of each applied change in reverse order.
+// Status: not yet implemented. No Rollback code exists.
 // (changes 0..AppliedCount-1):
 //   - ChangeAdd → delete the table/key
 //   - ChangeModify → restore OldValue (Set with OldValue fields)
@@ -1575,6 +1621,11 @@ func (cs *ChangeSet) Rollback(d *device.Device) error
 These types live in `pkg/device/verify.go` because `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/network` would create an import cycle (`pkg/device` → `pkg/network`). The `pkg/network` layer re-exports these types for convenience.
 
 These types support the v5 verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
+
+> **Status: not yet implemented.** `VerificationResult`, `VerificationError`, `RouteEntry`,
+> `NextHop`, and `RouteSource` types have no code in `pkg/device/verify.go` (file does not exist).
+> `VerifyChangeSet`, `GetRoute`, and `GetRouteASIC` methods are also not yet implemented.
+> See also device-lld §3 (AppDBClient), §4 (AsicDBClient), §5.7 (verification methods).
 
 **Consumers:** newtest's step executors are the primary consumers — `verifyProvisioningExecutor` reads `VerificationResult`, `verifyRouteExecutor` reads `RouteEntry`. See newtest LLD §5.4, §5.9.
 
@@ -1694,7 +1745,7 @@ func NewCompositeBuilder(network, device string, mode CompositeMode) *CompositeB
 func (cb *CompositeBuilder) AddBGPGlobals(entry BGPGlobalsEntry) *CompositeBuilder
 func (cb *CompositeBuilder) AddPeerGroup(name string, entry BGPPeerGroupEntry) *CompositeBuilder
 func (cb *CompositeBuilder) AddPortConfig(name string, entry PortEntry) *CompositeBuilder
-func (cb *CompositeBuilder) AddService(intf, service string, opts ApplyServiceOpts) *CompositeBuilder  // see ApplyServiceOpts below
+func (cb *CompositeBuilder) AddService(intf, service string, opts ApplyServiceOpts) *CompositeBuilder
 func (cb *CompositeBuilder) AddRouteRedistribution(vrf, protocol, af string, entry RouteRedistributeEntry) *CompositeBuilder
 func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string) *CompositeBuilder
 func (cb *CompositeBuilder) Build() *CompositeConfig
@@ -1711,18 +1762,15 @@ type CompositeDeliveryResult struct {
 // ApplyServiceOpts holds the parameters for applying a service within
 // a composite context. Used by CompositeBuilder.AddService().
 //
-// Why ApplyServiceOpts exists alongside Interface.ApplyService():
-// CompositeBuilder operates offline — it collects service entries into a
-// CompositeConfig without connecting to a device, so dryRun has no meaning.
-// Interface.ApplyService() is an online operation that connects, locks,
-// applies, and verifies, so it takes (ctx, serviceName, ipAddr string,
-// dryRun bool) directly. CompositeBuilder needs Params (extra fields like
-// peer_as) because composites bundle multiple services into a single
-// delivery, whereas ApplyService resolves params from the spec at call time.
+// ApplyServiceOpts holds parameters for applying a service to an interface.
+// Used by both Interface.ApplyService() and CompositeBuilder.AddService().
+//
+// Interface.ApplyService() returns a ChangeSet for preview; the caller applies
+// via cs.Apply(). CompositeBuilder operates offline, collecting entries into a
+// CompositeConfig without connecting to a device. Both use the same opts struct.
 type ApplyServiceOpts struct {
-    ServiceName string            // Service name from NetworkSpecFile.Services
-    IPAddr      string            // IP address (CIDR) to assign, e.g. "10.1.1.1/30"
-    Params      map[string]string // Additional parameters (e.g. peer_as for BGP)
+    IPAddr string // IP address (CIDR) to assign, e.g. "10.1.1.1/30"
+    PeerAS int    // Peer AS number (for BGP services with peer_as="request")
 }
 ```
 
@@ -1749,15 +1797,12 @@ Operations are methods on the objects they operate on. This follows true OO desi
 
 ### Execution Model
 
-All operations that return `*ChangeSet` accept a `dryRun bool` parameter:
+All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(d.Underlying())` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
 
-- **`dryRun == true`** (default in CLI): The operation computes the ChangeSet and returns it for preview. No writes are made to CONFIG_DB. **No lock is acquired.**
-- **`dryRun == false`** (CLI `-x` flag): The operation acquires the device lock, applies the ChangeSet, verifies it via `VerifyChangeSet()`, releases the lock, and returns the result. The lock is held only for the duration of the mutation + immediate verification.
-
-**Lock lifecycle per operation (execute mode):**
+**Caller execution pattern:**
 
 ```
-Lock → Apply ChangeSet → VerifyChangeSet → Unlock → return
+Lock → cs.Apply(d.Underlying()) → VerifyChangeSet → Unlock → return
 ```
 
 The lock is scoped to a single operation — not held across multiple operations or for the duration of a session. This ensures:
@@ -1766,35 +1811,21 @@ The lock is scoped to a single operation — not held across multiple operations
 3. Clear failure semantics — if lock acquisition fails, the operation fails immediately
 
 ```go
-// Pattern used by all mutating operations:
-func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string, dryRun bool) (*ChangeSet, error) {
+// Pattern: operation returns ChangeSet, caller applies it.
+func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
     d := i.Device()
     cs := NewChangeSet(d.Name(), "interface.apply-service")
     // ... build ChangeSet entries ...
-
-    if !dryRun {
-        // 1. Acquire lock immediately before mutation
-        if err := d.Lock(); err != nil {
-            return nil, fmt.Errorf("acquiring lock: %w", err)
-        }
-
-        // 2. Apply changes while holding lock
-        if err := cs.Apply(d.Conn()); err != nil {
-            d.Unlock() // release on failure
-            return cs, fmt.Errorf("applying changes: %w", err)
-        }
-
-        // 3. Verify changes while still holding lock
-        result, err := d.Conn().VerifyChangeSet(ctx, cs)
-        d.Unlock() // 4. Release lock after verification (always)
-
-        if err != nil {
-            return cs, fmt.Errorf("verifying changes: %w", err)
-        }
-        cs.Verification = result
-    }
     return cs, nil
 }
+
+// Caller applies the ChangeSet:
+//   cs, err := intf.ApplyService(ctx, "customer-l3", opts)
+//   // preview cs.String() ...
+//   d.Lock()
+//   cs.Apply(d.Underlying())
+//   d.Underlying().VerifyChangeSet(ctx, cs)
+//   d.Unlock()
 ```
 
 **Disconnect safety net:** `Device.Disconnect()` releases the lock if still held (e.g., after a panic during operation execution). This is a safety measure — normal operation always releases the lock within the operation method.
@@ -1812,19 +1843,124 @@ Interface operations are methods on the `Interface` type. All operations return 
 
 // ApplyService applies a service definition to this interface.
 // Creates VRF, ACLs, IP configuration, and service binding tracking.
-// When dryRun is false, applies the ChangeSet internally before returning.
-func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string, dryRun bool) (*ChangeSet, error)
+// Returns the ChangeSet for preview; caller applies via cs.Apply().
+func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error)
 
 // RemoveService removes the service from this interface.
 // Uses DependencyChecker to safely clean up shared resources (ACLs, VRFs).
-// When dryRun is false, applies the ChangeSet internally before returning.
-func (i *Interface) RemoveService(ctx context.Context, dryRun bool) (*ChangeSet, error)
+// Returns the ChangeSet for preview; caller applies via cs.Apply().
+func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error)
+```
+
+**RemoveService pseudocode** — reverse of ApplyService, using DependencyChecker
+(§5.5) to avoid deleting shared resources still referenced by other interfaces:
+
+```go
+func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
+    d := i.Device()
+    if d.Underlying() == nil {
+        return nil, util.ErrNotConnected
+    }
+
+    binding, ok := d.Underlying().ConfigDB.NewtronServiceBinding[i.name]
+    if !ok {
+        return nil, fmt.Errorf("no service bound to %s", i.name)
+    }
+
+    svc, err := i.Network().GetService(binding.ServiceName)
+    if err != nil {
+        return nil, fmt.Errorf("service spec %q: %w", binding.ServiceName, err)
+    }
+
+    cs := NewChangeSet(d.Name(), "interface.remove-service")
+    dc := NewDependencyChecker(d.Underlying().ConfigDB)
+
+    // 1. Remove service binding (always safe — owned by this interface)
+    cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeDelete,
+        map[string]string{"service": binding.ServiceName}, nil)
+
+    // 2. Remove IP binding entries (INTERFACE|<name>|<ip>)
+    for key := range d.Underlying().ConfigDB.Interface {
+        if strings.HasPrefix(key, i.name+"|") {
+            cs.Add("INTERFACE", key, ChangeDelete, nil, nil)
+        }
+    }
+
+    // 3. Remove BGP neighbors for this interface
+    neighborIP, _ := i.DeriveNeighborIP()
+    if neighborIP != "" {
+        vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
+        bgpKey := fmt.Sprintf("%s|%s", vrfName, neighborIP)
+        // Delete BGP_NEIGHBOR_AF entries first (child before parent)
+        for afKey := range d.Underlying().ConfigDB.BGPNeighborAF {
+            if strings.HasPrefix(afKey, bgpKey+"|") {
+                cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
+            }
+        }
+        if dc.CanDeleteBGPNeighbor(bgpKey) {
+            cs.Add("BGP_NEIGHBOR", bgpKey, ChangeDelete, nil, nil)
+        }
+    }
+
+    // 4. Remove ACLs if no other ports reference them
+    aclInName := util.DeriveACLName(binding.ServiceName, "in")
+    aclOutName := util.DeriveACLName(binding.ServiceName, "out")
+    for _, aclName := range []string{aclInName, aclOutName} {
+        if dc.CanDeleteACL(aclName, i.name) {
+            // No other ports reference this ACL — delete rules then table
+            for ruleKey := range d.Underlying().ConfigDB.ACLRule {
+                if strings.HasPrefix(ruleKey, aclName+"|") {
+                    cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+                }
+            }
+            cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
+        } else {
+            // Other ports still reference this ACL — just remove this interface from ports list
+            existing := d.Underlying().ConfigDB.ACLTable[aclName]
+            ports := strings.Split(existing.Ports, ",")
+            filtered := removeFromSlice(ports, i.name)
+            cs.Add("ACL_TABLE", aclName, ChangeModify,
+                map[string]string{"ports": existing.Ports},
+                map[string]string{"ports": strings.Join(filtered, ",")})
+        }
+    }
+
+    // 5. Remove VRF binding from INTERFACE base entry
+    cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+
+    // 6. Remove VRF if no other interfaces use it
+    vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
+    if dc.CanDeleteVRF(vrfName, i.name) {
+        cs.Add("VRF", vrfName, ChangeDelete, nil, nil)
+        // Also remove VXLAN_TUNNEL_MAP for L3VNI if present
+    }
+
+    // 7. L2/IRB-specific: remove VLAN member, VLAN if empty
+    if svc.ServiceType == ServiceTypeL2 || svc.ServiceType == ServiceTypeIRB {
+        vlanName := util.DeriveVLANName(binding.ServiceName)
+        memberKey := fmt.Sprintf("%s|%s", vlanName, i.name)
+        cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
+        if dc.CanDeleteVLAN(vlanName, i.name) {
+            cs.Add("VLAN", vlanName, ChangeDelete, nil, nil)
+            // Remove VXLAN_TUNNEL_MAP for L2VNI
+        }
+    }
+
+    // 8. Remove QoS/PORT_QOS_MAP entry for this interface
+    cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil, nil)
+
+    // Deletion order within the ChangeSet is children-before-parents:
+    //   IP entries before INTERFACE, MEMBER before VLAN, AF before NEIGHBOR
+
+    return cs, nil
+}
+```
 
 // RefreshService reapplies the service to sync with current definition.
 // Compares current interface config with current service spec and
 // generates changes to synchronize (updated filters, QoS, etc.).
-// When dryRun is false, applies the ChangeSet internally before returning.
-func (i *Interface) RefreshService(ctx context.Context, dryRun bool) (*ChangeSet, error)
+// Returns the ChangeSet for preview; caller applies via cs.Apply().
+func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error)
 
 // ============================================================================
 // Property Setting
@@ -1832,16 +1968,16 @@ func (i *Interface) RefreshService(ctx context.Context, dryRun bool) (*ChangeSet
 
 // Set sets a single property on this interface.
 // Supported properties: mtu, speed, admin-status, description
-func (i *Interface) Set(ctx context.Context, property, value string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet, error)
 
 // SetIP configures an IP address on this interface.
-func (i *Interface) SetIP(ctx context.Context, ipAddr string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error)
 
 // SetVRF binds this interface to a VRF.
-func (i *Interface) SetVRF(ctx context.Context, vrfName string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error)
 
 // Configure applies multiple configuration options at once.
-func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig, dryRun bool) (*ChangeSet, error)
+func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*ChangeSet, error)
 
 // ============================================================================
 // ACL Binding
@@ -1849,21 +1985,21 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig, dryRun 
 
 // BindACL binds an ACL to this interface.
 // ACLs are shared - adds this interface to the ACL's ports list.
-func (i *Interface) BindACL(ctx context.Context, aclName, direction string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error)
 
 // UnbindACL removes an ACL binding from this interface.
 // If last user, deletes the ACL; otherwise just removes from ports list.
-func (i *Interface) UnbindACL(ctx context.Context, aclName string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error)
 
 // ============================================================================
 // LAG/VLAN Member Management
 // ============================================================================
 
 // AddMember adds a member interface to this LAG or VLAN.
-func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged bool, dryRun bool) (*ChangeSet, error)
+func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged bool) (*ChangeSet, error)
 
 // RemoveMember removes a member interface from this LAG or VLAN.
-func (i *Interface) RemoveMember(ctx context.Context, memberIntf string, dryRun bool) (*ChangeSet, error)
+func (i *Interface) RemoveMember(ctx context.Context, memberIntf string) (*ChangeSet, error)
 
 // ============================================================================
 // BGP Neighbor Management (Direct Peering)
@@ -1906,8 +2042,9 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error)
 **ApplyService pseudocode** (shows full translation rules per service type):
 
 ```go
-func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string, dryRun bool) (*ChangeSet, error) {
+func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
     d := i.Device()
+    ipAddr := opts.IPAddr
 
     if !d.IsConnected() {
         return nil, util.ErrNotConnected
@@ -1919,51 +2056,74 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
         return nil, fmt.Errorf("service not found: %w", err)
     }
 
+    // Validate service type
+    validTypes := map[string]bool{
+        ServiceTypeL2: true, ServiceTypeL3: true, ServiceTypeIRB: true,
+    }
+    if !validTypes[svc.ServiceType] {
+        return nil, fmt.Errorf("unsupported service type %q (must be l2, l3, or irb)", svc.ServiceType)
+    }
+
     cs := NewChangeSet(d.Name(), "interface.apply-service")
 
     // ====================================================================
     // L3 service translation (ServiceType == "l3")
     // ====================================================================
     if svc.ServiceType == ServiceTypeL3 || svc.ServiceType == ServiceTypeIRB {
-        ipvpnDef := i.Network().GetIPVPN(svc.IPVPN)
+        vrfName := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 
-        // 1. VRF
-        vrfName := util.DeriveVRFName(svc.VRFType, svc.IPVPN, serviceName, i.name)
-        cs.Add("VRF", vrfName, ChangeAdd, nil, map[string]string{
-            "vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
-        })
+        if svc.IPVPN != "" {
+            // EVPN path: VRF with L3VNI, VXLAN tunnel map, BGP globals
+            ipvpnDef, err := i.Network().GetIPVPN(svc.IPVPN)
+            if err != nil {
+                return nil, fmt.Errorf("IPVPN %q: %w", svc.IPVPN, err)
+            }
 
-        // 2. VXLAN_TUNNEL_MAP for L3VNI → VRF
-        mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, vrfName)
-        cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-            "vni":  fmt.Sprintf("%d", ipvpnDef.L3VNI),
-            "vrf":  vrfName,
-        })
+            // 1. VRF
+            cs.Add("VRF", vrfName, ChangeAdd, nil, map[string]string{
+                "vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
+            })
 
-        // 3. INTERFACE: VRF binding + IP address
-        cs.Add("INTERFACE", i.name, ChangeAdd, nil, map[string]string{
-            "vrf_name": vrfName,
-        })
+            // 2. VXLAN_TUNNEL_MAP for L3VNI → VRF
+            mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, vrfName)
+            cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
+                "vni":  fmt.Sprintf("%d", ipvpnDef.L3VNI),
+                "vrf":  vrfName,
+            })
+
+            // 3. INTERFACE: VRF binding + IP address
+            cs.Add("INTERFACE", i.name, ChangeAdd, nil, map[string]string{
+                "vrf_name": vrfName,
+            })
+
+            // 4. BGP_GLOBALS_AF for the VRF (L3VNI route targets)
+            cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|ipv4_unicast", vrfName), ChangeAdd, nil, map[string]string{
+                "advertise_ipv4_unicast": "true",
+            })
+            cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|l2vpn_evpn", vrfName), ChangeAdd, nil, map[string]string{
+                "advertise-all-vni":            "true",
+                "route_target_import_evpn":     strings.Join(ipvpnDef.ImportRT, ","),
+                "route_target_export_evpn":     strings.Join(ipvpnDef.ExportRT, ","),
+            })
+        } else {
+            // Non-EVPN path: no VRF (global routing table), no VXLAN
+            // INTERFACE binding with no vrf_name — uses default VRF
+            cs.Add("INTERFACE", i.name, ChangeAdd, nil, nil)
+        }
+
         if ipAddr != "" {
             cs.Add("INTERFACE", fmt.Sprintf("%s|%s", i.name, ipAddr), ChangeAdd, nil, nil)
         }
-
-        // 4. BGP_GLOBALS_AF for the VRF (L3VNI route targets)
-        cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|ipv4_unicast", vrfName), ChangeAdd, nil, map[string]string{
-            "advertise_ipv4_unicast": "true",
-        })
-        cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|l2vpn_evpn", vrfName), ChangeAdd, nil, map[string]string{
-            "advertise-all-vni":            "true",
-            "route_target_import_evpn":     strings.Join(ipvpnDef.ImportRT, ","),
-            "route_target_export_evpn":     strings.Join(ipvpnDef.ExportRT, ","),
-        })
     }
 
     // ====================================================================
     // L2 service translation (ServiceType == "l2" or IRB L2 portion)
     // ====================================================================
     if svc.ServiceType == ServiceTypeL2 || svc.ServiceType == ServiceTypeIRB {
-        macvpnDef := i.Network().GetMACVPN(svc.MACVPN)
+        macvpnDef, err := i.Network().GetMACVPN(svc.MACVPN)
+        if err != nil {
+            return nil, fmt.Errorf("MACVPN %q: %w", svc.MACVPN, err)
+        }
 
         // 1. VLAN
         vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
@@ -1972,8 +2132,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
         })
 
         // 2. VLAN_MEMBER
+        // L2 services use untagged (access port); IRB uses tagged (trunk port)
+        taggingMode := "untagged"
+        if svc.ServiceType == ServiceTypeIRB {
+            taggingMode = "tagged"
+        }
         cs.Add("VLAN_MEMBER", fmt.Sprintf("%s|%s", vlanName, i.name), ChangeAdd, nil, map[string]string{
-            "tagging_mode": "tagged",
+            "tagging_mode": taggingMode,
         })
 
         // 3. VXLAN_TUNNEL_MAP for L2VNI → VLAN
@@ -1995,9 +2160,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
     // IRB additions (ServiceType == "irb")
     // ====================================================================
     if svc.ServiceType == ServiceTypeIRB {
-        macvpnDef := i.Network().GetMACVPN(svc.MACVPN)
+        macvpnDef, err := i.Network().GetMACVPN(svc.MACVPN)
+        if err != nil {
+            return nil, fmt.Errorf("MACVPN %q (IRB): %w", svc.MACVPN, err)
+        }
         vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
-        vrfName := util.DeriveVRFName(svc.VRFType, svc.IPVPN, serviceName, i.name)
+        vrfName := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 
         // 1. VLAN_INTERFACE: SVI with VRF binding
         cs.Add("VLAN_INTERFACE", vlanName, ChangeAdd, nil, map[string]string{
@@ -2024,12 +2192,18 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
     // ====================================================================
     if svc.IngressFilter != "" {
         aclName := util.DeriveACLName(serviceName, "in")
-        filterSpec, _ := i.Network().GetFilterSpec(svc.IngressFilter)
+        filterSpec, err := i.Network().GetFilterSpec(svc.IngressFilter)
+        if err != nil {
+            return nil, fmt.Errorf("ingress filter %q: %w", svc.IngressFilter, err)
+        }
         i.generateACLEntries(cs, aclName, filterSpec, "ingress")
     }
     if svc.EgressFilter != "" {
         aclName := util.DeriveACLName(serviceName, "out")
-        filterSpec, _ := i.Network().GetFilterSpec(svc.EgressFilter)
+        filterSpec, err := i.Network().GetFilterSpec(svc.EgressFilter)
+        if err != nil {
+            return nil, fmt.Errorf("egress filter %q: %w", svc.EgressFilter, err)
+        }
         i.generateACLEntries(cs, aclName, filterSpec, "egress")
     }
 
@@ -2048,7 +2222,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
     // BGP neighbor (for services with routing)
     // ====================================================================
     if svc.Routing != nil && svc.Routing.Protocol == "bgp" {
-        vrfName := util.DeriveVRFName(svc.VRFType, svc.IPVPN, serviceName, i.name)
+        vrfName := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
         neighborIP, _ := i.DeriveNeighborIP()
         peerAS := svc.Routing.PeerAS
         cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfName, neighborIP), ChangeAdd, nil, map[string]string{
@@ -2072,34 +2246,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
     }
     if svc.IPVPN != "" {
         bindingFields["ipvpn"] = svc.IPVPN
-        bindingFields["vrf_name"] = util.DeriveVRFName(svc.VRFType, svc.IPVPN, serviceName, i.name)
+        bindingFields["vrf_name"] = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
     }
     if svc.MACVPN != "" {
         bindingFields["macvpn"] = svc.MACVPN
     }
     cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeAdd, nil, bindingFields)
-
-    // ====================================================================
-    // Lock → Apply → Verify → Unlock (execute mode only)
-    // ====================================================================
-    if !dryRun {
-        if err := d.Lock(); err != nil {
-            return nil, fmt.Errorf("acquiring lock: %w", err)
-        }
-
-        if err := cs.Apply(d.Conn()); err != nil {
-            d.Unlock()
-            return cs, fmt.Errorf("applying changes: %w", err)
-        }
-
-        result, verifyErr := d.Conn().VerifyChangeSet(ctx, cs)
-        d.Unlock() // always release after verify
-
-        if verifyErr != nil {
-            return cs, fmt.Errorf("verifying changes: %w", verifyErr)
-        }
-        cs.Verification = result
-    }
 
     return cs, nil
 }
@@ -2112,7 +2264,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
 // If the ACL already exists in CONFIG_DB, appends this interface to the ports list
 // rather than creating a new ACL_TABLE entry.
 func (i *Interface) generateACLEntries(cs *ChangeSet, aclName string, filter *spec.FilterSpec, stage string) {
-    existing := i.Device().Conn().ConfigDB.ACLTable[aclName]
+    existing := i.Device().Underlying().ConfigDB.ACLTable[aclName]
     if existing.Type != "" {
         // ACL exists — add this interface to ports list
         ports := strings.Split(existing.Ports, ",")
@@ -2263,34 +2415,34 @@ Device operations are methods on the `Device` type. All operations return a `*Ch
 // VLAN Management
 // ============================================================================
 
-func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig, dryRun bool) (*ChangeSet, error)
-func (d *Device) DeleteVLAN(ctx context.Context, vlanID int, dryRun bool) (*ChangeSet, error)
-func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tagged bool, dryRun bool) (*ChangeSet, error)
+func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error)
+func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
+func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tagged bool) (*ChangeSet, error)
 
 // ============================================================================
 // PortChannel (LAG) Management
 // ============================================================================
 
-func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig, dryRun bool) (*ChangeSet, error)
-func (d *Device) DeletePortChannel(ctx context.Context, name string, dryRun bool) (*ChangeSet, error)
-func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string, dryRun bool) (*ChangeSet, error)
-func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member string, dryRun bool) (*ChangeSet, error)
+func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error)
+func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error)
+func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
+func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
 
 // ============================================================================
 // VRF Management
 // ============================================================================
 
-func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig, dryRun bool) (*ChangeSet, error)
-func (d *Device) DeleteVRF(ctx context.Context, name string, dryRun bool) (*ChangeSet, error)
+func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error)
+func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
 
 // ============================================================================
 // ACL Management
 // ============================================================================
 
-func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig, dryRun bool) (*ChangeSet, error)
-func (d *Device) DeleteACLTable(ctx context.Context, name string, dryRun bool) (*ChangeSet, error)
-func (d *Device) AddACLRule(ctx context.Context, tableName string, rule ACLRuleEntry, dryRun bool) (*ChangeSet, error)
-func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, port string, dryRun bool) (*ChangeSet, error)
+func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error)
+func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error)
+func (d *Device) AddACLRule(ctx context.Context, tableName string, rule ACLRuleEntry) (*ChangeSet, error)
+func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, port string) (*ChangeSet, error)
 
 // ============================================================================
 // EVPN/VTEP Management
@@ -2310,8 +2462,9 @@ func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error)
 // ============================================================================
 
 // RunHealthChecks runs health checks on the device.
-// checkType can be: "bgp", "interfaces", "evpn", "lag", or "" for all.
-func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error)
+// checks is a variadic filter: "bgp", "interfaces", "evpn", "lag", "vxlan".
+// If no checks are specified, all checks run.
+func (d *Device) RunHealthChecks(ctx context.Context, checks ...string) ([]HealthCheckResult, error)
 
 // ApplyBaseline applies a baseline configlet to the device.
 // vars is a list of "key=value" strings for template substitution.
@@ -2366,12 +2519,19 @@ func (d *Device) SSHClient() *ssh.Client {
 
 // ============================================================================
 // Verification Methods
+// Status: not yet implemented. No verify.go exists in pkg/network/.
 // ============================================================================
 
 // VerifyChangeSet re-reads CONFIG_DB through a fresh connection and confirms
 // every entry in the ChangeSet was applied. For each Change in the ChangeSet:
-//   - ChangeAdd/ChangeModify: reads the table/key, asserts all fields match NewValue
-//   - ChangeDelete: reads the table/key, asserts it does not exist
+//   - ChangeAdd/ChangeModify: reads the table/key, asserts every field in NewValue
+//     is present with the same value (superset match — Redis may have additional
+//     fields set by SONiC daemons or prior operations; these are ignored). If a
+//     NewValue field is missing or has a different value in Redis, the entry is
+//     marked as failed.
+//   - ChangeDelete: reads the table/key, asserts the key does not exist in Redis.
+//     If the key still exists (regardless of field values), the entry is marked
+//     as failed.
 // Returns a VerificationResult listing any missing or mismatched entries.
 //
 // "Fresh connection" means: creates a new ConfigDBClient on the existing SSH
@@ -2390,6 +2550,16 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 // GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
 // object chain: SAI_ROUTE_ENTRY → SAI_NEXT_HOP_GROUP → SAI_NEXT_HOP.
 // Returns nil RouteEntry (not error) if not programmed in ASIC.
+//
+// Algorithm (SAI OID chain resolution):
+//   1. Lookup SAI_ROUTE_ENTRY in ASIC_DB by JSON key containing vrf OID + prefix
+//   2. Read the "SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID" field → next_hop_group OID
+//   3. If OID type is SAI_NEXT_HOP (single path): read IP from that OID, return
+//   4. If OID type is SAI_NEXT_HOP_GROUP (ECMP):
+//      a. SCAN for SAI_NEXT_HOP_GROUP_MEMBER entries with matching group OID
+//      b. For each member, read "SAI_NEXT_HOP_GROUP_MEMBER_ATTR_NEXT_HOP_ID"
+//      c. For each next_hop OID, read "SAI_NEXT_HOP_ATTR_IP" → nexthop IP
+//   5. Assemble NextHop list and return RouteEntry
 func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
 
 // ============================================================================
@@ -2405,10 +2575,10 @@ func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*Chan
 // Pseudo-code:
 //   BGP_GLOBALS "default": local_asn, router_id, rr_cluster_id
 //   For each neighbor:
-//     BGP_NEIGHBOR: asn, local_addr, admin_status
-//     BGP_NEIGHBOR_AF "<ip>|ipv4_unicast": activate, rr_client, next_hop_self
-//     BGP_NEIGHBOR_AF "<ip>|ipv6_unicast": activate, rr_client, next_hop_self
-//     BGP_NEIGHBOR_AF "<ip>|l2vpn_evpn": activate, rr_client
+//     BGP_NEIGHBOR "default|<ip>": asn, local_addr, admin_status
+//     BGP_NEIGHBOR_AF "default|<ip>|ipv4_unicast": activate, rr_client, next_hop_self
+//     BGP_NEIGHBOR_AF "default|<ip>|ipv6_unicast": activate, rr_client, next_hop_self
+//     BGP_NEIGHBOR_AF "default|<ip>|l2vpn_evpn": activate, rr_client
 //   BGP_GLOBALS_AF "default|ipv4_unicast": max_ibgp_paths
 //   BGP_GLOBALS_AF "default|ipv6_unicast": max_ibgp_paths
 //   BGP_GLOBALS_AF "default|l2vpn_evpn": advertise-all-vni
@@ -2504,6 +2674,12 @@ func (d *Device) ValidateComposite(ctx context.Context, composite *CompositeConf
 // but CONFIG_DB already has BGP_GLOBALS|default with router_id="10.0.0.2".
 // This is a conflict because merge mode does not overwrite existing values.
 // The caller should use overwrite mode or resolve the conflict before retrying.
+//
+// TOCTOU note: The pre-state snapshot used for diff comparison is read before
+// the PipelineSet write. Another process could modify CONFIG_DB between the
+// snapshot and the pipeline execution, causing the diff to be stale. This is
+// acceptable for lab use (single operator). Production use would need CAS
+// (compare-and-swap) or optimistic locking on the snapshot version.
 ```
 
 ### 5.3 Operation Configuration Types
@@ -2768,38 +2944,38 @@ type DerivedValues struct {
     NeighborIP    string
     NetworkAddr   string
     BroadcastAddr string
-    SubnetMask    string
+    SubnetMask    int
     VRFName       string
     ACLNameBase   string
     Description   string
 }
 
-// DeriveFromInterface computes values from interface and IP
-func DeriveFromInterface(intf, ipWithMask string, svc *spec.ServiceSpec) *DerivedValues
+// DeriveFromInterface computes values from interface, IP, and service name.
+func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, error)
 
 // DeriveVRFName returns the VRF name based on VRF type.
-//   vrf_type "interface" → Vrf_{serviceName}_{interfaceName}
-//     Example: DeriveVRFName("interface", "cust-vpn", "customer-l3", "Ethernet0") → "Vrf_customer-l3_Ethernet0"
-//   vrf_type "shared"    → Vrf_{ipvpnName}
-//     Example: DeriveVRFName("shared", "cust-vpn", "customer-l3", "Ethernet0") → "Vrf_cust-vpn"
-//   vrf_type ""          → "" (no VRF, global routing table)
-func DeriveVRFName(vrfType, ipvpnName, serviceName, interfaceName string) string {
+// Uses shortened interface names for compact VRF names.
+//   vrf_type "interface" → {serviceName}-{shortenedIntf}
+//     Example: DeriveVRFName("interface", "customer-l3", "Ethernet0") → "customer-l3-Eth0"
+//   vrf_type "shared"    → {serviceName}
+//     Example: DeriveVRFName("shared", "customer-l3", "Ethernet0") → "customer-l3"
+//   default              → {serviceName}-{shortenedIntf} (same as interface)
+func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
     switch vrfType {
     case VRFTypeInterface:
-        return fmt.Sprintf("Vrf_%s_%s", serviceName, interfaceName)
+        return serviceName + "-" + SanitizeForName(ShortenInterfaceName(interfaceName))
     case VRFTypeShared:
-        return fmt.Sprintf("Vrf_%s", ipvpnName)
+        return serviceName
     default:
-        return ""
+        return serviceName + "-" + SanitizeForName(ShortenInterfaceName(interfaceName))
     }
 }
 
 // DeriveACLName returns the ACL table name for a service filter.
-//   direction "in"  → {SERVICE}-IN  (uppercased)
-//   direction "out" → {SERVICE}-OUT (uppercased)
-//   Example: DeriveACLName("customer-l3", "in") → "CUSTOMER-L3-IN"
+// ACLs are per-service, not per-interface.
+//   Example: DeriveACLName("customer-l3", "in") → "customer-l3-in"
 func DeriveACLName(serviceName, direction string) string {
-    return strings.ToUpper(fmt.Sprintf("%s-%s", serviceName, direction))
+    return serviceName + "-" + direction
 }
 
 // ComputeNeighborIP returns peer IP for point-to-point subnets
@@ -2930,7 +3106,9 @@ func ResolveProfile(
 }
 ```
 
-## 8. Audit Logging
+## 8. Audit Logging (Phase 2)
+
+> **Phase 2 — deferred.** Operations currently log actions, success/failure via standard `slog` logging. A structured audit trail (AuditLogger, AuditEvent, FileAuditLogger) and permission checking (PermissionChecker) are designed but deferred to Phase 2. The types below define the target interface.
 
 ### 8.1 Event Types (`pkg/audit/event.go`)
 
@@ -2947,7 +3125,6 @@ type AuditEvent struct {
     Success     bool                `json:"success"`
     Error       string              `json:"error,omitempty"`
     ExecuteMode bool                `json:"execute_mode"`
-    DryRun      bool                `json:"dry_run"`
 }
 ```
 
@@ -2978,7 +3155,9 @@ type FileAuditLogger struct {
 }
 ```
 
-## 9. Permission System
+## 9. Permission System (Phase 2)
+
+> **Phase 2 — deferred.** Permission checking is designed but not yet integrated into the operation call path. Operations currently execute without permission checks. The types below define the target interface.
 
 ### 9.1 Permission Definitions (`pkg/auth/permission.go`)
 
@@ -3287,7 +3466,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 When a service definition changes (e.g., filter-spec updated in `network.json`), interfaces using that service can be synchronized:
 
 ```go
-func (i *Interface) RefreshService(ctx context.Context, dryRun bool) (*ChangeSet, error) {
+func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
     svc, err := i.Network().GetService(i.serviceName)
     if err != nil {
         return nil, err
@@ -3419,11 +3598,10 @@ type Settings struct {
 
 Newtron uses three tiers of tests, each with different scope and infrastructure requirements:
 
-| Tier | Build Tag | Infrastructure | Speed | What It Tests |
-|------|-----------|---------------|-------|---------------|
-| Unit | `unit` | None | Fast (~1s) | Pure logic: IP math, name normalization, spec resolution |
-| Integration | `integration` | Standalone Redis | Medium (~10s) | Redis operations: CONFIG_DB read/write, state loading |
-| E2E | `e2e` | Lab (containerlab + SONiC-VS) | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
+| Tier | Infrastructure | Speed | What It Tests |
+|------|---------------|-------|---------------|
+| Unit | None | Fast (~1s) | Pure logic: IP math, name normalization, spec resolution |
+| E2E | vmlab + newtest | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
 
 ### 12.2 Unit Tests
 
@@ -3454,226 +3632,10 @@ func TestComputeNeighborIP(t *testing.T) {
 }
 ```
 
-### 12.3 Integration Tests
+### 12.3 E2E Testing (newtest)
 
-Integration tests use a standalone Redis instance (no SSH tunnel). The `SSHUser`/`SSHPass` fields are left empty in test profiles, causing `Device.Connect()` to use the direct `<ip>:6379` path.
-
-```go
-//go:build integration
-
-func TestApplyServiceOp_Validate(t *testing.T) {
-    dev := &device.Device{
-        State: &device.DeviceState{
-            Interfaces: map[string]*device.InterfaceState{
-                "Ethernet0": {Name: "Ethernet0"},
-            },
-        },
-    }
-    dev.SetConnected(true)
-    dev.SetLocked(true)
-
-    // ... validate operation against real Redis
-}
-```
-
-### 12.4 E2E Lab Tests (`internal/testutil/lab.go`)
-
-E2E tests run against a live containerlab topology with SONiC-VS nodes. The test infrastructure provides:
-
-**Node Discovery:**
-
-```go
-// LabNodes discovers running lab nodes and their IPs via containerlab inspect.
-func LabNodes(t *testing.T) []LabNode
-
-// LabSonicNodes returns only non-server nodes (SONiC devices with profiles and Redis).
-// Server nodes are filtered by checking for profile file existence.
-func LabSonicNodes(t *testing.T) []LabNode
-```
-
-This distinction matters because lab topologies may include both SONiC switches (which have Redis and profiles) and server containers (which are Linux boxes for data-plane testing). Only SONiC nodes have profiles and can accept newtron connections.
-
-**SSH Tunnel Pool:**
-
-E2E tests share SSH tunnels across test cases to avoid the overhead of establishing a new SSH session for each test.
-
-```go
-var (
-    labTunnelsMu sync.Mutex
-    labTunnels   map[string]*device.SSHTunnel
-)
-
-// labTunnelAddr returns a Redis address for a lab node.
-// Establishes and caches an SSH tunnel when SSH credentials are in the profile.
-func labTunnelAddr(t *testing.T, nodeName, nodeIP string) string
-
-// CloseLabTunnels closes all shared SSH tunnels. Call from TestMain after m.Run().
-func CloseLabTunnels()
-```
-
-**Assertion Helpers:**
-
-```go
-// AssertConfigDBEntry verifies a Redis hash in CONFIG_DB has the expected fields.
-func AssertConfigDBEntry(t *testing.T, name, table, key string, expectedFields map[string]string)
-
-// AssertConfigDBEntryExists checks that a key exists in CONFIG_DB.
-func AssertConfigDBEntryExists(t *testing.T, name, table, key string)
-
-// AssertConfigDBEntryAbsent checks that a key does NOT exist in CONFIG_DB.
-func AssertConfigDBEntryAbsent(t *testing.T, name, table, key string)
-
-// LabStateDBEntry reads a hash from STATE_DB (DB 6).
-func LabStateDBEntry(t *testing.T, name, table, key string) map[string]string
-
-// PollStateDB polls a STATE_DB entry until the expected value appears.
-func PollStateDB(ctx context.Context, t *testing.T, name, table, key, field, want string) error
-```
-
-**Convergence Testing:**
-
-The three-tier assertion model for E2E tests:
-
-1. **CONFIG_DB (hard fail)**: Verify the key was written. If this fails, the operation itself failed.
-2. **ASIC_DB (soft convergence)**: Poll ASIC_DB for orchagent processing. Uses timeout with retry.
-3. **Data-plane (skip if unavailable)**: Ping between server containers. Skipped if server nodes are not present.
-
-```go
-// WaitForASICVLAN polls ASIC_DB for a VLAN entry with the given vid.
-// Returns nil once a SAI_OBJECT_TYPE_VLAN entry with a matching
-// SAI_VLAN_ATTR_VLAN_ID is found, or an error if the context expires.
-func WaitForASICVLAN(ctx context.Context, t *testing.T, name string, vlanID int) error {
-    client := LabRedisClient(t, name, 1) // ASIC_DB
-    want := fmt.Sprintf("%d", vlanID)
-
-    for {
-        select {
-        case <-ctx.Done():
-            return fmt.Errorf("timeout waiting for VLAN %d in ASIC_DB on %s", vlanID, name)
-        default:
-        }
-
-        keys, err := client.Keys(ctx, "ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*").Result()
-        if err == nil {
-            for _, key := range keys {
-                vid, _ := client.HGet(ctx, key, "SAI_VLAN_ATTR_VLAN_ID").Result()
-                if vid == want {
-                    return nil
-                }
-            }
-        }
-        time.Sleep(1 * time.Second)
-    }
-}
-```
-
-**Server Container Helpers (Data-plane testing):**
-
-```go
-// ServerConfigureInterface configures an IP address on a server container's interface.
-func ServerConfigureInterface(t *testing.T, serverName, iface, ipCIDR, gateway string)
-
-// ServerPing pings targetIP from a server container. Returns true if packet received.
-// On failure, runs ip addr/ip route/arp diagnostics.
-func ServerPing(t *testing.T, serverName, targetIP string, count int) bool
-
-// EnsureServerTools verifies network tools (ping, ip) are on the server container.
-func EnsureServerTools(t *testing.T, serverName string)
-```
-
-### 12.5 ResetLabBaseline
-
-E2E tests can leave stale CONFIG_DB entries from previous runs. These stale entries (especially VXLAN/VRF entries) can crash `vxlanmgrd` or `orchagent` when they try to process entries that reference deleted resources.
-
-`ResetLabBaseline()` is called from `TestMain` before `m.Run()`:
-
-```go
-// staleE2EKeys lists CONFIG_DB keys that E2E tests may create.
-var staleE2EKeys = []string{
-    "VXLAN_TUNNEL_MAP|vtep1|map_10700_Vlan700",
-    "VLAN|Vlan700",
-    "VRF|Vrf_e2e_irb",
-    "INTERFACE|Ethernet2|10.90.1.1/30",
-    "ACL_TABLE|E2E_TEST_ACL",
-    // ... all known test-created keys
-}
-
-// ResetLabBaseline deletes stale CONFIG_DB entries from all SONiC nodes.
-func ResetLabBaseline() error {
-    // 1. Discover all SONiC nodes via containerlab inspect
-    // 2. Read SSH credentials from each node's profile
-    // 3. Build redis-cli DEL commands for all stale keys
-    // 4. Execute in parallel on all nodes via SSH
-    // 5. Sleep 5 seconds for orchagent to process deletions
-}
-```
-
-**Cleanup Ordering:**
-
-The `staleE2EKeys` list is ordered with dependencies last (e.g., VXLAN_TUNNEL_MAP before VLAN, INTERFACE IP keys before INTERFACE base keys). This prevents SONiC daemons from processing partial state.
-
-### 12.6 Test Lifecycle Helpers
-
-```go
-// LabConnectedDevice connects to a lab node via the normal network path.
-// Registers t.Cleanup to disconnect.
-func LabConnectedDevice(t *testing.T, name string) *network.Device
-
-// LabDevice is an alias for LabConnectedDevice.
-// Operations acquire/release the device lock automatically per-operation.
-func LabDevice(t *testing.T, name string) *network.Device
-
-// LabCleanupChanges registers a cleanup that reconnects and applies undo changes.
-// Uses a fresh device connection since the test's device may have stale cache.
-func LabCleanupChanges(t *testing.T, nodeName string, fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error))
-
-// LabContext returns a context with a 2-minute timeout for SONiC-VS operations.
-func LabContext(t *testing.T) context.Context
-```
-
-### 12.7 E2E Test Structure Example
-
-```go
-//go:build e2e
-
-func TestMain(m *testing.M) {
-    if err := testutil.ResetLabBaseline(); err != nil {
-        fmt.Fprintf(os.Stderr, "WARNING: %v\n", err)
-    }
-    code := m.Run()
-    testutil.CloseLabTunnels()
-    os.Exit(code)
-}
-
-func TestCreateVLAN(t *testing.T) {
-    testutil.SkipIfNoLab(t)
-    dev := testutil.LabDevice(t, "leaf1")
-    ctx := testutil.LabContext(t)
-
-    // Register cleanup BEFORE creating
-    testutil.LabCleanupChanges(t, "leaf1", func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-        return dev.DeleteVLAN(ctx, 500)
-    })
-
-    // Create VLAN
-    cs, err := dev.CreateVLAN(ctx, 500, network.VLANConfig{Description: "test"})
-    require.NoError(t, err)
-    require.NoError(t, cs.Apply(dev))
-
-    // Tier 1: CONFIG_DB assertion (hard fail)
-    testutil.AssertConfigDBEntry(t, "leaf1", "VLAN", "Vlan500", map[string]string{
-        "vlanid": "500",
-    })
-
-    // Tier 2: ASIC_DB convergence (soft, with timeout)
-    asicCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-    defer cancel()
-    err = testutil.WaitForASICVLAN(asicCtx, t, "leaf1", 500)
-    if err != nil {
-        t.Logf("ASIC convergence: %v (continuing)", err)
-    }
-}
-```
+E2E testing uses the newtest framework (see `docs/newtest/`). Patterns and learnings
+from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.md`.
 
 ---
 
@@ -3779,10 +3741,10 @@ Section numbers below refer to the version when the change was made and may not 
 |------|--------|
 | **Lock/Unlock** | Distributed lock via Redis STATE_DB hash (`NEWTRON_LOCK\|<device>`) with Lua-scripted atomic acquire/release and TTL expiry. `Lock()`, `Unlock()`, `IsLocked()`, `LockHolder()` on `device.Device` (§3.3) and `network.Device` (§3.2). Replaces file-based advisory lock. `ErrDeviceLocked` sentinel includes holder identity. |
 | **RouteEntry Package** | Attributed `RouteEntry`, `NextHop`, `RouteSource`, `VerificationResult` to `pkg/device/verify.go` (§3.6A) to avoid import cycle |
-| **Execution Model** | Per-operation locking: operations acquire lock immediately before mutation, verify, then release. `dryRun == true` skips lock entirely. Replaces session-level locking (§5) |
+| **Execution Model** | Operations return ChangeSets for preview; caller applies via `cs.Apply()`. Lock/verify is caller responsibility. Replaces session-level locking (§5) |
 | **ApplyService Translation** | Complete L3/L2/IRB/ACL/QoS/BGP translation rules replacing elided pseudocode (§5.1) |
 | **DependencyChecker** | Reference-counting via CONFIG_DB scan for safe ACL/VRF/VLAN deletion (§5.1) |
-| **DeriveVRFName/DeriveACLName** | Explicit formulas: `Vrf_{service}_{interface}` / `Vrf_{ipvpn}` and `{SERVICE}-IN`/`{SERVICE}-OUT` (§7.1) |
+| **DeriveVRFName/DeriveACLName** | Explicit formulas: `{service}-{shortenedIntf}` / `{service}` and `{service}-in`/`{service}-out` (§7.1) |
 | **Composite ChangeSet** | Documented overwrite vs merge ChangeSet generation in `DeliverComposite` (§5.2) |
 | **ConfigDB Entry Types** | 12 types defined: PortEntry, VLANEntry, VLANMemberEntry, InterfaceEntry, PortChannelEntry, VRFEntry, VXLANTunnelEntry, VXLANMapEntry, EVPNNVOEntry, ACLTableEntry, ACLRuleEntry, ACLTableTypeEntry (§3.4) |
 | **Missing Types** | Added ApplyServiceOpts (§3.8), AuditFilter (§8.2), PermContext (§9.2), QoSProfile, CoSClass (§3.1) |

@@ -77,7 +77,7 @@ newtron/
 │   ├── vmlab/            # vmlab core library
 │   └── newtest/          # newtest core library (scenario parser, runner,
 │                         #   verifiers, report generator)
-├── newtest/              # E2E test assets (replaces testlab/)
+├── newtest/              # E2E test assets
 │   ├── topologies/
 │   │   ├── 2node/
 │   │   │   └── specs/
@@ -121,22 +121,14 @@ newtron/
     └── newtest/
 ```
 
-### 3.1 Migration from testlab/
+### 3.1 Directory Layout
 
-The existing `testlab/` directory contains containerlab-based test
-infrastructure (topologies, specs, seed data, generated artifacts). newtest
-replaces this:
+Each topology is self-contained with its own spec directory:
 
-| Current (testlab/) | Target (newtest/) | Notes |
-|--------------------|--------------------|-------|
-| `topologies/*.yml` (containerlab YAML) | `topologies/*/specs/` (newtron spec dirs) | Static spec dirs, no generation |
-| `specs/` (hand-written) | Embedded in each topology dir | Each topology is self-contained |
-| `seed/` (configdb.json, statedb.json) | Not needed | Provisioning generates config |
-| `.generated/` (labgen output) | `.generated/` (runtime output only) | Reports, not specs |
-
-The `testlab/` directory and `cmd/labgen/` are retained during the transition
-period. Once all E2E tests have migrated to newtest scenarios, they can be
-removed.
+| Path | Purpose |
+|------|---------|
+| `topologies/*/specs/` | newtron spec dirs per topology |
+| `.generated/` | Runtime output (reports, logs) |
 
 ---
 
@@ -203,7 +195,7 @@ steps:
 
   - name: verify-underlay-route
     action: verify-route
-    device: spine1
+    devices: [spine1]
     prefix: "10.1.0.0/31"
     vrf: default
     expect:
@@ -225,7 +217,7 @@ steps:
 |--------|-------------|----------------|
 | `provision` | Run `newtron provision -d <device> -x` | newtron |
 | `verify-provisioning` | Verify CONFIG_DB matches expected state from provisioning | newtron `VerifyChangeSet` |
-| `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | newtron `VerifyChangeSet` or direct Redis read |
+| `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | Direct CONFIG_DB read via newtron's `ConfigDBClient` |
 | `verify-state-db` | Assert STATE_DB entries match expected values (with polling) | newtron STATE_DB read |
 | `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `RunHealthChecks` |
 | `verify-health` | Run health checks (interfaces, BGP, EVPN, LAG, VXLAN) [^1] | newtron `RunHealthChecks` |
@@ -337,7 +329,7 @@ source (APP_DB or ASIC_DB):
 # Verify underlay route: leaf1's subnet arrived at spine1 via BGP
 - name: verify-underlay-route
   action: verify-route
-  device: spine1
+  devices: [spine1]
   prefix: "10.1.0.0/31"
   vrf: default
   expect:
@@ -349,7 +341,7 @@ source (APP_DB or ASIC_DB):
 # Verify ASIC-level route installation
 - name: verify-asic-route
   action: verify-route
-  device: leaf1
+  devices: [leaf1]
   prefix: "10.0.0.1/32"
   vrf: default
   expect:
@@ -423,14 +415,14 @@ Platforms declare their capabilities in `platforms.json`:
       "vm_image": "~/.vmlab/images/sonic-vs.qcow2",
       "vm_nic_driver": "e1000",
       "vm_interface_map": "stride-4",
-      "dataplane": false
+      "dataplane": ""
     },
     "sonic-vpp": {
       "hwsku": "Force10-S6000",
       "vm_image": "~/.vmlab/images/sonic-vpp.qcow2",
       "vm_nic_driver": "virtio-net-pci",
       "vm_interface_map": "sequential",
-      "dataplane": true
+      "dataplane": "vpp"
     }
   }
 }
@@ -597,61 +589,11 @@ Run Options:
 
 ---
 
-## 11. Relationship to Existing E2E Tests
+## 11. Legacy E2E Learnings
 
-newtron has a mature Go-based E2E test suite in `test/e2e/` with 11 test
-files covering:
-
-| Test File | Coverage |
-|-----------|----------|
-| `provisioning_test.go` | TopologyProvisioner: validate, generate composite, deliver |
-| `service_test.go` | L2, L3, IRB service apply/remove, shared VRF, filter ACLs |
-| `bgp_test.go` | BGP globals, route redistribution, route maps, BGP networks |
-| `health_test.go` | Health checker: all checks, per-type, after config changes |
-| `audit_test.go` | Audit logger: creation, filtering, event types |
-| `baseline_test.go` | Configlet loading, resolution, application |
-| `operations_test.go` | VLAN, LAG, interface operations |
-| `connectivity_test.go` | Device connectivity and Redis access |
-| `multidevice_test.go` | Cross-device operations |
-| `dataplane_test.go` | L2/L3 forwarding via server containers |
-
-These tests use containerlab (requires root) and Docker (for SONiC containers
-and server containers). They rely on the rich test helper library in
-`internal/testutil/lab.go` which provides:
-- SSH tunnel pool for Redis access through containerlab nodes
-- CONFIG_DB/STATE_DB assertion helpers (`AssertConfigDBEntry`,
-  `AssertConfigDBEntryExists`, `AssertConfigDBEntryAbsent`)
-- STATE_DB polling (`PollStateDB`, `WaitForASICVLAN`)
-- Device connection helpers (`LabConnectedDevice`, `LabDevice`)
-- Cleanup infrastructure (`ResetLabBaseline`, `LabCleanupChanges`)
-- Server container management (`ServerPing`, `ServerConfigureInterface`)
-
-### 11.1 How newtest Relates
-
-newtest replaces the containerlab + Docker infrastructure with vmlab + QEMU
-while preserving the same verification patterns:
-
-| Aspect | Go E2E tests (test/e2e/) | newtest |
-|--------|-------------------------|---------|
-| **VM management** | containerlab (root required) | vmlab (no root) |
-| **SONiC image** | Docker containers | QEMU VMs (VS, VPP, vendor) |
-| **Test definition** | Go code | Declarative YAML scenarios |
-| **Verification** | Go assert helpers | Same patterns, YAML-driven |
-| **Data plane** | Server containers + ping | VPP forwarding + ping |
-| **Config assertions** | `AssertConfigDBEntry()` (test helper) | `verify-provisioning` → newtron `VerifyChangeSet` |
-| **Route verification** | `PollStateDB()` (test helper) | `verify-route` → newtron `GetRoute` |
-| **Health checks** | `dev.RunHealthChecks()` | `verify-health` → newtron `RunHealthChecks` |
-| **Audience** | Developers (`go test -tags e2e`) | Developers + CI/CD |
-
-### 11.2 Migration Path
-
-The Go E2E tests and newtest coexist during the transition:
-
-1. **Phase 1**: newtest runs alongside Go E2E tests. Both test suites are valid.
-2. **Phase 2**: New tests are written as newtest scenarios. Go E2E tests are
-   maintained but not expanded.
-3. **Phase 3**: Go E2E tests are migrated to newtest scenarios one by one.
-4. **Phase 4**: `testlab/`, `cmd/labgen/`, and `test/e2e/` are removed.
+The legacy Go-based E2E test suite (`test/e2e/`, `internal/testutil/`) has been removed.
+Patterns and SONiC-specific knowledge from those tests are captured in
+`docs/newtest/e2e-learnings.md` for reference when implementing newtest scenarios.
 
 ---
 
