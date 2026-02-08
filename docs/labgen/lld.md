@@ -518,7 +518,7 @@ Produces `specs/network.json` with:
 | Field | Value |
 |---|---|
 | `version` | `"1.0"` |
-| `lock_dir` | `"/tmp/newtron-lab-locks"` |
+| `lock_ttl` | `3600` |
 | `super_users` | `["labuser"]` |
 | `user_groups` | `{"neteng": ["labuser"]}` |
 | `permissions` | `{"all": ["neteng"]}` |

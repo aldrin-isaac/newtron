@@ -406,6 +406,9 @@ steps:
       overall: ok
 ```
 
+> **Note:** `verify-health` is a single-shot read — it does not poll. Use a
+> `wait` step before `verify-health` if convergence time is needed.
+
 ### 3. Run It
 
 ```bash
@@ -416,7 +419,9 @@ newtest run -scenario my-test
 
 For standard provisioning verification, use `verify-provisioning` — it calls
 newtron's `VerifyChangeSet` which automatically checks all CONFIG_DB tables
-against the ChangeSet produced by provisioning:
+against the ChangeSet produced by provisioning. The ChangeSet uses
+last-write-wins accumulation per device — if multiple operations write to the
+same table/key, the final value is what gets verified:
 
 ```yaml
 # Preferred: verify all CONFIG_DB entries from provisioning automatically
@@ -528,7 +533,8 @@ device and asserts the expected prefix, protocol, and next-hops:
 ```
 
 newtest determines the expected values from the topology spec — newtron's
-`GetRoute` only reads the device's routing table and returns structured data.
+`GetRoute` only reads the device's routing table and returns a
+`*device.RouteEntry` (prefix, VRF, protocol, next-hops, source).
 
 ### 7. Apply and Remove Services
 

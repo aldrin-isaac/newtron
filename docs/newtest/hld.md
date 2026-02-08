@@ -24,6 +24,8 @@ topologies, runs newtron against them, and validates results.
 └─────────────────┘          └─────────────────┘
 ```
 
+The Runner holds a `*network.Network` object (not individual device references). Devices are accessed via `r.Network.GetDevice(name)`.
+
 ---
 
 ## 2. Three Tools, Clear Boundaries
@@ -215,7 +217,7 @@ steps:
 | `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | newtron `VerifyChangeSet` or direct Redis read |
 | `verify-state-db` | Assert STATE_DB entries match expected values (with polling) | newtron STATE_DB read |
 | `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `RunHealthChecks` |
-| `verify-health` | Run health checks (interfaces, BGP, EVPN, LAG, VXLAN) | newtron `RunHealthChecks` |
+| `verify-health` | Run health checks (interfaces, BGP, EVPN, LAG, VXLAN) [^1] | newtron `RunHealthChecks` |
 | `verify-route` | Check a specific route exists on a device with expected next-hops | newtron `GetRoute` / `GetRouteASIC` |
 | `verify-ping` | Data plane ping between devices (requires `dataplane: true`) | **newtest native** |
 | `apply-service` | Apply a named service to a device interface | newtron |
@@ -223,6 +225,8 @@ steps:
 | `apply-baseline` | Apply a configlet baseline to a device | newtron |
 | `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
 | `wait` | Wait for specified duration | newtest native |
+
+[^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
 
 Steps implemented by newtron call newtron's built-in methods on the Device
 object. newtest provides the orchestration (which device, what parameters,
@@ -314,7 +318,9 @@ standard provisioning ChangeSet.
 
 The `verify-route` action uses newtron's `GetRoute` or `GetRouteASIC`
 primitives to check that a specific prefix exists in a device's routing table
-with expected attributes:
+with expected attributes. These methods return a `*device.RouteEntry` (from
+`pkg/device/verify.go`) containing prefix, VRF, protocol, next-hops, and
+source (APP_DB or ASIC_DB):
 
 ```yaml
 # Verify underlay route: leaf1's subnet arrived at spine1 via BGP
@@ -601,7 +607,7 @@ and server containers). They rely on the rich test helper library in
 - CONFIG_DB/STATE_DB assertion helpers (`AssertConfigDBEntry`,
   `AssertConfigDBEntryExists`, `AssertConfigDBEntryAbsent`)
 - STATE_DB polling (`PollStateDB`, `WaitForASICVLAN`)
-- Device connection helpers (`LabConnectedDevice`, `LabLockedDevice`)
+- Device connection helpers (`LabConnectedDevice`, `LabDevice`)
 - Cleanup infrastructure (`ResetLabBaseline`, `LabCleanupChanges`)
 - Server container management (`ServerPing`, `ServerConfigureInterface`)
 

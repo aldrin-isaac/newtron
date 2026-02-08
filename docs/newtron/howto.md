@@ -239,7 +239,7 @@ sudo vim /etc/newtron/network.json
 ```json
 {
   "version": "1.0",
-  "lock_dir": "/var/run/newtron",
+  "lock_ttl": 3600,
   "super_users": ["admin"],
   "user_groups": {
     "neteng": ["alice", "bob"],
@@ -801,7 +801,7 @@ newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
 
 **Preconditions checked:**
 
-- Device must be connected and locked
+- Device must be connected (lock is acquired automatically in execute mode)
 - Interface must not be a LAG member (configure the LAG instead)
 - Interface must not already have a service bound
 - L3 service requires an IP address
@@ -2231,7 +2231,7 @@ newtron show audit <event-id>
 | "L2 and L3 are mutually exclusive" | Adding VLAN member to routed port | Remove IP/VRF first |
 | "redis connection failed" | Port 6379 not forwarded | Add ssh_user/ssh_pass to profile for SSH tunnel |
 | "SSH dial ... connection refused" | Port 22 not reachable | Check SSH service, network, container health |
-| "device not locked" | Forgot to Lock() before write ops (Go API) | Call `dev.Lock(ctx)` before operations |
+| "device is locked by another process" | Another newtron instance holds the device lock | Wait for other operation to finish, or check `LockHolder()` for stale locks (TTL auto-expires) |
 | "interface already has service" | Apply-service to an interface that already has one | Remove existing service first |
 
 ### 18.10 Reset to Clean State
@@ -2420,21 +2420,13 @@ fmt.Printf("Region AS: %d\n", region.ASNumber)
 Operations are methods on the objects they operate on:
 
 ```go
-// Lock device for changes
-if err := dev.Lock(ctx); err != nil {
-    log.Fatal(err)
-}
-defer dev.Unlock()
-
 // Interface operations -- methods on Interface
+// Lock is acquired/released automatically per-operation in execute mode
 intf, _ := dev.GetInterface("Ethernet0")
 
-changeSet, err := intf.ApplyService(ctx, "customer-l3", network.ApplyServiceOpts{
-    IPAddress: "10.1.1.1/30",
-    PeerAS:    65100, // For services with routing.peer_as="request"
-})
+changeSet, err := intf.ApplyService(ctx, "customer-l3", "10.1.1.1/30", false /* dryRun */)
 if err != nil {
-    log.Fatal(err)
+    log.Fatal(err) // includes ErrDeviceLocked if another process has the lock
 }
 
 // Preview changes (dry-run)
@@ -2829,11 +2821,7 @@ if err != nil {
 }
 defer dev.Disconnect()
 
-if err := dev.Lock(ctx); err != nil {
-    log.Fatal(err)
-}
-defer dev.Unlock()
-
+// Lock is acquired/released automatically by DeliverComposite
 // Deliver with overwrite (replaces entire CONFIG_DB)
 result, err := dev.DeliverComposite(composite, network.CompositeOverwrite)
 if err != nil {
@@ -2859,14 +2847,11 @@ The following documents provide additional detail on specific topics:
 
 | Document | Description |
 |----------|-------------|
-| [HLD.md](HLD.md) | High-Level Design -- architecture overview, design decisions, system context |
-| [LLD.md](LLD.md) | Low-Level Design -- package structure, data flow, object model details |
-| [DESIGN_PRINCIPLES.md](DESIGN_PRINCIPLES.md) | Core design principles and philosophy |
-| [CONFIGDB_GUIDE.md](CONFIGDB_GUIDE.md) | SONiC CONFIG_DB table reference -- every table, field, and key format used by newtron |
-| [SONIC_VS_PITFALLS.md](SONIC_VS_PITFALLS.md) | Known issues and workarounds for SONiC Virtual Switch (VS) in containerlab |
-| [CONTAINERLAB_HOWTO.md](CONTAINERLAB_HOWTO.md) | Detailed guide for setting up and using the containerlab test environment |
-| [NGDP_DEBUGGING.md](NGDP_DEBUGGING.md) | Debugging the NGDP ASIC simulator (data plane bridging, NIC issues) |
-| [LEARNINGS.md](LEARNINGS.md) | Lessons learned during development (SONiC quirks, testing strategies, design evolution) |
-| [TESTING.md](TESTING.md) | Test strategy -- unit tests, integration tests, test helpers |
-| [E2E_TESTING.md](E2E_TESTING.md) | End-to-end testing guide -- lab setup, test patterns, data plane verification |
-| [VERIFICATION_TOOLKIT.md](VERIFICATION_TOOLKIT.md) | Tools and techniques for verifying configuration correctness |
+| [hld.md](hld.md) | High-Level Design -- architecture overview, design decisions, system context |
+| [lld.md](lld.md) | Low-Level Design -- package structure, data flow, object model details |
+| [device-lld.md](device-lld.md) | Device Layer LLD -- SSH tunnels, Redis clients, state access |
+| [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | Core design principles and philosophy |
+| [SONIC_VS_PITFALLS.md](../SONIC_VS_PITFALLS.md) | Known issues and workarounds for SONiC Virtual Switch (VS) |
+| [NGDP_DEBUGGING.md](../NGDP_DEBUGGING.md) | Debugging the NGDP ASIC simulator (data plane bridging, NIC issues) |
+| [LEARNINGS.md](../LEARNINGS.md) | Lessons learned during development (SONiC quirks, testing strategies, design evolution) |
+| [VERIFICATION_TOOLKIT.md](../VERIFICATION_TOOLKIT.md) | Tools and techniques for verifying configuration correctness |

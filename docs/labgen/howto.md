@@ -647,7 +647,7 @@ make test-e2e-full
 |---|---|---|
 | labgen HLD | [docs/labgen/hld.md](hld.md) | High-level architecture, input/output format, configlet system overview |
 | labgen LLD | [docs/labgen/lld.md](lld.md) | Detailed data structures, function signatures, generation pipeline internals |
-| Containerlab Guide | [docs/CONTAINERLAB_HOWTO.md](../CONTAINERLAB_HOWTO.md) | QEMU port forwarding, tripping hazards, NIC-to-VM mapping, lab debugging |
+| vmlab LLD | [docs/vmlab/lld.md](../vmlab/lld.md) | VM orchestration, QEMU lifecycle, port management |
 
 ### Topology Files
 

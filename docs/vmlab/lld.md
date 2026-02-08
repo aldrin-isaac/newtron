@@ -1,5 +1,9 @@
 # vmlab Low-Level Design (LLD)
 
+vmlab orchestrates QEMU virtual machines for SONiC lab environments. This document covers `pkg/vmlab/` — the VM lifecycle, networking, and port management layer. For the high-level architecture, see [vmlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
+
+---
+
 ## 1. Spec Type Extensions
 
 Changes to existing newtron types in `pkg/spec/types.go`.
@@ -21,7 +25,8 @@ type PlatformSpec struct {
     VMMemory       int            `json:"vm_memory,omitempty"`
     VMCPUs         int            `json:"vm_cpus,omitempty"`
     VMNICDriver    string         `json:"vm_nic_driver,omitempty"`
-    VMInterfaceMap string         `json:"vm_interface_map,omitempty"`
+    VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
+    VMInterfaceMapCustom map[string]int `json:"vm_interface_map_custom,omitempty"` // SONiC name → QEMU NIC index (for "custom" map type)
     VMCPUFeatures  string         `json:"vm_cpu_features,omitempty"`
     VMCredentials  *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout  int            `json:"vm_boot_timeout,omitempty"`
@@ -42,6 +47,7 @@ type VMCredentials struct {
 | `vm_cpus` | int | 2 | vCPU count |
 | `vm_nic_driver` | string | `"e1000"` | QEMU NIC model |
 | `vm_interface_map` | string | `"stride-4"` | NIC-to-interface mapping scheme |
+| `vm_interface_map_custom` | map[string]int | nil | Custom SONiC name→NIC index map (for `"custom"` scheme) |
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
 | `vm_credentials` | *VMCredentials | nil | Default SSH login |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for SSH |
@@ -101,7 +107,16 @@ type VMLabConfig struct {
 | `link_port_base` | 20000 | Starting TCP port for socket links |
 | `console_port_base` | 30000 | Starting port for serial consoles |
 | `ssh_port_base` | 40000 | Starting port for SSH forwarding |
-| `hosts` | (none) | Host name → IP address for multi-host |
+| `hosts` | (none) | Host name → IP address for multi-host (**Phase 3 — not implemented**) |
+
+**Multi-host deployment (Phase 3 placeholder):** The `hosts` map and `DeviceProfile.VMHost` fields are defined in the spec types for forward compatibility but are **not implemented**. The current implementation assumes single-host deployment:
+- All QEMU processes run on the local machine
+- `mgmt_ip` is always `127.0.0.1`
+- Link socket connections use `127.0.0.1`
+- PID management uses local process signals
+- State tracking uses local filesystem (`~/.vmlab/`)
+
+Multi-host support (remote QEMU launch via SSH, cross-host socket links, distributed state) is deferred to Phase 3.
 
 ---
 
@@ -197,16 +212,17 @@ cmd/vmlab/
 // Lab is the top-level vmlab orchestrator. It reads newtron spec files,
 // resolves VM configuration, and manages QEMU processes.
 type Lab struct {
-    Name     string
-    SpecDir  string
-    StateDir string                        // ~/.vmlab/labs/<name>/
-    Topology *spec.TopologySpecFile
-    Platform *spec.PlatformSpecFile
-    Profiles map[string]*spec.DeviceProfile
-    Config   *VMLabConfig                  // from topology.json vmlab section
-    Nodes    map[string]*NodeConfig
-    Links    []*LinkConfig
-    State    *LabState
+    Name     string                         // lab name (from spec dir basename)
+    SpecDir  string                         // path to spec directory
+    StateDir string                         // ~/.vmlab/labs/<name>/
+    Topology *spec.TopologySpecFile         // parsed topology.json
+    Platform *spec.PlatformSpecFile         // parsed platforms.json
+    Profiles map[string]*spec.DeviceProfile // per-device profiles
+    Config   *VMLabConfig                   // from topology.json vmlab section
+    Nodes    map[string]*NodeConfig         // resolved VM configs (keyed by device name)
+    Links    []*LinkConfig                  // resolved link configs
+    State    *LabState                      // runtime state (PIDs, ports, status)
+    Force    bool                           // --force flag: destroy existing before deploy
 }
 
 // VMLabConfig mirrors spec.VMLabConfig with resolved defaults.
@@ -222,18 +238,44 @@ type VMLabConfig struct {
 
 ```go
 // NewLab loads specs from specDir and returns a configured Lab.
+// Initialization:
+//   1. Set Name from filepath.Base(specDir)
+//   2. Set StateDir to ~/.vmlab/labs/<name>/
+//   3. Load topology.json, platforms.json, profiles/*.json
+//   4. Resolve VMLabConfig with defaults (link_port_base=20000, etc.)
+//   5. Resolve NodeConfig for each device (profile > platform > defaults)
+//   6. Allocate ports (SSH, console per node) and links
+// After NewLab, l.Nodes and l.Links are populated. Deploy() uses them
+// to build QEMU commands and start processes.
 func NewLab(specDir string) (*Lab, error)
 
 // Deploy creates overlay disks, starts QEMU processes, waits for SSH,
 // and patches profiles. Full deployment flow (see §12).
+// Reads l.Force to handle stale state.
 func (l *Lab) Deploy() error
 
 // Destroy kills QEMU processes, removes overlays, cleans state,
 // and restores profiles. Full teardown flow (see §13).
+// Can be called with only Name populated (loads SpecDir from state.json).
 func (l *Lab) Destroy() error
 
-// Status returns the current state of all nodes and links.
+// Status returns the current state by loading state.json, then live-checking
+// each PID via IsRunning() to update node status. Returns fresh LabState.
 func (l *Lab) Status() (*LabState, error)
+
+// FilterHost removes nodes not assigned to the given host name.
+// Nodes without a vm_host profile field are retained (single-host mode).
+// Also removes links that reference filtered-out nodes.
+func (l *Lab) FilterHost(host string)
+
+// Stop stops a single node by PID (SIGTERM then SIGKILL after 10s).
+// Updates state.json to mark node as "stopped".
+func (l *Lab) Stop(nodeName string) error
+
+// Start restarts a stopped node by rebuilding the QEMU command and
+// launching the process. Waits for SSH readiness. Updates state.json
+// with new PID.
+func (l *Lab) Start(nodeName string) error
 ```
 
 ### 4.2 NodeConfig — Resolved VM Configuration (`node.go`)
@@ -260,7 +302,7 @@ type NodeConfig struct {
 }
 ```
 
-**Resolution function:**
+#### 4.2.1 Resolution Function
 
 ```go
 // ResolveNodeConfig builds a NodeConfig for a device by merging
@@ -280,13 +322,13 @@ func ResolveNodeConfig(
 | Image | `vm_image` | `vm_image` | error |
 | Memory | `vm_memory` | `vm_memory` | 4096 |
 | CPUs | `vm_cpus` | `vm_cpus` | 2 |
-| NICDriver | — | `vm_nic_driver` | `"e1000"` |
-| InterfaceMap | — | `vm_interface_map` | `"stride-4"` |
-| CPUFeatures | — | `vm_cpu_features` | `""` |
-| SSHUser | `ssh_user` | `vm_credentials.user` | — |
-| SSHPass | `ssh_pass` | `vm_credentials.pass` | — |
-| BootTimeout | — | `vm_boot_timeout` | 180 |
-| Host | `vm_host` | — | `""` (local) |
+| NICDriver | | `vm_nic_driver` | `"e1000"` |
+| InterfaceMap | | `vm_interface_map` | `"stride-4"` |
+| CPUFeatures | | `vm_cpu_features` | `""` |
+| SSHUser | `ssh_user` | `vm_credentials.user` | |
+| SSHPass | `ssh_pass` | `vm_credentials.pass` | |
+| BootTimeout | | `vm_boot_timeout` | 180 |
+| Host | `vm_host` | | `""` (local) |
 
 ### 4.3 NICConfig — Per-NIC QEMU Configuration (`node.go`)
 
@@ -334,10 +376,11 @@ type LabState struct {
 
 // NodeState tracks per-node runtime state.
 type NodeState struct {
-    PID         int    `json:"pid"`
-    Status      string `json:"status"`       // "running", "stopped", "error"
-    SSHPort     int    `json:"ssh_port"`
-    ConsolePort int    `json:"console_port"`
+    PID            int    `json:"pid"`
+    Status         string `json:"status"`          // "running", "stopped", "error"
+    SSHPort        int    `json:"ssh_port"`
+    ConsolePort    int    `json:"console_port"`
+    OriginalMgmtIP string `json:"original_mgmt_ip"` // saved before patching, restored on destroy
 }
 
 // LinkState tracks per-link allocation.
@@ -376,6 +419,7 @@ type QEMUCommand struct {
 }
 
 // Build returns an exec.Cmd ready to start the QEMU process.
+// Binary: `qemu-system-x86_64` resolved from PATH.
 func (q *QEMUCommand) Build() *exec.Cmd
 ```
 
@@ -389,7 +433,7 @@ func (q *QEMUCommand) Build() *exec.Cmd
 | `-smp <cpus>` | `Node.CPUs` | `-smp 2` |
 | `-cpu host` or `-cpu host,<features>` | `Node.CPUFeatures` | `-cpu host,+sse4.2` |
 | `-enable-kvm` | auto-detect `/dev/kvm` | `-enable-kvm` |
-| `-drive file=<overlay>,format=qcow2` | `StateDir/disks/<name>.qcow2` | |
+| `-drive file=<overlay>,if=virtio,format=qcow2` | `StateDir/disks/<name>.qcow2` | |
 | `-nographic` | always | `-nographic` |
 | `-serial tcp::<console_port>,server,nowait` | `Node.ConsolePort` | `-serial tcp::30000,server,nowait` |
 | `-monitor unix:<mon_socket>,server,nowait` | `StateDir/qemu/<name>.mon` | |
@@ -419,12 +463,21 @@ func StopNode(pid int) error
 func IsRunning(pid int) bool
 ```
 
-### 5.4 KVM Detection
+### 5.4 Helper Functions
 
 ```go
 // kvmAvailable returns true if /dev/kvm exists and is writable.
 // Falls back to TCG (software emulation) if KVM is not available.
 func kvmAvailable() bool
+
+// probePort attempts net.Listen on the given port to check availability.
+// Immediately closes the listener. Returns error if the port is in use.
+func probePort(port int) error
+
+// destroyExisting tears down a stale deployment found via state.json.
+// Called by Deploy() when --force is set and a previous lab state exists.
+// Wraps Lab.Destroy() on the loaded state.
+func (l *Lab) destroyExisting(existing *LabState) error
 ```
 
 ---
@@ -437,7 +490,7 @@ func kvmAvailable() bool
 |----------|---------|-------|-------|-------|-------|-----------|
 | `sequential` | NIC N → Ethernet(N-1) | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | VPP |
 | `stride-4` | NIC N → Ethernet((N-1)*4) | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | VS, Cisco |
-| `custom` | explicit map from platform | (varies) | | | | Vendor |
+| `custom` | explicit map from `vm_interface_map_custom` | (varies) | | | | Vendor |
 
 NIC 0 is always management — data NICs start at index 1.
 
@@ -577,7 +630,8 @@ func PatchProfiles(lab *Lab) error
 
 1. Read profile JSON from `<specDir>/profiles/<device>.json`
 2. Unmarshal into `map[string]interface{}` (preserves all existing fields)
-3. Set `mgmt_ip` = `"127.0.0.1"` (single-host) or host IP (multi-host)
+3. Save `OriginalMgmtIP` from current profile into `NodeState` (for restore on destroy)
+4. Set `mgmt_ip` = `"127.0.0.1"` (single-host) or host IP (multi-host)
 4. Set `ssh_port` = node's allocated SSH port
 5. Set `console_port` = node's allocated console port
 6. Set `ssh_user` / `ssh_pass` from resolved credentials (if not already set)
@@ -592,8 +646,7 @@ func PatchProfiles(lab *Lab) error
 func RestoreProfiles(lab *Lab) error
 ```
 
-Removes: `ssh_port`, `console_port`. Resets `mgmt_ip` to original value
-(stored in state, or set to empty string).
+Removes: `ssh_port`, `console_port`. Resets `mgmt_ip` to the original value saved in `NodeState.OriginalMgmtIP` (captured during `PatchProfiles` before overwriting).
 
 ---
 
@@ -621,10 +674,21 @@ func ListLabs() ([]string, error)
 
 ## 12. Deploy Flow
 
-Step-by-step pseudocode for `Lab.Deploy()`:
+**Deploy pseudocode** (helper functions like `loadSpecs`, `allocatePorts`, `sortedListenFirst` are internal — shown here to illustrate the orchestration flow):
 
 ```go
 func (l *Lab) Deploy() error {
+    // 0. Check for stale state — if state.json exists, a previous deployment
+    // was not properly destroyed. Require --force to overwrite.
+    if existing, err := LoadState(l.Name); err == nil && existing != nil {
+        if !l.Force {
+            return fmt.Errorf("vmlab: lab %s already deployed (created %s); use --force to redeploy",
+                l.Name, existing.Created.Format(time.RFC3339))
+        }
+        // --force: destroy existing deployment first
+        l.destroyExisting(existing)
+    }
+
     // 1. Load specs
     topology, platforms, profiles := loadSpecs(l.SpecDir)
 
@@ -640,6 +704,18 @@ func (l *Lab) Deploy() error {
 
     // 4. Allocate ports (SSH, console per node; link ports per link)
     allocatePorts(l.Nodes, l.Config)  // sets SSHPort, ConsolePort on each node
+
+    // 4a. Port conflict detection: probe each allocated port with net.Listen
+    // to verify it's available before starting QEMU. This catches conflicts
+    // with other vmlab instances or unrelated services early, rather than
+    // failing mid-deploy with an opaque QEMU error.
+    for _, node := range l.Nodes {
+        for _, port := range []int{node.SSHPort, node.ConsolePort} {
+            if err := probePort(port); err != nil {
+                return fmt.Errorf("vmlab: port %d already in use: %w", port, err)
+            }
+        }
+    }
 
     // 5. Allocate links (assigns NICs, ports, listen/connect)
     l.Links = AllocateLinks(topology.Links, l.Nodes, l.Config)
@@ -691,6 +767,14 @@ func (l *Lab) Deploy() error {
 connect-side NICs. Within each group, nodes start in sorted name order.
 This ensures socket listeners are ready before connectors attempt to dial.
 
+**Mid-deploy failure recovery:** If a QEMU process fails to start (step 8)
+or SSH readiness times out (step 9), Deploy() still saves state (step 11)
+with the failed node marked as `"error"`. This leaves a valid state.json on
+disk so that `vmlab destroy` can clean up all started nodes. The caller sees
+a non-nil error. To retry, the user runs `vmlab destroy` then `vmlab deploy`
+(or `vmlab deploy --force`, which calls `destroyExisting` automatically).
+Partial deploys do **not** auto-rollback — explicit destroy is required.
+
 ---
 
 ## 13. Destroy Flow
@@ -702,22 +786,79 @@ func (l *Lab) Destroy() error {
     // 1. Load state
     state := LoadState(l.Name)
 
+    // Continue-on-error: collect all failures rather than stopping at the first.
+    // This ensures maximum cleanup — a failed process kill should not prevent
+    // profile restoration or state cleanup.
+    var errs []error
+
     // 2. Kill QEMU processes by PID
     for name, node := range state.Nodes {
         if IsRunning(node.PID) {
-            StopNode(node.PID)
+            if err := StopNode(node.PID); err != nil {
+                errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
+            }
         }
     }
 
     // 3. Restore profiles (remove ssh_port, console_port, reset mgmt_ip)
-    RestoreProfiles(l)
+    if err := RestoreProfiles(l); err != nil {
+        errs = append(errs, fmt.Errorf("restore profiles: %w", err))
+    }
 
     // 4. Remove state directory (includes overlay disks, logs, PID files)
-    RemoveState(l.Name)
+    if err := RemoveState(l.Name); err != nil {
+        errs = append(errs, fmt.Errorf("remove state: %w", err))
+    }
 
+    if len(errs) > 0 {
+        return fmt.Errorf("vmlab: destroy had %d errors: %v", len(errs), errs)
+    }
     return nil
 }
 ```
+
+### 13.1 Lab.Provision()
+
+Called by `vmlab deploy --provision` or `vmlab provision`. Shells out to `newtron provision` for each device:
+
+```go
+// Provision runs newtron provisioning for all (or specified) devices in the lab.
+// parallel controls concurrency: 1 = sequential, >1 = concurrent with semaphore.
+func (l *Lab) Provision(parallel int) error {
+    state := LoadState(l.Name)
+
+    sem := make(chan struct{}, parallel)
+    var mu sync.Mutex
+    var errs []error
+
+    var wg sync.WaitGroup
+    for name := range state.Nodes {
+        wg.Add(1)
+        go func(name string) {
+            defer wg.Done()
+            sem <- struct{}{}        // acquire semaphore
+            defer func() { <-sem }() // release
+
+            // Shell out: newtron provision -S <specDir> -d <name> -x
+            cmd := exec.Command("newtron", "provision", "-S", l.SpecDir, "-d", name, "-x")
+            output, err := cmd.CombinedOutput()
+            if err != nil {
+                mu.Lock()
+                errs = append(errs, fmt.Errorf("provision %s: %w\n%s", name, err, output))
+                mu.Unlock()
+            }
+        }(name)
+    }
+    wg.Wait()
+
+    if len(errs) > 0 {
+        return errors.Join(errs...)
+    }
+    return nil
+}
+```
+
+**Why shell out:** vmlab is a separate binary from newtron. Rather than importing newtron's `pkg/network` (which would create a circular dependency), vmlab invokes the `newtron` CLI. This keeps the tools loosely coupled — vmlab only needs the `newtron` binary on PATH.
 
 ---
 
@@ -753,7 +894,7 @@ func main() {
 
 | Command | File | Flags | Description |
 |---------|------|-------|-------------|
-| `vmlab deploy` | `cmd_deploy.go` | `-S` (required), `--host`, `--force` | Deploy VMs from spec |
+| `vmlab deploy` | `cmd_deploy.go` | `-S` (required), `--host`, `--force`, `--provision`, `--parallel` | Deploy VMs from spec |
 | `vmlab destroy` | `cmd_destroy.go` | `--force` | Stop and remove all VMs |
 | `vmlab status` | `cmd_status.go` | (none) | Show VM status table |
 | `vmlab ssh <node>` | `cmd_ssh.go` | (none) | SSH to a VM |
@@ -768,6 +909,8 @@ func main() {
 func newDeployCmd() *cobra.Command {
     var host string
     var force bool
+    var provision bool
+    var parallel int
 
     cmd := &cobra.Command{
         Use:   "deploy",
@@ -777,15 +920,24 @@ func newDeployCmd() *cobra.Command {
             if err != nil {
                 return err
             }
+            lab.Force = force
             if host != "" {
                 lab.FilterHost(host) // only deploy nodes for this host
             }
-            return lab.Deploy()
+            if err := lab.Deploy(); err != nil {
+                return err
+            }
+            if provision {
+                return lab.Provision(parallel)
+            }
+            return nil
         },
     }
 
     cmd.Flags().StringVar(&host, "host", "", "deploy only nodes for this host")
     cmd.Flags().BoolVar(&force, "force", false, "force deploy even if already running")
+    cmd.Flags().BoolVar(&provision, "provision", false, "provision devices after deploy")
+    cmd.Flags().IntVar(&parallel, "parallel", 1, "parallel provisioning threads")
     return cmd
 }
 ```
@@ -854,3 +1006,47 @@ return fmt.Errorf("vmlab: allocate links: port %d conflict: %w", port, err)
 | QEMU process crash | `"QEMU exited with code %d (see %s)"` | Check logs/<node>.log |
 | State not found | `"lab %s not found (no state.json)"` | Run deploy first |
 | Profile read error | `"reading profile %s: %w"` | Check file permissions |
+
+---
+
+## Cross-References
+
+### References to newtron LLD
+
+| newtron LLD Section | How vmlab Relates |
+|----------------------|-------------------|
+| §3.1 `PlatformSpec` | vmlab adds VM fields (`vm_image`, `vm_memory`, etc.) to the shared spec type — see §1.1 |
+| §3.1 `DeviceProfile` | vmlab adds per-device overrides (`ssh_port`, `console_port`) — see §1.2 |
+| §3.1 `TopologySpecFile` | vmlab reads topology for device list, links, and VM host assignments |
+
+### References to device LLD
+
+| Device LLD Section | How vmlab Relates |
+|--------------------|-------------------|
+| §1 SSH Tunnel | Tunnel reads `SSHPort` written by vmlab profile patching (§10) |
+| §5.1 `Device.Connect()` | Connection reads `SSHUser`/`SSHPass`/`SSHPort` from profiles that vmlab patches |
+
+### References to newtest LLD
+
+| newtest LLD Section | How vmlab Relates |
+|---------------------|-------------------|
+| §6.1 `DeployTopology` | newtest wraps `vmlab.NewLab()` + `vmlab.Lab.Deploy()` — see §4.1 |
+| §6.2 `DestroyTopology` | newtest wraps `vmlab.Lab.Destroy()` — see §4.1 |
+| §6.3 Platform Capability Check | newtest reads `PlatformSpec.Dataplane` (§1.1) to skip verify-ping |
+| §4.5 Device connection | newtest relies on vmlab profile patching (§10) before connecting devices |
+
+---
+
+## Appendix A: Changelog
+
+#### v6
+
+| Area | Change |
+|------|--------|
+| **Multi-host Phase 3** | Marked `hosts` and `VMHost` as Phase 3 placeholder; documented single-host assumptions (§1.4) |
+| **Stale State** | Deploy checks `state.json`, requires `--force` to overwrite (destroys first) (§12) |
+| **RestoreProfiles** | Added `OriginalMgmtIP` to `NodeState`; saved before patching, restored on destroy (§4.5, §10) |
+| **Custom Interface Map** | Added `vm_interface_map_custom` field to `PlatformSpec` for explicit SONiC→NIC mapping (§1.1, §6.1) |
+| **Port Conflict Detection** | `net.Listen` probe before QEMU start (§12) |
+| **QEMU Binary** | Documented `qemu-system-x86_64` from PATH (§5.1) |
+| **Destroy Error Handling** | Continue-on-error with collected failures (§13) |

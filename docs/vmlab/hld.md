@@ -287,6 +287,8 @@ Profile assigns VM to host:
 
 spine1 (server-a) listens on `0.0.0.0:20000`, leaf1 (server-b) connects to `192.168.1.10:20000`.
 
+> **Note:** Multi-host is Phase 3 (not yet implemented). The fields are defined for forward compatibility.
+
 ---
 
 ## 6. Profile Patching
@@ -310,6 +312,8 @@ After deploying VMs, vmlab updates profiles so newtron can connect:
   "ssh_pass": "YourPaSsWoRd"
 }
 ```
+
+On destroy, vmlab restores the original `mgmt_ip` from state.json (`original_mgmt_ip`), removing `ssh_port` and `console_port`.
 
 ---
 
@@ -370,7 +374,8 @@ Backward compatible — profiles without `ssh_port` use port 22.
       "pid": 12345,
       "status": "running",
       "ssh_port": 40000,
-      "console_port": 30000
+      "console_port": 30000,
+      "original_mgmt_ip": "PLACEHOLDER"
     }
   },
   "links": [
@@ -387,18 +392,21 @@ Backward compatible — profiles without `ssh_port` use port 22.
 vmlab - VM orchestration for network topologies
 
 Commands:
-  vmlab deploy -S <specs>        Deploy VMs from topology.json
+  vmlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
   vmlab destroy                  Stop and remove all VMs
   vmlab status                   Show VM status
   vmlab ssh <node>               SSH to a VM
   vmlab console <node>           Attach to serial console
   vmlab stop <node>              Stop a VM (preserves disk)
   vmlab start <node>             Start a stopped VM
+  vmlab provision -S <specs>     Provision devices via newtron
   vmlab snapshot --name <name>   Create snapshot
   vmlab restore --name <name>    Restore from snapshot
 
 Options:
-  -S, --specs <dir>     Spec directory (required)
+  -S, --specs <dir>     Spec directory (required for deploy/provision)
+  --provision           Provision devices after deploy
+  --parallel <n>        Parallel provisioning threads
   --host <name>         Multi-host: only deploy nodes for this host
   --force               Force destroy even if inconsistent
   -v, --verbose         Verbose output
@@ -434,7 +442,7 @@ Options:
 - NIC driver and CPU feature support
 - Improved error messages
 
-### Phase 3: Multi-Host
+### Phase 3: Multi-Host (not yet implemented)
 - vm_host in profiles
 - hosts map in topology.json vmlab section
 - Cross-host socket links

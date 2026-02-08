@@ -1,0 +1,927 @@
+# Newtron Device Layer LLD
+
+The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/device/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
+
+For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
+
+---
+
+## 1. SSH Tunnel (`pkg/device/tunnel.go`)
+
+SONiC devices in the lab run inside QEMU VMs managed by vmlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
+
+**Consumer note:** newtest's `Runner.connectDevices()` calls `Device.Connect()` (§5.1), which creates an SSH tunnel per device using the vmlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
+
+### 1.1 When Tunnels Are Used
+
+| Scenario | SSH Tunnel | Direct Redis |
+|----------|-----------|--------------|
+| Lab E2E tests (SONiC-VS in QEMU) | Yes - port 6379 not forwarded | No |
+| Integration tests (standalone Redis) | No | Yes - Redis exposed directly |
+| Production (if ever) | Would use proper auth | N/A |
+
+The decision is made in `Device.Connect()` (§5.1) based on the presence of `SSHUser` and `SSHPass` in the resolved profile. When these fields are empty, a direct `<mgmt_ip>:6379` connection is used. This allows integration tests to run against a standalone Redis instance without SSH.
+
+### 1.2 SSHTunnel Implementation
+
+```go
+// SSHTunnel forwards a local TCP port to a remote address through an SSH connection.
+// Used to access Redis (127.0.0.1:6379) inside SONiC containers via SSH,
+// since Redis has no authentication and port 6379 is not forwarded by QEMU.
+type SSHTunnel struct {
+    localAddr string         // "127.0.0.1:<port>"
+    sshClient *ssh.Client
+    listener  net.Listener
+    done      chan struct{}
+    wg        sync.WaitGroup
+}
+
+// NewSSHTunnel dials SSH on host:port and opens a local listener on a random port.
+// Connections to the local port are forwarded to 127.0.0.1:6379 inside the SSH host.
+// If port is 0, defaults to 22.
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error)
+
+// LocalAddr returns the local address (e.g. "127.0.0.1:54321") that forwards
+// to Redis inside the SSH host.
+func (t *SSHTunnel) LocalAddr() string
+
+// Close stops the listener, closes the SSH connection, and waits for
+// all forwarding goroutines to finish.
+func (t *SSHTunnel) Close() error
+
+// SSHClient returns the underlying ssh.Client for opening command sessions.
+// Used by newtest's verifyPingExecutor and sshCommandExecutor to run commands
+// inside the device (e.g., "ping", "show interfaces status") via ssh.Session.
+func (t *SSHTunnel) SSHClient() *ssh.Client { return t.sshClient }
+```
+
+**How it works:**
+
+1. `ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)` establishes the SSH connection with password auth
+2. `net.Listen("tcp", "127.0.0.1:0")` opens a local listener on a random available port
+3. A background goroutine (`acceptLoop`) accepts incoming local connections
+4. Each accepted connection is forwarded via `sshClient.Dial("tcp", "127.0.0.1:6379")`
+5. Bidirectional `io.Copy` relays data between the local and remote connections
+6. `Close()` signals the done channel, closes the listener, waits for goroutines, then closes SSH
+
+**Security note:** `HostKeyCallback: ssh.InsecureIgnoreHostKey()` is used because this is a lab/test environment only. SONiC-VS VMs regenerate host keys on each boot.
+
+**Timeouts:**
+- Dial timeout: 30 seconds (`ssh.ClientConfig.Timeout`)
+- Keepalive interval: 60 seconds (sent by the SSH client to detect dead connections)
+
+**Reconnection policy:** No automatic reconnection. If the SSH tunnel or any Redis client disconnects, the caller must call `Device.Disconnect()` and then `Device.Connect()` again. This is a deliberate simplicity choice — reconnection with state recovery adds complexity that isn't needed for lab/test workloads where a connection drop typically means the VM crashed.
+
+```go
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
+    if port == 0 {
+        port = 22
+    }
+    config := &ssh.ClientConfig{
+        User: user,
+        Auth: []ssh.AuthMethod{
+            ssh.Password(pass),
+        },
+        HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+        Timeout:         30 * time.Second, // dial timeout
+    }
+
+    sshClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
+    if err != nil {
+        return nil, fmt.Errorf("SSH dial %s: %w", host, err)
+    }
+
+    listener, err := net.Listen("tcp", "127.0.0.1:0")
+    if err != nil {
+        sshClient.Close()
+        return nil, fmt.Errorf("local listen: %w", err)
+    }
+
+    t := &SSHTunnel{
+        localAddr: listener.Addr().String(),
+        sshClient: sshClient,
+        listener:  listener,
+        done:      make(chan struct{}),
+    }
+
+    t.wg.Add(1)
+    go t.acceptLoop()
+
+    return t, nil
+}
+
+func (t *SSHTunnel) forward(local net.Conn) {
+    defer t.wg.Done()
+    defer local.Close()
+
+    remote, err := t.sshClient.Dial("tcp", "127.0.0.1:6379")
+    if err != nil {
+        return
+    }
+    defer remote.Close()
+
+    done := make(chan struct{}, 2)
+    go func() { io.Copy(remote, local); done <- struct{}{} }()
+    go func() { io.Copy(local, remote); done <- struct{}{} }()
+    <-done
+}
+```
+
+---
+
+## 2. StateDB (`pkg/device/statedb.go`)
+
+STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. Where CONFIG_DB represents what you asked for, STATE_DB represents what the system is actually doing.
+
+**Consumer note:** newtest's `verifyStateDBExecutor` reads STATE_DB tables via `StateDBClient.Get*()` methods, polling with timeout until expected values appear. `verifyBGPExecutor` reads `BGPNeighborTable` from STATE_DB to check BGP session state.
+
+### 2.1 StateDB Struct
+
+```go
+// StateDB mirrors SONiC's state_db structure (Redis DB 6)
+type StateDB struct {
+    PortTable         map[string]PortStateEntry         `json:"PORT_TABLE,omitempty"`
+    LAGTable          map[string]LAGStateEntry          `json:"LAG_TABLE,omitempty"`
+    LAGMemberTable    map[string]LAGMemberStateEntry    `json:"LAG_MEMBER_TABLE,omitempty"`
+    VLANTable         map[string]VLANStateEntry         `json:"VLAN_TABLE,omitempty"`
+    VRFTable          map[string]VRFStateEntry          `json:"VRF_TABLE,omitempty"`
+    VXLANTunnelTable  map[string]VXLANTunnelStateEntry  `json:"VXLAN_TUNNEL_TABLE,omitempty"`
+    BGPNeighborTable  map[string]BGPNeighborStateEntry  `json:"BGP_NEIGHBOR_TABLE,omitempty"`
+    InterfaceTable    map[string]InterfaceStateEntry    `json:"INTERFACE_TABLE,omitempty"`
+    NeighTable        map[string]NeighStateEntry        `json:"NEIGH_TABLE,omitempty"`
+    FDBTable          map[string]FDBStateEntry          `json:"FDB_TABLE,omitempty"`
+    RouteTable        map[string]RouteStateEntry        `json:"ROUTE_TABLE,omitempty"`
+    TransceiverInfo   map[string]TransceiverInfoEntry   `json:"TRANSCEIVER_INFO,omitempty"`
+    TransceiverStatus map[string]TransceiverStatusEntry `json:"TRANSCEIVER_STATUS,omitempty"`
+}
+```
+
+**STATE_DB key formats:**
+
+| Table | Key Pattern | Example |
+|-------|------------|---------|
+| `PORT_TABLE` | `PORT_TABLE\|<port>` | `PORT_TABLE\|Ethernet0` |
+| `LAG_TABLE` | `LAG_TABLE\|<lag>` | `LAG_TABLE\|PortChannel100` |
+| `LAG_MEMBER_TABLE` | `LAG_MEMBER_TABLE\|<lag>\|<member>` | `LAG_MEMBER_TABLE\|PortChannel100\|Ethernet0` |
+| `VLAN_TABLE` | `VLAN_TABLE\|<vlan>` | `VLAN_TABLE\|Vlan100` |
+| `VRF_TABLE` | `VRF_TABLE\|<vrf>` | `VRF_TABLE\|Vrf_CUST1` |
+| `VXLAN_TUNNEL_TABLE` | `VXLAN_TUNNEL_TABLE\|<name>` | `VXLAN_TUNNEL_TABLE\|vtep1` |
+| `BGP_NEIGHBOR_TABLE` | `BGP_NEIGHBOR_TABLE\|<vrf>\|<neighbor>` | `BGP_NEIGHBOR_TABLE\|default\|10.0.0.2` |
+| `INTERFACE_TABLE` | `INTERFACE_TABLE\|<intf>` | `INTERFACE_TABLE\|Ethernet0` |
+| `NEIGH_TABLE` | `NEIGH_TABLE\|<intf>\|<ip>` | `NEIGH_TABLE\|Ethernet0\|10.0.0.2` |
+| `FDB_TABLE` | `FDB_TABLE\|<vlan>\|<mac>` | `FDB_TABLE\|Vlan100\|00:11:22:33:44:55` |
+| `ROUTE_TABLE` | `ROUTE_TABLE\|<vrf>\|<prefix>` | `ROUTE_TABLE\|default\|10.1.0.0/31` |
+| `TRANSCEIVER_INFO` | `TRANSCEIVER_INFO\|<port>` | `TRANSCEIVER_INFO\|Ethernet0` |
+| `TRANSCEIVER_STATUS` | `TRANSCEIVER_STATUS\|<port>` | `TRANSCEIVER_STATUS\|Ethernet0` |
+| `NEWTRON_LOCK` | `NEWTRON_LOCK\|<device>` | `NEWTRON_LOCK\|spine1` |
+
+### 2.2 State Entry Types
+
+```go
+type PortStateEntry struct {
+    AdminStatus  string `json:"admin_status,omitempty"`
+    OperStatus   string `json:"oper_status,omitempty"`
+    Speed        string `json:"speed,omitempty"`
+    MTU          string `json:"mtu,omitempty"`
+    LinkTraining string `json:"link_training,omitempty"`
+}
+
+type LAGStateEntry struct {
+    OperStatus string `json:"oper_status,omitempty"`
+    Speed      string `json:"speed,omitempty"`
+    MTU        string `json:"mtu,omitempty"`
+}
+
+type LAGMemberStateEntry struct {
+    OperStatus     string `json:"oper_status,omitempty"`
+    CollectingDist string `json:"collecting_distributing,omitempty"`
+    Selected       string `json:"selected,omitempty"`
+    ActorPortNum   string `json:"actor_port_num,omitempty"`
+    PartnerPortNum string `json:"partner_port_num,omitempty"`
+}
+
+type BGPNeighborStateEntry struct {
+    State           string `json:"state,omitempty"`
+    RemoteAS        string `json:"remote_asn,omitempty"`
+    LocalAS         string `json:"local_asn,omitempty"`
+    PeerGroup       string `json:"peer_group,omitempty"`
+    PfxRcvd         string `json:"prefixes_received,omitempty"`
+    PfxSent         string `json:"prefixes_sent,omitempty"`
+    MsgRcvd         string `json:"msg_rcvd,omitempty"`
+    MsgSent         string `json:"msg_sent,omitempty"`
+    Uptime          string `json:"uptime,omitempty"`
+    HoldTime        string `json:"holdtime,omitempty"`
+    KeepaliveTime   string `json:"keepalive,omitempty"`
+    ConnectRetry    string `json:"connect_retry,omitempty"`
+    LastResetReason string `json:"last_reset_reason,omitempty"`
+}
+
+type VXLANTunnelStateEntry struct {
+    SrcIP      string `json:"src_ip,omitempty"`
+    OperStatus string `json:"operstatus,omitempty"`
+}
+
+type FDBStateEntry struct {
+    Port       string `json:"port,omitempty"`
+    Type       string `json:"type,omitempty"`
+    VNI        string `json:"vni,omitempty"`
+    RemoteVTEP string `json:"remote_vtep,omitempty"`
+}
+
+type RouteStateEntry struct {
+    NextHop   string `json:"nexthop,omitempty"`
+    Interface string `json:"ifname,omitempty"`
+    Protocol  string `json:"protocol,omitempty"`
+}
+
+type TransceiverInfoEntry struct {
+    Vendor          string `json:"vendor_name,omitempty"`
+    Model           string `json:"model,omitempty"`
+    SerialNum       string `json:"serial_num,omitempty"`
+    HardwareVersion string `json:"hardware_version,omitempty"`
+    Type            string `json:"type,omitempty"`
+    MediaInterface  string `json:"media_interface,omitempty"`
+}
+
+type VLANStateEntry struct {
+    AdminStatus string `json:"admin_status,omitempty"`
+    OperStatus  string `json:"oper_status,omitempty"`
+    AutoMember  string `json:"autostate,omitempty"`
+}
+
+type VRFStateEntry struct {
+    State string `json:"state,omitempty"`
+}
+
+type InterfaceStateEntry struct {
+    AdminStatus string `json:"admin_status,omitempty"`
+    OperStatus  string `json:"oper_status,omitempty"`
+    Speed       string `json:"speed,omitempty"`
+    MTU         string `json:"mtu,omitempty"`
+}
+
+type NeighStateEntry struct {
+    Family  string `json:"family,omitempty"`
+    Address string `json:"ip_address,omitempty"`
+    MAC     string `json:"neigh,omitempty"`
+    State   string `json:"state,omitempty"`
+}
+
+type TransceiverStatusEntry struct {
+    Present     string `json:"present,omitempty"`
+    Temperature string `json:"temperature,omitempty"`
+    Voltage     string `json:"voltage,omitempty"`
+    TxPower     string `json:"tx_power,omitempty"`
+    RxPower     string `json:"rx_power,omitempty"`
+}
+```
+
+### 2.3 StateDBClient
+
+```go
+// StateDBClient wraps Redis client for state_db access (DB 6)
+type StateDBClient struct {
+    client *redis.Client
+    ctx    context.Context
+}
+
+func NewStateDBClient(addr string) *StateDBClient
+func (c *StateDBClient) Connect() error
+func (c *StateDBClient) Close() error
+func (c *StateDBClient) GetAll() (*StateDB, error)
+func (c *StateDBClient) GetPortState(name string) (*PortStateEntry, error)
+func (c *StateDBClient) GetLAGState(name string) (*LAGStateEntry, error)
+func (c *StateDBClient) GetLAGMemberState(lag, member string) (*LAGMemberStateEntry, error)
+func (c *StateDBClient) GetBGPNeighborState(vrf, neighbor string) (*BGPNeighborStateEntry, error)
+func (c *StateDBClient) GetVXLANTunnelState(name string) (*VXLANTunnelStateEntry, error)
+func (c *StateDBClient) GetRemoteVTEPs() ([]string, error)
+func (c *StateDBClient) GetRouteCount(vrf string) (int, error)
+func (c *StateDBClient) GetFDBCount(vlan int) (int, error)
+func (c *StateDBClient) GetTransceiverInfo(port string) (*TransceiverInfoEntry, error)
+func (c *StateDBClient) GetTransceiverStatus(port string) (*TransceiverStatusEntry, error)
+
+// --- Generic accessor (for newtest's verifyStateDBExecutor) ---
+
+// GetEntry reads a single STATE_DB entry as raw map[string]string.
+// Returns (nil, nil) if the entry does not exist.
+// Used by newtest's verifyStateDBExecutor for generic table/key/field assertions.
+func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error)
+
+// --- Locking (write path) ---
+
+// AcquireLock atomically sets NEWTRON_LOCK|<device> in STATE_DB.
+// Returns ErrDeviceLocked (with current holder) if the key already exists.
+//
+// Uses a Lua script for atomic check-and-set with expiry:
+//
+//   -- Acquire lock atomically: set fields only if key does not exist
+//   if redis.call("EXISTS", KEYS[1]) == 0 then
+//       redis.call("HSET", KEYS[1], "holder", ARGV[1], "acquired", ARGV[2], "ttl", ARGV[3])
+//       redis.call("EXPIRE", KEYS[1], tonumber(ARGV[3]))
+//       return 1
+//   else
+//       return 0
+//   end
+//
+// EXPIRE provides automatic stale lock cleanup if the client crashes.
+func (c *StateDBClient) AcquireLock(device, holder string, ttlSeconds int) error
+
+// ReleaseLock deletes NEWTRON_LOCK|<device> from STATE_DB.
+// Only deletes if the current holder matches (atomic via Lua script
+// to prevent releasing another holder's lock).
+//
+//   if redis.call("HGET", KEYS[1], "holder") == ARGV[1] then
+//       return redis.call("DEL", KEYS[1])
+//   else
+//       return 0
+//   end
+func (c *StateDBClient) ReleaseLock(device, holder string) error
+
+// GetLockHolder reads NEWTRON_LOCK|<device> from STATE_DB.
+// Returns holder string and acquired time, or ("", zero) if no lock exists.
+func (c *StateDBClient) GetLockHolder(device string) (holder string, acquired time.Time, err error)
+```
+
+**NEWTRON_LOCK entry format** (Redis hash in STATE_DB):
+
+```
+NEWTRON_LOCK|spine1
+  holder:   "aldrin@workstation1"
+  acquired: "2026-02-07T16:00:00Z"
+  ttl:      "3600"
+```
+
+The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holder crashes.
+
+**Why STATE_DB (DB 6):**
+- Locks are operational state, not configuration — they should not persist across `config save -y` or device reboots
+- STATE_DB is ephemeral: cleared on reboot, which is correct — a rebooted device has no active sessions
+- SONiC daemons do not subscribe to `NEWTRON_LOCK` entries, so no unintended side effects
+
+**Why Lua scripts (not plain SET NX):**
+- The lock entry is a Redis hash (multiple fields: holder, acquired, ttl) — `SET NX` only works on string values
+- Lua scripts execute atomically on the Redis server — no race window between EXISTS check and HSET
+- EXPIRE is set in the same atomic script as HSET, ensuring TTL is always applied
+- Release also uses Lua to atomically verify holder before DEL (prevents releasing someone else's lock)
+
+### 2.4 Redis Serialization
+
+Redis hashes store field names and values as strings. SONiC uses these hash field names directly (e.g., `admin_status`, `oper_status`). The Go structs use `json` tags but these map to Redis hash field names via **manual copy** (not `json.Unmarshal`).
+
+The serialization path is:
+1. `HGETALL <table>|<key>` returns `map[string]string` from Redis
+2. Each field is manually assigned to the corresponding struct field by matching the json tag name
+3. This is done via a helper function, not via `json.Unmarshal` or `mapstructure` — it's a simple switch/map lookup
+
+**Why not json.Unmarshal:** Redis hashes are flat `map[string]string`, not JSON objects. There's no JSON to unmarshal. The `json` tags on structs serve double duty: they define both the Redis hash field name and the JSON serialization format (for when structs are marshaled to JSON for display/logging).
+
+### 2.5 PopulateDeviceState
+
+The `PopulateDeviceState` function merges data from STATE_DB and CONFIG_DB to build the unified `DeviceState` (pseudocode — comments indicate elided sections):
+
+```go
+// PopulateDeviceState fills DeviceState from StateDB data
+func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+    // Populate interface state from PORT_TABLE + CONFIG_DB VRF bindings
+    for name, portState := range stateDB.PortTable {
+        intfState := &InterfaceState{
+            Name:        name,
+            AdminStatus: portState.AdminStatus,
+            OperStatus:  portState.OperStatus,
+            Speed:       portState.Speed,
+        }
+        if portState.MTU != "" {
+            intfState.MTU, _ = strconv.Atoi(portState.MTU)
+        }
+        if configDB != nil {
+            if intfEntry, ok := configDB.Interface[name]; ok {
+                intfState.VRF = intfEntry.VRFName
+            }
+        }
+        state.Interfaces[name] = intfState
+    }
+
+    // Populate PortChannel state from LAG_TABLE + LAG_MEMBER_TABLE
+    // ... (active members from member state "selected" field)
+
+    // Populate BGP state
+    state.BGP = &BGPState{Neighbors: make(map[string]*BGPNeighborState)}
+    if configDB != nil {
+        if globals, ok := configDB.BGPGlobals["default"]; ok {
+            state.BGP.LocalAS, _ = strconv.Atoi(globals.LocalASN)
+            state.BGP.RouterID = globals.RouterID
+        }
+    }
+
+    // Populate EVPN state from VXLAN_TUNNEL_TABLE
+    // Distinguishes local VTEP (exists in configDB.VXLANTunnel) from remote VTEPs
+    state.EVPN = &EVPNState{}
+    for name, tunnelState := range stateDB.VXLANTunnelTable {
+        if configDB != nil {
+            if _, ok := configDB.VXLANTunnel[name]; ok {
+                state.EVPN.VTEPState = tunnelState.OperStatus // Local VTEP
+            } else {
+                state.EVPN.RemoteVTEPs = append(state.EVPN.RemoteVTEPs, name)
+            }
+        }
+    }
+}
+```
+
+---
+
+## 3. APP_DB (`pkg/device/appldb.go`)
+
+APP_DB (Redis DB 0) contains application-level state written by SONiC daemons. For route verification, newtron reads `ROUTE_TABLE` entries written by `fpmsyncd` (the FPM-to-Redis daemon that syncs FRR's RIB into APP_DB).
+
+**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRoute()` (§5.7) to observe routes from APP_DB; it interprets the returned `RouteEntry` (newtron LLD §3.6A) to assert protocol, next-hop, and presence.
+
+### 3.1 AppDB Struct
+
+```go
+// AppDB mirrors the route-relevant portion of SONiC's APP_DB (Redis DB 0).
+type AppDB struct {
+    RouteTable map[string]AppDBRouteEntry `json:"ROUTE_TABLE,omitempty"`
+}
+```
+
+Key format: `ROUTE_TABLE:<vrf>:<prefix>` — for example:
+- `ROUTE_TABLE:default:10.1.0.0/31` — route in the default VRF
+- `ROUTE_TABLE:Vrf-customer:192.168.1.0/24` — route in a named VRF
+
+### 3.2 Route Entry Type
+
+```go
+// AppDBRouteEntry represents a route in APP_DB's ROUTE_TABLE.
+// Multi-path (ECMP) routes use comma-separated values in nexthop and ifname.
+type AppDBRouteEntry struct {
+    NextHop   string `json:"nexthop"`   // "10.0.0.1" or "10.0.0.1,10.0.0.3" (ECMP)
+    Interface string `json:"ifname"`    // "Ethernet0" or "Ethernet0,Ethernet4" (ECMP)
+    Protocol  string `json:"protocol"`  // "bgp", "connected", "static"
+}
+```
+
+**ECMP convention:** For multi-path routes, `nexthop` and `ifname` are comma-separated with positional correspondence:
+```
+nexthop:  "10.0.0.1,10.0.0.3"
+ifname:   "Ethernet0,Ethernet4"
+-> NextHop{IP: "10.0.0.1", Interface: "Ethernet0"}
+-> NextHop{IP: "10.0.0.3", Interface: "Ethernet4"}
+```
+
+### 3.3 AppDBClient
+
+```go
+// AppDBClient wraps Redis client for APP_DB access (DB 0).
+type AppDBClient struct {
+    client *redis.Client
+    ctx    context.Context
+}
+
+func NewAppDBClient(addr string) *AppDBClient
+func (c *AppDBClient) Connect() error
+func (c *AppDBClient) Close() error
+
+// GetRoute reads a single route from ROUTE_TABLE by VRF and prefix.
+// Returns nil (not error) if the prefix does not exist.
+// Parses comma-separated nexthop/ifname into []NextHop.
+func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error)
+```
+
+---
+
+## 4. ASIC_DB (`pkg/device/asicdb.go`)
+
+ASIC_DB (Redis DB 1) contains SAI (Switch Abstraction Interface) objects that represent what is actually programmed in hardware. Reading routes from ASIC_DB confirms that the data plane is programmed, not just the control plane.
+
+**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRouteASIC()` (§5.7) when `expect.source == "asic_db"` to confirm data-plane programming. See newtest LLD §5.9.
+
+### 4.1 SAI Object Chain
+
+Unlike APP_DB's flat key-value routes, ASIC_DB stores routes as a chain of SAI objects that must be resolved:
+
+```
+Step 1: ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:{"dest":"10.1.0.0/31","vr":"oid:0x3..."}
+        -> SAI_ROUTE_ENTRY_ATTR_NEXT_HOP_ID = "oid:0x5000..."
+
+Step 2: ASIC_STATE:SAI_OBJECT_TYPE_NEXT_HOP_GROUP:oid:0x5000...
+        -> SAI_NEXT_HOP_GROUP_MEMBER_LIST (one OID per ECMP path)
+
+Step 3: ASIC_STATE:SAI_OBJECT_TYPE_NEXT_HOP:oid:0x4000...
+        -> SAI_NEXT_HOP_ATTR_IP = "10.0.0.1"
+        -> SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID = "oid:0x6000..."
+```
+
+For single-path routes, step 1 points directly to a `SAI_OBJECT_TYPE_NEXT_HOP` (skipping the group). The client handles both cases.
+
+**ASIC_DB key format:** Route entry keys are JSON-encoded with canonical formatting (sorted keys, no whitespace):
+
+```
+ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:{"dest":"10.1.0.0/31","switch_id":"oid:0x21...","vr":"oid:0x3..."}
+```
+
+**switch_id OID resolution:** The `switch_id` is the same for all routes on a device. On connect, `AsicDBClient` discovers it by scanning for the single `ASIC_STATE:SAI_OBJECT_TYPE_SWITCH:oid:0x...` key and caching the OID. This is set once and reused for all route lookups.
+
+**VR OID resolution:** The `vr` field identifies the Virtual Router (VRF). The resolution algorithm:
+
+1. **Default VRF**: Scan `ASIC_STATE:SAI_OBJECT_TYPE_VIRTUAL_ROUTER:oid:*` keys. The default VR is the one referenced by the switch object's `SAI_SWITCH_ATTR_DEFAULT_VIRTUAL_ROUTER_ID`. Cache this OID on connect.
+2. **Named VRF** (e.g., "Vrf_CUST1"): SONiC creates a VR OID for each VRF. To find it:
+   - Scan `ASIC_STATE:SAI_OBJECT_TYPE_VIRTUAL_ROUTER:oid:*` keys
+   - Cross-reference with `COUNTERS_DB` `COUNTERS_VRF_NAME_MAP` which maps VRF name → VR OID
+   - If `COUNTERS_VRF_NAME_MAP` is unavailable (older SONiC), iterate all VR OIDs and match via `ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY` keys that reference the VR OID — check for a known prefix in the VRF (e.g., the connected route for the VRF's loopback)
+3. Cache all discovered VRF → VR OID mappings on `AsicDBClient` to avoid repeated scans.
+
+**Note:** APP_DB uses colon (`:`) as the table-key separator (e.g., `ROUTE_TABLE:default:10.1.0.0/31`) while CONFIG_DB and STATE_DB use pipe (`|`). This is a SONiC convention — APP_DB entries are written by producer daemons that follow a different key format from CONFIG_DB's `sonic-cfggen` format.
+
+**Key canonicalization:** When constructing the JSON key for lookup, fields must be sorted alphabetically (`dest`, `switch_id`, `vr`) with no whitespace. This matches SONiC's `syncd` key format.
+
+### 4.2 AsicDBClient
+
+```go
+// AsicDBClient wraps Redis client for ASIC_DB access (DB 1).
+// More complex than AppDBClient due to SAI OID chain resolution.
+type AsicDBClient struct {
+    client *redis.Client
+    ctx    context.Context
+}
+
+func NewAsicDBClient(addr string) *AsicDBClient
+func (c *AsicDBClient) Connect() error
+func (c *AsicDBClient) Close() error
+
+// GetRouteASIC reads a route from ASIC_DB by resolving the SAI object chain:
+// SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
+// Returns nil (not error) if the route is not programmed in ASIC.
+// Returns RouteEntry with Source: RouteSourceAsicDB.
+func (c *AsicDBClient) GetRouteASIC(vrf, prefix string) (*RouteEntry, error)
+```
+
+---
+
+## 5. Redis Integration
+
+### 5.1 Connection (`pkg/device/device.go`)
+
+The connection logic uses SSH tunnels when `SSHUser` and `SSHPass` are present in the resolved profile. When these are absent (e.g., integration tests with standalone Redis), a direct connection is made.
+
+**Consumer note:** vmlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (vmlab LLD §10). `Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct vmlab-allocated port. newtest calls `Device.Connect()` in `Runner.connectDevices()` after vmlab deploy — see newtest LLD §4.5.
+
+```go
+func (d *Device) Connect(ctx context.Context) error {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    if d.connected {
+        return nil
+    }
+
+    var addr string
+    if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
+        tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
+        if err != nil {
+            return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
+        }
+        d.tunnel = tun
+        addr = tun.LocalAddr()
+    } else {
+        addr = fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
+    }
+
+    // Connect to CONFIG_DB (DB 4)
+    d.client = NewConfigDBClient(addr)
+    if err := d.client.Connect(); err != nil {
+        return fmt.Errorf("connecting to config_db on %s: %w", d.Name, err)
+    }
+
+    // Load config_db
+    var err error
+    d.ConfigDB, err = d.client.GetAll()
+    if err != nil {
+        d.client.Close()
+        return fmt.Errorf("loading config_db from %s: %w", d.Name, err)
+    }
+
+    // Connect to STATE_DB (DB 6)
+    d.stateClient = NewStateDBClient(addr)
+    if err := d.stateClient.Connect(); err != nil {
+        util.WithDevice(d.Name).Warnf("Failed to connect to state_db: %v", err)
+    } else {
+        d.StateDB, err = d.stateClient.GetAll()
+        if err != nil {
+            util.WithDevice(d.Name).Warnf("Failed to load state_db: %v", err)
+        } else {
+            PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
+        }
+    }
+
+    // Connect APP_DB and ASIC_DB clients for verification
+    d.applClient = NewAppDBClient(addr)
+    if err := d.applClient.Connect(); err != nil {
+        d.applClient = nil
+    }
+
+    d.asicClient = NewAsicDBClient(addr)
+    if err := d.asicClient.Connect(); err != nil {
+        d.asicClient = nil
+    }
+
+    d.connected = true
+    return nil
+}
+```
+
+**Key points:**
+- All Redis clients share the same address (same tunnel)
+- STATE_DB, APP_DB, and ASIC_DB failure is non-fatal: the device remains usable for config operations
+- The `ConfigDB` and `StateDB` snapshots are loaded in full on connect
+- APP_DB and ASIC_DB clients connect but do not bulk-load — routes are read on demand via `GetRoute`/`GetRouteASIC`
+- A single SSH tunnel multiplexes DB 0, DB 1, DB 4, and DB 6 connections
+
+### 5.2 State Loading (`pkg/device/state.go`)
+
+State is loaded from CONFIG_DB for structural information (VRF bindings, VLAN members, ACL bindings), and from STATE_DB for operational state (oper_status, BGP sessions, LACP state).
+
+```go
+func (d *Device) LoadState(ctx context.Context) error {
+    if err := d.RequireConnected(); err != nil {
+        return err
+    }
+
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    var err error
+    d.ConfigDB, err = d.client.GetAll()
+    if err != nil {
+        return fmt.Errorf("loading config_db: %w", err)
+    }
+
+    d.State.Interfaces = d.parseInterfaces()
+    d.State.PortChannels = d.parsePortChannels()
+    d.State.VLANs = d.parseVLANs()
+    d.State.VRFs = d.parseVRFs()
+
+    return nil
+}
+```
+
+### 5.3 Writing Changes
+
+```go
+// ApplyChanges writes a set of changes to config_db via Redis
+func (d *Device) ApplyChanges(changes []Change) error {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    if !d.connected {
+        return util.ErrNotConnected
+    }
+    if !d.locked {
+        return fmt.Errorf("device must be locked for changes")
+    }
+
+    for _, change := range changes {
+        var err error
+        switch change.Type {
+        case ChangeAdd, ChangeModify:
+            err = d.client.Set(change.Table, change.Key, change.NewValue)
+        case ChangeDelete:
+            err = d.client.Delete(change.Table, change.Key)
+        }
+        if err != nil {
+            return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
+        }
+    }
+
+    // Reload config_db to reflect changes
+    d.ConfigDB, _ = d.client.GetAll()
+
+    return nil
+}
+```
+
+### 5.4 Pipeline-Based Write Path
+
+Alongside the sequential `ApplyChanges()` path, there is a pipeline-based write path for atomic multi-entry operations:
+
+```go
+// ApplyChangesPipelined writes a set of changes atomically via Redis MULTI/EXEC.
+// Used when atomicity is required (composite delivery, bulk operations).
+func (d *Device) ApplyChangesPipelined(changes []Change) error {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    if !d.connected || !d.locked {
+        return fmt.Errorf("device must be connected and locked")
+    }
+
+    // Convert changes to pipeline format (see newtron LLD §3.5 pipeline.go)
+    var sets []TableChange
+    var dels []TableKey
+    for _, c := range changes {
+        switch c.Type {
+        case ChangeAdd, ChangeModify:
+            sets = append(sets, TableChange{Table: c.Table, Key: c.Key, Fields: c.NewValue})
+        case ChangeDelete:
+            dels = append(dels, TableKey{Table: c.Table, Key: c.Key})
+        }
+    }
+
+    // Execute atomically via ConfigDBClient's pipeline methods.
+    // PipelineSet and PipelineDelete are declared in newtron LLD §3.5.
+    if err := d.client.PipelineSet(sets, dels); err != nil {
+        return fmt.Errorf("pipeline exec: %w", err)
+    }
+
+    d.ConfigDB, _ = d.client.GetAll()
+    return nil
+}
+```
+
+**When to use each write path:**
+
+| Path | Method | Use Case |
+|------|--------|----------|
+| Sequential | `ApplyChanges()` | Normal operations (dry-run preview, individual changes) |
+| Pipeline | `ApplyChangesPipelined()` | Composite delivery, bulk operations requiring atomicity |
+| Full replace | `ReplaceAll()` | Composite overwrite mode (flush + pipeline write) |
+
+### 5.5 Disconnect with Tunnel Cleanup
+
+```go
+func (d *Device) Disconnect() error {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    if !d.connected {
+        return nil
+    }
+
+    // unlock() is private because Disconnect() already holds d.mu.
+    // Public Unlock() also acquires d.mu, which would deadlock.
+    // unlock() releases the STATE_DB lock without acquiring d.mu.
+    if d.locked {
+        if err := d.unlock(); err != nil {
+            util.WithDevice(d.Name).Warnf("Failed to release lock: %v", err)
+        }
+    }
+
+    if d.client != nil {
+        d.client.Close()
+    }
+
+    if d.stateClient != nil {
+        d.stateClient.Close()
+    }
+
+    if d.applClient != nil {
+        d.applClient.Close()
+    }
+
+    if d.asicClient != nil {
+        d.asicClient.Close()
+    }
+
+    // Close SSH tunnel last (after Redis clients)
+    if d.tunnel != nil {
+        d.tunnel.Close()
+        d.tunnel = nil
+    }
+
+    d.connected = false
+    return nil
+}
+```
+
+### 5.6 SONiC Redis Database Layout
+
+SONiC uses multiple Redis databases within a single Redis instance:
+
+| DB | Name | Purpose | Newtron Access |
+|----|------|---------|----------------|
+| 0 | APPL_DB | Application state (routes, neighbors) | **Read** (GetRoute — routing state observation) |
+| 1 | ASIC_DB | ASIC-programmed state (SAI objects) | **Read** (GetRouteASIC — ASIC route verification) |
+| 2 | COUNTERS_DB | Interface/port counters | Not used |
+| 3 | LOGLEVEL_DB | Logging configuration | Not used |
+| 4 | CONFIG_DB | Configuration (ports, VLANs, BGP, etc.) | **Read/Write** |
+| 5 | FLEX_COUNTER_DB | Flexible counters | Not used |
+| 6 | STATE_DB | Operational state (oper_status, BGP state) | **Read** |
+
+### 5.7 Verification Methods
+
+These methods expose DB 0 and DB 1 reads at the `Device` level. They are observation primitives — they return structured data, not pass/fail verdicts. Orchestrators (newtest) decide correctness.
+
+**Single-shot reads:** Both `GetRoute` and `GetRouteASIC` perform a single Redis read and return immediately. They do not poll or retry. If the caller needs to wait for route convergence (e.g., waiting for BGP to install a route), the caller must implement its own polling loop with timeout. newtest's `verifyRouteExecutor` (newtest LLD §5.9) does exactly this.
+
+```go
+// GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.
+// Parses the comma-separated nexthop/ifname fields into []NextHop.
+// Returns nil RouteEntry (not error) if the prefix is not present.
+func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+
+// GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
+// object chain: SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
+// Returns nil RouteEntry (not error) if not programmed in ASIC.
+func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+```
+
+### 5.8 Pipeline Operations
+
+Composite delivery and bulk operations use Redis pipelines for atomicity and performance.
+
+**Redis MULTI/EXEC semantics:**
+
+```
+MULTI                           -- start transaction
+HSET BGP_GLOBALS|default router_id 10.0.0.1 local_asn 65000
+HSET BGP_NEIGHBOR|10.0.0.2 asn 65000 local_addr 10.0.0.1
+HSET BGP_NEIGHBOR_AF|10.0.0.2|ipv4_unicast activate true
+DEL ROUTE_MAP|OLD_MAP|10
+EXEC                            -- execute atomically
+```
+
+**Why pipelines:**
+- **Atomicity**: Either all changes apply or none do. Prevents partial config states that could cause SONiC daemon issues.
+- **Performance**: Single round-trip vs one per entry. A composite with 200 entries takes 1 round-trip instead of 200.
+- **Consistency**: SONiC daemons see the complete change set at once via keyspace notifications, rather than processing entries one at a time.
+
+**Error handling:**
+- If any command in the pipeline fails, the entire MULTI/EXEC transaction is discarded
+- The pipeline returns per-command results; the wrapper checks all results and returns the first error
+- On pipeline failure, CONFIG_DB is not reloaded (no changes were applied)
+
+**ReplaceAll for overwrite mode:**
+```go
+func (c *ConfigDBClient) ReplaceAll(config *ConfigDB) error {
+    // 1. FLUSHDB — clear all keys in DB 4
+    // 2. Build pipeline of all HSET commands from config
+    // 3. MULTI/EXEC the pipeline
+    // This is used by composite overwrite mode only
+}
+```
+
+---
+
+## 6. Config Persistence
+
+Redis changes made by newtron are **runtime only**. They take effect immediately because SONiC daemons subscribe to CONFIG_DB changes, but they do not survive a device reboot.
+
+To persist configuration across reboots, the SONiC command `config save -y` must be run inside the VM. This writes the current CONFIG_DB contents to `/etc/sonic/config_db.json`, which is loaded at boot.
+
+**Implications for testing:**
+
+| Test Type | Persistence | Cleanup Strategy |
+|-----------|------------|------------------|
+| Unit tests | N/A (no Redis) | N/A |
+| Integration tests | Ephemeral (standalone Redis) | Fresh Redis per test |
+| E2E lab tests | Runtime only (SONiC-VS) | `ResetLabBaseline()` deletes stale keys |
+
+E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function (newtron LLD §12.5) cleans known stale keys before each test suite run. Tests do not call `config save -y`, so a simple VM restart restores the baseline.
+
+---
+
+## Cross-References
+
+### References to newtron LLD
+
+| newtron LLD Section | Relationship |
+|----------------------|-------------|
+| §3.5 ConfigDBClient | All Redis clients (§2.3, §3.3, §4.2) follow the same pattern |
+| §3.6 ChangeSet | Write paths (§5.3) apply ChangeSet entries to CONFIG_DB |
+| §3.6A VerificationResult, RouteEntry | Returned by verification methods (§5.7); consumed by newtest |
+| §5.2 Device operations | Device operations use the connection and write infrastructure documented here |
+| §12 Testing strategy | Tests use the SSH tunnel (§1) and write paths (§5.3) |
+
+### References to vmlab LLD
+
+| vmlab LLD Section | Relationship |
+|--------------------|-------------|
+| §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (§5.1) to target vmlab-allocated SSH port |
+| §1.1 PlatformSpec.VMCredentials | Source of SSHUser/SSHPass; resolved into DeviceProfile (§1.2) via profile patching (§10), then read by §5.1 |
+| §10 Profile patching | vmlab writes ssh_port/mgmt_ip into profiles; Device.Connect() reads them |
+
+### References to newtest LLD
+
+| newtest LLD Section | Relationship |
+|---------------------|-------------|
+| §4.5 Device connection | newtest calls `Device.Connect()` (§5.1) after vmlab deploy |
+| §5.2 provisionExecutor | Uses write paths (§5.3) via TopologyProvisioner |
+| §5.4 verifyProvisioningExecutor | Calls `Device.VerifyChangeSet()` which re-reads CONFIG_DB via a fresh ConfigDBClient on the same tunnel |
+| §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.7) |
+
+---
+
+## Appendix A: Changelog
+
+#### v6
+
+| Area | Change |
+|------|--------|
+| **STATE_DB Key Formats** | Added key format table for all 13 STATE_DB tables (§2.1) |
+| **SSH Timeouts** | 30s dial timeout, 60s keepalive in `ssh.ClientConfig` (§1.2) |
+| **Reconnection Policy** | Documented "no reconnection; caller re-Connects" (§1.2) |
+| **Redis Serialization** | Documented manual field copy from `map[string]string`, not `json.Unmarshal` (§2.4) |
+| **ASIC_DB Keys** | VR OID resolution via VIDTORID, JSON key canonicalization (§4.1) |
+| **ApplyChangesPipelined** | Single MULTI/EXEC TxPipeline for both sets and deletes (§5.4) |
+| **GetRoute/GetRouteASIC** | Documented single-shot read semantics, caller polls (§5.7) |
+| **Distributed Locking** | `StateDBClient.AcquireLock/ReleaseLock/GetLockHolder` via `NEWTRON_LOCK` hash in STATE_DB. Lua scripts for atomic acquire (EXISTS + HSET + EXPIRE) and safe release (holder check + DEL). Replaces file-based advisory lock (§2.3) |

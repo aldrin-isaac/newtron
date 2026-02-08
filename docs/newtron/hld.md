@@ -63,6 +63,16 @@
 
 **Lines:** ~1560 (v4) → ~1700 (v5) | All v4 sections preserved; verification architecture added.
 
+#### v6
+
+| Area | Change |
+|------|--------|
+| **Per-Operation Distributed Locking** | Locking moved from caller responsibility to per-operation: each mutating operation (ApplyService, RemoveService, etc.) acquires a distributed Redis STATE_DB lock with TTL, applies changes, verifies, and releases. Callers no longer need to lock/unlock explicitly. |
+| **ApplyService/RemoveService/RefreshService Signatures** | Simplified signatures: `(ctx, serviceName, ipAddr string, dryRun bool)` replacing `ApplyServiceOpts` struct. Added `RemoveService` (reverse with DependencyChecker) and `RefreshService` (spec diff + delta apply). |
+| **Execution Model** | Updated §4.5 to document Lock → Apply → Verify → Unlock pattern inside execute mode. Disconnect releases lock as safety net. |
+
+**Lines:** ~1700 (v5) → ~1730 (v6) | All v5 sections preserved; locking and signature updates.
+
 ---
 
 ## 1. Executive Summary
@@ -407,23 +417,32 @@ Low-level connection management for SONiC switches.
 The translation from spec to config happens in `Interface.ApplyService()` and related methods:
 
 ```go
-func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
+func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string, dryRun bool) (*ChangeSet, error) {
     // 1. Load spec (declarative)
     svc, _ := i.Network().GetService(serviceName)
 
     // 2. Translate with context
     vrfName := deriveVRFName(svc, i.name)           // spec + context -> config
-    peerIP, _ := util.DeriveNeighborIP(opts.IPAddress)  // derive from interface IP
-    localAS := i.Device().Resolved().ASNumber       // from device profile
+    peerIP, _ := util.DeriveNeighborIP(ipAddr)      // derive from interface IP
+    localAS := i.Device().Resolved().ASNumber        // from device profile
 
     // 3. Generate config (imperative)
     cs.Add("VRF", vrfName, ChangeAdd, nil, vrfConfig)
     cs.Add("BGP_NEIGHBOR", peerIP, ChangeAdd, nil, neighborConfig)
     cs.Add("ACL_TABLE", aclName, ChangeAdd, nil, aclConfig)
 
+    // 4. In execute mode: Lock → Apply → Verify → Unlock
+    //    (dry-run mode returns the ChangeSet without writing)
+
     return cs, nil
 }
 ```
+
+In execute mode (`dryRun == false`), the operation acquires a distributed lock on the device via STATE_DB, applies the ChangeSet, verifies it, and releases the lock. In dry-run mode, the ChangeSet is returned without writing to CONFIG_DB.
+
+**RemoveService** — `RemoveService(ctx, serviceName string, dryRun bool)` is the reverse of ApplyService. It removes all CONFIG_DB entries created by ApplyService for the given service on the interface. Uses DependencyChecker to protect shared resources (VRFs, ACLs, VLANs) that may be referenced by other interfaces.
+
+**RefreshService** — `RefreshService(ctx, serviceName string, dryRun bool)` re-reads the service spec, diffs the expected config against the current CONFIG_DB, and applies only the delta. This is used when a service spec is updated and the device needs to converge to the new definition without a full remove/apply cycle.
 
 ### 4.6 BGP Management Architecture
 
@@ -640,7 +659,7 @@ ProvisionDevice("leaf1-dc1")
   |     (VRF, ACL, IP, BGP neighbor, EVPN mappings,
   |      NEWTRON_SERVICE_BINDING)
   +-- 5. Build CompositeConfig
-  +-- 6. Connect → Lock → DeliverComposite → Unlock → Disconnect
+  +-- 6. Connect → DeliverComposite → Disconnect
 ```
 
 #### 4.8.4 Per-Interface Provisioning
@@ -706,7 +725,7 @@ Orchestrators like newtest then build on newtron's self-verification: they use n
 
 #### 4.9.2 ChangeSet Verification
 
-Every mutating operation (`ApplyService`, `CreateVLAN`, `SetupRouteReflector`, `DeliverComposite`, etc.) returns a `ChangeSet` — a list of CONFIG_DB entries that were written. The ChangeSet is the operation's own contract for what the device state should look like after execution.
+Every mutating operation (`ApplyService`, `RemoveService`, `RefreshService`, `CreateVLAN`, `SetupRouteReflector`, `DeliverComposite`, etc.) returns a `ChangeSet` — a list of CONFIG_DB entries that were written. The ChangeSet is the operation's own contract for what the device state should look like after execution.
 
 `VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly:
 
@@ -866,7 +885,7 @@ The `SSHTunnel` struct (`pkg/device/tunnel.go`) implements a TCP port forwarder 
 
 `Device.Disconnect()` tears down in order:
 
-1. Release device lock if held
+1. Release device lock if held (safety net — operations release locks after verify)
 2. Close ConfigDBClient (Redis connection)
 3. Close StateDBClient (Redis connection)
 4. Close SSHTunnel (if present): stops accept loop, waits for goroutines, closes SSH session
@@ -1432,7 +1451,7 @@ Run with `go test -tags e2e ./test/e2e/`. Require a running containerlab topolog
 
 - **Fresh connections for verification**: After executing an operation, E2E tests create a **new** `LabConnectedDevice(t, nodeName)` to read CONFIG_DB. This ensures verification reads the actual Redis state, not a cached in-memory copy.
 
-- **Device locking**: Mutating operations require `LabLockedDevice(t, nodeName)` which connects, locks, and registers cleanup to unlock and disconnect.
+- **Device access**: Mutating operations use `LabDevice(t, nodeName)` which connects and registers cleanup to disconnect. Per-operation locking is handled internally by each operation in execute mode.
 
 - **Baseline reset**: `TestMain` calls `ResetLabBaseline()` before running any tests. This SSHes into every SONiC node and deletes known stale CONFIG_DB keys from previous test runs, preventing `vxlanmgrd`/`orchagent` crashes.
 
@@ -1643,7 +1662,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **GetRoute** | Reads a route from APP_DB (DB 0) and returns structured data (prefix, protocol, next-hops). Observation primitive — returns data, not a verdict. |
 | **GetRouteASIC** | Reads a route from ASIC_DB (DB 1) by resolving SAI object chain. Confirms the ASIC programmed the route. |
 | **Audit Log** | Record of all executed changes with user, timestamp, and details. |
-| **Device Lock** | Exclusive lock acquired before mutating operations. Prevents concurrent modifications. |
+| **Device Lock** | Per-operation distributed lock in STATE_DB (Redis) with TTL. Each mutating operation acquires the lock, applies changes, verifies, and releases. Prevents concurrent modifications to the same device. |
 | **Baseline Reset** | Pre-test cleanup that deletes stale CONFIG_DB entries from previous test runs on all SONiC nodes. |
 
 ### BGP Management (v3)
