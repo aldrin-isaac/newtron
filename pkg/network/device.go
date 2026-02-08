@@ -1025,3 +1025,21 @@ func (d *Device) GetOrphanedACLs() []string {
 	}
 	return orphans
 }
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+// NewTestDevice creates a Device with pre-configured ConfigDB state for testing.
+// This is intended for use by external test packages (e.g., operations_test)
+// that need to construct Devices without connecting to real SONiC hardware.
+func NewTestDevice(name string, configDB *device.ConfigDB, connected, locked bool) *Device {
+	return &Device{
+		name:       name,
+		configDB:   configDB,
+		connected:  connected,
+		locked:     locked,
+		interfaces: make(map[string]*Interface),
+		resolved:   &spec.ResolvedProfile{DeviceName: name},
+	}
+}
