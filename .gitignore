@@ -1,5 +1,7 @@
 # Build artifacts
 /newtron
+/newtlab
+/newtest
 /test_acl
 /test_derive
 
