@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -34,9 +35,18 @@ func newRunCmd() *cobra.Command {
 			}
 
 			// Exit code based on results
+			// Exit 2 = infra error, Exit 1 = test failure
 			hasFailure, hasInfraError := false, false
 			for _, r := range results {
-				if r.DeployError != nil || r.Status == newtest.StatusError {
+				if r.DeployError != nil {
+					var infraErr *newtest.InfraError
+					if errors.As(r.DeployError, &infraErr) {
+						hasInfraError = true
+					} else {
+						hasInfraError = true
+					}
+				}
+				if r.Status == newtest.StatusError {
 					hasInfraError = true
 				}
 				if r.Status == newtest.StatusFailed {

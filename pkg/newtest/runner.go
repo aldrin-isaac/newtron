@@ -106,7 +106,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 	if !opts.NoDeploy {
 		lab, err := DeployTopology(specDir)
 		if err != nil {
-			result.DeployError = err
+			result.DeployError = &InfraError{Op: "deploy", Err: err}
 			result.Status = StatusError
 			result.Duration = time.Since(start)
 			return result, nil
@@ -158,17 +158,17 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	net, err := network.NewNetwork(specDir)
 	if err != nil {
-		return fmt.Errorf("loading specs: %w", err)
+		return &InfraError{Op: "connect", Err: fmt.Errorf("loading specs: %w", err)}
 	}
 	r.Network = net
 
 	for _, name := range net.ListDevices() {
 		dev, err := net.GetDevice(name)
 		if err != nil {
-			return fmt.Errorf("getting device %s: %w", name, err)
+			return &InfraError{Op: "connect", Device: name, Err: err}
 		}
 		if err := dev.Connect(ctx); err != nil {
-			return fmt.Errorf("connecting to %s: %w", name, err)
+			return &InfraError{Op: "connect", Device: name, Err: err}
 		}
 	}
 
@@ -179,12 +179,17 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput {
 	executor, ok := executors[step.Action]
 	if !ok {
+		err := &StepError{
+			Step:   step.Name,
+			Action: step.Action,
+			Err:    fmt.Errorf("unknown action: %s", step.Action),
+		}
 		return &StepOutput{
 			Result: &StepResult{
 				Name:    step.Name,
 				Action:  step.Action,
 				Status:  StatusError,
-				Message: fmt.Sprintf("unknown action: %s", step.Action),
+				Message: err.Error(),
 			},
 		}
 	}
