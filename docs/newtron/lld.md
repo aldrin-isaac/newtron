@@ -3353,16 +3353,29 @@ func init() {
     // Operation flags
     rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "s", "", "Specification directory")
     rootCmd.PersistentFlags().BoolVarP(&executeMode, "execute", "x", false, "Execute changes (default: dry-run)")
+    rootCmd.PersistentFlags().BoolVarP(&saveMode, "save", "", false, "Save config after execution")
     rootCmd.PersistentFlags().BoolVarP(&verboseMode, "verbose", "v", false, "Verbose output")
     rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 
-    // Command registration
-    rootCmd.AddCommand(listCmd, showCmd, settingsCmd)           // Network-level
-    rootCmd.AddCommand(createCmd, deleteCmd, healthCmd)         // Device-level
-    rootCmd.AddCommand(setCmd, applyServiceCmd, removeServiceCmd) // Interface-level
-    rootCmd.AddCommand(addMemberCmd, removeMemberCmd)
-    rootCmd.AddCommand(bindAclCmd, unbindAclCmd)
-    rootCmd.AddCommand(interactiveCmd, versionCmd)
+    // Command registration — OO verb commands (symmetric read/write)
+    rootCmd.AddCommand(showCmd, getCmd, listCmd)                          // Read verbs
+    rootCmd.AddCommand(getServiceCmd, listMembersCmd, listAclsCmd)       // Read verbs (cont.)
+    rootCmd.AddCommand(getMacvpnCmd, getL2VniCmd, listBgpCmd)            // Read verbs (cont.)
+    rootCmd.AddCommand(setCmd, createCmd, deleteCmd)                      // Write verbs
+    rootCmd.AddCommand(applyServiceCmd, removeServiceCmd, refreshServiceCmd) // Service verbs
+    rootCmd.AddCommand(addMemberCmd, removeMemberCmd)                    // Membership verbs
+    rootCmd.AddCommand(bindAclCmd, unbindAclCmd)                         // ACL verbs
+    rootCmd.AddCommand(bindMacvpnCmd, unbindMacvpnCmd)                   // MAC-VPN verbs
+    rootCmd.AddCommand(addBgpCmd, removeBgpCmd)                          // BGP verbs
+    rootCmd.AddCommand(healthCheckVerbCmd, applyBaselineCmd)             // Device operations
+    rootCmd.AddCommand(cleanupCmd, configureSVICmd)                      // Device operations (cont.)
+
+    // Command group subcommands
+    rootCmd.AddCommand(settingsCmd, serviceCmd, interfaceCmd)
+    rootCmd.AddCommand(lagCmd, vlanCmd, aclCmd, evpnCmd, bgpCmd)
+    rootCmd.AddCommand(healthCmd, baselineCmd, provisionCmd)
+    rootCmd.AddCommand(auditCmd, stateCmd)                               // Operational queries
+    rootCmd.AddCommand(interactiveCmd, shellCmd, versionCmd)
 }
 ```
 
@@ -3403,6 +3416,7 @@ func requireInterface(ctx context.Context) (*network.Device, *network.Interface,
 | `apply-service` / `remove-service` / `refresh-service` | `get-service` | Service binding |
 | `add-member` / `remove-member` | `list-members` | Collection membership |
 | `bind-acl` / `unbind-acl` | `list-acls` | ACL binding |
+| `bind-macvpn` / `unbind-macvpn` | `get-macvpn` | MAC-VPN binding |
 | `map-l2vni` / `unmap-l2vni` | `get-l2vni` | VNI mapping |
 | `add-bgp-neighbor` / `remove-bgp-neighbor` | `list-bgp-neighbors` | BGP neighbors |
 
@@ -3600,6 +3614,42 @@ type Settings struct {
 }
 ```
 
+### 11.9 Operational Query Commands
+
+These commands are read-only and do not require `-x`:
+
+**State commands** (`cmd_state.go`) — query operational state from STATE_DB:
+
+| Command | Description |
+|---------|-------------|
+| `state show` | Full device state summary (interfaces, LAGs, VLANs, VRFs) |
+| `state bgp` | BGP neighbor states from STATE_DB |
+| `state evpn` | EVPN/VXLAN state (VTEP, remote VTEPs, VNI count) |
+| `state lag` | LAG member states (selected, collecting/distributing) |
+| `state vrf` | VRF operational states |
+
+**Audit commands** (`cmd_audit.go`) — query audit log:
+
+| Command | Description |
+|---------|-------------|
+| `audit list` | List audit events with filters (`--device`, `--user`, `--last`, `--limit`, `--failures`) |
+
+**Shell command** (`shell.go`) — interactive REPL:
+
+| Command | Description |
+|---------|-------------|
+| `shell` | Enter interactive shell with device connection reuse, tab completion, and command history |
+
+### 11.10 Config Persistence (`--save`)
+
+The `--save` flag (in addition to `-x`) persists changes to disk after execution:
+
+```
+newtron -d leaf1 -i Ethernet0 set mtu 9000 -x --save
+```
+
+This calls `Device.SaveConfig()` after a successful `ChangeSet.Apply()`, running `sudo config save -y` on the device. Without `--save`, changes are applied to the running CONFIG_DB but may be lost on reboot.
+
 ## 12. Testing Strategy
 
 ### 12.1 Three-Tier Testing Architecture
@@ -3769,4 +3819,8 @@ Section numbers below refer to the version when the change was made and may not 
 | **Audit Change Type** | `audit.Event.Changes` now uses `network.Change` (typed `map[string]string` values) instead of `operations.Change` (untyped `interface{}` values). Eliminates circular dependency path |
 | **Package Structure** | Added `pkg/settings/` (CLI user settings persistence) and `pkg/configlet/` (baseline template loading and variable resolution) to §2 |
 | **CLI Files** | Added `cmd_verbs.go` (symmetric read/write operations), `cmd_provision.go` (topology provisioning), `shell.go` (interactive shell) to §2 |
+| **SSH Tunnel** | `NewSSHTunnel` now accepts `port int` parameter (0 defaults to 22). Added 30s dial timeout via `ssh.ClientConfig.Timeout`. `DeviceProfile` and `ResolvedProfile` gain `SSHPort` field for vmlab-allocated ports |
+| **Service Binding in State** | `parseInterfaces()` now extracts service binding from `NEWTRON_SERVICE_BINDING` table into `InterfaceState.Service` |
+| **CLI §11** | Documented `--save` flag (§11.10), `state` commands (§11.9), `audit list` (§11.9), `shell` REPL (§11.9), MAC-VPN verbs in §11.3 symmetric operations table. Updated §11.2 command registration to match actual codebase |
+| **Verification TODOs** | Added TODO comments in `device.go` (appldb/asicdb/GetRoute/GetRouteASIC), `statedb.go` (GetEntry/distributed locking), `changeset.go` (AppliedCount/Verification fields) |
 | **Code-LLD Reconciliation** | Systematic package-by-package comparison; all findings documented in this changelog |

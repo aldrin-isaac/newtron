@@ -179,6 +179,7 @@ func (l *Loader) ResolveProfile(deviceName string) (*ResolvedProfile, error) {
 	// SSH credentials (for Redis tunnel)
 	resolved.SSHUser = profile.SSHUser
 	resolved.SSHPass = profile.SSHPass
+	resolved.SSHPort = profile.SSHPort
 
 	// eBGP underlay ASN
 	resolved.UnderlayASN = profile.UnderlayASN

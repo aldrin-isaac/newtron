@@ -27,6 +27,9 @@ type Change struct {
 }
 
 // ChangeSet represents a collection of configuration changes.
+//
+// TODO(lld §3.6): Add AppliedCount int and Verification *VerificationResult
+// fields when the verification layer (appldb.go, asicdb.go) is implemented.
 type ChangeSet struct {
 	Device    string    `json:"device"`
 	Operation string    `json:"operation"`

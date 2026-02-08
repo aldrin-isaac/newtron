@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -20,9 +21,13 @@ type SSHTunnel struct {
 	wg        sync.WaitGroup
 }
 
-// NewSSHTunnel dials SSH on host:22 and opens a local listener on a random port.
+// NewSSHTunnel dials SSH on host:port and opens a local listener on a random port.
 // Connections to the local port are forwarded to 127.0.0.1:6379 inside the SSH host.
-func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error) {
+// If port is 0, defaults to 22.
+func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
+	if port == 0 {
+		port = 22
+	}
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -30,9 +35,10 @@ func NewSSHTunnel(host, user, pass string) (*SSHTunnel, error) {
 		},
 		// Lab/test environment — production would verify host keys.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
 	}
 
-	sshClient, err := ssh.Dial("tcp", host+":22", config)
+	sshClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial %s: %w", host, err)
 	}

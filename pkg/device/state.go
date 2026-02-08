@@ -79,6 +79,13 @@ func (d *Device) parseInterfaces() map[string]*InterfaceState {
 		}
 	}
 
+	// Add service bindings from NEWTRON_SERVICE_BINDING
+	for intfName, binding := range d.ConfigDB.NewtronServiceBinding {
+		if intf, ok := interfaces[intfName]; ok {
+			intf.Service = binding.ServiceName
+		}
+	}
+
 	// Add ACL bindings
 	for name, acl := range d.ConfigDB.ACLTable {
 		ports := strings.Split(acl.Ports, ",")

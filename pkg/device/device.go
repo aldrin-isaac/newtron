@@ -9,7 +9,11 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// Device represents a SONiC switch
+// Device represents a SONiC switch.
+//
+// TODO(device-lld §3, §4): Add appldb.go (APP_DB client with GetRoute) and
+// asicdb.go (ASIC_DB client with GetRouteASIC) for route verification primitives.
+// TODO(device-lld §5.8): Add GetRoute/GetRouteASIC observation methods.
 type Device struct {
 	Name     string
 	Profile  *spec.ResolvedProfile
@@ -136,7 +140,7 @@ func (d *Device) Connect(ctx context.Context) error {
 
 	var addr string
 	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
-		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass)
+		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
 		if err != nil {
 			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
 		}

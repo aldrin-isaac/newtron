@@ -135,7 +135,10 @@ type TransceiverStatusEntry struct {
 	RxPower     string `json:"rx_power,omitempty"`
 }
 
-// StateDBClient wraps Redis client for state_db access (DB 6)
+// StateDBClient wraps Redis client for state_db access (DB 6).
+//
+// TODO(device-lld §2.3): Add GetEntry(table, key string) generic accessor.
+// TODO(device-lld §2.3): Add AcquireLock/ReleaseLock/GetLockHolder for distributed locking.
 type StateDBClient struct {
 	client *redis.Client
 	ctx    context.Context

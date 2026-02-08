@@ -291,6 +291,7 @@ type DeviceProfile struct {
 	// OPTIONAL - SSH access for Redis tunnel
 	SSHUser string `json:"ssh_user,omitempty"`
 	SSHPass string `json:"ssh_pass,omitempty"`
+	SSHPort int    `json:"ssh_port,omitempty"` // 0 means default (22)
 
 	// OPTIONAL - eBGP underlay ASN (unique per device)
 	UnderlayASN int `json:"underlay_asn,omitempty"`
@@ -331,6 +332,7 @@ type ResolvedProfile struct {
 	// SSH access (for Redis tunnel)
 	SSHUser string
 	SSHPass string
+	SSHPort int // 0 means default (22)
 
 	// eBGP underlay ASN (unique per device; 0 means use ASNumber for iBGP-only)
 	UnderlayASN int
