@@ -94,6 +94,11 @@ func (t *SSHTunnel) acceptLoop() {
 	}
 }
 
+// SSHClient returns the underlying ssh.Client for opening command sessions.
+// Used by newtest's verifyPingExecutor and sshCommandExecutor to run commands
+// inside the device (e.g., "ping", "show interfaces status") via ssh.Session.
+func (t *SSHTunnel) SSHClient() *ssh.Client { return t.sshClient }
+
 // ExecCommand runs a command on the remote device via SSH and returns the combined output.
 // The SSH session is created per-call (stateless).
 func (t *SSHTunnel) ExecCommand(cmd string) (string, error) {

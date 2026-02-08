@@ -33,7 +33,7 @@ type ConfigDB struct {
 	BGPGlobals        map[string]BGPGlobalsEntry    `json:"BGP_GLOBALS,omitempty"`
 	BGPGlobalsAF      map[string]BGPGlobalsAFEntry  `json:"BGP_GLOBALS_AF,omitempty"`
 	BGPEVPNVNI        map[string]BGPEVPNVNIEntry    `json:"BGP_EVPN_VNI,omitempty"`
-	RouteTable        map[string]RouteEntry         `json:"ROUTE_TABLE,omitempty"`
+	RouteTable        map[string]StaticRouteEntry   `json:"ROUTE_TABLE,omitempty"`
 	ACLTable          map[string]ACLTableEntry      `json:"ACL_TABLE,omitempty"`
 	ACLRule           map[string]ACLRuleEntry       `json:"ACL_RULE,omitempty"`
 	ACLTableType      map[string]ACLTableTypeEntry  `json:"ACL_TABLE_TYPE,omitempty"`
@@ -223,8 +223,8 @@ type BGPNeighborAFEntry struct {
 	AddpathTxAll     string `json:"addpath_tx_all_paths,omitempty"`
 }
 
-// RouteEntry represents a static route
-type RouteEntry struct {
+// StaticRouteEntry represents a static route in CONFIG_DB's ROUTE_TABLE.
+type StaticRouteEntry struct {
 	NextHop    string `json:"nexthop,omitempty"`
 	Interface  string `json:"ifname,omitempty"`
 	Distance   string `json:"distance,omitempty"`
@@ -452,7 +452,7 @@ func (c *ConfigDBClient) GetAll() (*ConfigDB, error) {
 		BGPGlobals:            make(map[string]BGPGlobalsEntry),
 		BGPGlobalsAF:          make(map[string]BGPGlobalsAFEntry),
 		BGPEVPNVNI:            make(map[string]BGPEVPNVNIEntry),
-		RouteTable:            make(map[string]RouteEntry),
+		RouteTable:            make(map[string]StaticRouteEntry),
 		ACLTable:              make(map[string]ACLTableEntry),
 		ACLRule:               make(map[string]ACLRuleEntry),
 		ACLTableType:          make(map[string]ACLTableTypeEntry),

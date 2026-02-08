@@ -717,6 +717,26 @@ func (d *Device) Underlying() *device.Device {
 	return d.conn
 }
 
+// GetRoute reads a route from APP_DB (Redis DB 0).
+// Returns nil RouteEntry (not error) if the prefix is not present.
+// Single-shot read — does not poll or retry.
+func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+	return d.conn.GetRoute(ctx, vrf, prefix)
+}
+
+// GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
+// object chain. Returns nil RouteEntry (not error) if not programmed in ASIC.
+// Single-shot read — does not poll or retry.
+func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+	return d.conn.GetRouteASIC(ctx, vrf, prefix)
+}
+
 // ============================================================================
 // BGP Operations (Device-level: Indirect/iBGP neighbors using loopback)
 // ============================================================================

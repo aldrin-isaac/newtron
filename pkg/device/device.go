@@ -10,10 +10,6 @@ import (
 )
 
 // Device represents a SONiC switch.
-//
-// TODO(device-lld §3, §4): Add appldb.go (APP_DB client with GetRoute) and
-// asicdb.go (ASIC_DB client with GetRouteASIC) for route verification primitives.
-// TODO(device-lld §5.8): Add GetRoute/GetRouteASIC observation methods.
 type Device struct {
 	Name     string
 	Profile  *spec.ResolvedProfile
@@ -27,7 +23,9 @@ type Device struct {
 	// Redis connections
 	client      *ConfigDBClient
 	stateClient *StateDBClient
-	tunnel      *SSHTunnel // SSH tunnel for Redis access (nil if direct)
+	applClient  *AppDBClient  // APP_DB (DB 0) for route verification
+	asicClient  *AsicDBClient // ASIC_DB (DB 1) for ASIC-level verification
+	tunnel      *SSHTunnel    // SSH tunnel for Redis access (nil if direct)
 	connected   bool
 	locked      bool
 	lockFiles   []string
@@ -180,6 +178,20 @@ func (d *Device) Connect(ctx context.Context) error {
 		}
 	}
 
+	// Connect APP_DB (DB 0) for route verification — non-fatal
+	d.applClient = NewAppDBClient(addr)
+	if err := d.applClient.Connect(); err != nil {
+		util.WithDevice(d.Name).Warnf("Failed to connect to app_db: %v", err)
+		d.applClient = nil
+	}
+
+	// Connect ASIC_DB (DB 1) for ASIC-level verification — non-fatal
+	d.asicClient = NewAsicDBClient(addr)
+	if err := d.asicClient.Connect(); err != nil {
+		util.WithDevice(d.Name).Warnf("Failed to connect to asic_db: %v", err)
+		d.asicClient = nil
+	}
+
 	d.connected = true
 	util.WithDevice(d.Name).Info("Connected")
 
@@ -207,6 +219,14 @@ func (d *Device) Disconnect() error {
 
 	if d.stateClient != nil {
 		d.stateClient.Close()
+	}
+
+	if d.applClient != nil {
+		d.applClient.Close()
+	}
+
+	if d.asicClient != nil {
+		d.asicClient.Close()
 	}
 
 	if d.tunnel != nil {
@@ -729,4 +749,144 @@ func (d *Device) SaveConfig(ctx context.Context) error {
 		return fmt.Errorf("config save failed: %w (output: %s)", err, output)
 	}
 	return nil
+}
+
+// GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.
+// Parses the comma-separated nexthop/ifname fields into []NextHop.
+// Returns nil RouteEntry (not error) if the prefix is not present.
+// Single-shot read — does not poll or retry.
+func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if d.applClient == nil {
+		return nil, fmt.Errorf("APP_DB client not connected on %s", d.Name)
+	}
+	return d.applClient.GetRoute(vrf, prefix)
+}
+
+// GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
+// object chain: SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
+// Returns nil RouteEntry (not error) if not programmed in ASIC.
+// Single-shot read — does not poll or retry.
+func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if d.asicClient == nil {
+		return nil, fmt.Errorf("ASIC_DB client not connected on %s", d.Name)
+	}
+	return d.asicClient.GetRouteASIC(vrf, prefix, d.ConfigDB)
+}
+
+// VerifyChangeSet re-reads CONFIG_DB via a fresh connection and compares against
+// the ChangeSet to confirm that writes were persisted.
+//
+// For ChangeAdd/ChangeModify: asserts every field in NewValue is present with the
+// same value (superset match — Redis may have additional fields).
+// For ChangeDelete: asserts the key does not exist in Redis.
+//
+// Uses a fresh ConfigDBClient on the existing SSH tunnel to avoid reading from
+// the cached d.ConfigDB that was updated by Apply().
+func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*VerificationResult, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+
+	// Determine the address for the fresh connection
+	var addr string
+	if d.tunnel != nil {
+		addr = d.tunnel.LocalAddr()
+	} else {
+		addr = fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
+	}
+
+	// Create a fresh CONFIG_DB client for independent verification
+	freshClient := NewConfigDBClient(addr)
+	if err := freshClient.Connect(); err != nil {
+		return nil, fmt.Errorf("fresh config_db connection: %w", err)
+	}
+	defer freshClient.Close()
+
+	result := &VerificationResult{}
+
+	for _, change := range changes {
+		switch change.Type {
+		case ChangeTypeAdd, ChangeTypeModify:
+			// Read the table/key from fresh Redis and verify fields
+			actual, err := freshClient.Get(change.Table, change.Key)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)
+			}
+			if len(actual) == 0 {
+				result.Failed++
+				result.Errors = append(result.Errors, VerificationError{
+					Table:    change.Table,
+					Key:      change.Key,
+					Field:    "(all)",
+					Expected: "present",
+					Actual:   "",
+				})
+				continue
+			}
+			// Check each expected field (superset match)
+			allMatch := true
+			for field, expected := range change.Fields {
+				if got, ok := actual[field]; !ok || got != expected {
+					result.Failed++
+					allMatch = false
+					actualVal := ""
+					if ok {
+						actualVal = got
+					}
+					result.Errors = append(result.Errors, VerificationError{
+						Table:    change.Table,
+						Key:      change.Key,
+						Field:    field,
+						Expected: expected,
+						Actual:   actualVal,
+					})
+				}
+			}
+			if allMatch {
+				result.Passed++
+			}
+		case ChangeTypeDelete:
+			exists, err := freshClient.Exists(change.Table, change.Key)
+			if err != nil {
+				return nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
+			}
+			if exists {
+				result.Failed++
+				result.Errors = append(result.Errors, VerificationError{
+					Table:    change.Table,
+					Key:      change.Key,
+					Field:    "(all)",
+					Expected: "deleted",
+					Actual:   "present",
+				})
+			} else {
+				result.Passed++
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// Tunnel returns the SSH tunnel for direct access (e.g., newtest SSH commands).
+// Returns nil if no SSH tunnel is configured (direct Redis connection).
+func (d *Device) Tunnel() *SSHTunnel {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.tunnel
 }

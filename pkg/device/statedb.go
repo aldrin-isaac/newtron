@@ -136,9 +136,6 @@ type TransceiverStatusEntry struct {
 }
 
 // StateDBClient wraps Redis client for state_db access (DB 6).
-//
-// TODO(device-lld §2.3): Add GetEntry(table, key string) generic accessor.
-// TODO(device-lld §2.3): Add AcquireLock/ReleaseLock/GetLockHolder for distributed locking.
 type StateDBClient struct {
 	client *redis.Client
 	ctx    context.Context
@@ -163,6 +160,21 @@ func (c *StateDBClient) Connect() error {
 // Close closes the connection
 func (c *StateDBClient) Close() error {
 	return c.client.Close()
+}
+
+// GetEntry reads a single STATE_DB entry as raw map[string]string.
+// Returns (nil, nil) if the entry does not exist.
+// Used by newtest's verifyStateDBExecutor for generic table/key/field assertions.
+func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error) {
+	redisKey := fmt.Sprintf("%s|%s", table, key)
+	vals, err := c.client.HGetAll(c.ctx, redisKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	return vals, nil
 }
 
 // GetAll reads the entire state_db

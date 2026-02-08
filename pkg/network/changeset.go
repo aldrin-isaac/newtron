@@ -1,6 +1,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -27,14 +28,13 @@ type Change struct {
 }
 
 // ChangeSet represents a collection of configuration changes.
-//
-// TODO(lld §3.6): Add AppliedCount int and Verification *VerificationResult
-// fields when the verification layer (appldb.go, asicdb.go) is implemented.
 type ChangeSet struct {
-	Device    string    `json:"device"`
-	Operation string    `json:"operation"`
-	Timestamp time.Time `json:"timestamp"`
-	Changes   []Change  `json:"changes"`
+	Device       string                     `json:"device"`
+	Operation    string                     `json:"operation"`
+	Timestamp    time.Time                  `json:"timestamp"`
+	Changes      []Change                   `json:"changes"`
+	AppliedCount int                        `json:"applied_count"`            // number of changes successfully written by Apply(); 0 before Apply()
+	Verification *device.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
 }
 
 // NewChangeSet creates a new ChangeSet.
@@ -129,5 +129,44 @@ func (cs *ChangeSet) Apply(d *Device) error {
 	}
 
 	// Apply via device's Redis client
-	return d.Underlying().ApplyChanges(deviceChanges)
+	if err := d.Underlying().ApplyChanges(deviceChanges); err != nil {
+		return err
+	}
+	cs.AppliedCount = len(cs.Changes)
+	return nil
+}
+
+// Verify re-reads CONFIG_DB via a fresh connection and compares against the
+// ChangeSet to confirm that writes were persisted. Stores the result in
+// cs.Verification.
+func (cs *ChangeSet) Verify(d *Device) error {
+	if !d.IsConnected() {
+		return fmt.Errorf("device not connected")
+	}
+
+	// Convert network.Change to device.ConfigChange for verification
+	deviceChanges := make([]device.ConfigChange, 0, len(cs.Changes))
+	for _, c := range cs.Changes {
+		dc := device.ConfigChange{
+			Table:  c.Table,
+			Key:    c.Key,
+			Fields: c.NewValue,
+		}
+		switch c.Type {
+		case ChangeAdd:
+			dc.Type = device.ChangeTypeAdd
+		case ChangeModify:
+			dc.Type = device.ChangeTypeModify
+		case ChangeDelete:
+			dc.Type = device.ChangeTypeDelete
+		}
+		deviceChanges = append(deviceChanges, dc)
+	}
+
+	result, err := d.Underlying().VerifyChangeSet(context.Background(), deviceChanges)
+	if err != nil {
+		return err
+	}
+	cs.Verification = result
+	return nil
 }
