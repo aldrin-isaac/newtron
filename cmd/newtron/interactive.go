@@ -148,6 +148,16 @@ func serviceMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			ip, _ := reader.ReadString('\n')
 			ip = strings.TrimSpace(ip)
 
+			// Prompt for peer AS if service has routing.peer_as="request"
+			var peerASNum int
+			svcDef, svcErr := dev.Network().GetService(svc)
+			if svcErr == nil && svcDef.Routing != nil && svcDef.Routing.PeerAS == "request" {
+				fmt.Print("Enter BGP peer AS number: ")
+				peerASStr, _ := reader.ReadString('\n')
+				peerASStr = strings.TrimSpace(peerASStr)
+				peerASNum, _ = strconv.Atoi(peerASStr)
+			}
+
 			// Perform the actual operation
 			ctx := context.Background()
 			if err := dev.Lock(); err != nil {
@@ -164,7 +174,7 @@ func serviceMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 
 			cs, err := intfObj.ApplyService(ctx, svc, network.ApplyServiceOpts{
 				IPAddress: ip,
-				// TODO: Prompt for peer AS for BGP services
+				PeerAS:    peerASNum,
 			})
 			dev.Unlock()
 			if err != nil {

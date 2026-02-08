@@ -1045,7 +1045,7 @@ Examples:
 
 		changeSet, err := intf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
 			IPAddress: applyServiceIP,
-			// TODO: Add --peer-as flag for BGP services
+			PeerAS:    applyServicePeerAS,
 		})
 		if err != nil {
 			return fmt.Errorf("applying service: %w", err)
@@ -1067,6 +1067,7 @@ Examples:
 }
 
 var applyServiceIP string
+var applyServicePeerAS int
 
 // removeServiceCmd removes a service from an interface
 var removeServiceCmd = &cobra.Command{
@@ -1871,6 +1872,7 @@ func init() {
 
 	// Flags for apply-service
 	applyServiceCmd.Flags().StringVar(&applyServiceIP, "ip", "", "IP address (required)")
+	applyServiceCmd.Flags().IntVar(&applyServicePeerAS, "peer-as", 0, "BGP peer AS number")
 
 	// Flags for bind-acl
 	bindAclCmd.Flags().StringVar(&bindAclDirection, "direction", "ingress", "ACL direction (ingress, egress)")

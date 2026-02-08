@@ -181,7 +181,8 @@ var serviceShowCmd = &cobra.Command{
 }
 
 var (
-	applyIP string
+	applyIP  string
+	peerAS   int
 )
 
 var serviceApplyCmd = &cobra.Command{
@@ -257,7 +258,7 @@ Examples:
 		start := time.Now()
 		changeSet, err := intf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
 			IPAddress: applyIP,
-			// TODO: Add --peer-as flag for BGP services
+			PeerAS:    peerAS,
 		})
 		if err != nil {
 			return fmt.Errorf("applying service: %w", err)
@@ -366,6 +367,7 @@ Examples:
 
 func init() {
 	serviceApplyCmd.Flags().StringVar(&applyIP, "ip", "", "IP address for L3 service (CIDR notation)")
+	serviceApplyCmd.Flags().IntVar(&peerAS, "peer-as", 0, "BGP peer AS number")
 
 	serviceCmd.AddCommand(serviceListCmd)
 	serviceCmd.AddCommand(serviceShowCmd)
