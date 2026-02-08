@@ -1,16 +1,16 @@
-# vmlab — High-Level Design
+# newtlab — High-Level Design
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ## 1. Purpose
 
-vmlab realizes network topologies as connected QEMU virtual machines. It
+newtlab realizes network topologies as connected QEMU virtual machines. It
 reads newtron's spec files (`topology.json`, `platforms.json`,
 `profiles/*.json`) and brings the topology to life — deploying VMs
 (primarily SONiC) and wiring them together using socket-based links
 across one or more servers. No root, no bridges, no Docker.
 
-vmlab doesn't define the topology or touch device configuration — it
+newtlab doesn't define the topology or touch device configuration — it
 makes the topology physically exist. After deployment, it patches device
 profiles with SSH and console ports so newtron can connect.
 
@@ -18,16 +18,16 @@ profiles with SSH and console ports so newtron can connect.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Shared Spec Directory                         │
 │  specs/                                                              │
-│  ├── topology.json    ← vmlab reads: devices, links, vmlab settings │
-│  ├── platforms.json   ← vmlab reads: VM defaults (image, memory)    │
-│  ├── profiles/*.json  ← vmlab reads/writes: VM overrides, ports     │
+│  ├── topology.json    ← newtlab reads: devices, links, newtlab settings │
+│  ├── platforms.json   ← newtlab reads: VM defaults (image, memory)    │
+│  ├── profiles/*.json  ← newtlab reads/writes: VM overrides, ports     │
 │  ├── network.json     ← newtron reads: services, VPNs, filters      │
 │  └── site.json        ← newtron reads: site topology                │
 └─────────────────────────────────────────────────────────────────────┘
          │                                    │
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────┐
-│       vmlab         │            │      newtron        │
+│       newtlab         │            │      newtron        │
 │                     │            │                     │
 │ • Deploy QEMU VMs   │            │ • Provision devices │
 │ • Socket networking │            │ • Write CONFIG_DB   │
@@ -55,32 +55,32 @@ Benefits:
 ### 2.1 Deploy
 
 ```bash
-vmlab deploy -S specs/
+newtlab deploy -S specs/
 ```
 
 ### 2.2 Interact
 
 ```bash
-vmlab status
-vmlab ssh leaf1
-vmlab console spine1
+newtlab status
+newtlab ssh leaf1
+newtlab console spine1
 ```
 
 ### 2.3 Tear Down
 
 ```bash
-vmlab destroy
+newtlab destroy
 ```
 
 ---
 
 ## 3. Spec Files (Shared with newtron)
 
-vmlab reads from the same spec directory as newtron. No new files required.
+newtlab reads from the same spec directory as newtron. No new files required.
 
 ### 3.1 topology.json
 
-vmlab reads `devices` and `links` (same as newtron), plus an optional `vmlab`
+newtlab reads `devices` and `links` (same as newtron), plus an optional `newtlab`
 section for orchestration settings:
 
 ```json
@@ -101,7 +101,7 @@ section for orchestration settings:
   "links": [
     { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0" }
   ],
-  "vmlab": {
+  "newtlab": {
     "link_port_base": 20000,
     "console_port_base": 30000,
     "ssh_port_base": 40000,
@@ -122,7 +122,7 @@ section for orchestration settings:
 
 ### 3.2 platforms.json
 
-vmlab reads VM defaults from platform definitions. Multiple platforms can be
+newtlab reads VM defaults from platform definitions. Multiple platforms can be
 defined to support different SONiC images:
 
 ```json
@@ -133,7 +133,7 @@ defined to support different SONiC images:
       "description": "SONiC Virtual Switch (control plane only)",
       "port_count": 32,
       "default_speed": "40000",
-      "vm_image": "~/.vmlab/images/sonic-vs.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vs.qcow2",
       "vm_memory": 4096,
       "vm_cpus": 2,
       "vm_nic_driver": "e1000",
@@ -146,7 +146,7 @@ defined to support different SONiC images:
       "description": "SONiC with VPP dataplane (full forwarding)",
       "port_count": 32,
       "default_speed": "40000",
-      "vm_image": "~/.vmlab/images/sonic-vpp.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vpp.qcow2",
       "vm_memory": 4096,
       "vm_cpus": 4,
       "vm_nic_driver": "virtio-net-pci",
@@ -160,7 +160,7 @@ defined to support different SONiC images:
       "description": "Cisco 8000 SONiC NGDP image",
       "port_count": 32,
       "default_speed": "100000",
-      "vm_image": "~/.vmlab/images/sonic-cisco.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-cisco.qcow2",
       "vm_memory": 8192,
       "vm_cpus": 4,
       "vm_nic_driver": "e1000",
@@ -199,7 +199,7 @@ NIC 0 is always management.
 
 ### 3.3 profiles/*.json
 
-vmlab reads per-device overrides and writes runtime ports after deployment:
+newtlab reads per-device overrides and writes runtime ports after deployment:
 
 ```json
 {
@@ -262,7 +262,7 @@ leaf1 QEMU:
   -device <nic_driver>,netdev=eth0
 ```
 
-vmlab uses the platform's `vm_interface_map` to determine which QEMU NIC index
+newtlab uses the platform's `vm_interface_map` to determine which QEMU NIC index
 corresponds to each SONiC interface name.
 
 ### 5.2 Port Allocation
@@ -275,11 +275,11 @@ SSH ports:       ssh_port_base + node_index       (40000, 40001, ...)
 
 ### 5.3 Cross-Host Links
 
-For multi-host, vmlab uses the `hosts` map to resolve IPs:
+For multi-host, newtlab uses the `hosts` map to resolve IPs:
 
 ```json
 {
-  "vmlab": {
+  "newtlab": {
     "hosts": { "server-a": "192.168.1.10", "server-b": "192.168.1.11" }
   }
 }
@@ -298,17 +298,17 @@ spine1 (server-a) listens on `0.0.0.0:20000`, leaf1 (server-b) connects to `192.
 
 ## 6. Profile Patching
 
-After deploying VMs, vmlab updates profiles so newtron can connect:
+After deploying VMs, newtlab updates profiles so newtron can connect:
 
 ```json
-// Before vmlab deploy
+// Before newtlab deploy
 {
   "mgmt_ip": "PLACEHOLDER",
   "ssh_user": "admin",
   "ssh_pass": "YourPaSsWoRd"
 }
 
-// After vmlab deploy
+// After newtlab deploy
 {
   "mgmt_ip": "127.0.0.1",
   "ssh_port": 40000,
@@ -318,7 +318,7 @@ After deploying VMs, vmlab updates profiles so newtron can connect:
 }
 ```
 
-On destroy, vmlab restores the original `mgmt_ip` from state.json (`original_mgmt_ip`), removing `ssh_port` and `console_port`.
+On destroy, newtlab restores the original `mgmt_ip` from state.json (`original_mgmt_ip`), removing `ssh_port` and `console_port`.
 
 ---
 
@@ -356,7 +356,7 @@ Backward compatible — profiles without `ssh_port` use port 22.
 ### 8.1 Lab State Directory
 
 ```
-~/.vmlab/labs/<topology-name>/
+~/.newtlab/labs/<topology-name>/
 ├── state.json           # Running state
 ├── qemu/
 │   ├── spine1.pid
@@ -394,19 +394,19 @@ Backward compatible — profiles without `ssh_port` use port 22.
 ## 9. CLI
 
 ```
-vmlab - VM orchestration for network topologies
+newtlab - VM orchestration for network topologies
 
 Commands:
-  vmlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
-  vmlab destroy                  Stop and remove all VMs
-  vmlab status                   Show VM status
-  vmlab ssh <node>               SSH to a VM
-  vmlab console <node>           Attach to serial console
-  vmlab stop <node>              Stop a VM (preserves disk)
-  vmlab start <node>             Start a stopped VM
-  vmlab provision -S <specs>     Provision devices via newtron
-  vmlab snapshot --name <name>   Create snapshot
-  vmlab restore --name <name>    Restore from snapshot
+  newtlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
+  newtlab destroy                  Stop and remove all VMs
+  newtlab status                   Show VM status
+  newtlab ssh <node>               SSH to a VM
+  newtlab console <node>           Attach to serial console
+  newtlab stop <node>              Stop a VM (preserves disk)
+  newtlab start <node>             Start a stopped VM
+  newtlab provision -S <specs>     Provision devices via newtron
+  newtlab snapshot --name <name>   Create snapshot
+  newtlab restore --name <name>    Restore from snapshot
 
 Options:
   -S, --specs <dir>     Spec directory (required for deploy/provision)
@@ -421,7 +421,7 @@ Options:
 
 ## 10. Comparison with Containerlab
 
-| Aspect | vmlab | containerlab |
+| Aspect | newtlab | containerlab |
 |--------|-------|--------------|
 | Root required | No | Yes |
 | Host networking | None | Bridges, veth, tc |
@@ -449,7 +449,7 @@ Options:
 
 ### Phase 3: Multi-Host (not yet implemented)
 - vm_host in profiles
-- hosts map in topology.json vmlab section
+- hosts map in topology.json newtlab section
 - Cross-host socket links
 - Per-host deployment (`--host`)
 

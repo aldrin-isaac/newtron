@@ -2,15 +2,15 @@
 
 The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/device/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
 
 ---
 
 ## 1. SSH Tunnel (`pkg/device/tunnel.go`)
 
-SONiC devices in the lab run inside QEMU VMs managed by vmlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
+SONiC devices in the lab run inside QEMU VMs managed by newtlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
 
-**Consumer note:** newtest's `Runner.connectDevices()` calls `Device.Connect()` (§5.1), which creates an SSH tunnel per device using the vmlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
+**Consumer note:** newtest's `Runner.connectDevices()` calls `Device.Connect()` (§5.1), which creates an SSH tunnel per device using the newtlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
 
 ### 1.1 When Tunnels Are Used
 
@@ -656,7 +656,7 @@ func (c *AsicDBClient) GetRouteASIC(vrf, prefix string) (*RouteEntry, error)
 
 The connection logic uses SSH tunnels when `SSHUser` and `SSHPass` are present in the resolved profile. When these are absent (e.g., integration tests with standalone Redis), a direct connection is made.
 
-**Consumer note:** vmlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (vmlab LLD §10). `Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct vmlab-allocated port. newtest calls `Device.Connect()` in `Runner.connectDevices()` after vmlab deploy — see newtest LLD §4.5.
+**Consumer note:** newtlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (newtlab LLD §10). `Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct newtlab-allocated port. newtest calls `Device.Connect()` in `Runner.connectDevices()` after newtlab deploy — see newtest LLD §4.5.
 
 ```go
 func (d *Device) Connect(ctx context.Context) error {
@@ -1034,19 +1034,19 @@ E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function (ne
 | §5.2 Device operations | Device operations use the connection and write infrastructure documented here |
 | §12 Testing strategy | Tests use the SSH tunnel (§1) and write paths (§5.3) |
 
-### References to vmlab LLD
+### References to newtlab LLD
 
-| vmlab LLD Section | Relationship |
+| newtlab LLD Section | Relationship |
 |--------------------|-------------|
-| §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (§5.1) to target vmlab-allocated SSH port |
+| §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (§5.1) to target newtlab-allocated SSH port |
 | §1.1 PlatformSpec.VMCredentials | Source of SSHUser/SSHPass; resolved into DeviceProfile (§1.2) via profile patching (§10), then read by §5.1 |
-| §10 Profile patching | vmlab writes ssh_port/mgmt_ip into profiles; Device.Connect() reads them |
+| §10 Profile patching | newtlab writes ssh_port/mgmt_ip into profiles; Device.Connect() reads them |
 
 ### References to newtest LLD
 
 | newtest LLD Section | Relationship |
 |---------------------|-------------|
-| §4.5 Device connection | newtest calls `Device.Connect()` (§5.1) after vmlab deploy |
+| §4.5 Device connection | newtest calls `Device.Connect()` (§5.1) after newtlab deploy |
 | §5.2 provisionExecutor | Uses write paths (§5.3) via TopologyProvisioner |
 | §5.4 verifyProvisioningExecutor | Calls `Device.VerifyChangeSet()` which re-reads CONFIG_DB via a fresh ConfigDBClient on the same tunnel |
 | §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.7) |

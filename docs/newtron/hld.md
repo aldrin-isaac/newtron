@@ -79,7 +79,7 @@
 
 Newtron is an opinionated network automation tool for SONiC-based switches. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
 
-For the architectural principles behind newtron, vmlab, and newtest — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ### Key Features
 
@@ -1323,7 +1323,7 @@ This works for every operation (disaggregated or composite) because they all pro
 
 ## 14. Lab Architecture
 
-Lab environments use **vmlab** for VM orchestration (see `docs/vmlab/`).
+Lab environments use **newtlab** for VM orchestration (see `docs/newtlab/`).
 
 ## 15. Testing Architecture
 
@@ -1332,7 +1332,7 @@ Lab environments use **vmlab** for VM orchestration (see `docs/vmlab/`).
 | Tier | How | Purpose |
 |------|-----|---------|
 | Unit | `go test ./...` | Pure logic: IP derivation, spec parsing, ACL expansion |
-| E2E | newtest framework | Full stack: vmlab VMs, SSH tunnel, real SONiC |
+| E2E | newtest framework | Full stack: newtlab VMs, SSH tunnel, real SONiC |
 
 ### 15.2 Unit Tests
 
@@ -1377,7 +1377,7 @@ The system maintains this separation to enable:
 
 ### 17.3 Go Build Tags for Test Isolation
 
-**Decision**: Unit tests run with `go test ./...` (no dependencies). E2E tests use the newtest framework with vmlab VMs.
+**Decision**: Unit tests run with `go test ./...` (no dependencies). E2E tests use the newtest framework with newtlab VMs.
 
 **Rationale**: Unit tests must run instantly with zero infrastructure. E2E tests need QEMU VMs (minutes to start, gigabytes of RAM). This separation ensures `go test ./...` runs only fast unit tests by default.
 

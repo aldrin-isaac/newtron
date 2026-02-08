@@ -1,10 +1,10 @@
-# vmlab — HOWTO Guide
+# newtlab — HOWTO Guide
 
-vmlab realizes network topologies as connected QEMU virtual machines. It
+newtlab realizes network topologies as connected QEMU virtual machines. It
 reads newtron's spec files (`topology.json`, `platforms.json`, `profiles/`)
 and manages VM lifecycle without root privileges.
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 
@@ -25,16 +25,16 @@ sudo apt install netcat-openbsd
 
 ### VM Images
 
-Download or build SONiC VM images and place them in `~/.vmlab/images/`:
+Download or build SONiC VM images and place them in `~/.newtlab/images/`:
 
 ```bash
-mkdir -p ~/.vmlab/images
+mkdir -p ~/.newtlab/images
 
 # SONiC VS (control plane only, no dataplane)
-cp sonic-vs.qcow2 ~/.vmlab/images/
+cp sonic-vs.qcow2 ~/.newtlab/images/
 
 # SONiC VPP (full dataplane with VPP forwarding)
-cp sonic-vpp.qcow2 ~/.vmlab/images/
+cp sonic-vpp.qcow2 ~/.newtlab/images/
 ```
 
 The image path is configured per-platform in `platforms.json`.
@@ -45,23 +45,23 @@ The image path is configured per-platform in `platforms.json`.
 
 ```bash
 # 1. Deploy VMs from a spec directory
-vmlab deploy -S specs/
+newtlab deploy -S specs/
 
 # 2. Provision devices via newtron
-vmlab provision -S specs/
+newtlab provision -S specs/
 
 # 3. Access devices
-vmlab ssh leaf1
-vmlab console spine1
+newtlab ssh leaf1
+newtlab console spine1
 
 # 4. Tear down
-vmlab destroy
+newtlab destroy
 ```
 
 Or combine deploy and provision:
 
 ```bash
-vmlab deploy -S specs/ --provision
+newtlab deploy -S specs/ --provision
 ```
 
 ---
@@ -71,7 +71,7 @@ vmlab deploy -S specs/ --provision
 ### Deploy VMs
 
 ```bash
-vmlab deploy -S specs/
+newtlab deploy -S specs/
 ```
 
 Output:
@@ -99,7 +99,7 @@ Deploying VMs...
 ### Provision Devices
 
 ```bash
-vmlab provision -S specs/
+newtlab provision -S specs/
 ```
 
 This calls newtron for each device:
@@ -112,7 +112,7 @@ Provisioning...
 ### Combined Deploy + Provision
 
 ```bash
-vmlab deploy -S specs/ --provision
+newtlab deploy -S specs/ --provision
 ```
 
 ---
@@ -122,7 +122,7 @@ vmlab deploy -S specs/ --provision
 ### SSH
 
 ```bash
-vmlab ssh leaf1
+newtlab ssh leaf1
 # Or directly:
 ssh -p 40001 admin@localhost
 ```
@@ -130,7 +130,7 @@ ssh -p 40001 admin@localhost
 ### Console
 
 ```bash
-vmlab console spine1
+newtlab console spine1
 # Or directly:
 nc localhost 30000
 ```
@@ -140,7 +140,7 @@ nc localhost 30000
 ## Status
 
 ```bash
-vmlab status
+newtlab status
 
 Lab: spine-leaf
 State: running
@@ -160,9 +160,9 @@ Links (1):
 ## Managing Nodes
 
 ```bash
-vmlab stop leaf1      # Stop (preserves disk)
-vmlab start leaf1     # Start
-vmlab reset leaf1     # Hard reset via QEMU monitor
+newtlab stop leaf1      # Stop (preserves disk)
+newtlab start leaf1     # Start
+newtlab reset leaf1     # Hard reset via QEMU monitor
 ```
 
 ---
@@ -170,24 +170,24 @@ vmlab reset leaf1     # Hard reset via QEMU monitor
 ## Snapshots
 
 ```bash
-vmlab snapshot --name baseline    # Create
-vmlab snapshot --list             # List
-vmlab restore --name baseline     # Restore
+newtlab snapshot --name baseline    # Create
+newtlab snapshot --list             # List
+newtlab restore --name baseline     # Restore
 ```
 
 ---
 
 ## Spec Configuration
 
-### topology.json vmlab Section
+### topology.json newtlab Section
 
-The `vmlab` section in `topology.json` controls port allocation:
+The `newtlab` section in `topology.json` controls port allocation:
 
 ```json
 {
   "devices": { "..." : "..." },
   "links": [ "..." ],
-  "vmlab": {
+  "newtlab": {
     "link_port_base": 20000,
     "console_port_base": 30000,
     "ssh_port_base": 40000
@@ -214,7 +214,7 @@ Define multiple platforms for different SONiC images:
       "description": "SONiC Virtual Switch (control plane only)",
       "port_count": 32,
       "default_speed": "40000",
-      "vm_image": "~/.vmlab/images/sonic-vs.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vs.qcow2",
       "vm_memory": 4096,
       "vm_cpus": 2,
       "vm_nic_driver": "e1000",
@@ -227,7 +227,7 @@ Define multiple platforms for different SONiC images:
       "description": "SONiC with VPP dataplane (full forwarding)",
       "port_count": 32,
       "default_speed": "40000",
-      "vm_image": "~/.vmlab/images/sonic-vpp.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vpp.qcow2",
       "vm_memory": 4096,
       "vm_cpus": 4,
       "vm_nic_driver": "virtio-net-pci",
@@ -295,16 +295,16 @@ Credentials resolve:
 
 ## Profile Patching
 
-After deploying VMs, vmlab updates profiles so newtron can connect:
+After deploying VMs, newtlab updates profiles so newtron can connect:
 
 ```json
-// Before vmlab deploy
+// Before newtlab deploy
 {
   "mgmt_ip": "PLACEHOLDER",
   "platform": "sonic-vpp"
 }
 
-// After vmlab deploy
+// After newtlab deploy
 {
   "mgmt_ip": "127.0.0.1",
   "ssh_port": 40000,
@@ -327,7 +327,7 @@ instead of the default 22.
 
 ```json
 {
-  "vmlab": {
+  "newtlab": {
     "hosts": {
       "server-a": "192.168.1.10",
       "server-b": "192.168.1.11"
@@ -350,13 +350,13 @@ In `profiles/<device>.json`:
 
 ```bash
 # On server-a
-vmlab deploy -S specs/ --host server-a
+newtlab deploy -S specs/ --host server-a
 
 # On server-b
-vmlab deploy -S specs/ --host server-b
+newtlab deploy -S specs/ --host server-b
 
 # Provision from anywhere
-vmlab provision -S specs/
+newtlab provision -S specs/
 ```
 
 Cross-host links use TCP sockets. The listening side binds `0.0.0.0:<port>`,
@@ -369,7 +369,7 @@ the connecting side uses the host IP from the `hosts` map.
 ### VM Won't Start
 
 ```bash
-cat ~/.vmlab/labs/<topology>/logs/spine1.log
+cat ~/.newtlab/labs/<topology>/logs/spine1.log
 ```
 
 Common causes:
@@ -380,16 +380,16 @@ Common causes:
 ### Can't SSH
 
 ```bash
-vmlab status                    # Check if running
+newtlab status                    # Check if running
 nc -zv localhost 40000          # Check port
-vmlab console spine1            # Try console
+newtlab console spine1            # Try console
 ```
 
 ### Links Not Working
 
 ```bash
 ss -tlnp | grep 20000           # Check listener
-vmlab ssh spine1
+newtlab ssh spine1
 ip link show                    # Check interfaces inside VM
 ```
 
@@ -409,19 +409,19 @@ the `vm_interface_map` may be wrong for the image:
 ## Command Reference
 
 ```
-vmlab - VM orchestration for network topologies
+newtlab - VM orchestration for network topologies
 
 Commands:
-  vmlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
-  vmlab provision -S <specs>     Provision devices via newtron
-  vmlab destroy                  Stop and remove all VMs
-  vmlab status                   Show VM status
-  vmlab ssh <node>               SSH to a VM
-  vmlab console <node>           Attach to serial console
-  vmlab stop <node>              Stop a VM (preserves disk)
-  vmlab start <node>             Start a stopped VM
-  vmlab snapshot --name <name>   Create snapshot
-  vmlab restore --name <name>    Restore from snapshot
+  newtlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
+  newtlab provision -S <specs>     Provision devices via newtron
+  newtlab destroy                  Stop and remove all VMs
+  newtlab status                   Show VM status
+  newtlab ssh <node>               SSH to a VM
+  newtlab console <node>           Attach to serial console
+  newtlab stop <node>              Stop a VM (preserves disk)
+  newtlab start <node>             Start a stopped VM
+  newtlab snapshot --name <name>   Create snapshot
+  newtlab restore --name <name>    Restore from snapshot
 
 Options:
   -S, --specs <dir>     Spec directory (required for deploy/provision)

@@ -1,8 +1,8 @@
-# vmlab Low-Level Design (LLD)
+# newtlab Low-Level Design (LLD)
 
-vmlab realizes network topologies as connected QEMU virtual machines for SONiC lab environments. This document covers `pkg/vmlab/` — the VM lifecycle, networking, and port management layer.
+newtlab realizes network topologies as connected QEMU virtual machines for SONiC lab environments. This document covers `pkg/newtlab/` — the VM lifecycle, networking, and port management layer.
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [vmlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 
@@ -22,7 +22,7 @@ type PlatformSpec struct {
     DefaultSpeed string   `json:"default_speed"`
     Breakouts    []string `json:"breakouts,omitempty"`
 
-    // vmlab VM fields
+    // newtlab VM fields
     VMImage        string         `json:"vm_image,omitempty"`
     VMMemory       int            `json:"vm_memory,omitempty"`
     VMCPUs         int            `json:"vm_cpus,omitempty"`
@@ -55,13 +55,13 @@ type VMCredentials struct {
 | `vm_boot_timeout` | int | 180 | Seconds to wait for SSH |
 | `dataplane` | string | `""` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
 
-### 1.2 DeviceProfile — vmlab Fields
+### 1.2 DeviceProfile — newtlab Fields
 
 ```go
 type DeviceProfile struct {
     // ... existing fields ...
 
-    // vmlab per-device overrides (read by vmlab)
+    // newtlab per-device overrides (read by newtlab)
     SSHPort     int    `json:"ssh_port,omitempty"`
     ConsolePort int    `json:"console_port,omitempty"`
     VMMemory    int    `json:"vm_memory,omitempty"`
@@ -73,14 +73,14 @@ type DeviceProfile struct {
 
 | Field | Read/Write | Description |
 |-------|------------|-------------|
-| `ssh_port` | Write (vmlab) / Read (newtron) | Forwarded SSH port on host |
-| `console_port` | Write (vmlab) | Serial console port on host |
-| `vm_memory` | Read (vmlab) | Override platform memory |
-| `vm_cpus` | Read (vmlab) | Override platform CPU count |
-| `vm_image` | Read (vmlab) | Override platform disk image |
-| `vm_host` | Read (vmlab) | Target host for multi-host deployment |
+| `ssh_port` | Write (newtlab) / Read (newtron) | Forwarded SSH port on host |
+| `console_port` | Write (newtlab) | Serial console port on host |
+| `vm_memory` | Read (newtlab) | Override platform memory |
+| `vm_cpus` | Read (newtlab) | Override platform CPU count |
+| `vm_image` | Read (newtlab) | Override platform disk image |
+| `vm_host` | Read (newtlab) | Target host for multi-host deployment |
 
-### 1.3 TopologySpecFile — vmlab Section
+### 1.3 TopologySpecFile — newtlab Section
 
 ```go
 type TopologySpecFile struct {
@@ -88,15 +88,15 @@ type TopologySpecFile struct {
     Description string                     `json:"description,omitempty"`
     Devices     map[string]*TopologyDevice `json:"devices"`
     Links       []*TopologyLink            `json:"links,omitempty"`
-    VMLab       *VMLabConfig               `json:"vmlab,omitempty"`
+    NewtLab       *NewtLabConfig               `json:"newtlab,omitempty"`
 }
 ```
 
-### 1.4 VMLabConfig
+### 1.4 NewtLabConfig
 
 ```go
-// VMLabConfig holds vmlab orchestration settings from topology.json.
-type VMLabConfig struct {
+// NewtLabConfig holds newtlab orchestration settings from topology.json.
+type NewtLabConfig struct {
     LinkPortBase    int               `json:"link_port_base,omitempty"`
     ConsolePortBase int               `json:"console_port_base,omitempty"`
     SSHPortBase     int               `json:"ssh_port_base,omitempty"`
@@ -116,7 +116,7 @@ type VMLabConfig struct {
 - `mgmt_ip` is always `127.0.0.1`
 - Link socket connections use `127.0.0.1`
 - PID management uses local process signals
-- State tracking uses local filesystem (`~/.vmlab/`)
+- State tracking uses local filesystem (`~/.newtlab/`)
 
 Multi-host support (remote QEMU launch via SSH, cross-host socket links, distributed state) is deferred to Phase 3.
 
@@ -181,8 +181,8 @@ defaults to port 22 in `NewSSHTunnel`.
 ## 3. Package Structure
 
 ```
-pkg/vmlab/
-├── vmlab.go          # Lab type, Deploy, Destroy, Status
+pkg/newtlab/
+├── newtlab.go          # Lab type, Deploy, Destroy, Status
 ├── node.go           # NodeConfig, resolved VM settings
 ├── qemu.go           # QEMU command builder, process management
 ├── link.go           # Link wiring, port allocation
@@ -191,9 +191,9 @@ pkg/vmlab/
 ├── boot.go           # SSH boot wait, readiness check
 ├── profile.go        # Profile patching (write ssh_port, console_port, mgmt_ip)
 ├── state.go          # state.json persistence
-└── vmlab_test.go     # Unit tests
+└── newtlab_test.go     # Unit tests
 
-cmd/vmlab/
+cmd/newtlab/
 ├── main.go           # Entry point, root command
 ├── cmd_deploy.go     # deploy subcommand
 ├── cmd_destroy.go    # destroy subcommand
@@ -206,29 +206,29 @@ cmd/vmlab/
 
 ---
 
-## 4. Core Types (`pkg/vmlab/`)
+## 4. Core Types (`pkg/newtlab/`)
 
-### 4.1 Lab — Top-Level Orchestrator (`vmlab.go`)
+### 4.1 Lab — Top-Level Orchestrator (`newtlab.go`)
 
 ```go
-// Lab is the top-level vmlab orchestrator. It reads newtron spec files,
+// Lab is the top-level newtlab orchestrator. It reads newtron spec files,
 // resolves VM configuration, and manages QEMU processes.
 type Lab struct {
     Name     string                         // lab name (from spec dir basename)
     SpecDir  string                         // path to spec directory
-    StateDir string                         // ~/.vmlab/labs/<name>/
+    StateDir string                         // ~/.newtlab/labs/<name>/
     Topology *spec.TopologySpecFile         // parsed topology.json
     Platform *spec.PlatformSpecFile         // parsed platforms.json
     Profiles map[string]*spec.DeviceProfile // per-device profiles
-    Config   *VMLabConfig                   // from topology.json vmlab section
+    Config   *NewtLabConfig                   // from topology.json newtlab section
     Nodes    map[string]*NodeConfig         // resolved VM configs (keyed by device name)
     Links    []*LinkConfig                  // resolved link configs
     State    *LabState                      // runtime state (PIDs, ports, status)
     Force    bool                           // --force flag: destroy existing before deploy
 }
 
-// VMLabConfig mirrors spec.VMLabConfig with resolved defaults.
-type VMLabConfig struct {
+// NewtLabConfig mirrors spec.NewtLabConfig with resolved defaults.
+type NewtLabConfig struct {
     LinkPortBase    int               // default: 20000
     ConsolePortBase int               // default: 30000
     SSHPortBase     int               // default: 40000
@@ -242,9 +242,9 @@ type VMLabConfig struct {
 // NewLab loads specs from specDir and returns a configured Lab.
 // Initialization:
 //   1. Set Name from filepath.Base(specDir)
-//   2. Set StateDir to ~/.vmlab/labs/<name>/
+//   2. Set StateDir to ~/.newtlab/labs/<name>/
 //   3. Load topology.json, platforms.json, profiles/*.json
-//   4. Resolve VMLabConfig with defaults (link_port_base=20000, etc.)
+//   4. Resolve NewtLabConfig with defaults (link_port_base=20000, etc.)
 //   5. Resolve NodeConfig for each device (profile > platform > defaults)
 //   6. Allocate ports (SSH, console per node) and links
 // After NewLab, l.Nodes and l.Links are populated. Deploy() uses them
@@ -367,7 +367,7 @@ type LinkEndpoint struct {
 ### 4.5 LabState — Persisted State (`state.go`)
 
 ```go
-// LabState is persisted to ~/.vmlab/labs/<name>/state.json.
+// LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
     Name    string                  `json:"name"`
     Created time.Time               `json:"created"`
@@ -396,7 +396,7 @@ type LinkState struct {
 **State directory layout:**
 
 ```
-~/.vmlab/labs/<name>/
+~/.newtlab/labs/<name>/
 ├── state.json           # LabState
 ├── qemu/
 │   ├── spine1.pid       # QEMU PID file
@@ -549,7 +549,7 @@ func parseEthernetIndex(name string) int
 func AllocateLinks(
     links []*spec.TopologyLink,
     nodes map[string]*NodeConfig,
-    config *VMLabConfig,
+    config *NewtLabConfig,
 ) ([]*LinkConfig, error)
 ```
 
@@ -601,7 +601,7 @@ func RemoveOverlay(overlayPath string) error
 ```
 
 The base image is never modified. Each VM gets its own overlay in
-`~/.vmlab/labs/<name>/disks/<device>.qcow2`.
+`~/.newtlab/labs/<name>/disks/<device>.qcow2`.
 
 `~` in `vm_image` paths is expanded to `$HOME` at resolution time.
 
@@ -631,7 +631,7 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 ### 10.1 PatchProfiles
 
 ```go
-// PatchProfiles updates device profile JSON files with vmlab runtime values.
+// PatchProfiles updates device profile JSON files with newtlab runtime values.
 // Called after successful VM deployment.
 func PatchProfiles(lab *Lab) error
 ```
@@ -651,7 +651,7 @@ func PatchProfiles(lab *Lab) error
 ### 10.2 RestoreProfiles
 
 ```go
-// RestoreProfiles removes vmlab-written fields from profiles.
+// RestoreProfiles removes newtlab-written fields from profiles.
 // Called during destroy to clean up.
 func RestoreProfiles(lab *Lab) error
 ```
@@ -664,7 +664,7 @@ Removes: `ssh_port`, `console_port`. Resets `mgmt_ip` to the original value save
 
 ```go
 // LabDir returns the state directory path for a lab name.
-//   ~/.vmlab/labs/<name>/
+//   ~/.newtlab/labs/<name>/
 func LabDir(name string) string
 
 // SaveState writes lab state to state.json in the lab directory.
@@ -692,7 +692,7 @@ func (l *Lab) Deploy() error {
     // was not properly destroyed. Require --force to overwrite.
     if existing, err := LoadState(l.Name); err == nil && existing != nil {
         if !l.Force {
-            return fmt.Errorf("vmlab: lab %s already deployed (created %s); use --force to redeploy",
+            return fmt.Errorf("newtlab: lab %s already deployed (created %s); use --force to redeploy",
                 l.Name, existing.Created.Format(time.RFC3339))
         }
         // --force: destroy existing deployment first
@@ -702,8 +702,8 @@ func (l *Lab) Deploy() error {
     // 1. Load specs
     topology, platforms, profiles := loadSpecs(l.SpecDir)
 
-    // 2. Resolve vmlab config (with defaults)
-    l.Config = resolveVMLabConfig(topology.VMLab)
+    // 2. Resolve newtlab config (with defaults)
+    l.Config = resolveNewtLabConfig(topology.NewtLab)
 
     // 3. Resolve node configs (profile > platform > defaults)
     for name, device := range topology.Devices {
@@ -717,12 +717,12 @@ func (l *Lab) Deploy() error {
 
     // 4a. Port conflict detection: probe each allocated port with net.Listen
     // to verify it's available before starting QEMU. This catches conflicts
-    // with other vmlab instances or unrelated services early, rather than
+    // with other newtlab instances or unrelated services early, rather than
     // failing mid-deploy with an opaque QEMU error.
     for _, node := range l.Nodes {
         for _, port := range []int{node.SSHPort, node.ConsolePort} {
             if err := probePort(port); err != nil {
-                return fmt.Errorf("vmlab: port %d already in use: %w", port, err)
+                return fmt.Errorf("newtlab: port %d already in use: %w", port, err)
             }
         }
     }
@@ -730,7 +730,7 @@ func (l *Lab) Deploy() error {
     // 5. Allocate links (assigns NICs, ports, listen/connect)
     l.Links = AllocateLinks(topology.Links, l.Nodes, l.Config)
 
-    // 6. Create state directory (~/.vmlab/labs/<name>/)
+    // 6. Create state directory (~/.newtlab/labs/<name>/)
     os.MkdirAll(l.StateDir+"/qemu", 0755)
     os.MkdirAll(l.StateDir+"/disks", 0755)
     os.MkdirAll(l.StateDir+"/logs", 0755)
@@ -778,13 +778,13 @@ func (l *Lab) Deploy() error {
 }
 ```
 
-**`resolveVMLabConfig`** fills defaults for nil or zero-value fields:
+**`resolveNewtLabConfig`** fills defaults for nil or zero-value fields:
 
 ```go
-// resolveVMLabConfig returns a VMLabConfig with defaults applied.
-// Takes the optional *spec.VMLabConfig from topology.json (may be nil).
-func resolveVMLabConfig(cfg *spec.VMLabConfig) *VMLabConfig {
-    resolved := &VMLabConfig{
+// resolveNewtLabConfig returns a NewtLabConfig with defaults applied.
+// Takes the optional *spec.NewtLabConfig from topology.json (may be nil).
+func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *NewtLabConfig {
+    resolved := &NewtLabConfig{
         LinkPortBase:    20000,
         ConsolePortBase: 30000,
         SSHPortBase:     40000,
@@ -806,9 +806,9 @@ This ensures socket listeners are ready before connectors attempt to dial.
 **Mid-deploy failure recovery:** If a QEMU process fails to start (step 8)
 or SSH readiness times out (step 9), Deploy() still saves state (step 11)
 with the failed node marked as `"error"`. This leaves a valid state.json on
-disk so that `vmlab destroy` can clean up all started nodes. The caller sees
-a non-nil error. To retry, the user runs `vmlab destroy` then `vmlab deploy`
-(or `vmlab deploy --force`, which calls `destroyExisting` automatically).
+disk so that `newtlab destroy` can clean up all started nodes. The caller sees
+a non-nil error. To retry, the user runs `newtlab destroy` then `newtlab deploy`
+(or `newtlab deploy --force`, which calls `destroyExisting` automatically).
 Partial deploys do **not** auto-rollback — explicit destroy is required.
 
 ---
@@ -849,7 +849,7 @@ func (l *Lab) Destroy() error {
     }
 
     if len(errs) > 0 {
-        return fmt.Errorf("vmlab: destroy had %d errors: %v", len(errs), errs)
+        return fmt.Errorf("newtlab: destroy had %d errors: %v", len(errs), errs)
     }
     return nil
 }
@@ -857,7 +857,7 @@ func (l *Lab) Destroy() error {
 
 ### 13.1 Lab.Provision()
 
-Called by `vmlab deploy --provision` or `vmlab provision`. Shells out to `newtron provision` for each device:
+Called by `newtlab deploy --provision` or `newtlab provision`. Shells out to `newtron provision` for each device:
 
 ```go
 // Provision runs newtron provisioning for all (or specified) devices in the lab.
@@ -896,11 +896,11 @@ func (l *Lab) Provision(parallel int) error {
 }
 ```
 
-**Why shell out:** vmlab is a separate binary from newtron. Rather than importing newtron's `pkg/network` (which would create a circular dependency), vmlab invokes the `newtron` CLI. This keeps the tools loosely coupled — vmlab only needs the `newtron` binary on PATH.
+**Why shell out:** newtlab is a separate binary from newtron. Rather than importing newtron's `pkg/network` (which would create a circular dependency), newtlab invokes the `newtron` CLI. This keeps the tools loosely coupled — newtlab only needs the `newtron` binary on PATH.
 
 ---
 
-## 14. CLI Implementation (`cmd/vmlab/`)
+## 14. CLI Implementation (`cmd/newtlab/`)
 
 ### 14.1 Command Tree
 
@@ -909,7 +909,7 @@ Same Cobra pattern as `cmd/newtron/`. Root command with subcommands.
 ```go
 // main.go
 func main() {
-    rootCmd := &cobra.Command{Use: "vmlab"}
+    rootCmd := &cobra.Command{Use: "newtlab"}
     rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory")
     rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
@@ -932,14 +932,14 @@ func main() {
 
 | Command | File | Flags | Description |
 |---------|------|-------|-------------|
-| `vmlab deploy` | `cmd_deploy.go` | `-S` (required), `--host`, `--force`, `--provision`, `--parallel` | Deploy VMs from spec |
-| `vmlab destroy` | `cmd_destroy.go` | `--force` | Stop and remove all VMs |
-| `vmlab status` | `cmd_status.go` | (none) | Show VM status table |
-| `vmlab ssh <node>` | `cmd_ssh.go` | (none) | SSH to a VM |
-| `vmlab console <node>` | `cmd_console.go` | (none) | Attach to serial console |
-| `vmlab stop <node>` | `cmd_stop.go` | (none) | Stop a VM (preserves disk) |
-| `vmlab start <node>` | `cmd_stop.go` | (none) | Start a stopped VM |
-| `vmlab provision` | `cmd_provision.go` | `--device` | Run newtron provisioning |
+| `newtlab deploy` | `cmd_deploy.go` | `-S` (required), `--host`, `--force`, `--provision`, `--parallel` | Deploy VMs from spec |
+| `newtlab destroy` | `cmd_destroy.go` | `--force` | Stop and remove all VMs |
+| `newtlab status` | `cmd_status.go` | (none) | Show VM status table |
+| `newtlab ssh <node>` | `cmd_ssh.go` | (none) | SSH to a VM |
+| `newtlab console <node>` | `cmd_console.go` | (none) | Attach to serial console |
+| `newtlab stop <node>` | `cmd_stop.go` | (none) | Stop a VM (preserves disk) |
+| `newtlab start <node>` | `cmd_stop.go` | (none) | Start a stopped VM |
+| `newtlab provision` | `cmd_provision.go` | `--device` | Run newtron provisioning |
 
 ### 14.3 deploy
 
@@ -954,7 +954,7 @@ func newDeployCmd() *cobra.Command {
         Use:   "deploy",
         Short: "Deploy VMs from topology.json",
         RunE: func(cmd *cobra.Command, args []string) error {
-            lab, err := vmlab.NewLab(specDir)
+            lab, err := newtlab.NewLab(specDir)
             if err != nil {
                 return err
             }
@@ -1027,9 +1027,9 @@ func newProvisionCmd() *cobra.Command
 All errors use `fmt.Errorf` with `%w` wrapping for context:
 
 ```go
-return fmt.Errorf("vmlab: start node %s: %w", name, err)
-return fmt.Errorf("vmlab: create overlay %s: %w", overlayPath, err)
-return fmt.Errorf("vmlab: allocate links: port %d conflict: %w", port, err)
+return fmt.Errorf("newtlab: start node %s: %w", name, err)
+return fmt.Errorf("newtlab: create overlay %s: %w", overlayPath, err)
+return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 ```
 
 ### 15.2 Error Conditions
@@ -1051,27 +1051,27 @@ return fmt.Errorf("vmlab: allocate links: port %d conflict: %w", port, err)
 
 ### References to newtron LLD
 
-| newtron LLD Section | How vmlab Relates |
+| newtron LLD Section | How newtlab Relates |
 |----------------------|-------------------|
-| §3.1 `PlatformSpec` | vmlab adds VM fields (`vm_image`, `vm_memory`, etc.) to the shared spec type — see §1.1 |
-| §3.1 `DeviceProfile` | vmlab adds per-device overrides (`ssh_port`, `console_port`) — see §1.2 |
-| §3.1 `TopologySpecFile` | vmlab reads topology for device list, links, and VM host assignments |
+| §3.1 `PlatformSpec` | newtlab adds VM fields (`vm_image`, `vm_memory`, etc.) to the shared spec type — see §1.1 |
+| §3.1 `DeviceProfile` | newtlab adds per-device overrides (`ssh_port`, `console_port`) — see §1.2 |
+| §3.1 `TopologySpecFile` | newtlab reads topology for device list, links, and VM host assignments |
 
 ### References to device LLD
 
-| Device LLD Section | How vmlab Relates |
+| Device LLD Section | How newtlab Relates |
 |--------------------|-------------------|
-| §1 SSH Tunnel | Tunnel reads `SSHPort` written by vmlab profile patching (§10) |
-| §5.1 `Device.Connect()` | Connection reads `SSHUser`/`SSHPass`/`SSHPort` from profiles that vmlab patches |
+| §1 SSH Tunnel | Tunnel reads `SSHPort` written by newtlab profile patching (§10) |
+| §5.1 `Device.Connect()` | Connection reads `SSHUser`/`SSHPass`/`SSHPort` from profiles that newtlab patches |
 
 ### References to newtest LLD
 
-| newtest LLD Section | How vmlab Relates |
+| newtest LLD Section | How newtlab Relates |
 |---------------------|-------------------|
-| §6.1 `DeployTopology` | newtest wraps `vmlab.NewLab()` + `vmlab.Lab.Deploy()` — see §4.1 |
-| §6.2 `DestroyTopology` | newtest wraps `vmlab.Lab.Destroy()` — see §4.1 |
+| §6.1 `DeployTopology` | newtest wraps `newtlab.NewLab()` + `newtlab.Lab.Deploy()` — see §4.1 |
+| §6.2 `DestroyTopology` | newtest wraps `newtlab.Lab.Destroy()` — see §4.1 |
 | §6.3 Platform Capability Check | newtest reads `PlatformSpec.Dataplane` (§1.1) to skip verify-ping |
-| §4.5 Device connection | newtest relies on vmlab profile patching (§10) before connecting devices |
+| §4.5 Device connection | newtest relies on newtlab profile patching (§10) before connecting devices |
 
 ---
 

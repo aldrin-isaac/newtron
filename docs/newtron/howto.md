@@ -1,6 +1,6 @@
 # Newtron HOWTO Guide (v4)
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ### What Changed in v2
 
@@ -225,7 +225,7 @@ sudo mkdir -p /etc/newtron/configlets
         └── sonic-baseline.json
 ```
 
-For lab environments, vmlab generates specs per topology (see `docs/vmlab/`).
+For lab environments, newtlab generates specs per topology (see `docs/newtlab/`).
 
 ### 3.2 Network Specification (`network.json`)
 
@@ -1941,7 +1941,7 @@ This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any uns
 
 ## 17. Lab Environment
 
-Lab environments for newtron use **vmlab** (see `docs/vmlab/`). vmlab orchestrates
+Lab environments for newtron use **newtlab** (see `docs/newtlab/`). newtlab orchestrates
 SONiC-VS QEMU VMs without requiring root or Docker. E2E testing uses the **newtest**
 framework (see `docs/newtest/`).
 

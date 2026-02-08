@@ -1,7 +1,7 @@
 # Design Principles
 
 This document describes the architectural principles behind newtron,
-vmlab, and newtest — and the philosophy that keeps them coherent as a
+newtlab, and newtest — and the philosophy that keeps them coherent as a
 system. It is intended to be read before the HLDs and LLDs, as a guide
 for understanding *why* things are the way they are.
 
@@ -10,11 +10,11 @@ for understanding *why* things are the way they are.
 ## 1. Two Tools and an Orchestrator
 
 The system is split into three programs — newtron (provision devices),
-vmlab (deploy VMs), newtest (E2E testing) — not because three is a
+newtlab (deploy VMs), newtest (E2E testing) — not because three is a
 nice number, but because each program has a fundamentally different
 relationship with the world:
 
-- **vmlab** realizes a topology. It reads newtron's `topology.json` and
+- **newtlab** realizes a topology. It reads newtron's `topology.json` and
   brings it to life — deploying QEMU VMs (primarily SONiC) and wiring
   them together using socket-based links across one or more servers. No
   root, no bridges, no Docker. It doesn't define the topology or touch
@@ -28,20 +28,20 @@ relationship with the world:
 - **newtest** is an orchestrator specifically for E2E testing. It tests
   two things: that newtron's automation produces correct device state,
   and that SONiC software on each device behaves correctly in its role
-  (spine, leaf, etc.). It deploys topologies (via vmlab), provisions
+  (spine, leaf, etc.). It deploys topologies (via newtlab), provisions
   devices (via newtron), then asserts correctness — both per-device
   and across the fabric.
 
-newtron and vmlab are general-purpose tools. newtest is not — it exists
+newtron and newtlab are general-purpose tools. newtest is not — it exists
 to test newtron and the SONiC stack. Other orchestrators could be built on top of
-newtron and vmlab for different purposes (production deployment,
+newtron and newtlab for different purposes (production deployment,
 CI/CD pipelines, compliance auditing), and the architecture is designed
 to support that. newtron's observation primitives (`GetRoute`,
 `RunHealthChecks`) return structured data precisely so that *any*
 orchestrator can consume them — not just newtest.
 
 These boundaries follow from a single rule: **each program owns exactly
-one level of abstraction**. vmlab owns VM realization — turning a
+one level of abstraction**. newtlab owns VM realization — turning a
 topology spec into running, connected VMs. newtron owns single-device
 configuration — translating specs into CONFIG_DB entries. Orchestrators
 own the "what, where, and in what order" — which devices to provision,
@@ -52,7 +52,7 @@ testing.
 If you're unsure where something belongs, ask: "does this decide what
 gets applied where, or how something gets applied?" The former belongs
 in an orchestrator. The latter belongs in newtron. "Does this require
-knowing about device configuration at all?" If no, it belongs in vmlab.
+knowing about device configuration at all?" If no, it belongs in newtlab.
 
 ---
 
@@ -213,7 +213,7 @@ This separation enables two things that matter:
    already exists on an interface) rather than blindly re-applying.
 
 The spec directory is also the only coupling surface between the three
-programs. vmlab reads topology and platform specs to deploy VMs. newtron
+programs. newtlab reads topology and platform specs to deploy VMs. newtron
 reads all specs to provision devices. newtest reads scenario definitions
 that reference topology specs. No program imports another's packages or
 calls another's API. They communicate through files.
@@ -225,12 +225,12 @@ calls another's API. They communicate through files.
 DRY applies not just within a single codebase, but across the entire
 system. Every capability exists in exactly one place:
 
-**One spec directory.** vmlab, newtron, and newtest all read from the
+**One spec directory.** newtlab, newtron, and newtest all read from the
 same `specs/` directory. `topology.json` belongs to newtron — it defines
-the network's devices, interfaces, and links. vmlab reads the same file
+the network's devices, interfaces, and links. newtlab reads the same file
 because it needs to realize that topology as running VMs for testing.
-The `vmlab` section in `topology.json` is vmlab borrowing space in
-newtron's file, not the other way around. vmlab reads the `devices`
+The `newtlab` section in `topology.json` is newtlab borrowing space in
+newtron's file, not the other way around. newtlab reads the `devices`
 and `links` sections. newtron reads the `devices` and `interfaces`
 sections. Neither maintains its own copy.
 
@@ -248,20 +248,20 @@ verify methods, no table-specific assertion helpers, no parallel
 verification paths. One mechanism for everything.
 
 **One platform definition.** `platforms.json` describes each platform
-once. vmlab reads VM-specific fields (image, memory, NIC driver).
+once. newtlab reads VM-specific fields (image, memory, NIC driver).
 newtron reads hardware fields (HWSKU, port count). Orchestrators read
 capability fields (dataplane support). Each consumer takes what it needs
 from the same definition.
 
 **One profile per device.** A device profile starts with operator-authored
-fields (loopback IP, site, platform). vmlab adds runtime fields (SSH port,
+fields (loopback IP, site, platform). newtlab adds runtime fields (SSH port,
 console port, management IP). newtron reads the combined profile. There
-is no separate vmlab state file that newtron must also consult — vmlab
+is no separate newtlab state file that newtron must also consult — newtlab
 writes its output *into the same profile* newtron already reads.
 
 The anti-pattern this prevents: an orchestrator implementing its own
 CONFIG_DB reader "because it needs a slightly different format." Or
-vmlab maintaining its own device inventory "because it needs extra
+newtlab maintaining its own device inventory "because it needs extra
 fields." Every time a capability is duplicated, the copies drift. The
 system prevents drift by having one authoritative implementation of
 each capability.
@@ -292,24 +292,24 @@ provisioning possible.
 
 ## 7. Programs Communicate Through Files, Not APIs
 
-vmlab does not expose an API that newtron calls. newtron does not expose
+newtlab does not expose an API that newtron calls. newtron does not expose
 a service that newtest connects to. The programs are not microservices.
 
 Instead, they communicate through the spec directory:
 
-- vmlab writes `ssh_port`, `console_port`, and `mgmt_ip` into profile
+- newtlab writes `ssh_port`, `console_port`, and `mgmt_ip` into profile
   files after deploying VMs.
 - newtron reads those profile files and uses the ports to connect.
-- Orchestrators (like newtest) invoke vmlab and newtron as CLI commands,
+- Orchestrators (like newtest) invoke newtlab and newtron as CLI commands,
   passing the spec directory path.
 
 This means:
 
 - **No shared libraries.** A change to newtron's internal types does not
-  require rebuilding vmlab.
-- **No runtime coordination.** vmlab exits after deploying. newtron exits
+  require rebuilding newtlab.
+- **No runtime coordination.** newtlab exits after deploying. newtron exits
   after provisioning. They don't need to be alive at the same time.
-- **No service discovery.** newtron doesn't ask "where is vmlab's API?"
+- **No service discovery.** newtron doesn't ask "where is newtlab's API?"
   It reads a file.
 - **Portability.** The spec directory is the complete, self-contained
   state of the system. Copy it to another machine, run the tools, get
@@ -380,7 +380,7 @@ orchestrator decides the policy.
 
 | Principle | One-Line Rule |
 |-----------|---------------|
-| One level of abstraction per program | vmlab realizes the topology, newtron translates specs to config, orchestrators decide what gets applied where |
+| One level of abstraction per program | newtlab realizes the topology, newtron translates specs to config, orchestrators decide what gets applied where |
 | Objects own their methods | A method belongs to the smallest object that has all the context to execute it |
 | If you change it, you verify it | The tool that writes the state must be able to verify the write |
 | Spec vs config | Intent is declarative and version-controlled; state is imperative and generated |

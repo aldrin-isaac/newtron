@@ -1,6 +1,6 @@
 # Newtron Low-Level Design (LLD)
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
 
 Version history is in [Appendix A](#appendix-a-changelog) at the end of this document.
 
@@ -378,10 +378,10 @@ type DeviceProfile struct {
     // OPTIONAL - SSH access for Redis tunnel
     SSHUser string `json:"ssh_user,omitempty"`
     SSHPass string `json:"ssh_pass,omitempty"`
-    SSHPort int    `json:"ssh_port,omitempty"`  // Custom SSH port (vmlab)
+    SSHPort int    `json:"ssh_port,omitempty"`  // Custom SSH port (newtlab)
 
-    // OPTIONAL - vmlab overrides (see vmlab LLD §1.2)
-    ConsolePort int    `json:"console_port,omitempty"` // Written by vmlab profile patching
+    // OPTIONAL - newtlab overrides (see newtlab LLD §1.2)
+    ConsolePort int    `json:"console_port,omitempty"` // Written by newtlab profile patching
     VMMemory    int    `json:"vm_memory,omitempty"`    // Override platform default
     VMCPUs      int    `json:"vm_cpus,omitempty"`      // Override platform default
     VMImage     string `json:"vm_image,omitempty"`     // Override platform default
@@ -441,7 +441,7 @@ type TopologySpecFile struct {
     Description string                     `json:"description,omitempty"`
     Devices     map[string]*TopologyDevice `json:"devices"`
     Links       []*TopologyLink            `json:"links,omitempty"`
-    VMLab       *VMLabConfig               `json:"vmlab,omitempty"` // vmlab defaults (see vmlab LLD §1.3)
+    NewtLab       *NewtLabConfig               `json:"newtlab,omitempty"` // newtlab defaults (see newtlab LLD §1.3)
 }
 
 type TopologyDevice struct {
@@ -471,7 +471,7 @@ type PlatformSpecFile struct {
 }
 
 // PlatformSpec defines a hardware or virtual platform.
-// Core fields are read by newtron; VM fields are read by vmlab (see vmlab LLD §1.1).
+// Core fields are read by newtron; VM fields are read by newtlab (see newtlab LLD §1.1).
 type PlatformSpec struct {
     // Core (read by newtron)
     HwSKU        string   `json:"hwsku"`
@@ -481,7 +481,7 @@ type PlatformSpec struct {
     Breakouts    []string `json:"breakouts,omitempty"`
     Dataplane    string   `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
 
-    // VM (read by vmlab — see vmlab LLD §1.1 for full field docs)
+    // VM (read by newtlab — see newtlab LLD §1.1 for full field docs)
     VMImage              string            `json:"vm_image,omitempty"`
     VMMemory             int               `json:"vm_memory,omitempty"`
     VMCPUs               int               `json:"vm_cpus,omitempty"`
@@ -504,7 +504,7 @@ type VMCredentials struct {
 
 The `pkg/spec/` types are a shared coupling surface — all three tools read from the same JSON files. This table shows which tool reads or writes each field group:
 
-| Type | Field Group | newtron | vmlab | newtest |
+| Type | Field Group | newtron | newtlab | newtest |
 |------|-------------|---------|-------|---------|
 | `PlatformSpec` | Core (`hwsku`, `port_count`, `default_speed`) | Read | | |
 | `PlatformSpec` | VM (`vm_image`, `vm_memory`, `vm_cpus`, `vm_nic_driver`, ...) | | Read | |
@@ -515,11 +515,11 @@ The `pkg/spec/` types are a shared coupling surface — all three tools read fro
 | `DeviceProfile` | `ssh_port`, `mgmt_ip` | Read | **Write** (profile patching) | |
 | `DeviceProfile` | VM overrides (`vm_memory`, `vm_cpus`, `vm_image`) | | Read | |
 | `TopologySpecFile` | Devices, links | Read (topology provisioner) | Read (VM deployment) | Read (scenario topology) |
-| `TopologySpecFile` | `vmlab` config | | Read (VM defaults) | |
+| `TopologySpecFile` | `newtlab` config | | Read (VM defaults) | |
 | `NetworkSpecFile` | Services, VPNs, filters, regions | Read | | |
 | `SiteSpecFile` | Site topology, route reflectors | Read | | |
 
-**Key insight:** `DeviceProfile.ssh_port` and `DeviceProfile.mgmt_ip` are the only fields that vmlab **writes** — all other spec data flows from JSON files into the tools as read-only input. vmlab writes these into profile JSON during deployment (vmlab LLD §10), and newtron reads them in `Device.Connect()` (device LLD §5.1).
+**Key insight:** `DeviceProfile.ssh_port` and `DeviceProfile.mgmt_ip` are the only fields that newtlab **writes** — all other spec data flows from JSON files into the tools as read-only input. newtlab writes these into profile JSON during deployment (newtlab LLD §10), and newtron reads them in `Device.Connect()` (device LLD §5.1).
 
 ### 3.2 Object Hierarchy (`pkg/network/`)
 
@@ -3659,7 +3659,7 @@ Newtron uses three tiers of tests, each with different scope and infrastructure 
 | Tier | Infrastructure | Speed | What It Tests |
 |------|---------------|-------|---------------|
 | Unit | None | Fast (~1s) | Pure logic: IP math, name normalization, spec resolution |
-| E2E | vmlab + newtest | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
+| E2E | newtlab + newtest | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
 
 ### 12.2 Unit Tests
 
@@ -3711,19 +3711,19 @@ from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.m
 | §5.3 Write paths | Used by `ChangeSet.Apply()` and composite delivery (§5.2) |
 | §5.8 Pipeline ops | Used by `DeliverComposite()` for atomic writes |
 
-### References to vmlab LLD
+### References to newtlab LLD
 
-| vmlab LLD Section | How This LLD Uses It |
+| newtlab LLD Section | How This LLD Uses It |
 |--------------------|----------------------|
-| §1.1 PlatformSpec VM fields | newtron ignores VM fields; they're vmlab-only (see §3.1A ownership table) |
+| §1.1 PlatformSpec VM fields | newtron ignores VM fields; they're newtlab-only (see §3.1A ownership table) |
 | §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (device LLD §5.1) |
-| §10 Profile patching | vmlab writes `ssh_port`/`mgmt_ip` that newtron reads at connect time |
+| §10 Profile patching | newtlab writes `ssh_port`/`mgmt_ip` that newtron reads at connect time |
 
 ### References to newtest LLD
 
 | newtest LLD Section | How This LLD Relates |
 |---------------------|----------------------|
-| §4.5 Device connection | newtest calls `Device.Connect()` after vmlab deploy |
+| §4.5 Device connection | newtest calls `Device.Connect()` after newtlab deploy |
 | §5 Step executors | Executors call newtron device operations (§5.2) and verification methods |
 | §5.2 provisionExecutor | Calls `TopologyProvisioner.ProvisionDevice()` (§5.4) |
 | §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.2) |
@@ -3783,14 +3783,14 @@ Section numbers below refer to the version when the change was made and may not 
 
 | Area | Change |
 |------|--------|
-| **DeviceProfile** | Added `SSHPort` field for custom SSH port (vmlab integration) |
-| **TopologySpecFile** | Added `VMLab *VMLabConfig` field for vmlab defaults |
+| **DeviceProfile** | Added `SSHPort` field for custom SSH port (newtlab integration) |
+| **TopologySpecFile** | Added `NewtLab *NewtLabConfig` field for newtlab defaults |
 | **APP_DB Client** | `pkg/device/appldb.go` — AppDB struct, AppDBClient with GetRoute |
 | **ASIC_DB Client** | `pkg/device/asicdb.go` — AsicDBClient with GetRouteASIC, SAI object chain resolution |
 | **Verification Types** | VerificationResult, VerificationError, RouteEntry, NextHop, RouteSource (§3.6A) |
 | **Verification Methods** | VerifyChangeSet, GetRoute, GetRouteASIC |
 | **Spec Type Ownership** | New §3.1A: cross-tool field ownership table |
-| **Cross-References** | New section: bidirectional links to device LLD, vmlab LLD, newtest LLD, HLD |
+| **Cross-References** | New section: bidirectional links to device LLD, newtlab LLD, newtest LLD, HLD |
 | **Document Structure** | Extracted device-layer detail (SSH tunnel, StateDB, Redis, config persistence) to device-lld.md; sections renumbered |
 
 #### v6
@@ -3819,7 +3819,7 @@ Section numbers below refer to the version when the change was made and may not 
 | **Audit Change Type** | `audit.Event.Changes` now uses `network.Change` (typed `map[string]string` values) instead of `operations.Change` (untyped `interface{}` values). Eliminates circular dependency path |
 | **Package Structure** | Added `pkg/settings/` (CLI user settings persistence) and `pkg/configlet/` (baseline template loading and variable resolution) to §2 |
 | **CLI Files** | Added `cmd_verbs.go` (symmetric read/write operations), `cmd_provision.go` (topology provisioning), `shell.go` (interactive shell) to §2 |
-| **SSH Tunnel** | `NewSSHTunnel` now accepts `port int` parameter (0 defaults to 22). Added 30s dial timeout via `ssh.ClientConfig.Timeout`. `DeviceProfile` and `ResolvedProfile` gain `SSHPort` field for vmlab-allocated ports |
+| **SSH Tunnel** | `NewSSHTunnel` now accepts `port int` parameter (0 defaults to 22). Added 30s dial timeout via `ssh.ClientConfig.Timeout`. `DeviceProfile` and `ResolvedProfile` gain `SSHPort` field for newtlab-allocated ports |
 | **Service Binding in State** | `parseInterfaces()` now extracts service binding from `NEWTRON_SERVICE_BINDING` table into `InterfaceState.Service` |
 | **CLI §11** | Documented `--save` flag (§11.10), `state` commands (§11.9), `audit list` (§11.9), `shell` REPL (§11.9), MAC-VPN verbs in §11.3 symmetric operations table. Updated §11.2 command registration to match actual codebase |
 | **Verification TODOs** | Added TODO comments in `device.go` (appldb/asicdb/GetRoute/GetRouteASIC), `statedb.go` (GetEntry/distributed locking), `changeset.go` (AppliedCount/Verification fields) |

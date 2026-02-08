@@ -1,7 +1,7 @@
 # SONiC-VS Reference and E2E Learnings
 
 Captured from the legacy `test/e2e/`, `internal/testutil/`, and debugging docs
-before removal. These patterns inform newtest scenario design and vmlab-based
+before removal. These patterns inform newtest scenario design and newtlab-based
 testing.
 
 ---

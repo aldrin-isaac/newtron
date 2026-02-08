@@ -1,8 +1,8 @@
 # newtest Low-Level Design (LLD)
 
-newtest is an E2E test orchestrator for newtron and SONiC. It parses YAML scenario files, deploys VM topologies via vmlab, provisions devices via newtron, and runs multi-step verification sequences. This document covers `pkg/newtest/` and `cmd/newtest/`.
+newtest is an E2E test orchestrator for newtron and SONiC. It parses YAML scenario files, deploys VM topologies via newtlab, provisions devices via newtron, and runs multi-step verification sequences. This document covers `pkg/newtest/` and `cmd/newtest/`.
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 
@@ -22,7 +22,7 @@ newtron/
 │       ├── parser.go             # ParseScenario, ValidateScenario
 │       ├── runner.go             # Runner, RunOptions, RunScenario
 │       ├── steps.go              # StepExecutor interface, all executor implementations
-│       ├── deploy.go             # DeployTopology, DestroyTopology (vmlab wrapper)
+│       ├── deploy.go             # DeployTopology, DestroyTopology (newtlab wrapper)
 │       ├── report.go             # ScenarioResult, StepResult, ReportGenerator
 │       └── newtest_test.go       # Unit tests
 └── newtest/                      # E2E test assets
@@ -314,13 +314,13 @@ Maps YAML keys to Go struct fields for each action:
 
 ```go
 // Runner is the top-level newtest orchestrator. It loads scenarios, deploys
-// topologies via vmlab, provisions devices via newtron, runs test steps,
+// topologies via newtlab, provisions devices via newtron, runs test steps,
 // and collects results.
 type Runner struct {
     ScenariosDir  string                        // newtest/scenarios/
     TopologiesDir string                        // newtest/topologies/
     Network       *network.Network              // OO hierarchy (owns devices, specs)
-    Lab           *vmlab.Lab                    // vmlab Lab (nil if --no-deploy)
+    Lab           *newtlab.Lab                    // newtlab Lab (nil if --no-deploy)
     ChangeSets    map[string]*network.ChangeSet // last ChangeSet per device
     Verbose       bool
 
@@ -336,7 +336,7 @@ type Runner struct {
 | `ScenariosDir` | Path to `newtest/scenarios/` |
 | `TopologiesDir` | Path to `newtest/topologies/` |
 | `Network` | Top-level `network.Network` object (owns devices, specs, OO hierarchy). Replaces the previous `Devices` + `Platforms` fields — devices are accessed via `r.Network.GetDevice(name)`, platforms via `r.Network.GetPlatform()`. |
-| `Lab` | vmlab Lab instance from `DeployTopology()` (nil when `--no-deploy`) |
+| `Lab` | newtlab Lab instance from `DeployTopology()` (nil when `--no-deploy`) |
 | `ChangeSets` | Accumulated by the runner from executor `StepOutput`; maps device name to last ChangeSet from `provision` or `apply-*` steps; read by `verify-provisioning`. **Last-write-wins**: if multiple steps produce ChangeSets for the same device, only the latest is retained. |
 | `Verbose` | Enables detailed output during step execution |
 
@@ -526,7 +526,7 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
     r.Network = net
 
     // 2. Connect each device in topology (no locking — operations lock internally)
-    //    Profile has ssh_port, mgmt_ip from vmlab patching (see vmlab LLD §10)
+    //    Profile has ssh_port, mgmt_ip from newtlab patching (see newtlab LLD §10)
     for _, name := range net.DeviceNames() {
         dev, err := net.GetDevice(name)
         if err != nil {
@@ -544,7 +544,7 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 **Connection flow** (see device LLD §5.1):
 
 1. `device.NewDevice(name, profile)` — creates Device from resolved profile
-2. `dev.Connect(ctx)` — opens SSH tunnel using `profile.SSHPort` (vmlab-allocated),
+2. `dev.Connect(ctx)` — opens SSH tunnel using `profile.SSHPort` (newtlab-allocated),
    connects to CONFIG_DB (DB 4), STATE_DB (DB 6), APP_DB (DB 0), ASIC_DB (DB 1)
 3. All Redis clients share the same SSH tunnel
 4. STATE_DB, APP_DB, ASIC_DB failure is non-fatal (verification-only clients)
@@ -1069,18 +1069,18 @@ func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 
 ---
 
-## 6. vmlab Integration (`pkg/newtest/deploy.go`)
+## 6. newtlab Integration (`pkg/newtest/deploy.go`)
 
 ### 6.1 DeployTopology
 
 ```go
-// DeployTopology deploys a VM topology using vmlab.
-// Creates a vmlab.Lab from the spec directory, calls Lab.Deploy(),
+// DeployTopology deploys a VM topology using newtlab.
+// Creates a newtlab.Lab from the spec directory, calls Lab.Deploy(),
 // and returns the Lab for later destroy.
 //
-// See vmlab LLD §4.1 (Lab type), §12 (deploy flow).
-func DeployTopology(specDir string) (*vmlab.Lab, error) {
-    lab, err := vmlab.NewLab(specDir)
+// See newtlab LLD §4.1 (Lab type), §12 (deploy flow).
+func DeployTopology(specDir string) (*newtlab.Lab, error) {
+    lab, err := newtlab.NewLab(specDir)
     if err != nil {
         return nil, fmt.Errorf("newtest: load topology: %w", err)
     }
@@ -1095,7 +1095,7 @@ After `Deploy()` returns:
 
 - All VMs are running and SSH-reachable
 - Device profiles have been patched with `ssh_port`, `console_port`, `mgmt_ip`
-  (see vmlab LLD §10)
+  (see newtlab LLD §10)
 - newtest can now connect to devices using the patched profiles
 
 ### 6.2 DestroyTopology
@@ -1104,8 +1104,8 @@ After `Deploy()` returns:
 // DestroyTopology tears down a deployed topology.
 // Kills QEMU processes, removes overlay disks, restores profiles.
 //
-// See vmlab LLD §4.1 (Lab type), §13 (destroy flow).
-func DestroyTopology(lab *vmlab.Lab) error {
+// See newtlab LLD §4.1 (Lab type), §13 (destroy flow).
+func DestroyTopology(lab *newtlab.Lab) error {
     if lab == nil {
         return nil
     }
@@ -1142,7 +1142,7 @@ type ScenarioResult struct {
     Status      Status       // overall: PASS if all passed, FAIL if any failed
     Duration    time.Duration
     Steps       []StepResult
-    DeployError error        // non-nil if vmlab deploy failed
+    DeployError error        // non-nil if newtlab deploy failed
 }
 ```
 
@@ -1358,7 +1358,7 @@ grouping in CI dashboards.
 
 ### 8.1 Command Tree
 
-Same Cobra pattern as `cmd/newtron/` and `cmd/vmlab/`:
+Same Cobra pattern as `cmd/newtron/` and `cmd/newtlab/`:
 
 ```go
 // main.go
@@ -1556,7 +1556,7 @@ func (e *StepError) Unwrap() error { return e.Err }
 ```
 
 All errors use `fmt.Errorf` with `%w` wrapping for context, following the
-same pattern as vmlab (see vmlab LLD §15.1):
+same pattern as newtlab (see newtlab LLD §15.1):
 
 ```go
 return fmt.Errorf("newtest: deploy topology: %w", err)
@@ -1576,9 +1576,9 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 
 ### 9.3 Scenario Execution Order
 
-**Scenarios are strictly sequential.** When `--all` is used, scenarios run one at a time in `ParseAllScenarios` order (alphabetical by filename). Each scenario gets its own vmlab deploy/destroy cycle. There is no parallel scenario execution — this is intentional because:
+**Scenarios are strictly sequential.** When `--all` is used, scenarios run one at a time in `ParseAllScenarios` order (alphabetical by filename). Each scenario gets its own newtlab deploy/destroy cycle. There is no parallel scenario execution — this is intentional because:
 
-1. vmlab port allocations (SSH, console, link ports) would conflict between concurrent topologies
+1. newtlab port allocations (SSH, console, link ports) would conflict between concurrent topologies
 2. Resource consumption (QEMU VMs) makes parallelism impractical on a single host
 3. Test isolation is simpler to reason about with sequential execution
 
@@ -1614,17 +1614,17 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 | §3 APP_DB | Route reads for verify-route (source: `app_db`) |
 | §4 ASIC_DB | Route reads for verify-route (source: `asic_db`) |
 
-### References to vmlab LLD
+### References to newtlab LLD
 
-| vmlab LLD Section | How newtest Uses It |
+| newtlab LLD Section | How newtest Uses It |
 |--------------------|---------------------|
 | §1.1 `PlatformSpec.Dataplane` | `Runner.hasDataplane()` for verify-ping skip logic |
-| §1.2 `DeviceProfile.SSHPort` | Used by `Device.Connect()` after vmlab profile patching |
-| §4.1 `vmlab.Lab` | `Runner.Lab` field, `DeployTopology()` return type |
-| §4.1 `vmlab.NewLab(specDir)` | Called in `DeployTopology()` |
-| §4.1 `vmlab.Lab.Deploy()` | Called in `DeployTopology()` |
-| §4.1 `vmlab.Lab.Destroy()` | Called in `DestroyTopology()` |
-| §10 Profile patching | newtest relies on vmlab having patched `ssh_port`/`mgmt_ip` into profiles before connecting devices |
+| §1.2 `DeviceProfile.SSHPort` | Used by `Device.Connect()` after newtlab profile patching |
+| §4.1 `newtlab.Lab` | `Runner.Lab` field, `DeployTopology()` return type |
+| §4.1 `newtlab.NewLab(specDir)` | Called in `DeployTopology()` |
+| §4.1 `newtlab.Lab.Deploy()` | Called in `DeployTopology()` |
+| §4.1 `newtlab.Lab.Destroy()` | Called in `DestroyTopology()` |
+| §10 Profile patching | newtest relies on newtlab having patched `ssh_port`/`mgmt_ip` into profiles before connecting devices |
 
 ### References to newtest HLD
 

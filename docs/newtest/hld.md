@@ -1,16 +1,16 @@
 # newtest — High-Level Design
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ## 1. Purpose
 
 newtest is an E2E testing orchestrator for newtron and SONiC. It tests
 two things: that newtron's automation produces correct device state, and
 that SONiC software on each device behaves correctly in its role (spine,
-leaf, etc.). It uses vmlab to deploy VM topologies, runs newtron against
+leaf, etc.). It uses newtlab to deploy VM topologies, runs newtron against
 them, and validates results.
 
-newtest is one orchestrator built on top of newtron and vmlab — not the
+newtest is one orchestrator built on top of newtron and newtlab — not the
 only one. Other orchestrators could be built for different purposes
 (production deployment, CI/CD pipelines, compliance auditing). newtron's
 observation primitives return structured data so that any orchestrator
@@ -20,16 +20,16 @@ can consume them.
 ┌──────────────────────────────────────────────────────────────────┐
 │                            newtest                                │
 │                                                                   │
-│  1. Deploy topology        vmlab deploy -S specs/                │
+│  1. Deploy topology        newtlab deploy -S specs/                │
 │  2. Provision devices      newtron provision -S specs/ -d X -x   │
 │  3. Validate results       CONFIG_DB, STATE_DB, data plane       │
 │  4. Report pass/fail                                              │
-│  5. Tear down              vmlab destroy                          │
+│  5. Tear down              newtlab destroy                          │
 └──────────────────────────────────────────────────────────────────┘
          │                              │
          ▼                              ▼
 ┌─────────────────┐          ┌─────────────────┐
-│     vmlab       │          │    newtron      │
+│     newtlab       │          │    newtron      │
 │ Deploy/manage   │          │ Provision       │
 │ QEMU VMs        │          │ CONFIG_DB       │
 └─────────────────┘          └─────────────────┘
@@ -44,7 +44,7 @@ The Runner holds a `*network.Network` object (not individual device references).
 | Tool | Responsibility | Knows About |
 |------|---------------|-------------|
 | **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
-| **vmlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
+| **newtlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
 | **newtest** | E2E test orchestration: decide what gets provisioned where (devices, interfaces, services, parameters), sequence steps, assert cross-device correctness | Test scenarios, topology-wide expected results |
 
 **Verification principle**: If a tool changes the state of an entity, that same
@@ -64,7 +64,7 @@ exclusively through newtron's primitives. See newtron HLD §4.9 and §13.
 newtron/
 ├── cmd/
 │   ├── newtron/          # Device provisioning CLI
-│   ├── vmlab/            # VM topology management CLI
+│   ├── newtlab/            # VM topology management CLI
 │   └── newtest/          # E2E testing CLI
 ├── pkg/
 │   ├── network/          # newtron core (Device, Interface, CompositeBuilder,
@@ -74,7 +74,7 @@ newtron/
 │   ├── health/           # Health checker (interfaces, BGP, EVPN, LAG, VXLAN)
 │   ├── audit/            # Audit logger (FileLogger, event filtering)
 │   ├── configlet/        # Configlet loading and variable resolution
-│   ├── vmlab/            # vmlab core library
+│   ├── newtlab/            # newtlab core library
 │   └── newtest/          # newtest core library (scenario parser, runner,
 │                         #   verifiers, report generator)
 ├── newtest/              # E2E test assets
@@ -117,7 +117,7 @@ newtron/
 │   ├── sonic-acl-copp.json
 │   └── sonic-qos-8q.json
 └── docs/
-    ├── vmlab/
+    ├── newtlab/
     └── newtest/
 ```
 
@@ -161,11 +161,11 @@ generation step — newtest reads them directly. This ensures tests are
 reproducible and version-controlled.
 
 Each topology directory contains the full set of newtron specs:
-- `topology.json` — devices, interfaces, links (vmlab + newtron read)
+- `topology.json` — devices, interfaces, links (newtlab + newtron read)
 - `network.json` — services, filters, VPNs, regions (newtron reads)
 - `site.json` — site topology, route reflectors (newtron reads)
-- `platforms.json` — platform definitions with VM settings (vmlab reads)
-- `profiles/*.json` — per-device settings (vmlab writes ports, newtron reads)
+- `platforms.json` — platform definitions with VM settings (newtlab reads)
+- `profiles/*.json` — per-device settings (newtlab writes ports, newtron reads)
 
 ---
 
@@ -412,14 +412,14 @@ Platforms declare their capabilities in `platforms.json`:
   "platforms": {
     "sonic-vs": {
       "hwsku": "Force10-S6000",
-      "vm_image": "~/.vmlab/images/sonic-vs.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vs.qcow2",
       "vm_nic_driver": "e1000",
       "vm_interface_map": "stride-4",
       "dataplane": ""
     },
     "sonic-vpp": {
       "hwsku": "Force10-S6000",
-      "vm_image": "~/.vmlab/images/sonic-vpp.qcow2",
+      "vm_image": "~/.newtlab/images/sonic-vpp.qcow2",
       "vm_nic_driver": "virtio-net-pci",
       "vm_interface_map": "sequential",
       "dataplane": "vpp"
@@ -443,7 +443,7 @@ newtest run -scenario bgp-underlay
 
 Internally:
 1. Read scenario → determine topology (4node) and platform (sonic-vpp)
-2. `vmlab deploy -S newtest/topologies/4node/specs/`
+2. `newtlab deploy -S newtest/topologies/4node/specs/`
 3. Wait for all VMs to boot (SSH ready)
 4. Execute steps in order:
    - `newtron provision -S specs/ -d spine1 -x`
@@ -455,7 +455,7 @@ Internally:
    - Verify underlay routes propagated (newtron `GetRoute` on spines)
    - Run health checks on all devices (newtron `RunHealthChecks`)
 5. Report results
-6. `vmlab destroy`
+6. `newtlab destroy`
 
 ### 7.2 Run All Scenarios
 
@@ -469,20 +469,20 @@ newtest run --all
 newtest run -scenario bgp-underlay --keep
 # Topology stays up after tests for manual inspection
 # Clean up later:
-vmlab destroy
+newtlab destroy
 ```
 
 ### 7.4 Run Against Existing Topology
 
 ```bash
 # Deploy separately
-vmlab deploy -S newtest/topologies/4node/specs/
+newtlab deploy -S newtest/topologies/4node/specs/
 
 # Run tests without deploy/destroy
 newtest run -scenario bgp-underlay --no-deploy
 
 # Clean up when done
-vmlab destroy
+newtlab destroy
 ```
 
 ---
@@ -601,7 +601,7 @@ Patterns and SONiC-specific knowledge from those tests are captured in
 
 ### Phase 1: Core
 - Scenario YAML parser
-- Deploy/provision/destroy lifecycle via vmlab
+- Deploy/provision/destroy lifecycle via newtlab
 - CONFIG_DB verification (`verify-config-db`)
 - CLI: `run`, `list`
 - Pre-defined 2-node and 4-node topologies with full specs

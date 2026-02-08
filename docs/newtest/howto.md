@@ -1,10 +1,10 @@
 # newtest — HOWTO Guide
 
 newtest is an E2E testing orchestrator for newtron and SONiC. It deploys
-VM topologies via vmlab, provisions devices via newtron, and validates
+VM topologies via newtlab, provisions devices via newtron, and validates
 the results.
 
-For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 
@@ -13,15 +13,15 @@ For the architectural principles behind newtron, vmlab, and newtest, see [Design
 ### Required Tools
 
 ```bash
-# Build newtron, vmlab, and newtest
+# Build newtron, newtlab, and newtest
 go build ./cmd/newtron/
-go build ./cmd/vmlab/
+go build ./cmd/newtlab/
 go build ./cmd/newtest/
 ```
 
-### vmlab Must Be Working
+### newtlab Must Be Working
 
-newtest depends on vmlab for VM management. Ensure vmlab is set up:
+newtest depends on newtlab for VM management. Ensure newtlab is set up:
 
 ```bash
 # QEMU installed
@@ -31,10 +31,10 @@ qemu-system-x86_64 --version
 ls /dev/kvm
 
 # VM images in place
-ls ~/.vmlab/images/
+ls ~/.newtlab/images/
 ```
 
-See `docs/vmlab/howto.md` for vmlab setup details.
+See `docs/newtlab/howto.md` for newtlab setup details.
 
 ---
 
@@ -67,7 +67,7 @@ newtest/topologies/2node/specs/
 ├── site.json          # Site topology, route reflectors
 ├── platforms.json     # Platform definitions with VM settings
 └── profiles/
-    ├── spine1.json    # vmlab writes ssh_port, console_port after deploy
+    ├── spine1.json    # newtlab writes ssh_port, console_port after deploy
     └── leaf1.json
 ```
 
@@ -179,7 +179,7 @@ newtest run -scenario bgp-underlay
 ```
 
 This does everything automatically:
-1. Deploys the 4-node topology via vmlab
+1. Deploys the 4-node topology via newtlab
 2. Waits for all VMs to boot (SSH ready)
 3. Provisions all devices via newtron
 4. Waits for protocol convergence
@@ -231,24 +231,24 @@ The topology stays up after tests complete. You can SSH into devices to
 debug:
 
 ```bash
-vmlab ssh leaf1
-vmlab console spine1
+newtlab ssh leaf1
+newtlab console spine1
 ```
 
 Clean up when done:
 
 ```bash
-vmlab destroy
+newtlab destroy
 ```
 
 ### Run Against Existing Topology
 
-If you already have a topology deployed (from vmlab or a previous `--keep`
+If you already have a topology deployed (from newtlab or a previous `--keep`
 run):
 
 ```bash
 # Deploy topology manually
-vmlab deploy -S newtest/topologies/4node/specs/
+newtlab deploy -S newtest/topologies/4node/specs/
 
 # Run tests without deploy/destroy
 newtest run -scenario bgp-underlay --no-deploy
@@ -257,7 +257,7 @@ newtest run -scenario bgp-underlay --no-deploy
 newtest run -scenario bgp-underlay --no-deploy
 
 # Clean up when done
-vmlab destroy
+newtlab destroy
 ```
 
 This is useful for iterating on test scenarios without waiting for VM boot
@@ -662,18 +662,18 @@ newtest run --all --junit newtest/.generated/results.xml
 
 ### Scenario Fails at Deploy
 
-vmlab couldn't start VMs. Check:
+newtlab couldn't start VMs. Check:
 
 ```bash
 # Is the image available?
-ls ~/.vmlab/images/
+ls ~/.newtlab/images/
 
 # Are ports free?
 ss -tlnp | grep 40000
 
 # Any leftover VMs?
-vmlab status
-vmlab destroy --force
+newtlab status
+newtlab destroy --force
 ```
 
 ### Provisioning Fails
@@ -682,7 +682,7 @@ newtron couldn't configure a device. Check:
 
 ```bash
 # Is the VM reachable?
-vmlab ssh leaf1
+newtlab ssh leaf1
 
 # Run newtron manually with verbose output
 newtron provision -S newtest/topologies/2node/specs/ -d leaf1 -x -v
@@ -706,7 +706,7 @@ BGP sessions may take time to establish after provisioning. Try:
 Or SSH in and check manually:
 
 ```bash
-vmlab ssh spine1
+newtlab ssh spine1
 vtysh -c "show ip bgp summary"
 ```
 
@@ -720,7 +720,7 @@ If one fails:
 newtest run -scenario health -v
 
 # SSH in and inspect
-vmlab ssh leaf1
+newtlab ssh leaf1
 show interfaces status
 vtysh -c "show ip bgp summary"
 ```
