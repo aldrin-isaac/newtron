@@ -1,6 +1,6 @@
 # Newtron Low-Level Design (LLD)
 
-For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
 
 Version history is in [Appendix A](#appendix-a-changelog) at the end of this document.
 

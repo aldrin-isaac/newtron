@@ -77,7 +77,9 @@
 
 ## 1. Executive Summary
 
-Newtron is a network automation CLI tool for managing SONiC-based network switches. It provides a service-oriented approach to network configuration, combining interface settings, EVPN/VXLAN overlays, ACL filters, and QoS policies into reusable service definitions.
+Newtron is an opinionated network automation tool for SONiC-based switches. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
+
+For the architectural principles behind newtron, vmlab, and newtest — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ### Key Features
 
@@ -286,7 +288,9 @@ The translation layer interprets specs in context to generate config:
 
 ### 3.2 Object Hierarchy (OO Design)
 
-The system uses an object-oriented design with parent references, mirroring the original Perl architecture:
+The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it**. If an operation needs the interface name, the device profile, and the network specs, it lives on Interface (which can reach all three through its parent chain). If it only needs the Redis connection, it lives on Device.
+
+A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and site topology — so it lives on `Device.SetupRouteReflector()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
 
 ```
 +------------------------------------------------------------------+
@@ -311,7 +315,8 @@ The system uses an object-oriented design with parent references, mirroring the 
 |  - ResolvedProfile (after inheritance)                           |
 |  - ConfigDB (from Redis) <-- actual device config                |
 |                                                                   |
-|  Methods: Network(), ASNumber(), BGPNeighbors(), etc.            |
+|  Methods: Network(), ASNumber(), BGPNeighbors(),                 |
+|           SetupRouteReflector(), VerifyChangeSet(), etc.         |
 +------------------------------------------------------------------+
          |
          | creates (with parent reference)
@@ -323,7 +328,8 @@ The system uses an object-oriented design with parent references, mirroring the 
 |  - parent: *Device   <-- key: access to Device AND Network       |
 |  - Interface state (from config_db)                              |
 |                                                                   |
-|  Methods: Device(), Network(), HasService(), etc.                |
+|  Methods: Device(), Network(), HasService(),                     |
+|           ApplyService(), RemoveService(), RefreshService()      |
 +------------------------------------------------------------------+
 ```
 

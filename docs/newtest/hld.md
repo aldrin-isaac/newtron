@@ -1,9 +1,20 @@
 # newtest — High-Level Design
 
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+
 ## 1. Purpose
 
-newtest is the E2E testing tool for newtron. It uses vmlab to deploy VM
-topologies, runs newtron against them, and validates results.
+newtest is an E2E testing orchestrator for newtron and SONiC. It tests
+two things: that newtron's automation produces correct device state, and
+that SONiC software on each device behaves correctly in its role (spine,
+leaf, etc.). It uses vmlab to deploy VM topologies, runs newtron against
+them, and validates results.
+
+newtest is one orchestrator built on top of newtron and vmlab — not the
+only one. Other orchestrators could be built for different purposes
+(production deployment, CI/CD pipelines, compliance auditing). newtron's
+observation primitives return structured data so that any orchestrator
+can consume them.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -32,9 +43,9 @@ The Runner holds a `*network.Network` object (not individual device references).
 
 | Tool | Responsibility | Knows About |
 |------|---------------|-------------|
-| **newtron** | Provision a single device via CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
-| **vmlab** | Deploy/manage QEMU VM topologies | topology.json, platforms.json, QEMU |
-| **newtest** | E2E test orchestration; cross-device assertions; data-plane verification | Test scenarios, topology-wide expected results |
+| **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
+| **vmlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
+| **newtest** | E2E test orchestration: decide what gets provisioned where (devices, interfaces, services, parameters), sequence steps, assert cross-device correctness | Test scenarios, topology-wide expected results |
 
 **Verification principle**: If a tool changes the state of an entity, that same
 tool must be able to verify the change had the intended effect. newtron writes
@@ -380,20 +391,24 @@ primitives; newtest orchestrates them across devices and adds data-plane testing
 
 ### 6.1 What newtest Adds Beyond newtron
 
-newtest's value is in capabilities that require topology-wide context:
+newtest's value is in orchestration — deciding what gets applied where,
+with what parameters, in what order:
 
 1. **Multi-device orchestration** — Run `VerifyChangeSet` or `RunHealthChecks`
    on all devices in the topology, aggregate results, report "3/4 passed"
-2. **Cross-device route assertions** — Connect to spine1 via newtron, call
+2. **Multi-interface orchestration** — Apply different services to different
+   interfaces on the same device, with different parameters. newtron applies
+   one service to one interface; newtest decides which combinations to test.
+3. **Cross-device route assertions** — Connect to spine1 via newtron, call
    `GetRoute("default", "10.1.0.0/31")`, assert next-hop matches leaf1's IP
    from the topology spec. newtron provides the read; newtest provides the
    expected value.
-3. **Data-plane testing** — Ping between VMs through the fabric. newtron has
+4. **Data-plane testing** — Ping between VMs through the fabric. newtron has
    no concept of inter-device packet forwarding.
-4. **Scenario sequencing** — Provision, wait, verify, apply service, verify
+5. **Scenario sequencing** — Provision, wait, verify, apply service, verify
    again, remove service, verify removal. The step orchestration is newtest's
    job.
-5. **Platform-aware skipping** — Skip data-plane tests when the platform has
+6. **Platform-aware skipping** — Skip data-plane tests when the platform has
    `dataplane: false`. This is a test-framework concern.
 
 ### 6.2 Platform-Aware Test Skipping

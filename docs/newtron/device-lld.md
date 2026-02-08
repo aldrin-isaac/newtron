@@ -2,7 +2,7 @@
 
 The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/device/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
-For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
 
 ---
 

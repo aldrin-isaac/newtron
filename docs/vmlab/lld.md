@@ -1,6 +1,8 @@
 # vmlab Low-Level Design (LLD)
 
-vmlab orchestrates QEMU virtual machines for SONiC lab environments. This document covers `pkg/vmlab/` — the VM lifecycle, networking, and port management layer. For the high-level architecture, see [vmlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
+vmlab realizes network topologies as connected QEMU virtual machines for SONiC lab environments. This document covers `pkg/vmlab/` — the VM lifecycle, networking, and port management layer.
+
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [vmlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 

@@ -1,6 +1,8 @@
 # newtest Low-Level Design (LLD)
 
-newtest is the E2E test orchestrator for newtron. It parses YAML scenario files, deploys VM topologies via vmlab, provisions devices via newtron, and runs multi-step verification sequences. This document covers `pkg/newtest/` and `cmd/newtest/`. For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
+newtest is an E2E test orchestrator for newtron and SONiC. It parses YAML scenario files, deploys VM topologies via vmlab, provisions devices via newtron, and runs multi-step verification sequences. This document covers `pkg/newtest/` and `cmd/newtest/`.
+
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 

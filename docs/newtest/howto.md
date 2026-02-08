@@ -1,7 +1,10 @@
 # newtest — HOWTO Guide
 
-newtest is the E2E testing tool for newtron. It deploys VM topologies via
-vmlab, provisions devices via newtron, and validates the results.
+newtest is an E2E testing orchestrator for newtron and SONiC. It deploys
+VM topologies via vmlab, provisions devices via newtron, and validates
+the results.
+
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 

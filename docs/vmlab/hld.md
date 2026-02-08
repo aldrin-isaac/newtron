@@ -1,13 +1,18 @@
 # vmlab — High-Level Design
 
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+
 ## 1. Purpose
 
-vmlab is a standalone VM orchestration tool that deploys QEMU-based network
-topologies using socket-based networking. It reads newtron spec files
-(`topology.json`, `platforms.json`, `profiles/*.json`) to deploy and manage VMs.
+vmlab realizes network topologies as connected QEMU virtual machines. It
+reads newtron's spec files (`topology.json`, `platforms.json`,
+`profiles/*.json`) and brings the topology to life — deploying VMs
+(primarily SONiC) and wiring them together using socket-based links
+across one or more servers. No root, no bridges, no Docker.
 
-vmlab is topology-agnostic — it doesn't care what the VMs are for. It just
-deploys them, wires them up, and makes them accessible.
+vmlab doesn't define the topology or touch device configuration — it
+makes the topology physically exist. After deployment, it patches device
+profiles with SSH and console ports so newtron can connect.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

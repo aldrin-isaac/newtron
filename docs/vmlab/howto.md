@@ -1,8 +1,10 @@
 # vmlab — HOWTO Guide
 
-vmlab deploys QEMU-based network topologies using socket networking. It reads
-the same spec files as newtron (`topology.json`, `platforms.json`, `profiles/`)
+vmlab realizes network topologies as connected QEMU virtual machines. It
+reads newtron's spec files (`topology.json`, `platforms.json`, `profiles/`)
 and manages VM lifecycle without root privileges.
+
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 

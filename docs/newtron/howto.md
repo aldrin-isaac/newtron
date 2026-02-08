@@ -1,5 +1,7 @@
 # Newtron HOWTO Guide (v4)
 
+For the architectural principles behind newtron, vmlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+
 ### What Changed in v2
 
 | Area | Change |
