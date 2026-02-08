@@ -83,11 +83,24 @@ func AllocateLinks(
 		}
 		result = append(result, lc)
 
-		// Determine connect IP for Z side
+		// Determine connect IP for Z side.
+		// Z connects to A's listening socket. When A and Z are on the same
+		// host (or both local), 127.0.0.1 is used. When they are on different
+		// hosts, Z needs A's host IP to reach the listening socket.
 		connectIP := "127.0.0.1"
-		if nodeA.Host != nodeZ.Host && nodeA.Host != "" {
-			if ip, ok := config.Hosts[nodeA.Host]; ok {
-				connectIP = ip
+		if nodeA.Host != nodeZ.Host {
+			if nodeA.Host != "" {
+				// A is on a named host — use that host's IP
+				if ip, ok := config.Hosts[nodeA.Host]; ok {
+					connectIP = ip
+				}
+			} else if nodeZ.Host != "" {
+				// A is local, Z is remote — Z needs the local host's IP.
+				// Use the "local" entry in the hosts map, or fall back to
+				// the first non-remote host IP.
+				if ip, ok := config.Hosts["local"]; ok {
+					connectIP = ip
+				}
 			}
 		}
 

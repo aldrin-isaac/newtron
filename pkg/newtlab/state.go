@@ -24,6 +24,8 @@ type NodeState struct {
 	SSHPort        int    `json:"ssh_port"`
 	ConsolePort    int    `json:"console_port"`
 	OriginalMgmtIP string `json:"original_mgmt_ip"`
+	Host           string `json:"host,omitempty"`   // host name (empty = local)
+	HostIP         string `json:"host_ip,omitempty"` // host IP address (empty = 127.0.0.1)
 }
 
 // LinkState tracks per-link allocation.

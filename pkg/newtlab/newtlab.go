@@ -174,12 +174,17 @@ func (l *Lab) Deploy() error {
 	var deployErr error
 	for _, name := range sortedListenFirst(l.Nodes, l.Links) {
 		node := l.Nodes[name]
+		// Resolve host IP for remote nodes
+		hostIP := resolveHostIP(node, l.Config)
+
 		pid, err := StartNode(node, l.StateDir)
 		if err != nil {
 			l.State.Nodes[name] = &NodeState{
 				Status:      "error",
 				SSHPort:     node.SSHPort,
 				ConsolePort: node.ConsolePort,
+				Host:        node.Host,
+				HostIP:      hostIP,
 			}
 			deployErr = err
 			continue
@@ -189,6 +194,8 @@ func (l *Lab) Deploy() error {
 			Status:      "running",
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
+			Host:        node.Host,
+			HostIP:      hostIP,
 		}
 	}
 
@@ -196,13 +203,19 @@ func (l *Lab) Deploy() error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for name, node := range l.Nodes {
-		if l.State.Nodes[name].Status != "running" {
+		ns := l.State.Nodes[name]
+		if ns.Status != "running" {
 			continue
 		}
+		// Use host IP for SSH (remote nodes listen on their host IP)
+		sshHost := "127.0.0.1"
+		if ns.HostIP != "" {
+			sshHost = ns.HostIP
+		}
 		wg.Add(1)
-		go func(name string, node *NodeConfig) {
+		go func(name, sshHost string, node *NodeConfig) {
 			defer wg.Done()
-			err := WaitForSSH("127.0.0.1", node.SSHPort, node.SSHUser, node.SSHPass,
+			err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 				time.Duration(node.BootTimeout)*time.Second)
 			if err != nil {
 				mu.Lock()
@@ -212,7 +225,7 @@ func (l *Lab) Deploy() error {
 				}
 				mu.Unlock()
 			}
-		}(name, node)
+		}(name, sshHost, node)
 	}
 	wg.Wait()
 
@@ -247,8 +260,8 @@ func (l *Lab) Destroy() error {
 
 	// Kill QEMU processes
 	for name, node := range state.Nodes {
-		if IsRunning(node.PID) {
-			if err := StopNode(node.PID); err != nil {
+		if IsRunning(node.PID, node.HostIP) {
+			if err := StopNode(node.PID, node.HostIP); err != nil {
 				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
 			}
 		}
@@ -279,7 +292,7 @@ func (l *Lab) Status() (*LabState, error) {
 	}
 
 	for _, node := range state.Nodes {
-		if node.Status == "running" && !IsRunning(node.PID) {
+		if node.Status == "running" && !IsRunning(node.PID, node.HostIP) {
 			node.Status = "stopped"
 		}
 	}
@@ -320,7 +333,7 @@ func (l *Lab) Stop(nodeName string) error {
 		return fmt.Errorf("newtlab: node %q not found", nodeName)
 	}
 
-	if err := StopNode(node.PID); err != nil {
+	if err := StopNode(node.PID, node.HostIP); err != nil {
 		return err
 	}
 
@@ -363,8 +376,12 @@ func (l *Lab) Start(nodeName string) error {
 	nodeState.PID = pid
 	nodeState.Status = "running"
 
-	// Wait for SSH
-	if err := WaitForSSH("127.0.0.1", node.SSHPort, node.SSHUser, node.SSHPass,
+	// Wait for SSH — use host IP for remote nodes
+	sshHost := "127.0.0.1"
+	if nodeState.HostIP != "" {
+		sshHost = nodeState.HostIP
+	}
+	if err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 		time.Duration(node.BootTimeout)*time.Second); err != nil {
 		nodeState.Status = "error"
 		SaveState(state)
@@ -422,8 +439,8 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 	}
 	// Kill processes
 	for name, node := range existing.Nodes {
-		if IsRunning(node.PID) {
-			if err := StopNode(node.PID); err != nil {
+		if IsRunning(node.PID, node.HostIP) {
+			if err := StopNode(node.PID, node.HostIP); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: stop %s (pid %d): %v\n", name, node.PID, err)
 			}
 		}
@@ -476,4 +493,20 @@ func sortedListenFirst(nodes map[string]*NodeConfig, links []*LinkConfig) []stri
 	sort.Strings(listen)
 	sort.Strings(connect)
 	return append(listen, connect...)
+}
+
+// resolveHostIP returns the IP address for a node's host.
+// For local nodes (Host==""), returns "" (callers default to 127.0.0.1).
+// For remote nodes, looks up the host name in the lab's Hosts map.
+func resolveHostIP(node *NodeConfig, config *VMLabConfig) string {
+	if node.Host == "" {
+		return ""
+	}
+	if config != nil && config.Hosts != nil {
+		if ip, ok := config.Hosts[node.Host]; ok {
+			return ip
+		}
+	}
+	// Fall back to host name as IP (allows using raw IPs as host names)
+	return node.Host
 }

@@ -1,11 +1,14 @@
 package newtlab
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -80,9 +83,18 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 }
 
 // StartNode launches the QEMU process for a node.
-// Redirects stdout/stderr to logs/<name>.log.
+// If node.Host is set, launches on the remote host via SSH.
+// Otherwise launches locally, redirecting stdout/stderr to logs/<name>.log.
 // Returns PID after process is started (does not wait for boot).
 func StartNode(node *NodeConfig, stateDir string) (int, error) {
+	if node.Host != "" {
+		return StartNodeRemote(node, stateDir, node.Host)
+	}
+	return startNodeLocal(node, stateDir)
+}
+
+// startNodeLocal launches QEMU on the local host.
+func startNodeLocal(node *NodeConfig, stateDir string) (int, error) {
 	qemu := &QEMUCommand{Node: node, StateDir: stateDir}
 	cmd := qemu.Build()
 
@@ -113,8 +125,47 @@ func StartNode(node *NodeConfig, stateDir string) (int, error) {
 	return pid, nil
 }
 
+// StartNodeRemote launches QEMU on a remote host via SSH.
+// The QEMU command is built locally and executed remotely via "ssh <hostIP> ...".
+// Returns the remote PID.
+func StartNodeRemote(node *NodeConfig, stateDir, hostIP string) (int, error) {
+	qemu := &QEMUCommand{Node: node, StateDir: stateDir}
+	localCmd := qemu.Build()
+
+	// Build the remote command string with nohup and background
+	// Use nohup + & so QEMU survives SSH session termination
+	qemuArgs := append([]string{localCmd.Path}, localCmd.Args[1:]...)
+	remoteCmd := fmt.Sprintf("nohup %s > /dev/null 2>&1 & echo $!", strings.Join(quoteArgs(qemuArgs), " "))
+
+	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, remoteCmd)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return 0, fmt.Errorf("newtlab: start node %s on %s: %w", node.Name, hostIP, err)
+	}
+
+	pidStr := strings.TrimSpace(stdout.String())
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return 0, fmt.Errorf("newtlab: parse remote PID for %s: %w (output: %q)", node.Name, err, pidStr)
+	}
+
+	return pid, nil
+}
+
 // StopNode sends SIGTERM to the QEMU process, then SIGKILL after 10s.
-func StopNode(pid int) error {
+// If hostIP is non-empty, kills the process on the remote host via SSH.
+func StopNode(pid int, hostIP string) error {
+	if hostIP != "" {
+		return StopNodeRemote(pid, hostIP)
+	}
+	return stopNodeLocal(pid)
+}
+
+// stopNodeLocal kills a local QEMU process.
+func stopNodeLocal(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("newtlab: find process %d: %w", pid, err)
@@ -129,7 +180,7 @@ func StopNode(pid int) error {
 	// Wait up to 10s for graceful shutdown
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if !IsRunning(pid) {
+		if !IsRunning(pid, "") {
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -140,8 +191,41 @@ func StopNode(pid int) error {
 	return nil
 }
 
+// StopNodeRemote kills a QEMU process on a remote host via SSH.
+func StopNodeRemote(pid int, hostIP string) error {
+	// Try SIGTERM first
+	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
+		fmt.Sprintf("kill %d 2>/dev/null; exit 0", pid))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("newtlab: kill remote pid %d on %s: %w", pid, hostIP, err)
+	}
+
+	// Wait up to 10s for graceful shutdown
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !IsRunning(pid, hostIP) {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Force kill
+	exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
+		fmt.Sprintf("kill -9 %d 2>/dev/null; exit 0", pid)).Run()
+	return nil
+}
+
 // IsRunning checks if a QEMU process is alive by PID.
-func IsRunning(pid int) bool {
+// If hostIP is non-empty, checks on the remote host via SSH.
+func IsRunning(pid int, hostIP string) bool {
+	if hostIP != "" {
+		return IsRunningRemote(pid, hostIP)
+	}
+	return isRunningLocal(pid)
+}
+
+// isRunningLocal checks if a local process is alive.
+func isRunningLocal(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return false
@@ -149,6 +233,13 @@ func IsRunning(pid int) bool {
 	// Signal 0 checks if process exists without sending a signal
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// IsRunningRemote checks if a process is alive on a remote host via SSH.
+func IsRunningRemote(pid int, hostIP string) bool {
+	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
+		fmt.Sprintf("kill -0 %d 2>/dev/null", pid))
+	return cmd.Run() == nil
 }
 
 // kvmAvailable returns true if /dev/kvm exists and is writable.
@@ -170,4 +261,17 @@ func probePort(port int) error {
 	}
 	ln.Close()
 	return nil
+}
+
+// quoteArgs shell-quotes arguments for safe SSH command execution.
+func quoteArgs(args []string) []string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		if strings.ContainsAny(arg, " \t\n\"'\\$`!#&|;(){}[]<>?*~") {
+			quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
+		} else {
+			quoted[i] = arg
+		}
+	}
+	return quoted
 }

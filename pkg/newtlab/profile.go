@@ -30,8 +30,12 @@ func PatchProfiles(lab *Lab) error {
 			}
 		}
 
-		// Patch fields
-		profile["mgmt_ip"] = "127.0.0.1"
+		// Patch fields — use host IP for remote nodes, 127.0.0.1 for local
+		mgmtIP := "127.0.0.1"
+		if nodeState, ok2 := lab.State.Nodes[name]; ok2 && nodeState.HostIP != "" {
+			mgmtIP = nodeState.HostIP
+		}
+		profile["mgmt_ip"] = mgmtIP
 		profile["ssh_port"] = node.SSHPort
 		profile["console_port"] = node.ConsolePort
 		if node.SSHUser != "" {
