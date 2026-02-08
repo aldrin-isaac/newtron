@@ -441,13 +441,200 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, peerIP), ChangeAdd, nil, neighborFields)
 
 	// Add address-family activation (IPv4 unicast by default)
-	afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
-	cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
+	afFields := map[string]string{
 		"activate": "true",
-	})
+	}
+
+	// Apply route policies from service routing spec
+	if routing.ImportPolicy != "" {
+		rmName := i.addRoutePolicyConfig(cs, svc.Description, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
+		if rmName != "" {
+			afFields["route_map_in"] = rmName
+		}
+	} else if routing.ImportCommunity != "" || routing.ImportPrefixList != "" {
+		rmName := i.addInlineRoutePolicy(cs, svc.Description, "import", routing.ImportCommunity, routing.ImportPrefixList)
+		if rmName != "" {
+			afFields["route_map_in"] = rmName
+		}
+	}
+
+	if routing.ExportPolicy != "" {
+		rmName := i.addRoutePolicyConfig(cs, svc.Description, "export", routing.ExportPolicy, routing.ExportCommunity, routing.ExportPrefixList)
+		if rmName != "" {
+			afFields["route_map_out"] = rmName
+		}
+	} else if routing.ExportCommunity != "" || routing.ExportPrefixList != "" {
+		rmName := i.addInlineRoutePolicy(cs, svc.Description, "export", routing.ExportCommunity, routing.ExportPrefixList)
+		if rmName != "" {
+			afFields["route_map_out"] = rmName
+		}
+	}
+
+	afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
+	cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, afFields)
+
+	// Override default redistribution if specified
+	if routing.Redistribute != nil {
+		redistKey := fmt.Sprintf("%s|ipv4_unicast", vrfKey)
+		if *routing.Redistribute {
+			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, nil, map[string]string{
+				"redistribute_connected": "true",
+				"redistribute_static":    "true",
+			})
+		} else {
+			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, nil, map[string]string{
+				"redistribute_connected": "false",
+				"redistribute_static":    "false",
+			})
+		}
+	}
 
 	util.WithDevice(d.Name()).Infof("Added BGP neighbor %s (AS %d) via %s", peerIP, peerAS, localIP)
 	return peerIP
+}
+
+// addRoutePolicyConfig translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
+// PREFIX_SET, and COMMUNITY_SET entries. Returns the generated route-map name.
+func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, policyName, extraCommunity, extraPrefixList string) string {
+	policy, err := i.Network().GetRoutePolicy(policyName)
+	if err != nil {
+		util.WithDevice(i.device.Name()).Warnf("Route policy '%s' not found: %v", policyName, err)
+		return ""
+	}
+
+	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+
+	for _, rule := range policy.Rules {
+		ruleKey := fmt.Sprintf("%s|%d", rmName, rule.Sequence)
+		fields := map[string]string{
+			"route_operation": rule.Action,
+		}
+
+		if rule.PrefixList != "" {
+			prefixSetName := fmt.Sprintf("%s-pl-%d", rmName, rule.Sequence)
+			i.addPrefixSetFromList(cs, prefixSetName, rule.PrefixList)
+			fields["match_prefix_set"] = prefixSetName
+		}
+
+		if rule.Community != "" {
+			csName := fmt.Sprintf("%s-cs-%d", rmName, rule.Sequence)
+			cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+				"set_type":         "standard",
+				"match_action":     "any",
+				"community_member": rule.Community,
+			})
+			fields["match_community"] = csName
+		}
+
+		if rule.Set != nil {
+			if rule.Set.LocalPref > 0 {
+				fields["set_local_pref"] = fmt.Sprintf("%d", rule.Set.LocalPref)
+			}
+			if rule.Set.Community != "" {
+				fields["set_community"] = rule.Set.Community
+			}
+			if rule.Set.MED > 0 {
+				fields["set_med"] = fmt.Sprintf("%d", rule.Set.MED)
+			}
+		}
+
+		cs.Add("ROUTE_MAP", ruleKey, ChangeAdd, nil, fields)
+	}
+
+	// Extra community AND condition from service routing spec
+	if extraCommunity != "" {
+		csName := fmt.Sprintf("%s-extra-cs", rmName)
+		cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+			"set_type":         "standard",
+			"match_action":     "any",
+			"community_member": extraCommunity,
+		})
+		extraFields := map[string]string{
+			"route_operation": "permit",
+			"match_community": csName,
+		}
+		if direction == "export" {
+			extraFields["set_community"] = extraCommunity
+		}
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9000", rmName), ChangeAdd, nil, extraFields)
+	}
+
+	// Extra prefix list AND condition
+	if extraPrefixList != "" {
+		plName := fmt.Sprintf("%s-extra-pl", rmName)
+		i.addPrefixSetFromList(cs, plName, extraPrefixList)
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9100", rmName), ChangeAdd, nil, map[string]string{
+			"route_operation":  "permit",
+			"match_prefix_set": plName,
+		})
+	}
+
+	return rmName
+}
+
+// addInlineRoutePolicy creates a route-map from standalone community/prefix filters.
+func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, community, prefixList string) string {
+	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+	seq := 10
+
+	if community != "" {
+		csName := fmt.Sprintf("%s-cs", rmName)
+		cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+			"set_type":         "standard",
+			"match_action":     "any",
+			"community_member": community,
+		})
+		fields := map[string]string{
+			"route_operation": "permit",
+			"match_community": csName,
+		}
+		if direction == "export" {
+			fields["set_community"] = community
+		}
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, nil, fields)
+		seq += 10
+	}
+
+	if prefixList != "" {
+		plName := fmt.Sprintf("%s-pl", rmName)
+		i.addPrefixSetFromList(cs, plName, prefixList)
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, nil, map[string]string{
+			"route_operation":  "permit",
+			"match_prefix_set": plName,
+		})
+	}
+
+	return rmName
+}
+
+// addPrefixSetFromList resolves a prefix list and creates PREFIX_SET entries.
+func (i *Interface) addPrefixSetFromList(cs *ChangeSet, prefixSetName, prefixListName string) {
+	prefixes, err := i.Network().GetPrefixList(prefixListName)
+	if err != nil || len(prefixes) == 0 {
+		util.WithDevice(i.device.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
+		return
+	}
+	for seq, prefix := range prefixes {
+		entryKey := fmt.Sprintf("%s|%d", prefixSetName, (seq+1)*10)
+		cs.Add("PREFIX_SET", entryKey, ChangeAdd, nil, map[string]string{
+			"ip_prefix": prefix,
+			"action":    "permit",
+		})
+	}
+}
+
+// sanitizeName replaces non-alphanumeric chars with hyphens for config key names.
+func sanitizeName(name string) string {
+	result := make([]byte, 0, len(name))
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
+			result = append(result, c)
+		} else {
+			result = append(result, '-')
+		}
+	}
+	return string(result)
 }
 
 // addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix lists

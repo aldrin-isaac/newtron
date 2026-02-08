@@ -23,9 +23,6 @@ type NetworkSpecFile struct {
 	CoSClasses   map[string]*model.CoSClass   `json:"cos_classes,omitempty"` // TODO(v4): not consumed — implement CoS class mapping to CONFIG_DB TC_TO_QUEUE_MAP
 
 	// Route policies (for BGP import/export)
-	// TODO(v4): RoutePolicy types are defined but not consumed by any runtime code.
-	// Implement: translate RoutePolicy rules into CONFIG_DB ROUTE_MAP entries with
-	// associated PREFIX_SET/COMMUNITY_SET/AS_PATH_SET references during service application.
 	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
 
 	// VPN definitions (referenced by services)
@@ -136,15 +133,15 @@ type RoutingSpec struct {
 
 	// BGP-specific
 	PeerAS       string `json:"peer_as,omitempty"`       // AS number, or "request"
-	ImportPolicy string `json:"import_policy,omitempty"` // TODO(v4): not consumed — resolve RoutePolicy from NetworkSpecFile, apply as ROUTE_MAP via SetRouteMap
-	ExportPolicy string `json:"export_policy,omitempty"` // TODO(v4): not consumed — resolve RoutePolicy from NetworkSpecFile, apply as ROUTE_MAP via SetRouteMap
+	ImportPolicy string `json:"import_policy,omitempty"` // Route policy name → translated to ROUTE_MAP
+	ExportPolicy string `json:"export_policy,omitempty"` // Route policy name → translated to ROUTE_MAP
 
-	// v3: Additional BGP filtering (compose as AND conditions with policies)
-	ImportCommunity  string `json:"import_community,omitempty"`    // TODO(v4): not consumed — apply as COMMUNITY_SET match in import route-map
-	ExportCommunity  string `json:"export_community,omitempty"`    // TODO(v4): not consumed — apply as COMMUNITY_SET set-action in export route-map
-	ImportPrefixList string `json:"import_prefix_list,omitempty"`  // TODO(v4): not consumed — apply as PREFIX_SET match in import route-map
-	ExportPrefixList string `json:"export_prefix_list,omitempty"`  // TODO(v4): not consumed — apply as PREFIX_SET match in export route-map
-	Redistribute     *bool  `json:"redistribute,omitempty"`        // TODO(v4): not consumed — override default redistribution (service=true, transit=false)
+	// Additional BGP filtering (compose as AND conditions with policies)
+	ImportCommunity  string `json:"import_community,omitempty"`   // COMMUNITY_SET match in import route-map
+	ExportCommunity  string `json:"export_community,omitempty"`   // COMMUNITY_SET set-action in export route-map
+	ImportPrefixList string `json:"import_prefix_list,omitempty"` // PREFIX_SET match in import route-map
+	ExportPrefixList string `json:"export_prefix_list,omitempty"` // PREFIX_SET match in export route-map
+	Redistribute     *bool  `json:"redistribute,omitempty"`       // Override default redistribution
 }
 
 // ============================================================================
@@ -190,16 +187,12 @@ type PolicerSpec struct {
 // RoutePolicy defines a BGP route policy for import/export filtering.
 // Referenced by service routing via import_policy/export_policy.
 //
-// TODO(v4): Entire RoutePolicy engine is spec-only — no runtime code consumes
-// these types. Implement: translate RoutePolicy rules into CONFIG_DB ROUTE_MAP
-// entries with associated PREFIX_SET/COMMUNITY_SET/AS_PATH_SET references.
 type RoutePolicy struct {
 	Description string             `json:"description,omitempty"`
 	Rules       []*RoutePolicyRule `json:"rules"`
 }
 
 // RoutePolicyRule defines a single rule within a RoutePolicy.
-// See RoutePolicy TODO — not yet consumed by runtime code.
 type RoutePolicyRule struct {
 	Sequence int    `json:"seq"`
 	Action   string `json:"action"` // permit, deny
@@ -214,7 +207,6 @@ type RoutePolicyRule struct {
 }
 
 // RoutePolicySet defines attributes to set on matching routes.
-// See RoutePolicy TODO — not yet consumed by runtime code.
 type RoutePolicySet struct {
 	LocalPref int    `json:"local_pref,omitempty"` // Set LOCAL_PREF
 	Community string `json:"community,omitempty"`  // Set/add community
