@@ -38,9 +38,10 @@ func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
 		Timeout:         30 * time.Second,
 	}
 
-	sshClient, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
+	addr := fmt.Sprintf("%s:%d", host, port)
+	sshClient, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		return nil, fmt.Errorf("SSH dial %s: %w", host, err)
+		return nil, fmt.Errorf("SSH dial %s@%s: %w", user, addr, err)
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -73,8 +74,11 @@ func (t *SSHTunnel) LocalAddr() string {
 func (t *SSHTunnel) Close() error {
 	close(t.done)
 	t.listener.Close()
+	// Close SSH client first to tear down all forwarded connections,
+	// unblocking any io.Copy goroutines waiting on remote reads.
+	t.sshClient.Close()
 	t.wg.Wait()
-	return t.sshClient.Close()
+	return nil
 }
 
 func (t *SSHTunnel) acceptLoop() {

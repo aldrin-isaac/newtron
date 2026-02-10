@@ -1,0 +1,7 @@
+{
+  "mgmt_ip": "127.0.0.1",
+  "loopback_ip": "10.0.0.12",
+  "site": "lab",
+  "platform": "sonic-vpp",
+  "underlay_asn": 65012
+}

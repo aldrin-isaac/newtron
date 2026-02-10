@@ -1,8 +1,12 @@
 # Build artifacts
+/bin/
 /newtron
 /newtlab
-/newtest
 /test_acl
+
+# newtest generated reports and runtime artifacts
+newtest/.generated/
+newtest/**/audit.log
 /test_derive
 
 # Claude Code local settings

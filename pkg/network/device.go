@@ -739,6 +739,22 @@ func (d *Device) SaveConfig(ctx context.Context) error {
 	return d.conn.SaveConfig(ctx)
 }
 
+// RestartService restarts a SONiC Docker container by name via SSH.
+func (d *Device) RestartService(ctx context.Context, name string) error {
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	return d.conn.RestartService(ctx, name)
+}
+
+// ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
+func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	return d.conn.ApplyFRRDefaults(ctx)
+}
+
 // Underlying returns the underlying device.Device for low-level operations.
 // This is used by ChangeSet to apply changes via Redis.
 func (d *Device) Underlying() *device.Device {

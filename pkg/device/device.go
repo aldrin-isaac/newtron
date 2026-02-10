@@ -909,6 +909,69 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*
 	return result, nil
 }
 
+// ApplyFRRDefaults sets FRR runtime defaults that the frrcfgd template does not
+// support via CONFIG_DB. Currently disables:
+//   - bgp ebgp-requires-policy (FRR default: enabled; we need disabled for eBGP without route-maps)
+//   - bgp suppress-fib-pending (FRR default: enabled; suppresses route advertisement until FIB ack)
+//
+// Must be called after a BGP container restart since frr.conf is regenerated.
+func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	if d.tunnel == nil {
+		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
+	}
+
+	// Read bgp_asn from CONFIG_DB to build the correct vtysh command
+	asn := ""
+	if d.ConfigDB != nil {
+		if meta, ok := d.ConfigDB.DeviceMetadata["localhost"]; ok {
+			asn = meta["bgp_asn"]
+		}
+	}
+	if asn == "" {
+		return fmt.Errorf("cannot determine BGP ASN from CONFIG_DB")
+	}
+
+	cmd := fmt.Sprintf(
+		"vtysh -c 'configure terminal' -c 'router bgp %s' "+
+			"-c 'no bgp ebgp-requires-policy' "+
+			"-c 'no bgp suppress-fib-pending' "+
+			"-c 'end' -c 'write memory'",
+		asn)
+	output, err := d.tunnel.ExecCommand(cmd)
+	if err != nil {
+		return fmt.Errorf("ApplyFRRDefaults failed: %w (output: %s)", err, output)
+	}
+	return nil
+}
+
+// RestartService restarts a SONiC Docker container by name (e.g., "bgp", "swss",
+// "syncd") via SSH. Use this instead of ReloadConfig for incremental changes —
+// config reload is destructive (flushes CONFIG_DB, stops ALL services, reloads
+// from disk) and breaks VPP syncd.
+func (d *Device) RestartService(ctx context.Context, name string) error {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return fmt.Errorf("device not connected")
+	}
+	if d.tunnel == nil {
+		return fmt.Errorf("restart service requires SSH connection (no SSH credentials configured)")
+	}
+
+	output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo docker restart %s", name))
+	if err != nil {
+		return fmt.Errorf("restart service %s failed: %w (output: %s)", name, err, output)
+	}
+	return nil
+}
+
 // Tunnel returns the SSH tunnel for direct access (e.g., newtest SSH commands).
 // Returns nil if no SSH tunnel is configured (direct Redis connection).
 func (d *Device) Tunnel() *SSHTunnel {

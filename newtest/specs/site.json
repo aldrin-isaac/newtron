@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "sites": {
+    "lab": {
+      "region": "amer-wan",
+      "route_reflectors": ["spine1", "spine2"]
+    }
+  }
+}

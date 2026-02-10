@@ -154,7 +154,9 @@ defined to support different SONiC images:
       "vm_interface_map": "sequential",
       "vm_cpu_features": "+sse4.2",
       "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
-      "vm_boot_timeout": 180
+      "vm_boot_timeout": 180,
+      "dataplane": "vpp",
+      "vm_image_release": "202405"
     },
     "sonic-cisco-8000": {
       "hwsku": "cisco-8101-p4-32x100-vs",
@@ -185,6 +187,8 @@ defined to support different SONiC images:
 | `vm_cpu_features` | QEMU CPU feature flags (e.g., `+sse4.2` for VPP) |
 | `vm_credentials` | Default login credentials |
 | `vm_boot_timeout` | Seconds to wait for SSH readiness |
+| `dataplane` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
+| `vm_image_release` | Image release identifier — selects release-specific boot patches |
 
 #### Interface Maps
 
@@ -433,6 +437,46 @@ compatibility with single-host deployments.
 and merges their counters into a single table. Local bridges are queried
 via Unix socket; remote bridges via TCP.
 
+### 5.6 Platform Boot Patches
+
+Different SONiC images have platform-specific initialization quirks that must
+be patched after boot but before provisioning. Rather than hardcoding per-platform
+Go code, newtlab uses a **declarative boot patch framework**: JSON descriptors
+paired with Go templates.
+
+**Patch directory structure:**
+
+```
+patches/
+└── vpp/
+    ├── always/                      # Applied to every VPP image
+    │   ├── 01-disable-factory-hook.json
+    │   └── 02-port-config.json
+    └── 202405/                      # Applied only when vm_image_release = "202405"
+        └── 01-specific-fix.json
+```
+
+**Resolution order:**
+1. `patches/<dataplane>/always/*.json` — always applied for this dataplane
+2. `patches/<dataplane>/<release>/*.json` — applied only when `vm_image_release` matches
+
+Within each directory, patches are applied in filename sort order (hence the numeric prefix convention).
+
+**Template variables** are computed from what newtlab already knows — QEMU NIC
+count, deterministic PCI addresses, platform HWSKU, port speed. No SSH-based
+discovery inside the VM is needed.
+
+**Each patch descriptor** specifies:
+- `pre_commands` — shell commands to run before applying files (e.g., wait for a process to exit)
+- `disable_files` — paths to rename to `.disabled` (e.g., broken init hooks)
+- `files` — Go templates rendered with patch variables and uploaded to the VM
+- `redis` — Go templates rendered into redis-cli commands for CONFIG_DB writes
+- `post_commands` — shell commands to run after (e.g., restart services)
+
+**Adding support for a new platform** requires no Go code changes — create a
+directory under `patches/` with descriptors and templates. When an upstream
+image fixes a bug, delete the release-specific patch directory.
+
 ---
 
 ## 6. Profile Patching
@@ -620,3 +664,4 @@ Options:
 ### Phase 5: Advanced
 - Snapshot/restore
 - Image management
+- Platform boot patches — declarative patch framework (§5.6)

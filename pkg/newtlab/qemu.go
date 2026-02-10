@@ -42,11 +42,15 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 	overlayPath := filepath.Join(q.StateDir, "disks", name+".qcow2")
 	args = append(args, "-drive", fmt.Sprintf("file=%s,if=virtio,format=qcow2", overlayPath))
 
-	// Display
-	args = append(args, "-nographic")
+	// Display: use -display none (not -nographic, which adds an implicit -serial mon:stdio
+	// that conflicts with our explicit serial below and pushes console to ttyS1)
+	args = append(args, "-display", "none")
 
-	// Serial console
+	// Serial console: ttyS0 → TCP so we can connect via telnet/netcat
 	args = append(args, "-serial", fmt.Sprintf("tcp::%d,server,nowait", q.Node.ConsolePort))
+
+	// Boot from hard drive (not NIC PXE ROM)
+	args = append(args, "-boot", "c")
 
 	// Monitor socket
 	monSocket := filepath.Join(q.StateDir, "qemu", name+".mon")
@@ -57,25 +61,20 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 	args = append(args, "-pidfile", pidFile)
 
 	// Management NIC (NIC 0): user-mode networking with SSH port forward
+	// romfile= disables PXE boot ROM so QEMU boots from disk
 	args = append(args,
 		"-netdev", fmt.Sprintf("user,id=mgmt,hostfwd=tcp::%d-:22", q.Node.SSHPort),
-		"-device", fmt.Sprintf("%s,netdev=mgmt", q.Node.NICDriver),
+		"-device", fmt.Sprintf("%s,netdev=mgmt,romfile=", q.Node.NICDriver),
 	)
 
-	// Data NICs (NIC 1..N)
+	// Data NICs (NIC 1..N): all connect outbound to bridge workers
 	for _, nic := range q.Node.NICs {
 		if nic.Index == 0 {
 			continue // skip mgmt, already handled
 		}
-		var netdev string
-		if nic.Listen {
-			netdev = fmt.Sprintf("socket,id=%s,listen=:%d", nic.NetdevID, nic.LinkPort)
-		} else {
-			netdev = fmt.Sprintf("socket,id=%s,connect=%s:%d", nic.NetdevID, nic.RemoteIP, nic.LinkPort)
-		}
 		args = append(args,
-			"-netdev", netdev,
-			"-device", fmt.Sprintf("%s,netdev=%s", q.Node.NICDriver, nic.NetdevID),
+			"-netdev", fmt.Sprintf("socket,id=%s,connect=%s", nic.NetdevID, nic.ConnectAddr),
+			"-device", fmt.Sprintf("%s,netdev=%s,romfile=", q.Node.NICDriver, nic.NetdevID),
 		)
 	}
 

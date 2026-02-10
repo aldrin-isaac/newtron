@@ -324,7 +324,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Configure routing protocol if specified
 	var bgpNeighborIP string
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpNeighborIP = i.addBGPRoutingConfig(cs, svc, opts, vrfName)
+		var err error
+		bgpNeighborIP, err = i.addBGPRoutingConfig(cs, svc, opts, vrfName)
+		if err != nil {
+			return nil, fmt.Errorf("BGP routing config for %s: %w", i.name, err)
+		}
 	}
 
 	// Record service binding in NEWTRON_SERVICE_BINDING table for tracking
@@ -372,10 +376,10 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 }
 
 // addBGPRoutingConfig adds BGP neighbor configuration for services with routing.
-// Returns the neighbor IP that was configured, or empty string if none.
-func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, opts ApplyServiceOpts, vrfName string) string {
+// Returns the neighbor IP that was configured, or an error if required parameters are missing.
+func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, opts ApplyServiceOpts, vrfName string) (string, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
-		return ""
+		return "", nil
 	}
 
 	d := i.device
@@ -387,34 +391,33 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 		var err error
 		peerIP, err = util.DeriveNeighborIP(opts.IPAddress)
 		if err != nil {
-			util.WithDevice(d.Name()).Warnf("Could not derive BGP peer IP: %v", err)
-			return ""
+			return "", fmt.Errorf("could not derive BGP peer IP: %w", err)
 		}
 	}
 
 	if peerIP == "" {
-		util.WithDevice(d.Name()).Warnf("Could not determine BGP peer IP for service routing")
-		return ""
+		return "", fmt.Errorf("BGP routing requires an IP address (use --ip)")
 	}
 
 	// Determine peer AS - from service spec or from opts
 	var peerAS int
 	if routing.PeerAS == spec.PeerASRequest {
 		peerAS = opts.PeerAS
+		if peerAS == 0 {
+			return "", fmt.Errorf("service requires --peer-as flag")
+		}
 	} else if routing.PeerAS != "" {
 		fmt.Sscanf(routing.PeerAS, "%d", &peerAS)
 	}
 
 	if peerAS == 0 {
-		util.WithDevice(d.Name()).Warnf("Could not determine BGP peer AS for service routing")
-		return ""
+		return "", fmt.Errorf("could not determine BGP peer AS for service routing")
 	}
 
 	// Local AS from device profile
 	localAS := d.Resolved().ASNumber
 	if localAS == 0 {
-		util.WithDevice(d.Name()).Warnf("Device has no AS number configured")
-		return ""
+		return "", fmt.Errorf("device has no AS number configured")
 	}
 
 	// Local IP is the interface IP (without mask)
@@ -490,7 +493,7 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 	}
 
 	util.WithDevice(d.Name()).Infof("Added BGP neighbor %s (AS %d) via %s", peerIP, peerAS, localIP)
-	return peerIP
+	return peerIP, nil
 }
 
 // addRoutePolicyConfig translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,

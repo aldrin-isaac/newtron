@@ -1,0 +1,19 @@
+name: health
+description: Verify device health checks pass after provisioning
+topology: 2node
+platform: sonic-vpp
+
+steps:
+  - name: provision-all
+    action: provision
+    devices: all
+
+  - name: wait-services-start
+    action: wait
+    duration: 30s
+
+  - name: verify-health
+    action: verify-health
+    devices: all
+    expect:
+      overall: ok

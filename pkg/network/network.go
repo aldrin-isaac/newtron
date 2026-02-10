@@ -414,6 +414,7 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	// SSH credentials (for Redis tunnel)
 	resolved.SSHUser = profile.SSHUser
 	resolved.SSHPass = profile.SSHPass
+	resolved.SSHPort = profile.SSHPort
 
 	// eBGP underlay ASN
 	resolved.UnderlayASN = profile.UnderlayASN

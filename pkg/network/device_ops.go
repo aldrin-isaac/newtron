@@ -910,19 +910,47 @@ func (d *Device) checkBGP() []HealthCheckResult {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}
 	}
 
-	neighborCount := len(d.configDB.BGPNeighbor)
-	if neighborCount == 0 {
-		results = append(results, HealthCheckResult{
-			Check:   "bgp",
-			Status:  "warn",
-			Message: "No BGP neighbors configured",
-		})
-	} else {
-		results = append(results, HealthCheckResult{
-			Check:   "bgp",
-			Status:  "pass",
-			Message: fmt.Sprintf("%d BGP neighbors configured", neighborCount),
-		})
+	if len(d.configDB.BGPNeighbor) == 0 {
+		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}
+	}
+
+	stateClient := d.conn.StateClient()
+	for key := range d.configDB.BGPNeighbor {
+		// Key format: "vrf|ip" (e.g., "default|10.1.0.1")
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) != 2 {
+			results = append(results, HealthCheckResult{
+				Check:   "bgp",
+				Status:  "fail",
+				Message: fmt.Sprintf("Malformed BGP neighbor key: %s", key),
+			})
+			continue
+		}
+		vrf, neighbor := parts[0], parts[1]
+
+		entry, err := stateClient.GetBGPNeighborState(vrf, neighbor)
+		if err != nil {
+			results = append(results, HealthCheckResult{
+				Check:   "bgp",
+				Status:  "fail",
+				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): not found in STATE_DB", neighbor, vrf),
+			})
+			continue
+		}
+
+		if entry.State == "Established" {
+			results = append(results, HealthCheckResult{
+				Check:   "bgp",
+				Status:  "pass",
+				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): Established", neighbor, vrf),
+			})
+		} else {
+			results = append(results, HealthCheckResult{
+				Check:   "bgp",
+				Status:  "fail",
+				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): %s", neighbor, vrf, entry.State),
+			})
+		}
 	}
 
 	return results

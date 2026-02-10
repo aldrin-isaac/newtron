@@ -17,8 +17,10 @@ type NodeConfig struct {
 	NICDriver    string // resolved: platform > "e1000"
 	InterfaceMap string // resolved: platform > "stride-4"
 	CPUFeatures  string // resolved: platform > ""
-	SSHUser      string // resolved: profile ssh_user > platform credentials
-	SSHPass      string // resolved: profile ssh_pass > platform credentials
+	SSHUser      string // resolved: profile ssh_user > "admin"
+	SSHPass      string // resolved: profile ssh_pass > platform credentials pass
+	ConsoleUser  string // resolved: platform vm_credentials user (image default user)
+	ConsolePass  string // resolved: platform vm_credentials pass (image default password)
 	BootTimeout  int    // resolved: platform > 180
 	Host         string // from profile vm_host
 	SSHPort      int    // allocated
@@ -28,12 +30,10 @@ type NodeConfig struct {
 
 // NICConfig represents a single QEMU NIC attachment.
 type NICConfig struct {
-	Index     int    // QEMU NIC index (0=mgmt, 1..N=data)
-	NetdevID  string // "mgmt", "eth1", "eth2", ...
-	Interface string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
-	LinkPort  int    // TCP socket port (0 for mgmt — uses user-mode networking)
-	Listen    bool   // true = -netdev socket,listen=:PORT
-	RemoteIP  string // connect target IP (127.0.0.1 or host IP from hosts map)
+	Index       int    // QEMU NIC index (0=mgmt, 1..N=data)
+	NetdevID    string // "mgmt", "eth1", "eth2", ...
+	Interface   string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
+	ConnectAddr string // "IP:PORT" for data NICs (connects to bridge worker), empty for mgmt
 }
 
 // ResolveNodeConfig builds a NodeConfig for a device by merging
@@ -98,15 +98,20 @@ func ResolveNodeConfig(
 		nc.CPUFeatures = platform.VMCPUFeatures
 	}
 
-	// SSHUser: profile > platform credentials
-	switch {
-	case profile.SSHUser != "":
-		nc.SSHUser = profile.SSHUser
-	case platform != nil && platform.VMCredentials != nil:
-		nc.SSHUser = platform.VMCredentials.User
+	// ConsoleUser/ConsolePass: platform vm_credentials (the user baked into the image)
+	if platform != nil && platform.VMCredentials != nil {
+		nc.ConsoleUser = platform.VMCredentials.User
+		nc.ConsolePass = platform.VMCredentials.Pass
 	}
 
-	// SSHPass: profile > platform credentials
+	// SSHUser: profile > "admin"
+	if profile.SSHUser != "" {
+		nc.SSHUser = profile.SSHUser
+	} else {
+		nc.SSHUser = "admin"
+	}
+
+	// SSHPass: profile > platform credentials pass
 	switch {
 	case profile.SSHPass != "":
 		nc.SSHPass = profile.SSHPass

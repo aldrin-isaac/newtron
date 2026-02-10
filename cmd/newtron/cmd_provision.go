@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -91,7 +92,12 @@ Examples:
 			}
 			fmt.Printf("%s (%d entries applied)\n", green("OK"), result.Applied)
 
-			// Save and reload if requested
+			// Save config and restart BGP container if requested.
+			// We restart only the bgp container instead of a full config reload
+			// because config reload is destructive (flushes CONFIG_DB, stops ALL
+			// services) and breaks VPP syncd. Most CONFIG_DB changes are picked
+			// up via Redis keyspace notifications, but bgpcfgd cannot change the
+			// BGP ASN dynamically — it requires a container restart.
 			if saveMode {
 				dev, err := net.ConnectDevice(ctx, name)
 				if err != nil {
@@ -104,11 +110,20 @@ Examples:
 						fmt.Println(green("saved"))
 					}
 
-					fmt.Print("  Reloading config... ")
-					if err := dev.ReloadConfig(ctx); err != nil {
+					fmt.Print("  Restarting BGP... ")
+					if err := dev.RestartService(ctx, "bgp"); err != nil {
 						fmt.Printf("%s: %v\n", red("FAILED"), err)
 					} else {
-						fmt.Println(green("reloaded"))
+						fmt.Println(green("restarted"))
+
+						// Wait for FRR to start, then apply defaults
+						time.Sleep(5 * time.Second)
+						fmt.Print("  Applying FRR defaults... ")
+						if err := dev.ApplyFRRDefaults(ctx); err != nil {
+							fmt.Printf("%s: %v\n", red("FAILED"), err)
+						} else {
+							fmt.Println(green("OK"))
+						}
 					}
 					dev.Disconnect()
 				}

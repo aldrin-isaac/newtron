@@ -1,0 +1,39 @@
+name: service-l2
+description: Apply and remove l2-extend service, verify VLAN_MEMBER config
+topology: 2node
+platform: sonic-vpp
+
+steps:
+  - name: provision-all
+    action: provision
+    devices: all
+
+  - name: wait-config-apply
+    action: wait
+    duration: 30s
+
+  - name: apply-l2-extend
+    action: apply-service
+    devices: [leaf1]
+    interface: Ethernet1
+    service: l2-extend
+
+  - name: verify-vlan-member
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN_MEMBER
+    expect:
+      min_entries: 1
+
+  - name: remove-l2-extend
+    action: remove-service
+    devices: [leaf1]
+    interface: Ethernet1
+
+  - name: verify-vlan-member-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet1"
+    expect:
+      exists: false

@@ -234,7 +234,9 @@ Define multiple platforms for different SONiC images:
       "vm_interface_map": "sequential",
       "vm_cpu_features": "+sse4.2",
       "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
-      "vm_boot_timeout": 180
+      "vm_boot_timeout": 180,
+      "dataplane": "vpp",
+      "vm_image_release": "202405"
     }
   }
 }
@@ -252,6 +254,8 @@ Define multiple platforms for different SONiC images:
 | `vm_cpu_features` | QEMU CPU feature flags (e.g., `+sse4.2` for VPP) |
 | `vm_credentials` | Default login credentials |
 | `vm_boot_timeout` | Seconds to wait for SSH readiness |
+| `dataplane` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
+| `vm_image_release` | Image release (e.g., `"202405"`) — selects release-specific boot patches |
 
 #### Interface Maps
 
@@ -315,6 +319,64 @@ After deploying VMs, newtlab updates profiles so newtron can connect:
 
 newtron reads `ssh_port` from the profile to connect on the correct port
 instead of the default 22.
+
+---
+
+## Platform Boot Patches
+
+Some SONiC images have platform-specific initialization issues that newtlab
+automatically patches after boot. Patches are selected by the platform's
+`dataplane` and optionally `vm_image_release` fields.
+
+### How It Works
+
+During deploy, after VMs boot and SSH is available, newtlab:
+
+1. Looks up patches for the platform's dataplane type (e.g., `vpp`)
+2. Applies `always/` patches (present for every image of this type)
+3. Applies release-specific patches if `vm_image_release` matches a subdirectory
+
+### Example: VPP patches
+
+The VPP dataplane has known issues with QEMU-based deployment:
+- The factory default hook runs twice, clobbering port configuration
+- `port_config.ini` and `sonic_vpp_ifmap.ini` are generated empty
+
+newtlab ships with built-in patches that fix these automatically. No user
+action is required — setting `"dataplane": "vpp"` in `platforms.json` is
+sufficient.
+
+### When Release-Specific Patches Are Needed
+
+If a specific SONiC image build has a unique bug that's fixed in later releases,
+add `vm_image_release` to the platform definition:
+
+```json
+{
+    "sonic-vpp": {
+        "dataplane": "vpp",
+        "vm_image_release": "202405",
+        "vm_image": "~/.newtlab/images/sonic-vpp-202405.qcow2"
+    }
+}
+```
+
+newtlab will apply the always patches plus any patches in `patches/vpp/202405/`.
+
+### Troubleshooting
+
+If boot patches fail:
+```bash
+# Check deploy output for "boot patch" errors
+# Patches run via SSH, so SSH must be working first
+newtlab ssh <node>
+
+# Verify CONFIG_DB has PORT entries (VPP)
+redis-cli -n 4 keys "PORT|Ethernet*"
+
+# Check if factory hook was disabled (VPP)
+ls /etc/config-setup/factory-default-hooks.d/
+```
 
 ---
 

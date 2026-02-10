@@ -1,0 +1,8 @@
+{
+  "mgmt_ip": "127.0.0.1",
+  "loopback_ip": "10.0.0.1",
+  "site": "lab",
+  "platform": "sonic-vpp",
+  "is_route_reflector": true,
+  "underlay_asn": 65001
+}

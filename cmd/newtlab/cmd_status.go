@@ -62,12 +62,12 @@ func newStatusCmd() *cobra.Command {
 
 			// Link table
 			if len(state.Links) > 0 {
-				fmt.Printf("\n%-40s %-8s\n", "LINK", "PORT")
-				fmt.Printf("%-40s %-8s\n", "────────────────────────────────────────", "────────")
+				fmt.Printf("\n%-40s %-8s %-8s\n", "LINK", "A_PORT", "Z_PORT")
+				fmt.Printf("%-40s %-8s %-8s\n", "────────────────────────────────────────", "────────", "────────")
 				for _, link := range state.Links {
-					fmt.Printf("%-40s %-8d\n",
+					fmt.Printf("%-40s %-8d %-8d\n",
 						fmt.Sprintf("%s ↔ %s", link.A, link.Z),
-						link.Port,
+						link.APort, link.ZPort,
 					)
 				}
 			}

@@ -52,6 +52,11 @@ func (tp *TopologyProvisioner) ValidateTopologyDevice(deviceName string) error {
 	}
 
 	for intfName, ti := range topoDev.Interfaces {
+		// Skip interfaces with no service assignment (stub ports)
+		if ti.Service == "" {
+			continue
+		}
+
 		// Verify service exists
 		svc, err := tp.network.GetService(ti.Service)
 		if err != nil {
@@ -107,8 +112,11 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*Comp
 	// Step 1: Device-level entries
 	tp.addDeviceEntries(cb, deviceName, resolved, topoDev)
 
-	// Step 2: Per-interface service entries
+	// Step 2: Per-interface service entries (skip stub interfaces with no service)
 	for intfName, ti := range topoDev.Interfaces {
+		if ti.Service == "" {
+			continue
+		}
 		if err := tp.addInterfaceEntries(cb, intfName, ti, resolved); err != nil {
 			return nil, fmt.Errorf("interface %s: %w", intfName, err)
 		}
@@ -247,8 +255,14 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *CompositeBuilder, deviceName
 	loopbackIPKey := fmt.Sprintf("Loopback0|%s/32", resolved.LoopbackIP)
 	cb.AddEntry("LOOPBACK_INTERFACE", loopbackIPKey, map[string]string{})
 
-	// PORT entries for each interface in topology
-	for intfName := range topoDev.Interfaces {
+	// PORT entries for each interface in topology.
+	// Skip stub interfaces (no service AND no link) — they may have no
+	// physical backing in VPP and creating PORT entries for non-existent
+	// ports crashes orchagent.
+	for intfName, ti := range topoDev.Interfaces {
+		if ti.Service == "" && ti.Link == "" {
+			continue
+		}
 		// Only add PORT entries for physical interfaces (Ethernet*)
 		if strings.HasPrefix(intfName, "Ethernet") {
 			cb.AddPortConfig(intfName, map[string]string{
@@ -287,26 +301,78 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *CompositeBuilder, deviceName
 		})
 	}
 
-	// BGP neighbors from route reflectors (iBGP overlay via loopback)
+	// BGP neighbors from route reflectors (iBGP overlay via loopback).
+	// These peers use the regional AS (ASNumber) with local-as override.
+	// Since the router bgp uses underlayASN, FRR treats these as eBGP,
+	// so ebgp_multihop is required for loopback-based peering.
 	for _, rrIP := range resolved.BGPNeighbors {
 		cb.AddBGPNeighbor("default", rrIP, map[string]string{
-			"asn":          fmt.Sprintf("%d", resolved.ASNumber),
-			"local_addr":   resolved.LoopbackIP,
-			"local_asn":    fmt.Sprintf("%d", resolved.ASNumber),
-			"admin_status": "up",
+			"asn":            fmt.Sprintf("%d", resolved.ASNumber),
+			"local_addr":     resolved.LoopbackIP,
+			"local_asn":      fmt.Sprintf("%d", resolved.ASNumber),
+			"admin_status":   "up",
+			"ebgp_multihop":  "true",
 		})
 
-		// Activate IPv4 unicast
+		// Activate IPv4 unicast (frrcfgd uses admin_status for activation)
 		cb.AddBGPNeighborAF("default", rrIP, "ipv4_unicast", map[string]string{
-			"activate": "true",
+			"admin_status": "true",
 		})
 
 		if hasEVPN {
 			// Activate L2VPN EVPN
 			cb.AddBGPNeighborAF("default", rrIP, "l2vpn_evpn", map[string]string{
-				"activate": "true",
+				"admin_status": "true",
 			})
 		}
+	}
+
+	// eBGP underlay neighbors from topology links
+	// For each interface with a link and IP, derive the peer's underlay_asn
+	// and create a BGP_NEIGHBOR entry for the eBGP underlay session.
+	for _, ti := range topoDev.Interfaces {
+		if ti.Link == "" || ti.IP == "" {
+			continue
+		}
+		// Parse "peerDevice:peerInterface" from the link field
+		parts := strings.SplitN(ti.Link, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		peerDeviceName := parts[0]
+
+		// Load peer device's profile to get its underlay_asn
+		peerProfile, err := tp.network.loadProfile(peerDeviceName)
+		if err != nil {
+			util.Warnf("Could not load peer profile %s for underlay BGP: %v", peerDeviceName, err)
+			continue
+		}
+		peerASN := peerProfile.UnderlayASN
+		if peerASN == 0 {
+			continue // No underlay ASN — skip eBGP neighbor
+		}
+
+		// Derive peer IP from our interface IP (/31 or /30)
+		peerIP, err := util.DeriveNeighborIP(ti.IP)
+		if err != nil {
+			continue
+		}
+
+		localAS := resolved.ASNumber
+		if resolved.UnderlayASN > 0 {
+			localAS = resolved.UnderlayASN
+		}
+
+		localIP, _ := util.SplitIPMask(ti.IP)
+		cb.AddBGPNeighbor("default", peerIP, map[string]string{
+			"asn":          fmt.Sprintf("%d", peerASN),
+			"local_asn":    fmt.Sprintf("%d", localAS),
+			"local_addr":   localIP,
+			"admin_status": "up",
+		})
+		cb.AddBGPNeighborAF("default", peerIP, "ipv4_unicast", map[string]string{
+			"admin_status": "true",
+		})
 	}
 
 	// Route redistribution for connected (loopback + service subnets)
@@ -337,21 +403,57 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *CompositeBuilder, re
 		"log_neighbor_changes":  "true",
 	})
 
-	// For RR neighbors, enable route-reflector-client on all AFs
+	// Discover RR clients: iterate all devices in the topology.
+	// Any device that is NOT a route reflector and is NOT this device is a client.
+	topo := tp.network.GetTopology()
+	for clientName, clientTopoDev := range topo.Devices {
+		if clientName == resolved.DeviceName {
+			continue // skip self
+		}
+		if clientTopoDev.DeviceConfig != nil && clientTopoDev.DeviceConfig.RouteReflector {
+			continue // skip other RRs
+		}
+		// Load client profile to get its loopback IP
+		clientProfile, err := tp.network.loadProfile(clientName)
+		if err != nil {
+			util.Warnf("Could not load client profile %s for RR: %v", clientName, err)
+			continue
+		}
+		clientLoopback := clientProfile.LoopbackIP
+		if clientLoopback == "" {
+			continue
+		}
+
+		// Add iBGP neighbor for this client (loopback-based, needs multihop)
+		cb.AddBGPNeighbor("default", clientLoopback, map[string]string{
+			"asn":            fmt.Sprintf("%d", resolved.ASNumber),
+			"local_asn":      fmt.Sprintf("%d", resolved.ASNumber),
+			"local_addr":     resolved.LoopbackIP,
+			"admin_status":   "up",
+			"ebgp_multihop":  "true",
+		})
+		cb.AddBGPNeighborAF("default", clientLoopback, "ipv4_unicast", map[string]string{
+			"admin_status": "true",
+			"rrclient":     "true",
+			"nhself":       "true",
+		})
+	}
+
+	// For RR-to-RR neighbors (from BGPNeighbors list), enable route-reflector-client
 	for _, rrIP := range resolved.BGPNeighbors {
 		cb.AddBGPNeighborAF("default", rrIP, "ipv4_unicast", map[string]string{
-			"activate":               "true",
-			"route_reflector_client": "true",
-			"next_hop_self":          "true",
+			"admin_status": "true",
+			"rrclient":     "true",
+			"nhself":       "true",
 		})
 		cb.AddBGPNeighborAF("default", rrIP, "ipv6_unicast", map[string]string{
-			"activate":               "true",
-			"route_reflector_client": "true",
-			"next_hop_self":          "true",
+			"admin_status": "true",
+			"rrclient":     "true",
+			"nhself":       "true",
 		})
 		cb.AddBGPNeighborAF("default", rrIP, "l2vpn_evpn", map[string]string{
-			"activate":               "true",
-			"route_reflector_client": "true",
+			"admin_status": "true",
+			"rrclient":     "true",
 		})
 	}
 
@@ -605,7 +707,10 @@ func (tp *TopologyProvisioner) generateServiceEntries(
 
 	// BGP routing configuration
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpEntries := tp.generateBGPEntries(svc, ipAddr, params, vrfName, resolved)
+		bgpEntries, err := tp.generateBGPEntries(svc, ipAddr, params, vrfName, resolved)
+		if err != nil {
+			return nil, fmt.Errorf("interface %s: BGP routing: %w", interfaceName, err)
+		}
 		entries = append(entries, bgpEntries...)
 	}
 
@@ -768,9 +873,9 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 	params map[string]string,
 	vrfName string,
 	resolved *spec.ResolvedProfile,
-) []CompositeEntry {
+) ([]CompositeEntry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
-		return nil
+		return nil, nil
 	}
 
 	var entries []CompositeEntry
@@ -782,11 +887,11 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 		var err error
 		peerIP, err = util.DeriveNeighborIP(ipAddr)
 		if err != nil {
-			return nil
+			return nil, fmt.Errorf("could not derive BGP peer IP: %w", err)
 		}
 	}
 	if peerIP == "" {
-		return nil
+		return nil, fmt.Errorf("BGP routing requires an IP address")
 	}
 
 	// Determine peer AS
@@ -795,11 +900,14 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 		if peerASStr, ok := params["peer_as"]; ok {
 			fmt.Sscanf(peerASStr, "%d", &peerAS)
 		}
+		if peerAS == 0 {
+			return nil, fmt.Errorf("service requires peer_as parameter")
+		}
 	} else if routing.PeerAS != "" {
 		fmt.Sscanf(routing.PeerAS, "%d", &peerAS)
 	}
 	if peerAS == 0 {
-		return nil
+		return nil, fmt.Errorf("could not determine BGP peer AS for service routing")
 	}
 
 	localAS := resolved.ASNumber
@@ -807,7 +915,7 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 		localAS = resolved.UnderlayASN
 	}
 	if localAS == 0 {
-		return nil
+		return nil, fmt.Errorf("device %s has no AS number configured", resolved.DeviceName)
 	}
 
 	localIP, _ := util.SplitIPMask(ipAddr)
@@ -833,14 +941,15 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 		Fields: neighborFields,
 	})
 
-	// IPv4 unicast activation with optional RR-client and next-hop-self params
+	// IPv4 unicast activation with optional RR-client and next-hop-self params.
+	// frrcfgd uses admin_status (not activate), rrclient, nhself.
 	afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
-	afFields := map[string]string{"activate": "true"}
+	afFields := map[string]string{"admin_status": "true"}
 	if val, ok := params["route_reflector_client"]; ok && val == "true" {
-		afFields["route_reflector_client"] = "true"
+		afFields["rrclient"] = "true"
 	}
 	if val, ok := params["next_hop_self"]; ok && val == "true" {
-		afFields["next_hop_self"] = "true"
+		afFields["nhself"] = "true"
 	}
 	entries = append(entries, CompositeEntry{
 		Table:  "BGP_NEIGHBOR_AF",
@@ -848,7 +957,7 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 		Fields: afFields,
 	})
 
-	return entries
+	return entries, nil
 }
 
 // capitalizeFirst returns s with the first letter uppercased.
