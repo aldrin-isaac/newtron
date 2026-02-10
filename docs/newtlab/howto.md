@@ -469,6 +469,59 @@ Use `newtlab bridge-stats` to see aggregated counters from all hosts.
 
 ---
 
+## Multi-User Environments
+
+When multiple developers deploy to the same server pool, follow these
+conventions to avoid conflicts:
+
+### Port Bases
+
+Each user should configure distinct port bases in their `topology.json`.
+Since newtlab allocates ports sequentially from the base, spacing bases
+by 1000 provides ample room:
+
+| User | link_port_base | console_port_base | ssh_port_base |
+|------|----------------|-------------------|---------------|
+| Alice | 20000 | 30000 | 40000 |
+| Bob | 21000 | 31000 | 41000 |
+| Carol | 22000 | 32000 | 42000 |
+
+### Lab Naming
+
+Lab names should be unique across all users of a server pool. Prefix
+with your username to avoid collisions:
+
+```json
+{
+  "name": "alice-spine-leaf",
+  "devices": { "..." : "..." }
+}
+```
+
+Each lab writes its state to `~/.newtlab/labs/<name>/` on the host, so
+unique names ensure no overlap.
+
+### Port Conflict Detection
+
+`ProbeAllPorts` runs automatically during deploy and checks all allocated
+ports (SSH, console, link, bridge stats) on every host. If another user's
+lab occupies a port, deploy fails with a clear error message identifying
+the conflicting port and host.
+
+### Shared newtlink Binary
+
+The uploaded `newtlink` binary at `~/.newtlab/bin/newtlink` on remote
+servers is shared across all users of the same Unix account. Before
+uploading, newtlab checks the remote version — if it matches the local
+build, the upload is skipped. This means the last user to deploy gets
+their version installed, but since all newtlink versions are backward-
+compatible with the bridge config format, this is safe.
+
+To use a specific newtlink version, set `$NEWTLAB_BIN_DIR` to a directory
+containing your cross-compiled binaries.
+
+---
+
 ## Troubleshooting
 
 ### VM Won't Start
@@ -511,8 +564,8 @@ Common causes:
 - Port conflict — another process on the newtlink port range
 - Wrong `vm_interface_map` for the SONiC image type (interfaces exist but
   numbered differently than expected)
-- Remote bridge not started — verify `newtlab` binary is in `$PATH` on
-  remote hosts (required for `startBridgeProcessRemote`)
+- Remote bridge not started — newtlab auto-uploads the `newtlink` binary;
+  check `~/.newtlab/bin/newtlink --version` on the remote host
 
 ### Bridge Stats
 
@@ -531,7 +584,7 @@ If a bridge on a remote host is unreachable, `bridge-stats` returns an error
 for that host. Check that the remote bridge process is running:
 
 ```bash
-ssh server-b "ps aux | grep 'newtlab bridge'"
+ssh server-b "ps aux | grep newtlink"
 ```
 
 ### Wrong Interface Names

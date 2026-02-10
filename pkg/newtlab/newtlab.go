@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -104,12 +103,6 @@ func NewLab(specDir string) (*Lab, error) {
 		nc.SSHPort = l.Config.SSHPortBase + i
 		nc.ConsolePort = l.Config.ConsolePortBase + i
 
-		// Expand ~ in image path
-		if strings.HasPrefix(nc.Image, "~/") {
-			home, _ := os.UserHomeDir()
-			nc.Image = filepath.Join(home, nc.Image[2:])
-		}
-
 		l.Nodes[name] = nc
 	}
 
@@ -171,11 +164,34 @@ func (l *Lab) Deploy() error {
 		})
 	}
 
-	// Create overlay disks
+	// Set up remote state directories (one SSH per unique remote host)
+	remoteHosts := map[string]bool{}
+	for _, node := range l.Nodes {
+		hostIP := resolveHostIP(node, l.Config)
+		if hostIP != "" && !remoteHosts[hostIP] {
+			if err := setupRemoteStateDir(l.Name, hostIP); err != nil {
+				return err
+			}
+			remoteHosts[hostIP] = true
+		}
+	}
+
+	// Create overlay disks (local or remote)
 	for name, node := range l.Nodes {
-		overlayPath := filepath.Join(l.StateDir, "disks", name+".qcow2")
-		if err := CreateOverlay(node.Image, overlayPath); err != nil {
-			return err
+		hostIP := resolveHostIP(node, l.Config)
+		if hostIP != "" {
+			// Remote: use ~/-based paths for shell expansion on remote host
+			remoteOverlay := fmt.Sprintf("~/.newtlab/labs/%s/disks/%s.qcow2", l.Name, name)
+			remoteImage := unexpandHome(node.Image)
+			if err := CreateOverlayRemote(remoteImage, remoteOverlay, hostIP); err != nil {
+				return err
+			}
+		} else {
+			// Local: expand ~ and use absolute paths
+			overlayPath := filepath.Join(l.StateDir, "disks", name+".qcow2")
+			if err := CreateOverlay(expandHome(node.Image), overlayPath); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -255,7 +271,7 @@ func (l *Lab) Deploy() error {
 		node := l.Nodes[name]
 		hostIP := resolveHostIP(node, l.Config)
 
-		pid, err := StartNode(node, l.StateDir)
+		pid, err := StartNode(node, l.StateDir, hostIP)
 		if err != nil {
 			l.State.Nodes[name] = &NodeState{
 				Status:      "error",
@@ -430,12 +446,23 @@ func (l *Lab) Destroy() error {
 		}
 	}
 
+	// Clean up remote state directories
+	cleanedHosts := map[string]bool{}
+	for _, node := range state.Nodes {
+		if node.HostIP != "" && !cleanedHosts[node.HostIP] {
+			if err := cleanupRemoteStateDir(l.Name, node.HostIP); err != nil {
+				errs = append(errs, fmt.Errorf("cleanup remote state on %s: %w", node.HostIP, err))
+			}
+			cleanedHosts[node.HostIP] = true
+		}
+	}
+
 	// Restore profiles
 	if err := RestoreProfiles(l); err != nil {
 		errs = append(errs, fmt.Errorf("restore profiles: %w", err))
 	}
 
-	// Remove state directory
+	// Remove local state directory
 	if err := RemoveState(l.Name); err != nil {
 		errs = append(errs, fmt.Errorf("remove state: %w", err))
 	}
@@ -465,10 +492,14 @@ func (l *Lab) Status() (*LabState, error) {
 
 // FilterHost removes nodes not assigned to the given host name.
 // Nodes without a vm_host profile field are retained (single-host mode).
+// Nodes matching the given host have their Host cleared so they are
+// treated as local — QEMU runs directly instead of via SSH to self.
 func (l *Lab) FilterHost(host string) {
 	for name, node := range l.Nodes {
 		if node.Host != "" && node.Host != host {
 			delete(l.Nodes, name)
+		} else if node.Host == host {
+			node.Host = "" // this host is local — no SSH to self
 		}
 	}
 
@@ -531,7 +562,7 @@ func (l *Lab) Start(nodeName string) error {
 	node.SSHPort = nodeState.SSHPort
 	node.ConsolePort = nodeState.ConsolePort
 
-	pid, err := StartNode(node, LabDir(l.Name))
+	pid, err := StartNode(node, LabDir(l.Name), nodeState.HostIP)
 	if err != nil {
 		return err
 	}
@@ -620,9 +651,17 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 	} else if existing.BridgePID > 0 && isRunningLocal(existing.BridgePID) {
 		stopNodeLocal(existing.BridgePID)
 	}
+	// Clean up remote state directories
+	cleanedHosts := map[string]bool{}
+	for _, node := range existing.Nodes {
+		if node.HostIP != "" && !cleanedHosts[node.HostIP] {
+			cleanupRemoteStateDir(l.Name, node.HostIP) // best effort
+			cleanedHosts[node.HostIP] = true
+		}
+	}
 	// Restore profiles (best effort)
 	RestoreProfiles(old)
-	// Remove state
+	// Remove local state
 	return RemoveState(l.Name)
 }
 

@@ -15,7 +15,8 @@ import (
 // QEMUCommand builds a QEMU invocation for a single node.
 type QEMUCommand struct {
 	Node     *NodeConfig
-	StateDir string // lab state directory
+	StateDir string // lab state directory (absolute for local, "." for remote)
+	KVM      bool   // enable KVM acceleration
 }
 
 // Build returns an exec.Cmd ready to start the QEMU process.
@@ -33,7 +34,7 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 		args = append(args, "-cpu", "host")
 	}
 
-	if kvmAvailable() {
+	if q.KVM {
 		args = append(args, "-enable-kvm")
 	}
 
@@ -81,19 +82,20 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 }
 
 // StartNode launches the QEMU process for a node.
-// If node.Host is set, launches on the remote host via SSH.
+// If hostIP is non-empty, launches on the remote host via SSH.
 // Otherwise launches locally, redirecting stdout/stderr to logs/<name>.log.
 // Returns PID after process is started (does not wait for boot).
-func StartNode(node *NodeConfig, stateDir string) (int, error) {
-	if node.Host != "" {
-		return StartNodeRemote(node, stateDir, node.Host)
+func StartNode(node *NodeConfig, stateDir, hostIP string) (int, error) {
+	if hostIP != "" {
+		labName := filepath.Base(stateDir)
+		return StartNodeRemote(node, labName, hostIP)
 	}
 	return startNodeLocal(node, stateDir)
 }
 
 // startNodeLocal launches QEMU on the local host.
 func startNodeLocal(node *NodeConfig, stateDir string) (int, error) {
-	qemu := &QEMUCommand{Node: node, StateDir: stateDir}
+	qemu := &QEMUCommand{Node: node, StateDir: stateDir, KVM: kvmAvailable()}
 	cmd := qemu.Build()
 
 	logPath := filepath.Join(stateDir, "logs", node.Name+".log")
@@ -124,16 +126,19 @@ func startNodeLocal(node *NodeConfig, stateDir string) (int, error) {
 }
 
 // StartNodeRemote launches QEMU on a remote host via SSH.
-// The QEMU command is built locally and executed remotely via "ssh <hostIP> ...".
+// It builds the QEMU command with relative paths, then executes it remotely
+// after cd-ing to the lab state directory (so ~/ expands correctly).
 // Returns the remote PID.
-func StartNodeRemote(node *NodeConfig, stateDir, hostIP string) (int, error) {
-	qemu := &QEMUCommand{Node: node, StateDir: stateDir}
+func StartNodeRemote(node *NodeConfig, labName, hostIP string) (int, error) {
+	// Build QEMU command with relative paths from lab state dir
+	qemu := &QEMUCommand{Node: node, StateDir: ".", KVM: true}
 	localCmd := qemu.Build()
 
-	// Build the remote command string with nohup and background
-	// Use nohup + & so QEMU survives SSH session termination
+	// Build the remote command: cd to state dir, then nohup QEMU
 	qemuArgs := append([]string{localCmd.Path}, localCmd.Args[1:]...)
-	remoteCmd := fmt.Sprintf("nohup %s > /dev/null 2>&1 & echo $!", strings.Join(quoteArgs(qemuArgs), " "))
+	remoteDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	remoteCmd := fmt.Sprintf("cd %s && nohup %s > /dev/null 2>&1 & echo $!",
+		remoteDir, strings.Join(quoteArgs(qemuArgs), " "))
 
 	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, remoteCmd)
 	var stdout bytes.Buffer

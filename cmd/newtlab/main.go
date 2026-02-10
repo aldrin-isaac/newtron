@@ -21,6 +21,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/newtron-network/newtron/pkg/version"
 )
 
 var (
@@ -67,6 +69,7 @@ func init() {
 		newProvisionCmd(),
 		newBridgeCmd(),
 		newBridgeStatsCmd(),
+		newVersionCmd(),
 	)
 }
 
@@ -76,6 +79,16 @@ func requireSpecDir() (string, error) {
 		return "", fmt.Errorf("spec directory required: use -S <dir>")
 	}
 	return specDir, nil
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("newtlab %s (%s)\n", version.Version, version.GitCommit)
+		},
+	}
 }
 
 // Color helpers for terminal output

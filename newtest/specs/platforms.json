@@ -14,7 +14,8 @@
       "vm_cpu_features": "+sse4.2",
       "vm_credentials": {"user": "aldrin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 300,
-      "dataplane": "vpp"
+      "dataplane": "vpp",
+      "unsupported_features": ["acl"]
     }
   }
 }

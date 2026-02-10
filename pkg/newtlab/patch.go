@@ -64,12 +64,16 @@ var templateFuncs = template.FuncMap{
 }
 
 // QEMUPCIAddrs returns deterministic PCI addresses for data NICs.
-// QEMU assigns PCI slots sequentially: mgmt is slot 2, data NICs start at slot 3.
-// For N data NICs: 0000:00:03.0, 0000:00:04.0, ...
+// QEMU assigns PCI slots sequentially on the i440FX bus:
+//   slot 0: host bridge, slot 1: ISA/IDE/ACPI, slot 2: VGA
+//   slot 3: first -device (our management NIC)
+//   slot 4: second -device (first data NIC)
+//   slot 5: third -device (second data NIC), etc.
+// Data NICs start at slot 4 (slot 3 + 1, skipping mgmt).
 func QEMUPCIAddrs(dataNICs int) []string {
 	addrs := make([]string, dataNICs)
 	for i := 0; i < dataNICs; i++ {
-		addrs[i] = fmt.Sprintf("0000:00:%02x.0", 3+i)
+		addrs[i] = fmt.Sprintf("0000:00:%02x.0", 4+i)
 	}
 	return addrs
 }

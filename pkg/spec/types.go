@@ -263,6 +263,18 @@ type PlatformSpec struct {
 	VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
 	Dataplane            string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
 	VMImageRelease       string         `json:"vm_image_release,omitempty"` // e.g. "202405" — selects release-specific boot patches
+	UnsupportedFeatures  []string       `json:"unsupported_features,omitempty"` // features this platform cannot handle (e.g. "acl")
+}
+
+// SupportsFeature returns true if the platform supports the named feature.
+// A feature is unsupported only if explicitly listed in UnsupportedFeatures.
+func (p *PlatformSpec) SupportsFeature(feature string) bool {
+	for _, f := range p.UnsupportedFeatures {
+		if f == feature {
+			return false
+		}
+	}
+	return true
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.

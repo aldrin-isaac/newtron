@@ -1,10 +1,12 @@
 {
+    "console_port": 12001,
     "is_route_reflector": true,
     "loopback_ip": "10.0.0.1",
     "mgmt_ip": "127.0.0.1",
     "platform": "sonic-vpp",
     "site": "lab",
     "ssh_pass": "YourPaSsWoRd",
+    "ssh_port": 13001,
     "ssh_user": "admin",
     "underlay_asn": 65001
 }

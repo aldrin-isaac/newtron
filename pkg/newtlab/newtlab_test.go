@@ -535,6 +535,72 @@ func TestRemoveState(t *testing.T) {
 }
 
 // ============================================================================
+// FilterHost Tests
+// ============================================================================
+
+func TestFilterHost_ClearsLocalHost(t *testing.T) {
+	lab := &Lab{
+		Nodes: map[string]*NodeConfig{
+			"spine1": {Name: "spine1", Host: "server-a"},
+			"spine2": {Name: "spine2", Host: "server-a"},
+			"leaf1":  {Name: "leaf1", Host: "server-b"},
+			"leaf2":  {Name: "leaf2", Host: "server-b"},
+		},
+		Links: []*LinkConfig{
+			{A: LinkEndpoint{Device: "spine1"}, Z: LinkEndpoint{Device: "leaf1"}},
+			{A: LinkEndpoint{Device: "spine1"}, Z: LinkEndpoint{Device: "spine2"}},
+		},
+	}
+
+	lab.FilterHost("server-a")
+
+	// server-a nodes kept, server-b nodes removed
+	if _, ok := lab.Nodes["spine1"]; !ok {
+		t.Error("spine1 should be kept")
+	}
+	if _, ok := lab.Nodes["spine2"]; !ok {
+		t.Error("spine2 should be kept")
+	}
+	if _, ok := lab.Nodes["leaf1"]; ok {
+		t.Error("leaf1 should be removed")
+	}
+
+	// Nodes on the current host should have Host cleared (local)
+	if lab.Nodes["spine1"].Host != "" {
+		t.Errorf("spine1.Host = %q, want empty (local)", lab.Nodes["spine1"].Host)
+	}
+	if lab.Nodes["spine2"].Host != "" {
+		t.Errorf("spine2.Host = %q, want empty (local)", lab.Nodes["spine2"].Host)
+	}
+
+	// Only spine1↔spine2 link kept (both nodes exist), spine1↔leaf1 removed
+	if len(lab.Links) != 1 {
+		t.Fatalf("Links len = %d, want 1", len(lab.Links))
+	}
+}
+
+func TestFilterHost_KeepsUnhostNodes(t *testing.T) {
+	lab := &Lab{
+		Nodes: map[string]*NodeConfig{
+			"spine1": {Name: "spine1", Host: ""},        // no host (single-host mode)
+			"leaf1":  {Name: "leaf1", Host: "server-a"},
+		},
+		Links: nil,
+	}
+
+	lab.FilterHost("server-a")
+
+	// Unhosted node kept
+	if _, ok := lab.Nodes["spine1"]; !ok {
+		t.Error("spine1 (no host) should be kept")
+	}
+	// server-a node kept and made local
+	if lab.Nodes["leaf1"].Host != "" {
+		t.Errorf("leaf1.Host = %q, want empty (local)", lab.Nodes["leaf1"].Host)
+	}
+}
+
+// ============================================================================
 // PlaceWorkers Tests
 // ============================================================================
 
@@ -1069,3 +1135,102 @@ func TestQueryAllBridgeStats_LegacyFallback(t *testing.T) {
 		t.Errorf("A = %q, want spine1:Ethernet0", stats.Links[0].A)
 	}
 }
+
+// ============================================================================
+// Disk helpers
+// ============================================================================
+
+func TestExpandHome(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	tests := []struct {
+		input, want string
+	}{
+		{"~/foo/bar", filepath.Join(home, "foo/bar")},
+		{"/absolute/path", "/absolute/path"},
+		{"relative/path", "relative/path"},
+		{"~notahome", "~notahome"}, // only ~/... triggers expansion
+	}
+
+	for _, tt := range tests {
+		got := expandHome(tt.input)
+		if got != tt.want {
+			t.Errorf("expandHome(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestUnexpandHome(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	tests := []struct {
+		input, want string
+	}{
+		{home + "/foo/bar", "~/foo/bar"},
+		{"/other/path", "/other/path"},
+		{home, home}, // no trailing slash — not under home
+	}
+
+	for _, tt := range tests {
+		got := unexpandHome(tt.input)
+		if got != tt.want {
+			t.Errorf("unexpandHome(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// ============================================================================
+// QEMUCommand KVM
+// ============================================================================
+
+func TestQEMUCommand_KVM(t *testing.T) {
+	node := &NodeConfig{
+		Name:      "test",
+		Memory:    4096,
+		CPUs:      2,
+		NICDriver: "e1000",
+		NICs:      []NICConfig{{Index: 0, NetdevID: "mgmt"}},
+	}
+
+	// With KVM enabled
+	qemu := &QEMUCommand{Node: node, StateDir: "/tmp/test", KVM: true}
+	cmd := qemu.Build()
+	args := fmt.Sprintf("%v", cmd.Args)
+	if !containsStr(args, "-enable-kvm") {
+		t.Error("KVM=true should include -enable-kvm")
+	}
+
+	// Without KVM
+	qemu = &QEMUCommand{Node: node, StateDir: "/tmp/test", KVM: false}
+	cmd = qemu.Build()
+	args = fmt.Sprintf("%v", cmd.Args)
+	if containsStr(args, "-enable-kvm") {
+		t.Error("KVM=false should not include -enable-kvm")
+	}
+}
+
+func TestQEMUCommand_RelativePaths(t *testing.T) {
+	node := &NodeConfig{
+		Name:        "spine1",
+		Memory:      4096,
+		CPUs:        2,
+		NICDriver:   "virtio-net-pci",
+		SSHPort:     40000,
+		ConsolePort: 30000,
+		NICs:        []NICConfig{{Index: 0, NetdevID: "mgmt"}},
+	}
+
+	// Relative state dir (used for remote)
+	qemu := &QEMUCommand{Node: node, StateDir: ".", KVM: true}
+	cmd := qemu.Build()
+	args := fmt.Sprintf("%v", cmd.Args)
+
+	// Paths should be relative (no leading /)
+	if !containsStr(args, "disks/spine1.qcow2") {
+		t.Errorf("expected relative overlay path, got args: %s", args)
+	}
+	if !containsStr(args, "qemu/spine1.mon") {
+		t.Errorf("expected relative monitor path, got args: %s", args)
+	}
+}
+

@@ -81,8 +81,15 @@ func buildBridgeConfig(links []*LinkConfig, statsAddr string) BridgeConfig {
 // until the process receives SIGTERM/SIGINT. This is called by the hidden
 // "newtlab bridge" subcommand.
 func RunBridge(labName string) error {
-	stateDir := LabDir(labName)
-	data, err := os.ReadFile(filepath.Join(stateDir, "bridge.json"))
+	return RunBridgeFromFile(filepath.Join(LabDir(labName), "bridge.json"))
+}
+
+// RunBridgeFromFile reads a bridge config JSON file and runs bridge workers
+// until the process receives SIGTERM/SIGINT. The stateDir for pid/socket files
+// is derived from the config file's directory.
+func RunBridgeFromFile(configPath string) error {
+	stateDir := filepath.Dir(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("newtlab: read bridge config: %w", err)
 	}
@@ -231,15 +238,25 @@ func QueryAllBridgeStats(labName string) (*BridgeStats, error) {
 	return QueryBridgeStats(sockPath)
 }
 
-// startBridgeProcess spawns "newtlab bridge <labName>" as a background process.
-// Returns the PID of the spawned process.
+// startBridgeProcess spawns a bridge process locally.
+// It prefers the newtlink binary next to the current executable; falls back to
+// "newtlab bridge <labName>" for backward compatibility.
 func startBridgeProcess(labName, stateDir string) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("resolve executable: %w", err)
 	}
 
-	cmd := exec.Command(exe, "bridge", labName)
+	configPath := filepath.Join(stateDir, "bridge.json")
+
+	// Prefer newtlink binary next to current executable
+	var cmd *exec.Cmd
+	newtlinkPath := filepath.Join(filepath.Dir(exe), "newtlink")
+	if _, err := os.Stat(newtlinkPath); err == nil {
+		cmd = exec.Command(newtlinkPath, configPath)
+	} else {
+		cmd = exec.Command(exe, "bridge", labName)
+	}
 
 	logPath := filepath.Join(stateDir, "logs", "bridge.log")
 	logFile, err := os.Create(logPath)
@@ -268,21 +285,28 @@ func startBridgeProcess(labName, stateDir string) (int, error) {
 }
 
 // startBridgeProcessRemote starts a bridge process on a remote host via SSH.
-// It copies the bridge config JSON, then starts "newtlab bridge <labName>" via nohup.
-// Returns the remote PID.
+// It uploads the newtlink binary if needed, copies the bridge config JSON,
+// then starts newtlink via nohup. Returns the remote PID.
 func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, error) {
+	// Upload newtlink binary (skip if version matches)
+	newtlinkPath, err := uploadNewtlink(hostIP)
+	if err != nil {
+		return 0, fmt.Errorf("newtlab: upload newtlink to %s: %w", hostIP, err)
+	}
+
 	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	configPath := stateDir + "/bridge.json"
 
 	// Create remote state dir and write bridge config
-	mkdirCmd := fmt.Sprintf("mkdir -p %s/logs && cat > %s/bridge.json", stateDir, stateDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s/logs && cat > %s", stateDir, configPath)
 	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, mkdirCmd)
 	cmd.Stdin = bytes.NewReader(configJSON)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return 0, fmt.Errorf("newtlab: setup remote bridge dir on %s: %w\n%s", hostIP, err, out)
 	}
 
-	// Start bridge process
-	startCmd := fmt.Sprintf("nohup newtlab bridge %s > %s/logs/bridge.log 2>&1 & echo $!", labName, stateDir)
+	// Start newtlink with config file
+	startCmd := fmt.Sprintf("nohup %s %s > %s/logs/bridge.log 2>&1 & echo $!", newtlinkPath, configPath, stateDir)
 	cmd = exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, startCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

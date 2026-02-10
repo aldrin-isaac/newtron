@@ -53,10 +53,11 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/audit"
 	"github.com/newtron-network/newtron/pkg/auth"
-	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/settings"
+	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/newtron-network/newtron/pkg/version"
 )
 
 var (
@@ -293,8 +294,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Newtron v0.1.0")
-		fmt.Println("SONiC Network Configuration Tool")
+		fmt.Printf("newtron %s (%s)\n", version.Version, version.GitCommit)
 	},
 }
 

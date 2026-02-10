@@ -668,20 +668,28 @@ func (tp *TopologyProvisioner) generateServiceEntries(
 		}
 	}
 
-	// ACL configuration
-	if svc.IngressFilter != "" {
-		filterEntries, err := tp.generateACLEntries(serviceName, svc.IngressFilter, interfaceName, "ingress")
-		if err != nil {
-			return nil, err
+	// ACL configuration — skip if the platform does not support ACLs.
+	skipACL := false
+	if resolved.Platform != "" {
+		if platform, err := tp.network.GetPlatform(resolved.Platform); err == nil {
+			skipACL = !platform.SupportsFeature("acl")
 		}
-		entries = append(entries, filterEntries...)
 	}
-	if svc.EgressFilter != "" {
-		filterEntries, err := tp.generateACLEntries(serviceName, svc.EgressFilter, interfaceName, "egress")
-		if err != nil {
-			return nil, err
+	if !skipACL {
+		if svc.IngressFilter != "" {
+			filterEntries, err := tp.generateACLEntries(serviceName, svc.IngressFilter, interfaceName, "ingress")
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, filterEntries...)
 		}
-		entries = append(entries, filterEntries...)
+		if svc.EgressFilter != "" {
+			filterEntries, err := tp.generateACLEntries(serviceName, svc.EgressFilter, interfaceName, "egress")
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, filterEntries...)
+		}
 	}
 
 	// QoS configuration

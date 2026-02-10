@@ -13,9 +13,9 @@ func TestQEMUPCIAddrs(t *testing.T) {
 		want     []string
 	}{
 		{0, []string{}},
-		{1, []string{"0000:00:03.0"}},
-		{2, []string{"0000:00:03.0", "0000:00:04.0"}},
-		{4, []string{"0000:00:03.0", "0000:00:04.0", "0000:00:05.0", "0000:00:06.0"}},
+		{1, []string{"0000:00:04.0"}},
+		{2, []string{"0000:00:04.0", "0000:00:05.0"}},
+		{4, []string{"0000:00:04.0", "0000:00:05.0", "0000:00:06.0", "0000:00:07.0"}},
 	}
 
 	for _, tt := range tests {
@@ -119,8 +119,8 @@ func TestBuildPatchVars(t *testing.T) {
 	if len(vars.PCIAddrs) != 2 {
 		t.Errorf("PCIAddrs len = %d, want 2", len(vars.PCIAddrs))
 	}
-	if vars.PCIAddrs[0] != "0000:00:03.0" {
-		t.Errorf("PCIAddrs[0] = %q, want '0000:00:03.0'", vars.PCIAddrs[0])
+	if vars.PCIAddrs[0] != "0000:00:04.0" {
+		t.Errorf("PCIAddrs[0] = %q, want '0000:00:04.0'", vars.PCIAddrs[0])
 	}
 	if vars.HWSkuDir != "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000" {
 		t.Errorf("HWSkuDir = %q", vars.HWSkuDir)
