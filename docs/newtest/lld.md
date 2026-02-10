@@ -19,17 +19,20 @@ newtron/
 ├── pkg/
 │   └── newtest/
 │       ├── scenario.go           # Scenario, Step, StepAction, ExpectBlock types
-│       ├── parser.go             # ParseScenario, ValidateScenario
-│       ├── runner.go             # Runner, RunOptions, RunScenario
-│       ├── steps.go              # StepExecutor interface, all executor implementations
+│       ├── parser.go             # ParseScenario, ValidateScenario, topologicalSort
+│       ├── runner.go             # Runner, RunOptions, RunScenario, runShared
+│       ├── steps.go              # StepExecutor interface, all 31 executor implementations
 │       ├── deploy.go             # DeployTopology, DestroyTopology (newtlab wrapper)
+│       ├── errors.go             # InfraError, StepError
 │       ├── report.go             # ScenarioResult, StepResult, ReportGenerator
-│       └── newtest_test.go       # Unit tests
+│       └── newtest_test.go       # Unit tests (81 tests)
 └── newtest/                      # E2E test assets
     ├── topologies/
     │   ├── 2node/specs/          # 2-node topology spec dir
     │   └── 4node/specs/          # 4-node topology spec dir
-    ├── scenarios/                # YAML scenario files
+    ├── scenarios/                # Standalone scenario files
+    ├── suites/                   # Incremental test suites
+    │   └── 2node-incremental/    # 25 scenarios, dependency-ordered
     └── .generated/               # Runtime output (gitignored)
 ```
 
@@ -47,6 +50,8 @@ type Scenario struct {
     Description string   `yaml:"description"`
     Topology    string   `yaml:"topology"`    // "2node", "4node"
     Platform    string   `yaml:"platform"`    // "sonic-vpp", "sonic-vs"
+    Requires    []string `yaml:"requires"`    // dependency names (suite mode only)
+    Repeat      int      `yaml:"repeat"`      // run all steps N times (0 = once)
     Steps       []Step   `yaml:"steps"`
 }
 ```
@@ -57,6 +62,8 @@ type Scenario struct {
 | `description` | yes | Human-readable description shown in `newtest list` |
 | `topology` | yes | Topology directory name under `newtest/topologies/` |
 | `platform` | yes | Platform name from `platforms.json` in the topology spec dir |
+| `requires` | no | List of scenario names that must pass before this one runs (suite mode) |
+| `repeat` | no | Run all steps N times; 0 or omitted means once. Fail-fast per iteration. |
 | `steps` | yes | Ordered list of test steps |
 
 ### 2.2 Step — Single Test Step
@@ -128,6 +135,24 @@ const (
     ActionRemoveService      StepAction = "remove-service"
     ActionApplyBaseline      StepAction = "apply-baseline"
     ActionSSHCommand         StepAction = "ssh-command"
+    ActionRestartService     StepAction = "restart-service"
+    ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
+    ActionSetInterface       StepAction = "set-interface"
+    ActionCreateVLAN         StepAction = "create-vlan"
+    ActionDeleteVLAN         StepAction = "delete-vlan"
+    ActionAddVLANMember      StepAction = "add-vlan-member"
+    ActionCreateVRF          StepAction = "create-vrf"
+    ActionDeleteVRF          StepAction = "delete-vrf"
+    ActionCreateVTEP         StepAction = "create-vtep"
+    ActionDeleteVTEP         StepAction = "delete-vtep"
+    ActionMapL2VNI           StepAction = "map-l2vni"
+    ActionMapL3VNI           StepAction = "map-l3vni"
+    ActionUnmapVNI           StepAction = "unmap-vni"
+    ActionConfigureSVI       StepAction = "configure-svi"
+    ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
+    ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
+    ActionRefreshService     StepAction = "refresh-service"
+    ActionCleanup            StepAction = "cleanup"
 )
 ```
 
@@ -148,6 +173,24 @@ const (
 | `apply-baseline` | newtron | `Device.ApplyBaseline()` |
 | `ssh-command` | **newtest native** | SSH exec |
 | `wait` | **newtest native** | `time.Sleep` |
+| `restart-service` | newtron | `Device.RestartService()` |
+| `apply-frr-defaults` | newtron | `Device.ApplyFRRDefaults()` |
+| `set-interface` | newtron | `Interface.Set()` / `SetIP()` / `SetVRF()` |
+| `create-vlan` | newtron | `Device.CreateVLAN()` |
+| `delete-vlan` | newtron | `Device.DeleteVLAN()` |
+| `add-vlan-member` | newtron | `Device.AddVLANMember()` |
+| `create-vrf` | newtron | `Device.CreateVRF()` |
+| `delete-vrf` | newtron | `Device.DeleteVRF()` |
+| `create-vtep` | newtron | `Device.CreateVTEP()` |
+| `delete-vtep` | newtron | `Device.DeleteVTEP()` |
+| `map-l2vni` | newtron | `Device.MapL2VNI()` |
+| `map-l3vni` | newtron | `Device.MapL3VNI()` |
+| `unmap-vni` | newtron | `Device.UnmapVNI()` |
+| `configure-svi` | newtron | `Device.ConfigureSVI()` |
+| `bgp-add-neighbor` | newtron | `Interface.AddBGPNeighbor()` / `Device.AddLoopbackBGPNeighbor()` |
+| `bgp-remove-neighbor` | newtron | `Interface.RemoveBGPNeighbor()` / `Device.RemoveBGPNeighbor()` |
+| `refresh-service` | newtron | `Interface.RefreshService()` |
+| `cleanup` | newtron | `Device.Cleanup()` |
 
 ### 2.4 DeviceSelector
 
@@ -247,8 +290,18 @@ func ParseScenario(path string) (*Scenario, error)
 
 ```go
 // ParseAllScenarios reads all .yaml files in dir and returns parsed scenarios.
-// Stops on first parse error.
+// Stops on first parse error. Used by both --all and --dir modes.
+// In suite mode (--dir), scenarios are sorted by topological order based on
+// their Requires field using validateDependencyGraph + topologicalSort.
 func ParseAllScenarios(dir string) ([]*Scenario, error)
+
+// validateDependencyGraph checks that all requires references exist and
+// there are no cycles. Returns error on first cycle detected.
+func validateDependencyGraph(scenarios []*Scenario) error
+
+// topologicalSort returns scenario names in dependency order (Kahn's algorithm).
+// Scenarios with no dependencies come first.
+func topologicalSort(scenarios []*Scenario) ([]string, error)
 ```
 
 ### 3.2 ValidateScenario
@@ -281,6 +334,34 @@ func ValidateScenario(s *Scenario, topologiesDir string) error
 | `remove-service` | `devices`, `interface` |
 | `apply-baseline` | `devices`, `configlet` |
 | `ssh-command` | `devices`, `command` |
+| `restart-service` | `devices`, `params.service` |
+| `apply-frr-defaults` | `devices` |
+| `set-interface` | `devices`, `interface`, `params.property` |
+| `create-vlan` | `devices`, `params.vlan_id` |
+| `delete-vlan` | `devices`, `params.vlan_id` |
+| `add-vlan-member` | `devices`, `params.vlan_id`, `params.port` |
+| `create-vrf` | `devices`, `params.vrf` |
+| `delete-vrf` | `devices`, `params.vrf` |
+| `create-vtep` | `devices`, `params.source_ip` |
+| `delete-vtep` | `devices` |
+| `map-l2vni` | `devices`, `params.vlan_id`, `params.vni` |
+| `map-l3vni` | `devices`, `params.vrf`, `params.vni` |
+| `unmap-vni` | `devices`, `params.vni` |
+| `configure-svi` | `devices`, `params.vlan_id` |
+| `bgp-add-neighbor` | `devices`, `params.remote_asn` |
+| `bgp-remove-neighbor` | `devices`, `params.neighbor_ip` |
+| `refresh-service` | `devices`, `interface` |
+| `cleanup` | `devices` |
+
+**Validation helpers** (used by `validateStepFields`):
+
+```go
+// requireParam checks that params[key] exists.
+func requireParam(prefix string, params map[string]any, key string) error
+
+// requireDevices checks that step.Devices is non-empty.
+func requireDevices(prefix string, step *Step) error
+```
 
 ### 3.3 YAML Field Mapping
 
@@ -296,9 +377,9 @@ Maps YAML keys to Go struct fields for each action:
 | `key` | `Step.Key` | verify-config-db, verify-state-db |
 | `prefix` | `Step.Prefix` | verify-route |
 | `vrf` | `Step.VRF` | verify-route |
-| `interface` | `Step.Interface` | apply-service, remove-service |
+| `interface` | `Step.Interface` | apply-service, remove-service, set-interface, refresh-service, bgp-add-neighbor, bgp-remove-neighbor |
 | `service` | `Step.Service` | apply-service |
-| `params` | `Step.Params` | apply-service |
+| `params` | `Step.Params` | apply-service, set-interface, create-vlan, delete-vlan, add-vlan-member, create-vrf, delete-vrf, create-vtep, map-l2vni, map-l3vni, unmap-vni, configure-svi, bgp-add-neighbor, bgp-remove-neighbor, restart-service, cleanup |
 | `configlet` | `Step.Configlet` | apply-baseline |
 | `vars` | `Step.Vars` | apply-baseline |
 | `command` | `Step.Command` | ssh-command |
@@ -347,6 +428,7 @@ type Runner struct {
 type RunOptions struct {
     Scenario  string // scenario name (or "" for --all)
     All       bool   // run all scenarios
+    Dir       string // suite directory (--dir mode)
     Topology  string // override topology (default: from scenario)
     Platform  string // override platform (default: from scenario)
     Keep      bool   // don't destroy after tests
@@ -363,8 +445,11 @@ type RunOptions struct {
 func NewRunner(scenariosDir, topologiesDir string) *Runner
 
 // Run executes one or all scenarios and returns results.
-// When opts.All is true, runs all scenarios in ParseAllScenarios order.
-// When opts.Scenario is set, runs only that scenario.
+// Three modes:
+//   - opts.Scenario: runs a single scenario (independent deploy/destroy)
+//   - opts.All: runs all scenarios in ParseAllScenarios order (each gets own deploy/destroy)
+//   - opts.Dir: suite mode — ParseAllScenarios from dir, shared deploy, dependency ordering,
+//     skip propagation on failure. Uses runShared() internally.
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error)
 
 // RunScenario executes a single scenario end-to-end.
@@ -464,6 +549,57 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 }
 ```
 
+### 4.3a Suite Mode (`--dir`)
+
+When `opts.Dir` is set, the runner uses `runShared()` — a shared-deployment
+execution mode:
+
+```go
+// runShared deploys the topology once, runs all scenarios in dependency order,
+// and propagates skip on failure.
+func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error)
+```
+
+**Suite execution flow:**
+
+1. Parse all scenarios from `opts.Dir` via `ParseAllScenarios(dir)`
+2. Validate dependency graph: `validateDependencyGraph(scenarios)` — checks for
+   missing references and cycles
+3. Sort scenarios in topological order: `topologicalSort(scenarios)` — Kahn's algorithm
+4. Deploy topology once (from first scenario's topology/platform)
+5. Connect devices once
+6. For each scenario in topological order:
+   - Check if all `requires` passed. If any dependency failed/skipped → mark as `SKIP`
+   - Execute `runScenarioSteps()` — handles `repeat` loop
+7. Destroy topology once
+
+**Repeat loop** (`runScenarioSteps`):
+
+When `scenario.Repeat > 0`, all steps execute N times. Each iteration is
+fail-fast — a failure in any iteration stops the scenario. The
+`ScenarioResult.FailedIteration` field records which iteration failed (0-based).
+
+**Skip propagation:**
+
+If scenario A fails and scenario B has `requires: [A]`, B gets
+`StatusSkipped` with message `"dependency A failed"`. This cascades
+transitively — if C requires B, and B was skipped, C is also skipped.
+
+### 4.3b ScenarioResult Extensions
+
+```go
+type ScenarioResult struct {
+    // ... existing fields (§7.1) ...
+    Repeat          int  // scenario.Repeat value (0 = not a repeat scenario)
+    FailedIteration int  // which iteration failed (0-based, -1 if passed)
+}
+
+type StepResult struct {
+    // ... existing fields (§7.2) ...
+    Iteration int  // which repeat iteration (0-based)
+}
+```
+
 ### 4.4 Step Dispatch
 
 ```go
@@ -482,6 +618,24 @@ var executors = map[StepAction]StepExecutor{
     ActionRemoveService:      &removeServiceExecutor{},
     ActionApplyBaseline:      &applyBaselineExecutor{},
     ActionSSHCommand:         &sshCommandExecutor{},
+    ActionRestartService:     &restartServiceExecutor{},
+    ActionApplyFRRDefaults:   &applyFRRDefaultsExecutor{},
+    ActionSetInterface:       &setInterfaceExecutor{},
+    ActionCreateVLAN:         &createVLANExecutor{},
+    ActionDeleteVLAN:         &deleteVLANExecutor{},
+    ActionAddVLANMember:      &addVLANMemberExecutor{},
+    ActionCreateVRF:          &createVRFExecutor{},
+    ActionDeleteVRF:          &deleteVRFExecutor{},
+    ActionCreateVTEP:         &createVTEPExecutor{},
+    ActionDeleteVTEP:         &deleteVTEPExecutor{},
+    ActionMapL2VNI:           &mapL2VNIExecutor{},
+    ActionMapL3VNI:           &mapL3VNIExecutor{},
+    ActionUnmapVNI:           &unmapVNIExecutor{},
+    ActionConfigureSVI:       &configureSVIExecutor{},
+    ActionBGPAddNeighbor:     &bgpAddNeighborExecutor{},
+    ActionBGPRemoveNeighbor:  &bgpRemoveNeighborExecutor{},
+    ActionRefreshService:     &refreshServiceExecutor{},
+    ActionCleanup:            &cleanupExecutor{},
 }
 
 // executeStep dispatches a step to its executor and wraps the result
@@ -1067,6 +1221,228 @@ func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step)
      - Not found → `StatusFailed` with output snippet
    - If no expect: pass if exit code is 0
 
+### 5.15 Param Helpers
+
+Three helpers extract typed values from `step.Params map[string]any`:
+
+```go
+// strParam returns params[key] as a string via fmt.Sprintf.
+// Returns "" if key is missing.
+func strParam(params map[string]any, key string) string
+
+// intParam returns params[key] as an int.
+// Handles int, float64 (from YAML), and string (via strconv).
+// Returns 0 if key is missing or unparseable.
+func intParam(params map[string]any, key string) int
+
+// boolParam returns params[key] as a bool.
+// Handles bool and string ("true"/"1").
+// Returns false if key is missing.
+func boolParam(params map[string]any, key string) bool
+```
+
+These are used by all operation executors (§5.17–§5.32) to read action-specific parameters from YAML.
+
+### 5.16 restartServiceExecutor
+
+```go
+type restartServiceExecutor struct{}
+```
+
+**Wraps:** `Device.RestartService(ctx, serviceName)`
+
+Reads `params.service` (e.g., `"bgp"`, `"swss"`). Calls `RestartService` on each resolved device. Returns `StatusPassed` on success.
+
+### 5.17 applyFRRDefaultsExecutor
+
+```go
+type applyFRRDefaultsExecutor struct{}
+```
+
+**Wraps:** `Device.ApplyFRRDefaults(ctx)`
+
+Applies FRR runtime defaults via vtysh: disables `ebgp_requires_policy`, disables `suppress_fib_pending`, configures `ttl-security`, and runs `clear bgp * soft out`. No params needed.
+
+### 5.18 setInterfaceExecutor
+
+```go
+type setInterfaceExecutor struct{}
+```
+
+**Wraps:** `Interface.Set()` / `Interface.SetIP()` / `Interface.SetVRF()`
+
+Dispatches on `params.property`:
+- `"ip"` → `iface.SetIP(ctx, value)` — via `ExecuteOp`
+- `"vrf"` → `iface.SetVRF(ctx, value)` — via `ExecuteOp`
+- anything else → `iface.Set(ctx, property, value)` — via `ExecuteOp`
+
+All paths return a ChangeSet via `dev.ExecuteOp(func() (*network.ChangeSet, error) { ... })`.
+
+### 5.19 createVLANExecutor
+
+```go
+type createVLANExecutor struct{}
+```
+
+**Wraps:** `Device.CreateVLAN(ctx, vlanID, VLANConfig{})`
+
+Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
+
+### 5.20 deleteVLANExecutor
+
+```go
+type deleteVLANExecutor struct{}
+```
+
+**Wraps:** `Device.DeleteVLAN(ctx, vlanID)`
+
+Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
+
+### 5.21 addVLANMemberExecutor
+
+```go
+type addVLANMemberExecutor struct{}
+```
+
+**Wraps:** `Device.AddVLANMember(ctx, vlanID, port, tagged)`
+
+Reads `params.vlan_id` (int), `params.port` (string), `params.tagged` (bool, defaults to true). Returns ChangeSet.
+
+### 5.22 createVRFExecutor
+
+```go
+type createVRFExecutor struct{}
+```
+
+**Wraps:** `Device.CreateVRF(ctx, vrfName, VRFConfig{})`
+
+Reads `params.vrf` via `strParam`. Returns ChangeSet.
+
+### 5.23 deleteVRFExecutor
+
+```go
+type deleteVRFExecutor struct{}
+```
+
+**Wraps:** `Device.DeleteVRF(ctx, vrfName)`
+
+Reads `params.vrf` via `strParam`. Returns ChangeSet.
+
+### 5.24 createVTEPExecutor
+
+```go
+type createVTEPExecutor struct{}
+```
+
+**Wraps:** `Device.CreateVTEP(ctx, VTEPConfig{SourceIP})`
+
+Reads `params.source_ip` via `strParam`. Returns ChangeSet.
+
+### 5.25 deleteVTEPExecutor
+
+```go
+type deleteVTEPExecutor struct{}
+```
+
+**Wraps:** `Device.DeleteVTEP(ctx)`
+
+No params required. Returns ChangeSet.
+
+### 5.26 mapL2VNIExecutor
+
+```go
+type mapL2VNIExecutor struct{}
+```
+
+**Wraps:** `Device.MapL2VNI(ctx, vlanID, vni)`
+
+Reads `params.vlan_id` and `params.vni` via `intParam`. Returns ChangeSet.
+
+### 5.27 mapL3VNIExecutor
+
+```go
+type mapL3VNIExecutor struct{}
+```
+
+**Wraps:** `Device.MapL3VNI(ctx, vrfName, vni)`
+
+Reads `params.vrf` (string) and `params.vni` (int). Returns ChangeSet.
+
+### 5.28 unmapVNIExecutor
+
+```go
+type unmapVNIExecutor struct{}
+```
+
+**Wraps:** `Device.UnmapVNI(ctx, vni)`
+
+Reads `params.vni` via `intParam`. Returns ChangeSet.
+
+### 5.29 configureSVIExecutor
+
+```go
+type configureSVIExecutor struct{}
+```
+
+**Wraps:** `Device.ConfigureSVI(ctx, vlanID, SVIConfig{})`
+
+Reads `params.vlan_id` (int), optionally `params.vrf` (string) and `params.ip` (string) into `SVIConfig`. Returns ChangeSet.
+
+### 5.30 bgpAddNeighborExecutor
+
+```go
+type bgpAddNeighborExecutor struct{}
+```
+
+**Dispatches** based on `step.Interface`:
+- **Interface set** → direct BGP neighbor via `Interface.AddBGPNeighbor(ctx, DirectBGPNeighborConfig{NeighborIP, RemoteAS})` — via `ExecuteOp`
+- **Interface empty** → loopback BGP neighbor via `Device.AddLoopbackBGPNeighbor(ctx, neighborIP, remoteASN, "", false)` — via `ExecuteOp`
+
+Reads `params.neighbor_ip` and `params.remote_asn` (int). Returns ChangeSet.
+
+### 5.31 bgpRemoveNeighborExecutor
+
+```go
+type bgpRemoveNeighborExecutor struct{}
+```
+
+**Dispatches** based on `step.Interface`:
+- **Interface set** → `Interface.RemoveBGPNeighbor(ctx, neighborIP)` — via `ExecuteOp`
+- **Interface empty** → `Device.RemoveBGPNeighbor(ctx, neighborIP)` — via `ExecuteOp`
+
+Reads `params.neighbor_ip` via `strParam`. Returns ChangeSet.
+
+### 5.32 refreshServiceExecutor
+
+```go
+type refreshServiceExecutor struct{}
+```
+
+**Wraps:** `Interface.RefreshService(ctx)`
+
+Requires `step.Interface`. Calls via `ExecuteOp`. Returns ChangeSet.
+
+### 5.33 cleanupExecutor
+
+```go
+type cleanupExecutor struct{}
+```
+
+**Wraps:** `Device.Cleanup(ctx, cleanupType)` — returns `(*ChangeSet, *CleanupSummary, error)`
+
+Since `ExecuteOp` expects `func() (*ChangeSet, error)`, the 3-return-value `Cleanup` is wrapped via closure capture:
+
+```go
+var summary *network.CleanupSummary
+cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+    cs, s, err := dev.Cleanup(ctx, cleanupType)
+    summary = s
+    return cs, err
+})
+```
+
+Reads optional `params.type` for cleanup scope. Returns ChangeSet.
+
 ---
 
 ## 6. newtlab Integration (`pkg/newtest/deploy.go`)
@@ -1431,6 +1807,7 @@ func newRunCmd() *cobra.Command {
 
     cmd.Flags().StringVar(&opts.Scenario, "scenario", "", "run specific scenario")
     cmd.Flags().BoolVar(&opts.All, "all", false, "run all scenarios")
+    cmd.Flags().StringVar(&opts.Dir, "dir", "", "run incremental suite from directory")
     cmd.Flags().StringVar(&opts.Topology, "topology", "", "override topology")
     cmd.Flags().StringVar(&opts.Platform, "platform", "", "override platform")
     cmd.Flags().BoolVar(&opts.Keep, "keep", false, "don't destroy topology after tests")
@@ -1449,6 +1826,7 @@ func newRunCmd() *cobra.Command {
 |------|-----------------|---------|
 | `--scenario <name>` | `Scenario` | `""` |
 | `--all` | `All` | `false` |
+| `--dir <path>` | `Dir` | `""` |
 | `--topology <name>` | `Topology` | `""` (from scenario) |
 | `--platform <name>` | `Platform` | `""` (from scenario) |
 | `--keep` | `Keep` | `false` |
@@ -1604,6 +1982,18 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 | §5.2 `Device.ApplyBaseline()` | applyBaselineExecutor |
 | §5.3 `HealthCheckResult` (within Operation Configuration Types) | Health check status interpretation |
 | §5.4 `TopologyProvisioner.ProvisionDevice()` | provisionExecutor |
+| §5.1 `Interface.Set/SetIP/SetVRF()` | setInterfaceExecutor (§5.18) |
+| §5.1 `Interface.AddBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.30), bgpRemoveNeighborExecutor (§5.31) |
+| §5.1 `Interface.RefreshService()` | refreshServiceExecutor (§5.32) |
+| §5.2 `Device.CreateVLAN/DeleteVLAN/AddVLANMember()` | §5.19–§5.21 |
+| §5.2 `Device.CreateVRF/DeleteVRF()` | §5.22–§5.23 |
+| §5.2 `Device.CreateVTEP/DeleteVTEP()` | §5.24–§5.25 |
+| §5.2 `Device.MapL2VNI/MapL3VNI/UnmapVNI()` | §5.26–§5.28 |
+| §5.2 `Device.ConfigureSVI()` | configureSVIExecutor (§5.29) |
+| §5.2 `Device.Cleanup()` | cleanupExecutor (§5.33) |
+| §5.2 `Device.RestartService()` | restartServiceExecutor (§5.16) |
+| §5.2 `Device.ApplyFRRDefaults()` | applyFRRDefaultsExecutor (§5.17) |
+| §5.2 `Device.AddLoopbackBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.30), bgpRemoveNeighborExecutor (§5.31) |
 
 ### References to Device Layer LLD
 
@@ -1640,6 +2030,22 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 ---
 
 ## Appendix A: Changelog
+
+#### v7
+
+| Area | Change |
+|------|--------|
+| **Suite mode** | Added `--dir` flag, `runShared()`, shared deployment, dependency ordering via `requires` field (§4.3a) |
+| **Scenario.Requires/Repeat** | New fields on Scenario struct for suite mode dependencies and stress testing (§2.1) |
+| **Dependency graph** | `validateDependencyGraph()` and `topologicalSort()` (Kahn's algorithm) in parser.go (§3.1) |
+| **Skip propagation** | Failed dependency → all dependents skipped (§4.3a) |
+| **ScenarioResult extensions** | Added `Repeat`, `FailedIteration` fields; `StepResult.Iteration` (§4.3b) |
+| **18 new StepAction constants** | `restart-service`, `apply-frr-defaults`, `set-interface`, `create-vlan`, `delete-vlan`, `add-vlan-member`, `create-vrf`, `delete-vrf`, `create-vtep`, `delete-vtep`, `map-l2vni`, `map-l3vni`, `unmap-vni`, `configure-svi`, `bgp-add-neighbor`, `bgp-remove-neighbor`, `refresh-service`, `cleanup` (§2.3) |
+| **18 new executors** | §5.16–§5.33, all using `ExecuteOp` pattern with ChangeSet accumulation |
+| **Param helpers** | `strParam()`, `intParam()`, `boolParam()` for typed extraction from `Params map[string]any` (§5.15) |
+| **Validation helpers** | `requireParam()`, `requireDevices()` in parser.go (§3.2) |
+| **2node-incremental suite** | 25 scenarios in `newtest/suites/2node-incremental/` testing all newtron config operations |
+| **Unit tests** | 81 tests (57 existing + 24 new action validation + param helper tests) |
 
 #### v6
 

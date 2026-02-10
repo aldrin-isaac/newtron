@@ -1,0 +1,32 @@
+name: vtep-lifecycle
+description: "VTEP create/delete lifecycle via newtron API"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vtep
+    action: create-vtep
+    devices: [leaf1]
+    params:
+      source_ip: "10.0.0.11"
+
+  - name: verify-vtep-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: true
+
+  - name: delete-vtep
+    action: delete-vtep
+    devices: [leaf1]
+
+  - name: verify-vtep-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false

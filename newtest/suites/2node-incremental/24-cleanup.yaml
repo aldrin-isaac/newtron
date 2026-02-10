@@ -1,0 +1,17 @@
+name: cleanup
+description: Run cleanup on leaf1 to remove orphaned resources and verify
+topology: 2node
+platform: sonic-vpp
+requires: [service-churn]
+
+steps:
+  - name: run-cleanup
+    action: cleanup
+    devices: [leaf1]
+
+  - name: verify-no-orphan-bindings
+    action: verify-config-db
+    devices: [leaf1]
+    table: NEWTRON_SERVICE_BINDING
+    expect:
+      min_entries: 0

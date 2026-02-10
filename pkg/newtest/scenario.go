@@ -78,6 +78,22 @@ const (
 	ActionSSHCommand         StepAction = "ssh-command"
 	ActionRestartService     StepAction = "restart-service"
 	ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
+	ActionSetInterface       StepAction = "set-interface"
+	ActionCreateVLAN         StepAction = "create-vlan"
+	ActionDeleteVLAN         StepAction = "delete-vlan"
+	ActionAddVLANMember      StepAction = "add-vlan-member"
+	ActionCreateVRF          StepAction = "create-vrf"
+	ActionDeleteVRF          StepAction = "delete-vrf"
+	ActionCreateVTEP         StepAction = "create-vtep"
+	ActionDeleteVTEP         StepAction = "delete-vtep"
+	ActionMapL2VNI           StepAction = "map-l2vni"
+	ActionMapL3VNI           StepAction = "map-l3vni"
+	ActionUnmapVNI           StepAction = "unmap-vni"
+	ActionConfigureSVI       StepAction = "configure-svi"
+	ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
+	ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
+	ActionRefreshService     StepAction = "refresh-service"
+	ActionCleanup            StepAction = "cleanup"
 )
 
 // validActions is the set of all recognized step actions.
@@ -97,6 +113,22 @@ var validActions = map[StepAction]bool{
 	ActionSSHCommand:         true,
 	ActionRestartService:     true,
 	ActionApplyFRRDefaults:   true,
+	ActionSetInterface:       true,
+	ActionCreateVLAN:         true,
+	ActionDeleteVLAN:         true,
+	ActionAddVLANMember:      true,
+	ActionCreateVRF:          true,
+	ActionDeleteVRF:          true,
+	ActionCreateVTEP:         true,
+	ActionDeleteVTEP:         true,
+	ActionMapL2VNI:           true,
+	ActionMapL3VNI:           true,
+	ActionUnmapVNI:           true,
+	ActionConfigureSVI:       true,
+	ActionBGPAddNeighbor:     true,
+	ActionBGPRemoveNeighbor:  true,
+	ActionRefreshService:     true,
+	ActionCleanup:            true,
 }
 
 // DeviceSelector handles the two YAML forms for the "devices" field:

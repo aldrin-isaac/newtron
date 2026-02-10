@@ -96,8 +96,9 @@ full fabric provisioning.
 
 ## Test Scenarios
 
-Scenarios are YAML files in `newtest/scenarios/` that define what to test
-against a deployed topology.
+Scenarios are YAML files that define what to test against a deployed topology.
+They live in `newtest/scenarios/` (standalone) or `newtest/suites/*/`
+(incremental suites with dependency ordering).
 
 ### Listing Scenarios
 
@@ -161,6 +162,24 @@ steps:
 | `apply-baseline` | Apply a configlet baseline to a device | newtron |
 | `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
 | `wait` | Pause for a specified duration | newtest native |
+| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron |
+| `apply-frr-defaults` | Apply FRR runtime defaults via vtysh | newtron |
+| `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron |
+| `create-vlan` | Create a VLAN | newtron |
+| `delete-vlan` | Delete a VLAN | newtron |
+| `add-vlan-member` | Add port to a VLAN | newtron |
+| `create-vrf` | Create a VRF | newtron |
+| `delete-vrf` | Delete a VRF | newtron |
+| `create-vtep` | Create a VXLAN tunnel endpoint | newtron |
+| `delete-vtep` | Delete a VTEP | newtron |
+| `map-l2vni` | Map a VLAN to a L2 VNI | newtron |
+| `map-l3vni` | Map a VRF to a L3 VNI | newtron |
+| `unmap-vni` | Remove a VNI mapping | newtron |
+| `configure-svi` | Configure a VLAN interface (SVI) | newtron |
+| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback) | newtron |
+| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron |
+| `refresh-service` | Refresh a service binding on an interface | newtron |
+| `cleanup` | Run device cleanup to remove orphaned resources | newtron |
 
 Most verification steps delegate to newtron's built-in methods (see newtron
 HLD §4.9). newtest provides the orchestration — which device, what parameters,
@@ -608,6 +627,245 @@ newtest determines the expected values from the topology spec — newtron's
     contains: "BGP_NEIGHBOR"
 ```
 
+### 10. Set Interface Properties
+
+Use `set-interface` to change interface attributes. The `params.property` field
+dispatches to the appropriate method: `ip` → `SetIP`, `vrf` → `SetVRF`,
+anything else → `Set(property, value)`.
+
+```yaml
+# Change MTU
+- name: set-mtu
+  action: set-interface
+  devices: [leaf1]
+  interface: Ethernet1
+  params:
+    property: mtu
+    value: "9000"
+
+# Set IP address
+- name: set-ip
+  action: set-interface
+  devices: [leaf1]
+  interface: Ethernet1
+  params:
+    property: ip
+    value: "192.168.99.1/24"
+
+# Bind interface to VRF
+- name: set-vrf
+  action: set-interface
+  devices: [leaf1]
+  interface: Ethernet1
+  params:
+    property: vrf
+    value: Vrf_test
+```
+
+### 11. VLAN Operations
+
+```yaml
+# Create a VLAN
+- name: create-vlan
+  action: create-vlan
+  devices: [leaf1]
+  params:
+    vlan_id: 100
+
+# Add a port as tagged member
+- name: add-member
+  action: add-vlan-member
+  devices: [leaf1]
+  params:
+    vlan_id: 100
+    port: Ethernet2
+
+# Verify the VLAN was created
+- name: verify-vlan
+  action: verify-config-db
+  devices: [leaf1]
+  table: VLAN
+  key: "Vlan100"
+  expect:
+    exists: true
+
+# Delete the VLAN
+- name: delete-vlan
+  action: delete-vlan
+  devices: [leaf1]
+  params:
+    vlan_id: 100
+```
+
+### 12. VRF Operations
+
+```yaml
+# Create a VRF
+- name: create-vrf
+  action: create-vrf
+  devices: [leaf1]
+  params:
+    vrf: Vrf_test
+
+# Verify VRF exists
+- name: verify-vrf
+  action: verify-config-db
+  devices: [leaf1]
+  table: VRF
+  key: "Vrf_test"
+  expect:
+    exists: true
+
+# Delete the VRF
+- name: delete-vrf
+  action: delete-vrf
+  devices: [leaf1]
+  params:
+    vrf: Vrf_test
+```
+
+### 13. VXLAN / EVPN Operations
+
+```yaml
+# Create VTEP
+- name: create-vtep
+  action: create-vtep
+  devices: [leaf1]
+  params:
+    source_ip: "10.0.0.11"
+
+# Map L2 VNI (VLAN to VNI)
+- name: map-l2vni
+  action: map-l2vni
+  devices: [leaf1]
+  params:
+    vlan_id: 200
+    vni: 10200
+
+# Map L3 VNI (VRF to VNI)
+- name: map-l3vni
+  action: map-l3vni
+  devices: [leaf1]
+  params:
+    vrf: Vrf_evpn
+    vni: 20001
+
+# Unmap a VNI
+- name: unmap-vni
+  action: unmap-vni
+  devices: [leaf1]
+  params:
+    vni: 10200
+
+# Configure SVI (VLAN interface)
+- name: configure-svi
+  action: configure-svi
+  devices: [leaf1]
+  params:
+    vlan_id: 500
+    vrf: Vrf_svi
+    ip: "10.1.50.1/24"
+
+# Delete VTEP
+- name: delete-vtep
+  action: delete-vtep
+  devices: [leaf1]
+```
+
+### 14. BGP Neighbor Operations
+
+```yaml
+# Add loopback-based BGP neighbor
+- name: add-loopback-peer
+  action: bgp-add-neighbor
+  devices: [leaf1]
+  params:
+    neighbor_ip: "10.0.0.99"
+    remote_asn: 65099
+
+# Add direct (interface-based) BGP neighbor
+- name: add-direct-peer
+  action: bgp-add-neighbor
+  devices: [leaf1]
+  interface: Ethernet1
+  params:
+    neighbor_ip: "10.1.1.0"
+    remote_asn: 65001
+
+# Remove a BGP neighbor
+- name: remove-peer
+  action: bgp-remove-neighbor
+  devices: [leaf1]
+  params:
+    neighbor_ip: "10.0.0.99"
+```
+
+### 15. Service Refresh and Cleanup
+
+```yaml
+# Refresh a service (re-apply without remove)
+- name: refresh
+  action: refresh-service
+  devices: [leaf1]
+  interface: Ethernet1
+
+# Run cleanup to remove orphaned resources
+- name: cleanup
+  action: cleanup
+  devices: [leaf1]
+```
+
+### 16. Incremental Suite Scenarios
+
+Scenarios in a suite directory use `requires` to declare dependencies:
+
+```yaml
+# newtest/suites/2node-incremental/07-vrf-lifecycle.yaml
+name: vrf-lifecycle
+description: Create and delete a VRF via newtron API
+topology: 2node
+platform: sonic-vpp
+requires: [provision]    # won't run until 01-provision passes
+
+steps:
+  - name: create-vrf
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_test
+  # ...
+```
+
+Stress testing with `repeat`:
+
+```yaml
+name: service-churn
+description: Stress test service apply/remove cycles
+topology: 2node
+platform: sonic-vpp
+requires: [verify-provisioning]
+repeat: 10    # run all steps 10 times
+
+steps:
+  - name: apply-customer-l3
+    action: apply-service
+    devices: [leaf1]
+    interface: Ethernet1
+    service: customer-l3
+    params:
+      ip: "192.168.1.1/24"
+  - name: remove-customer-l3
+    action: remove-service
+    devices: [leaf1]
+    interface: Ethernet1
+```
+
+Run a suite:
+
+```bash
+newtest run --dir newtest/suites/2node-incremental
+```
+
 ---
 
 ## Parallel Provisioning
@@ -758,6 +1016,7 @@ Commands:
 Run Options:
   -scenario <name>       Run specific scenario
   --all                  Run all scenarios
+  --dir <path>           Run incremental suite from directory
   --topology <name>      Override topology (default: from scenario)
   --platform <name>      Override platform (default: from scenario)
   --keep                 Don't destroy topology after tests

@@ -1,12 +1,8 @@
-name: service-churn
-description: >
-  Stress test: repeatedly apply and remove customer-l3 service on
-  leaf1:Ethernet1 to detect resource leaks (VRF, interface config,
-  service bindings) or CONFIG_DB staleness across cycles.
+name: refresh-service
+description: Apply service, refresh it, verify binding persists, then remove
 topology: 2node
 platform: sonic-vpp
 requires: [service-remove]
-repeat: 10
 
 steps:
   - name: apply-customer-l3
@@ -17,7 +13,7 @@ steps:
     params:
       ip: "192.168.1.1/24"
 
-  - name: verify-binding-exists
+  - name: verify-binding-after-apply
     action: verify-config-db
     devices: [leaf1]
     table: NEWTRON_SERVICE_BINDING
@@ -26,15 +22,21 @@ steps:
       fields:
         service: customer-l3
 
-  - name: verify-vrf-exists
+  - name: refresh-ethernet1
+    action: refresh-service
+    devices: [leaf1]
+    interface: Ethernet1
+
+  - name: verify-binding-after-refresh
     action: verify-config-db
     devices: [leaf1]
-    table: VRF
-    key: Vrf_customer-vpn_Ethernet1
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet1
     expect:
-      exists: true
+      fields:
+        service: customer-l3
 
-  - name: remove-customer-l3
+  - name: remove-service
     action: remove-service
     devices: [leaf1]
     interface: Ethernet1
@@ -44,13 +46,5 @@ steps:
     devices: [leaf1]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
-    expect:
-      exists: false
-
-  - name: verify-vrf-removed
-    action: verify-config-db
-    devices: [leaf1]
-    table: VRF
-    key: Vrf_customer-vpn_Ethernet1
     expect:
       exists: false

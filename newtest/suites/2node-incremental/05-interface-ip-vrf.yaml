@@ -1,0 +1,52 @@
+name: interface-ip-vrf
+description: Test interface IP and VRF binding via newtron set-interface API
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vrf-test
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_test
+
+  - name: set-vrf-ethernet1
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: vrf
+      value: Vrf_test
+
+  - name: verify-vrf-binding
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    key: Ethernet1
+    expect:
+      fields:
+        vrf_name: Vrf_test
+
+  - name: set-ip-ethernet1
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "192.168.99.1/24"
+
+  - name: verify-ip-binding
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    key: "Ethernet1|192.168.99.1/24"
+    expect:
+      exists: true
+
+  # Cleanup: delete VRF (unbinds interface)
+  - name: cleanup-vrf
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_test

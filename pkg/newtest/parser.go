@@ -81,6 +81,25 @@ func ValidateScenario(s *Scenario, topologiesDir string) error {
 	return nil
 }
 
+// requireParam checks that a required key exists in step.Params.
+func requireParam(prefix string, params map[string]any, key string) error {
+	if params == nil {
+		return fmt.Errorf("%s: params.%s is required", prefix, key)
+	}
+	if _, ok := params[key]; !ok {
+		return fmt.Errorf("%s: params.%s is required", prefix, key)
+	}
+	return nil
+}
+
+// requireDevices checks that the step has a device selector.
+func requireDevices(prefix string, step *Step) error {
+	if !step.Devices.All && len(step.Devices.Devices) == 0 {
+		return fmt.Errorf("%s: devices is required", prefix)
+	}
+	return nil
+}
+
 // validateStepFields checks required fields per action type.
 func validateStepFields(scenario string, index int, step *Step) error {
 	prefix := fmt.Sprintf("scenario %s step %d (%s)", scenario, index, step.Name)
@@ -190,8 +209,126 @@ func validateStepFields(scenario string, index int, step *Step) error {
 			return fmt.Errorf("%s: service is required", prefix)
 		}
 	case ActionApplyFRRDefaults:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+	case ActionSetInterface:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if step.Interface == "" {
+			return fmt.Errorf("%s: interface is required", prefix)
+		}
+		if err := requireParam(prefix, step.Params, "property"); err != nil {
+			return err
+		}
+	case ActionCreateVLAN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+	case ActionDeleteVLAN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+	case ActionAddVLANMember:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "port"); err != nil {
+			return err
+		}
+	case ActionCreateVRF:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+	case ActionDeleteVRF:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+	case ActionCreateVTEP:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "source_ip"); err != nil {
+			return err
+		}
+	case ActionDeleteVTEP:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+	case ActionMapL2VNI:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vni"); err != nil {
+			return err
+		}
+	case ActionMapL3VNI:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vni"); err != nil {
+			return err
+		}
+	case ActionUnmapVNI:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vni"); err != nil {
+			return err
+		}
+	case ActionConfigureSVI:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+	case ActionBGPAddNeighbor:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "remote_asn"); err != nil {
+			return err
+		}
+	case ActionBGPRemoveNeighbor:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "neighbor_ip"); err != nil {
+			return err
+		}
+	case ActionRefreshService:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if step.Interface == "" {
+			return fmt.Errorf("%s: interface is required", prefix)
+		}
+	case ActionCleanup:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 	}
 

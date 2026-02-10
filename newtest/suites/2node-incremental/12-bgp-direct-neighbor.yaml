@@ -1,0 +1,66 @@
+name: bgp-direct-neighbor
+description: "Configure IPs and add/remove a direct eBGP neighbor on Ethernet1"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  # Set IPs on both ends of the link
+  - name: set-ip-spine1
+    action: set-interface
+    devices: [spine1]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "10.1.1.0/31"
+
+  - name: set-ip-leaf1
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "10.1.1.1/31"
+
+  # Add direct BGP neighbor on leaf1
+  - name: add-direct-neighbor
+    action: bgp-add-neighbor
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      neighbor_ip: "10.1.1.0"
+      remote_asn: 65001
+
+  - name: verify-neighbor-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: BGP_NEIGHBOR
+    key: "10.1.1.0"
+    expect:
+      exists: true
+
+  # Remove the neighbor
+  - name: remove-direct-neighbor
+    action: bgp-remove-neighbor
+    devices: [leaf1]
+    params:
+      neighbor_ip: "10.1.1.0"
+
+  - name: verify-neighbor-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: BGP_NEIGHBOR
+    key: "10.1.1.0"
+    expect:
+      exists: false
+
+  # Clean up IPs via ssh-command (set empty IP to remove)
+  - name: cleanup-ip-spine1
+    action: ssh-command
+    devices: [spine1]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|10.1.1.0/31'"
+
+  - name: cleanup-ip-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|10.1.1.1/31'"

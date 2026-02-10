@@ -1,14 +1,15 @@
-name: vrf-create
-description: "Disaggregated L3: create VRF via redis-cli, verify, clean up"
+name: vrf-lifecycle
+description: "VRF create/delete lifecycle via newtron API"
 topology: 2node
 platform: sonic-vpp
 requires: [provision]
 
 steps:
   - name: create-vrf-cust1
-    action: ssh-command
+    action: create-vrf
     devices: [leaf1]
-    command: "redis-cli -n 4 HSET 'VRF|Vrf_cust1' fallback false"
+    params:
+      vrf: Vrf_cust1
 
   - name: verify-vrf-cust1-exists
     action: verify-config-db
@@ -18,10 +19,11 @@ steps:
     expect:
       exists: true
 
-  - name: cleanup-vrf-cust1
-    action: ssh-command
+  - name: delete-vrf-cust1
+    action: delete-vrf
     devices: [leaf1]
-    command: "redis-cli -n 4 DEL 'VRF|Vrf_cust1'"
+    params:
+      vrf: Vrf_cust1
 
   - name: verify-vrf-cust1-removed
     action: verify-config-db

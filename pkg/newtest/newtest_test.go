@@ -1128,6 +1128,286 @@ func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 }
 
 // ============================================================================
+// Param Helper Tests
+// ============================================================================
+
+func TestStrParam(t *testing.T) {
+	params := map[string]any{"name": "test", "count": 42, "flag": true}
+
+	if got := strParam(params, "name"); got != "test" {
+		t.Errorf("strParam(name) = %q, want %q", got, "test")
+	}
+	if got := strParam(params, "count"); got != "42" {
+		t.Errorf("strParam(count) = %q, want %q", got, "42")
+	}
+	if got := strParam(params, "missing"); got != "" {
+		t.Errorf("strParam(missing) = %q, want %q", got, "")
+	}
+	if got := strParam(nil, "any"); got != "" {
+		t.Errorf("strParam(nil, any) = %q, want %q", got, "")
+	}
+}
+
+func TestIntParam(t *testing.T) {
+	params := map[string]any{
+		"int_val":    42,
+		"float_val":  float64(100),
+		"string_val": "200",
+		"bad_string": "abc",
+		"bool_val":   true,
+	}
+
+	if got := intParam(params, "int_val"); got != 42 {
+		t.Errorf("intParam(int_val) = %d, want 42", got)
+	}
+	if got := intParam(params, "float_val"); got != 100 {
+		t.Errorf("intParam(float_val) = %d, want 100", got)
+	}
+	if got := intParam(params, "string_val"); got != 200 {
+		t.Errorf("intParam(string_val) = %d, want 200", got)
+	}
+	if got := intParam(params, "bad_string"); got != 0 {
+		t.Errorf("intParam(bad_string) = %d, want 0", got)
+	}
+	if got := intParam(params, "bool_val"); got != 0 {
+		t.Errorf("intParam(bool_val) = %d, want 0", got)
+	}
+	if got := intParam(params, "missing"); got != 0 {
+		t.Errorf("intParam(missing) = %d, want 0", got)
+	}
+	if got := intParam(nil, "any"); got != 0 {
+		t.Errorf("intParam(nil, any) = %d, want 0", got)
+	}
+}
+
+func TestBoolParam(t *testing.T) {
+	params := map[string]any{
+		"bool_true":   true,
+		"bool_false":  false,
+		"str_true":    "true",
+		"str_false":   "false",
+		"str_one":     "1",
+		"int_val":     42,
+	}
+
+	if got := boolParam(params, "bool_true"); !got {
+		t.Error("boolParam(bool_true) = false, want true")
+	}
+	if got := boolParam(params, "bool_false"); got {
+		t.Error("boolParam(bool_false) = true, want false")
+	}
+	if got := boolParam(params, "str_true"); !got {
+		t.Error("boolParam(str_true) = false, want true")
+	}
+	if got := boolParam(params, "str_false"); got {
+		t.Error("boolParam(str_false) = true, want false")
+	}
+	if got := boolParam(params, "str_one"); !got {
+		t.Error("boolParam(str_one) = false, want true")
+	}
+	if got := boolParam(params, "int_val"); got {
+		t.Error("boolParam(int_val) = true, want false")
+	}
+	if got := boolParam(params, "missing"); got {
+		t.Error("boolParam(missing) = true, want false")
+	}
+	if got := boolParam(nil, "any"); got {
+		t.Error("boolParam(nil, any) = true, want false")
+	}
+}
+
+// ============================================================================
+// Validation Tests for New Actions
+// ============================================================================
+
+func TestValidateStepFields_NewActions(t *testing.T) {
+	dir := t.TempDir()
+	topoDir := filepath.Join(dir, "2node")
+	if err := os.MkdirAll(topoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		step    Step
+		wantErr bool
+		errMsg  string
+	}{
+		// set-interface
+		{
+			name:    "set-interface valid",
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0", Params: map[string]any{"property": "mtu", "value": "9000"}},
+			wantErr: false,
+		},
+		{
+			name:    "set-interface missing interface",
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"property": "mtu"}},
+			wantErr: true, errMsg: "interface is required",
+		},
+		{
+			name:    "set-interface missing property",
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: true, errMsg: "params.property is required",
+		},
+		// create-vlan
+		{
+			name:    "create-vlan valid",
+			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: false,
+		},
+		{
+			name:    "create-vlan missing vlan_id",
+			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vlan_id is required",
+		},
+		// add-vlan-member
+		{
+			name:    "add-vlan-member missing port",
+			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: true, errMsg: "params.port is required",
+		},
+		// create-vrf
+		{
+			name:    "create-vrf valid",
+			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: false,
+		},
+		{
+			name:    "create-vrf missing vrf",
+			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		// create-vtep
+		{
+			name:    "create-vtep valid",
+			step:    Step{Name: "s", Action: ActionCreateVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
+			wantErr: false,
+		},
+		{
+			name:    "create-vtep missing source_ip",
+			step:    Step{Name: "s", Action: ActionCreateVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.source_ip is required",
+		},
+		// delete-vtep (no params needed)
+		{
+			name:    "delete-vtep valid",
+			step:    Step{Name: "s", Action: ActionDeleteVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "delete-vtep missing devices",
+			step:    Step{Name: "s", Action: ActionDeleteVTEP},
+			wantErr: true, errMsg: "devices is required",
+		},
+		// map-l2vni
+		{
+			name:    "map-l2vni missing vni",
+			step:    Step{Name: "s", Action: ActionMapL2VNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: true, errMsg: "params.vni is required",
+		},
+		// map-l3vni
+		{
+			name:    "map-l3vni valid",
+			step:    Step{Name: "s", Action: ActionMapL3VNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "vni": 20001}},
+			wantErr: false,
+		},
+		// unmap-vni
+		{
+			name:    "unmap-vni missing vni",
+			step:    Step{Name: "s", Action: ActionUnmapVNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vni is required",
+		},
+		// configure-svi
+		{
+			name:    "configure-svi valid",
+			step:    Step{Name: "s", Action: ActionConfigureSVI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: false,
+		},
+		// bgp-add-neighbor
+		{
+			name:    "bgp-add-neighbor valid",
+			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"remote_asn": 65000, "neighbor_ip": "10.0.0.1"}},
+			wantErr: false,
+		},
+		{
+			name:    "bgp-add-neighbor missing remote_asn",
+			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.remote_asn is required",
+		},
+		// bgp-remove-neighbor
+		{
+			name:    "bgp-remove-neighbor valid",
+			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"neighbor_ip": "10.0.0.1"}},
+			wantErr: false,
+		},
+		{
+			name:    "bgp-remove-neighbor missing neighbor_ip",
+			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.neighbor_ip is required",
+		},
+		// refresh-service
+		{
+			name:    "refresh-service valid",
+			step:    Step{Name: "s", Action: ActionRefreshService, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: false,
+		},
+		{
+			name:    "refresh-service missing interface",
+			step:    Step{Name: "s", Action: ActionRefreshService, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "interface is required",
+		},
+		// cleanup
+		{
+			name:    "cleanup valid",
+			step:    Step{Name: "s", Action: ActionCleanup, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "cleanup missing devices",
+			step:    Step{Name: "s", Action: ActionCleanup},
+			wantErr: true, errMsg: "devices is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := Scenario{
+				Name:     "test",
+				Topology: "2node",
+				Platform: "sonic-vpp",
+				Steps:    []Step{tt.step},
+			}
+			err := ValidateScenario(&s, dir)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("expected error containing %q, got: %s", tt.errMsg, err)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+// ============================================================================
+// requireParam Tests
+// ============================================================================
+
+func TestRequireParam(t *testing.T) {
+	if err := requireParam("test", map[string]any{"key": "val"}, "key"); err != nil {
+		t.Errorf("expected nil, got: %v", err)
+	}
+	if err := requireParam("test", map[string]any{"key": "val"}, "missing"); err == nil {
+		t.Error("expected error for missing key")
+	}
+	if err := requireParam("test", nil, "key"); err == nil {
+		t.Error("expected error for nil params")
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

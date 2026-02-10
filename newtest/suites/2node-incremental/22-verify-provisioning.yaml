@@ -2,7 +2,7 @@ name: verify-provisioning
 description: Apply a service, then verify the ChangeSet was persisted in CONFIG_DB
 topology: 2node
 platform: sonic-vpp
-requires: [service-remove]
+requires: [refresh-service]
 
 steps:
   # Apply customer-l3 service — this produces a ChangeSet

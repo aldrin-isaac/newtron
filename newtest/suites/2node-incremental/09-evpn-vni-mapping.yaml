@@ -1,0 +1,103 @@
+name: evpn-vni-mapping
+description: "EVPN VNI mapping lifecycle: VTEP + VLAN + VRF + L2/L3 VNI map/unmap"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  # Setup infrastructure
+  - name: create-vtep
+    action: create-vtep
+    devices: [leaf1]
+    params:
+      source_ip: "10.0.0.11"
+
+  - name: create-vlan200
+    action: create-vlan
+    devices: [leaf1]
+    params:
+      vlan_id: 200
+
+  - name: create-vrf-evpn
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_evpn
+
+  # Map L2VNI
+  - name: map-l2vni
+    action: map-l2vni
+    devices: [leaf1]
+    params:
+      vlan_id: 200
+      vni: 10200
+
+  - name: verify-l2vni-mapping
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_10200"
+    expect:
+      exists: true
+
+  # Map L3VNI
+  - name: map-l3vni
+    action: map-l3vni
+    devices: [leaf1]
+    params:
+      vrf: Vrf_evpn
+      vni: 20001
+
+  - name: verify-l3vni-mapping
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_20001"
+    expect:
+      exists: true
+
+  # Unmap both
+  - name: unmap-l2vni
+    action: unmap-vni
+    devices: [leaf1]
+    params:
+      vni: 10200
+
+  - name: verify-l2vni-unmapped
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_10200"
+    expect:
+      exists: false
+
+  - name: unmap-l3vni
+    action: unmap-vni
+    devices: [leaf1]
+    params:
+      vni: 20001
+
+  - name: verify-l3vni-unmapped
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_20001"
+    expect:
+      exists: false
+
+  # Cleanup infrastructure
+  - name: cleanup-vrf
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_evpn
+
+  - name: cleanup-vlan
+    action: delete-vlan
+    devices: [leaf1]
+    params:
+      vlan_id: 200
+
+  - name: cleanup-vtep
+    action: delete-vtep
+    devices: [leaf1]

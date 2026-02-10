@@ -1,0 +1,56 @@
+name: svi-configure
+description: "Create VLAN + VRF, configure SVI, verify VLAN_INTERFACE entries"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vlan500
+    action: create-vlan
+    devices: [leaf1]
+    params:
+      vlan_id: 500
+
+  - name: create-vrf-svi
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_svi
+
+  - name: configure-svi
+    action: configure-svi
+    devices: [leaf1]
+    params:
+      vlan_id: 500
+      vrf: Vrf_svi
+      ip: "10.1.50.1/24"
+
+  - name: verify-svi-vrf
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN_INTERFACE
+    key: Vlan500
+    expect:
+      fields:
+        vrf_name: Vrf_svi
+
+  - name: verify-svi-ip
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN_INTERFACE
+    key: "Vlan500|10.1.50.1/24"
+    expect:
+      exists: true
+
+  # Cleanup
+  - name: cleanup-vrf
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_svi
+
+  - name: cleanup-vlan
+    action: delete-vlan
+    devices: [leaf1]
+    params:
+      vlan_id: 500

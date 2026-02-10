@@ -90,22 +90,15 @@ newtron/
 │   │   │           └── leaf1.json
 │   │   └── 4node/
 │   │       └── specs/
-│   │           ├── topology.json
-│   │           ├── network.json
-│   │           ├── site.json
-│   │           ├── platforms.json
-│   │           └── profiles/
-│   │               ├── spine1.json
-│   │               ├── spine2.json
-│   │               ├── leaf1.json
-│   │               └── leaf2.json
-│   ├── scenarios/        # Test scenario definitions
-│   │   ├── bgp-underlay.yaml
-│   │   ├── bgp-overlay.yaml
-│   │   ├── service-l3.yaml
-│   │   ├── service-irb.yaml
-│   │   ├── health.yaml
-│   │   └── full-fabric.yaml
+│   │           └── ...
+│   ├── scenarios/        # Standalone scenario definitions
+│   │   └── *.yaml
+│   ├── suites/           # Incremental test suites (dependency-ordered)
+│   │   └── 2node-incremental/
+│   │       ├── 00-boot-ssh.yaml
+│   │       ├── 01-provision.yaml
+│   │       ├── ...
+│   │       └── 24-cleanup.yaml
 │   ├── images/           # VM images or symlinks
 │   └── .generated/       # Runtime output (gitignored)
 │       └── report.md
@@ -128,6 +121,8 @@ Each topology is self-contained with its own spec directory:
 | Path | Purpose |
 |------|---------|
 | `topologies/*/specs/` | newtron spec dirs per topology |
+| `scenarios/` | Standalone scenario YAML files |
+| `suites/*/` | Incremental test suites with dependency ordering |
 | `.generated/` | Runtime output (reports, logs) |
 
 ---
@@ -228,6 +223,24 @@ steps:
 | `apply-baseline` | Apply a configlet baseline to a device | newtron |
 | `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
 | `wait` | Wait for specified duration | newtest native |
+| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron `Device.RestartService()` |
+| `apply-frr-defaults` | Apply FRR runtime defaults (ebgp_requires_policy, clear bgp) | newtron `Device.ApplyFRRDefaults()` |
+| `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron `Interface.Set/SetIP/SetVRF` |
+| `create-vlan` | Create a VLAN | newtron `Device.CreateVLAN()` |
+| `delete-vlan` | Delete a VLAN | newtron `Device.DeleteVLAN()` |
+| `add-vlan-member` | Add port to a VLAN as tagged/untagged member | newtron `Device.AddVLANMember()` |
+| `create-vrf` | Create a VRF | newtron `Device.CreateVRF()` |
+| `delete-vrf` | Delete a VRF | newtron `Device.DeleteVRF()` |
+| `create-vtep` | Create a VXLAN tunnel endpoint (VTEP) | newtron `Device.CreateVTEP()` |
+| `delete-vtep` | Delete a VTEP | newtron `Device.DeleteVTEP()` |
+| `map-l2vni` | Map a VLAN to a L2 VNI via VXLAN | newtron `Device.MapL2VNI()` |
+| `map-l3vni` | Map a VRF to a L3 VNI via VXLAN | newtron `Device.MapL3VNI()` |
+| `unmap-vni` | Remove a VNI mapping | newtron `Device.UnmapVNI()` |
+| `configure-svi` | Configure a Switched Virtual Interface (VLAN interface) | newtron `Device.ConfigureSVI()` |
+| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback-based) | newtron `Interface.AddBGPNeighbor` / `Device.AddLoopbackBGPNeighbor` |
+| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
+| `refresh-service` | Refresh a service binding on an interface | newtron `Interface.RefreshService()` |
+| `cleanup` | Run device cleanup to remove orphaned resources | newtron `Device.Cleanup()` |
 
 [^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
 
@@ -356,16 +369,49 @@ assertion logic.
 
 ### 5.6 Built-In Scenarios
 
-| Scenario | Topology | What It Tests |
-|----------|----------|---------------|
-| `bgp-underlay` | 4node | eBGP sessions, underlay routes, redistribute connected |
-| `bgp-overlay` | 4node | iBGP sessions, route reflection, L2VPN EVPN AF |
-| `service-l3` | 2node | L3 service apply/remove, per-interface VRF, ACL filters |
-| `service-irb` | 4node | IRB service, shared VRF, VXLAN mapping, anycast gateway |
-| `service-l2` | 2node | L2 VLAN extension, VXLAN tunnel map |
-| `health` | 2node | Health checks pass after provisioning |
-| `baseline` | 2node | Configlet application, variable resolution |
-| `full-fabric` | 4node | End-to-end: underlay + overlay + services + health + data plane |
+Scenarios are organized in two ways:
+
+**Standalone scenarios** (`newtest/scenarios/`) — independent tests, each with its own deploy/destroy cycle.
+
+**Incremental suites** (`newtest/suites/`) — ordered tests with dependency chaining (`requires` field). A suite shares a single topology deployment. Scenarios run in topological order; if a dependency fails, dependent scenarios are skipped.
+
+#### 2node-incremental Suite
+
+The `newtest/suites/2node-incremental/` suite contains 25 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
+
+| # | Scenario | Requires | What It Tests |
+|---|----------|----------|---------------|
+| 00 | `boot-ssh` | — | VM boot and SSH connectivity |
+| 01 | `provision` | boot-ssh | Full device provisioning |
+| 02 | `bgp-converge` | provision | eBGP underlay + iBGP overlay convergence |
+| 03 | `route-propagation` | bgp-converge | Loopback route visible on remote device |
+| 04 | `interface-set` | provision | Interface property changes (mtu, description, admin-status) |
+| 05 | `interface-ip-vrf` | provision | Interface IP and VRF assignment |
+| 06 | `vlan-lifecycle` | provision | VLAN create, add member, delete |
+| 07 | `vrf-lifecycle` | provision | VRF create, delete |
+| 08 | `vtep-lifecycle` | provision | VTEP create, delete |
+| 09 | `evpn-vni-mapping` | provision | L2VNI + L3VNI map/unmap with VTEP |
+| 10 | `svi-configure` | provision | VLAN interface (SVI) creation |
+| 11 | `bgp-loopback-neighbor` | provision | Add/remove loopback BGP peer |
+| 12 | `bgp-direct-neighbor` | provision | Add/remove direct eBGP peer on interface |
+| 13 | `state-db-port` | provision | STATE_DB port status verification |
+| 14 | `apply-baseline` | provision | Configlet baseline application |
+| 15 | `device-health` | bgp-converge | Health checks after convergence |
+| 16 | `service-transit` | bgp-converge | Transit service with FRR defaults |
+| 17 | `ping-loopback` | route-propagation | Data plane ping between loopbacks |
+| 18 | `service-l3` | vrf-lifecycle | L3 service apply/verify/remove |
+| 19 | `service-l2` | vlan-lifecycle | L2 service apply/verify/remove |
+| 20 | `service-remove` | service-l3, service-l2 | Service removal and cleanup verification |
+| 21 | `refresh-service` | service-remove | Service refresh preserves binding |
+| 22 | `verify-provisioning` | refresh-service | ChangeSet verification after apply |
+| 23 | `service-churn` | verify-provisioning | Stress test: 10x apply/remove cycle |
+| 24 | `cleanup` | service-churn | Cleanup and verify no orphaned resources |
+
+Run the suite with:
+
+```bash
+newtest run --dir newtest/suites/2node-incremental
+```
 
 ---
 
@@ -462,6 +508,15 @@ Internally:
 ```bash
 newtest run --all
 ```
+
+### 7.2a Run an Incremental Suite
+
+```bash
+newtest run --dir newtest/suites/2node-incremental
+```
+
+Suite mode deploys the topology once, runs scenarios in dependency order,
+and skips scenarios whose dependencies failed.
 
 ### 7.3 Keep Topology Running
 
@@ -579,6 +634,7 @@ Commands:
 Run Options:
   -scenario <name>       Run specific scenario
   --all                  Run all scenarios
+  --dir <path>           Run incremental suite from directory
   --topology <name>      Override topology (default: from scenario)
   --platform <name>      Override platform (default: from scenario)
   --keep                 Don't destroy topology after tests

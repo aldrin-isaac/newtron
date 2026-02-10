@@ -1,0 +1,83 @@
+name: interface-set
+description: Test interface property changes via newtron set-interface API
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: set-mtu-9000
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: mtu
+      value: "9000"
+
+  - name: verify-mtu-9000
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORT
+    key: Ethernet1
+    expect:
+      fields:
+        mtu: "9000"
+
+  - name: set-description
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: description
+      value: "test-link"
+
+  - name: verify-description
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORT
+    key: Ethernet1
+    expect:
+      fields:
+        description: "test-link"
+
+  - name: set-admin-down
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: admin_status
+      value: down
+
+  - name: verify-admin-down
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORT
+    key: Ethernet1
+    expect:
+      fields:
+        admin_status: down
+
+  - name: set-admin-up
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: admin_status
+      value: up
+
+  - name: verify-admin-up
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORT
+    key: Ethernet1
+    expect:
+      fields:
+        admin_status: up
+
+  # Restore default MTU
+  - name: restore-mtu
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: mtu
+      value: "9100"
