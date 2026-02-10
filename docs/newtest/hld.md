@@ -91,9 +91,9 @@ newtron/
 │   │   └── 4node/
 │   │       └── specs/
 │   │           └── ...
-│   ├── scenarios/        # Standalone scenario definitions
-│   │   └── *.yaml
-│   ├── suites/           # Incremental test suites (dependency-ordered)
+│   ├── suites/           # Test suites (standalone and incremental)
+│   │   ├── 2node-standalone/
+│   │   │   └── *.yaml
 │   │   └── 2node-incremental/
 │   │       ├── 00-boot-ssh.yaml
 │   │       ├── 01-provision.yaml
@@ -121,8 +121,8 @@ Each topology is self-contained with its own spec directory:
 | Path | Purpose |
 |------|---------|
 | `topologies/*/specs/` | newtron spec dirs per topology |
-| `scenarios/` | Standalone scenario YAML files |
-| `suites/*/` | Incremental test suites with dependency ordering |
+| `suites/2node-standalone/` | Standalone scenario YAML files |
+| `suites/2node-incremental/` | Incremental test suite with dependency ordering |
 | `.generated/` | Runtime output (reports, logs) |
 
 ---
@@ -169,7 +169,7 @@ Each topology directory contains the full set of newtron specs:
 A scenario defines what to test against a deployed topology:
 
 ```yaml
-# newtest/scenarios/bgp-underlay.yaml
+# newtest/suites/2node-standalone/bgp-underlay.yaml
 name: bgp-underlay
 description: Verify eBGP underlay sessions establish
 topology: 4node
@@ -371,9 +371,9 @@ assertion logic.
 
 Scenarios are organized in two ways:
 
-**Standalone scenarios** (`newtest/scenarios/`) — independent tests, each with its own deploy/destroy cycle.
+**Standalone scenarios** (`newtest/suites/2node-standalone/`) — independent tests, each with its own deploy/destroy cycle.
 
-**Incremental suites** (`newtest/suites/`) — ordered tests with dependency chaining (`requires` field). A suite shares a single topology deployment. Scenarios run in topological order; if a dependency fails, dependent scenarios are skipped.
+**Incremental suites** (`newtest/suites/2node-incremental/`) — ordered tests with dependency chaining (`requires` field). A suite shares a single topology deployment. Scenarios run in topological order; if a dependency fails, dependent scenarios are skipped.
 
 #### 2node-incremental Suite
 

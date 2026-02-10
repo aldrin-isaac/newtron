@@ -30,8 +30,8 @@ newtron/
     ├── topologies/
     │   ├── 2node/specs/          # 2-node topology spec dir
     │   └── 4node/specs/          # 4-node topology spec dir
-    ├── scenarios/                # Standalone scenario files
-    ├── suites/                   # Incremental test suites
+    ├── suites/                   # Test suites
+    │   ├── 2node-standalone/     # Standalone scenario files
     │   └── 2node-incremental/    # 25 scenarios, dependency-ordered
     └── .generated/               # Runtime output (gitignored)
 ```
@@ -398,7 +398,7 @@ Maps YAML keys to Go struct fields for each action:
 // topologies via newtlab, provisions devices via newtron, runs test steps,
 // and collects results.
 type Runner struct {
-    ScenariosDir  string                        // newtest/scenarios/
+    ScenariosDir  string                        // newtest/suites/2node-standalone/
     TopologiesDir string                        // newtest/topologies/
     Network       *network.Network              // OO hierarchy (owns devices, specs)
     Lab           *newtlab.Lab                    // newtlab Lab (nil if --no-deploy)
@@ -414,7 +414,7 @@ type Runner struct {
 
 | Field | Description |
 |-------|-------------|
-| `ScenariosDir` | Path to `newtest/scenarios/` |
+| `ScenariosDir` | Path to `newtest/suites/2node-standalone/` |
 | `TopologiesDir` | Path to `newtest/topologies/` |
 | `Network` | Top-level `network.Network` object (owns devices, specs, OO hierarchy). Replaces the previous `Devices` + `Platforms` fields — devices are accessed via `r.Network.GetDevice(name)`, platforms via `r.Network.GetPlatform()`. |
 | `Lab` | newtlab Lab instance from `DeployTopology()` (nil when `--no-deploy`) |
@@ -1767,7 +1767,7 @@ func newRunCmd() *cobra.Command {
         Use:   "run",
         Short: "Run test scenarios",
         RunE: func(cmd *cobra.Command, args []string) error {
-            runner := NewRunner("newtest/scenarios", "newtest/topologies")
+            runner := NewRunner("newtest/suites/2node-standalone", "newtest/topologies")
             results, err := runner.Run(opts)
             if err != nil {
                 return err
@@ -1844,7 +1844,7 @@ func newListCmd() *cobra.Command {
         Use:   "list",
         Short: "List available scenarios",
         RunE: func(cmd *cobra.Command, args []string) error {
-            scenarios, err := ParseAllScenarios("newtest/scenarios")
+            scenarios, err := ParseAllScenarios("newtest/suites/2node-standalone")
             if err != nil {
                 return err
             }

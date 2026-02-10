@@ -13,12 +13,12 @@ func newListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List available scenarios",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			scenarios, err := newtest.ParseAllScenarios("newtest/scenarios")
+			scenarios, err := newtest.ParseAllScenarios("newtest/suites/2node-standalone")
 			if err != nil {
 				return err
 			}
 			if len(scenarios) == 0 {
-				fmt.Println("No scenarios found in newtest/scenarios/")
+				fmt.Println("No scenarios found in newtest/suites/2node-standalone/")
 				return nil
 			}
 			fmt.Println("Available scenarios:")

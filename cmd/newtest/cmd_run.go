@@ -64,7 +64,7 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "newtest/scenarios", "directory containing scenario YAML files")
+	cmd.Flags().StringVar(&dir, "dir", "newtest/suites/2node-standalone", "directory containing scenario YAML files")
 	cmd.Flags().StringVar(&opts.Scenario, "scenario", "", "run specific scenario")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "run all scenarios in dir")
 	cmd.Flags().StringVar(&opts.Topology, "topology", "", "override topology")

@@ -97,8 +97,8 @@ full fabric provisioning.
 ## Test Scenarios
 
 Scenarios are YAML files that define what to test against a deployed topology.
-They live in `newtest/scenarios/` (standalone) or `newtest/suites/*/`
-(incremental suites with dependency ordering).
+They live in `newtest/suites/` — either `2node-standalone/` (independent tests)
+or `2node-incremental/` (dependency-ordered suite).
 
 ### Listing Scenarios
 
@@ -119,7 +119,7 @@ Available scenarios:
 ### Scenario Format
 
 ```yaml
-# newtest/scenarios/bgp-underlay.yaml
+# newtest/suites/2node-standalone/bgp-underlay.yaml
 name: bgp-underlay
 description: Verify eBGP underlay sessions establish
 topology: 4node
@@ -214,7 +214,7 @@ This does everything automatically:
 newtest run --all
 ```
 
-Runs every scenario in `newtest/scenarios/` sequentially. Each gets its own
+Runs every scenario in `newtest/suites/2node-standalone/` sequentially. Each gets its own
 topology deploy/destroy cycle.
 
 ### Override Platform
@@ -389,7 +389,7 @@ Pick `2node` or `4node` based on what you need to test.
 ### 2. Create a Scenario File
 
 ```yaml
-# newtest/scenarios/my-test.yaml
+# newtest/suites/2node-standalone/my-test.yaml
 name: my-test
 description: Test custom L3 service
 topology: 2node
