@@ -1,7 +1,9 @@
 {
-  "mgmt_ip": "127.0.0.1",
-  "loopback_ip": "10.0.0.11",
-  "site": "lab",
-  "platform": "sonic-vpp",
-  "underlay_asn": 65011
+    "loopback_ip": "10.0.0.11",
+    "mgmt_ip": "127.0.0.1",
+    "platform": "sonic-vpp",
+    "site": "lab",
+    "ssh_pass": "YourPaSsWoRd",
+    "ssh_user": "admin",
+    "underlay_asn": 65011
 }

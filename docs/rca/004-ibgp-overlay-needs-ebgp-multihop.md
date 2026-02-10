@@ -47,3 +47,7 @@ classifies overlay sessions as eBGP even though they're logically iBGP.
 Loopback-to-loopback eBGP sessions always need `ebgp-multihop`. This is a
 common gotcha when mixing eBGP underlay with iBGP overlay in the same FRR
 instance.
+
+**Update (RCA-015):** FRR silently ignores `ebgp-multihop` when `local-as`
+equals `remote-as` on the neighbor. The reliable workaround is
+`ttl-security hops N` + `disable-connected-check`. See RCA-015 for details.

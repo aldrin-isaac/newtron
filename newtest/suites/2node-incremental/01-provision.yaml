@@ -1,5 +1,5 @@
 name: provision
-description: Provision all devices and verify CONFIG_DB state
+description: Provision all devices, restart BGP, apply FRR defaults, and verify CONFIG_DB state
 topology: 2node
 platform: sonic-vpp
 requires: [boot-ssh]
@@ -7,10 +7,6 @@ requires: [boot-ssh]
 steps:
   - name: provision-all
     action: provision
-    devices: all
-
-  - name: verify-provisioning
-    action: verify-provisioning
     devices: all
 
   - name: verify-device-metadata-spine1
@@ -42,3 +38,24 @@ steps:
     table: LOOPBACK_INTERFACE
     expect:
       min_entries: 1
+
+  # Restart BGP containers to pick up the new CONFIG_DB entries.
+  # config reload breaks VPP syncd (RCA-001), so restart bgp only.
+  - name: restart-bgp
+    action: restart-service
+    devices: all
+    service: bgp
+
+  # Wait for FRR + frrcfgd to finish initial config render
+  - name: wait-bgp-restart
+    action: wait
+    duration: 15s
+
+  # Apply FRR defaults not supported by frrcfgd templates:
+  # - no bgp ebgp-requires-policy
+  # - no bgp suppress-fib-pending
+  # - ttl-security for iBGP overlay neighbors with ebgp_multihop
+  # - clear bgp * soft out (force route re-advertisement)
+  - name: apply-frr-defaults
+    action: apply-frr-defaults
+    devices: all

@@ -10,6 +10,9 @@
     ],
     "post_commands": [
         "sudo config save -y",
-        "sudo systemctl restart syncd"
+        "sudo systemctl restart syncd",
+        "sleep 10",
+        "sudo systemctl reset-failed swss || true",
+        "sudo systemctl restart swss"
     ]
 }

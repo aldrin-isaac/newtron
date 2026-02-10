@@ -354,7 +354,12 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	}
 	r.Network = net
 
-	for _, name := range net.ListDevices() {
+	topo := net.GetTopology()
+	if topo == nil {
+		return &InfraError{Op: "connect", Err: fmt.Errorf("no topology.json found")}
+	}
+
+	for _, name := range topo.DeviceNames() {
 		dev, err := net.GetDevice(name)
 		if err != nil {
 			return &InfraError{Op: "connect", Device: name, Err: err}
@@ -401,6 +406,9 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 
 // allDeviceNames returns sorted names of all topology devices.
 func (r *Runner) allDeviceNames() []string {
+	if topo := r.Network.GetTopology(); topo != nil {
+		return topo.DeviceNames()
+	}
 	return r.Network.ListDevices()
 }
 

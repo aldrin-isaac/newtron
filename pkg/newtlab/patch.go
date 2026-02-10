@@ -48,13 +48,14 @@ type RedisPatch struct {
 
 // PatchVars holds the variables available to all boot patch templates.
 type PatchVars struct {
-	NumPorts  int
-	PCIAddrs  []string
-	HWSkuDir  string
-	PortSpeed int
-	Platform  string
-	Dataplane string
-	Release   string
+	NumPorts   int
+	PCIAddrs   []string
+	PortStride int // 1 for sequential, 4 for stride-4 (default)
+	HWSkuDir   string
+	PortSpeed  int
+	Platform   string
+	Dataplane  string
+	Release    string
 }
 
 // templateFuncs provides helper functions for boot patch templates.
@@ -259,14 +260,20 @@ func buildPatchVars(node *NodeConfig, platform *spec.PlatformSpec) *PatchVars {
 		speed = 25000
 	}
 
+	portStride := 4 // default: stride-4 (e.g. Ethernet0, Ethernet4, Ethernet8)
+	if platform.VMInterfaceMap == "sequential" {
+		portStride = 1 // sequential: Ethernet0, Ethernet1, Ethernet2
+	}
+
 	return &PatchVars{
-		NumPorts:  dataNICs,
-		PCIAddrs:  QEMUPCIAddrs(dataNICs),
-		HWSkuDir:  fmt.Sprintf("/usr/share/sonic/device/x86_64-kvm_x86_64-r0/%s", platform.HWSKU),
-		PortSpeed: speed,
-		Platform:  node.Platform,
-		Dataplane: platform.Dataplane,
-		Release:   platform.VMImageRelease,
+		NumPorts:   dataNICs,
+		PCIAddrs:   QEMUPCIAddrs(dataNICs),
+		PortStride: portStride,
+		HWSkuDir:   fmt.Sprintf("/usr/share/sonic/device/x86_64-kvm_x86_64-r0/%s", platform.HWSKU),
+		PortSpeed:  speed,
+		Platform:   node.Platform,
+		Dataplane:  platform.Dataplane,
+		Release:    platform.VMImageRelease,
 	}
 }
 

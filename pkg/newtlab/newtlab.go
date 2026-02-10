@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/newtron-network/newtron/pkg/spec"
 )
 
@@ -607,7 +609,7 @@ func (l *Lab) Provision(parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.Command("newtron", "provision", "-S", l.SpecDir, "-d", name, "-xs")
+			cmd := exec.Command(findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-xs")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()
@@ -621,7 +623,75 @@ func (l *Lab) Provision(parallel int) error {
 	if len(errs) > 0 {
 		return errors.Join(errs...)
 	}
+
+	// Post-provision: trigger a global BGP soft clear to force route
+	// re-advertisement. When devices are provisioned in parallel, each
+	// device's ApplyFRRDefaults runs before all peers are ready, so routes
+	// may remain un-advertised until the next timer cycle (120s). A single
+	// soft clear pass after all devices are provisioned resolves this.
+	l.refreshBGP(state)
+
 	return nil
+}
+
+// refreshBGP SSHs to each device and runs "clear bgp * soft" via vtysh.
+// Errors are logged but not returned — this is a best-effort convergence aid.
+func (l *Lab) refreshBGP(state *LabState) {
+	// Brief delay for the last-provisioned device's BGP to start.
+	time.Sleep(5 * time.Second)
+
+	for name, node := range state.Nodes {
+		profilePath := filepath.Join(l.SpecDir, "profiles", name+".json")
+		data, err := os.ReadFile(profilePath)
+		if err != nil {
+			continue
+		}
+		var profile struct {
+			SSHUser string `json:"ssh_user"`
+			SSHPass string `json:"ssh_pass"`
+		}
+		if err := json.Unmarshal(data, &profile); err != nil || profile.SSHUser == "" {
+			continue
+		}
+
+		host := node.HostIP
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr := fmt.Sprintf("%s:%d", host, node.SSHPort)
+
+		config := &ssh.ClientConfig{
+			User:            profile.SSHUser,
+			Auth:            []ssh.AuthMethod{ssh.Password(profile.SSHPass)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         5 * time.Second,
+		}
+
+		client, err := ssh.Dial("tcp", addr, config)
+		if err != nil {
+			continue
+		}
+		session, err := client.NewSession()
+		if err != nil {
+			client.Close()
+			continue
+		}
+		_ = session.Run("vtysh -c 'clear bgp * soft'")
+		session.Close()
+		client.Close()
+	}
+}
+
+// findSiblingBinary returns the path to a binary adjacent to the current
+// executable. Falls back to the bare name (resolved via $PATH).
+func findSiblingBinary(name string) string {
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return name
 }
 
 // destroyExisting tears down a stale deployment found via state.json.

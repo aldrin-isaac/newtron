@@ -116,8 +116,9 @@ Examples:
 					} else {
 						fmt.Println(green("restarted"))
 
-						// Wait for FRR to start, then apply defaults
-						time.Sleep(5 * time.Second)
+						// Wait for FRR + frrcfgd to finish initial config render,
+						// then apply defaults that frrcfgd doesn't support.
+						time.Sleep(15 * time.Second)
 						fmt.Print("  Applying FRR defaults... ")
 						if err := dev.ApplyFRRDefaults(ctx); err != nil {
 							fmt.Printf("%s: %v\n", red("FAILED"), err)

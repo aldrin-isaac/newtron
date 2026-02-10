@@ -177,6 +177,31 @@ func (d *Device) IsConnected() bool {
 	return d.connected
 }
 
+// Refresh reloads CONFIG_DB from Redis and rebuilds the interface list.
+// Call after operations that write to CONFIG_DB outside the normal device flow
+// (e.g., composite provisioning).
+func (d *Device) Refresh() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if !d.connected || d.conn == nil {
+		return fmt.Errorf("device not connected")
+	}
+
+	configDB, err := d.conn.Client().GetAll()
+	if err != nil {
+		return fmt.Errorf("reloading config_db: %w", err)
+	}
+	d.conn.ConfigDB = configDB
+	d.configDB = configDB
+
+	// Rebuild interfaces from the refreshed CONFIG_DB
+	d.interfaces = make(map[string]*Interface)
+	d.loadInterfaces()
+
+	return nil
+}
+
 // Lock acquires a distributed lock for configuration changes.
 // Constructs a holder identity from the current user and hostname,
 // and acquires the lock with a default TTL of 3600 seconds.
@@ -244,6 +269,32 @@ func (d *Device) IsLocked() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.locked
+}
+
+// ExecuteOp locks the device, runs the operation function, applies the
+// resulting ChangeSet to CONFIG_DB, and unlocks. This is the standard
+// pattern for all state-mutating operations — used by both the CLI
+// (execute mode) and the test runner, ensuring identical behavior.
+//
+// The operation function should build a ChangeSet without side effects
+// (e.g., iface.ApplyService, iface.RemoveService, dev.ApplyBaseline).
+// ExecuteOp handles the lock/apply/unlock lifecycle.
+func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
+	if err := d.Lock(); err != nil {
+		return nil, fmt.Errorf("lock: %w", err)
+	}
+	defer d.Unlock()
+
+	cs, err := fn()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cs.Apply(d); err != nil {
+		return nil, fmt.Errorf("apply: %w", err)
+	}
+
+	return cs, nil
 }
 
 // ============================================================================

@@ -138,10 +138,11 @@ func TestBuildPatchVars(t *testing.T) {
 
 func TestRenderTemplate_PortConfig(t *testing.T) {
 	vars := &PatchVars{
-		NumPorts:  2,
-		PCIAddrs:  []string{"0000:00:03.0", "0000:00:04.0"},
-		HWSkuDir:  "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000",
-		PortSpeed: 25000,
+		NumPorts:   2,
+		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0"},
+		PortStride: 4,
+		HWSkuDir:   "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/Force10-S6000",
+		PortSpeed:  25000,
 	}
 
 	content, err := renderTemplate("port_config.ini.tmpl", "patches/vpp/always", vars)
@@ -193,8 +194,9 @@ func TestRenderTemplate_SyncdVPPEnv(t *testing.T) {
 
 func TestRenderTemplate_IFMap(t *testing.T) {
 	vars := &PatchVars{
-		NumPorts: 3,
-		PCIAddrs: []string{"0000:00:03.0", "0000:00:04.0", "0000:00:05.0"},
+		NumPorts:   3,
+		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0", "0000:00:05.0"},
+		PortStride: 4,
 	}
 
 	content, err := renderTemplate("sonic_vpp_ifmap.ini.tmpl", "patches/vpp/always", vars)
@@ -215,9 +217,10 @@ func TestRenderTemplate_IFMap(t *testing.T) {
 
 func TestRenderTemplate_PortEntries(t *testing.T) {
 	vars := &PatchVars{
-		NumPorts:  2,
-		PCIAddrs:  []string{"0000:00:03.0", "0000:00:04.0"},
-		PortSpeed: 25000,
+		NumPorts:   2,
+		PCIAddrs:   []string{"0000:00:03.0", "0000:00:04.0"},
+		PortStride: 4,
+		PortSpeed:  25000,
 	}
 
 	content, err := renderTemplate("port_entries.tmpl", "patches/vpp/always", vars)
@@ -225,6 +228,9 @@ func TestRenderTemplate_PortEntries(t *testing.T) {
 		t.Fatalf("renderTemplate error: %v", err)
 	}
 
+	if !strings.Contains(content, `EVAL "for _,k in ipairs(redis.call('KEYS','PORT|*')) do redis.call('DEL',k) end" 0`) {
+		t.Errorf("missing EVAL cleanup, got:\n%s", content)
+	}
 	if !strings.Contains(content, `HSET "PORT|Ethernet0" admin_status up alias Ethernet0 index 0 lanes 0 speed 25000`) {
 		t.Errorf("missing Ethernet0 redis entry, got:\n%s", content)
 	}

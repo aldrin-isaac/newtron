@@ -1,0 +1,30 @@
+name: state-db-port
+description: Verify PORT operational state appears in STATE_DB after provisioning
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  # Verify spine1 Ethernet0 appears in STATE_DB with oper_status
+  - name: verify-port-state-spine1
+    action: verify-state-db
+    devices: [spine1]
+    table: PORT_TABLE
+    key: Ethernet0
+    expect:
+      fields:
+        oper_status: up
+      timeout: 60s
+      poll_interval: 5s
+
+  # Verify leaf1 Ethernet0 appears in STATE_DB with oper_status
+  - name: verify-port-state-leaf1
+    action: verify-state-db
+    devices: [leaf1]
+    table: PORT_TABLE
+    key: Ethernet0
+    expect:
+      fields:
+        oper_status: up
+      timeout: 60s
+      poll_interval: 5s

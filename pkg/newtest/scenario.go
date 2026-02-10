@@ -76,6 +76,8 @@ const (
 	ActionRemoveService      StepAction = "remove-service"
 	ActionApplyBaseline      StepAction = "apply-baseline"
 	ActionSSHCommand         StepAction = "ssh-command"
+	ActionRestartService     StepAction = "restart-service"
+	ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
 )
 
 // validActions is the set of all recognized step actions.
@@ -93,6 +95,8 @@ var validActions = map[StepAction]bool{
 	ActionRemoveService:      true,
 	ActionApplyBaseline:      true,
 	ActionSSHCommand:         true,
+	ActionRestartService:     true,
+	ActionApplyFRRDefaults:   true,
 }
 
 // DeviceSelector handles the two YAML forms for the "devices" field:

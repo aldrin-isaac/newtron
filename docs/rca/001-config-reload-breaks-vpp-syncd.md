@@ -36,12 +36,17 @@ without touching syncd or other services.
 
 // After (safe for all platforms):
 // ssh: "sudo config save -y"
-// ssh: "sudo docker restart bgp"
+// ssh: "sudo systemctl restart bgp"
 ```
+
+**Update (RCA-012):** The original fix used `docker restart bgp`, which was
+later found to bypass systemd and trigger `start-limit-hit`. The correct
+approach is `systemctl restart bgp`. See RCA-012 for details.
 
 ## Lesson
 
 Never use `config reload` on SONiC-VPP. Prefer targeted service restarts
-(`docker restart <service>`) over full config reloads. When writing a
-provisioning tool that supports multiple SONiC platforms, assume the most
-fragile platform and use the safest restart strategy.
+(`systemctl restart <service>`) over full config reloads. Always use
+`systemctl` instead of `docker restart` to work with SONiC's systemd service
+management. When writing a provisioning tool that supports multiple SONiC
+platforms, assume the most fragile platform and use the safest restart strategy.

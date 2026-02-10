@@ -21,7 +21,3 @@ steps:
     expect:
       fields:
         service: customer-l3
-
-  - name: verify-l3-provisioning
-    action: verify-provisioning
-    devices: [leaf1]

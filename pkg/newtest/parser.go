@@ -182,6 +182,17 @@ func validateStepFields(scenario string, index int, step *Step) error {
 		if step.Command == "" {
 			return fmt.Errorf("%s: command is required", prefix)
 		}
+	case ActionRestartService:
+		if !step.Devices.All && len(step.Devices.Devices) == 0 {
+			return fmt.Errorf("%s: devices is required", prefix)
+		}
+		if step.Service == "" {
+			return fmt.Errorf("%s: service is required", prefix)
+		}
+	case ActionApplyFRRDefaults:
+		if !step.Devices.All && len(step.Devices.Devices) == 0 {
+			return fmt.Errorf("%s: devices is required", prefix)
+		}
 	}
 
 	return nil

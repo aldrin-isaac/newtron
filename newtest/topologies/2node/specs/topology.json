@@ -11,6 +11,12 @@
           "link": "leaf1:Ethernet0",
           "service": "transit",
           "ip": "10.1.0.0/31"
+        },
+        "Ethernet1": {
+          "link": "leaf1:Ethernet1"
+        },
+        "Ethernet2": {
+          "link": "leaf1:Ethernet2"
         }
       }
     },
@@ -21,13 +27,19 @@
           "service": "transit",
           "ip": "10.1.0.1/31"
         },
-        "Ethernet1": {},
-        "Ethernet2": {}
+        "Ethernet1": {
+          "link": "spine1:Ethernet1"
+        },
+        "Ethernet2": {
+          "link": "spine1:Ethernet2"
+        }
       }
     }
   },
   "links": [
-    {"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"}
+    {"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"},
+    {"a": "spine1:Ethernet1", "z": "leaf1:Ethernet1"},
+    {"a": "spine1:Ethernet2", "z": "leaf1:Ethernet2"}
   ],
   "newtlab": {
     "link_port_base": 10000,

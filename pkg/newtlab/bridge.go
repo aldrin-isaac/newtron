@@ -242,20 +242,16 @@ func QueryAllBridgeStats(labName string) (*BridgeStats, error) {
 // It prefers the newtlink binary next to the current executable; falls back to
 // "newtlab bridge <labName>" for backward compatibility.
 func startBridgeProcess(labName, stateDir string) (int, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return 0, fmt.Errorf("resolve executable: %w", err)
-	}
-
 	configPath := filepath.Join(stateDir, "bridge.json")
 
-	// Prefer newtlink binary next to current executable
+	// Prefer newtlink binary next to current executable; fall back to newtlab bridge
 	var cmd *exec.Cmd
-	newtlinkPath := filepath.Join(filepath.Dir(exe), "newtlink")
-	if _, err := os.Stat(newtlinkPath); err == nil {
-		cmd = exec.Command(newtlinkPath, configPath)
-	} else {
+	if p := findSiblingBinary("newtlink"); p != "newtlink" {
+		cmd = exec.Command(p, configPath)
+	} else if exe, err := os.Executable(); err == nil {
 		cmd = exec.Command(exe, "bridge", labName)
+	} else {
+		return 0, fmt.Errorf("resolve executable: %w", err)
 	}
 
 	logPath := filepath.Join(stateDir, "logs", "bridge.log")

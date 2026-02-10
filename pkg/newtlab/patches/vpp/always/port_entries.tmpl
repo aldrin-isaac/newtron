@@ -1,3 +1,4 @@
+EVAL "for _,k in ipairs(redis.call('KEYS','PORT|*')) do redis.call('DEL',k) end" 0
 {{- range $i, $_ := .PCIAddrs}}
-HSET "PORT|Ethernet{{mul $i 4}}" admin_status up alias Ethernet{{mul $i 4}} index {{$i}} lanes {{mul $i 4}} speed {{$.PortSpeed}}
+HSET "PORT|Ethernet{{mul $i $.PortStride}}" admin_status up alias Ethernet{{mul $i $.PortStride}} index {{$i}} lanes {{mul $i $.PortStride}} speed {{$.PortSpeed}}
 {{- end}}

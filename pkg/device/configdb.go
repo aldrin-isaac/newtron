@@ -781,6 +781,13 @@ func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
 	return c.client.HGetAll(c.ctx, redisKey).Result()
 }
 
+// TableKeys returns all Redis keys matching the given table prefix.
+// Useful for counting entries or iterating a table without loading all values.
+func (c *ConfigDBClient) TableKeys(table string) ([]string, error) {
+	pattern := fmt.Sprintf("%s|*", table)
+	return c.client.Keys(c.ctx, pattern).Result()
+}
+
 // Exists checks if a key exists
 func (c *ConfigDBClient) Exists(table, key string) (bool, error) {
 	redisKey := fmt.Sprintf("%s|%s", table, key)

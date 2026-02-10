@@ -39,6 +39,8 @@ var executors = map[StepAction]StepExecutor{
 	ActionRemoveService:      &removeServiceExecutor{},
 	ActionApplyBaseline:      &applyBaselineExecutor{},
 	ActionSSHCommand:         &sshCommandExecutor{},
+	ActionRestartService:     &restartServiceExecutor{},
+	ActionApplyFRRDefaults:   &applyFRRDefaultsExecutor{},
 }
 
 // ============================================================================
@@ -61,15 +63,61 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	allPassed := true
 
 	for _, name := range devices {
-		result, err := provisioner.ProvisionDevice(ctx, name)
+		// Generate composite config offline, then deliver using the shared
+		// connection (without disconnecting). ProvisionDevice() can't be used
+		// here because it calls defer dev.Disconnect() which kills the shared
+		// test runner connection.
+		composite, err := provisioner.GenerateDeviceComposite(name)
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("provision failed: %s", err),
+				Message: fmt.Sprintf("generate composite: %s", err),
 			})
 			allPassed = false
 			continue
 		}
+
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("get device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		if err := dev.Lock(); err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("lock: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		result, err := dev.DeliverComposite(composite, network.CompositeOverwrite)
+		dev.Unlock()
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("deliver composite: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		// Refresh the device's cached CONFIG_DB and interface list so
+		// subsequent steps see the newly provisioned PORT entries.
+		if err := dev.Refresh(); err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("refresh after provision: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
 			Message: fmt.Sprintf("provisioned (%d entries applied)", result.Applied),
@@ -230,11 +278,22 @@ func (e *verifyConfigDBExecutor) checkDevice(d *device.Device, step *Step) check
 
 	// Mode 1: min_entries
 	if step.Expect.MinEntries != nil {
-		vals, err := client.Get(step.Table, step.Key)
-		if err != nil {
-			return checkResult{StatusError, fmt.Sprintf("reading %s: %s", step.Table, err)}
+		var count int
+		if step.Key == "" {
+			// No key: count all entries in the table
+			keys, err := client.TableKeys(step.Table)
+			if err != nil {
+				return checkResult{StatusError, fmt.Sprintf("scanning %s: %s", step.Table, err)}
+			}
+			count = len(keys)
+		} else {
+			// Specific key: count fields in that entry
+			vals, err := client.Get(step.Table, step.Key)
+			if err != nil {
+				return checkResult{StatusError, fmt.Sprintf("reading %s|%s: %s", step.Table, step.Key, err)}
+			}
+			count = len(vals)
 		}
-		count := len(vals)
 		if count >= *step.Expect.MinEntries {
 			return checkResult{StatusPassed, fmt.Sprintf("%s: %d entries (≥ %d)", step.Table, count, *step.Expect.MinEntries)}
 		}
@@ -763,7 +822,9 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 			}
 		}
 
-		cs, err := iface.ApplyService(ctx, step.Service, opts)
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return iface.ApplyService(ctx, step.Service, opts)
+		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
@@ -776,7 +837,7 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("applied service %s on %s", step.Service, step.Interface),
+			Message: fmt.Sprintf("applied service %s on %s (%d changes)", step.Service, step.Interface, len(cs.Changes)),
 		})
 	}
 
@@ -823,7 +884,9 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 			continue
 		}
 
-		cs, err := iface.RemoveService(ctx)
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return iface.RemoveService(ctx)
+		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
@@ -836,7 +899,7 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed service from %s", step.Interface),
+			Message: fmt.Sprintf("removed service from %s (%d changes)", step.Interface, len(cs.Changes)),
 		})
 	}
 
@@ -879,7 +942,9 @@ func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *St
 			vars = append(vars, fmt.Sprintf("%s=%s", k, v))
 		}
 
-		cs, err := dev.ApplyBaseline(ctx, step.Configlet, vars)
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.ApplyBaseline(ctx, step.Configlet, vars)
+		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
@@ -892,7 +957,7 @@ func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *St
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("applied baseline %s", step.Configlet),
+			Message: fmt.Sprintf("applied baseline %s (%d changes)", step.Configlet, len(cs.Changes)),
 		})
 	}
 
@@ -968,6 +1033,94 @@ func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 				allPassed = false
 			}
 		}
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+}
+
+// ============================================================================
+// restartServiceExecutor
+// ============================================================================
+
+type restartServiceExecutor struct{}
+
+func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	allPassed := true
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		if err := dev.RestartService(ctx, step.Service); err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("restart %s: %s", step.Service, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("restarted %s", step.Service),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+}
+
+// ============================================================================
+// applyFRRDefaultsExecutor
+// ============================================================================
+
+type applyFRRDefaultsExecutor struct{}
+
+func (e *applyFRRDefaultsExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	allPassed := true
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		if err := dev.ApplyFRRDefaults(ctx); err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusFailed,
+				Message: fmt.Sprintf("apply FRR defaults: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: "applied FRR defaults",
+		})
 	}
 
 	status := StatusPassed
