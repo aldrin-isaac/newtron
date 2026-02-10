@@ -45,7 +45,8 @@ Benefits:
 - No Linux bridges, TAP interfaces, or veth pairs
 - No Docker or container runtime needed
 - Single source of truth for topology (topology.json)
-- Native multi-host support via TCP sockets
+- Native multi-host support via newtlink TCP bridge agents
+- No VM startup ordering — both sides connect out to newtlink
 - Supports multiple SONiC image types (VS, VPP, vendor)
 
 ---
@@ -244,38 +245,92 @@ Credentials resolve:
 
 ---
 
-## 5. Socket-Based Networking
+## 5. Link Networking — newtlink Bridge Agent
 
 ### 5.1 How It Works
 
-Each link in `topology.json` becomes a TCP socket pair:
+Each link in `topology.json` is realized by a **newtlink bridge worker** — a
+goroutine that listens on two TCP ports (one per endpoint) and bridges
+Ethernet frames between them. Both QEMU VMs connect *outbound* to newtlink;
+newtlink never connects to QEMU.
 
 ```
 Link: { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0" }
 
+newtlink worker (per link):
+  Listen on :20000  (A-side port)
+  Listen on :20001  (Z-side port)
+  Accept one connection on each
+  Bridge frames: A↔Z
+
 spine1 QEMU:
-  -netdev socket,id=eth0,listen=:20000
-  -device <nic_driver>,netdev=eth0
+  -netdev socket,id=eth1,connect=127.0.0.1:20000
+  -device <nic_driver>,netdev=eth1
 
 leaf1 QEMU:
-  -netdev socket,id=eth0,connect=127.0.0.1:20000
-  -device <nic_driver>,netdev=eth0
+  -netdev socket,id=eth1,connect=127.0.0.1:20001
+  -device <nic_driver>,netdev=eth1
 ```
 
 newtlab uses the platform's `vm_interface_map` to determine which QEMU NIC index
 corresponds to each SONiC interface name.
 
+#### Why newtlink instead of direct QEMU sockets?
+
+QEMU's built-in `-netdev socket` supports a listen/connect model where one VM
+listens and the other connects. This has three problems:
+
+1. **Startup ordering** — the listen-side VM must start before the connect-side
+   VM, creating a dependency graph that complicates deployment.
+2. **Asymmetry** — each side of a link uses different QEMU arguments (listen vs
+   connect), so link wiring must track which side is which.
+3. **Cross-host divergence** — local links use `127.0.0.1` while cross-host
+   links need the remote host's IP, requiring different implementations.
+
+newtlink eliminates all three: both VMs always `connect` to a known local port,
+newtlink handles the bridging, and the same model works identically for local
+and cross-host links (newtlink just listens on `0.0.0.0` instead of `127.0.0.1`
+for cross-host endpoints).
+
 ### 5.2 Port Allocation
 
+Each link consumes **two** ports (one per endpoint):
+
 ```
-Link ports:      link_port_base + link_index      (20000, 20001, ...)
-Console ports:   console_port_base + node_index   (30000, 30001, ...)
-SSH ports:       ssh_port_base + node_index       (40000, 40001, ...)
+Link ports:      link_port_base + (link_index * 2)         A-side
+                 link_port_base + (link_index * 2) + 1     Z-side
+Console ports:   console_port_base + node_index            (30000, 30001, ...)
+SSH ports:       ssh_port_base + node_index                (40000, 40001, ...)
+```
+
+Example for two links:
+```
+Link 0: A-side :20000, Z-side :20001
+Link 1: A-side :20002, Z-side :20003
 ```
 
 ### 5.3 Cross-Host Links
 
-For multi-host, newtlab uses the `hosts` map to resolve IPs:
+For cross-host links, the newtlink worker runs on one of the two hosts (the
+A-side host by convention). The A-side port listens on `127.0.0.1` (local VM
+connects to it), while the Z-side port listens on `0.0.0.0` (remote VM connects
+across the network).
+
+```
+Link: spine1 (server-a) ↔ leaf1 (server-b)
+
+newtlink on server-a:
+  Listen 127.0.0.1:20000  (spine1 connects locally)
+  Listen 0.0.0.0:20001    (leaf1 connects from server-b)
+
+spine1 QEMU (server-a):
+  -netdev socket,id=eth1,connect=127.0.0.1:20000
+
+leaf1 QEMU (server-b):
+  -netdev socket,id=eth1,connect=192.168.1.10:20001
+```
+
+The `hosts` map in `topology.json` provides IP addresses:
 
 ```json
 {
@@ -290,9 +345,93 @@ Profile assigns VM to host:
 { "vm_host": "server-a" }
 ```
 
-spine1 (server-a) listens on `0.0.0.0:20000`, leaf1 (server-b) connects to `192.168.1.10:20000`.
+For same-host links, both ports listen on `127.0.0.1`.
 
-> **Note:** Multi-host is Phase 3 (not yet implemented). The fields are defined for forward compatibility.
+### 5.4 Worker Placement (Multi-Host)
+
+Each newtlink worker must run on one of its link's two endpoint hosts — never
+a third host, which would add an unnecessary network hop. A cross-host link
+always costs exactly one network hop regardless of which endpoint host runs the
+worker (one side is local, the other crosses the network). So placement is
+about **load balancing**, not latency.
+
+In multi-host mode, each host runs `newtlab deploy --host X` independently.
+All instances read the same `topology.json`, so the placement algorithm must
+be **deterministic from the topology alone** — no coordination needed.
+
+**Placement rules:**
+
+1. **Local link** (both VMs on same host): worker runs on that host.
+2. **Cross-host link**: assigned to the endpoint host with fewer cross-host
+   workers so far (greedy, iterating links in sorted order). Ties broken by
+   host name sort order.
+
+Since every host computes the same sorted link order and the same greedy
+assignment, each host's newtlab instance knows exactly which cross-host
+link workers it owns — and starts only those.
+
+**Example:** 2 spines on host-A, 4 leaves on host-B, full-mesh links:
+
+```
+Link 0: spine1↔leaf1  → host-A has 0, host-B has 0 → assign host-A (tie, A < B)
+Link 1: spine1↔leaf2  → host-A has 1, host-B has 0 → assign host-B
+Link 2: spine1↔leaf3  → host-A has 1, host-B has 1 → assign host-A
+Link 3: spine1↔leaf4  → host-A has 2, host-B has 1 → assign host-B
+Link 4: spine2↔leaf1  → host-A has 2, host-B has 2 → assign host-A
+Link 5: spine2↔leaf2  → host-A has 3, host-B has 2 → assign host-B
+Link 6: spine2↔leaf3  → host-A has 3, host-B has 3 → assign host-A
+Link 7: spine2↔leaf4  → host-A has 4, host-B has 3 → assign host-B
+Result: 4 workers on host-A, 4 on host-B (perfectly balanced)
+```
+
+For pairwise balancing with 3+ hosts, the same greedy rule applies
+independently to each host pair. Each cross-host link only considers the two
+endpoint hosts — the global count doesn't matter since traffic is pairwise.
+
+### 5.5 Multi-Host Bridge Distribution
+
+In single-host mode, all bridge workers run in one process. In multi-host
+mode, each host runs its own bridge process for the links assigned to it
+by the worker placement algorithm (§5.4).
+
+```
+2-host topology:
+
+server-a                         server-b
+┌────────────────────┐           ┌────────────────────┐
+│ Bridge process     │           │ Bridge process     │
+│  • spine1↔leaf1    │           │  • spine1↔leaf2    │
+│  • spine2↔leaf1    │           │  • spine2↔leaf2    │
+│                    │           │                    │
+│ Stats TCP :19999   │           │ Stats TCP :19998   │
+│ Stats Unix sock    │           │                    │
+└────────────────────┘           └────────────────────┘
+```
+
+**Bridge process lifecycle:**
+- **Local host:** spawned as a child process via `newtlab bridge <lab>`
+- **Remote host:** started via SSH: `nohup newtlab bridge <lab> &`
+- **Bridge config:** each host's bridge process reads `bridge.json` from
+  `~/.newtlab/labs/<name>/bridge.json`, containing only its assigned links
+
+**Stats port allocation:** Each bridge process exposes a TCP stats endpoint
+for remote queries, allocated from the link port space counting downward:
+
+```
+Stats ports:     link_port_base - 1 - host_index
+                 (where host_index = 0 for local, 1 for first remote, etc.)
+
+Example with link_port_base=20000 and 2 hosts:
+  Local bridge:   127.0.0.1:19999   (also has Unix socket for local queries)
+  Remote bridge:  0.0.0.0:19998     (TCP only)
+```
+
+The local bridge also listens on a Unix socket (`bridge.sock`) for backward
+compatibility with single-host deployments.
+
+**Stats aggregation:** `newtlab bridge-stats` queries all bridge processes
+and merges their counters into a single table. Local bridges are queried
+via Unix socket; remote bridges via TCP.
 
 ---
 
@@ -380,14 +519,24 @@ Backward compatible — profiles without `ssh_port` use port 22.
       "status": "running",
       "ssh_port": 40000,
       "console_port": 30000,
-      "original_mgmt_ip": "PLACEHOLDER"
+      "original_mgmt_ip": "PLACEHOLDER",
+      "host": "server-a",
+      "host_ip": "192.168.1.10"
     }
   },
   "links": [
-    { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0", "port": 20000 }
-  ]
+    { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0", "a_port": 20000, "z_port": 20001, "worker_host": "server-a" }
+  ],
+  "bridges": {
+    "": { "pid": 54321, "stats_addr": "127.0.0.1:19999" },
+    "server-b": { "pid": 54322, "host_ip": "192.168.1.11", "stats_addr": "192.168.1.11:19998" }
+  }
 }
 ```
+
+The `bridges` map tracks per-host bridge processes (see §5.5). The key is
+the host name (`""` for local). `bridge_pid` is retained for backward
+compatibility with older state files but is superseded by `bridges`.
 
 ---
 
@@ -405,6 +554,7 @@ Commands:
   newtlab stop <node>              Stop a VM (preserves disk)
   newtlab start <node>             Start a stopped VM
   newtlab provision -S <specs>     Provision devices via newtron
+  newtlab bridge-stats             Show live bridge telemetry (aggregated)
   newtlab snapshot --name <name>   Create snapshot
   newtlab restore --name <name>    Restore from snapshot
 
@@ -434,25 +584,39 @@ Options:
 
 ## 11. Implementation Phases
 
-### Phase 1: Core
+### Phase 1: Core (done)
 - Read topology.json, platforms.json, profiles/*.json
 - Single-host QEMU deployment with platform-based image selection
 - Interface map support (sequential, stride-4)
-- Socket links from topology.json links
+- Direct socket links from topology.json links (listen/connect model)
 - Profile patching (mgmt_ip, ssh_port, console_port)
 - CLI: deploy, destroy, status, ssh, console
 
-### Phase 2: Polish
+### Phase 2: Polish (done)
 - Boot timeout and health check
 - NIC driver and CPU feature support
 - Improved error messages
 
-### Phase 3: Multi-Host (not yet implemented)
+### Phase 3: Multi-Host (done)
 - vm_host in profiles
 - hosts map in topology.json newtlab section
-- Cross-host socket links
+- Cross-host socket links (direct listen/connect model)
 - Per-host deployment (`--host`)
+- Remote QEMU launch via SSH (`StartNodeRemote`/`StopNodeRemote`)
 
-### Phase 4: Advanced
+### Phase 4: newtlink Bridge Agent (done)
+- Replace direct listen/connect sockets with newtlink bridge workers
+- Each link gets a goroutine that listens on two ports and bridges frames
+- Both QEMU VMs use `-netdev socket,connect=...` (no listen mode)
+- Eliminates startup ordering dependency
+- Unifies local and cross-host link handling
+- newtlink process lifecycle tied to Lab (start before VMs, stop after)
+- Per-link byte counters and session tracking
+- Multi-host bridge distribution: one bridge process per WorkerHost
+- TCP stats transport for remote bridge queries
+- `bridge-stats` CLI aggregates counters from all hosts
+- Legacy `bridge_pid` preserved for backward compatibility
+
+### Phase 5: Advanced
 - Snapshot/restore
 - Image management

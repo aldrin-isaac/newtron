@@ -320,9 +320,6 @@ instead of the default 22.
 
 ## Multi-Host
 
-> **Phase 3 — Not yet implemented.** The configuration format below is defined
-> for forward compatibility. Single-host deployment is the current mode.
-
 ### Configure in topology.json
 
 ```json
@@ -359,8 +356,16 @@ newtlab deploy -S specs/ --host server-b
 newtlab provision -S specs/
 ```
 
-Cross-host links use TCP sockets. The listening side binds `0.0.0.0:<port>`,
-the connecting side uses the host IP from the `hosts` map.
+Cross-host links are handled by newtlink bridge processes. Each host runs
+its own bridge process for the links assigned to it by the load-balancing
+placement algorithm. For a link between `spine1` (server-a) and `leaf1`
+(server-b), the bridge worker runs on whichever host has fewer assigned
+workers (ties broken alphabetically). It listens on `127.0.0.1` for the
+local VM and `0.0.0.0` for the remote VM, then bridges frames between them.
+The remote VM connects to the bridge host's IP (from the `hosts` map).
+
+Each bridge process also exposes a TCP stats endpoint for telemetry queries.
+Use `newtlab bridge-stats` to see aggregated counters from all hosts.
 
 ---
 
@@ -388,14 +393,44 @@ newtlab console spine1            # Try console
 ### Links Not Working
 
 ```bash
-ss -tlnp | grep 20000           # Check listener
+# Check newtlink listeners (two ports per link)
+ss -tlnp | grep 20000
+ss -tlnp | grep 20001
+
+# Check inside VM
 newtlab ssh spine1
-ip link show                    # Check interfaces inside VM
+ip link show                    # Check interfaces
 ```
 
-Check that the platform's `vm_interface_map` matches the SONiC image type.
-Wrong mapping means interfaces exist but are numbered differently than
-expected.
+Common causes:
+- newtlink not running — check that deploy completed successfully. In
+  multi-host mode, each host runs its own bridge process; check
+  `newtlab bridge-stats` to see which bridges are reachable.
+- Port conflict — another process on the newtlink port range
+- Wrong `vm_interface_map` for the SONiC image type (interfaces exist but
+  numbered differently than expected)
+- Remote bridge not started — verify `newtlab` binary is in `$PATH` on
+  remote hosts (required for `startBridgeProcessRemote`)
+
+### Bridge Stats
+
+Check bridge link counters (aggregated across all hosts):
+
+```bash
+newtlab bridge-stats
+
+LINK                                     A→Z          Z→A          SESSIONS  CONNECTED
+────────────────────────────────────────  ────────────  ────────────  ─────────  ─────────
+spine1:Ethernet0 ↔ leaf1:Ethernet0      1.2 MB       856.0 KB     3         yes
+spine1:Ethernet4 ↔ leaf2:Ethernet0      2.5 MB       1.1 MB       2         yes
+```
+
+If a bridge on a remote host is unreachable, `bridge-stats` returns an error
+for that host. Check that the remote bridge process is running:
+
+```bash
+ssh server-b "ps aux | grep 'newtlab bridge'"
+```
 
 ### Wrong Interface Names
 
@@ -420,6 +455,7 @@ Commands:
   newtlab console <node>           Attach to serial console
   newtlab stop <node>              Stop a VM (preserves disk)
   newtlab start <node>             Start a stopped VM
+  newtlab bridge-stats             Show live bridge telemetry (all hosts)
   newtlab snapshot --name <name>   Create snapshot
   newtlab restore --name <name>    Restore from snapshot
 

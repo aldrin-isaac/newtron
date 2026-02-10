@@ -39,6 +39,9 @@ func NewLab(specDir string) (*Lab, error) {
 	}
 
 	name := filepath.Base(absDir)
+	if name == "specs" {
+		name = filepath.Base(filepath.Dir(absDir))
+	}
 
 	l := &Lab{
 		Name:     name,
@@ -156,9 +159,11 @@ func (l *Lab) Deploy() error {
 	}
 	for _, lc := range l.Links {
 		l.State.Links = append(l.State.Links, &LinkState{
-			A:    fmt.Sprintf("%s:%s", lc.A.Device, lc.A.Interface),
-			Z:    fmt.Sprintf("%s:%s", lc.Z.Device, lc.Z.Interface),
-			Port: lc.Port,
+			A:          fmt.Sprintf("%s:%s", lc.A.Device, lc.A.Interface),
+			Z:          fmt.Sprintf("%s:%s", lc.Z.Device, lc.Z.Interface),
+			APort:      lc.APort,
+			ZPort:      lc.ZPort,
+			WorkerHost: lc.WorkerHost,
 		})
 	}
 
@@ -170,11 +175,80 @@ func (l *Lab) Deploy() error {
 		}
 	}
 
-	// Start QEMU processes: listen-side first, then connect-side
+	// Start bridge processes before QEMU so VMs can connect immediately.
+	// Group links by WorkerHost and start a separate bridge per host.
 	var deployErr error
-	for _, name := range sortedListenFirst(l.Nodes, l.Links) {
+	if len(l.Links) > 0 {
+		hostLinks := map[string][]*LinkConfig{}
+		for _, lc := range l.Links {
+			hostLinks[lc.WorkerHost] = append(hostLinks[lc.WorkerHost], lc)
+		}
+
+		l.State.Bridges = make(map[string]*BridgeState)
+		statsPortNext := l.Config.LinkPortBase - 1
+
+		for _, host := range sortedHosts(hostLinks) {
+			statsPort := statsPortNext
+			statsPortNext--
+
+			links := hostLinks[host]
+
+			// Determine bind and reachable addresses for the stats listener.
+			// Local bridge binds to 127.0.0.1; remote binds to 0.0.0.0.
+			bindAddr := "127.0.0.1"
+			hostIP := resolveWorkerHostIP(host, l.Config)
+			if host != "" {
+				bindAddr = "0.0.0.0"
+			}
+			statsBindAddr := fmt.Sprintf("%s:%d", bindAddr, statsPort)
+
+			if host == "" {
+				// Local bridge
+				if err := WriteBridgeConfig(l.StateDir, links, statsBindAddr); err != nil {
+					return err
+				}
+				pid, err := startBridgeProcess(l.Name, l.StateDir)
+				if err != nil {
+					return fmt.Errorf("newtlab: start bridge: %w", err)
+				}
+				reachAddr := fmt.Sprintf("127.0.0.1:%d", statsPort)
+				l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: reachAddr}
+				l.State.BridgePID = pid // back-compat
+			} else {
+				// Remote bridge
+				cfg := buildBridgeConfig(links, statsBindAddr)
+				configJSON, err := json.MarshalIndent(cfg, "", "    ")
+				if err != nil {
+					return fmt.Errorf("newtlab: marshal remote bridge config: %w", err)
+				}
+				pid, err := startBridgeProcessRemote(l.Name, hostIP, configJSON)
+				if err != nil {
+					return fmt.Errorf("newtlab: start remote bridge on %s: %w", hostIP, err)
+				}
+				reachAddr := fmt.Sprintf("%s:%d", hostIP, statsPort)
+				l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP, StatsAddr: reachAddr}
+			}
+
+			// Wait for bridge listeners to be ready
+			for _, lc := range links {
+				probeHost := "127.0.0.1"
+				if host != "" {
+					probeHost = hostIP
+				}
+				if err := waitForPort(probeHost, lc.APort, 10*time.Second); err != nil {
+					return fmt.Errorf("newtlab: bridge not ready: %w", err)
+				}
+				if err := waitForPort(probeHost, lc.ZPort, 10*time.Second); err != nil {
+					return fmt.Errorf("newtlab: bridge not ready: %w", err)
+				}
+			}
+		}
+	}
+
+	// Start QEMU processes in sorted name order.
+	// All VMs connect outbound to bridge workers — no ordering constraints.
+	for _, name := range sortedNodeNames(l.Nodes) {
 		node := l.Nodes[name]
-		// Resolve host IP for remote nodes
 		hostIP := resolveHostIP(node, l.Config)
 
 		pid, err := StartNode(node, l.StateDir)
@@ -199,7 +273,8 @@ func (l *Lab) Deploy() error {
 		}
 	}
 
-	// Wait for SSH readiness (parallel)
+	// Bootstrap network via serial console (parallel).
+	// QEMU user-mode networking requires eth0 up + DHCP before SSH port forwarding works.
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for name, node := range l.Nodes {
@@ -207,15 +282,15 @@ func (l *Lab) Deploy() error {
 		if ns.Status != "running" {
 			continue
 		}
-		// Use host IP for SSH (remote nodes listen on their host IP)
-		sshHost := "127.0.0.1"
+		consoleHost := "127.0.0.1"
 		if ns.HostIP != "" {
-			sshHost = ns.HostIP
+			consoleHost = ns.HostIP
 		}
 		wg.Add(1)
-		go func(name, sshHost string, node *NodeConfig) {
+		go func(name, consoleHost string, node *NodeConfig) {
 			defer wg.Done()
-			err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
+			err := BootstrapNetwork(consoleHost, node.ConsolePort,
+				node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
 				time.Duration(node.BootTimeout)*time.Second)
 			if err != nil {
 				mu.Lock()
@@ -225,7 +300,71 @@ func (l *Lab) Deploy() error {
 				}
 				mu.Unlock()
 			}
+		}(name, consoleHost, node)
+	}
+	wg.Wait()
+
+	// Wait for SSH readiness (parallel)
+	for name, node := range l.Nodes {
+		ns := l.State.Nodes[name]
+		if ns.Status != "running" {
+			continue
+		}
+		sshHost := "127.0.0.1"
+		if ns.HostIP != "" {
+			sshHost = ns.HostIP
+		}
+		wg.Add(1)
+		go func(name, sshHost string, node *NodeConfig) {
+			defer wg.Done()
+			err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
+				60*time.Second)
+			if err != nil {
+				mu.Lock()
+				l.State.Nodes[name].Status = "error"
+				if deployErr == nil {
+					deployErr = err
+				}
+				mu.Unlock()
+			}
 		}(name, sshHost, node)
+	}
+	wg.Wait()
+
+	// Fix VPP configuration (parallel).
+	// SONiC VPP's factory default hook can run twice during first boot.
+	// The second run occurs after vpp-port-config has already bound data NICs
+	// to uio_pci_generic, so the init script sees no ethN interfaces and
+	// overwrites syncd_vpp_env with empty values. Detect this and fix it.
+	for name, node := range l.Nodes {
+		ns := l.State.Nodes[name]
+		if ns.Status != "running" {
+			continue
+		}
+		sshHost := "127.0.0.1"
+		if ns.HostIP != "" {
+			sshHost = ns.HostIP
+		}
+		dataNICs := 0
+		for _, nic := range node.NICs {
+			if nic.Index > 0 {
+				dataNICs++
+			}
+		}
+		if dataNICs > 0 {
+			wg.Add(1)
+			go func(name, sshHost string, node *NodeConfig, dataNICs int) {
+				defer wg.Done()
+				err := FixVPPConfig(sshHost, node.SSHPort, node.SSHUser, node.SSHPass, dataNICs)
+				if err != nil {
+					mu.Lock()
+					if deployErr == nil {
+						deployErr = fmt.Errorf("newtlab: fix VPP config %s: %w", name, err)
+					}
+					mu.Unlock()
+				}
+			}(name, sshHost, node, dataNICs)
+		}
 	}
 	wg.Wait()
 
@@ -264,6 +403,26 @@ func (l *Lab) Destroy() error {
 			if err := StopNode(node.PID, node.HostIP); err != nil {
 				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
 			}
+		}
+	}
+
+	// Stop bridge processes (per-host)
+	if len(state.Bridges) > 0 {
+		for host, bs := range state.Bridges {
+			if bs.HostIP != "" {
+				if err := stopBridgeProcessRemote(bs.PID, bs.HostIP); err != nil {
+					errs = append(errs, fmt.Errorf("stop bridge on %s (pid %d): %w", host, bs.PID, err))
+				}
+			} else if isRunningLocal(bs.PID) {
+				if err := stopNodeLocal(bs.PID); err != nil {
+					errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", bs.PID, err))
+				}
+			}
+		}
+	} else if state.BridgePID > 0 && isRunningLocal(state.BridgePID) {
+		// Legacy fallback
+		if err := stopNodeLocal(state.BridgePID); err != nil {
+			errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", state.BridgePID, err))
 		}
 	}
 
@@ -413,7 +572,7 @@ func (l *Lab) Provision(parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.Command("newtron", "provision", "-S", l.SpecDir, "-d", name, "-x")
+			cmd := exec.Command("newtron", "provision", "-S", l.SpecDir, "-d", name, "-xs")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()
@@ -437,13 +596,25 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 		SpecDir: existing.SpecDir,
 		State:   existing,
 	}
-	// Kill processes
+	// Kill QEMU processes
 	for name, node := range existing.Nodes {
 		if IsRunning(node.PID, node.HostIP) {
 			if err := StopNode(node.PID, node.HostIP); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: stop %s (pid %d): %v\n", name, node.PID, err)
 			}
 		}
+	}
+	// Kill bridge processes (per-host)
+	if len(existing.Bridges) > 0 {
+		for _, bs := range existing.Bridges {
+			if bs.HostIP != "" {
+				stopBridgeProcessRemote(bs.PID, bs.HostIP)
+			} else if isRunningLocal(bs.PID) {
+				stopNodeLocal(bs.PID)
+			}
+		}
+	} else if existing.BridgePID > 0 && isRunningLocal(existing.BridgePID) {
+		stopNodeLocal(existing.BridgePID)
 	}
 	// Restore profiles (best effort)
 	RestoreProfiles(old)
@@ -473,28 +644,6 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 	return resolved
 }
 
-// sortedListenFirst returns node names sorted so that A-side (listen) nodes
-// come before Z-side (connect-only) nodes. Within each group, alphabetical.
-func sortedListenFirst(nodes map[string]*NodeConfig, links []*LinkConfig) []string {
-	listenNodes := make(map[string]bool)
-	for _, link := range links {
-		listenNodes[link.A.Device] = true
-	}
-
-	var listen, connect []string
-	for name := range nodes {
-		if listenNodes[name] {
-			listen = append(listen, name)
-		} else {
-			connect = append(connect, name)
-		}
-	}
-
-	sort.Strings(listen)
-	sort.Strings(connect)
-	return append(listen, connect...)
-}
-
 // resolveHostIP returns the IP address for a node's host.
 // For local nodes (Host==""), returns "" (callers default to 127.0.0.1).
 // For remote nodes, looks up the host name in the lab's Hosts map.
@@ -509,4 +658,30 @@ func resolveHostIP(node *NodeConfig, config *VMLabConfig) string {
 	}
 	// Fall back to host name as IP (allows using raw IPs as host names)
 	return node.Host
+}
+
+// resolveWorkerHostIP returns the IP address for a bridge worker's host.
+// For the local host (host==""), returns "127.0.0.1".
+// For remote hosts, looks up the host name in the lab's Hosts map.
+func resolveWorkerHostIP(host string, config *VMLabConfig) string {
+	if host == "" {
+		return "127.0.0.1"
+	}
+	if config != nil && config.Hosts != nil {
+		if ip, ok := config.Hosts[host]; ok {
+			return ip
+		}
+	}
+	return host
+}
+
+// sortedHosts returns host keys from the map in sorted order,
+// with the local host ("") always first.
+func sortedHosts(hostLinks map[string][]*LinkConfig) []string {
+	hosts := make([]string, 0, len(hostLinks))
+	for host := range hostLinks {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts
 }

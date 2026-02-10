@@ -109,16 +109,14 @@ type NewtLabConfig struct {
 | `link_port_base` | 20000 | Starting TCP port for socket links |
 | `console_port_base` | 30000 | Starting port for serial consoles |
 | `ssh_port_base` | 40000 | Starting port for SSH forwarding |
-| `hosts` | (none) | Host name → IP address for multi-host (**Phase 3 — not implemented**) |
+| `hosts` | (none) | Host name → IP address for multi-host |
 
-**Multi-host deployment (Phase 3 placeholder):** The `hosts` map and `DeviceProfile.VMHost` fields are defined in the spec types for forward compatibility but are **not implemented**. The current implementation assumes single-host deployment:
-- All QEMU processes run on the local machine
-- `mgmt_ip` is always `127.0.0.1`
-- Link socket connections use `127.0.0.1`
-- PID management uses local process signals
-- State tracking uses local filesystem (`~/.newtlab/`)
-
-Multi-host support (remote QEMU launch via SSH, cross-host socket links, distributed state) is deferred to Phase 3.
+**Multi-host deployment (Phase 3 — implemented):** The `hosts` map provides
+host name→IP resolution for cross-host links. `DeviceProfile.VMHost` assigns
+a VM to a specific host. Remote QEMU processes are launched via SSH
+(`StartNodeRemote`/`StopNodeRemote`). newtlink bridge workers handle
+cross-host links by binding the remote-side port on `0.0.0.0` so the remote
+VM can connect across the network (see HLD §5.3).
 
 ---
 
@@ -182,26 +180,29 @@ defaults to port 22 in `NewSSHTunnel`.
 
 ```
 pkg/newtlab/
-├── newtlab.go          # Lab type, Deploy, Destroy, Status
+├── newtlab.go        # Lab type, Deploy, Destroy, Status
 ├── node.go           # NodeConfig, resolved VM settings
 ├── qemu.go           # QEMU command builder, process management
-├── link.go           # Link wiring, port allocation
+├── link.go           # Link wiring, port allocation, bridge workers
+├── bridge.go         # Bridge config, process lifecycle, stats queries
 ├── iface_map.go      # Interface mapping (sequential, stride-4, custom)
 ├── disk.go           # COW overlay disk creation
 ├── boot.go           # SSH boot wait, readiness check
 ├── profile.go        # Profile patching (write ssh_port, console_port, mgmt_ip)
 ├── state.go          # state.json persistence
-└── newtlab_test.go     # Unit tests
+└── newtlab_test.go   # Unit tests
 
 cmd/newtlab/
-├── main.go           # Entry point, root command
-├── cmd_deploy.go     # deploy subcommand
-├── cmd_destroy.go    # destroy subcommand
-├── cmd_status.go     # status subcommand
-├── cmd_ssh.go        # ssh subcommand
-├── cmd_console.go    # console subcommand
-├── cmd_stop.go       # stop/start subcommands
-└── cmd_provision.go  # provision subcommand (calls newtron)
+├── main.go              # Entry point, root command
+├── cmd_deploy.go        # deploy subcommand
+├── cmd_destroy.go       # destroy subcommand
+├── cmd_status.go        # status subcommand
+├── cmd_ssh.go           # ssh subcommand
+├── cmd_console.go       # console subcommand
+├── cmd_stop.go          # stop/start subcommands
+├── cmd_provision.go     # provision subcommand (calls newtron)
+├── cmd_bridge.go        # bridge subcommand (hidden, internal)
+└── cmd_bridge_stats.go  # bridge-stats subcommand
 ```
 
 ---
@@ -220,15 +221,15 @@ type Lab struct {
     Topology *spec.TopologySpecFile         // parsed topology.json
     Platform *spec.PlatformSpecFile         // parsed platforms.json
     Profiles map[string]*spec.DeviceProfile // per-device profiles
-    Config   *NewtLabConfig                   // from topology.json newtlab section
+    Config   *VMLabConfig                   // from topology.json newtlab section
     Nodes    map[string]*NodeConfig         // resolved VM configs (keyed by device name)
     Links    []*LinkConfig                  // resolved link configs
     State    *LabState                      // runtime state (PIDs, ports, status)
     Force    bool                           // --force flag: destroy existing before deploy
 }
 
-// NewtLabConfig mirrors spec.NewtLabConfig with resolved defaults.
-type NewtLabConfig struct {
+// VMLabConfig mirrors spec.NewtLabConfig with resolved defaults.
+type VMLabConfig struct {
     LinkPortBase    int               // default: 20000
     ConsolePortBase int               // default: 30000
     SSHPortBase     int               // default: 40000
@@ -337,23 +338,30 @@ func ResolveNodeConfig(
 ```go
 // NICConfig represents a single QEMU NIC attachment.
 type NICConfig struct {
-    Index     int    // QEMU NIC index (0=mgmt, 1..N=data)
-    NetdevID  string // "eth0", "eth1", ...
-    Interface string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
-    LinkPort  int    // TCP socket port (0 for mgmt — uses user-mode networking)
-    Listen    bool   // true = -netdev socket,listen=:PORT
-    RemoteIP  string // connect target IP (127.0.0.1 or host IP from hosts map)
+    Index      int    // QEMU NIC index (0=mgmt, 1..N=data)
+    NetdevID   string // "eth0", "eth1", ...
+    Interface  string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
+    ConnectAddr string // "IP:PORT" — newtlink endpoint to connect to (empty for mgmt)
 }
 ```
+
+All data NICs use `-netdev socket,connect=<ConnectAddr>`. The newtlink bridge
+worker listens on the target port before QEMU starts. Management NIC (index 0)
+uses `-netdev user` with SSH port forwarding — `ConnectAddr` is empty.
 
 ### 4.4 LinkConfig — Resolved Link (`link.go`)
 
 ```go
 // LinkConfig represents a resolved link between two device NICs.
+// Each link has two newtlink ports — one per endpoint.
 type LinkConfig struct {
-    A    LinkEndpoint
-    Z    LinkEndpoint
-    Port int // TCP port for this link
+    A         LinkEndpoint
+    Z         LinkEndpoint
+    APort     int    // newtlink listen port for A-side
+    ZPort     int    // newtlink listen port for Z-side
+    ABind     string // newtlink bind address for A-side ("127.0.0.1" or "0.0.0.0")
+    ZBind     string // newtlink bind address for Z-side ("127.0.0.1" or "0.0.0.0")
+    WorkerHost string // host that runs this link's bridge worker (empty = local)
 }
 
 // LinkEndpoint identifies one side of a link.
@@ -369,29 +377,46 @@ type LinkEndpoint struct {
 ```go
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
-    Name    string                  `json:"name"`
-    Created time.Time               `json:"created"`
-    SpecDir string                  `json:"spec_dir"`
-    Nodes   map[string]*NodeState   `json:"nodes"`
-    Links   []*LinkState            `json:"links"`
+    Name      string                   `json:"name"`
+    Created   time.Time                `json:"created"`
+    SpecDir   string                   `json:"spec_dir"`
+    Nodes     map[string]*NodeState    `json:"nodes"`
+    Links     []*LinkState             `json:"links"`
+    BridgePID int                      `json:"bridge_pid,omitempty"` // deprecated: use Bridges
+    Bridges   map[string]*BridgeState  `json:"bridges,omitempty"`   // host ("" = local) → bridge info
 }
 
 // NodeState tracks per-node runtime state.
 type NodeState struct {
     PID            int    `json:"pid"`
-    Status         string `json:"status"`          // "running", "stopped", "error"
+    Status         string `json:"status"`            // "running", "stopped", "error"
     SSHPort        int    `json:"ssh_port"`
     ConsolePort    int    `json:"console_port"`
-    OriginalMgmtIP string `json:"original_mgmt_ip"` // saved before patching, restored on destroy
+    OriginalMgmtIP string `json:"original_mgmt_ip"`  // saved before patching, restored on destroy
+    Host           string `json:"host,omitempty"`     // host name (empty = local)
+    HostIP         string `json:"host_ip,omitempty"`  // host IP address (empty = 127.0.0.1)
+}
+
+// BridgeState tracks a per-host bridge process.
+type BridgeState struct {
+    PID       int    `json:"pid"`
+    HostIP    string `json:"host_ip,omitempty"` // "" for local
+    StatsAddr string `json:"stats_addr"`        // "host:port" for TCP stats queries
 }
 
 // LinkState tracks per-link allocation.
 type LinkState struct {
-    A    string `json:"a"`    // "device:interface"
-    Z    string `json:"z"`    // "device:interface"
-    Port int    `json:"port"`
+    A          string `json:"a"`                     // "device:interface"
+    Z          string `json:"z"`                     // "device:interface"
+    APort      int    `json:"a_port"`                // newtlink A-side port
+    ZPort      int    `json:"z_port"`                // newtlink Z-side port
+    WorkerHost string `json:"worker_host,omitempty"` // host running the bridge worker
 }
 ```
+
+`BridgePID` is retained for backward compatibility with state files created
+before multi-host bridge distribution. `Destroy` checks `Bridges` first,
+falling back to `BridgePID` for legacy state files.
 
 **State directory layout:**
 
@@ -443,12 +468,18 @@ func (q *QEMUCommand) Build() *exec.Cmd
 | `-netdev user,id=mgmt,hostfwd=tcp::<ssh_port>-:22` | `Node.SSHPort` | |
 | `-device <nic_driver>,netdev=mgmt` | `Node.NICDriver` | `-device e1000,netdev=mgmt` |
 
-Per data NIC (index 1..N):
+Per data NIC (index 1..N) — all NICs connect to newtlink:
 
-| Argument | Listen Side | Connect Side |
-|----------|-------------|--------------|
-| `-netdev` | `socket,id=ethN,listen=:PORT` | `socket,id=ethN,connect=IP:PORT` |
-| `-device` | `<nic_driver>,netdev=ethN` | `<nic_driver>,netdev=ethN` |
+| Argument | Value |
+|----------|-------|
+| `-netdev` | `socket,id=ethN,connect=IP:PORT` |
+| `-device` | `<nic_driver>,netdev=ethN,romfile=` |
+
+Every data NIC uses `connect=` to dial the newtlink bridge worker's listening
+port for that endpoint. `romfile=` suppresses PXE ROM loading.
+
+> **Note:** `romfile=` is needed on all NICs to prevent PXE boot attempts on
+> data ports, which delays startup and can interfere with VPP.
 
 ### 5.3 Process Management
 
@@ -545,7 +576,8 @@ func parseEthernetIndex(name string) int
 
 ```go
 // AllocateLinks resolves topology links into LinkConfig entries with
-// port allocations and NIC index assignments.
+// port allocations and NIC index assignments. Each link gets two ports
+// (one per endpoint) for the newtlink bridge worker.
 func AllocateLinks(
     links []*spec.TopologyLink,
     nodes map[string]*NodeConfig,
@@ -555,21 +587,30 @@ func AllocateLinks(
 
 **Algorithm:**
 
-1. Iterate `topology.json` links in order
-2. Assign port: `config.LinkPortBase + linkIndex`
+1. Iterate `topology.json` links in sorted order (deterministic for multi-host)
+2. Assign two ports per link: `config.LinkPortBase + (linkIndex * 2)` for A-side, `+1` for Z-side
 3. Resolve NIC index for each endpoint via `ResolveNICIndex(node.InterfaceMap, iface)`
-4. Determine listen vs connect: A side listens, Z side connects
-5. For cross-host links: resolve connect IP from `config.Hosts[nodeZ.Host]`
-6. For same-host links: connect IP = `127.0.0.1`
+4. Determine worker placement (see §7.5):
+   - Same-host link: worker host = shared host
+   - Cross-host link: greedy assignment to the endpoint host with fewer cross-host workers
+5. Determine bind addresses based on worker placement:
+   - Local endpoint (VM on same host as worker): bind `127.0.0.1`
+   - Remote endpoint (VM on different host): bind `0.0.0.0`
+6. Determine connect addresses for QEMU:
+   - VM on worker host: connect `127.0.0.1:<port>`
+   - VM on remote host: connect `<worker-host-IP>:<port>`
 7. Attach NIC configs to corresponding `NodeConfig.NICs` slice
 8. Return `[]*LinkConfig`
 
 ### 7.2 Port Allocation Summary
 
+Each link uses two consecutive ports (one per endpoint):
+
 ```
-Link ports:      link_port_base + link_index      (20000, 20001, ...)
-Console ports:   console_port_base + node_index   (30000, 30001, ...)
-SSH ports:       ssh_port_base + node_index        (40000, 40001, ...)
+Link ports:      link_port_base + (link_index * 2)       A-side
+                 link_port_base + (link_index * 2) + 1   Z-side
+Console ports:   console_port_base + node_index           (30000, 30001, ...)
+SSH ports:       ssh_port_base + node_index               (40000, 40001, ...)
 ```
 
 Node index is determined by sorted device name order (deterministic).
@@ -581,9 +622,188 @@ After link allocation, each `NodeConfig.NICs` contains:
 | Index | NetdevID | Role | Netdev Type |
 |-------|----------|------|-------------|
 | 0 | `mgmt` | Management | `user` (hostfwd SSH) |
-| 1 | `eth1` | Data (first link) | `socket` (listen or connect) |
-| 2 | `eth2` | Data (second link) | `socket` (listen or connect) |
+| 1 | `eth1` | Data (first link) | `socket` (connect to newtlink) |
+| 2 | `eth2` | Data (second link) | `socket` (connect to newtlink) |
 | ... | ... | ... | ... |
+
+### 7.4 newtlink Bridge Worker (`link.go`)
+
+```go
+// BridgeWorker manages a single link's newtlink bridge.
+// It listens on two ports, accepts one connection on each,
+// and copies Ethernet frames bidirectionally until one side closes.
+type BridgeWorker struct {
+    Link      *LinkConfig
+    aListener net.Listener     // listening on ABind:APort
+    zListener net.Listener     // listening on ZBind:ZPort
+    aToZBytes atomic.Int64     // A→Z byte counter
+    zToABytes atomic.Int64     // Z→A byte counter
+    sessions  atomic.Int64     // connection pair count
+    connected atomic.Bool      // true when both sides connected
+}
+
+// Bridge holds all bridge workers and provides lifecycle and stats access.
+type Bridge struct {
+    workers []*BridgeWorker
+    wg      sync.WaitGroup
+}
+
+// Stop closes all listeners and waits for goroutines to finish.
+func (b *Bridge) Stop()
+
+// Stats returns a snapshot of all bridge worker counters.
+func (b *Bridge) Stats() BridgeStats
+
+// StartBridgeWorkers opens TCP listeners for all links and spawns bridge
+// goroutines. Returns a Bridge that provides Stop() and Stats().
+func StartBridgeWorkers(links []*LinkConfig) (*Bridge, error)
+```
+
+**Bridge worker lifecycle:**
+
+1. `StartBridgeWorkers` opens TCP listeners for every link endpoint (2 per link)
+2. If any listener fails (port conflict), all opened listeners are closed and
+   an error is returned — no partial state
+3. For each link, a goroutine is spawned that:
+   a. Accepts exactly one connection on each listener (A and Z)
+   b. Spawns two `io.Copy` goroutines: A→Z and Z→A (with byte counting via `countingWriter`)
+   c. When either copy returns (connection closed), closes both connections
+   d. Re-accepts new connections (handles QEMU restart without newtlink restart)
+4. `Stop()` closes all listeners and waits for goroutines to exit
+
+**Frame bridging** uses `io.Copy` — QEMU's socket netdev sends/receives raw
+Ethernet frames prefixed with a 4-byte length header. `io.Copy` is transparent
+to this framing since it operates on the byte stream.
+
+**Reconnection:** If a QEMU VM is stopped and restarted (`newtlab stop`/`start`),
+the bridge worker detects the closed connection and loops back to accept a new one.
+This means newtlink workers survive VM restarts without needing to be restarted.
+
+### 7.6 Bridge Config and Stats (`bridge.go`)
+
+```go
+// BridgeConfig is the serialized link configuration read by the bridge process.
+type BridgeConfig struct {
+    Links     []BridgeLink `json:"links"`
+    StatsAddr string       `json:"stats_addr,omitempty"` // TCP listen addr for remote stats queries
+}
+
+// BridgeLink holds the bind/port config for one link's bridge worker.
+type BridgeLink struct {
+    APort int    `json:"a_port"`
+    ZPort int    `json:"z_port"`
+    ABind string `json:"a_bind"`
+    ZBind string `json:"z_bind"`
+    A     string `json:"a"` // display label, e.g. "spine1:Ethernet0"
+    Z     string `json:"z"` // display label, e.g. "leaf1:Ethernet0"
+}
+
+// BridgeStats is the telemetry snapshot returned over Unix socket or TCP.
+type BridgeStats struct {
+    Links []LinkStats `json:"links"`
+}
+
+// LinkStats holds telemetry counters for a single bridge link.
+type LinkStats struct {
+    A         string `json:"a"`
+    Z         string `json:"z"`
+    APort     int    `json:"a_port"`
+    ZPort     int    `json:"z_port"`
+    AToZBytes int64  `json:"a_to_z_bytes"`
+    ZToABytes int64  `json:"z_to_a_bytes"`
+    Sessions  int64  `json:"sessions"`
+    Connected bool   `json:"connected"`
+}
+```
+
+### 7.7 Bridge Process Lifecycle (`bridge.go`)
+
+```go
+// WriteBridgeConfig serializes link config to bridge.json in the state dir.
+func WriteBridgeConfig(stateDir string, links []*LinkConfig, statsAddr string) error
+
+// RunBridge reads bridge.json from the lab's state dir and runs bridge workers
+// until the process receives SIGTERM/SIGINT. This is called by the hidden
+// "newtlab bridge" subcommand.
+// Starts:
+//   1. Bridge workers (TCP listeners for each link)
+//   2. Unix socket stats listener (bridge.sock in state dir)
+//   3. TCP stats listener (if StatsAddr is set in config)
+func RunBridge(labName string) error
+
+// startBridgeProcess spawns "newtlab bridge <labName>" as a local background process.
+func startBridgeProcess(labName, stateDir string) (int, error)
+
+// startBridgeProcessRemote starts a bridge process on a remote host via SSH.
+// Creates remote state dir, writes bridge.json via stdin, starts via nohup.
+func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, error)
+
+// stopBridgeProcessRemote kills a bridge process on a remote host via SSH.
+func stopBridgeProcessRemote(pid int, hostIP string) error
+```
+
+### 7.8 Stats Queries (`bridge.go`)
+
+```go
+// QueryBridgeStats connects to a running bridge's stats endpoint.
+// The addr is either a Unix socket path (starts with "/") or a TCP
+// address ("host:port").
+func QueryBridgeStats(addr string) (*BridgeStats, error)
+
+// QueryAllBridgeStats aggregates stats from all bridge processes in a lab.
+// Loads state.json, queries each bridge in Bridges map, merges results.
+// For local bridges, prefers Unix socket if available.
+// Falls back to legacy single-bridge Unix socket if Bridges map is empty.
+func QueryAllBridgeStats(labName string) (*BridgeStats, error)
+```
+
+### 7.5 Worker Placement (`link.go`)
+
+```go
+// PlaceWorkers assigns each cross-host link to an endpoint host using
+// greedy load balancing. Local links are assigned to their shared host.
+// The assignment is deterministic: links are processed in sorted order
+// and ties are broken by host name sort order.
+//
+// Returns a map of link index → host name. Single-host deployments
+// return all empty strings (local).
+func PlaceWorkers(links []*LinkConfig, nodes map[string]*NodeConfig) map[int]string
+```
+
+**Algorithm:**
+
+```
+hostCount := map[string]int{}  // cross-host workers assigned to each host
+
+for each link in sorted order:
+    hostA := nodes[link.A.Device].Host
+    hostZ := nodes[link.Z.Device].Host
+
+    if hostA == hostZ:
+        link.WorkerHost = hostA          // local link — trivial
+        continue
+
+    // Cross-host: assign to endpoint host with fewer workers
+    if hostCount[hostA] < hostCount[hostZ]:
+        link.WorkerHost = hostA
+    else if hostCount[hostZ] < hostCount[hostA]:
+        link.WorkerHost = hostZ
+    else:
+        // Tie: pick lexicographically smaller host name
+        link.WorkerHost = min(hostA, hostZ)
+
+    hostCount[link.WorkerHost]++
+```
+
+This gets within 1 of optimal balance for any host pair. For 3+ hosts,
+balancing is pairwise — each cross-host link only considers its two endpoint
+hosts. This is correct because traffic is pairwise (the worker bridges frames
+between exactly two hosts, so only those two hosts' load matters).
+
+`FilterHost` uses `WorkerHost` to determine which bridge workers a given host
+is responsible for. A host starts workers for:
+- All local links (both VMs on this host)
+- Cross-host links where `WorkerHost` equals this host
 
 ---
 
@@ -741,14 +961,36 @@ func (l *Lab) Deploy() error {
         CreateOverlay(node.Image, overlay)
     }
 
+    // 7a. Start newtlink bridge processes (per-host)
+    //     Group links by WorkerHost and start a separate bridge per host.
+    //     Each bridge gets a stats TCP port: LinkPortBase - 1 - hostIndex.
+    hostLinks := groupByWorkerHost(l.Links)
+    l.State.Bridges = map[string]*BridgeState{}
+    statsPortNext := l.Config.LinkPortBase - 1
+    for _, host := range sortedHosts(hostLinks) {
+        statsPort := statsPortNext; statsPortNext--
+        if host == "" {
+            // Local: write bridge.json, spawn child process
+            WriteBridgeConfig(l.StateDir, hostLinks[host], statsBindAddr)
+            pid := startBridgeProcess(l.Name, l.StateDir)
+            l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: "127.0.0.1:<port>"}
+            l.State.BridgePID = pid  // back-compat
+        } else {
+            // Remote: marshal config JSON, SSH to host, start via nohup
+            pid := startBridgeProcessRemote(l.Name, hostIP, configJSON)
+            l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP, StatsAddr: "..."}
+        }
+        // Wait for bridge listeners (link ports + stats port)
+        for _, lc := range hostLinks[host] {
+            waitForPort(probeHost, lc.APort, 10*time.Second)
+            waitForPort(probeHost, lc.ZPort, 10*time.Second)
+        }
+    }
+
     // 8. Build and start QEMU commands
-    //    Start listen-side nodes first, then connect-side nodes.
-    //
-    //    sortedListenFirst(nodes, links) returns sorted node names where
-    //    A-side nodes come first. For each link, A-side is listen, Z-side
-    //    is connect. Nodes appearing only as Z-side start after all A-side
-    //    nodes. Within each group, sorted alphabetically.
-    for _, name := range sortedListenFirst(l.Nodes, l.Links) {
+    //    No startup ordering needed — all VMs connect outbound to newtlink,
+    //    which is already listening. Start nodes in sorted name order.
+    for _, name := range sortedNodeNames(l.Nodes) {
         pid := StartNode(l.Nodes[name], l.StateDir)
         l.State.Nodes[name] = &NodeState{PID: pid, Status: "running", ...}
     }
@@ -799,9 +1041,10 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *NewtLabConfig {
 }
 ```
 
-**Start order:** Nodes with listen-side NICs start before nodes with
-connect-side NICs. Within each group, nodes start in sorted name order.
-This ensures socket listeners are ready before connectors attempt to dial.
+**Start order:** With newtlink, there is no startup ordering constraint.
+All newtlink bridge processes are started first (step 7a) — one per host,
+each with its assigned links. QEMU processes then start in sorted name order.
+Each VM connects outbound to its newtlink ports, which are already listening.
 
 **Mid-deploy failure recovery:** If a QEMU process fails to start (step 8)
 or SSH readiness times out (step 9), Deploy() still saves state (step 11)
@@ -836,6 +1079,19 @@ func (l *Lab) Destroy() error {
                 errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
             }
         }
+    }
+
+    // 2a. Stop newtlink bridge processes (per-host)
+    if len(state.Bridges) > 0 {
+        for host, bs := range state.Bridges {
+            if bs.HostIP != "" {
+                stopBridgeProcessRemote(bs.PID, bs.HostIP)
+            } else if isRunningLocal(bs.PID) {
+                stopNodeLocal(bs.PID)
+            }
+        }
+    } else if state.BridgePID > 0 && isRunningLocal(state.BridgePID) {
+        stopNodeLocal(state.BridgePID) // legacy fallback
     }
 
     // 3. Restore profiles (remove ssh_port, console_port, reset mgmt_ip)
@@ -922,6 +1178,8 @@ func main() {
         newStopCmd(),
         newStartCmd(),
         newProvisionCmd(),
+        newBridgeCmd(),      // hidden: "newtlab bridge <lab>" (internal)
+        newBridgeStatsCmd(), // "newtlab bridge-stats"
     )
 
     rootCmd.Execute()
@@ -940,6 +1198,8 @@ func main() {
 | `newtlab stop <node>` | `cmd_stop.go` | (none) | Stop a VM (preserves disk) |
 | `newtlab start <node>` | `cmd_stop.go` | (none) | Start a stopped VM |
 | `newtlab provision` | `cmd_provision.go` | `--device` | Run newtron provisioning |
+| `newtlab bridge <lab>` | `cmd_bridge.go` | (none) | Run bridge workers (hidden, internal) |
+| `newtlab bridge-stats` | `cmd_bridge_stats.go` | `-S` | Show live bridge telemetry |
 
 ### 14.3 deploy
 
@@ -1076,6 +1336,37 @@ return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 ---
 
 ## Appendix A: Changelog
+
+#### v8
+
+| Area | Change |
+|------|--------|
+| **Multi-Host Bridge Distribution** | Bridge processes are now distributed per host — one bridge process per `WorkerHost`, started via `startBridgeProcess` (local) or `startBridgeProcessRemote` (SSH). See §7.7. |
+| **BridgeState** | New `BridgeState` type tracks per-host bridge PID, host IP, and stats address. `LabState.Bridges` map replaces the single `BridgePID` field (kept for legacy fallback). See §4.5. |
+| **LinkState.WorkerHost** | `LinkState` now includes `WorkerHost` to track which host runs each link's bridge worker (§4.5). |
+| **TCP Stats Transport** | Bridge processes listen on both Unix socket (local) and TCP (remote) for stats queries. Stats port allocated from `LinkPortBase - 1` descending per host. See §7.6, §7.8. |
+| **QueryAllBridgeStats** | New aggregation function queries all bridge processes and merges `LinkStats`. Legacy fallback queries single Unix socket. See §7.8. |
+| **Bridge Config** | `BridgeConfig` gains `StatsAddr` field. `WriteBridgeConfig` takes a `statsAddr` parameter. `buildBridgeConfig` helper extracted. See §7.6. |
+| **Deploy Flow** | Step 7a now groups links by `WorkerHost`, starts per-host bridges with stats ports, waits for all ports. See §12. |
+| **Destroy Flow** | Step 2a iterates `Bridges` map to stop per-host bridges (local via signal, remote via SSH). Falls back to `BridgePID` for legacy state. See §13. |
+| **CLI** | Added `bridge` (hidden, internal) and `bridge-stats` subcommands. See §14.2. |
+| **Lab Type** | Removed `stopBridges func()` field — bridge lifecycle is now managed via state-persisted PIDs, not in-memory function. See §4.1. |
+
+#### v7
+
+| Area | Change |
+|------|--------|
+| **newtlink Bridge Agent** | Replaced direct listen/connect socket model with newtlink bridge workers (§7.4). Each link gets a goroutine that listens on two ports and bridges frames between connected QEMU VMs. |
+| **NICConfig Simplified** | Removed `Listen`, `RemoteIP`, `LinkPort` fields; replaced with single `ConnectAddr` (§4.3) |
+| **LinkConfig Two Ports** | Each link now has `APort`/`ZPort`/`ABind`/`ZBind` instead of single `Port` (§4.4) |
+| **LinkState Updated** | `port` → `a_port`/`z_port` to track both newtlink endpoints (§4.5) |
+| **Lab.stopBridges** | Lab struct holds bridge worker stop function for clean shutdown (§4.1) |
+| **Deploy Flow** | newtlink workers started before QEMU (step 7a); no startup ordering needed (§12) |
+| **Destroy Flow** | Bridge workers stopped after QEMU processes (step 2a) (§13) |
+| **Port Allocation** | Two ports per link instead of one: `base + (index * 2)` for A, `+1` for Z (§7.2) |
+| **QEMU Args** | All data NICs use `connect=` (no `listen=`); added `romfile=` (§5.2) |
+| **Worker Placement** | Greedy load-balanced placement of cross-host bridge workers (§7.5). `LinkConfig.WorkerHost` tracks assignment. Deterministic from topology — no coordination needed between hosts. |
+| **Multi-host Implemented** | Updated §1.4 to reflect Phase 3 completion; cross-host via newtlink `0.0.0.0` bind |
 
 #### v6
 

@@ -65,6 +65,8 @@ func init() {
 		newStopCmd(),
 		newStartCmd(),
 		newProvisionCmd(),
+		newBridgeCmd(),
+		newBridgeStatsCmd(),
 	)
 }
 

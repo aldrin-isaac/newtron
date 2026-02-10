@@ -10,11 +10,13 @@ import (
 
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
-	Name    string                `json:"name"`
-	Created time.Time             `json:"created"`
-	SpecDir string                `json:"spec_dir"`
-	Nodes   map[string]*NodeState `json:"nodes"`
-	Links   []*LinkState          `json:"links"`
+	Name      string                   `json:"name"`
+	Created   time.Time                `json:"created"`
+	SpecDir   string                   `json:"spec_dir"`
+	Nodes     map[string]*NodeState    `json:"nodes"`
+	Links     []*LinkState             `json:"links"`
+	BridgePID int                      `json:"bridge_pid,omitempty"` // deprecated: use Bridges
+	Bridges   map[string]*BridgeState  `json:"bridges,omitempty"`   // host ("" = local) → bridge info
 }
 
 // NodeState tracks per-node runtime state.
@@ -28,11 +30,20 @@ type NodeState struct {
 	HostIP         string `json:"host_ip,omitempty"` // host IP address (empty = 127.0.0.1)
 }
 
+// BridgeState tracks a per-host bridge process.
+type BridgeState struct {
+	PID       int    `json:"pid"`
+	HostIP    string `json:"host_ip,omitempty"` // "" for local
+	StatsAddr string `json:"stats_addr"`        // "host:port" for TCP stats
+}
+
 // LinkState tracks per-link allocation.
 type LinkState struct {
-	A    string `json:"a"`    // "device:interface"
-	Z    string `json:"z"`    // "device:interface"
-	Port int    `json:"port"`
+	A          string `json:"a"`                     // "device:interface"
+	Z          string `json:"z"`                     // "device:interface"
+	APort      int    `json:"a_port"`                // bridge worker A-side listen port
+	ZPort      int    `json:"z_port"`                // bridge worker Z-side listen port
+	WorkerHost string `json:"worker_host,omitempty"` // host running the bridge worker
 }
 
 // LabDir returns the state directory path for a lab name.
