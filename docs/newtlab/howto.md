@@ -181,7 +181,8 @@ newtlab restore --name baseline     # Restore
 
 ### topology.json newtlab Section
 
-The `newtlab` section in `topology.json` controls port allocation:
+The `newtlab` section in `topology.json` controls port allocation and
+multi-host settings:
 
 ```json
 {
@@ -190,7 +191,11 @@ The `newtlab` section in `topology.json` controls port allocation:
   "newtlab": {
     "link_port_base": 20000,
     "console_port_base": 30000,
-    "ssh_port_base": 40000
+    "ssh_port_base": 40000,
+    "servers": [
+      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 },
+      { "name": "server-b", "address": "192.168.1.11", "max_nodes": 4 }
+    ]
   }
 }
 ```
@@ -200,7 +205,8 @@ The `newtlab` section in `topology.json` controls port allocation:
 | `link_port_base` | 20000 | Base port for socket links |
 | `console_port_base` | 30000 | Base port for serial consoles |
 | `ssh_port_base` | 40000 | Base port for SSH forwarding |
-| `hosts` | (none) | Host name → IP mapping for multi-host |
+| `servers` | (none) | Server pool for auto-placement (see Multi-Host section) |
+| `hosts` | (none) | Legacy host name → IP mapping (use `servers` instead) |
 
 ### platforms.json — Multi-Platform Support
 
@@ -382,7 +388,46 @@ ls /etc/config-setup/factory-default-hooks.d/
 
 ## Multi-Host
 
-### Configure in topology.json
+### Server Pool (Recommended)
+
+Define servers in `topology.json` with capacity constraints. newtlab
+auto-places nodes across servers:
+
+```json
+{
+  "newtlab": {
+    "servers": [
+      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 },
+      { "name": "server-b", "address": "192.168.1.11", "max_nodes": 4 }
+    ]
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Server name (referenced by `vm_host` for pinning) |
+| `address` | Yes | IP address |
+| `max_nodes` | No | Maximum VMs on this server (0 = unlimited) |
+
+**Auto-placement:** Nodes are spread across servers to minimize maximum load.
+No `vm_host` configuration needed — newtlab distributes automatically.
+
+**Pinning (optional):** To force a specific node onto a specific server,
+set `vm_host` in `profiles/<device>.json`:
+
+```json
+{
+  "vm_host": "server-a"
+}
+```
+
+Pinned nodes are validated against the server list and count toward capacity.
+Unpinned nodes are distributed across remaining capacity.
+
+### Legacy hosts Map
+
+The older `hosts` map is still supported for backward compatibility:
 
 ```json
 {
@@ -395,15 +440,8 @@ ls /etc/config-setup/factory-default-hooks.d/
 }
 ```
 
-### Assign VMs to Hosts
-
-In `profiles/<device>.json`:
-
-```json
-{
-  "vm_host": "server-a"
-}
-```
+With `hosts`, you must manually set `vm_host` in every device profile.
+Prefer `servers` for new topologies.
 
 ### Deploy Per Host
 
@@ -424,7 +462,7 @@ placement algorithm. For a link between `spine1` (server-a) and `leaf1`
 (server-b), the bridge worker runs on whichever host has fewer assigned
 workers (ties broken alphabetically). It listens on `127.0.0.1` for the
 local VM and `0.0.0.0` for the remote VM, then bridges frames between them.
-The remote VM connects to the bridge host's IP (from the `hosts` map).
+The remote VM connects to the bridge host's IP.
 
 Each bridge process also exposes a TCP stats endpoint for telemetry queries.
 Use `newtlab bridge-stats` to see aggregated counters from all hosts.
@@ -442,7 +480,9 @@ cat ~/.newtlab/labs/<topology>/logs/spine1.log
 Common causes:
 - Image not found (check `vm_image` path in platforms.json)
 - KVM not available (falls back to TCG, much slower)
-- Port already in use (`ss -tlnp | grep 40000`)
+- Port already in use — newtlab probes all allocated ports (SSH, console,
+  link, bridge stats) before deploy. If you see "port conflicts", stop the
+  conflicting process or change port bases in `topology.json`.
 
 ### Can't SSH
 

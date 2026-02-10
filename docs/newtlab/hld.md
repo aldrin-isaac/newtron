@@ -106,10 +106,10 @@ section for orchestration settings:
     "link_port_base": 20000,
     "console_port_base": 30000,
     "ssh_port_base": 40000,
-    "hosts": {
-      "server-a": "192.168.1.10",
-      "server-b": "192.168.1.11"
-    }
+    "servers": [
+      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 },
+      { "name": "server-b", "address": "192.168.1.11", "max_nodes": 4 }
+    ]
   }
 }
 ```
@@ -119,7 +119,8 @@ section for orchestration settings:
 | `link_port_base` | 20000 | Base port for socket links |
 | `console_port_base` | 30000 | Base port for serial consoles |
 | `ssh_port_base` | 40000 | Base port for SSH forwarding |
-| `hosts` | (none) | Host name → IP mapping for multi-host |
+| `servers` | (none) | Server pool for auto-placement (see §5.7) |
+| `hosts` | (none) | Legacy host name → IP mapping (use `servers` instead) |
 
 ### 3.2 platforms.json
 
@@ -334,20 +335,26 @@ leaf1 QEMU (server-b):
   -netdev socket,id=eth1,connect=192.168.1.10:20001
 ```
 
-The `hosts` map in `topology.json` provides IP addresses:
+The `servers` list in `topology.json` provides IP addresses (the legacy
+`hosts` map is also supported):
 
 ```json
 {
   "newtlab": {
-    "hosts": { "server-a": "192.168.1.10", "server-b": "192.168.1.11" }
+    "servers": [
+      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 },
+      { "name": "server-b", "address": "192.168.1.11", "max_nodes": 4 }
+    ]
   }
 }
 ```
 
-Profile assigns VM to host:
+Profile can optionally pin a VM to a specific host:
 ```json
 { "vm_host": "server-a" }
 ```
+
+Unpinned VMs are auto-placed across the server pool (see §5.7).
 
 For same-host links, both ports listen on `127.0.0.1`.
 
@@ -476,6 +483,82 @@ discovery inside the VM is needed.
 **Adding support for a new platform** requires no Go code changes — create a
 directory under `patches/` with descriptors and templates. When an upstream
 image fixes a bug, delete the release-specific patch directory.
+
+### 5.7 Server Pool Auto-Placement
+
+Deploying large topologies (20+ nodes) across multiple servers requires
+assigning each node to a host. Manually setting `vm_host` in every profile is
+tedious and error-prone. The **server pool** automates this.
+
+**Configuration:** Define a `servers` list in the `newtlab` section of
+`topology.json`:
+
+```json
+{
+  "newtlab": {
+    "servers": [
+      { "name": "server-a", "address": "10.0.0.1", "max_nodes": 4 },
+      { "name": "server-b", "address": "10.0.0.2", "max_nodes": 4 }
+    ]
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Server name (used for `vm_host` pinning and state) |
+| `address` | Yes | IP address (replaces `hosts` map) |
+| `max_nodes` | No | Max VMs on this server (0 = unlimited) |
+
+**Placement algorithm — spread (minimize maximum load):**
+
+1. **Phase 1 (pinned nodes):** Nodes with `vm_host` set in their profile are
+   validated against the server list and count toward capacity. Error if pinned
+   to an unknown server or the server is over capacity.
+
+2. **Phase 2 (unpinned nodes):** Remaining nodes are placed one at a time onto
+   the server with the fewest nodes so far. Ties broken by server name sort
+   order. Error if no server has capacity.
+
+Iteration is deterministic (sorted by device name) — given the same
+`topology.json`, every host computes the same placement independently. This
+is required for `--host X` deploys where each server runs `newtlab deploy`
+without coordination.
+
+**Example:** 6 nodes, 2 servers (max 4 each), `leaf1` pinned to `server-a`:
+
+```
+Pinned:    leaf1 → server-a (count: a=1, b=0)
+Unpinned:  leaf2 → server-b (a=1, b=0 → pick b)
+           leaf3 → server-a (a=1, b=1 → tie, pick a)
+           spine1 → server-b (a=2, b=1 → pick b)
+           spine2 → server-a (a=2, b=2 → tie, pick a)
+           spine3 → server-b (a=3, b=2 → pick b)
+Result:    server-a: 3, server-b: 3
+```
+
+**Backward compatibility:** If no `servers` field is present, behavior is
+identical to before — `hosts` map is used directly, and `vm_host` must be
+set manually in each profile.
+
+### 5.8 Port Conflict Detection
+
+Before starting any QEMU or bridge process, newtlab probes **all** allocated
+ports to detect conflicts early. This catches issues that would otherwise
+cause cryptic failures mid-deploy.
+
+**Ports probed:**
+- SSH ports (one per node, on the node's host)
+- Console ports (one per node, on the node's host)
+- Link ports (two per link — A-side and Z-side, on the bridge worker's host)
+- Bridge stats ports (one per bridge worker host)
+
+**Local ports** are tested with `net.Listen` — if the port can be bound, it's
+free. **Remote ports** are tested via a single SSH connection per host running
+`ss -tlnH` to check for listening sockets.
+
+All conflicts are reported in a single multi-error message listing every
+conflict with its purpose (e.g., "spine1 SSH: port 40000 in use").
 
 ---
 
@@ -661,7 +744,11 @@ Options:
 - `bridge-stats` CLI aggregates counters from all hosts
 - Legacy `bridge_pid` preserved for backward compatibility
 
-### Phase 5: Advanced
+### Phase 5: Operations (done)
+- Server pool auto-placement — spread algorithm with capacity constraints (§5.7)
+- Comprehensive port conflict detection — all ports (SSH, console, link, stats), local and remote (§5.8)
+- Platform boot patches — declarative patch framework (§5.6)
+
+### Phase 6: Advanced
 - Snapshot/restore
 - Image management
-- Platform boot patches — declarative patch framework (§5.6)

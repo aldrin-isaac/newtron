@@ -97,12 +97,20 @@ type TopologySpecFile struct {
 ### 1.4 NewtLabConfig
 
 ```go
+// ServerConfig defines a server in the newtlab server pool.
+type ServerConfig struct {
+    Name     string `json:"name"`
+    Address  string `json:"address"`
+    MaxNodes int    `json:"max_nodes,omitempty"` // 0 = unlimited
+}
+
 // NewtLabConfig holds newtlab orchestration settings from topology.json.
 type NewtLabConfig struct {
     LinkPortBase    int               `json:"link_port_base,omitempty"`
     ConsolePortBase int               `json:"console_port_base,omitempty"`
     SSHPortBase     int               `json:"ssh_port_base,omitempty"`
-    Hosts           map[string]string `json:"hosts,omitempty"`
+    Hosts           map[string]string `json:"hosts,omitempty"`   // legacy: kept for backward compat
+    Servers         []*ServerConfig   `json:"servers,omitempty"` // server pool for auto-placement
 }
 ```
 
@@ -111,11 +119,18 @@ type NewtLabConfig struct {
 | `link_port_base` | 20000 | Starting TCP port for socket links |
 | `console_port_base` | 30000 | Starting port for serial consoles |
 | `ssh_port_base` | 40000 | Starting port for SSH forwarding |
-| `hosts` | (none) | Host name → IP address for multi-host |
+| `servers` | (none) | Server pool for auto-placement (see §7.9) |
+| `hosts` | (none) | Legacy host name → IP mapping (use `servers` instead) |
 
-**Multi-host deployment (Phase 3 — implemented):** The `hosts` map provides
-host name→IP resolution for cross-host links. `DeviceProfile.VMHost` assigns
-a VM to a specific host. Remote QEMU processes are launched via SSH
+**Server pool (§7.9):** When `servers` is present, the `Hosts` map is
+auto-derived from it (`server.Name` → `server.Address`). Nodes are
+auto-placed across servers by `PlaceNodes` (see §7.9). Nodes pinned via
+`DeviceProfile.VMHost` are validated against the server list.
+
+**Legacy multi-host:** When only `hosts` is present (no `servers`), behavior
+is unchanged — `DeviceProfile.VMHost` assigns VMs manually.
+
+Remote QEMU processes are launched via SSH
 (`StartNodeRemote`/`StopNodeRemote`). newtlink bridge workers handle
 cross-host links by binding the remote-side port on `0.0.0.0` so the remote
 VM can connect across the network (see HLD §5.3).
@@ -187,6 +202,8 @@ pkg/newtlab/
 ├── qemu.go           # QEMU command builder, process management
 ├── link.go           # Link wiring, port allocation, bridge workers
 ├── bridge.go         # Bridge config, process lifecycle, stats queries
+├── placement.go      # Server pool auto-placement (PlaceNodes)
+├── probe.go          # Comprehensive port conflict detection (CollectAllPorts, ProbeAllPorts)
 ├── iface_map.go      # Interface mapping (sequential, stride-4, custom)
 ├── disk.go           # COW overlay disk creation
 ├── boot.go           # SSH boot wait, serial bootstrap, boot patch engine
@@ -239,10 +256,11 @@ type Lab struct {
 
 // VMLabConfig mirrors spec.NewtLabConfig with resolved defaults.
 type VMLabConfig struct {
-    LinkPortBase    int               // default: 20000
-    ConsolePortBase int               // default: 30000
-    SSHPortBase     int               // default: 40000
-    Hosts           map[string]string // host name → IP
+    LinkPortBase    int                  // default: 20000
+    ConsolePortBase int                  // default: 30000
+    SSHPortBase     int                  // default: 40000
+    Hosts           map[string]string    // host name → IP
+    Servers         []*spec.ServerConfig // server pool (nil = single-host mode)
 }
 ```
 
@@ -255,8 +273,10 @@ type VMLabConfig struct {
 //   2. Set StateDir to ~/.newtlab/labs/<name>/
 //   3. Load topology.json, platforms.json, profiles/*.json
 //   4. Resolve NewtLabConfig with defaults (link_port_base=20000, etc.)
+//      When servers is present, derive Hosts map from server list.
 //   5. Resolve NodeConfig for each device (profile > platform > defaults)
-//   6. Allocate ports (SSH, console per node) and links
+//   6. Auto-place nodes across server pool if configured (PlaceNodes, §7.9)
+//   7. Allocate ports (SSH, console per node) and links
 // After NewLab, l.Nodes and l.Links are populated. Deploy() uses them
 // to build QEMU commands and start processes.
 func NewLab(specDir string) (*Lab, error)
@@ -512,15 +532,13 @@ func IsRunning(pid int) bool
 // Falls back to TCG (software emulation) if KVM is not available.
 func kvmAvailable() bool
 
-// probePort attempts net.Listen on the given port to check availability.
-// Immediately closes the listener. Returns error if the port is in use.
-func probePort(port int) error
-
 // destroyExisting tears down a stale deployment found via state.json.
 // Called by Deploy() when --force is set and a previous lab state exists.
 // Wraps Lab.Destroy() on the loaded state.
 func (l *Lab) destroyExisting(existing *LabState) error
 ```
+
+Port conflict detection has been moved to `probe.go` (see §7.10).
 
 ---
 
@@ -814,6 +832,101 @@ is responsible for. A host starts workers for:
 - All local links (both VMs on this host)
 - Cross-host links where `WorkerHost` equals this host
 
+### 7.9 Server Pool Auto-Placement (`placement.go`)
+
+```go
+// PlaceNodes assigns unpinned nodes to servers using a spread algorithm
+// that minimizes maximum load across servers. Pinned nodes (Host != "")
+// are validated against the server list and count toward capacity.
+//
+// If servers is empty, PlaceNodes is a no-op (single-host mode).
+func PlaceNodes(nodes map[string]*NodeConfig, servers []*spec.ServerConfig) error
+```
+
+**Algorithm:**
+
+```
+Phase 1 — Pinned nodes (sorted by name):
+    for each node with Host != "":
+        find matching server in servers list
+        error if server not found or over capacity
+        increment server's count
+
+Phase 2 — Unpinned nodes (sorted by name):
+    for each node with Host == "":
+        sort servers by (count asc, name asc)
+        pick first server with available capacity
+        set node.Host = server.Name
+        increment server's count
+        error if no server has capacity
+```
+
+**Properties:**
+- **Deterministic**: sorted iteration produces the same result from any host
+- **Spread**: minimizes maximum load across servers
+- **Respects capacity**: `max_nodes=0` means unlimited
+- **Reduces to round-robin** when all servers are equal and no nodes are pinned
+
+**Internal types:**
+
+```go
+// serverLoad tracks current node count for a server during placement.
+type serverLoad struct {
+    server *spec.ServerConfig
+    count  int
+}
+```
+
+**Integration point:** Called in `NewLab` after `ResolveNodeConfig` (which
+reads `profile.VMHost` into `nc.Host`) but before `AllocateLinks` (which
+needs final host assignments for worker placement).
+
+### 7.10 Port Conflict Detection (`probe.go`)
+
+```go
+// PortAllocation describes a single TCP port allocation in the lab.
+type PortAllocation struct {
+    Host    string // host name ("" = local)
+    HostIP  string // resolved IP ("" = 127.0.0.1 for local)
+    Port    int
+    Purpose string // e.g. "spine1 SSH", "link spine1:Ethernet0 A-side"
+}
+
+// CollectAllPorts gathers all TCP port allocations for the lab:
+// SSH ports, console ports, link A/Z ports, and bridge stats ports.
+func CollectAllPorts(lab *Lab) []PortAllocation
+
+// ProbeAllPorts checks that all allocated ports are free.
+// Local ports: net.Listen test. Remote ports: SSH + ss.
+// Returns a multi-error listing all conflicts.
+func ProbeAllPorts(allocations []PortAllocation) error
+
+// probePortLocal attempts net.Listen on the given port to check availability.
+// Returns error if the port is in use.
+func probePortLocal(port int) error
+
+// probePortsRemote checks port availability on a remote host via SSH + ss.
+// Executes a single SSH session per host: ss -tlnH '( sport = :P1 or sport = :P2 ... )'
+// Returns a map of port → error for ports that are in use.
+func probePortsRemote(hostIP string, ports []int) map[int]error
+
+// allocateBridgeStatsPorts returns the stats port for each bridge worker host.
+// Mirrors the allocation logic in Deploy(): counting down from LinkPortBase - 1.
+func allocateBridgeStatsPorts(lab *Lab) map[string]int
+```
+
+**`CollectAllPorts`** gathers:
+1. SSH and console ports for each node (on the node's host)
+2. Link A/Z ports for each link (on the bridge worker's host)
+3. Bridge stats ports for each unique worker host
+
+**`ProbeAllPorts`** groups allocations by host:
+- **Local** (`Host == ""`): each port tested with `net.Listen`
+- **Remote**: one SSH connection per host, running `ss -tlnH` with a filter
+  for all allocated ports on that host. Any output means a conflict.
+
+All conflicts are collected and returned as a single sorted multi-error.
+
 ---
 
 ## 8. Disk Management (`disk.go`)
@@ -1090,20 +1203,24 @@ func (l *Lab) Deploy() error {
     // 4. Allocate ports (SSH, console per node; link ports per link)
     allocatePorts(l.Nodes, l.Config)  // sets SSHPort, ConsolePort on each node
 
-    // 4a. Port conflict detection: probe each allocated port with net.Listen
-    // to verify it's available before starting QEMU. This catches conflicts
-    // with other newtlab instances or unrelated services early, rather than
-    // failing mid-deploy with an opaque QEMU error.
-    for _, node := range l.Nodes {
-        for _, port := range []int{node.SSHPort, node.ConsolePort} {
-            if err := probePort(port); err != nil {
-                return fmt.Errorf("newtlab: port %d already in use: %w", port, err)
-            }
+    // 4a. Auto-place nodes across server pool (if configured)
+    //     Runs after ResolveNodeConfig reads profile.VMHost into nc.Host,
+    //     so pinned nodes are already set. PlaceNodes fills in the rest.
+    if len(l.Config.Servers) > 0 {
+        if err := PlaceNodes(l.Nodes, l.Config.Servers); err != nil {
+            return nil, err
         }
     }
 
     // 5. Allocate links (assigns NICs, ports, listen/connect)
     l.Links = AllocateLinks(topology.Links, l.Nodes, l.Config)
+
+    // 5a. Comprehensive port conflict detection (§7.10)
+    //     Probes SSH, console, link, and bridge stats ports — local and remote.
+    allocs := CollectAllPorts(l)
+    if err := ProbeAllPorts(allocs); err != nil {
+        return fmt.Errorf("newtlab: port conflicts:\n%w", err)
+    }
 
     // 6. Create state directory (~/.newtlab/labs/<name>/)
     os.MkdirAll(l.StateDir+"/qemu", 0755)
@@ -1208,13 +1325,14 @@ func (l *Lab) Deploy() error {
 }
 ```
 
-**`resolveNewtLabConfig`** fills defaults for nil or zero-value fields:
+**`resolveNewtLabConfig`** fills defaults for nil or zero-value fields.
+When `servers` is present, derives the `Hosts` map from the server list:
 
 ```go
-// resolveNewtLabConfig returns a NewtLabConfig with defaults applied.
+// resolveNewtLabConfig returns a VMLabConfig with defaults applied.
 // Takes the optional *spec.NewtLabConfig from topology.json (may be nil).
-func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *NewtLabConfig {
-    resolved := &NewtLabConfig{
+func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
+    resolved := &VMLabConfig{
         LinkPortBase:    20000,
         ConsolePortBase: 30000,
         SSHPortBase:     40000,
@@ -1223,7 +1341,15 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *NewtLabConfig {
         if cfg.LinkPortBase != 0    { resolved.LinkPortBase = cfg.LinkPortBase }
         if cfg.ConsolePortBase != 0 { resolved.ConsolePortBase = cfg.ConsolePortBase }
         if cfg.SSHPortBase != 0     { resolved.SSHPortBase = cfg.SSHPortBase }
-        resolved.Hosts = cfg.Hosts
+        if len(cfg.Servers) > 0 {
+            resolved.Servers = cfg.Servers
+            resolved.Hosts = make(map[string]string, len(cfg.Servers))
+            for _, s := range cfg.Servers {
+                resolved.Hosts[s.Name] = s.Address
+            }
+        } else {
+            resolved.Hosts = cfg.Hosts
+        }
     }
     return resolved
 }
@@ -1487,7 +1613,9 @@ return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 | No `vm_image` resolved | `"no vm_image for device %s (check platform or profile)"` | Set vm_image in platform or profile |
 | Base image not found | `"vm_image not found: %s"` | Download or fix path |
 | KVM not available | Warning logged, falls back to TCG | Install KVM or accept slower emulation |
-| Port conflict | `"port %d already in use"` | Change port base or stop conflicting process |
+| Port conflict | `"port conflicts:\n  <purpose>: port N in use"` | Change port base or stop conflicting process |
+| Pinned to unknown server | `"node X pinned to unknown server Y"` | Fix `vm_host` or add server to `servers` list |
+| Server over capacity | `"no server capacity for node X"` | Increase `max_nodes` or add servers |
 | SSH boot timeout | `"SSH timeout after %s for %s:%d"` | Increase vm_boot_timeout or check image |
 | QEMU process crash | `"QEMU exited with code %d (see %s)"` | Check logs/<node>.log |
 | State not found | `"lab %s not found (no state.json)"` | Run deploy first |
@@ -1524,6 +1652,19 @@ return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 ---
 
 ## Appendix A: Changelog
+
+#### v10
+
+| Area | Change |
+|------|--------|
+| **Server Pool Auto-Placement** | New `ServerConfig` type and `Servers` field in `NewtLabConfig`. `PlaceNodes` spread algorithm places unpinned nodes across servers respecting capacity constraints. See §1.4, §7.9. |
+| **Comprehensive Port Probing** | `CollectAllPorts` and `ProbeAllPorts` replace per-node SSH/console-only probing. Now covers link ports, bridge stats ports, and remote hosts. Multi-error reports all conflicts. See §7.10. |
+| **VMLabConfig** | Added `Servers []*spec.ServerConfig` field. See §4.1. |
+| **resolveNewtLabConfig** | When `servers` is present, derives `Hosts` map from server list. See §12. |
+| **NewLab** | Added placement step between node resolution and link allocation. See §4.1. |
+| **Deploy Flow** | Port probing replaced: step 4a removed, step 5a added with comprehensive `CollectAllPorts` + `ProbeAllPorts`. See §12. |
+| **qemu.go** | Removed `probePort` function (moved to `probe.go` as `probePortLocal`). See §5.4. |
+| **Package Structure** | Added `placement.go` and `probe.go`. See §3. |
 
 #### v9
 
