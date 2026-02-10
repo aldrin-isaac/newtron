@@ -32,7 +32,8 @@ type PlatformSpec struct {
     VMCPUFeatures  string         `json:"vm_cpu_features,omitempty"`
     VMCredentials  *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout  int            `json:"vm_boot_timeout,omitempty"`
-    Dataplane      string         `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
+    Dataplane      string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
+    VMImageRelease string         `json:"vm_image_release,omitempty"` // e.g. "202405", "202311" — selects release-specific boot patches
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.
@@ -54,6 +55,7 @@ type VMCredentials struct {
 | `vm_credentials` | *VMCredentials | nil | Default SSH login |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for SSH |
 | `dataplane` | string | `""` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
+| `vm_image_release` | string | `""` | Image release identifier for release-specific boot patches |
 
 ### 1.2 DeviceProfile — newtlab Fields
 
@@ -187,10 +189,17 @@ pkg/newtlab/
 ├── bridge.go         # Bridge config, process lifecycle, stats queries
 ├── iface_map.go      # Interface mapping (sequential, stride-4, custom)
 ├── disk.go           # COW overlay disk creation
-├── boot.go           # SSH boot wait, readiness check
+├── boot.go           # SSH boot wait, serial bootstrap, boot patch engine
 ├── profile.go        # Profile patching (write ssh_port, console_port, mgmt_ip)
 ├── state.go          # state.json persistence
-└── newtlab_test.go   # Unit tests
+├── newtlab_test.go   # Unit tests
+└── patches/          # Platform boot patches (//go:embed)
+    └── vpp/
+        ├── always/
+        │   ├── 01-disable-factory-hook.json
+        │   └── 02-port-config.json
+        └── 202405/
+            └── 01-specific-fix.json
 
 cmd/newtlab/
 ├── main.go              # Entry point, root command
@@ -827,7 +836,9 @@ The base image is never modified. Each VM gets its own overlay in
 
 ---
 
-## 9. Boot Wait (`boot.go`)
+## 9. Boot (`boot.go`)
+
+### 9.1 WaitForSSH
 
 ```go
 // WaitForSSH polls SSH connectivity to host:port with the given credentials.
@@ -843,6 +854,150 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 3. On success: open session, run `echo ready`, close, return nil
 4. On failure: sleep 5s, retry
 5. On timeout: return `fmt.Errorf("SSH timeout after %s for %s:%d", timeout, host, port)`
+
+### 9.2 BootstrapNetwork
+
+```go
+// BootstrapNetwork connects to the serial console and prepares the VM for SSH access.
+// Steps:
+//  1. Wait for login prompt (VM may still be booting)
+//  2. Log in using consoleUser/consolePass (the user baked into the image)
+//  3. Bring up eth0 with DHCP (QEMU user-mode networking requires this)
+//  4. If sshUser differs from consoleUser, create the SSH user with sudo + bash access
+//  5. Log out
+func BootstrapNetwork(consoleHost string, consolePort int, consoleUser, consolePass, sshUser, sshPass string, timeout time.Duration) error
+```
+
+**Flow:**
+
+1. TCP connect to `consoleHost:consolePort` (serial console)
+2. Use `readUntil` helper to wait for `login:` prompt (with timeout)
+3. Send `consoleUser` + `consolePass` to log in
+4. Run `sudo ip link set eth0 up` and `sudo dhclient eth0`
+5. If `sshUser != consoleUser`: create SSH user via `useradd -m -s /bin/bash`, set password, add to sudo group
+6. Log out with `exit`
+
+### 9.3 Platform Boot Patches
+
+Different SONiC images have platform-specific initialization quirks that must
+be patched after boot but before provisioning. Rather than hardcoding per-platform
+Go code, newtlab uses a **declarative boot patch framework**: JSON descriptors
+paired with Go templates, embedded at compile time via `//go:embed`.
+
+#### Patch Descriptor
+
+```go
+// BootPatch defines a declarative patch to apply after VM boot.
+// Patch descriptors are JSON files under patches/<dataplane>/.
+type BootPatch struct {
+    Description  string       `json:"description"`
+    PreCommands  []string     `json:"pre_commands,omitempty"`  // shell commands to run before files
+    DisableFiles []string     `json:"disable_files,omitempty"` // paths to rename to .disabled
+    Files        []FilePatch  `json:"files,omitempty"`         // render template → upload to VM
+    Redis        []RedisPatch `json:"redis,omitempty"`         // render template → redis-cli pipeline
+    PostCommands []string     `json:"post_commands,omitempty"` // shell commands to run after everything
+}
+
+// FilePatch renders a Go template and writes the result to a path on the VM.
+type FilePatch struct {
+    Template string `json:"template"` // filename relative to patch directory
+    Dest     string `json:"dest"`     // absolute path on VM (supports Go template expansion)
+}
+
+// RedisPatch renders a Go template into redis-cli commands and executes them.
+type RedisPatch struct {
+    DB       int    `json:"db"`       // Redis database number (e.g. 4 for CONFIG_DB)
+    Template string `json:"template"` // renders to one redis-cli command per line
+}
+```
+
+#### Template Variables
+
+```go
+// PatchVars holds the variables available to all boot patch templates.
+// Computed from NodeConfig and PlatformSpec — no VM-side discovery needed.
+type PatchVars struct {
+    NumPorts  int      // number of data NICs (from link allocation)
+    PCIAddrs  []string // deterministic QEMU PCI addresses (from QEMUPCIAddrs)
+    HWSkuDir  string   // "/usr/share/sonic/device/x86_64-kvm_x86_64-r0/<HWSKU>"
+    PortSpeed int      // from PlatformSpec.DefaultSpeed (parsed to int)
+    Platform  string   // platform name (e.g. "sonic-vpp")
+    Dataplane string   // "vpp", "barefoot", "" (from PlatformSpec.Dataplane)
+    Release   string   // from PlatformSpec.VMImageRelease
+}
+
+// QEMUPCIAddrs returns deterministic PCI addresses for data NICs.
+// QEMU assigns PCI slots sequentially starting from a known base.
+// For N data NICs: 00:03.0, 00:04.0, 00:05.0, ... (slot = 3 + index).
+func QEMUPCIAddrs(dataNICs int) []string
+```
+
+Key design point: **all template variables are derived from what newtlab already
+knows** (QEMU config, platform spec, link allocation). No SSH-based discovery
+inside the VM. This eliminates the multi-source PCI fallback logic in the
+current `FixVPPConfig`.
+
+#### Patch Resolution
+
+```go
+// ResolveBootPatches returns the ordered list of patches for a platform.
+// Resolution order:
+//   1. patches/<dataplane>/always/*.json  (sorted by filename)
+//   2. patches/<dataplane>/<release>/*.json (sorted by filename, if release != "")
+// Patches are loaded from //go:embed at compile time.
+// Returns nil if no patches exist for the dataplane (no error).
+func ResolveBootPatches(dataplane, release string) ([]*BootPatch, error)
+```
+
+#### Patch Engine
+
+```go
+// ApplyBootPatches applies all resolved patches to a VM via SSH.
+// For each patch in order:
+//   1. Execute pre_commands
+//   2. Rename disable_files to .disabled
+//   3. Render and upload file templates
+//   4. Render and execute redis templates
+//   5. Execute post_commands
+// All commands run via SSH. Template rendering uses Go text/template.
+// Returns on first error (patches are ordered, later patches may depend on earlier ones).
+func ApplyBootPatches(host string, port int, user, pass string, patches []*BootPatch, vars *PatchVars) error
+```
+
+#### Example: VPP port config patch
+
+Descriptor (`patches/vpp/always/02-port-config.json`):
+```json
+{
+    "description": "Fix empty port_config.ini and sonic_vpp_ifmap.ini from broken factory hook",
+    "pre_commands": [
+        "while pgrep -f config-setup >/dev/null 2>&1; do sleep 2; done"
+    ],
+    "disable_files": [
+        "/etc/config-setup/factory-default-hooks.d/10-01-vpp-cfg-init"
+    ],
+    "files": [
+        { "template": "syncd_vpp_env.tmpl", "dest": "/etc/sonic/vpp/syncd_vpp_env" },
+        { "template": "port_config.ini.tmpl", "dest": "{{.HWSkuDir}}/port_config.ini" },
+        { "template": "sonic_vpp_ifmap.ini.tmpl", "dest": "{{.HWSkuDir}}/sonic_vpp_ifmap.ini" }
+    ],
+    "redis": [
+        { "db": 4, "template": "port_entries.tmpl" }
+    ],
+    "post_commands": [
+        "sudo config save -y",
+        "sudo systemctl restart syncd"
+    ]
+}
+```
+
+Template example (`patches/vpp/always/port_config.ini.tmpl`):
+```
+# name  lanes  alias  index  speed
+{{- range $i, $_ := .PCIAddrs}}
+Ethernet{{mul $i 4}}  {{mul $i 4}}  Ethernet{{mul $i 4}}  {{$i}}  {{$.PortSpeed}}
+{{- end}}
+```
 
 ---
 
@@ -995,8 +1150,21 @@ func (l *Lab) Deploy() error {
         l.State.Nodes[name] = &NodeState{PID: pid, Status: "running", ...}
     }
 
-    // 9. Wait for SSH readiness (parallel, per node)
+    // 9a. Bootstrap network (parallel, per node)
+    //     Serial console: login, bring up eth0, DHCP, create SSH user
     var wg sync.WaitGroup
+    for name, node := range l.Nodes {
+        wg.Add(1)
+        go func(name string, node *NodeConfig) {
+            defer wg.Done()
+            BootstrapNetwork(consoleHost, node.ConsolePort,
+                node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
+                time.Duration(node.BootTimeout)*time.Second)
+        }(name, node)
+    }
+    wg.Wait()
+
+    // 9b. Wait for SSH readiness (parallel, per node)
     for name, node := range l.Nodes {
         wg.Add(1)
         go func(name string, node *NodeConfig) {
@@ -1007,6 +1175,26 @@ func (l *Lab) Deploy() error {
                 l.State.Nodes[name].Status = "error"
             }
         }(name, node)
+    }
+    wg.Wait()
+
+    // 9c. Apply platform boot patches (parallel, per node)
+    //     Resolve patches for platform's dataplane + image release,
+    //     compute template vars from NodeConfig, apply via SSH.
+    for name, node := range l.Nodes {
+        platform := platforms.Platforms[profiles[name].Platform]
+        patches := ResolveBootPatches(platform.Dataplane, platform.VMImageRelease)
+        if len(patches) > 0 {
+            wg.Add(1)
+            go func(name string, node *NodeConfig, patches []*BootPatch) {
+                defer wg.Done()
+                vars := buildPatchVars(node, platform)
+                if err := ApplyBootPatches(sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars); err != nil {
+                    log.Printf("newtlab: boot patches for %s: %v", name, err)
+                    l.State.Nodes[name].Status = "error"
+                }
+            }(name, node, patches)
+        }
     }
     wg.Wait()
 
@@ -1336,6 +1524,16 @@ return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 ---
 
 ## Appendix A: Changelog
+
+#### v9
+
+| Area | Change |
+|------|--------|
+| **Platform Boot Patches** | New declarative boot patch framework: JSON descriptors + Go templates, resolved by dataplane + image release. Replaces hardcoded `FixVPPConfig`. See §9.3. |
+| **BootstrapNetwork** | Documented existing serial console bootstrap function. See §9.2. |
+| **PlatformSpec** | Added `vm_image_release` field for release-scoped boot patches. See §1.1. |
+| **Deploy Flow** | Added steps 9a (BootstrapNetwork), 9b (WaitForSSH — renumbered), 9c (ApplyBootPatches). See §12. |
+| **Package Structure** | Added `patches/` embedded directory for platform boot patches. See §3. |
 
 #### v8
 
