@@ -331,40 +331,40 @@ func (l *Lab) Deploy() error {
 	}
 	wg.Wait()
 
-	// Fix VPP configuration (parallel).
-	// SONiC VPP's factory default hook can run twice during first boot.
-	// The second run occurs after vpp-port-config has already bound data NICs
-	// to uio_pci_generic, so the init script sees no ethN interfaces and
-	// overwrites syncd_vpp_env with empty values. Detect this and fix it.
+	// Apply platform boot patches (parallel, per node).
+	// Resolve patches for each platform's dataplane + image release,
+	// compute template vars from NodeConfig, apply via SSH.
 	for name, node := range l.Nodes {
 		ns := l.State.Nodes[name]
 		if ns.Status != "running" {
+			continue
+		}
+		profile := l.Profiles[name]
+		platform := l.Platform.Platforms[profile.Platform]
+		if platform == nil {
+			continue
+		}
+		patches, err := ResolveBootPatches(platform.Dataplane, platform.VMImageRelease)
+		if err != nil || len(patches) == 0 {
 			continue
 		}
 		sshHost := "127.0.0.1"
 		if ns.HostIP != "" {
 			sshHost = ns.HostIP
 		}
-		dataNICs := 0
-		for _, nic := range node.NICs {
-			if nic.Index > 0 {
-				dataNICs++
-			}
-		}
-		if dataNICs > 0 {
-			wg.Add(1)
-			go func(name, sshHost string, node *NodeConfig, dataNICs int) {
-				defer wg.Done()
-				err := FixVPPConfig(sshHost, node.SSHPort, node.SSHUser, node.SSHPass, dataNICs)
-				if err != nil {
-					mu.Lock()
-					if deployErr == nil {
-						deployErr = fmt.Errorf("newtlab: fix VPP config %s: %w", name, err)
-					}
-					mu.Unlock()
+		vars := buildPatchVars(node, platform)
+		wg.Add(1)
+		go func(name, sshHost string, node *NodeConfig, patches []*BootPatch, vars *PatchVars) {
+			defer wg.Done()
+			err := ApplyBootPatches(sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars)
+			if err != nil {
+				mu.Lock()
+				if deployErr == nil {
+					deployErr = fmt.Errorf("newtlab: boot patches %s: %w", name, err)
 				}
-			}(name, sshHost, node, dataNICs)
-		}
+				mu.Unlock()
+			}
+		}(name, sshHost, node, patches, vars)
 	}
 	wg.Wait()
 

@@ -261,7 +261,8 @@ type PlatformSpec struct {
 	VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
 	VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
 	VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
-	Dataplane            string         `json:"dataplane,omitempty"` // "vpp", "barefoot", "" (none/vs)
+	Dataplane            string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
+	VMImageRelease       string         `json:"vm_image_release,omitempty"` // e.g. "202405" — selects release-specific boot patches
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.

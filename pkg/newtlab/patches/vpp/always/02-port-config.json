@@ -1,0 +1,15 @@
+{
+    "description": "Fix empty port_config.ini, sonic_vpp_ifmap.ini, syncd_vpp_env, and PORT entries",
+    "files": [
+        { "template": "syncd_vpp_env.tmpl", "dest": "/etc/sonic/vpp/syncd_vpp_env" },
+        { "template": "port_config.ini.tmpl", "dest": "{{.HWSkuDir}}/port_config.ini" },
+        { "template": "sonic_vpp_ifmap.ini.tmpl", "dest": "{{.HWSkuDir}}/sonic_vpp_ifmap.ini" }
+    ],
+    "redis": [
+        { "db": 4, "template": "port_entries.tmpl" }
+    ],
+    "post_commands": [
+        "sudo config save -y",
+        "sudo systemctl restart syncd"
+    ]
+}

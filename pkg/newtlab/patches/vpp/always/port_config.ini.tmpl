@@ -1,0 +1,4 @@
+# name  lanes  alias  index  speed
+{{- range $i, $_ := .PCIAddrs}}
+Ethernet{{mul $i 4}}  {{mul $i 4}}  Ethernet{{mul $i 4}}  {{$i}}  {{$.PortSpeed}}
+{{- end}}

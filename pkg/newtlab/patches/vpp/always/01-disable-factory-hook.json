@@ -1,0 +1,9 @@
+{
+    "description": "Wait for config-setup to finish, then disable the factory hook that overwrites VPP config",
+    "pre_commands": [
+        "for i in $(seq 1 60); do pgrep -f config-setup >/dev/null 2>&1 || break; sleep 2; done"
+    ],
+    "disable_files": [
+        "/etc/config-setup/factory-default-hooks.d/10-01-vpp-cfg-init"
+    ]
+}

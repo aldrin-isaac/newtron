@@ -1,0 +1,5 @@
+DPDK_DISABLE=n
+VPP_DPDK_PORTS={{range $i, $addr := .PCIAddrs}}{{if $i}},{{end}}{{$addr}}{{end}}
+SONIC_NUM_PORTS={{.NumPorts}}
+VPP_PORT_LIST={{range $i, $_ := .PCIAddrs}}{{if $i}},{{end}}eth{{add $i 1}}{{end}}
+NO_LINUX_NL=y
