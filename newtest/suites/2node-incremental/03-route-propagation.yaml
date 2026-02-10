@@ -1,0 +1,28 @@
+name: route-propagation
+description: Verify loopback routes propagate between spine and leaf
+topology: 2node
+platform: sonic-vpp
+requires: [bgp-converge]
+
+steps:
+  - name: leaf1-loopback-at-spine1
+    action: verify-route
+    devices: [spine1]
+    prefix: "10.0.0.11/32"
+    vrf: default
+    expect:
+      protocol: bgp
+      source: app_db
+      timeout: 60s
+      poll_interval: 5s
+
+  - name: spine1-loopback-at-leaf1
+    action: verify-route
+    devices: [leaf1]
+    prefix: "10.0.0.1/32"
+    vrf: default
+    expect:
+      protocol: bgp
+      source: app_db
+      timeout: 60s
+      poll_interval: 5s

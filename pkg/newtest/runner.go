@@ -3,8 +3,8 @@ package newtest
 import (
 	"context"
 	"fmt"
-	"os/signal"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -47,6 +47,9 @@ func NewRunner(scenariosDir, topologiesDir string) *Runner {
 }
 
 // Run executes one or all scenarios and returns results.
+// When running multiple scenarios with a shared topology, it deploys once and
+// shares connections. Scenarios with `requires` are sorted by dependency order
+// and skipped if a blocker fails.
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	if opts.Scenario == "" && !opts.All {
 		return nil, fmt.Errorf("specify --scenario <name> or --all")
@@ -72,14 +75,168 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 		scenarios = []*Scenario{s}
 	}
 
+	// Validate and topologically sort if any scenario declares requires
+	if opts.All && hasRequires(scenarios) {
+		if err := validateDependencyGraph(scenarios); err != nil {
+			return nil, err
+		}
+		sorted, err := topologicalSort(scenarios)
+		if err != nil {
+			return nil, err
+		}
+		scenarios = sorted
+	}
+
+	// If all scenarios share the same topology, deploy once and share connections
+	if len(scenarios) > 1 {
+		if topology := sharedTopology(scenarios, opts.Topology); topology != "" {
+			return r.runShared(context.Background(), scenarios, topology, opts)
+		}
+	}
+
+	// Independent mode: different topologies or single scenario
+	return r.runIndependent(context.Background(), scenarios, opts)
+}
+
+// runShared deploys once, connects once, and runs all scenarios with a shared
+// Runner. Skip propagation is applied based on requires.
+func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
+	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
+
+	// Deploy once
+	if !opts.NoDeploy {
+		lab, err := DeployTopology(specDir)
+		if err != nil {
+			var results []*ScenarioResult
+			for _, sc := range scenarios {
+				results = append(results, &ScenarioResult{
+					Name:        sc.Name,
+					Topology:    topology,
+					Platform:    sc.Platform,
+					Status:      StatusError,
+					DeployError: &InfraError{Op: "deploy", Err: err},
+				})
+			}
+			return results, nil
+		}
+		r.Lab = lab
+		if !opts.Keep {
+			defer func() { _ = DestroyTopology(r.Lab) }()
+		}
+	}
+
+	// SIGINT handling
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+
+	// Connect devices once
+	if err := r.connectDevices(ctx, specDir); err != nil {
+		var results []*ScenarioResult
+		for _, sc := range scenarios {
+			results = append(results, &ScenarioResult{
+				Name:        sc.Name,
+				Topology:    topology,
+				Platform:    sc.Platform,
+				Status:      StatusError,
+				DeployError: err,
+			})
+		}
+		return results, nil
+	}
+
+	r.ChangeSets = make(map[string]*network.ChangeSet)
+
+	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
+
+	for _, sc := range scenarios {
+		platform := opts.Platform
+		if platform == "" {
+			platform = sc.Platform
+		}
+
+		if reason := checkRequires(sc, scenarioStatus); reason != "" {
+			results = append(results, &ScenarioResult{
+				Name:       sc.Name,
+				Topology:   topology,
+				Platform:   platform,
+				Status:     StatusSkipped,
+				SkipReason: reason,
+			})
+			scenarioStatus[sc.Name] = StatusSkipped
+			if opts.Verbose {
+				fmt.Printf("\nnewtest: %s — skipped (%s)\n", sc.Name, reason)
+			}
+			continue
+		}
+
+		if opts.Verbose {
+			fmt.Printf("\nnewtest: %s\n", sc.Name)
+		}
+
+		r.opts = RunOptions{
+			Topology: topology,
+			Platform: platform,
+			NoDeploy: true,
+			Keep:     true,
+			Verbose:  opts.Verbose,
+		}
+		r.scenario = sc
+
+		result := &ScenarioResult{
+			Name:     sc.Name,
+			Topology: topology,
+			Platform: platform,
+		}
+		start := time.Now()
+		r.runScenarioSteps(ctx, sc, r.opts, result)
+		result.Duration = time.Since(start)
+
+		results = append(results, result)
+		scenarioStatus[sc.Name] = result.Status
+	}
+
+	return results, nil
+}
+
+// runIndependent runs each scenario with its own deploy/connect cycle.
+// Skip propagation is still applied based on requires.
+func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error) {
+	scenarioStatus := make(map[string]Status)
+	var results []*ScenarioResult
+
 	for _, s := range scenarios {
-		result, err := r.RunScenario(context.Background(), s, opts)
+		if reason := checkRequires(s, scenarioStatus); reason != "" {
+			topology := opts.Topology
+			if topology == "" {
+				topology = s.Topology
+			}
+			platform := opts.Platform
+			if platform == "" {
+				platform = s.Platform
+			}
+			results = append(results, &ScenarioResult{
+				Name:       s.Name,
+				Topology:   topology,
+				Platform:   platform,
+				Status:     StatusSkipped,
+				SkipReason: reason,
+			})
+			scenarioStatus[s.Name] = StatusSkipped
+			if opts.Verbose {
+				fmt.Printf("\nnewtest: %s — skipped (%s)\n", s.Name, reason)
+			}
+			continue
+		}
+
+		result, err := r.RunScenario(ctx, s, opts)
 		if err != nil {
 			return results, err
 		}
 		results = append(results, result)
+		scenarioStatus[s.Name] = result.Status
 	}
+
 	return results, nil
 }
 
@@ -131,27 +288,62 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 	}
 
 	// Execute steps sequentially
-	r.ChangeSets = make(map[string]*network.ChangeSet)
-	for i, step := range scenario.Steps {
-		output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
+	r.runScenarioSteps(ctx, scenario, opts, result)
+	result.Duration = time.Since(start)
 
-		// Merge ChangeSets (last-write-wins)
-		for name, cs := range output.ChangeSets {
-			r.ChangeSets[name] = cs
+	return result, nil
+}
+
+// runScenarioSteps executes the steps of a scenario, appending results to result.
+// When scenario.Repeat > 1, all steps are executed in a loop for the specified
+// number of iterations. Execution stops on the first failed iteration.
+func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
+	if r.ChangeSets == nil {
+		r.ChangeSets = make(map[string]*network.ChangeSet)
+	}
+
+	repeat := scenario.Repeat
+	if repeat <= 1 {
+		repeat = 1
+	}
+	result.Repeat = scenario.Repeat
+
+	for iter := 1; iter <= repeat; iter++ {
+		if repeat > 1 && opts.Verbose {
+			fmt.Printf("  --- iteration %d/%d ---\n", iter, repeat)
 		}
 
-		result.Steps = append(result.Steps, *output.Result)
+		iterFailed := false
+		for i, step := range scenario.Steps {
+			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
 
-		// Fail-fast
-		if output.Result.Status == StatusFailed || output.Result.Status == StatusError {
+			// Merge ChangeSets (last-write-wins)
+			for name, cs := range output.ChangeSets {
+				r.ChangeSets[name] = cs
+			}
+
+			sr := *output.Result
+			if repeat > 1 {
+				sr.Iteration = iter
+			}
+			result.Steps = append(result.Steps, sr)
+
+			// Fail-fast within iteration
+			if output.Result.Status == StatusFailed || output.Result.Status == StatusError {
+				iterFailed = true
+				break
+			}
+		}
+
+		if iterFailed {
+			if repeat > 1 {
+				result.FailedIteration = iter
+			}
 			break
 		}
 	}
 
 	result.Status = computeOverallStatus(result.Steps)
-	result.Duration = time.Since(start)
-
-	return result, nil
 }
 
 // connectDevices builds the Network OO hierarchy and connects all devices.
@@ -245,4 +437,43 @@ func computeOverallStatus(steps []StepResult) Status {
 		return StatusError
 	}
 	return StatusPassed
+}
+
+// hasRequires returns true if any scenario declares dependencies.
+func hasRequires(scenarios []*Scenario) bool {
+	for _, s := range scenarios {
+		if len(s.Requires) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// sharedTopology returns the common topology if all scenarios use the same one,
+// or the override if set. Returns "" if topologies are mixed.
+func sharedTopology(scenarios []*Scenario, override string) string {
+	if override != "" {
+		return override
+	}
+	if len(scenarios) == 0 {
+		return ""
+	}
+	topo := scenarios[0].Topology
+	for _, s := range scenarios[1:] {
+		if s.Topology != topo {
+			return ""
+		}
+	}
+	return topo
+}
+
+// checkRequires returns a skip reason if any required scenario did not pass,
+// or "" if all requirements are satisfied.
+func checkRequires(sc *Scenario, status map[string]Status) string {
+	for _, req := range sc.Requires {
+		if st, ok := status[req]; ok && st != StatusPassed {
+			return fmt.Sprintf("requires '%s' which %s", req, statusVerb(st))
+		}
+	}
+	return ""
 }

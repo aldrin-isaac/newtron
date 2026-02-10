@@ -1,0 +1,52 @@
+name: service-transit
+description: Verify transit service entries applied by provisioning
+topology: 2node
+platform: sonic-vpp
+requires: [bgp-converge]
+
+steps:
+  - name: verify-port-ethernet0-spine1
+    action: verify-config-db
+    devices: [spine1]
+    table: PORT
+    key: Ethernet0
+    expect:
+      fields:
+        admin_status: up
+
+  - name: verify-port-ethernet0-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORT
+    key: Ethernet0
+    expect:
+      fields:
+        admin_status: up
+
+  - name: verify-interface-ip-spine1
+    action: verify-config-db
+    devices: [spine1]
+    table: INTERFACE
+    expect:
+      min_entries: 1
+
+  - name: verify-interface-ip-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    expect:
+      min_entries: 1
+
+  - name: verify-bgp-neighbor-spine1
+    action: verify-config-db
+    devices: [spine1]
+    table: BGP_NEIGHBOR
+    expect:
+      min_entries: 1
+
+  - name: verify-bgp-neighbor-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: BGP_NEIGHBOR
+    expect:
+      min_entries: 1

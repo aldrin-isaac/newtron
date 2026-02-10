@@ -1,0 +1,28 @@
+name: service-l2
+description: Apply l2-extend service on leaf1:Ethernet2 and verify
+topology: 2node
+platform: sonic-vpp
+requires: [vlan-create]
+
+steps:
+  - name: apply-l2-extend
+    action: apply-service
+    devices: [leaf1]
+    interface: Ethernet2
+    service: l2-extend
+
+  - name: verify-l2-binding
+    action: verify-config-db
+    devices: [leaf1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet2
+    expect:
+      fields:
+        service: l2-extend
+
+  - name: verify-vlan-member
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN_MEMBER
+    expect:
+      min_entries: 1

@@ -187,6 +187,82 @@ func validateStepFields(scenario string, index int, step *Step) error {
 	return nil
 }
 
+// validateDependencyGraph checks that all Requires references exist and there
+// are no cycles.
+func validateDependencyGraph(scenarios []*Scenario) error {
+	names := make(map[string]bool, len(scenarios))
+	for _, s := range scenarios {
+		if names[s.Name] {
+			return fmt.Errorf("duplicate scenario name: %s", s.Name)
+		}
+		names[s.Name] = true
+	}
+
+	for _, s := range scenarios {
+		for _, req := range s.Requires {
+			if !names[req] {
+				return fmt.Errorf("scenario %s requires unknown scenario %q", s.Name, req)
+			}
+			if req == s.Name {
+				return fmt.Errorf("scenario %s requires itself", s.Name)
+			}
+		}
+	}
+
+	// Cycle detection via topological sort
+	_, err := topologicalSort(scenarios)
+	return err
+}
+
+// topologicalSort returns scenarios in dependency order using Kahn's algorithm.
+func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
+	byName := make(map[string]*Scenario, len(scenarios))
+	inDegree := make(map[string]int, len(scenarios))
+	dependents := make(map[string][]string) // name -> scenarios that depend on it
+
+	for _, s := range scenarios {
+		byName[s.Name] = s
+		inDegree[s.Name] = len(s.Requires)
+		for _, req := range s.Requires {
+			dependents[req] = append(dependents[req], s.Name)
+		}
+	}
+
+	// Seed queue with scenarios that have no dependencies
+	var queue []string
+	for _, s := range scenarios {
+		if inDegree[s.Name] == 0 {
+			queue = append(queue, s.Name)
+		}
+	}
+
+	var sorted []*Scenario
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		sorted = append(sorted, byName[name])
+
+		for _, dep := range dependents[name] {
+			inDegree[dep]--
+			if inDegree[dep] == 0 {
+				queue = append(queue, dep)
+			}
+		}
+	}
+
+	if len(sorted) != len(scenarios) {
+		var inCycle []string
+		for name, deg := range inDegree {
+			if deg > 0 {
+				inCycle = append(inCycle, name)
+			}
+		}
+		return nil, fmt.Errorf("dependency cycle involving: %s", strings.Join(inCycle, ", "))
+	}
+
+	return sorted, nil
+}
+
 // applyDefaults sets default values for steps.
 func applyDefaults(s *Scenario) {
 	for i := range s.Steps {

@@ -1,0 +1,32 @@
+name: service-remove
+description: Remove services from leaf1 interfaces and verify cleanup
+topology: 2node
+platform: sonic-vpp
+requires: [service-l3, service-l2]
+
+steps:
+  - name: remove-service-ethernet1
+    action: remove-service
+    devices: [leaf1]
+    interface: Ethernet1
+
+  - name: verify-ethernet1-unbound
+    action: verify-config-db
+    devices: [leaf1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet1
+    expect:
+      exists: false
+
+  - name: remove-service-ethernet2
+    action: remove-service
+    devices: [leaf1]
+    interface: Ethernet2
+
+  - name: verify-ethernet2-unbound
+    action: verify-config-db
+    devices: [leaf1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet2
+    expect:
+      exists: false

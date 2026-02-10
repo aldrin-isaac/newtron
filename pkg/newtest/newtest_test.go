@@ -1,8 +1,10 @@
 package newtest
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -517,5 +519,621 @@ func TestStatusSymbol(t *testing.T) {
 				t.Errorf("statusSymbol(%s) = %q, want %q", tt.status, got, tt.want)
 			}
 		})
+	}
+}
+
+// ============================================================================
+// topologicalSort Tests
+// ============================================================================
+
+func TestTopologicalSort_Linear(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "c", Requires: []string{"b"}},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "a"},
+	}
+
+	sorted, err := topologicalSort(scenarios)
+	if err != nil {
+		t.Fatalf("topologicalSort error: %v", err)
+	}
+
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 scenarios, got %d", len(sorted))
+	}
+
+	indexOf := make(map[string]int)
+	for i, s := range sorted {
+		indexOf[s.Name] = i
+	}
+	if indexOf["a"] > indexOf["b"] {
+		t.Errorf("a (index %d) should come before b (index %d)", indexOf["a"], indexOf["b"])
+	}
+	if indexOf["b"] > indexOf["c"] {
+		t.Errorf("b (index %d) should come before c (index %d)", indexOf["b"], indexOf["c"])
+	}
+}
+
+func TestTopologicalSort_Diamond(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "d", Requires: []string{"b", "c"}},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "c", Requires: []string{"a"}},
+		{Name: "a"},
+	}
+
+	sorted, err := topologicalSort(scenarios)
+	if err != nil {
+		t.Fatalf("topologicalSort error: %v", err)
+	}
+
+	indexOf := make(map[string]int)
+	for i, s := range sorted {
+		indexOf[s.Name] = i
+	}
+
+	if indexOf["a"] > indexOf["b"] || indexOf["a"] > indexOf["c"] {
+		t.Error("a should come before b and c")
+	}
+	if indexOf["b"] > indexOf["d"] || indexOf["c"] > indexOf["d"] {
+		t.Error("b and c should come before d")
+	}
+}
+
+func TestTopologicalSort_NoDeps(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "x"},
+		{Name: "y"},
+		{Name: "z"},
+	}
+
+	sorted, err := topologicalSort(scenarios)
+	if err != nil {
+		t.Fatalf("topologicalSort error: %v", err)
+	}
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 scenarios, got %d", len(sorted))
+	}
+}
+
+// ============================================================================
+// Cycle Detection Tests
+// ============================================================================
+
+func TestTopologicalSort_Cycle(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a", Requires: []string{"b"}},
+		{Name: "b", Requires: []string{"a"}},
+	}
+
+	_, err := topologicalSort(scenarios)
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+	if !strings.Contains(err.Error(), "dependency cycle") {
+		t.Errorf("expected 'dependency cycle' in error, got: %s", err)
+	}
+}
+
+func TestTopologicalSort_SelfCycle(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a", Requires: []string{"a"}},
+	}
+
+	_, err := topologicalSort(scenarios)
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+}
+
+func TestTopologicalSort_ThreeNodeCycle(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a", Requires: []string{"c"}},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "c", Requires: []string{"b"}},
+	}
+
+	_, err := topologicalSort(scenarios)
+	if err == nil {
+		t.Fatal("expected cycle error, got nil")
+	}
+}
+
+// ============================================================================
+// validateDependencyGraph Tests
+// ============================================================================
+
+func TestValidateDependencyGraph_Valid(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "c", Requires: []string{"a", "b"}},
+	}
+
+	if err := validateDependencyGraph(scenarios); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateDependencyGraph_UnknownRequires(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", Requires: []string{"nonexistent"}},
+	}
+
+	err := validateDependencyGraph(scenarios)
+	if err == nil {
+		t.Fatal("expected error for unknown requires")
+	}
+	if !strings.Contains(err.Error(), "unknown scenario") {
+		t.Errorf("expected 'unknown scenario' in error, got: %s", err)
+	}
+}
+
+func TestValidateDependencyGraph_DuplicateName(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "a"},
+	}
+
+	err := validateDependencyGraph(scenarios)
+	if err == nil {
+		t.Fatal("expected error for duplicate name")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("expected 'duplicate' in error, got: %s", err)
+	}
+}
+
+func TestValidateDependencyGraph_SelfRequires(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a", Requires: []string{"a"}},
+	}
+
+	err := validateDependencyGraph(scenarios)
+	if err == nil {
+		t.Fatal("expected error for self-requires")
+	}
+	if !strings.Contains(err.Error(), "requires itself") {
+		t.Errorf("expected 'requires itself' in error, got: %s", err)
+	}
+}
+
+// ============================================================================
+// Dependency Graph from YAML Tests
+// ============================================================================
+
+func TestParseAndSortScenariosWithRequires(t *testing.T) {
+	dir := t.TempDir()
+
+	writeScenario(t, dir, "01-a.yaml", `
+name: a
+description: first
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	writeScenario(t, dir, "02-b.yaml", `
+name: b
+description: second
+topology: 2node
+platform: sonic-vpp
+requires: [a]
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+
+	scenarios, err := ParseAllScenarios(dir)
+	if err != nil {
+		t.Fatalf("ParseAllScenarios error: %v", err)
+	}
+	if err := validateDependencyGraph(scenarios); err != nil {
+		t.Fatalf("validateDependencyGraph error: %v", err)
+	}
+	sorted, err := topologicalSort(scenarios)
+	if err != nil {
+		t.Fatalf("topologicalSort error: %v", err)
+	}
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 scenarios, got %d", len(sorted))
+	}
+	if sorted[0].Name != "a" {
+		t.Errorf("first scenario should be 'a', got %q", sorted[0].Name)
+	}
+	if sorted[1].Name != "b" {
+		t.Errorf("second scenario should be 'b', got %q", sorted[1].Name)
+	}
+}
+
+func TestParseScenariosWithCycleError(t *testing.T) {
+	dir := t.TempDir()
+
+	writeScenario(t, dir, "a.yaml", `
+name: a
+description: first
+topology: 2node
+platform: sonic-vpp
+requires: [b]
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	writeScenario(t, dir, "b.yaml", `
+name: b
+description: second
+topology: 2node
+platform: sonic-vpp
+requires: [a]
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+
+	scenarios, err := ParseAllScenarios(dir)
+	if err != nil {
+		t.Fatalf("ParseAllScenarios error: %v", err)
+	}
+	if err := validateDependencyGraph(scenarios); err == nil {
+		t.Fatal("expected cycle error")
+	}
+}
+
+// ============================================================================
+// Skip Propagation Tests
+// ============================================================================
+
+func TestStatusVerb(t *testing.T) {
+	tests := []struct {
+		status Status
+		want   string
+	}{
+		{StatusFailed, "failed"},
+		{StatusError, "errored"},
+		{StatusSkipped, "was skipped"},
+		{StatusPassed, "PASS"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			got := statusVerb(tt.status)
+			if got != tt.want {
+				t.Errorf("statusVerb(%s) = %q, want %q", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCheckRequires(t *testing.T) {
+	status := map[string]Status{
+		"a": StatusPassed,
+		"b": StatusFailed,
+		"c": StatusSkipped,
+	}
+
+	tests := []struct {
+		name     string
+		scenario *Scenario
+		wantSkip bool
+	}{
+		{"no requires", &Scenario{Name: "x"}, false},
+		{"all passed", &Scenario{Name: "x", Requires: []string{"a"}}, false},
+		{"one failed", &Scenario{Name: "x", Requires: []string{"a", "b"}}, true},
+		{"one skipped", &Scenario{Name: "x", Requires: []string{"c"}}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reason := checkRequires(tt.scenario, status)
+			if (reason != "") != tt.wantSkip {
+				t.Errorf("checkRequires() = %q, wantSkip=%v", reason, tt.wantSkip)
+			}
+		})
+	}
+}
+
+func TestHasRequires(t *testing.T) {
+	if hasRequires([]*Scenario{{Name: "a"}, {Name: "b"}}) {
+		t.Error("expected false for no requires")
+	}
+	if !hasRequires([]*Scenario{{Name: "a"}, {Name: "b", Requires: []string{"a"}}}) {
+		t.Error("expected true when one has requires")
+	}
+}
+
+func TestSharedTopology(t *testing.T) {
+	if got := sharedTopology([]*Scenario{
+		{Name: "a", Topology: "2node"},
+		{Name: "b", Topology: "2node"},
+	}, ""); got != "2node" {
+		t.Errorf("sharedTopology() = %q, want '2node'", got)
+	}
+
+	if got := sharedTopology([]*Scenario{
+		{Name: "a", Topology: "2node"},
+		{Name: "b", Topology: "4node"},
+	}, ""); got != "" {
+		t.Errorf("sharedTopology() = %q, want ''", got)
+	}
+
+	if got := sharedTopology([]*Scenario{
+		{Name: "a", Topology: "2node"},
+		{Name: "b", Topology: "4node"},
+	}, "override"); got != "override" {
+		t.Errorf("sharedTopology() = %q, want 'override'", got)
+	}
+}
+
+// ============================================================================
+// Report with SkipReason Tests
+// ============================================================================
+
+func TestPrintConsole_SkipReason(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:       "skipped-test",
+			Topology:   "2node",
+			Platform:   "sonic-vpp",
+			Status:     StatusSkipped,
+			SkipReason: "requires 'provision' which failed",
+		},
+	}
+
+	gen := &ReportGenerator{Results: results}
+	var buf bytes.Buffer
+	gen.PrintConsole(&buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "skipped") {
+		t.Errorf("expected 'skipped' in output, got: %s", output)
+	}
+	if !strings.Contains(output, "requires 'provision' which failed") {
+		t.Errorf("expected skip reason in output, got: %s", output)
+	}
+}
+
+func TestWriteJUnit_SkipReason(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:       "skipped-test",
+			Topology:   "2node",
+			Platform:   "sonic-vpp",
+			Status:     StatusSkipped,
+			SkipReason: "requires 'boot-ssh' which failed",
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.xml")
+	gen := &ReportGenerator{Results: results}
+	if err := gen.WriteJUnit(path); err != nil {
+		t.Fatalf("WriteJUnit error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading JUnit: %v", err)
+	}
+	xmlStr := string(data)
+	if !strings.Contains(xmlStr, "skipped") {
+		t.Errorf("expected <skipped> element in JUnit XML, got: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "requires") {
+		t.Errorf("expected skip reason in JUnit XML, got: %s", xmlStr)
+	}
+}
+
+// ============================================================================
+// Scenario Requires Parsing Test
+// ============================================================================
+
+func TestParseScenario_Requires(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "test.yaml", `
+name: test-requires
+description: test
+topology: 2node
+platform: sonic-vpp
+requires: [boot-ssh, provision]
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+
+	s, err := ParseScenario(filepath.Join(dir, "test.yaml"))
+	if err != nil {
+		t.Fatalf("ParseScenario error: %v", err)
+	}
+	if len(s.Requires) != 2 {
+		t.Fatalf("expected 2 requires, got %d", len(s.Requires))
+	}
+	if s.Requires[0] != "boot-ssh" {
+		t.Errorf("Requires[0] = %q, want %q", s.Requires[0], "boot-ssh")
+	}
+	if s.Requires[1] != "provision" {
+		t.Errorf("Requires[1] = %q, want %q", s.Requires[1], "provision")
+	}
+}
+
+// ============================================================================
+// Repeat Tests
+// ============================================================================
+
+func TestParseScenario_Repeat(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "churn.yaml", `
+name: service-churn
+description: stress test
+topology: 2node
+platform: sonic-vpp
+repeat: 20
+steps:
+  - name: apply-service
+    action: ssh-command
+    devices: [leaf1]
+    command: "echo apply"
+  - name: remove-service
+    action: ssh-command
+    devices: [leaf1]
+    command: "echo remove"
+`)
+
+	s, err := ParseScenario(filepath.Join(dir, "churn.yaml"))
+	if err != nil {
+		t.Fatalf("ParseScenario error: %v", err)
+	}
+	if s.Repeat != 20 {
+		t.Errorf("Repeat = %d, want 20", s.Repeat)
+	}
+}
+
+func TestParseScenario_RepeatDefault(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "basic.yaml", `
+name: basic
+description: no repeat
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+
+	s, err := ParseScenario(filepath.Join(dir, "basic.yaml"))
+	if err != nil {
+		t.Fatalf("ParseScenario error: %v", err)
+	}
+	if s.Repeat != 0 {
+		t.Errorf("Repeat = %d, want 0 (default)", s.Repeat)
+	}
+}
+
+func TestPrintConsole_RepeatPass(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:     "service-churn",
+			Topology: "2node",
+			Platform: "sonic-vpp",
+			Status:   StatusPassed,
+			Duration: 5 * time.Minute,
+			Repeat:   10,
+			Steps: func() []StepResult {
+				var steps []StepResult
+				for i := 1; i <= 10; i++ {
+					steps = append(steps,
+						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+					)
+				}
+				return steps
+			}(),
+		},
+	}
+
+	gen := &ReportGenerator{Results: results}
+	var buf bytes.Buffer
+	gen.PrintConsole(&buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "10/10 iterations passed") {
+		t.Errorf("expected '10/10 iterations passed' in output, got: %s", output)
+	}
+}
+
+func TestPrintConsole_RepeatFail(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:            "service-churn",
+			Topology:        "2node",
+			Platform:        "sonic-vpp",
+			Status:          StatusFailed,
+			Duration:        2 * time.Minute,
+			Repeat:          10,
+			FailedIteration: 5,
+			Steps: func() []StepResult {
+				var steps []StepResult
+				for i := 1; i <= 4; i++ {
+					steps = append(steps,
+						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+					)
+				}
+				// Iteration 5 fails on apply
+				steps = append(steps,
+					StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusFailed, Iteration: 5, Message: "service binding not found"},
+				)
+				return steps
+			}(),
+		},
+	}
+
+	gen := &ReportGenerator{Results: results}
+	var buf bytes.Buffer
+	gen.PrintConsole(&buf)
+
+	output := buf.String()
+	if !strings.Contains(output, "failed on iteration 5/10") {
+		t.Errorf("expected 'failed on iteration 5/10' in output, got: %s", output)
+	}
+	if !strings.Contains(output, "service binding not found") {
+		t.Errorf("expected failure message in output, got: %s", output)
+	}
+}
+
+func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
+	results := []*ScenarioResult{
+		{
+			Name:     "churn",
+			Topology: "2node",
+			Platform: "sonic-vpp",
+			Status:   StatusPassed,
+			Repeat:   3,
+			Steps: []StepResult{
+				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 1},
+				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 1},
+				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 2},
+				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 2},
+				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 3},
+				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 3},
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "results.xml")
+	gen := &ReportGenerator{Results: results}
+	if err := gen.WriteJUnit(path); err != nil {
+		t.Fatalf("WriteJUnit error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading JUnit: %v", err)
+	}
+	xmlStr := string(data)
+	if !strings.Contains(xmlStr, "[iter 1] apply") {
+		t.Errorf("expected '[iter 1] apply' in JUnit XML, got: %s", xmlStr)
+	}
+	if !strings.Contains(xmlStr, "[iter 3] remove") {
+		t.Errorf("expected '[iter 3] remove' in JUnit XML, got: %s", xmlStr)
+	}
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+func writeScenario(t *testing.T, dir, filename, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

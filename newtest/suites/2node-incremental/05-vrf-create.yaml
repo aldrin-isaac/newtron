@@ -1,0 +1,32 @@
+name: vrf-create
+description: "Disaggregated L3: create VRF via redis-cli, verify, clean up"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vrf-cust1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 HSET 'VRF|Vrf_cust1' fallback false"
+
+  - name: verify-vrf-cust1-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: VRF
+    key: Vrf_cust1
+    expect:
+      exists: true
+
+  - name: cleanup-vrf-cust1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 DEL 'VRF|Vrf_cust1'"
+
+  - name: verify-vrf-cust1-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: VRF
+    key: Vrf_cust1
+    expect:
+      exists: false

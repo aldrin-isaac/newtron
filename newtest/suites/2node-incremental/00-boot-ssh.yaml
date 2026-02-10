@@ -1,0 +1,19 @@
+name: boot-ssh
+description: Verify SSH connectivity to all devices
+topology: 2node
+platform: sonic-vpp
+
+steps:
+  - name: ssh-echo-spine1
+    action: ssh-command
+    devices: [spine1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: ssh-echo-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "echo ok"
+    expect:
+      contains: "ok"

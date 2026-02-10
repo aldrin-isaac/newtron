@@ -11,11 +11,13 @@ import (
 
 // Scenario is a parsed test scenario from a YAML file.
 type Scenario struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Topology    string `yaml:"topology"`
-	Platform    string `yaml:"platform"`
-	Steps       []Step `yaml:"steps"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Topology    string   `yaml:"topology"`
+	Platform    string   `yaml:"platform"`
+	Requires    []string `yaml:"requires,omitempty"`
+	Repeat      int      `yaml:"repeat,omitempty"`
+	Steps       []Step   `yaml:"steps"`
 }
 
 // Step is a single action within a scenario.

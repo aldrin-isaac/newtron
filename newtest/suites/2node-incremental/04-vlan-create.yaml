@@ -1,0 +1,32 @@
+name: vlan-create
+description: "Disaggregated L2: create VLAN via redis-cli, verify, clean up"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vlan100
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 HSET 'VLAN|Vlan100' vlanid 100"
+
+  - name: verify-vlan100-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: true
+
+  - name: cleanup-vlan100
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 DEL 'VLAN|Vlan100'"
+
+  - name: verify-vlan100-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false

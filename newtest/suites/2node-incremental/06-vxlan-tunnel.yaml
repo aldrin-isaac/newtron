@@ -1,0 +1,24 @@
+name: vxlan-tunnel
+description: "Disaggregated EVPN infra: verify or create VXLAN_TUNNEL entry"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vtep
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 HSET 'VXLAN_TUNNEL|vtep1' src_ip 10.0.0.11"
+
+  - name: verify-vtep-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: true
+
+  - name: cleanup-vtep
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 DEL 'VXLAN_TUNNEL|vtep1'"

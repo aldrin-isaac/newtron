@@ -1,0 +1,27 @@
+name: service-l3
+description: Apply customer-l3 service on leaf1:Ethernet1 and verify
+topology: 2node
+platform: sonic-vpp
+requires: [vrf-create]
+
+steps:
+  - name: apply-customer-l3
+    action: apply-service
+    devices: [leaf1]
+    interface: Ethernet1
+    service: customer-l3
+    params:
+      ip: "192.168.1.1/24"
+
+  - name: verify-l3-binding
+    action: verify-config-db
+    devices: [leaf1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet1
+    expect:
+      fields:
+        service: customer-l3
+
+  - name: verify-l3-provisioning
+    action: verify-provisioning
+    devices: [leaf1]
