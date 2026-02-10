@@ -113,6 +113,13 @@ func NewLab(specDir string) (*Lab, error) {
 		l.Nodes[name] = nc
 	}
 
+	// Auto-place nodes across server pool (if configured)
+	if len(l.Config.Servers) > 0 {
+		if err := PlaceNodes(l.Nodes, l.Config.Servers); err != nil {
+			return nil, err
+		}
+	}
+
 	// Allocate links
 	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config)
 	if err != nil {
@@ -134,13 +141,10 @@ func (l *Lab) Deploy() error {
 		l.destroyExisting(existing)
 	}
 
-	// Port conflict detection
-	for _, node := range l.Nodes {
-		for _, port := range []int{node.SSHPort, node.ConsolePort} {
-			if err := probePort(port); err != nil {
-				return fmt.Errorf("newtlab: %w", err)
-			}
-		}
+	// Port conflict detection (SSH, console, link, bridge stats — local and remote)
+	allocs := CollectAllPorts(l)
+	if err := ProbeAllPorts(allocs); err != nil {
+		return fmt.Errorf("newtlab: port conflicts:\n%w", err)
 	}
 
 	// Create state directories
@@ -639,7 +643,15 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 		if cfg.SSHPortBase != 0 {
 			resolved.SSHPortBase = cfg.SSHPortBase
 		}
-		resolved.Hosts = cfg.Hosts
+		if len(cfg.Servers) > 0 {
+			resolved.Servers = cfg.Servers
+			resolved.Hosts = make(map[string]string, len(cfg.Servers))
+			for _, s := range cfg.Servers {
+				resolved.Hosts[s.Name] = s.Address
+			}
+		} else {
+			resolved.Hosts = cfg.Hosts
+		}
 	}
 	return resolved
 }

@@ -402,12 +402,20 @@ type TopologySpecFile struct {
 	NewtLab     *NewtLabConfig             `json:"newtlab,omitempty"`
 }
 
+// ServerConfig defines a server in the newtlab server pool.
+type ServerConfig struct {
+	Name     string `json:"name"`
+	Address  string `json:"address"`
+	MaxNodes int    `json:"max_nodes,omitempty"` // 0 = unlimited
+}
+
 // NewtLabConfig holds newtlab orchestration settings from topology.json.
 type NewtLabConfig struct {
 	LinkPortBase    int               `json:"link_port_base,omitempty"`
 	ConsolePortBase int               `json:"console_port_base,omitempty"`
 	SSHPortBase     int               `json:"ssh_port_base,omitempty"`
-	Hosts           map[string]string `json:"hosts,omitempty"`
+	Hosts           map[string]string `json:"hosts,omitempty"`   // legacy: kept for backward compat
+	Servers         []*ServerConfig   `json:"servers,omitempty"` // server pool for auto-placement
 }
 
 // TopologyDevice defines a device's configuration within a topology.

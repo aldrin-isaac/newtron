@@ -48,6 +48,7 @@ type VMLabConfig struct {
 	ConsolePortBase int               // default: 30000
 	SSHPortBase     int               // default: 40000
 	Hosts           map[string]string // host name → IP
+	Servers         []*spec.ServerConfig // server pool (nil = single-host mode)
 }
 
 // AllocateLinks resolves topology links into LinkConfig entries with

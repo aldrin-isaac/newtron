@@ -3,7 +3,6 @@ package newtlab
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -249,17 +248,6 @@ func kvmAvailable() bool {
 	}
 	f.Close()
 	return true
-}
-
-// probePort attempts net.Listen on the given port to check availability.
-// Immediately closes the listener. Returns error if the port is in use.
-func probePort(port int) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return fmt.Errorf("port %d already in use", port)
-	}
-	ln.Close()
-	return nil
 }
 
 // quoteArgs shell-quotes arguments for safe SSH command execution.
