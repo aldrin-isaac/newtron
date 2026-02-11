@@ -20,4 +20,4 @@ steps:
     key: Ethernet1
     expect:
       fields:
-        service: customer-l3
+        service_name: customer-l3

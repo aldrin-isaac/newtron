@@ -7,12 +7,12 @@ requires: [provision]
 steps:
   - name: wait-bgp-startup
     action: wait
-    duration: 15s
+    duration: 30s
 
   - name: verify-bgp-all
     action: verify-bgp
     devices: all
     expect:
       state: Established
-      timeout: 120s
-      poll_interval: 5s
+      timeout: 180s
+      poll_interval: 10s

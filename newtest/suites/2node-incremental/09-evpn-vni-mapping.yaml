@@ -36,7 +36,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10200"
+    key: "vtep1|map_10200_Vlan200"
     expect:
       exists: true
 
@@ -52,7 +52,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_20001"
+    key: "vtep1|map_20001_Vrf_evpn"
     expect:
       exists: true
 
@@ -67,7 +67,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10200"
+    key: "vtep1|map_10200_Vlan200"
     expect:
       exists: false
 
@@ -81,7 +81,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_20001"
+    key: "vtep1|map_20001_Vrf_evpn"
     expect:
       exists: false
 

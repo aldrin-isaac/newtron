@@ -884,9 +884,10 @@ func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, 
 		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
 	}
 
-	// Check if neighbor already exists
+	// Check if neighbor already exists (key format: "default|<IP>")
 	if d.configDB != nil {
-		if _, ok := d.configDB.BGPNeighbor[neighborIP]; ok {
+		key := fmt.Sprintf("default|%s", neighborIP)
+		if _, ok := d.configDB.BGPNeighbor[key]; ok {
 			return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
 		}
 	}
@@ -941,9 +942,10 @@ func (d *Device) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Cha
 		return nil, fmt.Errorf("device not locked")
 	}
 
-	// Check if neighbor exists
+	// Check if neighbor exists (key format: "default|<IP>")
 	if d.configDB != nil {
-		if _, ok := d.configDB.BGPNeighbor[neighborIP]; !ok {
+		key := fmt.Sprintf("default|%s", neighborIP)
+		if _, ok := d.configDB.BGPNeighbor[key]; !ok {
 			return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
 		}
 	}
@@ -999,9 +1001,10 @@ func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
 			continue
 		}
 
-		// Check if neighbor already exists
+		// Check if neighbor already exists (key format: "default|<IP>")
 		if d.configDB != nil {
-			if _, ok := d.configDB.BGPNeighbor[rrIP]; ok {
+			key := fmt.Sprintf("default|%s", rrIP)
+			if _, ok := d.configDB.BGPNeighbor[key]; ok {
 				// Already exists, skip
 				continue
 			}
@@ -1030,11 +1033,13 @@ func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
 }
 
 // BGPNeighborExists checks if a BGP neighbor exists.
+// Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
 func (d *Device) BGPNeighborExists(neighborIP string) bool {
 	if d.configDB == nil {
 		return false
 	}
-	_, ok := d.configDB.BGPNeighbor[neighborIP]
+	key := fmt.Sprintf("default|%s", neighborIP)
+	_, ok := d.configDB.BGPNeighbor[key]
 	return ok
 }
 

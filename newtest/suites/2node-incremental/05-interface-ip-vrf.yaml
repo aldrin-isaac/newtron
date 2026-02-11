@@ -44,7 +44,20 @@ steps:
     expect:
       exists: true
 
-  # Cleanup: delete VRF (unbinds interface)
+  # Cleanup: remove IP, unbind VRF, then delete VRF
+  - name: cleanup-ip
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|192.168.99.1/24'"
+
+  - name: cleanup-unbind-vrf
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: vrf
+      value: ""
+
   - name: cleanup-vrf
     action: delete-vrf
     devices: [leaf1]

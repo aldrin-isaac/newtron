@@ -18,7 +18,7 @@ steps:
     key: Ethernet2
     expect:
       fields:
-        service: l2-extend
+        service_name: l2-extend
 
   - name: verify-vlan-member
     action: verify-config-db
