@@ -205,6 +205,12 @@ func (d *Device) Refresh() error {
 // Lock acquires a distributed lock for configuration changes.
 // Constructs a holder identity from the current user and hostname,
 // and acquires the lock with a default TTL of 3600 seconds.
+//
+// After acquiring the lock, Lock refreshes the CONFIG_DB cache to guarantee
+// that precondition checks within the subsequent write episode see all changes
+// made by prior lock holders. If the cache refresh fails, the lock is released
+// and an error is returned — operating with a stale cache under lock is worse
+// than failing the operation.
 func (d *Device) Lock() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -220,8 +226,22 @@ func (d *Device) Lock() error {
 	if err := d.conn.Lock(holder, 3600); err != nil {
 		return err
 	}
-
 	d.locked = true
+
+	// Refresh CONFIG_DB cache — guarantees precondition checks see
+	// all changes made by prior lock holders.
+	configDB, err := d.conn.Client().GetAll()
+	if err != nil {
+		// Release lock on refresh failure — don't hold a lock with stale cache
+		d.conn.Unlock()
+		d.locked = false
+		return fmt.Errorf("refresh config_db after lock: %w", err)
+	}
+	d.conn.ConfigDB = configDB
+	d.configDB = configDB
+	d.interfaces = make(map[string]*Interface)
+	d.loadInterfaces()
+
 	return nil
 }
 
@@ -279,6 +299,11 @@ func (d *Device) IsLocked() bool {
 // The operation function should build a ChangeSet without side effects
 // (e.g., iface.ApplyService, iface.RemoveService, dev.ApplyBaseline).
 // ExecuteOp handles the lock/apply/unlock lifecycle.
+//
+// Write episode lifecycle: Lock() refreshes the CONFIG_DB cache (start of
+// episode) → fn() reads preconditions from cache → Apply() writes to Redis →
+// Unlock() ends the episode. No post-Apply refresh — the next episode
+// (whether write or read-only) will refresh itself.
 func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
 	if err := d.Lock(); err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
@@ -292,11 +317,6 @@ func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
 
 	if err := cs.Apply(d); err != nil {
 		return nil, fmt.Errorf("apply: %w", err)
-	}
-
-	// Refresh CONFIG_DB cache so subsequent operations see the writes
-	if err := d.Refresh(); err != nil {
-		return nil, fmt.Errorf("refresh after apply: %w", err)
 	}
 
 	return cs, nil

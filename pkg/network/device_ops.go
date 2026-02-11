@@ -879,9 +879,17 @@ type HealthCheckResult struct {
 
 // RunHealthChecks runs health checks on the device.
 // If checkType is empty, all checks are run.
+//
+// Starts a fresh read-only episode by calling Refresh() to ensure health
+// checks (checkBGP, checkInterfaces, etc.) read current CONFIG_DB state.
 func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error) {
 	if !d.IsConnected() {
 		return nil, fmt.Errorf("device not connected")
+	}
+
+	// Start a fresh read-only episode
+	if err := d.Refresh(); err != nil {
+		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
 	var results []HealthCheckResult

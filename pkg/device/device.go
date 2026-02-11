@@ -576,7 +576,10 @@ func (d *Device) Client() *ConfigDBClient {
 	return d.client
 }
 
-// ApplyChanges writes a set of changes to config_db via Redis
+// ApplyChanges writes a set of changes to config_db via Redis.
+// This is a pure write — it does not reload the CONFIG_DB cache afterward.
+// Cache refresh is the caller's responsibility via Lock() (for write episodes)
+// or Refresh() (for read-only episodes). See HLD §4.10 for the episode model.
 func (d *Device) ApplyChanges(changes []ConfigChange) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -599,13 +602,6 @@ func (d *Device) ApplyChanges(changes []ConfigChange) error {
 		if err != nil {
 			return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
 		}
-	}
-
-	// Reload config_db to reflect changes
-	var err error
-	d.ConfigDB, err = d.client.GetAll()
-	if err != nil {
-		util.WithDevice(d.Name).Warnf("Failed to reload config_db after changes: %v", err)
 	}
 
 	return nil

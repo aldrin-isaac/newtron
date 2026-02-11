@@ -361,6 +361,22 @@ The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holde
 
 `device.Device.Lock(holder, ttl)` stores the holder string in `d.lockHolder` and calls `d.stateClient.AcquireLock(d.Name, holder, ttl)`. `device.Device.Unlock()` reads `d.lockHolder` and calls `d.stateClient.ReleaseLock(d.Name, d.lockHolder)` — the caller does not need to pass the holder string again. The `network.Device.Lock()` wrapper (newtron LLD §3.2) constructs the holder string as `"user@hostname"` and delegates to `d.conn.Lock(holder, ttl)`.
 
+**CONFIG_DB cache refresh on Lock (HLD §4.10):**
+
+`network.Device.Lock()` refreshes the CONFIG_DB cache immediately after acquiring the distributed lock. This starts a **write episode**: precondition checks within the subsequent `ExecuteOp` `fn()` read from this fresh snapshot. If `GetAll()` fails after lock acquisition, the lock is released and an error is returned — operating with a stale cache under lock is worse than failing the operation.
+
+**ExecuteOp write episode lifecycle:**
+
+`Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
+
+**RunHealthChecks read-only episode:**
+
+`RunHealthChecks()` calls `Refresh()` at entry to start a fresh read-only episode before reading from the cache for `checkBGP`, `checkInterfaces`, etc.
+
+**Refresh():**
+
+`Refresh()` calls `GetAll()` + rebuilds the interface list. It starts a read-only episode. Used after composite delivery, before health checks, and any other read-only code that needs current CONFIG_DB state.
+
 **Why STATE_DB (DB 6):**
 - Locks are operational state, not configuration — they should not persist across `config save -y` or device reboots
 - STATE_DB is ephemeral: cleared on reboot, which is correct — a rebooted device has no active sessions
@@ -787,8 +803,12 @@ func (d *Device) parseVRFs() map[string]*VRFState
 
 ### 5.3 Writing Changes
 
+`ApplyChanges` is a **pure write** — it writes entries to Redis and returns. It does not reload the CONFIG_DB cache afterward. Cache refresh is the caller's responsibility: `Lock()` refreshes at the start of each write episode, and `Refresh()` is available for read-only episodes. See HLD §4.10 for the episode model.
+
 ```go
-// ApplyChanges writes a set of changes to config_db via Redis
+// ApplyChanges writes a set of changes to config_db via Redis.
+// Pure write — does not reload CONFIG_DB cache. Cache refresh is the
+// caller's responsibility via Lock() or Refresh().
 func (d *Device) ApplyChanges(changes []Change) error {
     d.mu.Lock()
     defer d.mu.Unlock()
@@ -812,9 +832,6 @@ func (d *Device) ApplyChanges(changes []Change) error {
             return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
         }
     }
-
-    // Reload config_db to reflect changes
-    d.ConfigDB, _ = d.client.GetAll()
 
     return nil
 }
@@ -853,7 +870,6 @@ func (d *Device) ApplyChangesPipelined(changes []Change) error {
         return fmt.Errorf("pipeline exec: %w", err)
     }
 
-    d.ConfigDB, _ = d.client.GetAll()
     return nil
 }
 ```
@@ -1067,3 +1083,9 @@ E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function (ne
 | **ApplyChangesPipelined** | Single MULTI/EXEC TxPipeline for both sets and deletes (§5.4) |
 | **GetRoute/GetRouteASIC** | Documented single-shot read semantics, caller polls (§5.7) |
 | **Distributed Locking** | `StateDBClient.AcquireLock/ReleaseLock/GetLockHolder` via `NEWTRON_LOCK` hash in STATE_DB. Lua scripts for atomic acquire (EXISTS + HSET + EXPIRE) and safe release (holder check + DEL). Replaces file-based advisory lock (§2.3) |
+
+#### v7
+
+| Area | Change |
+|------|--------|
+| **CONFIG_DB Cache Lifecycle** | Documented episode-based cache refresh model (§2.3). `Lock()` refreshes CONFIG_DB cache after acquiring lock (write episodes). `ApplyChanges()` is now a pure write — removed post-write `GetAll()` reload (§5.3). `ApplyChangesPipelined()` also pure write (§5.4). `RunHealthChecks()` calls `Refresh()` at entry (read-only episodes). See HLD §4.10. |

@@ -73,6 +73,14 @@
 
 **Lines:** ~1700 (v5) → ~1730 (v6) | All v5 sections preserved; locking and signature updates.
 
+#### v7
+
+| Area | Change |
+|------|--------|
+| **CONFIG_DB Cache Architecture** | New §4.10: episode-based cache lifecycle with single invariant — every episode begins with a fresh CONFIG_DB snapshot. Lock() refreshes cache after acquiring distributed lock (write episodes). RunHealthChecks() calls Refresh() at entry (read-only episodes). ApplyChanges() is a pure write (no post-write reload). Removed ad-hoc post-Apply sync from ExecuteOp. |
+
+**Lines:** ~1730 (v6) → ~1800 (v7) | All v6 sections preserved; cache architecture added.
+
 ---
 
 ## 1. Executive Summary
@@ -822,6 +830,64 @@ These require topology-wide context and belong in the orchestrator (newtest).
 | Route installed by FRR | `GetRoute(vrf, prefix)` | APP_DB (DB 0) | RouteEntry or nil |
 | Route programmed in ASIC | `GetRouteASIC(vrf, prefix)` | ASIC_DB (DB 1) | RouteEntry or nil |
 | Operational health | `RunHealthChecks()` | STATE_DB (DB 6) | Health report |
+
+### 4.10 CONFIG_DB Cache Architecture
+
+newtron maintains an in-memory snapshot of CONFIG_DB (`network.Device.configDB`) loaded at `Connect()` time. This section documents the cache lifecycle, the invariant that governs it, and its limitations.
+
+#### 4.10.1 Shared-Device Reality
+
+A SONiC device is a shared resource. CONFIG_DB (Redis DB 4) can be modified by:
+- Other newtron instances (coordinated via STATE_DB distributed lock)
+- Admins running `redis-cli` or SONiC `config` commands
+- Automation tools (Ansible, Salt, etc.)
+- SONiC daemons (frrcfgd, orchagent, etc.)
+
+The distributed STATE_DB lock only coordinates newtron instances cooperatively. It does not prevent external actors from writing to CONFIG_DB at any time.
+
+#### 4.10.2 Why the Cache Exists
+
+newtron reads CONFIG_DB for two purposes:
+1. **Write-path precondition checks** (~10 methods inside `ExecuteOp` lock scope): `VRFExists`, `VLANExists`, `VTEPExists`, `BGPNeighborExists`, `ACLTableExists`, etc. These are advisory safety checks — they catch common mistakes (creating a duplicate VRF, adding a member to a non-existent VLAN) but cannot prevent all race conditions with external actors.
+2. **Read-only queries** (no lock needed): `checkBGP`, `checkInterfaces`, `ListVLANs`, `ListVRFs`, etc. These are informational — they display or reason about what's configured.
+
+Without a cache, every precondition check would require a Redis round-trip. For composite operations that check multiple preconditions, this adds up. The cache batches all table data into a single `GetAll()` call.
+
+#### 4.10.3 The Episode Model
+
+An **episode** is a time-boxed unit of work that reads the cache. Every episode must start with a fresh cache — no episode should depend on cache left behind by a prior episode.
+
+| Episode type | How it refreshes | Examples |
+|-------------|-----------------|---------|
+| **Write episode** | `Lock()` refreshes after acquiring distributed lock | `ExecuteOp` (all mutating operations) |
+| **Read-only episode** | `Refresh()` at the start | `RunHealthChecks`, CLI show commands |
+| **Composite episode** | `Refresh()` after delivery | Composite provisioning path |
+| **Initial episode** | `Connect()` loads initial snapshot | First use after connection |
+
+Within an episode, the cache is a consistent snapshot. Between episodes, the cache must be considered stale.
+
+#### 4.10.4 Invariant
+
+*Every episode begins with a fresh CONFIG_DB snapshot. Within an episode, the cache is read from that snapshot. No episode relies on cache from a prior episode.*
+
+#### 4.10.5 Cache Lifecycle
+
+| Event | Cache action | What it sees |
+|-------|-------------|-----------|
+| `Connect()` | Initial `GetAll()` | Redis state at connection time |
+| `Lock()` | `GetAll()` + rebuild interfaces | All changes by any actor up to lock time |
+| Inside `ExecuteOp` `fn()` | Precondition reads from cache | Snapshot from Lock |
+| `Apply()` | Writes to Redis only (no reload) | Cache stale (episode ending) |
+| `Unlock()` | No cache action | Episode over |
+| `Refresh()` | `GetAll()` + rebuild interfaces | Redis state at call time (starts a new read-only episode) |
+| `RunHealthChecks()` | `Refresh()` at entry | Fresh snapshot for health checks |
+
+#### 4.10.6 Known Limitation
+
+Between a refresh and the code that reads the cache, an external actor can modify CONFIG_DB. This is an inherent race condition in any system without database-level transactional isolation. The precondition checks are **advisory safety nets** — they reduce the risk of harmful changes but cannot prevent race conditions with non-newtron actors. This is acceptable because:
+- In lab/test environments, newtron is typically the sole CONFIG_DB writer
+- In production, coordinated change windows reduce concurrent modification risk
+- The alternative (Redis WATCH/MULTI transactions) would require fundamental architectural changes for marginal benefit
 
 ## 5. Device Connection Architecture
 

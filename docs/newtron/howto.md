@@ -62,7 +62,8 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 20. [Quick Reference](#20-quick-reference)
 21. [Topology Provisioning](#21-topology-provisioning)
 22. [Composite Configuration](#22-composite-configuration)
-23. [Related Documentation](#23-related-documentation)
+23. [CONFIG_DB Cache Behavior](#23-config_db-cache-behavior)
+24. [Related Documentation](#24-related-documentation)
 
 ---
 
@@ -2707,7 +2708,41 @@ fmt.Printf("Applied: %d, Skipped: %d\n", result.Applied, result.Skipped)
 
 ---
 
-## 23. Related Documentation
+## 23. CONFIG_DB Cache Behavior
+
+newtron caches CONFIG_DB (Redis DB 4) in memory to avoid per-check Redis round-trips during precondition validation. This section explains how the cache is managed and when it refreshes.
+
+### 23.1 Shared-Device Context
+
+A SONiC device's CONFIG_DB can be modified by newtron, other automation tools (Ansible, Salt), admins running `redis-cli`, and SONiC daemons (frrcfgd, orchagent). newtron's distributed lock (STATE_DB) only coordinates newtron instances — it does not prevent external writes. The cache is an optimization, not transactional isolation.
+
+### 23.2 The Episode Model
+
+Every self-contained unit of work that reads the cache must start with a fresh snapshot. These units are called **episodes**:
+
+- **Write operations** (via `ExecuteOp`): `Lock()` automatically refreshes the cache after acquiring the distributed lock. Precondition checks within the operation read from this fresh snapshot. No action needed by the caller.
+
+- **Read-only code** (health checks, CLI show commands): Call `Refresh()` before reading from the cache, or use `ConfigDBClient.Get()`/`Exists()` to read from Redis directly (as `verify-config-db` does in newtest).
+
+- **Composite provisioning path**: Call `Refresh()` after `DeliverComposite()` to reload the cache with the newly written config.
+
+### 23.3 Precondition Checks
+
+Precondition checks (`VRFExists`, `VLANExists`, `VTEPExists`, etc.) read from the cached snapshot. They are **advisory safety nets** — they catch common mistakes like creating a duplicate VRF or adding a member to a non-existent VLAN. They cannot prevent all race conditions with external actors modifying CONFIG_DB concurrently.
+
+### 23.4 When to Call Refresh()
+
+| Situation | Action |
+|-----------|--------|
+| Before a write operation | Not needed — `ExecuteOp` calls `Lock()` which refreshes |
+| After composite delivery | Call `Refresh()` |
+| Before health checks | Not needed — `RunHealthChecks()` calls `Refresh()` internally |
+| Before reading cache in custom code | Call `Refresh()` |
+| For one-off Redis reads | Use `ConfigDBClient.Get()` directly (bypasses cache) |
+
+---
+
+## 24. Related Documentation
 
 The following documents provide additional detail on specific topics:
 

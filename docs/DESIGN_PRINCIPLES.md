@@ -376,7 +376,53 @@ orchestrator decides the policy.
 
 ---
 
-## 10. Summary
+## 10. Episodic Caching — Fresh Snapshot per Unit of Work
+
+newtron caches CONFIG_DB in memory to batch precondition checks into a
+single `GetAll()` call instead of a Redis round-trip per check. But a
+cache is only useful if you know when it's fresh and when it's stale.
+The rule is simple:
+
+> Every self-contained unit of work — an **episode** — begins with a
+> fresh CONFIG_DB snapshot. No episode relies on cache from a prior
+> episode.
+
+An episode is any code path that reads the cache for a purpose:
+
+- **Write episodes** (`ExecuteOp`): `Lock()` refreshes the cache after
+  acquiring the distributed lock. Precondition checks within the
+  operation read from this snapshot. `Apply()` writes to Redis without
+  reloading — the episode is ending.
+
+- **Read-only episodes** (`RunHealthChecks`, CLI show commands):
+  `Refresh()` at the start loads a current snapshot.
+
+- **Composite episodes** (provisioning): `Refresh()` after delivery
+  reloads the cache to reflect the bulk write.
+
+The key design choice is *where* the refresh happens. It does not happen
+after `Apply()` — that would reload the cache at the end of an episode,
+serving no one. It happens at the *start* of the next episode, where it
+serves the code that's about to read. This means between episodes the
+cache may be stale, and that's fine — no code reads it there.
+
+This is not transactional isolation. A SONiC device is a shared resource
+— admins, other tools, and SONiC daemons can write to CONFIG_DB at any
+time. The distributed lock coordinates newtron instances but cannot
+prevent external writes. The precondition checks are **advisory safety
+nets**: they catch common mistakes (duplicate VRF, non-existent VLAN)
+but cannot prevent all race conditions. This is acceptable — the
+alternative (Redis WATCH/MULTI transactions for reads) would add
+fundamental complexity for marginal benefit in environments where
+newtron is typically the sole CONFIG_DB writer.
+
+The principle: **cache freshness is a property of episodes, not of
+individual reads**. Refresh once at the start, read many times within,
+never carry state across episode boundaries.
+
+---
+
+## 11. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -389,3 +435,4 @@ orchestrator decides the policy.
 | Files, not APIs | Programs communicate through the spec directory, not through shared libraries or services |
 | Observation vs assertion | Assert your own work; observe everything else as structured data |
 | The ChangeSet is universal | One contract for all mutations; one verification method for all operations |
+| Episodic caching | Refresh once at episode start; read many times within; never carry cache across episode boundaries |
