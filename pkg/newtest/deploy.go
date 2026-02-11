@@ -12,6 +12,7 @@ func DeployTopology(specDir string) (*newtlab.Lab, error) {
 	if err != nil {
 		return nil, fmt.Errorf("newtest: load topology: %w", err)
 	}
+	lab.Force = true
 	if err := lab.Deploy(); err != nil {
 		return nil, fmt.Errorf("newtest: deploy topology: %w", err)
 	}
