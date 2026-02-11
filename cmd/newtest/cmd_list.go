@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -9,24 +12,55 @@ import (
 )
 
 func newListCmd() *cobra.Command {
-	return &cobra.Command{
+	var dir string
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List available scenarios",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			scenarios, err := newtest.ParseAllScenarios("newtest/suites/2node-standalone")
+			dir = resolveDir(cmd, dir)
+
+			scenarios, err := newtest.ParseAllScenarios(dir)
 			if err != nil {
 				return err
 			}
 			if len(scenarios) == 0 {
-				fmt.Println("No scenarios found in newtest/suites/2node-standalone/")
+				fmt.Printf("No scenarios found in %s/\n", dir)
 				return nil
 			}
-			fmt.Println("Available scenarios:")
-			for _, s := range scenarios {
-				fmt.Printf("  %-20s %s (%s, %s)\n",
-					s.Name, s.Description, s.Topology, s.Platform)
+
+			// Sort by dependency order if applicable
+			if newtest.HasRequiresExported(scenarios) {
+				sorted, sortErr := newtest.TopologicalSortExported(scenarios)
+				if sortErr == nil {
+					scenarios = sorted
+				}
 			}
+
+			// Derive suite name from dir
+			suiteName := dir
+			if idx := strings.LastIndex(dir, "/"); idx >= 0 {
+				suiteName = dir[idx+1:]
+			}
+
+			fmt.Printf("Suite: %s (%d scenarios)\n\n", suiteName, len(scenarios))
+
+			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "  #\tSCENARIO\tSTEPS\tTOPOLOGY\tREQUIRES")
+			for i, s := range scenarios {
+				requires := "-"
+				if len(s.Requires) > 0 {
+					requires = strings.Join(s.Requires, ", ")
+				}
+				fmt.Fprintf(w, "  %d\t%s\t%d\t%s\t%s\n",
+					i+1, s.Name, len(s.Steps), s.Topology, requires)
+			}
+			w.Flush()
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
+
+	return cmd
 }

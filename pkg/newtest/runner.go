@@ -20,6 +20,7 @@ type Runner struct {
 	Lab           *newtlab.Lab
 	ChangeSets    map[string]*network.ChangeSet
 	Verbose       bool
+	Progress      ProgressReporter
 
 	opts     RunOptions
 	scenario *Scenario
@@ -87,15 +88,35 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 		scenarios = sorted
 	}
 
+	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
+
+	suiteStart := time.Now()
+
+	var results []*ScenarioResult
+	var err error
+
 	// If all scenarios share the same topology, deploy once and share connections
 	if len(scenarios) > 1 {
 		if topology := sharedTopology(scenarios, opts.Topology); topology != "" {
-			return r.runShared(context.Background(), scenarios, topology, opts)
+			results, err = r.runShared(context.Background(), scenarios, topology, opts)
+			if err != nil {
+				return results, err
+			}
+			r.progress(func(p ProgressReporter) { p.SuiteEnd(results, time.Since(suiteStart)) })
+			return results, nil
 		}
 	}
 
 	// Independent mode: different topologies or single scenario
-	return r.runIndependent(context.Background(), scenarios, opts)
+	results, err = r.runIndependent(context.Background(), scenarios, opts)
+	if err != nil {
+		return results, err
+	}
+
+	if len(scenarios) > 1 {
+		r.progress(func(p ProgressReporter) { p.SuiteEnd(results, time.Since(suiteStart)) })
+	}
+	return results, nil
 }
 
 // runShared deploys once, connects once, and runs all scenarios with a shared
@@ -149,30 +170,29 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
 
-	for _, sc := range scenarios {
+	for i, sc := range scenarios {
 		platform := opts.Platform
 		if platform == "" {
 			platform = sc.Platform
 		}
 
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
-			results = append(results, &ScenarioResult{
+			result := &ScenarioResult{
 				Name:       sc.Name,
 				Topology:   topology,
 				Platform:   platform,
 				Status:     StatusSkipped,
 				SkipReason: reason,
-			})
-			scenarioStatus[sc.Name] = StatusSkipped
-			if opts.Verbose {
-				fmt.Printf("\nnewtest: %s — skipped (%s)\n", sc.Name, reason)
 			}
+			results = append(results, result)
+			scenarioStatus[sc.Name] = StatusSkipped
+			idx := i
+			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
 			continue
 		}
 
-		if opts.Verbose {
-			fmt.Printf("\nnewtest: %s\n", sc.Name)
-		}
+		idx := i
+		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, idx, len(scenarios)) })
 
 		r.opts = RunOptions{
 			Topology: topology,
@@ -194,6 +214,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 
 		results = append(results, result)
 		scenarioStatus[sc.Name] = result.Status
+		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
 	}
 
 	return results, nil
@@ -205,7 +226,7 @@ func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts
 	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
 
-	for _, s := range scenarios {
+	for i, s := range scenarios {
 		if reason := checkRequires(s, scenarioStatus); reason != "" {
 			topology := opts.Topology
 			if topology == "" {
@@ -215,19 +236,22 @@ func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts
 			if platform == "" {
 				platform = s.Platform
 			}
-			results = append(results, &ScenarioResult{
+			result := &ScenarioResult{
 				Name:       s.Name,
 				Topology:   topology,
 				Platform:   platform,
 				Status:     StatusSkipped,
 				SkipReason: reason,
-			})
-			scenarioStatus[s.Name] = StatusSkipped
-			if opts.Verbose {
-				fmt.Printf("\nnewtest: %s — skipped (%s)\n", s.Name, reason)
 			}
+			results = append(results, result)
+			scenarioStatus[s.Name] = StatusSkipped
+			idx := i
+			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
 			continue
 		}
+
+		idx := i
+		r.progress(func(p ProgressReporter) { p.ScenarioStart(s.Name, idx, len(scenarios)) })
 
 		result, err := r.RunScenario(ctx, s, opts)
 		if err != nil {
@@ -235,6 +259,7 @@ func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts
 		}
 		results = append(results, result)
 		scenarioStatus[s.Name] = result.Status
+		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
 	}
 
 	return results, nil
@@ -309,12 +334,13 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	result.Repeat = scenario.Repeat
 
 	for iter := 1; iter <= repeat; iter++ {
-		if repeat > 1 && opts.Verbose {
-			fmt.Printf("  --- iteration %d/%d ---\n", iter, repeat)
-		}
-
 		iterFailed := false
 		for i, step := range scenario.Steps {
+			stepCopy := step
+			idx := i
+			total := len(scenario.Steps)
+			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, idx, total) })
+
 			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
 
 			// Merge ChangeSets (last-write-wins)
@@ -327,6 +353,9 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 				sr.Iteration = iter
 			}
 			result.Steps = append(result.Steps, sr)
+
+			srCopy := sr
+			r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, idx, total) })
 
 			// Fail-fast within iteration
 			if output.Result.Status == StatusFailed || output.Result.Status == StatusError {
@@ -391,10 +420,6 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 		}
 	}
 
-	if opts.Verbose {
-		fmt.Printf("  [%d/%d] %s\n", index+1, total, step.Name)
-	}
-
 	start := time.Now()
 	output := executor.Execute(ctx, r, step)
 	output.Result.Duration = time.Since(start)
@@ -402,6 +427,13 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 	output.Result.Action = step.Action
 
 	return output
+}
+
+// progress calls fn with the ProgressReporter if one is set.
+func (r *Runner) progress(fn func(ProgressReporter)) {
+	if r.Progress != nil {
+		fn(r.Progress)
+	}
 }
 
 // allDeviceNames returns sorted names of all topology devices.

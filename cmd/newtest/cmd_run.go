@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/newtest"
+	"github.com/newtron-network/newtron/pkg/settings"
 )
 
 func newRunCmd() *cobra.Command {
@@ -17,17 +18,18 @@ func newRunCmd() *cobra.Command {
 		Use:   "run",
 		Short: "Run test scenarios",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runner := newtest.NewRunner(dir, "newtest/topologies")
+			dir = resolveDir(cmd, dir)
+			topologiesDir := resolveTopologiesDir()
+
+			runner := newtest.NewRunner(dir, topologiesDir)
+			runner.Progress = newtest.NewConsoleProgress(opts.Verbose)
 			results, err := runner.Run(opts)
 			if err != nil {
 				return err
 			}
 
-			// Print console output
-			gen := &newtest.ReportGenerator{Results: results}
-			gen.PrintConsole(os.Stdout)
-
 			// Write markdown report
+			gen := &newtest.ReportGenerator{Results: results}
 			_ = gen.WriteMarkdown("newtest/.generated/report.md")
 
 			// Write JUnit if requested
@@ -64,7 +66,7 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "newtest/suites/2node-standalone", "directory containing scenario YAML files")
+	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
 	cmd.Flags().StringVar(&opts.Scenario, "scenario", "", "run specific scenario")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "run all scenarios in dir")
 	cmd.Flags().StringVar(&opts.Topology, "topology", "", "override topology")
@@ -76,4 +78,29 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.JUnitPath, "junit", "", "JUnit XML output path")
 
 	return cmd
+}
+
+// resolveDir resolves the suite directory from: flag > env > settings > default.
+func resolveDir(cmd *cobra.Command, flagVal string) string {
+	if cmd.Flags().Changed("dir") {
+		return flagVal
+	}
+	if v := os.Getenv("NEWTEST_SUITE"); v != "" {
+		return v
+	}
+	if s, err := settings.Load(); err == nil && s.DefaultSuite != "" {
+		return s.DefaultSuite
+	}
+	return "newtest/suites/2node-standalone"
+}
+
+// resolveTopologiesDir resolves the topologies base directory from: env > settings > default.
+func resolveTopologiesDir() string {
+	if v := os.Getenv("NEWTEST_TOPOLOGIES"); v != "" {
+		return v
+	}
+	if s, err := settings.Load(); err == nil && s.TopologiesDir != "" {
+		return s.TopologiesDir
+	}
+	return "newtest/topologies"
 }

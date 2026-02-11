@@ -24,6 +24,15 @@ type Settings struct {
 	// ExecuteByDefault if true, executes changes without -x flag
 	// (DANGEROUS - not recommended, dry-run is safer default)
 	ExecuteByDefault bool `json:"execute_by_default,omitempty"`
+
+	// LabSpecs is the default -S spec directory for newtlab
+	LabSpecs string `json:"lab_specs,omitempty"`
+
+	// DefaultSuite is the default --dir for newtest run
+	DefaultSuite string `json:"default_suite,omitempty"`
+
+	// TopologiesDir is the base directory for newtest topologies
+	TopologiesDir string `json:"topologies_dir,omitempty"`
 }
 
 // DefaultSettingsPath returns the default path for the settings file
@@ -102,6 +111,21 @@ func (s *Settings) GetSpecDir() string {
 		return s.SpecDir
 	}
 	return "/etc/newtron"
+}
+
+// SetLabSpecs sets the default newtlab spec directory
+func (s *Settings) SetLabSpecs(dir string) {
+	s.LabSpecs = dir
+}
+
+// SetDefaultSuite sets the default newtest suite directory
+func (s *Settings) SetDefaultSuite(dir string) {
+	s.DefaultSuite = dir
+}
+
+// SetTopologiesDir sets the base directory for topologies
+func (s *Settings) SetTopologiesDir(dir string) {
+	s.TopologiesDir = dir
 }
 
 // Clear resets all settings to defaults

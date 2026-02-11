@@ -18,6 +18,7 @@ func main() {
 	rootCmd.AddCommand(
 		newRunCmd(),
 		newListCmd(),
+		newSuitesCmd(),
 		newTopologiesCmd(),
 		&cobra.Command{
 			Use:   "version",

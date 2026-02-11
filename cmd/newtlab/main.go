@@ -22,6 +22,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/settings"
 	"github.com/newtron-network/newtron/pkg/version"
 )
 
@@ -73,12 +75,18 @@ func init() {
 	)
 }
 
-// requireSpecDir returns specDir or errors if not set.
+// requireSpecDir resolves spec directory from: -S flag > NEWTLAB_SPECS env > settings > error.
 func requireSpecDir() (string, error) {
-	if specDir == "" {
-		return "", fmt.Errorf("spec directory required: use -S <dir>")
+	if specDir != "" {
+		return specDir, nil
 	}
-	return specDir, nil
+	if v := os.Getenv("NEWTLAB_SPECS"); v != "" {
+		return v, nil
+	}
+	if s, err := settings.Load(); err == nil && s.LabSpecs != "" {
+		return s.LabSpecs, nil
+	}
+	return "", fmt.Errorf("spec directory required: use -S <dir>, set NEWTLAB_SPECS, or run 'newtron settings set lab_specs <dir>'")
 }
 
 func newVersionCmd() *cobra.Command {
@@ -91,7 +99,7 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// Color helpers for terminal output
-func green(s string) string  { return "\033[32m" + s + "\033[0m" }
-func yellow(s string) string { return "\033[33m" + s + "\033[0m" }
-func red(s string) string    { return "\033[31m" + s + "\033[0m" }
+// Color helpers — delegate to pkg/cli
+func green(s string) string  { return cli.Green(s) }
+func yellow(s string) string { return cli.Yellow(s) }
+func red(s string) string    { return cli.Red(s) }

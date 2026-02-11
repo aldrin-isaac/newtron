@@ -53,6 +53,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/audit"
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/settings"
 	"github.com/newtron-network/newtron/pkg/spec"
@@ -155,8 +156,7 @@ Examples:
   newtron interactive`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip initialization for certain commands
-		cmdName := cmd.Name()
-		if cmdName == "help" || cmdName == "version" || cmdName == "settings" {
+		if isSettingsOrHelp(cmd) {
 			return nil
 		}
 
@@ -397,19 +397,19 @@ func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
 	return nil
 }
 
-// Color helpers for terminal output
-func green(s string) string {
-	return "\033[32m" + s + "\033[0m"
+// isSettingsOrHelp checks whether cmd (or any ancestor) is a settings, help, or version command.
+func isSettingsOrHelp(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "help", "version", "settings":
+			return true
+		}
+	}
+	return false
 }
 
-func yellow(s string) string {
-	return "\033[33m" + s + "\033[0m"
-}
-
-func red(s string) string {
-	return "\033[31m" + s + "\033[0m"
-}
-
-func bold(s string) string {
-	return "\033[1m" + s + "\033[0m"
-}
+// Color helpers — delegate to pkg/cli
+func green(s string) string  { return cli.Green(s) }
+func yellow(s string) string { return cli.Yellow(s) }
+func red(s string) string    { return cli.Red(s) }
+func bold(s string) string   { return cli.Bold(s) }

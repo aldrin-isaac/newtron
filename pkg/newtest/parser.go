@@ -411,6 +411,19 @@ func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	return sorted, nil
 }
 
+// HasRequiresExported is an exported wrapper for hasRequires.
+func HasRequiresExported(scenarios []*Scenario) bool {
+	return hasRequires(scenarios)
+}
+
+// TopologicalSortExported is an exported wrapper for topologicalSort.
+func TopologicalSortExported(scenarios []*Scenario) ([]*Scenario, error) {
+	if err := validateDependencyGraph(scenarios); err != nil {
+		return nil, err
+	}
+	return topologicalSort(scenarios)
+}
+
 // applyDefaults sets default values for steps.
 func applyDefaults(s *Scenario) {
 	for i := range s.Steps {
