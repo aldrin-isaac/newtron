@@ -294,6 +294,11 @@ func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
 		return nil, fmt.Errorf("apply: %w", err)
 	}
 
+	// Refresh CONFIG_DB cache so subsequent operations see the writes
+	if err := d.Refresh(); err != nil {
+		return nil, fmt.Errorf("refresh after apply: %w", err)
+	}
+
 	return cs, nil
 }
 

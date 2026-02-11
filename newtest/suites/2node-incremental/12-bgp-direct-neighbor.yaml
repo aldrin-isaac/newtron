@@ -35,7 +35,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: BGP_NEIGHBOR
-    key: "10.1.1.0"
+    key: "default|10.1.1.0"
     expect:
       exists: true
 
@@ -50,7 +50,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: BGP_NEIGHBOR
-    key: "10.1.1.0"
+    key: "default|10.1.1.0"
     expect:
       exists: false
 
