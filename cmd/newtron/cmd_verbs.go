@@ -673,42 +673,17 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		property := args[0]
 		value := strings.Join(args[1:], " ")
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		// Check permissions
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.Set(ctx, property, value)
-		if err != nil {
-			return fmt.Errorf("setting %s: %w", property, err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.Set(ctx, property, value)
+			if err != nil {
+				return nil, fmt.Errorf("setting %s: %w", property, err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -735,92 +710,70 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		objType := args[0]
-		ctx := context.Background()
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			var cs *network.ChangeSet
+			var err error
 
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
+			switch objType {
+			case "vlan":
+				if len(args) < 2 {
+					return nil, fmt.Errorf("vlan ID required")
+				}
+				var vlanID int
+				fmt.Sscanf(args[1], "%d", &vlanID)
+				cs, err = dev.CreateVLAN(ctx, vlanID, network.VLANConfig{
+					Name: createVlanName,
+				})
 
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
+			case "lag", "portchannel":
+				if len(args) < 2 {
+					return nil, fmt.Errorf("LAG name required")
+				}
+				members := []string{}
+				if createLagMembers != "" {
+					members = strings.Split(createLagMembers, ",")
+				}
+				cs, err = dev.CreatePortChannel(ctx, args[1], network.PortChannelConfig{
+					Members:  members,
+					MinLinks: createLagMinLinks,
+					FastRate: createLagFastRate,
+				})
 
-		var changeSet *network.ChangeSet
+			case "vrf":
+				if len(args) < 2 {
+					return nil, fmt.Errorf("VRF name required")
+				}
+				cs, err = dev.CreateVRF(ctx, args[1], network.VRFConfig{
+					L3VNI: createVrfL3VNI,
+				})
 
-		switch objType {
-		case "vlan":
-			if len(args) < 2 {
-				return fmt.Errorf("vlan ID required")
+			case "vtep":
+				sourceIP := createVtepSourceIP
+				if sourceIP == "" {
+					sourceIP = dev.Profile().LoopbackIP
+				}
+				cs, err = dev.CreateVTEP(ctx, network.VTEPConfig{
+					SourceIP: sourceIP,
+				})
+
+			case "acl":
+				if len(args) < 2 {
+					return nil, fmt.Errorf("ACL name required")
+				}
+				cs, err = dev.CreateACLTable(ctx, args[1], network.ACLTableConfig{
+					Type:  createAclType,
+					Stage: createAclStage,
+				})
+
+			default:
+				return nil, fmt.Errorf("unknown type: %s", objType)
 			}
-			var vlanID int
-			fmt.Sscanf(args[1], "%d", &vlanID)
-			changeSet, err = dev.CreateVLAN(ctx, vlanID, network.VLANConfig{
-				Name: createVlanName,
-			})
 
-		case "lag", "portchannel":
-			if len(args) < 2 {
-				return fmt.Errorf("LAG name required")
+			if err != nil {
+				return nil, fmt.Errorf("creating %s: %w", objType, err)
 			}
-			members := []string{}
-			if createLagMembers != "" {
-				members = strings.Split(createLagMembers, ",")
-			}
-			changeSet, err = dev.CreatePortChannel(ctx, args[1], network.PortChannelConfig{
-				Members:  members,
-				MinLinks: createLagMinLinks,
-				FastRate: createLagFastRate,
-			})
-
-		case "vrf":
-			if len(args) < 2 {
-				return fmt.Errorf("VRF name required")
-			}
-			changeSet, err = dev.CreateVRF(ctx, args[1], network.VRFConfig{
-				L3VNI: createVrfL3VNI,
-			})
-
-		case "vtep":
-			sourceIP := createVtepSourceIP
-			if sourceIP == "" {
-				sourceIP = dev.Profile().LoopbackIP
-			}
-			changeSet, err = dev.CreateVTEP(ctx, network.VTEPConfig{
-				SourceIP: sourceIP,
-			})
-
-		case "acl":
-			if len(args) < 2 {
-				return fmt.Errorf("ACL name required")
-			}
-			changeSet, err = dev.CreateACLTable(ctx, args[1], network.ACLTableConfig{
-				Type:  createAclType,
-				Stage: createAclStage,
-			})
-
-		default:
-			return fmt.Errorf("unknown type: %s", objType)
-		}
-
-		if err != nil {
-			return fmt.Errorf("creating %s: %w", objType, err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			return cs, nil
+		})
 	},
 }
 
@@ -852,56 +805,34 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		objType := args[0]
 		objName := args[1]
-		ctx := context.Background()
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			var cs *network.ChangeSet
+			var err error
 
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
+			switch objType {
+			case "vlan":
+				var vlanID int
+				fmt.Sscanf(objName, "%d", &vlanID)
+				cs, err = dev.DeleteVLAN(ctx, vlanID)
 
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
+			case "lag", "portchannel":
+				cs, err = dev.DeletePortChannel(ctx, objName)
 
-		var changeSet *network.ChangeSet
+			case "vrf":
+				cs, err = dev.DeleteVRF(ctx, objName)
 
-		switch objType {
-		case "vlan":
-			var vlanID int
-			fmt.Sscanf(objName, "%d", &vlanID)
-			changeSet, err = dev.DeleteVLAN(ctx, vlanID)
+			case "acl":
+				cs, err = dev.DeleteACLTable(ctx, objName)
 
-		case "lag", "portchannel":
-			changeSet, err = dev.DeletePortChannel(ctx, objName)
-
-		case "vrf":
-			changeSet, err = dev.DeleteVRF(ctx, objName)
-
-		case "acl":
-			changeSet, err = dev.DeleteACLTable(ctx, objName)
-
-		default:
-			return fmt.Errorf("unknown type: %s", objType)
-		}
-
-		if err != nil {
-			return fmt.Errorf("deleting %s: %w", objType, err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+			default:
+				return nil, fmt.Errorf("unknown type: %s", objType)
 			}
-		} else {
-			printDryRunNotice()
-		}
 
-		return nil
+			if err != nil {
+				return nil, fmt.Errorf("deleting %s: %w", objType, err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -920,41 +851,17 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		memberIntf := args[0]
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.AddMember(ctx, memberIntf, addMemberTagged)
-		if err != nil {
-			return fmt.Errorf("adding member: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.AddMember(ctx, memberIntf, addMemberTagged)
+			if err != nil {
+				return nil, fmt.Errorf("adding member: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -974,41 +881,17 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		memberIntf := args[0]
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.RemoveMember(ctx, memberIntf)
-		if err != nil {
-			return fmt.Errorf("removing member: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.RemoveMember(ctx, memberIntf)
+			if err != nil {
+				return nil, fmt.Errorf("removing member: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1025,44 +908,20 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serviceName := args[0]
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName).WithService(serviceName)
-		if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
-			IPAddress: applyServiceIP,
-			PeerAS:    applyServicePeerAS,
-		})
-		if err != nil {
-			return fmt.Errorf("applying service: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName).WithService(serviceName)
+			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
+				IPAddress: applyServiceIP,
+				PeerAS:    applyServicePeerAS,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("applying service: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1080,41 +939,17 @@ Requires -d (device) and -i (interface) flags.
 Examples:
   newtron -d leaf1-ny -i Ethernet0 remove-service -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.RemoveService(ctx)
-		if err != nil {
-			return fmt.Errorf("removing service: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.RemoveService(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("removing service: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1139,61 +974,39 @@ Requires -d (device) and -i (interface) flags.
 Examples:
   newtron -d leaf1-ny -i Ethernet0 refresh-service -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		// Check if interface has a service bound
-		if !intf.HasService() {
-			return fmt.Errorf("no service bound to interface %s", interfaceName)
-		}
-
-		serviceName := intf.ServiceName()
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName).WithService(serviceName)
-		if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.RefreshService(ctx)
-		if err != nil {
-			return fmt.Errorf("refreshing service: %w", err)
-		}
-
-		if changeSet.IsEmpty() {
-			fmt.Println("Service is already in sync with definition. No changes needed.")
-			return nil
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		// Show orphaned ACLs that will be cleaned up
-		orphans := dev.GetOrphanedACLs()
-		if len(orphans) > 0 {
-			fmt.Println("\nOrphaned ACLs to be removed:")
-			for _, acl := range orphans {
-				fmt.Printf("  - %s\n", acl)
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			if !intf.HasService() {
+				return nil, fmt.Errorf("no service bound to interface %s", interfaceName)
 			}
-		}
 
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+			serviceName := intf.ServiceName()
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName).WithService(serviceName)
+			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
 
-		return nil
+			cs, err := intf.RefreshService(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("refreshing service: %w", err)
+			}
+
+			if cs.IsEmpty() {
+				fmt.Println("Service is already in sync with definition. No changes needed.")
+				return nil, nil
+			}
+
+			// Show orphaned ACLs that will be cleaned up
+			orphans := dev.GetOrphanedACLs()
+			if len(orphans) > 0 {
+				fmt.Println("Orphaned ACLs to be removed:")
+				for _, acl := range orphans {
+					fmt.Printf("  - %s\n", acl)
+				}
+				fmt.Println()
+			}
+
+			return cs, nil
+		})
 	},
 }
 
@@ -1210,41 +1023,17 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
-		if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.BindACL(ctx, aclName, bindAclDirection)
-		if err != nil {
-			return fmt.Errorf("binding ACL: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.BindACL(ctx, aclName, bindAclDirection)
+			if err != nil {
+				return nil, fmt.Errorf("binding ACL: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1263,41 +1052,17 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
-		if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.UnbindACL(ctx, aclName)
-		if err != nil {
-			return fmt.Errorf("unbinding ACL: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.UnbindACL(ctx, aclName)
+			if err != nil {
+				return nil, fmt.Errorf("unbinding ACL: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1315,53 +1080,31 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		macvpnName := args[0]
-		ctx := context.Background()
 
-		// Look up macvpn definition
+		// Look up macvpn definition before entering write path
 		macvpnDef, err := net.GetMACVPN(macvpnName)
 		if err != nil {
 			return fmt.Errorf("macvpn '%s' not found in network.json", macvpnName)
 		}
 
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Show what will be applied
-		fmt.Printf("MAC-VPN: %s\n", macvpnName)
-		fmt.Printf("  L2VNI: %d\n", macvpnDef.L2VNI)
-		fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
-		fmt.Println()
-
-		changeSet, err := intf.BindMACVPN(ctx, macvpnName, macvpnDef)
-		if err != nil {
-			return fmt.Errorf("binding MAC-VPN: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
 
-		return nil
+			// Show what will be applied
+			fmt.Printf("MAC-VPN: %s\n", macvpnName)
+			fmt.Printf("  L2VNI: %d\n", macvpnDef.L2VNI)
+			fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
+			fmt.Println()
+
+			cs, err := intf.BindMACVPN(ctx, macvpnName, macvpnDef)
+			if err != nil {
+				return nil, fmt.Errorf("binding MAC-VPN: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1377,41 +1120,17 @@ Requires -d (device) and -i (VLAN) flags.
 Examples:
   newtron -d leaf1-ny -i Vlan100 unbind-macvpn -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.UnbindMACVPN(ctx)
-		if err != nil {
-			return fmt.Errorf("unbinding MAC-VPN: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.UnbindMACVPN(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("unbinding MAC-VPN: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1450,76 +1169,51 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var remoteASN int
 		fmt.Sscanf(args[0], "%d", &remoteASN)
-		ctx := context.Background()
 
-		// Validate mutually exclusive flags
+		// Validate mutually exclusive flags before entering write path
 		if bgpNeighborIP != "" && bgpPassive {
 			return fmt.Errorf("--neighbor-ip and --passive are mutually exclusive")
 		}
 
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermBGPModify, authCtx); err != nil {
+				return nil, err
+			}
 
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermBGPModify, authCtx); err != nil {
-			return err
-		}
+			// Build BGP neighbor config
+			bgpConfig := network.BGPNeighborConfig{
+				RemoteASN: remoteASN,
+				Passive:   bgpPassive,
+				TTL:       1, // Hardcoded for security - direct neighbors only
+			}
 
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
+			// Determine neighbor IP
+			if bgpPassive {
+				bgpConfig.NeighborIP = ""
+			} else if bgpNeighborIP != "" {
+				bgpConfig.NeighborIP = bgpNeighborIP
+			} else {
+				derivedIP, err := intf.DeriveNeighborIP()
+				if err != nil {
+					return nil, fmt.Errorf("cannot auto-derive neighbor IP: %w\nuse --neighbor-ip for subnets larger than /30", err)
+				}
+				bgpConfig.NeighborIP = derivedIP
+			}
 
-		// Build BGP neighbor config
-		bgpConfig := network.BGPNeighborConfig{
-			RemoteASN: remoteASN,
-			Passive:   bgpPassive,
-			TTL:       1, // Hardcoded for security - direct neighbors only
-		}
-
-		// Determine neighbor IP
-		if bgpPassive {
-			// Passive mode: no neighbor IP needed (we wait for connection)
-			bgpConfig.NeighborIP = ""
-		} else if bgpNeighborIP != "" {
-			// Explicit neighbor IP provided
-			bgpConfig.NeighborIP = bgpNeighborIP
-		} else {
-			// Try to auto-derive from interface IP
-			// This will fail if subnet is larger than /30
-			derivedIP, err := intf.DeriveNeighborIP()
+			cs, err := intf.AddBGPNeighborWithConfig(ctx, bgpConfig)
 			if err != nil {
-				return fmt.Errorf("cannot auto-derive neighbor IP: %w\nuse --neighbor-ip for subnets larger than /30", err)
+				return nil, fmt.Errorf("adding BGP neighbor: %w", err)
 			}
-			bgpConfig.NeighborIP = derivedIP
-		}
 
-		changeSet, err := intf.AddBGPNeighborWithConfig(ctx, bgpConfig)
-		if err != nil {
-			return fmt.Errorf("adding BGP neighbor: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		// Show derived values
-		if bgpConfig.NeighborIP != "" && bgpNeighborIP == "" {
-			fmt.Printf("\nDerived neighbor IP: %s\n", bgpConfig.NeighborIP)
-		}
-		fmt.Println("TTL: 1 (hardcoded for direct neighbors)")
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+			// Show derived values
+			if bgpConfig.NeighborIP != "" && bgpNeighborIP == "" {
+				fmt.Printf("Derived neighbor IP: %s\n", bgpConfig.NeighborIP)
 			}
-		} else {
-			printDryRunNotice()
-		}
+			fmt.Println("TTL: 1 (hardcoded for direct neighbors)")
 
-		return nil
+			return cs, nil
+		})
 	},
 }
 
@@ -1541,41 +1235,17 @@ Examples:
   newtron -d leaf1-ny -i Ethernet0 remove-bgp-neighbor -x
   newtron -d leaf1-ny -i Ethernet0 remove-bgp-neighbor --neighbor-ip 10.1.1.2 -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-
-		dev, intf, err := requireInterface(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
-		if err := checkExecutePermission(auth.PermBGPModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := intf.RemoveBGPNeighbor(ctx, removeBgpNeighborIP)
-		if err != nil {
-			return fmt.Errorf("removing BGP neighbor: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withInterfaceWrite(func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(interfaceName)
+			if err := checkExecutePermission(auth.PermBGPModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := intf.RemoveBGPNeighbor(ctx, removeBgpNeighborIP)
+			if err != nil {
+				return nil, fmt.Errorf("removing BGP neighbor: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1643,41 +1313,17 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configletName := args[0]
-		ctx := context.Background()
-
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(configletName)
-		if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.ApplyBaseline(ctx, configletName, baselineVars)
-		if err != nil {
-			return fmt.Errorf("applying baseline: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(configletName)
+			if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := dev.ApplyBaseline(ctx, configletName, baselineVars)
+			if err != nil {
+				return nil, fmt.Errorf("applying baseline: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -1711,72 +1357,50 @@ Examples:
   newtron -d leaf1-ny cleanup --type acls -x
   newtron -d leaf1-ny cleanup --type vrfs -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName)
-		if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Collect orphaned resources
-		changeSet, summary, err := dev.Cleanup(ctx, cleanupType)
-		if err != nil {
-			return fmt.Errorf("analyzing orphaned configs: %w", err)
-		}
-
-		if changeSet.IsEmpty() {
-			fmt.Println("No orphaned configurations found. Device is clean.")
-			return nil
-		}
-
-		// Display summary
-		fmt.Printf("Orphaned Configurations on %s\n", bold(deviceName))
-		fmt.Println(strings.Repeat("=", 50))
-
-		if len(summary.OrphanedACLs) > 0 {
-			fmt.Printf("\nOrphaned ACLs (%d):\n", len(summary.OrphanedACLs))
-			for _, acl := range summary.OrphanedACLs {
-				fmt.Printf("  - %s\n", acl)
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName)
+			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
+				return nil, err
 			}
-		}
 
-		if len(summary.OrphanedVRFs) > 0 {
-			fmt.Printf("\nOrphaned VRFs (%d):\n", len(summary.OrphanedVRFs))
-			for _, vrf := range summary.OrphanedVRFs {
-				fmt.Printf("  - %s\n", vrf)
+			cs, summary, err := dev.Cleanup(ctx, cleanupType)
+			if err != nil {
+				return nil, fmt.Errorf("analyzing orphaned configs: %w", err)
 			}
-		}
 
-		if len(summary.OrphanedVNIMappings) > 0 {
-			fmt.Printf("\nOrphaned VNI Mappings (%d):\n", len(summary.OrphanedVNIMappings))
-			for _, vni := range summary.OrphanedVNIMappings {
-				fmt.Printf("  - %s\n", vni)
+			if cs.IsEmpty() {
+				fmt.Println("No orphaned configurations found. Device is clean.")
+				return nil, nil
 			}
-		}
 
-		fmt.Println("\nChanges to be applied:")
-		fmt.Print(changeSet.String())
+			// Display summary before changeset
+			fmt.Printf("Orphaned Configurations on %s\n", bold(deviceName))
+			fmt.Println(strings.Repeat("=", 50))
 
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+			if len(summary.OrphanedACLs) > 0 {
+				fmt.Printf("\nOrphaned ACLs (%d):\n", len(summary.OrphanedACLs))
+				for _, acl := range summary.OrphanedACLs {
+					fmt.Printf("  - %s\n", acl)
+				}
 			}
-		} else {
-			printDryRunNotice()
-		}
 
-		return nil
+			if len(summary.OrphanedVRFs) > 0 {
+				fmt.Printf("\nOrphaned VRFs (%d):\n", len(summary.OrphanedVRFs))
+				for _, vrf := range summary.OrphanedVRFs {
+					fmt.Printf("  - %s\n", vrf)
+				}
+			}
+
+			if len(summary.OrphanedVNIMappings) > 0 {
+				fmt.Printf("\nOrphaned VNI Mappings (%d):\n", len(summary.OrphanedVNIMappings))
+				for _, vni := range summary.OrphanedVNIMappings {
+					fmt.Printf("  - %s\n", vni)
+				}
+			}
+			fmt.Println()
+
+			return cs, nil
+		})
 	},
 }
 
@@ -1808,45 +1432,21 @@ Examples:
 		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
 			return fmt.Errorf("invalid VLAN ID: %s", args[0])
 		}
-		ctx := context.Background()
-
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-		if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-			return err
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.ConfigureSVI(ctx, vlanID, network.SVIConfig{
-			VRF:        sviVRF,
-			IPAddress:  sviIP,
-			AnycastMAC: sviAnycastGW,
-		})
-		if err != nil {
-			return fmt.Errorf("configuring SVI: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
+			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := dev.ConfigureSVI(ctx, vlanID, network.SVIConfig{
+				VRF:        sviVRF,
+				IPAddress:  sviIP,
+				AnycastMAC: sviAnycastGW,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("configuring SVI: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 

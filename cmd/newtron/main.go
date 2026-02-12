@@ -83,77 +83,23 @@ var (
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "newtron",
-	Short: "SONiC Network Configuration Tool",
-	Long: `Newtron is an object-oriented CLI tool for managing SONiC network devices.
+	Use:               "newtron",
+	Short:             "SONiC Network Configuration Tool",
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
+	Long: `Newtron is an object-oriented CLI for managing SONiC network devices.
 
-OO Pattern: Context flags select the object; commands are methods on that object.
+Context flags select the object; commands are methods on that object.
+Write commands preview changes by default — use -x to execute.
 
-  newtron -d <device> -i <interface> <verb> [args] [-x]
-
-Context Flags (Object Selection):
-  -n, --network    Network name (defaults from settings)
-  -d, --device     Device name (selects Device object)
-  -i, --interface  Interface/LAG/VLAN name (selects Interface object)
-
-Option Flags:
-  -x, --execute    Execute changes (default is dry-run/preview)
-  -s, --save       Save config to disk after executing changes (requires -x)
-  -S, --specs      Specification directory
-  -v, --verbose    Verbose output
-      --json       JSON output format
-
-Command Verbs (Object Methods):
-  show, get <prop>     Read object details or specific property
-  set <prop> <value>   Set object property
-  list <type>          List child objects (interfaces, vlans, etc.)
-  create <type>        Create new object
-  delete <type>        Delete object
-  add-member           Add member to collection (LAG/VLAN)
-  remove-member        Remove member from collection
-  list-members         List collection members
-  apply-service        Bind service to interface
-  remove-service       Unbind service from interface
-  get-service          Get bound service name
-  bind-acl             Bind ACL to interface
-  unbind-acl           Unbind ACL from interface
-  list-acls            List bound ACLs
-  map-l2vni            Map VLAN to L2VNI
-  unmap-l2vni          Unmap L2VNI (via: evpn unmap-l2vni)
-  get-l2vni            Get L2VNI mapping
-  configure-svi        Configure SVI (Layer 3 VLAN interface)
-
-Examples:
-  # Device-level operations
-  newtron -d leaf1-ny show                           # Show device status
-  newtron -d leaf1-ny list interfaces                # List interfaces
-  newtron -d leaf1-ny create vlan 100 --name Servers # Create VLAN
-
-  # Interface-level operations
-  newtron -d leaf1-ny -i Ethernet0 show              # Show interface
-  newtron -d leaf1-ny -i Ethernet0 get mtu           # Get MTU value
-  newtron -d leaf1-ny -i Ethernet0 set mtu 9000 -x   # Set MTU
-  newtron -d leaf1-ny -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
-  newtron -d leaf1-ny -i Ethernet0 get-service       # Get bound service
-
-  # LAG operations
-  newtron -d leaf1-ny create lag PortChannel100 --members Ethernet0,Ethernet4
-  newtron -d leaf1-ny -i PortChannel100 add-member Ethernet8 -x
-  newtron -d leaf1-ny -i PortChannel100 list-members # List LAG members
-
-  # VLAN operations
-  newtron -d leaf1-ny -i Vlan100 add-member Ethernet4 --tagged -x
-  newtron -d leaf1-ny -i Vlan100 list-members        # List VLAN members
-  newtron -d leaf1-ny -i Vlan100 map-l2vni 10100 -x
-  newtron -d leaf1-ny -i Vlan100 get-l2vni           # Get VNI mapping
-
-  # Interactive mode
-  newtron interactive`,
+  newtron -d <device> -i <interface> <verb> [args] [-x]`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip initialization for certain commands
 		if isSettingsOrHelp(cmd) {
@@ -181,9 +127,11 @@ Examples:
 			specDir = userSettings.GetSpecDir()
 		}
 
-		// Set log level
+		// Set log level: quiet by default, verbose on -v
 		if verbose {
 			util.SetLogLevel("debug")
+		} else {
+			util.SetLogLevel("warn")
 		}
 
 		// Initialize spec loader
@@ -226,76 +174,115 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Device name (object selector)")
 	rootCmd.PersistentFlags().StringVarP(&interfaceName, "interface", "i", "", "Interface/LAG/VLAN name (object selector)")
 
-	// Option flags
+	// Option flags (global)
 	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "Specification directory")
-	rootCmd.PersistentFlags().BoolVarP(&executeMode, "execute", "x", false, "Execute changes (default is dry-run)")
-	rootCmd.PersistentFlags().BoolVarP(&saveMode, "save", "s", false, "Save config to disk after executing changes")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
-	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+
+	// Write flags (-x/-s) and output flags (--json) are local to commands that use them.
+	// Use addWriteFlags(cmd) and addOutputFlags(cmd) to register them.
+
+	// Add write flags to verb commands that mutate state
+	for _, cmd := range []*cobra.Command{
+		setCmd, createCmd, deleteCmd, addMemberCmd, removeMemberCmd,
+		applyServiceCmd, removeServiceCmd, refreshServiceCmd,
+		bindAclCmd, unbindAclCmd, bindMacvpnCmd, unbindMacvpnCmd,
+		addBgpCmd, removeBgpCmd, applyBaselineCmd, cleanupCmd, configureSVICmd,
+		provisionCmd,
+	} {
+		addWriteFlags(cmd)
+	}
+
+	// Add output flags to verb commands that produce structured output
+	for _, cmd := range []*cobra.Command{
+		showCmd, getCmd, listCmd, listMembersCmd, listAclsCmd,
+		getServiceCmd, getL2VniCmd, getMacvpnCmd, listBgpCmd,
+		healthCheckVerbCmd,
+	} {
+		addOutputFlags(cmd)
+	}
+
+	// Noun-group aliases: inherit write/output flags for their subcommands
+	for _, cmd := range []*cobra.Command{aclCmd, bgpCmd, lagCmd, vlanCmd, evpnCmd, baselineCmd} {
+		addWriteFlags(cmd)
+		addOutputFlags(cmd)
+	}
+	for _, cmd := range []*cobra.Command{serviceCmd, interfaceCmd, healthCmd} {
+		addOutputFlags(cmd)
+	}
 
 	// ============================================================================
-	// OO Command Verbs (methods on the selected object)
+	// Command Groups
 	// ============================================================================
 
-	// Read operations (symmetric with write operations)
-	rootCmd.AddCommand(showCmd)        // show - display object details
-	rootCmd.AddCommand(getCmd)         // get <property> - get specific property
-	rootCmd.AddCommand(listCmd)        // list <type> - list child objects
-	rootCmd.AddCommand(listMembersCmd) // list-members - list collection members
-	rootCmd.AddCommand(listAclsCmd)    // list-acls - list bound ACLs
-	rootCmd.AddCommand(getServiceCmd)  // get-service - get bound service
-	rootCmd.AddCommand(getL2VniCmd)    // get-l2vni - get L2VNI mapping
-	rootCmd.AddCommand(listBgpCmd)     // list-bgp-neighbors - list BGP neighbors
+	rootCmd.AddGroup(
+		&cobra.Group{ID: "query", Title: "Object Operations:"},
+		&cobra.Group{ID: "mutate", Title: "Resource Management:"},
+		&cobra.Group{ID: "device", Title: "Device Operations:"},
+		&cobra.Group{ID: "meta", Title: "Configuration & Meta:"},
+	)
 
-	// Write operations
-	rootCmd.AddCommand(setCmd)            // set <property> <value>
-	rootCmd.AddCommand(createCmd)         // create <type> <name>
-	rootCmd.AddCommand(deleteCmd)         // delete <type> <name>
-	rootCmd.AddCommand(addMemberCmd)      // add-member <interface>
-	rootCmd.AddCommand(removeMemberCmd)   // remove-member <interface>
-	rootCmd.AddCommand(applyServiceCmd)   // apply-service <service>
-	rootCmd.AddCommand(removeServiceCmd)  // remove-service
-	rootCmd.AddCommand(refreshServiceCmd) // refresh-service (sync to current definition)
-	rootCmd.AddCommand(bindAclCmd)        // bind-acl <acl>
-	rootCmd.AddCommand(unbindAclCmd)      // unbind-acl <acl>
-	rootCmd.AddCommand(bindMacvpnCmd)     // bind-macvpn <macvpn-name>
-	rootCmd.AddCommand(unbindMacvpnCmd)   // unbind-macvpn
-	rootCmd.AddCommand(getMacvpnCmd)      // get-macvpn
-	rootCmd.AddCommand(addBgpCmd)         // add-bgp-neighbor <asn>
-	rootCmd.AddCommand(removeBgpCmd)      // remove-bgp-neighbor
+	// Object Operations (read/query)
+	for _, cmd := range []*cobra.Command{
+		showCmd, getCmd, listCmd, listMembersCmd, listAclsCmd,
+		getServiceCmd, getL2VniCmd, getMacvpnCmd, listBgpCmd,
+	} {
+		cmd.GroupID = "query"
+		rootCmd.AddCommand(cmd)
+	}
 
-	// Device-level operations
-	rootCmd.AddCommand(healthCheckVerbCmd) // health-check
-	rootCmd.AddCommand(applyBaselineCmd)   // apply-baseline <configlet>
-	rootCmd.AddCommand(cleanupCmd)         // cleanup (remove orphaned configs)
-	rootCmd.AddCommand(configureSVICmd)    // configure-svi <vlan-id>
+	// Resource Management (write/mutate)
+	for _, cmd := range []*cobra.Command{
+		setCmd, createCmd, deleteCmd, addMemberCmd, removeMemberCmd,
+		applyServiceCmd, removeServiceCmd, refreshServiceCmd,
+		bindAclCmd, unbindAclCmd, bindMacvpnCmd, unbindMacvpnCmd,
+		addBgpCmd, removeBgpCmd, configureSVICmd,
+	} {
+		cmd.GroupID = "mutate"
+		rootCmd.AddCommand(cmd)
+	}
 
-	// ============================================================================
-	// Legacy command groups (for backwards compatibility and grouping)
-	// ============================================================================
-	rootCmd.AddCommand(settingsCmd)
-	rootCmd.AddCommand(serviceCmd)   // service list, service show (network-level)
-	rootCmd.AddCommand(interfaceCmd) // interface list (device-level alias)
-	rootCmd.AddCommand(lagCmd)       // lag list, lag create (device-level aliases)
-	rootCmd.AddCommand(vlanCmd)      // vlan list, vlan create (device-level aliases)
-	rootCmd.AddCommand(aclCmd)       // acl list, acl create (device-level aliases)
-	rootCmd.AddCommand(evpnCmd)      // evpn list (device-level alias)
-	rootCmd.AddCommand(bgpCmd)       // bgp neighbors (device-level alias)
-	rootCmd.AddCommand(healthCmd)    // health check (device-level alias)
-	rootCmd.AddCommand(baselineCmd)  // baseline list, baseline show (network-level)
-	rootCmd.AddCommand(auditCmd)
-	rootCmd.AddCommand(stateCmd)
+	// Device Operations
+	for _, cmd := range []*cobra.Command{
+		provisionCmd, healthCheckVerbCmd, applyBaselineCmd, cleanupCmd, stateCmd,
+	} {
+		cmd.GroupID = "device"
+		rootCmd.AddCommand(cmd)
+	}
+
+	// Configuration & Meta
+	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, versionCmd} {
+		cmd.GroupID = "meta"
+		rootCmd.AddCommand(cmd)
+	}
+
+	// Noun-group aliases: hidden but still functional
+	for _, cmd := range []*cobra.Command{
+		serviceCmd, interfaceCmd, lagCmd, vlanCmd, aclCmd,
+		evpnCmd, bgpCmd, healthCmd, baselineCmd,
+	} {
+		cmd.Hidden = true
+		rootCmd.AddCommand(cmd)
+	}
+
+	// Premature commands (hidden)
 	rootCmd.AddCommand(interactiveCmd)
 	rootCmd.AddCommand(shellCmd)
-	rootCmd.AddCommand(versionCmd)
 }
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("newtron %s (%s)\n", version.Version, version.GitCommit)
+		printVersion("newtron")
 	},
+}
+
+func printVersion(tool string) {
+	if version.Version == "dev" {
+		fmt.Printf("%s dev build (use 'make build' for version info)\n", tool)
+	} else {
+		fmt.Printf("%s %s (%s)\n", tool, version.Version, version.GitCommit)
+	}
 }
 
 // ============================================================================
@@ -397,6 +384,74 @@ func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
 	return nil
 }
 
+// withDeviceWrite handles boilerplate for device-level write commands.
+// The callback receives a connected, locked device and returns a changeset.
+// If changeset is nil, the helper returns nil (command handled its own output).
+// If changeset is non-nil, the helper prints it and handles execute/dry-run.
+func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+	ctx := context.Background()
+	dev, err := requireDevice(ctx)
+	if err != nil {
+		return err
+	}
+	defer dev.Disconnect()
+
+	if err := dev.Lock(); err != nil {
+		return fmt.Errorf("locking device: %w", err)
+	}
+	defer dev.Unlock()
+
+	changeSet, err := fn(ctx, dev)
+	if err != nil {
+		return err
+	}
+	if changeSet == nil {
+		return nil
+	}
+
+	fmt.Println("Changes to be applied:")
+	fmt.Print(changeSet.String())
+
+	if executeMode {
+		return executeAndSave(ctx, changeSet, dev)
+	}
+	printDryRunNotice()
+	return nil
+}
+
+// withInterfaceWrite handles boilerplate for interface-level write commands.
+// Same contract as withDeviceWrite but also resolves the interface.
+func withInterfaceWrite(fn func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error)) error {
+	ctx := context.Background()
+	dev, intf, err := requireInterface(ctx)
+	if err != nil {
+		return err
+	}
+	defer dev.Disconnect()
+
+	if err := dev.Lock(); err != nil {
+		return fmt.Errorf("locking device: %w", err)
+	}
+	defer dev.Unlock()
+
+	changeSet, err := fn(ctx, dev, intf)
+	if err != nil {
+		return err
+	}
+	if changeSet == nil {
+		return nil
+	}
+
+	fmt.Println("Changes to be applied:")
+	fmt.Print(changeSet.String())
+
+	if executeMode {
+		return executeAndSave(ctx, changeSet, dev)
+	}
+	printDryRunNotice()
+	return nil
+}
+
 // isSettingsOrHelp checks whether cmd (or any ancestor) is a settings, help, or version command.
 func isSettingsOrHelp(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
@@ -406,6 +461,27 @@ func isSettingsOrHelp(cmd *cobra.Command) bool {
 		}
 	}
 	return false
+}
+
+// addWriteFlags registers -x/--execute and -s/--save as local flags.
+// For noun-group parent commands, these are PersistentFlags so subcommands inherit.
+func addWriteFlags(cmd *cobra.Command) {
+	flags := cmd.Flags()
+	if cmd.HasSubCommands() {
+		flags = cmd.PersistentFlags()
+	}
+	flags.BoolVarP(&executeMode, "execute", "x", false, "Execute changes (default is dry-run)")
+	flags.BoolVarP(&saveMode, "save", "s", false, "Save config after changes (requires -x)")
+}
+
+// addOutputFlags registers --json as a local flag.
+// For noun-group parent commands, this is a PersistentFlag so subcommands inherit.
+func addOutputFlags(cmd *cobra.Command) {
+	flags := cmd.Flags()
+	if cmd.HasSubCommands() {
+		flags = cmd.PersistentFlags()
+	}
+	flags.BoolVar(&jsonOutput, "json", false, "JSON output")
 }
 
 // Color helpers — delegate to pkg/cli
