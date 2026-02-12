@@ -9,13 +9,30 @@ import (
 	"github.com/newtron-network/newtron/pkg/version"
 )
 
+var verboseFlag bool
+
 func main() {
 	rootCmd := &cobra.Command{
 		Use:   "newtest",
 		Short: "E2E testing for newtron",
+		Long: `Newtest runs end-to-end test scenarios against newtron-managed topologies.
+
+Scenarios are YAML files that define steps (provision, configure, verify).
+Use --dir to select a test suite, --all to run every scenario in it.
+
+  newtest start --dir <suite> --all`,
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
 	}
 
+	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
+
 	rootCmd.AddCommand(
+		newStartCmd(),
+		newPauseCmd(),
+		newStopCmd(),
+		newStatusCmd(),
 		newRunCmd(),
 		newListCmd(),
 		newSuitesCmd(),
@@ -24,7 +41,11 @@ func main() {
 			Use:   "version",
 			Short: "Print version information",
 			Run: func(cmd *cobra.Command, args []string) {
-				fmt.Printf("newtest %s (%s)\n", version.Version, version.GitCommit)
+				if version.Version == "dev" {
+					fmt.Println("newtest dev build (use 'make build' for version info)")
+				} else {
+					fmt.Printf("newtest %s (%s)\n", version.Version, version.GitCommit)
+				}
 			},
 		},
 	)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/network"
@@ -37,6 +38,11 @@ type RunOptions struct {
 	Parallel  int
 	Verbose   bool
 	JUnitPath string
+
+	// Lifecycle fields (set by `start` command, not by `run`)
+	Suite     string            // suite name for state tracking; empty disables lifecycle
+	Resume    bool              // true when resuming a paused run
+	Completed map[string]Status // scenario → status from previous run (resume)
 }
 
 // NewRunner creates a new test runner.
@@ -56,6 +62,14 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 		return nil, fmt.Errorf("specify --scenario <name> or --all")
 	}
 
+	// Validate --topology override exists
+	if opts.Topology != "" {
+		topoDir := filepath.Join(r.TopologiesDir, opts.Topology, "specs")
+		if _, err := os.Stat(topoDir); os.IsNotExist(err) {
+			return nil, fmt.Errorf("topology %q not found: %s does not exist", opts.Topology, topoDir)
+		}
+	}
+
 	var scenarios []*Scenario
 
 	if opts.All {
@@ -68,7 +82,10 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 			return nil, fmt.Errorf("no scenarios found in %s", r.ScenariosDir)
 		}
 	} else {
-		path := filepath.Join(r.ScenariosDir, opts.Scenario+".yaml")
+		path, err := resolveScenarioPath(r.ScenariosDir, opts.Scenario)
+		if err != nil {
+			return nil, err
+		}
 		s, err := ParseScenario(path)
 		if err != nil {
 			return nil, err
@@ -124,25 +141,44 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
 	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
 
-	// Deploy once
+	// Deploy: lifecycle mode uses EnsureTopology; legacy mode uses DeployTopology
 	if !opts.NoDeploy {
-		lab, err := DeployTopology(specDir)
-		if err != nil {
-			var results []*ScenarioResult
-			for _, sc := range scenarios {
-				results = append(results, &ScenarioResult{
-					Name:        sc.Name,
-					Topology:    topology,
-					Platform:    sc.Platform,
-					Status:      StatusError,
-					DeployError: &InfraError{Op: "deploy", Err: err},
-				})
+		if opts.Suite != "" {
+			lab, _, err := EnsureTopology(specDir)
+			if err != nil {
+				var results []*ScenarioResult
+				for _, sc := range scenarios {
+					results = append(results, &ScenarioResult{
+						Name:        sc.Name,
+						Topology:    topology,
+						Platform:    sc.Platform,
+						Status:      StatusError,
+						DeployError: &InfraError{Op: "deploy", Err: err},
+					})
+				}
+				return results, nil
 			}
-			return results, nil
-		}
-		r.Lab = lab
-		if !opts.Keep {
-			defer func() { _ = DestroyTopology(r.Lab) }()
+			r.Lab = lab
+			// Lifecycle mode: never destroy — stop command handles that
+		} else {
+			lab, err := DeployTopology(specDir)
+			if err != nil {
+				var results []*ScenarioResult
+				for _, sc := range scenarios {
+					results = append(results, &ScenarioResult{
+						Name:        sc.Name,
+						Topology:    topology,
+						Platform:    sc.Platform,
+						Status:      StatusError,
+						DeployError: &InfraError{Op: "deploy", Err: err},
+					})
+				}
+				return results, nil
+			}
+			r.Lab = lab
+			if !opts.Keep {
+				defer func() { _ = DestroyTopology(r.Lab) }()
+			}
 		}
 	}
 
@@ -152,6 +188,10 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 
 	// Connect devices once
 	if err := r.connectDevices(ctx, specDir); err != nil {
+		connectErr := err
+		if opts.NoDeploy {
+			connectErr = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
+		}
 		var results []*ScenarioResult
 		for _, sc := range scenarios {
 			results = append(results, &ScenarioResult{
@@ -159,7 +199,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 				Topology:    topology,
 				Platform:    sc.Platform,
 				Status:      StatusError,
-				DeployError: err,
+				DeployError: connectErr,
 			})
 		}
 		return results, nil
@@ -170,10 +210,39 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
 
+	// Seed status map with completed scenarios from previous run (resume)
+	if opts.Completed != nil {
+		for name, st := range opts.Completed {
+			scenarioStatus[name] = st
+		}
+	}
+
 	for i, sc := range scenarios {
 		platform := opts.Platform
 		if platform == "" {
 			platform = sc.Platform
+		}
+
+		// Resume: skip already-completed scenarios
+		if opts.Resume {
+			if prev, ok := opts.Completed[sc.Name]; ok && prev == StatusPassed {
+				result := &ScenarioResult{
+					Name:       sc.Name,
+					Topology:   topology,
+					Platform:   platform,
+					Status:     StatusSkipped,
+					SkipReason: "already passed (resumed)",
+				}
+				results = append(results, result)
+				idx := i
+				r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+				continue
+			}
+		}
+
+		// Pause check: if another process set status to "pausing", stop here
+		if opts.Suite != "" && CheckPausing(opts.Suite) {
+			return results, &PauseError{Completed: len(results)}
 		}
 
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
@@ -226,16 +295,46 @@ func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts
 	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
 
+	// Seed status map with completed scenarios from previous run (resume)
+	if opts.Completed != nil {
+		for name, st := range opts.Completed {
+			scenarioStatus[name] = st
+		}
+	}
+
 	for i, s := range scenarios {
+		topology := opts.Topology
+		if topology == "" {
+			topology = s.Topology
+		}
+		platform := opts.Platform
+		if platform == "" {
+			platform = s.Platform
+		}
+
+		// Resume: skip already-completed scenarios
+		if opts.Resume {
+			if prev, ok := opts.Completed[s.Name]; ok && prev == StatusPassed {
+				result := &ScenarioResult{
+					Name:       s.Name,
+					Topology:   topology,
+					Platform:   platform,
+					Status:     StatusSkipped,
+					SkipReason: "already passed (resumed)",
+				}
+				results = append(results, result)
+				idx := i
+				r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+				continue
+			}
+		}
+
+		// Pause check
+		if opts.Suite != "" && CheckPausing(opts.Suite) {
+			return results, &PauseError{Completed: len(results)}
+		}
+
 		if reason := checkRequires(s, scenarioStatus); reason != "" {
-			topology := opts.Topology
-			if topology == "" {
-				topology = s.Topology
-			}
-			platform := opts.Platform
-			if platform == "" {
-				platform = s.Platform
-			}
 			result := &ScenarioResult{
 				Name:       s.Name,
 				Topology:   topology,
@@ -286,17 +385,27 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
-		lab, err := DeployTopology(specDir)
-		if err != nil {
-			result.DeployError = &InfraError{Op: "deploy", Err: err}
-			result.Status = StatusError
-			result.Duration = time.Since(start)
-			return result, nil
-		}
-		r.Lab = lab
-
-		if !opts.Keep {
-			defer func() { _ = DestroyTopology(r.Lab) }()
+		if opts.Suite != "" {
+			lab, _, err := EnsureTopology(specDir)
+			if err != nil {
+				result.DeployError = &InfraError{Op: "deploy", Err: err}
+				result.Status = StatusError
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			r.Lab = lab
+		} else {
+			lab, err := DeployTopology(specDir)
+			if err != nil {
+				result.DeployError = &InfraError{Op: "deploy", Err: err}
+				result.Status = StatusError
+				result.Duration = time.Since(start)
+				return result, nil
+			}
+			r.Lab = lab
+			if !opts.Keep {
+				defer func() { _ = DestroyTopology(r.Lab) }()
+			}
 		}
 	}
 
@@ -306,7 +415,11 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 
 	// Connect to all devices
 	if err := r.connectDevices(ctx, specDir); err != nil {
-		result.DeployError = err
+		if opts.NoDeploy {
+			result.DeployError = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
+		} else {
+			result.DeployError = err
+		}
 		result.Status = StatusError
 		result.Duration = time.Since(start)
 		return result, nil
@@ -426,6 +539,19 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 	output.Result.Name = step.Name
 	output.Result.Action = step.Action
 
+	// Aggregate per-device error details into Message when executors only set Details
+	if output.Result.Message == "" && len(output.Result.Details) > 0 {
+		var msgs []string
+		for _, d := range output.Result.Details {
+			if d.Status != StatusPassed && d.Message != "" {
+				msgs = append(msgs, d.Device+": "+d.Message)
+			}
+		}
+		if len(msgs) > 0 {
+			output.Result.Message = strings.Join(msgs, "; ")
+		}
+	}
+
 	return output
 }
 
@@ -516,4 +642,44 @@ func checkRequires(sc *Scenario, status map[string]Status) string {
 		}
 	}
 	return ""
+}
+
+// resolveScenarioPath resolves a scenario name to a YAML file path.
+// Tries in order:
+//  1. Exact match: <dir>/<name>.yaml
+//  2. Numbered prefix: <dir>/*-<name>.yaml
+//  3. Scan files for matching name: field
+func resolveScenarioPath(dir, name string) (string, error) {
+	// 1. Exact match
+	exact := filepath.Join(dir, name+".yaml")
+	if _, err := os.Stat(exact); err == nil {
+		return exact, nil
+	}
+
+	// 2. Numbered prefix glob: *-<name>.yaml
+	matches, _ := filepath.Glob(filepath.Join(dir, "*-"+name+".yaml"))
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	// 3. Scan all YAML files for matching name: field
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("scenario %q not found: %w", name, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		s, err := ParseScenario(path)
+		if err != nil {
+			continue
+		}
+		if s.Name == name {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("scenario %q not found in %s", name, dir)
 }

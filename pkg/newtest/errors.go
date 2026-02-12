@@ -34,3 +34,12 @@ func (e *StepError) Error() string {
 func (e *StepError) Unwrap() error {
 	return e.Err
 }
+
+// PauseError is returned when a suite run is interrupted by a pause signal.
+type PauseError struct {
+	Completed int
+}
+
+func (e *PauseError) Error() string {
+	return fmt.Sprintf("paused after %d scenarios", e.Completed)
+}

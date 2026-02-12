@@ -79,7 +79,10 @@ func (p *ConsoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) 
 	tag := fmt.Sprintf("[%d/%d]", index+1, total)
 
 	if p.Verbose {
-		// In verbose mode, steps are printed inline; just print the final status
+		// Surface deploy/connect errors that otherwise have no visible output
+		if result.DeployError != nil {
+			fmt.Fprintf(p.W, "          %s\n", cli.Dim(result.DeployError.Error()))
+		}
 		fmt.Fprintf(p.W, "          %s  (%s)\n\n", p.colorStatus(result.Status), p.formatDuration(result.Duration))
 		return
 	}
@@ -176,7 +179,17 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 				if step.Status == StatusFailed || step.Status == StatusError {
 					msg := step.Message
 					if msg == "" {
-						msg = string(step.Status)
+						var msgs []string
+						for _, d := range step.Details {
+							if d.Status != StatusPassed && d.Message != "" {
+								msgs = append(msgs, d.Device+": "+d.Message)
+							}
+						}
+						if len(msgs) > 0 {
+							msg = strings.Join(msgs, "; ")
+						} else {
+							msg = string(step.Status)
+						}
 					}
 					fmt.Fprintf(p.W, "         step %q (%s): %s\n", step.Name, step.Action, msg)
 				}
@@ -232,4 +245,47 @@ func (p *ConsoleProgress) formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", m)
 	}
 	return fmt.Sprintf("%dm%02ds", m, s)
+}
+
+// StateReporter wraps a ProgressReporter and persists run state after each
+// scenario completes. This enables the status command and resume on pause.
+type StateReporter struct {
+	Inner ProgressReporter
+	State *RunState
+}
+
+func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
+	// Initialize scenario states
+	r.State.Scenarios = make([]ScenarioState, len(scenarios))
+	for i, s := range scenarios {
+		r.State.Scenarios[i] = ScenarioState{Name: s.Name}
+	}
+	_ = SaveRunState(r.State)
+	r.Inner.SuiteStart(scenarios)
+}
+
+func (r *StateReporter) ScenarioStart(name string, index, total int) {
+	r.Inner.ScenarioStart(name, index, total)
+}
+
+func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
+	if index < len(r.State.Scenarios) {
+		r.State.Scenarios[index].Status = string(result.Status)
+		r.State.Scenarios[index].Duration = result.Duration.Round(time.Second).String()
+	}
+	_ = SaveRunState(r.State)
+	r.Inner.ScenarioEnd(result, index, total)
+}
+
+func (r *StateReporter) StepStart(scenario string, step *Step, index, total int) {
+	r.Inner.StepStart(scenario, step, index, total)
+}
+
+func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, total int) {
+	r.Inner.StepEnd(scenario, result, index, total)
+}
+
+func (r *StateReporter) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
+	_ = SaveRunState(r.State)
+	r.Inner.SuiteEnd(results, duration)
 }

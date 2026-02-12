@@ -8,6 +8,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtest"
 	"github.com/newtron-network/newtron/pkg/settings"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 func newRunCmd() *cobra.Command {
@@ -15,9 +16,21 @@ func newRunCmd() *cobra.Command {
 	var dir string
 
 	cmd := &cobra.Command{
-		Use:   "run",
-		Short: "Run test scenarios",
+		Use:    "run",
+		Short:  "Run test scenarios",
+		Long:   "Deprecated: use 'newtest start' instead. Kept for backward compatibility.",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Inherit verbose from global -v flag
+			opts.Verbose = verboseFlag
+
+			// Quiet by default; verbose on -v
+			if opts.Verbose {
+				util.SetLogLevel("debug")
+			} else {
+				util.SetLogLevel("warn")
+			}
+
 			dir = resolveDir(cmd, dir)
 			topologiesDir := resolveTopologiesDir()
 
@@ -74,7 +87,6 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Keep, "keep", false, "don't destroy topology after tests")
 	cmd.Flags().BoolVar(&opts.NoDeploy, "no-deploy", false, "skip deploy/destroy")
 	cmd.Flags().IntVar(&opts.Parallel, "parallel", 1, "parallel provisioning count")
-	cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", false, "verbose output")
 	cmd.Flags().StringVar(&opts.JUnitPath, "junit", "", "JUnit XML output path")
 
 	return cmd
