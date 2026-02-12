@@ -392,12 +392,20 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *CompositeBuilder, re
 		underlayASN = resolved.UnderlayASN
 	}
 
+	// Determine RR cluster ID: use SiteSpec.ClusterID if set, fall back to loopback IP.
+	clusterID := resolved.LoopbackIP
+	if resolved.Site != "" {
+		if site, err := tp.network.GetSite(resolved.Site); err == nil && site.ClusterID != "" {
+			clusterID = site.ClusterID
+		}
+	}
+
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
 	// log_neighbor_changes are already set in addDeviceEntries for all devices)
 	cb.AddBGPGlobals("default", map[string]string{
 		"local_asn":              fmt.Sprintf("%d", underlayASN),
 		"router_id":             resolved.RouterID,
-		"rr_cluster_id":         resolved.LoopbackIP,
+		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
 		"ebgp_requires_policy":  "false",
 		"log_neighbor_changes":  "true",

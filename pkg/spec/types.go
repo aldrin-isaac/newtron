@@ -229,7 +229,7 @@ type SiteSpecFile struct {
 type SiteSpec struct {
 	Region          string   `json:"region"`                     // Region this site belongs to
 	RouteReflectors []string `json:"route_reflectors,omitempty"` // Device names that are RRs
-	ClusterID       string   `json:"cluster_id,omitempty"`       // TODO(v4): not consumed — SetupRouteReflector should read from SiteSpecFile when config doesn't override
+	ClusterID       string   `json:"cluster_id,omitempty"`       // BGP RR cluster ID; used by topology provisioner, falls back to loopback IP
 }
 
 // ============================================================================
