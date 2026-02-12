@@ -2,7 +2,6 @@
 
 For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
 
-Version history is in [Appendix A](#appendix-a-changelog) at the end of this document.
 
 ---
 
@@ -3738,89 +3737,3 @@ from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.m
 | §12 Execution modes | §11 CLI implementation |
 | §13 Verification strategy | §3.6A types, §5.2 verification methods |
 
----
-
-## Appendix A: Changelog
-
-Section numbers below refer to the version when the change was made and may not match current numbering.
-
-#### v2
-
-| Area | Change |
-|------|--------|
-| **SSH Tunnel** | Added `pkg/device/tunnel.go` — SSHTunnel struct, NewSSHTunnel, LocalAddr, Close |
-| **StateDB Client** | Added `pkg/device/statedb.go` — StateDB struct with 13 state tables |
-| **Device Struct** | Added `tunnel`, `stateClient`, `StateDB`, `mu` fields |
-| **ResolvedProfile** | Added `SSHUser` and `SSHPass` fields |
-| **ConfigDB Tables** | Added NEWTRON_SERVICE_BINDING, SAG_GLOBAL, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, QoS tables |
-| **Redis Integration** | SSH tunnel when creds present, direct otherwise; dual-client architecture |
-| **Device Operations** | Added RunHealthChecks, Cleanup, MapL2VNI/MapL3VNI/UnmapVNI, CreateVTEP/DeleteVTEP, ApplyBaseline |
-| **Interface Operations** | Added RefreshService, BindMACVPN/UnbindMACVPN, AddBGPNeighborWithConfig |
-| **Testing Strategy** | Three-tier assertions, build tags, SSH tunnel pool, ResetLabBaseline |
-
-#### v3
-
-| Area | Change |
-|------|--------|
-| **CONFIG_DB Tables** | Added 9 tables: ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, BGP_GLOBALS_AF_NETWORK, BGP_GLOBALS_AF_AGGREGATE_ADDR, PREFIX_SET, COMMUNITY_SET, AS_PATH_SET |
-| **Extended BGP Structs** | BGPGlobalsEntry, BGPGlobalsAFEntry, BGPNeighborEntry, BGPNeighborAFEntry expanded |
-| **Platform Config** | SonicPlatformConfig, PortDefinition, platform.json parsing via SSH |
-| **Composite Types** | CompositeConfig, CompositeBuilder, CompositeMode, CompositeDeliveryResult |
-| **Pipeline Operations** | Redis MULTI/EXEC pipeline for composite delivery |
-| **Device Operations** | Added SetBGPGlobals, SetupRouteReflector, ConfigurePeerGroup, route map/prefix set management, port management, composite delivery |
-| **Precondition Checker** | Added RequirePortAllowed, RequirePlatformLoaded, RequireNoExistingService, RequirePeerGroupExists |
-
-#### v4
-
-| Area | Change |
-|------|--------|
-| **Spool → Composite Rename** | All spool types/functions renamed to composite |
-| **Type Naming Cleanup** | Container types get `SpecFile` suffix, individual types get `Spec` suffix |
-| **Topology Types** | TopologySpecFile, TopologyDevice, TopologyDeviceConfig, TopologyInterface, TopologyLink |
-| **Topology Provisioner** | TopologyProvisioner with ProvisionDevice, ProvisionInterface, GenerateDeviceComposite |
-
-#### v5
-
-| Area | Change |
-|------|--------|
-| **DeviceProfile** | Added `SSHPort` field for custom SSH port (newtlab integration) |
-| **TopologySpecFile** | Added `NewtLab *NewtLabConfig` field for newtlab defaults |
-| **APP_DB Client** | `pkg/device/appldb.go` — AppDB struct, AppDBClient with GetRoute |
-| **ASIC_DB Client** | `pkg/device/asicdb.go` — AsicDBClient with GetRouteASIC, SAI object chain resolution |
-| **Verification Types** | VerificationResult, VerificationError, RouteEntry, NextHop, RouteSource (§3.6A) |
-| **Verification Methods** | VerifyChangeSet, GetRoute, GetRouteASIC |
-| **Spec Type Ownership** | New §3.1A: cross-tool field ownership table |
-| **Cross-References** | New section: bidirectional links to device LLD, newtlab LLD, newtest LLD, HLD |
-| **Document Structure** | Extracted device-layer detail (SSH tunnel, StateDB, Redis, config persistence) to device-lld.md; sections renumbered |
-
-#### v6
-
-| Area | Change |
-|------|--------|
-| **Lock/Unlock** | Distributed lock via Redis STATE_DB hash (`NEWTRON_LOCK\|<device>`) with Lua-scripted atomic acquire/release and TTL expiry. `Lock()`, `Unlock()`, `IsLocked()`, `LockHolder()` on `device.Device` (§3.3) and `network.Device` (§3.2). Replaces file-based advisory lock. `ErrDeviceLocked` sentinel includes holder identity. |
-| **RouteEntry Package** | Attributed `RouteEntry`, `NextHop`, `RouteSource`, `VerificationResult` to `pkg/device/verify.go` (§3.6A) to avoid import cycle |
-| **Execution Model** | Operations return ChangeSets for preview; caller applies via `cs.Apply()`. Lock/verify is caller responsibility. Replaces session-level locking (§5) |
-| **ApplyService Translation** | Complete L3/L2/IRB/ACL/QoS/BGP translation rules replacing elided pseudocode (§5.1) |
-| **DependencyChecker** | Reference-counting via CONFIG_DB scan for safe ACL/VRF/VLAN deletion (§5.1) |
-| **DeriveVRFName/DeriveACLName** | Explicit formulas: `{service}-{shortenedIntf}` / `{service}` and `{service}-in`/`{service}-out` (§7.1) |
-| **Composite ChangeSet** | Documented overwrite vs merge ChangeSet generation in `DeliverComposite` (§5.2) |
-| **ConfigDB Entry Types** | 12 types defined: PortEntry, VLANEntry, VLANMemberEntry, InterfaceEntry, PortChannelEntry, VRFEntry, VXLANTunnelEntry, VXLANMapEntry, EVPNNVOEntry, ACLTableEntry, ACLRuleEntry, ACLTableTypeEntry (§3.4) |
-| **Missing Types** | Added ApplyServiceOpts (§3.8), AuditFilter (§8.2), PermContext (§9.2), QoSProfile, CoSClass (§3.1) |
-| **ChangeSet.Apply()** | Documented partial failure semantics — sequential writes, no auto-rollback (§3.6) |
-| **ChangeSet.Rollback()** | Documented inverse operations — add→delete, modify→restore, delete→recreate (§3.6) |
-| **Composite Merge Conflict** | Documented conflict rules — same key/different values = error (§5.2) |
-| **Error Sentinels** | Added `ErrDeviceLocked`, `ErrNotConnected` (§10.1) |
-
-#### v7
-
-| Area | Change |
-|------|--------|
-| **Operations Cleanup** | Removed legacy operation wrapper files (`interface.go`, `service.go`, `vlan.go`, `lag.go`, `acl.go`, `evpn.go`) from `pkg/operations/`. Renamed `operation.go` to `precondition.go`, retaining only `PreconditionChecker` and `DependencyChecker`. Removed `Operation` interface, `BaseOperation`, `ChangeSet`, `Change`, and `applyPreview` bridge — all operations are now methods on `network.Device` and `network.Interface` (§5) |
-| **Audit Change Type** | `audit.Event.Changes` now uses `network.Change` (typed `map[string]string` values) instead of `operations.Change` (untyped `interface{}` values). Eliminates circular dependency path |
-| **Package Structure** | Added `pkg/settings/` (CLI user settings persistence) and `pkg/configlet/` (baseline template loading and variable resolution) to §2 |
-| **CLI Files** | Added `cmd_verbs.go` (symmetric read/write operations), `cmd_provision.go` (topology provisioning), `shell.go` (interactive shell) to §2 |
-| **SSH Tunnel** | `NewSSHTunnel` now accepts `port int` parameter (0 defaults to 22). Added 30s dial timeout via `ssh.ClientConfig.Timeout`. `DeviceProfile` and `ResolvedProfile` gain `SSHPort` field for newtlab-allocated ports |
-| **Service Binding in State** | `parseInterfaces()` now extracts service binding from `NEWTRON_SERVICE_BINDING` table into `InterfaceState.Service` |
-| **CLI §11** | Documented `--save` flag (§11.10), `state` commands (§11.9), `audit list` (§11.9), `shell` REPL (§11.9), MAC-VPN verbs in §11.3 symmetric operations table. Updated §11.2 command registration to match actual codebase |
-| **Verification TODOs** | Added TODO comments in `device.go` (appldb/asicdb/GetRoute/GetRouteASIC), `statedb.go` (GetEntry/distributed locking), `changeset.go` (AppliedCount/Verification fields) |
-| **Code-LLD Reconciliation** | Systematic package-by-package comparison; all findings documented in this changelog |

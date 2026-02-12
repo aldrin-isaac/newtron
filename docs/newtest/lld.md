@@ -2027,36 +2027,3 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 | §10 CLI | §8 CLI implementation |
 | §12 Implementation phases | All sections (phased delivery) |
 
----
-
-## Appendix A: Changelog
-
-#### v7
-
-| Area | Change |
-|------|--------|
-| **Suite mode** | Added `--dir` flag, `runShared()`, shared deployment, dependency ordering via `requires` field (§4.3a) |
-| **Scenario.Requires/Repeat** | New fields on Scenario struct for suite mode dependencies and stress testing (§2.1) |
-| **Dependency graph** | `validateDependencyGraph()` and `topologicalSort()` (Kahn's algorithm) in parser.go (§3.1) |
-| **Skip propagation** | Failed dependency → all dependents skipped (§4.3a) |
-| **ScenarioResult extensions** | Added `Repeat`, `FailedIteration` fields; `StepResult.Iteration` (§4.3b) |
-| **18 new StepAction constants** | `restart-service`, `apply-frr-defaults`, `set-interface`, `create-vlan`, `delete-vlan`, `add-vlan-member`, `create-vrf`, `delete-vrf`, `create-vtep`, `delete-vtep`, `map-l2vni`, `map-l3vni`, `unmap-vni`, `configure-svi`, `bgp-add-neighbor`, `bgp-remove-neighbor`, `refresh-service`, `cleanup` (§2.3) |
-| **18 new executors** | §5.16–§5.33, all using `ExecuteOp` pattern with ChangeSet accumulation |
-| **Param helpers** | `strParam()`, `intParam()`, `boolParam()` for typed extraction from `Params map[string]any` (§5.15) |
-| **Validation helpers** | `requireParam()`, `requireDevices()` in parser.go (§3.2) |
-| **2node-incremental suite** | 25 scenarios in `newtest/suites/2node-incremental/` testing all newtron config operations |
-| **Unit tests** | 81 tests (57 existing + 24 new action validation + param helper tests) |
-
-#### v6
-
-| Area | Change |
-|------|--------|
-| **Runner.Network** | Replaced `Devices map[string]*device.Device` + `Platforms` with `Network *network.Network` (§4.1) |
-| **connectDevices()** | Rewritten: builds `network.Network` OO hierarchy, connects all devices. No session-level locking — newtron operations lock per-operation (§4.5) |
-| **RouteEntry** | Fixed type to `*device.RouteEntry` (not `*network.RouteEntry`) — lives in `pkg/device/verify.go` |
-| **VM Leak Prevention** | Added `defer DestroyTopology(r.Lab)` after successful deploy (§4.3) |
-| **SIGINT Handling** | Added `signal.NotifyContext` for clean shutdown on Ctrl-C (§4.3) |
-| **verify-health** | Documented single-shot semantics — no polling, use `wait` for convergence (§5.8) |
-| **ChangeSet Accumulation** | Documented last-write-wins explicitly (§4.1) |
-| **Parallel Scenarios** | Documented strictly sequential execution with rationale (§9.3) |
-| **Executor Updates** | applyServiceExecutor and removeServiceExecutor use `r.Network.GetDevice().GetInterface()` (§5.11, §5.12) |

@@ -1,40 +1,6 @@
-# Newtron HOWTO Guide (v4)
+# Newtron HOWTO Guide
 
 For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
-
-### What Changed in v2
-
-| Area | Change |
-|------|--------|
-| **Connection Architecture** | Added new Section 2 explaining SSH tunnels — why they are needed (port 6379 not forwarded), SSH credentials in profiles, Connect() flow |
-| **StateDB Queries** | Added new Section 13 for operational state access via STATE_DB (DB 6) |
-| **Config Persistence** | Added new Section 16 warning that Redis changes are runtime-only; `config save -y` required |
-| **Lab Environment** | Added new Section 17 with lab-start lifecycle, topology switching |
-| **Device Profiles** | Added `ssh_user`/`ssh_pass` optional fields to profile documentation |
-| **Service Management** | Added NEWTRON_SERVICE_BINDING tracking step to ApplyService flow |
-| **Build Lab Tools** | Added Section 1.3 with `make build` instructions |
-| **Host Key Verification** | Added InsecureIgnoreHostKey note for lab environments |
-
-**Lines:** 1699 (v1) → 2599 (v2) | All v1 sections preserved and renumbered.
-
-### What Changed in v3
-
-| Area | Change |
-|------|--------|
-| **BGP Management** | BGP now managed via frrcfgd (CONFIG_DB-managed) instead of direct FRR manipulation |
-| **Route Reflector Setup** | Added SetupRouteReflector (replaces SetupBGPEVPN) for BGP route reflector configuration |
-| **Composite Mode** | Added composite (formerly spool) mode for offline config generation without device connection |
-| **Port Creation** | Port creation now validates against platform.json for hardware compatibility |
-| **Extended Routing Spec** | Routing spec extended with community, prefix-list, and redistribute support |
-
-### What Changed in v4
-
-| Area | Change |
-|------|--------|
-| **Spool to Composite Rename** | Spool renamed to composite throughout the codebase and APIs |
-| **Topology Provisioning** | Added topology provisioning from topology.json (new Section 21) |
-| **Provisioning Modes** | Two provisioning modes: full device (CompositeOverwrite) and per-interface (ApplyService) |
-| **Type Naming Cleanup** | Type naming cleanup with Spec suffixes for consistency |
 
 ---
 

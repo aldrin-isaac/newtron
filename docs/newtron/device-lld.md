@@ -1067,25 +1067,3 @@ E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function (ne
 | §5.4 verifyProvisioningExecutor | Calls `Device.VerifyChangeSet()` which re-reads CONFIG_DB via a fresh ConfigDBClient on the same tunnel |
 | §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.7) |
 
----
-
-## Appendix A: Changelog
-
-#### v6
-
-| Area | Change |
-|------|--------|
-| **STATE_DB Key Formats** | Added key format table for all 13 STATE_DB tables (§2.1) |
-| **SSH Timeouts** | 30s dial timeout, 60s keepalive in `ssh.ClientConfig` (§1.2) |
-| **Reconnection Policy** | Documented "no reconnection; caller re-Connects" (§1.2) |
-| **Redis Serialization** | Documented manual field copy from `map[string]string`, not `json.Unmarshal` (§2.4) |
-| **ASIC_DB Keys** | VR OID resolution via CONFIG_DB prefix scan, JSON key canonicalization, `AsicDBClient` OID cache fields and `Connect()` pseudocode (§4.1, §4.2) |
-| **ApplyChangesPipelined** | Single MULTI/EXEC TxPipeline for both sets and deletes (§5.4) |
-| **GetRoute/GetRouteASIC** | Documented single-shot read semantics, caller polls (§5.7) |
-| **Distributed Locking** | `StateDBClient.AcquireLock/ReleaseLock/GetLockHolder` via `NEWTRON_LOCK` hash in STATE_DB. Lua scripts for atomic acquire (EXISTS + HSET + EXPIRE) and safe release (holder check + DEL). Replaces file-based advisory lock (§2.3) |
-
-#### v7
-
-| Area | Change |
-|------|--------|
-| **CONFIG_DB Cache Lifecycle** | Documented episode-based cache refresh model (§2.3). `Lock()` refreshes CONFIG_DB cache after acquiring lock (write episodes). `ApplyChanges()` is now a pure write — removed post-write `GetAll()` reload (§5.3). `ApplyChangesPipelined()` also pure write (§5.4). `RunHealthChecks()` calls `Refresh()` at entry (read-only episodes). See HLD §4.10. |
