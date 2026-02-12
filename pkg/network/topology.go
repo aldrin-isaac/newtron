@@ -112,6 +112,9 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*Comp
 	// Step 1: Device-level entries
 	tp.addDeviceEntries(cb, deviceName, resolved, topoDev)
 
+	// Step 1b: QoS device-wide tables (DSCP maps, schedulers, WRED profiles)
+	tp.addQoSDeviceEntries(cb, topoDev)
+
 	// Step 2: Per-interface service entries (skip stub interfaces with no service)
 	for intfName, ti := range topoDev.Interfaces {
 		if ti.Service == "" {
@@ -700,8 +703,10 @@ func (tp *TopologyProvisioner) generateServiceEntries(
 		}
 	}
 
-	// QoS configuration
-	if svc.QoSProfile != "" {
+	// QoS configuration: new-style policy takes precedence over legacy profile
+	if policyName, policy := resolveServiceQoSPolicy(tp.network, svc); policy != nil {
+		entries = append(entries, generateQoSInterfaceEntries(policyName, policy, interfaceName)...)
+	} else if svc.QoSProfile != "" {
 		qosProfile, err := tp.network.GetQoSProfile(svc.QoSProfile)
 		if err == nil && qosProfile != nil {
 			qosFields := map[string]string{}
@@ -974,6 +979,32 @@ func (tp *TopologyProvisioner) generateBGPEntries(
 	})
 
 	return entries, nil
+}
+
+// addQoSDeviceEntries scans all services in the topology, collects distinct QoS
+// policy names, and adds device-wide CONFIG_DB tables (DSCP maps, schedulers, WRED).
+func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *CompositeBuilder, topoDev *spec.TopologyDevice) {
+	seen := make(map[string]bool)
+	for _, ti := range topoDev.Interfaces {
+		if ti.Service == "" {
+			continue
+		}
+		svc, err := tp.network.GetService(ti.Service)
+		if err != nil {
+			continue
+		}
+		policyName, policy := resolveServiceQoSPolicy(tp.network, svc)
+		if policy == nil {
+			continue
+		}
+		if seen[policyName] {
+			continue
+		}
+		seen[policyName] = true
+		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
+			cb.AddEntry(entry.Table, entry.Key, entry.Fields)
+		}
+	}
 }
 
 // capitalizeFirst returns s with the first letter uppercased.

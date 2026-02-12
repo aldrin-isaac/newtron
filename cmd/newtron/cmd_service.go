@@ -170,10 +170,12 @@ var serviceShowCmd = &cobra.Command{
 			}
 		}
 
-		if svc.QoSProfile != "" {
+		if svc.QoSPolicy != "" {
 			fmt.Println("\nQoS:")
-			fmt.Printf("  Profile: %s\n", svc.QoSProfile)
-			fmt.Printf("  Trust DSCP: %v\n", svc.TrustDSCP)
+			fmt.Printf("  Policy: %s\n", svc.QoSPolicy)
+		} else if svc.QoSProfile != "" {
+			fmt.Println("\nQoS:")
+			fmt.Printf("  Profile: %s (legacy)\n", svc.QoSProfile)
 		}
 
 		return nil

@@ -5,24 +5,13 @@ import (
 	"strings"
 )
 
-// QoSProfile maps interface types to scheduler configurations
+// QoSProfile maps interface types to scheduler configurations (legacy).
 type QoSProfile struct {
-	Name         string            `json:"name"`
-	Description  string            `json:"description,omitempty"`
-	SchedulerMap string            `json:"scheduler_map"` // e.g., "8q" or "4q"
-	TrustDSCP    bool              `json:"trust_dscp"`    // Trust incoming DSCP
-	DSCPToTCMap  string            `json:"dscp_to_tc_map,omitempty"`
-	TCToQueueMap string            `json:"tc_to_queue_map,omitempty"`
-	Policers     map[string]string `json:"policers,omitempty"` // direction -> policer name
-}
-
-// CoSClass defines a Class of Service with DSCP mappings
-type CoSClass struct {
-	Name     string `json:"name"`     // be, ef, cs1-7, af11-42
-	DSCP     int    `json:"dscp"`     // DSCP value (0-63)
-	Queue    string `json:"queue"`    // Forwarding class (be, q1-q4, ef, sc, nc)
-	Priority string `json:"priority"` // low, high
-	Color    string `json:"color"`    // green, yellow, red (drop priority)
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	SchedulerMap string `json:"scheduler_map"` // e.g., "8q" or "4q"
+	DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
+	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
 }
 
 // Scheduler defines queue bandwidth allocation
@@ -56,34 +45,6 @@ type Policer struct {
 	Mode         string `json:"mode"`          // color-blind, color-aware
 	RedAction    string `json:"red_action"`    // drop, remark
 	YellowAction string `json:"yellow_action,omitempty"`
-}
-
-// DSCPToTCMap maps DSCP values to traffic classes
-type DSCPToTCMap struct {
-	Name    string      `json:"name"`
-	Entries map[int]int `json:"entries"` // DSCP -> TC
-}
-
-// TCToQueueMap maps traffic classes to queues
-type TCToQueueMap struct {
-	Name    string      `json:"name"`
-	Entries map[int]int `json:"entries"` // TC -> Queue
-}
-
-// PortQoSMap represents QoS maps applied to a port
-type PortQoSMap struct {
-	Port         string `json:"port"`
-	DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
-	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
-	Scheduler    string `json:"scheduler,omitempty"`
-}
-
-// QueueConfig represents per-queue configuration
-type QueueConfig struct {
-	Port        string `json:"port"`
-	Queue       int    `json:"queue"`
-	Scheduler   string `json:"scheduler"`
-	WREDProfile string `json:"wred_profile,omitempty"`
 }
 
 // Standard DSCP values
@@ -121,14 +82,6 @@ var Standard8QueueWeights = map[int]int{
 	5: 10, // EF (strict)
 	6: 5,  // SC
 	7: 5,  // NC (strict)
-}
-
-// NewQoSProfile creates a new QoS profile
-func NewQoSProfile(name string, schedulerMap string) *QoSProfile {
-	return &QoSProfile{
-		Name:         name,
-		SchedulerMap: schedulerMap,
-	}
 }
 
 // NewPolicer creates a new policer

@@ -1,6 +1,5 @@
 {
   "version": "1.0",
-  "lock_dir": "/var/run/newtron",
   "super_users": ["neteng", "admin"],
   "user_groups": {
     "neteng": ["alice", "bob", "charlie"],
@@ -31,13 +30,11 @@
   "regions": {
     "amer-wan": {
       "as_number": 64512,
-      "as_name": "amer",
-      "affinity": "east"
+      "as_name": "amer"
     },
     "emea-wan": {
       "as_number": 33181,
-      "as_name": "emea",
-      "affinity": "west"
+      "as_name": "emea"
     }
   },
   "prefix_lists": {
@@ -134,7 +131,7 @@
       "ipvpn": "customer-vpn",
       "ingress_filter": "customer-edge-in",
       "egress_filter": "customer-edge-out",
-      "qos_profile": "customer",
+      "qos_policy": "4q-customer",
       "permissions": {
         "all": ["neteng"],
         "service.apply": ["neteng", "netops"]
@@ -148,8 +145,7 @@
       "macvpn": "servers-vlan100",
       "anycast_gateway": "10.1.100.1/24",
       "anycast_mac": "00:00:00:01:02:03",
-      "qos_profile": "datacenter",
-      "trust_dscp": true
+      "qos_policy": "8q-datacenter"
     },
     "storage-irb": {
       "description": "Storage VLAN with shared VRF",
@@ -159,8 +155,7 @@
       "macvpn": "storage-vlan200",
       "anycast_gateway": "10.1.200.1/24",
       "anycast_mac": "00:00:00:01:02:03",
-      "qos_profile": "datacenter",
-      "trust_dscp": true
+      "qos_policy": "8q-datacenter"
     },
     "tenant-isolated": {
       "description": "Tenant VLAN with per-interface VRF isolation",
@@ -186,14 +181,28 @@
     }
   },
 
-  "qos_profiles": {
-    "customer": {
-      "scheduler_map": "8q",
-      "trust_dscp": false
+  "qos_policies": {
+    "8q-datacenter": {
+      "description": "8-queue datacenter policy with ECN on lossless queues",
+      "queues": [
+        { "name": "best-effort",   "type": "dwrr", "weight": 20, "dscp": [0] },
+        { "name": "bulk",          "type": "dwrr", "weight": 15, "dscp": [8, 10, 12, 14] },
+        { "name": "transactional", "type": "dwrr", "weight": 15, "dscp": [18, 20, 22] },
+        { "name": "lossless",      "type": "dwrr", "weight": 10, "dscp": [3, 4], "ecn": true },
+        { "name": "lossless-hi",   "type": "dwrr", "weight": 10, "dscp": [19, 21], "ecn": true },
+        { "name": "voice",         "type": "strict",             "dscp": [46] },
+        { "name": "signaling",     "type": "dwrr", "weight": 10, "dscp": [24, 26, 48] },
+        { "name": "network-ctrl",  "type": "strict",             "dscp": [56] }
+      ]
     },
-    "datacenter": {
-      "scheduler_map": "8q",
-      "trust_dscp": true
+    "4q-customer": {
+      "description": "4-queue customer-edge policy",
+      "queues": [
+        { "name": "best-effort",  "type": "dwrr", "weight": 40, "dscp": [0] },
+        { "name": "business",     "type": "dwrr", "weight": 30, "dscp": [10, 12, 14, 18, 20, 22] },
+        { "name": "voice",        "type": "strict",             "dscp": [46] },
+        { "name": "network-ctrl", "type": "strict",             "dscp": [48, 56] }
+      ]
     }
   }
 }

@@ -37,8 +37,7 @@ type Interface struct {
 	EgressACL  string `json:"egress_acl,omitempty"`
 
 	// QoS
-	QoSProfile string `json:"qos_profile,omitempty"`
-	TrustDSCP  bool   `json:"trust_dscp,omitempty"`
+	QoSPolicy string `json:"qos_policy,omitempty"`
 
 	// Statistics (read-only)
 	Stats *InterfaceStats `json:"stats,omitempty"`

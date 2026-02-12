@@ -245,10 +245,15 @@ sudo vim /etc/newtron/network.json
       "action": "drop"
     }
   },
-  "qos_profiles": {
-    "customer-qos": {
-      "dscp_to_tc_map": "DSCP_TO_TC_MAP",
-      "tc_to_queue_map": "TC_TO_QUEUE_MAP"
+  "qos_policies": {
+    "customer-4q": {
+      "description": "4-queue customer-edge policy",
+      "queues": [
+        { "name": "best-effort",  "type": "dwrr", "weight": 40, "dscp": [0] },
+        { "name": "business",     "type": "dwrr", "weight": 30, "dscp": [10, 18, 20] },
+        { "name": "voice",        "type": "strict",             "dscp": [46] },
+        { "name": "network-ctrl", "type": "strict",             "dscp": [48, 56] }
+      ]
     }
   },
   "route_policies": {
@@ -292,7 +297,7 @@ sudo vim /etc/newtron/network.json
       "vrf_type": "interface",
       "ipvpn": "customer-vpn",
       "ingress_filter": "customer-ingress",
-      "qos_profile": "customer-qos",
+      "qos_policy": "customer-4q",
       "routing": {
         "protocol": "bgp",
         "peer_as": "request",
@@ -326,7 +331,7 @@ sudo vim /etc/newtron/network.json
 | `services` | Service templates referencing ipvpn/macvpn by name |
 | `filter_specs` | Reusable ACL rule templates |
 | `policers` | Rate limiter definitions referenced by filter rules |
-| `qos_profiles` | QoS map references for DSCP/TC mapping |
+| `qos_policies` | Declarative queue definitions (DSCP mapping, scheduling, ECN) |
 | `route_policies` | BGP import/export policies |
 | `prefix_lists` | Reusable IP prefix lists (expanded in filter rules and policies) |
 
@@ -345,6 +350,18 @@ sudo vim /etc/newtron/network.json
 | `"interface"` | Per-interface VRF: `{service}-{interface}` |
 | `"shared"` | Shared VRF: name = ipvpn definition name |
 | (omitted) | Global routing table (no VPN) |
+
+**QoS Policies:**
+
+QoS policies define declarative queue configurations. Each policy contains 1-8 queues, where array position = queue index = traffic class. Services reference policies by name via `qos_policy`.
+
+Queue types:
+- `dwrr` — Deficit Weighted Round Robin, requires `weight` (percentage)
+- `strict` — Strict priority, must not have `weight`
+
+Optional: `ecn: true` on a queue creates a shared WRED profile with ECN marking.
+
+All 64 DSCP values are mapped: explicitly listed values go to their queue, unmapped values default to queue 0.
 
 ### 3.3 Site Specification (`site.json`)
 

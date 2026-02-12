@@ -899,17 +899,6 @@ func TestEVPNRouteTypes(t *testing.T) {
 
 // ===================== QoS Tests =====================
 
-func TestNewQoSProfile(t *testing.T) {
-	profile := NewQoSProfile("customer", "8q")
-
-	if profile.Name != "customer" {
-		t.Errorf("Name = %q, want %q", profile.Name, "customer")
-	}
-	if profile.SchedulerMap != "8q" {
-		t.Errorf("SchedulerMap = %q, want %q", profile.SchedulerMap, "8q")
-	}
-}
-
 func TestNewPolicer(t *testing.T) {
 	policer := NewPolicer("rate-limit", 100000000, 10000000)
 

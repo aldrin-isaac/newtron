@@ -105,8 +105,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// QoS profile validation
-	if svc.QoSProfile != "" {
+	// QoS validation
+	if svc.QoSPolicy != "" {
+		if _, err := i.Network().GetQoSPolicy(svc.QoSPolicy); err != nil {
+			return nil, fmt.Errorf("QoS policy '%s' not found", svc.QoSPolicy)
+		}
+	} else if svc.QoSProfile != "" {
 		if _, err := i.Network().GetQoSProfile(svc.QoSProfile); err != nil {
 			return nil, fmt.Errorf("QoS profile '%s' not found", svc.QoSProfile)
 		}
@@ -304,8 +308,17 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// Apply QoS profile if specified
-	if svc.QoSProfile != "" {
+	// Apply QoS: new-style policy takes precedence over legacy profile
+	if policyName, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
+		// Ensure device-wide tables exist (idempotent upsert)
+		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
+			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+		}
+		// Per-interface bindings
+		for _, entry := range generateQoSInterfaceEntries(policyName, policy, i.name) {
+			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+		}
+	} else if svc.QoSProfile != "" {
 		qosProfile, _ := i.Network().GetQoSProfile(svc.QoSProfile)
 		if qosProfile != nil {
 			qosFields := map[string]string{}
@@ -1038,10 +1051,19 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-interface resources (always delete)
 	// =========================================================================
 
-	// Remove QoS mapping
+	// Remove QoS mapping and per-interface QUEUE entries
 	if configDB != nil {
 		if _, ok := configDB.PortQoSMap[i.name]; ok {
 			cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil, nil)
+		}
+	}
+	// Delete QUEUE entries for this interface (QUEUE|{intf}|{N})
+	if svc != nil {
+		if _, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
+			for qi := range policy.Queues {
+				queueKey := fmt.Sprintf("%s|%d", i.name, qi)
+				cs.Add("QUEUE", queueKey, ChangeDelete, nil, nil)
+			}
 		}
 	}
 

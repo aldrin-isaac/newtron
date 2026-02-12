@@ -16,6 +16,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/model"
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
+
 )
 
 // Network is the top-level object representing the entire network.
@@ -153,7 +154,22 @@ func (n *Network) GetPolicer(name string) (*spec.PolicerSpec, error) {
 	return policer, nil
 }
 
-// GetQoSProfile returns a QoS profile by name.
+// GetQoSPolicy returns a QoS policy by name.
+func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if n.spec.QoSPolicies == nil {
+		return nil, fmt.Errorf("QoS policy '%s' not found (no QoS policies defined)", name)
+	}
+	policy, ok := n.spec.QoSPolicies[name]
+	if !ok {
+		return nil, fmt.Errorf("QoS policy '%s' not found", name)
+	}
+	return policy, nil
+}
+
+// GetQoSProfile returns a QoS profile by name (legacy).
 func (n *Network) GetQoSProfile(name string) (*model.QoSProfile, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -374,13 +390,9 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 		resolved.ASNumber = region.ASNumber
 	}
 
-	// Affinity: profile > region > default
-	resolved.Affinity = util.Coalesce(profile.Affinity, region.Affinity, "flat")
-
 	// Router ID and VTEP from loopback
 	resolved.RouterID = profile.LoopbackIP
 	resolved.VTEPSourceIP = profile.LoopbackIP
-	resolved.VTEPSourceIntf = "Loopback0"
 
 	// BGP neighbors from route reflectors
 	resolved.BGPNeighbors = n.deriveBGPNeighbors(site, name)
@@ -397,18 +409,6 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 		profile.PrefixLists,
 	)
 
-	// Boolean flags
-	if profile.IsRouter != nil {
-		resolved.IsRouter = *profile.IsRouter
-	} else {
-		resolved.IsRouter = true
-	}
-	if profile.IsBridge != nil {
-		resolved.IsBridge = *profile.IsBridge
-	} else {
-		resolved.IsBridge = true
-	}
-	resolved.IsBorderRouter = profile.IsBorderRouter
 	resolved.IsRouteReflector = profile.IsRouteReflector
 
 	// SSH credentials (for Redis tunnel)

@@ -7,10 +7,30 @@ import (
 	"github.com/newtron-network/newtron/pkg/model"
 )
 
+// ============================================================================
+// QoS Policy Definitions
+// ============================================================================
+
+// QoSPolicy defines a declarative queue policy.
+// Array position = queue index = traffic class.
+// Unmapped DSCP values default to queue 0.
+type QoSPolicy struct {
+	Description string      `json:"description,omitempty"`
+	Queues      []*QoSQueue `json:"queues"`
+}
+
+// QoSQueue defines a single queue within a QoS policy.
+type QoSQueue struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`             // "dwrr" or "strict"
+	Weight int    `json:"weight,omitempty"` // DWRR weight (percentage)
+	DSCP   []int  `json:"dscp,omitempty"`   // DSCP values mapped to this queue
+	ECN    bool   `json:"ecn,omitempty"`    // Enable ECN/WRED
+}
+
 // NetworkSpecFile represents the global network specification file (network.json).
 type NetworkSpecFile struct {
 	Version      string                       `json:"version"`
-	LockDir      string                       `json:"lock_dir"`            // TODO(v4): not consumed — implement lock directory for concurrent spec access
 	SuperUsers   []string                     `json:"super_users"`
 	UserGroups   map[string][]string          `json:"user_groups"`   // Group name → user list
 	Permissions  map[string][]string          `json:"permissions"`   // Action → allowed groups
@@ -19,8 +39,8 @@ type NetworkSpecFile struct {
 	PrefixLists  map[string][]string          `json:"prefix_lists"`
 	FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
 	Policers     map[string]*PolicerSpec       `json:"policers"`
-	QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"`
-	CoSClasses   map[string]*model.CoSClass   `json:"cos_classes,omitempty"` // TODO(v4): not consumed — implement CoS class mapping to CONFIG_DB TC_TO_QUEUE_MAP
+	QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
+	QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"` // Legacy — kept for backward compat
 
 	// Route policies (for BGP import/export)
 	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
@@ -37,18 +57,8 @@ type NetworkSpecFile struct {
 type RegionSpec struct {
 	ASNumber     int                 `json:"as_number"`
 	ASName       string              `json:"as_name,omitempty"`   // TODO(v4): not consumed — use as BGP AS name in DEVICE_METADATA or description fields
-	Affinity     string              `json:"affinity,omitempty"`
-	Sites        map[string]*SiteRef `json:"sites,omitempty"`
 	PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
 	GenericAlias map[string]string   `json:"generic_alias,omitempty"`
-}
-
-// SiteRef references a site within a region.
-// It points to a SiteSpec defined in SiteSpecFile and carries region-level overrides.
-// Not consumed by runtime code — all site data comes from SiteSpecFile.Sites.
-type SiteRef struct {
-	SiteIP          string   `json:"site_ip,omitempty"`          // TODO(v4): not consumed — use as site-level anycast IP or summary route
-	RouteReflectors []string `json:"route_reflectors,omitempty"` // TODO(v4): not consumed — duplicates SiteSpec.RouteReflectors
 }
 
 // ============================================================================
@@ -115,8 +125,8 @@ type ServiceSpec struct {
 	EgressFilter  string `json:"egress_filter,omitempty"`
 
 	// QoS
-	QoSProfile string `json:"qos_profile,omitempty"`
-	TrustDSCP  bool   `json:"trust_dscp,omitempty"` // TODO(v4): display only — implement CONFIG_DB DSCP_TO_TC_MAP binding
+	QoSPolicy  string `json:"qos_policy,omitempty"`
+	QoSProfile string `json:"qos_profile,omitempty"` // Legacy — kept for backward compat
 
 	// Permissions (override global permissions for this service)
 	Permissions map[string][]string `json:"permissions,omitempty"`
@@ -297,12 +307,8 @@ type DeviceProfile struct {
 	Site       string `json:"site"` // Site name - region is derived from site.json
 
 	// OPTIONAL OVERRIDES - if set, override region/global values
-	ASNumber         *int   `json:"as_number,omitempty"`
-	Affinity         string `json:"affinity,omitempty"`
-	IsRouter         *bool  `json:"is_router,omitempty"`
-	IsBridge         *bool  `json:"is_bridge,omitempty"`
-	IsBorderRouter   bool   `json:"is_border_router,omitempty"`
-	IsRouteReflector bool   `json:"is_route_reflector,omitempty"`
+	ASNumber         *int `json:"as_number,omitempty"`
+	IsRouteReflector bool `json:"is_route_reflector,omitempty"`
 
 	// OPTIONAL - device-specific
 	MAC             string              `json:"mac,omitempty"`
@@ -340,17 +346,12 @@ type ResolvedProfile struct {
 
 	// Resolved from inheritance
 	ASNumber         int
-	Affinity         string
-	IsRouter         bool
-	IsBridge         bool
-	IsBorderRouter   bool
 	IsRouteReflector bool
 
 	// Derived at runtime
-	RouterID       string   // = LoopbackIP
-	VTEPSourceIP   string   // = LoopbackIP
-	VTEPSourceIntf string   // = "Loopback0"
-	BGPNeighbors   []string // From site route_reflectors → lookup loopback IPs
+	RouterID     string   // = LoopbackIP
+	VTEPSourceIP string   // = LoopbackIP
+	BGPNeighbors []string // From site route_reflectors → lookup loopback IPs
 
 	// From profile (optional)
 	MAC string

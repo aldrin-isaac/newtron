@@ -984,7 +984,7 @@ Services are the primary abstraction - they bundle intent into reusable template
 - VRF instantiation policy (per-interface or shared)
 - Routing protocol and policies
 - Filter references (names, not rules)
-- QoS profile reference
+- QoS policy reference (declarative queue definitions)
 - Anycast gateway (for IRB)
 
 **What's NOT in the spec (derived at runtime):**
@@ -1122,7 +1122,6 @@ ResolvedProfile (runtime)
 |-------|--------|--------|---------|----------|
 | `as_number` | - | 64512 | (not set) | **64512** |
 | `as_number` | - | 64512 | 65535 | **65535** |
-| `affinity` | "flat" | "east" | "west" | **"west"** |
 
 ## 10. EVPN/VXLAN Architecture
 
@@ -1149,6 +1148,50 @@ ResolvedProfile (runtime)
 | Type-2 | MAC/IP Advertisement | L2 MAC learning |
 | Type-3 | Inclusive Multicast | BUM traffic |
 | Type-5 | IP Prefix | L3 routing |
+
+## 10a. QoS Policy Architecture
+
+QoS policies are self-contained queue definitions from which newtron derives all CONFIG_DB tables. This makes QoS consistent with how filters, VPNs, and routing already work — the spec declares intent, newtron translates it to CONFIG_DB entries.
+
+### 10a.1 Spec Model
+
+A QoS policy defines 1-8 queues. Array position = queue index = traffic class. Unmapped DSCP values default to queue 0.
+
+```json
+"qos_policies": {
+  "8q-datacenter": {
+    "description": "8-queue datacenter policy with ECN on lossless queues",
+    "queues": [
+      { "name": "best-effort",   "type": "dwrr", "weight": 20, "dscp": [0] },
+      { "name": "bulk",          "type": "dwrr", "weight": 15, "dscp": [8, 10, 12, 14] },
+      { "name": "lossless",      "type": "dwrr", "weight": 10, "dscp": [3, 4], "ecn": true },
+      { "name": "voice",         "type": "strict",             "dscp": [46] },
+      { "name": "network-ctrl",  "type": "strict",             "dscp": [56] }
+    ]
+  }
+}
+```
+
+Services reference policies by name: `"qos_policy": "8q-datacenter"`.
+
+### 10a.2 CONFIG_DB Derivation
+
+From one policy `P` applied to interface `Ethernet0`:
+
+| Table | Key | Derived From | Scope |
+|---|---|---|---|
+| `DSCP_TO_TC_MAP\|P` | All 64 DSCPs → TC index | `queues[N].dscp` arrays, gaps → "0" | Device-wide |
+| `TC_TO_QUEUE_MAP\|P` | Identity (TC N → Queue N) | Array position | Device-wide |
+| `SCHEDULER\|P.N` | Type + weight | `queues[N].type/weight` | Device-wide |
+| `WRED_PROFILE\|P.ecn` | ECN defaults | Created if any queue has `ecn: true` | Device-wide |
+| `PORT_QOS_MAP\|Ethernet0` | Bracket-ref to maps | Per-interface binding | Per-interface |
+| `QUEUE\|Ethernet0\|N` | Bracket-ref to scheduler (+WRED) | Per queue per port | Per-interface |
+
+### 10a.3 Two-Phase Apply
+
+**Device-wide tables** (DSCP maps, schedulers, WRED) are created once per policy per device — either by the topology provisioner during `GenerateDeviceComposite()`, or idempotently by `ApplyService()` on first use.
+
+**Per-interface bindings** (PORT_QOS_MAP, QUEUE) are created for each interface that uses the policy.
 
 ## 11. Security Model
 

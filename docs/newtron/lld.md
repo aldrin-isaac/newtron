@@ -127,6 +127,7 @@ newtron/
 | File | Purpose |
 |------|---------|
 | `pkg/network/topology.go` | TopologyProvisioner, ProvisionDevice, ProvisionInterface, generateServiceEntries |
+| `pkg/network/qos.go` | generateQoSDeviceEntries, generateQoSInterfaceEntries, resolveServiceQoSPolicy |
 
 ## 3. Core Data Structures
 
@@ -138,7 +139,6 @@ These types define **declarative intent** - what you want, not how to achieve it
 // NetworkSpecFile - Global network specification file (declarative)
 type NetworkSpecFile struct {
     Version      string                       `json:"version"`
-    LockDir      string                       `json:"lock_dir"`       // lock directory path
     SuperUsers   []string                     `json:"super_users"`
     UserGroups   map[string][]string          `json:"user_groups"`
     Permissions  map[string][]string          `json:"permissions"`
@@ -147,8 +147,8 @@ type NetworkSpecFile struct {
     PrefixLists  map[string][]string          `json:"prefix_lists"`
     FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
     Policers     map[string]*PolicerSpec      `json:"policers"`
-    QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"`
-    CoSClasses   map[string]*model.CoSClass   `json:"cos_classes,omitempty"`
+    QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
+    QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"` // Legacy
 
     // Route policies for BGP import/export
     RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
@@ -186,16 +186,8 @@ type MACVPNSpec struct {
 type RegionSpec struct {
     ASNumber     int                 `json:"as_number"`
     ASName       string              `json:"as_name,omitempty"`
-    Affinity     string              `json:"affinity,omitempty"`
-    Sites        map[string]*SiteRef `json:"sites,omitempty"`
     PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
     GenericAlias map[string]string   `json:"generic_alias,omitempty"`
-}
-
-// SiteRef references a site within a region
-type SiteRef struct {
-    SiteIP          string   `json:"site_ip,omitempty"`
-    RouteReflectors []string `json:"route_reflectors,omitempty"`
 }
 
 // SiteSpecFile - Site topology specification file (site.json)
@@ -248,8 +240,8 @@ type ServiceSpec struct {
     EgressFilter  string `json:"egress_filter,omitempty"`
 
     // QoS
-    QoSProfile string `json:"qos_profile,omitempty"`
-    TrustDSCP  bool   `json:"trust_dscp,omitempty"`
+    QoSPolicy  string `json:"qos_policy,omitempty"`
+    QoSProfile string `json:"qos_profile,omitempty"` // Legacy
 
     // Permissions (override global permissions for this service)
     Permissions map[string][]string `json:"permissions,omitempty"`
@@ -306,25 +298,30 @@ type PolicerSpec struct {
     Action    string `json:"action,omitempty"` // drop, remark
 }
 
-// QoSProfile defines a QoS configuration that can be referenced by services.
-// Lives in pkg/model/qos.go. Referenced by NetworkSpecFile.QoSProfiles and
-// ServiceSpec.QoSProfile.
-type QoSProfile struct {
-    Description string `json:"description,omitempty"`
-    DSCPToTCMap string `json:"dscp_to_tc_map"` // Reference to DSCP_TO_TC_MAP name
-    TCToQueueMap string `json:"tc_to_queue_map"` // Reference to TC_TO_QUEUE_MAP name
-    TrustMode   string `json:"trust_mode,omitempty"` // "dscp", "dot1p", "both"
+// QoSPolicy defines a declarative queue policy.
+// Lives in pkg/spec/types.go. Referenced by NetworkSpecFile.QoSPolicies.
+// Array position = queue index = traffic class.
+type QoSPolicy struct {
+    Description string      `json:"description,omitempty"`
+    Queues      []*QoSQueue `json:"queues"`
 }
 
-// CoSClass defines a Class of Service for traffic classification.
-// Lives in pkg/model/qos.go. Referenced by NetworkSpecFile.CoSClasses.
-type CoSClass struct {
-    Description string `json:"description,omitempty"`
-    DSCP        []int  `json:"dscp,omitempty"`     // DSCP values mapping to this class
-    TC          int    `json:"tc"`                  // Traffic class number (0-7)
-    Queue       int    `json:"queue"`               // Queue number (0-7)
-    Scheduler   string `json:"scheduler,omitempty"` // "STRICT" or "DWRR"
-    Weight      int    `json:"weight,omitempty"`    // DWRR weight (if scheduler=DWRR)
+// QoSQueue defines a single queue within a QoS policy.
+type QoSQueue struct {
+    Name   string `json:"name"`
+    Type   string `json:"type"`             // "dwrr" or "strict"
+    Weight int    `json:"weight,omitempty"` // DWRR weight (percentage)
+    DSCP   []int  `json:"dscp,omitempty"`   // DSCP values mapped to this queue
+    ECN    bool   `json:"ecn,omitempty"`    // Enable ECN/WRED
+}
+
+// QoSProfile defines a legacy QoS configuration (backward compat).
+// Lives in pkg/model/qos.go. Superseded by QoSPolicy.
+type QoSProfile struct {
+    Description  string `json:"description,omitempty"`
+    SchedulerMap string `json:"scheduler_map"`
+    DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
+    TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
 }
 
 // RoutePolicy defines a BGP route policy for import/export filtering.
@@ -360,10 +357,6 @@ type DeviceProfile struct {
 
     // OPTIONAL OVERRIDES - if set, override region/global values
     ASNumber         *int   `json:"as_number,omitempty"`
-    Affinity         string `json:"affinity,omitempty"`
-    IsRouter         *bool  `json:"is_router,omitempty"`
-    IsBridge         *bool  `json:"is_bridge,omitempty"`
-    IsBorderRouter   bool   `json:"is_border_router,omitempty"`
     IsRouteReflector bool   `json:"is_route_reflector,omitempty"`
 
     // OPTIONAL - device-specific
@@ -399,16 +392,11 @@ type ResolvedProfile struct {
 
     // Resolved from inheritance
     ASNumber         int
-    Affinity         string
-    IsRouter         bool
-    IsBridge         bool
-    IsBorderRouter   bool
     IsRouteReflector bool
 
     // Derived at runtime
-    RouterID       string   // = LoopbackIP
-    VTEPSourceIP   string   // = LoopbackIP
-    VTEPSourceIntf string   // = "Loopback0"
+    RouterID     string   // = LoopbackIP
+    VTEPSourceIP string   // = LoopbackIP
     BGPNeighbors   []string // From site route_reflectors -> lookup loopback IPs
 
     // Merged maps (profile > region > global)
@@ -576,12 +564,11 @@ type Device struct {
 
 // Lock acquires a distributed lock for this device via a Redis STATE_DB entry
 // on the device itself (NEWTRON_LOCK|<deviceName>). Uses SET NX + EX for atomic
-// acquisition with automatic TTL-based expiry. Lock directory comes from Network.spec.LockDir.
+// acquisition with automatic TTL-based expiry.
 // Not re-entrant — returns util.ErrDeviceLocked on contention.
 func (d *Device) Lock() error {
-    lockDir := d.network.spec.LockDir
     holder := fmt.Sprintf("%s@%s", currentUser(), hostname())
-    return d.conn.Lock(holder, lockDir)
+    return d.conn.Lock(holder)
 }
 
 // Unlock releases the distributed lock by deleting the NEWTRON_LOCK entry
@@ -2865,6 +2852,17 @@ func generateServiceEntries(
     network *Network,
     deviceName, interfaceName, serviceName, ipAddr string,
 ) ([]CompositeEntry, error)
+
+// generateQoSDeviceEntries produces device-wide CONFIG_DB entries for a QoS policy:
+// DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER (per queue), WRED_PROFILE (if ECN).
+func generateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []CompositeEntry
+
+// generateQoSInterfaceEntries produces per-interface CONFIG_DB entries:
+// PORT_QOS_MAP (bracket-refs to maps) and QUEUE entries (bracket-refs to schedulers).
+func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []CompositeEntry
+
+// resolveServiceQoSPolicy checks QoSPolicy first, falls back to legacy QoSProfile.
+func resolveServiceQoSPolicy(n *Network, svc *spec.ServiceSpec) (string, *spec.QoSPolicy)
 ```
 
 ## 6. Precondition Checker
@@ -3088,13 +3086,9 @@ func ResolveProfile(
         r.ASNumber = region.ASNumber
     }
 
-    // Affinity: profile > region > default
-    r.Affinity = coalesce(profile.Affinity, region.Affinity, "flat")
-
     // Router ID and VTEP from loopback
     r.RouterID = profile.LoopbackIP
     r.VTEPSourceIP = profile.LoopbackIP
-    r.VTEPSourceIntf = "Loopback0"
 
     // BGP neighbors: lookup route reflector profiles to get their loopback IPs
     r.BGPNeighbors = []string{}

@@ -139,27 +139,11 @@ func (l *Loader) ResolveProfile(deviceName string) (*ResolvedProfile, error) {
 		resolved.ASNumber = region.ASNumber
 	}
 
-	// Resolve affinity: profile > region > default
-	resolved.Affinity = util.CoalesceString(profile.Affinity, region.Affinity, "flat")
-
-	// Resolve boolean flags
-	if profile.IsRouter != nil {
-		resolved.IsRouter = *profile.IsRouter
-	} else {
-		resolved.IsRouter = true // Default
-	}
-	if profile.IsBridge != nil {
-		resolved.IsBridge = *profile.IsBridge
-	} else {
-		resolved.IsBridge = true // Default
-	}
-	resolved.IsBorderRouter = profile.IsBorderRouter
 	resolved.IsRouteReflector = profile.IsRouteReflector
 
 	// Derived values
 	resolved.RouterID = profile.LoopbackIP
 	resolved.VTEPSourceIP = profile.LoopbackIP
-	resolved.VTEPSourceIntf = util.DeriveVTEPSourceInterface()
 
 	// Derive BGP neighbors from route reflectors (lookup their profiles)
 	resolved.BGPNeighbors = l.deriveBGPNeighbors(site, deviceName)
@@ -256,6 +240,9 @@ func (l *Loader) loadPlatformSpec() (*PlatformSpecFile, error) {
 func (l *Loader) validate() error {
 	v := &util.ValidationBuilder{}
 
+	// Validate QoS policies
+	l.validateQoSPolicies(v)
+
 	// Validate services reference existing filter specs
 	for svcName, svc := range l.network.Services {
 		if svc.IngressFilter != "" {
@@ -266,6 +253,13 @@ func (l *Loader) validate() error {
 		if svc.EgressFilter != "" {
 			if _, ok := l.network.FilterSpecs[svc.EgressFilter]; !ok {
 				v.AddErrorf("service '%s' references unknown egress filter '%s'", svcName, svc.EgressFilter)
+			}
+		}
+		if svc.QoSPolicy != "" {
+			if l.network.QoSPolicies == nil {
+				v.AddErrorf("service '%s' references unknown QoS policy '%s'", svcName, svc.QoSPolicy)
+			} else if _, ok := l.network.QoSPolicies[svc.QoSPolicy]; !ok {
+				v.AddErrorf("service '%s' references unknown QoS policy '%s'", svcName, svc.QoSPolicy)
 			}
 		}
 		if svc.QoSProfile != "" {
@@ -334,6 +328,54 @@ func (l *Loader) validate() error {
 	}
 
 	return v.Build()
+}
+
+// validateQoSPolicies validates all QoS policy definitions.
+func (l *Loader) validateQoSPolicies(v *util.ValidationBuilder) {
+	for name, policy := range l.network.QoSPolicies {
+		if len(policy.Queues) == 0 {
+			v.AddErrorf("QoS policy '%s' has no queues", name)
+			continue
+		}
+		if len(policy.Queues) > 8 {
+			v.AddErrorf("QoS policy '%s' has %d queues (max 8)", name, len(policy.Queues))
+			continue
+		}
+
+		seenDSCP := make(map[int]string)   // DSCP value → queue name (for dup detection)
+		seenNames := make(map[string]bool)  // queue name uniqueness
+
+		for i, q := range policy.Queues {
+			if q.Name == "" {
+				v.AddErrorf("QoS policy '%s' queue[%d] has empty name", name, i)
+			} else if seenNames[q.Name] {
+				v.AddErrorf("QoS policy '%s' has duplicate queue name '%s'", name, q.Name)
+			}
+			seenNames[q.Name] = true
+
+			switch q.Type {
+			case "dwrr":
+				if q.Weight <= 0 {
+					v.AddErrorf("QoS policy '%s' queue '%s': DWRR requires weight > 0", name, q.Name)
+				}
+			case "strict":
+				if q.Weight != 0 {
+					v.AddErrorf("QoS policy '%s' queue '%s': strict queue must not have weight", name, q.Name)
+				}
+			default:
+				v.AddErrorf("QoS policy '%s' queue '%s': invalid type '%s' (must be dwrr or strict)", name, q.Name, q.Type)
+			}
+
+			for _, dscp := range q.DSCP {
+				if dscp < 0 || dscp > 63 {
+					v.AddErrorf("QoS policy '%s' queue '%s': DSCP value %d out of range (0-63)", name, q.Name, dscp)
+				} else if prev, dup := seenDSCP[dscp]; dup {
+					v.AddErrorf("QoS policy '%s': DSCP %d mapped to both '%s' and '%s'", name, dscp, prev, q.Name)
+				}
+				seenDSCP[dscp] = q.Name
+			}
+		}
+	}
 }
 
 func (l *Loader) validateProfile(profile *DeviceProfile) error {

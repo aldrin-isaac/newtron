@@ -17,12 +17,10 @@ func createTestSpecDir(t *testing.T) string {
 	// Create network.json
 	networkJSON := `{
 		"version": "1.0",
-		"lock_dir": "/var/lock",
 		"super_users": ["admin"],
 		"regions": {
 			"amer": {
-				"as_number": 65000,
-				"affinity": "east"
+				"as_number": 65000
 			}
 		},
 		"prefix_lists": {
@@ -260,13 +258,6 @@ func TestLoader_ResolveProfile(t *testing.T) {
 		t.Errorf("VTEPSourceIP = %q, want %q", resolved.VTEPSourceIP, "10.0.0.10")
 	}
 
-	// Check defaults
-	if !resolved.IsRouter {
-		t.Error("IsRouter should default to true")
-	}
-	if !resolved.IsBridge {
-		t.Error("IsBridge should default to true")
-	}
 }
 
 func TestLoader_GetService(t *testing.T) {
@@ -672,17 +663,11 @@ func TestLoader_ResolveProfile_WithOverrides(t *testing.T) {
 
 	// Create profile with explicit overrides
 	asNum := 65100
-	isRouter := false
-	isBridge := false
 	profileJSON := `{
 		"mgmt_ip": "192.168.1.200",
 		"loopback_ip": "10.0.0.200",
 		"site": "ny",
 		"as_number": 65100,
-		"affinity": "custom-affinity",
-		"is_router": false,
-		"is_bridge": false,
-		"is_border_router": true,
 		"is_route_reflector": true
 	}`
 	profilePath := filepath.Join(tmpDir, "profiles", "override-device.json")
@@ -698,18 +683,6 @@ func TestLoader_ResolveProfile_WithOverrides(t *testing.T) {
 	// Check that overrides are applied
 	if resolved.ASNumber != asNum {
 		t.Errorf("ASNumber = %d, want %d (from profile override)", resolved.ASNumber, asNum)
-	}
-	if resolved.Affinity != "custom-affinity" {
-		t.Errorf("Affinity = %q, want %q", resolved.Affinity, "custom-affinity")
-	}
-	if resolved.IsRouter != isRouter {
-		t.Errorf("IsRouter = %v, want %v", resolved.IsRouter, isRouter)
-	}
-	if resolved.IsBridge != isBridge {
-		t.Errorf("IsBridge = %v, want %v", resolved.IsBridge, isBridge)
-	}
-	if !resolved.IsBorderRouter {
-		t.Error("IsBorderRouter should be true")
 	}
 	if !resolved.IsRouteReflector {
 		t.Error("IsRouteReflector should be true")
@@ -1151,5 +1124,230 @@ func TestLoader_DeriveBGPNeighbors_SelfPeering(t *testing.T) {
 	// Should have no BGP neighbors since the only RR is itself
 	if len(resolved.BGPNeighbors) != 0 {
 		t.Errorf("Expected 0 BGP neighbors (self-peering excluded), got %d: %v", len(resolved.BGPNeighbors), resolved.BGPNeighbors)
+	}
+}
+
+func TestLoader_ValidateQoSPolicies(t *testing.T) {
+	tests := []struct {
+		name        string
+		networkJSON string
+		expectErr   bool
+	}{
+		{
+			name: "valid 2-queue policy",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"test": {
+						"queues": [
+							{"name": "be", "type": "dwrr", "weight": 80, "dscp": [0]},
+							{"name": "nc", "type": "strict", "dscp": [48]}
+						]
+					}
+				}
+			}`,
+			expectErr: false,
+		},
+		{
+			name: "zero queues",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"empty": {
+						"queues": []
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "too many queues (9)",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"big": {
+						"queues": [
+							{"name": "q0", "type": "dwrr", "weight": 10, "dscp": [0]},
+							{"name": "q1", "type": "dwrr", "weight": 10, "dscp": [1]},
+							{"name": "q2", "type": "dwrr", "weight": 10, "dscp": [2]},
+							{"name": "q3", "type": "dwrr", "weight": 10, "dscp": [3]},
+							{"name": "q4", "type": "dwrr", "weight": 10, "dscp": [4]},
+							{"name": "q5", "type": "dwrr", "weight": 10, "dscp": [5]},
+							{"name": "q6", "type": "dwrr", "weight": 10, "dscp": [6]},
+							{"name": "q7", "type": "dwrr", "weight": 10, "dscp": [7]},
+							{"name": "q8", "type": "dwrr", "weight": 10, "dscp": [8]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "duplicate DSCP",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"dup": {
+						"queues": [
+							{"name": "be", "type": "dwrr", "weight": 50, "dscp": [0, 10]},
+							{"name": "nc", "type": "strict", "dscp": [10]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "DSCP out of range",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "be", "type": "dwrr", "weight": 50, "dscp": [64]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "invalid queue type",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "be", "type": "wrr", "weight": 50, "dscp": [0]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "dwrr without weight",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "be", "type": "dwrr", "dscp": [0]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "strict with weight",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "nc", "type": "strict", "weight": 10, "dscp": [48]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "duplicate queue name",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "be", "type": "dwrr", "weight": 50, "dscp": [0]},
+							{"name": "be", "type": "strict", "dscp": [48]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "empty queue name",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {},
+				"qos_policies": {
+					"bad": {
+						"queues": [
+							{"name": "", "type": "dwrr", "weight": 50, "dscp": [0]}
+						]
+					}
+				}
+			}`,
+			expectErr: true,
+		},
+		{
+			name: "service references nonexistent qos_policy",
+			networkJSON: `{
+				"version": "1.0",
+				"regions": {},
+				"services": {
+					"bad-svc": {
+						"service_type": "l3",
+						"qos_policy": "nonexistent"
+					}
+				},
+				"qos_policies": {}
+			}`,
+			expectErr: true,
+		},
+	}
+
+	tmpDir, err := os.MkdirTemp("", "newtron-qos-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.RemoveAll(tmpDir)
+			os.MkdirAll(tmpDir, 0755)
+
+			if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(tt.networkJSON), 0644); err != nil {
+				t.Fatalf("Failed to write network.json: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(`{"version": "1.0", "sites": {}}`), 0644); err != nil {
+				t.Fatalf("Failed to write site.json: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644); err != nil {
+				t.Fatalf("Failed to write platforms.json: %v", err)
+			}
+
+			loader := NewLoader(tmpDir)
+			err := loader.Load()
+			if tt.expectErr && err == nil {
+				t.Error("Load() should fail with validation error")
+			}
+			if !tt.expectErr && err != nil {
+				t.Errorf("Load() unexpected error: %v", err)
+			}
+		})
 	}
 }
