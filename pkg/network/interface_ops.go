@@ -116,235 +116,132 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
-	// Build change set
+	// Generate base CONFIG_DB entries via shared generator (service_gen.go).
+	// This is the single source of truth for service → CONFIG_DB translation.
+	resolved := d.Resolved()
+	baseEntries, err := GenerateServiceEntries(i.Network(), ServiceEntryParams{
+		ServiceName:   serviceName,
+		InterfaceName: i.name,
+		IPAddress:     opts.IPAddress,
+		PeerAS:        opts.PeerAS,
+		LocalAS:       resolved.ASNumber,
+		UnderlayASN:   resolved.UnderlayASN,
+		PlatformName:  resolved.Platform,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("generating service entries: %w", err)
+	}
+
+	// Determine VLAN ID for idempotency checks
+	var vlanID int
+	if macvpnDef != nil {
+		vlanID = macvpnDef.VLAN
+	}
+
+	// Build change set with idempotency filtering.
+	// The shared generator always emits all entries (for topology provisioner's
+	// overwrite mode).  Here we skip entries that already exist on the device.
 	cs := NewChangeSet(d.Name(), "interface.apply-service")
+	configDB := d.ConfigDB()
 
-	// Create VLAN if needed (for L2/IRB)
-	if (svc.ServiceType == spec.ServiceTypeL2 || svc.ServiceType == spec.ServiceTypeIRB) && macvpnDef != nil {
-		vlanID := macvpnDef.VLAN
-		if !d.VLANExists(vlanID) {
-			vlanName := fmt.Sprintf("Vlan%d", vlanID)
-			cs.Add("VLAN", vlanName, ChangeAdd, nil, map[string]string{
-				"vlanid": fmt.Sprintf("%d", vlanID),
-			})
+	// Track ACL names from generated entries for port-merging
+	var ingressACLName, egressACLName string
+	if svc.IngressFilter != "" {
+		ingressACLName = util.DeriveACLName(serviceName, "in")
+	}
+	if svc.EgressFilter != "" {
+		egressACLName = util.DeriveACLName(serviceName, "out")
+	}
 
-			// L2VNI mapping from macvpn definition
-			if macvpnDef.L2VNI > 0 {
-				mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.L2VNI, vlanName)
-				cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-					"vlan": vlanName,
-					"vni":  fmt.Sprintf("%d", macvpnDef.L2VNI),
+	for _, e := range baseEntries {
+		switch {
+		// Skip VLAN + L2VNI + SUPPRESS entries if VLAN already exists
+		case (e.Table == "VLAN" || e.Table == "SUPPRESS_VLAN_NEIGH") && vlanID > 0 && d.VLANExists(vlanID):
+			continue
+		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vlan"] != "" && vlanID > 0 && d.VLANExists(vlanID):
+			continue
+
+		// Skip shared VRF + L3VNI + RT entries if VRF already exists
+		case e.Table == "VRF" && svc.VRFType == spec.VRFTypeShared && d.VRFExists(e.Key):
+			continue
+		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vrf"] == svc.IPVPN &&
+			svc.VRFType == spec.VRFTypeShared && d.VRFExists(svc.IPVPN):
+			continue
+		case (e.Table == "BGP_GLOBALS_AF" || e.Table == "BGP_EVPN_VNI") &&
+			svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" && d.VRFExists(svc.IPVPN):
+			continue
+
+		// Replace ACL entries with expanded version (prefix list Cartesian product + port merging)
+		case e.Table == "ACL_TABLE" && (e.Key == ingressACLName || e.Key == egressACLName):
+			aclName := e.Key
+			existingACL, aclExists := configDB.ACLTable[aclName]
+			if aclExists {
+				// ACL exists - just add this interface to the ports list
+				newPorts := addPortToList(existingACL.Ports, i.name)
+				cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+					"ports": newPorts,
 				})
+			} else {
+				// ACL doesn't exist - create table entry from generated fields
+				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+				// Add rules with prefix-list expansion
+				filterName := svc.IngressFilter
+				if aclName == egressACLName {
+					filterName = svc.EgressFilter
+				}
+				filterSpec, _ := i.Network().GetFilterSpec(filterName)
+				if filterSpec != nil {
+					i.addACLRulesFromFilterSpec(cs, aclName, filterSpec)
+				}
 			}
+			continue
+		case e.Table == "ACL_RULE":
+			// Skip — ACL rules are handled above via addACLRulesFromFilterSpec
+			continue
 
-			if macvpnDef.ARPSuppression {
-				cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeAdd, nil, map[string]string{
-					"suppress": "on",
-				})
-			}
+		// For NEWTRON_SERVICE_BINDING, add extra fields (ACL names, BGP neighbor)
+		case e.Table == "NEWTRON_SERVICE_BINDING":
+			// Handled separately below to add extra binding fields
+			continue
+		}
+
+		// QoS device-wide tables need idempotent upsert in incremental mode
+		if e.Table == "DSCP_TO_TC_MAP" || e.Table == "TC_TO_QUEUE_MAP" ||
+			e.Table == "SCHEDULER" || e.Table == "WRED_PROFILE" {
+			// For QoS device-wide entries, the shared generator doesn't emit these
+			// (only per-interface entries). Generate them here for incremental mode.
+		}
+
+		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+	}
+
+	// QoS device-wide tables (not in shared generator, which only emits per-interface entries)
+	if policyName, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
+		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
+			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
 		}
 	}
 
-	// Create VRF if needed (for L3/IRB with per-interface VRF)
-	if (svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB) &&
-		svc.VRFType == spec.VRFTypeInterface {
-		vrfName := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-		vrfFields := map[string]string{}
-		if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-			vrfFields["vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
-		}
-		cs.Add("VRF", vrfName, ChangeAdd, nil, vrfFields)
-
-		// L3VNI mapping from ipvpn definition
-		if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-			mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, vrfName)
-			cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-				"vrf": vrfName,
-				"vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
-			})
-
-			// Configure BGP EVPN route targets for the VRF from ipvpn definition
-			i.addRouteTargetConfig(cs, vrfName, ipvpnDef.L3VNI, ipvpnDef.ImportRT, ipvpnDef.ExportRT)
+	// Add route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) — these are only
+	// needed in the incremental path, not in topology provisioner.
+	var bgpNeighborIP string
+	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
+		bgpNeighborIP, err = i.addBGPRoutePolicies(cs, svc, opts)
+		if err != nil {
+			return nil, fmt.Errorf("BGP route policies for %s: %w", i.name, err)
 		}
 	}
 
-	// Create shared VRF if needed (for L3/IRB with shared VRF)
-	// First interface using the shared VRF creates it; subsequent users reuse it.
-	// Symmetric to per-interface VRF creation above, but VRF name = ipvpn name
-	// and the VRF persists until the last service user is removed.
-	if (svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB) &&
-		svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-		if !d.VRFExists(svc.IPVPN) {
-			vrfFields := map[string]string{}
-			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				vrfFields["vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
-			}
-			cs.Add("VRF", svc.IPVPN, ChangeAdd, nil, vrfFields)
-
-			// L3VNI tunnel map for EVPN type-5 route advertisement
-			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, svc.IPVPN)
-				cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-					"vrf": svc.IPVPN,
-					"vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
-				})
-
-				i.addRouteTargetConfig(cs, svc.IPVPN, ipvpnDef.L3VNI, ipvpnDef.ImportRT, ipvpnDef.ExportRT)
-			}
-		}
-	}
-
-	// Determine VRF name based on vrf_type
+	// Determine VRF name for binding and local state
 	var vrfName string
 	switch svc.VRFType {
 	case spec.VRFTypeInterface:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	case spec.VRFTypeShared:
-		vrfName = svc.IPVPN // Shared VRF uses ipvpn definition name
-	default:
-		vrfName = "" // Global routing table
+		vrfName = svc.IPVPN
 	}
 
-	// Configure interface based on service type
-	switch svc.ServiceType {
-	case spec.ServiceTypeL2:
-		vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
-		memberKey := fmt.Sprintf("%s|%s", vlanName, i.name)
-		cs.Add("VLAN_MEMBER", memberKey, ChangeAdd, nil, map[string]string{
-			"tagging_mode": "untagged",
-		})
-
-	case spec.ServiceTypeL3:
-		if vrfName != "" {
-			cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
-				"vrf_name": vrfName,
-			})
-		}
-		if opts.IPAddress != "" {
-			ipKey := fmt.Sprintf("%s|%s", i.name, opts.IPAddress)
-			cs.Add("INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
-		}
-
-	case spec.ServiceTypeIRB:
-		vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
-		memberKey := fmt.Sprintf("%s|%s", vlanName, i.name)
-		cs.Add("VLAN_MEMBER", memberKey, ChangeAdd, nil, map[string]string{
-			"tagging_mode": "tagged",
-		})
-
-		vlanIntfFields := map[string]string{}
-		if vrfName != "" {
-			vlanIntfFields["vrf_name"] = vrfName
-		}
-		cs.Add("VLAN_INTERFACE", vlanName, ChangeAdd, nil, vlanIntfFields)
-
-		if svc.AnycastGateway != "" {
-			sviIPKey := fmt.Sprintf("%s|%s", vlanName, svc.AnycastGateway)
-			cs.Add("VLAN_INTERFACE", sviIPKey, ChangeAdd, nil, map[string]string{})
-		}
-
-		if svc.AnycastMAC != "" {
-			cs.Add("SAG_GLOBAL", "IPv4", ChangeModify, nil, map[string]string{
-				"gwmac": svc.AnycastMAC,
-			})
-		}
-	}
-
-	// Bind ACLs - ACLs are per-service, shared across all interfaces using the service
-	var ingressACLName, egressACLName string
-	configDB := d.ConfigDB()
-
-	if svc.IngressFilter != "" {
-		ingressACLName = util.DeriveACLName(serviceName, "in")
-
-		// Check if ACL already exists
-		existingACL, aclExists := configDB.ACLTable[ingressACLName]
-		if aclExists {
-			// ACL exists - add this interface to ports list
-			newPorts := addPortToList(existingACL.Ports, i.name)
-			cs.Add("ACL_TABLE", ingressACLName, ChangeModify, nil, map[string]string{
-				"ports": newPorts,
-			})
-		} else {
-			// ACL doesn't exist - create it with rules
-			cs.Add("ACL_TABLE", ingressACLName, ChangeAdd, nil, map[string]string{
-				"type":        "L3",
-				"stage":       "ingress",
-				"ports":       i.name,
-				"policy_desc": fmt.Sprintf("Ingress filter for %s", serviceName),
-			})
-
-			filterSpec, _ := i.Network().GetFilterSpec(svc.IngressFilter)
-			if filterSpec != nil {
-				i.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec)
-			}
-		}
-	}
-
-	if svc.EgressFilter != "" {
-		egressACLName = util.DeriveACLName(serviceName, "out")
-
-		// Check if ACL already exists
-		existingACL, aclExists := configDB.ACLTable[egressACLName]
-		if aclExists {
-			// ACL exists - add this interface to ports list
-			newPorts := addPortToList(existingACL.Ports, i.name)
-			cs.Add("ACL_TABLE", egressACLName, ChangeModify, nil, map[string]string{
-				"ports": newPorts,
-			})
-		} else {
-			// ACL doesn't exist - create it with rules
-			cs.Add("ACL_TABLE", egressACLName, ChangeAdd, nil, map[string]string{
-				"type":        "L3",
-				"stage":       "egress",
-				"ports":       i.name,
-				"policy_desc": fmt.Sprintf("Egress filter for %s", serviceName),
-			})
-
-			filterSpec, _ := i.Network().GetFilterSpec(svc.EgressFilter)
-			if filterSpec != nil {
-				i.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
-			}
-		}
-	}
-
-	// Apply QoS: new-style policy takes precedence over legacy profile
-	if policyName, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
-		// Ensure device-wide tables exist (idempotent upsert)
-		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
-			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
-		}
-		// Per-interface bindings
-		for _, entry := range generateQoSInterfaceEntries(policyName, policy, i.name) {
-			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
-		}
-	} else if svc.QoSProfile != "" {
-		qosProfile, _ := i.Network().GetQoSProfile(svc.QoSProfile)
-		if qosProfile != nil {
-			qosFields := map[string]string{}
-			if qosProfile.DSCPToTCMap != "" {
-				qosFields["dscp_to_tc_map"] = qosProfile.DSCPToTCMap
-			}
-			if qosProfile.TCToQueueMap != "" {
-				qosFields["tc_to_queue_map"] = qosProfile.TCToQueueMap
-			}
-			if len(qosFields) > 0 {
-				cs.Add("PORT_QOS_MAP", i.name, ChangeAdd, nil, qosFields)
-			}
-		}
-	}
-
-	// Configure routing protocol if specified
-	var bgpNeighborIP string
-	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		var err error
-		bgpNeighborIP, err = i.addBGPRoutingConfig(cs, svc, opts, vrfName)
-		if err != nil {
-			return nil, fmt.Errorf("BGP routing config for %s: %w", i.name, err)
-		}
-	}
-
-	// Record service binding in NEWTRON_SERVICE_BINDING table for tracking
+	// Record service binding with extra fields
 	bindingFields := map[string]string{
 		"service_name": serviceName,
 	}
@@ -388,17 +285,19 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	return cs, nil
 }
 
-// addBGPRoutingConfig adds BGP neighbor configuration for services with routing.
-// Returns the neighbor IP that was configured, or an error if required parameters are missing.
-func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, opts ApplyServiceOpts, vrfName string) (string, error) {
+// addBGPRoutePolicies adds route policy entries (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
+// and redistribution config for BGP services.  The BGP_NEIGHBOR and BGP_NEIGHBOR_AF
+// entries are now generated by GenerateServiceEntries in service_gen.go.
+//
+// Returns the neighbor IP (for the service binding record).
+func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, opts ApplyServiceOpts) (string, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return "", nil
 	}
 
-	d := i.device
 	routing := svc.Routing
 
-	// Derive peer IP from interface IP (works for /30 and /31 point-to-point links)
+	// Derive peer IP (same logic as generateBGPEntries, needed for return value)
 	var peerIP string
 	if opts.IPAddress != "" {
 		var err error
@@ -408,60 +307,23 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 		}
 	}
 
-	if peerIP == "" {
-		return "", fmt.Errorf("BGP routing requires an IP address (use --ip)")
+	// Determine VRF key for route-map AF entries
+	vrfName := ""
+	if svc.VRFType == spec.VRFTypeInterface {
+		vrfName = util.DeriveVRFName(svc.VRFType, svc.Description, i.name)
+	} else if svc.VRFType == spec.VRFTypeShared {
+		vrfName = svc.IPVPN
 	}
-
-	// Determine peer AS - from service spec or from opts
-	var peerAS int
-	if routing.PeerAS == spec.PeerASRequest {
-		peerAS = opts.PeerAS
-		if peerAS == 0 {
-			return "", fmt.Errorf("service requires --peer-as flag")
-		}
-	} else if routing.PeerAS != "" {
-		fmt.Sscanf(routing.PeerAS, "%d", &peerAS)
-	}
-
-	if peerAS == 0 {
-		return "", fmt.Errorf("could not determine BGP peer AS for service routing")
-	}
-
-	// Local AS from device profile
-	localAS := d.Resolved().ASNumber
-	if localAS == 0 {
-		return "", fmt.Errorf("device has no AS number configured")
-	}
-
-	// Local IP is the interface IP (without mask)
-	localIP, _ := util.SplitIPMask(opts.IPAddress)
-
-	// Build BGP neighbor entry
-	neighborFields := map[string]string{
-		"asn":          fmt.Sprintf("%d", peerAS),
-		"local_asn":    fmt.Sprintf("%d", localAS),
-		"local_addr":   localIP,
-		"admin_status": "up",
-	}
-
-	// Add VRF if not global
-	if vrfName != "" {
-		neighborFields["vrf_name"] = vrfName
-	}
-
-	// Key format: vrf|neighborIP (per SONiC Unified FRR Mgmt schema)
 	vrfKey := "default"
 	if vrfName != "" {
 		vrfKey = vrfName
 	}
-	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, peerIP), ChangeAdd, nil, neighborFields)
 
-	// Add address-family activation (IPv4 unicast by default)
-	afFields := map[string]string{
-		"activate": "true",
-	}
+	// Build route-map references for the BGP_NEIGHBOR_AF entry that was
+	// already created by GenerateServiceEntries.  We add them as a modify
+	// to layer on route_map_in / route_map_out.
+	afFields := map[string]string{}
 
-	// Apply route policies from service routing spec
 	if routing.ImportPolicy != "" {
 		rmName := i.addRoutePolicyConfig(cs, svc.Description, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
 		if rmName != "" {
@@ -486,8 +348,11 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 		}
 	}
 
-	afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
-	cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, afFields)
+	// Merge route-map references into the BGP_NEIGHBOR_AF entry
+	if len(afFields) > 0 && peerIP != "" {
+		afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
+		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeModify, nil, afFields)
+	}
 
 	// Override default redistribution if specified
 	if routing.Redistribute != nil {
@@ -505,7 +370,6 @@ func (i *Interface) addBGPRoutingConfig(cs *ChangeSet, svc *spec.ServiceSpec, op
 		}
 	}
 
-	util.WithDevice(d.Name()).Infof("Added BGP neighbor %s (AS %d) via %s", peerIP, peerAS, localIP)
 	return peerIP, nil
 }
 
@@ -681,7 +545,7 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 					ruleIdx++
 				}
 
-				fields := i.buildACLRuleFieldsExpanded(rule, srcIP, dstIP)
+				fields := buildACLRuleFields(rule, srcIP, dstIP)
 				cs.Add("ACL_RULE", ruleKey, ChangeAdd, nil, fields)
 			}
 		}
@@ -704,117 +568,6 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 	return prefixes
 }
 
-// buildACLRuleFieldsExpanded builds ACL rule fields with expanded IPs and policer/CoS support
-func (i *Interface) buildACLRuleFieldsExpanded(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
-	fields := map[string]string{
-		"PRIORITY": fmt.Sprintf("%d", 10000-rule.Sequence),
-	}
-
-	if rule.Action == "permit" {
-		fields["PACKET_ACTION"] = "FORWARD"
-	} else {
-		fields["PACKET_ACTION"] = "DROP"
-	}
-
-	if srcIP != "" {
-		fields["SRC_IP"] = srcIP
-	}
-	if dstIP != "" {
-		fields["DST_IP"] = dstIP
-	}
-	if rule.Protocol != "" {
-		protoMap := map[string]int{
-			"tcp": 6, "udp": 17, "icmp": 1, "ospf": 89, "vrrp": 112, "bgp": 179, "gre": 47,
-		}
-		if proto, ok := protoMap[rule.Protocol]; ok {
-			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
-		} else {
-			// Try to use as numeric protocol
-			fields["IP_PROTOCOL"] = rule.Protocol
-		}
-	}
-	if rule.DstPort != "" {
-		fields["L4_DST_PORT"] = rule.DstPort
-	}
-	if rule.SrcPort != "" {
-		fields["L4_SRC_PORT"] = rule.SrcPort
-	}
-	if rule.DSCP != "" {
-		fields["DSCP"] = rule.DSCP
-	}
-
-	// Policer support - reference policer by name
-	if rule.Policer != "" {
-		fields["POLICER"] = rule.Policer
-	}
-
-	// CoS/TC marking - set traffic class for remarking
-	if rule.CoS != "" {
-		// Map CoS class name to TC value
-		cosToTC := map[string]string{
-			"be": "0", "cs1": "1", "cs2": "2", "cs3": "3",
-			"cs4": "4", "ef": "5", "cs6": "6", "cs7": "7",
-		}
-		if tc, ok := cosToTC[rule.CoS]; ok {
-			fields["TC"] = tc
-		}
-	}
-
-	return fields
-}
-
-// addRouteTargetConfig adds BGP EVPN route target configuration for a VRF
-func (i *Interface) addRouteTargetConfig(cs *ChangeSet, vrfName string, vni int, importRT, exportRT []string) {
-	// Configure BGP address-family for L2VPN EVPN with route targets
-	// Key format: "vrf_name|l2vpn_evpn"
-	afKey := fmt.Sprintf("%s|l2vpn_evpn", vrfName)
-
-	afFields := map[string]string{
-		"advertise_ipv4_unicast": "true",
-	}
-
-	// Add route targets if specified
-	if len(importRT) > 0 {
-		afFields["route_target_import_evpn"] = joinRouteTargets(importRT)
-	}
-	if len(exportRT) > 0 {
-		afFields["route_target_export_evpn"] = joinRouteTargets(exportRT)
-	}
-
-	cs.Add("BGP_GLOBALS_AF", afKey, ChangeAdd, nil, afFields)
-
-	// Also configure per-VNI route targets if specified
-	if vni > 0 && (len(importRT) > 0 || len(exportRT) > 0) {
-		vniKey := fmt.Sprintf("%s|%d", vrfName, vni)
-		vniFields := map[string]string{}
-
-		// Auto-derive RD from VRF name and VNI if not explicitly set
-		// Format: <router-id>:<vni> - but since we don't have router-id here,
-		// use VRF name hash or just the VNI for now
-		vniFields["rd"] = fmt.Sprintf("auto")
-
-		if len(importRT) > 0 {
-			vniFields["route_target_import"] = joinRouteTargets(importRT)
-		}
-		if len(exportRT) > 0 {
-			vniFields["route_target_export"] = joinRouteTargets(exportRT)
-		}
-
-		cs.Add("BGP_EVPN_VNI", vniKey, ChangeAdd, nil, vniFields)
-	}
-}
-
-// joinRouteTargets joins route targets into a comma-separated string
-func joinRouteTargets(rts []string) string {
-	result := ""
-	for i, rt := range rts {
-		if i > 0 {
-			result += ","
-		}
-		result += rt
-	}
-	return result
-}
 
 // addPortToList adds a port to a comma-separated ports list
 func addPortToList(portsList, newPort string) string {
