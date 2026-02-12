@@ -88,7 +88,7 @@ Config is **what the device uses** - imperative, concrete, and device-specific.
   "BGP_NEIGHBOR": {
     "10.1.1.2": {
       "asn": "65100",
-      "local_asn": "13908",
+      "local_asn": "64512",
       "local_addr": "10.1.1.1"
     }
   },
@@ -114,7 +114,7 @@ The translation layer interprets specs in context to generate config:
                                   | + Context:
                                   |   - Interface: Ethernet0
                                   |   - IP: 10.1.1.1/30
-                                  |   - Device AS: 13908
+                                  |   - Device AS: 64512
                                   |   - User-provided peer AS: 65100
                                   v
 +-----------------------------------------------------------------------+
@@ -1120,8 +1120,8 @@ ResolvedProfile (runtime)
 
 | Field | Global | Region | Profile | Resolved |
 |-------|--------|--------|---------|----------|
-| `as_number` | - | 13908 | (not set) | **13908** |
-| `as_number` | - | 13908 | 65535 | **65535** |
+| `as_number` | - | 64512 | (not set) | **64512** |
+| `as_number` | - | 64512 | 65535 | **65535** |
 | `affinity` | "flat" | "east" | "west" | **"west"** |
 
 ## 10. EVPN/VXLAN Architecture

@@ -30,7 +30,7 @@
   },
   "regions": {
     "amer-wan": {
-      "as_number": 13908,
+      "as_number": 64512,
       "as_name": "amer",
       "affinity": "east"
     },

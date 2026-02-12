@@ -17,17 +17,17 @@ The overlay BGP design uses `local-as` to present the regional overlay AS:
 
 ```
 router bgp 65001               ← underlay AS
-  neighbor 10.0.0.2 remote-as 13908
-  neighbor 10.0.0.2 local-as 13908
+  neighbor 10.0.0.2 remote-as 64512
+  neighbor 10.0.0.2 local-as 64512
 ```
 
 FRR has **inconsistent** internal classification for this configuration:
 
 1. **For TTL/socket**: FRR compares the router's global AS (65001) with the
-   neighbor's remote-as (13908). They differ → **external link** → TTL=1.
+   neighbor's remote-as (64512). They differ → **external link** → TTL=1.
 
-2. **For ebgp-multihop**: FRR compares local-as (13908) with remote-as
-   (13908). They match → **iBGP for this peer** → ebgp-multihop is silently
+2. **For ebgp-multihop**: FRR compares local-as (64512) with remote-as
+   (64512). They match → **iBGP for this peer** → ebgp-multihop is silently
    ignored (no-op for iBGP).
 
 This creates a catch-22: the session uses eBGP TTL=1 but the command to

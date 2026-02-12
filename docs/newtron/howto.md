@@ -2624,7 +2624,7 @@ cb := network.NewCompositeBuilder("leaf1-dc1", network.CompositeOverwrite).
 
 // Add device-level entries
 cb.AddBGPGlobals("default", map[string]string{
-    "local_asn": "13908",
+    "local_asn": "64512",
     "router_id": "10.0.0.11",
 })
 
