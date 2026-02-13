@@ -3,7 +3,6 @@ package operations
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -311,131 +310,12 @@ func (p *PreconditionChecker) HasErrors() bool {
 	return len(p.errors) > 0
 }
 
-// ============================================================================
-// DependencyChecker - Reverse dependency checking for safe deletion
-// ============================================================================
+// DependencyChecker is an alias for network.DependencyChecker.
+// Use network.NewDependencyChecker to create instances.
+// Kept as a type alias for backward compatibility.
+type DependencyChecker = network.DependencyChecker
 
-// DependencyChecker checks if resources can be safely deleted by verifying
-// no other resources depend on them. This is the reverse of PreconditionChecker.
-//
-// NOTE: There is also a DependencyChecker in pkg/network/interface_ops.go
-// which is used directly by Interface.RemoveService(). This version in
-// operations is for use by standalone Operation implementations.
-// Consider consolidating if import cycles can be avoided.
-type DependencyChecker struct {
-	device           *network.Device
-	excludeInterface string // Interface being removed (excluded from counts)
-}
-
-// NewDependencyChecker creates a new dependency checker
-func NewDependencyChecker(d *network.Device, excludeInterface string) *DependencyChecker {
-	return &DependencyChecker{
-		device:           d,
-		excludeInterface: excludeInterface,
-	}
-}
-
-// IsLastACLUser returns true if this is the last interface using the ACL
-func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
-	configDB := dc.device.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	acl, ok := configDB.ACLTable[aclName]
-	if !ok {
-		return true // ACL doesn't exist, safe to "delete"
-	}
-
-	// Count interfaces excluding the one being removed
-	count := 0
-	for _, intf := range util.SplitCommaSeparated(acl.Ports) {
-		if intf != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}
-
-// IsLastVLANMember returns true if this is the last member of the VLAN
-func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool {
-	configDB := dc.device.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-
-	// Count members excluding the one being removed
-	count := 0
-	for key := range configDB.VLANMember {
-		// Key format: Vlan100|Ethernet0
-		if len(key) > len(vlanName)+1 && key[:len(vlanName)+1] == vlanName+"|" {
-			memberIface := key[len(vlanName)+1:]
-			if memberIface != dc.excludeInterface {
-				count++
-			}
-		}
-	}
-	return count == 0
-}
-
-// IsLastVRFUser returns true if this is the last interface bound to the VRF
-func (dc *DependencyChecker) IsLastVRFUser(vrfName string) bool {
-	configDB := dc.device.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	// Count interfaces bound to this VRF
-	count := 0
-	for intfName, intf := range configDB.Interface {
-		// Skip composite keys (with |) - those are IP bindings
-		if strings.Contains(intfName, "|") {
-			continue
-		}
-		if intf.VRFName == vrfName && intfName != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}
-
-// IsLastServiceUser returns true if this is the last interface using the service
-func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
-	configDB := dc.device.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	// Count service bindings for this service
-	count := 0
-	for intfName, binding := range configDB.NewtronServiceBinding {
-		if binding.ServiceName == serviceName && intfName != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}
-
-// GetACLRemainingInterfaces returns the interfaces that will remain after removing the excluded one
-func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
-	configDB := dc.device.ConfigDB()
-	if configDB == nil {
-		return ""
-	}
-
-	acl, ok := configDB.ACLTable[aclName]
-	if !ok {
-		return ""
-	}
-
-	var remaining []string
-	for _, intf := range util.SplitCommaSeparated(acl.Ports) {
-		if intf != dc.excludeInterface {
-			remaining = append(remaining, intf)
-		}
-	}
-	return strings.Join(remaining, ",")
-}
+// NewDependencyChecker creates a new dependency checker.
+// Delegates to network.NewDependencyChecker (single source of truth).
+var NewDependencyChecker = network.NewDependencyChecker
 

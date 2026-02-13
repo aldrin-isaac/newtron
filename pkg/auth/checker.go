@@ -88,33 +88,25 @@ func (c *Checker) checkServicePermission(username string, permission Permission,
 	if svc.Permissions == nil {
 		return false
 	}
-
-	// Check for "all" permission first
-	if groups, ok := svc.Permissions["all"]; ok {
-		if c.userInGroups(username, groups) {
-			return true
-		}
-	}
-
-	// Check specific permission
-	groups, ok := svc.Permissions[string(permission)]
-	if !ok {
-		return false
-	}
-
-	return c.userInGroups(username, groups)
+	return c.checkPermissionMap(username, permission, svc.Permissions)
 }
 
 func (c *Checker) checkGlobalPermission(username string, permission Permission) bool {
+	return c.checkPermissionMap(username, permission, c.network.Permissions)
+}
+
+// checkPermissionMap checks whether username has the given permission in permMap.
+// It first checks the "all" wildcard key, then the specific permission key.
+func (c *Checker) checkPermissionMap(username string, permission Permission, permMap map[string][]string) bool {
 	// Check for "all" permission first
-	if groups, ok := c.network.Permissions["all"]; ok {
+	if groups, ok := permMap["all"]; ok {
 		if c.userInGroups(username, groups) {
 			return true
 		}
 	}
 
 	// Check specific permission
-	groups, ok := c.network.Permissions[string(permission)]
+	groups, ok := permMap[string(permission)]
 	if !ok {
 		return false
 	}

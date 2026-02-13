@@ -230,10 +230,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 // DependencyChecker checks if resources can be safely deleted.
 // Used by Interface.RemoveService() to determine when shared resources
 // (ACLs, VLANs, VRFs) can be deleted vs just having this interface removed.
-//
-// NOTE: There is also a DependencyChecker in pkg/operations/operation.go
-// for use by standalone Operation implementations. This version is the
-// primary one used by interface operations.
+// This is the single source of truth; pkg/operations re-exports it as a type alias.
 type DependencyChecker struct {
 	device           *Device
 	excludeInterface string

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/go-redis/redis/v8"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // TableChange represents a single change for pipeline execution.
@@ -161,7 +163,7 @@ func (d *Device) ApplyChangesPipelined(changes []ConfigChange) error {
 	d.ConfigDB, err = d.client.GetAll()
 	if err != nil {
 		// Non-fatal — changes were applied but reload failed
-		fmt.Printf("warning: failed to reload config_db after pipeline apply: %v\n", err)
+		util.WithDevice(d.Name).Warnf("Failed to reload config_db after pipeline apply: %v", err)
 	}
 
 	return nil
