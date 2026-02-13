@@ -44,7 +44,7 @@ var lagListCmd = &cobra.Command{
 
 		portChannels := dev.ListPortChannels()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(portChannels)
 		}
 
@@ -108,7 +108,7 @@ Examples:
 			return err
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(pc)
 		}
 
@@ -201,7 +201,7 @@ Examples:
 			statuses = append(statuses, s)
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(statuses)
 		}
 
@@ -270,7 +270,7 @@ Examples:
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
 				return nil, err
 			}
@@ -302,7 +302,7 @@ Examples:
 		lagName := args[0]
 		memberName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -329,7 +329,7 @@ Examples:
 		lagName := args[0]
 		memberName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -355,7 +355,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGDelete, authCtx); err != nil {
 				return nil, err
 			}

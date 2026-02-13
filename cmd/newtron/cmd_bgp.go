@@ -52,7 +52,7 @@ Examples:
 		underlying := dev.Underlying()
 
 		// --- Local BGP Identity ---
-		fmt.Printf("BGP Status for %s\n\n", bold(deviceName))
+		fmt.Printf("BGP Status for %s\n\n", bold(app.deviceName))
 		fmt.Printf("Local AS: %d\n", resolved.ASNumber)
 		fmt.Printf("Router ID: %s\n", resolved.RouterID)
 		fmt.Printf("Loopback IP: %s\n", resolved.LoopbackIP)

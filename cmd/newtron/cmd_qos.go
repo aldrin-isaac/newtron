@@ -43,9 +43,9 @@ var qosListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all QoS policies",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		policies := net.ListQoSPolicies()
+		policies := app.net.ListQoSPolicies()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(policies)
 		}
 
@@ -61,7 +61,7 @@ var qosListCmd = &cobra.Command{
 		fmt.Fprintln(w, "----\t------\t-----------")
 
 		for _, name := range policies {
-			policy, err := net.GetQoSPolicy(name)
+			policy, err := app.net.GetQoSPolicy(name)
 			if err != nil {
 				continue
 			}
@@ -80,12 +80,12 @@ var qosShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		policyName := args[0]
 
-		policy, err := net.GetQoSPolicy(policyName)
+		policy, err := app.net.GetQoSPolicy(policyName)
 		if err != nil {
 			return err
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(policy)
 		}
 
@@ -150,7 +150,7 @@ Examples:
 		policyName := args[0]
 
 		// Check if already exists
-		if _, err := net.GetQoSPolicy(policyName); err == nil {
+		if _, err := app.net.GetQoSPolicy(policyName); err == nil {
 			return fmt.Errorf("QoS policy '%s' already exists", policyName)
 		}
 
@@ -166,12 +166,12 @@ Examples:
 
 		fmt.Printf("QoS Policy: %s\n", policyName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.SaveQoSPolicy(policyName, policy); err != nil {
+		if err := app.net.SaveQoSPolicy(policyName, policy); err != nil {
 			return fmt.Errorf("saving QoS policy: %w", err)
 		}
 
@@ -194,7 +194,7 @@ Examples:
 		policyName := args[0]
 
 		// Verify it exists
-		if _, err := net.GetQoSPolicy(policyName); err != nil {
+		if _, err := app.net.GetQoSPolicy(policyName); err != nil {
 			return err
 		}
 
@@ -205,12 +205,12 @@ Examples:
 
 		fmt.Printf("Deleting QoS policy: %s\n", policyName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.DeleteQoSPolicy(policyName); err != nil {
+		if err := app.net.DeleteQoSPolicy(policyName); err != nil {
 			return err
 		}
 
@@ -264,7 +264,7 @@ Examples:
 			return err
 		}
 
-		policy, err := net.GetQoSPolicy(policyName)
+		policy, err := app.net.GetQoSPolicy(policyName)
 		if err != nil {
 			return err
 		}
@@ -304,14 +304,14 @@ Examples:
 
 		fmt.Printf("Queue %d (%s) for policy '%s'\n", queueID, addQueueType, policyName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
 		policy.Queues[queueID] = queue
 
-		if err := net.SaveQoSPolicy(policyName, policy); err != nil {
+		if err := app.net.SaveQoSPolicy(policyName, policy); err != nil {
 			return fmt.Errorf("saving QoS policy: %w", err)
 		}
 
@@ -341,7 +341,7 @@ Examples:
 			return err
 		}
 
-		policy, err := net.GetQoSPolicy(policyName)
+		policy, err := app.net.GetQoSPolicy(policyName)
 		if err != nil {
 			return err
 		}
@@ -352,7 +352,7 @@ Examples:
 
 		fmt.Printf("Removing queue %d from policy '%s'\n", queueID, policyName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
@@ -364,7 +364,7 @@ Examples:
 			policy.Queues = policy.Queues[:len(policy.Queues)-1]
 		}
 
-		if err := net.SaveQoSPolicy(policyName, policy); err != nil {
+		if err := app.net.SaveQoSPolicy(policyName, policy); err != nil {
 			return fmt.Errorf("saving QoS policy: %w", err)
 		}
 
@@ -389,13 +389,13 @@ Examples:
 		intfName := args[0]
 		policyName := args[1]
 
-		policy, err := net.GetQoSPolicy(policyName)
+		policy, err := app.net.GetQoSPolicy(policyName)
 		if err != nil {
 			return err
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(intfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -422,7 +422,7 @@ Examples:
 		intfName := args[0]
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(intfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
 				return nil, err
 			}

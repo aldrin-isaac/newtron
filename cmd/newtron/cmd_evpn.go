@@ -61,7 +61,7 @@ Examples:
   newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource("evpn")
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("evpn")
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -92,7 +92,7 @@ var evpnStatusCmd = &cobra.Command{
 		configDB := dev.ConfigDB()
 		underlying := dev.Underlying()
 
-		fmt.Printf("EVPN Status for %s\n\n", bold(deviceName))
+		fmt.Printf("EVPN Status for %s\n\n", bold(app.deviceName))
 
 		// --- VTEP Configuration ---
 		fmt.Println("VTEP Configuration:")
@@ -200,7 +200,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all IP-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpns := net.Spec().IPVPN
+		ipvpns := app.net.Spec().IPVPN
 
 		if len(ipvpns) == 0 {
 			fmt.Println("No IP-VPN definitions")
@@ -239,7 +239,7 @@ var evpnIpvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		ipvpn, err := net.GetIPVPN(name)
+		ipvpn, err := app.net.GetIPVPN(name)
 		if err != nil {
 			return err
 		}
@@ -313,12 +313,12 @@ Examples:
 			fmt.Printf("  Description: %s\n", ipvpnSpec.Description)
 		}
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.SaveIPVPN(name, ipvpnSpec); err != nil {
+		if err := app.net.SaveIPVPN(name, ipvpnSpec); err != nil {
 			return fmt.Errorf("saving IP-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("IP-VPN definition saved to network.json."))
@@ -341,7 +341,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := net.GetIPVPN(name); err != nil {
+		if _, err := app.net.GetIPVPN(name); err != nil {
 			return err
 		}
 
@@ -352,12 +352,12 @@ Examples:
 
 		fmt.Printf("Deleting IP-VPN: %s\n", name)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.DeleteIPVPN(name); err != nil {
+		if err := app.net.DeleteIPVPN(name); err != nil {
 			return fmt.Errorf("deleting IP-VPN: %w", err)
 		}
 		fmt.Println(green("IP-VPN definition deleted from network.json."))
@@ -392,7 +392,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all MAC-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		macvpns := net.Spec().MACVPN
+		macvpns := app.net.Spec().MACVPN
 
 		if len(macvpns) == 0 {
 			fmt.Println("No MAC-VPN definitions")
@@ -427,7 +427,7 @@ var evpnMacvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		macvpn, err := net.GetMACVPN(name)
+		macvpn, err := app.net.GetMACVPN(name)
 		if err != nil {
 			return err
 		}
@@ -485,12 +485,12 @@ Examples:
 			fmt.Printf("  Description: %s\n", macvpnSpec.Description)
 		}
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.SaveMACVPN(name, macvpnSpec); err != nil {
+		if err := app.net.SaveMACVPN(name, macvpnSpec); err != nil {
 			return fmt.Errorf("saving MAC-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("MAC-VPN definition saved to network.json."))
@@ -513,7 +513,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := net.GetMACVPN(name); err != nil {
+		if _, err := app.net.GetMACVPN(name); err != nil {
 			return err
 		}
 
@@ -524,12 +524,12 @@ Examples:
 
 		fmt.Printf("Deleting MAC-VPN: %s\n", name)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.DeleteMACVPN(name); err != nil {
+		if err := app.net.DeleteMACVPN(name); err != nil {
 			return fmt.Errorf("deleting MAC-VPN: %w", err)
 		}
 		fmt.Println(green("MAC-VPN definition deleted from network.json."))

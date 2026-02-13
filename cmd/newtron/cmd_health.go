@@ -46,7 +46,7 @@ var healthCheckCmd = &cobra.Command{
 				return err
 			}
 
-			if jsonOutput {
+			if app.jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode(result)
 			}
 
@@ -60,11 +60,11 @@ var healthCheckCmd = &cobra.Command{
 			return err
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(report)
 		}
 
-		fmt.Printf("\nHealth Report for %s\n", bold(deviceName))
+		fmt.Printf("\nHealth Report for %s\n", bold(app.deviceName))
 		fmt.Printf("Timestamp: %s\n", report.Timestamp.Format("2006-01-02 15:04:05"))
 		fmt.Printf("Duration: %s\n\n", report.Duration)
 

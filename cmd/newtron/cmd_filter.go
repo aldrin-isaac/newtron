@@ -38,9 +38,9 @@ var filterListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all filter templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filterNames := net.ListFilterSpecs()
+		filterNames := app.net.ListFilterSpecs()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(filterNames)
 		}
 
@@ -56,7 +56,7 @@ var filterListCmd = &cobra.Command{
 		fmt.Fprintln(w, "----\t----\t-----\t-----------")
 
 		for _, name := range filterNames {
-			fs, err := net.GetFilterSpec(name)
+			fs, err := app.net.GetFilterSpec(name)
 			if err != nil {
 				continue
 			}
@@ -75,12 +75,12 @@ var filterShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		fs, err := net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilterSpec(filterName)
 		if err != nil {
 			return err
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(fs)
 		}
 
@@ -148,7 +148,7 @@ Examples:
 		}
 
 		// Check if already exists
-		if _, err := net.GetFilterSpec(filterName); err == nil {
+		if _, err := app.net.GetFilterSpec(filterName); err == nil {
 			return fmt.Errorf("filter '%s' already exists", filterName)
 		}
 
@@ -165,12 +165,12 @@ Examples:
 
 		fmt.Printf("Filter: %s (type: %s)\n", filterName, filterCreateType)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 
@@ -193,7 +193,7 @@ Examples:
 		filterName := args[0]
 
 		// Verify it exists
-		if _, err := net.GetFilterSpec(filterName); err != nil {
+		if _, err := app.net.GetFilterSpec(filterName); err != nil {
 			return err
 		}
 
@@ -204,12 +204,12 @@ Examples:
 
 		fmt.Printf("Deleting filter: %s\n", filterName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.DeleteFilterSpec(filterName); err != nil {
+		if err := app.net.DeleteFilterSpec(filterName); err != nil {
 			return err
 		}
 
@@ -263,7 +263,7 @@ Examples:
 			return err
 		}
 
-		fs, err := net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilterSpec(filterName)
 		if err != nil {
 			return err
 		}
@@ -291,7 +291,7 @@ Examples:
 
 		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
@@ -303,7 +303,7 @@ Examples:
 			return fs.Rules[i].Sequence < fs.Rules[j].Sequence
 		})
 
-		if err := net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 
@@ -333,7 +333,7 @@ Examples:
 			return err
 		}
 
-		fs, err := net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilterSpec(filterName)
 		if err != nil {
 			return err
 		}
@@ -355,14 +355,14 @@ Examples:
 
 		fmt.Printf("Removing rule (priority %d) from filter '%s'\n", priority, filterName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
 		fs.Rules = newRules
 
-		if err := net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 

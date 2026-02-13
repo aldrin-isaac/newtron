@@ -157,7 +157,7 @@ Examples:
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -204,7 +204,7 @@ Examples:
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -242,7 +242,7 @@ Examples:
 		aclName := args[0]
 		ruleName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -271,7 +271,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -308,7 +308,7 @@ Examples:
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -345,7 +345,7 @@ Examples:
 		aclName := args[0]
 		interfaceName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(aclName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}

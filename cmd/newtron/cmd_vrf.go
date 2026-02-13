@@ -164,7 +164,7 @@ var vrfStatusCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Printf("VRF Status for %s\n\n", bold(deviceName))
+		fmt.Printf("VRF Status for %s\n\n", bold(app.deviceName))
 
 		// Config view
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -224,7 +224,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFCreate, authCtx); err != nil {
 				return nil, err
 			}
@@ -252,7 +252,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFDelete, authCtx); err != nil {
 				return nil, err
 			}
@@ -280,7 +280,7 @@ Examples:
 		vrfName := args[0]
 		intfName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -307,7 +307,7 @@ Examples:
 		vrfName := args[0]
 		intfName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -336,7 +336,7 @@ Examples:
 		vrfName := args[0]
 		ipvpnName := args[1]
 
-		ipvpnDef, err := net.GetIPVPN(ipvpnName)
+		ipvpnDef, err := app.net.GetIPVPN(ipvpnName)
 		if err != nil {
 			return fmt.Errorf("ipvpn '%s' not found in network.json", ipvpnName)
 		}
@@ -352,7 +352,7 @@ Examples:
 		fmt.Println()
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -378,7 +378,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -418,7 +418,7 @@ Examples:
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -464,7 +464,7 @@ Examples:
 		target := args[1]
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -509,7 +509,7 @@ Examples:
 		nextHop := args[2]
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -537,7 +537,7 @@ Examples:
 		prefix := args[1]
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
 			}

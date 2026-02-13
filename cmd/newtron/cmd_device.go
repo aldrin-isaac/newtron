@@ -42,7 +42,7 @@ Examples:
   newtron -d leaf1-ny device cleanup --type acls -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -58,7 +58,7 @@ Examples:
 			}
 
 			// Display summary before changeset
-			fmt.Printf("Orphaned Configurations on %s\n", bold(deviceName))
+			fmt.Printf("Orphaned Configurations on %s\n", bold(app.deviceName))
 			fmt.Println(strings.Repeat("=", 50))
 
 			if len(summary.OrphanedACLs) > 0 {

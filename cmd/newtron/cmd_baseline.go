@@ -31,7 +31,7 @@ Examples:
 func getConfigletDir() string {
 	// Try multiple locations
 	locations := []string{
-		specDir + "/../configlets",
+		app.specDir + "/../configlets",
 		"./configlets",
 		"/etc/newtron/configlets",
 	}
@@ -113,7 +113,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		templates := args
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource("baseline")
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("baseline")
 			if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
 				return nil, err
 			}
@@ -144,7 +144,7 @@ Examples:
 				}
 			}
 
-			fmt.Printf("Applying templates to %s:\n", deviceName)
+			fmt.Printf("Applying templates to %s:\n", app.deviceName)
 			for _, t := range templates {
 				fmt.Printf("  - %s\n", t)
 			}

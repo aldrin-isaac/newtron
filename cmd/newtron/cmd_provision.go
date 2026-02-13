@@ -31,21 +31,21 @@ Examples:
   newtron -S specs provision -x              # Execute all devices
   newtron -S specs provision -d leaf1 -xs    # Execute + save for one device`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !net.HasTopology() {
-			return fmt.Errorf("no topology.json found in spec directory %s", specDir)
+		if !app.net.HasTopology() {
+			return fmt.Errorf("no topology.json found in spec directory %s", app.specDir)
 		}
 
-		tp, err := network.NewTopologyProvisioner(net)
+		tp, err := network.NewTopologyProvisioner(app.net)
 		if err != nil {
 			return err
 		}
 
 		// Get device list
 		var deviceNames []string
-		if deviceName != "" {
-			deviceNames = []string{deviceName}
+		if app.deviceName != "" {
+			deviceNames = []string{app.deviceName}
 		} else {
-			deviceNames = net.GetTopology().DeviceNames()
+			deviceNames = app.net.GetTopology().DeviceNames()
 		}
 
 		if len(deviceNames) == 0 {
@@ -76,7 +76,7 @@ Examples:
 				fmt.Printf("    %s: %d keys\n", table, len(composite.Tables[table]))
 			}
 
-			if !executeMode {
+			if !app.executeMode {
 				fmt.Println()
 				continue
 			}
@@ -98,8 +98,8 @@ Examples:
 			// services) and breaks VPP syncd. Most CONFIG_DB changes are picked
 			// up via Redis keyspace notifications, but bgpcfgd cannot change the
 			// BGP ASN dynamically — it requires a container restart.
-			if saveMode {
-				dev, err := net.ConnectDevice(ctx, name)
+			if app.saveMode {
+				dev, err := app.net.ConnectDevice(ctx, name)
 				if err != nil {
 					fmt.Printf("  Save: %s (could not connect: %v)\n", red("FAILED"), err)
 				} else {
@@ -133,7 +133,7 @@ Examples:
 			fmt.Println()
 		}
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 		}
 

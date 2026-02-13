@@ -63,7 +63,7 @@ var auditListCmd = &cobra.Command{
 			return fmt.Errorf("querying audit log: %w", err)
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(events)
 		}
 

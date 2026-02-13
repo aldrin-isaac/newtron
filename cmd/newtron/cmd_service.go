@@ -49,9 +49,9 @@ var serviceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available services",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		services := net.ListServices()
+		services := app.net.ListServices()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(services)
 		}
 
@@ -65,7 +65,7 @@ var serviceListCmd = &cobra.Command{
 		fmt.Fprintln(w, "----\t----\t-----------")
 
 		for _, name := range services {
-			svc, _ := net.GetService(name)
+			svc, _ := app.net.GetService(name)
 			if svc != nil {
 				fmt.Fprintf(w, "%s\t%s\t%s\n", name, svc.ServiceType, svc.Description)
 			}
@@ -83,12 +83,12 @@ var serviceShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serviceName := args[0]
 
-		svc, err := net.GetService(serviceName)
+		svc, err := app.net.GetService(serviceName)
 		if err != nil {
 			return err
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(svc)
 		}
 
@@ -101,10 +101,10 @@ var serviceShowCmd = &cobra.Command{
 		var ipvpnDef *spec.IPVPNSpec
 		var macvpnDef *spec.MACVPNSpec
 		if svc.IPVPN != "" {
-			ipvpnDef, _ = net.GetIPVPN(svc.IPVPN)
+			ipvpnDef, _ = app.net.GetIPVPN(svc.IPVPN)
 		}
 		if svc.MACVPN != "" {
-			macvpnDef, _ = net.GetMACVPN(svc.MACVPN)
+			macvpnDef, _ = app.net.GetMACVPN(svc.MACVPN)
 		}
 
 		switch svc.ServiceType {
@@ -225,7 +225,7 @@ Examples:
 		intfArg := args[0]
 		serviceName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithService(serviceName).WithInterface(intfArg)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithService(serviceName).WithInterface(intfArg)
 			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
 				return nil, err
 			}
@@ -236,7 +236,7 @@ Examples:
 			}
 
 			// Show derived values
-			svc, _ := net.GetService(serviceName)
+			svc, _ := app.net.GetService(serviceName)
 			derived, _ := util.DeriveFromInterface(intfArg, applyIP, serviceName)
 
 			fmt.Printf("\nApplying service '%s' to interface %s...\n", serviceName, intfArg)
@@ -282,7 +282,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfArg := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithInterface(intfArg)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithInterface(intfArg)
 			if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
 				return nil, err
 			}
@@ -330,7 +330,7 @@ Examples:
 			return nil
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(map[string]string{
 				"service": svc,
 				"ip":      strings.Join(intf.IPAddresses(), ", "),
@@ -374,7 +374,7 @@ Examples:
 			}
 
 			serviceName := intf.ServiceName()
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(intfArg).WithService(serviceName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfArg).WithService(serviceName)
 			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
 				return nil, err
 			}
@@ -440,7 +440,7 @@ Examples:
 		}
 
 		// Check if already exists
-		if _, err := net.GetService(serviceName); err == nil {
+		if _, err := app.net.GetService(serviceName); err == nil {
 			return fmt.Errorf("service '%s' already exists", serviceName)
 		}
 
@@ -463,12 +463,12 @@ Examples:
 
 		fmt.Printf("Service: %s (type: %s)\n", serviceName, svcCreateType)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.SaveService(serviceName, svc); err != nil {
+		if err := app.net.SaveService(serviceName, svc); err != nil {
 			return fmt.Errorf("saving service: %w", err)
 		}
 
@@ -494,7 +494,7 @@ Examples:
 		serviceName := args[0]
 
 		// Verify it exists
-		if _, err := net.GetService(serviceName); err != nil {
+		if _, err := app.net.GetService(serviceName); err != nil {
 			return err
 		}
 
@@ -505,12 +505,12 @@ Examples:
 
 		fmt.Printf("Deleting service: %s\n", serviceName)
 
-		if !executeMode {
+		if !app.executeMode {
 			printDryRunNotice()
 			return nil
 		}
 
-		if err := net.DeleteService(serviceName); err != nil {
+		if err := app.net.DeleteService(serviceName); err != nil {
 			return err
 		}
 

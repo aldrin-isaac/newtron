@@ -467,17 +467,17 @@ Examples:
   newtron -d leaf1-ny -S /path/to/specs shell`,
 	Aliases: []string{"sh"},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if deviceName == "" {
+		if app.deviceName == "" {
 			return fmt.Errorf("device required: use -d <device> flag")
 		}
 		ctx := context.Background()
-		dev, err := net.ConnectDevice(ctx, deviceName)
+		dev, err := app.net.ConnectDevice(ctx, app.deviceName)
 		if err != nil {
 			return err
 		}
 		defer dev.Disconnect()
 
-		sh := NewShell(dev, deviceName)
+		sh := NewShell(dev, app.deviceName)
 		return sh.Run()
 	},
 }

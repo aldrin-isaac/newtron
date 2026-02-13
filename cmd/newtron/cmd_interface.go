@@ -40,7 +40,7 @@ var interfaceListCmd = &cobra.Command{
 
 		interfaces := dev.ListInterfaces()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(interfaces)
 		}
 
@@ -229,7 +229,7 @@ Examples:
 			return fmt.Errorf("unknown property: %s", property)
 		}
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(map[string]interface{}{property: value})
 		}
 		fmt.Println(value)
@@ -261,7 +261,7 @@ Examples:
 		property := args[1]
 		value := strings.Join(args[2:], " ")
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(intfName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
 				return nil, err
 			}
@@ -306,7 +306,7 @@ Examples:
 		ingressACL := intf.IngressACL()
 		egressACL := intf.EgressACL()
 
-		if jsonOutput {
+		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(map[string]string{
 				"ingress": ingressACL,
 				"egress":  egressACL,
@@ -356,7 +356,7 @@ Examples:
 
 		// Check if it's a LAG
 		if members := intf.LAGMembers(); len(members) > 0 {
-			if jsonOutput {
+			if app.jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode(members)
 			}
 			fmt.Println("LAG Members:")
@@ -368,7 +368,7 @@ Examples:
 
 		// Check if it's a VLAN
 		if members := intf.VLANMembers(); len(members) > 0 {
-			if jsonOutput {
+			if app.jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode(members)
 			}
 			fmt.Println("VLAN Members:")

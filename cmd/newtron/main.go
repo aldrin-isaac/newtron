@@ -45,24 +45,27 @@ import (
 	"github.com/newtron-network/newtron/pkg/version"
 )
 
-var (
-	// Global context flags (set the scope for operations)
-	networkName string // -n, --network
-	deviceName  string // -d, --device
+// App holds CLI state shared across all commands.
+type App struct {
+	// Context flags
+	networkName string
+	deviceName  string
 
-	// Global option flags
+	// Option flags
 	specDir     string
 	executeMode bool
 	saveMode    bool
 	verbose     bool
 	jsonOutput  bool
 
-	// Global state
-	userSettings *settings.Settings
-	loader       *spec.Loader
-	net          *network.Network
-	permChecker  *auth.Checker
-)
+	// Initialized state (set in PersistentPreRunE)
+	settings    *settings.Settings
+	loader      *spec.Loader
+	net         *network.Network
+	permChecker *auth.Checker
+}
+
+var app = &App{}
 
 func main() {
 	// Implicit device name: if the first arg is not a known command or flag,
@@ -124,52 +127,52 @@ Each resource takes its natural key as a positional argument:
 		}
 
 		// Validate flag combinations
-		if saveMode && !executeMode {
+		if app.saveMode && !app.executeMode {
 			return fmt.Errorf("--save (-s) requires --execute (-x): use -xs to execute and save")
 		}
 
 		// Load user settings
 		var err error
-		userSettings, err = settings.Load()
+		app.settings, err = settings.Load()
 		if err != nil {
 			util.Warnf("Could not load settings: %v", err)
-			userSettings = &settings.Settings{}
+			app.settings = &settings.Settings{}
 		}
 
 		// Apply defaults from settings
-		if networkName == "" {
-			networkName = userSettings.DefaultNetwork
+		if app.networkName == "" {
+			app.networkName = app.settings.DefaultNetwork
 		}
-		if specDir == "" {
-			specDir = userSettings.GetSpecDir()
+		if app.specDir == "" {
+			app.specDir = app.settings.GetSpecDir()
 		}
 
 		// Set log level: quiet by default, verbose on -v
-		if verbose {
+		if app.verbose {
 			util.SetLogLevel("debug")
 		} else {
 			util.SetLogLevel("warn")
 		}
 
 		// Initialize spec loader
-		loader = spec.NewLoader(specDir)
-		if err := loader.Load(); err != nil {
+		app.loader = spec.NewLoader(app.specDir)
+		if err := app.loader.Load(); err != nil {
 			return fmt.Errorf("loading specs: %w", err)
 		}
 
 		// Create Network object (the top-level object in OO hierarchy)
-		net, err = network.NewNetwork(specDir)
+		app.net, err = network.NewNetwork(app.specDir)
 		if err != nil {
 			return fmt.Errorf("initializing network: %w", err)
 		}
 
 		// Initialize permission checker
-		permChecker = auth.NewChecker(loader.GetNetwork())
+		app.permChecker = auth.NewChecker(app.loader.GetNetwork())
 
 		// Initialize audit logger
 		auditPath := "/var/log/newtron/audit.log"
-		if specDir != "" {
-			auditPath = specDir + "/audit.log"
+		if app.specDir != "" {
+			auditPath = app.specDir + "/audit.log"
 		}
 		auditLogger, err := audit.NewFileLogger(auditPath, audit.RotationConfig{
 			MaxSize:    10 * 1024 * 1024, // 10MB
@@ -187,12 +190,12 @@ Each resource takes its natural key as a positional argument:
 
 func init() {
 	// Context flags (object selectors)
-	rootCmd.PersistentFlags().StringVarP(&networkName, "network", "n", "", "Network name")
-	rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Device name")
+	rootCmd.PersistentFlags().StringVarP(&app.networkName, "network", "n", "", "Network name")
+	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "Specification directory")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().StringVarP(&app.specDir, "specs", "S", "", "Specification directory")
+	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
 	// (PersistentFlags so subcommands inherit)
@@ -270,10 +273,10 @@ func printVersion(tool string) {
 
 // requireDevice ensures a device is specified via -d flag
 func requireDevice(ctx context.Context) (*network.Device, error) {
-	if deviceName == "" {
+	if app.deviceName == "" {
 		return nil, fmt.Errorf("device required: use -d <device> flag")
 	}
-	return net.ConnectDevice(ctx, deviceName)
+	return app.net.ConnectDevice(ctx, app.deviceName)
 }
 
 // ============================================================================
@@ -282,7 +285,7 @@ func requireDevice(ctx context.Context) (*network.Device, error) {
 
 // Helper to print dry-run notice
 func printDryRunNotice() {
-	if !executeMode {
+	if !app.executeMode {
 		fmt.Println("\n" + yellow("DRY-RUN: No changes applied. Use -x to execute."))
 	}
 }
@@ -295,7 +298,7 @@ func executeAndSave(ctx context.Context, cs *network.ChangeSet, dev *network.Dev
 	}
 	fmt.Println("\n" + green("Changes applied successfully."))
 
-	if saveMode {
+	if app.saveMode {
 		fmt.Print("Saving configuration... ")
 		if err := dev.SaveConfig(ctx); err != nil {
 			fmt.Println(red("FAILED"))
@@ -308,8 +311,8 @@ func executeAndSave(ctx context.Context, cs *network.ChangeSet, dev *network.Dev
 
 // Helper to check execute permission
 func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
-	if executeMode {
-		return permChecker.Check(perm, ctx)
+	if app.executeMode {
+		return app.permChecker.Check(perm, ctx)
 	}
 	// Preview/dry-run only needs view permission
 	return nil
@@ -343,7 +346,7 @@ func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network
 	fmt.Println("Changes to be applied:")
 	fmt.Print(changeSet.String())
 
-	if executeMode {
+	if app.executeMode {
 		return executeAndSave(ctx, changeSet, dev)
 	}
 	printDryRunNotice()
@@ -368,8 +371,8 @@ func addWriteFlags(cmd *cobra.Command) {
 	if cmd.HasSubCommands() {
 		flags = cmd.PersistentFlags()
 	}
-	flags.BoolVarP(&executeMode, "execute", "x", false, "Execute changes (default is dry-run)")
-	flags.BoolVarP(&saveMode, "save", "s", false, "Save config after changes (requires -x)")
+	flags.BoolVarP(&app.executeMode, "execute", "x", false, "Execute changes (default is dry-run)")
+	flags.BoolVarP(&app.saveMode, "save", "s", false, "Save config after changes (requires -x)")
 }
 
 // addOutputFlags registers --json as a local flag.
@@ -379,7 +382,7 @@ func addOutputFlags(cmd *cobra.Command) {
 	if cmd.HasSubCommands() {
 		flags = cmd.PersistentFlags()
 	}
-	flags.BoolVar(&jsonOutput, "json", false, "JSON output")
+	flags.BoolVar(&app.jsonOutput, "json", false, "JSON output")
 }
 
 // Color helpers — delegate to pkg/cli
