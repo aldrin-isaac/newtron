@@ -153,7 +153,7 @@ type NetworkSpecFile struct {
     FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
     Policers     map[string]*PolicerSpec      `json:"policers"`
     QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
-    QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"` // Legacy
+    QoSProfiles  map[string]*spec.QoSProfile `json:"qos_profiles,omitempty"` // Legacy
 
     // Route policies for BGP import/export
     RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
@@ -789,7 +789,7 @@ func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error)
 func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error)
 
 // GetQoSProfile returns a QoS profile by name. Returns error if not found.
-func (n *Network) GetQoSProfile(name string) (*model.QoSProfile, error)
+func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error)
 
 // GetPlatform returns a platform spec by name, or error if not found.
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
