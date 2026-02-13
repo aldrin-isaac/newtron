@@ -15,10 +15,15 @@ func newListCmd() *cobra.Command {
 	var dir string
 
 	cmd := &cobra.Command{
-		Use:   "list",
+		Use:   "list [suite]",
 		Short: "List available scenarios",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir = resolveDir(cmd, dir)
+			var positional string
+			if len(args) > 0 {
+				positional = args[0]
+			}
+			dir = resolveDir(cmd, dir, positional)
 
 			scenarios, err := newtest.ParseAllScenarios(dir)
 			if err != nil {

@@ -25,12 +25,19 @@ func newStartCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start",
+		Use:   "start [suite]",
 		Short: "Start or resume a test suite",
 		Long: `Deploy topology (if needed), run scenarios, and leave topology up.
 
+The suite can be a name (resolved under newtest/suites/) or a path.
+All scenarios run by default unless --scenario selects one.
+
+  newtest start 2node-incremental
+  newtest start --scenario boot-ssh
+
 If a previous run was paused, start resumes from where it left off.
 Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if verboseFlag {
 				util.SetLogLevel("debug")
@@ -38,10 +45,20 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 				util.SetLogLevel("warn")
 			}
 
-			dir = resolveDir(cmd, dir)
+			// Positional arg overrides --dir
+			var positional string
+			if len(args) > 0 {
+				positional = args[0]
+			}
+			dir = resolveDir(cmd, dir, positional)
 			absDir, err := filepath.Abs(dir)
 			if err != nil {
 				return fmt.Errorf("resolve dir: %w", err)
+			}
+
+			// Default to --all unless --scenario is specified
+			if scenario == "" && !cmd.Flags().Changed("all") {
+				all = true
 			}
 
 			topologiesDir := resolveTopologiesDir()
@@ -109,7 +126,8 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			if errors.As(runErr, &pauseErr) {
 				state.Status = newtest.StatusPaused
 				_ = newtest.SaveRunState(state)
-				fmt.Fprintf(os.Stderr, "\n%s; resume with: newtest start --dir %s --all\n", pauseErr, dir)
+				suiteName := filepath.Base(dir)
+			fmt.Fprintf(os.Stderr, "\n%s; resume with: newtest start %s\n", pauseErr, suiteName)
 				return nil
 			}
 
