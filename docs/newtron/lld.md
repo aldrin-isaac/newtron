@@ -20,33 +20,38 @@ Newtron separates **specification** (declarative intent in `pkg/spec`) from **co
 ```
 newtron/
 ├── cmd/
-│   ├── newtron/                     # CLI application
-│   │   ├── main.go                  # Entry point, root command, context flags
-│   │   ├── cmd_verbs.go             # Symmetric read/write verb commands (set, get, add-member, etc.)
-│   │   ├── cmd_service.go           # Service subcommands
-│   │   ├── cmd_interface.go         # Interface subcommands
-│   │   ├── cmd_lag.go               # LAG subcommands
-│   │   ├── cmd_vlan.go              # VLAN subcommands
-│   │   ├── cmd_acl.go               # ACL subcommands
-│   │   ├── cmd_evpn.go              # EVPN subcommands
-│   │   ├── cmd_bgp.go               # BGP subcommands (direct/indirect neighbors)
+│   ├── newtron/                     # CLI application (noun-group pattern)
+│   │   ├── main.go                  # Entry point, root command, implicit device detection
+│   │   ├── cmd_interface.go         # Interface subcommands (list/show/get/set)
+│   │   ├── cmd_vlan.go              # VLAN subcommands (list/show/status/create/delete/add-interface/...)
+│   │   ├── cmd_vrf.go               # VRF subcommands (list/show/status/create/delete/add-interface/bind-ipvpn/add-neighbor/add-route/...)
+│   │   ├── cmd_lag.go               # LAG subcommands (list/show/status/create/delete/add-interface/remove-interface)
+│   │   ├── cmd_acl.go               # ACL subcommands (list/show/create/delete/add-rule/delete-rule/bind/unbind)
+│   │   ├── cmd_evpn.go              # EVPN overlay (setup/status/ipvpn/macvpn)
+│   │   ├── cmd_bgp.go               # BGP status (visibility-only)
+│   │   ├── cmd_service.go           # Service subcommands (list/show/get/apply/remove/refresh/create/delete)
+│   │   ├── cmd_qos.go               # QoS subcommands (list/show/create/delete/add-queue/remove-queue/apply/remove)
+│   │   ├── cmd_filter.go            # Filter subcommands (list/show/create/delete/add-rule/remove-rule)
+│   │   ├── cmd_show.go              # Device show command
+│   │   ├── cmd_device.go            # Device cleanup command
 │   │   ├── cmd_health.go            # Health check subcommands
 │   │   ├── cmd_baseline.go          # Baseline subcommands
 │   │   ├── cmd_audit.go             # Audit subcommands
 │   │   ├── cmd_settings.go          # Settings management
-│   │   ├── cmd_state.go             # State DB queries (bgp, evpn, lag, vrf)
 │   │   ├── cmd_provision.go         # Topology provisioning commands
 │   │   ├── interactive.go           # Interactive menu mode
 │   │   └── shell.go                 # Interactive shell with readline
 ├── pkg/
 │   ├── network/                     # OO hierarchy + spec->config translation
-│   │   ├── network.go               # Top-level Network object (owns specs)
+│   │   ├── network.go               # Top-level Network object (owns specs + spec persistence)
 │   │   ├── device.go                # Device with parent reference to Network
 │   │   ├── interface.go             # Interface with parent reference to Device
 │   │   ├── interface_ops.go         # Operations as methods on Interface
 │   │   ├── device_ops.go            # Operations as methods on Device
 │   │   ├── changeset.go             # ChangeSet for tracking config changes
 │   │   ├── composite.go            # CompositeBuilder, CompositeConfig, CompositeMode types
+│   │   ├── service_gen.go          # Service CONFIG_DB entry generation (GenerateServiceEntries)
+│   │   ├── qos.go                  # QoS CONFIG_DB entry generation (generateQoSDeviceEntries, generateQoSInterfaceEntries)
 │   │   └── topology.go             # TopologyProvisioner, ProvisionDevice, ProvisionInterface
 │   ├── spec/                        # Specification loading (declarative intent)
 │   │   ├── types.go                 # Spec structs (NetworkSpecFile, ServiceSpec, etc.)
@@ -175,9 +180,10 @@ type IPVPNSpec struct {
 
 // MACVPNSpec defines MAC-VPN parameters for L2 bridging (Type-2 routes).
 // Referenced by services via the "macvpn" field.
+// Note: VLAN ID moved to ServiceSpec in V2 (MAC-VPN is a VPN definition,
+// not a bridge domain; the local VLAN is a per-service property).
 type MACVPNSpec struct {
     Description    string `json:"description,omitempty"`
-    VLAN           int    `json:"vlan"`
     L2VNI          int    `json:"l2_vni"`
     ARPSuppression bool   `json:"arp_suppression,omitempty"`
 }
@@ -227,6 +233,9 @@ type ServiceSpec struct {
     IPVPN   string `json:"ipvpn,omitempty"`
     MACVPN  string `json:"macvpn,omitempty"`
     VRFType string `json:"vrf_type,omitempty"` // "interface" or "shared"
+
+    // VLAN ID for L2/IRB services (local bridge domain)
+    VLAN int `json:"vlan,omitempty"`
 
     // Routing protocol specification
     Routing *RoutingSpec `json:"routing,omitempty"`
@@ -2413,6 +2422,9 @@ func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*
 func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error)
 
+// RemoveVLANMember deletes a VLAN_MEMBER entry for the given VLAN and interface.
+func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error)
+
 // ============================================================================
 // PortChannel (LAG) Management
 // ============================================================================
@@ -2428,6 +2440,29 @@ func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member str
 
 func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error)
 func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
+
+// AddVRFInterface binds an interface to a VRF by setting vrf_name on the
+// INTERFACE table entry. Fails if the interface is already in a different VRF.
+func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
+
+// RemoveVRFInterface removes an interface from a VRF by clearing vrf_name
+// from the INTERFACE table entry.
+func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
+
+// BindIPVPN maps a VRF to an IP-VPN by setting the L3VNI on the VRF entry
+// and creating a VXLAN_TUNNEL_MAP entry for the VNI-to-VRF mapping.
+func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error)
+
+// UnbindIPVPN removes the L3VNI mapping from a VRF: clears the VNI from
+// the VRF entry and deletes the corresponding VXLAN_TUNNEL_MAP entry.
+func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error)
+
+// AddStaticRoute creates a static route in the STATIC_ROUTE table for
+// the given VRF, prefix, and next-hop.
+func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error)
+
+// RemoveStaticRoute deletes a static route from the STATIC_ROUTE table.
+func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error)
 
 // ============================================================================
 // ACL Management
@@ -2451,6 +2486,12 @@ func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, err
 func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error)
 func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error)
 
+// SetupEVPN is an idempotent composite that configures the full EVPN stack:
+// VXLAN_TUNNEL (VTEP), VXLAN_EVPN_NVO, and BGP EVPN address family.
+// sourceIP defaults to the device's loopback IP if empty.
+// Creates entries only if they don't already exist (idempotent).
+func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error)
+
 // ============================================================================
 // Health Checks and Maintenance
 // ============================================================================
@@ -2467,6 +2508,18 @@ func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars [
 // Cleanup identifies and removes orphaned configurations.
 // cleanupType can be: "acl", "vrf", "vni", or "" for all.
 func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error)
+
+// ============================================================================
+// QoS Management
+// ============================================================================
+
+// ApplyQoS configures per-interface QoS: creates SCHEDULER, DSCP_TO_TC_MAP,
+// TC_TO_QUEUE_MAP, QUEUE, and PORT_QOS_MAP entries from a QoS policy.
+func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error)
+
+// RemoveQoS removes QoS configuration from an interface: deletes QUEUE
+// and PORT_QOS_MAP entries for the interface.
+func (d *Device) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error)
 
 // ============================================================================
 // Query Methods (no ChangeSet returned)
@@ -2555,6 +2608,47 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 //      c. For each next_hop OID, read "SAI_NEXT_HOP_ATTR_IP" → nexthop IP
 //   5. Assemble NextHop list and return RouteEntry
 func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+
+// ============================================================================
+// Spec Persistence (methods on Network, not Device)
+// ============================================================================
+
+// These methods create/delete definitions in network.json. Used by CLI
+// spec-authoring commands (evpn ipvpn create, qos create, filter create,
+// service create, etc.). Each method updates the in-memory spec, then
+// calls loader.SaveNetwork() which writes atomically via temp+rename.
+
+// SaveIPVPN creates or updates an IP-VPN definition in network.json.
+func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error
+
+// DeleteIPVPN removes an IP-VPN definition from network.json.
+func (n *Network) DeleteIPVPN(name string) error
+
+// SaveMACVPN creates or updates a MAC-VPN definition in network.json.
+func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error
+
+// DeleteMACVPN removes a MAC-VPN definition from network.json.
+func (n *Network) DeleteMACVPN(name string) error
+
+// SaveQoSPolicy creates or updates a QoS policy definition in network.json.
+func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error
+
+// DeleteQoSPolicy removes a QoS policy definition from network.json.
+func (n *Network) DeleteQoSPolicy(name string) error
+
+// SaveFilterSpec creates or updates a filter spec definition in network.json.
+func (n *Network) SaveFilterSpec(name string, def *spec.FilterSpec) error
+
+// DeleteFilterSpec removes a filter spec definition from network.json.
+func (n *Network) DeleteFilterSpec(name string) error
+
+// SaveService creates or updates a service definition in network.json.
+func (n *Network) SaveService(name string, def *spec.ServiceSpec) error
+
+// DeleteService removes a service definition from network.json.
+// Fails if the service is currently applied to any interface (checks
+// all devices' NEWTRON_SERVICE_BINDING tables).
+func (n *Network) DeleteService(name string) error
 
 // ============================================================================
 // BGP Management
@@ -3168,23 +3262,74 @@ type Permission string
 const (
     PermServiceApply  Permission = "service.apply"
     PermServiceRemove Permission = "service.remove"
-    PermLagCreate     Permission = "lag.create"
-    PermLagModify     Permission = "lag.modify"
-    PermLagDelete     Permission = "lag.delete"
-    PermVlanCreate    Permission = "vlan.create"
-    PermVlanDelete    Permission = "vlan.delete"
-    PermAclModify     Permission = "acl.modify"
-    PermEvpnModify    Permission = "evpn.modify"
-    PermQosModify     Permission = "qos.modify"
+    PermServiceView   Permission = "service.view"
+
+    PermInterfaceConfig Permission = "interface.configure"
+    PermInterfaceModify Permission = "interface.modify"
+    PermInterfaceView   Permission = "interface.view"
+
+    PermLAGCreate Permission = "lag.create"
+    PermLAGModify Permission = "lag.modify"
+    PermLAGDelete Permission = "lag.delete"
+    PermLAGView   Permission = "lag.view"
+
+    PermVLANCreate Permission = "vlan.create"
+    PermVLANModify Permission = "vlan.modify"
+    PermVLANDelete Permission = "vlan.delete"
+    PermVLANView   Permission = "vlan.view"
+
+    PermACLCreate Permission = "acl.create"
+    PermACLModify Permission = "acl.modify"
+    PermACLDelete Permission = "acl.delete"
+    PermACLView   Permission = "acl.view"
+
+    PermEVPNModify Permission = "evpn.modify"
+    PermEVPNView   Permission = "evpn.view"
+
+    PermBGPModify Permission = "bgp.modify"
+    PermBGPView   Permission = "bgp.view"
+
+    PermQoSModify Permission = "qos.modify"
+    PermQoSView   Permission = "qos.view"
+
     PermBaselineApply Permission = "baseline.apply"
-    // v3 additions:
-    PermPortCreate       Permission = "port.create"
-    PermPortDelete       Permission = "port.delete"
-    PermBGPConfigure     Permission = "bgp.configure"
-    PermCompositeDeliver Permission = "composite.deliver"
-    // v4 additions:
+    PermHealthCheck   Permission = "health.check"
+
+    PermDeviceConnect    Permission = "device.connect"
+    PermDeviceLock       Permission = "device.lock"
+    PermDeviceDisconnect Permission = "device.disconnect"
+
+    PermAuditView Permission = "audit.view"
+
+    // v3: Port and BGP configuration permissions
+    PermPortCreate   Permission = "port.create"
+    PermPortDelete   Permission = "port.delete"
+    PermBGPConfigure Permission = "bgp.configure"
+
+    // v4: Composite delivery and topology provisioning permissions
+    PermCompositeDeliver  Permission = "composite.deliver"
     PermTopologyProvision Permission = "topology.provision"
-    PermAll               Permission = "all"
+
+    // v5: VRF management permissions
+    PermVRFCreate Permission = "vrf.create"
+    PermVRFModify Permission = "vrf.modify"
+    PermVRFDelete Permission = "vrf.delete"
+    PermVRFView   Permission = "vrf.view"
+
+    // v5: Spec authoring — create/delete definitions in network.json
+    PermSpecAuthor Permission = "spec.author"
+
+    // v5: Filter management
+    PermFilterCreate Permission = "filter.create"
+    PermFilterModify Permission = "filter.modify"
+    PermFilterDelete Permission = "filter.delete"
+    PermFilterView   Permission = "filter.view"
+
+    // v5: QoS create/delete (extends existing QoSModify/QoSView)
+    PermQoSCreate Permission = "qos.create"
+    PermQoSDelete Permission = "qos.delete"
+
+    PermAll Permission = "all" // Superuser — allows everything
 )
 ```
 
@@ -3307,74 +3452,120 @@ func (e *ValidationErrors) Error() string {
 
 ## 11. CLI Implementation
 
-### 11.1 OO CLI Design Pattern
+### 11.1 Noun-Group CLI Pattern
 
-The CLI follows a true object-oriented design where:
-- **Context flags** (`-n`, `-d`, `-i`) select the object (like `this` in OOP)
-- **Command verbs** are methods on that object
+The CLI uses a noun-group pattern where resources are top-level commands and actions are subcommands:
 
 ```
-newtron -n <network> -d <device> -i <interface> <verb> [args] [-x]
-         |--------------------|---------------------|   |------|
-                Object Selection                    Method Call
+newtron <device> <noun> <action> [args] [-x]
 ```
+
+**Implicit device detection:** The first argument is treated as a device name unless it matches a registered command. This lets users write `newtron leaf1 vlan list` instead of `newtron -d leaf1 vlan list`.
+
+**Two command scopes:**
+- **Device-required:** Commands that operate on CONFIG_DB (interface, vlan, vrf, lag, acl, evpn, bgp, qos apply/remove). Require a device name.
+- **No-device:** Commands that operate on network.json specs (service list, evpn ipvpn list, qos list, filter list, settings). Work without a device.
 
 ### 11.2 Root Command (`cmd/newtron/main.go`)
 
 ```go
 var rootCmd = &cobra.Command{
     Use:   "newtron",
-    Short: "Network automation CLI for SONiC switches",
+    Short: "SONiC Network Configuration Tool",
 }
 
 var (
-    networkName   string  // -n, --network
-    deviceName    string  // -d, --device
-    interfaceName string  // -i, --interface
-    specDir       string  // -s, --specs
-    executeMode   bool    // -x, --execute
-    verboseMode   bool    // -v, --verbose
-    jsonOutput    bool    //     --json
+    networkName string // -n, --network
+    deviceName  string // -d, --device
+
+    specDir     string // -S, --specs
+    executeMode bool   // -x, --execute
+    saveMode    bool   // -s, --save
+    verbose     bool   // -v, --verbose
+    jsonOutput  bool   //     --json
 )
+
+func main() {
+    // Implicit device name: if the first arg is not a known command or flag,
+    // treat it as a device name.
+    if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") && !isKnownCommand(os.Args[1]) {
+        os.Args = append([]string{os.Args[0], "-d", os.Args[1]}, os.Args[2:]...)
+    }
+    if err := rootCmd.Execute(); err != nil {
+        fmt.Fprintln(os.Stderr, err)
+        os.Exit(1)
+    }
+}
+
+// isKnownCommand checks if a string matches a registered top-level command name.
+func isKnownCommand(name string) bool {
+    for _, cmd := range rootCmd.Commands() {
+        if cmd.Name() == name { return true }
+        for _, alias := range cmd.Aliases {
+            if alias == name { return true }
+        }
+    }
+    return name == "help" || name == "completion"
+}
 
 func init() {
     // Context flags (object selectors)
-    rootCmd.PersistentFlags().StringVarP(&networkName, "network", "n", "", "Network spec name")
-    rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Target device name")
-    rootCmd.PersistentFlags().StringVarP(&interfaceName, "interface", "i", "", "Target interface")
+    rootCmd.PersistentFlags().StringVarP(&networkName, "network", "n", "", "Network name")
+    rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Device name")
 
-    // Operation flags
-    rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "s", "", "Specification directory")
-    rootCmd.PersistentFlags().BoolVarP(&executeMode, "execute", "x", false, "Execute changes (default: dry-run)")
-    rootCmd.PersistentFlags().BoolVarP(&saveMode, "save", "", false, "Save config after execution")
-    rootCmd.PersistentFlags().BoolVarP(&verboseMode, "verbose", "v", false, "Verbose output")
-    rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
+    // Global option flags
+    rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "Specification directory")
+    rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
-    // Command registration — OO verb commands (symmetric read/write)
-    rootCmd.AddCommand(showCmd, getCmd, listCmd)                          // Read verbs
-    rootCmd.AddCommand(getServiceCmd, listMembersCmd, listAclsCmd)       // Read verbs (cont.)
-    rootCmd.AddCommand(getMacvpnCmd, getL2VniCmd, listBgpCmd)            // Read verbs (cont.)
-    rootCmd.AddCommand(setCmd, createCmd, deleteCmd)                      // Write verbs
-    rootCmd.AddCommand(applyServiceCmd, removeServiceCmd, refreshServiceCmd) // Service verbs
-    rootCmd.AddCommand(addMemberCmd, removeMemberCmd)                    // Membership verbs
-    rootCmd.AddCommand(bindAclCmd, unbindAclCmd)                         // ACL verbs
-    rootCmd.AddCommand(bindMacvpnCmd, unbindMacvpnCmd)                   // MAC-VPN verbs
-    rootCmd.AddCommand(addBgpCmd, removeBgpCmd)                          // BGP verbs
-    rootCmd.AddCommand(healthCheckVerbCmd, applyBaselineCmd)             // Device operations
-    rootCmd.AddCommand(cleanupCmd, configureSVICmd)                      // Device operations (cont.)
+    // Write flags (-x/-s) registered per noun-group parent (PersistentFlags)
+    for _, cmd := range []*cobra.Command{
+        interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
+        vrfCmd, serviceCmd, baselineCmd, deviceCmd, qosCmd, filterCmd,
+    } {
+        addWriteFlags(cmd)
+        addOutputFlags(cmd)
+    }
 
-    // Command group subcommands
-    rootCmd.AddCommand(settingsCmd, serviceCmd, interfaceCmd)
-    rootCmd.AddCommand(lagCmd, vlanCmd, aclCmd, evpnCmd, bgpCmd)
-    rootCmd.AddCommand(healthCmd, baselineCmd, provisionCmd)
-    rootCmd.AddCommand(auditCmd, stateCmd)                               // Operational queries
-    rootCmd.AddCommand(interactiveCmd, shellCmd, versionCmd)
+    // Command Groups
+    rootCmd.AddGroup(
+        &cobra.Group{ID: "resource", Title: "Resource Commands:"},
+        &cobra.Group{ID: "device", Title: "Device Operations:"},
+        &cobra.Group{ID: "meta", Title: "Configuration & Meta:"},
+    )
+
+    // Resource Commands (noun-groups)
+    for _, cmd := range []*cobra.Command{
+        interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
+        vrfCmd, serviceCmd, baselineCmd, qosCmd, filterCmd,
+    } {
+        cmd.GroupID = "resource"
+        rootCmd.AddCommand(cmd)
+    }
+
+    // Device Operations
+    for _, cmd := range []*cobra.Command{showCmd, provisionCmd, healthCmd, deviceCmd} {
+        cmd.GroupID = "device"
+        rootCmd.AddCommand(cmd)
+    }
+
+    // Configuration & Meta
+    for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, versionCmd} {
+        cmd.GroupID = "meta"
+        rootCmd.AddCommand(cmd)
+    }
 }
 ```
 
-**Helper functions for context-based object resolution:**
+**Flag notes:**
+- `-s` is `--save` (short for save config after execution), not `--specs`
+- `-S` is `--specs` (uppercase S for specification directory)
+- No `-i` (interface) flag -- interface names are positional args within noun commands
+- `-x` / `--execute` and `-s` / `--save` are inherited via PersistentFlags on each noun-group parent
+
+**Helper functions:**
 
 ```go
+// requireDevice ensures a device is specified via -d flag or implicit first arg.
 func requireDevice(ctx context.Context) (*network.Device, error) {
     if deviceName == "" {
         return nil, fmt.Errorf("device required: use -d <device> flag")
@@ -3382,42 +3573,73 @@ func requireDevice(ctx context.Context) (*network.Device, error) {
     return net.ConnectDevice(ctx, deviceName)
 }
 
-func requireInterface(ctx context.Context) (*network.Device, *network.Interface, error) {
-    if deviceName == "" {
-        return nil, nil, fmt.Errorf("device required: use -d <device> flag")
-    }
-    if interfaceName == "" {
-        return nil, nil, fmt.Errorf("interface required: use -i <interface> flag")
-    }
-    dev, err := net.ConnectDevice(ctx, deviceName)
+// withDeviceWrite handles boilerplate for device-level write commands.
+// The callback receives a connected, locked device and returns a changeset.
+// If changeset is nil, the helper returns nil (command handled its own output).
+// If changeset is non-nil, the helper prints it and handles execute/dry-run.
+func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+    ctx := context.Background()
+    dev, err := requireDevice(ctx)
     if err != nil {
-        return nil, nil, err
+        return err
     }
-    intf, err := dev.GetInterface(interfaceName)
+    defer dev.Disconnect()
+
+    if err := dev.Lock(); err != nil {
+        return fmt.Errorf("locking device: %w", err)
+    }
+    defer dev.Unlock()
+
+    changeSet, err := fn(ctx, dev)
     if err != nil {
-        return nil, nil, err
+        return err
     }
-    return dev, intf, nil
+    if changeSet == nil {
+        return nil
+    }
+
+    fmt.Println("Changes to be applied:")
+    fmt.Print(changeSet.String())
+
+    if executeMode {
+        return executeAndSave(ctx, changeSet, dev)
+    }
+    printDryRunNotice()
+    return nil
 }
 ```
 
-### 11.3 Symmetric Read/Write Operations
+The `withDeviceWrite` pattern eliminates repeated connect-lock-execute boilerplate across all write commands. Every noun-group write action (e.g., `vlan create`, `vrf add-neighbor`, `evpn setup`) delegates through this helper.
 
-| Write Verb | Read Verb | Description |
-|------------|-----------|-------------|
-| `set <prop> <val>` | `get <prop>` | Property access |
-| `apply-service` / `remove-service` / `refresh-service` | `get-service` | Service binding |
-| `add-member` / `remove-member` | `list-members` | Collection membership |
-| `bind-acl` / `unbind-acl` | `list-acls` | ACL binding |
-| `bind-macvpn` / `unbind-macvpn` | `get-macvpn` | MAC-VPN binding |
-| `map-l2vni` / `unmap-l2vni` | `get-l2vni` | VNI mapping |
-| `add-bgp-neighbor` / `remove-bgp-neighbor` | `list-bgp-neighbors` | BGP neighbors |
+### 11.3 Noun-Group Command Mapping
 
-### 11.4 BGP Commands
+Each noun has its own set of write and read actions. Interface names, VLAN IDs, VRF names, and other natural keys are positional arguments within the noun command.
 
-BGP neighbors are added at different levels:
-- **Interface level** (`-i`): Direct neighbors using link IP as update-source
-- **Device level** (`-d` only): Loopback-sourced neighbors (e.g., EVPN peers)
+| Noun | Write Actions | Read Actions |
+|------|--------------|-------------|
+| `interface` | `set <intf> <prop> <val>` | `list`, `show <intf>`, `get <intf> <prop>`, `list-acls`, `list-members` |
+| `vlan` | `create`, `delete`, `add-interface`, `remove-interface`, `configure-svi`, `bind-macvpn`, `unbind-macvpn` | `list`, `show <id>`, `status` |
+| `vrf` | `create`, `delete`, `add-interface`, `remove-interface`, `bind-ipvpn`, `unbind-ipvpn`, `add-neighbor`, `remove-neighbor`, `add-route`, `remove-route` | `list`, `show <name>`, `status` |
+| `lag` | `create`, `delete`, `add-interface`, `remove-interface` | `list`, `show <name>`, `status` |
+| `evpn` | `setup` | `status` |
+| `evpn ipvpn` | `create`, `delete` | `list`, `show <name>` |
+| `evpn macvpn` | `create`, `delete` | `list`, `show <name>` |
+| `bgp` | (none -- visibility only) | `status` |
+| `qos` | `create`, `delete`, `add-queue`, `remove-queue`, `apply`, `remove` | `list`, `show <name>` |
+| `filter` | `create`, `delete`, `add-rule`, `remove-rule` | `list`, `show <name>` |
+| `service` | `create`, `delete`, `apply`, `remove`, `refresh` | `list`, `show <name>`, `get <intf>` |
+| `acl` | `create`, `delete`, `add-rule`, `delete-rule`, `bind`, `unbind` | `list`, `show <name>` |
+
+**Naming convention:** Member operations use `add-interface`/`remove-interface` (not `add-member`), making the target entity explicit.
+
+### 11.4 VRF Neighbor Commands
+
+Neighbor management lives in the `vrf` noun group, not in `bgp`. The `bgp` noun is visibility-only (status command).
+
+```
+newtron leaf1 vrf add-neighbor <vrf-name> <interface> <remote-asn> [-x]
+newtron leaf1 vrf remove-neighbor <vrf-name> <interface> [-x]
+```
 
 **Neighbor IP Auto-Derivation:**
 
@@ -3434,6 +3656,8 @@ BGP neighbors are added at different levels:
 | TTL | 1 | Hardcoded for all direct neighbors (GTSM) |
 | Subnet validation | Required | Neighbor IP must be on interface subnet |
 | Mutual exclusion | Enforced | `--passive` and `--neighbor-ip` cannot be used together |
+
+**BGP visibility:** `bgp status` is the only BGP CLI command. It shows a unified view combining local identity, configured neighbors, and operational state from STATE_DB.
 
 ### 11.5 Service Immutability Model
 
@@ -3466,7 +3690,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
         default:
             return nil, fmt.Errorf(
                 "property %q is immutable when service is bound; "+
-                "use remove-service first, then reapply with new settings",
+                "use `service remove` first, then reapply with new settings",
                 property)
         }
     }
@@ -3611,15 +3835,15 @@ type Settings struct {
 
 These commands are read-only and do not require `-x`:
 
-**State commands** (`cmd_state.go`) — query operational state from STATE_DB:
+**Per-noun status commands** — each noun group has its own `status` subcommand that queries STATE_DB for operational state:
 
 | Command | Description |
 |---------|-------------|
-| `state show` | Full device state summary (interfaces, LAGs, VLANs, VRFs) |
-| `state bgp` | BGP neighbor states from STATE_DB |
-| `state evpn` | EVPN/VXLAN state (VTEP, remote VTEPs, VNI count) |
-| `state lag` | LAG member states (selected, collecting/distributing) |
-| `state vrf` | VRF operational states |
+| `vlan status` | All VLANs with operational state (SVI up/down, member count) |
+| `vrf status` | All VRFs with interface and neighbor counts |
+| `lag status` | All LAGs with member active/standby state |
+| `bgp status` | All BGP neighbors with operational state (Established/Idle, pfx rcvd/sent, uptime) |
+| `evpn status` | VTEP state, VNI mappings, remote VTEPs |
 
 **Audit commands** (`cmd_audit.go`) — query audit log:
 
@@ -3633,15 +3857,15 @@ These commands are read-only and do not require `-x`:
 |---------|-------------|
 | `shell` | Enter interactive shell with device connection reuse, tab completion, and command history |
 
-### 11.10 Config Persistence (`--save`)
+### 11.10 Config Persistence (`--save` / `-s`)
 
-The `--save` flag (in addition to `-x`) persists changes to disk after execution:
+The `--save` (`-s`) flag (in addition to `-x`) persists changes to disk after execution:
 
 ```
-newtron -d leaf1 -i Ethernet0 set mtu 9000 -x --save
+newtron leaf1 interface set Ethernet0 mtu 9000 -xs
 ```
 
-This calls `Device.SaveConfig()` after a successful `ChangeSet.Apply()`, running `sudo config save -y` on the device. Without `--save`, changes are applied to the running CONFIG_DB but may be lost on reboot.
+This calls `Device.SaveConfig()` after a successful `ChangeSet.Apply()`, running `sudo config save -y` on the device. Without `--save`, changes are applied to the running CONFIG_DB but may be lost on reboot. The `-s` short flag can be combined with `-x` as `-xs` for brevity.
 
 ## 12. Testing Strategy
 
@@ -3730,4 +3954,22 @@ from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.m
 | §4.9 Verification architecture | §3.6A Verification types |
 | §12 Execution modes | §11 CLI implementation |
 | §13 Verification strategy | §3.6A types, §5.2 verification methods |
+
+---
+
+## Appendix A: Changelog
+
+### v8 -- V2 CLI Redesign
+
+| Area | Change |
+|------|--------|
+| §2 Package structure | `cmd_verbs.go` and `cmd_state.go` deleted. Added `cmd_vrf.go`, `cmd_qos.go`, `cmd_filter.go`, `cmd_show.go`, `cmd_device.go`. Added `service_gen.go` and `qos.go` to `pkg/network/`. |
+| §3.1 MACVPNSpec | Removed `VLAN` field (moved to ServiceSpec). |
+| §3.1 ServiceSpec | Added `VLAN int` field. |
+| §5.2 Device operations | Added: `AddVRFInterface`, `RemoveVRFInterface`, `BindIPVPN`, `UnbindIPVPN`, `AddStaticRoute`, `RemoveStaticRoute`, `RemoveVLANMember`, `SetupEVPN`, `ApplyQoS`, `RemoveQoS`. |
+| §5.2 Spec persistence | Added Network methods: `SaveIPVPN`/`DeleteIPVPN`, `SaveMACVPN`/`DeleteMACVPN`, `SaveQoSPolicy`/`DeleteQoSPolicy`, `SaveFilterSpec`/`DeleteFilterSpec`, `SaveService`/`DeleteService`. |
+| §9 Permissions | Added: `PermVRFCreate`/`Modify`/`Delete`/`View`, `PermSpecAuthor`, `PermFilterCreate`/`Modify`/`Delete`/`View`, `PermQoSCreate`/`Delete`. Full permission list expanded to match code. |
+| §11 CLI implementation | Complete rewrite: noun-group pattern (`newtron <device> <noun> <action>`), implicit device detection, `withDeviceWrite` helper, per-noun status commands replace `cmd_state.go`, `-s` is `--save` (not `--specs`), `-S` is `--specs`. |
+| §11.3 Command mapping | Replaced symmetric read/write verb table with noun-group command mapping table. |
+| §11.4 BGP/VRF | Neighbor management moved from BGP commands to `vrf add-neighbor`. BGP simplified to `status` only. |
 
