@@ -205,11 +205,3 @@ func (e *PermissionError) Error() string {
 func (e *PermissionError) Unwrap() error {
 	return util.ErrPermissionDenied
 }
-
-// RequirePermission is a helper that returns an error if permission is denied
-func RequirePermission(checker *Checker, permission Permission, ctx *Context) error {
-	if checker == nil {
-		return nil // No checker means no restrictions
-	}
-	return checker.Check(permission, ctx)
-}

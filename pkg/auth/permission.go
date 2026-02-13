@@ -1,183 +1,51 @@
 // Package auth provides permission-based access control.
+//
+// Permission enforcement design:
+// - Write operations are checked via checkExecutePermission() when -x (execute) flag is set
+// - Read/view operations are always allowed (no permission check in dry-run/preview mode)
+// - Permissions are defined in network.json under "permissions" and "super_users"
+// - Service-specific permission overrides are supported via ServiceSpec.Permissions
 package auth
 
 // Permission defines an action that can be controlled
 type Permission string
 
-// Standard permissions
+// Write permissions — enforced via checkExecutePermission() in CLI write commands.
 const (
 	PermServiceApply  Permission = "service.apply"
 	PermServiceRemove Permission = "service.remove"
-	PermServiceView   Permission = "service.view"
 
-	PermInterfaceConfig Permission = "interface.configure"
 	PermInterfaceModify Permission = "interface.modify"
-	PermInterfaceView   Permission = "interface.view"
 
 	PermLAGCreate Permission = "lag.create"
 	PermLAGModify Permission = "lag.modify"
 	PermLAGDelete Permission = "lag.delete"
-	PermLAGView   Permission = "lag.view"
 
 	PermVLANCreate Permission = "vlan.create"
 	PermVLANModify Permission = "vlan.modify"
 	PermVLANDelete Permission = "vlan.delete"
-	PermVLANView   Permission = "vlan.view"
 
-	PermACLCreate Permission = "acl.create"
 	PermACLModify Permission = "acl.modify"
-	PermACLDelete Permission = "acl.delete"
-	PermACLView   Permission = "acl.view"
 
 	PermEVPNModify Permission = "evpn.modify"
-	PermEVPNView   Permission = "evpn.view"
 
-	PermBGPModify Permission = "bgp.modify"
-	PermBGPView   Permission = "bgp.view"
-
+	PermQoSCreate Permission = "qos.create"
 	PermQoSModify Permission = "qos.modify"
-	PermQoSView   Permission = "qos.view"
+	PermQoSDelete Permission = "qos.delete"
 
-	PermBaselineApply Permission = "baseline.apply"
-	PermHealthCheck   Permission = "health.check"
-
-	PermDeviceConnect    Permission = "device.connect"
-	PermDeviceLock       Permission = "device.lock"
-	PermDeviceDisconnect Permission = "device.disconnect"
-
-	PermAuditView Permission = "audit.view"
-
-	// v3: Port and BGP configuration permissions
-	PermPortCreate   Permission = "port.create"
-	PermPortDelete   Permission = "port.delete"
-	PermBGPConfigure Permission = "bgp.configure"
-
-	// v4: Composite delivery and topology provisioning permissions
-	PermCompositeDeliver  Permission = "composite.deliver"
-	PermTopologyProvision Permission = "topology.provision"
-
-	// v5: VRF management permissions
 	PermVRFCreate Permission = "vrf.create"
 	PermVRFModify Permission = "vrf.modify"
 	PermVRFDelete Permission = "vrf.delete"
-	PermVRFView   Permission = "vrf.view"
 
-	// v5: Spec authoring — create/delete definitions in network.json
+	PermBaselineApply Permission = "baseline.apply"
+
 	PermSpecAuthor Permission = "spec.author"
 
-	// v5: Filter management
 	PermFilterCreate Permission = "filter.create"
-	PermFilterModify Permission = "filter.modify"
 	PermFilterDelete Permission = "filter.delete"
-	PermFilterView   Permission = "filter.view"
 
-	// v5: QoS create/delete (extends existing QoSModify/QoSView)
-	PermQoSCreate Permission = "qos.create"
-	PermQoSDelete Permission = "qos.delete"
-
-	PermAll Permission = "all" // Superuser - allows everything
+	PermAll Permission = "all" // Superuser — allows everything
 )
-
-// PermissionCategory groups related permissions
-type PermissionCategory struct {
-	Name        string
-	Description string
-	Permissions []Permission
-}
-
-// StandardCategories defines standard permission categories
-var StandardCategories = []PermissionCategory{
-	{
-		Name:        "service",
-		Description: "Service management",
-		Permissions: []Permission{PermServiceApply, PermServiceRemove, PermServiceView},
-	},
-	{
-		Name:        "interface",
-		Description: "Interface configuration",
-		Permissions: []Permission{PermInterfaceConfig, PermInterfaceModify, PermInterfaceView},
-	},
-	{
-		Name:        "lag",
-		Description: "Link aggregation",
-		Permissions: []Permission{PermLAGCreate, PermLAGModify, PermLAGDelete, PermLAGView},
-	},
-	{
-		Name:        "vlan",
-		Description: "VLAN management",
-		Permissions: []Permission{PermVLANCreate, PermVLANModify, PermVLANDelete, PermVLANView},
-	},
-	{
-		Name:        "acl",
-		Description: "Access control lists",
-		Permissions: []Permission{PermACLCreate, PermACLModify, PermACLDelete, PermACLView},
-	},
-	{
-		Name:        "evpn",
-		Description: "EVPN/VXLAN",
-		Permissions: []Permission{PermEVPNModify, PermEVPNView},
-	},
-	{
-		Name:        "bgp",
-		Description: "BGP routing",
-		Permissions: []Permission{PermBGPModify, PermBGPView},
-	},
-	{
-		Name:        "qos",
-		Description: "Quality of Service",
-		Permissions: []Permission{PermQoSModify, PermQoSView},
-	},
-	{
-		Name:        "baseline",
-		Description: "Baseline configuration",
-		Permissions: []Permission{PermBaselineApply},
-	},
-	{
-		Name:        "health",
-		Description: "Health checks",
-		Permissions: []Permission{PermHealthCheck},
-	},
-	{
-		Name:        "device",
-		Description: "Device connection",
-		Permissions: []Permission{PermDeviceConnect, PermDeviceLock, PermDeviceDisconnect},
-	},
-	{
-		Name:        "audit",
-		Description: "Audit log access",
-		Permissions: []Permission{PermAuditView},
-	},
-	{
-		Name:        "port",
-		Description: "Port creation and deletion",
-		Permissions: []Permission{PermPortCreate, PermPortDelete},
-	},
-	{
-		Name:        "composite",
-		Description: "Composite config delivery",
-		Permissions: []Permission{PermCompositeDeliver},
-	},
-	{
-		Name:        "topology",
-		Description: "Topology provisioning",
-		Permissions: []Permission{PermTopologyProvision},
-	},
-	{
-		Name:        "vrf",
-		Description: "VRF management",
-		Permissions: []Permission{PermVRFCreate, PermVRFModify, PermVRFDelete, PermVRFView},
-	},
-	{
-		Name:        "spec",
-		Description: "Spec authoring (network.json definitions)",
-		Permissions: []Permission{PermSpecAuthor},
-	},
-	{
-		Name:        "filter",
-		Description: "Filter template management",
-		Permissions: []Permission{PermFilterCreate, PermFilterModify, PermFilterDelete, PermFilterView},
-	},
-}
 
 // Context provides context for permission checks
 type Context struct {
@@ -214,25 +82,4 @@ func (c *Context) WithInterface(iface string) *Context {
 func (c *Context) WithResource(resource string) *Context {
 	c.Resource = resource
 	return c
-}
-
-// IsReadOnly returns true if the permission is read-only
-func (p Permission) IsReadOnly() bool {
-	switch p {
-	case PermServiceView, PermInterfaceView, PermLAGView, PermVLANView,
-		PermACLView, PermEVPNView, PermBGPView, PermQoSView, PermAuditView,
-		PermHealthCheck, PermVRFView, PermFilterView:
-		return true
-	}
-	return false
-}
-
-// IsWriteOperation returns true if the permission involves modification
-func (p Permission) IsWriteOperation() bool {
-	return !p.IsReadOnly() && p != PermDeviceConnect && p != PermDeviceDisconnect
-}
-
-// RequiresLock returns true if the permission requires device lock
-func (p Permission) RequiresLock() bool {
-	return p.IsWriteOperation()
 }

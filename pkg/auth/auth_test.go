@@ -8,55 +8,6 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-func TestPermission_IsReadOnly(t *testing.T) {
-	readOnlyPerms := []Permission{
-		PermServiceView, PermInterfaceView, PermLAGView, PermVLANView,
-		PermACLView, PermEVPNView, PermBGPView, PermQoSView, PermAuditView,
-		PermHealthCheck,
-	}
-
-	for _, p := range readOnlyPerms {
-		if !p.IsReadOnly() {
-			t.Errorf("%s should be read-only", p)
-		}
-	}
-
-	writePerms := []Permission{
-		PermServiceApply, PermInterfaceModify, PermLAGCreate, PermVLANDelete,
-		PermACLModify, PermEVPNModify, PermBGPModify,
-	}
-
-	for _, p := range writePerms {
-		if p.IsReadOnly() {
-			t.Errorf("%s should not be read-only", p)
-		}
-	}
-}
-
-func TestPermission_IsWriteOperation(t *testing.T) {
-	if PermServiceView.IsWriteOperation() {
-		t.Error("ServiceView should not be a write operation")
-	}
-	if !PermServiceApply.IsWriteOperation() {
-		t.Error("ServiceApply should be a write operation")
-	}
-	if PermDeviceConnect.IsWriteOperation() {
-		t.Error("DeviceConnect should not be a write operation")
-	}
-}
-
-func TestPermission_RequiresLock(t *testing.T) {
-	if !PermServiceApply.RequiresLock() {
-		t.Error("ServiceApply should require lock")
-	}
-	if PermServiceView.RequiresLock() {
-		t.Error("ServiceView should not require lock")
-	}
-	if PermDeviceConnect.RequiresLock() {
-		t.Error("DeviceConnect should not require lock")
-	}
-}
-
 func TestContext_Chaining(t *testing.T) {
 	ctx := NewContext().
 		WithDevice("leaf1-ny").
@@ -87,11 +38,11 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 			"viewer": {"eve"},
 		},
 		Permissions: map[string][]string{
-			"all":           {"neteng"},
-			"service.apply": {"neteng", "netops"},
-			"service.view":  {"neteng", "netops", "viewer"},
-			"vlan.create":   {"neteng"},
-			"health.check":  {"neteng", "netops", "viewer"},
+			"all":             {"neteng"},
+			"service.apply":   {"neteng", "netops"},
+			"service.remove":  {"neteng", "netops", "viewer"},
+			"vlan.create":     {"neteng"},
+			"baseline.apply":  {"neteng", "netops", "viewer"},
 		},
 		Services: map[string]*spec.ServiceSpec{
 			"customer-l3": {
@@ -153,12 +104,6 @@ func TestChecker_GlobalPermissions(t *testing.T) {
 		}
 	})
 
-	t.Run("user with limited permission", func(t *testing.T) {
-		checker.SetUser("eve") // In viewer
-		if err := checker.Check(PermServiceView, nil); err != nil {
-			t.Errorf("eve (viewer) should have service.view: %v", err)
-		}
-	})
 }
 
 func TestChecker_ServicePermissions(t *testing.T) {
@@ -248,17 +193,17 @@ func TestChecker_ListPermissions(t *testing.T) {
 		checker.SetUser("eve") // In viewer
 		perms := checker.ListPermissions()
 
-		// eve should have service.view and health.check
+		// eve should have service.remove and baseline.apply (via viewer group)
 		permMap := make(map[Permission]bool)
 		for _, p := range perms {
 			permMap[p] = true
 		}
 
-		if !permMap[PermServiceView] {
-			t.Error("eve should have service.view")
+		if !permMap[PermServiceRemove] {
+			t.Error("eve should have service.remove")
 		}
-		if !permMap[PermHealthCheck] {
-			t.Error("eve should have health.check")
+		if !permMap[PermBaselineApply] {
+			t.Error("eve should have baseline.apply")
 		}
 		if permMap[PermServiceApply] {
 			t.Error("eve should not have service.apply")
@@ -292,42 +237,6 @@ func TestChecker_DirectUserPermission(t *testing.T) {
 
 	if err := checker.Check(PermServiceApply, nil); err != nil {
 		t.Errorf("Direct user permission should work: %v", err)
-	}
-}
-
-func TestRequirePermission(t *testing.T) {
-	network := createTestNetworkSpec()
-	checker := NewChecker(network)
-	checker.SetUser("eve")
-
-	t.Run("nil checker", func(t *testing.T) {
-		if err := RequirePermission(nil, PermServiceApply, nil); err != nil {
-			t.Error("nil checker should allow all")
-		}
-	})
-
-	t.Run("with checker - allowed", func(t *testing.T) {
-		if err := RequirePermission(checker, PermServiceView, nil); err != nil {
-			t.Errorf("Should be allowed: %v", err)
-		}
-	})
-
-	t.Run("with checker - denied", func(t *testing.T) {
-		if err := RequirePermission(checker, PermServiceApply, nil); err == nil {
-			t.Error("Should be denied")
-		}
-	})
-}
-
-func TestStandardCategories(t *testing.T) {
-	// Verify all categories have permissions
-	for _, cat := range StandardCategories {
-		if cat.Name == "" {
-			t.Error("Category name should not be empty")
-		}
-		if len(cat.Permissions) == 0 {
-			t.Errorf("Category %s should have permissions", cat.Name)
-		}
 	}
 }
 
