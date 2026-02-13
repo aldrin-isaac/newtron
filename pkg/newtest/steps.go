@@ -47,11 +47,18 @@ var executors = map[StepAction]StepExecutor{
 	ActionAddVLANMember:      &addVLANMemberExecutor{},
 	ActionCreateVRF:          &createVRFExecutor{},
 	ActionDeleteVRF:          &deleteVRFExecutor{},
-	ActionCreateVTEP:         &createVTEPExecutor{},
-	ActionDeleteVTEP:         &deleteVTEPExecutor{},
-	ActionMapL2VNI:           &mapL2VNIExecutor{},
-	ActionMapL3VNI:           &mapL3VNIExecutor{},
-	ActionUnmapVNI:           &unmapVNIExecutor{},
+	ActionSetupEVPN:          &setupEVPNExecutor{},
+	ActionAddVRFInterface:    &addVRFInterfaceExecutor{},
+	ActionRemoveVRFInterface: &removeVRFInterfaceExecutor{},
+	ActionBindIPVPN:          &bindIPVPNExecutor{},
+	ActionUnbindIPVPN:        &unbindIPVPNExecutor{},
+	ActionBindMACVPN:         &bindMACVPNExecutor{},
+	ActionUnbindMACVPN:       &unbindMACVPNExecutor{},
+	ActionAddStaticRoute:     &addStaticRouteExecutor{},
+	ActionRemoveStaticRoute:  &removeStaticRouteExecutor{},
+	ActionRemoveVLANMember:   &removeVLANMemberExecutor{},
+	ActionApplyQoS:           &applyQoSExecutor{},
+	ActionRemoveQoS:          &removeQoSExecutor{},
 	ActionConfigureSVI:       &configureSVIExecutor{},
 	ActionBGPAddNeighbor:     &bgpAddNeighborExecutor{},
 	ActionBGPRemoveNeighbor:  &bgpRemoveNeighborExecutor{},
@@ -1542,12 +1549,12 @@ func (e *deleteVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 }
 
 // ============================================================================
-// createVTEPExecutor
+// setupEVPNExecutor
 // ============================================================================
 
-type createVTEPExecutor struct{}
+type setupEVPNExecutor struct{}
 
-func (e *createVTEPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+func (e *setupEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	devices := r.resolveDevices(step)
 	var details []DeviceResult
 	changeSets := make(map[string]*network.ChangeSet)
@@ -1567,12 +1574,12 @@ func (e *createVTEPExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 		}
 
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.CreateVTEP(ctx, network.VTEPConfig{SourceIP: sourceIP})
+			return dev.SetupEVPN(ctx, sourceIP)
 		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("create-vtep (source=%s): %s", sourceIP, err),
+				Message: fmt.Sprintf("setup-evpn (source=%s): %s", sourceIP, err),
 			})
 			allPassed = false
 			continue
@@ -1581,7 +1588,7 @@ func (e *createVTEPExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("created VTEP (source=%s, %d changes)", sourceIP, len(cs.Changes)),
+			Message: fmt.Sprintf("setup EVPN (source=%s, %d changes)", sourceIP, len(cs.Changes)),
 		})
 	}
 
@@ -1596,126 +1603,19 @@ func (e *createVTEPExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 }
 
 // ============================================================================
-// deleteVTEPExecutor
+// addVRFInterfaceExecutor
 // ============================================================================
 
-type deleteVTEPExecutor struct{}
+type addVRFInterfaceExecutor struct{}
 
-func (e *deleteVTEPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.DeleteVTEP(ctx)
-		})
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("delete-vtep: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("deleted VTEP (%d changes)", len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
-}
-
-// ============================================================================
-// mapL2VNIExecutor
-// ============================================================================
-
-type mapL2VNIExecutor struct{}
-
-func (e *mapL2VNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	vlanID := intParam(step.Params, "vlan_id")
-	vni := intParam(step.Params, "vni")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.MapL2VNI(ctx, vlanID, vni)
-		})
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("map-l2vni vlan=%d vni=%d: %s", vlanID, vni, err),
-			})
-			allPassed = false
-			continue
-		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("mapped L2VNI vlan=%d vni=%d (%d changes)", vlanID, vni, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
-}
-
-// ============================================================================
-// mapL3VNIExecutor
-// ============================================================================
-
-type mapL3VNIExecutor struct{}
-
-func (e *mapL3VNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+func (e *addVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	devices := r.resolveDevices(step)
 	var details []DeviceResult
 	changeSets := make(map[string]*network.ChangeSet)
 	allPassed := true
 
 	vrfName := strParam(step.Params, "vrf")
-	vni := intParam(step.Params, "vni")
+	intfName := strParam(step.Params, "interface")
 
 	for _, name := range devices {
 		dev, err := r.Network.GetDevice(name)
@@ -1729,12 +1629,12 @@ func (e *mapL3VNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		}
 
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.MapL3VNI(ctx, vrfName, vni)
+			return dev.AddVRFInterface(ctx, vrfName, intfName)
 		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("map-l3vni vrf=%s vni=%d: %s", vrfName, vni, err),
+				Message: fmt.Sprintf("add-vrf-interface %s %s: %s", vrfName, intfName, err),
 			})
 			allPassed = false
 			continue
@@ -1743,7 +1643,7 @@ func (e *mapL3VNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("mapped L3VNI vrf=%s vni=%d (%d changes)", vrfName, vni, len(cs.Changes)),
+			Message: fmt.Sprintf("added %s to VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)),
 		})
 	}
 
@@ -1758,18 +1658,19 @@ func (e *mapL3VNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 }
 
 // ============================================================================
-// unmapVNIExecutor
+// removeVRFInterfaceExecutor
 // ============================================================================
 
-type unmapVNIExecutor struct{}
+type removeVRFInterfaceExecutor struct{}
 
-func (e *unmapVNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+func (e *removeVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	devices := r.resolveDevices(step)
 	var details []DeviceResult
 	changeSets := make(map[string]*network.ChangeSet)
 	allPassed := true
 
-	vni := intParam(step.Params, "vni")
+	vrfName := strParam(step.Params, "vrf")
+	intfName := strParam(step.Params, "interface")
 
 	for _, name := range devices {
 		dev, err := r.Network.GetDevice(name)
@@ -1783,12 +1684,12 @@ func (e *unmapVNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		}
 
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.UnmapVNI(ctx, vni)
+			return dev.RemoveVRFInterface(ctx, vrfName, intfName)
 		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("unmap-vni %d: %s", vni, err),
+				Message: fmt.Sprintf("remove-vrf-interface %s %s: %s", vrfName, intfName, err),
 			})
 			allPassed = false
 			continue
@@ -1797,7 +1698,522 @@ func (e *unmapVNIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("unmapped VNI %d (%d changes)", vni, len(cs.Changes)),
+			Message: fmt.Sprintf("removed %s from VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// bindIPVPNExecutor
+// ============================================================================
+
+type bindIPVPNExecutor struct{}
+
+func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vrfName := strParam(step.Params, "vrf")
+	ipvpnName := strParam(step.Params, "ipvpn")
+
+	ipvpnDef, err := r.Network.GetIPVPN(ipvpnName)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{
+			Status: StatusError, Message: fmt.Sprintf("IP-VPN lookup: %s", err),
+		}}
+	}
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.BindIPVPN(ctx, vrfName, ipvpnDef)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("bind-ipvpn %s %s: %s", vrfName, ipvpnName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("bound IP-VPN %s to VRF %s (%d changes)", ipvpnName, vrfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// unbindIPVPNExecutor
+// ============================================================================
+
+type unbindIPVPNExecutor struct{}
+
+func (e *unbindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vrfName := strParam(step.Params, "vrf")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.UnbindIPVPN(ctx, vrfName)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("unbind-ipvpn %s: %s", vrfName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("unbound IP-VPN from VRF %s (%d changes)", vrfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// bindMACVPNExecutor
+// ============================================================================
+
+type bindMACVPNExecutor struct{}
+
+func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vlanID := intParam(step.Params, "vlan_id")
+	macvpnName := strParam(step.Params, "macvpn")
+
+	macvpnDef, err := r.Network.GetMACVPN(macvpnName)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{
+			Status: StatusError, Message: fmt.Sprintf("MAC-VPN lookup: %s", err),
+		}}
+	}
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.MapL2VNI(ctx, vlanID, macvpnDef.L2VNI)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("bound MAC-VPN %s to VLAN %d (%d changes)", macvpnName, vlanID, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// unbindMACVPNExecutor
+// ============================================================================
+
+type unbindMACVPNExecutor struct{}
+
+func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vlanID := intParam(step.Params, "vlan_id")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.UnmapL2VNI(ctx, vlanID)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("unbind-macvpn vlan=%d: %s", vlanID, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("unbound MAC-VPN from VLAN %d (%d changes)", vlanID, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// addStaticRouteExecutor
+// ============================================================================
+
+type addStaticRouteExecutor struct{}
+
+func (e *addStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vrfName := strParam(step.Params, "vrf")
+	prefix := strParam(step.Params, "prefix")
+	nextHop := strParam(step.Params, "next_hop")
+	metric := intParam(step.Params, "metric")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("add-static-route %s %s via %s: %s", vrfName, prefix, nextHop, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("added static route %s via %s in %s (%d changes)", prefix, nextHop, vrfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// removeStaticRouteExecutor
+// ============================================================================
+
+type removeStaticRouteExecutor struct{}
+
+func (e *removeStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vrfName := strParam(step.Params, "vrf")
+	prefix := strParam(step.Params, "prefix")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.RemoveStaticRoute(ctx, vrfName, prefix)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("remove-static-route %s %s: %s", vrfName, prefix, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("removed static route %s from %s (%d changes)", prefix, vrfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// removeVLANMemberExecutor
+// ============================================================================
+
+type removeVLANMemberExecutor struct{}
+
+func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	vlanID := intParam(step.Params, "vlan_id")
+	interfaceName := strParam(step.Params, "interface")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.RemoveVLANMember(ctx, vlanID, interfaceName)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("remove-vlan-member %d %s: %s", vlanID, interfaceName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("removed %s from VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// applyQoSExecutor
+// ============================================================================
+
+type applyQoSExecutor struct{}
+
+func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	intfName := strParam(step.Params, "interface")
+	policyName := strParam(step.Params, "qos_policy")
+
+	policy, err := r.Network.GetQoSPolicy(policyName)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{
+			Status: StatusError, Message: fmt.Sprintf("QoS policy lookup: %s", err),
+		}}
+	}
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.ApplyQoS(ctx, intfName, policyName, policy)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("apply-qos %s %s: %s", intfName, policyName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("applied QoS policy %s on %s (%d changes)", policyName, intfName, len(cs.Changes)),
+		})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// ============================================================================
+// removeQoSExecutor
+// ============================================================================
+
+type removeQoSExecutor struct{}
+
+func (e *removeQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	devices := r.resolveDevices(step)
+	var details []DeviceResult
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	intfName := strParam(step.Params, "interface")
+
+	for _, name := range devices {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("getting device: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			return dev.RemoveQoS(ctx, intfName)
+		})
+		if err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: fmt.Sprintf("remove-qos %s: %s", intfName, err),
+			})
+			allPassed = false
+			continue
+		}
+
+		changeSets[name] = cs
+		details = append(details, DeviceResult{
+			Device: name, Status: StatusPassed,
+			Message: fmt.Sprintf("removed QoS from %s (%d changes)", intfName, len(cs.Changes)),
 		})
 	}
 

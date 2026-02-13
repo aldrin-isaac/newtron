@@ -84,11 +84,18 @@ const (
 	ActionAddVLANMember      StepAction = "add-vlan-member"
 	ActionCreateVRF          StepAction = "create-vrf"
 	ActionDeleteVRF          StepAction = "delete-vrf"
-	ActionCreateVTEP         StepAction = "create-vtep"
-	ActionDeleteVTEP         StepAction = "delete-vtep"
-	ActionMapL2VNI           StepAction = "map-l2vni"
-	ActionMapL3VNI           StepAction = "map-l3vni"
-	ActionUnmapVNI           StepAction = "unmap-vni"
+	ActionSetupEVPN          StepAction = "setup-evpn"
+	ActionAddVRFInterface    StepAction = "add-vrf-interface"
+	ActionRemoveVRFInterface StepAction = "remove-vrf-interface"
+	ActionBindIPVPN          StepAction = "bind-ipvpn"
+	ActionUnbindIPVPN        StepAction = "unbind-ipvpn"
+	ActionBindMACVPN         StepAction = "bind-macvpn"
+	ActionUnbindMACVPN       StepAction = "unbind-macvpn"
+	ActionAddStaticRoute     StepAction = "add-static-route"
+	ActionRemoveStaticRoute  StepAction = "remove-static-route"
+	ActionRemoveVLANMember   StepAction = "remove-vlan-member"
+	ActionApplyQoS           StepAction = "apply-qos"
+	ActionRemoveQoS          StepAction = "remove-qos"
 	ActionConfigureSVI       StepAction = "configure-svi"
 	ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
 	ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
@@ -119,11 +126,18 @@ var validActions = map[StepAction]bool{
 	ActionAddVLANMember:      true,
 	ActionCreateVRF:          true,
 	ActionDeleteVRF:          true,
-	ActionCreateVTEP:         true,
-	ActionDeleteVTEP:         true,
-	ActionMapL2VNI:           true,
-	ActionMapL3VNI:           true,
-	ActionUnmapVNI:           true,
+	ActionSetupEVPN:          true,
+	ActionAddVRFInterface:    true,
+	ActionRemoveVRFInterface: true,
+	ActionBindIPVPN:          true,
+	ActionUnbindIPVPN:        true,
+	ActionBindMACVPN:         true,
+	ActionUnbindMACVPN:       true,
+	ActionAddStaticRoute:     true,
+	ActionRemoveStaticRoute:  true,
+	ActionRemoveVLANMember:   true,
+	ActionApplyQoS:           true,
+	ActionRemoveQoS:          true,
 	ActionConfigureSVI:       true,
 	ActionBGPAddNeighbor:     true,
 	ActionBGPRemoveNeighbor:  true,

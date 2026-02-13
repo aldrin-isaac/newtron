@@ -1277,45 +1277,187 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
-		// create-vtep
+		// setup-evpn
 		{
-			name:    "create-vtep valid",
-			step:    Step{Name: "s", Action: ActionCreateVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
+			name:    "setup-evpn valid",
+			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
-			name:    "create-vtep missing source_ip",
-			step:    Step{Name: "s", Action: ActionCreateVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			name:    "setup-evpn missing source_ip",
+			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.source_ip is required",
 		},
-		// delete-vtep (no params needed)
 		{
-			name:    "delete-vtep valid",
-			step:    Step{Name: "s", Action: ActionDeleteVTEP, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: false,
-		},
-		{
-			name:    "delete-vtep missing devices",
-			step:    Step{Name: "s", Action: ActionDeleteVTEP},
+			name:    "setup-evpn missing devices",
+			step:    Step{Name: "s", Action: ActionSetupEVPN, Params: map[string]any{"source_ip": "10.0.0.1"}},
 			wantErr: true, errMsg: "devices is required",
 		},
-		// map-l2vni
+		// add-vrf-interface
 		{
-			name:    "map-l2vni missing vni",
-			step:    Step{Name: "s", Action: ActionMapL2VNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
-			wantErr: true, errMsg: "params.vni is required",
-		},
-		// map-l3vni
-		{
-			name:    "map-l3vni valid",
-			step:    Step{Name: "s", Action: ActionMapL3VNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "vni": 20001}},
+			name:    "add-vrf-interface valid",
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
 			wantErr: false,
 		},
-		// unmap-vni
 		{
-			name:    "unmap-vni missing vni",
-			step:    Step{Name: "s", Action: ActionUnmapVNI, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vni is required",
+			name:    "add-vrf-interface missing vrf",
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		{
+			name:    "add-vrf-interface missing interface",
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: true, errMsg: "params.interface is required",
+		},
+		// remove-vrf-interface
+		{
+			name:    "remove-vrf-interface valid",
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-vrf-interface missing vrf",
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		{
+			name:    "remove-vrf-interface missing interface",
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: true, errMsg: "params.interface is required",
+		},
+		// bind-ipvpn
+		{
+			name:    "bind-ipvpn valid",
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"}},
+			wantErr: false,
+		},
+		{
+			name:    "bind-ipvpn missing vrf",
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"ipvpn": "customer-a"}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		{
+			name:    "bind-ipvpn missing ipvpn",
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: true, errMsg: "params.ipvpn is required",
+		},
+		// unbind-ipvpn
+		{
+			name:    "unbind-ipvpn valid",
+			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: false,
+		},
+		{
+			name:    "unbind-ipvpn missing vrf",
+			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		// bind-macvpn
+		{
+			name:    "bind-macvpn valid",
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "macvpn": "office-lan"}},
+			wantErr: false,
+		},
+		{
+			name:    "bind-macvpn missing vlan_id",
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"macvpn": "office-lan"}},
+			wantErr: true, errMsg: "params.vlan_id is required",
+		},
+		{
+			name:    "bind-macvpn missing macvpn",
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: true, errMsg: "params.macvpn is required",
+		},
+		// unbind-macvpn
+		{
+			name:    "unbind-macvpn valid",
+			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: false,
+		},
+		{
+			name:    "unbind-macvpn missing vlan_id",
+			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vlan_id is required",
+		},
+		// add-static-route
+		{
+			name:    "add-static-route valid",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
+			wantErr: false,
+		},
+		{
+			name:    "add-static-route missing vrf",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		{
+			name:    "add-static-route missing prefix",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "next_hop": "10.0.0.1"}},
+			wantErr: true, errMsg: "params.prefix is required",
+		},
+		{
+			name:    "add-static-route missing next_hop",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			wantErr: true, errMsg: "params.next_hop is required",
+		},
+		// remove-static-route
+		{
+			name:    "remove-static-route valid",
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-static-route missing vrf",
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24"}},
+			wantErr: true, errMsg: "params.vrf is required",
+		},
+		{
+			name:    "remove-static-route missing prefix",
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			wantErr: true, errMsg: "params.prefix is required",
+		},
+		// remove-vlan-member
+		{
+			name:    "remove-vlan-member valid",
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "interface": "Ethernet0"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-vlan-member missing vlan_id",
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			wantErr: true, errMsg: "params.vlan_id is required",
+		},
+		{
+			name:    "remove-vlan-member missing interface",
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: true, errMsg: "params.interface is required",
+		},
+		// apply-qos
+		{
+			name:    "apply-qos valid",
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"}},
+			wantErr: false,
+		},
+		{
+			name:    "apply-qos missing interface",
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"qos_policy": "8q-datacenter"}},
+			wantErr: true, errMsg: "params.interface is required",
+		},
+		{
+			name:    "apply-qos missing qos_policy",
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			wantErr: true, errMsg: "params.qos_policy is required",
+		},
+		// remove-qos
+		{
+			name:    "remove-qos valid",
+			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-qos missing interface",
+			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.interface is required",
 		},
 		// configure-svi
 		{

@@ -1,0 +1,27 @@
+name: evpn-setup
+description: "EVPN overlay setup via setup-evpn (idempotent composite)"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: setup-evpn-leaf1
+    action: setup-evpn
+    devices: [leaf1]
+    params:
+      source_ip: "10.0.0.11"
+
+  - name: verify-vtep-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: true
+
+  # Idempotent: running again should succeed without error
+  - name: setup-evpn-idempotent
+    action: setup-evpn
+    devices: [leaf1]
+    params:
+      source_ip: "10.0.0.11"

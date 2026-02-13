@@ -1,0 +1,50 @@
+name: static-route
+description: "Static route add/remove lifecycle"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vrf
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_route_test
+
+  - name: add-route
+    action: add-static-route
+    devices: [leaf1]
+    params:
+      vrf: Vrf_route_test
+      prefix: "10.99.0.0/24"
+      next_hop: "10.0.1.1"
+      metric: 100
+
+  - name: verify-route-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: STATIC_ROUTE
+    key: "Vrf_route_test|10.99.0.0/24"
+    expect:
+      exists: true
+
+  - name: remove-route
+    action: remove-static-route
+    devices: [leaf1]
+    params:
+      vrf: Vrf_route_test
+      prefix: "10.99.0.0/24"
+
+  - name: verify-route-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: STATIC_ROUTE
+    key: "Vrf_route_test|10.99.0.0/24"
+    expect:
+      exists: false
+
+  - name: cleanup-vrf
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_route_test

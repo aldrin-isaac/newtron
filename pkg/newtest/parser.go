@@ -260,42 +260,115 @@ func validateStepFields(scenario string, index int, step *Step) error {
 		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
 			return err
 		}
-	case ActionCreateVTEP:
+	case ActionSetupEVPN:
 		if err := requireDevices(prefix, step); err != nil {
 			return err
 		}
 		if err := requireParam(prefix, step.Params, "source_ip"); err != nil {
 			return err
 		}
-	case ActionDeleteVTEP:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionMapL2VNI:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vni"); err != nil {
-			return err
-		}
-	case ActionMapL3VNI:
+	case ActionAddVRFInterface:
 		if err := requireDevices(prefix, step); err != nil {
 			return err
 		}
 		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
 			return err
 		}
-		if err := requireParam(prefix, step.Params, "vni"); err != nil {
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
 			return err
 		}
-	case ActionUnmapVNI:
+	case ActionRemoveVRFInterface:
 		if err := requireDevices(prefix, step); err != nil {
 			return err
 		}
-		if err := requireParam(prefix, step.Params, "vni"); err != nil {
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
+			return err
+		}
+	case ActionBindIPVPN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "ipvpn"); err != nil {
+			return err
+		}
+	case ActionUnbindIPVPN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+	case ActionBindMACVPN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "macvpn"); err != nil {
+			return err
+		}
+	case ActionUnbindMACVPN:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+	case ActionAddStaticRoute:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "prefix"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "next_hop"); err != nil {
+			return err
+		}
+	case ActionRemoveStaticRoute:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "prefix"); err != nil {
+			return err
+		}
+	case ActionRemoveVLANMember:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
+			return err
+		}
+	case ActionApplyQoS:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "qos_policy"); err != nil {
+			return err
+		}
+	case ActionRemoveQoS:
+		if err := requireDevices(prefix, step); err != nil {
+			return err
+		}
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
 			return err
 		}
 	case ActionConfigureSVI:

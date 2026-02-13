@@ -1,17 +1,11 @@
-name: evpn-vni-mapping
-description: "EVPN VNI mapping lifecycle: VTEP + VLAN + VRF + L2/L3 VNI map/unmap"
+name: evpn-vpn-binding
+description: "VPN binding lifecycle: bind/unbind IP-VPN and MAC-VPN via spec references"
 topology: 2node
 platform: sonic-vpp
-requires: [provision]
+requires: [evpn-setup]
 
 steps:
-  # Setup infrastructure
-  - name: create-vtep
-    action: create-vtep
-    devices: [leaf1]
-    params:
-      source_ip: "10.0.0.11"
-
+  # Setup: create VLAN and VRF for binding
   - name: create-vlan200
     action: create-vlan
     devices: [leaf1]
@@ -24,13 +18,13 @@ steps:
     params:
       vrf: Vrf_evpn
 
-  # Map L2VNI
-  - name: map-l2vni
-    action: map-l2vni
+  # Bind MAC-VPN to VLAN (brings L2VNI from spec)
+  - name: bind-macvpn-vlan200
+    action: bind-macvpn
     devices: [leaf1]
     params:
       vlan_id: 200
-      vni: 10200
+      macvpn: storage-vlan200
 
   - name: verify-l2vni-mapping
     action: verify-config-db
@@ -40,13 +34,13 @@ steps:
     expect:
       exists: true
 
-  # Map L3VNI
-  - name: map-l3vni
-    action: map-l3vni
+  # Bind IP-VPN to VRF (brings L3VNI from spec)
+  - name: bind-ipvpn-vrf
+    action: bind-ipvpn
     devices: [leaf1]
     params:
       vrf: Vrf_evpn
-      vni: 20001
+      ipvpn: tenant-vpn
 
   - name: verify-l3vni-mapping
     action: verify-config-db
@@ -56,12 +50,12 @@ steps:
     expect:
       exists: true
 
-  # Unmap both
-  - name: unmap-l2vni
-    action: unmap-vni
+  # Unbind both
+  - name: unbind-macvpn-vlan200
+    action: unbind-macvpn
     devices: [leaf1]
     params:
-      vni: 10200
+      vlan_id: 200
 
   - name: verify-l2vni-unmapped
     action: verify-config-db
@@ -71,11 +65,11 @@ steps:
     expect:
       exists: false
 
-  - name: unmap-l3vni
-    action: unmap-vni
+  - name: unbind-ipvpn-vrf
+    action: unbind-ipvpn
     devices: [leaf1]
     params:
-      vni: 20001
+      vrf: Vrf_evpn
 
   - name: verify-l3vni-unmapped
     action: verify-config-db
@@ -85,7 +79,7 @@ steps:
     expect:
       exists: false
 
-  # Cleanup infrastructure
+  # Cleanup
   - name: cleanup-vrf
     action: delete-vrf
     devices: [leaf1]
@@ -97,7 +91,3 @@ steps:
     devices: [leaf1]
     params:
       vlan_id: 200
-
-  - name: cleanup-vtep
-    action: delete-vtep
-    devices: [leaf1]

@@ -1,0 +1,52 @@
+name: vrf-interface-binding
+description: "VRF interface binding: add/remove interface to/from VRF"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-vrf
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_bind_test
+
+  - name: add-interface-to-vrf
+    action: add-vrf-interface
+    devices: [leaf1]
+    params:
+      vrf: Vrf_bind_test
+      interface: Ethernet2
+
+  - name: verify-interface-vrf
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    key: Ethernet2
+    expect:
+      exists: true
+      fields:
+        vrf_name: Vrf_bind_test
+
+  - name: remove-interface-from-vrf
+    action: remove-vrf-interface
+    devices: [leaf1]
+    params:
+      vrf: Vrf_bind_test
+      interface: Ethernet2
+
+  - name: verify-interface-unbound
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    key: Ethernet2
+    expect:
+      exists: true
+      fields:
+        vrf_name: ""
+
+  - name: cleanup-vrf
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_bind_test
