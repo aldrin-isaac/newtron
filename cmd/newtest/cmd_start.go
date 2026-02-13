@@ -125,15 +125,19 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			var pauseErr *newtest.PauseError
 			if errors.As(runErr, &pauseErr) {
 				state.Status = newtest.StatusPaused
-				_ = newtest.SaveRunState(state)
+				if err := newtest.SaveRunState(state); err != nil {
+					util.Warnf("failed to save run state: %v", err)
+				}
 				suiteName := filepath.Base(dir)
-			fmt.Fprintf(os.Stderr, "\n%s; resume with: newtest start %s\n", pauseErr, suiteName)
+				fmt.Fprintf(os.Stderr, "\n%s; resume with: newtest start %s\n", pauseErr, suiteName)
 				return nil
 			}
 
 			if runErr != nil {
 				state.Status = newtest.StatusRunFailed
-				_ = newtest.SaveRunState(state)
+				if err := newtest.SaveRunState(state); err != nil {
+					util.Warnf("failed to save run state: %v", err)
+				}
 				return runErr
 			}
 
@@ -153,13 +157,19 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			} else {
 				state.Status = newtest.StatusComplete
 			}
-			_ = newtest.SaveRunState(state)
+			if err := newtest.SaveRunState(state); err != nil {
+				util.Warnf("failed to save run state: %v", err)
+			}
 
 			// Write reports
 			gen := &newtest.ReportGenerator{Results: results}
-			_ = gen.WriteMarkdown("newtest/.generated/report.md")
+			if err := gen.WriteMarkdown("newtest/.generated/report.md"); err != nil {
+				util.Warnf("failed to write markdown report: %v", err)
+			}
 			if junitPath != "" {
-				_ = gen.WriteJUnit(junitPath)
+				if err := gen.WriteJUnit(junitPath); err != nil {
+					util.Warnf("failed to write JUnit report: %v", err)
+				}
 			}
 
 			// Exit code via sentinel errors (deferred cleanup runs first)

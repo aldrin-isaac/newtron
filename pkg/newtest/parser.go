@@ -106,20 +106,20 @@ func validateStepFields(scenario string, index int, step *Step) error {
 
 	switch step.Action {
 	case ActionProvision:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 	case ActionWait:
 		if step.Duration == 0 {
 			return fmt.Errorf("%s: duration is required", prefix)
 		}
 	case ActionVerifyProvisioning:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 	case ActionVerifyConfigDB:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Table == "" {
 			return fmt.Errorf("%s: table is required", prefix)
@@ -131,8 +131,8 @@ func validateStepFields(scenario string, index int, step *Step) error {
 			return fmt.Errorf("%s: expect must have min_entries, exists, or fields", prefix)
 		}
 	case ActionVerifyStateDB:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Table == "" {
 			return fmt.Errorf("%s: table is required", prefix)
@@ -144,12 +144,12 @@ func validateStepFields(scenario string, index int, step *Step) error {
 			return fmt.Errorf("%s: expect.fields is required", prefix)
 		}
 	case ActionVerifyBGP:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 	case ActionVerifyHealth:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 	case ActionVerifyRoute:
 		devices := step.Devices.Resolve(nil)
@@ -171,8 +171,8 @@ func validateStepFields(scenario string, index int, step *Step) error {
 			return fmt.Errorf("%s: target is required", prefix)
 		}
 	case ActionApplyService:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Interface == "" {
 			return fmt.Errorf("%s: interface is required", prefix)
@@ -181,29 +181,29 @@ func validateStepFields(scenario string, index int, step *Step) error {
 			return fmt.Errorf("%s: service is required", prefix)
 		}
 	case ActionRemoveService:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Interface == "" {
 			return fmt.Errorf("%s: interface is required", prefix)
 		}
 	case ActionApplyBaseline:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Configlet == "" {
 			return fmt.Errorf("%s: configlet is required", prefix)
 		}
 	case ActionSSHCommand:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Command == "" {
 			return fmt.Errorf("%s: command is required", prefix)
 		}
 	case ActionRestartService:
-		if !step.Devices.All && len(step.Devices.Devices) == 0 {
-			return fmt.Errorf("%s: devices is required", prefix)
+		if err := requireDevices(prefix, step); err != nil {
+			return err
 		}
 		if step.Service == "" {
 			return fmt.Errorf("%s: service is required", prefix)
