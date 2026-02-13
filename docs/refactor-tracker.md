@@ -128,9 +128,9 @@ These items change public function signatures. Do them one at a time, updating a
 |---|------|-------|------------|----------|--------|
 | C.1 | **Add context.Context to newtlab public API**: Add `ctx context.Context` as first param to `Lab.Deploy`, `Lab.Destroy`, `Lab.Start`, `Lab.Stop`, `Lab.Provision`, `WaitForSSH`, `BootstrapNetwork`, `ApplyBootPatches`. Wire cancellation through goroutines. Then update callers: `cmd/newtlab/` and `pkg/newtest/deploy.go`. | `pkg/newtlab/*.go`, `cmd/newtlab/*.go`, `pkg/newtest/deploy.go` | Phase A+B complete | X-1 (newtlab) | DONE ✓ |
 | C.2 | **Delete interactive.go**: 1036 lines of parallel CLI implementation. Marked `Hidden: true`. Entire file duplicates noun-group CLI. If keeping, refactor to call same operation functions as noun-group commands. Decide: delete or refactor. | `cmd/newtron/interactive.go`, `cmd/newtron/main.go` | Track 2 Phase A | D-01, D-02, S-02 | DONE ✓ |
-| C.3 | **Resolve model types usage**: `pkg/model/` rich domain types (BGPConfig, VTEP, VRF, PortChannel, etc.) are largely unused — backend ops work with raw `map[string]string`. Decide: (a) wire ops to use model types, (b) deprecate, (c) remove. | `pkg/model/*.go`, `pkg/network/device_ops.go` | Phase B complete | M-03, X-02, X-03 | NOT STARTED |
-| C.4 | **Wire auth enforcement or document as aspirational**: `RequirePermission` has zero production call sites. The entire auth system is defined, tested, but never enforced. Either add `RequirePermission` calls to CLI write commands, or add a doc comment marking it as aspirational. | `pkg/auth/checker.go`, `cmd/newtron/*.go` | Phase A Track 2 | A-3 | NOT STARTED |
-| C.5 | **Refactor CLI globals into App struct**: 6 mutable globals shared across 20 files. Long-term: wrap in `App` struct, pass through cobra context. Makes CLI testable. | `cmd/newtron/*.go` (all 20 files) | Phase C.2 (less files after interactive.go gone) | S-01 | NOT STARTED |
+| C.3 | **Resolve model types usage**: `pkg/model/` rich domain types (BGPConfig, VTEP, VRF, PortChannel, etc.) are largely unused — backend ops work with raw `map[string]string`. Decide: (a) wire ops to use model types, (b) deprecate, (c) remove. | `pkg/model/*.go`, `pkg/network/device_ops.go` | Phase B complete | M-03, X-02, X-03 | DONE ✓ |
+| C.4 | **Wire auth enforcement or document as aspirational**: `RequirePermission` has zero production call sites. The entire auth system is defined, tested, but never enforced. Either add `RequirePermission` calls to CLI write commands, or add a doc comment marking it as aspirational. | `pkg/auth/checker.go`, `cmd/newtron/*.go` | Phase A Track 2 | A-3 | DONE ✓ |
+| C.5 | **Refactor CLI globals into App struct**: 6 mutable globals shared across 20 files. Long-term: wrap in `App` struct, pass through cobra context. Makes CLI testable. | `cmd/newtron/*.go` (all 20 files) | Phase C.2 (less files after interactive.go gone) | S-01 | DONE ✓ |
 
 ---
 
@@ -150,7 +150,7 @@ After each track/phase:
 2. **Phase B DONE** — committed as a3092e0. 9 items, 31 files (12 new), -3824 net lines.
 3. **Audit docs committed** as 0419197.
 4. **Phase C.1+C.2 DONE** — committed as ca9d918. 12 files, -987 net lines. Context threading + interactive.go deletion.
-5. **Phase C remaining** — 3 items (C.3, C.4, C.5), all require user decisions.
-6. **Model types resolution (C.3)** — needs design decision: wire ops to use rich types, deprecate, or remove.
-7. **Auth enforcement (C.4)** — needs decision: wire RequirePermission calls or document as aspirational.
-8. **CLI globals (C.5)** — unblocked now that C.2 is done. Wrap 6 mutable globals in App struct.
+5. **Phase C.3 DONE** — committed as 0986858. Deleted pkg/model/ (10 files, 1131-line test). Moved ProtoMap→pkg/network/, QoSProfile→pkg/spec/.
+6. **Phase C.4 DONE** — committed as 064103f. Pruned 28 unused permission constants, removed dead helper functions.
+7. **Phase C.5 DONE** — committed as 2d4418b. 11 globals → App struct, 18 files updated.
+8. **ALL PHASES COMPLETE** — 190 findings addressed across 5 audit documents.
