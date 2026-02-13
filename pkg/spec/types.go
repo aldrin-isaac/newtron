@@ -3,8 +3,6 @@ package spec
 
 import (
 	"sort"
-
-	"github.com/newtron-network/newtron/pkg/model"
 )
 
 // ============================================================================
@@ -28,6 +26,15 @@ type QoSQueue struct {
 	ECN    bool   `json:"ecn,omitempty"`    // Enable ECN/WRED
 }
 
+// QoSProfile maps interface types to scheduler configurations (legacy).
+type QoSProfile struct {
+	Name         string `json:"name"`
+	Description  string `json:"description,omitempty"`
+	SchedulerMap string `json:"scheduler_map"` // e.g., "8q" or "4q"
+	DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
+	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
+}
+
 // NetworkSpecFile represents the global network specification file (network.json).
 type NetworkSpecFile struct {
 	Version      string                       `json:"version"`
@@ -40,7 +47,7 @@ type NetworkSpecFile struct {
 	FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
 	Policers     map[string]*PolicerSpec       `json:"policers"`
 	QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
-	QoSProfiles  map[string]*model.QoSProfile `json:"qos_profiles,omitempty"` // Legacy — kept for backward compat
+	QoSProfiles  map[string]*QoSProfile       `json:"qos_profiles,omitempty"` // Legacy — kept for backward compat
 
 	// Route policies (for BGP import/export)
 	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`

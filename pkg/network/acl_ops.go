@@ -5,9 +5,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/model"
 	"github.com/newtron-network/newtron/pkg/util"
 )
+
+// ProtoMap is the canonical mapping from protocol name to IP protocol number.
+// BGP is intentionally absent: BGP uses TCP (protocol 6) on port 179.
+// Filter rules for BGP should use protocol: "tcp" with dst_port: "179".
+var ProtoMap = map[string]int{
+	"tcp":  6,
+	"udp":  17,
+	"icmp": 1,
+	"gre":  47,
+	"ospf": 89,
+	"vrrp": 112,
+}
 
 // ============================================================================
 // ACL Operations
@@ -96,7 +107,7 @@ func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opt
 		fields["DST_IP"] = opts.DstIP
 	}
 	if opts.Protocol != "" {
-		if proto, ok := model.ProtoMap[opts.Protocol]; ok {
+		if proto, ok := ProtoMap[opts.Protocol]; ok {
 			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
 		} else {
 			// Assume it's already a number

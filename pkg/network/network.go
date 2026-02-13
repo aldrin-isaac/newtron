@@ -13,10 +13,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/newtron-network/newtron/pkg/model"
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
-
 )
 
 // Network is the top-level object representing the entire network.
@@ -170,7 +168,7 @@ func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 }
 
 // GetQoSProfile returns a QoS profile by name (legacy).
-func (n *Network) GetQoSProfile(name string) (*model.QoSProfile, error) {
+func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 

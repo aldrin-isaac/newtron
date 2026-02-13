@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/model"
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -481,7 +480,7 @@ func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]s
 		fields["DST_IP"] = dstIP
 	}
 	if rule.Protocol != "" {
-		if proto, ok := model.ProtoMap[rule.Protocol]; ok {
+		if proto, ok := ProtoMap[rule.Protocol]; ok {
 			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
 		} else {
 			fields["IP_PROTOCOL"] = rule.Protocol
