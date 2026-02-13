@@ -349,7 +349,7 @@ func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
 
 	// Count interfaces excluding the one being removed
 	count := 0
-	for _, intf := range splitPorts(acl.Ports) {
+	for _, intf := range util.SplitCommaSeparated(acl.Ports) {
 		if intf != dc.excludeInterface {
 			count++
 		}
@@ -431,7 +431,7 @@ func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 	}
 
 	var remaining []string
-	for _, intf := range splitPorts(acl.Ports) {
+	for _, intf := range util.SplitCommaSeparated(acl.Ports) {
 		if intf != dc.excludeInterface {
 			remaining = append(remaining, intf)
 		}
@@ -439,17 +439,3 @@ func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 	return strings.Join(remaining, ",")
 }
 
-// splitPorts splits a comma-separated ports string into a slice
-func splitPorts(ports string) []string {
-	if ports == "" {
-		return nil
-	}
-	var result []string
-	for _, p := range strings.Split(ports, ",") {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			result = append(result, p)
-		}
-	}
-	return result
-}

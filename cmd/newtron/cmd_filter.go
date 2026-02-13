@@ -163,6 +163,13 @@ Examples:
 			Rules:       []*spec.FilterRule{},
 		}
 
+		fmt.Printf("Filter: %s (type: %s)\n", filterName, filterCreateType)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
 		if err := net.SaveFilterSpec(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
@@ -193,6 +200,13 @@ Examples:
 		authCtx := auth.NewContext().WithResource(filterName)
 		if err := checkExecutePermission(auth.PermFilterDelete, authCtx); err != nil {
 			return err
+		}
+
+		fmt.Printf("Deleting filter: %s\n", filterName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
 		if err := net.DeleteFilterSpec(filterName); err != nil {
@@ -275,6 +289,13 @@ Examples:
 			Policer:       filterRulePolicer,
 		}
 
+		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
 		fs.Rules = append(fs.Rules, rule)
 
 		// Sort rules by sequence for consistent ordering
@@ -330,6 +351,13 @@ Examples:
 
 		if !found {
 			return fmt.Errorf("rule with priority %d not found in filter '%s'", priority, filterName)
+		}
+
+		fmt.Printf("Removing rule (priority %d) from filter '%s'\n", priority, filterName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
 		fs.Rules = newRules

@@ -111,6 +111,68 @@ func boolParam(params map[string]any, key string) bool {
 	}
 }
 
+// executeForDevices runs an operation on each target device and collects results.
+// The callback fn receives the device and its name, returning an optional ChangeSet,
+// a human-readable message, and an error. Executors that use ExecuteOp should call
+// it inside fn.
+func (r *Runner) executeForDevices(step *Step, fn func(dev *network.Device, name string) (*network.ChangeSet, string, error)) *StepOutput {
+	names := r.resolveDevices(step)
+	details := make([]DeviceResult, 0, len(names))
+	changeSets := make(map[string]*network.ChangeSet)
+	allPassed := true
+
+	for _, name := range names {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{Device: name, Status: StatusError, Message: err.Error()})
+			allPassed = false
+			continue
+		}
+		cs, msg, err := fn(dev, name)
+		if err != nil {
+			details = append(details, DeviceResult{Device: name, Status: StatusError, Message: err.Error()})
+			allPassed = false
+			continue
+		}
+		if cs != nil {
+			changeSets[name] = cs
+			r.ChangeSets[name] = cs
+		}
+		details = append(details, DeviceResult{Device: name, Status: StatusPassed, Message: msg})
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{
+		Result:     &StepResult{Status: status, Details: details},
+		ChangeSets: changeSets,
+	}
+}
+
+// pollUntil polls fn at the given interval until it returns true, the timeout
+// expires, or ctx is cancelled.
+func pollUntil(ctx context.Context, timeout, interval time.Duration, fn func() (done bool, err error)) error {
+	deadline := time.Now().Add(timeout)
+pollLoop:
+	for time.Now().Before(deadline) {
+		done, err := fn()
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			break pollLoop
+		case <-time.After(interval):
+		}
+	}
+	return fmt.Errorf("timeout after %s", timeout)
+}
+
 // ============================================================================
 // provisionExecutor
 // ============================================================================
@@ -440,43 +502,35 @@ func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *St
 		}
 
 		matched := false
-		deadline := time.Now().Add(timeout)
 		polls := 0
+		var pollErr error
 
-		for time.Now().Before(deadline) {
+		err = pollUntil(ctx, timeout, interval, func() (bool, error) {
 			polls++
 			vals, err := stateClient.GetEntry(step.Table, step.Key)
 			if err != nil {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusError,
-					Message: fmt.Sprintf("reading STATE_DB: %s", err),
-				})
-				allPassed = false
-				break
+				pollErr = err
+				return false, fmt.Errorf("reading STATE_DB: %s", err)
 			}
-
 			if vals != nil && matchFields(vals, step.Expect.Fields) {
 				matched = true
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusPassed,
-					Message: fmt.Sprintf("%s|%s: all fields match (polled %d times)", step.Table, step.Key, polls),
-				})
-				break
+				return true, nil
 			}
+			return false, nil
+		})
 
-			select {
-			case <-time.After(interval):
-			case <-ctx.Done():
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusError,
-					Message: "interrupted",
-				})
-				allPassed = false
-				break
-			}
-		}
-
-		if !matched && allPassed {
+		if pollErr != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusError,
+				Message: pollErr.Error(),
+			})
+			allPassed = false
+		} else if matched {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusPassed,
+				Message: fmt.Sprintf("%s|%s: all fields match (polled %d times)", step.Table, step.Key, polls),
+			})
+		} else {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusFailed,
 				Message: fmt.Sprintf("%s|%s: timeout after %s (%d polls)", step.Table, step.Key, timeout, polls),
@@ -521,6 +575,11 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 		interval = 5 * time.Second
 	}
 
+	expectedState := "Established"
+	if step.Expect != nil && step.Expect.State != "" {
+		expectedState = step.Expect.State
+	}
+
 	for _, name := range devices {
 		dev, err := r.Network.GetDevice(name)
 		if err != nil {
@@ -533,19 +592,20 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 		}
 
 		matched := false
-		deadline := time.Now().Add(timeout)
 		polls := 0
+		var lastResults []network.HealthCheckResult
 
-		for time.Now().Before(deadline) {
+		err = pollUntil(ctx, timeout, interval, func() (bool, error) {
 			polls++
 
 			// Run BGP health check
 			results, err := dev.RunHealthChecks(ctx, "bgp")
 			if err != nil {
-				time.Sleep(interval)
-				continue
+				return false, nil // transient error, keep polling
 			}
+			lastResults = results
 
+			// Check if all peers are passing health checks
 			bgpOK := true
 			for _, hc := range results {
 				if hc.Status != "pass" {
@@ -554,35 +614,45 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 				}
 			}
 
-			if bgpOK {
-				matched = true
-				expectedState := "Established"
-				if step.Expect != nil && step.Expect.State != "" {
-					expectedState = step.Expect.State
+			if !bgpOK {
+				return false, nil
+			}
+
+			// Health checks pass — now verify against expectedState.
+			// The health check messages contain the peer state (e.g.,
+			// "BGP neighbor 10.1.0.1 (vrf default): Established").
+			// If expectedState is "Established" (the default), health check
+			// pass already implies it. For non-default states, check messages.
+			if expectedState != "Established" {
+				for _, hc := range results {
+					if !strings.Contains(hc.Message, expectedState) {
+						return false, nil
+					}
 				}
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusPassed,
-					Message: fmt.Sprintf("BGP %s (polled %d times)", expectedState, polls),
-				})
-				break
 			}
 
-			select {
-			case <-time.After(interval):
-			case <-ctx.Done():
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusError,
-					Message: "interrupted",
-				})
-				allPassed = false
-				break
-			}
-		}
+			matched = true
+			return true, nil
+		})
 
-		if !matched && allPassed {
+		if matched {
+			details = append(details, DeviceResult{
+				Device: name, Status: StatusPassed,
+				Message: fmt.Sprintf("BGP %s (polled %d times)", expectedState, polls),
+			})
+		} else {
+			// Build a diagnostic message from last health check results
+			msg := fmt.Sprintf("BGP not converged after %s (%d polls)", timeout, polls)
+			if len(lastResults) > 0 {
+				var states []string
+				for _, hc := range lastResults {
+					states = append(states, hc.Message)
+				}
+				msg += ": " + strings.Join(states, "; ")
+			}
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("BGP not converged after %s (%d polls)", timeout, polls),
+				Message: msg,
 			})
 			allPassed = false
 		}
@@ -675,10 +745,11 @@ func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step
 
 	timeout := step.Expect.Timeout
 	interval := step.Expect.PollInterval
-	deadline := time.Now().Add(timeout)
 	polls := 0
+	var matched bool
+	var matchMsg string
 
-	for time.Now().Before(deadline) {
+	pollErr := pollUntil(ctx, timeout, interval, func() (bool, error) {
 		polls++
 		var entry *device.RouteEntry
 		var routeErr error
@@ -690,9 +761,7 @@ func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step
 		}
 
 		if routeErr != nil {
-			return &StepOutput{Result: &StepResult{
-				Status: StatusError, Device: deviceName, Message: routeErr.Error(),
-			}}
+			return false, routeErr
 		}
 
 		if entry != nil && matchRoute(entry, step.Expect) {
@@ -700,20 +769,24 @@ func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step
 			if step.Expect.Source == "asic_db" {
 				source = "ASIC_DB"
 			}
-			msg := fmt.Sprintf("%s via %s (%s, %s, polled %d times)",
+			matchMsg = fmt.Sprintf("%s via %s (%s, %s, polled %d times)",
 				step.Prefix, step.Expect.NextHopIP, step.Expect.Protocol, source, polls)
-			return &StepOutput{Result: &StepResult{
-				Status: StatusPassed, Device: deviceName, Message: msg,
-			}}
+			matched = true
+			return true, nil
 		}
+		return false, nil
+	})
 
-		select {
-		case <-time.After(interval):
-		case <-ctx.Done():
-			return &StepOutput{Result: &StepResult{
-				Status: StatusError, Device: deviceName, Message: "interrupted",
-			}}
-		}
+	if matched {
+		return &StepOutput{Result: &StepResult{
+			Status: StatusPassed, Device: deviceName, Message: matchMsg,
+		}}
+	}
+
+	if pollErr != nil && !strings.HasPrefix(pollErr.Error(), "timeout after") {
+		return &StepOutput{Result: &StepResult{
+			Status: StatusError, Device: deviceName, Message: pollErr.Error(),
+		}}
 	}
 
 	return &StepOutput{Result: &StepResult{
@@ -856,67 +929,25 @@ func parsePingSuccessRate(output string) float64 {
 type applyServiceExecutor struct{}
 
 func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
+	opts := network.ApplyServiceOpts{}
+	if step.Params != nil {
+		if ip, ok := step.Params["ip"]; ok {
+			opts.IPAddress = fmt.Sprintf("%v", ip)
 		}
-
+	}
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		iface, err := dev.GetInterface(step.Interface)
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting interface %s: %s", step.Interface, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
 		}
-
-		// Extract IP from params if present
-		opts := network.ApplyServiceOpts{}
-		if step.Params != nil {
-			if ip, ok := step.Params["ip"]; ok {
-				opts.IPAddress = fmt.Sprintf("%v", ip)
-			}
-		}
-
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return iface.ApplyService(ctx, step.Service, opts)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("apply-service %s: %s", step.Service, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("apply-service %s: %s", step.Service, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("applied service %s on %s (%d changes)", step.Service, step.Interface, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("applied service %s on %s (%d changes)", step.Service, step.Interface, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -926,59 +957,19 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type removeServiceExecutor struct{}
 
 func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		iface, err := dev.GetInterface(step.Interface)
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting interface %s: %s", step.Interface, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
 		}
-
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return iface.RemoveService(ctx)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("remove-service: %s", err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("remove-service: %s", err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed service from %s (%d changes)", step.Interface, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed service from %s (%d changes)", step.Interface, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -988,55 +979,19 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 type applyBaselineExecutor struct{}
 
 func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		// Convert vars map to "key=value" slice
-		var vars []string
-		for k, v := range step.Vars {
-			vars = append(vars, fmt.Sprintf("%s=%s", k, v))
-		}
-
+	var vars []string
+	for k, v := range step.Vars {
+		vars = append(vars, fmt.Sprintf("%s=%s", k, v))
+	}
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.ApplyBaseline(ctx, step.Configlet, vars)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("apply-baseline %s: %s", step.Configlet, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("apply-baseline %s: %s", step.Configlet, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("applied baseline %s (%d changes)", step.Configlet, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("applied baseline %s (%d changes)", step.Configlet, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1117,41 +1072,12 @@ func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type restartServiceExecutor struct{}
 
 func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		if err := dev.RestartService(ctx, step.Service); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("restart %s: %s", step.Service, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("restart %s: %s", step.Service, err)
 		}
-
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("restarted %s", step.Service),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		return nil, fmt.Sprintf("restarted %s", step.Service), nil
+	})
 }
 
 // ============================================================================
@@ -1161,41 +1087,12 @@ func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *S
 type applyFRRDefaultsExecutor struct{}
 
 func (e *applyFRRDefaultsExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		if err := dev.ApplyFRRDefaults(ctx); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("apply FRR defaults: %s", err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("apply FRR defaults: %s", err)
 		}
-
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: "applied FRR defaults",
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		return nil, "applied FRR defaults", nil
+	})
 }
 
 // ============================================================================
@@ -1205,33 +1102,13 @@ func (e *applyFRRDefaultsExecutor) Execute(ctx context.Context, r *Runner, step 
 type setInterfaceExecutor struct{}
 
 func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	property := strParam(step.Params, "property")
 	value := strParam(step.Params, "value")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		iface, err := dev.GetInterface(step.Interface)
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting interface %s: %s", step.Interface, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
 		}
 
 		var cs *network.ChangeSet
@@ -1249,31 +1126,11 @@ func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 				return iface.Set(ctx, property, value)
 			})
 		}
-
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("set-interface %s %s=%s: %s", step.Interface, property, value, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("set-interface %s %s=%s: %s", step.Interface, property, value, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("set %s %s=%s (%d changes)", step.Interface, property, value, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("set %s %s=%s (%d changes)", step.Interface, property, value, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1283,51 +1140,16 @@ func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type createVLANExecutor struct{}
 
 func (e *createVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.CreateVLAN(ctx, vlanID, network.VLANConfig{})
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("create-vlan %d: %s", vlanID, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("create-vlan %d: %s", vlanID, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("created VLAN %d (%d changes)", vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("created VLAN %d (%d changes)", vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1337,51 +1159,16 @@ func (e *createVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type deleteVLANExecutor struct{}
 
 func (e *deleteVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.DeleteVLAN(ctx, vlanID)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("delete-vlan %d: %s", vlanID, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("delete-vlan %d: %s", vlanID, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("deleted VLAN %d (%d changes)", vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("deleted VLAN %d (%d changes)", vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1391,53 +1178,19 @@ func (e *deleteVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type addVLANMemberExecutor struct{}
 
 func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
 	interfaceName := strParam(step.Params, "interface")
 	tagged := boolParam(step.Params, "tagged")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.AddVLANMember(ctx, vlanID, interfaceName, tagged)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("add-vlan-member %d %s: %s", vlanID, interfaceName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("add-vlan-member %d %s: %s", vlanID, interfaceName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("added %s to VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("added %s to VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1447,51 +1200,16 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 type createVRFExecutor struct{}
 
 func (e *createVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.CreateVRF(ctx, vrfName, network.VRFConfig{})
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("create-vrf %s: %s", vrfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("create-vrf %s: %s", vrfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("created VRF %s (%d changes)", vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("created VRF %s (%d changes)", vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1501,51 +1219,16 @@ func (e *createVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type deleteVRFExecutor struct{}
 
 func (e *deleteVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.DeleteVRF(ctx, vrfName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("delete-vrf %s: %s", vrfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("delete-vrf %s: %s", vrfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("deleted VRF %s (%d changes)", vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("deleted VRF %s (%d changes)", vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1555,51 +1238,16 @@ func (e *deleteVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type setupEVPNExecutor struct{}
 
 func (e *setupEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	sourceIP := strParam(step.Params, "source_ip")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.SetupEVPN(ctx, sourceIP)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("setup-evpn (source=%s): %s", sourceIP, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("setup-evpn (source=%s): %s", sourceIP, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("setup EVPN (source=%s, %d changes)", sourceIP, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("setup EVPN (source=%s, %d changes)", sourceIP, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1609,52 +1257,17 @@ func (e *setupEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type addVRFInterfaceExecutor struct{}
 
 func (e *addVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
 	intfName := strParam(step.Params, "interface")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.AddVRFInterface(ctx, vrfName, intfName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("add-vrf-interface %s %s: %s", vrfName, intfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("add-vrf-interface %s %s: %s", vrfName, intfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("added %s to VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("added %s to VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1664,52 +1277,17 @@ func (e *addVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *
 type removeVRFInterfaceExecutor struct{}
 
 func (e *removeVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
 	intfName := strParam(step.Params, "interface")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.RemoveVRFInterface(ctx, vrfName, intfName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("remove-vrf-interface %s %s: %s", vrfName, intfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("remove-vrf-interface %s %s: %s", vrfName, intfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed %s from VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed %s from VRF %s (%d changes)", intfName, vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1719,11 +1297,6 @@ func (e *removeVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, ste
 type bindIPVPNExecutor struct{}
 
 func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
 	ipvpnName := strParam(step.Params, "ipvpn")
 
@@ -1734,44 +1307,15 @@ func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 		}}
 	}
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.BindIPVPN(ctx, vrfName, ipvpnDef)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("bind-ipvpn %s %s: %s", vrfName, ipvpnName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("bind-ipvpn %s %s: %s", vrfName, ipvpnName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("bound IP-VPN %s to VRF %s (%d changes)", ipvpnName, vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("bound IP-VPN %s to VRF %s (%d changes)", ipvpnName, vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1781,51 +1325,16 @@ func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type unbindIPVPNExecutor struct{}
 
 func (e *unbindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.UnbindIPVPN(ctx, vrfName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("unbind-ipvpn %s: %s", vrfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("unbind-ipvpn %s: %s", vrfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("unbound IP-VPN from VRF %s (%d changes)", vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("unbound IP-VPN from VRF %s (%d changes)", vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1835,11 +1344,6 @@ func (e *unbindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step
 type bindMACVPNExecutor struct{}
 
 func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
 	macvpnName := strParam(step.Params, "macvpn")
 
@@ -1850,44 +1354,15 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 		}}
 	}
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.MapL2VNI(ctx, vlanID, macvpnDef.L2VNI)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("bound MAC-VPN %s to VLAN %d (%d changes)", macvpnName, vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("bound MAC-VPN %s to VLAN %d (%d changes)", macvpnName, vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1897,51 +1372,16 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type unbindMACVPNExecutor struct{}
 
 func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.UnmapL2VNI(ctx, vlanID)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("unbind-macvpn vlan=%d: %s", vlanID, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("unbind-macvpn vlan=%d: %s", vlanID, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("unbound MAC-VPN from VLAN %d (%d changes)", vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("unbound MAC-VPN from VLAN %d (%d changes)", vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -1951,54 +1391,20 @@ func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type addStaticRouteExecutor struct{}
 
 func (e *addStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
 	prefix := strParam(step.Params, "prefix")
 	nextHop := strParam(step.Params, "next_hop")
 	metric := intParam(step.Params, "metric")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("add-static-route %s %s via %s: %s", vrfName, prefix, nextHop, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("add-static-route %s %s via %s: %s", vrfName, prefix, nextHop, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("added static route %s via %s in %s (%d changes)", prefix, nextHop, vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("added static route %s via %s in %s (%d changes)", prefix, nextHop, vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2008,52 +1414,18 @@ func (e *addStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *S
 type removeStaticRouteExecutor struct{}
 
 func (e *removeStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vrfName := strParam(step.Params, "vrf")
 	prefix := strParam(step.Params, "prefix")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.RemoveStaticRoute(ctx, vrfName, prefix)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("remove-static-route %s %s: %s", vrfName, prefix, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("remove-static-route %s %s: %s", vrfName, prefix, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed static route %s from %s (%d changes)", prefix, vrfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed static route %s from %s (%d changes)", prefix, vrfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2063,52 +1435,18 @@ func (e *removeStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step
 type removeVLANMemberExecutor struct{}
 
 func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
 	interfaceName := strParam(step.Params, "interface")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.RemoveVLANMember(ctx, vlanID, interfaceName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("remove-vlan-member %d %s: %s", vlanID, interfaceName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("remove-vlan-member %d %s: %s", vlanID, interfaceName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed %s from VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed %s from VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2118,11 +1456,6 @@ func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step 
 type applyQoSExecutor struct{}
 
 func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	intfName := strParam(step.Params, "interface")
 	policyName := strParam(step.Params, "qos_policy")
 
@@ -2133,44 +1466,15 @@ func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		}}
 	}
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.ApplyQoS(ctx, intfName, policyName, policy)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("apply-qos %s %s: %s", intfName, policyName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("apply-qos %s %s: %s", intfName, policyName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("applied QoS policy %s on %s (%d changes)", policyName, intfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("applied QoS policy %s on %s (%d changes)", policyName, intfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2180,51 +1484,16 @@ func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 type removeQoSExecutor struct{}
 
 func (e *removeQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	intfName := strParam(step.Params, "interface")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.RemoveQoS(ctx, intfName)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("remove-qos %s: %s", intfName, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("remove-qos %s: %s", intfName, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed QoS from %s (%d changes)", intfName, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed QoS from %s (%d changes)", intfName, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2234,55 +1503,20 @@ func (e *removeQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type configureSVIExecutor struct{}
 
 func (e *configureSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	vlanID := intParam(step.Params, "vlan_id")
 	opts := network.SVIConfig{
 		VRF:       strParam(step.Params, "vrf"),
 		IPAddress: strParam(step.Params, "ip"),
 	}
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return dev.ConfigureSVI(ctx, vlanID, opts)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("configure-svi vlan=%d: %s", vlanID, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("configure-svi vlan=%d: %s", vlanID, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("configured SVI Vlan%d (%d changes)", vlanID, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("configured SVI Vlan%d (%d changes)", vlanID, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2292,36 +1526,16 @@ func (e *configureSVIExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type bgpAddNeighborExecutor struct{}
 
 func (e *bgpAddNeighborExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	remoteASN := intParam(step.Params, "remote_asn")
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		var cs *network.ChangeSet
+		var err error
 		if step.Interface != "" {
-			// Direct (interface-based) BGP neighbor
 			iface, ifErr := dev.GetInterface(step.Interface)
 			if ifErr != nil {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusError,
-					Message: fmt.Sprintf("getting interface %s: %s", step.Interface, ifErr),
-				})
-				allPassed = false
-				continue
+				return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, ifErr)
 			}
 			cfg := network.DirectBGPNeighborConfig{
 				NeighborIP: neighborIP,
@@ -2331,36 +1545,15 @@ func (e *bgpAddNeighborExecutor) Execute(ctx context.Context, r *Runner, step *S
 				return iface.AddBGPNeighbor(ctx, cfg)
 			})
 		} else {
-			// Loopback-based BGP neighbor
 			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
 				return dev.AddLoopbackBGPNeighbor(ctx, neighborIP, remoteASN, "", false)
 			})
 		}
-
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("bgp-add-neighbor %s: %s", neighborIP, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("bgp-add-neighbor %s: %s", neighborIP, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("added BGP neighbor %s ASN %d (%d changes)", neighborIP, remoteASN, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("added BGP neighbor %s ASN %d (%d changes)", neighborIP, remoteASN, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2370,34 +1563,15 @@ func (e *bgpAddNeighborExecutor) Execute(ctx context.Context, r *Runner, step *S
 type bgpRemoveNeighborExecutor struct{}
 
 func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		var cs *network.ChangeSet
+		var err error
 		if step.Interface != "" {
 			iface, ifErr := dev.GetInterface(step.Interface)
 			if ifErr != nil {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusError,
-					Message: fmt.Sprintf("getting interface %s: %s", step.Interface, ifErr),
-				})
-				allPassed = false
-				continue
+				return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, ifErr)
 			}
 			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
 				return iface.RemoveBGPNeighbor(ctx, neighborIP)
@@ -2407,31 +1581,11 @@ func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step
 				return dev.RemoveBGPNeighbor(ctx, neighborIP)
 			})
 		}
-
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("bgp-remove-neighbor %s: %s", neighborIP, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("bgp-remove-neighbor %s: %s", neighborIP, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("removed BGP neighbor %s (%d changes)", neighborIP, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("removed BGP neighbor %s (%d changes)", neighborIP, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2441,59 +1595,19 @@ func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step
 type refreshServiceExecutor struct{}
 
 func (e *refreshServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		iface, err := dev.GetInterface(step.Interface)
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting interface %s: %s", step.Interface, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
 		}
-
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			return iface.RefreshService(ctx)
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("refresh-service %s: %s", step.Interface, err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("refresh-service %s: %s", step.Interface, err)
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("refreshed service on %s (%d changes)", step.Interface, len(cs.Changes)),
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, fmt.Sprintf("refreshed service on %s (%d changes)", step.Interface, len(cs.Changes)), nil
+	})
 }
 
 // ============================================================================
@@ -2503,25 +1617,8 @@ func (e *refreshServiceExecutor) Execute(ctx context.Context, r *Runner, step *S
 type cleanupExecutor struct{}
 
 func (e *cleanupExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	changeSets := make(map[string]*network.ChangeSet)
-	allPassed := true
-
 	cleanupType := strParam(step.Params, "type")
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		// Cleanup returns (*ChangeSet, *CleanupSummary, error) — wrap via closure.
+	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
 		var summary *network.CleanupSummary
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
 			cs, s, err := dev.Cleanup(ctx, cleanupType)
@@ -2529,33 +1626,13 @@ func (e *cleanupExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 			return cs, err
 		})
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("cleanup: %s", err),
-			})
-			allPassed = false
-			continue
+			return nil, "", fmt.Errorf("cleanup: %s", err)
 		}
-
 		msg := fmt.Sprintf("cleanup (%d changes)", len(cs.Changes))
 		if summary != nil {
 			orphans := len(summary.OrphanedACLs) + len(summary.OrphanedVRFs) + len(summary.OrphanedVNIMappings)
 			msg = fmt.Sprintf("cleanup: %d orphans removed (%d changes)", orphans, len(cs.Changes))
 		}
-
-		changeSets[name] = cs
-		details = append(details, DeviceResult{
-			Device: name, Status: StatusPassed,
-			Message: msg,
-		})
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		ChangeSets: changeSets,
-	}
+		return cs, msg, nil
+	})
 }

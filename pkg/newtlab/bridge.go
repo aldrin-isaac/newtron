@@ -295,7 +295,7 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 
 	// Create remote state dir and write bridge config
 	mkdirCmd := fmt.Sprintf("mkdir -p %s/logs && cat > %s", stateDir, configPath)
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, mkdirCmd)
+	cmd := sshCommand(hostIP, mkdirCmd)
 	cmd.Stdin = bytes.NewReader(configJSON)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return 0, fmt.Errorf("newtlab: setup remote bridge dir on %s: %w\n%s", hostIP, err, out)
@@ -303,7 +303,7 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 
 	// Start newtlink with config file
 	startCmd := fmt.Sprintf("nohup %s %s > %s/logs/bridge.log 2>&1 & echo $!", newtlinkPath, configPath, stateDir)
-	cmd = exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, startCmd)
+	cmd = sshCommand(hostIP, startCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr

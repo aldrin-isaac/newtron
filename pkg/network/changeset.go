@@ -101,16 +101,9 @@ func (cs *ChangeSet) Preview() string {
 	return sb.String()
 }
 
-// Apply writes the changes to the device's config_db via Redis.
-func (cs *ChangeSet) Apply(d *Device) error {
-	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return fmt.Errorf("device not locked - call Lock() first")
-	}
-
-	// Convert network.Change to device.ConfigChange
+// toDeviceChanges converts the ChangeSet's Changes to device.ConfigChange slice.
+// Used by both Apply() and Verify() to avoid duplicating the conversion logic.
+func (cs *ChangeSet) toDeviceChanges() []device.ConfigChange {
 	deviceChanges := make([]device.ConfigChange, 0, len(cs.Changes))
 	for _, c := range cs.Changes {
 		dc := device.ConfigChange{
@@ -128,9 +121,16 @@ func (cs *ChangeSet) Apply(d *Device) error {
 		}
 		deviceChanges = append(deviceChanges, dc)
 	}
+	return deviceChanges
+}
 
-	// Apply via device's Redis client
-	if err := d.Underlying().ApplyChanges(deviceChanges); err != nil {
+// Apply writes the changes to the device's config_db via Redis.
+func (cs *ChangeSet) Apply(d *Device) error {
+	if err := requireWritable(d); err != nil {
+		return err
+	}
+
+	if err := d.Underlying().ApplyChanges(cs.toDeviceChanges()); err != nil {
 		return err
 	}
 	cs.AppliedCount = len(cs.Changes)
@@ -145,26 +145,7 @@ func (cs *ChangeSet) Verify(d *Device) error {
 		return fmt.Errorf("device not connected")
 	}
 
-	// Convert network.Change to device.ConfigChange for verification
-	deviceChanges := make([]device.ConfigChange, 0, len(cs.Changes))
-	for _, c := range cs.Changes {
-		dc := device.ConfigChange{
-			Table:  c.Table,
-			Key:    c.Key,
-			Fields: c.NewValue,
-		}
-		switch c.Type {
-		case ChangeAdd:
-			dc.Type = device.ChangeTypeAdd
-		case ChangeModify:
-			dc.Type = device.ChangeTypeModify
-		case ChangeDelete:
-			dc.Type = device.ChangeTypeDelete
-		}
-		deviceChanges = append(deviceChanges, dc)
-	}
-
-	result, err := d.Underlying().VerifyChangeSet(context.Background(), deviceChanges)
+	result, err := d.Underlying().VerifyChangeSet(context.Background(), cs.toDeviceChanges())
 	if err != nil {
 		return err
 	}
@@ -181,11 +162,8 @@ func (cs *ChangeSet) Rollback(d *Device) error {
 	if cs.AppliedCount == 0 {
 		return nil
 	}
-	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return fmt.Errorf("device not locked - call Lock() first")
+	if err := requireWritable(d); err != nil {
+		return err
 	}
 
 	var errs []error

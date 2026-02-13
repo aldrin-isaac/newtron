@@ -27,19 +27,23 @@ func newConsoleCmd() *cobra.Command {
 				return fmt.Errorf("node %q not found", nodeName)
 			}
 
+			host := "127.0.0.1"
+			if node.HostIP != "" {
+				host = node.HostIP
+			}
 			port := strconv.Itoa(node.ConsolePort)
 
 			// Try socat first, then telnet
 			if socatBin, err := exec.LookPath("socat"); err == nil {
 				return syscallExec(socatBin,
-					[]string{"socat", "-,rawer", "TCP:127.0.0.1:" + port},
+					[]string{"socat", "-,rawer", "TCP:" + host + ":" + port},
 					os.Environ(),
 				)
 			}
 
 			if telnetBin, err := exec.LookPath("telnet"); err == nil {
 				return syscallExec(telnetBin,
-					[]string{"telnet", "127.0.0.1", port},
+					[]string{"telnet", host, port},
 					os.Environ(),
 				)
 			}

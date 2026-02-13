@@ -504,7 +504,8 @@ func (d *Device) InterfaceIsLAGMember(name string) bool {
 	name = util.NormalizeInterfaceName(name)
 	for key := range d.configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
-		if len(key) > len(name) && key[len(key)-len(name):] == name {
+		parts := splitConfigDBKey(key)
+		if len(parts) == 2 && parts[1] == name {
 			return true
 		}
 	}

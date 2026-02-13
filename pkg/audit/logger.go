@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,7 +30,6 @@ type FileLogger struct {
 // RotationConfig configures log file rotation
 type RotationConfig struct {
 	MaxSize    int64 // Max file size in bytes before rotation
-	MaxAge     int   // Max days to retain old files
 	MaxBackups int   // Max number of old files to retain
 }
 
@@ -99,9 +99,13 @@ func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 		}
 	}
 
-	// Apply limit and offset
-	if filter.Offset > 0 && filter.Offset < len(events) {
-		events = events[filter.Offset:]
+	// Apply offset and limit
+	if filter.Offset > 0 {
+		if filter.Offset >= len(events) {
+			events = nil
+		} else {
+			events = events[filter.Offset:]
+		}
 	}
 	if filter.Limit > 0 && filter.Limit < len(events) {
 		events = events[:filter.Limit]
@@ -226,26 +230,40 @@ func (l *FileLogger) cleanupOldFiles() {
 	}
 }
 
-// DefaultLogger is the package-level audit logger
-var DefaultLogger Logger
+// loggerHolder wraps a Logger so atomic.Value always stores the same concrete type.
+type loggerHolder struct {
+	logger Logger
+}
+
+var defaultLogger atomic.Value
 
 // SetDefaultLogger sets the default audit logger
 func SetDefaultLogger(logger Logger) {
-	DefaultLogger = logger
+	defaultLogger.Store(loggerHolder{logger: logger})
+}
+
+func getDefaultLogger() Logger {
+	v := defaultLogger.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(loggerHolder).logger
 }
 
 // Log logs an event using the default logger
 func Log(event *Event) error {
-	if DefaultLogger == nil {
+	l := getDefaultLogger()
+	if l == nil {
 		return nil // No-op if no logger configured
 	}
-	return DefaultLogger.Log(event)
+	return l.Log(event)
 }
 
 // Query queries events from the default logger
 func Query(filter Filter) ([]*Event, error) {
-	if DefaultLogger == nil {
+	l := getDefaultLogger()
+	if l == nil {
 		return []*Event{}, nil
 	}
-	return DefaultLogger.Query(filter)
+	return l.Query(filter)
 }

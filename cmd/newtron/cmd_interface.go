@@ -59,21 +59,13 @@ var interfaceListCmd = &cobra.Command{
 				continue
 			}
 
-			adminStatus := intf.AdminStatus()
-			if adminStatus == "up" {
-				adminStatus = green("up")
-			} else if adminStatus != "" {
-				adminStatus = red(adminStatus)
-			} else {
+			adminStatus := formatAdminStatus(intf.AdminStatus())
+			if adminStatus == "" {
 				adminStatus = "-"
 			}
 
-			operStatus := intf.OperStatus()
-			if operStatus == "up" {
-				operStatus = green("up")
-			} else if operStatus != "" {
-				operStatus = red(operStatus)
-			} else {
+			operStatus := formatOperStatus(intf.OperStatus())
+			if intf.OperStatus() == "" {
 				operStatus = "-"
 			}
 
@@ -135,24 +127,17 @@ Examples:
 		fmt.Printf("Interface: %s\n", bold(intfName))
 
 		// Show status with color coding
-		adminStatus := intf.AdminStatus()
-		operStatus := intf.OperStatus()
-
-		if adminStatus == "up" {
-			fmt.Printf("Admin Status: %s\n", green("up"))
-		} else if adminStatus != "" {
-			fmt.Printf("Admin Status: %s\n", red(adminStatus))
-		} else {
-			fmt.Printf("Admin Status: -\n")
+		adminFmt := formatAdminStatus(intf.AdminStatus())
+		if adminFmt == "" {
+			adminFmt = "-"
 		}
+		fmt.Printf("Admin Status: %s\n", adminFmt)
 
-		if operStatus == "up" {
-			fmt.Printf("Oper Status: %s\n", green("up"))
-		} else if operStatus != "" {
-			fmt.Printf("Oper Status: %s\n", red(operStatus))
-		} else {
-			fmt.Printf("Oper Status: -\n")
+		operFmt := formatOperStatus(intf.OperStatus())
+		if intf.OperStatus() == "" {
+			operFmt = "-"
 		}
+		fmt.Printf("Oper Status: %s\n", operFmt)
 
 		fmt.Printf("Speed: %s\n", intf.Speed())
 		fmt.Printf("MTU: %d\n", intf.MTU())

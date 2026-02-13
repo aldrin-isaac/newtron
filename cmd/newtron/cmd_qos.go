@@ -164,6 +164,13 @@ Examples:
 			Queues:      []*spec.QoSQueue{},
 		}
 
+		fmt.Printf("QoS Policy: %s\n", policyName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
 		if err := net.SaveQoSPolicy(policyName, policy); err != nil {
 			return fmt.Errorf("saving QoS policy: %w", err)
 		}
@@ -194,6 +201,13 @@ Examples:
 		authCtx := auth.NewContext().WithResource(policyName)
 		if err := checkExecutePermission(auth.PermQoSDelete, authCtx); err != nil {
 			return err
+		}
+
+		fmt.Printf("Deleting QoS policy: %s\n", policyName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
 		if err := net.DeleteQoSPolicy(policyName); err != nil {
@@ -288,6 +302,13 @@ Examples:
 			return fmt.Errorf("queue %d already exists in policy '%s'; remove it first", queueID, policyName)
 		}
 
+		fmt.Printf("Queue %d (%s) for policy '%s'\n", queueID, addQueueType, policyName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
 		policy.Queues[queueID] = queue
 
 		if err := net.SaveQoSPolicy(policyName, policy); err != nil {
@@ -327,6 +348,13 @@ Examples:
 
 		if queueID < 0 || queueID >= len(policy.Queues) || policy.Queues[queueID] == nil {
 			return fmt.Errorf("queue %d not found in policy '%s'", queueID, policyName)
+		}
+
+		fmt.Printf("Removing queue %d from policy '%s'\n", queueID, policyName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
 		policy.Queues[queueID] = nil

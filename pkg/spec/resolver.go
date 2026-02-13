@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+var resolveStringRegexp = regexp.MustCompile(`\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_-]*)`)
+
 // Resolver handles alias and variable resolution in configuration
 type Resolver struct {
 	aliases     map[string]string
@@ -22,10 +24,7 @@ func NewResolver(aliases map[string]string, prefixLists map[string][]string) *Re
 // ResolveString resolves aliases in a string
 // Aliases are referenced as ${alias_name} or $alias_name
 func (r *Resolver) ResolveString(s string) string {
-	// Match ${name} or $name patterns
-	re := regexp.MustCompile(`\$\{([^}]+)\}|\$([a-zA-Z_][a-zA-Z0-9_-]*)`)
-
-	return re.ReplaceAllStringFunc(s, func(match string) string {
+	return resolveStringRegexp.ReplaceAllStringFunc(s, func(match string) string {
 		var name string
 		if strings.HasPrefix(match, "${") {
 			name = match[2 : len(match)-1]

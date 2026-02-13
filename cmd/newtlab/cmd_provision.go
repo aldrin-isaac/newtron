@@ -27,21 +27,9 @@ func newProvisionCmd() *cobra.Command {
 				return err
 			}
 
-			// If --device specified, filter to just that device
+			// If --device specified, set filter so Provision() only targets that device
 			if device != "" {
-				state, loadErr := newtlab.LoadState(lab.Name)
-				if loadErr != nil {
-					return loadErr
-				}
-				if _, ok := state.Nodes[device]; !ok {
-					return fmt.Errorf("device %q not found in lab %s", device, lab.Name)
-				}
-				// Filter state to single device for provisioning
-				for name := range state.Nodes {
-					if name != device {
-						delete(state.Nodes, name)
-					}
-				}
+				lab.DeviceFilter = []string{device}
 			}
 
 			fmt.Println("Provisioning devices...")

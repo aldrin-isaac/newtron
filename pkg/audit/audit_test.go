@@ -358,34 +358,6 @@ func TestDefaultLogger(t *testing.T) {
 	SetDefaultLogger(nil)
 }
 
-func TestEventTypes(t *testing.T) {
-	// Just verify constants exist
-	types := []EventType{
-		EventTypeConnect,
-		EventTypeDisconnect,
-		EventTypeLock,
-		EventTypeUnlock,
-		EventTypePreview,
-		EventTypeExecute,
-		EventTypeRollback,
-	}
-
-	for _, et := range types {
-		if et == "" {
-			t.Error("EventType should not be empty")
-		}
-	}
-}
-
-func TestSeverities(t *testing.T) {
-	severities := []Severity{SeverityInfo, SeverityWarning, SeverityError}
-	for _, s := range severities {
-		if s == "" {
-			t.Error("Severity should not be empty")
-		}
-	}
-}
-
 func TestFileLogger_LogRotation(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "audit-rotation-test-*")
 	if err != nil {
@@ -603,17 +575,14 @@ func TestFileLogger_QueryOffsetBeyondEvents(t *testing.T) {
 		logger.Log(NewEvent("alice", "leaf1", "test").WithSuccess())
 	}
 
-	// Query with offset beyond total events
+	// Query with offset beyond total events — should return empty
 	results, err := logger.Query(Filter{Offset: 10})
 	if err != nil {
 		t.Fatalf("Query failed: %v", err)
 	}
 
-	// Offset 10 is beyond 3 events, should return slice from offset (empty since offset > len)
-	if len(results) != 3 {
-		// Based on the code: if filter.Offset > 0 && filter.Offset < len(events)
-		// So if offset >= len(events), no slicing happens
-		t.Logf("Got %d results with offset beyond events", len(results))
+	if len(results) != 0 {
+		t.Errorf("Expected 0 events when offset exceeds total, got %d", len(results))
 	}
 }
 

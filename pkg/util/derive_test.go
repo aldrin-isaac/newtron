@@ -135,19 +135,6 @@ func TestDeriveACLName(t *testing.T) {
 	}
 }
 
-func TestDeriveRouterID(t *testing.T) {
-	if got := DeriveRouterID("10.0.0.1"); got != "10.0.0.1" {
-		t.Errorf("DeriveRouterID() = %q, want %q", got, "10.0.0.1")
-	}
-}
-
-func TestDeriveVTEPSourceIP(t *testing.T) {
-	if got := DeriveVTEPSourceIP("10.0.0.1"); got != "10.0.0.1" {
-		t.Errorf("DeriveVTEPSourceIP() = %q, want %q", got, "10.0.0.1")
-	}
-}
-
-
 func TestIsPointToPoint(t *testing.T) {
 	tests := []struct {
 		maskLen int
@@ -337,28 +324,6 @@ func TestMergeStringSlices(t *testing.T) {
 			got := MergeStringSlices(tt.slices...)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MergeStringSlices() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDeriveRouteDistinguisher(t *testing.T) {
-	tests := []struct {
-		routerID string
-		vrfIndex int
-		want     string
-	}{
-		{"10.0.0.1", 1, "10.0.0.1:1"},
-		{"10.0.0.1", 100, "10.0.0.1:100"},
-		{"192.168.1.1", 0, "192.168.1.1:0"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			got := DeriveRouteDistinguisher(tt.routerID, tt.vrfIndex)
-			if got != tt.want {
-				t.Errorf("DeriveRouteDistinguisher(%q, %d) = %q, want %q",
-					tt.routerID, tt.vrfIndex, got, tt.want)
 			}
 		})
 	}

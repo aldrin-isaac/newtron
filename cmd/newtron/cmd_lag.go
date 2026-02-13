@@ -65,12 +65,7 @@ var lagListCmd = &cobra.Command{
 				continue
 			}
 
-			status := pc.AdminStatus
-			if status == "up" {
-				status = green("up")
-			} else {
-				status = red("down")
-			}
+			status := formatAdminStatus(pc.AdminStatus)
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%d/%d\n",
 				pc.Name,
@@ -119,12 +114,7 @@ Examples:
 
 		fmt.Printf("LAG: %s\n", bold(pc.Name))
 
-		adminStatus := pc.AdminStatus
-		if adminStatus == "up" {
-			fmt.Printf("Admin Status: %s\n", green("up"))
-		} else {
-			fmt.Printf("Admin Status: %s\n", red(adminStatus))
-		}
+		fmt.Printf("Admin Status: %s\n", formatAdminStatus(pc.AdminStatus))
 
 		if len(pc.Members) > 0 {
 			fmt.Printf("Members: %s\n", strings.Join(pc.Members, ", "))
@@ -220,19 +210,10 @@ Examples:
 		fmt.Fprintln(w, "----\t-----\t----\t-------\t------\t---")
 
 		for _, s := range statuses {
-			admin := s.AdminStatus
-			if admin == "up" {
-				admin = green("up")
-			} else {
-				admin = red("down")
-			}
+			admin := formatAdminStatus(s.AdminStatus)
 
-			oper := s.OperStatus
-			if oper == "up" {
-				oper = green("up")
-			} else if oper != "" {
-				oper = red(oper)
-			} else {
+			oper := formatOperStatus(s.OperStatus)
+			if s.OperStatus == "" {
 				oper = "-"
 			}
 
@@ -260,7 +241,6 @@ Examples:
 var (
 	lagMembers  string
 	lagMinLinks int
-	lagMode     string
 	lagFastRate bool
 	lagMTU      int
 )
@@ -276,7 +256,7 @@ Requires -d (device) flag.
 
 Examples:
   newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
-  newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4 --mode active --fast-rate -x`,
+  newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4 --fast-rate -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
@@ -376,7 +356,7 @@ Examples:
 		lagName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
-			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
+			if err := checkExecutePermission(auth.PermLAGDelete, authCtx); err != nil {
 				return nil, err
 			}
 			cs, err := dev.DeletePortChannel(ctx, lagName)
@@ -391,7 +371,6 @@ Examples:
 func init() {
 	lagCreateCmd.Flags().StringVar(&lagMembers, "members", "", "Comma-separated list of member interfaces (required)")
 	lagCreateCmd.Flags().IntVar(&lagMinLinks, "min-links", 1, "Minimum links required")
-	lagCreateCmd.Flags().StringVar(&lagMode, "mode", "active", "LACP mode: active, passive, or on")
 	lagCreateCmd.Flags().BoolVar(&lagFastRate, "fast-rate", true, "Use LACP fast rate (1s vs 30s)")
 	lagCreateCmd.Flags().IntVar(&lagMTU, "mtu", 9100, "MTU size")
 

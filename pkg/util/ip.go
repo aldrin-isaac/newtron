@@ -109,50 +109,6 @@ func IsValidIPv4CIDR(cidr string) bool {
 	return ip != nil && ip.To4() != nil
 }
 
-// IsValidMACAddress checks if a string is a valid MAC address
-func IsValidMACAddress(mac string) bool {
-	_, err := net.ParseMAC(mac)
-	return err == nil
-}
-
-// NormalizeMACAddress normalizes a MAC address to lowercase with colons
-func NormalizeMACAddress(mac string) (string, error) {
-	hw, err := net.ParseMAC(mac)
-	if err != nil {
-		return "", err
-	}
-	return hw.String(), nil
-}
-
-// IPInRange checks if an IP is within a given CIDR range
-func IPInRange(ipStr, cidr string) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	_, ipNet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return false
-	}
-	return ipNet.Contains(ip)
-}
-
-// ValidateVLANID checks if a VLAN ID is valid (1-4094)
-func ValidateVLANID(vlanID int) error {
-	if vlanID < 1 || vlanID > 4094 {
-		return fmt.Errorf("VLAN ID must be between 1 and 4094, got %d", vlanID)
-	}
-	return nil
-}
-
-// ValidateVNI checks if a VNI is valid (1-16777215)
-func ValidateVNI(vni int) error {
-	if vni < 1 || vni > 16777215 {
-		return fmt.Errorf("VNI must be between 1 and 16777215, got %d", vni)
-	}
-	return nil
-}
-
 // ValidateASN checks if an AS number is valid
 func ValidateASN(asn int) error {
 	if asn < 1 || asn > 4294967295 {
@@ -167,41 +123,6 @@ func ValidateMTU(mtu int) error {
 		return fmt.Errorf("MTU must be between 68 and 9216, got %d", mtu)
 	}
 	return nil
-}
-
-// ParsePortRange parses a port range string like "1024-65535"
-func ParsePortRange(rangeStr string) (start, end int, err error) {
-	parts := strings.Split(rangeStr, "-")
-	if len(parts) == 1 {
-		port, err := strconv.Atoi(parts[0])
-		if err != nil {
-			return 0, 0, fmt.Errorf("invalid port: %s", parts[0])
-		}
-		if port < 0 || port > 65535 {
-			return 0, 0, fmt.Errorf("port out of range: %d", port)
-		}
-		return port, port, nil
-	}
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("invalid port range format: %s", rangeStr)
-	}
-
-	start, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid start port: %s", parts[0])
-	}
-	end, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid end port: %s", parts[1])
-	}
-
-	if start < 0 || start > 65535 || end < 0 || end > 65535 {
-		return 0, 0, fmt.Errorf("port out of range")
-	}
-	if start > end {
-		return 0, 0, fmt.Errorf("start port %d greater than end port %d", start, end)
-	}
-	return start, end, nil
 }
 
 // FormatRouteDistinguisher generates an RD from router ID and index
@@ -231,6 +152,14 @@ func SplitIPMask(cidr string) (string, int) {
 // DeriveNeighborIP derives the BGP neighbor IP from a local IP address with CIDR mask.
 // Works for point-to-point links (/30 and /31).
 // Returns error if the subnet is not point-to-point.
+// ValidateVLANID checks that a VLAN ID is in the valid range (1-4094).
+func ValidateVLANID(vlanID int) error {
+	if vlanID < 1 || vlanID > 4094 {
+		return fmt.Errorf("invalid VLAN ID %d: must be 1-4094", vlanID)
+	}
+	return nil
+}
+
 func DeriveNeighborIP(localIPWithMask string) (string, error) {
 	ipStr, maskLen := SplitIPMask(localIPWithMask)
 	if maskLen == 0 {

@@ -25,11 +25,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	d := i.device
 
 	// Validate preconditions
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked - call Lock() first")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Get service definition via parent reference
@@ -764,11 +761,8 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !i.HasService() {
 		return nil, fmt.Errorf("interface %s has no service to remove", i.name)
@@ -966,11 +960,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !util.IsValidIPv4CIDR(ipAddr) {
 		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
@@ -993,11 +984,8 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
 		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
@@ -1022,11 +1010,8 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.ACLTableExists(aclName) {
 		return nil, fmt.Errorf("ACL table '%s' does not exist", aclName)
@@ -1066,11 +1051,8 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if i.IsLAGMember() {
 		return nil, fmt.Errorf("cannot configure LAG member directly")
@@ -1143,11 +1125,8 @@ type DirectBGPNeighborConfig struct {
 func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborConfig) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
 		return nil, fmt.Errorf("remote AS number is required")
@@ -1218,11 +1197,8 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// If no neighbor IP specified, try to derive it
@@ -1284,11 +1260,8 @@ func (i *Interface) GetBGPNeighborIP() string {
 func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef *spec.MACVPNSpec) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !i.IsVLAN() {
 		return nil, fmt.Errorf("bind-macvpn only valid for VLAN interfaces")
@@ -1326,11 +1299,8 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !i.IsVLAN() {
 		return nil, fmt.Errorf("unbind-macvpn only valid for VLAN interfaces")
@@ -1371,11 +1341,8 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if i.IsLAGMember() {
 		return nil, fmt.Errorf("cannot configure LAG member directly - configure the parent LAG")
@@ -1442,11 +1409,8 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged bool) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize member interface name (e.g., Eth0 -> Ethernet0)
@@ -1503,11 +1467,8 @@ func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged boo
 func (i *Interface) RemoveMember(ctx context.Context, memberIntf string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize member interface name (e.g., Eth0 -> Ethernet0)
@@ -1560,11 +1521,8 @@ func (i *Interface) RemoveMember(ctx context.Context, memberIntf string) (*Chang
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !i.HasService() {
 		return nil, fmt.Errorf("interface %s has no service to refresh", i.name)
@@ -1609,11 +1567,8 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	configDB := d.ConfigDB()
@@ -1679,11 +1634,8 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, routeMapName string) (*ChangeSet, error) {
 	d := i.device
 
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if direction != "in" && direction != "out" {
 		return nil, fmt.Errorf("direction must be 'in' or 'out'")

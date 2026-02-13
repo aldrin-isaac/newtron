@@ -461,6 +461,13 @@ Examples:
 			EgressFilter:  svcCreateEgressFilter,
 		}
 
+		fmt.Printf("Service: %s (type: %s)\n", serviceName, svcCreateType)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
 		if err := net.SaveService(serviceName, svc); err != nil {
 			return fmt.Errorf("saving service: %w", err)
 		}
@@ -494,6 +501,13 @@ Examples:
 		authCtx := auth.NewContext().WithResource(serviceName)
 		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
 			return err
+		}
+
+		fmt.Printf("Deleting service: %s\n", serviceName)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
 		if err := net.DeleteService(serviceName); err != nil {

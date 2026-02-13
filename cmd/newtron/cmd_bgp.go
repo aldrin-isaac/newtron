@@ -94,11 +94,7 @@ Examples:
 				if adminStatus == "" {
 					adminStatus = "up"
 				}
-				if adminStatus == "up" {
-					adminStatus = green("up")
-				} else {
-					adminStatus = red(adminStatus)
-				}
+				adminStatus = formatAdminStatus(adminStatus)
 
 				description := neighbor.Name
 				if description == "" {

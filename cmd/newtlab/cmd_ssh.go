@@ -36,12 +36,19 @@ func newSSHCmd() *cobra.Command {
 				return fmt.Errorf("ssh not found in PATH")
 			}
 
+			host := "127.0.0.1"
+			if node.HostIP != "" {
+				host = node.HostIP
+			}
+
+			user := "admin"
+
 			sshArgs := []string{"ssh",
 				"-o", "StrictHostKeyChecking=no",
 				"-o", "UserKnownHostsFile=/dev/null",
 				"-o", "LogLevel=ERROR",
 				"-p", strconv.Itoa(node.SSHPort),
-				"admin@127.0.0.1",
+				user + "@" + host,
 			}
 
 			return syscallExec(sshBin, sshArgs, os.Environ())

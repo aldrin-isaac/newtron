@@ -79,10 +79,27 @@ const (
 	ProtocolICMP = 1
 	ProtocolTCP  = 6
 	ProtocolUDP  = 17
+	ProtocolGRE  = 47
 	ProtocolOSPF = 89
 	ProtocolVRRP = 112
-	ProtocolBGP  = 179 // This is a port number, not protocol
 )
+
+// Well-known TCP/UDP port numbers
+const (
+	PortBGP = 179
+)
+
+// ProtoMap is the canonical mapping from protocol name to IP protocol number.
+// BGP is intentionally absent: BGP uses TCP (protocol 6) on port 179.
+// Filter rules for BGP should use protocol: "tcp" with dst_port: "179".
+var ProtoMap = map[string]int{
+	"tcp":  ProtocolTCP,
+	"udp":  ProtocolUDP,
+	"icmp": ProtocolICMP,
+	"gre":  ProtocolGRE,
+	"ospf": ProtocolOSPF,
+	"vrrp": ProtocolVRRP,
+}
 
 // ProtocolFromName converts protocol name to number
 func ProtocolFromName(name string) int {

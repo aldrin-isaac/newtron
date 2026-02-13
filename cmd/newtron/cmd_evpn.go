@@ -153,12 +153,8 @@ var evpnStatusCmd = &cobra.Command{
 			evpn := underlying.State.EVPN
 			fmt.Println("\nOperational State:")
 
-			vtepState := evpn.VTEPState
-			if vtepState == "up" || vtepState == "oper_up" {
-				vtepState = green(vtepState)
-			} else if vtepState != "" {
-				vtepState = red(vtepState)
-			} else {
+			vtepState := formatOperStatus(evpn.VTEPState)
+			if evpn.VTEPState == "" {
 				vtepState = "-"
 			}
 

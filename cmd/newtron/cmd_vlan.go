@@ -25,7 +25,7 @@ Requires -d (device) flag.
 Examples:
   newtron -d leaf1-ny vlan list
   newtron -d leaf1-ny vlan show 100
-  newtron -d leaf1-ny vlan create 100 --name "Frontend"
+  newtron -d leaf1-ny vlan create 100
   newtron -d leaf1-ny vlan add-interface 100 Ethernet0 --tagged
   newtron -d leaf1-ny vlan remove-interface 100 Ethernet0
   newtron -d leaf1-ny vlan status`,
@@ -101,9 +101,9 @@ Examples:
   newtron -d leaf1-ny vlan show 100`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 
 		ctx := context.Background()
@@ -245,7 +245,6 @@ Examples:
 }
 
 var (
-	vlanName        string
 	vlanDescription string
 )
 
@@ -257,12 +256,12 @@ var vlanCreateCmd = &cobra.Command{
 Requires -d (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan create 100 --name "Frontend"`,
+  newtron -d leaf1-ny vlan create 100 --description "Frontend VLAN"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
@@ -294,9 +293,9 @@ Examples:
   newtron -d leaf1-ny vlan add-interface 100 PortChannel100`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		interfaceName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
@@ -325,9 +324,9 @@ Examples:
   newtron -d leaf1-ny vlan remove-interface 100 PortChannel100 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		interfaceName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
@@ -355,13 +354,13 @@ Examples:
   newtron -d leaf1-ny vlan delete 100 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermVLANCreate, authCtx); err != nil {
+			if err := checkExecutePermission(auth.PermVLANDelete, authCtx); err != nil {
 				return nil, err
 			}
 			cs, err := dev.DeleteVLAN(ctx, vlanID)
@@ -399,9 +398,9 @@ Examples:
   newtron -d leaf1-ny vlan configure-svi 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:01:01 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
@@ -433,9 +432,9 @@ Examples:
   newtron -d leaf1-ny vlan bind-macvpn 100 servers-vlan100 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 		macvpnName := args[1]
 
@@ -482,9 +481,9 @@ Examples:
   newtron -d leaf1-ny vlan unbind-macvpn 100 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
 		}
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
@@ -508,8 +507,16 @@ Examples:
 	},
 }
 
+// parseVLANID parses a VLAN ID from a string argument.
+func parseVLANID(s string) (int, error) {
+	var id int
+	if _, err := fmt.Sscanf(s, "%d", &id); err != nil {
+		return 0, fmt.Errorf("invalid VLAN ID: %s", s)
+	}
+	return id, nil
+}
+
 func init() {
-	vlanCreateCmd.Flags().StringVar(&vlanName, "name", "", "VLAN name")
 	vlanCreateCmd.Flags().StringVar(&vlanDescription, "description", "", "VLAN description")
 
 	vlanAddInterfaceCmd.Flags().BoolVar(&vlanTagged, "tagged", false, "Add as tagged member")

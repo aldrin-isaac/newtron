@@ -2,7 +2,8 @@
 package audit
 
 import (
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/network"
@@ -26,28 +27,6 @@ type Event struct {
 	ClientIP    string              `json:"client_ip,omitempty"`
 	SessionID   string              `json:"session_id,omitempty"`
 }
-
-// EventType categorizes audit events
-type EventType string
-
-const (
-	EventTypeConnect    EventType = "connect"
-	EventTypeDisconnect EventType = "disconnect"
-	EventTypeLock       EventType = "lock"
-	EventTypeUnlock     EventType = "unlock"
-	EventTypePreview    EventType = "preview"
-	EventTypeExecute    EventType = "execute"
-	EventTypeRollback   EventType = "rollback"
-)
-
-// Severity indicates the importance of an audit event
-type Severity string
-
-const (
-	SeverityInfo    Severity = "info"
-	SeverityWarning Severity = "warning"
-	SeverityError   Severity = "error"
-)
 
 // Filter defines criteria for querying audit events
 type Filter struct {
@@ -122,5 +101,7 @@ func (e *Event) WithExecuteMode(execute bool) *Event {
 }
 
 func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

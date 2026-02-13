@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+var (
+	sanitizeRegexp       = regexp.MustCompile(`[^a-zA-Z0-9_-]`)
+	parseInterfaceRegexp = regexp.MustCompile(`^([a-zA-Z]+)(\d+(?:/\d+)*)$`)
+)
+
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
 	NeighborIP    string // Computed from local IP for point-to-point
@@ -49,8 +54,7 @@ func SanitizeForName(name string) string {
 	name = strings.ReplaceAll(name, ".", "_")
 	name = strings.ReplaceAll(name, "/", "_")
 	// Remove any other special characters
-	reg := regexp.MustCompile(`[^a-zA-Z0-9_-]`)
-	return reg.ReplaceAllString(name, "")
+	return sanitizeRegexp.ReplaceAllString(name, "")
 }
 
 // DeriveVRFName generates a VRF name based on type
@@ -73,21 +77,6 @@ func DeriveACLName(serviceName, direction string) string {
 	return serviceName + "-" + direction
 }
 
-// DeriveRouterID returns the router ID, typically from loopback IP
-func DeriveRouterID(loopbackIP string) string {
-	return loopbackIP
-}
-
-// DeriveVTEPSourceIP returns the VTEP source IP from loopback
-func DeriveVTEPSourceIP(loopbackIP string) string {
-	return loopbackIP
-}
-
-// DeriveRouteDistinguisher generates an RD for a VRF
-func DeriveRouteDistinguisher(routerID string, vrfIndex int) string {
-	return FormatRouteDistinguisher(routerID, vrfIndex)
-}
-
 // IsPointToPoint returns true if the mask length indicates a p2p link
 func IsPointToPoint(maskLen int) bool {
 	return maskLen == 30 || maskLen == 31
@@ -104,8 +93,7 @@ func ParseInterfaceName(name string) (ifType string, num string, subintf string)
 	}
 
 	// Extract type and number
-	reg := regexp.MustCompile(`^([a-zA-Z]+)(\d+(?:/\d+)*)$`)
-	matches := reg.FindStringSubmatch(name)
+	matches := parseInterfaceRegexp.FindStringSubmatch(name)
 	if len(matches) == 3 {
 		return matches[1], matches[2], subintf
 	}

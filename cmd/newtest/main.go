@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -10,6 +11,13 @@ import (
 )
 
 var verboseFlag bool
+
+// Sentinel errors for exit code mapping. RunE handlers return these instead
+// of calling os.Exit directly, so deferred cleanup (like lock release) runs.
+var (
+	errTestFailure = errors.New("test failure")
+	errInfraError  = errors.New("infrastructure error")
+)
 
 func main() {
 	rootCmd := &cobra.Command{
@@ -32,12 +40,20 @@ Scenarios are YAML files that define steps (provision, configure, verify).
 
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
 
+	startCmd := newStartCmd()
+
+	// Register "run" as a hidden alias for "start" (backward compatibility)
+	runCmd := *startCmd
+	runCmd.Use = "run [suite]"
+	runCmd.Hidden = true
+	runCmd.Deprecated = "use 'start' instead"
+
 	rootCmd.AddCommand(
-		newStartCmd(),
+		startCmd,
 		newPauseCmd(),
 		newStopCmd(),
 		newStatusCmd(),
-		newRunCmd(),
+		&runCmd,
 		newListCmd(),
 		newSuitesCmd(),
 		newTopologiesCmd(),
@@ -55,6 +71,9 @@ Scenarios are YAML files that define steps (provision, configure, verify).
 	)
 
 	if err := rootCmd.Execute(); err != nil {
+		if errors.Is(err, errInfraError) {
+			os.Exit(2)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

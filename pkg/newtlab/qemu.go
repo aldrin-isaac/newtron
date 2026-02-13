@@ -140,7 +140,7 @@ func StartNodeRemote(node *NodeConfig, labName, hostIP string) (int, error) {
 	remoteCmd := fmt.Sprintf("cd %s && nohup %s > /dev/null 2>&1 & echo $!",
 		remoteDir, strings.Join(quoteArgs(qemuArgs), " "))
 
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, remoteCmd)
+	cmd := sshCommand(hostIP, remoteCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -197,8 +197,7 @@ func stopNodeLocal(pid int) error {
 // StopNodeRemote kills a QEMU process on a remote host via SSH.
 func StopNodeRemote(pid int, hostIP string) error {
 	// Try SIGTERM first
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
-		fmt.Sprintf("kill %d 2>/dev/null; exit 0", pid))
+	cmd := sshCommand(hostIP, fmt.Sprintf("kill %d 2>/dev/null; exit 0", pid))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("newtlab: kill remote pid %d on %s: %w", pid, hostIP, err)
 	}
@@ -213,8 +212,7 @@ func StopNodeRemote(pid int, hostIP string) error {
 	}
 
 	// Force kill
-	exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
-		fmt.Sprintf("kill -9 %d 2>/dev/null; exit 0", pid)).Run()
+	sshCommand(hostIP, fmt.Sprintf("kill -9 %d 2>/dev/null; exit 0", pid)).Run()
 	return nil
 }
 
@@ -240,8 +238,7 @@ func isRunningLocal(pid int) bool {
 
 // IsRunningRemote checks if a process is alive on a remote host via SSH.
 func IsRunningRemote(pid int, hostIP string) bool {
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
-		fmt.Sprintf("kill -0 %d 2>/dev/null", pid))
+	cmd := sshCommand(hostIP, fmt.Sprintf("kill -0 %d 2>/dev/null", pid))
 	return cmd.Run() == nil
 }
 

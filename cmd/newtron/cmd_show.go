@@ -23,11 +23,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		if deviceName == "" {
-			return fmt.Errorf("device required: use -d <device> flag")
-		}
-
-		dev, err := net.ConnectDevice(ctx, deviceName)
+		dev, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}

@@ -162,12 +162,12 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 				_ = gen.WriteJUnit(junitPath)
 			}
 
-			// Exit code
+			// Exit code via sentinel errors (deferred cleanup runs first)
 			if hasError {
-				os.Exit(2)
+				return errInfraError
 			}
 			if hasFailure {
-				os.Exit(1)
+				return errTestFailure
 			}
 			return nil
 		},

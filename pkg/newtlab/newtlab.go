@@ -19,17 +19,18 @@ import (
 // Lab is the top-level newtlab orchestrator. It reads newtron spec files,
 // resolves VM configuration, and manages QEMU processes.
 type Lab struct {
-	Name     string
-	SpecDir  string
-	StateDir string
-	Topology *spec.TopologySpecFile
-	Platform *spec.PlatformSpecFile
-	Profiles map[string]*spec.DeviceProfile
-	Config   *VMLabConfig
-	Nodes    map[string]*NodeConfig
-	Links    []*LinkConfig
-	State    *LabState
-	Force    bool
+	Name         string
+	SpecDir      string
+	StateDir     string
+	Topology     *spec.TopologySpecFile
+	Platform     *spec.PlatformSpecFile
+	Profiles     map[string]*spec.DeviceProfile
+	Config       *VMLabConfig
+	Nodes        map[string]*NodeConfig
+	Links        []*LinkConfig
+	State        *LabState
+	Force        bool
+	DeviceFilter []string // if non-empty, only provision these devices
 }
 
 // NewLab loads specs from specDir and returns a configured Lab.
@@ -133,7 +134,9 @@ func (l *Lab) Deploy() error {
 			return fmt.Errorf("newtlab: lab %s already deployed (created %s); use --force to redeploy",
 				l.Name, existing.Created.Format(time.RFC3339))
 		}
-		l.destroyExisting(existing)
+		if err := l.destroyExisting(existing); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: cleanup of existing lab failed: %v\n", err)
+		}
 	}
 
 	// Port conflict detection (SSH, console, link, bridge stats — local and remote)
@@ -304,10 +307,7 @@ func (l *Lab) Deploy() error {
 		if ns.Status != "running" {
 			continue
 		}
-		consoleHost := "127.0.0.1"
-		if ns.HostIP != "" {
-			consoleHost = ns.HostIP
-		}
+		consoleHost := nodeHostIP(ns)
 		wg.Add(1)
 		go func(name, consoleHost string, node *NodeConfig) {
 			defer wg.Done()
@@ -332,10 +332,7 @@ func (l *Lab) Deploy() error {
 		if ns.Status != "running" {
 			continue
 		}
-		sshHost := "127.0.0.1"
-		if ns.HostIP != "" {
-			sshHost = ns.HostIP
-		}
+		sshHost := nodeHostIP(ns)
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig) {
 			defer wg.Done()
@@ -370,10 +367,7 @@ func (l *Lab) Deploy() error {
 		if err != nil || len(patches) == 0 {
 			continue
 		}
-		sshHost := "127.0.0.1"
-		if ns.HostIP != "" {
-			sshHost = ns.HostIP
-		}
+		sshHost := nodeHostIP(ns)
 		vars := buildPatchVars(node, platform)
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig, patches []*BootPatch, vars *PatchVars) {
@@ -429,24 +423,7 @@ func (l *Lab) Destroy() error {
 	}
 
 	// Stop bridge processes (per-host)
-	if len(state.Bridges) > 0 {
-		for host, bs := range state.Bridges {
-			if bs.HostIP != "" {
-				if err := stopBridgeProcessRemote(bs.PID, bs.HostIP); err != nil {
-					errs = append(errs, fmt.Errorf("stop bridge on %s (pid %d): %w", host, bs.PID, err))
-				}
-			} else if isRunningLocal(bs.PID) {
-				if err := stopNodeLocal(bs.PID); err != nil {
-					errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", bs.PID, err))
-				}
-			}
-		}
-	} else if state.BridgePID > 0 && isRunningLocal(state.BridgePID) {
-		// Legacy fallback
-		if err := stopNodeLocal(state.BridgePID); err != nil {
-			errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", state.BridgePID, err))
-		}
-	}
+	errs = append(errs, stopAllBridges(state)...)
 
 	// Clean up remote state directories
 	cleanedHosts := map[string]bool{}
@@ -573,10 +550,7 @@ func (l *Lab) Start(nodeName string) error {
 	nodeState.Status = "running"
 
 	// Wait for SSH — use host IP for remote nodes
-	sshHost := "127.0.0.1"
-	if nodeState.HostIP != "" {
-		sshHost = nodeState.HostIP
-	}
+	sshHost := nodeHostIP(nodeState)
 	if err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 		time.Duration(node.BootTimeout)*time.Second); err != nil {
 		nodeState.Status = "error"
@@ -595,6 +569,19 @@ func (l *Lab) Provision(parallel int) error {
 	}
 	if l.SpecDir == "" {
 		l.SpecDir = state.SpecDir
+	}
+
+	// Apply device filter if set
+	if len(l.DeviceFilter) > 0 {
+		allowed := make(map[string]bool, len(l.DeviceFilter))
+		for _, d := range l.DeviceFilter {
+			allowed[d] = true
+		}
+		for name := range state.Nodes {
+			if !allowed[name] {
+				delete(state.Nodes, name)
+			}
+		}
 	}
 
 	sem := make(chan struct{}, parallel)
@@ -654,10 +641,7 @@ func (l *Lab) refreshBGP(state *LabState) {
 			continue
 		}
 
-		host := node.HostIP
-		if host == "" {
-			host = "127.0.0.1"
-		}
+		host := nodeHostIP(node)
 		addr := fmt.Sprintf("%s:%d", host, node.SSHPort)
 
 		config := &ssh.ClientConfig{
@@ -694,6 +678,31 @@ func findSiblingBinary(name string) string {
 	return name
 }
 
+// stopAllBridges stops all bridge processes tracked in a lab state.
+// Returns a list of errors encountered during shutdown.
+func stopAllBridges(state *LabState) []error {
+	var errs []error
+	if len(state.Bridges) > 0 {
+		for host, bs := range state.Bridges {
+			if bs.HostIP != "" {
+				if err := stopBridgeProcessRemote(bs.PID, bs.HostIP); err != nil {
+					errs = append(errs, fmt.Errorf("stop bridge on %s (pid %d): %w", host, bs.PID, err))
+				}
+			} else if isRunningLocal(bs.PID) {
+				if err := stopNodeLocal(bs.PID); err != nil {
+					errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", bs.PID, err))
+				}
+			}
+		}
+	} else if state.BridgePID > 0 && isRunningLocal(state.BridgePID) {
+		// Legacy fallback
+		if err := stopNodeLocal(state.BridgePID); err != nil {
+			errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", state.BridgePID, err))
+		}
+	}
+	return errs
+}
+
 // destroyExisting tears down a stale deployment found via state.json.
 func (l *Lab) destroyExisting(existing *LabState) error {
 	old := &Lab{
@@ -709,18 +718,8 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 			}
 		}
 	}
-	// Kill bridge processes (per-host)
-	if len(existing.Bridges) > 0 {
-		for _, bs := range existing.Bridges {
-			if bs.HostIP != "" {
-				stopBridgeProcessRemote(bs.PID, bs.HostIP)
-			} else if isRunningLocal(bs.PID) {
-				stopNodeLocal(bs.PID)
-			}
-		}
-	} else if existing.BridgePID > 0 && isRunningLocal(existing.BridgePID) {
-		stopNodeLocal(existing.BridgePID)
-	}
+	// Kill bridge processes (per-host, best effort)
+	stopAllBridges(existing)
 	// Clean up remote state directories
 	cleanedHosts := map[string]bool{}
 	for _, node := range existing.Nodes {
@@ -763,6 +762,15 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 		}
 	}
 	return resolved
+}
+
+// nodeHostIP returns the effective host IP for a node state entry.
+// Returns the node's HostIP if set, otherwise "127.0.0.1" for local nodes.
+func nodeHostIP(ns *NodeState) string {
+	if ns.HostIP != "" {
+		return ns.HostIP
+	}
+	return "127.0.0.1"
 }
 
 // resolveHostIP returns the IP address for a node's host.

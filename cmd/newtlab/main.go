@@ -113,78 +113,72 @@ func resolveTopologyDir(name string) string {
 	return filepath.Join(topologiesBaseDir(), name, "specs")
 }
 
-// resolveSpecDir resolves the spec directory from: -S flag > positional topology name > auto-detect.
-// For commands that operate on a deployed lab, auto-detect finds the single deployed lab.
-func resolveSpecDir(args []string) (string, error) {
+// resolveTarget resolves both lab name and spec directory from:
+// -S flag > positional topology name > auto-detect from deployed labs.
+// This is the shared resolution logic used by resolveSpecDir and resolveLabName.
+func resolveTarget(args []string) (labName string, dir string, err error) {
 	// Explicit -S flag takes priority
 	if specDir != "" {
-		return specDir, nil
+		lab, labErr := newtlab.NewLab(specDir)
+		if labErr != nil {
+			return "", "", labErr
+		}
+		return lab.Name, specDir, nil
 	}
+
 	// Positional topology name
 	if len(args) > 0 && args[0] != "" {
-		dir := resolveTopologyDir(args[0])
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			return "", fmt.Errorf("topology %q not found: %s does not exist", args[0], dir)
+		// Check if it matches a deployed lab by name
+		labs, _ := newtlab.ListLabs()
+		for _, l := range labs {
+			if l == args[0] {
+				state, loadErr := newtlab.LoadState(l)
+				if loadErr != nil {
+					return "", "", loadErr
+				}
+				return l, state.SpecDir, nil
+			}
 		}
-		return dir, nil
+		// Try as topology name
+		d := resolveTopologyDir(args[0])
+		if _, statErr := os.Stat(d); statErr != nil {
+			return "", "", fmt.Errorf("topology %q not found: %s does not exist", args[0], d)
+		}
+		lab, labErr := newtlab.NewLab(d)
+		if labErr != nil {
+			return "", "", labErr
+		}
+		return lab.Name, d, nil
 	}
+
 	// Auto-detect from deployed labs
-	labs, err := newtlab.ListLabs()
-	if err != nil {
-		return "", err
+	labs, listErr := newtlab.ListLabs()
+	if listErr != nil {
+		return "", "", listErr
 	}
 	if len(labs) == 0 {
-		return "", fmt.Errorf("no deployed labs; specify topology name or use -S <dir>")
+		return "", "", fmt.Errorf("no deployed labs; specify topology name or use -S <dir>")
 	}
 	if len(labs) == 1 {
-		state, err := newtlab.LoadState(labs[0])
-		if err != nil {
-			return "", err
+		state, loadErr := newtlab.LoadState(labs[0])
+		if loadErr != nil {
+			return "", "", loadErr
 		}
-		return state.SpecDir, nil
+		return labs[0], state.SpecDir, nil
 	}
-	return "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
+	return "", "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
+}
+
+// resolveSpecDir resolves the spec directory from: -S flag > positional topology name > auto-detect.
+func resolveSpecDir(args []string) (string, error) {
+	_, dir, err := resolveTarget(args)
+	return dir, err
 }
 
 // resolveLabName resolves a lab name from: -S flag > positional name > auto-detect.
 func resolveLabName(args []string) (string, error) {
-	if specDir != "" {
-		lab, err := newtlab.NewLab(specDir)
-		if err != nil {
-			return "", err
-		}
-		return lab.Name, nil
-	}
-	if len(args) > 0 && args[0] != "" {
-		// Could be a topology name — check if it matches a deployed lab
-		labs, _ := newtlab.ListLabs()
-		for _, l := range labs {
-			if l == args[0] {
-				return l, nil
-			}
-		}
-		// Try as topology name → lab name is derived from spec dir
-		dir := resolveTopologyDir(args[0])
-		if _, err := os.Stat(dir); err == nil {
-			lab, err := newtlab.NewLab(dir)
-			if err != nil {
-				return "", err
-			}
-			return lab.Name, nil
-		}
-		return "", fmt.Errorf("topology %q not found", args[0])
-	}
-	labs, err := newtlab.ListLabs()
-	if err != nil {
-		return "", err
-	}
-	if len(labs) == 0 {
-		return "", fmt.Errorf("no deployed labs")
-	}
-	if len(labs) == 1 {
-		return labs[0], nil
-	}
-	return "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
+	name, _, err := resolveTarget(args)
+	return name, err
 }
 
 // ============================================================================

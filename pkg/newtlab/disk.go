@@ -29,7 +29,7 @@ func CreateOverlay(baseImage, overlayPath string) error {
 func CreateOverlayRemote(baseImage, overlayPath, hostIP string) error {
 	remoteCmd := fmt.Sprintf("qemu-img create -f qcow2 -b %s -F qcow2 %s",
 		baseImage, overlayPath)
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, remoteCmd)
+	cmd := sshCommand(hostIP, remoteCmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("newtlab: create remote overlay %s on %s: %w\n%s",
@@ -50,7 +50,7 @@ func RemoveOverlay(overlayPath string) error {
 func setupRemoteStateDir(labName, hostIP string) error {
 	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
 	mkdirCmd := fmt.Sprintf("mkdir -p %s/disks %s/qemu %s/logs", stateDir, stateDir, stateDir)
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, mkdirCmd)
+	cmd := sshCommand(hostIP, mkdirCmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("newtlab: create remote state dir on %s: %w\n%s", hostIP, err, out)
 	}
@@ -60,8 +60,7 @@ func setupRemoteStateDir(labName, hostIP string) error {
 // cleanupRemoteStateDir removes the lab state directory from a remote host.
 func cleanupRemoteStateDir(labName, hostIP string) error {
 	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP,
-		fmt.Sprintf("rm -rf %s", stateDir))
+	cmd := sshCommand(hostIP, fmt.Sprintf("rm -rf %s", stateDir))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("newtlab: remove remote state dir on %s: %w\n%s", hostIP, err, out)
 	}

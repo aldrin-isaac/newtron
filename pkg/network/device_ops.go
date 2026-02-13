@@ -6,9 +6,21 @@ import (
 	"strings"
 
 	"github.com/newtron-network/newtron/pkg/device"
+	"github.com/newtron-network/newtron/pkg/model"
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
+
+// requireWritable checks that a device is connected and locked for write operations.
+func requireWritable(d *Device) error {
+	if !d.IsConnected() {
+		return fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return fmt.Errorf("device not locked")
+	}
+	return nil
+}
 
 // ============================================================================
 // Device Operations - Methods on Device
@@ -16,11 +28,8 @@ import (
 
 // CreateVLAN creates a new VLAN on this device.
 func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if vlanID < 1 || vlanID > 4094 {
 		return nil, fmt.Errorf("invalid VLAN ID: %d (must be 1-4094)", vlanID)
@@ -56,11 +65,8 @@ func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*
 
 // DeleteVLAN removes a VLAN from this device.
 func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VLANExists(vlanID) {
 		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
@@ -96,11 +102,8 @@ func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 
 // AddVLANMember adds an interface to a VLAN as a tagged or untagged member.
 func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
@@ -132,11 +135,8 @@ func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName st
 
 // CreatePortChannel creates a new LAG/PortChannel.
 func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
@@ -184,11 +184,8 @@ func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortCh
 
 // DeletePortChannel removes a LAG/PortChannel.
 func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
@@ -218,11 +215,8 @@ func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet
 
 // AddPortChannelMember adds a member to a PortChannel.
 func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
@@ -249,11 +243,8 @@ func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string
 
 // RemovePortChannelMember removes a member from a PortChannel.
 func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
@@ -274,11 +265,8 @@ func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member str
 
 // CreateVRF creates a new VRF.
 func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if d.VRFExists(name) {
 		return nil, fmt.Errorf("VRF %s already exists", name)
@@ -308,11 +296,8 @@ func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*C
 
 // DeleteVRF removes a VRF.
 func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VRFExists(name) {
 		return nil, fmt.Errorf("VRF %s does not exist", name)
@@ -343,11 +328,8 @@ func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
 
 // CreateACLTable creates a new ACL table.
 func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if d.ACLTableExists(name) {
 		return nil, fmt.Errorf("ACL table %s already exists", name)
@@ -380,11 +362,8 @@ func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableC
 
 // AddACLRule adds a rule to an ACL table.
 func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.ACLTableExists(tableName) {
 		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
@@ -411,11 +390,7 @@ func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opt
 		fields["DST_IP"] = opts.DstIP
 	}
 	if opts.Protocol != "" {
-		// Map protocol name to number
-		protoMap := map[string]int{
-			"tcp": 6, "udp": 17, "icmp": 1, "ospf": 89, "vrrp": 112, "gre": 47,
-		}
-		if proto, ok := protoMap[opts.Protocol]; ok {
+		if proto, ok := model.ProtoMap[opts.Protocol]; ok {
 			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
 		} else {
 			// Assume it's already a number
@@ -437,11 +412,8 @@ func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opt
 
 // DeleteACLRule removes a single rule from an ACL table.
 func (d *Device) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.ACLTableExists(tableName) {
 		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
@@ -465,11 +437,8 @@ func (d *Device) DeleteACLRule(ctx context.Context, tableName, ruleName string) 
 
 // DeleteACLTable removes an ACL table and all its rules.
 func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.ACLTableExists(name) {
 		return nil, fmt.Errorf("ACL table %s does not exist", name)
@@ -496,11 +465,8 @@ func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, e
 
 // UnbindACLFromInterface removes an interface from an ACL table's binding.
 func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
@@ -517,14 +483,14 @@ func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceN
 		if table, ok := d.configDB.ACLTable[aclName]; ok {
 			currentBindings := table.Ports
 			var remaining []string
-			for _, p := range splitPorts(currentBindings) {
+			for _, p := range util.SplitCommaSeparated(currentBindings) {
 				if p != interfaceName {
 					remaining = append(remaining, p)
 				}
 			}
 
 			cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-				"ports": joinPorts(remaining),
+				"ports": strings.Join(remaining, ","),
 			})
 		}
 	}
@@ -539,11 +505,8 @@ func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceN
 
 // CreateVTEP creates a VXLAN Tunnel Endpoint.
 func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if d.VTEPExists() {
 		return nil, fmt.Errorf("VTEP already configured")
@@ -570,11 +533,8 @@ func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, e
 
 // DeleteVTEP removes the VXLAN Tunnel Endpoint.
 func (d *Device) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VTEPExists() {
 		return nil, fmt.Errorf("VTEP not configured")
@@ -603,11 +563,8 @@ func (d *Device) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
 
 // MapL2VNI maps a VLAN to an L2VNI for EVPN.
 func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VTEPExists() {
 		return nil, fmt.Errorf("VTEP must be configured first")
@@ -632,11 +589,8 @@ func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, err
 
 // MapL3VNI maps a VRF to an L3VNI for EVPN.
 func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VTEPExists() {
 		return nil, fmt.Errorf("VTEP must be configured first")
@@ -665,11 +619,8 @@ func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*Change
 
 // UnmapVNI removes a VNI mapping.
 func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.unmap-vni")
@@ -694,11 +645,8 @@ func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
 
 // UnmapL2VNI removes the L2VNI mapping for a VLAN.
 func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VLANExists(vlanID) {
 		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
@@ -729,11 +677,8 @@ func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error)
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VLANExists(vlanID) {
 		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
@@ -775,11 +720,8 @@ func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (
 
 // AddVRFInterface binds an interface to a VRF.
 func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	intfName = util.NormalizeInterfaceName(intfName)
@@ -803,11 +745,8 @@ func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) 
 
 // RemoveVRFInterface removes a VRF binding from an interface.
 func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	intfName = util.NormalizeInterfaceName(intfName)
@@ -828,11 +767,8 @@ func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName strin
 
 // BindIPVPN binds a VRF to an IP-VPN definition (creates L3VNI mapping).
 func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if !d.VTEPExists() {
 		return nil, fmt.Errorf("VTEP must be configured first")
@@ -861,11 +797,8 @@ func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.I
 
 // UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping).
 func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.unbind-ipvpn")
@@ -895,11 +828,8 @@ func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, e
 
 // AddStaticRoute adds a static route to a VRF.
 func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
 		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
@@ -930,11 +860,8 @@ func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop st
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.remove-static-route")
@@ -959,11 +886,8 @@ func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) 
 
 // RemoveVLANMember removes an interface from a VLAN.
 func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
@@ -989,11 +913,8 @@ func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName
 // SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
 // If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
 func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	resolved := d.Resolved()
@@ -1063,11 +984,8 @@ func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, er
 
 // ApplyQoS applies a QoS policy to a specific interface (surgical override).
 func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	intfName = util.NormalizeInterfaceName(intfName)
@@ -1096,11 +1014,8 @@ func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, poli
 
 // RemoveQoS removes QoS configuration from a specific interface.
 func (d *Device) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	intfName = util.NormalizeInterfaceName(intfName)
@@ -1191,38 +1106,6 @@ type ACLRuleConfig struct {
 // Helpers
 // ============================================================================
 
-func joinPorts(ports []string) string {
-	result := ""
-	for i, p := range ports {
-		if i > 0 {
-			result += ","
-		}
-		result += p
-	}
-	return result
-}
-
-func splitPorts(ports string) []string {
-	if ports == "" {
-		return nil
-	}
-	var result []string
-	current := ""
-	for _, c := range ports {
-		if c == ',' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
-			}
-		} else if c != ' ' {
-			current += string(c)
-		}
-	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
-}
 
 // ============================================================================
 // Health Checks
@@ -1412,11 +1295,8 @@ func (d *Device) checkLAG() []HealthCheckResult {
 
 // ApplyBaseline applies a baseline configlet to the device.
 func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	// Parse vars into a map
@@ -1484,11 +1364,8 @@ type CleanupSummary struct {
 // Cleanup identifies and removes orphaned configurations.
 // Returns a changeset to remove them and a summary of what was found.
 func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
-	if !d.IsConnected() {
-		return nil, nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.cleanup")
@@ -1583,11 +1460,8 @@ type BGPGlobalsConfig struct {
 
 // SetBGPGlobals configures BGP global settings via CONFIG_DB (frrcfgd).
 func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.set-bgp-globals")
@@ -1638,11 +1512,8 @@ type SetupRouteReflectorConfig struct {
 // (ipv4_unicast, ipv6_unicast, l2vpn_evpn). Replaces the v2 SetupBGPEVPN
 // with comprehensive multi-AF route reflection.
 func (d *Device) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	resolved := d.Resolved()
@@ -1738,11 +1609,8 @@ type PeerGroupConfig struct {
 
 // ConfigurePeerGroup creates or updates a BGP peer group template.
 func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.configure-peer-group")
@@ -1777,11 +1645,8 @@ func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*
 
 // DeletePeerGroup removes a BGP peer group.
 func (d *Device) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.delete-peer-group")
@@ -1814,11 +1679,8 @@ type RouteRedistributionConfig struct {
 
 // AddRouteRedistribution configures route redistribution into BGP.
 func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.add-route-redistribution")
@@ -1847,11 +1709,8 @@ func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistribu
 
 // RemoveRouteRedistribution removes a route redistribution entry.
 func (d *Device) RemoveRouteRedistribution(ctx context.Context, vrf, srcProtocol, af string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.remove-route-redistribution")
@@ -1882,11 +1741,8 @@ type RouteMapConfig struct {
 
 // AddRouteMap creates a route-map with match/set rules.
 func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.add-route-map")
@@ -1922,11 +1778,8 @@ func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSe
 
 // DeleteRouteMap removes a route-map.
 func (d *Device) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.delete-route-map")
@@ -1956,11 +1809,8 @@ type PrefixSetConfig struct {
 
 // AddPrefixSet creates a prefix list for route-map matching.
 func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.add-prefix-set")
@@ -1982,11 +1832,8 @@ func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*Change
 
 // DeletePrefixSet removes a prefix list.
 func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.delete-prefix-set")
@@ -2007,11 +1854,8 @@ func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, 
 
 // AddBGPNetwork adds a BGP network statement.
 func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, policy string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.add-bgp-network")
@@ -2033,11 +1877,8 @@ func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, poli
 
 // RemoveBGPNetwork removes a BGP network statement.
 func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.Name(), "device.remove-bgp-network")
@@ -2058,11 +1899,8 @@ func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (
 
 // CreatePort creates a PORT entry validated against the device's platform.json.
 func (d *Device) CreatePort(ctx context.Context, cfg device.CreatePortConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	underlying := d.Underlying()
@@ -2128,11 +1966,8 @@ func (d *Device) CreatePort(ctx context.Context, cfg device.CreatePortConfig) (*
 
 // DeletePort removes a PORT entry.
 func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	if _, ok := d.ConfigDB().Port[name]; !ok {
@@ -2153,11 +1988,8 @@ func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error
 
 // BreakoutPort applies a breakout mode to a port, creating child ports and removing the parent.
 func (d *Device) BreakoutPort(ctx context.Context, cfg device.BreakoutConfig) (*ChangeSet, error) {
-	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-	if !d.IsLocked() {
-		return nil, fmt.Errorf("device not locked")
+	if err := requireWritable(d); err != nil {
+		return nil, err
 	}
 
 	underlying := d.Underlying()

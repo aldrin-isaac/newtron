@@ -11,6 +11,17 @@ import (
 	"github.com/newtron-network/newtron/pkg/version"
 )
 
+// sshCommand creates an exec.Cmd for running a command on a remote host via SSH.
+// Standard options (StrictHostKeyChecking=no, ConnectTimeout=10) are always included.
+func sshCommand(hostIP string, remoteCmd string) *exec.Cmd {
+	return exec.Command("ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=10",
+		hostIP,
+		remoteCmd,
+	)
+}
+
 // parseUname parses "uname -s -m" output to Go's GOOS/GOARCH.
 // Examples: "Linux x86_64" → ("linux", "amd64"), "Linux aarch64" → ("linux", "arm64"),
 // "Darwin arm64" → ("darwin", "arm64").
@@ -43,7 +54,7 @@ func parseUname(output string) (goos, goarch string, err error) {
 
 // detectRemoteArch runs "uname -s -m" on a remote host via SSH.
 func detectRemoteArch(hostIP string) (goos, goarch string, err error) {
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", hostIP, "uname -s -m")
+	cmd := sshCommand(hostIP, "uname -s -m")
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
@@ -101,7 +112,7 @@ func uploadNewtlink(hostIP string) (string, error) {
 
 	// Check if remote version matches local
 	checkCmd := fmt.Sprintf("%s --version 2>/dev/null", remotePath)
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", hostIP, checkCmd)
+	cmd := sshCommand(hostIP, checkCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err == nil {
@@ -126,7 +137,7 @@ func uploadNewtlink(hostIP string) (string, error) {
 	}
 
 	// Create remote directory
-	mkdirCmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, "mkdir -p ~/.newtlab/bin")
+	mkdirCmd := sshCommand(hostIP, "mkdir -p ~/.newtlab/bin")
 	if out, err := mkdirCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("create remote bin dir on %s: %w\n%s", hostIP, err, out)
 	}
@@ -138,7 +149,7 @@ func uploadNewtlink(hostIP string) (string, error) {
 	}
 
 	// Make executable
-	chmodCmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, "chmod +x ~/.newtlab/bin/newtlink")
+	chmodCmd := sshCommand(hostIP, "chmod +x ~/.newtlab/bin/newtlink")
 	if out, err := chmodCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("chmod newtlink on %s: %w\n%s", hostIP, err, out)
 	}

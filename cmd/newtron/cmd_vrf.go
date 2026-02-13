@@ -191,11 +191,9 @@ var vrfStatusCmd = &cobra.Command{
 			routeCount := "-"
 			if underlying != nil && underlying.State != nil {
 				if vrfState, ok := underlying.State.VRFs[name]; ok {
-					state = vrfState.State
-					if state == "active" || state == "up" {
-						state = green(state)
-					} else if state != "" {
-						state = red(state)
+					state = formatOperStatus(vrfState.State)
+					if vrfState.State == "" {
+						state = "-"
 					}
 					routeCount = fmt.Sprintf("%d", vrfState.RouteCount)
 				}
@@ -255,7 +253,7 @@ Examples:
 		vrfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFCreate, authCtx); err != nil {
+			if err := checkExecutePermission(auth.PermVRFDelete, authCtx); err != nil {
 				return nil, err
 			}
 			cs, err := dev.DeleteVRF(ctx, vrfName)
@@ -418,8 +416,6 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("invalid ASN: %s", args[2])
 		}
-
-		_ = vrfName // VRF context — the interface must be bound to this VRF
 
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)

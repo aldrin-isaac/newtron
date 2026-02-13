@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"net"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -186,7 +185,7 @@ func probePortsRemote(hostIP string, ports []int) map[int]error {
 	ssFilter := strings.Join(filters, " or ")
 	ssCmd := fmt.Sprintf("ss -tlnH '( %s )'", ssFilter)
 
-	cmd := exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5", hostIP, ssCmd)
+	cmd := sshCommand(hostIP, ssCmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -6,6 +6,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/device"
 	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // testDevice creates a minimal Device for precondition testing.
@@ -550,10 +551,10 @@ func TestDependencyChecker_NilConfigDB(t *testing.T) {
 }
 
 // ============================================================================
-// splitPorts Tests
+// SplitCommaSeparated Tests (moved to pkg/util/strings.go)
 // ============================================================================
 
-func TestSplitPorts(t *testing.T) {
+func TestSplitCommaSeparated(t *testing.T) {
 	tests := []struct {
 		input string
 		want  int
@@ -565,9 +566,9 @@ func TestSplitPorts(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := splitPorts(tt.input)
+		got := util.SplitCommaSeparated(tt.input)
 		if len(got) != tt.want {
-			t.Errorf("splitPorts(%q) = %v (len %d), want len %d", tt.input, got, len(got), tt.want)
+			t.Errorf("SplitCommaSeparated(%q) = %v (len %d), want len %d", tt.input, got, len(got), tt.want)
 		}
 	}
 }

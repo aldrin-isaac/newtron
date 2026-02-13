@@ -388,3 +388,31 @@ func green(s string) string  { return cli.Green(s) }
 func yellow(s string) string { return cli.Yellow(s) }
 func red(s string) string    { return cli.Red(s) }
 func bold(s string) string   { return cli.Bold(s) }
+
+// formatOperStatus colorizes operational status values.
+func formatOperStatus(status string) string {
+	switch strings.ToLower(status) {
+	case "up", "oper_up", "active":
+		return green(status)
+	case "down":
+		return red(status)
+	case "":
+		return yellow("n/a")
+	default:
+		return yellow(status)
+	}
+}
+
+// formatAdminStatus colorizes administrative status values.
+func formatAdminStatus(status string) string {
+	switch strings.ToLower(status) {
+	case "up":
+		return green(status)
+	case "down":
+		return red(status)
+	case "":
+		return ""
+	default:
+		return status
+	}
+}
