@@ -40,7 +40,6 @@ import (
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/settings"
-	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )
@@ -48,8 +47,7 @@ import (
 // App holds CLI state shared across all commands.
 type App struct {
 	// Context flags
-	networkName string
-	deviceName  string
+	deviceName string
 
 	// Option flags
 	specDir     string
@@ -60,7 +58,6 @@ type App struct {
 
 	// Initialized state (set in PersistentPreRunE)
 	settings    *settings.Settings
-	loader      *spec.Loader
 	net         *network.Network
 	permChecker *auth.Checker
 }
@@ -140,9 +137,6 @@ Each resource takes its natural key as a positional argument:
 		}
 
 		// Apply defaults from settings
-		if app.networkName == "" {
-			app.networkName = app.settings.DefaultNetwork
-		}
 		if app.specDir == "" {
 			app.specDir = app.settings.GetSpecDir()
 		}
@@ -154,29 +148,20 @@ Each resource takes its natural key as a positional argument:
 			util.SetLogLevel("warn")
 		}
 
-		// Initialize spec loader
-		app.loader = spec.NewLoader(app.specDir)
-		if err := app.loader.Load(); err != nil {
-			return fmt.Errorf("loading specs: %w", err)
-		}
-
 		// Create Network object (the top-level object in OO hierarchy)
 		app.net, err = network.NewNetwork(app.specDir)
 		if err != nil {
 			return fmt.Errorf("initializing network: %w", err)
 		}
 
-		// Initialize permission checker
-		app.permChecker = auth.NewChecker(app.loader.GetNetwork())
+		// Initialize permission checker from network spec
+		app.permChecker = auth.NewChecker(app.net.Spec())
 
-		// Initialize audit logger
-		auditPath := "/var/log/newtron/audit.log"
-		if app.specDir != "" {
-			auditPath = app.specDir + "/audit.log"
-		}
+		// Initialize audit logger (path and rotation from settings)
+		auditPath := app.settings.GetAuditLogPath(app.specDir)
 		auditLogger, err := audit.NewFileLogger(auditPath, audit.RotationConfig{
-			MaxSize:    10 * 1024 * 1024, // 10MB
-			MaxBackups: 10,
+			MaxSize:    int64(app.settings.GetAuditMaxSizeMB()) * 1024 * 1024,
+			MaxBackups: app.settings.GetAuditMaxBackups(),
 		})
 		if err != nil {
 			util.Warnf("Could not initialize audit logging: %v", err)
@@ -190,7 +175,6 @@ Each resource takes its natural key as a positional argument:
 
 func init() {
 	// Context flags (object selectors)
-	rootCmd.PersistentFlags().StringVarP(&app.networkName, "network", "n", "", "Network name")
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
@@ -343,8 +327,7 @@ func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network
 		return nil
 	}
 
-	fmt.Println("Changes to be applied:")
-	fmt.Print(changeSet.String())
+	fmt.Print(changeSet.Preview())
 
 	if app.executeMode {
 		return executeAndSave(ctx, changeSet, dev)

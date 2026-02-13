@@ -260,8 +260,7 @@ func (s *Shell) cmdApplyService(args []string) {
 		return
 	}
 
-	fmt.Println("Changes to apply:")
-	fmt.Print(changeSet.String())
+	fmt.Print(changeSet.Preview())
 
 	if !s.confirmExecute() {
 		fmt.Println("Cancelled.")
@@ -297,8 +296,7 @@ func (s *Shell) cmdRemoveService() {
 		return
 	}
 
-	fmt.Println("Changes to apply:")
-	fmt.Print(changeSet.String())
+	fmt.Print(changeSet.Preview())
 
 	if !s.confirmExecute() {
 		fmt.Println("Cancelled.")

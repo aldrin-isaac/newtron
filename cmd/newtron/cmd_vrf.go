@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -46,6 +47,18 @@ var vrfListCmd = &cobra.Command{
 		defer dev.Disconnect()
 
 		vrfNames := dev.ListVRFs()
+
+		if app.jsonOutput {
+			var vrfs []*network.VRFInfo
+			for _, name := range vrfNames {
+				vrf, err := dev.GetVRF(name)
+				if err != nil {
+					continue
+				}
+				vrfs = append(vrfs, vrf)
+			}
+			return json.NewEncoder(os.Stdout).Encode(vrfs)
+		}
 
 		if len(vrfNames) == 0 {
 			fmt.Println("No VRFs configured")
@@ -97,6 +110,10 @@ var vrfShowCmd = &cobra.Command{
 		vrf, err := dev.GetVRF(vrfName)
 		if err != nil {
 			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(vrf)
 		}
 
 		fmt.Printf("VRF: %s\n", bold(vrf.Name))
@@ -160,8 +177,45 @@ var vrfStatusCmd = &cobra.Command{
 		vrfNames := dev.ListVRFs()
 
 		if len(vrfNames) == 0 {
+			if app.jsonOutput {
+				return json.NewEncoder(os.Stdout).Encode([]struct{}{})
+			}
 			fmt.Println("No VRFs configured")
 			return nil
+		}
+
+		underlying := dev.Underlying()
+
+		type vrfStatusEntry struct {
+			Name       string `json:"name"`
+			L3VNI      int    `json:"l3_vni,omitempty"`
+			Interfaces int    `json:"interfaces"`
+			State      string `json:"state,omitempty"`
+			RouteCount int    `json:"route_count,omitempty"`
+		}
+
+		var statuses []vrfStatusEntry
+		for _, name := range vrfNames {
+			vrf, err := dev.GetVRF(name)
+			if err != nil {
+				continue
+			}
+			s := vrfStatusEntry{
+				Name:       name,
+				L3VNI:      vrf.L3VNI,
+				Interfaces: len(vrf.Interfaces),
+			}
+			if underlying != nil && underlying.State != nil {
+				if vrfState, ok := underlying.State.VRFs[name]; ok {
+					s.State = vrfState.State
+					s.RouteCount = vrfState.RouteCount
+				}
+			}
+			statuses = append(statuses, s)
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(statuses)
 		}
 
 		fmt.Printf("VRF Status for %s\n\n", bold(app.deviceName))
@@ -171,36 +225,25 @@ var vrfStatusCmd = &cobra.Command{
 		fmt.Fprintln(w, "VRF\tL3VNI\tINTERFACES\tSTATE\tROUTES")
 		fmt.Fprintln(w, "---\t-----\t----------\t-----\t------")
 
-		underlying := dev.Underlying()
-
-		for _, name := range vrfNames {
-			vrf, err := dev.GetVRF(name)
-			if err != nil {
-				continue
-			}
-
+		for _, s := range statuses {
 			l3vni := "-"
-			if vrf.L3VNI > 0 {
-				l3vni = fmt.Sprintf("%d", vrf.L3VNI)
+			if s.L3VNI > 0 {
+				l3vni = fmt.Sprintf("%d", s.L3VNI)
 			}
 
-			intfCount := fmt.Sprintf("%d", len(vrf.Interfaces))
+			intfCount := fmt.Sprintf("%d", s.Interfaces)
 
-			// Operational state
 			state := "-"
+			if s.State != "" {
+				state = formatOperStatus(s.State)
+			}
 			routeCount := "-"
-			if underlying != nil && underlying.State != nil {
-				if vrfState, ok := underlying.State.VRFs[name]; ok {
-					state = formatOperStatus(vrfState.State)
-					if vrfState.State == "" {
-						state = "-"
-					}
-					routeCount = fmt.Sprintf("%d", vrfState.RouteCount)
-				}
+			if s.RouteCount > 0 {
+				routeCount = fmt.Sprintf("%d", s.RouteCount)
 			}
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				name, l3vni, intfCount, state, routeCount)
+				s.Name, l3vni, intfCount, state, routeCount)
 		}
 		w.Flush()
 

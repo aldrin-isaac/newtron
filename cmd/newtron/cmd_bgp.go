@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -50,6 +51,49 @@ Examples:
 		resolved := dev.Resolved()
 		configDB := dev.ConfigDB()
 		underlying := dev.Underlying()
+
+		if app.jsonOutput {
+			type bgpNeighborJSON struct {
+				Address   string `json:"address"`
+				RemoteAS  string `json:"remote_as"`
+				Type      string `json:"type"`
+				LocalAddr string `json:"local_addr,omitempty"`
+				Admin     string `json:"admin_status"`
+			}
+			type bgpStatusJSON struct {
+				LocalAS    int                `json:"local_as"`
+				RouterID   string             `json:"router_id"`
+				LoopbackIP string             `json:"loopback_ip"`
+				Neighbors  []bgpNeighborJSON  `json:"neighbors,omitempty"`
+			}
+			status := bgpStatusJSON{
+				LocalAS:    resolved.ASNumber,
+				RouterID:   resolved.RouterID,
+				LoopbackIP: resolved.LoopbackIP,
+			}
+			if configDB != nil {
+				for addr, neighbor := range configDB.BGPNeighbor {
+					nType := "indirect"
+					localAddr := neighbor.LocalAddr
+					if localAddr != "" && localAddr != resolved.LoopbackIP {
+						nType = "direct"
+					}
+					adminStatus := neighbor.AdminStatus
+					if adminStatus == "" {
+						adminStatus = "up"
+					}
+					status.Neighbors = append(status.Neighbors, bgpNeighborJSON{
+						Address:   addr,
+						RemoteAS:  neighbor.ASN,
+						Type:      nType,
+						LocalAddr: localAddr,
+						Admin:     adminStatus,
+					})
+				}
+			}
+			_ = underlying // operational state not yet serialized
+			return json.NewEncoder(os.Stdout).Encode(status)
+		}
 
 		// --- Local BGP Identity ---
 		fmt.Printf("BGP Status for %s\n\n", bold(app.deviceName))

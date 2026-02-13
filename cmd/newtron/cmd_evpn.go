@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -91,6 +92,29 @@ var evpnStatusCmd = &cobra.Command{
 
 		configDB := dev.ConfigDB()
 		underlying := dev.Underlying()
+
+		if app.jsonOutput {
+			type evpnStatusJSON struct {
+				VTEPs    map[string]string `json:"vteps,omitempty"`
+				NVOs     map[string]string `json:"nvos,omitempty"`
+				VNICount int               `json:"vni_count"`
+			}
+			status := evpnStatusJSON{
+				VTEPs: make(map[string]string),
+				NVOs:  make(map[string]string),
+			}
+			if configDB != nil {
+				for name, vtep := range configDB.VXLANTunnel {
+					status.VTEPs[name] = vtep.SrcIP
+				}
+				for name, nvo := range configDB.VXLANEVPNNVO {
+					status.NVOs[name] = nvo.SourceVTEP
+				}
+				status.VNICount = len(configDB.VXLANTunnelMap)
+			}
+			_ = underlying // operational state not yet serialized
+			return json.NewEncoder(os.Stdout).Encode(status)
+		}
 
 		fmt.Printf("EVPN Status for %s\n\n", bold(app.deviceName))
 
@@ -202,6 +226,10 @@ var evpnIpvpnListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ipvpns := app.net.Spec().IPVPN
 
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(ipvpns)
+		}
+
 		if len(ipvpns) == 0 {
 			fmt.Println("No IP-VPN definitions")
 			return nil
@@ -242,6 +270,10 @@ var evpnIpvpnShowCmd = &cobra.Command{
 		ipvpn, err := app.net.GetIPVPN(name)
 		if err != nil {
 			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(ipvpn)
 		}
 
 		fmt.Printf("IP-VPN: %s\n", bold(name))
@@ -394,6 +426,10 @@ var evpnMacvpnListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		macvpns := app.net.Spec().MACVPN
 
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(macvpns)
+		}
+
 		if len(macvpns) == 0 {
 			fmt.Println("No MAC-VPN definitions")
 			return nil
@@ -430,6 +466,10 @@ var evpnMacvpnShowCmd = &cobra.Command{
 		macvpn, err := app.net.GetMACVPN(name)
 		if err != nil {
 			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(macvpn)
 		}
 
 		fmt.Printf("MAC-VPN: %s\n", bold(name))
