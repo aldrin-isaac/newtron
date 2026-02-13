@@ -3,13 +3,43 @@ package newtlab
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/newtron-network/newtron/pkg/version"
 )
+
+// homeDir caches the result of os.UserHomeDir() so it is called at most once.
+var (
+	homeDirValue string
+	homeDirOnce  sync.Once
+	homeDirErr   error
+)
+
+// getHomeDir returns the user's home directory, caching the result.
+// If os.UserHomeDir fails, it logs a warning and returns the error.
+func getHomeDir() (string, error) {
+	homeDirOnce.Do(func() {
+		homeDirValue, homeDirErr = os.UserHomeDir()
+		if homeDirErr != nil {
+			log.Printf("newtlab: WARNING: os.UserHomeDir() failed: %v", homeDirErr)
+		}
+	})
+	return homeDirValue, homeDirErr
+}
+
+// resetHomeDir resets the cached home directory so it will be re-read
+// on the next call to getHomeDir(). This is only intended for tests
+// that override $HOME.
+func resetHomeDir() {
+	homeDirOnce = sync.Once{}
+	homeDirValue = ""
+	homeDirErr = nil
+}
 
 // sshCommand creates an exec.Cmd for running a command on a remote host via SSH.
 // Standard options (StrictHostKeyChecking=no, ConnectTimeout=10) are always included.
@@ -94,7 +124,7 @@ func findNewtlinkBinary(goos, goarch string) (string, error) {
 	}
 
 	// 3. ~/.newtlab/bin/
-	if home, err := os.UserHomeDir(); err == nil {
+	if home, err := getHomeDir(); err == nil {
 		p := filepath.Join(home, ".newtlab", "bin", name)
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
@@ -109,9 +139,10 @@ func findNewtlinkBinary(goos, goarch string) (string, error) {
 // Returns the remote binary path.
 func uploadNewtlink(hostIP string) (string, error) {
 	remotePath := "~/.newtlab/bin/newtlink"
+	quotedPath := shellQuote(remotePath)
 
 	// Check if remote version matches local
-	checkCmd := fmt.Sprintf("%s --version 2>/dev/null", remotePath)
+	checkCmd := fmt.Sprintf("%s --version 2>/dev/null", quotedPath)
 	cmd := sshCommand(hostIP, checkCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -137,7 +168,8 @@ func uploadNewtlink(hostIP string) (string, error) {
 	}
 
 	// Create remote directory
-	mkdirCmd := sshCommand(hostIP, "mkdir -p ~/.newtlab/bin")
+	quotedBinDir := shellQuote("~/.newtlab/bin")
+	mkdirCmd := sshCommand(hostIP, fmt.Sprintf("mkdir -p %s", quotedBinDir))
 	if out, err := mkdirCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("create remote bin dir on %s: %w\n%s", hostIP, err, out)
 	}
@@ -149,7 +181,7 @@ func uploadNewtlink(hostIP string) (string, error) {
 	}
 
 	// Make executable
-	chmodCmd := sshCommand(hostIP, "chmod +x ~/.newtlab/bin/newtlink")
+	chmodCmd := sshCommand(hostIP, fmt.Sprintf("chmod +x %s", quotedPath))
 	if out, err := chmodCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("chmod newtlink on %s: %w\n%s", hostIP, err, out)
 	}

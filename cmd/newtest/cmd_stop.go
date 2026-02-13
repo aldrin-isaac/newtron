@@ -19,7 +19,7 @@ func newStopCmd() *cobra.Command {
 		Long: `Tears down the deployed topology and removes suite state.
 Refuses to stop a suite with a running process — use 'newtest pause' first.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			suite, err := resolveSuiteForStop(cmd, dir)
+			suite, err := resolveSuite(cmd, dir, nil)
 			if err != nil {
 				return err
 			}
@@ -33,7 +33,7 @@ Refuses to stop a suite with a running process — use 'newtest pause' first.`,
 			}
 
 			// Refuse if runner is alive
-			if state.PID != 0 && isProcAlive(state.PID) {
+			if state.PID != 0 && newtest.IsProcessAlive(state.PID) {
 				return fmt.Errorf("suite %s is running (pid %d); use 'newtest pause' first", suite, state.PID)
 			}
 
@@ -73,25 +73,4 @@ Refuses to stop a suite with a running process — use 'newtest pause' first.`,
 	cmd.Flags().StringVar(&dir, "dir", "", "suite directory (auto-detected if omitted)")
 
 	return cmd
-}
-
-// resolveSuiteForStop resolves the suite name for the stop command.
-// Unlike resolveSuiteForControl, accepts any suite with state (not just active).
-func resolveSuiteForStop(cmd *cobra.Command, dir string) (string, error) {
-	if cmd.Flags().Changed("dir") {
-		return newtest.SuiteName(dir), nil
-	}
-
-	suites, err := newtest.ListSuiteStates()
-	if err != nil {
-		return "", err
-	}
-
-	if len(suites) == 0 {
-		return "", fmt.Errorf("no active suite found; use --dir to specify")
-	}
-	if len(suites) > 1 {
-		return "", fmt.Errorf("multiple active suites: %v; use --dir to specify", suites)
-	}
-	return suites[0], nil
 }

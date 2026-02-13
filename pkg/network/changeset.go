@@ -10,20 +10,22 @@ import (
 	"github.com/newtron-network/newtron/pkg/device"
 )
 
-// ChangeType represents the type of configuration change.
-type ChangeType string
+// ChangeType is an alias for device.ChangeType, re-exported for convenience.
+// All new code should prefer device.ChangeType directly.
+type ChangeType = device.ChangeType
 
+// Re-export device.ChangeType constants so existing code compiles without changes.
 const (
-	ChangeAdd    ChangeType = "add"
-	ChangeModify ChangeType = "modify"
-	ChangeDelete ChangeType = "delete"
+	ChangeAdd    = device.ChangeTypeAdd
+	ChangeModify = device.ChangeTypeModify
+	ChangeDelete = device.ChangeTypeDelete
 )
 
 // Change represents a single configuration change.
 type Change struct {
 	Table    string            `json:"table"`
 	Key      string            `json:"key"`
-	Type     ChangeType        `json:"type"`
+	Type     device.ChangeType `json:"type"`
 	OldValue map[string]string `json:"old_value,omitempty"`
 	NewValue map[string]string `json:"new_value,omitempty"`
 }
@@ -49,7 +51,7 @@ func NewChangeSet(device, operation string) *ChangeSet {
 }
 
 // Add adds a change to the set.
-func (cs *ChangeSet) Add(table, key string, changeType ChangeType, oldValue, newValue map[string]string) {
+func (cs *ChangeSet) Add(table, key string, changeType device.ChangeType, oldValue, newValue map[string]string) {
 	cs.Changes = append(cs.Changes, Change{
 		Table:    table,
 		Key:      key,
@@ -106,20 +108,12 @@ func (cs *ChangeSet) Preview() string {
 func (cs *ChangeSet) toDeviceChanges() []device.ConfigChange {
 	deviceChanges := make([]device.ConfigChange, 0, len(cs.Changes))
 	for _, c := range cs.Changes {
-		dc := device.ConfigChange{
+		deviceChanges = append(deviceChanges, device.ConfigChange{
 			Table:  c.Table,
 			Key:    c.Key,
+			Type:   c.Type,
 			Fields: c.NewValue,
-		}
-		switch c.Type {
-		case ChangeAdd:
-			dc.Type = device.ChangeTypeAdd
-		case ChangeModify:
-			dc.Type = device.ChangeTypeModify
-		case ChangeDelete:
-			dc.Type = device.ChangeTypeDelete
-		}
-		deviceChanges = append(deviceChanges, dc)
+		})
 	}
 	return deviceChanges
 }

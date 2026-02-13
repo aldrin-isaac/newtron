@@ -182,7 +182,8 @@ func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error) {
 
 // GetAll reads the entire state_db
 func (c *StateDBClient) GetAll() (*StateDB, error) {
-	keys, err := c.client.Keys(c.ctx, "*").Result()
+	// Get all keys using cursor-based SCAN (non-blocking, unlike KEYS *)
+	keys, err := scanKeys(c.ctx, c.client, "*", 100)
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +431,7 @@ func (c *StateDBClient) GetRemoteVTEPs() ([]string, error) {
 	// Remote VTEPs are discovered via EVPN and stored in VXLAN_TUNNEL_TABLE
 	// with entries like VXLAN_TUNNEL_TABLE|remote_vtep_ip
 	pattern := "VXLAN_TUNNEL_TABLE|*"
-	keys, err := c.client.Keys(c.ctx, pattern).Result()
+	keys, err := scanKeys(c.ctx, c.client, pattern, 100)
 	if err != nil {
 		return nil, err
 	}
@@ -454,7 +455,7 @@ func (c *StateDBClient) GetRouteCount(vrf string) (int, error) {
 		pattern = fmt.Sprintf("ROUTE_TABLE|%s|*", vrf)
 	}
 
-	keys, err := c.client.Keys(c.ctx, pattern).Result()
+	keys, err := scanKeys(c.ctx, c.client, pattern, 100)
 	if err != nil {
 		return 0, err
 	}
@@ -464,7 +465,7 @@ func (c *StateDBClient) GetRouteCount(vrf string) (int, error) {
 // GetFDBCount returns the number of MAC entries for a VLAN
 func (c *StateDBClient) GetFDBCount(vlan int) (int, error) {
 	pattern := fmt.Sprintf("FDB_TABLE|Vlan%d|*", vlan)
-	keys, err := c.client.Keys(c.ctx, pattern).Result()
+	keys, err := scanKeys(c.ctx, c.client, pattern, 100)
 	if err != nil {
 		return 0, err
 	}

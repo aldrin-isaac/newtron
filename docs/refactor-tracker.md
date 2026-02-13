@@ -35,56 +35,56 @@ cmd/newtest/  →  pkg/newtest/, pkg/newtlab/, pkg/network/, pkg/device/,
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 1.1 | **Fix protocol 179 bug**: Remove `"bgp": 179` from protoMap in `pkg/network/service_gen.go:484` and `pkg/network/device_ops.go:416`. Remove `ProtocolBGP = 179` from `pkg/model/acl.go:84`. Remove "bgp" from all protocol mappings — BGP filtering must use `protocol: "tcp"` + `dst_port: "179"`. Create single canonical `ProtoMap` in `model/acl.go`, delete inline protoMaps from service_gen.go and device_ops.go. | `pkg/model/acl.go`, `pkg/network/service_gen.go`, `pkg/network/device_ops.go` | N-09, M-01, M-02, X-01 | NOT STARTED |
-| 1.2 | **Extract `requireWritable()` helper**: Create `func requireWritable(d *Device) error` that checks `IsConnected()` and `IsLocked()`. Replace 40+ inline `if !d.IsConnected() { return nil, fmt.Errorf(...) }; if !d.IsLocked() { return nil, fmt.Errorf(...) }` blocks in `device_ops.go` and `interface_ops.go`. Pure mechanical replacement — no behavior change. | `pkg/network/device_ops.go`, `pkg/network/interface_ops.go` | N-03 | NOT STARTED |
-| 1.3 | **Consolidate splitPorts/joinPorts**: Move to `pkg/util/strings.go` as `SplitPorts(s string) []string` and use `strings.Join` for join. Delete 3 duplicate implementations: `device_ops.go:1194-1225`, `operations/precondition.go:443-455`, and any in service_gen.go. Also move `splitConfigDBKey` to `pkg/util/` as `SplitRedisKey`. | `pkg/util/`, `pkg/network/device_ops.go`, `pkg/operations/precondition.go` | N-05, N-06, O-02 | NOT STARTED |
-| 1.4 | **Extract ChangeSet.toDeviceChanges()**: The network.Change → device.ConfigChange conversion is duplicated in `changeset.go` Apply() and Verify(). Extract a shared `toDeviceChanges()` method. | `pkg/network/changeset.go` | N-11 | NOT STARTED |
-| 1.5 | **Fix InterfaceIsLAGMember**: Change from suffix match to `splitConfigDBKey` + exact match on parts[1], consistent with `GetInterfaceLAG`. | `pkg/network/device.go:505-511` | N-13 | NOT STARTED |
+| 1.1 | **Fix protocol 179 bug** | `pkg/model/acl.go`, `pkg/network/service_gen.go`, `pkg/network/device_ops.go` | N-09, M-01, M-02, X-01 | DONE ✓ |
+| 1.2 | **Extract `requireWritable()` helper** (65 replacements) | `pkg/network/device_ops.go`, `pkg/network/interface_ops.go`, `changeset.go`, `composite.go` | N-03 | DONE ✓ |
+| 1.3 | **Consolidate splitPorts/joinPorts** → `util.SplitCommaSeparated` | `pkg/util/strings.go`, `pkg/network/device_ops.go`, `pkg/operations/precondition.go` | N-05, N-06, O-02 | DONE ✓ |
+| 1.4 | **Extract ChangeSet.toDeviceChanges()** | `pkg/network/changeset.go` | N-11 | DONE ✓ |
+| 1.5 | **Fix InterfaceIsLAGMember** exact match | `pkg/network/device.go` | N-13 | DONE ✓ |
 
 ### Track 2: newtron CLI (`cmd/newtron/`)
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 2.1 | **Wire or remove dead flags**: (a) `lagMode` — declared at cmd_lag.go:263, flag registered at :394, never read. Either wire into `PortChannelConfig{}` at :297 or remove flag. (b) `vlanName` — declared at cmd_vlan.go:248, flag at :512, never read. Either wire into `VLANConfig{}` or remove. (c) `_ = vrfName` dead assignment at cmd_vrf.go:422 — just delete it. | `cmd/newtron/cmd_lag.go`, `cmd/newtron/cmd_vlan.go`, `cmd/newtron/cmd_vrf.go` | DC-01, DC-02, DC-05 | NOT STARTED |
-| 2.2 | **Extract `parseVLANID()` helper**: Pattern `var vlanID int; if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil { ... }` is repeated 7 times in cmd_vlan.go. Extract to a shared function in main.go. | `cmd/newtron/cmd_vlan.go`, `cmd/newtron/main.go` | D-04 | NOT STARTED |
-| 2.3 | **Extract status colorization helpers**: `formatAdminStatus(s string) string` and `formatOperStatus(s string) string`. Replace 12+ ad-hoc colorization locations across cmd_interface.go, cmd_lag.go, cmd_bgp.go, cmd_evpn.go, cmd_vrf.go, cmd_vlan.go. | `cmd/newtron/main.go` + 6 cmd files | D-03 | NOT STARTED |
-| 2.4 | **Add dry-run checks to spec authoring commands**: `filter create/delete/add-rule/remove-rule`, `qos create/delete/add-queue/remove-queue`, `service create/delete` all skip `executeMode` check. Add `if !executeMode { printDryRunNotice(); return nil }` before the save/delete call, matching `evpn ipvpn create/delete` pattern. | `cmd/newtron/cmd_filter.go`, `cmd/newtron/cmd_qos.go`, `cmd/newtron/cmd_service.go` | E-04, I-03 | NOT STARTED |
-| 2.5 | **Use `requireDevice` in cmd_show.go**: Lines 26-29 manually check `deviceName == ""` instead of calling `requireDevice(ctx)` like all other device-requiring commands. | `cmd/newtron/cmd_show.go` | S-03 | NOT STARTED |
-| 2.6 | **Fix delete permission constants**: `vlanDeleteCmd` uses `PermVLANCreate`, `lagDeleteCmd` uses `PermLAGCreate`, `vrfDeleteCmd` uses `PermVRFCreate`. Create proper `PermVLANDelete`, `PermLAGDelete`, `PermVRFDelete` in `pkg/auth/permission.go` and use them. | `cmd/newtron/cmd_vlan.go`, `cmd/newtron/cmd_lag.go`, `cmd/newtron/cmd_vrf.go`, `pkg/auth/permission.go` | I-05 | NOT STARTED |
+| 2.1 | **Wire or remove dead flags** (lagMode, vlanName, vrfName) | `cmd/newtron/cmd_lag.go`, `cmd/newtron/cmd_vlan.go`, `cmd/newtron/cmd_vrf.go` | DC-01, DC-02, DC-05 | DONE ✓ |
+| 2.2 | **Extract `parseVLANID()` helper** (7 replacements) | `cmd/newtron/cmd_vlan.go` | D-04 | DONE ✓ |
+| 2.3 | **Extract status colorization helpers** | `cmd/newtron/main.go` + 6 cmd files | D-03 | DONE ✓ |
+| 2.4 | **Add dry-run checks to spec authoring commands** | `cmd/newtron/cmd_filter.go`, `cmd/newtron/cmd_qos.go`, `cmd/newtron/cmd_service.go` | E-04, I-03 | DONE ✓ |
+| 2.5 | **Use `requireDevice` in cmd_show.go** | `cmd/newtron/cmd_show.go` | S-03 | DONE ✓ |
+| 2.6 | **Fix delete permission constants** | `cmd/newtron/cmd_*.go`, `pkg/auth/permission.go` | I-05 | DONE ✓ |
 
 ### Track 3: newtlab (`cmd/newtlab/`, `pkg/newtlab/`)
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 3.1 | **Fix SSH/console to use HostIP for remote nodes**: (a) `cmd_ssh.go:44` hardcodes `admin@127.0.0.1` — use `node.HostIP` when non-empty. (b) `cmd_console.go:35-41` hardcodes `127.0.0.1` — same fix. (c) `cmd_ssh.go:44` hardcodes `admin` — read from node profile or state. | `cmd/newtlab/cmd_ssh.go`, `cmd/newtlab/cmd_console.go` | S-2, S-3, C-1 | NOT STARTED |
-| 3.2 | **Fix --device provision filter**: `cmd_provision.go:32-45` loads and filters state, but `lab.Provision()` internally calls `LoadState()` again, ignoring the filter. Either pass filtered device list to Provision or add a device filter parameter. | `cmd/newtlab/cmd_provision.go`, `pkg/newtlab/newtlab.go` | P-1 | NOT STARTED |
-| 3.3 | **Check destroyExisting error**: `newtlab.go:136` discards `l.destroyExisting(existing)` return value. Check and return it (or at minimum log warning). | `pkg/newtlab/newtlab.go` | M-5 | NOT STARTED |
-| 3.4 | **Extract SSH command helper**: `exec.Command("ssh", "-o", "StrictHostKeyChecking=no", hostIP, ...)` appears 15+ times across qemu.go, disk.go, bridge.go, remote.go, probe.go with inconsistent options (some have ConnectTimeout, some don't). Create `sshCommand(hostIP, cmd string) *exec.Cmd` that always includes standard options. | `pkg/newtlab/` (new helper + 5 files) | Q-1, X-2 | NOT STARTED |
-| 3.5 | **Extract host resolution helpers**: (a) `nodeHostIP(ns *NodeState) string` — pattern `host := "127.0.0.1"; if ns.HostIP != "" { host = ns.HostIP }` appears 5+ times. (b) `stopAllBridges(state *LabState) error` — bridge shutdown logic duplicated between Destroy() and destroyExisting(). | `pkg/newtlab/newtlab.go` | N-2, N-3 | NOT STARTED |
-| 3.6 | **Unify resolveSpecDir/resolveLabName**: Both share 80% logic. Extract `resolveTarget(args) (labName, specDir, error)` wrapper. | `cmd/newtlab/main.go` | M-1 | NOT STARTED |
+| 3.1 | **Fix SSH/console to use HostIP for remote nodes** | `cmd/newtlab/cmd_ssh.go`, `cmd/newtlab/cmd_console.go` | S-2, S-3, C-1 | DONE ✓ |
+| 3.2 | **Fix --device provision filter** (DeviceFilter field) | `cmd/newtlab/cmd_provision.go`, `pkg/newtlab/newtlab.go` | P-1 | DONE ✓ |
+| 3.3 | **Check destroyExisting error** | `pkg/newtlab/newtlab.go` | M-5 | DONE ✓ |
+| 3.4 | **Extract SSH command helper** (14 replacements) | `pkg/newtlab/remote.go` + 5 files | Q-1, X-2 | DONE ✓ |
+| 3.5 | **Extract host resolution helpers** (nodeHostIP, stopAllBridges) | `pkg/newtlab/newtlab.go` | N-2, N-3 | DONE ✓ |
+| 3.6 | **Unify resolveSpecDir/resolveLabName** → resolveTarget | `cmd/newtlab/main.go` | M-1 | DONE ✓ |
 
 ### Track 4: newtest (`cmd/newtest/`, `pkg/newtest/`)
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 4.1 | **Fix break-in-select bug**: In `steps.go`, verifyStateDB (lines 467-477) and verifyBGP (lines 571-579), `break` inside `case <-ctx.Done()` only breaks the `select`, not the outer `for` loop. Use labeled break: `break pollLoop`. | `pkg/newtest/steps.go` | SE-03 | NOT STARTED |
-| 4.2 | **Fix verifyBGP to check expected state**: `steps.go:558-562` computes `expectedState` but never checks it — only checks if health check status == "pass". Must actually verify the reported BGP peer state matches `step.Expect.State`. | `pkg/newtest/steps.go` | SE-05 | NOT STARTED |
-| 4.3 | **Fix !matched && allPassed guard**: `steps.go` verifyBGP line 582-583 and verifyStateDB line 479 — the guard should be `!matched` alone. When an earlier device errored (allPassed=false), subsequent device timeouts go unreported. | `pkg/newtest/steps.go` | SE-06 | NOT STARTED |
-| 4.4 | **Extract `executeForDevices` helper**: 20+ mutating executors follow identical pattern: resolveDevices → init details/changeSets/allPassed → for each device: GetDevice → ExecuteOp → append result → compute status → return StepOutput. Extract generic helper, reduce steps.go from ~2562 to ~800 lines. Signature: `func (r *Runner) executeForDevices(step *Step, fn func(dev *network.Device) (*network.ChangeSet, string, error)) *StepOutput`. | `pkg/newtest/steps.go` | SE-01 | NOT STARTED |
-| 4.5 | **Extract `pollUntil` helper**: verifyStateDB, verifyBGP, verifyRoute all implement same poll-until-timeout loop. Extract: `func pollUntil(ctx context.Context, timeout, interval time.Duration, fn func() (done bool, err error)) error`. | `pkg/newtest/steps.go` | SE-02 | NOT STARTED |
-| 4.6 | **Move os.Exit out of RunE**: Both cmd_run.go and cmd_start.go call `os.Exit()` inside Cobra RunE, bypassing deferred cleanup (lock release). Return sentinel error, handle exit codes in main(). | `cmd/newtest/cmd_run.go`, `cmd/newtest/cmd_start.go`, `cmd/newtest/main.go` | S-04, X-01 | NOT STARTED |
-| 4.7 | **Deduplicate run/start commands**: `run` is deprecated+hidden. Either delete it entirely, or extract shared logic (runner construction, result analysis, report generation) into a helper both commands call. | `cmd/newtest/cmd_run.go`, `cmd/newtest/cmd_start.go` | R-04 | NOT STARTED |
+| 4.1 | **Fix break-in-select bug** (labeled pollLoop break) | `pkg/newtest/steps.go` | SE-03 | DONE ✓ |
+| 4.2 | **Fix verifyBGP to check expected state** | `pkg/newtest/steps.go` | SE-05 | DONE ✓ |
+| 4.3 | **Fix !matched && allPassed guard** (via pollUntil rewrite) | `pkg/newtest/steps.go` | SE-06 | DONE ✓ |
+| 4.4 | **Extract `executeForDevices` helper** (22 executors) | `pkg/newtest/steps.go` | SE-01 | DONE ✓ |
+| 4.5 | **Extract `pollUntil` helper** (3 verify executors) | `pkg/newtest/steps.go` | SE-02 | DONE ✓ |
+| 4.6 | **Move os.Exit out of RunE** (sentinel errors) | `cmd/newtest/cmd_start.go`, `cmd/newtest/main.go` | S-04, X-01 | DONE ✓ |
+| 4.7 | **Deduplicate run/start** (run = hidden alias for start) | `cmd/newtest/cmd_run.go` (deleted), `cmd/newtest/helpers.go` (new) | R-04 | DONE ✓ |
 
 ### Track 5: newtron support (`pkg/auth/`, `pkg/audit/`, `pkg/util/`, `pkg/settings/`)
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 5.1 | **Fix audit event ID generation**: `event.go:124-126` uses `time.Now().UnixNano()` — not unique under concurrency. Replace with `crypto/rand` or monotonic counter protected by mutex. | `pkg/audit/event.go` | AU-3 | NOT STARTED |
-| 5.2 | **Fix audit offset/limit bug**: `logger.go:103-108` — when `filter.Offset >= len(events)`, all events are returned instead of empty slice. | `pkg/audit/logger.go` | AU-5 | NOT STARTED |
-| 5.3 | **Remove dead audit types**: `EventType` constants (event.go:32-41) and `Severity` type (event.go:44-50) are defined but Event struct has no corresponding fields. Either add fields or remove types. Also `RotationConfig.MaxAge` (logger.go:30-33) defined but never implemented. | `pkg/audit/event.go`, `pkg/audit/logger.go` | AU-1, AU-2, AU-6 | NOT STARTED |
-| 5.4 | **Protect DefaultLogger**: `logger.go:229-230` — global `DefaultLogger` pointer is not concurrency-safe. Wrap with `sync.RWMutex` or `atomic.Value`. | `pkg/audit/logger.go` | AU-9 | NOT STARTED |
-| 5.5 | **Prune dead util functions**: 12+ exported functions with zero production call sites: `DeriveRouterID`, `DeriveVTEPSourceIP`, `DeriveRouteDistinguisher`, `IsValidMACAddress`, `NormalizeMACAddress`, `IPInRange`, `ValidateVNI`, `ValidateVLANID`, `ParsePortRange`, `ExpandSlotPortRange`, `ExpandInterfaceRange`, `ExpandVLANRange`, `CompactRange`, `ComputeBroadcastAddr`. Verify each has zero callers with `grep -r`, then remove. Keep test files in sync. | `pkg/util/derive.go`, `pkg/util/ip.go`, `pkg/util/range.go` | U-1 through U-13 | NOT STARTED |
-| 5.6 | **Hoist compiled regexps**: `derive.go:47` `SanitizeForName` and `derive.go:107` `ParseInterfaceName` both compile regexp on every call. Move to package-level `var`. Also `spec/resolver.go:26` `ResolveString`. | `pkg/util/derive.go`, `pkg/spec/resolver.go` | U-14, U-15, S-02(spec) | NOT STARTED |
+| 5.1 | **Fix audit event ID generation** (crypto/rand) | `pkg/audit/event.go` | AU-3 | DONE ✓ |
+| 5.2 | **Fix audit offset/limit bug** | `pkg/audit/logger.go` | AU-5 | DONE ✓ |
+| 5.3 | **Remove dead audit types** (EventType, Severity, MaxAge) | `pkg/audit/event.go`, `pkg/audit/logger.go` | AU-1, AU-2, AU-6 | DONE ✓ |
+| 5.4 | **Protect DefaultLogger** (atomic.Value) | `pkg/audit/logger.go` | AU-9 | DONE ✓ |
+| 5.5 | **Prune dead util functions** (range.go deleted entirely) | `pkg/util/derive.go`, `pkg/util/ip.go`, `pkg/util/range.go` (deleted) | U-1 through U-13 | DONE ✓ |
+| 5.6 | **Hoist compiled regexps** | `pkg/util/derive.go`, `pkg/spec/resolver.go` | U-14, U-15, S-02(spec) | DONE ✓ |
 
 ---
 
@@ -146,11 +146,9 @@ After each track/phase:
 
 ## Notes for Future Sessions
 
-1. **Audit docs are NOT committed yet** — they're untracked files at `docs/*/refactor-audit*.md`. Commit them before starting work.
-2. **Don't change public method signatures in Phase A** — that's what makes parallel execution safe.
-3. **The protocol 179 bug (1.1) is the highest-value single fix** — it's an actual bug that generates invalid ACL rules.
-4. **The break-in-select bug (4.1) is the second-highest** — context cancellation is silently ignored in verify loops.
-5. **Item 4.4 (executeForDevices)** is the highest-value refactor — eliminates ~1700 lines of boilerplate from steps.go.
-6. **Item 1.2 (requireWritable)** is the second-highest — eliminates ~120 lines of boilerplate from device_ops.go + interface_ops.go.
-7. **Items 1.7/1.8 (file splitting)** should be done AFTER 1.2 (requireWritable) to avoid splitting first and then touching every split file.
-8. **Interactive.go deletion (C.2)** should be a user decision — it's 1036 lines that could be useful as a TUI if someone wants to invest in it.
+1. **Phase A DONE** — committed as 3b9ed0f. 28 items, 46 files, -2027 net lines.
+2. **Audit docs committed** as 0419197.
+3. **Items 1.7/1.8 (file splitting)** should be the largest Phase B changes — device_ops.go and interface_ops.go are big files.
+4. **Item 1.9 (KEYS * → SCAN)** — only matters for production with large CONFIG_DB. Safe to do as internal change.
+5. **Phase B sync point**: After 1.6 (ChangeType unification), check if newtest steps.go needs import updates.
+6. **Interactive.go deletion (C.2)** should be a user decision — it's 1036 lines that could be useful as a TUI if someone wants to invest in it.

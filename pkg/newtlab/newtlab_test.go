@@ -411,7 +411,11 @@ func TestSaveAndLoadState(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	state := &LabState{
 		Name:    "test-lab",
@@ -479,7 +483,11 @@ func TestLoadState_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	_, err := LoadState("nonexistent")
 	if err == nil {
@@ -491,7 +499,11 @@ func TestListLabs(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	// No labs yet
 	labs, err := ListLabs()
@@ -519,7 +531,11 @@ func TestRemoveState(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	labDir := filepath.Join(tmpDir, ".newtlab", "labs", "rm-test")
 	os.MkdirAll(labDir, 0755)
@@ -956,7 +972,11 @@ func TestQueryAllBridgeStats_MultiBridge(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	// Bridge 1: one link
 	aPort1 := getFreePort(t)
@@ -1071,7 +1091,11 @@ func TestQueryAllBridgeStats_LegacyFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	resetHomeDir()
+	defer func() {
+		os.Setenv("HOME", origHome)
+		resetHomeDir()
+	}()
 
 	// Start a bridge and create a Unix socket
 	aPort := getFreePort(t)

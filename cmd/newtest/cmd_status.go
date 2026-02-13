@@ -89,7 +89,7 @@ func printSuiteStatus(suite string) error {
 
 	// Runner status
 	statusStr := string(state.Status)
-	if state.PID != 0 && isProcAlive(state.PID) {
+	if state.PID != 0 && newtest.IsProcessAlive(state.PID) {
 		statusStr = fmt.Sprintf("%s (pid %d)", statusStr, state.PID)
 	} else if state.PID != 0 {
 		// PID recorded but not alive
@@ -133,12 +133,12 @@ func printSuiteStatus(suite string) error {
 
 			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(sc.Status), dur)
 
-			switch sc.Status {
-			case "PASS":
+			switch newtest.Status(sc.Status) {
+			case newtest.StatusPassed:
 				passed++
-			case "FAIL":
+			case newtest.StatusFailed:
 				failed++
-			case "ERROR":
+			case newtest.StatusError:
 				errored++
 			case "":
 				// pending
@@ -212,15 +212,15 @@ func colorRunStatus(status newtest.RunStatus, text string) string {
 }
 
 func colorScenarioStatus(status string) string {
-	switch status {
-	case "PASS":
-		return cli.Green("PASS")
-	case "FAIL":
-		return cli.Red("FAIL")
-	case "ERROR":
-		return cli.Red("ERROR")
-	case "SKIP":
-		return cli.Yellow("SKIP")
+	switch newtest.Status(status) {
+	case newtest.StatusPassed:
+		return cli.Green(string(newtest.StatusPassed))
+	case newtest.StatusFailed:
+		return cli.Red(string(newtest.StatusFailed))
+	case newtest.StatusError:
+		return cli.Red(string(newtest.StatusError))
+	case newtest.StatusSkipped:
+		return cli.Yellow(string(newtest.StatusSkipped))
 	case "":
 		return "\u2014" // —
 	default:

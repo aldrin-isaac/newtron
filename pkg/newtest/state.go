@@ -128,7 +128,7 @@ func AcquireLock(state *RunState) error {
 		return err
 	}
 
-	if existing != nil && existing.PID != 0 && isProcessAlive(existing.PID) {
+	if existing != nil && existing.PID != 0 && IsProcessAlive(existing.PID) {
 		return fmt.Errorf("suite %s already running (pid %d)", state.Suite, existing.PID)
 	}
 
@@ -151,8 +151,8 @@ func CheckPausing(suite string) bool {
 	return state.Status == StatusPausing
 }
 
-// isProcessAlive checks if a process with the given PID exists.
-func isProcessAlive(pid int) bool {
+// IsProcessAlive checks if a process with the given PID exists.
+func IsProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}

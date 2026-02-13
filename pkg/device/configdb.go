@@ -424,8 +424,8 @@ func (c *ConfigDBClient) Close() error {
 
 // GetAll reads the entire config_db
 func (c *ConfigDBClient) GetAll() (*ConfigDB, error) {
-	// Get all keys
-	keys, err := c.client.Keys(c.ctx, "*").Result()
+	// Get all keys using cursor-based SCAN (non-blocking, unlike KEYS *)
+	keys, err := scanKeys(c.ctx, c.client, "*", 100)
 	if err != nil {
 		return nil, err
 	}
@@ -785,7 +785,7 @@ func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
 // Useful for counting entries or iterating a table without loading all values.
 func (c *ConfigDBClient) TableKeys(table string) ([]string, error) {
 	pattern := fmt.Sprintf("%s|*", table)
-	return c.client.Keys(c.ctx, pattern).Result()
+	return scanKeys(c.ctx, c.client, pattern, 100)
 }
 
 // Exists checks if a key exists
@@ -798,4 +798,24 @@ func (c *ConfigDBClient) Exists(table, key string) (bool, error) {
 // ToJSON exports config_db as JSON
 func (db *ConfigDB) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(db, "", "  ")
+}
+
+// scanKeys iterates Redis keys matching the given pattern using cursor-based
+// SCAN instead of the blocking O(N) KEYS command. The count hint controls
+// how many keys Redis returns per iteration (not an exact limit).
+func scanKeys(ctx context.Context, client *redis.Client, pattern string, countHint int64) ([]string, error) {
+	var cursor uint64
+	var keys []string
+	for {
+		batch, nextCursor, err := client.Scan(ctx, cursor, pattern, countHint).Result()
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, batch...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys, nil
 }

@@ -103,46 +103,16 @@ const (
 	ActionCleanup            StepAction = "cleanup"
 )
 
-// validActions is the set of all recognized step actions.
-var validActions = map[StepAction]bool{
-	ActionProvision:          true,
-	ActionWait:               true,
-	ActionVerifyProvisioning: true,
-	ActionVerifyConfigDB:     true,
-	ActionVerifyStateDB:      true,
-	ActionVerifyBGP:          true,
-	ActionVerifyHealth:       true,
-	ActionVerifyRoute:        true,
-	ActionVerifyPing:         true,
-	ActionApplyService:       true,
-	ActionRemoveService:      true,
-	ActionApplyBaseline:      true,
-	ActionSSHCommand:         true,
-	ActionRestartService:     true,
-	ActionApplyFRRDefaults:   true,
-	ActionSetInterface:       true,
-	ActionCreateVLAN:         true,
-	ActionDeleteVLAN:         true,
-	ActionAddVLANMember:      true,
-	ActionCreateVRF:          true,
-	ActionDeleteVRF:          true,
-	ActionSetupEVPN:          true,
-	ActionAddVRFInterface:    true,
-	ActionRemoveVRFInterface: true,
-	ActionBindIPVPN:          true,
-	ActionUnbindIPVPN:        true,
-	ActionBindMACVPN:         true,
-	ActionUnbindMACVPN:       true,
-	ActionAddStaticRoute:     true,
-	ActionRemoveStaticRoute:  true,
-	ActionRemoveVLANMember:   true,
-	ActionApplyQoS:           true,
-	ActionRemoveQoS:          true,
-	ActionConfigureSVI:       true,
-	ActionBGPAddNeighbor:     true,
-	ActionBGPRemoveNeighbor:  true,
-	ActionRefreshService:     true,
-	ActionCleanup:            true,
+// validActions is the set of all recognized step actions, derived from the
+// executors map in steps.go at init time. This avoids manual synchronization
+// between the two maps.
+var validActions map[StepAction]bool
+
+func init() {
+	validActions = make(map[StepAction]bool, len(executors))
+	for action := range executors {
+		validActions[action] = true
+	}
 }
 
 // DeviceSelector handles the two YAML forms for the "devices" field:

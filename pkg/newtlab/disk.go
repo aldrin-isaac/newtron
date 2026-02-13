@@ -28,7 +28,7 @@ func CreateOverlay(baseImage, overlayPath string) error {
 // Paths starting with ~/ are expanded by the remote shell.
 func CreateOverlayRemote(baseImage, overlayPath, hostIP string) error {
 	remoteCmd := fmt.Sprintf("qemu-img create -f qcow2 -b %s -F qcow2 %s",
-		baseImage, overlayPath)
+		shellQuote(baseImage), shellQuote(overlayPath))
 	cmd := sshCommand(hostIP, remoteCmd)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -48,7 +48,7 @@ func RemoveOverlay(overlayPath string) error {
 
 // setupRemoteStateDir creates the lab state directory structure on a remote host.
 func setupRemoteStateDir(labName, hostIP string) error {
-	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	stateDir := shellQuote(fmt.Sprintf("~/.newtlab/labs/%s", labName))
 	mkdirCmd := fmt.Sprintf("mkdir -p %s/disks %s/qemu %s/logs", stateDir, stateDir, stateDir)
 	cmd := sshCommand(hostIP, mkdirCmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -59,7 +59,7 @@ func setupRemoteStateDir(labName, hostIP string) error {
 
 // cleanupRemoteStateDir removes the lab state directory from a remote host.
 func cleanupRemoteStateDir(labName, hostIP string) error {
-	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	stateDir := shellQuote(fmt.Sprintf("~/.newtlab/labs/%s", labName))
 	cmd := sshCommand(hostIP, fmt.Sprintf("rm -rf %s", stateDir))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("newtlab: remove remote state dir on %s: %w\n%s", hostIP, err, out)
@@ -67,18 +67,41 @@ func cleanupRemoteStateDir(labName, hostIP string) error {
 	return nil
 }
 
+// shellQuote quotes a path for safe use in remote shell commands.
+// Paths starting with ~/ preserve tilde expansion while quoting the rest.
+// Other paths are fully single-quoted.
+func shellQuote(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		return "~/" + singleQuote(path[2:])
+	}
+	return singleQuote(path)
+}
+
+// singleQuote wraps a string in single quotes, escaping any embedded single quotes.
+func singleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 // expandHome replaces a leading ~/ with the user's home directory.
+// Uses the cached home directory from getHomeDir().
 func expandHome(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home, err := getHomeDir()
+		if err != nil {
+			return path // leave unexpanded if home dir unavailable
+		}
 		return filepath.Join(home, path[2:])
 	}
 	return path
 }
 
 // unexpandHome replaces a leading $HOME/ with ~/ for use in remote SSH commands.
+// Uses the cached home directory from getHomeDir().
 func unexpandHome(path string) string {
-	home, _ := os.UserHomeDir()
+	home, err := getHomeDir()
+	if err != nil {
+		return path // leave as-is if home dir unavailable
+	}
 	if strings.HasPrefix(path, home+"/") {
 		return "~/" + path[len(home)+1:]
 	}

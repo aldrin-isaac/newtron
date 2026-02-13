@@ -47,8 +47,14 @@ type LinkState struct {
 }
 
 // LabDir returns the state directory path for a lab name.
+// Uses the cached home directory from getHomeDir().
 func LabDir(name string) string {
-	home, _ := os.UserHomeDir()
+	home, err := getHomeDir()
+	if err != nil {
+		// Best effort: return a relative path that will likely fail downstream
+		// with a more informative error.
+		return filepath.Join(".newtlab", "labs", name)
+	}
 	return filepath.Join(home, ".newtlab", "labs", name)
 }
 
@@ -93,7 +99,10 @@ func RemoveState(name string) error {
 
 // ListLabs returns names of all labs with state directories.
 func ListLabs() ([]string, error) {
-	home, _ := os.UserHomeDir()
+	home, err := getHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("newtlab: list labs: %w", err)
+	}
 	labsDir := filepath.Join(home, ".newtlab", "labs")
 
 	entries, err := os.ReadDir(labsDir)

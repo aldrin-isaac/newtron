@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtest"
 	"github.com/newtron-network/newtron/pkg/settings"
 )
 
@@ -63,4 +65,50 @@ func resolveTopologiesDir() string {
 		return s.TopologiesDir
 	}
 	return "newtest/topologies"
+}
+
+// resolveSuite resolves a suite name from --dir flag or auto-detection.
+// The filter function controls which suites are considered: return true for
+// suites that should be included. Pass nil to accept any suite with state.
+func resolveSuite(cmd *cobra.Command, dir string, filter func(newtest.RunStatus) bool) (string, error) {
+	if cmd.Flags().Changed("dir") {
+		return newtest.SuiteName(dir), nil
+	}
+
+	suites, err := newtest.ListSuiteStates()
+	if err != nil {
+		return "", err
+	}
+
+	if len(suites) == 0 {
+		return "", fmt.Errorf("no active suite found; use --dir to specify")
+	}
+
+	// No filter: accept any suite with state (e.g. stop command)
+	if filter == nil {
+		if len(suites) > 1 {
+			return "", fmt.Errorf("multiple active suites: %v; use --dir to specify", suites)
+		}
+		return suites[0], nil
+	}
+
+	// Apply filter (e.g. pause command wants only running/pausing/paused)
+	var matched []string
+	for _, s := range suites {
+		state, err := newtest.LoadRunState(s)
+		if err != nil || state == nil {
+			continue
+		}
+		if filter(state.Status) {
+			matched = append(matched, s)
+		}
+	}
+
+	if len(matched) == 0 {
+		return "", fmt.Errorf("no active suite found; use --dir to specify")
+	}
+	if len(matched) > 1 {
+		return "", fmt.Errorf("multiple active suites: %v; use --dir to specify", matched)
+	}
+	return matched[0], nil
 }

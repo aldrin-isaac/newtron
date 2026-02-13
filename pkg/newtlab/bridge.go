@@ -290,8 +290,9 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 		return 0, fmt.Errorf("newtlab: upload newtlink to %s: %w", hostIP, err)
 	}
 
-	stateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
-	configPath := stateDir + "/bridge.json"
+	rawStateDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	stateDir := shellQuote(rawStateDir)
+	configPath := shellQuote(rawStateDir + "/bridge.json")
 
 	// Create remote state dir and write bridge config
 	mkdirCmd := fmt.Sprintf("mkdir -p %s/logs && cat > %s", stateDir, configPath)
@@ -302,7 +303,8 @@ func startBridgeProcessRemote(labName, hostIP string, configJSON []byte) (int, e
 	}
 
 	// Start newtlink with config file
-	startCmd := fmt.Sprintf("nohup %s %s > %s/logs/bridge.log 2>&1 & echo $!", newtlinkPath, configPath, stateDir)
+	startCmd := fmt.Sprintf("nohup %s %s > %s/logs/bridge.log 2>&1 & echo $!",
+		shellQuote(newtlinkPath), configPath, stateDir)
 	cmd = sshCommand(hostIP, startCmd)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

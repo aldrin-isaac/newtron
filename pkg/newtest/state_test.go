@@ -236,20 +236,20 @@ func TestCheckPausing(t *testing.T) {
 
 func TestIsProcessAlive(t *testing.T) {
 	// Our own PID is alive
-	if !isProcessAlive(os.Getpid()) {
+	if !IsProcessAlive(os.Getpid()) {
 		t.Error("own PID should be alive")
 	}
 
 	// Zero or negative PIDs are not alive
-	if isProcessAlive(0) {
+	if IsProcessAlive(0) {
 		t.Error("PID 0 should not be alive")
 	}
-	if isProcessAlive(-1) {
+	if IsProcessAlive(-1) {
 		t.Error("PID -1 should not be alive")
 	}
 
 	// Very large PID likely doesn't exist
-	if isProcessAlive(999999999) {
+	if IsProcessAlive(999999999) {
 		t.Error("PID 999999999 should not be alive")
 	}
 }

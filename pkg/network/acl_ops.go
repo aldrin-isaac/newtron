@@ -1,0 +1,206 @@
+package network
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/newtron-network/newtron/pkg/model"
+	"github.com/newtron-network/newtron/pkg/util"
+)
+
+// ============================================================================
+// ACL Operations
+// ============================================================================
+
+// ACLTableConfig holds configuration options for CreateACLTable.
+type ACLTableConfig struct {
+	Type        string // L3, L3V6
+	Stage       string // ingress, egress
+	Description string
+	Ports       string // Comma-separated interface names (maps to CONFIG_DB ACL_TABLE.ports)
+}
+
+// ACLRuleConfig holds configuration options for AddACLRule.
+type ACLRuleConfig struct {
+	Priority int
+	Action   string // permit, deny (or FORWARD, DROP)
+	SrcIP    string
+	DstIP    string
+	Protocol string // tcp, udp, icmp, or number
+	SrcPort  string
+	DstPort  string
+}
+
+// CreateACLTable creates a new ACL table.
+func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
+	if err := requireWritable(d); err != nil {
+		return nil, err
+	}
+	if d.ACLTableExists(name) {
+		return nil, fmt.Errorf("ACL table %s already exists", name)
+	}
+	if opts.Type == "" {
+		opts.Type = "L3"
+	}
+	if opts.Stage == "" {
+		opts.Stage = "ingress"
+	}
+
+	cs := NewChangeSet(d.name, "device.create-acl-table")
+
+	fields := map[string]string{
+		"type":  opts.Type,
+		"stage": opts.Stage,
+	}
+	if opts.Description != "" {
+		fields["policy_desc"] = opts.Description
+	}
+	if opts.Ports != "" {
+		fields["ports"] = opts.Ports
+	}
+
+	cs.Add("ACL_TABLE", name, ChangeAdd, nil, fields)
+
+	util.WithDevice(d.name).Infof("Created ACL table %s", name)
+	return cs, nil
+}
+
+// AddACLRule adds a rule to an ACL table.
+func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
+	if err := requireWritable(d); err != nil {
+		return nil, err
+	}
+	if !d.ACLTableExists(tableName) {
+		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
+	}
+
+	cs := NewChangeSet(d.name, "device.add-acl-rule")
+
+	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
+
+	// Map action
+	action := "DROP"
+	if opts.Action == "permit" || opts.Action == "FORWARD" {
+		action = "FORWARD"
+	}
+
+	fields := map[string]string{
+		"PRIORITY":      fmt.Sprintf("%d", opts.Priority),
+		"PACKET_ACTION": action,
+	}
+	if opts.SrcIP != "" {
+		fields["SRC_IP"] = opts.SrcIP
+	}
+	if opts.DstIP != "" {
+		fields["DST_IP"] = opts.DstIP
+	}
+	if opts.Protocol != "" {
+		if proto, ok := model.ProtoMap[opts.Protocol]; ok {
+			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
+		} else {
+			// Assume it's already a number
+			fields["IP_PROTOCOL"] = opts.Protocol
+		}
+	}
+	if opts.DstPort != "" {
+		fields["L4_DST_PORT"] = opts.DstPort
+	}
+	if opts.SrcPort != "" {
+		fields["L4_SRC_PORT"] = opts.SrcPort
+	}
+
+	cs.Add("ACL_RULE", ruleKey, ChangeAdd, nil, fields)
+
+	util.WithDevice(d.name).Infof("Added rule %s to ACL table %s", ruleName, tableName)
+	return cs, nil
+}
+
+// DeleteACLRule removes a single rule from an ACL table.
+func (d *Device) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*ChangeSet, error) {
+	if err := requireWritable(d); err != nil {
+		return nil, err
+	}
+	if !d.ACLTableExists(tableName) {
+		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
+	}
+
+	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
+
+	// Verify rule exists
+	if d.configDB != nil {
+		if _, ok := d.configDB.ACLRule[ruleKey]; !ok {
+			return nil, fmt.Errorf("rule %s not found in ACL table %s", ruleName, tableName)
+		}
+	}
+
+	cs := NewChangeSet(d.name, "device.delete-acl-rule")
+	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+
+	util.WithDevice(d.name).Infof("Deleted rule %s from ACL table %s", ruleName, tableName)
+	return cs, nil
+}
+
+// DeleteACLTable removes an ACL table and all its rules.
+func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
+	if err := requireWritable(d); err != nil {
+		return nil, err
+	}
+	if !d.ACLTableExists(name) {
+		return nil, fmt.Errorf("ACL table %s does not exist", name)
+	}
+
+	cs := NewChangeSet(d.name, "device.delete-acl-table")
+
+	// Remove all rules first
+	if d.configDB != nil {
+		prefix := name + "|"
+		for ruleKey := range d.configDB.ACLRule {
+			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
+				cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+			}
+		}
+	}
+
+	// Remove the table
+	cs.Add("ACL_TABLE", name, ChangeDelete, nil, nil)
+
+	util.WithDevice(d.name).Infof("Deleted ACL table %s", name)
+	return cs, nil
+}
+
+// UnbindACLFromInterface removes an interface from an ACL table's binding.
+func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error) {
+	if err := requireWritable(d); err != nil {
+		return nil, err
+	}
+
+	// Normalize interface name (e.g., Eth0 -> Ethernet0)
+	interfaceName = util.NormalizeInterfaceName(interfaceName)
+
+	if !d.ACLTableExists(aclName) {
+		return nil, fmt.Errorf("ACL table %s does not exist", aclName)
+	}
+
+	cs := NewChangeSet(d.name, "device.unbind-acl")
+
+	// Get current binding list and remove the specified interface
+	if d.configDB != nil {
+		if table, ok := d.configDB.ACLTable[aclName]; ok {
+			currentBindings := table.Ports
+			var remaining []string
+			for _, p := range util.SplitCommaSeparated(currentBindings) {
+				if p != interfaceName {
+					remaining = append(remaining, p)
+				}
+			}
+
+			cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+				"ports": strings.Join(remaining, ","),
+			})
+		}
+	}
+
+	util.WithDevice(d.name).Infof("Unbound ACL %s from interface %s", aclName, interfaceName)
+	return cs, nil
+}

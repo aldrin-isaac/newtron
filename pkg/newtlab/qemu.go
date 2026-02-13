@@ -136,7 +136,7 @@ func StartNodeRemote(node *NodeConfig, labName, hostIP string) (int, error) {
 
 	// Build the remote command: cd to state dir, then nohup QEMU
 	qemuArgs := append([]string{localCmd.Path}, localCmd.Args[1:]...)
-	remoteDir := fmt.Sprintf("~/.newtlab/labs/%s", labName)
+	remoteDir := shellQuote(fmt.Sprintf("~/.newtlab/labs/%s", labName))
 	remoteCmd := fmt.Sprintf("cd %s && nohup %s > /dev/null 2>&1 & echo $!",
 		remoteDir, strings.Join(quoteArgs(qemuArgs), " "))
 
