@@ -102,8 +102,14 @@ func RunBridgeFromFile(configPath string) error {
 	// Convert to LinkConfig for StartBridgeWorkers
 	links := make([]*LinkConfig, len(cfg.Links))
 	for i, bl := range cfg.Links {
-		aDevice, aIface, _ := splitLinkEndpoint(bl.A)
-		zDevice, zIface, _ := splitLinkEndpoint(bl.Z)
+		aDevice, aIface, err := splitLinkEndpoint(bl.A)
+		if err != nil {
+			return fmt.Errorf("newtlab: bridge link %d A-side: %w", i, err)
+		}
+		zDevice, zIface, err := splitLinkEndpoint(bl.Z)
+		if err != nil {
+			return fmt.Errorf("newtlab: bridge link %d Z-side: %w", i, err)
+		}
 		links[i] = &LinkConfig{
 			A:     LinkEndpoint{Device: aDevice, Interface: aIface},
 			Z:     LinkEndpoint{Device: zDevice, Interface: zIface},

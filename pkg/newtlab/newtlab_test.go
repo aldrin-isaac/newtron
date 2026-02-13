@@ -409,13 +409,9 @@ func TestAllocateLinks_PortSequence(t *testing.T) {
 func TestSaveAndLoadState(t *testing.T) {
 	// Use a temp dir to avoid polluting ~/.newtlab
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	state := &LabState{
 		Name:    "test-lab",
@@ -481,13 +477,9 @@ func TestSaveAndLoadState(t *testing.T) {
 
 func TestLoadState_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	_, err := LoadState("nonexistent")
 	if err == nil {
@@ -497,13 +489,9 @@ func TestLoadState_NotFound(t *testing.T) {
 
 func TestListLabs(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	// No labs yet
 	labs, err := ListLabs()
@@ -529,13 +517,9 @@ func TestListLabs(t *testing.T) {
 
 func TestRemoveState(t *testing.T) {
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	labDir := filepath.Join(tmpDir, ".newtlab", "labs", "rm-test")
 	os.MkdirAll(labDir, 0755)
@@ -970,13 +954,9 @@ func TestQueryAllBridgeStats_MultiBridge(t *testing.T) {
 	// different links, and verify QueryAllBridgeStats merges them.
 
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	// Bridge 1: one link
 	aPort1 := getFreePort(t)
@@ -1089,13 +1069,9 @@ func TestQueryAllBridgeStats_LegacyFallback(t *testing.T) {
 	// state files without Bridges field.
 
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 	resetHomeDir()
-	defer func() {
-		os.Setenv("HOME", origHome)
-		resetHomeDir()
-	}()
+	t.Cleanup(resetHomeDir)
 
 	// Start a bridge and create a Unix socket
 	aPort := getFreePort(t)

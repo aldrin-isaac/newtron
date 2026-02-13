@@ -253,14 +253,13 @@ func kvmAvailable() bool {
 }
 
 // quoteArgs shell-quotes arguments for safe SSH command execution.
+// Every argument is unconditionally wrapped in single quotes with internal
+// single quotes escaped as '\'' (end quote, literal quote, reopen quote).
+// This is safe for all shell special characters.
 func quoteArgs(args []string) []string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {
-		if strings.ContainsAny(arg, " \t\n\"'\\$`!#&|;(){}[]<>?*~") {
-			quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
-		} else {
-			quoted[i] = arg
-		}
+		quoted[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 	}
 	return quoted
 }

@@ -212,12 +212,10 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		}
 
 		l.State.Bridges = make(map[string]*BridgeState)
-		statsPortNext := l.Config.LinkPortBase - 1
+		statsPorts := allocateBridgeStatsPorts(l)
 
 		for _, host := range sortedHosts(hostLinks) {
-			statsPort := statsPortNext
-			statsPortNext--
-
+			statsPort := statsPorts[host]
 			links := hostLinks[host]
 
 			// Determine bind and reachable addresses for the stats listener.
@@ -407,6 +405,27 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	}
 
 	return deployErr
+}
+
+// DestroyByName destroys a lab identified only by name, loading all
+// necessary state from disk. This avoids constructing a partial Lab struct.
+func DestroyByName(ctx context.Context, name string) error {
+	lab := &Lab{Name: name}
+	return lab.Destroy(ctx)
+}
+
+// StopByName stops a node in a lab identified only by lab name and node name,
+// loading all necessary state from disk.
+func StopByName(ctx context.Context, labName, nodeName string) error {
+	lab := &Lab{Name: labName}
+	return lab.Stop(ctx, nodeName)
+}
+
+// StartByName starts a node in a lab identified only by lab name and node name,
+// loading all necessary state from disk.
+func StartByName(ctx context.Context, labName, nodeName string) error {
+	lab := &Lab{Name: labName}
+	return lab.Start(ctx, nodeName)
 }
 
 // Destroy kills QEMU processes, removes overlays, cleans state,
@@ -635,30 +654,23 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 
 // refreshBGP SSHs to each device and runs "clear bgp * soft" via vtysh.
 // Errors are logged but not returned — this is a best-effort convergence aid.
+// SSH credentials are read from l.Nodes (already resolved during NewLab).
 func (l *Lab) refreshBGP(state *LabState) {
 	// Brief delay for the last-provisioned device's BGP to start.
 	time.Sleep(5 * time.Second)
 
-	for name, node := range state.Nodes {
-		profilePath := filepath.Join(l.SpecDir, "profiles", name+".json")
-		data, err := os.ReadFile(profilePath)
-		if err != nil {
-			continue
-		}
-		var profile struct {
-			SSHUser string `json:"ssh_user"`
-			SSHPass string `json:"ssh_pass"`
-		}
-		if err := json.Unmarshal(data, &profile); err != nil || profile.SSHUser == "" {
+	for name, nodeState := range state.Nodes {
+		nc := l.Nodes[name]
+		if nc == nil || nc.SSHUser == "" {
 			continue
 		}
 
-		host := nodeHostIP(node)
-		addr := fmt.Sprintf("%s:%d", host, node.SSHPort)
+		host := nodeHostIP(nodeState)
+		addr := fmt.Sprintf("%s:%d", host, nodeState.SSHPort)
 
 		config := &ssh.ClientConfig{
-			User:            profile.SSHUser,
-			Auth:            []ssh.AuthMethod{ssh.Password(profile.SSHPass)},
+			User:            nc.SSHUser,
+			Auth:            []ssh.AuthMethod{ssh.Password(nc.SSHPass)},
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 			Timeout:         5 * time.Second,
 		}
