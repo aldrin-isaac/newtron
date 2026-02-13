@@ -1,28 +1,29 @@
 // NewtLab — VM orchestration for SONiC network topologies
 //
-// newtlab reads newtron's spec files (topology.json, platforms.json,
-// profiles/*.json) and deploys QEMU virtual machines with socket-based
-// networking. No root, no bridges, no Docker.
+// newtlab deploys QEMU virtual machines from newtron topology specs.
+// It reads topology.json, platforms.json, and profiles/*.json to create
+// connected VMs with socket-based networking. No root, no bridges, no Docker.
 //
 // Usage:
 //
-//	newtlab deploy -S <specs>        Deploy VMs from topology.json
-//	newtlab destroy                  Stop and remove all VMs
-//	newtlab status                   Show VM status
-//	newtlab ssh <node>               SSH to a VM
-//	newtlab console <node>           Attach to serial console
-//	newtlab stop <node>              Stop a VM (preserves disk)
-//	newtlab start <node>             Start a stopped VM
-//	newtlab provision -S <specs>     Provision devices via newtron
+//	newtlab list                     # show topologies
+//	newtlab deploy 2node             # deploy VMs
+//	newtlab status 2node             # show VM status
+//	newtlab ssh spine1               # SSH to a VM
+//	newtlab destroy 2node            # tear down
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/newtlab"
 	"github.com/newtron-network/newtron/pkg/settings"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
@@ -46,12 +47,17 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:      true,
 	SilenceErrors:     true,
 	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
-	Long: `NewtLab deploys QEMU virtual machines from newtron spec files.
+	Long: `NewtLab deploys QEMU virtual machines from newtron topology specs.
 
-It reads topology.json, platforms.json, and profiles/*.json to create
-connected VMs with socket-based networking. No root, no bridges, no Docker.
+Topologies are resolved by name from newtest/topologies/.
 
-  newtlab deploy -S <specs>`,
+  newtlab list                       # show topologies
+  newtlab deploy 2node               # deploy VMs from topology
+  newtlab status [topology]          # show VM status
+  newtlab ssh <node>                 # SSH to a VM
+  newtlab console <node>             # serial console
+  newtlab destroy [topology]         # tear down
+  newtlab provision [topology]       # provision via newtron`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if verbose {
 			util.SetLogLevel("debug")
@@ -63,10 +69,11 @@ connected VMs with socket-based networking. No root, no bridges, no Docker.
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory")
+	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "spec directory (overrides topology name)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	rootCmd.AddCommand(
+		newListCmd(),
 		newDeployCmd(),
 		newDestroyCmd(),
 		newStatusCmd(),
@@ -81,19 +88,195 @@ func init() {
 	)
 }
 
-// requireSpecDir resolves spec directory from: -S flag > NEWTLAB_SPECS env > settings > error.
-func requireSpecDir() (string, error) {
+// ============================================================================
+// Topology Resolution
+// ============================================================================
+
+// topologiesBaseDir returns the base directory for topologies.
+// Resolution: NEWTEST_TOPOLOGIES env > settings > default.
+func topologiesBaseDir() string {
+	if v := os.Getenv("NEWTEST_TOPOLOGIES"); v != "" {
+		return v
+	}
+	if s, err := settings.Load(); err == nil && s.TopologiesDir != "" {
+		return s.TopologiesDir
+	}
+	return "newtest/topologies"
+}
+
+// resolveTopologyDir resolves a topology name to its spec directory.
+// If name contains "/" it's used as-is. Otherwise resolved under topologiesBaseDir.
+func resolveTopologyDir(name string) string {
+	if strings.Contains(name, "/") {
+		return name
+	}
+	return filepath.Join(topologiesBaseDir(), name, "specs")
+}
+
+// resolveSpecDir resolves the spec directory from: -S flag > positional topology name > auto-detect.
+// For commands that operate on a deployed lab, auto-detect finds the single deployed lab.
+func resolveSpecDir(args []string) (string, error) {
+	// Explicit -S flag takes priority
 	if specDir != "" {
 		return specDir, nil
 	}
-	if v := os.Getenv("NEWTLAB_SPECS"); v != "" {
-		return v, nil
+	// Positional topology name
+	if len(args) > 0 && args[0] != "" {
+		dir := resolveTopologyDir(args[0])
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			return "", fmt.Errorf("topology %q not found: %s does not exist", args[0], dir)
+		}
+		return dir, nil
 	}
-	if s, err := settings.Load(); err == nil && s.SpecDir != "" {
-		return s.SpecDir, nil
+	// Auto-detect from deployed labs
+	labs, err := newtlab.ListLabs()
+	if err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("spec directory required: use -S <dir>, set NEWTLAB_SPECS, or run 'newtron settings set specs <dir>'")
+	if len(labs) == 0 {
+		return "", fmt.Errorf("no deployed labs; specify topology name or use -S <dir>")
+	}
+	if len(labs) == 1 {
+		state, err := newtlab.LoadState(labs[0])
+		if err != nil {
+			return "", err
+		}
+		return state.SpecDir, nil
+	}
+	return "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
 }
+
+// resolveLabName resolves a lab name from: -S flag > positional name > auto-detect.
+func resolveLabName(args []string) (string, error) {
+	if specDir != "" {
+		lab, err := newtlab.NewLab(specDir)
+		if err != nil {
+			return "", err
+		}
+		return lab.Name, nil
+	}
+	if len(args) > 0 && args[0] != "" {
+		// Could be a topology name — check if it matches a deployed lab
+		labs, _ := newtlab.ListLabs()
+		for _, l := range labs {
+			if l == args[0] {
+				return l, nil
+			}
+		}
+		// Try as topology name → lab name is derived from spec dir
+		dir := resolveTopologyDir(args[0])
+		if _, err := os.Stat(dir); err == nil {
+			lab, err := newtlab.NewLab(dir)
+			if err != nil {
+				return "", err
+			}
+			return lab.Name, nil
+		}
+		return "", fmt.Errorf("topology %q not found", args[0])
+	}
+	labs, err := newtlab.ListLabs()
+	if err != nil {
+		return "", err
+	}
+	if len(labs) == 0 {
+		return "", fmt.Errorf("no deployed labs")
+	}
+	if len(labs) == 1 {
+		return labs[0], nil
+	}
+	return "", fmt.Errorf("multiple labs deployed (%s); specify topology name", strings.Join(labs, ", "))
+}
+
+// ============================================================================
+// List Command
+// ============================================================================
+
+func newListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List topologies and their deployment status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			base := topologiesBaseDir()
+			entries, err := os.ReadDir(base)
+			if err != nil {
+				return fmt.Errorf("cannot find topologies directory %s: %w", base, err)
+			}
+
+			// Get deployed labs for status
+			deployedLabs := make(map[string]*newtlab.LabState)
+			labs, _ := newtlab.ListLabs()
+			for _, name := range labs {
+				state, err := newtlab.LoadState(name)
+				if err == nil {
+					deployedLabs[name] = state
+				}
+			}
+
+			fmt.Printf("  %-20s %-8s %-6s %-10s %s\n", "TOPOLOGY", "DEVICES", "LINKS", "STATUS", "NODES")
+			for _, e := range entries {
+				if !e.IsDir() {
+					continue
+				}
+				topoDir := filepath.Join(base, e.Name(), "specs")
+				devices, links := topoCounts(topoDir)
+				if devices == 0 {
+					continue
+				}
+
+				// Check deployment status
+				status := "—"
+				nodes := ""
+				// Derive lab name the same way NewLab does
+				lab, err := newtlab.NewLab(topoDir)
+				if err == nil {
+					if state, ok := deployedLabs[lab.Name]; ok {
+						running, total := 0, 0
+						for _, n := range state.Nodes {
+							total++
+							if n.Status == "running" {
+								running++
+							}
+						}
+						if running == total && total > 0 {
+							status = green("deployed")
+							nodes = fmt.Sprintf("%d/%d running", running, total)
+						} else if running > 0 {
+							status = yellow("degraded")
+							nodes = fmt.Sprintf("%d/%d running", running, total)
+						} else if total > 0 {
+							status = yellow("stopped")
+							nodes = fmt.Sprintf("0/%d", total)
+						}
+					}
+				}
+
+				fmt.Printf("  %-20s %-8d %-6d %-10s %s\n", e.Name(), devices, links, status, nodes)
+			}
+			return nil
+		},
+	}
+}
+
+// topoCounts returns device and link counts from a topology.json.
+func topoCounts(specDir string) (int, int) {
+	path := filepath.Join(specDir, "topology.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0
+	}
+	var topo struct {
+		Devices map[string]json.RawMessage `json:"devices"`
+		Links   []json.RawMessage          `json:"links"`
+	}
+	if err := json.Unmarshal(data, &topo); err != nil {
+		return 0, 0
+	}
+	return len(topo.Devices), len(topo.Links)
+}
+
+// ============================================================================
+// Misc
+// ============================================================================
 
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{

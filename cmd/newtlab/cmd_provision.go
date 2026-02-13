@@ -13,10 +13,11 @@ func newProvisionCmd() *cobra.Command {
 	var parallel int
 
 	cmd := &cobra.Command{
-		Use:   "provision",
+		Use:   "provision [topology]",
 		Short: "Provision devices via newtron",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir, err := requireSpecDir()
+			dir, err := resolveSpecDir(args)
 			if err != nil {
 				return err
 			}

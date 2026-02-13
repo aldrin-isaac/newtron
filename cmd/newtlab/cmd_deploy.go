@@ -15,10 +15,16 @@ func newDeployCmd() *cobra.Command {
 	var parallel int
 
 	cmd := &cobra.Command{
-		Use:   "deploy",
-		Short: "Deploy VMs from topology.json",
+		Use:   "deploy [topology]",
+		Short: "Deploy VMs from topology",
+		Long: `Deploy VMs from a topology spec. The topology can be a name
+(resolved under newtest/topologies/) or specified via -S.
+
+  newtlab deploy 2node
+  newtlab deploy 2node --provision`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir, err := requireSpecDir()
+			dir, err := resolveSpecDir(args)
 			if err != nil {
 				return err
 			}
