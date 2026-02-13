@@ -147,11 +147,6 @@ func TestDeriveVTEPSourceIP(t *testing.T) {
 	}
 }
 
-func TestDeriveVTEPSourceInterface(t *testing.T) {
-	if got := DeriveVTEPSourceInterface(); got != "Loopback0" {
-		t.Errorf("DeriveVTEPSourceInterface() = %q, want %q", got, "Loopback0")
-	}
-}
 
 func TestIsPointToPoint(t *testing.T) {
 	tests := []struct {
@@ -247,29 +242,6 @@ func TestNormalizeInterfaceName(t *testing.T) {
 			got := NormalizeInterfaceName(tt.input)
 			if got != tt.want {
 				t.Errorf("NormalizeInterfaceName(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCoalesce(t *testing.T) {
-	tests := []struct {
-		name   string
-		values []string
-		want   string
-	}{
-		{"first non-empty", []string{"", "b", "c"}, "b"},
-		{"all empty", []string{"", "", ""}, ""},
-		{"first is value", []string{"a", "b", "c"}, "a"},
-		{"single value", []string{"a"}, "a"},
-		{"empty slice", []string{}, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Coalesce(tt.values...)
-			if got != tt.want {
-				t.Errorf("Coalesce(%v) = %q, want %q", tt.values, got, tt.want)
 			}
 		})
 	}

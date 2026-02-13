@@ -75,7 +75,7 @@ type VLANState struct {
 	ID         int
 	Name       string
 	OperStatus string
-	Ports      []string
+	Members    []string
 	SVIStatus  string
 	L2VNI      int
 }
@@ -188,9 +188,10 @@ func (d *Device) Connect(ctx context.Context) error {
 	}
 
 	// Connect ASIC_DB (DB 1) for ASIC-level verification — non-fatal
+	// Expected to fail on VPP (no real ASIC); visible with -v
 	d.asicClient = NewAsicDBClient(addr)
 	if err := d.asicClient.Connect(); err != nil {
-		util.WithDevice(d.Name).Warnf("Failed to connect to asic_db: %v", err)
+		util.WithDevice(d.Name).Debugf("Failed to connect to asic_db: %v", err)
 		d.asicClient = nil
 	}
 

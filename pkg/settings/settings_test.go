@@ -18,9 +18,6 @@ func TestSettings_Defaults(t *testing.T) {
 	if s.DefaultNetwork != "" {
 		t.Errorf("DefaultNetwork should be empty, got %q", s.DefaultNetwork)
 	}
-	if s.DefaultDevice != "" {
-		t.Errorf("DefaultDevice should be empty, got %q", s.DefaultDevice)
-	}
 }
 
 func TestSettings_SettersGetters(t *testing.T) {
@@ -31,28 +28,31 @@ func TestSettings_SettersGetters(t *testing.T) {
 		t.Errorf("SetNetwork() failed, got %q", s.DefaultNetwork)
 	}
 
-	s.SetDevice("leaf1-ny")
-	if s.DefaultDevice != "leaf1-ny" {
-		t.Errorf("SetDevice() failed, got %q", s.DefaultDevice)
-	}
-
 	s.SetSpecDir("/custom/path")
 	if s.GetSpecDir() != "/custom/path" {
 		t.Errorf("SetSpecDir() failed, got %q", s.GetSpecDir())
+	}
+
+	s.SetDefaultSuite("newtest/suites/2node-incremental")
+	if s.DefaultSuite != "newtest/suites/2node-incremental" {
+		t.Errorf("SetDefaultSuite() failed, got %q", s.DefaultSuite)
+	}
+
+	s.SetTopologiesDir("newtest/topologies")
+	if s.TopologiesDir != "newtest/topologies" {
+		t.Errorf("SetTopologiesDir() failed, got %q", s.TopologiesDir)
 	}
 }
 
 func TestSettings_Clear(t *testing.T) {
 	s := &Settings{
 		DefaultNetwork: "test",
-		DefaultDevice:  "device",
 		SpecDir:        "/path",
-		LastDevice:     "last",
 	}
 
 	s.Clear()
 
-	if s.DefaultNetwork != "" || s.DefaultDevice != "" || s.SpecDir != "" || s.LastDevice != "" {
+	if s.DefaultNetwork != "" || s.SpecDir != "" {
 		t.Error("Clear() should reset all fields to empty")
 	}
 }
@@ -70,9 +70,9 @@ func TestSettings_SaveLoad(t *testing.T) {
 	// Create settings
 	original := &Settings{
 		DefaultNetwork: "production",
-		DefaultDevice:  "leaf1-ny",
 		SpecDir:        "/etc/newtron",
-		LastDevice:     "spine1-ny",
+		DefaultSuite:   "newtest/suites/2node-incremental",
+		TopologiesDir:  "newtest/topologies",
 	}
 
 	// Save
@@ -90,14 +90,14 @@ func TestSettings_SaveLoad(t *testing.T) {
 	if loaded.DefaultNetwork != original.DefaultNetwork {
 		t.Errorf("DefaultNetwork mismatch: got %q, want %q", loaded.DefaultNetwork, original.DefaultNetwork)
 	}
-	if loaded.DefaultDevice != original.DefaultDevice {
-		t.Errorf("DefaultDevice mismatch: got %q, want %q", loaded.DefaultDevice, original.DefaultDevice)
-	}
 	if loaded.SpecDir != original.SpecDir {
 		t.Errorf("SpecDir mismatch: got %q, want %q", loaded.SpecDir, original.SpecDir)
 	}
-	if loaded.LastDevice != original.LastDevice {
-		t.Errorf("LastDevice mismatch: got %q, want %q", loaded.LastDevice, original.LastDevice)
+	if loaded.DefaultSuite != original.DefaultSuite {
+		t.Errorf("DefaultSuite mismatch: got %q, want %q", loaded.DefaultSuite, original.DefaultSuite)
+	}
+	if loaded.TopologiesDir != original.TopologiesDir {
+		t.Errorf("TopologiesDir mismatch: got %q, want %q", loaded.TopologiesDir, original.TopologiesDir)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestSettings_LoadNonExistent(t *testing.T) {
 	if s == nil {
 		t.Fatal("LoadFrom() should return non-nil Settings")
 	}
-	if s.DefaultNetwork != "" || s.DefaultDevice != "" {
+	if s.DefaultNetwork != "" {
 		t.Error("LoadFrom() non-existent should return empty settings")
 	}
 }
@@ -156,44 +156,6 @@ func TestSettings_SaveCreatesDirectory(t *testing.T) {
 	}
 }
 
-func TestDefaultSettingsPath(t *testing.T) {
-	path := DefaultSettingsPath()
-	if path == "" {
-		t.Error("DefaultSettingsPath() should not be empty")
-	}
-	if !filepath.IsAbs(path) && path != "newtron_settings.json" {
-		t.Errorf("DefaultSettingsPath() should be absolute or fallback, got %q", path)
-	}
-}
-
-func TestSettings_ExecuteByDefault(t *testing.T) {
-	s := &Settings{ExecuteByDefault: true}
-
-	if !s.ExecuteByDefault {
-		t.Error("ExecuteByDefault should be true")
-	}
-
-	// Test save/load preserves this dangerous setting
-	tmpDir, err := os.MkdirTemp("", "newtron-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	path := filepath.Join(tmpDir, "settings.json")
-	if err := s.SaveTo(path); err != nil {
-		t.Fatalf("SaveTo() failed: %v", err)
-	}
-
-	loaded, err := LoadFrom(path)
-	if err != nil {
-		t.Fatalf("LoadFrom() failed: %v", err)
-	}
-	if !loaded.ExecuteByDefault {
-		t.Error("ExecuteByDefault should be preserved after save/load")
-	}
-}
-
 func TestLoad(t *testing.T) {
 	// Save original HOME and restore after test
 	originalHome := os.Getenv("HOME")
@@ -228,7 +190,7 @@ func TestLoad(t *testing.T) {
 	}
 
 	settingsPath := filepath.Join(newtronDir, "settings.json")
-	testSettings := `{"default_network":"test-network","default_device":"test-device"}`
+	testSettings := `{"default_network":"test-network"}`
 	if err := os.WriteFile(settingsPath, []byte(testSettings), 0644); err != nil {
 		t.Fatalf("Failed to write test settings: %v", err)
 	}
@@ -240,9 +202,6 @@ func TestLoad(t *testing.T) {
 	}
 	if s.DefaultNetwork != "test-network" {
 		t.Errorf("Load() DefaultNetwork = %q, want %q", s.DefaultNetwork, "test-network")
-	}
-	if s.DefaultDevice != "test-device" {
-		t.Errorf("Load() DefaultDevice = %q, want %q", s.DefaultDevice, "test-device")
 	}
 }
 
@@ -264,7 +223,6 @@ func TestSave(t *testing.T) {
 	// Create settings and save
 	s := &Settings{
 		DefaultNetwork: "saved-network",
-		DefaultDevice:  "saved-device",
 	}
 
 	if err := s.Save(); err != nil {
@@ -285,8 +243,15 @@ func TestSave(t *testing.T) {
 	if loaded.DefaultNetwork != "saved-network" {
 		t.Errorf("After Save(), DefaultNetwork = %q, want %q", loaded.DefaultNetwork, "saved-network")
 	}
-	if loaded.DefaultDevice != "saved-device" {
-		t.Errorf("After Save(), DefaultDevice = %q, want %q", loaded.DefaultDevice, "saved-device")
+}
+
+func TestDefaultSettingsPath(t *testing.T) {
+	path := DefaultSettingsPath()
+	if path == "" {
+		t.Error("DefaultSettingsPath() should not be empty")
+	}
+	if !filepath.IsAbs(path) && path != "newtron_settings.json" {
+		t.Errorf("DefaultSettingsPath() should be absolute or fallback, got %q", path)
 	}
 }
 

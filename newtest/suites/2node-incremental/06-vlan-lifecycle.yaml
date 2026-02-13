@@ -24,7 +24,7 @@ steps:
     devices: [leaf1]
     params:
       vlan_id: 100
-      port: Ethernet2
+      interface: Ethernet2
 
   - name: verify-vlan-member
     action: verify-config-db

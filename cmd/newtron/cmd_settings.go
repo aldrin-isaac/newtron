@@ -17,13 +17,11 @@ var settingsCmd = &cobra.Command{
 
 Settings provide defaults for context flags:
   - default_network: Used when -n is not specified
-  - default_device:  Used when -d is not specified
   - spec_dir:        Specification directory
 
 Examples:
   newtron settings show
   newtron settings set network production
-  newtron settings set device leaf1-ny
   newtron settings set specs /etc/newtron
   newtron settings clear`,
 }
@@ -51,10 +49,7 @@ var settingsShowCmd = &cobra.Command{
 		}
 
 		printSetting("default_network", s.DefaultNetwork)
-		printSetting("default_device", s.DefaultDevice)
 		printSetting("spec_dir", s.SpecDir)
-		printSetting("last_device", s.LastDevice)
-		printSetting("lab_specs", s.LabSpecs)
 		printSetting("default_suite", s.DefaultSuite)
 		printSetting("topologies_dir", s.TopologiesDir)
 
@@ -70,15 +65,12 @@ var settingsSetCmd = &cobra.Command{
 
 Available settings:
   network        - Default network name (-n flag default)
-  device         - Default device name (-d flag default)
-  specs          - Specification directory (-s flag default)
-  lab_specs      - Default newtlab spec directory (-S flag default)
+  specs          - Specification directory (-S flag default for newtron and newtlab)
   suite          - Default newtest suite directory (--dir flag default)
   topologies_dir - Base directory for newtest topologies
 
 Examples:
   newtron settings set network production
-  newtron settings set device leaf1-ny
   newtron settings set specs /etc/newtron
   newtron settings set suite newtest/suites/2node-incremental`,
 	Args: cobra.ExactArgs(2),
@@ -95,15 +87,9 @@ Examples:
 		case "network":
 			s.DefaultNetwork = value
 			fmt.Printf("Default network set to: %s\n", value)
-		case "device":
-			s.DefaultDevice = value
-			fmt.Printf("Default device set to: %s\n", value)
 		case "specs", "spec_dir":
 			s.SpecDir = value
 			fmt.Printf("Specification directory set to: %s\n", value)
-		case "lab_specs":
-			s.LabSpecs = value
-			fmt.Printf("Lab specs directory set to: %s\n", value)
 		case "suite", "default_suite":
 			s.DefaultSuite = value
 			fmt.Printf("Default suite set to: %s\n", value)
@@ -111,7 +97,7 @@ Examples:
 			s.TopologiesDir = value
 			fmt.Printf("Topologies directory set to: %s\n", value)
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, device, specs, lab_specs, suite, topologies_dir)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir)", setting)
 		}
 
 		if err := s.Save(); err != nil {
@@ -138,20 +124,14 @@ var settingsGetCmd = &cobra.Command{
 		switch setting {
 		case "network":
 			value = s.DefaultNetwork
-		case "device":
-			value = s.DefaultDevice
 		case "specs", "spec_dir":
 			value = s.SpecDir
-		case "last_device":
-			value = s.LastDevice
-		case "lab_specs":
-			value = s.LabSpecs
 		case "suite", "default_suite":
 			value = s.DefaultSuite
 		case "topologies_dir":
 			value = s.TopologiesDir
 		default:
-			return fmt.Errorf("unknown setting: %s", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir)", setting)
 		}
 
 		if value == "" {

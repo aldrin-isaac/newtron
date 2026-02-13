@@ -293,7 +293,7 @@ func TestVLANInfo_Structure(t *testing.T) {
 	info := VLANInfo{
 		ID:        100,
 		Name:      "ServerVLAN",
-		Ports:     []string{"Ethernet0", "Ethernet4(t)"},
+		Members:   []string{"Ethernet0", "Ethernet4(t)"},
 		SVIStatus: "up",
 	}
 
@@ -303,8 +303,8 @@ func TestVLANInfo_Structure(t *testing.T) {
 	if info.Name != "ServerVLAN" {
 		t.Errorf("Name = %q, want %q", info.Name, "ServerVLAN")
 	}
-	if len(info.Ports) != 2 {
-		t.Errorf("Ports count = %d, want %d", len(info.Ports), 2)
+	if len(info.Members) != 2 {
+		t.Errorf("Members count = %d, want %d", len(info.Members), 2)
 	}
 	if info.SVIStatus != "up" {
 		t.Errorf("SVIStatus = %q, want %q", info.SVIStatus, "up")
@@ -408,11 +408,11 @@ func TestPortChannelInfo_Structure(t *testing.T) {
 
 func TestACLTableInfo_Structure(t *testing.T) {
 	info := ACLTableInfo{
-		Name:   "customer-edge-in",
-		Type:   "L3",
-		Stage:  "ingress",
-		Ports:  "Ethernet0,Ethernet4",
-		Policy: "Customer edge ingress filter",
+		Name:            "customer-edge-in",
+		Type:            "L3",
+		Stage:           "ingress",
+		BoundInterfaces: "Ethernet0,Ethernet4",
+		Policy:          "Customer edge ingress filter",
 	}
 
 	if info.Name != "customer-edge-in" {
@@ -424,8 +424,8 @@ func TestACLTableInfo_Structure(t *testing.T) {
 	if info.Stage != "ingress" {
 		t.Errorf("Stage = %q, want %q", info.Stage, "ingress")
 	}
-	if info.Ports != "Ethernet0,Ethernet4" {
-		t.Errorf("Ports = %q, want %q", info.Ports, "Ethernet0,Ethernet4")
+	if info.BoundInterfaces != "Ethernet0,Ethernet4" {
+		t.Errorf("BoundInterfaces = %q, want %q", info.BoundInterfaces, "Ethernet0,Ethernet4")
 	}
 	if info.Policy != "Customer edge ingress filter" {
 		t.Errorf("Policy = %q, want %q", info.Policy, "Customer edge ingress filter")

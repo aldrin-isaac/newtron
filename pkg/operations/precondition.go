@@ -347,10 +347,10 @@ func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
 		return true // ACL doesn't exist, safe to "delete"
 	}
 
-	// Count ports excluding the one being removed
+	// Count interfaces excluding the one being removed
 	count := 0
-	for _, port := range splitPorts(acl.Ports) {
-		if port != dc.excludeInterface {
+	for _, intf := range splitPorts(acl.Ports) {
+		if intf != dc.excludeInterface {
 			count++
 		}
 	}
@@ -371,8 +371,8 @@ func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool {
 	for key := range configDB.VLANMember {
 		// Key format: Vlan100|Ethernet0
 		if len(key) > len(vlanName)+1 && key[:len(vlanName)+1] == vlanName+"|" {
-			memberPort := key[len(vlanName)+1:]
-			if memberPort != dc.excludeInterface {
+			memberIface := key[len(vlanName)+1:]
+			if memberIface != dc.excludeInterface {
 				count++
 			}
 		}
@@ -418,8 +418,8 @@ func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
 	return count == 0
 }
 
-// GetACLRemainingPorts returns the ports that will remain after removing the excluded interface
-func (dc *DependencyChecker) GetACLRemainingPorts(aclName string) string {
+// GetACLRemainingInterfaces returns the interfaces that will remain after removing the excluded one
+func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 	configDB := dc.device.ConfigDB()
 	if configDB == nil {
 		return ""
@@ -431,9 +431,9 @@ func (dc *DependencyChecker) GetACLRemainingPorts(aclName string) string {
 	}
 
 	var remaining []string
-	for _, port := range splitPorts(acl.Ports) {
-		if port != dc.excludeInterface {
-			remaining = append(remaining, port)
+	for _, intf := range splitPorts(acl.Ports) {
+		if intf != dc.excludeInterface {
+			remaining = append(remaining, intf)
 		}
 	}
 	return strings.Join(remaining, ",")

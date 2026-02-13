@@ -69,12 +69,12 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 	}
 
 	// VLAN creation (for L2/IRB)
-	if (svc.ServiceType == spec.ServiceTypeL2 || svc.ServiceType == spec.ServiceTypeIRB) && macvpnDef != nil {
-		vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
+	if (svc.ServiceType == spec.ServiceTypeL2 || svc.ServiceType == spec.ServiceTypeIRB) && svc.VLAN > 0 {
+		vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
 		entries = append(entries, CompositeEntry{
 			Table:  "VLAN",
 			Key:    vlanName,
-			Fields: map[string]string{"vlanid": fmt.Sprintf("%d", macvpnDef.VLAN)},
+			Fields: map[string]string{"vlanid": fmt.Sprintf("%d", svc.VLAN)},
 		})
 
 		// L2VNI mapping
@@ -158,8 +158,8 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 	// Interface configuration based on service type
 	switch svc.ServiceType {
 	case spec.ServiceTypeL2:
-		if macvpnDef != nil {
-			vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
+		if svc.VLAN > 0 {
+			vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
 			memberKey := fmt.Sprintf("%s|%s", vlanName, p.InterfaceName)
 			entries = append(entries, CompositeEntry{
 				Table:  "VLAN_MEMBER",
@@ -189,8 +189,8 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 		}
 
 	case spec.ServiceTypeIRB:
-		if macvpnDef != nil {
-			vlanName := fmt.Sprintf("Vlan%d", macvpnDef.VLAN)
+		if svc.VLAN > 0 {
+			vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
 			memberKey := fmt.Sprintf("%s|%s", vlanName, p.InterfaceName)
 			entries = append(entries, CompositeEntry{
 				Table:  "VLAN_MEMBER",

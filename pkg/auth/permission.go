@@ -56,6 +56,25 @@ const (
 	PermCompositeDeliver  Permission = "composite.deliver"
 	PermTopologyProvision Permission = "topology.provision"
 
+	// v5: VRF management permissions
+	PermVRFCreate Permission = "vrf.create"
+	PermVRFModify Permission = "vrf.modify"
+	PermVRFDelete Permission = "vrf.delete"
+	PermVRFView   Permission = "vrf.view"
+
+	// v5: Spec authoring — create/delete definitions in network.json
+	PermSpecAuthor Permission = "spec.author"
+
+	// v5: Filter management
+	PermFilterCreate Permission = "filter.create"
+	PermFilterModify Permission = "filter.modify"
+	PermFilterDelete Permission = "filter.delete"
+	PermFilterView   Permission = "filter.view"
+
+	// v5: QoS create/delete (extends existing QoSModify/QoSView)
+	PermQoSCreate Permission = "qos.create"
+	PermQoSDelete Permission = "qos.delete"
+
 	PermAll Permission = "all" // Superuser - allows everything
 )
 
@@ -143,6 +162,21 @@ var StandardCategories = []PermissionCategory{
 		Description: "Topology provisioning",
 		Permissions: []Permission{PermTopologyProvision},
 	},
+	{
+		Name:        "vrf",
+		Description: "VRF management",
+		Permissions: []Permission{PermVRFCreate, PermVRFModify, PermVRFDelete, PermVRFView},
+	},
+	{
+		Name:        "spec",
+		Description: "Spec authoring (network.json definitions)",
+		Permissions: []Permission{PermSpecAuthor},
+	},
+	{
+		Name:        "filter",
+		Description: "Filter template management",
+		Permissions: []Permission{PermFilterCreate, PermFilterModify, PermFilterDelete, PermFilterView},
+	},
 }
 
 // Context provides context for permission checks
@@ -187,7 +221,7 @@ func (p Permission) IsReadOnly() bool {
 	switch p {
 	case PermServiceView, PermInterfaceView, PermLAGView, PermVLANView,
 		PermACLView, PermEVPNView, PermBGPView, PermQoSView, PermAuditView,
-		PermHealthCheck:
+		PermHealthCheck, PermVRFView, PermFilterView:
 		return true
 	}
 	return false

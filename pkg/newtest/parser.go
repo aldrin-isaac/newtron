@@ -243,7 +243,7 @@ func validateStepFields(scenario string, index int, step *Step) error {
 		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
 			return err
 		}
-		if err := requireParam(prefix, step.Params, "port"); err != nil {
+		if err := requireParam(prefix, step.Params, "interface"); err != nil {
 			return err
 		}
 	case ActionCreateVRF:

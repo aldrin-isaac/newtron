@@ -83,11 +83,6 @@ func DeriveVTEPSourceIP(loopbackIP string) string {
 	return loopbackIP
 }
 
-// DeriveVTEPSourceInterface returns the convention VTEP source interface
-func DeriveVTEPSourceInterface() string {
-	return "Loopback0"
-}
-
 // DeriveRouteDistinguisher generates an RD for a VRF
 func DeriveRouteDistinguisher(routerID string, vrfIndex int) string {
 	return FormatRouteDistinguisher(routerID, vrfIndex)
@@ -181,21 +176,6 @@ func NormalizeInterfaceName(name string) string {
 
 	// Already in correct format or unknown
 	return name
-}
-
-// Coalesce returns the first non-empty string (alias for CoalesceString)
-func Coalesce(values ...string) string {
-	return CoalesceString(values...)
-}
-
-// CoalesceString returns the first non-empty string
-func CoalesceString(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // CoalesceInt returns the first non-zero int

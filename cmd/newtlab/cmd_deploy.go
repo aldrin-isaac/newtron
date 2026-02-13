@@ -59,7 +59,7 @@ func newDeployCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&host, "host", "", "deploy only nodes for this host")
+	cmd.Flags().StringVar(&host, "host", "", "deploy only nodes assigned to this host (multi-host mode)")
 	cmd.Flags().BoolVar(&force, "force", false, "force deploy (destroy existing first)")
 	cmd.Flags().BoolVar(&provision, "provision", false, "provision devices after deploy")
 	cmd.Flags().IntVar(&parallel, "parallel", 1, "parallel provisioning threads")

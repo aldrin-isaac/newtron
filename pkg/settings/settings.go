@@ -12,21 +12,8 @@ type Settings struct {
 	// DefaultNetwork is the network to use when -n is not specified
 	DefaultNetwork string `json:"default_network,omitempty"`
 
-	// DefaultDevice is the device to use when -d is not specified
-	DefaultDevice string `json:"default_device,omitempty"`
-
 	// SpecDir overrides the default specification directory
 	SpecDir string `json:"spec_dir,omitempty"`
-
-	// LastDevice tracks the last device connected to (for convenience)
-	LastDevice string `json:"last_device,omitempty"`
-
-	// ExecuteByDefault if true, executes changes without -x flag
-	// (DANGEROUS - not recommended, dry-run is safer default)
-	ExecuteByDefault bool `json:"execute_by_default,omitempty"`
-
-	// LabSpecs is the default -S spec directory for newtlab
-	LabSpecs string `json:"lab_specs,omitempty"`
 
 	// DefaultSuite is the default --dir for newtest run
 	DefaultSuite string `json:"default_suite,omitempty"`
@@ -95,11 +82,6 @@ func (s *Settings) SetNetwork(network string) {
 	s.DefaultNetwork = network
 }
 
-// SetDevice sets the default device
-func (s *Settings) SetDevice(device string) {
-	s.DefaultDevice = device
-}
-
 // SetSpecDir sets the specification directory
 func (s *Settings) SetSpecDir(dir string) {
 	s.SpecDir = dir
@@ -111,11 +93,6 @@ func (s *Settings) GetSpecDir() string {
 		return s.SpecDir
 	}
 	return "/etc/newtron"
-}
-
-// SetLabSpecs sets the default newtlab spec directory
-func (s *Settings) SetLabSpecs(dir string) {
-	s.LabSpecs = dir
 }
 
 // SetDefaultSuite sets the default newtest suite directory

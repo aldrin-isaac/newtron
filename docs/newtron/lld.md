@@ -957,7 +957,7 @@ type VLANState struct {
     ID         int
     Name       string
     OperStatus string
-    Ports      []string
+    Members    []string
     SVIStatus  string
     L2VNI      int
 }
@@ -1322,7 +1322,7 @@ type VLANEntry struct {
     MTU         string `json:"mtu,omitempty"`
 }
 
-// VLANMemberEntry represents a VLAN member port in CONFIG_DB.
+// VLANMemberEntry represents a VLAN member interface in CONFIG_DB.
 // Key format: "Vlan100|Ethernet0", "Vlan100|PortChannel100"
 type VLANMemberEntry struct {
     TaggingMode string `json:"tagging_mode"` // "tagged", "untagged"
@@ -1896,12 +1896,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
         }
     }
 
-    // 4. Remove ACLs if no other ports reference them
+    // 4. Remove ACLs if no other interfaces reference them
     aclInName := util.DeriveACLName(binding.ServiceName, "in")
     aclOutName := util.DeriveACLName(binding.ServiceName, "out")
     for _, aclName := range []string{aclInName, aclOutName} {
         if dc.CanDeleteACL(aclName, i.name) {
-            // No other ports reference this ACL — delete rules then table
+            // No other interfaces reference this ACL — delete rules then table
             for ruleKey := range d.Underlying().ConfigDB.ACLRule {
                 if strings.HasPrefix(ruleKey, aclName+"|") {
                     cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
@@ -1909,7 +1909,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
             }
             cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
         } else {
-            // Other ports still reference this ACL — just remove this interface from ports list
+            // Other interfaces still reference this ACL — just remove this interface from binding list
             existing := d.Underlying().ConfigDB.ACLTable[aclName]
             ports := strings.Split(existing.Ports, ",")
             filtered := removeFromSlice(ports, i.name)
@@ -1978,11 +1978,11 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*Chang
 // ============================================================================
 
 // BindACL binds an ACL to this interface.
-// ACLs are shared - adds this interface to the ACL's ports list.
+// ACLs are shared - adds this interface to the ACL's binding list.
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error)
 
 // UnbindACL removes an ACL binding from this interface.
-// If last user, deletes the ACL; otherwise just removes from ports list.
+// If last user, deletes the ACL; otherwise just removes from binding list.
 func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error)
 
 // ============================================================================
@@ -2255,12 +2255,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 ```go
 // generateACLEntries adds ACL_TABLE + ACL_RULE entries to the ChangeSet.
-// If the ACL already exists in CONFIG_DB, appends this interface to the ports list
+// If the ACL already exists in CONFIG_DB, appends this interface to the binding list
 // rather than creating a new ACL_TABLE entry.
 func (i *Interface) generateACLEntries(cs *ChangeSet, aclName string, filter *spec.FilterSpec, stage string) {
     existing := i.Device().Underlying().ConfigDB.ACLTable[aclName]
     if existing.Type != "" {
-        // ACL exists — add this interface to ports list
+        // ACL exists — add this interface to binding list
         ports := strings.Split(existing.Ports, ",")
         if !contains(ports, i.name) {
             ports = append(ports, i.name)
@@ -2313,7 +2313,7 @@ func NewDependencyChecker(configDB *device.ConfigDB) *DependencyChecker {
     return &DependencyChecker{configDB: configDB}
 }
 
-// CanDeleteACL returns true if the ACL has no remaining port bindings
+// CanDeleteACL returns true if the ACL has no remaining interface bindings
 // after removing the given interface. Checks ACL_TABLE[aclName].ports.
 func (dc *DependencyChecker) CanDeleteACL(aclName, removingInterface string) bool {
     entry, ok := dc.configDB.ACLTable[aclName]
@@ -2411,7 +2411,7 @@ Device operations are methods on the `Device` type. All operations return a `*Ch
 
 func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error)
 func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
-func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tagged bool) (*ChangeSet, error)
+func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error)
 
 // ============================================================================
 // PortChannel (LAG) Management
@@ -2436,7 +2436,7 @@ func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
 func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error)
 func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error)
 func (d *Device) AddACLRule(ctx context.Context, tableName string, rule ACLRuleEntry) (*ChangeSet, error)
-func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, port string) (*ChangeSet, error)
+func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error)
 
 // ============================================================================
 // EVPN/VTEP Management
@@ -2710,10 +2710,10 @@ type VTEPConfig struct {
 
 // ACLTableConfig holds configuration options for CreateACLTable
 type ACLTableConfig struct {
-    Type        string   // L3, L3V6, MIRROR
-    Stage       string   // ingress, egress
+    Type        string // L3, L3V6, MIRROR
+    Stage       string // ingress, egress
     Description string
-    Ports       []string
+    Ports       string // Comma-separated interface names (maps to CONFIG_DB ACL_TABLE.ports)
 }
 
 // LoopbackBGPNeighborConfig holds configuration for loopback-based BGP neighbors

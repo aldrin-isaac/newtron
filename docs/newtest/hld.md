@@ -228,7 +228,7 @@ steps:
 | `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron `Interface.Set/SetIP/SetVRF` |
 | `create-vlan` | Create a VLAN | newtron `Device.CreateVLAN()` |
 | `delete-vlan` | Delete a VLAN | newtron `Device.DeleteVLAN()` |
-| `add-vlan-member` | Add port to a VLAN as tagged/untagged member | newtron `Device.AddVLANMember()` |
+| `add-vlan-member` | Add an interface to a VLAN as tagged/untagged member | newtron `Device.AddVLANMember()` |
 | `create-vrf` | Create a VRF | newtron `Device.CreateVRF()` |
 | `delete-vrf` | Delete a VRF | newtron `Device.DeleteVRF()` |
 | `create-vtep` | Create a VXLAN tunnel endpoint (VTEP) | newtron `Device.CreateVTEP()` |
@@ -377,7 +377,7 @@ Scenarios are organized in two ways:
 
 #### 2node-incremental Suite
 
-The `newtest/suites/2node-incremental/` suite contains 25 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
+The `newtest/suites/2node-incremental/` suite contains 27 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
 
 | # | Scenario | Requires | What It Tests |
 |---|----------|----------|---------------|
@@ -406,6 +406,8 @@ The `newtest/suites/2node-incremental/` suite contains 25 scenarios that increme
 | 22 | `verify-provisioning` | refresh-service | ChangeSet verification after apply |
 | 23 | `service-churn` | verify-provisioning | Stress test: 10x apply/remove cycle |
 | 24 | `cleanup` | service-churn | Cleanup and verify no orphaned resources |
+| 25 | `qos-l3-service` | vrf-lifecycle | 4q-customer QoS: DSCP map, schedulers, port binding, cleanup |
+| 26 | `qos-datacenter` | vlan-lifecycle | 8q-datacenter QoS with ECN/WRED profile verification |
 
 Run the suite with:
 

@@ -357,70 +357,70 @@ func TestVLAN_IsIRB(t *testing.T) {
 	})
 }
 
-func TestVLAN_AddTaggedPort(t *testing.T) {
+func TestVLAN_AddTaggedMember(t *testing.T) {
 	vlan := NewVLAN(100, "Test")
 
-	vlan.AddTaggedPort("Ethernet0")
-	if len(vlan.TaggedPorts) != 1 {
-		t.Errorf("TaggedPorts count = %d, want %d", len(vlan.TaggedPorts), 1)
+	vlan.AddTaggedMember("Ethernet0")
+	if len(vlan.TaggedMembers) != 1 {
+		t.Errorf("TaggedMembers count = %d, want %d", len(vlan.TaggedMembers), 1)
 	}
 
 	// Duplicate should not add again
-	vlan.AddTaggedPort("Ethernet0")
-	if len(vlan.TaggedPorts) != 1 {
-		t.Errorf("Duplicate add should not increase count, got %d", len(vlan.TaggedPorts))
+	vlan.AddTaggedMember("Ethernet0")
+	if len(vlan.TaggedMembers) != 1 {
+		t.Errorf("Duplicate add should not increase count, got %d", len(vlan.TaggedMembers))
 	}
 }
 
-func TestVLAN_AddUntaggedPort(t *testing.T) {
+func TestVLAN_AddUntaggedMember(t *testing.T) {
 	vlan := NewVLAN(100, "Test")
 
-	vlan.AddUntaggedPort("Ethernet0")
-	if len(vlan.UntaggedPorts) != 1 {
-		t.Errorf("UntaggedPorts count = %d, want %d", len(vlan.UntaggedPorts), 1)
+	vlan.AddUntaggedMember("Ethernet0")
+	if len(vlan.UntaggedMembers) != 1 {
+		t.Errorf("UntaggedMembers count = %d, want %d", len(vlan.UntaggedMembers), 1)
 	}
 
 	// Duplicate should not add again
-	vlan.AddUntaggedPort("Ethernet0")
-	if len(vlan.UntaggedPorts) != 1 {
-		t.Errorf("Duplicate add should not increase count, got %d", len(vlan.UntaggedPorts))
+	vlan.AddUntaggedMember("Ethernet0")
+	if len(vlan.UntaggedMembers) != 1 {
+		t.Errorf("Duplicate add should not increase count, got %d", len(vlan.UntaggedMembers))
 	}
 }
 
-func TestVLAN_RemovePort(t *testing.T) {
+func TestVLAN_RemoveMember(t *testing.T) {
 	vlan := NewVLAN(100, "Test")
-	vlan.AddTaggedPort("Ethernet0")
-	vlan.AddUntaggedPort("Ethernet4")
+	vlan.AddTaggedMember("Ethernet0")
+	vlan.AddUntaggedMember("Ethernet4")
 
-	if !vlan.RemovePort("Ethernet0") {
-		t.Error("RemovePort() should return true for tagged port")
+	if !vlan.RemoveMember("Ethernet0") {
+		t.Error("RemoveMember() should return true for tagged member")
 	}
-	if len(vlan.TaggedPorts) != 0 {
-		t.Errorf("TaggedPorts count = %d, want %d", len(vlan.TaggedPorts), 0)
-	}
-
-	if !vlan.RemovePort("Ethernet4") {
-		t.Error("RemovePort() should return true for untagged port")
+	if len(vlan.TaggedMembers) != 0 {
+		t.Errorf("TaggedMembers count = %d, want %d", len(vlan.TaggedMembers), 0)
 	}
 
-	if vlan.RemovePort("Ethernet8") {
-		t.Error("RemovePort() should return false for non-member")
+	if !vlan.RemoveMember("Ethernet4") {
+		t.Error("RemoveMember() should return true for untagged member")
+	}
+
+	if vlan.RemoveMember("Ethernet8") {
+		t.Error("RemoveMember() should return false for non-member")
 	}
 }
 
-func TestVLAN_HasPort(t *testing.T) {
+func TestVLAN_HasMember(t *testing.T) {
 	vlan := NewVLAN(100, "Test")
-	vlan.AddTaggedPort("Ethernet0")
-	vlan.AddUntaggedPort("Ethernet4")
+	vlan.AddTaggedMember("Ethernet0")
+	vlan.AddUntaggedMember("Ethernet4")
 
-	if !vlan.HasPort("Ethernet0") {
-		t.Error("HasPort() should return true for tagged port")
+	if !vlan.HasMember("Ethernet0") {
+		t.Error("HasMember() should return true for tagged member")
 	}
-	if !vlan.HasPort("Ethernet4") {
-		t.Error("HasPort() should return true for untagged port")
+	if !vlan.HasMember("Ethernet4") {
+		t.Error("HasMember() should return true for untagged member")
 	}
-	if vlan.HasPort("Ethernet8") {
-		t.Error("HasPort() should return false for non-member")
+	if vlan.HasMember("Ethernet8") {
+		t.Error("HasMember() should return false for non-member")
 	}
 }
 
@@ -683,40 +683,40 @@ func TestACLTable_GetRule(t *testing.T) {
 	}
 }
 
-func TestACLTable_BindPort(t *testing.T) {
+func TestACLTable_BindInterface(t *testing.T) {
 	table := NewACLTable("TEST", ACLTypeL3, ACLStageIngress)
 
-	table.BindPort("Ethernet0")
+	table.BindInterface("Ethernet0")
 	if len(table.Ports) != 1 {
 		t.Errorf("Ports count = %d, want %d", len(table.Ports), 1)
 	}
 
 	// Duplicate should not add again
-	table.BindPort("Ethernet0")
+	table.BindInterface("Ethernet0")
 	if len(table.Ports) != 1 {
 		t.Errorf("Duplicate bind should not increase count, got %d", len(table.Ports))
 	}
 }
 
-func TestACLTable_UnbindPort(t *testing.T) {
+func TestACLTable_UnbindInterface(t *testing.T) {
 	table := NewACLTable("TEST", ACLTypeL3, ACLStageIngress)
-	table.BindPort("Ethernet0")
+	table.BindInterface("Ethernet0")
 
-	if !table.UnbindPort("Ethernet0") {
-		t.Error("UnbindPort() should return true")
+	if !table.UnbindInterface("Ethernet0") {
+		t.Error("UnbindInterface() should return true")
 	}
 	if len(table.Ports) != 0 {
 		t.Errorf("Ports count = %d, want %d", len(table.Ports), 0)
 	}
 
-	if table.UnbindPort("Ethernet0") {
-		t.Error("UnbindPort() should return false for non-bound")
+	if table.UnbindInterface("Ethernet0") {
+		t.Error("UnbindInterface() should return false for non-bound")
 	}
 }
 
 func TestACLTable_IsBoundTo(t *testing.T) {
 	table := NewACLTable("TEST", ACLTypeL3, ACLStageIngress)
-	table.BindPort("Ethernet0")
+	table.BindInterface("Ethernet0")
 
 	if !table.IsBoundTo("Ethernet0") {
 		t.Error("IsBoundTo() should return true")

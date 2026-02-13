@@ -7,47 +7,31 @@
 //   - Audit logging of all changes
 //   - Permission-based access control
 //
-// OO CLI Pattern:
+// Noun-group CLI Pattern:
 //
-//	Context flags select the object; commands are methods on that object:
+//	newtron <device> <resource> <action> [args] [-x]
 //
-//	newtron -n <network> -d <device> -i <interface> <verb> [args] [-x]
-//	         └─────────────┬─────────────────────┘   └──┬──┘
-//	               Object Selection              Method Call
-//
-// Context flags:
-//
-//	-n, --network   Network name (or set default via: newtron settings set network <name>)
-//	-d, --device    Device name (selects Device object)
-//	-i, --interface Interface name (selects Interface object)
-//
-// Command verbs (symmetric read/write):
-//
-//	show/get          - Read object details or properties
-//	set               - Write object properties
-//	list/list-*       - List child objects or collection members
-//	create/delete     - Object lifecycle
-//	add-*/remove-*    - Collection operations
-//	apply-*/remove-*  - Bind/unbind operations (service, baseline)
-//	bind-*/unbind-*   - Bind/unbind operations (ACL)
-//	map-*/unmap-*     - Mapping operations (VNI)
+// The first argument is the device name unless it matches a known command.
+// Commands that don't need a device (settings, version, service list) work without one.
 //
 // Examples:
 //
-//	newtron -d leaf1-ny show                              # Device details
-//	newtron -d leaf1-ny -i Ethernet0 show                 # Interface details
-//	newtron -d leaf1-ny -i Ethernet0 get mtu              # Get specific property
-//	newtron -d leaf1-ny -i Ethernet0 set mtu 9000         # Set property
-//	newtron -d leaf1-ny -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30
-//	newtron -d leaf1-ny -i Ethernet0 get-service          # Get bound service
-//	newtron -d leaf1-ny -i PortChannel100 add-member Ethernet0
-//	newtron -d leaf1-ny -i PortChannel100 list-members    # List LAG members
+//	newtron leaf1-ny show                              # Device details
+//	newtron leaf1-ny interface list                    # List interfaces
+//	newtron leaf1-ny interface set Ethernet0 mtu 9000 -x
+//	newtron leaf1-ny vlan create 100 --name Servers -x
+//	newtron leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
+//	newtron leaf1-ny vrf add-neighbor Vrf_CUST1 Ethernet0 65100 -x
+//	newtron leaf1-ny evpn setup -x
+//	newtron service list                               # No device needed
+//	newtron settings show                              # No device needed
 package main
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -63,9 +47,8 @@ import (
 
 var (
 	// Global context flags (set the scope for operations)
-	networkName   string // -n, --network
-	deviceName    string // -d, --device
-	interfaceName string // -i, --interface
+	networkName string // -n, --network
+	deviceName  string // -d, --device
 
 	// Global option flags
 	specDir     string
@@ -82,10 +65,34 @@ var (
 )
 
 func main() {
+	// Implicit device name: if the first arg is not a known command or flag,
+	// treat it as a device name. This lets users write:
+	//   newtron leaf1 vlan list
+	// instead of:
+	//   newtron -d leaf1 vlan list
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") && !isKnownCommand(os.Args[1]) {
+		os.Args = append([]string{os.Args[0], "-d", os.Args[1]}, os.Args[2:]...)
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// isKnownCommand checks if a string matches a registered top-level command name.
+func isKnownCommand(name string) bool {
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == name {
+			return true
+		}
+		for _, alias := range cmd.Aliases {
+			if alias == name {
+				return true
+			}
+		}
+	}
+	return name == "help" || name == "completion"
 }
 
 var rootCmd = &cobra.Command{
@@ -94,12 +101,22 @@ var rootCmd = &cobra.Command{
 	SilenceUsage:      true,
 	SilenceErrors:     true,
 	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
-	Long: `Newtron is an object-oriented CLI for managing SONiC network devices.
+	Long: `Newtron is a noun-group CLI for managing SONiC network devices.
 
-Context flags select the object; commands are methods on that object.
+Commands are organized by resource (vlan, lag, bgp, evpn, service, acl, etc.).
 Write commands preview changes by default — use -x to execute.
 
-  newtron -d <device> -i <interface> <verb> [args] [-x]`,
+  newtron <device> <resource> <action> [args] [-x]
+
+The first argument is the device name unless it matches a known command.
+Each resource takes its natural key as a positional argument:
+
+  newtron leaf1 interface show Ethernet0
+  newtron leaf1 vlan create 100
+  newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet0 65100 -x
+  newtron leaf1 service apply Ethernet0 customer-l3
+  newtron service list                           # no device needed
+  newtron settings show                          # no device needed`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip initialization for certain commands
 		if isSettingsOrHelp(cmd) {
@@ -170,80 +187,52 @@ Write commands preview changes by default — use -x to execute.
 
 func init() {
 	// Context flags (object selectors)
-	rootCmd.PersistentFlags().StringVarP(&networkName, "network", "n", "", "Network name (object selector)")
-	rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Device name (object selector)")
-	rootCmd.PersistentFlags().StringVarP(&interfaceName, "interface", "i", "", "Interface/LAG/VLAN name (object selector)")
+	rootCmd.PersistentFlags().StringVarP(&networkName, "network", "n", "", "Network name")
+	rootCmd.PersistentFlags().StringVarP(&deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
 	rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "Specification directory")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
-	// Write flags (-x/-s) and output flags (--json) are local to commands that use them.
-	// Use addWriteFlags(cmd) and addOutputFlags(cmd) to register them.
-
-	// Add write flags to verb commands that mutate state
+	// Write flags (-x/-s) and output flags (--json) on noun-group parents
+	// (PersistentFlags so subcommands inherit)
 	for _, cmd := range []*cobra.Command{
-		setCmd, createCmd, deleteCmd, addMemberCmd, removeMemberCmd,
-		applyServiceCmd, removeServiceCmd, refreshServiceCmd,
-		bindAclCmd, unbindAclCmd, bindMacvpnCmd, unbindMacvpnCmd,
-		addBgpCmd, removeBgpCmd, applyBaselineCmd, cleanupCmd, configureSVICmd,
-		provisionCmd,
+		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
+		vrfCmd, serviceCmd, baselineCmd, deviceCmd, qosCmd, filterCmd,
 	} {
 		addWriteFlags(cmd)
+		addOutputFlags(cmd)
 	}
-
-	// Add output flags to verb commands that produce structured output
-	for _, cmd := range []*cobra.Command{
-		showCmd, getCmd, listCmd, listMembersCmd, listAclsCmd,
-		getServiceCmd, getL2VniCmd, getMacvpnCmd, listBgpCmd,
-		healthCheckVerbCmd,
-	} {
+	for _, cmd := range []*cobra.Command{healthCmd} {
 		addOutputFlags(cmd)
 	}
 
-	// Noun-group aliases: inherit write/output flags for their subcommands
-	for _, cmd := range []*cobra.Command{aclCmd, bgpCmd, lagCmd, vlanCmd, evpnCmd, baselineCmd} {
-		addWriteFlags(cmd)
-		addOutputFlags(cmd)
-	}
-	for _, cmd := range []*cobra.Command{serviceCmd, interfaceCmd, healthCmd} {
-		addOutputFlags(cmd)
-	}
+	// Top-level commands that need their own flags
+	addOutputFlags(showCmd)
+	addWriteFlags(provisionCmd)
 
 	// ============================================================================
 	// Command Groups
 	// ============================================================================
 
 	rootCmd.AddGroup(
-		&cobra.Group{ID: "query", Title: "Object Operations:"},
-		&cobra.Group{ID: "mutate", Title: "Resource Management:"},
+		&cobra.Group{ID: "resource", Title: "Resource Commands:"},
 		&cobra.Group{ID: "device", Title: "Device Operations:"},
 		&cobra.Group{ID: "meta", Title: "Configuration & Meta:"},
 	)
 
-	// Object Operations (read/query)
+	// Resource Commands (noun-groups)
 	for _, cmd := range []*cobra.Command{
-		showCmd, getCmd, listCmd, listMembersCmd, listAclsCmd,
-		getServiceCmd, getL2VniCmd, getMacvpnCmd, listBgpCmd,
+		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
+		vrfCmd, serviceCmd, baselineCmd, qosCmd, filterCmd,
 	} {
-		cmd.GroupID = "query"
-		rootCmd.AddCommand(cmd)
-	}
-
-	// Resource Management (write/mutate)
-	for _, cmd := range []*cobra.Command{
-		setCmd, createCmd, deleteCmd, addMemberCmd, removeMemberCmd,
-		applyServiceCmd, removeServiceCmd, refreshServiceCmd,
-		bindAclCmd, unbindAclCmd, bindMacvpnCmd, unbindMacvpnCmd,
-		addBgpCmd, removeBgpCmd, configureSVICmd,
-	} {
-		cmd.GroupID = "mutate"
+		cmd.GroupID = "resource"
 		rootCmd.AddCommand(cmd)
 	}
 
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
-		provisionCmd, healthCheckVerbCmd, applyBaselineCmd, cleanupCmd, stateCmd,
+		showCmd, provisionCmd, healthCmd, deviceCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)
@@ -252,15 +241,6 @@ func init() {
 	// Configuration & Meta
 	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, versionCmd} {
 		cmd.GroupID = "meta"
-		rootCmd.AddCommand(cmd)
-	}
-
-	// Noun-group aliases: hidden but still functional
-	for _, cmd := range []*cobra.Command{
-		serviceCmd, interfaceCmd, lagCmd, vlanCmd, aclCmd,
-		evpnCmd, bgpCmd, healthCmd, baselineCmd,
-	} {
-		cmd.Hidden = true
 		rootCmd.AddCommand(cmd)
 	}
 
@@ -295,54 +275,6 @@ func requireDevice(ctx context.Context) (*network.Device, error) {
 		return nil, fmt.Errorf("device required: use -d <device> flag")
 	}
 	return net.ConnectDevice(ctx, deviceName)
-}
-
-// requireInterface ensures both device and interface are specified
-func requireInterface(ctx context.Context) (*network.Device, *network.Interface, error) {
-	if deviceName == "" {
-		return nil, nil, fmt.Errorf("device required: use -d <device> flag")
-	}
-	if interfaceName == "" {
-		return nil, nil, fmt.Errorf("interface required: use -i <interface> flag")
-	}
-
-	dev, err := net.ConnectDevice(ctx, deviceName)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Normalize interface name (e.g., Eth0 -> Ethernet0, Po100 -> PortChannel100)
-	normalizedName := util.NormalizeInterfaceName(interfaceName)
-	intf, err := dev.GetInterface(normalizedName)
-	if err != nil {
-		return nil, nil, err
-	}
-	return dev, intf, nil
-}
-
-// getDevice returns the device from -d flag (for commands that accept device as arg or flag)
-func getDevice(args []string) (string, error) {
-	if len(args) > 0 {
-		return args[0], nil
-	}
-	if deviceName != "" {
-		return deviceName, nil
-	}
-	return "", fmt.Errorf("device required: use -d <device> flag or provide as argument")
-}
-
-// getInterface returns the interface from -i flag (for commands that accept interface as arg or flag)
-// The returned name is normalized to SONiC format (e.g., Eth0 -> Ethernet0)
-func getInterface(args []string, offset int) (string, error) {
-	var name string
-	if len(args) > offset {
-		name = args[offset]
-	} else if interfaceName != "" {
-		name = interfaceName
-	} else {
-		return "", fmt.Errorf("interface required: use -i <interface> flag or provide as argument")
-	}
-	// Normalize interface name (e.g., Eth0 -> Ethernet0, Po100 -> PortChannel100)
-	return util.NormalizeInterfaceName(name), nil
 }
 
 // ============================================================================
@@ -402,39 +334,6 @@ func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network
 	defer dev.Unlock()
 
 	changeSet, err := fn(ctx, dev)
-	if err != nil {
-		return err
-	}
-	if changeSet == nil {
-		return nil
-	}
-
-	fmt.Println("Changes to be applied:")
-	fmt.Print(changeSet.String())
-
-	if executeMode {
-		return executeAndSave(ctx, changeSet, dev)
-	}
-	printDryRunNotice()
-	return nil
-}
-
-// withInterfaceWrite handles boilerplate for interface-level write commands.
-// Same contract as withDeviceWrite but also resolves the interface.
-func withInterfaceWrite(fn func(ctx context.Context, dev *network.Device, intf *network.Interface) (*network.ChangeSet, error)) error {
-	ctx := context.Background()
-	dev, intf, err := requireInterface(ctx)
-	if err != nil {
-		return err
-	}
-	defer dev.Disconnect()
-
-	if err := dev.Lock(); err != nil {
-		return fmt.Errorf("locking device: %w", err)
-	}
-	defer dev.Unlock()
-
-	changeSet, err := fn(ctx, dev, intf)
 	if err != nil {
 		return err
 	}

@@ -105,19 +105,16 @@
   "macvpn": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
-      "vlan": 100,
       "l2_vni": 10100,
       "arp_suppression": true
     },
     "storage-vlan200": {
       "description": "Storage VLAN 200",
-      "vlan": 200,
       "l2_vni": 10200,
       "arp_suppression": true
     },
     "tenant-vlan300": {
       "description": "Tenant VLAN 300",
-      "vlan": 300,
       "l2_vni": 10300,
       "arp_suppression": false
     }
@@ -143,6 +140,7 @@
       "vrf_type": "shared",
       "ipvpn": "server-vpn",
       "macvpn": "servers-vlan100",
+      "vlan": 100,
       "anycast_gateway": "10.1.100.1/24",
       "anycast_mac": "00:00:00:01:02:03",
       "qos_policy": "8q-datacenter"
@@ -153,6 +151,7 @@
       "vrf_type": "shared",
       "ipvpn": "server-vpn",
       "macvpn": "storage-vlan200",
+      "vlan": 200,
       "anycast_gateway": "10.1.200.1/24",
       "anycast_mac": "00:00:00:01:02:03",
       "qos_policy": "8q-datacenter"
@@ -163,13 +162,15 @@
       "vrf_type": "interface",
       "ipvpn": "tenant-vpn",
       "macvpn": "tenant-vlan300",
+      "vlan": 300,
       "anycast_gateway": "10.1.30.1/24",
       "anycast_mac": "00:00:00:01:02:03"
     },
     "l2-extend": {
       "description": "L2 VLAN extension only (no routing)",
       "service_type": "l2",
-      "macvpn": "servers-vlan100"
+      "macvpn": "servers-vlan100",
+      "vlan": 100
     },
     "transit": {
       "description": "Transit interface (global routing table, no VPN)",

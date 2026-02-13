@@ -79,9 +79,12 @@ type IPVPNSpec struct {
 
 // MACVPNSpec defines MAC-VPN parameters for L2 bridging (Type-2 routes).
 // Referenced by services via the "macvpn" field.
+//
+// Note: VLAN ID is NOT part of MAC-VPN — it's a local bridge domain concept.
+// VLAN IDs live in ServiceSpec (for L2/IRB services) or are specified
+// when binding a VLAN to a MAC-VPN via `vlan bind-macvpn`.
 type MACVPNSpec struct {
 	Description    string `json:"description,omitempty"`
-	VLAN           int    `json:"vlan"`
 	L2VNI          int    `json:"l2_vni"`
 	ARPSuppression bool   `json:"arp_suppression,omitempty"`
 }
@@ -112,6 +115,9 @@ type ServiceSpec struct {
 	IPVPN   string `json:"ipvpn,omitempty"`    // Reference to ipvpn definition
 	MACVPN  string `json:"macvpn,omitempty"`   // Reference to macvpn definition
 	VRFType string `json:"vrf_type,omitempty"` // "interface" or "shared"
+
+	// VLAN ID for L2/IRB services (local bridge domain)
+	VLAN int `json:"vlan,omitempty"`
 
 	// Routing protocol specification
 	Routing *RoutingSpec `json:"routing,omitempty"`
@@ -457,6 +463,12 @@ type TopologyInterface struct {
 type TopologyLink struct {
 	A string `json:"a"` // "device:interface"
 	Z string `json:"z"` // "device:interface"
+}
+
+// HasDevice returns true if the topology contains a device with the given name.
+func (t *TopologySpecFile) HasDevice(name string) bool {
+	_, ok := t.Devices[name]
+	return ok
 }
 
 // DeviceNames returns a sorted list of device names in the topology.

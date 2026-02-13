@@ -1390,7 +1390,7 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 	allPassed := true
 
 	vlanID := intParam(step.Params, "vlan_id")
-	port := strParam(step.Params, "port")
+	interfaceName := strParam(step.Params, "interface")
 	tagged := boolParam(step.Params, "tagged")
 
 	for _, name := range devices {
@@ -1405,12 +1405,12 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 		}
 
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-			return dev.AddVLANMember(ctx, vlanID, port, tagged)
+			return dev.AddVLANMember(ctx, vlanID, interfaceName, tagged)
 		})
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("add-vlan-member %d %s: %s", vlanID, port, err),
+				Message: fmt.Sprintf("add-vlan-member %d %s: %s", vlanID, interfaceName, err),
 			})
 			allPassed = false
 			continue
@@ -1419,7 +1419,7 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 		changeSets[name] = cs
 		details = append(details, DeviceResult{
 			Device: name, Status: StatusPassed,
-			Message: fmt.Sprintf("added %s to VLAN %d (%d changes)", port, vlanID, len(cs.Changes)),
+			Message: fmt.Sprintf("added %s to VLAN %d (%d changes)", interfaceName, vlanID, len(cs.Changes)),
 		})
 	}
 

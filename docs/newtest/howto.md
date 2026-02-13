@@ -167,7 +167,7 @@ steps:
 | `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron |
 | `create-vlan` | Create a VLAN | newtron |
 | `delete-vlan` | Delete a VLAN | newtron |
-| `add-vlan-member` | Add port to a VLAN | newtron |
+| `add-vlan-member` | Add an interface to a VLAN | newtron |
 | `create-vrf` | Create a VRF | newtron |
 | `delete-vrf` | Delete a VRF | newtron |
 | `create-vtep` | Create a VXLAN tunnel endpoint | newtron |
@@ -672,13 +672,13 @@ anything else → `Set(property, value)`.
   params:
     vlan_id: 100
 
-# Add a port as tagged member
+# Add an interface as tagged member
 - name: add-member
   action: add-vlan-member
   devices: [leaf1]
   params:
     vlan_id: 100
-    port: Ethernet2
+    interface: Ethernet2
 
 # Verify the VLAN was created
 - name: verify-vlan

@@ -485,6 +485,46 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
+// SaveNetwork writes the network spec to disk atomically (temp file + rename).
+func (l *Loader) SaveNetwork(spec *NetworkSpecFile) error {
+	path := filepath.Join(l.specDir, "network.json")
+
+	data, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling network spec: %w", err)
+	}
+	data = append(data, '\n')
+
+	// Write to temp file in the same directory (ensures same filesystem for atomic rename)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "network-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	// Update the in-memory copy
+	l.network = spec
+
+	return nil
+}
+
 func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 	path := filepath.Join(l.specDir, "topology.json")
 	data, err := os.ReadFile(path)

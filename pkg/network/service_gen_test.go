@@ -13,10 +13,11 @@ func TestGenerateServiceEntries_L2(t *testing.T) {
 				"customer-l2": {
 					ServiceType: spec.ServiceTypeL2,
 					MACVPN:      "cust-mac",
+					VLAN:        100,
 				},
 			},
 			MACVPN: map[string]*spec.MACVPNSpec{
-				"cust-mac": {VLAN: 100, L2VNI: 20100, ARPSuppression: true},
+				"cust-mac": {L2VNI: 20100, ARPSuppression: true},
 			},
 		},
 	}
@@ -145,6 +146,7 @@ func TestGenerateServiceEntries_IRB(t *testing.T) {
 					VRFType:        spec.VRFTypeInterface,
 					IPVPN:          "cust-vpn",
 					MACVPN:         "cust-mac",
+					VLAN:           100,
 					AnycastGateway: "10.1.100.1/24",
 					AnycastMAC:     "00:00:00:01:02:03",
 				},
@@ -153,7 +155,7 @@ func TestGenerateServiceEntries_IRB(t *testing.T) {
 				"cust-vpn": {L3VNI: 10001},
 			},
 			MACVPN: map[string]*spec.MACVPNSpec{
-				"cust-mac": {VLAN: 100, L2VNI: 20100},
+				"cust-mac": {L2VNI: 20100},
 			},
 		},
 	}

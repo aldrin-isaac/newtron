@@ -14,22 +14,25 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 6. [Interface Configuration](#6-interface-configuration)
 7. [Link Aggregation (LAG)](#7-link-aggregation-lag)
 8. [VLAN Management](#8-vlan-management)
-9. [EVPN/VXLAN Configuration](#9-evpnvxlan-configuration)
-10. [ACL Management](#10-acl-management)
-11. [BGP Direct Neighbors](#11-bgp-direct-neighbors)
-12. [Health Checks](#12-health-checks)
-13. [State DB Queries](#13-state-db-queries)
-14. [Baseline Configuration](#14-baseline-configuration)
-15. [Cleanup Operations](#15-cleanup-operations)
-16. [Config Persistence](#16-config-persistence)
-17. [Lab Environment](#17-lab-environment)
-18. [Troubleshooting](#18-troubleshooting)
-19. [Go API Usage](#19-go-api-usage)
-20. [Quick Reference](#20-quick-reference)
-21. [Topology Provisioning](#21-topology-provisioning)
-22. [Composite Configuration](#22-composite-configuration)
-23. [CONFIG_DB Cache Behavior](#23-config_db-cache-behavior)
-24. [Related Documentation](#24-related-documentation)
+9. [VRF Management](#9-vrf-management)
+10. [EVPN/VXLAN Configuration](#10-evpnvxlan-configuration)
+11. [ACL Management](#11-acl-management)
+12. [BGP Visibility](#12-bgp-visibility)
+13. [QoS Management](#13-qos-management)
+14. [Filter Management](#14-filter-management)
+15. [Health Checks](#15-health-checks)
+16. [Baseline Configuration](#16-baseline-configuration)
+17. [Cleanup Operations](#17-cleanup-operations)
+18. [Config Persistence](#18-config-persistence)
+19. [Lab Environment](#19-lab-environment)
+20. [Troubleshooting](#20-troubleshooting)
+21. [Go API Usage](#21-go-api-usage)
+22. [Quick Reference](#22-quick-reference)
+23. [Topology Provisioning](#23-topology-provisioning)
+24. [Composite Configuration](#24-composite-configuration)
+25. [End-to-End Workflows](#25-end-to-end-workflows)
+26. [CONFIG_DB Cache Behavior](#26-config_db-cache-behavior)
+27. [Related Documentation](#27-related-documentation)
 
 ---
 
@@ -284,7 +287,6 @@ sudo vim /etc/newtron/network.json
   "macvpn": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
-      "vlan": 100,
       "l2_vni": 10100,
       "arp_suppression": true
     }
@@ -327,7 +329,7 @@ sudo vim /etc/newtron/network.json
 | Section | Purpose |
 |---------|---------|
 | `ipvpn` | IP-VPN definitions (L3VNI, route targets) for L3 routing |
-| `macvpn` | MAC-VPN definitions (VLAN, L2VNI) for L2 bridging |
+| `macvpn` | MAC-VPN definitions (L2VNI) for L2 bridging |
 | `services` | Service templates referencing ipvpn/macvpn by name |
 | `filter_specs` | Reusable ACL rule templates |
 | `policers` | Rate limiter definitions referenced by filter rules |
@@ -356,8 +358,8 @@ sudo vim /etc/newtron/network.json
 QoS policies define declarative queue configurations. Each policy contains 1-8 queues, where array position = queue index = traffic class. Services reference policies by name via `qos_policy`.
 
 Queue types:
-- `dwrr` — Deficit Weighted Round Robin, requires `weight` (percentage)
-- `strict` — Strict priority, must not have `weight`
+- `dwrr` -- Deficit Weighted Round Robin, requires `weight` (percentage)
+- `strict` -- Strict priority, must not have `weight`
 
 Optional: `ecn: true` on a queue creates a shared WRED profile with ECN marking.
 
@@ -523,23 +525,33 @@ Topology spec is optional. When present, it enables automated provisioning via `
 
 ## 4. Basic Usage
 
-### 4.1 Command Structure (Object-Oriented)
+### 4.1 Command Structure (Noun-Group CLI)
 
-The CLI follows an object-oriented design where **context flags select the object** and **commands are methods on that object**:
+The CLI follows a **noun-group** design where commands are organized by resource type. The first positional argument is the device name unless it matches a known command:
 
 ```
-newtron -n <network> -d <device> -i <interface> <verb> [args] [-x]
-         |                                     |   |         |
-         +----- Object Selection --------------+   +- Method-+
+newtron <device> <noun> <action> [args] [-x]
+         |         |       |              |
+         +- scope -+       +-- operation -+
 ```
 
-**Context Flags (Object Selectors):**
+Examples:
 
-| Flag | Description | Object Level |
-|------|-------------|--------------|
-| `-n, --network` | Network configuration name | Network object |
-| `-d, --device` | Target device name | Device object |
-| `-i, --interface` | Target interface/LAG/VLAN | Interface object |
+```bash
+newtron leaf1 interface list                # device-required
+newtron leaf1 vlan create 100 -x            # write with execute
+newtron service list                        # no device needed
+newtron evpn ipvpn list                     # no device needed
+```
+
+**Implicit device detection:** If the first argument does not match a known command name, it is treated as the device name. This means `newtron leaf1 vlan list` is equivalent to `newtron -d leaf1 vlan list`.
+
+**Two command scopes:**
+
+| Scope | Description | Examples |
+|-------|-------------|----------|
+| Device-required | Reads/writes CONFIG_DB on a specific device | `interface list`, `vlan create`, `vrf add-neighbor` |
+| No-device | Reads/writes network.json specs | `service list`, `evpn ipvpn create`, `qos create`, `filter list` |
 
 **Interface Name Formats:**
 
@@ -547,32 +559,24 @@ Both short and full interface names are accepted. Short names are automatically 
 
 | Short | Full (SONiC) | Example Usage |
 |-------|--------------|---------------|
-| `Eth0` | `Ethernet0` | `-i Eth0` |
-| `Po100` | `PortChannel100` | `-i Po100` |
-| `Vl100` | `Vlan100` | `-i Vl100` |
-| `Lo0` | `Loopback0` | `-i Lo0` |
+| `Eth0` | `Ethernet0` | `interface show Eth0` |
+| `Po100` | `PortChannel100` | `lag show Po100` |
+| `Vl100` | `Vlan100` | `vlan show 100` |
+| `Lo0` | `Loopback0` | `interface show Lo0` |
 
 Case-insensitive: `eth0`, `Eth0`, `ETH0` all work.
 
-**Command Verbs (Symmetric Read/Write Operations):**
+**Flags:**
 
-| Write Verb | Read Verb | Description |
-|------------|-----------|-------------|
-| `set <prop> <val>` | `get <prop>` | Property access |
-| `create <type>` | `show` / `list <type>s` | Object lifecycle |
-| `delete <type>` | - | Object deletion |
-| `add-member` / `remove-member` | `list-members` | Collection membership |
-| `apply-service` / `remove-service` / `refresh-service` | `get-service` | Service binding |
-| `bind-acl` / `unbind-acl` | `list-acls` | ACL binding |
-| `bind-macvpn` / `unbind-macvpn` | `get-macvpn` | MAC-VPN binding |
-| `add-bgp-neighbor` | `list-bgp-neighbors` | BGP neighbors |
-
-**Operation Flags:**
-
-- `-s, --specs` - Specification directory (default: `/etc/newtron`)
-- `-x, --execute` - Execute changes (default: dry-run)
-- `-v, --verbose` - Verbose output
-- `--json` - JSON output format
+| Flag | Description |
+|------|-------------|
+| `-d, --device` | Target device name (optional if implicit device used) |
+| `-n, --network` | Network configuration name |
+| `-S, --specs` | Specification directory (default: `/etc/newtron`) |
+| `-x, --execute` | Execute changes (default: dry-run) |
+| `-s, --save` | Save config after changes (requires `-x`; use `-xs` together) |
+| `-v, --verbose` | Verbose output |
+| `--json` | JSON output format |
 
 ### 4.2 Persistent Settings
 
@@ -596,11 +600,10 @@ Settings are stored in `~/.newtron/settings.json`.
 
 ### 4.3 Dry-Run Mode (Default)
 
-By default, all commands run in dry-run mode, showing what changes would be made without applying them:
+By default, all write commands run in dry-run mode, showing what changes would be made without applying them:
 
 ```bash
-# Using short interface name (Eth0 expands to Ethernet0)
-newtron -d leaf1-dc1 -i Eth0 apply-service customer-l3 --ip 10.1.1.1/30
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
 
 # Output:
 # Changes to be applied:
@@ -618,22 +621,26 @@ newtron -d leaf1-dc1 -i Eth0 apply-service customer-l3 --ip 10.1.1.1/30
 Add the `-x` flag to actually apply changes:
 
 ```bash
-newtron -d leaf1-dc1 -i Eth0 apply-service customer-l3 --ip 10.1.1.1/30 -x
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 
 # Output:
 # Changes to be applied:
 #   [ADD] VRF|customer-l3-Ethernet0
 #   ...
 #
-# Service applied successfully.
+# Changes applied successfully.
 ```
 
-### 4.5 View Device/Interface Status
-
-View device status:
+To execute and save in one step:
 
 ```bash
-newtron -d leaf1-dc1 show
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -xs
+```
+
+### 4.5 View Device Status
+
+```bash
+newtron leaf1 show
 
 # Output:
 # Device: leaf1-dc1
@@ -654,26 +661,6 @@ newtron -d leaf1-dc1 show
 #   PortChannels: 2
 ```
 
-View interface details:
-
-```bash
-# Short name Eth0 expands to Ethernet0
-newtron -d leaf1-dc1 -i Eth0 show
-
-# Output:
-# Interface: Ethernet0
-# Admin Status: up
-# Oper Status: up
-# MTU: 9100
-# Speed: 100G
-# Service: customer-l3
-# VRF: customer-l3-Ethernet0
-# IP Address: 10.1.1.1/30
-# ACLs:
-#   Ingress: customer-l3-in
-#   Egress: customer-l3-out
-```
-
 ### 4.6 Interactive Mode
 
 Enter interactive menu mode:
@@ -683,7 +670,7 @@ Enter interactive menu mode:
 newtron interactive
 
 # With device
-newtron -d leaf1-dc1 interactive
+newtron leaf1 interactive
 ```
 
 ```
@@ -713,13 +700,13 @@ Services are the primary way to configure interfaces with bundled VPN, filter, Q
 
 ### 5.1 List Available Services
 
+No device needed -- reads from network.json:
+
 ```bash
-newtron list services
+newtron service list
 
 # Output:
-# Available Services:
-#
-# Name           Type   Description
+# NAME           TYPE   DESCRIPTION
 # ----           ----   -----------
 # customer-l3    l3     L3 routed customer interface
 # server-irb     irb    Server VLAN with IRB routing
@@ -729,7 +716,7 @@ newtron list services
 ### 5.2 Show Service Details
 
 ```bash
-newtron show service customer-l3
+newtron service show customer-l3
 
 # Output:
 # Service: customer-l3
@@ -746,7 +733,7 @@ newtron show service customer-l3
 #   Ingress: customer-ingress
 #   Egress: customer-egress
 #
-# QoS Profile: customer-qos
+# QoS Policy: customer-4q
 #
 # Routing:
 #   Protocol: bgp
@@ -757,16 +744,38 @@ newtron show service customer-l3
 #   service.apply: [neteng, netops]
 ```
 
-### 5.3 Apply a Service
+### 5.3 Create a Service Definition
 
-Apply a service to an interface (OO style: method on interface object):
+Create a new service definition in network.json (no device needed):
 
 ```bash
-# Dry-run first (select device and interface, then call apply-service method)
-newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30
+newtron service create my-service --type l3 --ipvpn customer-vpn --vrf-type interface -x
+
+newtron service create my-l2svc --type l2 --macvpn servers-vlan100 -x
+
+newtron service create my-irb --type irb --ipvpn server-vpn --macvpn servers-vlan100 \
+  --qos-policy customer-4q --ingress-filter customer-ingress --description "IRB service" -x
+```
+
+### 5.4 Delete a Service Definition
+
+```bash
+newtron service delete my-service -x
+```
+
+### 5.5 Apply a Service
+
+Apply a service to an interface on a device:
+
+```bash
+# Dry-run first
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
 
 # Execute
-newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
+
+# With eBGP peer AS (for services with routing.peer_as: "request")
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 --peer-as 65100 -x
 ```
 
 **What happens (in order):**
@@ -777,7 +786,7 @@ newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
 4. Binds Ethernet0 to the VRF
 5. Configures IP 10.1.1.1/30 on interface
 6. Creates or updates ACL from `customer-ingress` filter spec (shared across all interfaces using this service)
-7. Binds ACL to interface (adds interface to ports list)
+7. Binds ACL to interface (adds interface to ACL binding list)
 8. Applies QoS profile mappings (DSCP-to-TC, TC-to-queue) if specified
 9. Configures BGP neighbor if service has routing spec
 10. Records service binding in `NEWTRON_SERVICE_BINDING` table for tracking
@@ -788,45 +797,45 @@ newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
 - Interface must not be a LAG member (configure the LAG instead)
 - Interface must not already have a service bound
 - L3 service requires an IP address
-- L2/IRB service requires a `macvpn` reference with a `vlan` field
+- L2/IRB service requires a `macvpn` reference
 - EVPN services require VTEP and BGP to be configured
 - Shared VRF must already exist (for `vrf_type: shared`)
-- All referenced filter_specs, QoS profiles, and route policies must exist in the spec
+- All referenced filter_specs, QoS policies, and route policies must exist in the spec
 
-### 5.4 Apply Service to PortChannel
+### 5.6 Apply Service to PortChannel
 
 ```bash
-newtron -d leaf1-dc1 -i PortChannel100 apply-service customer-l3 --ip 10.2.1.1/30 -x
+newtron leaf1 service apply PortChannel100 customer-l3 --ip 10.2.1.1/30 -x
 ```
 
-### 5.5 Remove a Service
+### 5.7 Remove a Service
 
 ```bash
 # Preview removal
-newtron -d leaf1-dc1 -i Ethernet0 remove-service
+newtron leaf1 service remove Ethernet0
 
 # Execute removal
-newtron -d leaf1-dc1 -i Ethernet0 remove-service -x
+newtron leaf1 service remove Ethernet0 -x
 ```
 
 **What happens:**
 
 1. Removes QoS mapping from interface (always)
 2. Removes IP addresses from interface (always)
-3. Handles shared ACLs: removes interface from ACL ports list, or deletes ACL entirely if this was the last user
+3. Handles shared ACLs: removes interface from ACL binding list, or deletes ACL entirely if this was the last user
 4. Unbinds interface from VRF; for per-interface VRFs (`vrf_type: interface`), deletes the VRF and all associated EVPN config (BGP_EVPN_VNI, BGP_GLOBALS_AF, VXLAN_TUNNEL_MAP)
 5. For L2/IRB services: removes VLAN membership; if last member, removes all VLAN-related config (SVI, ARP suppression, L2VNI mapping, VLAN itself)
 6. Deletes `NEWTRON_SERVICE_BINDING` entry
 
 **Dependency-aware cleanup:** Shared resources (ACLs, VLANs, VRFs) are only deleted when the interface being cleaned up is the last user. This is determined by a `DependencyChecker` that counts remaining users while excluding the current interface.
 
-### 5.6 Refresh a Service
+### 5.8 Refresh a Service
 
-When a service definition changes in `network.json` (e.g., updated filter-spec, QoS profile, or route policy), use `refresh-service` to synchronize the interface:
+When a service definition changes in `network.json` (e.g., updated filter-spec, QoS profile, or route policy), use `refresh` to synchronize the interface:
 
 ```bash
 # Preview what would change
-newtron -d leaf1-dc1 -i Ethernet0 refresh-service
+newtron leaf1 service refresh Ethernet0
 
 # Output:
 # Changes to synchronize service:
@@ -843,7 +852,7 @@ newtron -d leaf1-dc1 -i Ethernet0 refresh-service
 # DRY-RUN: No changes applied. Use -x to execute.
 
 # Execute the refresh
-newtron -d leaf1-dc1 -i Ethernet0 refresh-service -x
+newtron leaf1 service refresh Ethernet0 -x
 ```
 
 **How RefreshService works internally:**
@@ -862,20 +871,24 @@ This approach ensures all changes in the service definition are picked up, inclu
 - Route policy changes
 - VPN parameter changes (route targets, VNI)
 
-**Use cases:**
-
-- Filter-spec rules were added/removed/modified in `network.json`
-- QoS profile was updated
-- Route policy was changed
-- Service RT/VNI settings changed
-
 **Example -- refresh after filter change:**
 
 ```bash
 # 1. Edit network.json to add a new rule to the customer-ingress filter-spec
 # 2. Refresh all interfaces using that service
-newtron -d leaf1-dc1 -i Ethernet0 refresh-service -x
-newtron -d leaf1-dc1 -i Ethernet4 refresh-service -x
+newtron leaf1 service refresh Ethernet0 -x
+newtron leaf1 service refresh Ethernet4 -x
+```
+
+### 5.9 Get Service Binding
+
+```bash
+newtron leaf1 service get Ethernet0
+
+# Output:
+# Service: customer-l3
+# IP: 10.1.1.1/30
+# VRF: customer-l3-Ethernet0
 ```
 
 ---
@@ -885,21 +898,21 @@ newtron -d leaf1-dc1 -i Ethernet4 refresh-service -x
 ### 6.1 List Interfaces
 
 ```bash
-newtron -d leaf1-dc1 list interfaces
+newtron leaf1 interface list
 
 # Output:
-# Interface     Status   Speed    MTU    Description        Service
-# ---------     ------   -----    ---    -----------        -------
-# Ethernet0     up       100G     9100   Uplink to spine1   customer-l3
-# Ethernet4     up       100G     9100   Uplink to spine2   -
-# Ethernet8     down     100G     9100   -                  -
-# PortChannel100 up      200G     9100   Server bond        server-irb
+# INTERFACE      ADMIN  OPER  IP ADDRESS    VRF                   SERVICE
+# ---------      -----  ----  ----------    ---                   -------
+# Ethernet0      up     up    10.1.1.1/30   customer-l3-Ethernet0 customer-l3
+# Ethernet4      up     up    -             -                      -
+# Ethernet8      down   down  -             -                      -
+# PortChannel100 up     up    10.2.1.1/30   -                      server-irb
 ```
 
 ### 6.2 Show Interface Details
 
 ```bash
-newtron -d leaf1-dc1 -i Ethernet0 show
+newtron leaf1 interface show Ethernet0
 
 # Output:
 # Interface: Ethernet0
@@ -927,48 +940,37 @@ newtron -d leaf1-dc1 -i Ethernet0 show
 
 ### 6.3 Get Interface Properties
 
-Use `get` method to read individual properties:
-
 ```bash
 # Get MTU
-newtron -d leaf1-dc1 -i Ethernet0 get mtu
+newtron leaf1 interface get Ethernet0 mtu
 # Output: mtu: 9100
 
 # Get admin status
-newtron -d leaf1-dc1 -i Ethernet0 get admin-status
+newtron leaf1 interface get Ethernet0 admin-status
 # Output: admin-status: up
 
 # Get description
-newtron -d leaf1-dc1 -i Ethernet0 get description
+newtron leaf1 interface get Ethernet0 description
 # Output: description: Uplink to spine1
 
-# Get bound service
-newtron -d leaf1-dc1 -i Ethernet0 get-service
-# Output: Service: customer-l3
-
 # Get with JSON output
-newtron -d leaf1-dc1 -i Ethernet0 get mtu --json
+newtron leaf1 interface get Ethernet0 mtu --json
 # Output: {"mtu": "9100"}
 ```
 
 ### 6.4 Configure Interface Properties
 
-Use `set` method on the interface object. The `Set()` method determines the correct Redis table based on interface type (`PORT` for physical, `PORTCHANNEL` for LAGs):
+The `set` action determines the correct Redis table based on interface type (`PORT` for physical, `PORTCHANNEL` for LAGs):
 
 ```bash
 # Set description
-newtron -d leaf1-dc1 -i Ethernet4 set description "Link to customer-A" -x
+newtron leaf1 interface set Ethernet4 description "Link to customer-A" -x
 
 # Set MTU
-newtron -d leaf1-dc1 -i Ethernet4 set mtu 9000 -x
+newtron leaf1 interface set Ethernet4 mtu 9000 -x
 
 # Admin down
-newtron -d leaf1-dc1 -i Ethernet8 set admin-status down -x
-
-# Multiple settings (multiple set commands)
-newtron -d leaf1-dc1 -i Ethernet4 set description "Customer link" -x
-newtron -d leaf1-dc1 -i Ethernet4 set mtu 9000 -x
-newtron -d leaf1-dc1 -i Ethernet4 set admin-status up -x
+newtron leaf1 interface set Ethernet8 admin-status down -x
 ```
 
 **Supported properties:**
@@ -982,6 +984,27 @@ newtron -d leaf1-dc1 -i Ethernet4 set admin-status up -x
 
 **Preconditions:** LAG members cannot be configured directly; configure the parent LAG instead.
 
+### 6.5 List ACLs on Interface
+
+```bash
+newtron leaf1 interface list-acls Ethernet0
+
+# Output:
+# Direction  ACL Name
+# ---------  --------
+# ingress    customer-l3-in
+# egress     customer-l3-out
+```
+
+### 6.6 List VLAN Members on Interface
+
+```bash
+newtron leaf1 interface list-members Ethernet0
+
+# Output:
+# VLAN 100 (untagged)
+```
+
 ---
 
 ## 7. Link Aggregation (LAG)
@@ -989,22 +1012,49 @@ newtron -d leaf1-dc1 -i Ethernet4 set admin-status up -x
 ### 7.1 List LAGs
 
 ```bash
-newtron -d leaf1-dc1 list lags
+newtron leaf1 lag list
 
 # Output:
-# LAG            Status   Members              Mode     MTU
-# ---            ------   -------              ----     ---
-# PortChannel100 up       Ethernet12,Ethernet16 active   9100
-# PortChannel200 up       Ethernet20,Ethernet24 active   9100
+# NAME             STATUS   MEMBERS                ACTIVE
+# ----             ------   -------                ------
+# PortChannel100   up       Ethernet12,Ethernet16  2
+# PortChannel200   up       Ethernet20,Ethernet24  2
 ```
 
-### 7.2 Create a LAG
-
-Create at device level (LAG does not exist yet):
+### 7.2 Show LAG Details
 
 ```bash
-# Create LAG with members
-newtron -d leaf1-dc1 create lag PortChannel300 \
+newtron leaf1 lag show PortChannel100
+
+# Output:
+# LAG: PortChannel100
+# Admin Status: up
+# MTU: 9100
+# Mode: active
+# Min Links: 1
+# Members:
+#   Ethernet12 (active)
+#   Ethernet16 (active)
+```
+
+### 7.3 LAG Status
+
+```bash
+newtron leaf1 lag status
+
+# Output:
+# LAG operational summary from STATE_DB:
+#
+# NAME             OPER    ACTIVE/TOTAL  MIN-LINKS
+# ----             ----    ------------  ---------
+# PortChannel100   up      2/2           1
+# PortChannel200   up      2/2           1
+```
+
+### 7.4 Create a LAG
+
+```bash
+newtron leaf1 lag create PortChannel300 \
   --members Ethernet28,Ethernet32 \
   --mode active \
   --min-links 1 \
@@ -1026,25 +1076,10 @@ newtron -d leaf1-dc1 create lag PortChannel300 \
 - All member interfaces must exist
 - No member may already be in another LAG
 
-### 7.3 List LAG Members
-
-Use `list-members` to see current membership:
+### 7.5 Add Interface to LAG
 
 ```bash
-newtron -d leaf1-dc1 -i PortChannel300 list-members
-
-# Output:
-# Ethernet28
-# Ethernet32
-```
-
-### 7.4 Add Member to LAG
-
-Select the LAG with `-i`, then use `add-member` method:
-
-```bash
-# Short names: Po300 = PortChannel300, Eth36 = Ethernet36
-newtron -d leaf1-dc1 -i Po300 add-member Eth36 -x
+newtron leaf1 lag add-interface PortChannel300 Ethernet36 -x
 ```
 
 **Preconditions checked:**
@@ -1054,24 +1089,24 @@ newtron -d leaf1-dc1 -i Po300 add-member Eth36 -x
 - Interface must not be in another LAG
 - Interface must not have a service bound
 
-### 7.5 Remove Member from LAG
+### 7.6 Remove Interface from LAG
 
 ```bash
-newtron -d leaf1-dc1 -i Po300 remove-member Eth36 -x
+newtron leaf1 lag remove-interface PortChannel300 Ethernet36 -x
 ```
 
 **Preconditions checked:**
 
 - Interface must be a member of this LAG
 
-### 7.6 Delete a LAG
+### 7.7 Delete a LAG
 
 ```bash
 # Remove service first if bound
-newtron -d leaf1-dc1 -i PortChannel300 remove-service -x
+newtron leaf1 service remove PortChannel300 -x
 
-# Then delete LAG (device-level operation, members are removed automatically)
-newtron -d leaf1-dc1 delete lag PortChannel300 -x
+# Then delete LAG (members are removed automatically)
+newtron leaf1 lag delete PortChannel300 -x
 ```
 
 ---
@@ -1081,22 +1116,53 @@ newtron -d leaf1-dc1 delete lag PortChannel300 -x
 ### 8.1 List VLANs
 
 ```bash
-newtron -d leaf1-dc1 list vlans
+newtron leaf1 vlan list
 
 # Output:
-# VLAN  NAME        MAC-VPN           L2VNI  ARP-SUPP
-# ----  ----        -------           -----  --------
-# 100   Servers     servers-vlan100   10100  on
-# 200   Storage     storage-vlan200   10200  on
-# 300   Management  -                 -      -
+# VLAN ID  L2VNI  SVI       MEMBERS
+# -------  -----  ---       -------
+# 100      10100  up        Ethernet0,Ethernet4,PortChannel100
+# 200      10200  up        Ethernet8
+# 300      -      -         Ethernet12
 ```
 
-### 8.2 Create a VLAN
-
-Create at device level:
+### 8.2 Show VLAN Details
 
 ```bash
-newtron -d leaf1-dc1 create vlan 400 --name "NewVLAN" --description "Test VLAN" -x
+newtron leaf1 vlan show 100
+
+# Output:
+# VLAN: 100
+# Name: Servers
+# L2VNI: 10100
+# ARP Suppression: on
+# MAC-VPN: servers-vlan100
+# SVI: Vlan100 (10.1.100.1/24, VRF: Vrf_SERVER)
+# Members:
+#   Ethernet0 (untagged)
+#   Ethernet4 (tagged)
+#   PortChannel100 (untagged)
+```
+
+### 8.3 VLAN Status
+
+```bash
+newtron leaf1 vlan status
+
+# Output:
+# VLAN operational summary from STATE_DB:
+#
+# VLAN  OPER   L2VNI  MEMBERS  MAC-VPN
+# ----  ----   -----  -------  -------
+# 100   up     10100  3        servers-vlan100
+# 200   up     10200  1        storage-vlan200
+# 300   up     -      1        -
+```
+
+### 8.4 Create a VLAN
+
+```bash
+newtron leaf1 vlan create 400 --name "NewVLAN" --description "Test VLAN" -x
 ```
 
 **Preconditions checked:**
@@ -1104,170 +1170,42 @@ newtron -d leaf1-dc1 create vlan 400 --name "NewVLAN" --description "Test VLAN" 
 - VLAN ID must be between 1 and 4094
 - VLAN must not already exist
 
-### 8.3 List VLAN Members
-
-Use `list-members` to see current VLAN membership:
+### 8.5 Add Interface to VLAN
 
 ```bash
-# Vl100 = Vlan100
-newtron -d leaf1-dc1 -i Vl100 list-members
+# Add as untagged (access)
+newtron leaf1 vlan add-interface 400 Ethernet40 -x
 
-# Output:
-# Ethernet0 (untagged)
-# Ethernet4 (tagged)
-# PortChannel100 (untagged)
-```
-
-### 8.4 Add Port to VLAN
-
-Select the VLAN with `-i Vl<id>` or `-i Vlan<id>`, then use `add-member` method:
-
-```bash
-# Add as untagged (access port) - short names
-newtron -d leaf1-dc1 -i Vl400 add-member Eth40 -x
-
-# Add as tagged (trunk port)
-newtron -d leaf1-dc1 -i Vlan400 add-member Ethernet44 --tagged -x
+# Add as tagged (trunk)
+newtron leaf1 vlan add-interface 400 Ethernet44 --tagged -x
 ```
 
 **Preconditions checked:**
 
-- Port must not have IP addresses (L3 config)
-- Port must not be bound to a VRF
+- Interface must not have IP addresses (L3 config)
+- Interface must not be bound to a VRF
 - L2 and L3 are mutually exclusive
 
-### 8.5 Remove Port from VLAN
+### 8.6 Remove Interface from VLAN
 
 ```bash
-newtron -d leaf1-dc1 -i Vlan400 remove-member Ethernet40 -x
+newtron leaf1 vlan remove-interface 400 Ethernet40 -x
 ```
 
-### 8.6 Configure VLAN SVI
+### 8.7 Configure VLAN SVI
 
-Select the VLAN interface and use `set` methods:
+Configure an SVI (Switched Virtual Interface) on a VLAN:
 
 ```bash
-newtron -d leaf1-dc1 -i Vlan400 set ip 10.1.40.1/24 -x
-newtron -d leaf1-dc1 -i Vlan400 set vrf Vrf_TENANT1 -x
+newtron leaf1 vlan configure-svi 400 --ip 10.1.40.1/24 --vrf Vrf_TENANT1 --anycast-gw -x
 ```
 
-### 8.7 Delete a VLAN
+### 8.8 Bind VLAN to MAC-VPN
+
+Bind a VLAN to a MAC-VPN definition from network.json for VXLAN extension:
 
 ```bash
-# Remove all members first
-newtron -d leaf1-dc1 -i Vlan400 remove-member Ethernet40 -x
-newtron -d leaf1-dc1 -i Vlan400 remove-member Ethernet44 -x
-
-# Remove MAC-VPN binding if present
-newtron -d leaf1-dc1 -i Vlan400 unbind-macvpn -x
-
-# Delete VLAN (device-level operation, also removes VNI mappings and members)
-newtron -d leaf1-dc1 delete vlan 400 -x
-```
-
-The `DeleteVLAN` operation automatically removes VLAN members and VNI mappings as part of the changeset.
-
----
-
-## 9. EVPN/VXLAN Configuration
-
-### 9.1 Prerequisites
-
-Before configuring EVPN services:
-
-1. **VTEP must be configured**
-2. **BGP EVPN must be configured**
-
-### 9.2 Create VTEP
-
-Device-level operation:
-
-```bash
-newtron -d leaf1-dc1 create vtep --source-ip 10.0.0.10 -x
-
-# Source IP is typically the loopback IP (auto-derived from profile)
-```
-
-This creates two entries:
-
-- `VXLAN_TUNNEL|vtep1` with `src_ip` set to the source IP
-- `VXLAN_EVPN_NVO|nvo1` with `source_vtep` pointing to `vtep1`
-
-### 9.3 View EVPN Status
-
-```bash
-newtron -d leaf1-dc1 list evpn
-
-# Output:
-# VTEP: vtep1
-# Source IP: 10.0.0.10
-#
-# IP-VPN (L3):
-#   Vrf_CUST1     L3VNI: 10001  RT: 65001:1
-#   Vrf_TENANT1   L3VNI: 10002  RT: 65001:2
-#
-# MAC-VPN (L2):
-#   Vlan100       servers-vlan100   L2VNI: 10100  ARP Suppress: on
-#   Vlan200       storage-vlan200   L2VNI: 10200  ARP Suppress: on
-```
-
-### 9.4 Create VRF with L3VNI
-
-Device-level operation:
-
-```bash
-newtron -d leaf1-dc1 create vrf Vrf_NEWCUST --l3vni 10003 -x
-```
-
-This creates:
-
-- `VRF|Vrf_NEWCUST` with `vni` field
-- `VXLAN_TUNNEL_MAP|vtep1|map_10003_Vrf_NEWCUST` mapping
-
-**Preconditions checked:**
-
-- VTEP must exist (for L3VNI mapping)
-- VRF must not already exist
-- VNI must be valid (1-16777215)
-
-### 9.5 Map L2VNI and L3VNI
-
-Direct VNI mapping operations (lower-level than service apply):
-
-```bash
-# Map VLAN to L2VNI
-newtron -d leaf1-dc1 map-l2vni --vlan 100 --vni 10100 -x
-
-# Map VRF to L3VNI
-newtron -d leaf1-dc1 map-l3vni --vrf Vrf_CUST1 --vni 10001 -x
-
-# Unmap a VNI
-newtron -d leaf1-dc1 unmap-vni --vni 10100 -x
-```
-
-### 9.6 Get MAC-VPN Binding
-
-Check the current MAC-VPN binding for a VLAN:
-
-```bash
-newtron -d leaf1-dc1 -i Vlan100 get-macvpn
-
-# Output:
-# MAC-VPN: servers-vlan100
-#   L2VNI: 10100
-#   ARP Suppression: true
-
-# If no binding exists:
-# (no MAC-VPN bound)
-```
-
-### 9.7 Bind VLAN to MAC-VPN
-
-Bind a VLAN to a MAC-VPN definition from network.json.
-Select the VLAN with `-i`, then use `bind-macvpn` method:
-
-```bash
-newtron -d leaf1-dc1 -i Vlan300 bind-macvpn tenant-vlan300 -x
+newtron leaf1 vlan bind-macvpn 100 servers-vlan100 -x
 ```
 
 The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
@@ -1275,9 +1213,9 @@ The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
 ```json
 {
   "macvpn": {
-    "tenant-vlan300": {
-      "vlan": 300,
-      "l2_vni": 10300,
+    "servers-vlan100": {
+      "description": "Server VLAN 100",
+      "l2_vni": 10100,
       "arp_suppression": true
     }
   }
@@ -1286,56 +1224,354 @@ The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
 
 **Preconditions checked:**
 
-- Interface must be a VLAN interface
+- VLAN must exist on the device
 - VTEP must exist
 - MAC-VPN definition must exist in network.json
 
-### 9.8 Unbind MAC-VPN
+### 8.9 Unbind MAC-VPN
 
 ```bash
-newtron -d leaf1-dc1 -i Vlan300 unbind-macvpn -x
+newtron leaf1 vlan unbind-macvpn 100 -x
 ```
 
 This removes the L2VNI mapping (VXLAN_TUNNEL_MAP) and ARP suppression (SUPPRESS_VLAN_NEIGH) settings.
 
-### 9.9 Delete VRF
+### 8.10 Delete a VLAN
 
 ```bash
-# Remove all interface bindings first
-newtron -d leaf1-dc1 -i Ethernet0 set vrf default -x
+# Remove all members first
+newtron leaf1 vlan remove-interface 400 Ethernet40 -x
+newtron leaf1 vlan remove-interface 400 Ethernet44 -x
 
-# Delete VRF (device-level operation, removes VNI mappings)
-newtron -d leaf1-dc1 delete vrf Vrf_NEWCUST -x
+# Unbind MAC-VPN if present
+newtron leaf1 vlan unbind-macvpn 400 -x
+
+# Delete VLAN (also removes VNI mappings and members)
+newtron leaf1 vlan delete 400 -x
+```
+
+The `DeleteVLAN` operation automatically removes VLAN members and VNI mappings as part of the changeset.
+
+---
+
+## 9. VRF Management
+
+VRFs (Virtual Routing and Forwarding instances) are first-class routing contexts that own interfaces, BGP neighbors, IP-VPN bindings, and static routes.
+
+### 9.1 List VRFs
+
+```bash
+newtron leaf1 vrf list
+
+# Output:
+# NAME               L3VNI  INTERFACES
+# ----               -----  ----------
+# default            -      Ethernet0,Ethernet4
+# Vrf_CUST1          10001  Ethernet8,Ethernet12
+# Vrf_SERVER         20001  Vlan100
+```
+
+### 9.2 Show VRF Details
+
+```bash
+newtron leaf1 vrf show Vrf_CUST1
+
+# Output:
+# VRF: Vrf_CUST1
+# L3VNI: 10001
+# IP-VPN: customer-vpn
+# Import RT: 65001:1
+# Export RT: 65001:1
+#
+# Interfaces:
+#   Ethernet8 (10.1.1.1/30)
+#   Ethernet12 (10.1.2.1/30)
+#
+# BGP Neighbors:
+#   10.1.1.2  AS 65100  via Ethernet8
+#   10.1.2.2  AS 65200  via Ethernet12
+#
+# Static Routes:
+#   10.99.0.0/16 -> 10.1.1.2
+```
+
+### 9.3 VRF Status
+
+```bash
+newtron leaf1 vrf status
+
+# Output:
+# VRF operational summary from STATE_DB:
+#
+# NAME           STATE    INTERFACES  NEIGHBORS  L3VNI
+# ----           -----    ----------  ---------  -----
+# default        up       2           4          -
+# Vrf_CUST1      up       2           2          10001
+# Vrf_SERVER     up       1           0          20001
+```
+
+### 9.4 Create a VRF
+
+```bash
+newtron leaf1 vrf create Vrf_CUST1 -x
+```
+
+**Preconditions checked:**
+
+- VRF must not already exist
+
+### 9.5 Delete a VRF
+
+```bash
+newtron leaf1 vrf delete Vrf_CUST1 -x
 ```
 
 **Preconditions checked:**
 
 - VRF must exist
 - VRF must have no interfaces bound to it
+- VRF must have no BGP neighbors configured
+- VRF must not have an IP-VPN bound
+
+### 9.6 Add Interface to VRF
+
+```bash
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet8 -x
+```
+
+### 9.7 Remove Interface from VRF
+
+```bash
+newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
+```
+
+### 9.8 Bind IP-VPN
+
+Bind a VRF to an IP-VPN definition from network.json. This configures L3VNI, route targets, and VXLAN tunnel mapping:
+
+```bash
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+```
+
+### 9.9 Unbind IP-VPN
+
+```bash
+newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x
+```
+
+### 9.10 Add BGP Neighbor
+
+Add a BGP neighbor to a VRF. The neighbor is associated with a specific interface and remote AS:
+
+```bash
+# Auto-derived neighbor IP for /30 subnets (interface has 10.1.1.1/30, derives 10.1.1.2)
+newtron leaf1 vrf add-neighbor default Ethernet0 65100 -x
+
+# Auto-derived neighbor IP for /31 subnets (interface has 10.1.1.0/31, derives 10.1.1.1)
+newtron leaf1 vrf add-neighbor default Ethernet4 65200 -x
+
+# Explicit neighbor IP (for /29 or larger, or loopback-based peering)
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Loopback0 64512 --neighbor 10.0.0.1 -x
+
+# With description
+newtron leaf1 vrf add-neighbor default Ethernet0 65100 --description "Customer A uplink" -x
+```
+
+**Auto-derivation rules:**
+
+- `/30` subnet: the other usable IP on the /30 is used (e.g., .1 derives .2, .2 derives .1)
+- `/31` subnet: the other IP on the /31 is used (e.g., .0 derives .1, .1 derives .0)
+- `/29` or larger: `--neighbor` flag is required (too many candidates to auto-derive)
+
+**Validation:**
+
+- The neighbor IP must be on the same subnet as the interface (unless loopback-based)
+- The interface must have an IP address configured (unless `--neighbor` is explicit)
+
+### 9.11 Remove BGP Neighbor
+
+```bash
+# Remove by interface
+newtron leaf1 vrf remove-neighbor default Ethernet0 -x
+
+# Remove by explicit neighbor IP
+newtron leaf1 vrf remove-neighbor Vrf_CUST1 10.0.0.1 -x
+```
+
+The remove operation deletes all address-family entries (ipv4_unicast, ipv6_unicast, l2vpn_evpn) and the neighbor entry.
+
+### 9.12 Add Static Route
+
+```bash
+newtron leaf1 vrf add-route Vrf_CUST1 10.99.0.0/16 10.1.1.2 -x
+
+# With metric
+newtron leaf1 vrf add-route Vrf_CUST1 10.99.0.0/16 10.1.1.2 --metric 100 -x
+```
+
+### 9.13 Remove Static Route
+
+```bash
+newtron leaf1 vrf remove-route Vrf_CUST1 10.99.0.0/16 -x
+```
+
+### 9.14 VRF Workflow
+
+Typical workflow for setting up a customer VRF:
+
+```bash
+# 1. Create VRF
+newtron leaf1 vrf create Vrf_CUST1 -x
+
+# 2. Add interfaces
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet8 -x
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet12 -x
+
+# 3. Add BGP neighbors
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet8 65100 -x
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet12 65200 -x
+
+# 4. Bind to IP-VPN for EVPN extension
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+
+# 5. Verify
+newtron leaf1 vrf show Vrf_CUST1
+```
 
 ---
 
-## 10. ACL Management
+## 10. EVPN/VXLAN Configuration
 
-### 10.1 List ACL Tables
+The EVPN subsystem manages the overlay transport layer: VTEP, NVO, and BGP EVPN sessions.
+
+### 10.1 Setup EVPN Overlay
+
+The `setup` command is an idempotent composite that configures the full EVPN stack in one shot:
 
 ```bash
-newtron -d leaf1-dc1 list acls
+# Uses loopback IP from device profile as source IP
+newtron leaf1 evpn setup -x
+
+# Explicit source IP
+newtron leaf1 evpn setup --source-ip 10.0.0.10 -x
+```
+
+**What setup creates (skips any that already exist):**
+
+1. `VXLAN_TUNNEL|vtep1` with `src_ip` set to the loopback IP
+2. `VXLAN_EVPN_NVO|nvo1` with `source_vtep` pointing to `vtep1`
+3. BGP EVPN sessions with route reflectors from site config
+
+### 10.2 EVPN Status
+
+View combined config and operational state:
+
+```bash
+newtron leaf1 evpn status
 
 # Output:
-# ACL Table                   Type   Stage    Ports
-# ---------                   ----   -----    -----
-# customer-l3-in              L3     ingress  Ethernet0,Ethernet4
-# customer-l3-out             L3     egress   Ethernet0,Ethernet4
-# DATAACL                     L3     ingress  Ethernet8
+# EVPN Overlay Status
+# ===================
+#
+# VTEP: vtep1
+# Source IP: 10.0.0.10
+# NVO: nvo1
+#
+# IP-VPN (L3) Bindings:
+#   Vrf_CUST1     L3VNI: 10001  RT: 65001:1
+#   Vrf_SERVER    L3VNI: 20001  RT: 65001:100
+#
+# MAC-VPN (L2) Bindings:
+#   Vlan100       servers-vlan100   L2VNI: 10100  ARP Suppress: on
+#   Vlan200       storage-vlan200   L2VNI: 10200  ARP Suppress: on
+#
+# BGP EVPN Neighbors:
+#   10.0.0.1   Established  (spine1-dc1)
+#   10.0.0.2   Established  (spine2-dc1)
+```
+
+### 10.3 IP-VPN Management (Spec Authoring)
+
+IP-VPN definitions are spec-level objects in network.json. No device needed:
+
+```bash
+# List all IP-VPN definitions
+newtron evpn ipvpn list
+
+# Show details
+newtron evpn ipvpn show customer-vpn
+
+# Create a new IP-VPN definition
+newtron evpn ipvpn create my-vpn --l3vni 10001 --import-rt 65001:1 --export-rt 65001:1 \
+  --description "Customer VPN" -x
+
+# Delete
+newtron evpn ipvpn delete my-vpn -x
+```
+
+### 10.4 MAC-VPN Management (Spec Authoring)
+
+MAC-VPN definitions are also spec-level objects. No device needed:
+
+```bash
+# List all MAC-VPN definitions
+newtron evpn macvpn list
+
+# Show details
+newtron evpn macvpn show servers-vlan100
+
+# Create a new MAC-VPN definition
+newtron evpn macvpn create my-l2vpn --l2vni 10100 --arp-suppress \
+  --description "Server L2 extension" -x
+
+# Delete
+newtron evpn macvpn delete my-l2vpn -x
+```
+
+### 10.5 EVPN Workflow
+
+Set up a complete EVPN overlay from scratch:
+
+```bash
+# 1. Create VPN definitions (no device needed)
+newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65001:1 --export-rt 65001:1 -x
+newtron evpn macvpn create servers-vlan100 --l2vni 10100 --arp-suppress -x
+
+# 2. Set up overlay on device
+newtron leaf1 evpn setup -x
+
+# 3. Create VRF and bind to IP-VPN
+newtron leaf1 vrf create Vrf_CUST1 -x
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+
+# 4. Create VLAN and bind to MAC-VPN
+newtron leaf1 vlan create 100 -x
+newtron leaf1 vlan bind-macvpn 100 servers-vlan100 -x
+```
+
+---
+
+## 11. ACL Management
+
+### 11.1 List ACL Tables
+
+```bash
+newtron leaf1 acl list
+
+# Output:
+# NAME                 TYPE   STAGE    INTERFACES              RULES
+# ----                 ----   -----    ----------              -----
+# customer-l3-in       L3     ingress  Ethernet0,Ethernet4     4
+# customer-l3-out      L3     egress   Ethernet0,Ethernet4     2
+# DATAACL              L3     ingress  Ethernet8               3
 ```
 
 Note: ACLs created by services are shared -- the same ACL table is bound to multiple interfaces via the `ports` field.
 
-### 10.2 Show ACL Rules
+### 11.2 Show ACL Rules
 
 ```bash
-newtron -d leaf1-dc1 show acl customer-l3-in
+newtron leaf1 acl show customer-l3-in
 
 # Output:
 # ACL Table: customer-l3-in
@@ -1347,37 +1583,34 @@ newtron -d leaf1-dc1 show acl customer-l3-in
 # Seq    Match                           Action   Counter
 # ---    -----                           ------   -------
 # 100    src: 0.0.0.0/8                  DENY     1234
-# 101    src: 127.0.0.0/8                DENY     0
-# 102    src: 224.0.0.0/4                DENY     567
+# 101    src: 127.0.0.0/8               DENY     0
+# 102    src: 224.0.0.0/4               DENY     567
 # 9999   any                             PERMIT   892456
 ```
 
-### 10.3 Create Custom ACL Table
-
-Device-level operation:
+### 11.3 Create Custom ACL Table
 
 ```bash
-newtron -d leaf1-dc1 create acl CUSTOM-ACL \
+newtron leaf1 acl create CUSTOM-ACL \
   --type L3 \
   --stage ingress \
+  --interfaces Ethernet0 \
   --description "Custom access control" \
   -x
 ```
 
-### 10.4 Add ACL Rule
-
-Device-level operation (ACL rules are part of the ACL table):
+### 11.4 Add ACL Rule
 
 ```bash
 # Permit specific subnet
-newtron -d leaf1-dc1 add-acl-rule CUSTOM-ACL RULE_100 \
+newtron leaf1 acl add-rule CUSTOM-ACL RULE_100 \
   --priority 9000 \
   --src-ip 10.100.0.0/16 \
   --action permit \
   -x
 
 # Deny SSH from external
-newtron -d leaf1-dc1 add-acl-rule CUSTOM-ACL RULE_200 \
+newtron leaf1 acl add-rule CUSTOM-ACL RULE_200 \
   --priority 8000 \
   --protocol tcp \
   --dst-port 22 \
@@ -1385,67 +1618,51 @@ newtron -d leaf1-dc1 add-acl-rule CUSTOM-ACL RULE_200 \
   -x
 
 # Permit all else
-newtron -d leaf1-dc1 add-acl-rule CUSTOM-ACL RULE_9999 \
+newtron leaf1 acl add-rule CUSTOM-ACL RULE_9999 \
   --priority 1 \
   --action permit \
   -x
 ```
 
-### 10.5 Delete ACL Rule
+### 11.5 Delete ACL Rule
 
 ```bash
-newtron -d leaf1-dc1 delete-acl-rule CUSTOM-ACL RULE_200 -x
+newtron leaf1 acl delete-rule CUSTOM-ACL RULE_200 -x
 ```
 
-### 10.6 List ACLs Bound to Interface
-
-Use `list-acls` to see ACLs bound to an interface:
+### 11.6 Bind ACL to Interface
 
 ```bash
-newtron -d leaf1-dc1 -i Ethernet0 list-acls
-
-# Output:
-# Direction  ACL Name
-# ---------  --------
-# ingress    customer-l3-in
-# egress     customer-l3-out
+newtron leaf1 acl bind CUSTOM-ACL Ethernet4 --direction ingress -x
 ```
 
-### 10.7 Bind ACL to Interface
+This adds the interface to the ACL's binding list (ACLs are shared across interfaces).
 
-Select the interface, then use `bind-acl` method:
+### 11.7 Unbind ACL from Interface
 
 ```bash
-newtron -d leaf1-dc1 -i Ethernet4 bind-acl CUSTOM-ACL --direction ingress -x
+newtron leaf1 acl unbind CUSTOM-ACL Ethernet4 -x
 ```
 
-This adds the interface to the ACL's `ports` list (ACLs are shared across interfaces).
+If this is the last interface bound to the ACL, the ACL table and all its rules are deleted. Otherwise, the interface is removed from the ACL's binding list.
 
-### 10.8 Unbind ACL from Interface
-
-```bash
-newtron -d leaf1-dc1 -i Ethernet4 unbind-acl CUSTOM-ACL -x
-```
-
-If this is the last interface bound to the ACL, the ACL table and all its rules are deleted. Otherwise, the interface is removed from the ACL's ports list.
-
-### 10.9 Delete ACL Table
+### 11.8 Delete ACL Table
 
 ```bash
 # Unbind from all interfaces first
-newtron -d leaf1-dc1 -i Ethernet4 unbind-acl CUSTOM-ACL -x
+newtron leaf1 acl unbind CUSTOM-ACL Ethernet4 -x
 
-# Delete table (device-level operation, rules are deleted automatically)
-newtron -d leaf1-dc1 delete acl CUSTOM-ACL -x
+# Delete table (rules are deleted automatically)
+newtron leaf1 acl delete CUSTOM-ACL -x
 ```
 
-### 10.10 How Filter-Specs Become ACLs
+### 11.9 How Filter-Specs Become ACLs
 
 When a service with a filter_spec is applied, newtron:
 
 1. Derives the ACL name from the service name (e.g., `customer-l3-in`, `customer-l3-out`)
 2. Checks if the ACL already exists (shared across interfaces using the same service)
-3. If the ACL exists: adds the new interface to the `ports` list
+3. If the ACL exists: adds the new interface to the binding list
 4. If the ACL does not exist: creates the ACL table and expands all rules
 
 Rule expansion handles:
@@ -1457,78 +1674,59 @@ Rule expansion handles:
 
 ---
 
-## 11. BGP Direct Neighbors
+## 12. BGP Visibility
 
-Configure BGP neighbors on interfaces. These are direct eBGP peers using the interface IP as update-source.
+BGP is **visibility-only** in the noun-group CLI. It has a single `status` subcommand that shows a unified view of BGP configuration and operational state. All peer management lives in the `vrf` noun group (`vrf add-neighbor` / `vrf remove-neighbor`), and EVPN overlay sessions are managed by `evpn setup`.
 
-### 11.1 Add BGP Neighbor (Auto-Derived IP)
-
-For /30 and /31 subnets, the neighbor IP is automatically computed:
+### 12.1 View BGP Status
 
 ```bash
-# Interface has IP 10.1.1.1/30, neighbor IP auto-derived as 10.1.1.2
-newtron -d leaf1-dc1 -i Ethernet0 add-bgp-neighbor 65100 -x
-
-# Interface has IP 10.1.1.0/31, neighbor IP auto-derived as 10.1.1.1
-newtron -d leaf1-dc1 -i Ethernet4 add-bgp-neighbor 65200 -x
-```
-
-### 11.2 Add BGP Neighbor (Explicit IP)
-
-For /29 or larger subnets, you must specify the neighbor IP:
-
-```bash
-# Interface has IP 10.1.1.1/29
-newtron -d leaf1-dc1 -i Ethernet8 add-bgp-neighbor 65300 --neighbor-ip 10.1.1.5 -x
-```
-
-**Validation:**
-
-- The neighbor IP must be on the same subnet as the interface
-- If `--neighbor-ip` is omitted for /29 or larger, the command fails with an error
-- The interface must have an IP address configured
-
-### 11.3 Add BGP Neighbor (Passive Mode)
-
-For customer-facing interfaces where the customer initiates the BGP session:
-
-```bash
-newtron -d leaf1-dc1 -i Ethernet0 add-bgp-neighbor 65100 --passive -x
-```
-
-**Notes:**
-
-- `--passive` and `--neighbor-ip` are mutually exclusive
-- Passive mode waits for the peer to initiate the connection
-
-### 11.4 List BGP Neighbors
-
-```bash
-# List all BGP neighbors on device
-newtron -d leaf1-dc1 list-bgp-neighbors
-
-# List BGP neighbors on specific interface
-newtron -d leaf1-dc1 -i Ethernet0 list-bgp-neighbors
+newtron leaf1 bgp status
 
 # Output:
-# Neighbor IP    Remote AS   State
-# -----------    ---------   -----
-# 10.1.1.2       65100       Established
+# BGP Status for leaf1-dc1
+# ========================
+#
+# Identity:
+#   Local AS: 65001
+#   Router ID: 10.0.0.10
+#   Loopback: 10.0.0.10
+#
+# Configured Neighbors (CONFIG_DB):
+#   IP             AS      Type       VRF             Interface
+#   --             --      ----       ---             ---------
+#   10.0.0.1       65001   overlay    default         Loopback0
+#   10.0.0.2       65001   overlay    default         Loopback0
+#   10.1.1.2       65100   underlay   default         Ethernet0
+#   10.1.2.2       65200   underlay   Vrf_CUST1       Ethernet8
+#
+# Operational State (STATE_DB):
+#   Neighbor       State         Pfx Rcvd  Pfx Sent  Uptime
+#   --------       -----         --------  --------  ------
+#   10.0.0.1       Established   12        8         02:15:30
+#   10.0.0.2       Established   12        8         02:15:28
+#   10.1.1.2       Established   4         6         01:45:12
+#   10.1.2.2       Established   3         5         01:30:05
 ```
 
-### 11.5 Remove BGP Neighbor
+### 12.2 Managing BGP Neighbors
+
+All BGP peer management uses the `vrf` noun group:
 
 ```bash
-# Remove BGP neighbor from interface
-newtron -d leaf1-dc1 -i Ethernet0 remove-bgp-neighbor -x
+# Add eBGP neighbor (auto-derived IP for /30)
+newtron leaf1 vrf add-neighbor default Ethernet0 65100 -x
 
-# Remove specific neighbor IP (if multiple neighbors on interface)
-newtron -d leaf1-dc1 -i Ethernet0 remove-bgp-neighbor --neighbor-ip 10.1.1.2 -x
+# Add iBGP neighbor (explicit IP for loopback-based peering)
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Loopback0 64512 --neighbor 10.0.0.1 -x
+
+# Remove a neighbor
+newtron leaf1 vrf remove-neighbor default Ethernet0 -x
 ```
 
-The remove operation deletes all address-family entries (ipv4_unicast, ipv6_unicast, l2vpn_evpn) and the neighbor entry.
+See [Section 9: VRF Management](#9-vrf-management) for the full set of neighbor operations.
 
-### 11.6 Security Constraints
+### 12.3 Security Constraints
 
 All direct BGP neighbors have these non-negotiable security constraints:
 
@@ -1540,14 +1738,211 @@ All direct BGP neighbors have these non-negotiable security constraints:
 
 ---
 
-## 12. Health Checks
+## 13. QoS Management
 
-### 12.1 Run All Health Checks
+QoS policies define declarative queue configurations. The QoS noun has two scopes: spec authoring (no device needed) and device application (requires device).
 
-Device-level operation:
+### 13.1 List QoS Policies
+
+No device needed:
 
 ```bash
-newtron -d leaf1-dc1 health-check
+newtron qos list
+
+# Output:
+# NAME             QUEUES  DESCRIPTION
+# ----             ------  -----------
+# customer-4q      4       4-queue customer-edge policy
+# 8q-datacenter    8       8-queue datacenter policy
+```
+
+### 13.2 Show QoS Policy
+
+```bash
+newtron qos show customer-4q
+
+# Output:
+# Policy: customer-4q
+# Description: 4-queue customer-edge policy
+# Queues: 4
+#
+# Queue  Name           Type    Weight  DSCP         ECN
+# -----  ----           ----    ------  ----         ---
+# 0      best-effort    dwrr    40      0            -
+# 1      business       dwrr    30      10,18,20     -
+# 2      voice          strict  -       46           -
+# 3      network-ctrl   strict  -       48,56        -
+```
+
+### 13.3 Create a QoS Policy
+
+```bash
+newtron qos create my-policy --description "Custom QoS" -x
+```
+
+### 13.4 Add Queues to a Policy
+
+```bash
+newtron qos add-queue my-policy 0 --type dwrr --weight 40 --dscp 0 --name best-effort -x
+newtron qos add-queue my-policy 1 --type dwrr --weight 30 --dscp 10,18,20 --name business -x
+newtron qos add-queue my-policy 2 --type strict --dscp 46 --name voice -x
+newtron qos add-queue my-policy 3 --type strict --dscp 48,56 --name network-ctrl --ecn -x
+```
+
+**Queue parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `--type` | `dwrr` (weighted) or `strict` (priority) |
+| `--weight` | DWRR weight percentage (required for `dwrr`, forbidden for `strict`) |
+| `--dscp` | Comma-separated DSCP values (0-63) mapped to this queue |
+| `--name` | Human-readable queue name |
+| `--ecn` | Enable ECN marking (creates WRED profile) |
+
+**Constraints:** 1-8 queues per policy. DSCP values 0-63, no duplicates across queues. DWRR weights sum to 100%.
+
+### 13.5 Remove a Queue
+
+```bash
+newtron qos remove-queue my-policy 3 -x
+```
+
+### 13.6 Delete a QoS Policy
+
+```bash
+newtron qos delete my-policy -x
+```
+
+### 13.7 Apply QoS to Interface
+
+Apply a QoS policy to a device interface (requires device):
+
+```bash
+newtron leaf1 qos apply Ethernet0 8q-datacenter -x
+```
+
+This creates DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, and PORT_QOS_MAP entries in CONFIG_DB.
+
+### 13.8 Remove QoS from Interface
+
+```bash
+newtron leaf1 qos remove Ethernet0 -x
+```
+
+### 13.9 QoS Override Workflow
+
+Override service-managed QoS on a specific interface:
+
+```bash
+# Apply custom QoS (overrides service-managed policy)
+newtron leaf1 qos apply Ethernet0 8q-datacenter -x
+
+# Revert to service-managed QoS (refresh re-applies the service definition)
+newtron leaf1 qos remove Ethernet0 -x
+newtron leaf1 service refresh Ethernet0 -x
+```
+
+---
+
+## 14. Filter Management
+
+Filters are reusable ACL rule templates in network.json (spec authoring). When a service is applied, its `ingress_filter` and `egress_filter` references are instantiated as device-level ACLs.
+
+**Key distinction:** A `filter` is a template definition in the spec; an `acl` is a device-level instance. Services bridge the two -- applying a service with a filter creates the corresponding ACL.
+
+### 14.1 List Filters
+
+No device needed:
+
+```bash
+newtron filter list
+
+# Output:
+# NAME               TYPE  RULES  DESCRIPTION
+# ----               ----  -----  -----------
+# customer-ingress   L3    2      Ingress filter for customer interfaces
+# transit-protect    L3    5      Transit peering protection
+```
+
+### 14.2 Show Filter Details
+
+```bash
+newtron filter show customer-ingress
+
+# Output:
+# Filter: customer-ingress
+# Type: L3
+# Description: Ingress filter for customer interfaces
+#
+# Rules:
+# Seq    Match                    Action   Log
+# ---    -----                    ------   ---
+# 100    src_prefix_list: bogons  deny     yes
+# 9999   any                      permit   -
+```
+
+### 14.3 Create a Filter
+
+```bash
+newtron filter create my-filter --type l3 --description "Custom filter" -x
+```
+
+### 14.4 Add Rules to a Filter
+
+```bash
+# Deny a source prefix
+newtron filter add-rule my-filter --priority 100 --action deny --src-ip 10.0.0.0/8 -x
+
+# Deny specific protocol
+newtron filter add-rule my-filter --priority 200 --action deny --protocol icmp -x
+
+# Permit all else (default deny-all if omitted)
+newtron filter add-rule my-filter --priority 9999 --action permit -x
+```
+
+### 14.5 Remove a Rule
+
+```bash
+newtron filter remove-rule my-filter 200 -x
+```
+
+### 14.6 Delete a Filter
+
+```bash
+newtron filter delete my-filter -x
+```
+
+### 14.7 Filter Lifecycle
+
+Filters live in network.json and are instantiated on devices when services reference them:
+
+```bash
+# 1. Create filter template
+newtron filter create my-filter --type l3 -x
+newtron filter add-rule my-filter --priority 100 --action deny --src-ip 10.0.0.0/8 -x
+newtron filter add-rule my-filter --priority 9999 --action permit -x
+
+# 2. Create service referencing the filter
+newtron service create my-svc --type l3 --ingress-filter my-filter -x
+
+# 3. Apply service to device interface (filter becomes ACL on device)
+newtron leaf1 service apply Ethernet0 my-svc --ip 10.1.1.1/30 -x
+
+# 4. Update filter rules
+newtron filter add-rule my-filter --priority 150 --action deny --src-ip 172.16.0.0/12 -x
+
+# 5. Refresh service to pick up filter changes
+newtron leaf1 service refresh Ethernet0 -x
+```
+
+---
+
+## 15. Health Checks
+
+### 15.1 Run All Health Checks
+
+```bash
+newtron leaf1 health check
 
 # Output:
 # Health Check Results for leaf1-dc1
@@ -1564,22 +1959,20 @@ newtron -d leaf1-dc1 health-check
 # Summary: 6 passed, 1 warning, 0 failed
 ```
 
-### 12.2 Check Specific Component
-
-The `RunHealthChecks` method accepts a `checkType` parameter to run specific checks:
+### 15.2 Check Specific Component
 
 ```bash
 # BGP health
-newtron -d leaf1-dc1 health-check --check bgp
+newtron leaf1 health check --check bgp
 
 # Interface health
-newtron -d leaf1-dc1 health-check --check interfaces
+newtron leaf1 health check --check interfaces
 
 # EVPN health
-newtron -d leaf1-dc1 health-check --check evpn
+newtron leaf1 health check --check evpn
 
 # LAG health
-newtron -d leaf1-dc1 health-check --check lag
+newtron leaf1 health check --check lag
 ```
 
 **Available check types:**
@@ -1591,10 +1984,10 @@ newtron -d leaf1-dc1 health-check --check lag
 | `evpn` | VTEP existence and VNI mapping count |
 | `lag` | LAG count and total member count |
 
-### 12.3 JSON Output
+### 15.3 JSON Output
 
 ```bash
-newtron -d leaf1-dc1 health-check --json
+newtron leaf1 health check --json
 
 # Useful for monitoring integration
 ```
@@ -1603,117 +1996,17 @@ The JSON output uses `HealthCheckResult` objects with `check`, `status`, and `me
 
 ---
 
-## 13. State DB Queries
+## 16. Baseline Configuration
 
-Newtron reads operational state from SONiC's **STATE_DB** (Redis database 6). This provides real-time information that is separate from configuration state.
+### 16.1 List Available Configlets
 
-### 13.1 Available State Tables
-
-| Table | Information |
-|-------|-------------|
-| `PORT_TABLE` | Interface oper_status, admin_status, speed, MTU |
-| `LAG_TABLE` | LAG oper_status, speed, MTU |
-| `LAG_MEMBER_TABLE` | LAG member status, selected state, LACP port numbers |
-| `VLAN_TABLE` | VLAN oper_status |
-| `VRF_TABLE` | VRF state |
-| `VXLAN_TUNNEL_TABLE` | VTEP oper_status, discovered remote VTEPs |
-| `BGP_NEIGHBOR_TABLE` | Neighbor state, prefixes received/sent, uptime |
-| `INTERFACE_TABLE` | Interface VRF binding, proxy ARP |
-| `NEIGH_TABLE` | ARP/NDP neighbor entries |
-| `FDB_TABLE` | MAC forwarding entries (port, type, VNI, remote VTEP) |
-| `ROUTE_TABLE` | Routes (nexthop, interface, protocol) |
-| `TRANSCEIVER_INFO` | Optics vendor, model, serial number |
-| `TRANSCEIVER_STATUS` | Optics temperature, voltage, TX/RX power |
-
-### 13.2 Query BGP Neighbor State
+No device needed:
 
 ```bash
-newtron -d leaf1-dc1 state bgp-neighbors
+newtron baseline list
 
 # Output:
-# BGP Neighbors (from STATE_DB):
-#
-# Neighbor         State         AS     Pfx Rcvd  Pfx Sent  Uptime
-# --------         -----         --     --------  --------  ------
-# 10.0.0.1         Established   65001  12        8         02:15:30
-# 10.0.0.2         Established   65001  12        8         02:15:28
-# 10.1.1.2         Established   65100  4         6         01:45:12
-```
-
-### 13.3 Query Interface Operational State
-
-```bash
-newtron -d leaf1-dc1 state interfaces
-
-# Output:
-# Interface State (from STATE_DB):
-#
-# Interface     Admin    Oper     Speed    MTU
-# ---------     -----    ----     -----    ---
-# Ethernet0     up       up       100000   9100
-# Ethernet4     up       up       100000   9100
-# Ethernet8     down     down     100000   9100
-```
-
-### 13.4 Query EVPN State
-
-```bash
-newtron -d leaf1-dc1 state evpn
-
-# Output:
-# EVPN State (from STATE_DB):
-#
-# VTEP:
-#   vtep1: oper_status=active, src_ip=10.0.0.10
-#
-# Remote VTEPs:
-#   10.0.0.11 (leaf2-dc1)
-#   10.0.0.12 (leaf3-dc1)
-#
-# VNI Count: 5
-```
-
-### 13.5 Query Transceiver Info
-
-```bash
-newtron -d leaf1-dc1 state transceiver Ethernet0
-
-# Output:
-# Transceiver: Ethernet0
-#   Vendor: Finisar
-#   Model: FTLX8574D3BCL
-#   Serial: ABC12345
-#   Type: QSFP28
-#   Present: true
-#   Temperature: 32.5C
-#   TX Power: -1.2 dBm
-#   RX Power: -2.1 dBm
-```
-
-### 13.6 State DB vs Config DB
-
-It is important to understand the distinction between these two databases:
-
-| Aspect | CONFIG_DB (DB 4) | STATE_DB (DB 6) |
-|--------|-----------------|-----------------|
-| Content | Desired configuration | Operational state |
-| Modified by | Newtron, config reload, CLI | SONiC daemons (orchagent, bgpcfgd, etc.) |
-| Persistence | Saved to /etc/sonic/config_db.json | Runtime only (lost on reboot) |
-| Example | `PORT|Ethernet0` with `admin_status=up` | `PORT_TABLE|Ethernet0` with `oper_status=up` |
-
----
-
-## 14. Baseline Configuration
-
-### 14.1 List Available Configlets
-
-Network-level operation (no device needed):
-
-```bash
-newtron list baselines
-
-# Output:
-# Available Configlets:
+# Available baseline templates:
 #
 # Name              Version   Description
 # ----              -------   -----------
@@ -1722,10 +2015,10 @@ newtron list baselines
 # sonic-qos-8q      1.0       8-queue QoS configuration
 ```
 
-### 14.2 Show Configlet Details
+### 16.2 Show Configlet Details
 
 ```bash
-newtron show baseline sonic-baseline
+newtron baseline show sonic-baseline
 
 # Output:
 # Configlet: sonic-baseline
@@ -1750,32 +2043,32 @@ newtron show baseline sonic-baseline
 #   - MGMT_VRF_CONFIG
 ```
 
-### 14.3 Apply Baseline Configuration
+### 16.3 Apply Baseline Configuration
 
-Device-level operation. The `ApplyBaseline` method automatically provides default variables from the device's resolved profile (device_name, loopback_ip):
+The `apply` command automatically provides default variables from the device's resolved profile:
 
 ```bash
 # Preview
-newtron -d leaf1-dc1 apply-baseline sonic-baseline
+newtron leaf1 baseline apply sonic-baseline
 
 # Execute
-newtron -d leaf1-dc1 apply-baseline sonic-baseline -x
+newtron leaf1 baseline apply sonic-baseline -x
 
 # Apply multiple configlets
-newtron -d leaf1-dc1 apply-baseline sonic-baseline sonic-evpn -x
+newtron leaf1 baseline apply sonic-baseline sonic-evpn -x
 ```
 
-### 14.4 Provide Missing Variables
+### 16.4 Provide Missing Variables
 
 ```bash
-newtron -d leaf1-dc1 apply-baseline sonic-baseline \
+newtron leaf1 baseline apply sonic-baseline \
   --var ntp_server_1=10.100.1.1 \
   --var ntp_server_2=10.100.1.2 \
   --var syslog_server=10.100.2.1 \
   -x
 ```
 
-### 14.5 Built-in Configlets
+### 16.5 Built-in Configlets
 
 | Configlet | Tables Modified | Description |
 |-----------|----------------|-------------|
@@ -1784,14 +2077,14 @@ newtron -d leaf1-dc1 apply-baseline sonic-baseline \
 
 ---
 
-## 15. Cleanup Operations
+## 17. Cleanup Operations
 
 Newtron's cleanup operation identifies and removes orphaned configurations -- resources that are no longer in use.
 
-### 15.1 Preview All Cleanup
+### 17.1 Preview All Cleanup
 
 ```bash
-newtron -d leaf1-dc1 cleanup
+newtron leaf1 device cleanup
 
 # Output:
 # Orphaned configurations to remove:
@@ -1804,27 +2097,26 @@ newtron -d leaf1-dc1 cleanup
 # DRY-RUN: No changes applied. Use -x to execute.
 ```
 
-### 15.2 Execute Cleanup
+### 17.2 Execute Cleanup
 
 ```bash
-# Clean up all orphaned resources
-newtron -d leaf1-dc1 cleanup -x
+newtron leaf1 device cleanup -x
 ```
 
-### 15.3 Cleanup Specific Types
+### 17.3 Cleanup Specific Types
 
 ```bash
-# Only orphaned ACLs (ACL tables with empty ports list)
-newtron -d leaf1-dc1 cleanup --type acls -x
+# Only orphaned ACLs (ACL tables with no interfaces bound)
+newtron leaf1 device cleanup --type acls -x
 
 # Only orphaned VRFs (VRFs with no interface bindings, excluding "default")
-newtron -d leaf1-dc1 cleanup --type vrfs -x
+newtron leaf1 device cleanup --type vrfs -x
 
 # Only orphaned VNI mappings (VNI maps pointing to deleted VLANs/VRFs)
-newtron -d leaf1-dc1 cleanup --type vnis -x
+newtron leaf1 device cleanup --type vnis -x
 ```
 
-### 15.4 What Gets Cleaned Up
+### 17.4 What Gets Cleaned Up
 
 | Type | Detection Criteria | What Gets Deleted |
 |------|--------------------|-------------------|
@@ -1832,7 +2124,7 @@ newtron -d leaf1-dc1 cleanup --type vnis -x
 | `vrf` | VRF with no interface `vrf_name` references (skip "default") | VRF entry |
 | `vni` | VXLAN_TUNNEL_MAP pointing to nonexistent VRF or VLAN | VXLAN_TUNNEL_MAP entry |
 
-### 15.5 Orphaned Resource Detection Details
+### 17.5 Orphaned Resource Detection Details
 
 **ACLs:** The cleanup scans all `ACL_TABLE` entries. If `acl.Ports` is empty, the ACL has no interfaces bound and is considered orphaned. All corresponding `ACL_RULE` entries (matching the `aclName|` prefix) are deleted first, then the table itself.
 
@@ -1840,7 +2132,7 @@ newtron -d leaf1-dc1 cleanup --type vnis -x
 
 **VNIs:** The cleanup scans all `VXLAN_TUNNEL_MAP` entries. For each mapping, it checks whether the referenced VRF or VLAN still exists. If the referenced resource is gone, the mapping is orphaned.
 
-### 15.6 When to Run Cleanup
+### 17.6 When to Run Cleanup
 
 - After removing services from multiple interfaces
 - After deleting VLANs or VRFs
@@ -1852,18 +2144,18 @@ newtron -d leaf1-dc1 cleanup --type vnis -x
 
 ---
 
-## 16. Config Persistence
+## 18. Config Persistence
 
-### 16.1 Runtime vs Persistent Configuration
+### 18.1 Runtime vs Persistent Configuration
 
 Newtron writes configuration changes to **Redis CONFIG_DB** (database 4). These changes take effect immediately at runtime but are **ephemeral** -- they exist only in Redis memory and are lost on device reboot.
 
 ```
-newtron apply-service --> Redis CONFIG_DB (runtime) --> SONiC daemons process changes
+newtron service apply --> Redis CONFIG_DB (runtime) --> SONiC daemons process changes
                           NOT saved to disk yet
 ```
 
-### 16.2 Persisting Changes
+### 18.2 Persisting Changes
 
 To persist changes across reboots, you must save the running configuration to disk on the SONiC device:
 
@@ -1875,19 +2167,19 @@ ssh admin@192.168.1.10
 sudo config save -y
 ```
 
-Or as a one-liner:
+Or use the `-s` flag with newtron to save automatically after executing:
+
+```bash
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -xs
+```
+
+Or as a one-liner via SSH:
 
 ```bash
 ssh admin@192.168.1.10 'sudo config save -y'
 ```
 
-With the lab SSH credentials:
-
-```bash
-ssh cisco@<mgmt_ip> 'sudo config save -y'
-```
-
-### 16.3 What Happens on Reboot Without Save
+### 18.3 What Happens on Reboot Without Save
 
 If the device reboots before `config save -y`:
 
@@ -1895,23 +2187,23 @@ If the device reboots before `config save -y`:
 2. All changes made since the last `config save` are gone
 3. The device returns to its last persisted state
 
-### 16.4 When to Save
+### 18.4 When to Save
 
 Save after completing a set of related changes:
 
 ```bash
 # Apply services
-newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
-newtron -d leaf1-dc1 -i Ethernet4 apply-service customer-l3 --ip 10.1.2.1/30 -x
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
+newtron leaf1 service apply Ethernet4 customer-l3 --ip 10.1.2.1/30 -x
 
 # Verify everything looks correct
-newtron -d leaf1-dc1 health-check
+newtron leaf1 health check
 
 # Then persist
 ssh admin@192.168.1.10 'sudo config save -y'
 ```
 
-### 16.5 Config Reload
+### 18.5 Config Reload
 
 To revert to the persisted configuration (discard runtime changes):
 
@@ -1923,20 +2215,20 @@ This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any uns
 
 ---
 
-## 17. Lab Environment
+## 19. Lab Environment
 
 Lab environments for newtron use **newtlab** (see `docs/newtlab/`). newtlab orchestrates
 SONiC-VS QEMU VMs without requiring root or Docker. E2E testing uses the **newtest**
 framework (see `docs/newtest/`).
 
-### 17.1 Running Tests
+### 19.1 Running Tests
 
 ```bash
 # Run unit tests (no lab required)
 make test
 ```
 
-### 17.2 Redis Access
+### 19.2 Redis Access
 
 Redis inside SONiC listens on `127.0.0.1:6379` and is not directly accessible.
 newtron uses SSH tunnels when `ssh_user`/`ssh_pass` are set in the device profile:
@@ -1947,14 +2239,14 @@ newtron --> SSH to device:22 --> forward to 127.0.0.1:6379 (inside device)
 
 ---
 
-## 18. Troubleshooting
+## 20. Troubleshooting
 
-### 18.1 Connection Issues
+### 20.1 Connection Issues
 
 **Problem:** Cannot connect to device -- Redis connection refused
 
 ```bash
-newtron -d leaf1-dc1 show
+newtron leaf1 show
 # Error: redis connection failed: dial tcp 192.168.1.10:6379: connect: connection refused
 ```
 
@@ -1968,12 +2260,12 @@ newtron -d leaf1-dc1 show
 4. For direct Redis (non-QEMU), verify Redis is running: `ssh admin@192.168.1.10 'redis-cli ping'`
 5. For production, check firewall rules allow port 6379
 
-### 18.2 SSH Tunnel Failed
+### 20.2 SSH Tunnel Failed
 
 **Problem:** SSH tunnel cannot be established
 
 ```bash
-newtron -d leaf1-dc1 show
+newtron leaf1 show
 # Error: SSH tunnel to 172.20.20.3: SSH dial 172.20.20.3: dial tcp 172.20.20.3:22: connect: connection refused
 ```
 
@@ -1982,10 +2274,10 @@ newtron -d leaf1-dc1 show
 1. Verify SSH service is running on the device: `ssh cisco@<mgmt_ip>` manually
 2. Check SSH credentials in the profile (`ssh_user` and `ssh_pass`)
 3. Verify port 22 is accessible from the newtron host
-4. In lab: ensure `make lab-start` completed successfully (profile patching sets SSH creds)
-5. In lab: check that the container is healthy: `make lab-status`
+4. In lab: ensure `newtlab deploy` completed successfully (profile patching sets SSH creds)
+5. In lab: check that the VM is healthy: `newtlab status`
 
-### 18.3 Changes Lost After Reboot
+### 20.3 Changes Lost After Reboot
 
 **Problem:** Configuration changes disappear after device reboot
 
@@ -1997,63 +2289,77 @@ newtron -d leaf1-dc1 show
 ssh admin@192.168.1.10 'sudo config save -y'
 ```
 
-See [Section 16: Config Persistence](#16-config-persistence) for details.
+Or use `-xs` to execute and save in one step.
 
-### 18.4 Stale State After Test
+See [Section 18: Config Persistence](#18-config-persistence) for details.
+
+### 20.4 Stale State After Test
 
 **Problem:** Tests fail because leftover configuration from a previous test run causes crashes or unexpected behavior in SONiC daemons (vxlanmgrd, orchagent).
 
 **Solutions:**
 
 1. Use the `ResetLabBaseline()` function in test `TestMain` to clean stale entries before tests
-2. Use the `Cleanup` device operation to remove orphaned resources
+2. Use `device cleanup` to remove orphaned resources
 3. As a last resort, reload config on the device: `ssh admin@<ip> 'sudo config reload -y'`
 
 In E2E tests, the `ResetLabBaseline()` helper connects to each SONiC node via SSH and deletes known stale CONFIG_DB keys in parallel.
 
-### 18.5 Precondition Failures
+### 20.5 Precondition Failures
 
 **Problem:** Operation fails precondition check
 
 ```bash
-newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30
-# Error: apply-service on Ethernet0: VTEP configured required - VTEP not configured - create VTEP first
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
+# Error: service apply on Ethernet0: VTEP configured required - VTEP not configured - create VTEP first
 ```
 
 **Solution:** Follow the dependency chain:
 
 ```bash
-# 1. Create VTEP first
-newtron -d leaf1-dc1 create vtep --source-ip 10.0.0.10 -x
+# 1. Set up EVPN overlay first (creates VTEP + NVO + BGP EVPN)
+newtron leaf1 evpn setup -x
 
-# 2. Verify BGP is configured (manual or via baseline)
-
-# 3. Then apply service
-newtron -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30 -x
+# 2. Then apply service
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 ```
 
-### 18.6 Interface in Use
+**VRF precondition failures:**
+
+```bash
+newtron leaf1 vrf delete Vrf_CUST1
+# Error: vrf delete: VRF has interfaces bound - remove interfaces first
+```
+
+```bash
+# Remove interfaces before deleting VRF
+newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
+newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet12 -x
+newtron leaf1 vrf delete Vrf_CUST1 -x
+```
+
+### 20.6 Interface in Use
 
 **Problem:** Cannot modify interface that has configuration
 
 ```bash
-newtron -d leaf1-dc1 -i PortChannel100 add-member Ethernet0
-# Error: add-member on Ethernet0: interface must not have service - interface has service 'customer-l3' bound
+newtron leaf1 lag add-interface PortChannel100 Ethernet0
+# Error: add-interface on Ethernet0: interface must not have service - interface has service 'customer-l3' bound
 ```
 
 **Solution:** Remove the service first:
 
 ```bash
-newtron -d leaf1-dc1 -i Ethernet0 remove-service -x
-newtron -d leaf1-dc1 -i PortChannel100 add-member Ethernet0 -x
+newtron leaf1 service remove Ethernet0 -x
+newtron leaf1 lag add-interface PortChannel100 Ethernet0 -x
 ```
 
-### 18.7 Verbose Mode
+### 20.7 Verbose Mode
 
 Enable verbose output for debugging:
 
 ```bash
-newtron -v -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30
+newtron -v leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
 
 # Shows detailed logs including:
 # - Configuration loading
@@ -2063,54 +2369,48 @@ newtron -v -d leaf1-dc1 -i Ethernet0 apply-service customer-l3 --ip 10.1.1.1/30
 # - Change generation
 ```
 
-### 18.8 View Audit Logs
+### 20.8 View Audit Logs
 
 Check what changes were made:
 
 ```bash
-newtron -d leaf1-dc1 list audit --last 24h
+newtron audit --last 24h
 
 # Output:
-# Timestamp            User    Operation       Interface   Status
-# ---------            ----    ---------       ---------   ------
-# 2024-01-15 10:30:00  alice   apply-service   Ethernet0   success
-# 2024-01-15 10:25:00  alice   create lag      PC100       success
-# 2024-01-15 10:20:00  bob     apply-service   Ethernet4   failed
+# Timestamp            User    Operation          Device      Status
+# ---------            ----    ---------          ------      ------
+# 2024-01-15 10:30:00  alice   service apply      leaf1-dc1   success
+# 2024-01-15 10:25:00  alice   lag create         leaf1-dc1   success
+# 2024-01-15 10:20:00  bob     service apply      leaf1-dc1   failed
 ```
 
-Show specific audit event:
-
-```bash
-newtron show audit <event-id>
-```
-
-### 18.9 Common Error Messages
+### 20.9 Common Error Messages
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| "device required" | Missing -d flag | Add `-d <device>` to command |
-| "interface required" | Missing -i flag | Add `-i <interface>` to command |
-| "interface does not exist" | Typo in interface name | Check `newtron -d <device> list interfaces` |
+| "device required" | Missing device name | Add `-d <device>` or use implicit device as first arg |
+| "interface does not exist" | Typo in interface name | Check `newtron <device> interface list` |
 | "VRF does not exist" | Service uses shared VRF not created | Create VRF first or use `vrf_type: interface` |
-| "VTEP not configured" | EVPN service without VTEP | Create VTEP with `newtron -d <device> create vtep` |
+| "VRF has interfaces bound" | Trying to delete VRF with interfaces | Remove interfaces first with `vrf remove-interface` |
+| "VTEP not configured" | EVPN service without VTEP | Set up EVPN with `newtron <device> evpn setup -x` |
 | "BGP not configured" | EVPN service without BGP | Configure BGP (manual or baseline) |
 | "interface is a member of LAG" | Trying to configure LAG member directly | Configure the LAG instead |
 | "L2 and L3 are mutually exclusive" | Adding VLAN member to routed port | Remove IP/VRF first |
 | "redis connection failed" | Port 6379 not forwarded | Add ssh_user/ssh_pass to profile for SSH tunnel |
-| "SSH dial ... connection refused" | Port 22 not reachable | Check SSH service, network, container health |
+| "SSH dial ... connection refused" | Port 22 not reachable | Check SSH service, network, VM health |
 | "device is locked by another process" | Another newtron instance holds the device lock | Wait for other operation to finish, or check `LockHolder()` for stale locks (TTL auto-expires) |
-| "interface already has service" | Apply-service to an interface that already has one | Remove existing service first |
+| "interface already has service" | Apply service to an interface that already has one | Remove existing service first |
 
-### 18.10 Reset to Clean State
+### 20.10 Reset to Clean State
 
 If configuration is in a bad state:
 
 ```bash
 # Option 1: Remove services and start fresh
-newtron -d leaf1-dc1 -i Ethernet0 remove-service -x
+newtron leaf1 service remove Ethernet0 -x
 
 # Option 2: Run cleanup to remove all orphaned resources
-newtron -d leaf1-dc1 cleanup -x
+newtron leaf1 device cleanup -x
 
 # Option 3: Use SONiC's config reload (on switch, reverts to saved config)
 ssh admin@192.168.1.10 'sudo config reload -y'
@@ -2118,11 +2418,11 @@ ssh admin@192.168.1.10 'sudo config reload -y'
 
 ---
 
-## 19. Go API Usage
+## 21. Go API Usage
 
 The newtron package provides an object-oriented API for programmatic access. The design uses parent references so child objects can access their parent's configuration.
 
-### 19.1 Object Hierarchy
+### 21.1 Object Hierarchy
 
 ```
 Network (top-level: loads specs, owns device profiles)
@@ -2140,7 +2440,7 @@ Each object level can reach its parent:
 
 This design means operations on an Interface can access the full specification (services, filter-specs, prefix-lists) without needing specs passed as parameters.
 
-### 19.2 Creating a Network and Connecting to a Device
+### 21.2 Creating a Network and Connecting to a Device
 
 ```go
 package main
@@ -2178,7 +2478,7 @@ func main() {
 }
 ```
 
-### 19.3 Connecting with SSH Tunnel (Explicit)
+### 21.3 Connecting with SSH Tunnel (Explicit)
 
 The SSH tunnel is established automatically by `Device.Connect()` when the device profile contains `ssh_user` and `ssh_pass`. You do not need to create the tunnel manually. However, understanding the flow is useful for debugging:
 
@@ -2209,7 +2509,7 @@ The SSH tunnel is established automatically by `Device.Connect()` when the devic
 //   1. Connect Redis client directly to 172.20.20.3:6379
 ```
 
-### 19.4 Accessing Specifications Through Parent References
+### 21.4 Accessing Specifications Through Parent References
 
 ```go
 // Get an interface (Interface is created in Device's context)
@@ -2236,7 +2536,7 @@ if err != nil {
 fmt.Printf("Filter rules: %d\n", len(filter.Rules))
 ```
 
-### 19.5 Checking Device State
+### 21.5 Checking Device State
 
 ```go
 // List all interfaces
@@ -2264,13 +2564,19 @@ if intf.IsLAGMember() {
 }
 ```
 
-### 19.6 Listing Network-Level Specifications
+### 21.6 Listing Network-Level Specifications
 
 ```go
 // List all services
 for _, name := range net.ListServices() {
     svc, _ := net.GetService(name)
     fmt.Printf("Service %s: %s (%s)\n", name, svc.Description, svc.ServiceType)
+}
+
+// List IP-VPN definitions
+for _, name := range net.ListIPVPNs() {
+    ipvpn, _ := net.GetIPVPN(name)
+    fmt.Printf("IP-VPN %s: L3VNI %d\n", name, ipvpn.L3VNI)
 }
 
 // Get prefix list
@@ -2282,13 +2588,12 @@ region, _ := net.GetRegion("amer-wan")
 fmt.Printf("Region AS: %d\n", region.ASNumber)
 ```
 
-### 19.7 Performing Operations (OO Style)
+### 21.7 Performing Operations
 
 Operations are methods on the objects they operate on:
 
 ```go
-// Interface operations -- methods on Interface
-// Lock is acquired/released automatically per-operation in execute mode
+// Interface operations
 intf, _ := dev.GetInterface("Ethernet0")
 
 changeSet, err := intf.ApplyService(ctx, "customer-l3", network.ApplyServiceOpts{IPAddr: "10.1.1.1/30"})
@@ -2306,13 +2611,12 @@ if err := changeSet.Apply(dev); err != nil {
 }
 ```
 
-**Device operations -- methods on Device:**
+**Device operations:**
 
 ```go
 // Create a VLAN
 changeSet, err := dev.CreateVLAN(ctx, 100, network.VLANConfig{
     Description: "Server VLAN",
-    L2VNI:       10100,
 })
 if err != nil {
     log.Fatal(err)
@@ -2330,19 +2634,36 @@ if err != nil {
 }
 changeSet.Apply(dev)
 
-// Add member to PortChannel
-changeSet, err := dev.AddPortChannelMember(ctx, "PortChannel100", "Ethernet8")
+// Create VRF
+changeSet, err := dev.CreateVRF(ctx, "Vrf_CUST1")
 if err != nil {
     log.Fatal(err)
 }
 changeSet.Apply(dev)
 
-// Create VRF with L3VNI
-changeSet, err := dev.CreateVRF(ctx, "Vrf_CUST1", network.VRFConfig{
-    L3VNI:    10001,
-    ImportRT: []string{"65001:1"},
-    ExportRT: []string{"65001:1"},
-})
+// Add interface to VRF
+changeSet, err := dev.AddVRFInterface(ctx, "Vrf_CUST1", "Ethernet8")
+if err != nil {
+    log.Fatal(err)
+}
+changeSet.Apply(dev)
+
+// Bind IP-VPN to VRF
+changeSet, err := dev.BindIPVPN(ctx, "Vrf_CUST1", "customer-vpn")
+if err != nil {
+    log.Fatal(err)
+}
+changeSet.Apply(dev)
+
+// Add static route to VRF
+changeSet, err := dev.AddStaticRoute(ctx, "Vrf_CUST1", "10.99.0.0/16", "10.1.1.2")
+if err != nil {
+    log.Fatal(err)
+}
+changeSet.Apply(dev)
+
+// Set up EVPN overlay (idempotent composite)
+changeSet, err := dev.SetupEVPN(ctx, "") // empty = use loopback IP
 if err != nil {
     log.Fatal(err)
 }
@@ -2369,7 +2690,29 @@ if !changeSet.IsEmpty() {
 }
 ```
 
-### 19.8 Disconnect and Tunnel Cleanup
+**Spec authoring (network-level, no device):**
+
+```go
+// Save a new IP-VPN definition
+err := net.SaveIPVPN("my-vpn", spec.IPVPNSpec{
+    Description: "Customer VPN",
+    L3VNI:      10001,
+    ImportRT:    []string{"65001:1"},
+    ExportRT:    []string{"65001:1"},
+})
+
+// Delete an IP-VPN definition
+err := net.DeleteIPVPN("my-vpn")
+
+// Save a new MAC-VPN definition
+err := net.SaveMACVPN("my-l2vpn", spec.MACVPNSpec{
+    Description:     "Server L2 extension",
+    L2VNI:           10100,
+    ARPSuppression:  true,
+})
+```
+
+### 21.8 Disconnect and Tunnel Cleanup
 
 ```go
 // Disconnect closes Redis clients, releases lock, and closes SSH tunnel
@@ -2379,7 +2722,7 @@ dev.Disconnect()
 E2E testing uses the newtest framework. See `docs/newtest/e2e-learnings.md` for
 SONiC-specific patterns (convergence timing, cleanup ordering, vxlanmgrd pitfalls).
 
-### 19.9 Design Benefits
+### 21.9 Design Benefits
 
 The parent reference design provides:
 
@@ -2391,97 +2734,152 @@ The parent reference design provides:
 
 ---
 
-## 20. Quick Reference
+## 22. Quick Reference
 
-### 20.1 OO CLI Pattern
+### 22.1 CLI Pattern
 
 ```
-newtron -d <device> -i <interface> <verb> [args] [-x]
-         |              |            |
-         +-- Object Selection --+    +-- Method Call
+newtron <device> <noun> <action> [args] [-x]
 ```
 
-### 20.2 Command Cheat Sheet
+The first argument is the device name unless it matches a known command. Write commands preview changes by default; use `-x` to execute.
 
-```bash
-# Network-level (no device needed)
-newtron list services                              # List available services
-newtron list devices                               # List known devices
-newtron show service <name>                        # Show service details
-newtron settings set device <device>               # Set default device
+### 22.2 Command Tree
 
-# Device-level (select device with -d)
-newtron -d <device> show                           # Show device status
-newtron -d <device> list interfaces                # List interfaces
-newtron -d <device> list vlans                     # List VLANs
-newtron -d <device> list lags                      # List LAGs
-newtron -d <device> list vrfs                      # List VRFs
-newtron -d <device> list acls                      # List ACLs
-newtron -d <device> create vlan <id> [options]     # Create VLAN
-newtron -d <device> create lag <name> [options]    # Create LAG
-newtron -d <device> create vrf <name> [options]    # Create VRF
-newtron -d <device> create vtep [options]          # Create VTEP
-newtron -d <device> create acl <name> [options]    # Create ACL
-newtron -d <device> delete vlan <id>               # Delete VLAN
-newtron -d <device> delete lag <name>              # Delete LAG
-newtron -d <device> delete vrf <name>              # Delete VRF
-newtron -d <device> delete acl <name>              # Delete ACL
-newtron -d <device> health-check                   # Run health checks
-newtron -d <device> apply-baseline <configlet>     # Apply baseline
-newtron -d <device> cleanup                        # Remove orphaned configs
-newtron -d <device> cleanup --type acls            # Cleanup only ACLs
+```
+Resource Commands
+├── interface
+│   ├── list
+│   ├── show <interface>
+│   ├── get <interface> <property>
+│   ├── set <interface> <property> <value>
+│   ├── list-acls <interface>
+│   └── list-members <interface>
+├── vlan
+│   ├── list
+│   ├── show <vlan-id>
+│   ├── status
+│   ├── create <vlan-id> [--name] [--description]
+│   ├── delete <vlan-id>
+│   ├── add-interface <vlan-id> <interface> [--tagged]
+│   ├── remove-interface <vlan-id> <interface>
+│   ├── configure-svi <vlan-id> [--vrf] [--ip] [--anycast-gw]
+│   ├── bind-macvpn <vlan-id> <macvpn-name>
+│   └── unbind-macvpn <vlan-id>
+├── vrf
+│   ├── list
+│   ├── show <vrf-name>
+│   ├── status
+│   ├── create <vrf-name>
+│   ├── delete <vrf-name>
+│   ├── add-interface <vrf-name> <interface>
+│   ├── remove-interface <vrf-name> <interface>
+│   ├── bind-ipvpn <vrf-name> <ipvpn-name>
+│   ├── unbind-ipvpn <vrf-name>
+│   ├── add-neighbor <vrf-name> <interface> <remote-asn> [--neighbor] [--description]
+│   ├── remove-neighbor <vrf-name> <interface|ip>
+│   ├── add-route <vrf-name> <prefix> <next-hop> [--metric]
+│   └── remove-route <vrf-name> <prefix>
+├── lag
+│   ├── list
+│   ├── show <lag-name>
+│   ├── status
+│   ├── create <lag-name> --members <...> [--min-links] [--mode] [--fast-rate] [--mtu]
+│   ├── delete <lag-name>
+│   ├── add-interface <lag-name> <interface>
+│   └── remove-interface <lag-name> <interface>
+├── bgp
+│   └── status
+├── evpn
+│   ├── setup [--source-ip]
+│   ├── status
+│   ├── ipvpn
+│   │   ├── list
+│   │   ├── show <name>
+│   │   ├── create <name> --l3vni <vni> [--import-rt] [--export-rt] [--description]
+│   │   └── delete <name>
+│   └── macvpn
+│       ├── list
+│       ├── show <name>
+│       ├── create <name> --l2vni <vni> [--arp-suppress] [--description]
+│       └── delete <name>
+├── qos
+│   ├── list
+│   ├── show <policy-name>
+│   ├── create <policy-name> [--description]
+│   ├── delete <policy-name>
+│   ├── add-queue <policy-name> <queue-id> --type <dwrr|strict> [--weight] [--dscp] [--name] [--ecn]
+│   ├── remove-queue <policy-name> <queue-id>
+│   ├── apply <interface> <policy-name>
+│   └── remove <interface>
+├── filter
+│   ├── list
+│   ├── show <filter-name>
+│   ├── create <filter-name> --type <l3|l3v6> [--description]
+│   ├── delete <filter-name>
+│   ├── add-rule <filter-name> --priority <N> --action <permit|deny> [match flags...]
+│   └── remove-rule <filter-name> <priority>
+├── acl
+│   ├── list
+│   ├── show <acl-name>
+│   ├── create <acl-name> --type <L3|L3V6> --stage <ingress|egress> [--interfaces] [--description]
+│   ├── delete <acl-name>
+│   ├── add-rule <acl-name> <rule-name> --priority <N> [match flags...] --action <permit|deny>
+│   ├── delete-rule <acl-name> <rule-name>
+│   ├── bind <acl-name> <interface> --direction <ingress|egress>
+│   └── unbind <acl-name> <interface>
+├── service
+│   ├── list
+│   ├── show <service-name>
+│   ├── create <service-name> --type <l2|l3|irb> [--ipvpn] [--macvpn] [--vrf-type]
+│   │   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
+│   ├── delete <service-name>
+│   ├── apply <interface> <service> [--ip] [--peer-as]
+│   ├── remove <interface>
+│   ├── get <interface>
+│   └── refresh <interface>
+└── baseline
+    ├── list
+    ├── show <configlet-name>
+    └── apply <configlet...> [--var key=value]
 
-# State DB queries
-newtron -d <device> state bgp-neighbors            # BGP neighbor operational state
-newtron -d <device> state interfaces               # Interface oper_status
-newtron -d <device> state evpn                     # VTEP and remote VTEPs
-newtron -d <device> state transceiver <port>       # Optics info
+Device Operations
+├── show
+├── provision [-d <device>] [-x] [-s]
+├── health check [--check <name>]
+└── device
+    └── cleanup [--type]
 
-# Interface-level (select device and interface with -d -i)
-newtron -d <device> -i <intf> show                 # Show interface details
-newtron -d <device> -i <intf> get mtu              # Get MTU value
-newtron -d <device> -i <intf> get admin-status     # Get admin status
-newtron -d <device> -i <intf> set mtu <value>      # Set MTU
-newtron -d <device> -i <intf> set admin-status up  # Set admin status
-newtron -d <device> -i <intf> set description "x"  # Set description
-newtron -d <device> -i <intf> get-service          # Get bound service name
-newtron -d <device> -i <intf> apply-service <svc> --ip <cidr>  # Apply service
-newtron -d <device> -i <intf> remove-service       # Remove service
-newtron -d <device> -i <intf> refresh-service      # Sync to current service def
-newtron -d <device> -i <intf> list-acls            # List bound ACLs
-newtron -d <device> -i <intf> bind-acl <acl>       # Bind ACL
-newtron -d <device> -i <intf> unbind-acl <acl>     # Unbind ACL
-
-# LAG/VLAN operations (interface is LAG or VLAN)
-newtron -d <device> -i PortChannel100 list-members             # List LAG members
-newtron -d <device> -i PortChannel100 add-member Ethernet0     # Add LAG member
-newtron -d <device> -i PortChannel100 remove-member Ethernet0  # Remove LAG member
-newtron -d <device> -i Vlan100 list-members                    # List VLAN members
-newtron -d <device> -i Vlan100 add-member Ethernet4 --tagged   # Add VLAN member
-newtron -d <device> -i Vlan100 remove-member Ethernet4         # Remove VLAN member
-newtron -d <device> -i Vlan100 get-macvpn                      # Get MAC-VPN binding
-newtron -d <device> -i Vlan100 bind-macvpn servers-vlan100     # Bind MAC-VPN
-newtron -d <device> -i Vlan100 unbind-macvpn                   # Unbind MAC-VPN
-
-# BGP operations (direct neighbors, TTL=1 enforced)
-newtron -d <device> -i <intf> list-bgp-neighbors               # List BGP neighbors
-newtron -d <device> -i <intf> add-bgp-neighbor <asn>           # Auto-derive IP (/30, /31)
-newtron -d <device> -i <intf> add-bgp-neighbor <asn> --neighbor-ip <ip>  # Explicit IP (/29+)
-newtron -d <device> -i <intf> add-bgp-neighbor <asn> --passive # Passive mode (customer)
-newtron -d <device> -i <intf> remove-bgp-neighbor              # Remove BGP neighbor
+Configuration & Meta
+├── settings
+│   ├── show
+│   ├── set <key> <value>
+│   └── clear
+├── audit [--last <duration>]
+└── version
 ```
 
-### 20.3 Dependency Order for New Device
+### 22.3 Common Flag Reference
 
-1. Configure baseline: `newtron -d <device> apply-baseline sonic-baseline -x`
-2. Create VTEP: `newtron -d <device> create vtep --source-ip <loopback> -x`
-3. Configure BGP (manual or baseline)
-4. Create LAGs if needed: `newtron -d <device> create lag ...`
-5. Create VLANs if needed: `newtron -d <device> create vlan ...`
-6. Apply services: `newtron -d <device> -i <interface> apply-service ...`
-7. Persist: `ssh admin@<ip> 'sudo config save -y'`
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--device` | `-d` | Target device name |
+| `--network` | `-n` | Network configuration name |
+| `--specs` | `-S` | Specification directory |
+| `--execute` | `-x` | Execute changes (default: dry-run) |
+| `--save` | `-s` | Save config after execute (requires `-x`) |
+| `--verbose` | `-v` | Verbose output |
+| `--json` | | JSON output format |
 
-### 20.4 Lab Quick Start
+### 22.4 Dependency Order for New Device
+
+1. Set up overlay: `newtron leaf1 evpn setup -x`
+2. Provision from topology: `newtron provision -d leaf1 -x`
+3. Or apply services individually: `newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x`
+4. Verify: `newtron leaf1 health check`
+5. Persist: `ssh admin@<ip> 'sudo config save -y'` (or use `-xs`)
+
+### 22.5 Lab Quick Start
 
 ```bash
 # Start lab
@@ -2499,11 +2897,11 @@ make lab-stop
 
 ---
 
-## 21. Topology Provisioning
+## 23. Topology Provisioning
 
-Topology provisioning automates device configuration from a `topology.json` spec file. Instead of manually running service-apply commands for each interface, the topology declares the complete desired state.
+Topology provisioning automates device configuration from a `topology.json` spec file. Instead of manually running service apply commands for each interface, the topology declares the complete desired state.
 
-### 21.1 Creating a Topology Spec
+### 23.1 Creating a Topology Spec
 
 Create `specs/topology.json`:
 
@@ -2549,7 +2947,23 @@ Create `specs/topology.json`:
 - `params` provides values for services that require them (e.g., `peer_as: "request"`)
 - `links` section is optional, used for validation
 
-### 21.2 Full Device Provisioning (Go API)
+### 23.2 Provisioning via CLI
+
+```bash
+# Dry-run all devices
+newtron provision
+
+# Dry-run specific device
+newtron provision -d leaf1
+
+# Execute all devices
+newtron provision -x
+
+# Execute + save for one device
+newtron provision -d leaf1 -xs
+```
+
+### 23.3 Full Device Provisioning (Go API)
 
 Full device provisioning generates the complete CONFIG_DB offline and delivers it atomically:
 
@@ -2585,7 +2999,7 @@ This mode:
 - Connects only for delivery (CompositeOverwrite)
 - Replaces entire CONFIG_DB
 
-### 21.3 Per-Interface Provisioning (Go API)
+### 23.4 Per-Interface Provisioning (Go API)
 
 Per-interface provisioning connects to the device and applies a single service:
 
@@ -2607,7 +3021,7 @@ if err := cs.Apply(dev); err != nil {
 
 This mode uses the standard `ApplyService()` path with full precondition checking.
 
-### 21.4 Inspecting Generated Config
+### 23.5 Inspecting Generated Config
 
 You can generate the composite config without delivering it:
 
@@ -2619,7 +3033,7 @@ if err != nil {
 fmt.Printf("Generated %d entries\n", composite.EntryCount())
 ```
 
-### 21.5 When to Use Each Mode
+### 23.6 When to Use Each Mode
 
 | Mode | Use Case |
 |------|----------|
@@ -2628,11 +3042,11 @@ fmt.Printf("Generated %d entries\n", composite.EntryCount())
 
 ---
 
-## 22. Composite Configuration
+## 24. Composite Configuration
 
 Composite mode generates a complete CONFIG_DB configuration offline (without a device connection), then delivers it atomically.
 
-### 22.1 Building a Composite Config (Go API)
+### 24.1 Building a Composite Config (Go API)
 
 ```go
 cb := network.NewCompositeBuilder("leaf1-dc1", network.CompositeOverwrite).
@@ -2661,7 +3075,7 @@ composite := cb.Build()
 fmt.Printf("Composite has %d entries\n", composite.EntryCount())
 ```
 
-### 22.2 Delivering a Composite Config
+### 24.2 Delivering a Composite Config
 
 ```go
 // Connect to device
@@ -2680,7 +3094,7 @@ if err != nil {
 fmt.Printf("Applied: %d, Skipped: %d\n", result.Applied, result.Skipped)
 ```
 
-### 22.3 Delivery Modes
+### 24.3 Delivery Modes
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
@@ -2691,15 +3105,145 @@ fmt.Printf("Applied: %d, Skipped: %d\n", result.Applied, result.Skipped)
 
 ---
 
-## 23. CONFIG_DB Cache Behavior
+## 25. End-to-End Workflows
+
+These workflows show how newtron primitives compose for common operational tasks.
+
+### 25.1 Day-1: New Device Provisioning
+
+```bash
+# 1. Set up overlay infrastructure
+newtron leaf1 evpn setup --source-ip 10.0.0.2 -x
+
+# 2. Provision from topology
+newtron provision -d leaf1 -x
+
+# 3. Verify BGP sessions
+newtron leaf1 bgp status
+
+# 4. Run health checks
+newtron leaf1 health check
+
+# 5. Persist
+newtron leaf1 evpn setup -xs    # -xs = execute + save
+```
+
+### 25.2 Add L3 Customer Interface
+
+```bash
+# 1. Apply customer service
+newtron leaf1 service apply Ethernet4 customer-l3 --ip 10.1.1.1/30 --peer-as 65100 -x
+
+# 2. Verify service binding
+newtron leaf1 service get Ethernet4
+
+# 3. Verify BGP neighbor came up
+newtron leaf1 bgp status
+```
+
+### 25.3 Add L2 VLAN Extension
+
+```bash
+# 1. Create VLAN
+newtron leaf1 vlan create 100 --name Servers -x
+
+# 2. Add interface to VLAN
+newtron leaf1 vlan add-interface 100 Ethernet5 -x
+
+# 3. Bind to MAC-VPN for VXLAN extension
+newtron leaf1 vlan bind-macvpn 100 servers-vlan100 -x
+```
+
+### 25.4 Set Up EVPN Overlay from Scratch
+
+```bash
+# 1. Create VPN definitions (no device needed)
+newtron evpn ipvpn create my-vpn --l3vni 10001 --import-rt 65100:1 --export-rt 65100:1 -x
+newtron evpn macvpn create my-l2vpn --l2vni 10100 --arp-suppress -x
+
+# 2. Set up overlay on device
+newtron leaf1 evpn setup --source-ip 10.0.0.2 -x
+
+# 3. Create VRF and bind to IP-VPN
+newtron leaf1 vrf create Vrf_CUST1 -x
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 my-vpn -x
+
+# 4. Create VLAN and bind to MAC-VPN
+newtron leaf1 vlan create 100 -x
+newtron leaf1 vlan bind-macvpn 100 my-l2vpn -x
+```
+
+### 25.5 Manual Surgical QoS Override
+
+```bash
+# Override service-managed QoS on a specific interface
+newtron leaf1 qos apply Ethernet0 8q-datacenter -x
+
+# Revert to service-managed QoS
+newtron leaf1 qos remove Ethernet0 -x
+newtron leaf1 service refresh Ethernet0 -x
+```
+
+### 25.6 Add Customer VRF with Full Connectivity
+
+```bash
+# 1. Create VRF
+newtron leaf1 vrf create Vrf_CUST1 -x
+
+# 2. Add customer-facing interfaces
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet8 -x
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet12 -x
+
+# 3. Add eBGP neighbors
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet8 65100 -x
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet12 65200 -x
+
+# 4. Bind to IP-VPN for EVPN extension
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+
+# 5. Add a static route for a non-BGP destination
+newtron leaf1 vrf add-route Vrf_CUST1 10.99.0.0/16 10.1.1.2 -x
+
+# 6. Verify
+newtron leaf1 vrf show Vrf_CUST1
+newtron leaf1 bgp status
+```
+
+### 25.7 Decommission a Customer VRF
+
+```bash
+# 1. Remove static routes
+newtron leaf1 vrf remove-route Vrf_CUST1 10.99.0.0/16 -x
+
+# 2. Remove BGP neighbors
+newtron leaf1 vrf remove-neighbor Vrf_CUST1 Ethernet8 -x
+newtron leaf1 vrf remove-neighbor Vrf_CUST1 Ethernet12 -x
+
+# 3. Unbind IP-VPN
+newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x
+
+# 4. Remove interfaces
+newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet8 -x
+newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet12 -x
+
+# 5. Delete VRF
+newtron leaf1 vrf delete Vrf_CUST1 -x
+
+# 6. Clean up any orphaned resources
+newtron leaf1 device cleanup -x
+```
+
+---
+
+## 26. CONFIG_DB Cache Behavior
 
 newtron caches CONFIG_DB (Redis DB 4) in memory to avoid per-check Redis round-trips during precondition validation. This section explains how the cache is managed and when it refreshes.
 
-### 23.1 Shared-Device Context
+### 26.1 Shared-Device Context
 
-A SONiC device's CONFIG_DB can be modified by newtron, other automation tools (Ansible, Salt), admins running `redis-cli`, and SONiC daemons (frrcfgd, orchagent). newtron's distributed lock (STATE_DB) only coordinates newtron instances — it does not prevent external writes. The cache is an optimization, not transactional isolation.
+A SONiC device's CONFIG_DB can be modified by newtron, other automation tools (Ansible, Salt), admins running `redis-cli`, and SONiC daemons (frrcfgd, orchagent). newtron's distributed lock (STATE_DB) only coordinates newtron instances -- it does not prevent external writes. The cache is an optimization, not transactional isolation.
 
-### 23.2 The Episode Model
+### 26.2 The Episode Model
 
 Every self-contained unit of work that reads the cache must start with a fresh snapshot. These units are called **episodes**:
 
@@ -2709,23 +3253,23 @@ Every self-contained unit of work that reads the cache must start with a fresh s
 
 - **Composite provisioning path**: Call `Refresh()` after `DeliverComposite()` to reload the cache with the newly written config.
 
-### 23.3 Precondition Checks
+### 26.3 Precondition Checks
 
-Precondition checks (`VRFExists`, `VLANExists`, `VTEPExists`, etc.) read from the cached snapshot. They are **advisory safety nets** — they catch common mistakes like creating a duplicate VRF or adding a member to a non-existent VLAN. They cannot prevent all race conditions with external actors modifying CONFIG_DB concurrently.
+Precondition checks (`VRFExists`, `VLANExists`, `VTEPExists`, etc.) read from the cached snapshot. They are **advisory safety nets** -- they catch common mistakes like creating a duplicate VRF or adding a member to a non-existent VLAN. They cannot prevent all race conditions with external actors modifying CONFIG_DB concurrently.
 
-### 23.4 When to Call Refresh()
+### 26.4 When to Call Refresh()
 
 | Situation | Action |
 |-----------|--------|
-| Before a write operation | Not needed — `ExecuteOp` calls `Lock()` which refreshes |
+| Before a write operation | Not needed -- `ExecuteOp` calls `Lock()` which refreshes |
 | After composite delivery | Call `Refresh()` |
-| Before health checks | Not needed — `RunHealthChecks()` calls `Refresh()` internally |
+| Before health checks | Not needed -- `RunHealthChecks()` calls `Refresh()` internally |
 | Before reading cache in custom code | Call `Refresh()` |
 | For one-off Redis reads | Use `ConfigDBClient.Get()` directly (bypasses cache) |
 
 ---
 
-## 24. Related Documentation
+## 27. Related Documentation
 
 The following documents provide additional detail on specific topics:
 

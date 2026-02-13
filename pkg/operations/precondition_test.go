@@ -504,7 +504,7 @@ func TestDependencyChecker_IsLastServiceUser_MultipleUsers(t *testing.T) {
 	}
 }
 
-func TestDependencyChecker_GetACLRemainingPorts(t *testing.T) {
+func TestDependencyChecker_GetACLRemainingInterfaces(t *testing.T) {
 	db := emptyConfigDB()
 	db.ACLTable["CUST-IN"] = device.ACLTableEntry{
 		Type:  "L3",
@@ -513,18 +513,18 @@ func TestDependencyChecker_GetACLRemainingPorts(t *testing.T) {
 	dev := testDevice(db, true, false)
 
 	dc := NewDependencyChecker(dev, "Ethernet0")
-	remaining := dc.GetACLRemainingPorts("CUST-IN")
+	remaining := dc.GetACLRemainingInterfaces("CUST-IN")
 	if remaining != "Ethernet4,Ethernet8" {
-		t.Errorf("GetACLRemainingPorts = %q, want %q", remaining, "Ethernet4,Ethernet8")
+		t.Errorf("GetACLRemainingInterfaces = %q, want %q", remaining, "Ethernet4,Ethernet8")
 	}
 }
 
-func TestDependencyChecker_GetACLRemainingPorts_NonexistentACL(t *testing.T) {
+func TestDependencyChecker_GetACLRemainingInterfaces_NonexistentACL(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
 	dc := NewDependencyChecker(dev, "Ethernet0")
-	remaining := dc.GetACLRemainingPorts("NONEXISTENT")
+	remaining := dc.GetACLRemainingInterfaces("NONEXISTENT")
 	if remaining != "" {
-		t.Errorf("GetACLRemainingPorts for nonexistent ACL = %q, want empty", remaining)
+		t.Errorf("GetACLRemainingInterfaces for nonexistent ACL = %q, want empty", remaining)
 	}
 }
 
@@ -544,8 +544,8 @@ func TestDependencyChecker_NilConfigDB(t *testing.T) {
 	if !dc.IsLastServiceUser("any") {
 		t.Error("IsLastServiceUser with nil configDB should return true")
 	}
-	if dc.GetACLRemainingPorts("any") != "" {
-		t.Error("GetACLRemainingPorts with nil configDB should return empty")
+	if dc.GetACLRemainingInterfaces("any") != "" {
+		t.Error("GetACLRemainingInterfaces with nil configDB should return empty")
 	}
 }
 

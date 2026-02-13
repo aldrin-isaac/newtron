@@ -153,20 +153,20 @@ func (t *ACLTable) GetRule(name string) *ACLRule {
 	return nil
 }
 
-// BindPort binds the ACL to a port
-func (t *ACLTable) BindPort(port string) {
+// BindInterface binds the ACL to an interface.
+func (t *ACLTable) BindInterface(iface string) {
 	for _, p := range t.Ports {
-		if p == port {
+		if p == iface {
 			return
 		}
 	}
-	t.Ports = append(t.Ports, port)
+	t.Ports = append(t.Ports, iface)
 }
 
-// UnbindPort removes a port binding
-func (t *ACLTable) UnbindPort(port string) bool {
+// UnbindInterface removes an interface binding.
+func (t *ACLTable) UnbindInterface(iface string) bool {
 	for i, p := range t.Ports {
-		if p == port {
+		if p == iface {
 			t.Ports = append(t.Ports[:i], t.Ports[i+1:]...)
 			return true
 		}
@@ -174,10 +174,10 @@ func (t *ACLTable) UnbindPort(port string) bool {
 	return false
 }
 
-// IsBoundTo returns true if the ACL is bound to the port
-func (t *ACLTable) IsBoundTo(port string) bool {
+// IsBoundTo returns true if the ACL is bound to the given interface.
+func (t *ACLTable) IsBoundTo(iface string) bool {
 	for _, p := range t.Ports {
-		if p == port {
+		if p == iface {
 			return true
 		}
 	}

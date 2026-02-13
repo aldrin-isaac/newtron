@@ -559,7 +559,7 @@ func (d *Device) InterfaceHasService(name string) bool {
 type VLANInfo struct {
 	ID         int
 	Name       string      // VLAN name from config
-	Ports      []string    // All member ports
+	Members    []string    // All member interfaces
 	SVIStatus  string      // "up" if VLAN_INTERFACE exists, empty otherwise
 	MACVPNInfo *MACVPNInfo // MAC-VPN binding info (L2VNI, ARP suppression)
 }
@@ -594,15 +594,15 @@ func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 
 	info := &VLANInfo{ID: id, Name: vlanEntry.Description}
 
-	// Collect member ports from VLAN_MEMBER
+	// Collect member interfaces from VLAN_MEMBER
 	for key, member := range d.configDB.VLANMember {
 		parts := splitConfigDBKey(key)
 		if len(parts) == 2 && parts[0] == vlanKey {
-			port := parts[1]
+			iface := parts[1]
 			if member.TaggingMode == "tagged" {
-				info.Ports = append(info.Ports, port+"(t)")
+				info.Members = append(info.Members, iface+"(t)")
 			} else {
-				info.Ports = append(info.Ports, port)
+				info.Members = append(info.Members, iface)
 			}
 		}
 	}
@@ -1084,11 +1084,11 @@ func (d *Device) ListACLTables() []string {
 
 // ACLTableInfo represents ACL table data for display.
 type ACLTableInfo struct {
-	Name   string
-	Type   string
-	Stage  string
-	Ports  string
-	Policy string
+	Name            string
+	Type            string
+	Stage           string
+	BoundInterfaces string
+	Policy          string
 }
 
 // GetACLTable retrieves ACL table information by name.
@@ -1101,15 +1101,15 @@ func (d *Device) GetACLTable(name string) (*ACLTableInfo, error) {
 		return nil, fmt.Errorf("ACL table %s not found", name)
 	}
 	return &ACLTableInfo{
-		Name:   name,
-		Type:   acl.Type,
-		Stage:  acl.Stage,
-		Ports:  acl.Ports,
-		Policy: acl.PolicyDesc,
+		Name:            name,
+		Type:            acl.Type,
+		Stage:           acl.Stage,
+		BoundInterfaces: acl.Ports,
+		Policy:          acl.PolicyDesc,
 	}, nil
 }
 
-// GetOrphanedACLs returns ACL tables that have no ports bound.
+// GetOrphanedACLs returns ACL tables that have no interfaces bound.
 func (d *Device) GetOrphanedACLs() []string {
 	if d.configDB == nil {
 		return nil

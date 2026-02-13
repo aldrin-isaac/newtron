@@ -112,75 +112,46 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		templates := args
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource("baseline")
-		if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
-			return err
-		}
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Build variables map from device profile
-		vars := map[string]string{
-			"device_name": dev.Name(),
-			"loopback_ip": dev.LoopbackIP(),
-			"mgmt_ip":     dev.MgmtIP(),
-			"router_id":   dev.RouterID(),
-			"as_number":   fmt.Sprintf("%d", dev.ASNumber()),
-			"region":      dev.Region(),
-			"site":        dev.Site(),
-		}
-
-		// Load and merge all configlets
-		allChanges := network.NewChangeSet(dev.Name(), "baseline.apply")
-
-		configletDir := getConfigletDir()
-		for _, templateName := range templates {
-			c, err := configlet.LoadConfiglet(configletDir, templateName)
-			if err != nil {
-				return fmt.Errorf("loading template %s: %w", templateName, err)
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource("baseline")
+			if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
+				return nil, err
 			}
 
-			changes, err := configletToChangeSet(c, vars, dev)
-			if err != nil {
-				return fmt.Errorf("processing template %s: %w", templateName, err)
+			vars := map[string]string{
+				"device_name": dev.Name(),
+				"loopback_ip": dev.LoopbackIP(),
+				"mgmt_ip":     dev.MgmtIP(),
+				"router_id":   dev.RouterID(),
+				"as_number":   fmt.Sprintf("%d", dev.ASNumber()),
+				"region":      dev.Region(),
+				"site":        dev.Site(),
 			}
 
-			// Merge changes
-			for _, c := range changes.Changes {
-				allChanges.Changes = append(allChanges.Changes, c)
+			allChanges := network.NewChangeSet(dev.Name(), "baseline.apply")
+			configletDir := getConfigletDir()
+			for _, templateName := range templates {
+				c, err := configlet.LoadConfiglet(configletDir, templateName)
+				if err != nil {
+					return nil, fmt.Errorf("loading template %s: %w", templateName, err)
+				}
+				changes, err := configletToChangeSet(c, vars, dev)
+				if err != nil {
+					return nil, fmt.Errorf("processing template %s: %w", templateName, err)
+				}
+				for _, c := range changes.Changes {
+					allChanges.Changes = append(allChanges.Changes, c)
+				}
 			}
-		}
 
-		fmt.Printf("Applying templates to %s:\n", deviceName)
-		for _, t := range templates {
-			fmt.Printf("  - %s\n", t)
-		}
-		fmt.Println()
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(allChanges.String())
-
-		if executeMode {
-			if err := allChanges.Apply(dev); err != nil {
-				return fmt.Errorf("execution failed: %w", err)
+			fmt.Printf("Applying templates to %s:\n", deviceName)
+			for _, t := range templates {
+				fmt.Printf("  - %s\n", t)
 			}
-			fmt.Println("\n" + green("Baseline applied successfully."))
-		} else {
-			printDryRunNotice()
-		}
+			fmt.Println()
 
-		return nil
+			return allChanges, nil
+		})
 	},
 }
 

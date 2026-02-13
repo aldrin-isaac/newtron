@@ -450,8 +450,9 @@ func (s *Shell) cmdHelp() {
 
 // shellCmd is the cobra command for the interactive shell.
 var shellCmd = &cobra.Command{
-	Use:   "shell",
-	Short: "Interactive shell with persistent device connection",
+	Use:    "shell",
+	Short:  "Interactive shell with persistent device connection",
+	Hidden: true,
 	Long: `Start an interactive shell with a persistent connection to a SONiC device.
 
 The shell provides a REPL with:

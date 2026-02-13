@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -23,9 +24,11 @@ Requires -d (device) flag.
 
 Examples:
   newtron -d leaf1-ny lag list
+  newtron -d leaf1-ny lag show PortChannel100
   newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
-  newtron -d leaf1-ny lag add-member PortChannel100 Ethernet8
-  newtron -d leaf1-ny lag remove-member PortChannel100 Ethernet8`,
+  newtron -d leaf1-ny lag add-interface PortChannel100 Ethernet8
+  newtron -d leaf1-ny lag remove-interface PortChannel100 Ethernet8
+  newtron -d leaf1-ny lag status`,
 }
 
 var lagListCmd = &cobra.Command{
@@ -49,6 +52,8 @@ var lagListCmd = &cobra.Command{
 			fmt.Println("No LAGs configured")
 			return nil
 		}
+
+		sort.Strings(portChannels)
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "NAME\tSTATUS\tMEMBERS\tACTIVE")
@@ -81,6 +86,177 @@ var lagListCmd = &cobra.Command{
 	},
 }
 
+var lagShowCmd = &cobra.Command{
+	Use:   "show <lag-name>",
+	Short: "Show detailed LAG information",
+	Long: `Show detailed information about a single LAG.
+
+Includes name, status, members, active members, MTU, and min-links.
+
+Requires -d (device) flag.
+
+Examples:
+  newtron -d leaf1-ny lag show PortChannel100`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		lagName := args[0]
+
+		ctx := context.Background()
+		dev, err := requireDevice(ctx)
+		if err != nil {
+			return err
+		}
+		defer dev.Disconnect()
+
+		pc, err := dev.GetPortChannel(lagName)
+		if err != nil {
+			return err
+		}
+
+		if jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(pc)
+		}
+
+		fmt.Printf("LAG: %s\n", bold(pc.Name))
+
+		adminStatus := pc.AdminStatus
+		if adminStatus == "up" {
+			fmt.Printf("Admin Status: %s\n", green("up"))
+		} else {
+			fmt.Printf("Admin Status: %s\n", red(adminStatus))
+		}
+
+		if len(pc.Members) > 0 {
+			fmt.Printf("Members: %s\n", strings.Join(pc.Members, ", "))
+		} else {
+			fmt.Println("Members: (none)")
+		}
+
+		if len(pc.ActiveMembers) > 0 {
+			fmt.Printf("Active Members: %s (%d/%d)\n",
+				strings.Join(pc.ActiveMembers, ", "),
+				len(pc.ActiveMembers),
+				len(pc.Members),
+			)
+		} else {
+			fmt.Printf("Active Members: (none) (0/%d)\n", len(pc.Members))
+		}
+
+		// Show interface details for the LAG
+		intf, err := dev.GetInterface(pc.Name)
+		if err == nil {
+			fmt.Printf("MTU: %d\n", intf.MTU())
+		}
+
+		return nil
+	},
+}
+
+var lagStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show all LAGs with operational state",
+	Long: `Show all LAGs with their operational state.
+
+Combines config and STATE_DB information.
+
+Requires -d (device) flag.
+
+Examples:
+  newtron -d leaf1-ny lag status`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		dev, err := requireDevice(ctx)
+		if err != nil {
+			return err
+		}
+		defer dev.Disconnect()
+
+		portChannels := dev.ListPortChannels()
+
+		if len(portChannels) == 0 {
+			fmt.Println("No LAGs configured")
+			return nil
+		}
+
+		sort.Strings(portChannels)
+
+		type lagStatus struct {
+			Name          string   `json:"name"`
+			AdminStatus   string   `json:"admin_status"`
+			OperStatus    string   `json:"oper_status,omitempty"`
+			Members       []string `json:"members"`
+			ActiveMembers []string `json:"active_members"`
+			MTU           int      `json:"mtu,omitempty"`
+		}
+
+		var statuses []lagStatus
+		for _, pcName := range portChannels {
+			pc, err := dev.GetPortChannel(pcName)
+			if err != nil {
+				continue
+			}
+			s := lagStatus{
+				Name:          pc.Name,
+				AdminStatus:   pc.AdminStatus,
+				Members:       pc.Members,
+				ActiveMembers: pc.ActiveMembers,
+			}
+
+			// Try to get operational info from interface
+			if intf, err := dev.GetInterface(pc.Name); err == nil {
+				s.OperStatus = intf.OperStatus()
+				s.MTU = intf.MTU()
+			}
+
+			statuses = append(statuses, s)
+		}
+
+		if jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(statuses)
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tADMIN\tOPER\tMEMBERS\tACTIVE\tMTU")
+		fmt.Fprintln(w, "----\t-----\t----\t-------\t------\t---")
+
+		for _, s := range statuses {
+			admin := s.AdminStatus
+			if admin == "up" {
+				admin = green("up")
+			} else {
+				admin = red("down")
+			}
+
+			oper := s.OperStatus
+			if oper == "up" {
+				oper = green("up")
+			} else if oper != "" {
+				oper = red(oper)
+			} else {
+				oper = "-"
+			}
+
+			mtu := "-"
+			if s.MTU > 0 {
+				mtu = fmt.Sprintf("%d", s.MTU)
+			}
+
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d/%d\t%s\n",
+				s.Name,
+				admin,
+				oper,
+				strings.Join(s.Members, ","),
+				len(s.ActiveMembers),
+				len(s.Members),
+				mtu,
+			)
+		}
+		w.Flush()
+
+		return nil
+	},
+}
+
 var (
 	lagMembers  string
 	lagMinLinks int
@@ -105,12 +281,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 
-		// Check permissions
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
-		if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
-			return err
-		}
-
 		if lagMembers == "" {
 			return fmt.Errorf("--members is required")
 		}
@@ -119,145 +289,102 @@ Examples:
 			members[i] = strings.TrimSpace(members[i])
 		}
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Create LAG using OO style (method on device)
-		changeSet, err := dev.CreatePortChannel(ctx, lagName, network.PortChannelConfig{
-			Members:  members,
-			MinLinks: lagMinLinks,
-			FastRate: lagFastRate,
-			MTU:      lagMTU,
-		})
-		if err != nil {
-			return fmt.Errorf("creating LAG: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := dev.CreatePortChannel(ctx, lagName, network.PortChannelConfig{
+				Members:  members,
+				MinLinks: lagMinLinks,
+				FastRate: lagFastRate,
+				MTU:      lagMTU,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("creating LAG: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
-var lagAddMemberCmd = &cobra.Command{
-	Use:   "add-member <lag-name> <interface>",
-	Short: "Add a member to a LAG",
+var lagAddInterfaceCmd = &cobra.Command{
+	Use:   "add-interface <lag-name> <interface>",
+	Short: "Add an interface to a LAG",
 	Long: `Add a member interface to a LAG.
 
 Requires -d (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag add-member PortChannel100 Ethernet8`,
+  newtron -d leaf1-ny lag add-interface PortChannel100 Ethernet8`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
-		if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-			return err
-		}
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Add member using OO style (method on device)
-		changeSet, err := dev.AddPortChannelMember(ctx, lagName, memberName)
-		if err != nil {
-			return fmt.Errorf("adding member: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
-
-		return nil
+			cs, err := dev.AddPortChannelMember(ctx, lagName, memberName)
+			if err != nil {
+				return nil, fmt.Errorf("adding interface: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
-var lagRemoveMemberCmd = &cobra.Command{
-	Use:   "remove-member <lag-name> <interface>",
-	Short: "Remove a member from a LAG",
+var lagRemoveInterfaceCmd = &cobra.Command{
+	Use:   "remove-interface <lag-name> <interface>",
+	Short: "Remove an interface from a LAG",
 	Long: `Remove a member interface from a LAG.
 
 Requires -d (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag remove-member PortChannel100 Ethernet8`,
+  newtron -d leaf1-ny lag remove-interface PortChannel100 Ethernet8`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
-		if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-			return err
-		}
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		// Remove member using OO style (method on device)
-		changeSet, err := dev.RemovePortChannelMember(ctx, lagName, memberName)
-		if err != nil {
-			return fmt.Errorf("removing member: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
+				return nil, err
 			}
-		} else {
-			printDryRunNotice()
-		}
+			cs, err := dev.RemovePortChannelMember(ctx, lagName, memberName)
+			if err != nil {
+				return nil, fmt.Errorf("removing interface: %w", err)
+			}
+			return cs, nil
+		})
+	},
+}
 
-		return nil
+var lagDeleteCmd = &cobra.Command{
+	Use:   "delete <lag-name>",
+	Short: "Delete a LAG",
+	Long: `Delete a link aggregation group.
+
+Requires -d (device) flag.
+
+Examples:
+  newtron -d leaf1-ny lag delete PortChannel100 -x`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		lagName := args[0]
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource(lagName)
+			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
+				return nil, err
+			}
+			cs, err := dev.DeletePortChannel(ctx, lagName)
+			if err != nil {
+				return nil, fmt.Errorf("deleting LAG: %w", err)
+			}
+			return cs, nil
+		})
 	},
 }
 
@@ -269,7 +396,10 @@ func init() {
 	lagCreateCmd.Flags().IntVar(&lagMTU, "mtu", 9100, "MTU size")
 
 	lagCmd.AddCommand(lagListCmd)
+	lagCmd.AddCommand(lagShowCmd)
+	lagCmd.AddCommand(lagStatusCmd)
 	lagCmd.AddCommand(lagCreateCmd)
-	lagCmd.AddCommand(lagAddMemberCmd)
-	lagCmd.AddCommand(lagRemoveMemberCmd)
+	lagCmd.AddCommand(lagDeleteCmd)
+	lagCmd.AddCommand(lagAddInterfaceCmd)
+	lagCmd.AddCommand(lagRemoveInterfaceCmd)
 }

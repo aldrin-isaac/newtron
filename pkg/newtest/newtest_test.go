@@ -1262,9 +1262,9 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		},
 		// add-vlan-member
 		{
-			name:    "add-vlan-member missing port",
+			name:    "add-vlan-member missing interface",
 			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
-			wantErr: true, errMsg: "params.port is required",
+			wantErr: true, errMsg: "params.interface is required",
 		},
 		// create-vrf
 		{

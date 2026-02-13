@@ -339,7 +339,7 @@ func ValidateScenario(s *Scenario, topologiesDir string) error
 | `set-interface` | `devices`, `interface`, `params.property` |
 | `create-vlan` | `devices`, `params.vlan_id` |
 | `delete-vlan` | `devices`, `params.vlan_id` |
-| `add-vlan-member` | `devices`, `params.vlan_id`, `params.port` |
+| `add-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
 | `create-vrf` | `devices`, `params.vrf` |
 | `delete-vrf` | `devices`, `params.vrf` |
 | `create-vtep` | `devices`, `params.source_ip` |
@@ -1304,9 +1304,9 @@ Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
 type addVLANMemberExecutor struct{}
 ```
 
-**Wraps:** `Device.AddVLANMember(ctx, vlanID, port, tagged)`
+**Wraps:** `Device.AddVLANMember(ctx, vlanID, interfaceName, tagged)`
 
-Reads `params.vlan_id` (int), `params.port` (string), `params.tagged` (bool, defaults to true). Returns ChangeSet.
+Reads `params.vlan_id` (int), `params.interface` (string), `params.tagged` (bool, defaults to true). Returns ChangeSet.
 
 ### 5.22 createVRFExecutor
 

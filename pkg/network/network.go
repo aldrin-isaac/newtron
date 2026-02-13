@@ -247,6 +247,195 @@ func (n *Network) ListFilterSpecs() []string {
 	return names
 }
 
+// ============================================================================
+// Spec Authoring - CLI-authored definitions persisted to network.json
+// ============================================================================
+
+// persistSpec writes the current network spec to disk atomically (temp + rename).
+func (n *Network) persistSpec() error {
+	if n.loader == nil {
+		return fmt.Errorf("no loader configured")
+	}
+	return n.loader.SaveNetwork(n.spec)
+}
+
+// SaveIPVPN creates or updates an IP-VPN definition in network.json.
+func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.IPVPN == nil {
+		n.spec.IPVPN = make(map[string]*spec.IPVPNSpec)
+	}
+	n.spec.IPVPN[name] = def
+	return n.persistSpec()
+}
+
+// DeleteIPVPN removes an IP-VPN definition from network.json.
+// Returns error if any service references it.
+func (n *Network) DeleteIPVPN(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Check for dependent services
+	for svcName, svc := range n.spec.Services {
+		if svc.IPVPN == name {
+			return fmt.Errorf("cannot delete ipvpn '%s': referenced by service '%s'", name, svcName)
+		}
+	}
+
+	delete(n.spec.IPVPN, name)
+	return n.persistSpec()
+}
+
+// SaveMACVPN creates or updates a MAC-VPN definition in network.json.
+func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.MACVPN == nil {
+		n.spec.MACVPN = make(map[string]*spec.MACVPNSpec)
+	}
+	n.spec.MACVPN[name] = def
+	return n.persistSpec()
+}
+
+// DeleteMACVPN removes a MAC-VPN definition from network.json.
+// Returns error if any service references it.
+func (n *Network) DeleteMACVPN(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Check for dependent services
+	for svcName, svc := range n.spec.Services {
+		if svc.MACVPN == name {
+			return fmt.Errorf("cannot delete macvpn '%s': referenced by service '%s'", name, svcName)
+		}
+	}
+
+	delete(n.spec.MACVPN, name)
+	return n.persistSpec()
+}
+
+// SaveQoSPolicy creates or updates a QoS policy in network.json.
+func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.QoSPolicies == nil {
+		n.spec.QoSPolicies = make(map[string]*spec.QoSPolicy)
+	}
+	n.spec.QoSPolicies[name] = def
+	return n.persistSpec()
+}
+
+// DeleteQoSPolicy removes a QoS policy from network.json.
+// Returns error if any service references it.
+func (n *Network) DeleteQoSPolicy(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Check for dependent services
+	for svcName, svc := range n.spec.Services {
+		if svc.QoSPolicy == name {
+			return fmt.Errorf("cannot delete QoS policy '%s': referenced by service '%s'", name, svcName)
+		}
+	}
+
+	delete(n.spec.QoSPolicies, name)
+	return n.persistSpec()
+}
+
+// SaveFilterSpec creates or updates a filter spec in network.json.
+func (n *Network) SaveFilterSpec(name string, def *spec.FilterSpec) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.FilterSpecs == nil {
+		n.spec.FilterSpecs = make(map[string]*spec.FilterSpec)
+	}
+	n.spec.FilterSpecs[name] = def
+	return n.persistSpec()
+}
+
+// DeleteFilterSpec removes a filter spec from network.json.
+// Returns error if any service references it.
+func (n *Network) DeleteFilterSpec(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Check for dependent services
+	for svcName, svc := range n.spec.Services {
+		if svc.IngressFilter == name || svc.EgressFilter == name {
+			return fmt.Errorf("cannot delete filter spec '%s': referenced by service '%s'", name, svcName)
+		}
+	}
+
+	delete(n.spec.FilterSpecs, name)
+	return n.persistSpec()
+}
+
+// SaveService creates or updates a service definition in network.json.
+func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.Services == nil {
+		n.spec.Services = make(map[string]*spec.ServiceSpec)
+	}
+	n.spec.Services[name] = def
+	return n.persistSpec()
+}
+
+// DeleteService removes a service definition from network.json.
+// Returns error if any interface has it applied (caller checks this).
+func (n *Network) DeleteService(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	delete(n.spec.Services, name)
+	return n.persistSpec()
+}
+
+// ListIPVPN returns all IP-VPN definition names.
+func (n *Network) ListIPVPN() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	names := make([]string, 0, len(n.spec.IPVPN))
+	for name := range n.spec.IPVPN {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ListMACVPN returns all MAC-VPN definition names.
+func (n *Network) ListMACVPN() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	names := make([]string, 0, len(n.spec.MACVPN))
+	for name := range n.spec.MACVPN {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ListQoSPolicies returns all QoS policy names.
+func (n *Network) ListQoSPolicies() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if n.spec.QoSPolicies == nil {
+		return nil
+	}
+	names := make([]string, 0, len(n.spec.QoSPolicies))
+	for name := range n.spec.QoSPolicies {
+		names = append(names, name)
+	}
+	return names
+}
+
 // Spec returns the raw network spec (for advanced access).
 func (n *Network) Spec() *spec.NetworkSpecFile {
 	return n.spec
@@ -423,11 +612,17 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 }
 
 // deriveBGPNeighbors looks up route reflector loopback IPs from their profiles.
+// Silently skips RR peers that aren't in the current topology (e.g., spine2 in a 2-node topo).
 func (n *Network) deriveBGPNeighbors(site *spec.SiteSpec, selfName string) []string {
+	topo := n.GetTopology()
 	var neighbors []string
 	for _, rrName := range site.RouteReflectors {
 		if rrName == selfName {
 			continue // Don't peer with self
+		}
+		// Skip devices not in the current topology
+		if topo != nil && !topo.HasDevice(rrName) {
+			continue
 		}
 		// Load RR profile to get its loopback IP
 		rrProfile, err := n.loadProfile(rrName)

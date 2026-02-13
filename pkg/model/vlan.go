@@ -18,8 +18,8 @@ type VLAN struct {
 	AnycastMAC     string `json:"anycast_mac,omitempty"`
 
 	// Members
-	TaggedPorts   []string `json:"tagged_ports,omitempty"`
-	UntaggedPorts []string `json:"untagged_ports,omitempty"`
+	TaggedMembers   []string `json:"tagged_members,omitempty"`
+	UntaggedMembers []string `json:"untagged_members,omitempty"`
 
 	// DHCP Relay
 	DHCPRelayAddrs []string `json:"dhcp_relay_addrs,omitempty"`
@@ -28,7 +28,7 @@ type VLAN struct {
 	Service string `json:"service,omitempty"`
 }
 
-// VLANMember represents VLAN membership for a port
+// VLANMember represents VLAN membership for an interface
 type VLANMember struct {
 	VLAN      int    `json:"vlan"`
 	Interface string `json:"interface"`
@@ -43,7 +43,7 @@ type VLANState struct {
 	OperStatus  string   `json:"oper_status"`
 	SVIStatus   string   `json:"svi_status,omitempty"`
 	MACCount    int      `json:"mac_count"`
-	ActivePorts []string `json:"active_ports"`
+	ActiveMembers []string `json:"active_members"`
 }
 
 // NewVLAN creates a new VLAN with defaults
@@ -70,39 +70,39 @@ func (v *VLAN) IsIRB() bool {
 	return v.HasEVPN() && v.HasSVI()
 }
 
-// AddTaggedPort adds a tagged port to the VLAN
-func (v *VLAN) AddTaggedPort(port string) {
-	for _, p := range v.TaggedPorts {
-		if p == port {
+// AddTaggedMember adds a tagged member to the VLAN.
+func (v *VLAN) AddTaggedMember(iface string) {
+	for _, m := range v.TaggedMembers {
+		if m == iface {
 			return
 		}
 	}
-	v.TaggedPorts = append(v.TaggedPorts, port)
+	v.TaggedMembers = append(v.TaggedMembers, iface)
 }
 
-// AddUntaggedPort adds an untagged port to the VLAN
-func (v *VLAN) AddUntaggedPort(port string) {
-	for _, p := range v.UntaggedPorts {
-		if p == port {
+// AddUntaggedMember adds an untagged member to the VLAN.
+func (v *VLAN) AddUntaggedMember(iface string) {
+	for _, m := range v.UntaggedMembers {
+		if m == iface {
 			return
 		}
 	}
-	v.UntaggedPorts = append(v.UntaggedPorts, port)
+	v.UntaggedMembers = append(v.UntaggedMembers, iface)
 }
 
-// RemovePort removes a port from the VLAN (both tagged and untagged)
-func (v *VLAN) RemovePort(port string) bool {
+// RemoveMember removes a member from the VLAN (both tagged and untagged).
+func (v *VLAN) RemoveMember(iface string) bool {
 	removed := false
-	for i, p := range v.TaggedPorts {
-		if p == port {
-			v.TaggedPorts = append(v.TaggedPorts[:i], v.TaggedPorts[i+1:]...)
+	for i, m := range v.TaggedMembers {
+		if m == iface {
+			v.TaggedMembers = append(v.TaggedMembers[:i], v.TaggedMembers[i+1:]...)
 			removed = true
 			break
 		}
 	}
-	for i, p := range v.UntaggedPorts {
-		if p == port {
-			v.UntaggedPorts = append(v.UntaggedPorts[:i], v.UntaggedPorts[i+1:]...)
+	for i, m := range v.UntaggedMembers {
+		if m == iface {
+			v.UntaggedMembers = append(v.UntaggedMembers[:i], v.UntaggedMembers[i+1:]...)
 			removed = true
 			break
 		}
@@ -110,15 +110,15 @@ func (v *VLAN) RemovePort(port string) bool {
 	return removed
 }
 
-// HasPort returns true if the port is a member of this VLAN
-func (v *VLAN) HasPort(port string) bool {
-	for _, p := range v.TaggedPorts {
-		if p == port {
+// HasMember returns true if the interface is a member of this VLAN.
+func (v *VLAN) HasMember(iface string) bool {
+	for _, m := range v.TaggedMembers {
+		if m == iface {
 			return true
 		}
 	}
-	for _, p := range v.UntaggedPorts {
-		if p == port {
+	for _, m := range v.UntaggedMembers {
+		if m == iface {
 			return true
 		}
 	}

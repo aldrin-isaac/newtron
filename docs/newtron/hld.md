@@ -1,4 +1,13 @@
-# Newtron High-Level Design (HLD)
+# Newtron High-Level Design (HLD) — v6
+
+### Changelog
+
+| Version | Changes |
+|---------|---------|
+| **v6** | V2 CLI: pure noun-group pattern with implicit device detection. VRF as first-class noun (13 subcommands). BGP simplified to visibility-only (single `status` subcommand); peer management moved to `vrf add-neighbor`. EVPN restructured: `setup` (idempotent composite) + `status` + `ipvpn`/`macvpn` spec authoring sub-nouns. QoS and Filter nouns for spec authoring. Service `create`/`delete` for spec authoring. Per-noun `status` replaces old `state` command. Spec authoring with atomic persistence to network.json. New permissions: PermVRFCreate/Modify/Delete/View, PermSpecAuthor, PermFilterCreate/Modify/Delete/View, PermQoSCreate/PermQoSDelete. |
+| **v5** | Verification architecture: ChangeSet-based CONFIG_DB verification, APP_DB/ASIC_DB routing state observation primitives, four-tier verification strategy. |
+| **v4** | Topology provisioning: `topology.json` spec, `ProvisionDevice` (offline composite + atomic delivery), `ProvisionInterface` (online per-interface). |
+| **v3** | Composite mode, frrcfgd BGP management, platform.json port validation, route policy engine, Redis pipeline delivery, SiteSpec ClusterID. |
 
 ## 1. Executive Summary
 
@@ -8,15 +17,19 @@ For the architectural principles behind newtron, newtlab, and newtest — includ
 
 ### Key Features
 
+- **Noun-Group CLI**: Unified `newtron <device> <noun> <action> [args] [-x]` pattern with implicit device detection — first argument is the device name unless it matches a known command
 - **SONiC-Native**: Direct integration with SONiC's config_db via Redis
 - **Service-Oriented**: Pre-defined service templates for consistent configuration
-- **EVPN/VXLAN**: Modern overlay networking replacing traditional MPLS L3VPN
+- **VRF Management**: First-class VRF noun with 13 subcommands — owns interfaces, BGP neighbors, static routes, and IP-VPN bindings
+- **Spec Authoring**: CLI-authored definitions (services, IP-VPNs, MAC-VPNs, QoS policies, filters) persist atomically to network.json
+- **EVPN/VXLAN**: Modern overlay networking with idempotent composite setup and IP-VPN/MAC-VPN spec authoring
 - **Full BGP via frrcfgd**: Underlay, IPv6, and L2/L3 EVPN overlays managed through CONFIG_DB using SONiC's FRR management framework
 - **Multi-AF Route Reflection**: Single `SetupRouteReflector` operation configures IPv4, IPv6, and L2VPN EVPN address families with cluster-id
 - **Composite Mode**: Offline composite config generation with atomic delivery (overwrite or merge)
 - **Topology Provisioning**: Automated device provisioning from topology.json specs — full-device overwrite or per-interface service application
 - **Platform-Validated Port Creation**: PORT entries validated against SONiC's on-device `platform.json`
 - **Built-In Verification**: ChangeSet-based CONFIG_DB verification, routing state observation via APP_DB/ASIC_DB, health checks — single-device primitives that orchestrators compose for fabric-wide assertions
+- **Per-Noun Status**: Each resource noun (`vlan`, `vrf`, `lag`, `bgp`, `evpn`) owns its own `status` subcommand combining CONFIG_DB config with operational state
 - **Safety-First**: Dry-run by default with explicit execution flag
 - **Airtight Validation**: Comprehensive precondition checking prevents misconfigurations
 - **Audit Trail**: All changes logged with user, timestamp, and device context
@@ -262,21 +275,171 @@ A related principle: **whatever configuration can be right-shifted to the interf
 
 ### 4.1 CLI Layer (`cmd/newtron`)
 
-The command-line interface built with Cobra framework.
+The command-line interface is built with the Cobra framework using a **noun-group** pattern.
 
-**CLI Pattern (Object-Oriented):**
+#### 4.1.1 CLI Pattern
+
 ```
-newtron -n <network> -d <device> -i <interface> <verb> [args] [-x]
+newtron <device> <noun> <action> [args] [-x]
 ```
 
-**Context Flags (Object Selection):**
-| Flag | Description | Object Level |
-|------|-------------|--------------|
-| `-n, --network` | Network specs name | Network object |
-| `-d, --device` | Target device name | Device object |
-| `-i, --interface` | Target interface/LAG/VLAN | Interface object |
+The first argument is the device name unless it matches a known command. This lets users write `newtron leaf1 vlan list` instead of `newtron -d leaf1 vlan list`. If no device is needed (e.g., spec authoring commands), the device argument is omitted: `newtron service list`.
 
-**Interface Name Formats:**
+**Context Flags:**
+| Flag | Description |
+|------|-------------|
+| `-n, --network` | Network specs name |
+| `-d, --device` | Target device name (alternative to positional first arg) |
+| `-S, --specs` | Specification directory |
+
+**Write Flags:**
+| Flag | Description |
+|------|-------------|
+| `-x, --execute` | Execute changes (default is dry-run preview) |
+| `-s, --save` | Save config after changes (requires `-x`; runs `config save -y`) |
+
+**Output Flags:**
+| Flag | Description |
+|------|-------------|
+| `--json` | JSON output |
+| `-v, --verbose` | Verbose/debug output |
+
+#### 4.1.2 Two Command Scopes
+
+Commands fall into two categories based on whether they need a device connection:
+
+| Scope | Target | Needs Device | Examples |
+|-------|--------|-------------|----------|
+| **Device-required** | CONFIG_DB on a SONiC switch | Yes (`-d` or implicit) | `vlan create`, `vrf add-neighbor`, `service apply`, `evpn setup` |
+| **No-device** | network.json specs (local file) | No | `service list`, `evpn ipvpn create`, `qos create`, `filter list` |
+
+Device-required commands connect to the device via SSH tunnel, acquire a distributed lock, execute the operation, and release the lock. No-device commands read or write the local network.json spec file without any device connection.
+
+#### 4.1.3 The `withDeviceWrite` Helper
+
+All device-level write commands use the `withDeviceWrite` helper, which encapsulates the standard connect-lock-execute-print-unlock pattern:
+
+```go
+func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+    // 1. requireDevice(ctx) — connect to device via SSH tunnel
+    // 2. dev.Lock() — acquire distributed STATE_DB lock
+    // 3. fn(ctx, dev) — execute the operation, returns ChangeSet
+    // 4. Print ChangeSet preview
+    // 5. If -x: Apply ChangeSet, optionally save config
+    //    If not -x: Print dry-run notice
+    // 6. defer dev.Unlock() + dev.Disconnect()
+}
+```
+
+This ensures every write command follows the same lifecycle: connect, lock, call the operation function, print the changeset, and handle execute/dry-run — with guaranteed cleanup.
+
+#### 4.1.4 Full Command Tree
+
+```
+Resource Commands
++-- interface
+|   +-- list
+|   +-- show <interface>
+|   +-- get <interface> <property>
+|   +-- set <interface> <property> <value>
+|   +-- list-acls <interface>
+|   +-- list-members <interface>
++-- vlan
+|   +-- list
+|   +-- show <vlan-id>
+|   +-- status
+|   +-- create <vlan-id> [--name] [--description]
+|   +-- delete <vlan-id>
+|   +-- add-interface <vlan-id> <interface> [--tagged]
+|   +-- remove-interface <vlan-id> <interface>
+|   +-- configure-svi <vlan-id> [--vrf] [--ip] [--anycast-gw]
+|   +-- bind-macvpn <vlan-id> <macvpn-name>
+|   +-- unbind-macvpn <vlan-id>
++-- vrf
+|   +-- list
+|   +-- show <vrf-name>
+|   +-- status
+|   +-- create <vrf-name>
+|   +-- delete <vrf-name>
+|   +-- add-interface <vrf-name> <interface>
+|   +-- remove-interface <vrf-name> <interface>
+|   +-- bind-ipvpn <vrf-name> <ipvpn-name>
+|   +-- unbind-ipvpn <vrf-name>
+|   +-- add-neighbor <vrf-name> <interface> <remote-asn> [--neighbor] [--description]
+|   +-- remove-neighbor <vrf-name> <interface|ip>
+|   +-- add-route <vrf-name> <prefix> <next-hop> [--metric]
+|   +-- remove-route <vrf-name> <prefix>
++-- lag
+|   +-- list
+|   +-- show <lag-name>
+|   +-- status
+|   +-- create <lag-name> --members <...> [--min-links] [--mode] [--fast-rate] [--mtu]
+|   +-- delete <lag-name>
+|   +-- add-interface <lag-name> <interface>
+|   +-- remove-interface <lag-name> <interface>
++-- bgp
+|   +-- status
++-- evpn
+|   +-- setup [--source-ip]
+|   +-- status
+|   +-- ipvpn
+|   |   +-- list
+|   |   +-- show <name>
+|   |   +-- create <name> --l3vni <vni> [--import-rt] [--export-rt] [--description]
+|   |   +-- delete <name>
+|   +-- macvpn
+|       +-- list
+|       +-- show <name>
+|       +-- create <name> --l2vni <vni> [--arp-suppress] [--description]
+|       +-- delete <name>
++-- qos
+|   +-- list
+|   +-- show <policy-name>
+|   +-- create <policy-name> [--description]
+|   +-- delete <policy-name>
+|   +-- add-queue <policy-name> <queue-id> --type <dwrr|strict> [--weight] [--dscp] [--name] [--ecn]
+|   +-- remove-queue <policy-name> <queue-id>
+|   +-- apply <interface> <policy-name>
+|   +-- remove <interface>
++-- filter
+|   +-- list
+|   +-- show <filter-name>
+|   +-- create <filter-name> --type <l3|l3v6> [--description]
+|   +-- delete <filter-name>
+|   +-- add-rule <filter-name> --priority <N> --action <permit|deny> [match flags...]
+|   +-- remove-rule <filter-name> <priority>
++-- acl
+|   +-- list / show / create / delete
+|   +-- add-rule / delete-rule
+|   +-- bind / unbind
++-- service
+|   +-- list
+|   +-- show <service-name>
+|   +-- create <service-name> --type <l2|l3|irb> [--ipvpn] [--macvpn] [--vrf-type]
+|   |   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
+|   +-- delete <service-name>
+|   +-- apply <interface> <service> [--ip] [--peer-as]
+|   +-- remove <interface>
+|   +-- get <interface>
+|   +-- refresh <interface>
++-- baseline
+    +-- list / show / apply
+
+Device Operations
++-- show
++-- provision [-d <device>] [-x] [-s]
++-- health check [--check <name>]
++-- device
+    +-- cleanup [--type]
+
+Configuration & Meta
++-- settings
++-- audit
++-- version
+```
+
+#### 4.1.5 Interface Name Formats
+
 | Short Form | Full Form (SONiC) |
 |------------|-------------------|
 | `Eth0` | `Ethernet0` |
@@ -348,13 +511,13 @@ Low-level connection management for SONiC switches.
 The translation from spec to config happens in `Interface.ApplyService()` and related methods:
 
 ```go
-func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string, dryRun bool) (*ChangeSet, error) {
+func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
     // 1. Load spec (declarative)
     svc, _ := i.Network().GetService(serviceName)
 
     // 2. Translate with context
     vrfName := deriveVRFName(svc, i.name)           // spec + context -> config
-    peerIP, _ := util.DeriveNeighborIP(ipAddr)      // derive from interface IP
+    peerIP, _ := util.DeriveNeighborIP(opts.IPAddress) // derive from interface IP
     localAS := i.Device().Resolved().ASNumber        // from device profile
 
     // 3. Generate config (imperative)
@@ -362,22 +525,52 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName, ipAddr string
     cs.Add("BGP_NEIGHBOR", peerIP, ChangeAdd, nil, neighborConfig)
     cs.Add("ACL_TABLE", aclName, ChangeAdd, nil, aclConfig)
 
-    // 4. In execute mode: Lock → Apply → Verify → Unlock
-    //    (dry-run mode returns the ChangeSet without writing)
-
     return cs, nil
 }
 ```
 
-In execute mode (`dryRun == false`), the operation acquires a distributed lock on the device via STATE_DB, applies the ChangeSet, verifies it, and releases the lock. In dry-run mode, the ChangeSet is returned without writing to CONFIG_DB.
+The CLI uses the `withDeviceWrite` helper (see section 4.1.3) to handle the connect-lock-execute-print lifecycle. The operation function returns a ChangeSet; `withDeviceWrite` prints it and applies it if `-x` is set.
 
-**RemoveService** — `RemoveService(ctx, serviceName string, dryRun bool)` is the reverse of ApplyService. It removes all CONFIG_DB entries created by ApplyService for the given service on the interface. Uses DependencyChecker to protect shared resources (VRFs, ACLs, VLANs) that may be referenced by other interfaces.
+```
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
+```
 
-**RefreshService** — `RefreshService(ctx, serviceName string, dryRun bool)` re-reads the service spec, diffs the expected config against the current CONFIG_DB, and applies only the delta. This is used when a service spec is updated and the device needs to converge to the new definition without a full remove/apply cycle.
+**RemoveService** — `RemoveService(ctx)` is the reverse of ApplyService. It removes all CONFIG_DB entries created by ApplyService for the bound service on the interface. Uses DependencyChecker to protect shared resources (VRFs, ACLs, VLANs) that may be referenced by other interfaces.
+
+```
+newtron leaf1 service remove Ethernet0 -x
+```
+
+**RefreshService** — `RefreshService(ctx)` re-reads the service spec, diffs the expected config against the current CONFIG_DB, and applies only the delta. This is used when a service spec is updated and the device needs to converge to the new definition without a full remove/apply cycle.
+
+```
+newtron leaf1 service refresh Ethernet0 -x
+```
 
 ### 4.6 BGP Management Architecture
 
-#### 4.6.1 SONiC BGP Management Modes
+#### 4.6.1 BGP CLI: Visibility Only
+
+BGP is a visibility-only noun in the CLI. It has a single `status` subcommand that provides a unified view of BGP configuration and operational state:
+
+```
+newtron leaf1 bgp status
+```
+
+The `status` view combines:
+- **Local BGP identity** — AS number, router ID, loopback IP (from device profile)
+- **Configured neighbors** — from CONFIG_DB `BGP_NEIGHBOR` table, classified as direct (interface-level, different local_addr) or indirect (loopback-based)
+- **Operational state** — from STATE_DB `BGP_NEIGHBOR_TABLE`, showing session state (Established/Idle), prefix counts, and uptime
+- **Expected EVPN neighbors** — from site config (route reflector loopbacks)
+
+All BGP peer management is handled through other nouns:
+- **`vrf add-neighbor`** — creates eBGP or iBGP neighbors with per-interface context (local_addr from interface IP, auto-derived neighbor IP for /30 and /31 subnets)
+- **`vrf remove-neighbor`** — removes a BGP neighbor from a VRF
+- **`evpn setup`** — creates overlay iBGP EVPN sessions with route reflectors from site config
+
+This separation reflects SONiC's data model: BGP neighbors belong to routing contexts (VRFs), and the VRF is the natural owner of neighbor lifecycle. The BGP noun provides read-only visibility across all VRFs.
+
+#### 4.6.2 SONiC BGP Management Modes
 
 SONiC supports three BGP management modes:
 
@@ -387,9 +580,9 @@ SONiC supports three BGP management modes:
 | **Legacy unified** | (default) | `bgpcfgd` | Jinja templates translate CONFIG_DB to FRR. Limited coverage: missing peer groups, route-maps, redistribute, max-paths, cluster-id. |
 | **FRR management framework** | `frr_mgmt_framework_config=true` | `frrcfgd` | Full CONFIG_DB → FRR translation. Supports all needed features. Stable since SONiC 202305+. |
 
-The lab runs SONiC 202411 (Gibraltar). Newtron v3 switches from split mode to frrcfgd, enabling full BGP management through CONFIG_DB.
+The lab runs SONiC 202411 (Gibraltar). Newtron uses frrcfgd, enabling full BGP management through CONFIG_DB.
 
-#### 4.6.2 Why frrcfgd
+#### 4.6.3 Why frrcfgd
 
 The FRR management framework (`frrcfgd`) provides:
 - Complete CONFIG_DB coverage for BGP features (peer groups, route-maps, redistribute, prefix-lists, community-sets, AS-path filters)
@@ -398,7 +591,7 @@ The FRR management framework (`frrcfgd`) provides:
 - No direct `frr.conf` file management needed
 - Consistent management of underlay, IPv6, and EVPN overlay through a single mechanism
 
-#### 4.6.3 New CONFIG_DB Tables (9 tables)
+#### 4.6.4 CONFIG_DB BGP Tables (9 tables)
 
 | Table | Key Format | Purpose |
 |-------|-----------|---------|
@@ -412,7 +605,7 @@ The FRR management framework (`frrcfgd`) provides:
 | `COMMUNITY_SET` | `set_name` | BGP community lists |
 | `AS_PATH_SET` | `set_name` | AS-path regex filters |
 
-#### 4.6.4 Extended Fields on Existing Tables
+#### 4.6.5 Extended Fields on Existing Tables
 
 **BGP_GLOBALS** (`default` or VRF name):
 - `load_balance_mp_relax` — multipath relax (needed for ECMP across neighbor ASNs)
@@ -438,9 +631,9 @@ The FRR management framework (`frrcfgd`) provides:
 - `default_originate` — advertise default route to neighbor
 - `addpath_tx_all_paths` — send all paths to neighbor
 
-#### 4.6.5 SetupRouteReflector
+#### 4.6.6 SetupRouteReflector
 
-`SetupRouteReflector` replaces the v2 `SetupBGPEVPN` operation (which only activated `l2vpn_evpn`). The new operation configures full multi-AF route reflection:
+`SetupRouteReflector` configures full multi-AF route reflection. It is used by the topology provisioner (not directly by the CLI — the CLI equivalent is `evpn setup` which calls different underlying methods):
 
 ```
 SetupRouteReflector(ctx, neighbors []string)
@@ -465,7 +658,7 @@ SetupRouteReflector(ctx, neighbors []string)
   +-- ROUTE_REDISTRIBUTE "default|connected|bgp|ipv6": (if IPv6 enabled)
 ```
 
-#### 4.6.6 Route Redistribution Defaults
+#### 4.6.7 Route Redistribution Defaults
 
 Redistribution follows opinionated defaults:
 - **Service interfaces**: redistribute connected subnets into BGP (default)
@@ -473,7 +666,9 @@ Redistribution follows opinionated defaults:
 - **Transit interfaces**: NOT redistributed by default (fabric underlay uses direct BGP)
 - Service spec flag `redistribute` controls per-service override
 
-#### 4.6.7 New BGP Operations
+#### 4.6.8 BGP Network-Layer Operations
+
+These operations are methods on `network.Device` and `network.Interface`. They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
 
 **Device-level operations:**
 
@@ -497,6 +692,185 @@ Redistribution follows opinionated defaults:
 | Operation | Description |
 |-----------|-------------|
 | `SetRouteMap` | Bind route-map to BGP neighbor in/out direction |
+
+### 4.6a VRF Architecture
+
+VRF is a first-class noun in the CLI with 13 subcommands. It represents a Virtual Routing and Forwarding instance in CONFIG_DB and serves as the routing context that owns interfaces, BGP neighbors, static routes, and IP-VPN bindings.
+
+#### 4.6a.1 VRF as CONFIG_DB Entity
+
+A VRF is a row in the `VRF` CONFIG_DB table. VRF ownership is expressed through foreign-key references in other tables:
+
+| Owned Resource | CONFIG_DB Table | Foreign Key |
+|----------------|----------------|-------------|
+| Interfaces | `INTERFACE` | `vrf_name` field on `INTERFACE\|<name>` |
+| BGP Neighbors | `BGP_NEIGHBOR` | `local_addr` derived from VRF interface IP |
+| Static Routes | `STATIC_ROUTE` | `vrf\|prefix\|nexthop` key format |
+| IP-VPN Binding | `VXLAN_TUNNEL_MAP` | L3VNI mapping for the VRF |
+
+#### 4.6a.2 Dependency Chain
+
+Operations on a VRF follow a dependency chain — each step requires the preceding one:
+
+```
+VRF exists
+  +-- bind interfaces (add-interface)
+  |     +-- add BGP neighbors (add-neighbor, requires interface IP)
+  |     +-- add static routes (add-route)
+  +-- bind IP-VPN (bind-ipvpn, requires VTEP from evpn setup)
+```
+
+#### 4.6a.3 Preconditions
+
+| Operation | Preconditions |
+|-----------|---------------|
+| `create` | VRF name not already in use |
+| `delete` | No interfaces bound, no BGP neighbors, no VNI mapping |
+| `add-interface` | VRF exists, interface exists, interface not already in another VRF |
+| `remove-interface` | Interface is bound to this VRF |
+| `bind-ipvpn` | VRF exists, IP-VPN definition exists in network.json, VTEP configured |
+| `unbind-ipvpn` | VRF has an IP-VPN binding |
+| `add-neighbor` | VRF exists, interface bound to VRF, interface has IP address |
+| `remove-neighbor` | Neighbor exists in CONFIG_DB |
+| `add-route` | VRF exists |
+| `remove-route` | Route exists in VRF |
+
+#### 4.6a.4 Auto-Derived Neighbor IP
+
+For `vrf add-neighbor`, if the `--neighbor` flag is omitted, the neighbor IP is auto-derived from the interface's IP address:
+
+| Interface Prefix | Derivation | Example |
+|-----------------|------------|---------|
+| `/30` | XOR last 2 bits with 0x03 | `10.1.1.1/30` → neighbor `10.1.1.2` |
+| `/31` | XOR last bit | `10.0.0.0/31` → neighbor `10.0.0.1` |
+| Other | Must provide `--neighbor` explicitly | `/24`, `/29`, etc. |
+
+This aligns with standard point-to-point link addressing conventions.
+
+#### 4.6a.5 CLI Examples
+
+```
+newtron leaf1 vrf create Vrf_CUST1 -x
+newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet4 -x
+newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet4 65100 -x
+newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x
+newtron leaf1 vrf status
+newtron leaf1 vrf show Vrf_CUST1
+```
+
+### 4.6b EVPN Overlay System
+
+EVPN has been restructured from individual VNI-mapping commands into a higher-level overlay system with two concerns: device-level overlay setup and spec-level VPN definition authoring.
+
+#### 4.6b.1 EVPN Setup (Idempotent Composite)
+
+The `evpn setup` command is an idempotent composite that configures the full EVPN stack in one shot:
+
+```
+newtron leaf1 evpn setup -x
+newtron leaf1 evpn setup --source-ip 10.0.0.10 -x
+```
+
+The operation performs three steps, skipping any that are already configured:
+
+1. **VXLAN Tunnel Endpoint (VTEP)** — creates `VXLAN_TUNNEL` entry with source IP (defaults to device loopback IP)
+2. **EVPN NVO** — creates `VXLAN_EVPN_NVO` entry referencing the VTEP
+3. **BGP EVPN sessions** — creates `BGP_NEIGHBOR` entries for route reflectors from site config, with `l2vpn_evpn` address family activated
+
+Idempotency means `evpn setup` can be run multiple times safely — it checks for existing entries before creating new ones.
+
+#### 4.6b.2 EVPN Status
+
+The `evpn status` command combines configuration and operational state in a single view:
+
+```
+newtron leaf1 evpn status
+```
+
+Output includes VTEP configuration, EVPN NVO, VNI mappings (L2/L3 with resource type), VRFs with L3VNI, and operational state (VTEP status, VNI count, Type-2/Type-5 route counts, remote VTEPs).
+
+#### 4.6b.3 IP-VPN and MAC-VPN Spec Authoring
+
+`ipvpn` and `macvpn` are sub-nouns under `evpn` for managing VPN definitions in network.json. These are spec authoring commands that do not require a device connection:
+
+```
+newtron evpn ipvpn list
+newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65000:10001 -x
+newtron evpn ipvpn delete customer-vpn -x
+
+newtron evpn macvpn list
+newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x
+newtron evpn macvpn delete servers-vlan100 -x
+```
+
+**IP-VPN** (L3 VPN) contains: L3VNI, import/export route targets, description.
+**MAC-VPN** (L2 VPN) contains: L2VNI, ARP suppression flag, description.
+
+The MAC-VPN definition does **not** contain a VLAN ID. Overlay definition and local bridge domain are separate concepts — the same MAC-VPN can be used by different VLANs on different devices. VLANs bind to MAC-VPNs via `vlan bind-macvpn`, which brings the L2VNI from the definition.
+
+#### 4.6b.4 CONFIG_DB Tables
+
+| Table | Key | Purpose |
+|-------|-----|---------|
+| `VXLAN_TUNNEL` | Tunnel name (e.g., `vtep1`) | VTEP source IP |
+| `VXLAN_EVPN_NVO` | NVO name (e.g., `nvo1`) | References source VTEP |
+| `VXLAN_TUNNEL_MAP` | `tunnel\|map_name` | VNI → VLAN (L2) or VNI → VRF (L3) mapping |
+| `BGP_NEIGHBOR` | Neighbor IP | EVPN peers (RRs from site config) |
+| `BGP_NEIGHBOR_AF` | `ip\|l2vpn_evpn` | EVPN AF activation and attributes |
+
+### 4.6c Spec Authoring
+
+Several CLI nouns support **spec authoring** — creating, modifying, and deleting definitions in network.json without connecting to a device.
+
+#### 4.6c.1 Authorable Definitions
+
+| Noun | Subcommands | Definition Type |
+|------|-------------|----------------|
+| `evpn ipvpn` | `list`, `show`, `create`, `delete` | IP-VPN (L3VNI, route targets) |
+| `evpn macvpn` | `list`, `show`, `create`, `delete` | MAC-VPN (L2VNI, ARP suppression) |
+| `qos` | `list`, `show`, `create`, `delete`, `add-queue`, `remove-queue` | QoS policy (queues, DSCP mappings) |
+| `filter` | `list`, `show`, `create`, `delete`, `add-rule`, `remove-rule` | Filter spec (ACL template rules) |
+| `service` | `list`, `show`, `create`, `delete` | Service (type, VPN refs, filters, QoS) |
+
+#### 4.6c.2 Persistence
+
+Spec authoring commands persist changes to network.json via atomic write:
+
+1. Write to a temporary file in the same directory
+2. `os.Rename` the temp file over the original (atomic on POSIX)
+3. Update the in-memory cache so subsequent reads within the same session see the new data
+
+This ensures no partial writes — the file is either fully updated or untouched.
+
+#### 4.6c.3 Dependency Checking on Delete
+
+Delete operations check for references before removing a definition:
+
+| Definition | Cannot delete if... |
+|------------|-------------------|
+| IP-VPN | Any service references it via `ipvpn` field |
+| MAC-VPN | Any service references it via `macvpn` field |
+| QoS policy | Any service references it via `qos_policy` field |
+| Filter | Any service references it via `ingress_filter` or `egress_filter` field |
+| Service | (No cross-reference check — operator must remove from interfaces first) |
+
+#### 4.6c.4 Permission
+
+All spec authoring create/delete operations require `PermSpecAuthor`. Read operations (list, show) have no permission requirement.
+
+### 4.6d Per-Noun Status
+
+Each resource noun that has operational state owns a `status` subcommand that combines CONFIG_DB configuration with STATE_DB operational data in a single view. This replaces the old `state` command that was a separate top-level command.
+
+| Noun | `status` Shows |
+|------|---------------|
+| `vlan status` | All VLANs with ID, name, L2VNI, SVI status, member count, MAC-VPN binding |
+| `vrf status` | All VRFs with interface count, neighbor count, L3VNI, IP-VPN binding |
+| `lag status` | All LAGs with member count, min-links, oper status, LACP state |
+| `bgp status` | Local identity, neighbor summary, configured neighbors table, operational state table |
+| `evpn status` | VTEP config, NVO, VNI mappings, VRFs with L3VNI, operational state |
+
+The `status` subcommand always requires a device connection (`-d` flag or implicit device name).
 
 ### 4.7 Composite Mode
 
@@ -953,7 +1327,7 @@ For **overwrite** mode (initial provisioning), the expectation is that the opera
 
 ## 8. Service Model
 
-Services are the primary abstraction - they bundle intent into reusable templates.
+Services are the primary abstraction - they bundle intent into reusable templates. Services can be created and deleted via CLI spec authoring (`service create`, `service delete`) in addition to being defined directly in network.json.
 
 ### 8.1 Service Spec Structure
 
@@ -965,14 +1339,16 @@ Services are the primary abstraction - they bundle intent into reusable template
       "service_type": "l3",
       "ipvpn": "customer-vpn",
       "vrf_type": "interface",
+      "vlan": 0,
+      "qos_policy": "8q-datacenter",
+      "ingress_filter": "customer-edge-in",
+      "egress_filter": "customer-edge-out",
       "routing": {
         "protocol": "bgp",
         "peer_as": "request",
         "import_policy": "customer-import",
         "export_policy": "customer-export"
-      },
-      "ingress_filter": "customer-edge-in",
-      "egress_filter": "customer-edge-out"
+      }
     }
   }
 }
@@ -982,6 +1358,7 @@ Services are the primary abstraction - they bundle intent into reusable template
 - Service type (l2, l3, irb)
 - VPN reference (name of ipvpn/macvpn definition)
 - VRF instantiation policy (per-interface or shared)
+- VLAN ID (for l2/irb services — the local bridge domain; moved here from MACVPNSpec because overlay definition and local VLAN are separate concerns)
 - Routing protocol and policies
 - Filter references (names, not rules)
 - QoS policy reference (declarative queue definitions)
@@ -992,6 +1369,33 @@ Services are the primary abstraction - they bundle intent into reusable template
 - VRF name (generated from service + interface)
 - ACL table names (generated)
 - Specific ACL rule numbers (from filter-spec expansion)
+
+### 8.1a Service CLI Authoring
+
+Services can be created and deleted via CLI without editing JSON directly:
+
+```
+newtron service create customer-l3 --type l3 --ipvpn cust-vpn --vrf-type shared \
+  --qos-policy 8q-datacenter --ingress-filter customer-in --description "Customer L3 VPN" -x
+
+newtron service delete customer-l3 -x
+```
+
+The `create` command accepts all ServiceSpec fields as flags:
+
+| Flag | Description |
+|------|-------------|
+| `--type` | Service type: `l2`, `l3`, or `irb` (required) |
+| `--ipvpn` | IP-VPN reference name |
+| `--macvpn` | MAC-VPN reference name |
+| `--vrf-type` | VRF instantiation: `interface` or `shared` |
+| `--vlan` | VLAN ID for L2/IRB services |
+| `--qos-policy` | QoS policy name |
+| `--ingress-filter` | Ingress filter spec name |
+| `--egress-filter` | Egress filter spec name |
+| `--description` | Service description |
+
+The `delete` command verifies the service exists but does not check whether it is currently applied to interfaces — the operator must remove it from interfaces first using `service remove`.
 
 ### 8.2 Routing Spec
 
@@ -1125,7 +1529,12 @@ ResolvedProfile (runtime)
 
 ## 10. EVPN/VXLAN Architecture
 
-**v3 change**: The BGP EVPN underlay is now managed via CONFIG_DB through frrcfgd instead of direct `frr.conf` files. `SetupRouteReflector` replaces `SetupBGPEVPN`, activating all three address families (ipv4_unicast, ipv6_unicast, l2vpn_evpn) rather than just l2vpn_evpn. The underlay, IPv6, and overlay are now managed through a single consistent mechanism.
+BGP EVPN is managed via CONFIG_DB through frrcfgd. `SetupRouteReflector` (topology provisioner) and `evpn setup` (CLI) activate the overlay stack. VNIs are never manipulated directly through CLI commands — they are properties of VPN definitions (IP-VPN defines L3VNI, MAC-VPN defines L2VNI) and are brought into CONFIG_DB through binding operations:
+
+- **L2VNI**: `vlan bind-macvpn <vlan-id> <macvpn-name>` reads the L2VNI from the MAC-VPN definition and creates the `VXLAN_TUNNEL_MAP` entry
+- **L3VNI**: `vrf bind-ipvpn <vrf-name> <ipvpn-name>` reads the L3VNI from the IP-VPN definition and creates the mapping
+
+The `evpn setup` command is an idempotent composite that creates the VTEP, NVO, and BGP EVPN sessions in one shot (see section 4.6b.1).
 
 ### 10.1 Overlay Design
 
@@ -1153,6 +1562,8 @@ ResolvedProfile (runtime)
 
 QoS policies are self-contained queue definitions from which newtron derives all CONFIG_DB tables. This makes QoS consistent with how filters, VPNs, and routing already work — the spec declares intent, newtron translates it to CONFIG_DB entries.
 
+QoS policies are CLI-authorable via the `qos` noun (see section 4.6c). The `qos apply` and `qos remove` subcommands provide surgical per-interface QoS override that takes precedence over service-managed QoS.
+
 ### 10a.1 Spec Model
 
 A QoS policy defines 1-8 queues. Array position = queue index = traffic class. Unmapped DSCP values default to queue 0.
@@ -1174,6 +1585,25 @@ A QoS policy defines 1-8 queues. Array position = queue index = traffic class. U
 
 Services reference policies by name: `"qos_policy": "8q-datacenter"`.
 
+### 10a.1a QoS CLI Authoring and Application
+
+**Spec authoring** (no device needed):
+```
+newtron qos create 4q-customer --description "4-queue customer policy" -x
+newtron qos add-queue 4q-customer 0 --type dwrr --weight 50 --dscp 0 --name best-effort -x
+newtron qos add-queue 4q-customer 1 --type dwrr --weight 30 --dscp 46 --name voice -x
+newtron qos add-queue 4q-customer 2 --type strict --dscp 48 --name network-ctrl -x
+newtron qos delete 4q-customer -x
+```
+
+**Per-interface override** (device required):
+```
+newtron leaf1 qos apply Ethernet0 4q-customer -x
+newtron leaf1 qos remove Ethernet0 -x
+```
+
+The `qos apply` command writes PORT_QOS_MAP and QUEUE entries for the interface, overriding any QoS inherited from the service definition. The `qos remove` command deletes these per-interface entries, reverting to service-managed QoS (if any).
+
 ### 10a.2 CONFIG_DB Derivation
 
 From one policy `P` applied to interface `Ethernet0`:
@@ -1193,6 +1623,54 @@ From one policy `P` applied to interface `Ethernet0`:
 
 **Per-interface bindings** (PORT_QOS_MAP, QUEUE) are created for each interface that uses the policy.
 
+## 10b. Filter Architecture
+
+Newtron distinguishes between **spec-level filter templates** (in network.json) and **device-level ACL instances** (in CONFIG_DB). The `filter` CLI manages templates; the `acl` CLI manages device instances.
+
+### 10b.1 Two-Level Design
+
+| Level | CLI Noun | Storage | Scope | Purpose |
+|-------|----------|---------|-------|---------|
+| **Filter** (template) | `filter` | network.json | Network-wide | Reusable rule definitions referenced by services |
+| **ACL** (instance) | `acl` | CONFIG_DB | Per-device | Concrete ACL_TABLE + ACL_RULE entries on the device |
+
+### 10b.2 Filter → Service → ACL Instantiation
+
+When a service is applied to an interface, the instantiation chain is:
+
+```
+filter spec (network.json)
+  +-- referenced by service (ingress_filter / egress_filter)
+       +-- service applied to interface (service apply)
+            +-- ACL_TABLE created: "{service}-{interface}-{in|out}"
+            +-- ACL_RULE entries created: one per filter rule, with derived priority
+```
+
+The filter spec defines rules abstractly (match conditions + action). The service spec references filters by name. When the service is applied, newtron instantiates the filter rules as concrete ACL entries on the device, scoped to the specific interface.
+
+### 10b.3 Filter CLI (Spec Authoring)
+
+```
+newtron filter list
+newtron filter show customer-edge-in
+newtron filter create customer-edge-in --type l3 --description "Customer ingress filter" -x
+newtron filter add-rule customer-edge-in --priority 100 --action deny --src-ip 0.0.0.0/8 -x
+newtron filter add-rule customer-edge-in --priority 200 --action deny --src-ip 10.0.0.0/8 -x
+newtron filter add-rule customer-edge-in --priority 1000 --action permit -x
+newtron filter remove-rule customer-edge-in 100 -x
+newtron filter delete customer-edge-in -x
+```
+
+Filter types correspond to ACL table types:
+| Filter Type | ACL Table Type | Description |
+|------------|----------------|-------------|
+| `l3` | `L3` | IPv4 ACL |
+| `l3v6` | `L3V6` | IPv6 ACL |
+
+### 10b.4 ACL CLI (Device Instances)
+
+The `acl` CLI operates on device-level ACL_TABLE and ACL_RULE entries directly. It is unchanged from prior versions. Both manually-created ACLs (`acl create`) and service-instantiated ACLs (from filter specs) appear in `acl list`. Service-instantiated ACLs follow the naming convention `{service}-{interface}-{direction}`.
+
 ## 11. Security Model
 
 ### 11.1 Transport Security
@@ -1205,13 +1683,26 @@ In integration test environments, a standalone Redis container is used without S
 
 | Permission | Description |
 |------------|-------------|
-| `service.apply` | Apply services |
-| `service.remove` | Remove services |
-| `interface.configure` | Configure interfaces |
+| `service.apply` | Apply services to interfaces |
+| `service.remove` | Remove services from interfaces |
+| `interface.configure` | Configure interface properties |
 | `lag.create` | Create LAGs |
-| `vlan.create` | Create VLANs |
-| `acl.modify` | Modify ACLs |
-| `bgp.modify` | Modify BGP |
+| `vlan.create` | Create/delete VLANs |
+| `vlan.modify` | Modify VLAN membership |
+| `acl.modify` | Modify ACLs (create/delete/bind/unbind rules) |
+| `bgp.modify` | Modify BGP configuration |
+| `evpn.modify` | EVPN setup and VNI operations |
+| `vrf.create` | Create VRFs |
+| `vrf.modify` | Modify VRF bindings (interfaces, neighbors, routes) |
+| `vrf.delete` | Delete VRFs |
+| `vrf.view` | View VRF details |
+| `spec.author` | Create/delete definitions in network.json (IP-VPN, MAC-VPN, QoS, filter, service) |
+| `filter.create` | Create filter specs |
+| `filter.modify` | Add/remove filter rules |
+| `filter.delete` | Delete filter specs |
+| `filter.view` | View filter details |
+| `qos.create` | Create QoS policies |
+| `qos.delete` | Delete QoS policies |
 | `all` | Superuser |
 
 ### 11.3 Audit Logging
@@ -1271,7 +1762,7 @@ All operations logged with:
 The `--verify` flag can be appended to any execute-mode operation. After writing changes, newtron reconnects (fresh CONFIG_DB read) and runs `VerifyChangeSet` against the ChangeSet that was just applied:
 
 ```
-newtron -d leaf1 interface Ethernet2 apply-service customer-l3 -x --verify
+newtron leaf1 service apply Ethernet2 customer-l3 --ip 10.1.1.1/30 -x --verify
 newtron provision -S specs/ -d leaf1 -x --verify
 ```
 
@@ -1477,6 +1968,46 @@ The ChangeSet-based approach is universal: it works for disaggregated operations
 
 Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron configured BGP redistribution, so newtron can read APP_DB to confirm the route appeared locally. This is still single-device self-verification — confirming the intended effect of newtron's own change. Cross-device assertions (did the route reach the neighbor) require topology-wide context and belong in the orchestrator (newtest).
 
+### 17.15 Why No MAC-VRF Noun
+
+**Decision**: VLANs bind directly to MAC-VPNs via `vlan bind-macvpn` rather than through a MAC-VRF intermediary noun.
+
+**Rationale**: SONiC has no `MAC_VRF` table in CONFIG_DB. A MAC-VRF in EVPN parlance is a layer 2 forwarding domain, but SONiC models this as VLAN + VXLAN_TUNNEL_MAP (L2VNI binding). Introducing a MAC-VRF noun would create an abstraction with no backing CONFIG_DB table, requiring newtron to maintain a synthetic mapping layer. Instead, the VLAN noun directly manages the concrete CONFIG_DB tables (VLAN, VLAN_MEMBER, VXLAN_TUNNEL_MAP), and MAC-VPN definitions in network.json provide the overlay parameters (L2VNI, ARP suppression) that get applied when a VLAN is bound to a MAC-VPN.
+
+**Alternative considered**: A `macvrf` noun that wraps VLAN + L2VNI + ARP suppression as a single entity. Rejected because it would obscure the CONFIG_DB reality and create confusion about what is a config object vs. a spec object.
+
+### 17.16 Why VRF Owns BGP Neighbors
+
+**Decision**: BGP neighbor management lives under the `vrf` noun (`add-neighbor`, `remove-neighbor`) rather than under `bgp`.
+
+**Rationale**: A VRF is a routing context. BGP neighbors exist within a routing context — the neighbor IP, remote AS, and local address are properties of a specific VRF + interface combination. In CONFIG_DB, BGP_NEIGHBOR entries reference VRF-bound interfaces for their local address. Placing neighbor management under VRF makes the ownership explicit: the VRF owns its interfaces and its neighbors. The BGP noun becomes a read-only visibility surface that shows the aggregate state across all VRFs.
+
+**Alternative considered**: A `bgp add-neighbor` command with a `--vrf` flag. Rejected because it inverts the ownership — the VRF is the container, the neighbor is the content. The command `vrf add-neighbor Vrf_CUST1 Ethernet4 65100` reads naturally as "add a neighbor to this VRF's routing domain via this interface."
+
+### 17.17 Why EVPN Setup is Composite and Idempotent
+
+**Decision**: `evpn setup` is a single composite command that creates VTEP + NVO + BGP EVPN sessions together, and skips components that already exist.
+
+**Rationale**: The EVPN overlay requires all three components (VTEP, NVO, BGP EVPN peers) to function. Creating them separately risks partial configuration — a VTEP without NVO or NVO without BGP EVPN peers is non-functional. Making it a composite ensures the overlay is either fully configured or not at all. Idempotency (skipping existing components) enables safe re-runs: if BGP EVPN peers are already configured but VTEP was missed, `evpn setup` creates only the VTEP. This is critical for operational safety — operators can run it without worrying about duplicating entries.
+
+**Alternative considered**: Separate `evpn create-vtep`, `evpn create-nvo`, `evpn add-peer` commands. Rejected because they require the operator to know the correct ordering and component dependencies, and partial execution leaves the overlay broken.
+
+### 17.18 Why MAC-VPN Has No VLAN Field
+
+**Decision**: The MACVPNSpec contains L2VNI and ARP suppression but no VLAN ID. VLAN ID is in ServiceSpec for L2/IRB services.
+
+**Rationale**: The overlay definition (MAC-VPN) and the local bridge domain (VLAN) are separate concepts. The same MAC-VPN can be used by different VLANs on different devices — VLAN 100 on leaf1 and VLAN 200 on leaf2 can both participate in the same L2VNI. Putting the VLAN ID in MACVPNSpec would couple overlay identity to local bridge domain, preventing this flexibility. By placing VLAN ID in the ServiceSpec (which is instantiated per-interface), each device can map its own local VLAN to the shared overlay.
+
+**Alternative considered**: MACVPNSpec with an optional `vlan` field. Rejected because it creates ambiguity — if both MACVPNSpec and ServiceSpec have VLAN IDs, which one wins? The clean separation eliminates this question.
+
+### 17.19 Why Spec Authoring via CLI
+
+**Decision**: Definitions (IP-VPN, MAC-VPN, QoS policies, filters, services) can be created, modified, and deleted through CLI commands that persist changes to network.json.
+
+**Rationale**: Operators should be able to author definitions without editing JSON files directly. Direct JSON editing is error-prone (syntax errors, missing required fields, invalid values) and bypasses validation. CLI commands validate inputs before writing and use atomic file operations (temp file + rename) to prevent partial writes. The `-x` flag applies to spec authoring too — operators see what will be written before committing. This aligns with the dry-run-by-default principle.
+
+**Alternative considered**: A web UI or separate spec-editing tool. Rejected for complexity — the CLI already has the spec loader, validation, and atomic write infrastructure. Adding create/delete subcommands to existing nouns is a natural extension.
+
 ---
 
 ## Appendix A: Glossary
@@ -1496,7 +2027,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **Network** | Top-level object representing the entire network. Owns all specs and provides access to devices. |
 | **Device** | A specific switch instance with its own IP, site membership, and profile. Represents a physical or virtual SONiC switch. |
 | **Platform** | Hardware type definition (HWSKU, port count, speeds). Describes what kind of switch hardware is supported. |
-| **Interface** | A port on a device (physical, LAG, VLAN, loopback). Services are applied to interfaces. |
+| **Interface** | A logical network endpoint on a device (physical Ethernet, LAG, VLAN, loopback). Services are applied to interfaces. |
 
 ### Spec Types (Go structs)
 
@@ -1521,11 +2052,11 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 
 | Term | Definition |
 |------|------------|
-| **IPVPN** | IP-VPN definition for L3 routing. Contains L3VNI and route targets. |
-| **MACVPN** | MAC-VPN definition for L2 bridging. Contains VLAN, L2VNI, ARP suppression. |
+| **IPVPN** | IP-VPN definition for L3 routing. Contains L3VNI and route targets. CLI-authorable via `evpn ipvpn create/delete`. |
+| **MACVPN** | MAC-VPN definition for L2 bridging. Contains L2VNI and ARP suppression (no VLAN ID — overlay definition is separate from local bridge domain). CLI-authorable via `evpn macvpn create/delete`. VLANs bind to MAC-VPNs via `vlan bind-macvpn`. |
 | **L2VNI** | Layer 2 VNI for VXLAN bridging (MAC learning, BUM traffic). |
 | **L3VNI** | Layer 3 VNI for VXLAN routing (inter-subnet traffic). |
-| **VRF** | Virtual Routing and Forwarding instance for traffic isolation. |
+| **VRF** | Virtual Routing and Forwarding instance for traffic isolation. First-class CLI noun with 13 subcommands: owns interfaces, BGP neighbors, static routes, and IP-VPN bindings. |
 | **Route Target (RT)** | BGP extended community controlling VPN route import/export. |
 
 ### VRF Types
@@ -1559,12 +2090,24 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | 4 | CONFIG_DB | Device configuration (read/write by Newtron) |
 | 6 | STATE_DB | Operational state (read-only by Newtron via `RunHealthChecks`) |
 
+### CLI Architecture (v6)
+
+| Term | Definition |
+|------|------------|
+| **Noun-Group CLI** | CLI pattern `newtron <device> <noun> <action> [args] [-x]`. All commands are organized by resource noun (vlan, vrf, bgp, etc.). |
+| **Implicit Device** | The first argument is treated as a device name if it does not match a known command. Equivalent to `-d <device>`. |
+| **withDeviceWrite** | CLI helper that encapsulates connect → lock → execute → print changeset → apply/dry-run → unlock → disconnect for all device-level write commands. |
+| **Spec Authoring** | CLI-authored definitions (IP-VPN, MAC-VPN, QoS, filter, service) that persist to network.json via atomic write (temp file + rename). No device connection required. |
+| **Per-Noun Status** | Each resource noun owns its `status` subcommand combining CONFIG_DB config with operational state from STATE_DB. Replaces the old `state` command. |
+| **Filter vs ACL** | A filter is a spec-level template in network.json (reusable across devices); an ACL is a device-level CONFIG_DB instance. `service apply` instantiates filters as ACLs. |
+
 ### Operations
 
 | Term | Definition |
 |------|------------|
 | **Dry-Run** | Preview mode (default). Shows what would change without applying. |
 | **Execute (`-x`)** | Apply mode. Actually writes changes to device config_db. |
+| **Save (`-s`)** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json` after execute. Requires `-x`. |
 | **ChangeSet** | Collection of pending changes to be previewed or applied. Also serves as the verification contract — `VerifyChangeSet` diffs the ChangeSet against live CONFIG_DB. |
 | **VerifyChangeSet** | Re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly. The only assertion newtron makes. |
 | **GetRoute** | Reads a route from APP_DB (DB 0) and returns structured data (prefix, protocol, next-hops). Observation primitive — returns data, not a verdict. |

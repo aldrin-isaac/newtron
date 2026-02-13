@@ -24,6 +24,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/settings"
+	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )
 
@@ -34,26 +35,31 @@ var (
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "newtlab",
-	Short: "VM orchestration for SONiC network topologies",
+	Use:               "newtlab",
+	Short:             "VM orchestration for SONiC network topologies",
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
 	Long: `NewtLab deploys QEMU virtual machines from newtron spec files.
 
 It reads topology.json, platforms.json, and profiles/*.json to create
 connected VMs with socket-based networking. No root, no bridges, no Docker.
 
-Commands:
-  deploy      Deploy VMs from topology.json
-  destroy     Stop and remove all VMs
-  status      Show VM status
-  ssh         SSH to a VM
-  console     Attach to serial console
-  stop/start  Stop or start individual VMs
-  provision   Provision devices via newtron`,
+  newtlab deploy -S <specs>`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if verbose {
+			util.SetLogLevel("debug")
+		} else {
+			util.SetLogLevel("warn")
+		}
+		return nil
+	},
 }
 
 func init() {
@@ -83,10 +89,10 @@ func requireSpecDir() (string, error) {
 	if v := os.Getenv("NEWTLAB_SPECS"); v != "" {
 		return v, nil
 	}
-	if s, err := settings.Load(); err == nil && s.LabSpecs != "" {
-		return s.LabSpecs, nil
+	if s, err := settings.Load(); err == nil && s.SpecDir != "" {
+		return s.SpecDir, nil
 	}
-	return "", fmt.Errorf("spec directory required: use -S <dir>, set NEWTLAB_SPECS, or run 'newtron settings set lab_specs <dir>'")
+	return "", fmt.Errorf("spec directory required: use -S <dir>, set NEWTLAB_SPECS, or run 'newtron settings set specs <dir>'")
 }
 
 func newVersionCmd() *cobra.Command {
@@ -94,7 +100,11 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("newtlab %s (%s)\n", version.Version, version.GitCommit)
+			if version.Version == "dev" {
+				fmt.Println("newtlab dev build (use 'make build' for version info)")
+			} else {
+				fmt.Printf("newtlab %s (%s)\n", version.Version, version.GitCommit)
+			}
 		},
 	}
 }

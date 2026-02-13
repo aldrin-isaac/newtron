@@ -141,6 +141,4 @@ Examples:
 	},
 }
 
-func init() {
-	rootCmd.AddCommand(provisionCmd)
-}
+// provisionCmd is registered via rootCmd.AddCommand in main.go init().

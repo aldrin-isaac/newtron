@@ -77,8 +77,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
 		}
 	case spec.ServiceTypeL2, spec.ServiceTypeIRB:
-		if macvpnDef == nil || macvpnDef.VLAN == 0 {
-			return nil, fmt.Errorf("L2/IRB service requires macvpn reference with 'vlan' field")
+		if svc.VLAN == 0 {
+			return nil, fmt.Errorf("L2/IRB service requires 'vlan' field in service definition")
+		}
+		if macvpnDef == nil {
+			return nil, fmt.Errorf("L2/IRB service requires macvpn reference")
 		}
 	}
 
@@ -133,10 +136,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// Determine VLAN ID for idempotency checks
-	var vlanID int
-	if macvpnDef != nil {
-		vlanID = macvpnDef.VLAN
-	}
+	vlanID := svc.VLAN
 
 	// Build change set with idempotency filtering.
 	// The shared generator always emits all entries (for topology provisioner's
@@ -144,7 +144,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	cs := NewChangeSet(d.Name(), "interface.apply-service")
 	configDB := d.ConfigDB()
 
-	// Track ACL names from generated entries for port-merging
+	// Track ACL names from generated entries for interface-merging
 	var ingressACLName, egressACLName string
 	if svc.IngressFilter != "" {
 		ingressACLName = util.DeriveACLName(serviceName, "in")
@@ -171,15 +171,15 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" && d.VRFExists(svc.IPVPN):
 			continue
 
-		// Replace ACL entries with expanded version (prefix list Cartesian product + port merging)
+		// Replace ACL entries with expanded version (prefix list Cartesian product + interface merging)
 		case e.Table == "ACL_TABLE" && (e.Key == ingressACLName || e.Key == egressACLName):
 			aclName := e.Key
 			existingACL, aclExists := configDB.ACLTable[aclName]
 			if aclExists {
-				// ACL exists - just add this interface to the ports list
-				newPorts := addPortToList(existingACL.Ports, i.name)
+				// ACL exists - merge this interface into the binding list
+				newBindings := addInterfaceToList(existingACL.Ports, i.name)
 				cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-					"ports": newPorts,
+					"ports": newBindings,
 				})
 			} else {
 				// ACL doesn't exist - create table entry from generated fields
@@ -569,27 +569,29 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 }
 
 
-// addPortToList adds a port to a comma-separated ports list
-func addPortToList(portsList, newPort string) string {
-	if portsList == "" {
-		return newPort
+// addInterfaceToList adds an interface name to a comma-separated list
+// (used for ACL_TABLE.ports which contains interface names despite the field name).
+func addInterfaceToList(list, interfaceName string) string {
+	if list == "" {
+		return interfaceName
 	}
-	ports := strings.Split(portsList, ",")
-	for _, p := range ports {
-		if strings.TrimSpace(p) == newPort {
-			return portsList // Already in list
+	parts := strings.Split(list, ",")
+	for _, p := range parts {
+		if strings.TrimSpace(p) == interfaceName {
+			return list // Already in list
 		}
 	}
-	return portsList + "," + newPort
+	return list + "," + interfaceName
 }
 
-// removePortFromList removes a port from a comma-separated ports list
-func removePortFromList(portsList, portToRemove string) string {
-	ports := strings.Split(portsList, ",")
+// removeInterfaceFromList removes an interface name from a comma-separated list
+// (used for ACL_TABLE.ports which contains interface names despite the field name).
+func removeInterfaceFromList(list, interfaceName string) string {
+	parts := strings.Split(list, ",")
 	var result []string
-	for _, p := range ports {
+	for _, p := range parts {
 		p = strings.TrimSpace(p)
-		if p != "" && p != portToRemove {
+		if p != "" && p != interfaceName {
 			result = append(result, p)
 		}
 	}
@@ -632,12 +634,12 @@ func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
 		return true
 	}
 
-	remaining := removePortFromList(acl.Ports, dc.excludeInterface)
+	remaining := removeInterfaceFromList(acl.Ports, dc.excludeInterface)
 	return remaining == ""
 }
 
-// GetACLRemainingPorts returns ports remaining after removing this interface
-func (dc *DependencyChecker) GetACLRemainingPorts(aclName string) string {
+// GetACLRemainingInterfaces returns interfaces remaining after removing this one
+func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 	configDB := dc.device.ConfigDB()
 	if configDB == nil {
 		return ""
@@ -648,7 +650,7 @@ func (dc *DependencyChecker) GetACLRemainingPorts(aclName string) string {
 		return ""
 	}
 
-	return removePortFromList(acl.Ports, dc.excludeInterface)
+	return removeInterfaceFromList(acl.Ports, dc.excludeInterface)
 }
 
 // IsLastVLANMember returns true if this is the last member of the VLAN
@@ -747,10 +749,10 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 		}
 		cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
 	} else {
-		// Other users exist - just remove this interface from ports
-		remainingPorts := depCheck.GetACLRemainingPorts(aclName)
+		// Other users exist - just remove this interface from the binding list
+		remainingBindings := depCheck.GetACLRemainingInterfaces(aclName)
 		cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-			"ports": remainingPorts,
+			"ports": remainingBindings,
 		})
 	}
 }
@@ -896,7 +898,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	if svc != nil && macvpnDef != nil {
 		switch svc.ServiceType {
 		case spec.ServiceTypeL2, spec.ServiceTypeIRB:
-			vlanID := macvpnDef.VLAN
+			vlanID := svc.VLAN
 			vlanName := fmt.Sprintf("Vlan%d", vlanID)
 
 			// Always remove this interface's VLAN membership
@@ -1016,7 +1018,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 }
 
 // BindACL binds an ACL to this interface.
-// ACLs are shared - adds this interface to the ACL's ports list.
+// ACLs are shared - adds this interface to the ACL's binding list.
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
 	d := i.device
 
@@ -1035,18 +1037,18 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 
 	cs := NewChangeSet(d.Name(), "interface.bind-acl")
 
-	// ACLs are shared - add this interface to existing ports list
+	// ACLs are shared - add this interface to existing binding list
 	configDB := d.ConfigDB()
 	existingACL, ok := configDB.ACLTable[aclName]
-	var newPorts string
+	var newBindings string
 	if ok && existingACL.Ports != "" {
-		newPorts = addPortToList(existingACL.Ports, i.name)
+		newBindings = addInterfaceToList(existingACL.Ports, i.name)
 	} else {
-		newPorts = i.name
+		newBindings = i.name
 	}
 
 	cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-		"ports": newPorts,
+		"ports": newBindings,
 		"stage": direction,
 	})
 
@@ -1650,10 +1652,10 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 		}
 		cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
 	} else {
-		// Other users exist - just remove this interface from ports
-		remainingPorts := depCheck.GetACLRemainingPorts(aclName)
+		// Other users exist - just remove this interface from the binding list
+		remainingBindings := depCheck.GetACLRemainingInterfaces(aclName)
 		cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-			"ports": remainingPorts,
+			"ports": remainingBindings,
 		})
 	}
 

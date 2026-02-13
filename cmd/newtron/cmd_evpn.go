@@ -4,34 +4,83 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
 	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/spec"
 )
 
 var evpnCmd = &cobra.Command{
 	Use:   "evpn",
-	Short: "Manage EVPN/VXLAN configuration",
-	Long: `Manage EVPN and VXLAN configuration.
+	Short: "Manage EVPN overlay system",
+	Long: `Manage the EVPN overlay system (VTEP + NVO + BGP EVPN).
+
+EVPN is the overlay transport for VXLAN. The 'setup' command is an idempotent
+composite that configures the full EVPN stack in one shot. The 'status' command
+shows both config and operational state.
+
+IP-VPN and MAC-VPN definitions are spec-level objects in network.json that
+define L3 and L2 VPN parameters respectively. They do not require a device.
+
+Examples:
+  newtron leaf1 evpn setup -x
+  newtron leaf1 evpn setup --source-ip 10.0.0.10 -x
+  newtron leaf1 evpn status
+  newtron evpn ipvpn list
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
+  newtron evpn macvpn list
+  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x`,
+}
+
+// ============================================================================
+// evpn setup — idempotent composite: VTEP + NVO + BGP EVPN
+// ============================================================================
+
+var evpnSetupSourceIP string
+
+var evpnSetupCmd = &cobra.Command{
+	Use:   "setup",
+	Short: "Configure EVPN overlay (VTEP + NVO + BGP EVPN)",
+	Long: `Idempotent composite that configures the full EVPN stack:
+
+1. Creates VXLAN Tunnel Endpoint (VTEP) with source IP
+2. Creates EVPN NVO (Network Virtualization Overlay)
+3. Configures BGP EVPN sessions with route reflectors from site config
+
+If --source-ip is not specified, uses the device's loopback IP.
+Skips any components that are already configured.
 
 Requires -d (device) flag.
 
 Examples:
-  newtron -d leaf1-ny evpn list
-  newtron -d leaf1-ny evpn show Vrf_CUST1
-  newtron -d leaf1-ny evpn create-vtep --source-ip 10.0.0.10
-  newtron -d leaf1-ny evpn create-vrf Vrf_CUST1 --l3vni 10001
-  newtron -d leaf1-ny evpn map-l2vni 100 1100  # Map VLAN 100 to VNI 1100
-  newtron -d leaf1-ny evpn unmap-l2vni 100     # Unmap L2VNI from VLAN 100
-  newtron -d leaf1-ny evpn map-l3vni Vrf_CUST1 10001`,
+  newtron leaf1 evpn setup -x
+  newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+			authCtx := auth.NewContext().WithDevice(deviceName).WithResource("evpn")
+			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+				return nil, err
+			}
+			cs, err := dev.SetupEVPN(ctx, evpnSetupSourceIP)
+			if err != nil {
+				return nil, fmt.Errorf("setting up EVPN: %w", err)
+			}
+			return cs, nil
+		})
+	},
 }
 
-var evpnListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List EVPN configuration",
+// ============================================================================
+// evpn status — unified config + operational state view
+// ============================================================================
+
+var evpnStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show EVPN config and operational state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		dev, err := requireDevice(ctx)
@@ -41,32 +90,33 @@ var evpnListCmd = &cobra.Command{
 		defer dev.Disconnect()
 
 		configDB := dev.ConfigDB()
-		if configDB == nil {
-			fmt.Println("Not connected to device config_db")
-			return nil
-		}
+		underlying := dev.Underlying()
 
-		// Show VTEP
+		fmt.Printf("EVPN Status for %s\n\n", bold(deviceName))
+
+		// --- VTEP Configuration ---
 		fmt.Println("VTEP Configuration:")
-		if len(configDB.VXLANTunnel) == 0 {
+		if configDB == nil || len(configDB.VXLANTunnel) == 0 {
 			fmt.Println("  (not configured)")
-		}
-		for name, vtep := range configDB.VXLANTunnel {
-			fmt.Printf("  %s: source_ip=%s\n", name, vtep.SrcIP)
+		} else {
+			for name, vtep := range configDB.VXLANTunnel {
+				fmt.Printf("  %s: source_ip=%s\n", name, vtep.SrcIP)
+			}
 		}
 
-		// Show NVO
+		// --- EVPN NVO ---
 		fmt.Println("\nEVPN NVO:")
-		if len(configDB.VXLANEVPNNVO) == 0 {
+		if configDB == nil || len(configDB.VXLANEVPNNVO) == 0 {
 			fmt.Println("  (not configured)")
-		}
-		for name, nvo := range configDB.VXLANEVPNNVO {
-			fmt.Printf("  %s: source_vtep=%s\n", name, nvo.SourceVTEP)
+		} else {
+			for name, nvo := range configDB.VXLANEVPNNVO {
+				fmt.Printf("  %s: source_vtep=%s\n", name, nvo.SourceVTEP)
+			}
 		}
 
-		// Show VNI mappings
+		// --- VNI Mappings ---
 		fmt.Println("\nVNI Mappings:")
-		if len(configDB.VXLANTunnelMap) == 0 {
+		if configDB == nil || len(configDB.VXLANTunnelMap) == 0 {
 			fmt.Println("  (none)")
 		} else {
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -84,7 +134,7 @@ var evpnListCmd = &cobra.Command{
 			w.Flush()
 		}
 
-		// Show VRFs with VNI
+		// --- VRFs with L3VNI ---
 		fmt.Println("\nVRFs with L3VNI:")
 		hasVRFs := false
 		for _, vrfName := range dev.ListVRFs() {
@@ -98,376 +148,430 @@ var evpnListCmd = &cobra.Command{
 			fmt.Println("  (none)")
 		}
 
+		// --- Operational State ---
+		if underlying != nil && underlying.State != nil && underlying.State.EVPN != nil {
+			evpn := underlying.State.EVPN
+			fmt.Println("\nOperational State:")
+
+			vtepState := evpn.VTEPState
+			if vtepState == "up" || vtepState == "oper_up" {
+				vtepState = green(vtepState)
+			} else if vtepState != "" {
+				vtepState = red(vtepState)
+			} else {
+				vtepState = "-"
+			}
+
+			fmt.Printf("  VTEP Status: %s\n", vtepState)
+			fmt.Printf("  VNI Count: %d\n", evpn.VNICount)
+			fmt.Printf("  Type-2 Routes: %d\n", evpn.Type2Routes)
+			fmt.Printf("  Type-5 Routes: %d\n", evpn.Type5Routes)
+
+			if len(evpn.RemoteVTEPs) > 0 {
+				fmt.Printf("  Remote VTEPs (%d):\n", len(evpn.RemoteVTEPs))
+				for _, vtep := range evpn.RemoteVTEPs {
+					fmt.Printf("    %s\n", vtep)
+				}
+			} else {
+				fmt.Println("  Remote VTEPs: (none)")
+			}
+		}
+
 		return nil
 	},
 }
 
-var evpnShowCmd = &cobra.Command{
-	Use:   "show <vrf-name>",
-	Short: "Show EVPN VRF details",
+// ============================================================================
+// evpn ipvpn — spec authoring commands for IP-VPN definitions
+// ============================================================================
+
+var evpnIpvpnCmd = &cobra.Command{
+	Use:   "ipvpn",
+	Short: "Manage IP-VPN definitions (network.json)",
+	Long: `Manage IP-VPN definitions in network.json.
+
+IP-VPN defines L3 VPN parameters (L3VNI, route targets) used by services
+and VRF bindings. These are spec-level objects that do not require a device.
+
+Examples:
+  newtron evpn ipvpn list
+  newtron evpn ipvpn show customer-vpn
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
+  newtron evpn ipvpn delete customer-vpn -x`,
+}
+
+var evpnIpvpnListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all IP-VPN definitions",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ipvpns := net.Spec().IPVPN
+
+		if len(ipvpns) == 0 {
+			fmt.Println("No IP-VPN definitions")
+			return nil
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tL3VNI\tIMPORT RT\tEXPORT RT\tDESCRIPTION")
+		fmt.Fprintln(w, "----\t-----\t---------\t---------\t-----------")
+
+		for name, ipvpn := range ipvpns {
+			importRT := "-"
+			if len(ipvpn.ImportRT) > 0 {
+				importRT = strings.Join(ipvpn.ImportRT, ",")
+			}
+			exportRT := "-"
+			if len(ipvpn.ExportRT) > 0 {
+				exportRT = strings.Join(ipvpn.ExportRT, ",")
+			}
+			desc := ipvpn.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n",
+				name, ipvpn.L3VNI, importRT, exportRT, desc)
+		}
+		w.Flush()
+
+		return nil
+	},
+}
+
+var evpnIpvpnShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Show IP-VPN definition details",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		vrf, err := dev.GetVRF(vrfName)
+		name := args[0]
+		ipvpn, err := net.GetIPVPN(name)
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("VRF: %s\n", vrf.Name)
-		fmt.Printf("  L3VNI: %d\n", vrf.L3VNI)
-		fmt.Printf("  Interfaces: %v\n", vrf.Interfaces)
-
-		return nil
-	},
-}
-
-var vtepSourceIP string
-
-var evpnCreateVTEPCmd = &cobra.Command{
-	Use:   "create-vtep",
-	Short: "Create VXLAN Tunnel Endpoint (VTEP)",
-	Long: `Create a VXLAN Tunnel Endpoint (VTEP).
-
-Requires -d (device) flag.
-
-Examples:
-  newtron -d leaf1-ny evpn create-vtep --source-ip 10.0.0.10`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource("vtep")
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-			return err
+		fmt.Printf("IP-VPN: %s\n", bold(name))
+		if ipvpn.Description != "" {
+			fmt.Printf("Description: %s\n", ipvpn.Description)
 		}
-
-		if vtepSourceIP == "" {
-			return fmt.Errorf("--source-ip is required")
+		fmt.Printf("L3VNI: %d\n", ipvpn.L3VNI)
+		if len(ipvpn.ImportRT) > 0 {
+			fmt.Printf("Import RT: %s\n", strings.Join(ipvpn.ImportRT, ", "))
 		}
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.CreateVTEP(ctx, network.VTEPConfig{SourceIP: vtepSourceIP})
-		if err != nil {
-			return fmt.Errorf("creating VTEP: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
-			printDryRunNotice()
+		if len(ipvpn.ExportRT) > 0 {
+			fmt.Printf("Export RT: %s\n", strings.Join(ipvpn.ExportRT, ", "))
 		}
 
 		return nil
 	},
 }
 
-var l3vni int
+var (
+	ipvpnL3VNI       int
+	ipvpnImportRT    string
+	ipvpnExportRT    string
+	ipvpnDescription string
+)
 
-var evpnCreateVRFCmd = &cobra.Command{
-	Use:   "create-vrf <vrf-name>",
-	Short: "Create VRF with L3VNI for EVPN",
-	Long: `Create a VRF with L3VNI for EVPN.
+var evpnIpvpnCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create an IP-VPN definition",
+	Long: `Create an IP-VPN definition in network.json.
 
-Requires -d (device) flag.
+This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron -d leaf1-ny evpn create-vrf Vrf_CUST1 --l3vni 10001`,
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65000:10001 --export-rt 65000:10001 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
+		name := args[0]
 
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+		if ipvpnL3VNI <= 0 {
+			return fmt.Errorf("--l3vni is required")
+		}
+
+		authCtx := auth.NewContext().WithResource(name)
+		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
 			return err
 		}
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
+		ipvpnSpec := &spec.IPVPNSpec{
+			Description: ipvpnDescription,
+			L3VNI:       ipvpnL3VNI,
 		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
+		if ipvpnImportRT != "" {
+			ipvpnSpec.ImportRT = strings.Split(ipvpnImportRT, ",")
 		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.CreateVRF(ctx, vrfName, network.VRFConfig{
-			L3VNI: l3vni,
-		})
-		if err != nil {
-			return fmt.Errorf("creating VRF: %w", err)
+		if ipvpnExportRT != "" {
+			ipvpnSpec.ExportRT = strings.Split(ipvpnExportRT, ",")
 		}
 
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
+		fmt.Printf("IP-VPN: %s\n", name)
+		fmt.Printf("  L3VNI: %d\n", ipvpnSpec.L3VNI)
+		if len(ipvpnSpec.ImportRT) > 0 {
+			fmt.Printf("  Import RT: %v\n", ipvpnSpec.ImportRT)
+		}
+		if len(ipvpnSpec.ExportRT) > 0 {
+			fmt.Printf("  Export RT: %v\n", ipvpnSpec.ExportRT)
+		}
+		if ipvpnSpec.Description != "" {
+			fmt.Printf("  Description: %s\n", ipvpnSpec.Description)
+		}
 
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
+		if !executeMode {
 			printDryRunNotice()
+			return nil
 		}
+
+		if err := net.SaveIPVPN(name, ipvpnSpec); err != nil {
+			return fmt.Errorf("saving IP-VPN: %w", err)
+		}
+		fmt.Println("\n" + green("IP-VPN definition saved to network.json."))
 
 		return nil
 	},
 }
 
-var evpnDeleteVRFCmd = &cobra.Command{
-	Use:   "delete-vrf <vrf-name>",
-	Short: "Delete VRF",
-	Long: `Delete a VRF.
+var evpnIpvpnDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete an IP-VPN definition",
+	Long: `Delete an IP-VPN definition from network.json.
 
-Requires -d (device) flag.
+This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron -d leaf1-ny evpn delete-vrf Vrf_CUST1`,
+  newtron evpn ipvpn delete customer-vpn -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
+		name := args[0]
 
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+		// Verify it exists
+		if _, err := net.GetIPVPN(name); err != nil {
 			return err
 		}
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		authCtx := auth.NewContext().WithResource(name)
+		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
+		fmt.Printf("Deleting IP-VPN: %s\n", name)
 
-		changeSet, err := dev.DeleteVRF(ctx, vrfName)
-		if err != nil {
-			return fmt.Errorf("deleting VRF: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
+		if !executeMode {
 			printDryRunNotice()
+			return nil
 		}
+
+		if err := net.DeleteIPVPN(name); err != nil {
+			return fmt.Errorf("deleting IP-VPN: %w", err)
+		}
+		fmt.Println(green("IP-VPN definition deleted from network.json."))
 
 		return nil
 	},
 }
 
-var evpnMapL2VNICmd = &cobra.Command{
-	Use:   "map-l2vni <vlan-id> <vni>",
-	Short: "Map VLAN to L2VNI",
-	Long: `Map a VLAN to an L2VNI for VXLAN.
+// ============================================================================
+// evpn macvpn — spec authoring commands for MAC-VPN definitions
+// ============================================================================
 
-Requires -d (device) flag.
+var evpnMacvpnCmd = &cobra.Command{
+	Use:   "macvpn",
+	Short: "Manage MAC-VPN definitions (network.json)",
+	Long: `Manage MAC-VPN definitions in network.json.
+
+MAC-VPN defines L2 VPN parameters (L2VNI, ARP suppression) used by services
+and VLAN bindings. These are spec-level objects that do not require a device.
+
+Note: VLAN ID is NOT part of MAC-VPN. VLANs are local bridge domains that
+subscribe to a MAC-VPN via 'vlan bind-macvpn'.
 
 Examples:
-  newtron -d leaf1-ny evpn map-l2vni 100 1100`,
-	Args: cobra.ExactArgs(2),
+  newtron evpn macvpn list
+  newtron evpn macvpn show servers-vlan100
+  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x
+  newtron evpn macvpn delete servers-vlan100 -x`,
+}
+
+var evpnMacvpnListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all MAC-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID, vni int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
-		}
-		if _, err := fmt.Sscanf(args[1], "%d", &vni); err != nil {
-			return fmt.Errorf("invalid VNI: %s", args[1])
-		}
+		macvpns := net.Spec().MACVPN
 
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-			return err
+		if len(macvpns) == 0 {
+			fmt.Println("No MAC-VPN definitions")
+			return nil
 		}
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(w, "NAME\tL2VNI\tARP SUPPRESS\tDESCRIPTION")
+		fmt.Fprintln(w, "----\t-----\t------------\t-----------")
 
-		if !dev.VLANExists(vlanID) {
-			return fmt.Errorf("VLAN %d does not exist", vlanID)
-		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.MapL2VNI(ctx, vlanID, vni)
-		if err != nil {
-			return fmt.Errorf("mapping L2VNI: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
+		for name, macvpn := range macvpns {
+			arpSuppress := "no"
+			if macvpn.ARPSuppression {
+				arpSuppress = "yes"
 			}
-		} else {
-			printDryRunNotice()
+			desc := macvpn.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
+				name, macvpn.L2VNI, arpSuppress, desc)
 		}
+		w.Flush()
 
 		return nil
 	},
 }
 
-var evpnMapL3VNICmd = &cobra.Command{
-	Use:   "map-l3vni <vrf-name> <vni>",
-	Short: "Map VRF to L3VNI",
-	Long: `Map a VRF to an L3VNI for VXLAN.
-
-Requires -d (device) flag.
-
-Examples:
-  newtron -d leaf1-ny evpn map-l3vni Vrf_CUST1 10001`,
-	Args: cobra.ExactArgs(2),
+var evpnMacvpnShowCmd = &cobra.Command{
+	Use:   "show <name>",
+	Short: "Show MAC-VPN definition details",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
-		var vni int
-		if _, err := fmt.Sscanf(args[1], "%d", &vni); err != nil {
-			return fmt.Errorf("invalid VNI: %s", args[1])
-		}
-
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(vrfName)
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-			return err
-		}
-
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		name := args[0]
+		macvpn, err := net.GetMACVPN(name)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		if !dev.VRFExists(vrfName) {
-			return fmt.Errorf("VRF %s does not exist", vrfName)
+		fmt.Printf("MAC-VPN: %s\n", bold(name))
+		if macvpn.Description != "" {
+			fmt.Printf("Description: %s\n", macvpn.Description)
 		}
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.MapL3VNI(ctx, vrfName, vni)
-		if err != nil {
-			return fmt.Errorf("mapping L3VNI: %w", err)
-		}
-
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
-
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
-			printDryRunNotice()
-		}
+		fmt.Printf("L2VNI: %d\n", macvpn.L2VNI)
+		fmt.Printf("ARP Suppression: %v\n", macvpn.ARPSuppression)
 
 		return nil
 	},
 }
 
-var evpnUnmapL2VNICmd = &cobra.Command{
-	Use:   "unmap-l2vni <vlan-id>",
-	Short: "Unmap L2VNI from a VLAN",
-	Long: `Remove the L2VNI mapping from a VLAN.
+var (
+	macvpnL2VNI          int
+	macvpnARPSuppress    bool
+	macvpnDescription    string
+)
 
-Requires -d (device) flag.
+var evpnMacvpnCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a MAC-VPN definition",
+	Long: `Create a MAC-VPN definition in network.json.
+
+This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron -d leaf1-ny evpn unmap-l2vni 100`,
+  newtron evpn macvpn create servers-vlan100 --l2vni 1100 -x
+  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress --description "Server VLAN 100" -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var vlanID int
-		if _, err := fmt.Sscanf(args[0], "%d", &vlanID); err != nil {
-			return fmt.Errorf("invalid VLAN ID: %s", args[0])
+		name := args[0]
+
+		if macvpnL2VNI <= 0 {
+			return fmt.Errorf("--l2vni is required")
 		}
 
-		authCtx := auth.NewContext().WithDevice(deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-		if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
+		authCtx := auth.NewContext().WithResource(name)
+		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
 			return err
 		}
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		if err := dev.Lock(); err != nil {
-			return fmt.Errorf("locking device: %w", err)
-		}
-		defer dev.Unlock()
-
-		changeSet, err := dev.UnmapL2VNI(ctx, vlanID)
-		if err != nil {
-			return fmt.Errorf("unmapping L2VNI: %w", err)
+		macvpnSpec := &spec.MACVPNSpec{
+			Description:    macvpnDescription,
+			L2VNI:          macvpnL2VNI,
+			ARPSuppression: macvpnARPSuppress,
 		}
 
-		fmt.Println("Changes to be applied:")
-		fmt.Print(changeSet.String())
+		fmt.Printf("MAC-VPN: %s\n", name)
+		fmt.Printf("  L2VNI: %d\n", macvpnSpec.L2VNI)
+		fmt.Printf("  ARP Suppression: %v\n", macvpnSpec.ARPSuppression)
+		if macvpnSpec.Description != "" {
+			fmt.Printf("  Description: %s\n", macvpnSpec.Description)
+		}
 
-		if executeMode {
-			if err := executeAndSave(ctx, changeSet, dev); err != nil {
-				return err
-			}
-		} else {
+		if !executeMode {
 			printDryRunNotice()
+			return nil
 		}
+
+		if err := net.SaveMACVPN(name, macvpnSpec); err != nil {
+			return fmt.Errorf("saving MAC-VPN: %w", err)
+		}
+		fmt.Println("\n" + green("MAC-VPN definition saved to network.json."))
+
+		return nil
+	},
+}
+
+var evpnMacvpnDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a MAC-VPN definition",
+	Long: `Delete a MAC-VPN definition from network.json.
+
+This is a spec authoring command that does not require a device connection.
+
+Examples:
+  newtron evpn macvpn delete servers-vlan100 -x`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		// Verify it exists
+		if _, err := net.GetMACVPN(name); err != nil {
+			return err
+		}
+
+		authCtx := auth.NewContext().WithResource(name)
+		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
+			return err
+		}
+
+		fmt.Printf("Deleting MAC-VPN: %s\n", name)
+
+		if !executeMode {
+			printDryRunNotice()
+			return nil
+		}
+
+		if err := net.DeleteMACVPN(name); err != nil {
+			return fmt.Errorf("deleting MAC-VPN: %w", err)
+		}
+		fmt.Println(green("MAC-VPN definition deleted from network.json."))
 
 		return nil
 	},
 }
 
 func init() {
-	evpnCreateVTEPCmd.Flags().StringVar(&vtepSourceIP, "source-ip", "", "Source IP address for VTEP (typically loopback IP)")
+	// evpn setup flags
+	evpnSetupCmd.Flags().StringVar(&evpnSetupSourceIP, "source-ip", "", "Source IP address for VTEP (defaults to loopback IP)")
 
-	evpnCreateVRFCmd.Flags().IntVar(&l3vni, "l3vni", 0, "L3VNI for the VRF")
+	// ipvpn create flags
+	evpnIpvpnCreateCmd.Flags().IntVar(&ipvpnL3VNI, "l3vni", 0, "L3VNI for the IP-VPN (required)")
+	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnImportRT, "import-rt", "", "Comma-separated import route targets")
+	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnExportRT, "export-rt", "", "Comma-separated export route targets")
+	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnDescription, "description", "", "IP-VPN description")
 
-	evpnCmd.AddCommand(evpnListCmd)
-	evpnCmd.AddCommand(evpnShowCmd)
-	evpnCmd.AddCommand(evpnCreateVTEPCmd)
-	evpnCmd.AddCommand(evpnCreateVRFCmd)
-	evpnCmd.AddCommand(evpnDeleteVRFCmd)
-	evpnCmd.AddCommand(evpnMapL2VNICmd)
-	evpnCmd.AddCommand(evpnUnmapL2VNICmd)
-	evpnCmd.AddCommand(evpnMapL3VNICmd)
+	// macvpn create flags
+	evpnMacvpnCreateCmd.Flags().IntVar(&macvpnL2VNI, "l2vni", 0, "L2VNI for the MAC-VPN (required)")
+	evpnMacvpnCreateCmd.Flags().BoolVar(&macvpnARPSuppress, "arp-suppress", false, "Enable ARP suppression")
+	evpnMacvpnCreateCmd.Flags().StringVar(&macvpnDescription, "description", "", "MAC-VPN description")
+
+	// ipvpn subcommands
+	evpnIpvpnCmd.AddCommand(evpnIpvpnListCmd)
+	evpnIpvpnCmd.AddCommand(evpnIpvpnShowCmd)
+	evpnIpvpnCmd.AddCommand(evpnIpvpnCreateCmd)
+	evpnIpvpnCmd.AddCommand(evpnIpvpnDeleteCmd)
+
+	// macvpn subcommands
+	evpnMacvpnCmd.AddCommand(evpnMacvpnListCmd)
+	evpnMacvpnCmd.AddCommand(evpnMacvpnShowCmd)
+	evpnMacvpnCmd.AddCommand(evpnMacvpnCreateCmd)
+	evpnMacvpnCmd.AddCommand(evpnMacvpnDeleteCmd)
+
+	// evpn subcommands
+	evpnCmd.AddCommand(evpnSetupCmd)
+	evpnCmd.AddCommand(evpnStatusCmd)
+	evpnCmd.AddCommand(evpnIpvpnCmd)
+	evpnCmd.AddCommand(evpnMacvpnCmd)
 }

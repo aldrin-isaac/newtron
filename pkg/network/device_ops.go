@@ -94,8 +94,8 @@ func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 	return cs, nil
 }
 
-// AddVLANMember adds a port to a VLAN.
-func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tagged bool) (*ChangeSet, error) {
+// AddVLANMember adds an interface to a VLAN as a tagged or untagged member.
+func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
 	if !d.IsConnected() {
 		return nil, fmt.Errorf("device not connected")
 	}
@@ -104,18 +104,18 @@ func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tag
 	}
 
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
-	port = util.NormalizeInterfaceName(port)
+	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
 	if !d.VLANExists(vlanID) {
 		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
 	}
-	if !d.InterfaceExists(port) {
-		return nil, fmt.Errorf("interface %s does not exist", port)
+	if !d.InterfaceExists(interfaceName) {
+		return nil, fmt.Errorf("interface %s does not exist", interfaceName)
 	}
 
 	cs := NewChangeSet(d.name, "device.add-vlan-member")
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	memberKey := fmt.Sprintf("%s|%s", vlanName, port)
+	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
 
 	taggingMode := "untagged"
 	if tagged {
@@ -126,7 +126,7 @@ func (d *Device) AddVLANMember(ctx context.Context, vlanID int, port string, tag
 		"tagging_mode": taggingMode,
 	})
 
-	util.WithDevice(d.name).Infof("Added %s to VLAN %d (%s)", port, vlanID, taggingMode)
+	util.WithDevice(d.name).Infof("Added %s to VLAN %d (%s)", interfaceName, vlanID, taggingMode)
 	return cs, nil
 }
 
@@ -494,8 +494,8 @@ func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, e
 	return cs, nil
 }
 
-// UnbindACLFromPort removes a port from an ACL table's binding.
-func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, portName string) (*ChangeSet, error) {
+// UnbindACLFromInterface removes an interface from an ACL table's binding.
+func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error) {
 	if !d.IsConnected() {
 		return nil, fmt.Errorf("device not connected")
 	}
@@ -504,7 +504,7 @@ func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, portName string
 	}
 
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
-	portName = util.NormalizeInterfaceName(portName)
+	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
 	if !d.ACLTableExists(aclName) {
 		return nil, fmt.Errorf("ACL table %s does not exist", aclName)
@@ -512,25 +512,24 @@ func (d *Device) UnbindACLFromPort(ctx context.Context, aclName, portName string
 
 	cs := NewChangeSet(d.name, "device.unbind-acl")
 
-	// Get current ports and remove the specified one
+	// Get current binding list and remove the specified interface
 	if d.configDB != nil {
 		if table, ok := d.configDB.ACLTable[aclName]; ok {
-			currentPorts := table.Ports
-			// Parse and filter out the port
-			var newPorts []string
-			for _, p := range splitPorts(currentPorts) {
-				if p != portName {
-					newPorts = append(newPorts, p)
+			currentBindings := table.Ports
+			var remaining []string
+			for _, p := range splitPorts(currentBindings) {
+				if p != interfaceName {
+					remaining = append(remaining, p)
 				}
 			}
 
 			cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
-				"ports": joinPorts(newPorts),
+				"ports": joinPorts(remaining),
 			})
 		}
 	}
 
-	util.WithDevice(d.name).Infof("Unbound ACL %s from port %s", aclName, portName)
+	util.WithDevice(d.name).Infof("Unbound ACL %s from interface %s", aclName, interfaceName)
 	return cs, nil
 }
 
@@ -771,6 +770,365 @@ func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (
 }
 
 // ============================================================================
+// VRF Interface Binding
+// ============================================================================
+
+// AddVRFInterface binds an interface to a VRF.
+func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	if !d.VRFExists(vrfName) {
+		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
+	}
+	if !d.InterfaceExists(intfName) {
+		return nil, fmt.Errorf("interface %s does not exist", intfName)
+	}
+
+	cs := NewChangeSet(d.name, "device.add-vrf-interface")
+
+	cs.Add("INTERFACE", intfName, ChangeModify, nil, map[string]string{
+		"vrf_name": vrfName,
+	})
+
+	util.WithDevice(d.name).Infof("Bound interface %s to VRF %s", intfName, vrfName)
+	return cs, nil
+}
+
+// RemoveVRFInterface removes a VRF binding from an interface.
+func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	cs := NewChangeSet(d.name, "device.remove-vrf-interface")
+
+	cs.Add("INTERFACE", intfName, ChangeModify, nil, map[string]string{
+		"vrf_name": "",
+	})
+
+	util.WithDevice(d.name).Infof("Removed VRF binding from interface %s", intfName)
+	return cs, nil
+}
+
+// ============================================================================
+// IP-VPN Binding (L3VNI)
+// ============================================================================
+
+// BindIPVPN binds a VRF to an IP-VPN definition (creates L3VNI mapping).
+func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+	if !d.VTEPExists() {
+		return nil, fmt.Errorf("VTEP must be configured first")
+	}
+	if !d.VRFExists(vrfName) {
+		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
+	}
+
+	cs := NewChangeSet(d.name, "device.bind-ipvpn")
+
+	// Set VNI on the VRF
+	cs.Add("VRF", vrfName, ChangeModify, nil, map[string]string{
+		"vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
+	})
+
+	// Add VXLAN_TUNNEL_MAP entry for L3VNI
+	mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, vrfName)
+	cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
+		"vrf": vrfName,
+		"vni": fmt.Sprintf("%d", ipvpnDef.L3VNI),
+	})
+
+	util.WithDevice(d.name).Infof("Bound VRF %s to IP-VPN (L3VNI %d)", vrfName, ipvpnDef.L3VNI)
+	return cs, nil
+}
+
+// UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping).
+func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	cs := NewChangeSet(d.name, "device.unbind-ipvpn")
+
+	// Find and remove the VXLAN_TUNNEL_MAP entry for this VRF
+	if d.configDB != nil {
+		for key, mapping := range d.configDB.VXLANTunnelMap {
+			if mapping.VRF == vrfName {
+				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
+				break
+			}
+		}
+	}
+
+	// Clear VNI on the VRF
+	cs.Add("VRF", vrfName, ChangeModify, nil, map[string]string{
+		"vni": "",
+	})
+
+	util.WithDevice(d.name).Infof("Unbound IP-VPN from VRF %s", vrfName)
+	return cs, nil
+}
+
+// ============================================================================
+// Static Routes
+// ============================================================================
+
+// AddStaticRoute adds a static route to a VRF.
+func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
+		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
+	}
+
+	cs := NewChangeSet(d.name, "device.add-static-route")
+
+	// Key format: "vrfName|prefix" for non-default VRF, just "prefix" for default
+	var routeKey string
+	if vrfName == "" || vrfName == "default" {
+		routeKey = prefix
+	} else {
+		routeKey = fmt.Sprintf("%s|%s", vrfName, prefix)
+	}
+
+	fields := map[string]string{
+		"nexthop": nextHop,
+	}
+	if metric > 0 {
+		fields["distance"] = fmt.Sprintf("%d", metric)
+	}
+
+	cs.Add("STATIC_ROUTE", routeKey, ChangeAdd, nil, fields)
+
+	util.WithDevice(d.name).Infof("Added static route %s via %s (VRF %s)", prefix, nextHop, vrfName)
+	return cs, nil
+}
+
+// RemoveStaticRoute removes a static route from a VRF.
+func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	cs := NewChangeSet(d.name, "device.remove-static-route")
+
+	// Key format: "vrfName|prefix" for non-default VRF, just "prefix" for default
+	var routeKey string
+	if vrfName == "" || vrfName == "default" {
+		routeKey = prefix
+	} else {
+		routeKey = fmt.Sprintf("%s|%s", vrfName, prefix)
+	}
+
+	cs.Add("STATIC_ROUTE", routeKey, ChangeDelete, nil, nil)
+
+	util.WithDevice(d.name).Infof("Removed static route %s (VRF %s)", prefix, vrfName)
+	return cs, nil
+}
+
+// ============================================================================
+// VLAN Member Removal
+// ============================================================================
+
+// RemoveVLANMember removes an interface from a VLAN.
+func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	interfaceName = util.NormalizeInterfaceName(interfaceName)
+
+	if !d.VLANExists(vlanID) {
+		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
+	}
+
+	cs := NewChangeSet(d.name, "device.remove-vlan-member")
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
+
+	cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
+
+	util.WithDevice(d.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
+	return cs, nil
+}
+
+// ============================================================================
+// EVPN Setup (Idempotent Composite)
+// ============================================================================
+
+// SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
+// If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
+func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	resolved := d.Resolved()
+	if sourceIP == "" {
+		sourceIP = resolved.VTEPSourceIP
+	}
+	if sourceIP == "" {
+		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
+	}
+
+	cs := NewChangeSet(d.name, "device.setup-evpn")
+
+	// Create VTEP (skip if exists)
+	if !d.VTEPExists() {
+		cs.Add("VXLAN_TUNNEL", "vtep1", ChangeAdd, nil, map[string]string{
+			"src_ip": sourceIP,
+		})
+		cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeAdd, nil, map[string]string{
+			"source_vtep": "vtep1",
+		})
+	}
+
+	// Create BGP EVPN sessions with route reflectors (skip if already exist)
+	if len(resolved.BGPNeighbors) > 0 {
+		// Ensure BGP globals are set
+		cs.Add("BGP_GLOBALS", "default", ChangeAdd, nil, map[string]string{
+			"local_asn": fmt.Sprintf("%d", resolved.ASNumber),
+			"router_id": resolved.RouterID,
+		})
+
+		// Enable L2VPN EVPN address-family
+		cs.Add("BGP_GLOBALS_AF", "default|l2vpn_evpn", ChangeAdd, nil, map[string]string{
+			"advertise-all-vni": "true",
+		})
+
+		for _, rrIP := range resolved.BGPNeighbors {
+			if rrIP == resolved.LoopbackIP {
+				continue
+			}
+			// Skip if neighbor already exists
+			if d.BGPNeighborExists(rrIP) {
+				continue
+			}
+
+			fields := map[string]string{
+				"asn":          fmt.Sprintf("%d", resolved.ASNumber),
+				"admin_status": "up",
+				"name":         "route-reflector",
+				"local_addr":   resolved.LoopbackIP,
+			}
+			cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", rrIP), ChangeAdd, nil, fields)
+
+			afKey := fmt.Sprintf("default|%s|l2vpn_evpn", rrIP)
+			cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
+				"activate": "true",
+			})
+		}
+	}
+
+	util.WithDevice(d.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
+	return cs, nil
+}
+
+// ============================================================================
+// QoS Operations (Per-Interface)
+// ============================================================================
+
+// ApplyQoS applies a QoS policy to a specific interface (surgical override).
+func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	if !d.InterfaceExists(intfName) {
+		return nil, fmt.Errorf("interface %s does not exist", intfName)
+	}
+
+	cs := NewChangeSet(d.name, "device.apply-qos")
+
+	// Generate device-wide entries (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE)
+	deviceEntries := generateQoSDeviceEntries(policyName, policy)
+	for _, entry := range deviceEntries {
+		cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+	}
+
+	// Generate per-interface entries (PORT_QOS_MAP, QUEUE)
+	intfEntries := generateQoSInterfaceEntries(policyName, policy, intfName)
+	for _, entry := range intfEntries {
+		cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+	}
+
+	util.WithDevice(d.name).Infof("Applied QoS policy '%s' to interface %s", policyName, intfName)
+	return cs, nil
+}
+
+// RemoveQoS removes QoS configuration from a specific interface.
+func (d *Device) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
+	if !d.IsConnected() {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if !d.IsLocked() {
+		return nil, fmt.Errorf("device not locked")
+	}
+
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	cs := NewChangeSet(d.name, "device.remove-qos")
+
+	// Find and remove QUEUE entries for this interface
+	if d.configDB != nil {
+		prefix := intfName + "|"
+		for key := range d.configDB.Queue {
+			if strings.HasPrefix(key, prefix) {
+				cs.Add("QUEUE", key, ChangeDelete, nil, nil)
+			}
+		}
+	}
+
+	// Remove PORT_QOS_MAP entry for this interface
+	if d.configDB != nil {
+		if _, ok := d.configDB.PortQoSMap[intfName]; ok {
+			cs.Add("PORT_QOS_MAP", intfName, ChangeDelete, nil, nil)
+		}
+	}
+
+	util.WithDevice(d.name).Infof("Removed QoS from interface %s", intfName)
+	return cs, nil
+}
+
+// ============================================================================
 // Configuration Types
 // ============================================================================
 
@@ -808,7 +1166,7 @@ type ACLTableConfig struct {
 	Type        string // L3, L3V6
 	Stage       string // ingress, egress
 	Description string
-	Ports       string // Comma-separated list or single port
+	Ports       string // Comma-separated interface names (maps to CONFIG_DB ACL_TABLE.ports)
 }
 
 // SVIConfig holds configuration options for ConfigureSVI.
@@ -1141,7 +1499,7 @@ func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *
 		return cs, summary, nil
 	}
 
-	// Find orphaned ACLs (no ports bound)
+	// Find orphaned ACLs (no interfaces bound)
 	if cleanupType == "" || cleanupType == "acl" {
 		for aclName, acl := range configDB.ACLTable {
 			if acl.Ports == "" {

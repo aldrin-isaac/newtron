@@ -14,8 +14,9 @@ import (
 )
 
 var interactiveCmd = &cobra.Command{
-	Use:   "interactive",
-	Short: "Enter interactive mode",
+	Use:    "interactive",
+	Short:  "Enter interactive mode",
+	Hidden: true,
 	Long: `Enter interactive menu mode for device configuration.
 
 Use -d (device) flag to connect to a device.
@@ -517,7 +518,7 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 		fmt.Println(bold("VLAN Management"))
 		fmt.Println("  1. List VLANs")
 		fmt.Println("  2. Create VLAN")
-		fmt.Println("  3. Add port to VLAN")
+		fmt.Println("  3. Add interface to VLAN")
 		fmt.Println("  b. Back")
 		fmt.Print("Select: ")
 
@@ -543,7 +544,7 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 					if vlan.L2VNI() > 0 {
 						vni = fmt.Sprintf(" (VNI: %d)", vlan.L2VNI())
 					}
-					fmt.Printf("  %d:%s ports=%v\n", id, vni, vlan.Ports)
+					fmt.Printf("  %d:%s members=%v\n", id, vni, vlan.Members)
 				}
 			}
 
@@ -604,9 +605,9 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 				continue
 			}
 
-			fmt.Print("Port name: ")
-			port, _ := reader.ReadString('\n')
-			port = strings.TrimSpace(port)
+			fmt.Print("Interface name: ")
+			iface, _ := reader.ReadString('\n')
+			iface = strings.TrimSpace(iface)
 
 			fmt.Print("Tagged? [y/N]: ")
 			taggedStr, _ := reader.ReadString('\n')
@@ -619,10 +620,10 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 				continue
 			}
 
-			cs, err := dev.AddVLANMember(ctx, vlanID, port, tagged)
+			cs, err := dev.AddVLANMember(ctx, vlanID, iface, tagged)
 			dev.Unlock()
 			if err != nil {
-				fmt.Println(red("Failed to add port: " + err.Error()))
+				fmt.Println(red("Failed to add member: " + err.Error()))
 				continue
 			}
 
@@ -636,7 +637,7 @@ func vlanMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 				if err := cs.Apply(dev); err != nil {
 					fmt.Println(red("Failed to apply changes: " + err.Error()))
 				} else {
-					fmt.Println(green("Port added to VLAN successfully!"))
+					fmt.Println(green("Interface added to VLAN successfully!"))
 				}
 			} else {
 				fmt.Println("Cancelled.")
@@ -709,7 +710,7 @@ func aclMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			}
 			fmt.Println("\nACL Tables:")
 			for name, table := range configDB.ACLTable {
-				fmt.Printf("  %s: type=%s stage=%s ports=%s\n",
+				fmt.Printf("  %s: type=%s stage=%s interfaces=%s\n",
 					name, table.Type, table.Stage, table.Ports)
 			}
 
@@ -750,7 +751,7 @@ func aclMenu(reader *bufio.Reader, dev *network.Device, deviceName string) {
 			fmt.Printf("\nACL Table: %s\n", bold(name))
 			fmt.Printf("Type: %s\n", table.Type)
 			fmt.Printf("Stage: %s\n", table.Stage)
-			fmt.Printf("Ports: %s\n", table.Ports)
+			fmt.Printf("Interfaces: %s\n", table.Ports)
 			fmt.Printf("Description: %s\n", table.PolicyDesc)
 
 			// Show rules

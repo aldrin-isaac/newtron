@@ -150,7 +150,7 @@ func (d *Device) parseVLANs() map[int]*VLANState {
 			ID:         vlanID,
 			Name:       name,
 			OperStatus: vlan.AdminStatus,
-			Ports:      []string{},
+			Members:    []string{},
 		}
 		vlans[vlanID] = state
 	}
@@ -160,15 +160,15 @@ func (d *Device) parseVLANs() map[int]*VLANState {
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) == 2 {
 			vlanName := parts[0]
-			portName := parts[1]
+			memberName := parts[1]
 			// Parse VLAN ID from name (Vlan100)
 			if strings.HasPrefix(vlanName, "Vlan") {
 				vlanID, _ := strconv.Atoi(vlanName[4:])
 				if vlan, ok := vlans[vlanID]; ok {
 					if member.TaggingMode == "tagged" {
-						vlan.Ports = append(vlan.Ports, portName+"(t)")
+						vlan.Members = append(vlan.Members, memberName+"(t)")
 					} else {
-						vlan.Ports = append(vlan.Ports, portName)
+						vlan.Members = append(vlan.Members, memberName)
 					}
 				}
 			}

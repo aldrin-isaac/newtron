@@ -322,7 +322,7 @@ func (c *StateDBClient) parseEntry(db *StateDB, table, entry string, vals map[st
 	}
 }
 
-// GetPortState returns operational state for a specific port
+// GetPortState returns operational state for a specific interface from PORT_TABLE.
 func (c *StateDBClient) GetPortState(name string) (*PortStateEntry, error) {
 	key := fmt.Sprintf("PORT_TABLE|%s", name)
 	vals, err := c.client.HGetAll(c.ctx, key).Result()
@@ -330,7 +330,7 @@ func (c *StateDBClient) GetPortState(name string) (*PortStateEntry, error) {
 		return nil, err
 	}
 	if len(vals) == 0 {
-		return nil, fmt.Errorf("port %s not found in state_db", name)
+		return nil, fmt.Errorf("interface %s not found in state_db PORT_TABLE", name)
 	}
 	return &PortStateEntry{
 		AdminStatus:  vals["admin_status"],

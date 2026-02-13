@@ -331,7 +331,7 @@ func TestVLANState_Structure(t *testing.T) {
 		OperStatus: "up",
 		SVIStatus:  "configured",
 		L2VNI:      10100,
-		Ports:      []string{"Ethernet0", "Ethernet4(t)"},
+		Members:    []string{"Ethernet0", "Ethernet4(t)"},
 	}
 
 	if vlan.ID != 100 {
