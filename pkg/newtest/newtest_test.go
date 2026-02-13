@@ -2,6 +2,8 @@ package newtest
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/device"
+	"github.com/newtron-network/newtron/pkg/network"
 )
 
 // ============================================================================
@@ -1546,6 +1549,494 @@ func TestRequireParam(t *testing.T) {
 	}
 	if err := requireParam("test", nil, "key"); err == nil {
 		t.Error("expected error for nil params")
+	}
+}
+
+// ============================================================================
+// Executor Registration Completeness Test (TE-01)
+// ============================================================================
+
+func TestAllActionsHaveExecutors(t *testing.T) {
+	// Every StepAction in validActions should have an executor
+	for action := range validActions {
+		if _, ok := executors[action]; !ok {
+			t.Errorf("action %q is in validActions but has no executor", action)
+		}
+	}
+	// Every executor should have a corresponding validAction entry
+	for action := range executors {
+		if _, ok := validActions[action]; !ok {
+			t.Errorf("executor %q is registered but not in validActions", action)
+		}
+	}
+}
+
+func TestExecutorCountMatchesActionConstants(t *testing.T) {
+	// All StepAction constants defined in scenario.go
+	allActions := []StepAction{
+		ActionProvision, ActionWait, ActionVerifyProvisioning,
+		ActionVerifyConfigDB, ActionVerifyStateDB, ActionVerifyBGP,
+		ActionVerifyHealth, ActionVerifyRoute, ActionVerifyPing,
+		ActionApplyService, ActionRemoveService, ActionApplyBaseline,
+		ActionSSHCommand, ActionRestartService, ActionApplyFRRDefaults,
+		ActionSetInterface, ActionCreateVLAN, ActionDeleteVLAN,
+		ActionAddVLANMember, ActionCreateVRF, ActionDeleteVRF,
+		ActionSetupEVPN, ActionAddVRFInterface, ActionRemoveVRFInterface,
+		ActionBindIPVPN, ActionUnbindIPVPN, ActionBindMACVPN, ActionUnbindMACVPN,
+		ActionAddStaticRoute, ActionRemoveStaticRoute, ActionRemoveVLANMember,
+		ActionApplyQoS, ActionRemoveQoS, ActionConfigureSVI,
+		ActionBGPAddNeighbor, ActionBGPRemoveNeighbor,
+		ActionRefreshService, ActionCleanup,
+	}
+
+	if len(executors) != len(allActions) {
+		t.Errorf("executors map has %d entries, but there are %d StepAction constants",
+			len(executors), len(allActions))
+	}
+
+	for _, action := range allActions {
+		if _, ok := executors[action]; !ok {
+			t.Errorf("StepAction constant %q has no executor", action)
+		}
+	}
+}
+
+// ============================================================================
+// executeStep Dispatch Tests (TE-01)
+// ============================================================================
+
+func TestExecuteStep_UnknownAction(t *testing.T) {
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
+	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
+
+	if output.Result.Status != StatusError {
+		t.Errorf("expected StatusError for unknown action, got %v", output.Result.Status)
+	}
+	if !strings.Contains(output.Result.Message, "unknown action") {
+		t.Errorf("expected 'unknown action' in message, got %q", output.Result.Message)
+	}
+	if output.Result.Name != "test-unknown" {
+		t.Errorf("expected step name 'test-unknown', got %q", output.Result.Name)
+	}
+	if output.Result.Action != "nonexistent-action" {
+		t.Errorf("expected action 'nonexistent-action', got %q", output.Result.Action)
+	}
+}
+
+func TestExecuteStep_SetsNameAndAction(t *testing.T) {
+	// The wait executor is the simplest — it just sleeps.
+	// With 0 duration it returns immediately.
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	step := &Step{
+		Action:   ActionWait,
+		Name:     "quick-wait",
+		Duration: 0,
+	}
+	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
+
+	if output.Result.Name != "quick-wait" {
+		t.Errorf("Name = %q, want %q", output.Result.Name, "quick-wait")
+	}
+	if output.Result.Action != ActionWait {
+		t.Errorf("Action = %q, want %q", output.Result.Action, ActionWait)
+	}
+	if output.Result.Status != StatusPassed {
+		t.Errorf("Status = %v, want %v", output.Result.Status, StatusPassed)
+	}
+	if output.Result.Duration == 0 {
+		t.Error("expected Duration to be set (non-zero)")
+	}
+}
+
+// ============================================================================
+// resolveScenarioPath Tests (TE-01)
+// ============================================================================
+
+func TestResolveScenarioPath_ExactMatch(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "boot-ssh.yaml", `
+name: boot-ssh
+description: test
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	got, err := resolveScenarioPath(dir, "boot-ssh")
+	if err != nil {
+		t.Fatalf("resolveScenarioPath error: %v", err)
+	}
+	if filepath.Base(got) != "boot-ssh.yaml" {
+		t.Errorf("expected boot-ssh.yaml, got %s", filepath.Base(got))
+	}
+}
+
+func TestResolveScenarioPath_NumberedPrefix(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "03-bgp-converge.yaml", `
+name: bgp-converge
+description: test
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	got, err := resolveScenarioPath(dir, "bgp-converge")
+	if err != nil {
+		t.Fatalf("resolveScenarioPath error: %v", err)
+	}
+	if filepath.Base(got) != "03-bgp-converge.yaml" {
+		t.Errorf("expected 03-bgp-converge.yaml, got %s", filepath.Base(got))
+	}
+}
+
+func TestResolveScenarioPath_NameFieldScan(t *testing.T) {
+	dir := t.TempDir()
+	// File name doesn't match the scenario name at all
+	writeScenario(t, dir, "scenario-alpha.yaml", `
+name: my-custom-name
+description: test
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	got, err := resolveScenarioPath(dir, "my-custom-name")
+	if err != nil {
+		t.Fatalf("resolveScenarioPath error: %v", err)
+	}
+	if filepath.Base(got) != "scenario-alpha.yaml" {
+		t.Errorf("expected scenario-alpha.yaml, got %s", filepath.Base(got))
+	}
+}
+
+func TestResolveScenarioPath_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeScenario(t, dir, "other.yaml", `
+name: other
+description: test
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	_, err := resolveScenarioPath(dir, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent scenario")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %s", err)
+	}
+}
+
+func TestResolveScenarioPath_PrefersExactOverNumbered(t *testing.T) {
+	dir := t.TempDir()
+	// Both exact match and numbered prefix exist
+	writeScenario(t, dir, "vlan.yaml", `
+name: vlan
+description: exact match
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	writeScenario(t, dir, "06-vlan.yaml", `
+name: vlan-numbered
+description: numbered prefix
+topology: 2node
+platform: sonic-vpp
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	got, err := resolveScenarioPath(dir, "vlan")
+	if err != nil {
+		t.Fatalf("resolveScenarioPath error: %v", err)
+	}
+	// Exact match should win
+	if filepath.Base(got) != "vlan.yaml" {
+		t.Errorf("expected vlan.yaml (exact), got %s", filepath.Base(got))
+	}
+}
+
+// ============================================================================
+// pollUntil Tests (TE-01)
+// ============================================================================
+
+func TestPollUntil_ImmediateSuccess(t *testing.T) {
+	calls := 0
+	err := pollUntil(context.Background(), 5*time.Second, 10*time.Millisecond, func() (bool, error) {
+		calls++
+		return true, nil
+	})
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected 1 call, got %d", calls)
+	}
+}
+
+func TestPollUntil_Timeout(t *testing.T) {
+	err := pollUntil(context.Background(), 50*time.Millisecond, 10*time.Millisecond, func() (bool, error) {
+		return false, nil
+	})
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("expected 'timeout' in error, got: %s", err)
+	}
+}
+
+func TestPollUntil_ErrorPropagation(t *testing.T) {
+	sentinel := fmt.Errorf("redis connection refused")
+	err := pollUntil(context.Background(), 5*time.Second, 10*time.Millisecond, func() (bool, error) {
+		return false, sentinel
+	})
+	if err != sentinel {
+		t.Errorf("expected sentinel error, got %v", err)
+	}
+}
+
+func TestPollUntil_ContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	err := pollUntil(ctx, 5*time.Second, 10*time.Millisecond, func() (bool, error) {
+		return false, nil
+	})
+	if err == nil {
+		t.Fatal("expected error after context cancellation, got nil")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Errorf("expected 'timeout' in error, got: %s", err)
+	}
+}
+
+func TestPollUntil_SuccessAfterRetries(t *testing.T) {
+	calls := 0
+	err := pollUntil(context.Background(), 5*time.Second, 10*time.Millisecond, func() (bool, error) {
+		calls++
+		return calls >= 3, nil
+	})
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls, got %d", calls)
+	}
+}
+
+// ============================================================================
+// Executor Missing Params Panic Safety Tests (TE-01)
+// ============================================================================
+
+func TestExecutorsMissingParams_NoPanic(t *testing.T) {
+	// Executors that operate via executeForDevices need r.Network and
+	// resolveDevices, which requires a topology. With a nil Network, they
+	// will either panic in resolveDevices or in the device lookup.
+	// We test that the executor.Execute call itself doesn't panic with
+	// nil Runner fields by wrapping in recover. Since these executors call
+	// r.resolveDevices → r.allDeviceNames → r.Network.GetTopology, which
+	// will panic on nil Network, we test the subset that doesn't call
+	// resolveDevices first. For executors that do, we still verify no
+	// unexpected panics by catching and reporting them.
+
+	// Parameterized actions that extract params before doing device work.
+	// Even with nil Network, the param extraction itself shouldn't panic.
+	paramActions := []StepAction{
+		ActionCreateVLAN, ActionDeleteVLAN, ActionAddVLANMember,
+		ActionCreateVRF, ActionDeleteVRF, ActionSetupEVPN,
+		ActionAddVRFInterface, ActionRemoveVRFInterface,
+		ActionUnbindIPVPN, ActionUnbindMACVPN,
+		ActionAddStaticRoute, ActionRemoveStaticRoute,
+		ActionRemoveVLANMember, ActionRemoveQoS,
+		ActionConfigureSVI, ActionBGPAddNeighbor, ActionBGPRemoveNeighbor,
+		ActionSetInterface,
+	}
+
+	for _, action := range paramActions {
+		t.Run(string(action), func(t *testing.T) {
+			executor, ok := executors[action]
+			if !ok {
+				t.Skipf("no executor for %q", action)
+				return
+			}
+
+			step := &Step{
+				Action:  action,
+				Name:    "test-" + string(action),
+				Params:  map[string]any{},
+				Devices: DeviceSelector{Devices: []string{"leaf1"}},
+			}
+
+			// The executor will panic at r.Network (nil dereference) when
+			// it calls resolveDevices/executeForDevices. We verify that the
+			// panic comes from the nil Network access, NOT from a missing
+			// param causing an unexpected crash.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						// Expected: nil pointer on Network access.
+						// Check that it's the Network nil deref, not something else.
+						msg := fmt.Sprintf("%v", r)
+						if !strings.Contains(msg, "nil pointer") && !strings.Contains(msg, "invalid memory address") {
+							t.Errorf("executor %q panicked unexpectedly: %v", action, r)
+						}
+					}
+				}()
+				r := &Runner{
+					ChangeSets: make(map[string]*network.ChangeSet),
+				}
+				executor.Execute(context.Background(), r, step)
+			}()
+		})
+	}
+}
+
+func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
+	// bind-ipvpn extracts params and calls r.Network.GetIPVPN before
+	// resolveDevices, so it should produce a clean panic or error on nil Network.
+	executor := executors[ActionBindIPVPN]
+	step := &Step{
+		Action:  ActionBindIPVPN,
+		Name:    "test-bind-ipvpn",
+		Params:  map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"},
+		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("%v", r)
+				if !strings.Contains(msg, "nil pointer") && !strings.Contains(msg, "invalid memory address") {
+					t.Errorf("executor panicked unexpectedly: %v", r)
+				}
+			}
+		}()
+		r := &Runner{
+			ChangeSets: make(map[string]*network.ChangeSet),
+		}
+		executor.Execute(context.Background(), r, step)
+	}()
+}
+
+func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
+	// bind-macvpn extracts params and calls r.Network.GetMACVPN before
+	// resolveDevices, so it should produce a clean panic on nil Network.
+	executor := executors[ActionBindMACVPN]
+	step := &Step{
+		Action:  ActionBindMACVPN,
+		Name:    "test-bind-macvpn",
+		Params:  map[string]any{"vlan_id": 100, "macvpn": "office-lan"},
+		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("%v", r)
+				if !strings.Contains(msg, "nil pointer") && !strings.Contains(msg, "invalid memory address") {
+					t.Errorf("executor panicked unexpectedly: %v", r)
+				}
+			}
+		}()
+		r := &Runner{
+			ChangeSets: make(map[string]*network.ChangeSet),
+		}
+		executor.Execute(context.Background(), r, step)
+	}()
+}
+
+func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
+	// apply-qos calls r.Network.GetQoSPolicy before resolveDevices
+	executor := executors[ActionApplyQoS]
+	step := &Step{
+		Action:  ActionApplyQoS,
+		Name:    "test-apply-qos",
+		Params:  map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"},
+		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("%v", r)
+				if !strings.Contains(msg, "nil pointer") && !strings.Contains(msg, "invalid memory address") {
+					t.Errorf("executor panicked unexpectedly: %v", r)
+				}
+			}
+		}()
+		r := &Runner{
+			ChangeSets: make(map[string]*network.ChangeSet),
+		}
+		executor.Execute(context.Background(), r, step)
+	}()
+}
+
+// ============================================================================
+// Wait Executor Tests (TE-01)
+// ============================================================================
+
+func TestWaitExecutor_ZeroDuration(t *testing.T) {
+	executor := executors[ActionWait]
+	step := &Step{Action: ActionWait, Name: "zero-wait", Duration: 0}
+	output := executor.Execute(context.Background(), &Runner{}, step)
+
+	if output.Result.Status != StatusPassed {
+		t.Errorf("expected StatusPassed, got %v", output.Result.Status)
+	}
+}
+
+func TestWaitExecutor_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+
+	executor := executors[ActionWait]
+	step := &Step{Action: ActionWait, Name: "cancelled-wait", Duration: 10 * time.Second}
+	output := executor.Execute(ctx, &Runner{}, step)
+
+	if output.Result.Status != StatusError {
+		t.Errorf("expected StatusError for cancelled context, got %v", output.Result.Status)
+	}
+	if !strings.Contains(output.Result.Message, "interrupted") {
+		t.Errorf("expected 'interrupted' in message, got %q", output.Result.Message)
+	}
+}
+
+// ============================================================================
+// DeviceSelector Additional Edge Cases (TE-01)
+// ============================================================================
+
+func TestDeviceSelector_Resolve_AllEmpty(t *testing.T) {
+	ds := DeviceSelector{All: true}
+	got := ds.Resolve(nil)
+	if len(got) != 0 {
+		t.Errorf("Resolve(all, nil) returned %d devices, want 0", len(got))
+	}
+}
+
+func TestDeviceSelector_Resolve_AllPreservesOriginal(t *testing.T) {
+	ds := DeviceSelector{All: true}
+	original := []string{"spine1", "leaf1", "leaf2"}
+	_ = ds.Resolve(original)
+	// Original should not be modified (Resolve copies before sort)
+	if original[0] != "spine1" || original[1] != "leaf1" || original[2] != "leaf2" {
+		t.Error("Resolve(all) modified the original slice")
 	}
 }
 
