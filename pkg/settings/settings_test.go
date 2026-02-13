@@ -10,8 +10,8 @@ func TestSettings_Defaults(t *testing.T) {
 	s := &Settings{}
 
 	// Test default spec dir
-	if got := s.GetSpecDir(); got != "/etc/newtron" {
-		t.Errorf("GetSpecDir() default = %q, want %q", got, "/etc/newtron")
+	if got := s.GetSpecDir(); got != DefaultSpecDir {
+		t.Errorf("GetSpecDir() default = %q, want %q", got, DefaultSpecDir)
 	}
 
 	// Test empty defaults

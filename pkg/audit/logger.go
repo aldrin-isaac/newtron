@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // Logger defines the interface for audit logging backends
@@ -23,7 +25,7 @@ type FileLogger struct {
 	path     string
 	file     *os.File
 	encoder  *json.Encoder
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	rotation RotationConfig
 }
 
@@ -74,8 +76,8 @@ func (l *FileLogger) Log(event *Event) error {
 
 // Query searches for events matching the filter
 func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	file, err := os.Open(l.path)
 	if err != nil {
@@ -88,10 +90,13 @@ func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 
 	var events []*Event
 	scanner := bufio.NewScanner(file)
+	lineNum := 0
 	for scanner.Scan() {
+		lineNum++
 		var event Event
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			continue // Skip malformed lines
+			util.Warnf("audit: skipping malformed log entry at line %d: %v", lineNum, err)
+			continue
 		}
 
 		if l.matchesFilter(&event, filter) {
