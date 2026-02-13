@@ -2,6 +2,7 @@ package newtlab
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -155,8 +156,8 @@ func loadPatchDir(dir string) ([]*BootPatch, error) {
 //  4. Render and execute redis templates
 //  5. Execute post_commands
 //
-// Returns on first error.
-func ApplyBootPatches(host string, port int, user, pass string, patches []*BootPatch, vars *PatchVars) error {
+// Returns on first error or context cancellation.
+func ApplyBootPatches(ctx context.Context, host string, port int, user, pass string, patches []*BootPatch, vars *PatchVars) error {
 	config := &ssh.ClientConfig{
 		User:            user,
 		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
@@ -181,6 +182,12 @@ func ApplyBootPatches(host string, port int, user, pass string, patches []*BootP
 	}
 
 	for _, p := range patches {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: boot patches cancelled: %w", ctx.Err())
+		default:
+		}
+
 		// 1. Pre-commands
 		for _, cmd := range p.PreCommands {
 			if _, err := run(cmd); err != nil {

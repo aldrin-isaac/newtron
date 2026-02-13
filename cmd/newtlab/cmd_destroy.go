@@ -21,7 +21,7 @@ func newDestroyCmd() *cobra.Command {
 
 			lab := &newtlab.Lab{Name: labName}
 			fmt.Printf("Destroying lab %s...\n", labName)
-			if err := lab.Destroy(); err != nil {
+			if err := lab.Destroy(cmd.Context()); err != nil {
 				return err
 			}
 			fmt.Printf("%s Lab %s destroyed\n", green("✓"), labName)

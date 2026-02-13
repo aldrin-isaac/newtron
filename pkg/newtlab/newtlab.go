@@ -1,6 +1,7 @@
 package newtlab
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,8 +127,9 @@ func NewLab(specDir string) (*Lab, error) {
 }
 
 // Deploy creates overlay disks, starts QEMU processes, waits for SSH,
-// and patches profiles.
-func (l *Lab) Deploy() error {
+// and patches profiles. The context is checked at each major phase and
+// threaded into long-running sub-operations.
+func (l *Lab) Deploy(ctx context.Context) error {
 	// Check for stale state
 	if existing, err := LoadState(l.Name); err == nil && existing != nil {
 		if !l.Force {
@@ -270,6 +272,14 @@ func (l *Lab) Deploy() error {
 		}
 	}
 
+	// Check for cancellation before starting VMs
+	select {
+	case <-ctx.Done():
+		SaveState(l.State)
+		return fmt.Errorf("newtlab: deploy cancelled: %w", ctx.Err())
+	default:
+	}
+
 	// Start QEMU processes in sorted name order.
 	// All VMs connect outbound to bridge workers — no ordering constraints.
 	for _, name := range sortedNodeNames(l.Nodes) {
@@ -311,7 +321,7 @@ func (l *Lab) Deploy() error {
 		wg.Add(1)
 		go func(name, consoleHost string, node *NodeConfig) {
 			defer wg.Done()
-			err := BootstrapNetwork(consoleHost, node.ConsolePort,
+			err := BootstrapNetwork(ctx, consoleHost, node.ConsolePort,
 				node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
 				time.Duration(node.BootTimeout)*time.Second)
 			if err != nil {
@@ -336,7 +346,7 @@ func (l *Lab) Deploy() error {
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig) {
 			defer wg.Done()
-			err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
+			err := WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 				60*time.Second)
 			if err != nil {
 				mu.Lock()
@@ -372,7 +382,7 @@ func (l *Lab) Deploy() error {
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig, patches []*BootPatch, vars *PatchVars) {
 			defer wg.Done()
-			err := ApplyBootPatches(sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars)
+			err := ApplyBootPatches(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars)
 			if err != nil {
 				mu.Lock()
 				if deployErr == nil {
@@ -400,8 +410,9 @@ func (l *Lab) Deploy() error {
 }
 
 // Destroy kills QEMU processes, removes overlays, cleans state,
-// and restores profiles.
-func (l *Lab) Destroy() error {
+// and restores profiles. The context allows cancellation of the
+// teardown sequence.
+func (l *Lab) Destroy(ctx context.Context) error {
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -495,7 +506,7 @@ func (l *Lab) FilterHost(host string) {
 }
 
 // Stop stops a single node by PID.
-func (l *Lab) Stop(nodeName string) error {
+func (l *Lab) Stop(ctx context.Context, nodeName string) error {
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -515,7 +526,7 @@ func (l *Lab) Stop(nodeName string) error {
 }
 
 // Start restarts a stopped node.
-func (l *Lab) Start(nodeName string) error {
+func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -551,7 +562,7 @@ func (l *Lab) Start(nodeName string) error {
 
 	// Wait for SSH — use host IP for remote nodes
 	sshHost := nodeHostIP(nodeState)
-	if err := WaitForSSH(sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
+	if err := WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 		time.Duration(node.BootTimeout)*time.Second); err != nil {
 		nodeState.Status = "error"
 		SaveState(state)
@@ -562,7 +573,8 @@ func (l *Lab) Start(nodeName string) error {
 }
 
 // Provision runs newtron provisioning for all (or specified) devices.
-func (l *Lab) Provision(parallel int) error {
+// The context is threaded into exec.CommandContext for cancellation.
+func (l *Lab) Provision(ctx context.Context, parallel int) error {
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -596,7 +608,7 @@ func (l *Lab) Provision(parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.Command(findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-xs")
+			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-xs")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()

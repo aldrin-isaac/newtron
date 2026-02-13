@@ -33,7 +33,7 @@ func newProvisionCmd() *cobra.Command {
 			}
 
 			fmt.Println("Provisioning devices...")
-			if err := lab.Provision(parallel); err != nil {
+			if err := lab.Provision(cmd.Context(), parallel); err != nil {
 				return err
 			}
 			fmt.Printf("%s Provisioning complete\n", green("✓"))

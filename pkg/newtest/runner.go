@@ -144,7 +144,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 	// Deploy: lifecycle mode uses EnsureTopology; legacy mode uses DeployTopology
 	if !opts.NoDeploy {
 		if opts.Suite != "" {
-			lab, _, err := EnsureTopology(specDir)
+			lab, _, err := EnsureTopology(ctx, specDir)
 			if err != nil {
 				var results []*ScenarioResult
 				for _, sc := range scenarios {
@@ -161,7 +161,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 			r.Lab = lab
 			// Lifecycle mode: never destroy — stop command handles that
 		} else {
-			lab, err := DeployTopology(specDir)
+			lab, err := DeployTopology(ctx, specDir)
 			if err != nil {
 				var results []*ScenarioResult
 				for _, sc := range scenarios {
@@ -177,7 +177,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 			}
 			r.Lab = lab
 			if !opts.Keep {
-				defer func() { _ = DestroyTopology(r.Lab) }()
+				defer func() { _ = DestroyTopology(context.Background(), r.Lab) }()
 			}
 		}
 	}
@@ -386,7 +386,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
 		if opts.Suite != "" {
-			lab, _, err := EnsureTopology(specDir)
+			lab, _, err := EnsureTopology(ctx, specDir)
 			if err != nil {
 				result.DeployError = &InfraError{Op: "deploy", Err: err}
 				result.Status = StatusError
@@ -395,7 +395,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 			}
 			r.Lab = lab
 		} else {
-			lab, err := DeployTopology(specDir)
+			lab, err := DeployTopology(ctx, specDir)
 			if err != nil {
 				result.DeployError = &InfraError{Op: "deploy", Err: err}
 				result.Status = StatusError
@@ -404,7 +404,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 			}
 			r.Lab = lab
 			if !opts.Keep {
-				defer func() { _ = DestroyTopology(r.Lab) }()
+				defer func() { _ = DestroyTopology(context.Background(), r.Lab) }()
 			}
 		}
 	}

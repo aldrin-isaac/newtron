@@ -245,7 +245,6 @@ func init() {
 	}
 
 	// Premature commands (hidden)
-	rootCmd.AddCommand(interactiveCmd)
 	rootCmd.AddCommand(shellCmd)
 }
 

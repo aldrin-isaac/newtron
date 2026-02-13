@@ -1,6 +1,7 @@
 package newtlab
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strings"
@@ -10,9 +11,9 @@ import (
 )
 
 // WaitForSSH polls SSH connectivity to host:port with the given credentials.
-// Returns nil when SSH login succeeds, or error if timeout is reached.
-// Polls every 5 seconds.
-func WaitForSSH(host string, port int, user, pass string, timeout time.Duration) error {
+// Returns nil when SSH login succeeds, or error if timeout is reached or context
+// is cancelled. Polls every 5 seconds.
+func WaitForSSH(ctx context.Context, host string, port int, user, pass string, timeout time.Duration) error {
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -26,9 +27,19 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: SSH wait cancelled for %s: %w", addr, ctx.Err())
+		default:
+		}
+
 		client, err := ssh.Dial("tcp", addr, config)
 		if err != nil {
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("newtlab: SSH wait cancelled for %s: %w", addr, ctx.Err())
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
@@ -36,7 +47,11 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 		session, err := client.NewSession()
 		if err != nil {
 			client.Close()
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("newtlab: SSH wait cancelled for %s: %w", addr, ctx.Err())
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 
@@ -47,7 +62,11 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 		if err == nil {
 			return nil
 		}
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: SSH wait cancelled for %s: %w", addr, ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
 	}
 
 	return fmt.Errorf("newtlab: SSH timeout after %s for %s", timeout, addr)
@@ -61,18 +80,28 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 //  3. Bring up eth0 with DHCP (QEMU user-mode networking requires this).
 //  4. If sshUser differs from consoleUser, create the SSH user with sudo + bash access.
 //  5. Log out.
-func BootstrapNetwork(consoleHost string, consolePort int, consoleUser, consolePass, sshUser, sshPass string, timeout time.Duration) error {
+func BootstrapNetwork(ctx context.Context, consoleHost string, consolePort int, consoleUser, consolePass, sshUser, sshPass string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	// Poll until we can connect to the serial console
 	var conn net.Conn
 	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: bootstrap cancelled for %s:%d: %w", consoleHost, consolePort, ctx.Err())
+		default:
+		}
+
 		var err error
 		conn, err = net.DialTimeout("tcp", fmt.Sprintf("%s:%d", consoleHost, consolePort), 5*time.Second)
 		if err == nil {
 			break
 		}
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: bootstrap cancelled for %s:%d: %w", consoleHost, consolePort, ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
 	}
 	if conn == nil {
 		return fmt.Errorf("newtlab: serial console connect timeout for %s:%d", consoleHost, consolePort)

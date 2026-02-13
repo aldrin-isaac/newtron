@@ -22,7 +22,7 @@ func newStopCmd() *cobra.Command {
 			}
 
 			lab := &newtlab.Lab{Name: labName}
-			if err := lab.Stop(nodeName); err != nil {
+			if err := lab.Stop(cmd.Context(), nodeName); err != nil {
 				return err
 			}
 			fmt.Printf("%s Stopped %s\n", green("✓"), nodeName)
@@ -47,7 +47,7 @@ func newStartCmd() *cobra.Command {
 
 			lab := &newtlab.Lab{Name: labName}
 			fmt.Printf("Starting %s...\n", nodeName)
-			if err := lab.Start(nodeName); err != nil {
+			if err := lab.Start(cmd.Context(), nodeName); err != nil {
 				return err
 			}
 			fmt.Printf("%s Started %s\n", green("✓"), nodeName)

@@ -53,7 +53,7 @@ Refuses to stop a suite with a running process — use 'newtest pause' first.`,
 					lab, err := newtlab.NewLab(specDir)
 					if err == nil {
 						fmt.Printf("destroying topology %s...\n", topology)
-						if err := lab.Destroy(); err != nil {
+						if err := lab.Destroy(cmd.Context()); err != nil {
 							fmt.Printf("warning: destroy topology: %v\n", err)
 						}
 					}

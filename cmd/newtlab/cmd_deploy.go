@@ -40,7 +40,7 @@ func newDeployCmd() *cobra.Command {
 			}
 
 			fmt.Println("Deploying VMs...")
-			if err := lab.Deploy(); err != nil {
+			if err := lab.Deploy(cmd.Context()); err != nil {
 				return err
 			}
 
@@ -55,7 +55,7 @@ func newDeployCmd() *cobra.Command {
 
 			if provision {
 				fmt.Println("\nProvisioning devices...")
-				if err := lab.Provision(parallel); err != nil {
+				if err := lab.Provision(cmd.Context(), parallel); err != nil {
 					return err
 				}
 				fmt.Printf("%s Provisioning complete\n", green("✓"))

@@ -1,19 +1,20 @@
 package newtest
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
 
 // DeployTopology deploys a VM topology using newtlab.
-func DeployTopology(specDir string) (*newtlab.Lab, error) {
+func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
 	lab, err := newtlab.NewLab(specDir)
 	if err != nil {
 		return nil, fmt.Errorf("newtest: load topology: %w", err)
 	}
 	lab.Force = true
-	if err := lab.Deploy(); err != nil {
+	if err := lab.Deploy(ctx); err != nil {
 		return nil, fmt.Errorf("newtest: deploy topology: %w", err)
 	}
 	return lab, nil
@@ -21,7 +22,7 @@ func DeployTopology(specDir string) (*newtlab.Lab, error) {
 
 // EnsureTopology reuses an existing lab if all nodes are running, otherwise
 // deploys fresh. Returns the lab and whether a new deploy was performed.
-func EnsureTopology(specDir string) (*newtlab.Lab, bool, error) {
+func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, bool, error) {
 	lab, err := newtlab.NewLab(specDir)
 	if err != nil {
 		return nil, false, fmt.Errorf("newtest: load topology: %w", err)
@@ -42,18 +43,18 @@ func EnsureTopology(specDir string) (*newtlab.Lab, bool, error) {
 	}
 
 	lab.Force = true
-	if err := lab.Deploy(); err != nil {
+	if err := lab.Deploy(ctx); err != nil {
 		return nil, false, fmt.Errorf("newtest: deploy topology: %w", err)
 	}
 	return lab, true, nil
 }
 
 // DestroyTopology tears down a deployed topology.
-func DestroyTopology(lab *newtlab.Lab) error {
+func DestroyTopology(ctx context.Context, lab *newtlab.Lab) error {
 	if lab == nil {
 		return nil
 	}
-	if err := lab.Destroy(); err != nil {
+	if err := lab.Destroy(ctx); err != nil {
 		return fmt.Errorf("newtest: destroy topology: %w", err)
 	}
 	return nil
