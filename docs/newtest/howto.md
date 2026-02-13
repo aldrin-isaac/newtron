@@ -170,11 +170,18 @@ steps:
 | `add-vlan-member` | Add an interface to a VLAN | newtron |
 | `create-vrf` | Create a VRF | newtron |
 | `delete-vrf` | Delete a VRF | newtron |
-| `create-vtep` | Create a VXLAN tunnel endpoint | newtron |
-| `delete-vtep` | Delete a VTEP | newtron |
-| `map-l2vni` | Map a VLAN to a L2 VNI | newtron |
-| `map-l3vni` | Map a VRF to a L3 VNI | newtron |
-| `unmap-vni` | Remove a VNI mapping | newtron |
+| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron |
+| `add-vrf-interface` | Bind an interface to a VRF | newtron |
+| `remove-vrf-interface` | Remove an interface from a VRF | newtron |
+| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron |
+| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron |
+| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron |
+| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron |
+| `add-static-route` | Add a static route to a VRF | newtron |
+| `remove-static-route` | Remove a static route from a VRF | newtron |
+| `remove-vlan-member` | Remove an interface from a VLAN | newtron |
+| `apply-qos` | Apply a QoS policy to an interface | newtron |
+| `remove-qos` | Remove QoS policy from an interface | newtron |
 | `configure-svi` | Configure a VLAN interface (SVI) | newtron |
 | `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback) | newtron |
 | `bgp-remove-neighbor` | Remove a BGP neighbor | newtron |
@@ -724,38 +731,45 @@ anything else → `Set(property, value)`.
     vrf: Vrf_test
 ```
 
-### 13. VXLAN / EVPN Operations
+### 13. EVPN and VPN Operations
 
 ```yaml
-# Create VTEP
-- name: create-vtep
-  action: create-vtep
+# Set up EVPN overlay (VTEP + NVO + BGP EVPN in one step)
+- name: setup-evpn
+  action: setup-evpn
   devices: [leaf1]
   params:
-    source_ip: "10.0.0.11"
+    source_ip: "10.0.0.11"    # optional, defaults to loopback IP
 
-# Map L2 VNI (VLAN to VNI)
-- name: map-l2vni
-  action: map-l2vni
+# Bind an IP-VPN to a VRF (looks up VPN definition from network spec)
+- name: bind-ipvpn
+  action: bind-ipvpn
+  devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+    ipvpn_name: customer-ipvpn
+
+# Unbind IP-VPN from a VRF
+- name: unbind-ipvpn
+  action: unbind-ipvpn
+  devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+
+# Bind a MAC-VPN to a VLAN (looks up VPN definition from network spec)
+- name: bind-macvpn
+  action: bind-macvpn
   devices: [leaf1]
   params:
     vlan_id: 200
-    vni: 10200
+    macvpn_name: customer-macvpn
 
-# Map L3 VNI (VRF to VNI)
-- name: map-l3vni
-  action: map-l3vni
+# Unbind MAC-VPN from a VLAN
+- name: unbind-macvpn
+  action: unbind-macvpn
   devices: [leaf1]
   params:
-    vrf: Vrf_evpn
-    vni: 20001
-
-# Unmap a VNI
-- name: unmap-vni
-  action: unmap-vni
-  devices: [leaf1]
-  params:
-    vni: 10200
+    vlan_id: 200
 
 # Configure SVI (VLAN interface)
 - name: configure-svi
@@ -765,11 +779,79 @@ anything else → `Set(property, value)`.
     vlan_id: 500
     vrf: Vrf_svi
     ip: "10.1.50.1/24"
+```
 
-# Delete VTEP
-- name: delete-vtep
-  action: delete-vtep
+### 13a. VRF Interface Binding
+
+```yaml
+# Add an interface to a VRF
+- name: add-vrf-intf
+  action: add-vrf-interface
   devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+    interface: Ethernet2
+
+# Remove an interface from a VRF
+- name: remove-vrf-intf
+  action: remove-vrf-interface
+  devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+    interface: Ethernet2
+```
+
+### 13b. Static Routes
+
+```yaml
+# Add a static route
+- name: add-route
+  action: add-static-route
+  devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+    prefix: "10.99.0.0/24"
+    next_hop: "192.168.1.254"
+    metric: 100    # optional, defaults to 0
+
+# Remove a static route
+- name: remove-route
+  action: remove-static-route
+  devices: [leaf1]
+  params:
+    vrf_name: Vrf_customer
+    prefix: "10.99.0.0/24"
+```
+
+### 13c. VLAN Member Removal
+
+```yaml
+# Remove an interface from a VLAN
+- name: remove-member
+  action: remove-vlan-member
+  devices: [leaf1]
+  params:
+    vlan_id: 100
+    interface: Ethernet2
+```
+
+### 13d. QoS Operations
+
+```yaml
+# Apply a QoS policy to an interface (looks up policy from network spec)
+- name: apply-qos
+  action: apply-qos
+  devices: [leaf1]
+  params:
+    interface: Ethernet1
+    policy_name: 4q-customer
+
+# Remove QoS policy from an interface
+- name: remove-qos
+  action: remove-qos
+  devices: [leaf1]
+  params:
+    interface: Ethernet1
 ```
 
 ### 14. BGP Neighbor Operations

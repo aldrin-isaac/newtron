@@ -98,7 +98,7 @@ newtron/
 │   │       ├── 00-boot-ssh.yaml
 │   │       ├── 01-provision.yaml
 │   │       ├── ...
-│   │       └── 24-cleanup.yaml
+│   │       └── 30-qos-apply-remove.yaml
 │   ├── images/           # VM images or symlinks
 │   └── .generated/       # Runtime output (gitignored)
 │       └── report.md
@@ -231,11 +231,18 @@ steps:
 | `add-vlan-member` | Add an interface to a VLAN as tagged/untagged member | newtron `Device.AddVLANMember()` |
 | `create-vrf` | Create a VRF | newtron `Device.CreateVRF()` |
 | `delete-vrf` | Delete a VRF | newtron `Device.DeleteVRF()` |
-| `create-vtep` | Create a VXLAN tunnel endpoint (VTEP) | newtron `Device.CreateVTEP()` |
-| `delete-vtep` | Delete a VTEP | newtron `Device.DeleteVTEP()` |
-| `map-l2vni` | Map a VLAN to a L2 VNI via VXLAN | newtron `Device.MapL2VNI()` |
-| `map-l3vni` | Map a VRF to a L3 VNI via VXLAN | newtron `Device.MapL3VNI()` |
-| `unmap-vni` | Remove a VNI mapping | newtron `Device.UnmapVNI()` |
+| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron `Device.SetupEVPN()` |
+| `add-vrf-interface` | Bind an interface to a VRF | newtron `Device.AddVRFInterface()` |
+| `remove-vrf-interface` | Remove an interface from a VRF | newtron `Device.RemoveVRFInterface()` |
+| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron `Device.BindIPVPN()` |
+| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron `Device.UnbindIPVPN()` |
+| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron `Device.BindMACVPN()` |
+| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron `Device.UnbindMACVPN()` |
+| `add-static-route` | Add a static route to a VRF | newtron `Device.AddStaticRoute()` |
+| `remove-static-route` | Remove a static route from a VRF | newtron `Device.RemoveStaticRoute()` |
+| `remove-vlan-member` | Remove an interface from a VLAN | newtron `Device.RemoveVLANMember()` |
+| `apply-qos` | Apply a QoS policy to an interface | newtron `Device.ApplyQoS()` |
+| `remove-qos` | Remove QoS policy from an interface | newtron `Device.RemoveQoS()` |
 | `configure-svi` | Configure a Switched Virtual Interface (VLAN interface) | newtron `Device.ConfigureSVI()` |
 | `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback-based) | newtron `Interface.AddBGPNeighbor` / `Device.AddLoopbackBGPNeighbor` |
 | `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
@@ -377,7 +384,7 @@ Scenarios are organized in two ways:
 
 #### 2node-incremental Suite
 
-The `newtest/suites/2node-incremental/` suite contains 27 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
+The `newtest/suites/2node-incremental/` suite contains 31 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
 
 | # | Scenario | Requires | What It Tests |
 |---|----------|----------|---------------|
@@ -389,8 +396,8 @@ The `newtest/suites/2node-incremental/` suite contains 27 scenarios that increme
 | 05 | `interface-ip-vrf` | provision | Interface IP and VRF assignment |
 | 06 | `vlan-lifecycle` | provision | VLAN create, add member, delete |
 | 07 | `vrf-lifecycle` | provision | VRF create, delete |
-| 08 | `vtep-lifecycle` | provision | VTEP create, delete |
-| 09 | `evpn-vni-mapping` | provision | L2VNI + L3VNI map/unmap with VTEP |
+| 08 | `evpn-setup` | provision | EVPN overlay setup (VTEP + NVO + BGP EVPN) |
+| 09 | `evpn-vpn-binding` | provision | IP-VPN + MAC-VPN bind/unbind |
 | 10 | `svi-configure` | provision | VLAN interface (SVI) creation |
 | 11 | `bgp-loopback-neighbor` | provision | Add/remove loopback BGP peer |
 | 12 | `bgp-direct-neighbor` | provision | Add/remove direct eBGP peer on interface |
@@ -408,6 +415,12 @@ The `newtest/suites/2node-incremental/` suite contains 27 scenarios that increme
 | 24 | `cleanup` | service-churn | Cleanup and verify no orphaned resources |
 | 25 | `qos-l3-service` | vrf-lifecycle | 4q-customer QoS: DSCP map, schedulers, port binding, cleanup |
 | 26 | `qos-datacenter` | vlan-lifecycle | 8q-datacenter QoS with ECN/WRED profile verification |
+| 27 | `vrf-interface-binding` | vrf-lifecycle | VRF interface add/remove |
+| 28 | `static-route` | vrf-lifecycle | Static route add/remove in VRF |
+| 29 | `vlan-member-remove` | vlan-lifecycle | VLAN member removal |
+| 30 | `qos-apply-remove` | provision | QoS policy apply and remove on interface |
+
+**Standalone scenarios** (`newtest/suites/2node-standalone/`) include `evpn-overlay` — an end-to-end overlay test that exercises EVPN setup, VPN binding, and traffic verification in a single scenario.
 
 Run the suite with:
 

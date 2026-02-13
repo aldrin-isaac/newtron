@@ -21,7 +21,7 @@ newtron/
 │       ├── scenario.go           # Scenario, Step, StepAction, ExpectBlock types
 │       ├── parser.go             # ParseScenario, ValidateScenario, topologicalSort
 │       ├── runner.go             # Runner, RunOptions, RunScenario, runShared
-│       ├── steps.go              # StepExecutor interface, all 31 executor implementations
+│       ├── steps.go              # StepExecutor interface, all 38 executor implementations
 │       ├── deploy.go             # DeployTopology, DestroyTopology (newtlab wrapper)
 │       ├── errors.go             # InfraError, StepError
 │       ├── report.go             # ScenarioResult, StepResult, ReportGenerator
@@ -32,7 +32,7 @@ newtron/
     │   └── 4node/specs/          # 4-node topology spec dir
     ├── suites/                   # Test suites
     │   ├── 2node-standalone/     # Standalone scenario files
-    │   └── 2node-incremental/    # 25 scenarios, dependency-ordered
+    │   └── 2node-incremental/    # 31 scenarios, dependency-ordered
     └── .generated/               # Runtime output (gitignored)
 ```
 
@@ -143,11 +143,18 @@ const (
     ActionAddVLANMember      StepAction = "add-vlan-member"
     ActionCreateVRF          StepAction = "create-vrf"
     ActionDeleteVRF          StepAction = "delete-vrf"
-    ActionCreateVTEP         StepAction = "create-vtep"
-    ActionDeleteVTEP         StepAction = "delete-vtep"
-    ActionMapL2VNI           StepAction = "map-l2vni"
-    ActionMapL3VNI           StepAction = "map-l3vni"
-    ActionUnmapVNI           StepAction = "unmap-vni"
+    ActionSetupEVPN          StepAction = "setup-evpn"
+    ActionAddVRFInterface    StepAction = "add-vrf-interface"
+    ActionRemoveVRFInterface StepAction = "remove-vrf-interface"
+    ActionBindIPVPN          StepAction = "bind-ipvpn"
+    ActionUnbindIPVPN        StepAction = "unbind-ipvpn"
+    ActionBindMACVPN         StepAction = "bind-macvpn"
+    ActionUnbindMACVPN       StepAction = "unbind-macvpn"
+    ActionAddStaticRoute     StepAction = "add-static-route"
+    ActionRemoveStaticRoute  StepAction = "remove-static-route"
+    ActionRemoveVLANMember   StepAction = "remove-vlan-member"
+    ActionApplyQoS           StepAction = "apply-qos"
+    ActionRemoveQoS          StepAction = "remove-qos"
     ActionConfigureSVI       StepAction = "configure-svi"
     ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
     ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
@@ -181,11 +188,18 @@ const (
 | `add-vlan-member` | newtron | `Device.AddVLANMember()` |
 | `create-vrf` | newtron | `Device.CreateVRF()` |
 | `delete-vrf` | newtron | `Device.DeleteVRF()` |
-| `create-vtep` | newtron | `Device.CreateVTEP()` |
-| `delete-vtep` | newtron | `Device.DeleteVTEP()` |
-| `map-l2vni` | newtron | `Device.MapL2VNI()` |
-| `map-l3vni` | newtron | `Device.MapL3VNI()` |
-| `unmap-vni` | newtron | `Device.UnmapVNI()` |
+| `setup-evpn` | newtron | `Device.SetupEVPN()` |
+| `add-vrf-interface` | newtron | `Device.AddVRFInterface()` |
+| `remove-vrf-interface` | newtron | `Device.RemoveVRFInterface()` |
+| `bind-ipvpn` | newtron | `Device.BindIPVPN()` |
+| `unbind-ipvpn` | newtron | `Device.UnbindIPVPN()` |
+| `bind-macvpn` | newtron | `Device.BindMACVPN()` |
+| `unbind-macvpn` | newtron | `Device.UnbindMACVPN()` |
+| `add-static-route` | newtron | `Device.AddStaticRoute()` |
+| `remove-static-route` | newtron | `Device.RemoveStaticRoute()` |
+| `remove-vlan-member` | newtron | `Device.RemoveVLANMember()` |
+| `apply-qos` | newtron | `Device.ApplyQoS()` |
+| `remove-qos` | newtron | `Device.RemoveQoS()` |
 | `configure-svi` | newtron | `Device.ConfigureSVI()` |
 | `bgp-add-neighbor` | newtron | `Interface.AddBGPNeighbor()` / `Device.AddLoopbackBGPNeighbor()` |
 | `bgp-remove-neighbor` | newtron | `Interface.RemoveBGPNeighbor()` / `Device.RemoveBGPNeighbor()` |
@@ -342,11 +356,18 @@ func ValidateScenario(s *Scenario, topologiesDir string) error
 | `add-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
 | `create-vrf` | `devices`, `params.vrf` |
 | `delete-vrf` | `devices`, `params.vrf` |
-| `create-vtep` | `devices`, `params.source_ip` |
-| `delete-vtep` | `devices` |
-| `map-l2vni` | `devices`, `params.vlan_id`, `params.vni` |
-| `map-l3vni` | `devices`, `params.vrf`, `params.vni` |
-| `unmap-vni` | `devices`, `params.vni` |
+| `setup-evpn` | `devices` |
+| `add-vrf-interface` | `devices`, `params.vrf_name`, `params.interface` |
+| `remove-vrf-interface` | `devices`, `params.vrf_name`, `params.interface` |
+| `bind-ipvpn` | `devices`, `params.vrf_name`, `params.ipvpn_name` |
+| `unbind-ipvpn` | `devices`, `params.vrf_name` |
+| `bind-macvpn` | `devices`, `params.vlan_id`, `params.macvpn_name` |
+| `unbind-macvpn` | `devices`, `params.vlan_id` |
+| `add-static-route` | `devices`, `params.vrf_name`, `params.prefix`, `params.next_hop` |
+| `remove-static-route` | `devices`, `params.vrf_name`, `params.prefix` |
+| `remove-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
+| `apply-qos` | `devices`, `params.interface`, `params.policy_name` |
+| `remove-qos` | `devices`, `params.interface` |
 | `configure-svi` | `devices`, `params.vlan_id` |
 | `bgp-add-neighbor` | `devices`, `params.remote_asn` |
 | `bgp-remove-neighbor` | `devices`, `params.neighbor_ip` |
@@ -379,7 +400,7 @@ Maps YAML keys to Go struct fields for each action:
 | `vrf` | `Step.VRF` | verify-route |
 | `interface` | `Step.Interface` | apply-service, remove-service, set-interface, refresh-service, bgp-add-neighbor, bgp-remove-neighbor |
 | `service` | `Step.Service` | apply-service |
-| `params` | `Step.Params` | apply-service, set-interface, create-vlan, delete-vlan, add-vlan-member, create-vrf, delete-vrf, create-vtep, map-l2vni, map-l3vni, unmap-vni, configure-svi, bgp-add-neighbor, bgp-remove-neighbor, restart-service, cleanup |
+| `params` | `Step.Params` | apply-service, set-interface, create-vlan, delete-vlan, add-vlan-member, remove-vlan-member, create-vrf, delete-vrf, setup-evpn, add-vrf-interface, remove-vrf-interface, bind-ipvpn, unbind-ipvpn, bind-macvpn, unbind-macvpn, add-static-route, remove-static-route, apply-qos, remove-qos, configure-svi, bgp-add-neighbor, bgp-remove-neighbor, restart-service, cleanup |
 | `configlet` | `Step.Configlet` | apply-baseline |
 | `vars` | `Step.Vars` | apply-baseline |
 | `command` | `Step.Command` | ssh-command |
@@ -626,11 +647,18 @@ var executors = map[StepAction]StepExecutor{
     ActionAddVLANMember:      &addVLANMemberExecutor{},
     ActionCreateVRF:          &createVRFExecutor{},
     ActionDeleteVRF:          &deleteVRFExecutor{},
-    ActionCreateVTEP:         &createVTEPExecutor{},
-    ActionDeleteVTEP:         &deleteVTEPExecutor{},
-    ActionMapL2VNI:           &mapL2VNIExecutor{},
-    ActionMapL3VNI:           &mapL3VNIExecutor{},
-    ActionUnmapVNI:           &unmapVNIExecutor{},
+    ActionSetupEVPN:          &setupEVPNExecutor{},
+    ActionAddVRFInterface:    &addVRFInterfaceExecutor{},
+    ActionRemoveVRFInterface: &removeVRFInterfaceExecutor{},
+    ActionBindIPVPN:          &bindIPVPNExecutor{},
+    ActionUnbindIPVPN:        &unbindIPVPNExecutor{},
+    ActionBindMACVPN:         &bindMACVPNExecutor{},
+    ActionUnbindMACVPN:       &unbindMACVPNExecutor{},
+    ActionAddStaticRoute:     &addStaticRouteExecutor{},
+    ActionRemoveStaticRoute:  &removeStaticRouteExecutor{},
+    ActionRemoveVLANMember:   &removeVLANMemberExecutor{},
+    ActionApplyQoS:           &applyQoSExecutor{},
+    ActionRemoveQoS:          &removeQoSExecutor{},
     ActionConfigureSVI:       &configureSVIExecutor{},
     ActionBGPAddNeighbor:     &bgpAddNeighborExecutor{},
     ActionBGPRemoveNeighbor:  &bgpRemoveNeighborExecutor{},
@@ -1241,7 +1269,7 @@ func intParam(params map[string]any, key string) int
 func boolParam(params map[string]any, key string) bool
 ```
 
-These are used by all operation executors (§5.17–§5.32) to read action-specific parameters from YAML.
+These are used by all operation executors (§5.17–§5.40) to read action-specific parameters from YAML.
 
 ### 5.16 restartServiceExecutor
 
@@ -1328,57 +1356,127 @@ type deleteVRFExecutor struct{}
 
 Reads `params.vrf` via `strParam`. Returns ChangeSet.
 
-### 5.24 createVTEPExecutor
+### 5.24 setupEVPNExecutor
 
 ```go
-type createVTEPExecutor struct{}
+type setupEVPNExecutor struct{}
 ```
 
-**Wraps:** `Device.CreateVTEP(ctx, VTEPConfig{SourceIP})`
+**Wraps:** `Device.SetupEVPN(ctx, sourceIP)`
 
-Reads `params.source_ip` via `strParam`. Returns ChangeSet.
+Sets up the full EVPN overlay: VTEP, NVO, and BGP EVPN configuration. Reads optional `params.source_ip` via `strParam` (defaults to device loopback IP if empty). Returns ChangeSet.
 
-### 5.25 deleteVTEPExecutor
+### 5.25 addVRFInterfaceExecutor
 
 ```go
-type deleteVTEPExecutor struct{}
+type addVRFInterfaceExecutor struct{}
 ```
 
-**Wraps:** `Device.DeleteVTEP(ctx)`
+**Wraps:** `Device.AddVRFInterface(ctx, vrfName, intfName)`
 
-No params required. Returns ChangeSet.
+Binds an interface to a VRF. Reads `params.vrf_name` and `params.interface` via `strParam`. Returns ChangeSet.
 
-### 5.26 mapL2VNIExecutor
+### 5.26 removeVRFInterfaceExecutor
 
 ```go
-type mapL2VNIExecutor struct{}
+type removeVRFInterfaceExecutor struct{}
 ```
 
-**Wraps:** `Device.MapL2VNI(ctx, vlanID, vni)`
+**Wraps:** `Device.RemoveVRFInterface(ctx, vrfName, intfName)`
 
-Reads `params.vlan_id` and `params.vni` via `intParam`. Returns ChangeSet.
+Removes an interface from a VRF. Reads `params.vrf_name` and `params.interface` via `strParam`. Returns ChangeSet.
 
-### 5.27 mapL3VNIExecutor
+### 5.27 bindIPVPNExecutor
 
 ```go
-type mapL3VNIExecutor struct{}
+type bindIPVPNExecutor struct{}
 ```
 
-**Wraps:** `Device.MapL3VNI(ctx, vrfName, vni)`
+**Wraps:** `Device.BindIPVPN(ctx, vrfName, ipvpnName, ipvpnDef)`
 
-Reads `params.vrf` (string) and `params.vni` (int). Returns ChangeSet.
+Binds an IP-VPN definition to a VRF. Reads `params.vrf_name` and `params.ipvpn_name` via `strParam`. The IP-VPN definition is resolved from the network spec by name. Returns ChangeSet.
 
-### 5.28 unmapVNIExecutor
+### 5.28 unbindIPVPNExecutor
 
 ```go
-type unmapVNIExecutor struct{}
+type unbindIPVPNExecutor struct{}
 ```
 
-**Wraps:** `Device.UnmapVNI(ctx, vni)`
+**Wraps:** `Device.UnbindIPVPN(ctx, vrfName)`
 
-Reads `params.vni` via `intParam`. Returns ChangeSet.
+Unbinds the IP-VPN from a VRF. Reads `params.vrf_name` via `strParam`. Returns ChangeSet.
 
-### 5.29 configureSVIExecutor
+### 5.29 bindMACVPNExecutor
+
+```go
+type bindMACVPNExecutor struct{}
+```
+
+**Wraps:** `Device.BindMACVPN(ctx, vlanID, macvpnName, macvpnDef)`
+
+Binds a MAC-VPN definition to a VLAN. Reads `params.vlan_id` via `intParam` and `params.macvpn_name` via `strParam`. The MAC-VPN definition is resolved from the network spec by name. Returns ChangeSet.
+
+### 5.30 unbindMACVPNExecutor
+
+```go
+type unbindMACVPNExecutor struct{}
+```
+
+**Wraps:** `Device.UnbindMACVPN(ctx, vlanID)`
+
+Unbinds the MAC-VPN from a VLAN. Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
+
+### 5.31 addStaticRouteExecutor
+
+```go
+type addStaticRouteExecutor struct{}
+```
+
+**Wraps:** `Device.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)`
+
+Adds a static route to a VRF. Reads `params.vrf_name`, `params.prefix`, `params.next_hop` via `strParam` and optional `params.metric` via `intParam` (defaults to 0). Returns ChangeSet.
+
+### 5.32 removeStaticRouteExecutor
+
+```go
+type removeStaticRouteExecutor struct{}
+```
+
+**Wraps:** `Device.RemoveStaticRoute(ctx, vrfName, prefix)`
+
+Removes a static route from a VRF. Reads `params.vrf_name` and `params.prefix` via `strParam`. Returns ChangeSet.
+
+### 5.33 removeVLANMemberExecutor
+
+```go
+type removeVLANMemberExecutor struct{}
+```
+
+**Wraps:** `Device.RemoveVLANMember(ctx, vlanID, intfName)`
+
+Removes an interface from a VLAN. Reads `params.vlan_id` via `intParam` and `params.interface` via `strParam`. Returns ChangeSet.
+
+### 5.34 applyQoSExecutor
+
+```go
+type applyQoSExecutor struct{}
+```
+
+**Wraps:** `Device.ApplyQoS(ctx, intfName, policyName, policy)`
+
+Applies a QoS policy to an interface. Reads `params.interface` and `params.policy_name` via `strParam`. The QoS policy definition is resolved from the network spec by name. Returns ChangeSet.
+
+### 5.35 removeQoSExecutor
+
+```go
+type removeQoSExecutor struct{}
+```
+
+**Wraps:** `Device.RemoveQoS(ctx, intfName)`
+
+Removes QoS policy from an interface. Reads `params.interface` via `strParam`. Returns ChangeSet.
+
+### 5.36 configureSVIExecutor
 
 ```go
 type configureSVIExecutor struct{}
@@ -1388,7 +1486,7 @@ type configureSVIExecutor struct{}
 
 Reads `params.vlan_id` (int), optionally `params.vrf` (string) and `params.ip` (string) into `SVIConfig`. Returns ChangeSet.
 
-### 5.30 bgpAddNeighborExecutor
+### 5.37 bgpAddNeighborExecutor
 
 ```go
 type bgpAddNeighborExecutor struct{}
@@ -1400,7 +1498,7 @@ type bgpAddNeighborExecutor struct{}
 
 Reads `params.neighbor_ip` and `params.remote_asn` (int). Returns ChangeSet.
 
-### 5.31 bgpRemoveNeighborExecutor
+### 5.38 bgpRemoveNeighborExecutor
 
 ```go
 type bgpRemoveNeighborExecutor struct{}
@@ -1412,7 +1510,7 @@ type bgpRemoveNeighborExecutor struct{}
 
 Reads `params.neighbor_ip` via `strParam`. Returns ChangeSet.
 
-### 5.32 refreshServiceExecutor
+### 5.39 refreshServiceExecutor
 
 ```go
 type refreshServiceExecutor struct{}
@@ -1422,7 +1520,7 @@ type refreshServiceExecutor struct{}
 
 Requires `step.Interface`. Calls via `ExecuteOp`. Returns ChangeSet.
 
-### 5.33 cleanupExecutor
+### 5.40 cleanupExecutor
 
 ```go
 type cleanupExecutor struct{}
@@ -1983,17 +2081,22 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 | §5.3 `HealthCheckResult` (within Operation Configuration Types) | Health check status interpretation |
 | §5.4 `TopologyProvisioner.ProvisionDevice()` | provisionExecutor |
 | §5.1 `Interface.Set/SetIP/SetVRF()` | setInterfaceExecutor (§5.18) |
-| §5.1 `Interface.AddBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.30), bgpRemoveNeighborExecutor (§5.31) |
-| §5.1 `Interface.RefreshService()` | refreshServiceExecutor (§5.32) |
+| §5.1 `Interface.AddBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.37), bgpRemoveNeighborExecutor (§5.38) |
+| §5.1 `Interface.RefreshService()` | refreshServiceExecutor (§5.39) |
 | §5.2 `Device.CreateVLAN/DeleteVLAN/AddVLANMember()` | §5.19–§5.21 |
+| §5.2 `Device.RemoveVLANMember()` | removeVLANMemberExecutor (§5.33) |
 | §5.2 `Device.CreateVRF/DeleteVRF()` | §5.22–§5.23 |
-| §5.2 `Device.CreateVTEP/DeleteVTEP()` | §5.24–§5.25 |
-| §5.2 `Device.MapL2VNI/MapL3VNI/UnmapVNI()` | §5.26–§5.28 |
-| §5.2 `Device.ConfigureSVI()` | configureSVIExecutor (§5.29) |
-| §5.2 `Device.Cleanup()` | cleanupExecutor (§5.33) |
+| §5.2 `Device.SetupEVPN()` | setupEVPNExecutor (§5.24) |
+| §5.2 `Device.AddVRFInterface/RemoveVRFInterface()` | §5.25–§5.26 |
+| §5.2 `Device.BindIPVPN/UnbindIPVPN()` | §5.27–§5.28 |
+| §5.2 `Device.BindMACVPN/UnbindMACVPN()` | §5.29–§5.30 |
+| §5.2 `Device.AddStaticRoute/RemoveStaticRoute()` | §5.31–§5.32 |
+| §5.2 `Device.ApplyQoS/RemoveQoS()` | §5.34–§5.35 |
+| §5.2 `Device.ConfigureSVI()` | configureSVIExecutor (§5.36) |
+| §5.2 `Device.Cleanup()` | cleanupExecutor (§5.40) |
 | §5.2 `Device.RestartService()` | restartServiceExecutor (§5.16) |
 | §5.2 `Device.ApplyFRRDefaults()` | applyFRRDefaultsExecutor (§5.17) |
-| §5.2 `Device.AddLoopbackBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.30), bgpRemoveNeighborExecutor (§5.31) |
+| §5.2 `Device.AddLoopbackBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.37), bgpRemoveNeighborExecutor (§5.38) |
 
 ### References to Device Layer LLD
 
@@ -2026,4 +2129,19 @@ Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status`
 | §9 Report format | §7.6 Markdown report format |
 | §10 CLI | §8 CLI implementation |
 | §12 Implementation phases | All sections (phased delivery) |
+
+---
+
+## Appendix A: Changelog
+
+### v8 — V2 CLI Action Alignment
+
+| Change | Details |
+|--------|---------|
+| Deleted 5 actions | `create-vtep`, `delete-vtep`, `map-l2vni`, `map-l3vni`, `unmap-vni` — replaced by higher-level V2 CLI operations |
+| Added 12 actions | `setup-evpn`, `add-vrf-interface`, `remove-vrf-interface`, `bind-ipvpn`, `unbind-ipvpn`, `bind-macvpn`, `unbind-macvpn`, `add-static-route`, `remove-static-route`, `remove-vlan-member`, `apply-qos`, `remove-qos` |
+| Action count | 31 &rarr; 38 |
+| Executor sections | §5.24–§5.28 replaced; §5.24–§5.35 are new executors; §5.36–§5.40 renumbered from §5.29–§5.33 |
+| Suite scenarios | 27 &rarr; 31 incremental (added 27-30: vrf-interface-binding, static-route, vlan-member-remove, qos-apply-remove); renamed 08 vtep-lifecycle &rarr; evpn-setup, 09 evpn-vni-mapping &rarr; evpn-vpn-binding |
+| Standalone scenarios | Added `evpn-overlay` (end-to-end overlay test) |
 
