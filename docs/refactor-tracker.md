@@ -96,25 +96,25 @@ Complete Phase A first. Then these can run in parallel, with one sync after Trac
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 1.6 | **Unify ChangeType**: Define single `ChangeType` in `pkg/device/` (canonical). Have `pkg/network/changeset.go` use `device.ChangeType` directly instead of its own duplicate. Delete `network.ChangeTypeAdd/Modify/Delete`. This changes imports in changeset.go only — no public API change. | `pkg/network/changeset.go`, `pkg/device/device.go` | N-04, D-03 | NOT STARTED |
-| 1.7 | **Split device_ops.go**: Into `vlan_ops.go`, `portchannel_ops.go`, `vrf_ops.go`, `acl_ops.go`, `evpn_ops.go`, `bgp_ops.go`, `port_ops.go`, `health.go`, `qos_ops.go`. Move config types to co-locate with operations. Pure file reorganization — zero logic changes. | `pkg/network/device_ops.go` → 8+ files | N-01 | NOT STARTED |
-| 1.8 | **Split interface_ops.go**: Into `service_ops.go` (ApplyService/RemoveService/RefreshService), `dependency.go` (DependencyChecker), `interface_bgp.go` (BGP neighbor ops). | `pkg/network/interface_ops.go` → 3+ files | N-02 | NOT STARTED |
-| 1.9 | **Replace KEYS * with SCAN**: In `pkg/device/configdb.go` ConfigDBClient.GetAll() and `pkg/device/statedb.go` StateDBClient.GetAll(). Use cursor-based SCAN with per-table patterns. | `pkg/device/configdb.go`, `pkg/device/statedb.go` | D-01 | NOT STARTED |
+| 1.6 | **Unify ChangeType** (network uses device.ChangeType) | `pkg/network/changeset.go` | N-04, D-03 | DONE ✓ |
+| 1.7 | **Split device_ops.go** (2139→40 lines, 9 domain files) | `pkg/network/` (12 new files) | N-01 | DONE ✓ |
+| 1.8 | **Split interface_ops.go** (1723→75 lines, 3 domain files) | `pkg/network/` (3 new files) | N-02 | DONE ✓ |
+| 1.9 | **Replace KEYS * with SCAN** (scanKeys helper) | `pkg/device/configdb.go`, `pkg/device/statedb.go` | D-01 | DONE ✓ |
 
 ### Track 3 continued
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 3.7 | **Fix unquoted paths in remote commands**: `disk.go:30-31` doesn't quote paths in qemu-img create. `disk.go:63-64` uses unquoted path in `rm -rf`. Use `quoteArgs` or single-quote paths. | `pkg/newtlab/disk.go` | DK-1, DK-3 | NOT STARTED |
-| 3.8 | **Cache os.UserHomeDir()**: Called in 5 places with error silently discarded (state.go:51, state.go:96, disk.go:74, disk.go:82, remote.go:86). Cache in package-level var with proper error handling. | `pkg/newtlab/state.go`, `pkg/newtlab/disk.go`, `pkg/newtlab/remote.go` | ST-1, DK-2, X-4 | NOT STARTED |
+| 3.7 | **Fix unquoted paths** (shellQuote helper) | `pkg/newtlab/disk.go`, `bridge.go`, `qemu.go`, `remote.go` | DK-1, DK-3 | DONE ✓ |
+| 3.8 | **Cache os.UserHomeDir()** (sync.Once + error propagation) | `pkg/newtlab/remote.go`, `state.go`, `disk.go` | ST-1, DK-2, X-4 | DONE ✓ |
 
 ### Track 4 continued
 
 | # | Item | Files | Audit ID | Status |
 |---|------|-------|----------|--------|
-| 4.8 | **Derive validActions from executors**: `scenario.go:107-146` `validActions` map must be manually synced with `steps.go` executors map. Instead: `func init() { for k := range executors { validActions[k] = true } }`. | `pkg/newtest/scenario.go`, `pkg/newtest/steps.go` | SC-01, X-02 | NOT STARTED |
-| 4.9 | **Deduplicate suite resolvers**: `resolveSuiteForStop` (cmd_stop.go:80-97) and `resolveSuiteForControl` (cmd_pause.go) share logic. Unify into `resolveSuite(filter func(RunStatus) bool)`. Also export `IsProcessAlive` from pkg/newtest and delete CLI duplicate `isProcAlive`. | `cmd/newtest/cmd_stop.go`, `cmd/newtest/cmd_pause.go`, `pkg/newtest/state.go` | T-01, P-01 | NOT STARTED |
-| 4.10 | **Use typed status constants in cmd_status.go**: Lines 137-147 compare against raw strings "PASS"/"FAIL"/"ERROR"/"SKIP" instead of `newtest.StatusPassed` etc. | `cmd/newtest/cmd_status.go` | ST-01 | NOT STARTED |
+| 4.8 | **Derive validActions from executors** (init()) | `pkg/newtest/scenario.go` | SC-01, X-02 | DONE ✓ |
+| 4.9 | **Deduplicate suite resolvers** (unified resolveSuite + export IsProcessAlive) | `cmd/newtest/helpers.go`, `cmd_pause.go`, `cmd_stop.go`, `pkg/newtest/state.go` | T-01, P-01 | DONE ✓ |
+| 4.10 | **Use typed status constants** | `cmd/newtest/cmd_status.go` | ST-01 | DONE ✓ |
 
 **Sync point**: After Track 1 Phase B merges (1.6 ChangeType unification), check if newtest steps.go needs import updates. Track 1.7/1.8 (file splitting) is invisible to importers (same package).
 
@@ -126,8 +126,8 @@ These items change public function signatures. Do them one at a time, updating a
 
 | # | Item | Files | Depends On | Audit ID | Status |
 |---|------|-------|------------|----------|--------|
-| C.1 | **Add context.Context to newtlab public API**: Add `ctx context.Context` as first param to `Lab.Deploy`, `Lab.Destroy`, `Lab.Start`, `Lab.Stop`, `Lab.Provision`, `WaitForSSH`, `BootstrapNetwork`, `ApplyBootPatches`. Wire cancellation through goroutines. Then update callers: `cmd/newtlab/` and `pkg/newtest/deploy.go`. | `pkg/newtlab/*.go`, `cmd/newtlab/*.go`, `pkg/newtest/deploy.go` | Phase A+B complete | X-1 (newtlab) | NOT STARTED |
-| C.2 | **Delete interactive.go**: 1036 lines of parallel CLI implementation. Marked `Hidden: true`. Entire file duplicates noun-group CLI. If keeping, refactor to call same operation functions as noun-group commands. Decide: delete or refactor. | `cmd/newtron/interactive.go`, `cmd/newtron/main.go` | Track 2 Phase A | D-01, D-02, S-02 | NOT STARTED |
+| C.1 | **Add context.Context to newtlab public API**: Add `ctx context.Context` as first param to `Lab.Deploy`, `Lab.Destroy`, `Lab.Start`, `Lab.Stop`, `Lab.Provision`, `WaitForSSH`, `BootstrapNetwork`, `ApplyBootPatches`. Wire cancellation through goroutines. Then update callers: `cmd/newtlab/` and `pkg/newtest/deploy.go`. | `pkg/newtlab/*.go`, `cmd/newtlab/*.go`, `pkg/newtest/deploy.go` | Phase A+B complete | X-1 (newtlab) | DONE ✓ |
+| C.2 | **Delete interactive.go**: 1036 lines of parallel CLI implementation. Marked `Hidden: true`. Entire file duplicates noun-group CLI. If keeping, refactor to call same operation functions as noun-group commands. Decide: delete or refactor. | `cmd/newtron/interactive.go`, `cmd/newtron/main.go` | Track 2 Phase A | D-01, D-02, S-02 | DONE ✓ |
 | C.3 | **Resolve model types usage**: `pkg/model/` rich domain types (BGPConfig, VTEP, VRF, PortChannel, etc.) are largely unused — backend ops work with raw `map[string]string`. Decide: (a) wire ops to use model types, (b) deprecate, (c) remove. | `pkg/model/*.go`, `pkg/network/device_ops.go` | Phase B complete | M-03, X-02, X-03 | NOT STARTED |
 | C.4 | **Wire auth enforcement or document as aspirational**: `RequirePermission` has zero production call sites. The entire auth system is defined, tested, but never enforced. Either add `RequirePermission` calls to CLI write commands, or add a doc comment marking it as aspirational. | `pkg/auth/checker.go`, `cmd/newtron/*.go` | Phase A Track 2 | A-3 | NOT STARTED |
 | C.5 | **Refactor CLI globals into App struct**: 6 mutable globals shared across 20 files. Long-term: wrap in `App` struct, pass through cobra context. Makes CLI testable. | `cmd/newtron/*.go` (all 20 files) | Phase C.2 (less files after interactive.go gone) | S-01 | NOT STARTED |
@@ -147,8 +147,10 @@ After each track/phase:
 ## Notes for Future Sessions
 
 1. **Phase A DONE** — committed as 3b9ed0f. 28 items, 46 files, -2027 net lines.
-2. **Audit docs committed** as 0419197.
-3. **Items 1.7/1.8 (file splitting)** should be the largest Phase B changes — device_ops.go and interface_ops.go are big files.
-4. **Item 1.9 (KEYS * → SCAN)** — only matters for production with large CONFIG_DB. Safe to do as internal change.
-5. **Phase B sync point**: After 1.6 (ChangeType unification), check if newtest steps.go needs import updates.
-6. **Interactive.go deletion (C.2)** should be a user decision — it's 1036 lines that could be useful as a TUI if someone wants to invest in it.
+2. **Phase B DONE** — committed as a3092e0. 9 items, 31 files (12 new), -3824 net lines.
+3. **Audit docs committed** as 0419197.
+4. **Phase C.1+C.2 DONE** — committed as ca9d918. 12 files, -987 net lines. Context threading + interactive.go deletion.
+5. **Phase C remaining** — 3 items (C.3, C.4, C.5), all require user decisions.
+6. **Model types resolution (C.3)** — needs design decision: wire ops to use rich types, deprecate, or remove.
+7. **Auth enforcement (C.4)** — needs decision: wire RequirePermission calls or document as aspirational.
+8. **CLI globals (C.5)** — unblocked now that C.2 is done. Wrap 6 mutable globals in App struct.
