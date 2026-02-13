@@ -136,88 +136,27 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	return results, nil
 }
 
-// runShared deploys once, connects once, and runs all scenarios with a shared
-// Runner. Skip propagation is applied based on requires.
-func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
-	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
+// scenarioRunner is a callback that executes a single scenario within the
+// iteration loop. It receives the resolved topology and platform names.
+type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error)
 
-	// Deploy: lifecycle mode uses EnsureTopology; legacy mode uses DeployTopology
-	if !opts.NoDeploy {
-		if opts.Suite != "" {
-			lab, _, err := EnsureTopology(ctx, specDir)
-			if err != nil {
-				var results []*ScenarioResult
-				for _, sc := range scenarios {
-					results = append(results, &ScenarioResult{
-						Name:        sc.Name,
-						Topology:    topology,
-						Platform:    sc.Platform,
-						Status:      StatusError,
-						DeployError: &InfraError{Op: "deploy", Err: err},
-					})
-				}
-				return results, nil
-			}
-			r.Lab = lab
-			// Lifecycle mode: never destroy — stop command handles that
-		} else {
-			lab, err := DeployTopology(ctx, specDir)
-			if err != nil {
-				var results []*ScenarioResult
-				for _, sc := range scenarios {
-					results = append(results, &ScenarioResult{
-						Name:        sc.Name,
-						Topology:    topology,
-						Platform:    sc.Platform,
-						Status:      StatusError,
-						DeployError: &InfraError{Op: "deploy", Err: err},
-					})
-				}
-				return results, nil
-			}
-			r.Lab = lab
-			if !opts.Keep {
-				defer func() { _ = DestroyTopology(context.Background(), r.Lab) }()
-			}
-		}
-	}
-
-	// SIGINT handling
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
-
-	// Connect devices once
-	if err := r.connectDevices(ctx, specDir); err != nil {
-		connectErr := err
-		if opts.NoDeploy {
-			connectErr = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
-		}
-		var results []*ScenarioResult
-		for _, sc := range scenarios {
-			results = append(results, &ScenarioResult{
-				Name:        sc.Name,
-				Topology:    topology,
-				Platform:    sc.Platform,
-				Status:      StatusError,
-				DeployError: connectErr,
-			})
-		}
-		return results, nil
-	}
-
-	r.ChangeSets = make(map[string]*network.ChangeSet)
-
+// iterateScenarios encapsulates the common scenario iteration loop used by both
+// runShared and runIndependent. It handles resume, pause, requires checks, and
+// progress reporting. The run callback performs the actual per-scenario execution.
+func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, run scenarioRunner) ([]*ScenarioResult, error) {
 	scenarioStatus := make(map[string]Status)
 	var results []*ScenarioResult
 
 	// Seed status map with completed scenarios from previous run (resume)
-	if opts.Completed != nil {
-		for name, st := range opts.Completed {
-			scenarioStatus[name] = st
-		}
+	for name, st := range opts.Completed {
+		scenarioStatus[name] = st
 	}
 
 	for i, sc := range scenarios {
+		topology := opts.Topology
+		if topology == "" {
+			topology = sc.Topology
+		}
 		platform := opts.Platform
 		if platform == "" {
 			platform = sc.Platform
@@ -263,6 +202,94 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 		idx := i
 		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, idx, len(scenarios)) })
 
+		result, err := run(ctx, sc, topology, platform)
+		if err != nil {
+			return results, err
+		}
+
+		results = append(results, result)
+		scenarioStatus[sc.Name] = result.Status
+		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+	}
+
+	return results, nil
+}
+
+// deployTopology deploys the lab topology using lifecycle mode (EnsureTopology)
+// or legacy mode (DeployTopology). It returns a cleanup function that should be
+// deferred by the caller; the cleanup is nil when no teardown is needed.
+func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
+	if opts.Suite != "" {
+		lab, _, err := EnsureTopology(ctx, specDir)
+		if err != nil {
+			return nil, err
+		}
+		r.Lab = lab
+		return nil, nil // lifecycle mode: stop command handles teardown
+	}
+	lab, err := DeployTopology(ctx, specDir)
+	if err != nil {
+		return nil, err
+	}
+	r.Lab = lab
+	if !opts.Keep {
+		return func() { _ = DestroyTopology(context.Background(), r.Lab) }, nil
+	}
+	return nil, nil
+}
+
+// runShared deploys once, connects once, and runs all scenarios with a shared
+// Runner. Skip propagation is applied based on requires.
+func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
+	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
+
+	// Deploy topology (unless --no-deploy)
+	if !opts.NoDeploy {
+		cleanup, err := r.deployTopology(ctx, specDir, opts)
+		if err != nil {
+			var results []*ScenarioResult
+			for _, sc := range scenarios {
+				results = append(results, &ScenarioResult{
+					Name:        sc.Name,
+					Topology:    topology,
+					Platform:    sc.Platform,
+					Status:      StatusError,
+					DeployError: &InfraError{Op: "deploy", Err: err},
+				})
+			}
+			return results, nil
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+	}
+
+	// SIGINT handling
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+
+	// Connect devices once
+	if err := r.connectDevices(ctx, specDir); err != nil {
+		connectErr := err
+		if opts.NoDeploy {
+			connectErr = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
+		}
+		var results []*ScenarioResult
+		for _, sc := range scenarios {
+			results = append(results, &ScenarioResult{
+				Name:        sc.Name,
+				Topology:    topology,
+				Platform:    sc.Platform,
+				Status:      StatusError,
+				DeployError: connectErr,
+			})
+		}
+		return results, nil
+	}
+
+	r.ChangeSets = make(map[string]*network.ChangeSet)
+
+	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
 		r.opts = RunOptions{
 			Topology: topology,
 			Platform: platform,
@@ -280,88 +307,16 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 		start := time.Now()
 		r.runScenarioSteps(ctx, sc, r.opts, result)
 		result.Duration = time.Since(start)
-
-		results = append(results, result)
-		scenarioStatus[sc.Name] = result.Status
-		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
-	}
-
-	return results, nil
+		return result, nil
+	})
 }
 
 // runIndependent runs each scenario with its own deploy/connect cycle.
 // Skip propagation is still applied based on requires.
 func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error) {
-	scenarioStatus := make(map[string]Status)
-	var results []*ScenarioResult
-
-	// Seed status map with completed scenarios from previous run (resume)
-	if opts.Completed != nil {
-		for name, st := range opts.Completed {
-			scenarioStatus[name] = st
-		}
-	}
-
-	for i, s := range scenarios {
-		topology := opts.Topology
-		if topology == "" {
-			topology = s.Topology
-		}
-		platform := opts.Platform
-		if platform == "" {
-			platform = s.Platform
-		}
-
-		// Resume: skip already-completed scenarios
-		if opts.Resume {
-			if prev, ok := opts.Completed[s.Name]; ok && prev == StatusPassed {
-				result := &ScenarioResult{
-					Name:       s.Name,
-					Topology:   topology,
-					Platform:   platform,
-					Status:     StatusSkipped,
-					SkipReason: "already passed (resumed)",
-				}
-				results = append(results, result)
-				idx := i
-				r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
-				continue
-			}
-		}
-
-		// Pause check
-		if opts.Suite != "" && CheckPausing(opts.Suite) {
-			return results, &PauseError{Completed: len(results)}
-		}
-
-		if reason := checkRequires(s, scenarioStatus); reason != "" {
-			result := &ScenarioResult{
-				Name:       s.Name,
-				Topology:   topology,
-				Platform:   platform,
-				Status:     StatusSkipped,
-				SkipReason: reason,
-			}
-			results = append(results, result)
-			scenarioStatus[s.Name] = StatusSkipped
-			idx := i
-			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
-			continue
-		}
-
-		idx := i
-		r.progress(func(p ProgressReporter) { p.ScenarioStart(s.Name, idx, len(scenarios)) })
-
-		result, err := r.RunScenario(ctx, s, opts)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-		scenarioStatus[s.Name] = result.Status
-		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
-	}
-
-	return results, nil
+	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+		return r.RunScenario(ctx, sc, opts)
+	})
 }
 
 // RunScenario executes a single scenario end-to-end.
@@ -385,27 +340,15 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
-		if opts.Suite != "" {
-			lab, _, err := EnsureTopology(ctx, specDir)
-			if err != nil {
-				result.DeployError = &InfraError{Op: "deploy", Err: err}
-				result.Status = StatusError
-				result.Duration = time.Since(start)
-				return result, nil
-			}
-			r.Lab = lab
-		} else {
-			lab, err := DeployTopology(ctx, specDir)
-			if err != nil {
-				result.DeployError = &InfraError{Op: "deploy", Err: err}
-				result.Status = StatusError
-				result.Duration = time.Since(start)
-				return result, nil
-			}
-			r.Lab = lab
-			if !opts.Keep {
-				defer func() { _ = DestroyTopology(context.Background(), r.Lab) }()
-			}
+		cleanup, err := r.deployTopology(ctx, specDir, opts)
+		if err != nil {
+			result.DeployError = &InfraError{Op: "deploy", Err: err}
+			result.Status = StatusError
+			result.Duration = time.Since(start)
+			return result, nil
+		}
+		if cleanup != nil {
+			defer cleanup()
 		}
 	}
 
