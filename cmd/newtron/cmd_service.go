@@ -249,10 +249,10 @@ Examples:
 			}
 			if svc != nil {
 				if svc.IngressFilter != "" {
-					fmt.Printf("  Ingress ACL: %s-in\n", derived.ACLNameBase)
+					fmt.Printf("  Ingress ACL: %s-in\n", derived.ACLPrefix)
 				}
 				if svc.EgressFilter != "" {
-					fmt.Printf("  Egress ACL: %s-out\n", derived.ACLNameBase)
+					fmt.Printf("  Egress ACL: %s-out\n", derived.ACLPrefix)
 				}
 			}
 			fmt.Println()

@@ -3045,7 +3045,7 @@ type DerivedValues struct {
     BroadcastAddr string
     SubnetMask    int
     VRFName       string
-    ACLNameBase   string
+    ACLPrefix     string
     Description   string
 }
 

@@ -3,6 +3,7 @@ package auth
 import (
 	"fmt"
 	"os/user"
+	"slices"
 
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -76,12 +77,7 @@ func (c *Checker) IsSuperUser() bool {
 }
 
 func (c *Checker) isSuperUser(username string) bool {
-	for _, su := range c.network.SuperUsers {
-		if su == username {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.network.SuperUsers, username)
 }
 
 func (c *Checker) checkServicePermission(username string, permission Permission, svc *spec.ServiceSpec) bool {
@@ -116,17 +112,12 @@ func (c *Checker) checkPermissionMap(username string, permission Permission, per
 
 func (c *Checker) userInGroups(username string, allowedGroups []string) bool {
 	for _, group := range allowedGroups {
-		// Check if it's a direct username match
 		if group == username {
 			return true
 		}
-
-		// Check if user is in the group
 		if members, ok := c.network.UserGroups[group]; ok {
-			for _, member := range members {
-				if member == username {
-					return true
-				}
+			if slices.Contains(members, username) {
+				return true
 			}
 		}
 	}

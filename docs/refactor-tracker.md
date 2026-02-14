@@ -1,7 +1,7 @@
 # Refactor Tracker — N-4 Code Quality
 
 **Created**: 2026-02-13
-**Source**: 5 audit documents totaling 190 findings (36 HIGH, 86 MEDIUM, 68 LOW)
+**Source**: 5 audit documents totaling ~257 findings (36 HIGH, 87 MEDIUM, ~134 LOW)
 **Audit docs**: `docs/newtron/refactor-audit-cli.md`, `docs/newtron/refactor-audit-backend.md`, `docs/newtron/refactor-audit-support.md`, `docs/newtlab/refactor-audit.md`, `docs/newtest/refactor-audit.md`
 
 ---
@@ -260,6 +260,132 @@ All structural rewrites complete. N-1, U-19, U-20 addressed.
 
 ---
 
+## LOW Findings Summary
+
+**Total**: ~134 LOW findings across 5 audit documents
+**Fixed**: 48 | **Already done**: 58 | **Skipped**: 28
+
+Round 1 committed as f72e06f. Round 2 (7 Support LOWs) committed separately.
+
+### CLI LOWs — 3 fixed, 5 already done, 4 skipped
+
+| Fixed | Details |
+|-------|---------|
+| N-01 | Moved `defaultStr` from cmd_acl.go to main.go (shared helper) |
+| N-02 | Renamed `intfArg` → `intfName` in cmd_service.go (13 sites) |
+| I-04 | Added `PermDeviceCleanup`, used in cmd_device.go cleanup command |
+
+Skipped: N-03 (naming aesthetic), I-06 (withDeviceRead low value), M-02 (configlet dir is feature request), M-04 (ACL priority is UX choice)
+
+### Backend LOWs — 7 fixed, 8 already done, 5 skipped
+
+| Fixed | Details |
+|-------|---------|
+| N-10 | Removed dead `VTEPConfig.UDPPort`, `VRFConfig.ImportRT/ExportRT` fields |
+| N-12 | Map-based seen-set dedup in `GetVRF` (replaces linear scan) |
+| N-14 | WRED magic numbers → `defaultWREDMinThreshold/MaxThreshold/DropProbility` |
+| N-15 | Lock TTL → `const defaultLockTTL = 3600` |
+| D-06 | `InterfaceIsLAGMember` uses `splitKey` + exact match |
+| S-03 | `splitEndpoint` → `strings.SplitN` |
+| S-04 | `ListServices`/`ListRegions` sorted for deterministic output |
+
+Skipped: N-06 (cross-pkg dedup adds coupling), N-16 (generics over-engineering), D-09 (structural rewrite), S-01 (TODO markers useful), X-03 (pkg/model deleted)
+
+### Support LOWs — 20 fixed, 30 already done, 6 skipped
+
+| Fixed | Details |
+|-------|---------|
+| A-05/A-06 | Deleted unused `ListPermissions`/`ListPermissionsForUser`/`GetUserGroups` |
+| A-09 | `isSuperUser`/`userInGroups` use `slices.Contains` |
+| A-10 | Replaced custom `contains`/`containsHelper` with `strings.Contains` in auth tests |
+| AU-08 | Log warning on `os.Remove` failure in `cleanupOldFiles` |
+| AU-12 | `rotate()` recovery: reopens original file if rename fails |
+| C-02 | `NO_COLOR` env var support in pkg/cli (per no-color.org) |
+| C-03 | Doc comments on all 5 exported color functions |
+| S-01 | Deleted trivial setters from settings.go; direct field assignment |
+| S-03 | `DefaultSettingsPath` fallback → `/tmp/newtron_settings.json` |
+| S-05 | Thread safety comment on Settings struct |
+| U-08 | Deleted dead `ValidateVLANID` |
+| U-16 | `NormalizeInterfaceName` sorted longest-first for deterministic matching |
+| U-17 | Deleted `ExpandInterfaceName` alias |
+| U-18 | Deleted `CoalesceInt` (zero callers) |
+| U-22 | `ValidateASN` magic number → `const maxASN` |
+| U-23 | Renamed `ACLNameBase` → `ACLPrefix` |
+| V-01 | Added `version_test.go` (TestDefaults, TestInfo) |
+| V-02 | Added `BuildDate` ldflags var + `Info()` formatter |
+| C-04 | `DotPad` negative width guard |
+
+Skipped: S-04 (standard conventions), AU-11 (structural coupling), U-04/U-19/U-21/U-24 (used in production / structural rewrites)
+
+### newtlab LOWs — 10 fixed, 12 already done, 8 skipped
+
+| Fixed | Details |
+|-------|---------|
+| S-01 | Removed `_ = labName` dead assignment in cmd_ssh.go |
+| D-01 | Sorted node names in deploy summary output |
+| N-04 | Extracted `cleanupAllRemoteHosts` helper (dedup Destroy/destroyExisting) |
+| N-05 | `destroyExisting` uses shared cleanup helper |
+| N-07 | Extracted `bgpRefreshDelay = 5 * time.Second` constant |
+| PR-01 | `fmt.Errorf` → `errors.New` for multi-line error in ProbeAllPorts |
+| PR-02 | Deleted `contains`/`containsStr` → `strings.Contains` in tests |
+| BR-02 | Added error check on bridge pid file write |
+| BO-02 | Moved buffer allocation outside polling loop in `readUntil` |
+| PF-02 | Added comment explaining RestoreProfiles asymmetry |
+
+Skipped: M-04 (anonymous struct simpler), B-01 (single use), ST-02 (backward compat), NO-01/L-01/L-02 (verbose but readable), Q-02/Q-03 (edge cases), BO-01/BO-03/BO-04/PA-02/R-01/R-02/BR-03 (doc-only/structural)
+
+### newtest LOWs — 8 fixed, 3 already done, 5 skipped
+
+| Fixed | Details |
+|-------|---------|
+| ST-02 | Removed no-op `dur = ""` assignment in cmd_status.go |
+| L-01 | Extracted shared `topoSummary` struct for topology parsing |
+| PA-03 | Exported `TopologicalSort`/`ValidateDependencyGraph`/`HasRequires` directly (deleted `*Exported` wrappers) |
+| PA-04 | `ValidateDependencyGraph` returns sorted result (eliminated double-sort) |
+| PA-05 | Extracted `DefaultVerifyTimeout`/`DefaultRouteTimeout`/`DefaultPingTimeout`/`DefaultPollInterval` constants |
+| SE-04 | Removed redundant BGP timeout defaults from verifyBGP executor |
+| RU-03 | `checkRequires` handles unresolved requirements |
+| X-03 | Extracted `resolveTopologyFromState` shared helper |
+
+Skipped: TO-01 (single use constant), RU-04 (unexporting breaks tests), RE-01 (intentional behavior), PR-01 (different types), PR-02 (intentional no-op)
+
+---
+
+## Over-Engineering (will not fix)
+
+Items across all audits that were evaluated and deliberately skipped as over-engineering — the proposed change adds complexity without proportional benefit.
+
+| ID | Summary | Reason |
+|----|---------|--------|
+| U-19 | Logger global rewrite | Already addressed by wrapper deletion |
+| U-21 | Split pkg/util/ into sub-packages | 6 files, marginal cohesion gain |
+| U-04 | Delete ComputeBroadcastAddr/ComputeNetworkAddr | NOT dead — used by DeriveFromInterface |
+| U-24 | Merge ParseIPWithMask and SplitIPMask | Different APIs for different contexts |
+| S-04 | File permissions as named constants | 0755/0644 are universally understood |
+| AU-11 | Decouple Event.Changes from network.Change | No other consumer exists |
+| N-06 | Consolidate splitKey into pkg/util/ | Adds cross-package coupling |
+| N-16 | Generic getSpec[T] for Get* methods | Hides type info, harder to read |
+| N-03 | Rename evpn flag variables | Naming aesthetic, no behavioral change |
+| D-09 | Split device.go into connection.go + frr.go | Scatters cohesive lifecycle |
+| I-06 | Extract withDeviceRead helper | 2-line pattern, not worth abstracting |
+| M-02 | Configlet dir via settings | Feature request, not refactor |
+| M-04 (cli) | ACL priority default | UX choice, not code quality |
+| M-04 (newtlab) | topoCounts anonymous struct | Simpler than defining a spec type |
+| B-01 | humanBytes to shared package | Single use |
+| ST-02 | Remove deprecated BridgePID | Backward compat |
+| NO-01 | Generic resolveField[T] | Verbose but readable |
+| L-01/L-02 | Move utility functions | Same package, no benefit |
+| Q-02/Q-03 | Refine process kill error handling | Edge cases |
+| BO-01/BO-03/BO-04 | Boot patch structural changes | Doc-only improvements |
+| PA-02/R-01/R-02/BR-03 | Structural/doc-only changes | Low value |
+| TO-01 | Description truncation constant | Single use |
+| RU-04 | Unexport Runner fields | Breaks tests |
+| RE-01 | Handle StatusSkipped | Intentional design |
+| PR-01 | Consolidate colorStatus | Different types |
+| PR-02 | Remove empty StepStart | Intentional no-op |
+
+---
+
 ## Completion Checklist
 
 After each track/phase:
@@ -279,7 +405,8 @@ After each track/phase:
 5. **Phase C.3 DONE** — committed as 0986858. Deleted pkg/model/ (10 files, 1131-line test). Moved ProtoMap→pkg/network/, QoSProfile→pkg/spec/.
 6. **Phase C.4 DONE** — committed as 064103f. Pruned 28 unused permission constants, removed dead helper functions.
 7. **Phase C.5 DONE** — committed as 2d4418b. 11 globals → App struct, 18 files updated.
-8. **ALL PHASES COMPLETE** — 190 findings addressed across 5 audit documents.
+8. **ALL PHASES COMPLETE** — HIGH and MEDIUM findings addressed across 5 audit documents.
 9. **D-02 parseEntry refactor DONE** — committed as 3610750. Table-driven `tableParsers` registry replaces 250-line switch. Fixed 11 tables that were initialized but never parsed (QoS, routing, SAG, DSCP/TC maps). Also fixed incomplete field assignments in existing parsers. Net -292 lines in configdb.go, +398 lines in configdb_parsers.go, +227 lines in configdb_parsers_test.go.
 10. **D-07 state-building merge DONE** — `PopulateDeviceState` now handles nil StateDB (config-only fallback), called unconditionally in `Connect()`/`Reload()`. Deleted dead code: `LoadState()`, `parseInterfaces()`, `parsePortChannels()`, `parseVLANs()`, `parseVRFs()`, `RefreshState()` (~220 lines from state.go). Added 2 `PopulateDeviceState` tests (nil + non-nil StateDB paths).
 11. **D-08 ConfigDB/StateDB init refactor DONE** — Reflection-based `initMaps()` replaces 42-line manual `newEmptyConfigDB()` and 13-line manual StateDB init. StateDB parser registry (`stateTableParsers`, 15 entries) in `statedb_parsers.go` replaces 13-case switch. Added `TestNewEmptyStateDB`, `TestStateParsers_AllTablesRegistered`, `TestStateDB_ParseEntry` (6 tables).
+12. **LOW findings round DONE** — committed as f72e06f. 41 fixed, 58 already done, 35 skipped. 38 files, -188 net lines. Dead code removal, magic number extraction, dedup helpers, deterministic output, test cleanup. **Refactor complete across all priorities.**

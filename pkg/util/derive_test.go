@@ -61,8 +61,8 @@ func TestDeriveFromInterface(t *testing.T) {
 				if got.VRFName != tt.checkVRF {
 					t.Errorf("DeriveFromInterface() VRFName = %q, want %q", got.VRFName, tt.checkVRF)
 				}
-				if tt.checkACL != "" && got.ACLNameBase != tt.checkACL {
-					t.Errorf("DeriveFromInterface() ACLNameBase = %q, want %q", got.ACLNameBase, tt.checkACL)
+				if tt.checkACL != "" && got.ACLPrefix != tt.checkACL {
+					t.Errorf("DeriveFromInterface() ACLPrefix = %q, want %q", got.ACLPrefix, tt.checkACL)
 				}
 			}
 		})

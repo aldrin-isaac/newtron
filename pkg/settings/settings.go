@@ -10,7 +10,8 @@ import (
 // DefaultSpecDir is the default specification directory used when no override is configured.
 const DefaultSpecDir = "/etc/newtron"
 
-// Settings holds persistent user preferences
+// Settings holds persistent user preferences.
+// Settings is not goroutine-safe; callers must synchronize concurrent access.
 type Settings struct {
 	// DefaultNetwork is the network to use when -n is not specified
 	DefaultNetwork string `json:"default_network,omitempty"`

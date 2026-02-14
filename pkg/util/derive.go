@@ -19,7 +19,7 @@ type DerivedValues struct {
 	SubnetMask    int    // Subnet mask length
 	VRFName       string // Auto-generated VRF name
 	Description   string // Auto-generated description
-	ACLNameBase   string // Base name for ACLs
+	ACLPrefix     string // Prefix for per-interface ACL names (append "-in"/"-out")
 }
 
 // DeriveFromInterface derives values from interface name, IP, and service name
@@ -43,7 +43,7 @@ func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, 
 	d.VRFName = serviceName + "-" + shortIntf
 
 	// Generate ACL base name (using short names)
-	d.ACLNameBase = serviceName + "-" + shortIntf
+	d.ACLPrefix = serviceName + "-" + shortIntf
 
 	return d, nil
 }
