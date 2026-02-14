@@ -100,307 +100,132 @@ func requireDevices(prefix string, step *Step) error {
 	return nil
 }
 
-// validateStepFields checks required fields per action type.
-func validateStepFields(scenario string, index int, step *Step) error {
-	prefix := fmt.Sprintf("scenario %s step %d (%s)", scenario, index, step.Name)
+// stepValidation declares what fields/params each action requires.
+type stepValidation struct {
+	needsDevices  bool     // must have a device selector
+	singleDevice  bool     // exactly one device required (implies needsDevices)
+	fields        []string // required step-level fields: "interface", "service", "table", etc.
+	params        []string // required params map keys
+	custom        func(prefix string, step *Step) error
+}
 
-	switch step.Action {
-	case ActionProvision:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionWait:
+// stepValidations is the declarative validation table for all step actions.
+// Actions not listed here have no field requirements.
+var stepValidations = map[StepAction]stepValidation{
+	ActionWait: {custom: func(prefix string, step *Step) error {
 		if step.Duration == 0 {
 			return fmt.Errorf("%s: duration is required", prefix)
 		}
-	case ActionVerifyProvisioning:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionVerifyConfigDB:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Table == "" {
-			return fmt.Errorf("%s: table is required", prefix)
-		}
+		return nil
+	}},
+	ActionProvision:         {needsDevices: true},
+	ActionVerifyProvisioning: {needsDevices: true},
+	ActionVerifyBGP:         {needsDevices: true},
+	ActionVerifyHealth:      {needsDevices: true},
+	ActionApplyFRRDefaults:  {needsDevices: true},
+	ActionCleanup:           {needsDevices: true},
+	ActionVerifyConfigDB: {needsDevices: true, fields: []string{"table"}, custom: func(prefix string, step *Step) error {
 		if step.Expect == nil {
 			return fmt.Errorf("%s: expect is required", prefix)
 		}
 		if step.Expect.MinEntries == nil && step.Expect.Exists == nil && len(step.Expect.Fields) == 0 {
 			return fmt.Errorf("%s: expect must have min_entries, exists, or fields", prefix)
 		}
-	case ActionVerifyStateDB:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Table == "" {
-			return fmt.Errorf("%s: table is required", prefix)
-		}
-		if step.Key == "" {
-			return fmt.Errorf("%s: key is required", prefix)
-		}
+		return nil
+	}},
+	ActionVerifyStateDB: {needsDevices: true, fields: []string{"table", "key"}, custom: func(prefix string, step *Step) error {
 		if step.Expect == nil || len(step.Expect.Fields) == 0 {
 			return fmt.Errorf("%s: expect.fields is required", prefix)
 		}
-	case ActionVerifyBGP:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionVerifyHealth:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionVerifyRoute:
+		return nil
+	}},
+	ActionVerifyRoute:        {singleDevice: true, fields: []string{"prefix", "vrf"}},
+	ActionVerifyPing:         {singleDevice: true, fields: []string{"target"}},
+	ActionApplyService:       {needsDevices: true, fields: []string{"interface", "service"}},
+	ActionRemoveService:      {needsDevices: true, fields: []string{"interface"}},
+	ActionApplyBaseline:      {needsDevices: true, fields: []string{"configlet"}},
+	ActionSSHCommand:         {needsDevices: true, fields: []string{"command"}},
+	ActionRestartService:     {needsDevices: true, fields: []string{"service"}},
+	ActionRefreshService:     {needsDevices: true, fields: []string{"interface"}},
+	ActionSetInterface:       {needsDevices: true, fields: []string{"interface"}, params: []string{"property"}},
+	ActionCreateVLAN:         {needsDevices: true, params: []string{"vlan_id"}},
+	ActionDeleteVLAN:         {needsDevices: true, params: []string{"vlan_id"}},
+	ActionAddVLANMember:      {needsDevices: true, params: []string{"vlan_id", "interface"}},
+	ActionRemoveVLANMember:   {needsDevices: true, params: []string{"vlan_id", "interface"}},
+	ActionCreateVRF:          {needsDevices: true, params: []string{"vrf"}},
+	ActionDeleteVRF:          {needsDevices: true, params: []string{"vrf"}},
+	ActionSetupEVPN:          {needsDevices: true, params: []string{"source_ip"}},
+	ActionAddVRFInterface:    {needsDevices: true, params: []string{"vrf", "interface"}},
+	ActionRemoveVRFInterface: {needsDevices: true, params: []string{"vrf", "interface"}},
+	ActionBindIPVPN:          {needsDevices: true, params: []string{"vrf", "ipvpn"}},
+	ActionUnbindIPVPN:        {needsDevices: true, params: []string{"vrf"}},
+	ActionBindMACVPN:         {needsDevices: true, params: []string{"vlan_id", "macvpn"}},
+	ActionUnbindMACVPN:       {needsDevices: true, params: []string{"vlan_id"}},
+	ActionAddStaticRoute:     {needsDevices: true, params: []string{"vrf", "prefix", "next_hop"}},
+	ActionRemoveStaticRoute:  {needsDevices: true, params: []string{"vrf", "prefix"}},
+	ActionApplyQoS:           {needsDevices: true, params: []string{"interface", "qos_policy"}},
+	ActionRemoveQoS:          {needsDevices: true, params: []string{"interface"}},
+	ActionConfigureSVI:       {needsDevices: true, params: []string{"vlan_id"}},
+	ActionBGPAddNeighbor:     {needsDevices: true, params: []string{"remote_asn"}},
+	ActionBGPRemoveNeighbor:  {needsDevices: true, params: []string{"neighbor_ip"}},
+}
+
+// stepFieldGetter maps step-level field names to their accessor functions.
+var stepFieldGetter = map[string]func(*Step) string{
+	"interface": func(s *Step) string { return s.Interface },
+	"service":   func(s *Step) string { return s.Service },
+	"table":     func(s *Step) string { return s.Table },
+	"key":       func(s *Step) string { return s.Key },
+	"prefix":    func(s *Step) string { return s.Prefix },
+	"vrf":       func(s *Step) string { return s.VRF },
+	"target":    func(s *Step) string { return s.Target },
+	"configlet": func(s *Step) string { return s.Configlet },
+	"command":   func(s *Step) string { return s.Command },
+}
+
+// validateStepFields checks required fields per action type using the
+// stepValidations table.
+func validateStepFields(scenario string, index int, step *Step) error {
+	prefix := fmt.Sprintf("scenario %s step %d (%s)", scenario, index, step.Name)
+
+	v, ok := stepValidations[step.Action]
+	if !ok {
+		return nil // no validation rules for this action
+	}
+
+	// Check device requirements
+	if v.singleDevice {
 		devices := step.Devices.Resolve(nil)
 		if !step.Devices.All && len(devices) != 1 {
-			return fmt.Errorf("%s: verify-route requires exactly one device", prefix)
+			return fmt.Errorf("%s: %s requires exactly one device", prefix, step.Action)
 		}
-		if step.Prefix == "" {
-			return fmt.Errorf("%s: prefix is required", prefix)
-		}
-		if step.VRF == "" {
-			return fmt.Errorf("%s: vrf is required", prefix)
-		}
-	case ActionVerifyPing:
-		devices := step.Devices.Resolve(nil)
-		if !step.Devices.All && len(devices) != 1 {
-			return fmt.Errorf("%s: verify-ping requires exactly one device", prefix)
-		}
-		if step.Target == "" {
-			return fmt.Errorf("%s: target is required", prefix)
-		}
-	case ActionApplyService:
+	} else if v.needsDevices {
 		if err := requireDevices(prefix, step); err != nil {
 			return err
 		}
-		if step.Interface == "" {
-			return fmt.Errorf("%s: interface is required", prefix)
+	}
+
+	// Check required step-level fields
+	for _, field := range v.fields {
+		getter, exists := stepFieldGetter[field]
+		if !exists {
+			return fmt.Errorf("%s: unknown validation field %q (bug)", prefix, field)
 		}
-		if step.Service == "" {
-			return fmt.Errorf("%s: service is required", prefix)
+		if getter(step) == "" {
+			return fmt.Errorf("%s: %s is required", prefix, field)
 		}
-	case ActionRemoveService:
-		if err := requireDevices(prefix, step); err != nil {
+	}
+
+	// Check required params
+	for _, key := range v.params {
+		if err := requireParam(prefix, step.Params, key); err != nil {
 			return err
 		}
-		if step.Interface == "" {
-			return fmt.Errorf("%s: interface is required", prefix)
-		}
-	case ActionApplyBaseline:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Configlet == "" {
-			return fmt.Errorf("%s: configlet is required", prefix)
-		}
-	case ActionSSHCommand:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Command == "" {
-			return fmt.Errorf("%s: command is required", prefix)
-		}
-	case ActionRestartService:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Service == "" {
-			return fmt.Errorf("%s: service is required", prefix)
-		}
-	case ActionApplyFRRDefaults:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-	case ActionSetInterface:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Interface == "" {
-			return fmt.Errorf("%s: interface is required", prefix)
-		}
-		if err := requireParam(prefix, step.Params, "property"); err != nil {
-			return err
-		}
-	case ActionCreateVLAN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-	case ActionDeleteVLAN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-	case ActionAddVLANMember:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-	case ActionCreateVRF:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-	case ActionDeleteVRF:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-	case ActionSetupEVPN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "source_ip"); err != nil {
-			return err
-		}
-	case ActionAddVRFInterface:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-	case ActionRemoveVRFInterface:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-	case ActionBindIPVPN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "ipvpn"); err != nil {
-			return err
-		}
-	case ActionUnbindIPVPN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-	case ActionBindMACVPN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "macvpn"); err != nil {
-			return err
-		}
-	case ActionUnbindMACVPN:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-	case ActionAddStaticRoute:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "prefix"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "next_hop"); err != nil {
-			return err
-		}
-	case ActionRemoveStaticRoute:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vrf"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "prefix"); err != nil {
-			return err
-		}
-	case ActionRemoveVLANMember:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-	case ActionApplyQoS:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "qos_policy"); err != nil {
-			return err
-		}
-	case ActionRemoveQoS:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "interface"); err != nil {
-			return err
-		}
-	case ActionConfigureSVI:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "vlan_id"); err != nil {
-			return err
-		}
-	case ActionBGPAddNeighbor:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "remote_asn"); err != nil {
-			return err
-		}
-	case ActionBGPRemoveNeighbor:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if err := requireParam(prefix, step.Params, "neighbor_ip"); err != nil {
-			return err
-		}
-	case ActionRefreshService:
-		if err := requireDevices(prefix, step); err != nil {
-			return err
-		}
-		if step.Interface == "" {
-			return fmt.Errorf("%s: interface is required", prefix)
-		}
-	case ActionCleanup:
-		if err := requireDevices(prefix, step); err != nil {
+	}
+
+	// Run custom validation if present
+	if v.custom != nil {
+		if err := v.custom(prefix, step); err != nil {
 			return err
 		}
 	}
