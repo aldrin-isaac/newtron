@@ -15,7 +15,16 @@ func newProvisionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provision [topology]",
 		Short: "Provision devices via newtron",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Run newtron provisioning on deployed VMs.
+
+This invokes 'newtron provision -xs' on each device in the topology,
+delivering the CONFIG_DB derived from spec files. Equivalent to the
+--provision flag on 'newtlab deploy'.
+
+  newtlab provision 2node
+  newtlab provision 2node --device leaf1    # single device
+  newtlab provision 2node --parallel 4      # parallel provisioning`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := resolveSpecDir(args)
 			if err != nil {

@@ -25,14 +25,21 @@ func main() {
 		Short: "E2E testing for newtron",
 		Long: `Newtest runs end-to-end test scenarios against newtron-managed topologies.
 
-Scenarios are YAML files that define steps (provision, configure, verify).
+A suite is a directory of YAML scenario files (e.g., "2node-incremental").
+Each scenario defines steps like provision, configure, and verify.
+Suites can be specified by name (resolved under newtest/suites/) or by path.
 
-  newtest list                       # show available suites
-  newtest list 2node-incremental     # show scenarios in a suite
-  newtest start 2node-incremental    # deploy topology and run all scenarios
+Lifecycle:
+  newtest start <suite>              # deploy topology, run all scenarios
   newtest status                     # check progress
   newtest pause                      # stop after current scenario
-  newtest stop                       # tear down topology`,
+  newtest start <suite>              # resume from where it left off
+  newtest stop                       # tear down topology and clean state
+
+Discovery:
+  newtest list                       # show available suites
+  newtest list <suite>               # show scenarios in a suite
+  newtest topologies                 # show available topologies`,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},

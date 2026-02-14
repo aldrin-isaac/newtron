@@ -12,7 +12,14 @@ func newStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop <node>",
 		Short: "Stop a VM (preserves disk)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Stop a running VM by killing its QEMU process.
+
+The overlay disk is preserved, so the VM can be restarted with
+'newtlab start' without losing state.
+
+  newtlab stop leaf1
+  newtlab start leaf1     # resume from saved disk`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeName := args[0]
 
@@ -35,7 +42,13 @@ func newStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start <node>",
 		Short: "Start a stopped VM",
-		Args:  cobra.ExactArgs(1),
+		Long: `Start a previously stopped VM.
+
+Launches QEMU using the existing overlay disk and waits for SSH
+connectivity before returning.
+
+  newtlab start leaf1`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeName := args[0]
 

@@ -50,14 +50,22 @@ var vrfListCmd = &cobra.Command{
 
 		if app.jsonOutput {
 			var vrfs []*network.VRFInfo
+			skipped := 0
 			for _, name := range vrfNames {
 				vrf, err := dev.GetVRF(name)
 				if err != nil {
+					skipped++
 					continue
 				}
 				vrfs = append(vrfs, vrf)
 			}
-			return json.NewEncoder(os.Stdout).Encode(vrfs)
+			if err := json.NewEncoder(os.Stdout).Encode(vrfs); err != nil {
+				return err
+			}
+			if skipped > 0 {
+				fmt.Fprintf(os.Stderr, "warning: %d VRF(s) could not be read\n", skipped)
+			}
+			return nil
 		}
 
 		if len(vrfNames) == 0 {
@@ -69,9 +77,11 @@ var vrfListCmd = &cobra.Command{
 		fmt.Fprintln(w, "NAME\tL3VNI\tINTERFACES")
 		fmt.Fprintln(w, "----\t-----\t----------")
 
+		skipped := 0
 		for _, name := range vrfNames {
 			vrf, err := dev.GetVRF(name)
 			if err != nil {
+				skipped++
 				continue
 			}
 
@@ -85,6 +95,10 @@ var vrfListCmd = &cobra.Command{
 			fmt.Fprintf(w, "%s\t%s\t%s\n", name, l3vni, intfs)
 		}
 		w.Flush()
+
+		if skipped > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %d VRF(s) could not be read\n", skipped)
+		}
 
 		return nil
 	},

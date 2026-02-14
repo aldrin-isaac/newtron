@@ -59,9 +59,11 @@ var vlanListCmd = &cobra.Command{
 		fmt.Fprintln(w, "VLAN ID\tL2VNI\tSVI\tMEMBERS")
 		fmt.Fprintln(w, "-------\t-----\t---\t-------")
 
+		skipped := 0
 		for _, id := range vlanIDs {
 			vlan, err := dev.GetVLAN(id)
 			if err != nil {
+				skipped++
 				continue
 			}
 
@@ -77,6 +79,10 @@ var vlanListCmd = &cobra.Command{
 			)
 		}
 		w.Flush()
+
+		if skipped > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %d VLAN(s) could not be read\n", skipped)
+		}
 
 		return nil
 	},

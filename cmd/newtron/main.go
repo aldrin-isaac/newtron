@@ -121,15 +121,22 @@ Write commands preview changes by default — use -x to execute.
 
   newtron <device> <resource> <action> [args] [-x]
 
-The first argument is the device name unless it matches a known command.
-Each resource takes its natural key as a positional argument:
+The first argument is treated as a device name (equivalent to -d <device>)
+unless it matches a known command. This lets you write:
+
+  newtron leaf1 vlan list          instead of    newtron -d leaf1 vlan list
+
+Commands that don't need a device work without one:
+
+  newtron service list             # list service specs
+  newtron settings show            # show settings
+
+Examples:
 
   newtron leaf1 interface show Ethernet0
-  newtron leaf1 vlan create 100
+  newtron leaf1 vlan create 100 -x
   newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet0 65100 -x
-  newtron leaf1 service apply Ethernet0 customer-l3
-  newtron service list                           # no device needed
-  newtron settings show                          # no device needed`,
+  newtron leaf1 service apply Ethernet0 customer-l3 -x`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip initialization for certain commands
 		if isSettingsOrHelp(cmd) {
@@ -194,7 +201,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (parent of specs/ and configlets/)")
+	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/ and configlets/)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents

@@ -15,7 +15,14 @@ func newSSHCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ssh <node>",
 		Short: "SSH to a VM",
-		Args:  cobra.ExactArgs(1),
+		Long: `Open an SSH session to a deployed VM by node name.
+
+The node is found by searching all deployed labs. Use -S to limit
+the search to a specific lab.
+
+  newtlab ssh leaf1
+  newtlab ssh spine1`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeName := args[0]
 

@@ -53,9 +53,11 @@ var interfaceListCmd = &cobra.Command{
 		fmt.Fprintln(w, "INTERFACE\tADMIN\tOPER\tIP ADDRESS\tVRF\tSERVICE")
 		fmt.Fprintln(w, "---------\t-----\t----\t----------\t---\t-------")
 
+		skipped := 0
 		for _, name := range interfaces {
 			intf, err := dev.GetInterface(name)
 			if err != nil {
+				skipped++
 				continue
 			}
 
@@ -88,6 +90,10 @@ var interfaceListCmd = &cobra.Command{
 			)
 		}
 		w.Flush()
+
+		if skipped > 0 {
+			fmt.Fprintf(os.Stderr, "warning: %d interface(s) could not be read\n", skipped)
+		}
 
 		return nil
 	},

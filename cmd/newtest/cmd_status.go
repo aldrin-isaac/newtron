@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -13,18 +15,24 @@ import (
 )
 
 func newStatusCmd() *cobra.Command {
-	var dir string
+	var (
+		dir        string
+		jsonOutput bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show suite run status",
 		Long: `Show the status of a running, paused, or completed test suite.
-Without --dir, shows all suites with state.`,
+Without --dir, shows all suites with state.
+
+  newtest status             # all suites
+  newtest status --json      # machine-readable output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Specific suite
 			if cmd.Flags().Changed("dir") {
 				suite := newtest.SuiteName(dir)
-				return printSuiteStatus(suite)
+				return printSuiteStatus(suite, jsonOutput)
 			}
 
 			// All suites
@@ -33,15 +41,31 @@ Without --dir, shows all suites with state.`,
 				return err
 			}
 			if len(suites) == 0 {
+				if jsonOutput {
+					fmt.Println("[]")
+					return nil
+				}
 				fmt.Println("no active suites")
 				return nil
+			}
+
+			if jsonOutput {
+				var states []*newtest.RunState
+				for _, suite := range suites {
+					state, err := newtest.LoadRunState(suite)
+					if err != nil || state == nil {
+						continue
+					}
+					states = append(states, state)
+				}
+				return json.NewEncoder(os.Stdout).Encode(states)
 			}
 
 			for i, suite := range suites {
 				if i > 0 {
 					fmt.Println()
 				}
-				if err := printSuiteStatus(suite); err != nil {
+				if err := printSuiteStatus(suite, false); err != nil {
 					fmt.Printf("  error: %v\n", err)
 				}
 			}
@@ -50,17 +74,22 @@ Without --dir, shows all suites with state.`,
 	}
 
 	cmd.Flags().StringVar(&dir, "dir", "", "suite directory")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
 
 	return cmd
 }
 
-func printSuiteStatus(suite string) error {
+func printSuiteStatus(suite string, jsonMode bool) error {
 	state, err := newtest.LoadRunState(suite)
 	if err != nil {
 		return err
 	}
 	if state == nil {
 		return fmt.Errorf("no state found for suite %s", suite)
+	}
+
+	if jsonMode {
+		return json.NewEncoder(os.Stdout).Encode(state)
 	}
 
 	// Header

@@ -13,7 +13,13 @@ func newConsoleCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "console <node>",
 		Short: "Attach to serial console",
-		Args:  cobra.ExactArgs(1),
+		Long: `Attach to a VM's serial console via socat or telnet.
+
+Useful for debugging boot issues when SSH is not yet available.
+Press Ctrl+] to detach from telnet, or Ctrl+C for socat.
+
+  newtlab console leaf1`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeName := args[0]
 

@@ -1,12 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
+
+var jsonOutput bool
 
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -18,7 +22,8 @@ Without arguments, shows all deployed labs.
 With a topology name, shows detailed status for that lab.
 
   newtlab status           # all labs
-  newtlab status 2node     # detailed view`,
+  newtlab status 2node     # detailed view
+  newtlab status --json    # machine-readable output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No args and no -S: show all deployed labs
@@ -34,6 +39,8 @@ With a topology name, shows detailed status for that lab.
 			return showLabDetail(labName)
 		},
 	}
+
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
 	return cmd
 }
 
@@ -43,8 +50,24 @@ func showAllLabs() error {
 		return err
 	}
 	if len(labs) == 0 {
+		if jsonOutput {
+			fmt.Println("[]")
+			return nil
+		}
 		fmt.Println("no deployed labs")
 		return nil
+	}
+
+	if jsonOutput {
+		var states []*newtlab.LabState
+		for _, labName := range labs {
+			state, err := newtlab.LoadState(labName)
+			if err != nil {
+				continue
+			}
+			states = append(states, state)
+		}
+		return json.NewEncoder(os.Stdout).Encode(states)
 	}
 
 	for i, labName := range labs {
@@ -63,6 +86,10 @@ func showLabDetail(labName string) error {
 	state, err := lab.Status()
 	if err != nil {
 		return err
+	}
+
+	if jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(state)
 	}
 
 	fmt.Printf("Lab: %s (deployed %s)\n", state.Name, state.Created.Format("2006-01-02 15:04:05"))

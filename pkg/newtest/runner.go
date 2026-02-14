@@ -238,6 +238,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
+		fmt.Fprintf(os.Stderr, "newtest: deploying topology %s...\n", topology)
 		cleanup, err := r.deployTopology(ctx, specDir, opts)
 		if err != nil {
 			var results []*ScenarioResult
@@ -252,6 +253,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 			}
 			return results, nil
 		}
+		fmt.Fprintf(os.Stderr, "newtest: topology ready\n")
 		if cleanup != nil {
 			defer cleanup()
 		}
@@ -262,6 +264,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 	defer cancel()
 
 	// Connect devices once
+	fmt.Fprintf(os.Stderr, "newtest: connecting to devices...\n")
 	if err := r.connectDevices(ctx, specDir); err != nil {
 		connectErr := err
 		if opts.NoDeploy {
@@ -333,6 +336,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
+		fmt.Fprintf(os.Stderr, "newtest: deploying topology %s...\n", topology)
 		cleanup, err := r.deployTopology(ctx, specDir, opts)
 		if err != nil {
 			result.DeployError = &InfraError{Op: "deploy", Err: err}
@@ -340,6 +344,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 			result.Duration = time.Since(start)
 			return result, nil
 		}
+		fmt.Fprintf(os.Stderr, "newtest: topology ready\n")
 		if cleanup != nil {
 			defer cleanup()
 		}
@@ -350,6 +355,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 	defer cancel()
 
 	// Connect to all devices
+	fmt.Fprintf(os.Stderr, "newtest: connecting to devices...\n")
 	if err := r.connectDevices(ctx, specDir); err != nil {
 		if opts.NoDeploy {
 			result.DeployError = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)

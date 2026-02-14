@@ -17,7 +17,6 @@ func newStartCmd() *cobra.Command {
 	var (
 		dir       string
 		scenario  string
-		all       bool
 		topology  string
 		platform  string
 		junitPath string
@@ -29,10 +28,10 @@ func newStartCmd() *cobra.Command {
 		Long: `Deploy topology (if needed), run scenarios, and leave topology up.
 
 The suite can be a name (resolved under newtest/suites/) or a path.
-All scenarios run by default unless --scenario selects one.
+All scenarios run by default. Use --scenario to run a single one.
 
-  newtest start 2node-incremental
-  newtest start --scenario boot-ssh
+  newtest start 2node-incremental                    # run all scenarios
+  newtest start 2node-incremental --scenario boot-ssh
 
 If a previous run was paused, start resumes from where it left off.
 Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
@@ -55,18 +54,15 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 				return fmt.Errorf("resolve dir: %w", err)
 			}
 
-			// Default to --all unless --scenario is specified
-			if scenario == "" && !cmd.Flags().Changed("all") {
-				all = true
-			}
-
 			topologiesDir := resolveTopologiesDir()
 			suite := newtest.SuiteName(absDir)
+
+			fmt.Fprintf(os.Stderr, "newtest: suite %s (%s)\n", suite, absDir)
 
 			// Check for paused state → resume
 			opts := newtest.RunOptions{
 				Scenario:  scenario,
-				All:       all,
+				All:       scenario == "",
 				Topology:  topology,
 				Platform:  platform,
 				Verbose:   verboseFlag,
@@ -182,8 +178,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 	}
 
 	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
-	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario")
-	cmd.Flags().BoolVar(&all, "all", false, "run all scenarios in dir")
+	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario (default: all)")
 	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
