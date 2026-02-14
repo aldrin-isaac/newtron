@@ -2041,6 +2041,295 @@ func TestDeviceSelector_Resolve_AllPreservesOriginal(t *testing.T) {
 }
 
 // ============================================================================
+// iterateScenarios Tests (TE-02)
+// ============================================================================
+
+func TestIterateScenarios_Normal(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+	}
+
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+		return &ScenarioResult{
+			Name:     sc.Name,
+			Topology: topology,
+			Platform: platform,
+			Status:   StatusPassed,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("iterateScenarios error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for i, res := range results {
+		if res.Status != StatusPassed {
+			t.Errorf("result[%d].Status = %v, want %v", i, res.Status, StatusPassed)
+		}
+	}
+	if results[0].Name != "sc1" || results[1].Name != "sc2" {
+		t.Errorf("names = [%q, %q], want [sc1, sc2]", results[0].Name, results[1].Name)
+	}
+	if results[0].Topology != "2node" || results[0].Platform != "sonic-vpp" {
+		t.Errorf("result[0] topology=%q platform=%q, want 2node/sonic-vpp",
+			results[0].Topology, results[0].Platform)
+	}
+}
+
+func TestIterateScenarios_TopologyOverride(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+	}
+
+	var gotTopology string
+	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node"}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+		gotTopology = topology
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusPassed}, nil
+	})
+	if err != nil {
+		t.Fatalf("iterateScenarios error: %v", err)
+	}
+	if gotTopology != "4node" {
+		t.Errorf("callback received topology=%q, want %q", gotTopology, "4node")
+	}
+}
+
+func TestIterateScenarios_Resume(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+	}
+
+	callbackCalls := 0
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{
+		Resume:    true,
+		Completed: map[string]Status{"sc1": StatusPassed},
+	}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+		callbackCalls++
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusPassed}, nil
+	})
+	if err != nil {
+		t.Fatalf("iterateScenarios error: %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Errorf("callback called %d times, want 1 (sc1 should be skipped)", callbackCalls)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Status != StatusSkipped {
+		t.Errorf("results[0].Status = %v, want StatusSkipped", results[0].Status)
+	}
+	if !strings.Contains(results[0].SkipReason, "already passed (resumed)") {
+		t.Errorf("results[0].SkipReason = %q, want 'already passed (resumed)'",
+			results[0].SkipReason)
+	}
+	if results[1].Status != StatusPassed {
+		t.Errorf("results[1].Status = %v, want StatusPassed", results[1].Status)
+	}
+}
+
+func TestIterateScenarios_RequiresSkip(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp", Requires: []string{"sc1"}},
+	}
+
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusFailed}, nil
+	})
+	if err != nil {
+		t.Fatalf("iterateScenarios error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[1].Status != StatusSkipped {
+		t.Errorf("results[1].Status = %v, want StatusSkipped", results[1].Status)
+	}
+	if !strings.Contains(results[1].SkipReason, "requires") {
+		t.Errorf("results[1].SkipReason = %q, want to contain 'requires'",
+			results[1].SkipReason)
+	}
+}
+
+func TestIterateScenarios_CallbackError(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+	}
+
+	sentinel := fmt.Errorf("deploy failed")
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, _, _ string) (*ScenarioResult, error) {
+		if sc.Name == "sc1" {
+			return nil, sentinel
+		}
+		return &ScenarioResult{Name: sc.Name, Status: StatusPassed}, nil
+	})
+	if err != sentinel {
+		t.Errorf("expected sentinel error, got %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("expected 0 results (error on first scenario), got %d", len(results))
+	}
+	_ = results // ensure partial results are returned
+}
+
+// ============================================================================
+// runScenarioSteps Tests (TE-02)
+// ============================================================================
+
+func TestRunScenarioSteps_SingleStep(t *testing.T) {
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	scenario := &Scenario{
+		Name: "test",
+		Steps: []Step{
+			{Name: "quick-wait", Action: ActionWait, Duration: 0},
+		},
+	}
+	result := &ScenarioResult{Name: "test"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	if len(result.Steps) != 1 {
+		t.Fatalf("expected 1 step result, got %d", len(result.Steps))
+	}
+	if result.Status != StatusPassed {
+		t.Errorf("Status = %v, want StatusPassed", result.Status)
+	}
+	if result.Steps[0].Name != "quick-wait" {
+		t.Errorf("Steps[0].Name = %q, want %q", result.Steps[0].Name, "quick-wait")
+	}
+}
+
+func TestRunScenarioSteps_FailFast(t *testing.T) {
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	scenario := &Scenario{
+		Name: "test",
+		Steps: []Step{
+			{Name: "bad-step", Action: "nonexistent-action"},
+			{Name: "should-not-run", Action: ActionWait, Duration: 0},
+		},
+	}
+	result := &ScenarioResult{Name: "test"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	if len(result.Steps) != 1 {
+		t.Fatalf("expected 1 step result (fail-fast), got %d", len(result.Steps))
+	}
+	if result.Status != StatusError {
+		t.Errorf("Status = %v, want StatusError", result.Status)
+	}
+}
+
+func TestRunScenarioSteps_Repeat(t *testing.T) {
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	scenario := &Scenario{
+		Name:   "test",
+		Repeat: 3,
+		Steps: []Step{
+			{Name: "quick-wait", Action: ActionWait, Duration: 0},
+		},
+	}
+	result := &ScenarioResult{Name: "test"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	if len(result.Steps) != 3 {
+		t.Fatalf("expected 3 step results (3 iterations), got %d", len(result.Steps))
+	}
+	if result.Status != StatusPassed {
+		t.Errorf("Status = %v, want StatusPassed", result.Status)
+	}
+	for i, sr := range result.Steps {
+		if sr.Iteration != i+1 {
+			t.Errorf("Steps[%d].Iteration = %d, want %d", i, sr.Iteration, i+1)
+		}
+	}
+	if result.Repeat != 3 {
+		t.Errorf("Repeat = %d, want 3", result.Repeat)
+	}
+}
+
+func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
+	r := &Runner{
+		ChangeSets: make(map[string]*network.ChangeSet),
+	}
+	scenario := &Scenario{
+		Name:   "test",
+		Repeat: 3,
+		Steps: []Step{
+			{Name: "bad-step", Action: "nonexistent-action"},
+		},
+	}
+	result := &ScenarioResult{Name: "test"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	if len(result.Steps) != 1 {
+		t.Fatalf("expected 1 step result (fail on iter 1), got %d", len(result.Steps))
+	}
+	if result.FailedIteration != 1 {
+		t.Errorf("FailedIteration = %d, want 1", result.FailedIteration)
+	}
+	if result.Status != StatusError {
+		t.Errorf("Status = %v, want StatusError", result.Status)
+	}
+}
+
+func TestRunScenarioSteps_InitChangeSets(t *testing.T) {
+	r := &Runner{} // nil ChangeSets
+	scenario := &Scenario{
+		Name: "test",
+		Steps: []Step{
+			{Name: "quick-wait", Action: ActionWait, Duration: 0},
+		},
+	}
+	result := &ScenarioResult{Name: "test"}
+	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
+
+	if r.ChangeSets == nil {
+		t.Error("expected ChangeSets to be initialized, got nil")
+	}
+}
+
+// ============================================================================
+// Run Validation Tests (TE-02)
+// ============================================================================
+
+func TestRun_NoFlags(t *testing.T) {
+	r := NewRunner(t.TempDir(), t.TempDir())
+	_, err := r.Run(RunOptions{})
+	if err == nil {
+		t.Fatal("expected error for no flags, got nil")
+	}
+	if !strings.Contains(err.Error(), "--scenario") || !strings.Contains(err.Error(), "--all") {
+		t.Errorf("expected error about --scenario/--all, got: %s", err)
+	}
+}
+
+func TestRun_TopologyNotFound(t *testing.T) {
+	r := NewRunner(t.TempDir(), t.TempDir())
+	_, err := r.Run(RunOptions{Scenario: "x", Topology: "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent topology, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error, got: %s", err)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

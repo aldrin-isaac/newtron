@@ -250,13 +250,13 @@ These items change public function signatures. Do them one at a time, updating a
 | S-03 | Swallowed report generation errors (cmd_start.go) | DONE ✓ | util.Warnf on report write errors |
 | X-01 | os.Exit() bypasses cleanup (= S-04) | DONE ✓ | Phase A 4.6 |
 | X-02 | No validActions/executors integration (= SC-01) | DONE ✓ | Phase B 4.8 |
-| TE-02 | No tests for runner.go Run/RunScenario methods | — | Test coverage |
+| TE-02 | No tests for runner.go Run/RunScenario methods | DONE ✓ | Test coverage |
 
-### Remaining MEDIUMs (5)
+### Remaining MEDIUMs (4)
 
 **Structural rewrites** (4): O-03 (PreconditionChecker), N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
 
-**Test coverage** (1): TE-02 (runner tests)
+**Test coverage**: TE-02 (runner tests) — DONE ✓
 
 **Deferred** (1): PA-1 (SSH session per command — standard pattern, low priority)
 
