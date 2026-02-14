@@ -437,56 +437,6 @@ func (d *Device) GetVRF(name string) (*VRFState, error) {
 	return vrf, nil
 }
 
-// InterfaceExists checks if an interface exists.
-func (d *Device) InterfaceExists(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	// Check PORT table
-	if _, ok := d.ConfigDB.Port[name]; ok {
-		return true
-	}
-	// Check PORTCHANNEL table
-	if _, ok := d.ConfigDB.PortChannel[name]; ok {
-		return true
-	}
-	// Check VLAN_INTERFACE
-	for key := range d.ConfigDB.VLANInterface {
-		if key == name || key == fmt.Sprintf("%s|", name) {
-			return true
-		}
-	}
-	return false
-}
-
-// VLANExists checks if a VLAN exists
-func (d *Device) VLANExists(id int) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	key := fmt.Sprintf("Vlan%d", id)
-	_, ok := d.ConfigDB.VLAN[key]
-	return ok
-}
-
-// VRFExists checks if a VRF exists
-func (d *Device) VRFExists(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	_, ok := d.ConfigDB.VRF[name]
-	return ok
-}
-
-// PortChannelExists checks if a PortChannel exists
-func (d *Device) PortChannelExists(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	_, ok := d.ConfigDB.PortChannel[name]
-	return ok
-}
-
 // InterfaceHasService checks if an interface has a service bound
 func (d *Device) InterfaceHasService(name string) bool {
 	d.mu.RLock()
@@ -535,41 +485,6 @@ func splitKey(key string) []string {
 		}
 	}
 	return []string{key}
-}
-
-// VTEPExists checks if a VTEP is configured
-func (d *Device) VTEPExists() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	return len(d.ConfigDB.VXLANTunnel) > 0
-}
-
-// BGPConfigured checks if BGP is configured.
-// Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
-// DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
-func (d *Device) BGPConfigured() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if len(d.ConfigDB.BGPNeighbor) > 0 {
-		return true
-	}
-	if meta, ok := d.ConfigDB.DeviceMetadata["localhost"]; ok {
-		if asn, ok := meta["bgp_asn"]; ok && asn != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// ACLTableExists checks if an ACL table exists
-func (d *Device) ACLTableExists(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	_, ok := d.ConfigDB.ACLTable[name]
-	return ok
 }
 
 // Client returns the underlying ConfigDB client for direct access

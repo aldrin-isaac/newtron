@@ -382,16 +382,7 @@ func (d *Device) ListInterfaces() []string {
 
 // interfaceExistsInConfigDB checks if interface exists.
 func (d *Device) interfaceExistsInConfigDB(name string) bool {
-	if d.configDB == nil {
-		return false
-	}
-	if _, ok := d.configDB.Port[name]; ok {
-		return true
-	}
-	if _, ok := d.configDB.PortChannel[name]; ok {
-		return true
-	}
-	return false
+	return d.configDB.HasInterface(name)
 }
 
 // loadInterfaces populates the interfaces map from config_db.
@@ -426,74 +417,31 @@ func (d *Device) loadInterfaces() {
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
 func (d *Device) InterfaceExists(name string) bool {
-	name = util.NormalizeInterfaceName(name)
-	return d.interfaceExistsInConfigDB(name)
+	return d.configDB.HasInterface(util.NormalizeInterfaceName(name))
 }
 
 // VLANExists checks if a VLAN exists.
-func (d *Device) VLANExists(id int) bool {
-	if d.configDB == nil {
-		return false
-	}
-	key := fmt.Sprintf("Vlan%d", id)
-	_, ok := d.configDB.VLAN[key]
-	return ok
-}
+func (d *Device) VLANExists(id int) bool { return d.configDB.HasVLAN(id) }
 
 // VRFExists checks if a VRF exists.
-func (d *Device) VRFExists(name string) bool {
-	if d.configDB == nil {
-		return false
-	}
-	_, ok := d.configDB.VRF[name]
-	return ok
-}
+func (d *Device) VRFExists(name string) bool { return d.configDB.HasVRF(name) }
 
 // PortChannelExists checks if a PortChannel exists.
 // Accepts both short (Po100) and full (PortChannel100) names.
 func (d *Device) PortChannelExists(name string) bool {
-	if d.configDB == nil {
-		return false
-	}
-	name = util.NormalizeInterfaceName(name)
-	_, ok := d.configDB.PortChannel[name]
-	return ok
+	return d.configDB.HasPortChannel(util.NormalizeInterfaceName(name))
 }
 
 // VTEPExists checks if VTEP is configured.
-func (d *Device) VTEPExists() bool {
-	if d.configDB == nil {
-		return false
-	}
-	return len(d.configDB.VXLANTunnel) > 0
-}
+func (d *Device) VTEPExists() bool { return d.configDB.HasVTEP() }
 
 // BGPConfigured checks if BGP is configured.
 // Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
 // DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
-func (d *Device) BGPConfigured() bool {
-	if d.configDB == nil {
-		return false
-	}
-	if len(d.configDB.BGPNeighbor) > 0 {
-		return true
-	}
-	if meta, ok := d.configDB.DeviceMetadata["localhost"]; ok {
-		if asn, ok := meta["bgp_asn"]; ok && asn != "" {
-			return true
-		}
-	}
-	return false
-}
+func (d *Device) BGPConfigured() bool { return d.configDB.BGPConfigured() }
 
 // ACLTableExists checks if an ACL table exists.
-func (d *Device) ACLTableExists(name string) bool {
-	if d.configDB == nil {
-		return false
-	}
-	_, ok := d.configDB.ACLTable[name]
-	return ok
-}
+func (d *Device) ACLTableExists(name string) bool { return d.configDB.HasACLTable(name) }
 
 // InterfaceIsLAGMember checks if an interface is a LAG member.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
@@ -1036,12 +984,7 @@ func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
 // BGPNeighborExists checks if a BGP neighbor exists.
 // Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
 func (d *Device) BGPNeighborExists(neighborIP string) bool {
-	if d.configDB == nil {
-		return false
-	}
-	key := fmt.Sprintf("default|%s", neighborIP)
-	_, ok := d.configDB.BGPNeighbor[key]
-	return ok
+	return d.configDB.HasBGPNeighbor(fmt.Sprintf("default|%s", neighborIP))
 }
 
 // VTEPSourceIP returns the VTEP source IP (from loopback).

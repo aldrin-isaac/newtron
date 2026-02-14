@@ -511,6 +511,94 @@ func (db *ConfigDB) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(db, "", "  ")
 }
 
+// ============================================================================
+// Nil-safe query methods — called by network.Device to avoid nil-check boilerplate
+// ============================================================================
+
+// HasVLAN reports whether the given VLAN ID exists in the VLAN table.
+func (db *ConfigDB) HasVLAN(id int) bool {
+	if db == nil {
+		return false
+	}
+	_, ok := db.VLAN[fmt.Sprintf("Vlan%d", id)]
+	return ok
+}
+
+// HasVRF reports whether the named VRF exists.
+func (db *ConfigDB) HasVRF(name string) bool {
+	if db == nil {
+		return false
+	}
+	_, ok := db.VRF[name]
+	return ok
+}
+
+// HasPortChannel reports whether the named PortChannel exists.
+func (db *ConfigDB) HasPortChannel(name string) bool {
+	if db == nil {
+		return false
+	}
+	_, ok := db.PortChannel[name]
+	return ok
+}
+
+// HasACLTable reports whether the named ACL table exists.
+func (db *ConfigDB) HasACLTable(name string) bool {
+	if db == nil {
+		return false
+	}
+	_, ok := db.ACLTable[name]
+	return ok
+}
+
+// HasVTEP reports whether any VXLAN tunnel (VTEP) is configured.
+func (db *ConfigDB) HasVTEP() bool {
+	if db == nil {
+		return false
+	}
+	return len(db.VXLANTunnel) > 0
+}
+
+// HasBGPNeighbor reports whether the given BGP neighbor key exists.
+// Key format: "vrf|ip" (e.g., "default|10.0.0.2").
+func (db *ConfigDB) HasBGPNeighbor(key string) bool {
+	if db == nil {
+		return false
+	}
+	_, ok := db.BGPNeighbor[key]
+	return ok
+}
+
+// HasInterface reports whether the named interface exists in either the
+// Port or PortChannel table.
+func (db *ConfigDB) HasInterface(name string) bool {
+	if db == nil {
+		return false
+	}
+	if _, ok := db.Port[name]; ok {
+		return true
+	}
+	_, ok := db.PortChannel[name]
+	return ok
+}
+
+// BGPConfigured reports whether BGP is configured, checking both the
+// BGP_NEIGHBOR table and DEVICE_METADATA bgp_asn.
+func (db *ConfigDB) BGPConfigured() bool {
+	if db == nil {
+		return false
+	}
+	if len(db.BGPNeighbor) > 0 {
+		return true
+	}
+	if meta, ok := db.DeviceMetadata["localhost"]; ok {
+		if asn, ok := meta["bgp_asn"]; ok && asn != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // scanKeys iterates Redis keys matching the given pattern using cursor-based
 // SCAN instead of the blocking O(N) KEYS command. The count hint controls
 // how many keys Redis returns per iteration (not an exact limit).

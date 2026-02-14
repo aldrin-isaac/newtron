@@ -154,3 +154,4 @@ After each track/phase:
 6. **Phase C.4 DONE** — committed as 064103f. Pruned 28 unused permission constants, removed dead helper functions.
 7. **Phase C.5 DONE** — committed as 2d4418b. 11 globals → App struct, 18 files updated.
 8. **ALL PHASES COMPLETE** — 190 findings addressed across 5 audit documents.
+9. **D-02 parseEntry refactor DONE** — committed as 3610750. Table-driven `tableParsers` registry replaces 250-line switch. Fixed 11 tables that were initialized but never parsed (QoS, routing, SAG, DSCP/TC maps). Also fixed incomplete field assignments in existing parsers. Net -292 lines in configdb.go, +398 lines in configdb_parsers.go, +227 lines in configdb_parsers_test.go.

@@ -213,6 +213,122 @@ func TestParseEntry_UnknownTable(t *testing.T) {
 	client.parseEntry(db, "NONEXISTENT_TABLE", "key1", map[string]string{"foo": "bar"})
 }
 
+func TestConfigDB_Has_Positive(t *testing.T) {
+	db := newEmptyConfigDB()
+	db.VLAN["Vlan100"] = VLANEntry{VLANID: "100"}
+	db.VRF["Vrf_CUST1"] = VRFEntry{}
+	db.PortChannel["PortChannel100"] = PortChannelEntry{}
+	db.ACLTable["MY_ACL"] = ACLTableEntry{Type: "L3"}
+	db.VXLANTunnel["vtep1"] = VXLANTunnelEntry{SrcIP: "10.0.0.1"}
+	db.BGPNeighbor["default|10.0.0.2"] = BGPNeighborEntry{ASN: "65001"}
+	db.Port["Ethernet0"] = PortEntry{}
+
+	if !db.HasVLAN(100) {
+		t.Error("HasVLAN(100) = false, want true")
+	}
+	if !db.HasVRF("Vrf_CUST1") {
+		t.Error("HasVRF(Vrf_CUST1) = false, want true")
+	}
+	if !db.HasPortChannel("PortChannel100") {
+		t.Error("HasPortChannel(PortChannel100) = false, want true")
+	}
+	if !db.HasACLTable("MY_ACL") {
+		t.Error("HasACLTable(MY_ACL) = false, want true")
+	}
+	if !db.HasVTEP() {
+		t.Error("HasVTEP() = false, want true")
+	}
+	if !db.HasBGPNeighbor("default|10.0.0.2") {
+		t.Error("HasBGPNeighbor(default|10.0.0.2) = false, want true")
+	}
+	if !db.HasInterface("Ethernet0") {
+		t.Error("HasInterface(Ethernet0) = false, want true")
+	}
+	if !db.HasInterface("PortChannel100") {
+		t.Error("HasInterface(PortChannel100) = false, want true")
+	}
+}
+
+func TestConfigDB_Has_Negative(t *testing.T) {
+	db := newEmptyConfigDB()
+
+	if db.HasVLAN(100) {
+		t.Error("HasVLAN(100) = true on empty DB")
+	}
+	if db.HasVRF("Vrf_CUST1") {
+		t.Error("HasVRF = true on empty DB")
+	}
+	if db.HasPortChannel("PortChannel100") {
+		t.Error("HasPortChannel = true on empty DB")
+	}
+	if db.HasACLTable("MY_ACL") {
+		t.Error("HasACLTable = true on empty DB")
+	}
+	if db.HasVTEP() {
+		t.Error("HasVTEP = true on empty DB")
+	}
+	if db.HasBGPNeighbor("default|10.0.0.2") {
+		t.Error("HasBGPNeighbor = true on empty DB")
+	}
+	if db.HasInterface("Ethernet0") {
+		t.Error("HasInterface = true on empty DB")
+	}
+	if db.BGPConfigured() {
+		t.Error("BGPConfigured = true on empty DB")
+	}
+}
+
+func TestConfigDB_Has_NilReceiver(t *testing.T) {
+	var db *ConfigDB
+	if db.HasVLAN(100) {
+		t.Error("nil.HasVLAN should be false")
+	}
+	if db.HasVRF("x") {
+		t.Error("nil.HasVRF should be false")
+	}
+	if db.HasPortChannel("x") {
+		t.Error("nil.HasPortChannel should be false")
+	}
+	if db.HasACLTable("x") {
+		t.Error("nil.HasACLTable should be false")
+	}
+	if db.HasVTEP() {
+		t.Error("nil.HasVTEP should be false")
+	}
+	if db.HasBGPNeighbor("x") {
+		t.Error("nil.HasBGPNeighbor should be false")
+	}
+	if db.HasInterface("x") {
+		t.Error("nil.HasInterface should be false")
+	}
+	if db.BGPConfigured() {
+		t.Error("nil.BGPConfigured should be false")
+	}
+}
+
+func TestConfigDB_BGPConfigured(t *testing.T) {
+	// Path 1: BGPNeighbor non-empty
+	db := newEmptyConfigDB()
+	db.BGPNeighbor["default|10.0.0.2"] = BGPNeighborEntry{ASN: "65001"}
+	if !db.BGPConfigured() {
+		t.Error("BGPConfigured should be true with BGP neighbor")
+	}
+
+	// Path 2: DeviceMetadata bgp_asn
+	db2 := newEmptyConfigDB()
+	db2.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65000"}
+	if !db2.BGPConfigured() {
+		t.Error("BGPConfigured should be true with device metadata ASN")
+	}
+
+	// Path 3: DeviceMetadata with empty bgp_asn
+	db3 := newEmptyConfigDB()
+	db3.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": ""}
+	if db3.BGPConfigured() {
+		t.Error("BGPConfigured should be false with empty ASN")
+	}
+}
+
 func TestNewEmptyConfigDB(t *testing.T) {
 	db := newEmptyConfigDB()
 	typ := reflect.TypeOf(*db)
