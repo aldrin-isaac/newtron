@@ -625,7 +625,7 @@ func (n *Network) deriveBGPNeighbors(site *spec.SiteSpec, selfName string) []str
 		// Load RR profile to get its loopback IP
 		rrProfile, err := n.loadProfile(rrName)
 		if err != nil {
-			util.Warnf("Could not load route reflector profile %s: %v", rrName, err)
+			util.Logger.Warnf("Could not load route reflector profile %s: %v", rrName, err)
 			continue
 		}
 		neighbors = append(neighbors, rrProfile.LoopbackIP)

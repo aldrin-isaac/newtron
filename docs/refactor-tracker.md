@@ -137,8 +137,8 @@ These items change public function signatures. Do them one at a time, updating a
 ## MEDIUM Findings Tracker
 
 **Total**: 87 MEDIUM findings across 5 audit documents
-**Addressed**: 82 (94%)
-**Remaining**: 5
+**Addressed**: 85 (98%)
+**Remaining**: 2
 
 ### Backend (`refactor-audit-backend.md`) — 18/19 addressed
 
@@ -200,8 +200,8 @@ These items change public function signatures. Do them one at a time, updating a
 | U-6 | IPInRange has zero production call sites | DONE ✓ | Phase A 5.5 |
 | U-10 | ExpandSlotPortRange has zero production call sites | DONE ✓ | Phase A 5.5 (range.go deleted) |
 | C-1 | No tests for pkg/cli | DONE ✓ | MEDIUM round 2 (pkg/cli tests) |
-| U-19 | Logger as package-level mutable global | — | Structural rewrite |
-| U-20 | 10 trivial one-line Logger wrappers | — | |
+| U-19 | Logger as package-level mutable global | DONE ✓ | Deleted 10 wrappers, callers use Logger directly |
+| U-20 | 10 trivial one-line Logger wrappers | DONE ✓ | Deleted all 10, migrated 17 call sites to util.Logger.Xf() |
 
 ### newtlab (`newtlab/refactor-audit.md`) — 21/22 addressed
 
@@ -227,7 +227,7 @@ These items change public function signatures. Do them one at a time, updating a
 | PF-1 | PatchProfiles uses map[string]interface{} | DONE ✓ | Uses spec.DeviceProfile |
 | NT-1 | Tests modify global HOME (not parallel-safe) | DONE ✓ | All use t.Setenv() |
 | G-1 | Zero test coverage for cmd/newtlab/ helpers | DONE ✓ | humanBytes, topoCounts, resolveTopologyDir |
-| N-1 | Lab struct has too many responsibilities | — | Structural rewrite |
+| N-1 | Lab struct has too many responsibilities | DONE ✓ | Extracted setupBridges, startNodes, bootstrapNodes, applyNodePatches from Deploy() |
 | PA-1 | ApplyBootPatches creates new SSH session per command | — | Standard SSH pattern; low priority |
 
 ### newtest (`newtest/refactor-audit.md`) — 16/17 addressed
@@ -252,9 +252,9 @@ These items change public function signatures. Do them one at a time, updating a
 | X-02 | No validActions/executors integration (= SC-01) | DONE ✓ | Phase B 4.8 |
 | TE-02 | No tests for runner.go Run/RunScenario methods | DONE ✓ | Test coverage |
 
-### Remaining MEDIUMs (3)
+### Remaining MEDIUMs (0)
 
-**Structural rewrites** (3): N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
+All structural rewrites complete. N-1, U-19, U-20 addressed.
 
 **Deferred** (1): PA-1 (SSH session per command — standard pattern, low priority)
 

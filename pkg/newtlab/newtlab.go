@@ -131,7 +131,7 @@ func NewLab(specDir string) (*Lab, error) {
 // and patches profiles. The context is checked at each major phase and
 // threaded into long-running sub-operations.
 func (l *Lab) Deploy(ctx context.Context) error {
-	util.Infof("newtlab: deploying lab %s from %s", l.Name, l.SpecDir)
+	util.Logger.Infof("newtlab: deploying lab %s from %s", l.Name, l.SpecDir)
 
 	// Check for stale state
 	if existing, err := LoadState(l.Name); err == nil && existing != nil {
@@ -205,72 +205,8 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		}
 	}
 
-	// Start bridge processes before QEMU so VMs can connect immediately.
-	// Group links by WorkerHost and start a separate bridge per host.
-	var deployErr error
-	if len(l.Links) > 0 {
-		hostLinks := map[string][]*LinkConfig{}
-		for _, lc := range l.Links {
-			hostLinks[lc.WorkerHost] = append(hostLinks[lc.WorkerHost], lc)
-		}
-
-		l.State.Bridges = make(map[string]*BridgeState)
-		statsPorts := allocateBridgeStatsPorts(l)
-
-		for _, host := range sortedHosts(hostLinks) {
-			statsPort := statsPorts[host]
-			links := hostLinks[host]
-
-			// Determine bind and reachable addresses for the stats listener.
-			// Local bridge binds to 127.0.0.1; remote binds to 0.0.0.0.
-			bindAddr := "127.0.0.1"
-			hostIP := resolveWorkerHostIP(host, l.Config)
-			if host != "" {
-				bindAddr = "0.0.0.0"
-			}
-			statsBindAddr := fmt.Sprintf("%s:%d", bindAddr, statsPort)
-
-			if host == "" {
-				// Local bridge
-				if err := WriteBridgeConfig(l.StateDir, links, statsBindAddr); err != nil {
-					return err
-				}
-				pid, err := startBridgeProcess(l.Name, l.StateDir)
-				if err != nil {
-					return fmt.Errorf("newtlab: start bridge: %w", err)
-				}
-				reachAddr := fmt.Sprintf("127.0.0.1:%d", statsPort)
-				l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: reachAddr}
-				l.State.BridgePID = pid // back-compat
-			} else {
-				// Remote bridge
-				cfg := buildBridgeConfig(links, statsBindAddr)
-				configJSON, err := json.MarshalIndent(cfg, "", "    ")
-				if err != nil {
-					return fmt.Errorf("newtlab: marshal remote bridge config: %w", err)
-				}
-				pid, err := startBridgeProcessRemote(l.Name, hostIP, configJSON)
-				if err != nil {
-					return fmt.Errorf("newtlab: start remote bridge on %s: %w", hostIP, err)
-				}
-				reachAddr := fmt.Sprintf("%s:%d", hostIP, statsPort)
-				l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP, StatsAddr: reachAddr}
-			}
-
-			// Wait for bridge listeners to be ready
-			for _, lc := range links {
-				probeHost := "127.0.0.1"
-				if host != "" {
-					probeHost = hostIP
-				}
-				if err := waitForPort(probeHost, lc.APort, 10*time.Second); err != nil {
-					return fmt.Errorf("newtlab: bridge not ready: %w", err)
-				}
-				if err := waitForPort(probeHost, lc.ZPort, 10*time.Second); err != nil {
-					return fmt.Errorf("newtlab: bridge not ready: %w", err)
-				}
-			}
-		}
+	if err := l.setupBridges(ctx); err != nil {
+		return err
 	}
 
 	// Check for cancellation before starting VMs
@@ -281,8 +217,97 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	default:
 	}
 
-	// Start QEMU processes in sorted name order.
-	// All VMs connect outbound to bridge workers — no ordering constraints.
+	var deployErr error
+	if err := l.startNodes(ctx); err != nil {
+		deployErr = err
+	}
+	if err := l.bootstrapNodes(ctx); err != nil && deployErr == nil {
+		deployErr = err
+	}
+	if err := l.applyNodePatches(ctx); err != nil && deployErr == nil {
+		deployErr = err
+	}
+
+	// Save state (always, even on error — enables cleanup)
+	if err := SaveState(l.State); err != nil {
+		return err
+	}
+
+	return deployErr
+}
+
+// setupBridges starts bridge worker processes for inter-VM networking.
+// Groups links by host and starts a local or remote bridge per host.
+func (l *Lab) setupBridges(ctx context.Context) error {
+	if len(l.Links) == 0 {
+		return nil
+	}
+
+	hostLinks := map[string][]*LinkConfig{}
+	for _, lc := range l.Links {
+		hostLinks[lc.WorkerHost] = append(hostLinks[lc.WorkerHost], lc)
+	}
+
+	l.State.Bridges = make(map[string]*BridgeState)
+	statsPorts := allocateBridgeStatsPorts(l)
+
+	for _, host := range sortedHosts(hostLinks) {
+		statsPort := statsPorts[host]
+		links := hostLinks[host]
+
+		bindAddr := "127.0.0.1"
+		hostIP := resolveWorkerHostIP(host, l.Config)
+		if host != "" {
+			bindAddr = "0.0.0.0"
+		}
+		statsBindAddr := fmt.Sprintf("%s:%d", bindAddr, statsPort)
+
+		if host == "" {
+			if err := WriteBridgeConfig(l.StateDir, links, statsBindAddr); err != nil {
+				return err
+			}
+			pid, err := startBridgeProcess(l.Name, l.StateDir)
+			if err != nil {
+				return fmt.Errorf("newtlab: start bridge: %w", err)
+			}
+			reachAddr := fmt.Sprintf("127.0.0.1:%d", statsPort)
+			l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: reachAddr}
+			l.State.BridgePID = pid // back-compat
+		} else {
+			cfg := buildBridgeConfig(links, statsBindAddr)
+			configJSON, err := json.MarshalIndent(cfg, "", "    ")
+			if err != nil {
+				return fmt.Errorf("newtlab: marshal remote bridge config: %w", err)
+			}
+			pid, err := startBridgeProcessRemote(l.Name, hostIP, configJSON)
+			if err != nil {
+				return fmt.Errorf("newtlab: start remote bridge on %s: %w", hostIP, err)
+			}
+			reachAddr := fmt.Sprintf("%s:%d", hostIP, statsPort)
+			l.State.Bridges[host] = &BridgeState{PID: pid, HostIP: hostIP, StatsAddr: reachAddr}
+		}
+
+		for _, lc := range links {
+			probeHost := "127.0.0.1"
+			if host != "" {
+				probeHost = hostIP
+			}
+			if err := waitForPort(probeHost, lc.APort, 10*time.Second); err != nil {
+				return fmt.Errorf("newtlab: bridge not ready: %w", err)
+			}
+			if err := waitForPort(probeHost, lc.ZPort, 10*time.Second); err != nil {
+				return fmt.Errorf("newtlab: bridge not ready: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// startNodes starts QEMU processes for all nodes in sorted order.
+// Continues on error so that remaining nodes are still started.
+func (l *Lab) startNodes(ctx context.Context) error {
+	var firstErr error
 	for _, name := range sortedNodeNames(l.Nodes) {
 		node := l.Nodes[name]
 		hostIP := resolveHostIP(node, l.Config)
@@ -297,7 +322,9 @@ func (l *Lab) Deploy(ctx context.Context) error {
 				Host:        node.Host,
 				HostIP:      hostIP,
 			}
-			deployErr = err
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
 		l.State.Nodes[name] = &NodeState{
@@ -309,11 +336,17 @@ func (l *Lab) Deploy(ctx context.Context) error {
 			HostIP:      hostIP,
 		}
 	}
+	return firstErr
+}
+
+// bootstrapNodes configures network via serial console and waits for SSH (parallel).
+func (l *Lab) bootstrapNodes(ctx context.Context) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
 
 	// Bootstrap network via serial console (parallel).
 	// QEMU user-mode networking requires eth0 up + DHCP before SSH port forwarding works.
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	for name, node := range l.Nodes {
 		ns := l.State.Nodes[name]
 		if ns.Status != "running" {
@@ -329,8 +362,8 @@ func (l *Lab) Deploy(ctx context.Context) error {
 			if err != nil {
 				mu.Lock()
 				l.State.Nodes[name].Status = "error"
-				if deployErr == nil {
-					deployErr = err
+				if firstErr == nil {
+					firstErr = err
 				}
 				mu.Unlock()
 			}
@@ -353,8 +386,8 @@ func (l *Lab) Deploy(ctx context.Context) error {
 			if err != nil {
 				mu.Lock()
 				l.State.Nodes[name].Status = "error"
-				if deployErr == nil {
-					deployErr = err
+				if firstErr == nil {
+					firstErr = err
 				}
 				mu.Unlock()
 			}
@@ -362,9 +395,16 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	}
 	wg.Wait()
 
-	// Apply platform boot patches (parallel, per node).
-	// Resolve patches for each platform's dataplane + image release,
-	// compute template vars from NodeConfig, apply via SSH.
+	return firstErr
+}
+
+// applyNodePatches resolves and applies platform boot patches per node (parallel),
+// then patches device profiles.
+func (l *Lab) applyNodePatches(ctx context.Context) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+
 	for name, node := range l.Nodes {
 		ns := l.State.Nodes[name]
 		if ns.Status != "running" {
@@ -387,8 +427,8 @@ func (l *Lab) Deploy(ctx context.Context) error {
 			err := ApplyBootPatches(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars)
 			if err != nil {
 				mu.Lock()
-				if deployErr == nil {
-					deployErr = fmt.Errorf("newtlab: boot patches %s: %w", name, err)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("newtlab: boot patches %s: %w", name, err)
 				}
 				mu.Unlock()
 			}
@@ -396,19 +436,13 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	}
 	wg.Wait()
 
-	// Patch profiles
 	if err := PatchProfiles(l); err != nil {
-		if deployErr == nil {
-			deployErr = err
+		if firstErr == nil {
+			firstErr = err
 		}
 	}
 
-	// Save state (always, even on error — enables cleanup)
-	if err := SaveState(l.State); err != nil {
-		return err
-	}
-
-	return deployErr
+	return firstErr
 }
 
 // DestroyByName destroys a lab identified only by name, loading all
@@ -436,7 +470,7 @@ func StartByName(ctx context.Context, labName, nodeName string) error {
 // and restores profiles. The context allows cancellation of the
 // teardown sequence.
 func (l *Lab) Destroy(ctx context.Context) error {
-	util.Infof("newtlab: destroying lab %s", l.Name)
+	util.Logger.Infof("newtlab: destroying lab %s", l.Name)
 
 	state, err := LoadState(l.Name)
 	if err != nil {
@@ -602,7 +636,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 // Provision runs newtron provisioning for all (or specified) devices.
 // The context is threaded into exec.CommandContext for cancellation.
 func (l *Lab) Provision(ctx context.Context, parallel int) error {
-	util.Infof("newtlab: provisioning lab %s (parallel=%d)", l.Name, parallel)
+	util.Logger.Infof("newtlab: provisioning lab %s (parallel=%d)", l.Name, parallel)
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err

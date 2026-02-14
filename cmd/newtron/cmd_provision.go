@@ -178,7 +178,7 @@ func waitForFRR(ctx context.Context, dev *network.Device) error {
 			if err == nil {
 				return nil
 			}
-			util.Debugf("waitForFRR: vtysh not ready yet: %v", err)
+			util.Logger.Debugf("waitForFRR: vtysh not ready yet: %v", err)
 		}
 	}
 }

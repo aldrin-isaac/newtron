@@ -57,7 +57,7 @@ func TestSetLogOutput(t *testing.T) {
 	SetLogOutput(&buf)
 
 	// Log something
-	Info("test message")
+	Logger.Info("test message")
 
 	// Check output was written to buffer
 	if buf.Len() == 0 {
@@ -76,7 +76,7 @@ func TestSetJSONFormat(t *testing.T) {
 	SetJSONFormat()
 
 	// Log something
-	Info("test json")
+	Logger.Info("test json")
 
 	// Check output contains JSON markers
 	output := buf.String()
@@ -120,7 +120,7 @@ func TestWithOperation(t *testing.T) {
 	}
 }
 
-func TestDebug(t *testing.T) {
+func TestLoggerDirect(t *testing.T) {
 	out, level, formatter := saveLoggerState()
 	defer restoreLoggerState(out, level, formatter)
 
@@ -128,116 +128,18 @@ func TestDebug(t *testing.T) {
 	SetLogOutput(&buf)
 	SetLogLevel("debug")
 
-	Debug("debug message")
+	Logger.Debug("debug message")
+	Logger.Debugf("debug %s %d", "message", 123)
+	Logger.Info("info message")
+	Logger.Infof("info %s %d", "message", 456)
+	Logger.Warn("warn message")
+	Logger.Warnf("warn %s %d", "message", 789)
+	Logger.Error("error message")
+	Logger.Errorf("error %s %d", "message", 999)
 
 	if buf.Len() == 0 {
-		t.Error("Expected debug output")
+		t.Error("Expected output from Logger direct calls")
 	}
 }
 
-func TestDebugf(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-	SetLogLevel("debug")
-
-	Debugf("debug %s %d", "message", 123)
-
-	if buf.Len() == 0 {
-		t.Error("Expected debug output")
-	}
-}
-
-func TestInfo(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Info("info message")
-
-	if buf.Len() == 0 {
-		t.Error("Expected info output")
-	}
-}
-
-func TestInfof(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Infof("info %s %d", "message", 456)
-
-	if buf.Len() == 0 {
-		t.Error("Expected info output")
-	}
-}
-
-func TestWarn(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Warn("warn message")
-
-	if buf.Len() == 0 {
-		t.Error("Expected warn output")
-	}
-}
-
-func TestWarnf(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Warnf("warn %s %d", "message", 789)
-
-	if buf.Len() == 0 {
-		t.Error("Expected warn output")
-	}
-}
-
-func TestError(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Error("error message")
-
-	if buf.Len() == 0 {
-		t.Error("Expected error output")
-	}
-}
-
-func TestErrorf(t *testing.T) {
-	out, level, formatter := saveLoggerState()
-	defer restoreLoggerState(out, level, formatter)
-
-	var buf bytes.Buffer
-	SetLogOutput(&buf)
-
-	Errorf("error %s %d", "message", 999)
-
-	if buf.Len() == 0 {
-		t.Error("Expected error output")
-	}
-}
-
-// Note: Fatal and Fatalf are not tested because they call os.Exit(1)
-// which would terminate the test process. They are simple wrappers
-// around logrus.Fatal/Fatalf, so we trust the underlying implementation.
-// To get coverage, we acknowledge they exist but cannot safely test them.
-var _ = Fatal  // Reference to prevent "unused" warning in coverage
-var _ = Fatalf // Reference to prevent "unused" warning in coverage
 var _ = os.Stderr // Used in init()

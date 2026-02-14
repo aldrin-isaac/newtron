@@ -338,7 +338,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *CompositeBuilder, deviceName
 		// Load peer device's profile to get its underlay_asn
 		peerProfile, err := tp.network.loadProfile(peerDeviceName)
 		if err != nil {
-			util.Warnf("Could not load peer profile %s for underlay BGP: %v", peerDeviceName, err)
+			util.Logger.Warnf("Could not load peer profile %s for underlay BGP: %v", peerDeviceName, err)
 			continue
 		}
 		peerASN := peerProfile.UnderlayASN
@@ -418,7 +418,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *CompositeBuilder, re
 		// Load client profile to get its loopback IP
 		clientProfile, err := tp.network.loadProfile(clientName)
 		if err != nil {
-			util.Warnf("Could not load client profile %s for RR: %v", clientName, err)
+			util.Logger.Warnf("Could not load client profile %s for RR: %v", clientName, err)
 			continue
 		}
 		clientLoopback := clientProfile.LoopbackIP

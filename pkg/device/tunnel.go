@@ -41,7 +41,7 @@ func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	util.Warnf("SSH tunnel to %s: host key verification disabled (InsecureIgnoreHostKey)", addr)
+	util.Logger.Warnf("SSH tunnel to %s: host key verification disabled (InsecureIgnoreHostKey)", addr)
 	sshClient, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial %s@%s: %w", user, addr, err)

@@ -132,7 +132,7 @@ Each resource takes its natural key as a positional argument:
 		var err error
 		app.settings, err = settings.Load()
 		if err != nil {
-			util.Warnf("Could not load settings: %v", err)
+			util.Logger.Warnf("Could not load settings: %v", err)
 			app.settings = &settings.Settings{}
 		}
 
@@ -164,7 +164,7 @@ Each resource takes its natural key as a positional argument:
 			MaxBackups: app.settings.GetAuditMaxBackups(),
 		})
 		if err != nil {
-			util.Warnf("Could not initialize audit logging: %v", err)
+			util.Logger.Warnf("Could not initialize audit logging: %v", err)
 		} else {
 			audit.SetDefaultLogger(auditLogger)
 		}

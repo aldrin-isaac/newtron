@@ -96,7 +96,7 @@ func (l *FileLogger) Query(filter Filter) ([]*Event, error) {
 		lineNum++
 		var event Event
 		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			util.Warnf("audit: skipping malformed log entry at line %d: %v", lineNum, err)
+			util.Logger.Warnf("audit: skipping malformed log entry at line %d: %v", lineNum, err)
 			continue
 		}
 
