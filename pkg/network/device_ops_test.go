@@ -155,8 +155,8 @@ func TestCreateVLAN_AlreadyExists(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for existing VLAN")
 	}
-	if got := err.Error(); got != "VLAN 100 already exists" {
-		t.Errorf("error = %q, want 'VLAN 100 already exists'", got)
+	if !errors.Is(err, util.ErrPreconditionFailed) {
+		t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
 	}
 }
 
@@ -611,8 +611,11 @@ func TestDevice_NotConnected(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if err.Error() != "device not connected" {
-				t.Errorf("error = %q, want 'device not connected'", err.Error())
+			// Single-error preconditions wrap ErrPreconditionFailed;
+			// multi-error results (e.g., disconnected + missing resource)
+			// wrap ErrValidationFailed. Both are acceptable.
+			if !errors.Is(err, util.ErrPreconditionFailed) && !errors.Is(err, util.ErrValidationFailed) {
+				t.Errorf("error = %q, want ErrPreconditionFailed or ErrValidationFailed", err.Error())
 			}
 		})
 	}
@@ -646,8 +649,8 @@ func TestDevice_NotLocked(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if !errors.Is(err, util.ErrNotLocked) {
-				t.Errorf("error = %q, want ErrNotLocked", err.Error())
+			if !errors.Is(err, util.ErrPreconditionFailed) {
+				t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
 			}
 		})
 	}

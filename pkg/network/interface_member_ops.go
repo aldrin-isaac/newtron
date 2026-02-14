@@ -18,7 +18,7 @@ import (
 func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged bool) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-member", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +76,7 @@ func (i *Interface) AddMember(ctx context.Context, memberIntf string, tagged boo
 func (i *Interface) RemoveMember(ctx context.Context, memberIntf string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-member", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -130,7 +130,7 @@ func (i *Interface) RemoveMember(ctx context.Context, memberIntf string) (*Chang
 func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef *spec.MACVPNSpec) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("bind-macvpn", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.IsVLAN() {
@@ -169,7 +169,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("unbind-macvpn", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.IsVLAN() {
@@ -210,7 +210,7 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("unbind-acl", i.name).Result(); err != nil {
 		return nil, err
 	}
 

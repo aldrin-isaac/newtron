@@ -24,7 +24,7 @@ type InterfaceConfig struct {
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("set-ip", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !util.IsValidIPv4CIDR(ipAddr) {
@@ -48,7 +48,7 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("set-vrf", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
@@ -74,7 +74,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("bind-acl", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !d.ACLTableExists(aclName) {
@@ -115,7 +115,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("configure", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsLAGMember() {
@@ -164,7 +164,7 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*Chang
 func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("set-property", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsLAGMember() {

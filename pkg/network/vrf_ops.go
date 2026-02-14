@@ -21,11 +21,10 @@ type VRFConfig struct {
 
 // CreateVRF creates a new VRF.
 func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("create-vrf", name).
+		RequireVRFNotExists(name).
+		Result(); err != nil {
 		return nil, err
-	}
-	if d.VRFExists(name) {
-		return nil, fmt.Errorf("VRF %s already exists", name)
 	}
 
 	cs := NewChangeSet(d.name, "device.create-vrf")
@@ -52,11 +51,10 @@ func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*C
 
 // DeleteVRF removes a VRF.
 func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-vrf", name).
+		RequireVRFExists(name).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VRFExists(name) {
-		return nil, fmt.Errorf("VRF %s does not exist", name)
 	}
 
 	// Check no interfaces are bound to this VRF
@@ -88,17 +86,13 @@ func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
 
 // AddVRFInterface binds an interface to a VRF.
 func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	intfName = util.NormalizeInterfaceName(intfName)
 
-	if !d.VRFExists(vrfName) {
-		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
-	}
-	if !d.InterfaceExists(intfName) {
-		return nil, fmt.Errorf("interface %s does not exist", intfName)
+	if err := d.precondition("add-vrf-interface", vrfName).
+		RequireVRFExists(vrfName).
+		RequireInterfaceExists(intfName).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.add-vrf-interface")
@@ -113,7 +107,7 @@ func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) 
 
 // RemoveVRFInterface removes a VRF binding from an interface.
 func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-vrf-interface", vrfName).Result(); err != nil {
 		return nil, err
 	}
 
@@ -135,14 +129,11 @@ func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName strin
 
 // BindIPVPN binds a VRF to an IP-VPN definition (creates L3VNI mapping).
 func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("bind-ipvpn", vrfName).
+		RequireVTEPConfigured().
+		RequireVRFExists(vrfName).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VTEPExists() {
-		return nil, fmt.Errorf("VTEP must be configured first")
-	}
-	if !d.VRFExists(vrfName) {
-		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
 	}
 
 	cs := NewChangeSet(d.name, "device.bind-ipvpn")
@@ -165,7 +156,7 @@ func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.I
 
 // UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping).
 func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("unbind-ipvpn", vrfName).Result(); err != nil {
 		return nil, err
 	}
 
@@ -196,11 +187,11 @@ func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, e
 
 // AddStaticRoute adds a static route to a VRF.
 func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-static-route", prefix).
+		Check(vrfName == "" || vrfName == "default" || d.VRFExists(vrfName),
+			"VRF must exist", fmt.Sprintf("VRF '%s' not found", vrfName)).
+		Result(); err != nil {
 		return nil, err
-	}
-	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
-		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
 	}
 
 	cs := NewChangeSet(d.name, "device.add-static-route")
@@ -228,7 +219,7 @@ func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop st
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-static-route", prefix).Result(); err != nil {
 		return nil, err
 	}
 

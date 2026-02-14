@@ -34,7 +34,7 @@ type DirectBGPNeighborConfig struct {
 func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborConfig) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-bgp-neighbor", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
@@ -106,7 +106,7 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-bgp-neighbor", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -169,7 +169,7 @@ func (i *Interface) GetBGPNeighborIP() string {
 func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, routeMapName string) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("set-route-map", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if direction != "in" && direction != "out" {

@@ -2,20 +2,7 @@ package network
 
 import (
 	"strings"
-
-	"github.com/newtron-network/newtron/pkg/util"
 )
-
-// requireWritable checks that a device is connected and locked for write operations.
-func requireWritable(d *Device) error {
-	if !d.IsConnected() {
-		return util.ErrNotConnected
-	}
-	if !d.IsLocked() {
-		return util.ErrNotLocked
-	}
-	return nil
-}
 
 // parseBreakoutSpeed converts a breakout mode speed suffix to SONiC speed value.
 // e.g., "4x25G" -> "25000", "2x50G" -> "50000"

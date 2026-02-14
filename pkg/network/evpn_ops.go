@@ -26,14 +26,11 @@ type SVIConfig struct {
 
 // CreateVTEP creates a VXLAN Tunnel Endpoint.
 func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("create-vtep", "vtep1").
+		Check(!d.VTEPExists(), "VTEP must not exist", "VTEP already configured").
+		Check(opts.SourceIP != "", "source IP required", "source IP must be specified").
+		Result(); err != nil {
 		return nil, err
-	}
-	if d.VTEPExists() {
-		return nil, fmt.Errorf("VTEP already configured")
-	}
-	if opts.SourceIP == "" {
-		return nil, fmt.Errorf("source IP is required")
 	}
 
 	cs := NewChangeSet(d.name, "device.create-vtep")
@@ -54,11 +51,10 @@ func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, e
 
 // DeleteVTEP removes the VXLAN Tunnel Endpoint.
 func (d *Device) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-vtep", "vtep1").
+		RequireVTEPConfigured().
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VTEPExists() {
-		return nil, fmt.Errorf("VTEP not configured")
 	}
 
 	// Check for existing VNI mappings
@@ -84,14 +80,11 @@ func (d *Device) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
 
 // MapL2VNI maps a VLAN to an L2VNI for EVPN.
 func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("map-l2vni", vlanResource(vlanID)).
+		RequireVTEPConfigured().
+		RequireVLANExists(vlanID).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VTEPExists() {
-		return nil, fmt.Errorf("VTEP must be configured first")
-	}
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
 	}
 
 	cs := NewChangeSet(d.name, "device.map-l2vni")
@@ -110,14 +103,11 @@ func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, err
 
 // MapL3VNI maps a VRF to an L3VNI for EVPN.
 func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("map-l3vni", vrfName).
+		RequireVTEPConfigured().
+		RequireVRFExists(vrfName).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VTEPExists() {
-		return nil, fmt.Errorf("VTEP must be configured first")
-	}
-	if !d.VRFExists(vrfName) {
-		return nil, fmt.Errorf("VRF %s does not exist", vrfName)
 	}
 
 	cs := NewChangeSet(d.name, "device.map-l3vni")
@@ -140,7 +130,7 @@ func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*Change
 
 // UnmapVNI removes a VNI mapping.
 func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("unmap-vni", fmt.Sprintf("VNI-%d", vni)).Result(); err != nil {
 		return nil, err
 	}
 
@@ -166,11 +156,10 @@ func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
 
 // UnmapL2VNI removes the L2VNI mapping for a VLAN.
 func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("unmap-l2vni", vlanResource(vlanID)).
+		RequireVLANExists(vlanID).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
 	}
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
@@ -198,14 +187,13 @@ func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error)
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	pc := d.precondition("configure-svi", vlanResource(vlanID)).
+		RequireVLANExists(vlanID)
+	if opts.VRF != "" {
+		pc.RequireVRFExists(opts.VRF)
+	}
+	if err := pc.Result(); err != nil {
 		return nil, err
-	}
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
-	}
-	if opts.VRF != "" && !d.VRFExists(opts.VRF) {
-		return nil, fmt.Errorf("VRF %s does not exist", opts.VRF)
 	}
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
@@ -238,7 +226,7 @@ func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (
 // SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
 // If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
 func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("setup-evpn", "evpn").Result(); err != nil {
 		return nil, err
 	}
 

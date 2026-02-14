@@ -27,16 +27,15 @@ type BGPGlobalsConfig struct {
 
 // SetBGPGlobals configures BGP global settings via CONFIG_DB (frrcfgd).
 func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
-	cs := NewChangeSet(d.Name(), "device.set-bgp-globals")
-
 	vrf := cfg.VRF
 	if vrf == "" {
 		vrf = "default"
 	}
+	if err := d.precondition("set-bgp-globals", vrf).Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(d.Name(), "device.set-bgp-globals")
 
 	fields := map[string]string{
 		"local_asn": fmt.Sprintf("%d", cfg.LocalASN),
@@ -79,7 +78,7 @@ type SetupRouteReflectorConfig struct {
 // (ipv4_unicast, ipv6_unicast, l2vpn_evpn). Replaces the v2 SetupBGPEVPN
 // with comprehensive multi-AF route reflection.
 func (d *Device) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("setup-route-reflector", "bgp").Result(); err != nil {
 		return nil, err
 	}
 
@@ -176,7 +175,7 @@ type PeerGroupConfig struct {
 
 // ConfigurePeerGroup creates or updates a BGP peer group template.
 func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("configure-peer-group", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -212,7 +211,7 @@ func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*
 
 // DeletePeerGroup removes a BGP peer group.
 func (d *Device) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-peer-group", name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -246,7 +245,7 @@ type RouteRedistributionConfig struct {
 
 // AddRouteRedistribution configures route redistribution into BGP.
 func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-route-redistribution", cfg.SrcProtocol).Result(); err != nil {
 		return nil, err
 	}
 
@@ -276,7 +275,7 @@ func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistribu
 
 // RemoveRouteRedistribution removes a route redistribution entry.
 func (d *Device) RemoveRouteRedistribution(ctx context.Context, vrf, srcProtocol, af string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-route-redistribution", srcProtocol).Result(); err != nil {
 		return nil, err
 	}
 
@@ -308,7 +307,7 @@ type RouteMapConfig struct {
 
 // AddRouteMap creates a route-map with match/set rules.
 func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-route-map", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -345,7 +344,7 @@ func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSe
 
 // DeleteRouteMap removes a route-map.
 func (d *Device) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-route-map", name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -376,7 +375,7 @@ type PrefixSetConfig struct {
 
 // AddPrefixSet creates a prefix list for route-map matching.
 func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-prefix-set", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -399,7 +398,7 @@ func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*Change
 
 // DeletePrefixSet removes a prefix list.
 func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-prefix-set", name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -421,7 +420,7 @@ func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, 
 
 // AddBGPNetwork adds a BGP network statement.
 func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, policy string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-bgp-network", prefix).Result(); err != nil {
 		return nil, err
 	}
 
@@ -444,7 +443,7 @@ func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, poli
 
 // RemoveBGPNetwork removes a BGP network statement.
 func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-bgp-network", prefix).Result(); err != nil {
 		return nil, err
 	}
 

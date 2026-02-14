@@ -45,11 +45,10 @@ type ACLRuleConfig struct {
 
 // CreateACLTable creates a new ACL table.
 func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("create-acl-table", name).
+		RequireACLTableNotExists(name).
+		Result(); err != nil {
 		return nil, err
-	}
-	if d.ACLTableExists(name) {
-		return nil, fmt.Errorf("ACL table %s already exists", name)
 	}
 	if opts.Type == "" {
 		opts.Type = "L3"
@@ -79,11 +78,10 @@ func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableC
 
 // AddACLRule adds a rule to an ACL table.
 func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("add-acl-rule", tableName).
+		RequireACLTableExists(tableName).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.ACLTableExists(tableName) {
-		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
 	}
 
 	cs := NewChangeSet(d.name, "device.add-acl-rule")
@@ -129,11 +127,10 @@ func (d *Device) AddACLRule(ctx context.Context, tableName, ruleName string, opt
 
 // DeleteACLRule removes a single rule from an ACL table.
 func (d *Device) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-acl-rule", tableName).
+		RequireACLTableExists(tableName).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.ACLTableExists(tableName) {
-		return nil, fmt.Errorf("ACL table %s does not exist", tableName)
 	}
 
 	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
@@ -154,11 +151,10 @@ func (d *Device) DeleteACLRule(ctx context.Context, tableName, ruleName string) 
 
 // DeleteACLTable removes an ACL table and all its rules.
 func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-acl-table", name).
+		RequireACLTableExists(name).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.ACLTableExists(name) {
-		return nil, fmt.Errorf("ACL table %s does not exist", name)
 	}
 
 	cs := NewChangeSet(d.name, "device.delete-acl-table")
@@ -182,15 +178,13 @@ func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, e
 
 // UnbindACLFromInterface removes an interface from an ACL table's binding.
 func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if !d.ACLTableExists(aclName) {
-		return nil, fmt.Errorf("ACL table %s does not exist", aclName)
+	if err := d.precondition("unbind-acl", aclName).
+		RequireACLTableExists(aclName).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.unbind-acl")

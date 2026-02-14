@@ -121,7 +121,7 @@ func (cs *ChangeSet) toDeviceChanges() []device.ConfigChange {
 
 // Apply writes the changes to the device's config_db via Redis.
 func (cs *ChangeSet) Apply(d *Device) error {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("apply-changeset", cs.Operation).Result(); err != nil {
 		return err
 	}
 
@@ -157,7 +157,7 @@ func (cs *ChangeSet) Rollback(d *Device) error {
 	if cs.AppliedCount == 0 {
 		return nil
 	}
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("rollback-changeset", cs.Operation).Result(); err != nil {
 		return err
 	}
 

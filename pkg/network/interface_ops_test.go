@@ -2,10 +2,12 @@ package network
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/device"
 	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // testInterface builds a Device + Interface pair ready for interface-level
@@ -296,8 +298,8 @@ func TestInterface_NotConnected(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if err.Error() != "device not connected" {
-				t.Errorf("error = %q, want 'device not connected'", err.Error())
+			if !errors.Is(err, util.ErrPreconditionFailed) {
+				t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
 			}
 		})
 	}

@@ -15,11 +15,11 @@ import (
 
 // ApplyQoS applies a QoS policy to a specific interface (surgical override).
 func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	if err := d.precondition("apply-qos", intfName).Result(); err != nil {
 		return nil, err
 	}
-
-	intfName = util.NormalizeInterfaceName(intfName)
 
 	if !d.InterfaceExists(intfName) {
 		return nil, fmt.Errorf("interface %s does not exist", intfName)
@@ -45,11 +45,11 @@ func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, poli
 
 // RemoveQoS removes QoS configuration from a specific interface.
 func (d *Device) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	intfName = util.NormalizeInterfaceName(intfName)
+
+	if err := d.precondition("remove-qos", intfName).Result(); err != nil {
 		return nil, err
 	}
-
-	intfName = util.NormalizeInterfaceName(intfName)
 
 	cs := NewChangeSet(d.name, "device.remove-qos")
 

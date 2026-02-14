@@ -162,7 +162,7 @@ These items change public function signatures. Do them one at a time, updating a
 | X-02 | 3 representations of same domain concepts | DONE ✓ | Phase C.3 (reduced to 2 by design) |
 | X-04 | Inconsistent error creation patterns | DONE ✓ | MEDIUM round 2 (sentinel errors) |
 | D-10 | No lock TTL refresh; Lua script error handling | N/A | By design: lock is device-local Redis key with TTL; Lua is atomic |
-| O-03 | PreconditionChecker underused by device_ops | — | Structural rewrite |
+| O-03 | PreconditionChecker underused by device_ops | DONE ✓ | Moved to pkg/network/, adopted via d.precondition() in 68 ops |
 
 ### CLI (`refactor-audit-cli.md`) — 14/14 addressed
 
@@ -252,11 +252,9 @@ These items change public function signatures. Do them one at a time, updating a
 | X-02 | No validActions/executors integration (= SC-01) | DONE ✓ | Phase B 4.8 |
 | TE-02 | No tests for runner.go Run/RunScenario methods | DONE ✓ | Test coverage |
 
-### Remaining MEDIUMs (4)
+### Remaining MEDIUMs (3)
 
-**Structural rewrites** (4): O-03 (PreconditionChecker), N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
-
-**Test coverage**: TE-02 (runner tests) — DONE ✓
+**Structural rewrites** (3): N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
 
 **Deferred** (1): PA-1 (SSH session per command — standard pattern, low priority)
 

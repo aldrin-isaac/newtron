@@ -22,15 +22,13 @@ type PortChannelConfig struct {
 
 // CreatePortChannel creates a new LAG/PortChannel.
 func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
-	if d.PortChannelExists(name) {
-		return nil, fmt.Errorf("PortChannel %s already exists", name)
+	if err := d.precondition("create-portchannel", name).
+		RequirePortChannelNotExists(name).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.create-portchannel")
@@ -71,15 +69,13 @@ func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortCh
 
 // DeletePortChannel removes a LAG/PortChannel.
 func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
-	if !d.PortChannelExists(name) {
-		return nil, fmt.Errorf("PortChannel %s does not exist", name)
+	if err := d.precondition("delete-portchannel", name).
+		RequirePortChannelExists(name).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.delete-portchannel")
@@ -102,22 +98,16 @@ func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet
 
 // AddPortChannelMember adds a member to a PortChannel.
 func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
 	pcName = util.NormalizeInterfaceName(pcName)
 	member = util.NormalizeInterfaceName(member)
 
-	if !d.PortChannelExists(pcName) {
-		return nil, fmt.Errorf("PortChannel %s does not exist", pcName)
-	}
-	if !d.InterfaceExists(member) {
-		return nil, fmt.Errorf("interface %s does not exist", member)
-	}
-	if d.InterfaceIsLAGMember(member) {
-		return nil, fmt.Errorf("interface %s is already a LAG member", member)
+	if err := d.precondition("add-portchannel-member", pcName).
+		RequirePortChannelExists(pcName).
+		RequireInterfaceExists(member).
+		RequireInterfaceNotLAGMember(member).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.add-portchannel-member")
@@ -130,16 +120,14 @@ func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string
 
 // RemovePortChannelMember removes a member from a PortChannel.
 func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
 	pcName = util.NormalizeInterfaceName(pcName)
 	member = util.NormalizeInterfaceName(member)
 
-	if !d.PortChannelExists(pcName) {
-		return nil, fmt.Errorf("PortChannel %s does not exist", pcName)
+	if err := d.precondition("remove-portchannel-member", pcName).
+		RequirePortChannelExists(pcName).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.remove-portchannel-member")

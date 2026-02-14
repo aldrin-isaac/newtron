@@ -25,7 +25,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	d := i.device
 
 	// Validate preconditions
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("apply-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -630,7 +630,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("remove-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.HasService() {
@@ -830,7 +830,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	d := i.device
 
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("refresh-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.HasService() {

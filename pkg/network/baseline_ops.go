@@ -16,7 +16,7 @@ import (
 
 // ApplyBaseline applies a baseline configlet to the device.
 func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("apply-baseline", configletName).Result(); err != nil {
 		return nil, err
 	}
 
@@ -85,7 +85,7 @@ type CleanupSummary struct {
 // Cleanup identifies and removes orphaned configurations.
 // Returns a changeset to remove them and a summary of what was found.
 func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("cleanup", cleanupType).Result(); err != nil {
 		return nil, nil, err
 	}
 
@@ -168,7 +168,7 @@ func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *
 
 // CreatePort creates a PORT entry validated against the device's platform.json.
 func (d *Device) CreatePort(ctx context.Context, cfg device.CreatePortConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("create-port", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -235,7 +235,7 @@ func (d *Device) CreatePort(ctx context.Context, cfg device.CreatePortConfig) (*
 
 // DeletePort removes a PORT entry.
 func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-port", name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -257,7 +257,7 @@ func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error
 
 // BreakoutPort applies a breakout mode to a port, creating child ports and removing the parent.
 func (d *Device) BreakoutPort(ctx context.Context, cfg device.BreakoutConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("breakout-port", cfg.ParentPort).Result(); err != nil {
 		return nil, err
 	}
 

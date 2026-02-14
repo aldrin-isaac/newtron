@@ -7,6 +7,9 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
+// vlanResource returns the canonical resource name for a VLAN.
+func vlanResource(id int) string { return fmt.Sprintf("Vlan%d", id) }
+
 // ============================================================================
 // VLAN Operations
 // ============================================================================
@@ -20,14 +23,11 @@ type VLANConfig struct {
 
 // CreateVLAN creates a new VLAN on this device.
 func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("create-vlan", vlanResource(vlanID)).
+		Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
+		RequireVLANNotExists(vlanID).
+		Result(); err != nil {
 		return nil, err
-	}
-	if vlanID < 1 || vlanID > 4094 {
-		return nil, fmt.Errorf("invalid VLAN ID: %d (must be 1-4094)", vlanID)
-	}
-	if d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d already exists", vlanID)
 	}
 
 	cs := NewChangeSet(d.name, "device.create-vlan")
@@ -57,11 +57,10 @@ func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*
 
 // DeleteVLAN removes a VLAN from this device.
 func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("delete-vlan", vlanResource(vlanID)).
+		RequireVLANExists(vlanID).
+		Result(); err != nil {
 		return nil, err
-	}
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
 	}
 
 	cs := NewChangeSet(d.name, "device.delete-vlan")
@@ -94,18 +93,14 @@ func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 
 // AddVLANMember adds an interface to a VLAN as a tagged or untagged member.
 func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
-	}
-	if !d.InterfaceExists(interfaceName) {
-		return nil, fmt.Errorf("interface %s does not exist", interfaceName)
+	if err := d.precondition("add-vlan-member", vlanResource(vlanID)).
+		RequireVLANExists(vlanID).
+		RequireInterfaceExists(interfaceName).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.add-vlan-member")
@@ -127,14 +122,12 @@ func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName st
 
 // RemoveVLANMember removes an interface from a VLAN.
 func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
-	if err := requireWritable(d); err != nil {
-		return nil, err
-	}
-
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if !d.VLANExists(vlanID) {
-		return nil, fmt.Errorf("VLAN %d does not exist", vlanID)
+	if err := d.precondition("remove-vlan-member", vlanResource(vlanID)).
+		RequireVLANExists(vlanID).
+		Result(); err != nil {
+		return nil, err
 	}
 
 	cs := NewChangeSet(d.name, "device.remove-vlan-member")

@@ -206,7 +206,7 @@ func (cc *CompositeConfig) ToTableChanges() []device.TableChange {
 // For overwrite mode: replaces entire CONFIG_DB.
 // For merge mode: validates no conflicts, then pipeline-writes new entries.
 func (d *Device) DeliverComposite(composite *CompositeConfig, mode CompositeMode) (*CompositeDeliveryResult, error) {
-	if err := requireWritable(d); err != nil {
+	if err := d.precondition("deliver-composite", string(mode)).Result(); err != nil {
 		return nil, err
 	}
 
