@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-// Status represents the outcome of a step or scenario.
-type Status string
+// StepStatus represents the outcome of a step or scenario.
+type StepStatus string
 
 const (
-	StatusPassed  Status = "PASS"
-	StatusFailed  Status = "FAIL"
-	StatusSkipped Status = "SKIP"
-	StatusError   Status = "ERROR"
+	StepStatusPassed  StepStatus = "PASS"
+	StepStatusFailed  StepStatus = "FAIL"
+	StepStatusSkipped StepStatus = "SKIP"
+	StepStatusError   StepStatus = "ERROR"
 )
 
 // ScenarioResult holds the result of a single scenario execution.
@@ -24,11 +24,11 @@ type ScenarioResult struct {
 	Name        string
 	Topology    string
 	Platform    string
-	Status      Status
+	Status      StepStatus
 	Duration    time.Duration
 	Steps       []StepResult
 	DeployError error
-	SkipReason  string // set when Status==StatusSkipped (e.g. "requires 'bgp-converge' which failed")
+	SkipReason  string // set when Status==StepStatusSkipped (e.g. "requires 'bgp-converge' which failed")
 
 	Repeat          int // total iterations requested (from scenario.repeat, 0 = no repeat)
 	FailedIteration int // which iteration failed (0 = none; only set when Repeat > 1)
@@ -38,7 +38,7 @@ type ScenarioResult struct {
 type StepResult struct {
 	Name      string
 	Action    StepAction
-	Status    Status
+	Status    StepStatus
 	Duration  time.Duration
 	Message   string
 	Device    string
@@ -49,7 +49,7 @@ type StepResult struct {
 // DeviceResult holds the result for a single device within a multi-device step.
 type DeviceResult struct {
 	Device  string
-	Status  Status
+	Status  StepStatus
 	Message string
 }
 
@@ -59,15 +59,15 @@ type ReportGenerator struct {
 }
 
 // statusSymbol returns the console symbol for a status.
-func statusSymbol(s Status) string {
+func statusSymbol(s StepStatus) string {
 	switch s {
-	case StatusPassed:
+	case StepStatusPassed:
 		return "\u2713" // ✓
-	case StatusFailed:
+	case StepStatusFailed:
 		return "\u2717" // ✗
-	case StatusSkipped:
+	case StepStatusSkipped:
 		return "\u2298" // ⊘
-	case StatusError:
+	case StepStatusError:
 		return "!"
 	default:
 		return "?"
@@ -79,8 +79,8 @@ func (g *ReportGenerator) PrintConsole(w io.Writer) {
 	for _, r := range g.Results {
 		fmt.Fprintf(w, "\nnewtest: %s (%s topology, %s)\n\n", r.Name, r.Topology, r.Platform)
 
-		if r.Status == StatusSkipped && r.SkipReason != "" {
-			fmt.Fprintf(w, "  %s skipped: %s\n\n", statusSymbol(StatusSkipped), r.SkipReason)
+		if r.Status == StepStatusSkipped && r.SkipReason != "" {
+			fmt.Fprintf(w, "  %s skipped: %s\n\n", statusSymbol(StepStatusSkipped), r.SkipReason)
 			continue
 		}
 
@@ -114,7 +114,7 @@ func (g *ReportGenerator) printStepsConsole(w io.Writer, r *ScenarioResult) {
 
 	passed := 0
 	for _, s := range r.Steps {
-		if s.Status == StatusPassed {
+		if s.Status == StepStatusPassed {
 			passed++
 		}
 	}
@@ -128,20 +128,20 @@ func (g *ReportGenerator) printRepeatConsole(w io.Writer, r *ScenarioResult) {
 	if r.FailedIteration > 0 {
 		// Show which iteration failed and its step details
 		fmt.Fprintf(w, "Running %d iterations...\n", r.Repeat)
-		fmt.Fprintf(w, "  %s iterations 1-%d passed\n", statusSymbol(StatusPassed), r.FailedIteration-1)
-		fmt.Fprintf(w, "  %s iteration %d:\n", statusSymbol(StatusFailed), r.FailedIteration)
+		fmt.Fprintf(w, "  %s iterations 1-%d passed\n", statusSymbol(StepStatusPassed), r.FailedIteration-1)
+		fmt.Fprintf(w, "  %s iteration %d:\n", statusSymbol(StepStatusFailed), r.FailedIteration)
 
 		for _, step := range r.Steps {
 			if step.Iteration != r.FailedIteration {
 				continue
 			}
 			fmt.Fprintf(w, "    [%s] %s", statusSymbol(step.Status), step.Name)
-			if step.Message != "" && step.Status != StatusPassed {
+			if step.Message != "" && step.Status != StepStatusPassed {
 				fmt.Fprintf(w, ": %s", step.Message)
 			}
 			fmt.Fprintln(w)
 			for _, d := range step.Details {
-				if d.Status != StatusPassed {
+				if d.Status != StepStatusPassed {
 					fmt.Fprintf(w, "      %s %s: %s\n", statusSymbol(d.Status), d.Device, d.Message)
 				}
 			}
@@ -190,7 +190,7 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 	hasFailures := false
 	for _, r := range g.Results {
 		for _, s := range r.Steps {
-			if s.Status == StatusFailed {
+			if s.Status == StepStatusFailed {
 				if !hasFailures {
 					fmt.Fprintf(f, "\n## Failures\n\n")
 					hasFailures = true
@@ -198,7 +198,7 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 				fmt.Fprintf(f, "### %s\n", r.Name)
 				fmt.Fprintf(f, "Step %s (%s): %s\n\n", s.Name, s.Action, s.Message)
 				for _, d := range s.Details {
-					if d.Status == StatusFailed {
+					if d.Status == StepStatusFailed {
 						fmt.Fprintf(f, "  %s: %s\n", d.Device, d.Message)
 					}
 				}
@@ -224,7 +224,7 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 		}
 
 		// Scenario-level skip: emit a single skipped test case
-		if r.Status == StatusSkipped && r.SkipReason != "" {
+		if r.Status == StepStatusSkipped && r.SkipReason != "" {
 			suite.Tests = 1
 			suite.Skipped = 1
 			suite.Cases = append(suite.Cases, junitTestCase{
@@ -250,18 +250,18 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 			}
 
 			switch s.Status {
-			case StatusFailed:
+			case StepStatusFailed:
 				suite.Failures++
 				tc.Failure = &junitFailure{
 					Message: s.Message,
 					Type:    string(s.Action),
 				}
-			case StatusSkipped:
+			case StepStatusSkipped:
 				suite.Skipped++
 				tc.Skipped = &junitSkipped{
 					Message: s.Message,
 				}
-			case StatusError:
+			case StepStatusError:
 				suite.Errors++
 				tc.Error = &junitError{
 					Message: s.Message,
@@ -284,13 +284,13 @@ func (g *ReportGenerator) WriteJUnit(path string) error {
 }
 
 // statusVerb returns a past-tense verb for a status, used in skip reasons.
-func statusVerb(s Status) string {
+func statusVerb(s StepStatus) string {
 	switch s {
-	case StatusFailed:
+	case StepStatusFailed:
 		return "failed"
-	case StatusError:
+	case StepStatusError:
 		return "errored"
-	case StatusSkipped:
+	case StepStatusSkipped:
 		return "was skipped"
 	default:
 		return string(s)

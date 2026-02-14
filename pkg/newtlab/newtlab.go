@@ -347,110 +347,86 @@ func (l *Lab) startNodes(ctx context.Context) error {
 	return firstErr
 }
 
-// bootstrapNodes configures network via serial console and waits for SSH (parallel).
-func (l *Lab) bootstrapNodes(ctx context.Context) error {
+// parallelForNodes runs fn for each node with status "running" in parallel.
+// On error, the node's status is set to "error" and the first error is returned.
+func (l *Lab) parallelForNodes(fn func(name string, node *NodeConfig, ns *NodeState) error) error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
 
+	for name, node := range l.Nodes {
+		ns := l.State.Nodes[name]
+		if ns == nil || ns.Status != "running" {
+			continue
+		}
+		wg.Add(1)
+		go func(name string, node *NodeConfig, ns *NodeState) {
+			defer wg.Done()
+			if err := fn(name, node, ns); err != nil {
+				mu.Lock()
+				ns.Status = "error"
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+			}
+		}(name, node, ns)
+	}
+	wg.Wait()
+	return firstErr
+}
+
+// bootstrapNodes configures network via serial console and waits for SSH (parallel).
+func (l *Lab) bootstrapNodes(ctx context.Context) error {
 	// Bootstrap network via serial console (parallel).
 	// QEMU user-mode networking requires eth0 up + DHCP before SSH port forwarding works.
-	for name, node := range l.Nodes {
-		ns := l.State.Nodes[name]
-		if ns.Status != "running" {
-			continue
-		}
+	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		consoleHost := resolveHostIP(node.Host, l.Config)
-		wg.Add(1)
-		go func(name, consoleHost string, node *NodeConfig) {
-			defer wg.Done()
-			err := BootstrapNetwork(ctx, consoleHost, node.ConsolePort,
-				node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
-				time.Duration(node.BootTimeout)*time.Second)
-			if err != nil {
-				mu.Lock()
-				l.State.Nodes[name].Status = "error"
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-			}
-		}(name, consoleHost, node)
-	}
-	wg.Wait()
+		return BootstrapNetwork(ctx, consoleHost, node.ConsolePort,
+			node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
+			time.Duration(node.BootTimeout)*time.Second)
+	})
 
-	// Wait for SSH readiness (parallel)
-	for name, node := range l.Nodes {
-		ns := l.State.Nodes[name]
-		if ns.Status != "running" {
-			continue
-		}
+	// Wait for SSH readiness (parallel) — only for nodes still running.
+	if err2 := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		sshHost := resolveHostIP(node.Host, l.Config)
-		wg.Add(1)
-		go func(name, sshHost string, node *NodeConfig) {
-			defer wg.Done()
-			err := WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
-				60*time.Second)
-			if err != nil {
-				mu.Lock()
-				l.State.Nodes[name].Status = "error"
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-			}
-		}(name, sshHost, node)
+		return WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
+			60*time.Second)
+	}); err == nil {
+		err = err2
 	}
-	wg.Wait()
 
-	return firstErr
+	return err
 }
 
 // applyNodePatches resolves and applies platform boot patches per node (parallel),
 // then patches device profiles.
 func (l *Lab) applyNodePatches(ctx context.Context) error {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-
-	for name, node := range l.Nodes {
-		ns := l.State.Nodes[name]
-		if ns.Status != "running" {
-			continue
-		}
+	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		profile := l.Profiles[name]
 		platform := l.Platform.Platforms[profile.Platform]
 		if platform == nil {
-			continue
+			return nil
 		}
-		patches, err := ResolveBootPatches(platform.Dataplane, platform.VMImageRelease)
-		if err != nil || len(patches) == 0 {
-			continue
+		patches, patchErr := ResolveBootPatches(platform.Dataplane, platform.VMImageRelease)
+		if patchErr != nil || len(patches) == 0 {
+			return nil
 		}
 		sshHost := resolveHostIP(node.Host, l.Config)
 		vars := buildPatchVars(node, platform)
-		wg.Add(1)
-		go func(name, sshHost string, node *NodeConfig, patches []*BootPatch, vars *PatchVars) {
-			defer wg.Done()
-			err := ApplyBootPatches(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("newtlab: boot patches %s: %w", name, err)
-				}
-				mu.Unlock()
-			}
-		}(name, sshHost, node, patches, vars)
-	}
-	wg.Wait()
+		if patchErr = ApplyBootPatches(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass, patches, vars); patchErr != nil {
+			return fmt.Errorf("newtlab: boot patches %s: %w", name, patchErr)
+		}
+		return nil
+	})
 
-	if err := PatchProfiles(l); err != nil {
-		if firstErr == nil {
-			firstErr = err
+	if patchErr := PatchProfiles(l); patchErr != nil {
+		if err == nil {
+			err = patchErr
 		}
 	}
 
-	return firstErr
+	return err
 }
 
 // DestroyByName destroys a lab identified only by name, loading all
@@ -724,14 +700,20 @@ func (l *Lab) refreshBGP(state *LabState) {
 
 		client, err := ssh.Dial("tcp", addr, config)
 		if err != nil {
+			util.Logger.Warnf("refreshBGP %s: SSH dial: %v", name, err)
 			continue
 		}
 		session, err := client.NewSession()
 		if err != nil {
+			util.Logger.Warnf("refreshBGP %s: new session: %v", name, err)
 			client.Close()
 			continue
 		}
-		_ = session.Run("vtysh -c 'clear bgp * soft'")
+		if err := session.Run("vtysh -c 'clear bgp * soft'"); err != nil {
+			util.Logger.Warnf("refreshBGP %s: clear bgp: %v", name, err)
+		} else {
+			util.Logger.Infof("refreshBGP %s: done", name)
+		}
 		session.Close()
 		client.Close()
 	}

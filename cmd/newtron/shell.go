@@ -20,6 +20,7 @@ type Shell struct {
 	intfName    string             // "" = device scope
 	reader     *bufio.Reader
 	dirty      bool // true if changes applied since last save
+	commands   map[string]func(args []string)
 
 	// Composite build mode
 	composite    *network.CompositeBuilder // non-nil when in composite mode
@@ -28,11 +29,24 @@ type Shell struct {
 
 // NewShell creates a new interactive shell for the given device.
 func NewShell(dev *network.Device, deviceName string) *Shell {
-	return &Shell{
+	s := &Shell{
 		dev:        dev,
 		deviceName: deviceName,
 		reader:     bufio.NewReader(os.Stdin),
 	}
+	s.commands = map[string]func(args []string){
+		"show":           func([]string) { s.cmdShow() },
+		"list":           s.cmdList,
+		"interface":      s.cmdInterface,
+		"exit":           func([]string) { s.cmdExit() },
+		"apply-service":  s.cmdApplyService,
+		"remove-service": func([]string) { s.cmdRemoveService() },
+		"composite":      s.cmdComposite,
+		"save":           func([]string) { s.cmdSave() },
+		"help":           func([]string) { s.cmdHelp() },
+		"?":              func([]string) { s.cmdHelp() },
+	}
+	return s
 }
 
 // Run starts the interactive shell loop.
@@ -57,28 +71,14 @@ func (s *Shell) Run() error {
 		cmd := args[0]
 
 		switch cmd {
-		case "show":
-			s.cmdShow()
-		case "list":
-			s.cmdList(args[1:])
-		case "interface":
-			s.cmdInterface(args[1:])
-		case "exit":
-			s.cmdExit()
-		case "apply-service":
-			s.cmdApplyService(args[1:])
-		case "remove-service":
-			s.cmdRemoveService()
-		case "composite":
-			s.cmdComposite(args[1:])
-		case "save":
-			s.cmdSave()
 		case "quit", "disconnect", "q":
 			return s.handleQuit()
-		case "help", "?":
-			s.cmdHelp()
 		default:
-			fmt.Printf("Unknown command: %s (type 'help' for commands)\n", cmd)
+			if fn, ok := s.commands[cmd]; ok {
+				fn(args[1:])
+			} else {
+				fmt.Printf("Unknown command: %s (type 'help' for commands)\n", cmd)
+			}
 		}
 	}
 }

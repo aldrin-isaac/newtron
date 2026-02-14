@@ -38,7 +38,7 @@ func TestSaveLoadRunState(t *testing.T) {
 		Platform: "sonic-vpp",
 		LabName:  "2node",
 		PID:      12345,
-		Status:   StatusRunning,
+		Status:   SuiteStatusRunning,
 		Started:  time.Now().Truncate(time.Second),
 		Scenarios: []ScenarioState{
 			{Name: "boot-ssh", Status: "PASS", Duration: "2s"},
@@ -69,8 +69,8 @@ func TestSaveLoadRunState(t *testing.T) {
 	if loaded.Suite != "test-suite" {
 		t.Errorf("Suite = %q, want %q", loaded.Suite, "test-suite")
 	}
-	if loaded.Status != StatusRunning {
-		t.Errorf("Status = %q, want %q", loaded.Status, StatusRunning)
+	if loaded.Status != SuiteStatusRunning {
+		t.Errorf("Status = %q, want %q", loaded.Status, SuiteStatusRunning)
 	}
 	if len(loaded.Scenarios) != 2 {
 		t.Errorf("Scenarios count = %d, want 2", len(loaded.Scenarios))
@@ -97,7 +97,7 @@ func TestRemoveRunState(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
-	state := &RunState{Suite: "removable", Status: StatusComplete}
+	state := &RunState{Suite: "removable", Status: SuiteStatusComplete}
 	if err := SaveRunState(state); err != nil {
 		t.Fatalf("SaveRunState: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestListSuiteStates(t *testing.T) {
 
 	// Create two suites
 	for _, suite := range []string{"suite-a", "suite-b"} {
-		state := &RunState{Suite: suite, Status: StatusComplete}
+		state := &RunState{Suite: suite, Status: SuiteStatusComplete}
 		if err := SaveRunState(state); err != nil {
 			t.Fatalf("SaveRunState(%s): %v", suite, err)
 		}
@@ -151,7 +151,7 @@ func TestAcquireLock_Fresh(t *testing.T) {
 
 	state := &RunState{
 		Suite:  "lock-test",
-		Status: StatusRunning,
+		Status: SuiteStatusRunning,
 	}
 
 	if err := AcquireLock(state); err != nil {
@@ -171,14 +171,14 @@ func TestAcquireLock_StalePID(t *testing.T) {
 	old := &RunState{
 		Suite:  "stale-lock",
 		PID:    999999999, // won't exist
-		Status: StatusRunning,
+		Status: SuiteStatusRunning,
 	}
 	if err := SaveRunState(old); err != nil {
 		t.Fatalf("SaveRunState: %v", err)
 	}
 
 	// Should succeed — stale PID
-	state := &RunState{Suite: "stale-lock", Status: StatusRunning}
+	state := &RunState{Suite: "stale-lock", Status: SuiteStatusRunning}
 	if err := AcquireLock(state); err != nil {
 		t.Fatalf("AcquireLock with stale PID: %v", err)
 	}
@@ -192,14 +192,14 @@ func TestAcquireLock_ActivePID(t *testing.T) {
 	old := &RunState{
 		Suite:  "active-lock",
 		PID:    os.Getpid(),
-		Status: StatusRunning,
+		Status: SuiteStatusRunning,
 	}
 	if err := SaveRunState(old); err != nil {
 		t.Fatalf("SaveRunState: %v", err)
 	}
 
 	// Should fail — PID is alive
-	state := &RunState{Suite: "active-lock", Status: StatusRunning}
+	state := &RunState{Suite: "active-lock", Status: SuiteStatusRunning}
 	err := AcquireLock(state)
 	if err == nil {
 		t.Fatal("expected error for active PID lock")
@@ -216,7 +216,7 @@ func TestCheckPausing(t *testing.T) {
 	}
 
 	// Running → false
-	state := &RunState{Suite: "pause-test", Status: StatusRunning}
+	state := &RunState{Suite: "pause-test", Status: SuiteStatusRunning}
 	if err := SaveRunState(state); err != nil {
 		t.Fatalf("SaveRunState: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestCheckPausing(t *testing.T) {
 	}
 
 	// Pausing → true
-	state.Status = StatusPausing
+	state.Status = SuiteStatusPausing
 	if err := SaveRunState(state); err != nil {
 		t.Fatalf("SaveRunState: %v", err)
 	}

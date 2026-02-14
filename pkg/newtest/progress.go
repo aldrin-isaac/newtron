@@ -90,13 +90,13 @@ func (p *ConsoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) 
 	padded := cli.DotPad(result.Name, p.dotWidth)
 
 	switch result.Status {
-	case StatusSkipped:
+	case StepStatusSkipped:
 		fmt.Fprintf(p.W, "  %-7s %s %s\n", tag, padded, cli.Yellow("SKIP"))
-	case StatusPassed:
+	case StepStatusPassed:
 		fmt.Fprintf(p.W, "  %-7s %s %s  (%s)\n", tag, padded, cli.Green("PASS"), p.formatDuration(result.Duration))
-	case StatusFailed:
+	case StepStatusFailed:
 		fmt.Fprintf(p.W, "  %-7s %s %s  (%s)\n", tag, padded, cli.Red("FAIL"), p.formatDuration(result.Duration))
-	case StatusError:
+	case StepStatusError:
 		fmt.Fprintf(p.W, "  %-7s %s %s  (%s)\n", tag, padded, cli.Red("ERROR"), p.formatDuration(result.Duration))
 	}
 }
@@ -115,12 +115,12 @@ func (p *ConsoleProgress) StepEnd(scenario string, result *StepResult, index, to
 	fmt.Fprintf(p.W, "          %s %s %s  (%s)\n", tag, stepDot, p.colorStatus(result.Status), p.formatDuration(result.Duration))
 
 	// Print failure details
-	if result.Status == StatusFailed || result.Status == StatusError {
+	if result.Status == StepStatusFailed || result.Status == StepStatusError {
 		if result.Message != "" {
 			fmt.Fprintf(p.W, "               %s\n", cli.Dim(result.Message))
 		}
 		for _, d := range result.Details {
-			if d.Status != StatusPassed {
+			if d.Status != StepStatusPassed {
 				fmt.Fprintf(p.W, "               %s: %s\n", d.Device, cli.Dim(d.Message))
 			}
 		}
@@ -131,13 +131,13 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 	passed, failed, skipped, errored := 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
-		case StatusPassed:
+		case StepStatusPassed:
 			passed++
-		case StatusFailed:
+		case StepStatusFailed:
 			failed++
-		case StatusSkipped:
+		case StepStatusSkipped:
 			skipped++
-		case StatusError:
+		case StepStatusError:
 			errored++
 		}
 	}
@@ -167,7 +167,7 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 	if failed+errored > 0 {
 		fmt.Fprintf(p.W, "\n  FAILED:\n")
 		for i, r := range results {
-			if r.Status != StatusFailed && r.Status != StatusError {
+			if r.Status != StepStatusFailed && r.Status != StepStatusError {
 				continue
 			}
 			fmt.Fprintf(p.W, "    [%d]  %s\n", i+1, r.Name)
@@ -176,12 +176,12 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 				continue
 			}
 			for _, step := range r.Steps {
-				if step.Status == StatusFailed || step.Status == StatusError {
+				if step.Status == StepStatusFailed || step.Status == StepStatusError {
 					msg := step.Message
 					if msg == "" {
 						var msgs []string
 						for _, d := range step.Details {
-							if d.Status != StatusPassed && d.Message != "" {
+							if d.Status != StepStatusPassed && d.Message != "" {
 								msgs = append(msgs, d.Device+": "+d.Message)
 							}
 						}
@@ -201,7 +201,7 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 	if skipped > 0 {
 		fmt.Fprintf(p.W, "\n  SKIPPED:\n")
 		for i, r := range results {
-			if r.Status != StatusSkipped {
+			if r.Status != StepStatusSkipped {
 				continue
 			}
 			reason := r.SkipReason
@@ -216,15 +216,15 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 	fmt.Fprintln(p.W)
 }
 
-func (p *ConsoleProgress) colorStatus(s Status) string {
+func (p *ConsoleProgress) colorStatus(s StepStatus) string {
 	switch s {
-	case StatusPassed:
+	case StepStatusPassed:
 		return cli.Green(string(s))
-	case StatusFailed:
+	case StepStatusFailed:
 		return cli.Red(string(s))
-	case StatusSkipped:
+	case StepStatusSkipped:
 		return cli.Yellow(string(s))
-	case StatusError:
+	case StepStatusError:
 		return cli.Red(string(s))
 	default:
 		return string(s)

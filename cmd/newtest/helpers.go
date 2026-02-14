@@ -70,7 +70,7 @@ func resolveTopologiesDir() string {
 // resolveSuite resolves a suite name from --dir flag or auto-detection.
 // The filter function controls which suites are considered: return true for
 // suites that should be included. Pass nil to accept any suite with state.
-func resolveSuite(cmd *cobra.Command, dir string, filter func(newtest.RunStatus) bool) (string, error) {
+func resolveSuite(cmd *cobra.Command, dir string, filter func(newtest.SuiteStatus) bool) (string, error) {
 	if cmd.Flags().Changed("dir") {
 		return newtest.SuiteName(dir), nil
 	}

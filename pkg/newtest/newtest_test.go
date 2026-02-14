@@ -460,32 +460,32 @@ func TestComputeOverallStatus(t *testing.T) {
 	tests := []struct {
 		name  string
 		steps []StepResult
-		want  Status
+		want  StepStatus
 	}{
 		{
 			name:  "all passed",
-			steps: []StepResult{{Status: StatusPassed}, {Status: StatusPassed}},
-			want:  StatusPassed,
+			steps: []StepResult{{Status: StepStatusPassed}, {Status: StepStatusPassed}},
+			want:  StepStatusPassed,
 		},
 		{
 			name:  "one failed",
-			steps: []StepResult{{Status: StatusPassed}, {Status: StatusFailed}},
-			want:  StatusFailed,
+			steps: []StepResult{{Status: StepStatusPassed}, {Status: StepStatusFailed}},
+			want:  StepStatusFailed,
 		},
 		{
 			name:  "one error",
-			steps: []StepResult{{Status: StatusPassed}, {Status: StatusError}},
-			want:  StatusError,
+			steps: []StepResult{{Status: StepStatusPassed}, {Status: StepStatusError}},
+			want:  StepStatusError,
 		},
 		{
 			name:  "error and failed prefers failed",
-			steps: []StepResult{{Status: StatusError}, {Status: StatusFailed}},
-			want:  StatusFailed,
+			steps: []StepResult{{Status: StepStatusError}, {Status: StepStatusFailed}},
+			want:  StepStatusFailed,
 		},
 		{
 			name:  "empty steps is passed",
 			steps: []StepResult{},
-			want:  StatusPassed,
+			want:  StepStatusPassed,
 		},
 	}
 
@@ -505,14 +505,14 @@ func TestComputeOverallStatus(t *testing.T) {
 
 func TestStatusSymbol(t *testing.T) {
 	tests := []struct {
-		status Status
+		status StepStatus
 		want   string
 	}{
-		{StatusPassed, "\u2713"},
-		{StatusFailed, "\u2717"},
-		{StatusSkipped, "\u2298"},
-		{StatusError, "!"},
-		{Status("unknown"), "?"},
+		{StepStatusPassed, "\u2713"},
+		{StepStatusFailed, "\u2717"},
+		{StepStatusSkipped, "\u2298"},
+		{StepStatusError, "!"},
+		{StepStatus("unknown"), "?"},
 	}
 
 	for _, tt := range tests {
@@ -791,13 +791,13 @@ steps:
 
 func TestStatusVerb(t *testing.T) {
 	tests := []struct {
-		status Status
+		status StepStatus
 		want   string
 	}{
-		{StatusFailed, "failed"},
-		{StatusError, "errored"},
-		{StatusSkipped, "was skipped"},
-		{StatusPassed, "PASS"},
+		{StepStatusFailed, "failed"},
+		{StepStatusError, "errored"},
+		{StepStatusSkipped, "was skipped"},
+		{StepStatusPassed, "PASS"},
 	}
 
 	for _, tt := range tests {
@@ -811,10 +811,10 @@ func TestStatusVerb(t *testing.T) {
 }
 
 func TestCheckRequires(t *testing.T) {
-	status := map[string]Status{
-		"a": StatusPassed,
-		"b": StatusFailed,
-		"c": StatusSkipped,
+	status := map[string]StepStatus{
+		"a": StepStatusPassed,
+		"b": StepStatusFailed,
+		"c": StepStatusSkipped,
 	}
 
 	tests := []struct {
@@ -881,7 +881,7 @@ func TestPrintConsole_SkipReason(t *testing.T) {
 			Name:       "skipped-test",
 			Topology:   "2node",
 			Platform:   "sonic-vpp",
-			Status:     StatusSkipped,
+			Status:     StepStatusSkipped,
 			SkipReason: "requires 'provision' which failed",
 		},
 	}
@@ -905,7 +905,7 @@ func TestWriteJUnit_SkipReason(t *testing.T) {
 			Name:       "skipped-test",
 			Topology:   "2node",
 			Platform:   "sonic-vpp",
-			Status:     StatusSkipped,
+			Status:     StepStatusSkipped,
 			SkipReason: "requires 'boot-ssh' which failed",
 		},
 	}
@@ -1023,15 +1023,15 @@ func TestPrintConsole_RepeatPass(t *testing.T) {
 			Name:     "service-churn",
 			Topology: "2node",
 			Platform: "sonic-vpp",
-			Status:   StatusPassed,
+			Status:   StepStatusPassed,
 			Duration: 5 * time.Minute,
 			Repeat:   10,
 			Steps: func() []StepResult {
 				var steps []StepResult
 				for i := 1; i <= 10; i++ {
 					steps = append(steps,
-						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
-						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
+						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
 					)
 				}
 				return steps
@@ -1055,7 +1055,7 @@ func TestPrintConsole_RepeatFail(t *testing.T) {
 			Name:            "service-churn",
 			Topology:        "2node",
 			Platform:        "sonic-vpp",
-			Status:          StatusFailed,
+			Status:          StepStatusFailed,
 			Duration:        2 * time.Minute,
 			Repeat:          10,
 			FailedIteration: 5,
@@ -1063,13 +1063,13 @@ func TestPrintConsole_RepeatFail(t *testing.T) {
 				var steps []StepResult
 				for i := 1; i <= 4; i++ {
 					steps = append(steps,
-						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
-						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: i},
+						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
+						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
 					)
 				}
 				// Iteration 5 fails on apply
 				steps = append(steps,
-					StepResult{Name: "apply", Action: ActionSSHCommand, Status: StatusFailed, Iteration: 5, Message: "service binding not found"},
+					StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusFailed, Iteration: 5, Message: "service binding not found"},
 				)
 				return steps
 			}(),
@@ -1095,15 +1095,15 @@ func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 			Name:     "churn",
 			Topology: "2node",
 			Platform: "sonic-vpp",
-			Status:   StatusPassed,
+			Status:   StepStatusPassed,
 			Repeat:   3,
 			Steps: []StepResult{
-				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 1},
-				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 1},
-				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 2},
-				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 2},
-				{Name: "apply", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 3},
-				{Name: "remove", Action: ActionSSHCommand, Status: StatusPassed, Iteration: 3},
+				{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 1},
+				{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 1},
+				{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 2},
+				{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 2},
+				{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 3},
+				{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: 3},
 			},
 		},
 	}
@@ -1610,8 +1610,8 @@ func TestExecuteStep_UnknownAction(t *testing.T) {
 	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
 	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
 
-	if output.Result.Status != StatusError {
-		t.Errorf("expected StatusError for unknown action, got %v", output.Result.Status)
+	if output.Result.Status != StepStatusError {
+		t.Errorf("expected StepStatusError for unknown action, got %v", output.Result.Status)
 	}
 	if !strings.Contains(output.Result.Message, "unknown action") {
 		t.Errorf("expected 'unknown action' in message, got %q", output.Result.Message)
@@ -1643,8 +1643,8 @@ func TestExecuteStep_SetsNameAndAction(t *testing.T) {
 	if output.Result.Action != ActionWait {
 		t.Errorf("Action = %q, want %q", output.Result.Action, ActionWait)
 	}
-	if output.Result.Status != StatusPassed {
-		t.Errorf("Status = %v, want %v", output.Result.Status, StatusPassed)
+	if output.Result.Status != StepStatusPassed {
+		t.Errorf("Status = %v, want %v", output.Result.Status, StepStatusPassed)
 	}
 	if output.Result.Duration == 0 {
 		t.Error("expected Duration to be set (non-zero)")
@@ -1995,8 +1995,8 @@ func TestWaitExecutor_ZeroDuration(t *testing.T) {
 	step := &Step{Action: ActionWait, Name: "zero-wait", Duration: 0}
 	output := executor.Execute(context.Background(), &Runner{}, step)
 
-	if output.Result.Status != StatusPassed {
-		t.Errorf("expected StatusPassed, got %v", output.Result.Status)
+	if output.Result.Status != StepStatusPassed {
+		t.Errorf("expected StepStatusPassed, got %v", output.Result.Status)
 	}
 }
 
@@ -2008,8 +2008,8 @@ func TestWaitExecutor_ContextCancelled(t *testing.T) {
 	step := &Step{Action: ActionWait, Name: "cancelled-wait", Duration: 10 * time.Second}
 	output := executor.Execute(ctx, &Runner{}, step)
 
-	if output.Result.Status != StatusError {
-		t.Errorf("expected StatusError for cancelled context, got %v", output.Result.Status)
+	if output.Result.Status != StepStatusError {
+		t.Errorf("expected StepStatusError for cancelled context, got %v", output.Result.Status)
 	}
 	if !strings.Contains(output.Result.Message, "interrupted") {
 		t.Errorf("expected 'interrupted' in message, got %q", output.Result.Message)
@@ -2054,7 +2054,7 @@ func TestIterateScenarios_Normal(t *testing.T) {
 			Name:     sc.Name,
 			Topology: topology,
 			Platform: platform,
-			Status:   StatusPassed,
+			Status:   StepStatusPassed,
 		}, nil
 	})
 	if err != nil {
@@ -2064,8 +2064,8 @@ func TestIterateScenarios_Normal(t *testing.T) {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
 	for i, res := range results {
-		if res.Status != StatusPassed {
-			t.Errorf("result[%d].Status = %v, want %v", i, res.Status, StatusPassed)
+		if res.Status != StepStatusPassed {
+			t.Errorf("result[%d].Status = %v, want %v", i, res.Status, StepStatusPassed)
 		}
 	}
 	if results[0].Name != "sc1" || results[1].Name != "sc2" {
@@ -2086,7 +2086,7 @@ func TestIterateScenarios_TopologyOverride(t *testing.T) {
 	var gotTopology string
 	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node"}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		gotTopology = topology
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusPassed}, nil
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
@@ -2106,10 +2106,10 @@ func TestIterateScenarios_Resume(t *testing.T) {
 	callbackCalls := 0
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{
 		Resume:    true,
-		Completed: map[string]Status{"sc1": StatusPassed},
+		Completed: map[string]StepStatus{"sc1": StepStatusPassed},
 	}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		callbackCalls++
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusPassed}, nil
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
@@ -2120,15 +2120,15 @@ func TestIterateScenarios_Resume(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
-	if results[0].Status != StatusSkipped {
-		t.Errorf("results[0].Status = %v, want StatusSkipped", results[0].Status)
+	if results[0].Status != StepStatusSkipped {
+		t.Errorf("results[0].Status = %v, want StepStatusSkipped", results[0].Status)
 	}
 	if !strings.Contains(results[0].SkipReason, "already passed (resumed)") {
 		t.Errorf("results[0].SkipReason = %q, want 'already passed (resumed)'",
 			results[0].SkipReason)
 	}
-	if results[1].Status != StatusPassed {
-		t.Errorf("results[1].Status = %v, want StatusPassed", results[1].Status)
+	if results[1].Status != StepStatusPassed {
+		t.Errorf("results[1].Status = %v, want StepStatusPassed", results[1].Status)
 	}
 }
 
@@ -2140,7 +2140,7 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 	}
 
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StatusFailed}, nil
+		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusFailed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
@@ -2148,8 +2148,8 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
-	if results[1].Status != StatusSkipped {
-		t.Errorf("results[1].Status = %v, want StatusSkipped", results[1].Status)
+	if results[1].Status != StepStatusSkipped {
+		t.Errorf("results[1].Status = %v, want StepStatusSkipped", results[1].Status)
 	}
 	if !strings.Contains(results[1].SkipReason, "requires") {
 		t.Errorf("results[1].SkipReason = %q, want to contain 'requires'",
@@ -2169,7 +2169,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 		if sc.Name == "sc1" {
 			return nil, sentinel
 		}
-		return &ScenarioResult{Name: sc.Name, Status: StatusPassed}, nil
+		return &ScenarioResult{Name: sc.Name, Status: StepStatusPassed}, nil
 	})
 	if err != sentinel {
 		t.Errorf("expected sentinel error, got %v", err)
@@ -2200,8 +2200,8 @@ func TestRunScenarioSteps_SingleStep(t *testing.T) {
 	if len(result.Steps) != 1 {
 		t.Fatalf("expected 1 step result, got %d", len(result.Steps))
 	}
-	if result.Status != StatusPassed {
-		t.Errorf("Status = %v, want StatusPassed", result.Status)
+	if result.Status != StepStatusPassed {
+		t.Errorf("Status = %v, want StepStatusPassed", result.Status)
 	}
 	if result.Steps[0].Name != "quick-wait" {
 		t.Errorf("Steps[0].Name = %q, want %q", result.Steps[0].Name, "quick-wait")
@@ -2225,8 +2225,8 @@ func TestRunScenarioSteps_FailFast(t *testing.T) {
 	if len(result.Steps) != 1 {
 		t.Fatalf("expected 1 step result (fail-fast), got %d", len(result.Steps))
 	}
-	if result.Status != StatusError {
-		t.Errorf("Status = %v, want StatusError", result.Status)
+	if result.Status != StepStatusError {
+		t.Errorf("Status = %v, want StepStatusError", result.Status)
 	}
 }
 
@@ -2247,8 +2247,8 @@ func TestRunScenarioSteps_Repeat(t *testing.T) {
 	if len(result.Steps) != 3 {
 		t.Fatalf("expected 3 step results (3 iterations), got %d", len(result.Steps))
 	}
-	if result.Status != StatusPassed {
-		t.Errorf("Status = %v, want StatusPassed", result.Status)
+	if result.Status != StepStatusPassed {
+		t.Errorf("Status = %v, want StepStatusPassed", result.Status)
 	}
 	for i, sr := range result.Steps {
 		if sr.Iteration != i+1 {
@@ -2280,8 +2280,8 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	if result.FailedIteration != 1 {
 		t.Errorf("FailedIteration = %d, want 1", result.FailedIteration)
 	}
-	if result.Status != StatusError {
-		t.Errorf("Status = %v, want StatusError", result.Status)
+	if result.Status != StepStatusError {
+		t.Errorf("Status = %v, want StepStatusError", result.Status)
 	}
 }
 

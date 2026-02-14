@@ -41,7 +41,7 @@ type RunOptions struct {
 	// Lifecycle fields (set by `start` command, not by `run`)
 	Suite     string            // suite name for state tracking; empty disables lifecycle
 	Resume    bool              // true when resuming a paused run
-	Completed map[string]Status // scenario → status from previous run (resume)
+	Completed map[string]StepStatus // scenario → status from previous run (resume)
 }
 
 // NewRunner creates a new test runner.
@@ -140,7 +140,7 @@ type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform s
 // runShared and runIndependent. It handles resume, pause, requires checks, and
 // progress reporting. The run callback performs the actual per-scenario execution.
 func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, run scenarioRunner) ([]*ScenarioResult, error) {
-	scenarioStatus := make(map[string]Status)
+	scenarioStatus := make(map[string]StepStatus)
 	var results []*ScenarioResult
 
 	// Seed status map with completed scenarios from previous run (resume)
@@ -160,17 +160,16 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 
 		// Resume: skip already-completed scenarios
 		if opts.Resume {
-			if prev, ok := opts.Completed[sc.Name]; ok && prev == StatusPassed {
+			if prev, ok := opts.Completed[sc.Name]; ok && prev == StepStatusPassed {
 				result := &ScenarioResult{
 					Name:       sc.Name,
 					Topology:   topology,
 					Platform:   platform,
-					Status:     StatusSkipped,
+					Status:     StepStatusSkipped,
 					SkipReason: "already passed (resumed)",
 				}
 				results = append(results, result)
-				idx := i
-				r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+				r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, i, len(scenarios)) })
 				continue
 			}
 		}
@@ -185,18 +184,16 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 				Name:       sc.Name,
 				Topology:   topology,
 				Platform:   platform,
-				Status:     StatusSkipped,
+				Status:     StepStatusSkipped,
 				SkipReason: reason,
 			}
 			results = append(results, result)
-			scenarioStatus[sc.Name] = StatusSkipped
-			idx := i
-			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+			scenarioStatus[sc.Name] = StepStatusSkipped
+			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, i, len(scenarios)) })
 			continue
 		}
 
-		idx := i
-		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, idx, len(scenarios)) })
+		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, i, len(scenarios)) })
 
 		result, err := run(ctx, sc, topology, platform)
 		if err != nil {
@@ -205,7 +202,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 
 		results = append(results, result)
 		scenarioStatus[sc.Name] = result.Status
-		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, idx, len(scenarios)) })
+		r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, i, len(scenarios)) })
 	}
 
 	return results, nil
@@ -249,7 +246,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 					Name:        sc.Name,
 					Topology:    topology,
 					Platform:    sc.Platform,
-					Status:      StatusError,
+					Status:      StepStatusError,
 					DeployError: &InfraError{Op: "deploy", Err: err},
 				})
 			}
@@ -276,7 +273,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 				Name:        sc.Name,
 				Topology:    topology,
 				Platform:    sc.Platform,
-				Status:      StatusError,
+				Status:      StepStatusError,
 				DeployError: connectErr,
 			})
 		}
@@ -339,7 +336,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 		cleanup, err := r.deployTopology(ctx, specDir, opts)
 		if err != nil {
 			result.DeployError = &InfraError{Op: "deploy", Err: err}
-			result.Status = StatusError
+			result.Status = StepStatusError
 			result.Duration = time.Since(start)
 			return result, nil
 		}
@@ -359,7 +356,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 		} else {
 			result.DeployError = err
 		}
-		result.Status = StatusError
+		result.Status = StepStatusError
 		result.Duration = time.Since(start)
 		return result, nil
 	}
@@ -389,9 +386,7 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 		iterFailed := false
 		for i, step := range scenario.Steps {
 			stepCopy := step
-			idx := i
-			total := len(scenario.Steps)
-			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, idx, total) })
+			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
 
 			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
 
@@ -407,10 +402,10 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 			result.Steps = append(result.Steps, sr)
 
 			srCopy := sr
-			r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, idx, total) })
+			r.progress(func(p ProgressReporter) { p.StepEnd(scenario.Name, &srCopy, i, len(scenario.Steps)) })
 
 			// Fail-fast within iteration
-			if output.Result.Status == StatusFailed || output.Result.Status == StatusError {
+			if output.Result.Status == StepStatusFailed || output.Result.Status == StepStatusError {
 				iterFailed = true
 				break
 			}
@@ -466,7 +461,7 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 			Result: &StepResult{
 				Name:    step.Name,
 				Action:  step.Action,
-				Status:  StatusError,
+				Status:  StepStatusError,
 				Message: err.Error(),
 			},
 		}
@@ -482,7 +477,7 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 	if output.Result.Message == "" && len(output.Result.Details) > 0 {
 		var msgs []string
 		for _, d := range output.Result.Details {
-			if d.Status != StatusPassed && d.Message != "" {
+			if d.Status != StepStatusPassed && d.Message != "" {
 				msgs = append(msgs, d.Device+": "+d.Message)
 			}
 		}
@@ -528,20 +523,20 @@ func (r *Runner) hasDataplane() bool {
 }
 
 // computeOverallStatus computes overall scenario status from step results.
-func computeOverallStatus(steps []StepResult) Status {
+func computeOverallStatus(steps []StepResult) StepStatus {
 	hasError := false
 	for _, s := range steps {
-		if s.Status == StatusError {
+		if s.Status == StepStatusError {
 			hasError = true
 		}
-		if s.Status == StatusFailed {
-			return StatusFailed
+		if s.Status == StepStatusFailed {
+			return StepStatusFailed
 		}
 	}
 	if hasError {
-		return StatusError
+		return StepStatusError
 	}
-	return StatusPassed
+	return StepStatusPassed
 }
 
 // HasRequires returns true if any scenario declares dependencies.
@@ -575,13 +570,13 @@ func sharedTopology(scenarios []*Scenario, override string) string {
 // checkRequires returns a skip reason if any required scenario did not pass,
 // or "" if all requirements are satisfied. A required scenario that has not
 // been run yet is treated as not passed.
-func checkRequires(sc *Scenario, status map[string]Status) string {
+func checkRequires(sc *Scenario, status map[string]StepStatus) string {
 	for _, req := range sc.Requires {
 		st, ok := status[req]
 		if !ok {
 			return fmt.Sprintf("requires '%s' which has not run yet", req)
 		}
-		if st != StatusPassed {
+		if st != StepStatusPassed {
 			return fmt.Sprintf("requires '%s' which %s", req, statusVerb(st))
 		}
 	}

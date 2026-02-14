@@ -87,7 +87,7 @@ func printSuiteStatus(suite string) error {
 		statusStr = fmt.Sprintf("%s (pid %d)", statusStr, state.PID)
 	} else if state.PID != 0 {
 		// PID recorded but not alive
-		if state.Status == newtest.StatusRunning {
+		if state.Status == newtest.SuiteStatusRunning {
 			statusStr = cli.Yellow("aborted") + fmt.Sprintf(" (pid %d exited)", state.PID)
 		}
 	}
@@ -117,12 +117,12 @@ func printSuiteStatus(suite string) error {
 		for i, sc := range state.Scenarios {
 			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(sc.Status), sc.Duration)
 
-			switch newtest.Status(sc.Status) {
-			case newtest.StatusPassed:
+			switch newtest.StepStatus(sc.Status) {
+			case newtest.StepStatusPassed:
 				passed++
-			case newtest.StatusFailed:
+			case newtest.StepStatusFailed:
 				failed++
-			case newtest.StatusError:
+			case newtest.StepStatusError:
 				errored++
 			case "":
 				// pending
@@ -180,15 +180,15 @@ func checkTopologyStatus(topology string) string {
 	return fmt.Sprintf("stopped, %d nodes", total)
 }
 
-func colorRunStatus(status newtest.RunStatus, text string) string {
+func colorRunStatus(status newtest.SuiteStatus, text string) string {
 	switch status {
-	case newtest.StatusRunning:
+	case newtest.SuiteStatusRunning:
 		return cli.Green(text)
-	case newtest.StatusPausing, newtest.StatusPaused:
+	case newtest.SuiteStatusPausing, newtest.SuiteStatusPaused:
 		return cli.Yellow(text)
-	case newtest.StatusComplete:
+	case newtest.SuiteStatusComplete:
 		return cli.Green(text)
-	case newtest.StatusRunFailed, newtest.StatusAborted:
+	case newtest.SuiteStatusFailed, newtest.SuiteStatusAborted:
 		return cli.Red(text)
 	default:
 		return text
@@ -196,15 +196,15 @@ func colorRunStatus(status newtest.RunStatus, text string) string {
 }
 
 func colorScenarioStatus(status string) string {
-	switch newtest.Status(status) {
-	case newtest.StatusPassed:
-		return cli.Green(string(newtest.StatusPassed))
-	case newtest.StatusFailed:
-		return cli.Red(string(newtest.StatusFailed))
-	case newtest.StatusError:
-		return cli.Red(string(newtest.StatusError))
-	case newtest.StatusSkipped:
-		return cli.Yellow(string(newtest.StatusSkipped))
+	switch newtest.StepStatus(status) {
+	case newtest.StepStatusPassed:
+		return cli.Green(string(newtest.StepStatusPassed))
+	case newtest.StepStatusFailed:
+		return cli.Red(string(newtest.StepStatusFailed))
+	case newtest.StepStatusError:
+		return cli.Red(string(newtest.StepStatusError))
+	case newtest.StepStatusSkipped:
+		return cli.Yellow(string(newtest.StepStatusSkipped))
 	case "":
 		return "\u2014" // —
 	default:

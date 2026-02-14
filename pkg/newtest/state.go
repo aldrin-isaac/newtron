@@ -9,18 +9,16 @@ import (
 	"time"
 )
 
-// RunStatus is the lifecycle state of a suite run.
-type RunStatus string
+// SuiteStatus is the lifecycle state of a suite run.
+type SuiteStatus string
 
 const (
-	StatusRunning  RunStatus = "running"
-	StatusPausing  RunStatus = "pausing"
-	StatusPaused   RunStatus = "paused"
-	StatusComplete RunStatus = "complete"
-	StatusAborted  RunStatus = "aborted"
-	// Note: "failed" is intentionally StatusRunFailed to avoid collision with
-	// the step-level StatusFailed constant.
-	StatusRunFailed RunStatus = "failed"
+	SuiteStatusRunning  SuiteStatus = "running"
+	SuiteStatusPausing  SuiteStatus = "pausing"
+	SuiteStatusPaused   SuiteStatus = "paused"
+	SuiteStatusComplete SuiteStatus = "complete"
+	SuiteStatusAborted  SuiteStatus = "aborted"
+	SuiteStatusFailed   SuiteStatus = "failed"
 )
 
 // RunState is persisted to ~/.newtron/newtest/<suite>/state.json.
@@ -31,7 +29,7 @@ type RunState struct {
 	Platform  string          `json:"platform"`
 	LabName   string          `json:"lab_name"`
 	PID       int             `json:"pid"`
-	Status    RunStatus       `json:"status"`
+	Status    SuiteStatus     `json:"status"`
 	Started   time.Time       `json:"started"`
 	Updated   time.Time       `json:"updated"`
 	Scenarios []ScenarioState `json:"scenarios"`
@@ -165,7 +163,7 @@ func CheckPausing(suite string) bool {
 	if err != nil || state == nil {
 		return false
 	}
-	return state.Status == StatusPausing
+	return state.Status == SuiteStatusPausing
 }
 
 // IsProcessAlive checks if a process with the given PID exists.

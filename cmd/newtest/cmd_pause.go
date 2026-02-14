@@ -17,8 +17,8 @@ func newPauseCmd() *cobra.Command {
 		Long: `Signals a running suite to pause after the current scenario completes.
 The topology stays deployed. Resume with 'newtest start'.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			suite, err := resolveSuite(cmd, dir, func(s newtest.RunStatus) bool {
-				return s == newtest.StatusRunning || s == newtest.StatusPausing || s == newtest.StatusPaused
+			suite, err := resolveSuite(cmd, dir, func(s newtest.SuiteStatus) bool {
+				return s == newtest.SuiteStatusRunning || s == newtest.SuiteStatusPausing || s == newtest.SuiteStatusPaused
 			})
 			if err != nil {
 				return err
@@ -32,7 +32,7 @@ The topology stays deployed. Resume with 'newtest start'.`,
 				return fmt.Errorf("no state found for suite %s", suite)
 			}
 
-			if state.Status != newtest.StatusRunning {
+			if state.Status != newtest.SuiteStatusRunning {
 				return fmt.Errorf("suite %s is not running (status: %s)", suite, state.Status)
 			}
 
@@ -40,7 +40,7 @@ The topology stays deployed. Resume with 'newtest start'.`,
 				return fmt.Errorf("suite %s runner process is not alive (pid %d)", suite, state.PID)
 			}
 
-			state.Status = newtest.StatusPausing
+			state.Status = newtest.SuiteStatusPausing
 			if err := newtest.SaveRunState(state); err != nil {
 				return err
 			}

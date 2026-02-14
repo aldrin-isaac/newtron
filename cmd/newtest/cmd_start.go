@@ -80,13 +80,13 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			if err != nil {
 				return err
 			}
-			if existing != nil && existing.Status == newtest.StatusPaused {
+			if existing != nil && existing.Status == newtest.SuiteStatusPaused {
 				fmt.Fprintf(os.Stderr, "resuming paused suite %s\n", suite)
 				opts.Resume = true
-				completedMap := make(map[string]newtest.Status)
+				completedMap := make(map[string]newtest.StepStatus)
 				for _, sc := range existing.Scenarios {
 					if sc.Status != "" {
-						completedMap[sc.Name] = newtest.Status(sc.Status)
+						completedMap[sc.Name] = newtest.StepStatus(sc.Status)
 					}
 				}
 				opts.Completed = completedMap
@@ -98,7 +98,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 				SuiteDir: absDir,
 				Topology: topology,
 				Platform: platform,
-				Status:   newtest.StatusRunning,
+				Status:   newtest.SuiteStatusRunning,
 				Started:  time.Now(),
 			}
 
@@ -122,7 +122,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			// Handle pause
 			var pauseErr *newtest.PauseError
 			if errors.As(runErr, &pauseErr) {
-				state.Status = newtest.StatusPaused
+				state.Status = newtest.SuiteStatusPaused
 				if err := newtest.SaveRunState(state); err != nil {
 					util.Logger.Warnf("failed to save run state: %v", err)
 				}
@@ -132,7 +132,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			}
 
 			if runErr != nil {
-				state.Status = newtest.StatusRunFailed
+				state.Status = newtest.SuiteStatusFailed
 				if err := newtest.SaveRunState(state); err != nil {
 					util.Logger.Warnf("failed to save run state: %v", err)
 				}
@@ -142,18 +142,18 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			// Determine final status
 			hasFailure, hasError := false, false
 			for _, r := range results {
-				if r.Status == newtest.StatusFailed {
+				if r.Status == newtest.StepStatusFailed {
 					hasFailure = true
 				}
-				if r.Status == newtest.StatusError || r.DeployError != nil {
+				if r.Status == newtest.StepStatusError || r.DeployError != nil {
 					hasError = true
 				}
 			}
 
 			if hasFailure || hasError {
-				state.Status = newtest.StatusRunFailed
+				state.Status = newtest.SuiteStatusFailed
 			} else {
-				state.Status = newtest.StatusComplete
+				state.Status = newtest.SuiteStatusComplete
 			}
 			if err := newtest.SaveRunState(state); err != nil {
 				util.Logger.Warnf("failed to save run state: %v", err)
