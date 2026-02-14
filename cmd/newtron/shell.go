@@ -105,19 +105,9 @@ func (s *Shell) cmdShow() {
 }
 
 func (s *Shell) showDevice() {
-	dev := s.dev
-	fmt.Printf("Device: %s\n", bold(dev.Name()))
-	fmt.Printf("Management IP: %s\n", dev.MgmtIP())
-	fmt.Printf("Loopback IP: %s\n", dev.LoopbackIP())
-	fmt.Printf("Site: %s\n", dev.Site())
-	fmt.Printf("BGP AS: %d\n", dev.ASNumber())
-	fmt.Printf("Router ID: %s\n", dev.RouterID())
-
-	fmt.Println("\nState:")
-	fmt.Printf("  Interfaces: %d\n", len(dev.ListInterfaces()))
-	fmt.Printf("  PortChannels: %d\n", len(dev.ListPortChannels()))
-	fmt.Printf("  VLANs: %d\n", len(dev.ListVLANs()))
-	fmt.Printf("  VRFs: %d\n", len(dev.ListVRFs()))
+	if err := showDevice(s.dev); err != nil {
+		fmt.Printf("Error: %v\n", err)
+	}
 }
 
 func (s *Shell) showInterface() {

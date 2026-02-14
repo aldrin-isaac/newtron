@@ -134,6 +134,134 @@ These items change public function signatures. Do them one at a time, updating a
 
 ---
 
+## MEDIUM Findings Tracker
+
+**Total**: 87 MEDIUM findings across 5 audit documents
+**Addressed**: 81 (93%)
+**Remaining**: 6
+
+### Backend (`refactor-audit-backend.md`) — 18/19 addressed
+
+| ID | Summary | Status | Addressed By |
+|----|---------|--------|-------------|
+| N-04 | Duplicate ChangeType definitions | DONE ✓ | Phase B 1.6 |
+| N-07 | Existence checks duplicated across layers | DONE ✓ | 71e93a9 (nil-safe ConfigDB queries) |
+| N-08 | readFileViaSSH is a non-functional stub | DONE ✓ | MEDIUM round 2 |
+| N-11 | Apply/Verify duplicate Change conversion | DONE ✓ | Phase A 1.4 (toDeviceChanges) |
+| N-13 | InterfaceIsLAGMember uses suffix match | DONE ✓ | Phase A 1.5 |
+| D-02 | parseEntry 250-line switch statement | DONE ✓ | 3610750 (table-driven parsers) |
+| D-03 | Duplicate ChangeType (see N-04) | DONE ✓ | Phase B 1.6 |
+| D-04 | fmt.Printf instead of structured logging | DONE ✓ | MEDIUM round 1 |
+| D-05 | InsecureIgnoreHostKey in SSH tunnel | DONE ✓ | MEDIUM round 2 (host key warning) |
+| D-07 | statedb PopulateDeviceState overlaps state.go | DONE ✓ | Post-tracker D-07 |
+| D-08 | ConfigDB struct 30+ fields / manual init | DONE ✓ | Post-tracker D-08 |
+| S-05 | deriveBGPNeighbors silently swallows errors | DONE ✓ | MEDIUM round 2 (util.Warnf) |
+| S-06 | AliasContext mutates shared resolver state | DONE ✓ | MEDIUM round 2 |
+| M-03 | Model types largely unused by backend ops | DONE ✓ | Phase C.3 (deleted pkg/model/) |
+| O-01 | DependencyChecker exists in two places | DONE ✓ | MEDIUM round 1 |
+| X-02 | 3 representations of same domain concepts | DONE ✓ | Phase C.3 (reduced to 2 by design) |
+| X-04 | Inconsistent error creation patterns | DONE ✓ | MEDIUM round 2 (sentinel errors) |
+| D-10 | No lock TTL refresh; Lua script error handling | N/A | By design: lock is device-local Redis key with TTL; Lua is atomic |
+| O-03 | PreconditionChecker underused by device_ops | — | Structural rewrite |
+
+### CLI (`refactor-audit-cli.md`) — 14/14 addressed
+
+| ID | Summary | Status | Addressed By |
+|----|---------|--------|-------------|
+| D-03 | Admin status colorization repeated 6+ files | DONE ✓ | Phase A 2.3 |
+| D-04 | VLAN ID parsing duplicated 7 times | DONE ✓ | Phase A 2.2 |
+| E-01 | reader.ReadString errors ignored (interactive.go) | DONE ✓ | Phase C.2 (file deleted) |
+| E-02 | peerASNum silently sets 0 (interactive.go) | DONE ✓ | Phase C.2 (file deleted) |
+| E-04 | Spec authoring commands skip dry-run check | DONE ✓ | Phase A 2.4 |
+| I-01 | cs.String() vs cs.Preview() inconsistency | DONE ✓ | MEDIUM round 1 (changeset Preview) |
+| I-02 | Read commands inconsistently handle jsonOutput | DONE ✓ | MEDIUM round 1 + b75afa0 |
+| I-03 | Dry-run inconsistency (= E-04) | DONE ✓ | Phase A 2.4 |
+| M-03 | time.Sleep(15s) in provision command | DONE ✓ | MEDIUM round 2 (provision polling) |
+| S-02 | interactive.go and shell.go parallel systems | DONE ✓ | Phase C.2 (file deleted) |
+| DC-03 | networkName set but never used | DONE ✓ | App struct refactor (field + flag removed) |
+| DC-04 | loader initialized but unused | DONE ✓ | App struct refactor (uses net.Spec()) |
+| M-01 | Audit log path and rotation config hardcoded | DONE ✓ | Settings: AuditLogPath, AuditMaxSizeMB |
+| D-05 | Duplicate showDevice (shell.go vs cmd_show.go) | DONE ✓ | Shell delegates to showDevice() |
+
+### Support (`refactor-audit-support.md`) — 13/15 addressed
+
+| ID | Summary | Status | Addressed By |
+|----|---------|--------|-------------|
+| A-1 | Duplicated checkServicePermission/checkGlobalPermission | DONE ✓ | MEDIUM round 1 (auth dedup) |
+| A-4 | StandardCategories only used in tests | DONE ✓ | Phase C.4 (auth pruning) |
+| S-2 | Hardcoded `/etc/newtron` fallback path | DONE ✓ | MEDIUM round 1 (settings constants) |
+| AU-4 | Malformed JSON lines silently skipped in query | DONE ✓ | MEDIUM round 2 (util.Warnf) |
+| AU-5 | Offset/limit bug returns all events | DONE ✓ | Phase A 5.2 |
+| AU-6 | RotationConfig.MaxAge defined but never used | DONE ✓ | Phase A 5.3 |
+| AU-9 | DefaultLogger pointer not concurrency-safe | DONE ✓ | Phase A 5.4 (atomic.Value) |
+| AU-10 | Query holds write lock unnecessarily | DONE ✓ | RWMutex + RLock in Query |
+| U-1 | DeriveRouterID/DeriveVTEPSourceIP unused | DONE ✓ | Phase A 5.5 (dead util pruning) |
+| U-5 | IsValidMACAddress/NormalizeMACAddress unused | DONE ✓ | Phase A 5.5 |
+| U-6 | IPInRange has zero production call sites | DONE ✓ | Phase A 5.5 |
+| U-10 | ExpandSlotPortRange has zero production call sites | DONE ✓ | Phase A 5.5 (range.go deleted) |
+| C-1 | No tests for pkg/cli | DONE ✓ | MEDIUM round 2 (pkg/cli tests) |
+| U-19 | Logger as package-level mutable global | — | Structural rewrite |
+| U-20 | 10 trivial one-line Logger wrappers | — | |
+
+### newtlab (`newtlab/refactor-audit.md`) — 20/22 addressed
+
+| ID | Summary | Status | Addressed By |
+|----|---------|--------|-------------|
+| M-1 | resolveSpecDir/resolveLabName share 80% logic | DONE ✓ | Phase A 3.6 (resolveTarget) |
+| Y-1 | Partial Lab struct in destroy command | DONE ✓ | MEDIUM round 1 (standalone destroy) |
+| S-3 | SSH hardcodes `admin` username | DONE ✓ | Phase A 3.1 |
+| T-1 | Partial Lab struct in stop/start commands | DONE ✓ | MEDIUM round 1 (standalone stop/start) |
+| N-2 | Duplicated host IP resolution (5 sites) | DONE ✓ | Phase A 3.5 (nodeHostIP) |
+| N-3 | Duplicated bridge process shutdown logic | DONE ✓ | Phase A 3.5 (stopAllBridges) |
+| ST-1 | LabDir/ListLabs silently ignore UserHomeDir errors | DONE ✓ | Phase B 3.8 (sync.Once + error) |
+| Q-1 | SSH command construction duplicated 15+ times | DONE ✓ | Phase A 3.4 (sshCommand helper) |
+| DK-1 | CreateOverlayRemote doesn't shell-quote paths | DONE ✓ | Phase B 3.7 (shellQuote) |
+| DK-3 | cleanupRemoteStateDir uses unquoted path in rm -rf | DONE ✓ | Phase B 3.7 |
+| X-1 | No context.Context support anywhere | DONE ✓ | Phase C.1 |
+| X-2 | Inconsistent SSH option sets / timeouts | DONE ✓ | Phase A 3.4 (sshCommand helper) |
+| X-3 | No logging throughout orchestration | DONE ✓ | MEDIUM round 2 |
+| N-6 | refreshBGP reads profile files instead of l.Profiles | DONE ✓ | Uses l.Nodes[name] for SSH creds |
+| N-8 | Stats port allocation duplicated vs probe.go | DONE ✓ | Deploy calls allocateBridgeStatsPorts() |
+| Q-4 | quoteArgs doesn't handle all shell special chars | DONE ✓ | Always single-quotes with '\'' escaping |
+| BR-1 | RunBridgeFromFile ignores splitLinkEndpoint errors | DONE ✓ | Error checked and returned |
+| PF-1 | PatchProfiles uses map[string]interface{} | DONE ✓ | Uses spec.DeviceProfile |
+| NT-1 | Tests modify global HOME (not parallel-safe) | DONE ✓ | All use t.Setenv() |
+| G-1 | Zero test coverage for cmd/newtlab/ helpers | — | Test coverage |
+| N-1 | Lab struct has too many responsibilities | — | Structural rewrite |
+| PA-1 | ApplyBootPatches creates new SSH session per command | — | Standard SSH pattern; low priority |
+
+### newtest (`newtest/refactor-audit.md`) — 16/17 addressed
+
+| ID | Summary | Status | Addressed By |
+|----|---------|--------|-------------|
+| S-04 | os.Exit() inside RunE bypasses deferred cleanup | DONE ✓ | Phase A 4.6 (sentinel errors) |
+| P-01 | Duplicate isProcAlive in CLI vs pkg | DONE ✓ | Phase B 4.9 (IsProcessAlive) |
+| T-01 | resolveSuiteForStop duplicates resolveSuiteForControl | DONE ✓ | Phase B 4.9 |
+| ST-01c | Hardcoded status strings in cmd_status.go | DONE ✓ | Phase B 4.10 |
+| SC-01 | validActions redundant with executors map | DONE ✓ | Phase B 4.8 |
+| PA-01 | requireDevices used inconsistently | DONE ✓ | MEDIUM round 1 |
+| PA-02 | validateStepFields 300-line switch | DONE ✓ | MEDIUM round 2 (table-driven) |
+| SE-02 | Polling pattern duplicated in verify executors | DONE ✓ | Phase A 4.5 (pollUntil) |
+| SE-05 | verifyBGP ignores step.Expect.State | DONE ✓ | Phase A 4.2 |
+| SE-06 | !matched && allPassed guard incorrect | DONE ✓ | Phase A 4.3 (pollUntil rewrite) |
+| ST-01s | UserHomeDir error discarded in state.go | DONE ✓ | e959579 |
+| R-02 | Swallowed report generation errors (cmd_run.go) | DONE ✓ | Phase A 4.7 (file deleted) |
+| S-02 | Swallowed state persistence errors (cmd_start.go) | DONE ✓ | util.Warnf on SaveRunState errors |
+| S-03 | Swallowed report generation errors (cmd_start.go) | DONE ✓ | util.Warnf on report write errors |
+| X-01 | os.Exit() bypasses cleanup (= S-04) | DONE ✓ | Phase A 4.6 |
+| X-02 | No validActions/executors integration (= SC-01) | DONE ✓ | Phase B 4.8 |
+| TE-02 | No tests for runner.go Run/RunScenario methods | — | Test coverage |
+
+### Remaining MEDIUMs (6)
+
+**Structural rewrites** (4): O-03 (PreconditionChecker), N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
+
+**Test coverage** (2): G-1 (cmd/newtlab tests), TE-02 (runner tests)
+
+**Deferred** (1): PA-1 (SSH session per command — standard pattern, low priority)
+
+---
+
 ## Completion Checklist
 
 After each track/phase:
