@@ -14,9 +14,7 @@ import (
 
 // VRFConfig holds configuration options for CreateVRF.
 type VRFConfig struct {
-	L3VNI    int
-	ImportRT []string
-	ExportRT []string
+	L3VNI int
 }
 
 // CreateVRF creates a new VRF.

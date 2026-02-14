@@ -234,28 +234,6 @@ func TestNormalizeInterfaceName(t *testing.T) {
 	}
 }
 
-func TestCoalesceInt(t *testing.T) {
-	tests := []struct {
-		name   string
-		values []int
-		want   int
-	}{
-		{"first non-zero", []int{0, 5, 10}, 5},
-		{"all zero", []int{0, 0, 0}, 0},
-		{"first is value", []int{1, 2, 3}, 1},
-		{"negative", []int{0, -1, 1}, -1},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := CoalesceInt(tt.values...)
-			if got != tt.want {
-				t.Errorf("CoalesceInt(%v) = %d, want %d", tt.values, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestMergeMaps(t *testing.T) {
 	tests := []struct {
 		name string
@@ -324,28 +302,6 @@ func TestMergeStringSlices(t *testing.T) {
 			got := MergeStringSlices(tt.slices...)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MergeStringSlices() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExpandInterfaceName(t *testing.T) {
-	// ExpandInterfaceName is an alias for NormalizeInterfaceName
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"eth0", "Ethernet0"},
-		{"po100", "PortChannel100"},
-		{"lo0", "Loopback0"},
-		{"Ethernet0", "Ethernet0"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := ExpandInterfaceName(tt.input)
-			if got != tt.want {
-				t.Errorf("ExpandInterfaceName(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

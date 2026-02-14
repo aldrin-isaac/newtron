@@ -84,7 +84,11 @@ func RestoreProfiles(lab *Lab) error {
 			profile.MgmtIP = nodeState.OriginalMgmtIP
 		}
 
-		// Remove newtlab-written fields by zeroing them
+		// Remove newtlab-written fields by zeroing them.
+		// ssh_user and ssh_pass are intentionally NOT removed: they may
+		// have been present before PatchProfiles (user-configured) and
+		// PatchProfiles only writes them when absent, so removing them
+		// here could discard user-set credentials.
 		profile.SSHPort = 0
 		profile.ConsolePort = 0
 

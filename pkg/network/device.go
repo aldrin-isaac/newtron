@@ -13,6 +13,9 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
+// defaultLockTTL is the TTL in seconds for distributed device locks.
+const defaultLockTTL = 3600 // 1 hour
+
 // Device represents a SONiC switch within the context of a Network.
 //
 // Key design: Device has a parent reference to Network, allowing it to access
@@ -223,7 +226,7 @@ func (d *Device) Lock() error {
 	}
 
 	holder := lockHolder()
-	if err := d.conn.Lock(holder, 3600); err != nil {
+	if err := d.conn.Lock(holder, defaultLockTTL); err != nil {
 		return err
 	}
 	d.locked = true
@@ -621,22 +624,14 @@ func (d *Device) GetVRF(name string) (*VRFInfo, error) {
 	}
 
 	// Find interfaces bound to this VRF from INTERFACE table
+	seen := make(map[string]bool)
 	for key, intf := range d.configDB.Interface {
 		// Key could be "Ethernet0" or "Ethernet0|10.1.1.1/24"
 		parts := splitConfigDBKey(key)
 		intfName := parts[0]
-		if intf.VRFName == name {
-			// Avoid duplicates
-			found := false
-			for _, existing := range info.Interfaces {
-				if existing == intfName {
-					found = true
-					break
-				}
-			}
-			if !found {
-				info.Interfaces = append(info.Interfaces, intfName)
-			}
+		if intf.VRFName == name && !seen[intfName] {
+			seen[intfName] = true
+			info.Interfaces = append(info.Interfaces, intfName)
 		}
 	}
 
@@ -646,17 +641,9 @@ func (d *Device) GetVRF(name string) (*VRFInfo, error) {
 		vlanName := parts[0]
 		// VLANInterface value contains vrf_name
 		if vals, ok := d.configDB.VLANInterface[vlanName]; ok {
-			if vals["vrf_name"] == name {
-				found := false
-				for _, existing := range info.Interfaces {
-					if existing == vlanName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					info.Interfaces = append(info.Interfaces, vlanName)
-				}
+			if vals["vrf_name"] == name && !seen[vlanName] {
+				seen[vlanName] = true
+				info.Interfaces = append(info.Interfaces, vlanName)
 			}
 		}
 	}

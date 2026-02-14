@@ -14,7 +14,7 @@ func Dim(s string) string    { return "\033[2m" + s + "\033[0m" }
 // DotPad pads name with dots to the given width.
 // Example: DotPad("boot-ssh", 30) → "boot-ssh ......................"
 func DotPad(name string, width int) string {
-	if len(name) >= width-1 {
+	if width <= 0 || len(name) >= width-1 {
 		return name
 	}
 	dots := width - len(name) - 1

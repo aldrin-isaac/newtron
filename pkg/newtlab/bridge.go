@@ -127,7 +127,9 @@ func RunBridgeFromFile(configPath string) error {
 
 	// Signal readiness by writing pid to bridge.pid
 	pidFile := filepath.Join(stateDir, "bridge.pid")
-	os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: write bridge pid file: %v\n", err)
+	}
 
 	// Stats query handler: encode stats JSON and close.
 	handleStatsConn := func(conn net.Conn) {

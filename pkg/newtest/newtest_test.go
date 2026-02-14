@@ -536,9 +536,9 @@ func TestTopologicalSort_Linear(t *testing.T) {
 		{Name: "a"},
 	}
 
-	sorted, err := topologicalSort(scenarios)
+	sorted, err := TopologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("topologicalSort error: %v", err)
+		t.Fatalf("TopologicalSort error: %v", err)
 	}
 
 	if len(sorted) != 3 {
@@ -565,9 +565,9 @@ func TestTopologicalSort_Diamond(t *testing.T) {
 		{Name: "a"},
 	}
 
-	sorted, err := topologicalSort(scenarios)
+	sorted, err := TopologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("topologicalSort error: %v", err)
+		t.Fatalf("TopologicalSort error: %v", err)
 	}
 
 	indexOf := make(map[string]int)
@@ -590,9 +590,9 @@ func TestTopologicalSort_NoDeps(t *testing.T) {
 		{Name: "z"},
 	}
 
-	sorted, err := topologicalSort(scenarios)
+	sorted, err := TopologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("topologicalSort error: %v", err)
+		t.Fatalf("TopologicalSort error: %v", err)
 	}
 	if len(sorted) != 3 {
 		t.Fatalf("expected 3 scenarios, got %d", len(sorted))
@@ -609,7 +609,7 @@ func TestTopologicalSort_Cycle(t *testing.T) {
 		{Name: "b", Requires: []string{"a"}},
 	}
 
-	_, err := topologicalSort(scenarios)
+	_, err := TopologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -623,7 +623,7 @@ func TestTopologicalSort_SelfCycle(t *testing.T) {
 		{Name: "a", Requires: []string{"a"}},
 	}
 
-	_, err := topologicalSort(scenarios)
+	_, err := TopologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -636,7 +636,7 @@ func TestTopologicalSort_ThreeNodeCycle(t *testing.T) {
 		{Name: "c", Requires: []string{"b"}},
 	}
 
-	_, err := topologicalSort(scenarios)
+	_, err := TopologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -653,7 +653,7 @@ func TestValidateDependencyGraph_Valid(t *testing.T) {
 		{Name: "c", Requires: []string{"a", "b"}},
 	}
 
-	if err := validateDependencyGraph(scenarios); err != nil {
+	if _, err := ValidateDependencyGraph(scenarios); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -664,7 +664,7 @@ func TestValidateDependencyGraph_UnknownRequires(t *testing.T) {
 		{Name: "b", Requires: []string{"nonexistent"}},
 	}
 
-	err := validateDependencyGraph(scenarios)
+	_, err := ValidateDependencyGraph(scenarios)
 	if err == nil {
 		t.Fatal("expected error for unknown requires")
 	}
@@ -679,7 +679,7 @@ func TestValidateDependencyGraph_DuplicateName(t *testing.T) {
 		{Name: "a"},
 	}
 
-	err := validateDependencyGraph(scenarios)
+	_, err := ValidateDependencyGraph(scenarios)
 	if err == nil {
 		t.Fatal("expected error for duplicate name")
 	}
@@ -693,7 +693,7 @@ func TestValidateDependencyGraph_SelfRequires(t *testing.T) {
 		{Name: "a", Requires: []string{"a"}},
 	}
 
-	err := validateDependencyGraph(scenarios)
+	_, err := ValidateDependencyGraph(scenarios)
 	if err == nil {
 		t.Fatal("expected error for self-requires")
 	}
@@ -735,12 +735,9 @@ steps:
 	if err != nil {
 		t.Fatalf("ParseAllScenarios error: %v", err)
 	}
-	if err := validateDependencyGraph(scenarios); err != nil {
-		t.Fatalf("validateDependencyGraph error: %v", err)
-	}
-	sorted, err := topologicalSort(scenarios)
+	sorted, err := ValidateDependencyGraph(scenarios)
 	if err != nil {
-		t.Fatalf("topologicalSort error: %v", err)
+		t.Fatalf("ValidateDependencyGraph error: %v", err)
 	}
 	if len(sorted) != 2 {
 		t.Fatalf("expected 2 scenarios, got %d", len(sorted))
@@ -783,7 +780,7 @@ steps:
 	if err != nil {
 		t.Fatalf("ParseAllScenarios error: %v", err)
 	}
-	if err := validateDependencyGraph(scenarios); err == nil {
+	if _, err := ValidateDependencyGraph(scenarios); err == nil {
 		t.Fatal("expected cycle error")
 	}
 }
@@ -829,6 +826,7 @@ func TestCheckRequires(t *testing.T) {
 		{"all passed", &Scenario{Name: "x", Requires: []string{"a"}}, false},
 		{"one failed", &Scenario{Name: "x", Requires: []string{"a", "b"}}, true},
 		{"one skipped", &Scenario{Name: "x", Requires: []string{"c"}}, true},
+		{"not yet run", &Scenario{Name: "x", Requires: []string{"unknown"}}, true},
 	}
 
 	for _, tt := range tests {
@@ -842,10 +840,10 @@ func TestCheckRequires(t *testing.T) {
 }
 
 func TestHasRequires(t *testing.T) {
-	if hasRequires([]*Scenario{{Name: "a"}, {Name: "b"}}) {
+	if HasRequires([]*Scenario{{Name: "a"}, {Name: "b"}}) {
 		t.Error("expected false for no requires")
 	}
-	if !hasRequires([]*Scenario{{Name: "a"}, {Name: "b", Requires: []string{"a"}}}) {
+	if !HasRequires([]*Scenario{{Name: "a"}, {Name: "b", Requires: []string{"a"}}}) {
 		t.Error("expected true when one has requires")
 	}
 }

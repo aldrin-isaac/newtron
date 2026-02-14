@@ -133,47 +133,6 @@ func (c *Checker) userInGroups(username string, allowedGroups []string) bool {
 	return false
 }
 
-// ListPermissions returns all permissions the current user has
-func (c *Checker) ListPermissions() []Permission {
-	return c.ListPermissionsForUser(c.currentUser)
-}
-
-// ListPermissionsForUser returns all permissions a user has
-func (c *Checker) ListPermissionsForUser(username string) []Permission {
-	if c.isSuperUser(username) {
-		return []Permission{PermAll}
-	}
-
-	permSet := make(map[Permission]bool)
-
-	// Check all global permissions
-	for permStr, groups := range c.network.Permissions {
-		if c.userInGroups(username, groups) {
-			permSet[Permission(permStr)] = true
-		}
-	}
-
-	var perms []Permission
-	for p := range permSet {
-		perms = append(perms, p)
-	}
-	return perms
-}
-
-// GetUserGroups returns the groups a user belongs to
-func (c *Checker) GetUserGroups(username string) []string {
-	var groups []string
-	for groupName, members := range c.network.UserGroups {
-		for _, member := range members {
-			if member == username {
-				groups = append(groups, groupName)
-				break
-			}
-		}
-	}
-	return groups
-}
-
 // PermissionError represents a permission denial
 type PermissionError struct {
 	User       string

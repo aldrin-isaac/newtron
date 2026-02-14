@@ -12,6 +12,13 @@ import (
 	"github.com/newtron-network/newtron/pkg/spec"
 )
 
+// Default WRED thresholds for ECN profiles.
+const (
+	defaultWREDMinThreshold  = "1048576" // 1 MB
+	defaultWREDMaxThreshold  = "2097152" // 2 MB
+	defaultWREDDropProbility = "5"       // 5%
+)
+
 // generateQoSDeviceEntries produces device-wide CONFIG_DB entries for a QoS policy:
 //   - 1 DSCP_TO_TC_MAP entry (all 64 DSCP values, unmapped → "0")
 //   - 1 TC_TO_QUEUE_MAP entry (identity mapping)
@@ -77,10 +84,10 @@ func generateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 			Table: "WRED_PROFILE",
 			Key:   policyName + ".ecn",
 			Fields: map[string]string{
-				"ecn":            "ecn_all",
-				"green_min_threshold": "1048576",  // 1 MB
-				"green_max_threshold": "2097152",  // 2 MB
-				"green_drop_probability": "5",
+				"ecn":                   "ecn_all",
+				"green_min_threshold":   defaultWREDMinThreshold,
+				"green_max_threshold":   defaultWREDMaxThreshold,
+				"green_drop_probability": defaultWREDDropProbility,
 			},
 		})
 	}

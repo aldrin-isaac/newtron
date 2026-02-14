@@ -109,10 +109,12 @@ func IsValidIPv4CIDR(cidr string) bool {
 	return ip != nil && ip.To4() != nil
 }
 
-// ValidateASN checks if an AS number is valid
+const maxASN = 4294967295 // max uint32 — 4-byte ASN range
+
+// ValidateASN checks if an AS number is valid (1 to 4294967295).
 func ValidateASN(asn int) error {
-	if asn < 1 || asn > 4294967295 {
-		return fmt.Errorf("AS number must be between 1 and 4294967295, got %d", asn)
+	if asn < 1 || asn > maxASN {
+		return fmt.Errorf("AS number must be between 1 and %d, got %d", maxASN, asn)
 	}
 	return nil
 }
@@ -152,14 +154,6 @@ func SplitIPMask(cidr string) (string, int) {
 // DeriveNeighborIP derives the BGP neighbor IP from a local IP address with CIDR mask.
 // Works for point-to-point links (/30 and /31).
 // Returns error if the subnet is not point-to-point.
-// ValidateVLANID checks that a VLAN ID is in the valid range (1-4094).
-func ValidateVLANID(vlanID int) error {
-	if vlanID < 1 || vlanID > 4094 {
-		return fmt.Errorf("invalid VLAN ID %d: must be 1-4094", vlanID)
-	}
-	return nil
-}
-
 func DeriveNeighborIP(localIPWithMask string) (string, error) {
 	ipStr, maskLen := SplitIPMask(localIPWithMask)
 	if maskLen == 0 {

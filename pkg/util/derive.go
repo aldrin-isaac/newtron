@@ -2,6 +2,7 @@ package util
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -121,7 +122,21 @@ var (
 		"vlan": "Vlan",
 		"mgmt": "Management",
 	}
+
+	// shortToLongSorted contains abbreviation keys sorted longest-first
+	// so that "vlan" is matched before "vl" in NormalizeInterfaceName.
+	shortToLongSorted []string
 )
+
+func init() {
+	shortToLongSorted = make([]string, 0, len(shortToLong))
+	for k := range shortToLong {
+		shortToLongSorted = append(shortToLongSorted, k)
+	}
+	sort.Slice(shortToLongSorted, func(i, j int) bool {
+		return len(shortToLongSorted[i]) > len(shortToLongSorted[j])
+	})
+}
 
 // ShortenInterfaceName converts a full interface name to short form
 // Ethernet0 -> Eth0, PortChannel100 -> Po100, Loopback0 -> Lo0, Vlan100 -> Vl100
@@ -140,40 +155,23 @@ func ShortenInterfaceName(name string) string {
 	return SanitizeForName(name)
 }
 
-// ExpandInterfaceName converts a short interface name to full SONiC format
-// Eth0 -> Ethernet0, Po100 -> PortChannel100, Lo0 -> Loopback0, Vl100 -> Vlan100
-func ExpandInterfaceName(name string) string {
-	return NormalizeInterfaceName(name)
-}
-
 // NormalizeInterfaceName normalizes interface names to SONiC format
 // eth0 -> Ethernet0, po100 -> PortChannel100, etc.
 func NormalizeInterfaceName(name string) string {
 	name = strings.TrimSpace(name)
 	lower := strings.ToLower(name)
 
-	for abbr, full := range shortToLong {
+	for _, abbr := range shortToLongSorted {
 		if strings.HasPrefix(lower, abbr) && len(name) > len(abbr) {
 			suffix := name[len(abbr):]
-			// Check if suffix starts with a digit
 			if len(suffix) > 0 && suffix[0] >= '0' && suffix[0] <= '9' {
-				return full + suffix
+				return shortToLong[abbr] + suffix
 			}
 		}
 	}
 
 	// Already in correct format or unknown
 	return name
-}
-
-// CoalesceInt returns the first non-zero int
-func CoalesceInt(values ...int) int {
-	for _, v := range values {
-		if v != 0 {
-			return v
-		}
-	}
-	return 0
 }
 
 // MergeMaps merges maps with later maps overriding earlier ones

@@ -374,6 +374,14 @@ func yellow(s string) string { return cli.Yellow(s) }
 func red(s string) string    { return cli.Red(s) }
 func bold(s string) string   { return cli.Bold(s) }
 
+// defaultStr returns s if non-empty, otherwise def.
+func defaultStr(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
 // formatOperStatus colorizes operational status values.
 func formatOperStatus(status string) string {
 	switch strings.ToLower(status) {

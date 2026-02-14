@@ -2,6 +2,7 @@ package newtlab
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"sort"
@@ -154,7 +155,7 @@ func ProbeAllPorts(allocations []PortAllocation) error {
 
 	if len(errs) > 0 {
 		sort.Strings(errs)
-		return fmt.Errorf("%s", strings.Join(errs, "\n"))
+		return errors.New(strings.Join(errs, "\n"))
 	}
 	return nil
 }

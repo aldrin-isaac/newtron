@@ -111,10 +111,10 @@ func BootstrapNetwork(ctx context.Context, consoleHost string, consolePort int, 
 	// Helper to read from console until a string appears or timeout
 	readUntil := func(expected string, timeout time.Duration) (string, error) {
 		var buf []byte
+		tmp := make([]byte, 4096)
 		dl := time.Now().Add(timeout)
 		for time.Now().Before(dl) {
 			conn.SetReadDeadline(time.Now().Add(1 * time.Second))
-			tmp := make([]byte, 4096)
 			n, err := conn.Read(tmp)
 			if n > 0 {
 				buf = append(buf, tmp[:n]...)

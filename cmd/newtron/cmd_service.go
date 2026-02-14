@@ -222,24 +222,24 @@ Examples:
   newtron -d leaf1-ny service apply PortChannel100 transit --ip 192.168.1.1/31 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		intfArg := args[0]
+		intfName := args[0]
 		serviceName := args[1]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithService(serviceName).WithInterface(intfArg)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithService(serviceName).WithInterface(intfName)
 			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
 				return nil, err
 			}
 
-			intf, err := dev.GetInterface(intfArg)
+			intf, err := dev.GetInterface(intfName)
 			if err != nil {
 				return nil, fmt.Errorf("interface not found: %w", err)
 			}
 
 			// Show derived values
 			svc, _ := app.net.GetService(serviceName)
-			derived, _ := util.DeriveFromInterface(intfArg, applyIP, serviceName)
+			derived, _ := util.DeriveFromInterface(intfName, applyIP, serviceName)
 
-			fmt.Printf("\nApplying service '%s' to interface %s...\n", serviceName, intfArg)
+			fmt.Printf("\nApplying service '%s' to interface %s...\n", serviceName, intfName)
 			fmt.Println("\nDerived configuration:")
 			if applyIP != "" && derived != nil {
 				if derived.NeighborIP != "" {
@@ -280,13 +280,13 @@ Examples:
   newtron -d leaf1-ny service remove Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		intfArg := args[0]
+		intfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithInterface(intfArg)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithInterface(intfName)
 			if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
 				return nil, err
 			}
-			intf, err := dev.GetInterface(intfArg)
+			intf, err := dev.GetInterface(intfName)
 			if err != nil {
 				return nil, fmt.Errorf("interface not found: %w", err)
 			}
@@ -310,7 +310,7 @@ Examples:
   newtron -d leaf1-ny service get Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		intfArg := args[0]
+		intfName := args[0]
 		ctx := context.Background()
 
 		dev, err := requireDevice(ctx)
@@ -319,7 +319,7 @@ Examples:
 		}
 		defer dev.Disconnect()
 
-		intf, err := dev.GetInterface(intfArg)
+		intf, err := dev.GetInterface(intfName)
 		if err != nil {
 			return err
 		}
@@ -363,18 +363,18 @@ Examples:
   newtron -d leaf1-ny service refresh Ethernet0 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		intfArg := args[0]
+		intfName := args[0]
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
-			intf, err := dev.GetInterface(intfArg)
+			intf, err := dev.GetInterface(intfName)
 			if err != nil {
 				return nil, fmt.Errorf("interface not found: %w", err)
 			}
 			if !intf.HasService() {
-				return nil, fmt.Errorf("no service bound to interface %s", intfArg)
+				return nil, fmt.Errorf("no service bound to interface %s", intfName)
 			}
 
 			serviceName := intf.ServiceName()
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfArg).WithService(serviceName)
+			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName).WithService(serviceName)
 			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
 				return nil, err
 			}

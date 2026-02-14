@@ -14,7 +14,6 @@ import (
 // VTEPConfig holds configuration options for CreateVTEP.
 type VTEPConfig struct {
 	SourceIP string // VTEP source IP (typically loopback)
-	UDPPort  int    // UDP port (default 4789)
 }
 
 // SVIConfig holds configuration options for ConfigureSVI.

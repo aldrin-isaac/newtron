@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -463,21 +465,23 @@ func (l *Loader) GetPolicer(name string) (*PolicerSpec, error) {
 	return policer, nil
 }
 
-// ListServices returns all service names
+// ListServices returns all service names, sorted for deterministic output.
 func (l *Loader) ListServices() []string {
-	var names []string
+	names := make([]string, 0, len(l.network.Services))
 	for name := range l.network.Services {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
-// ListRegions returns all region names
+// ListRegions returns all region names, sorted for deterministic output.
 func (l *Loader) ListRegions() []string {
-	var names []string
+	names := make([]string, 0, len(l.network.Regions))
 	for name := range l.network.Regions {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -605,10 +609,5 @@ func (l *Loader) validateLinkEndpoint(v *util.ValidationBuilder, linkIdx int, si
 
 // splitEndpoint splits a "device:interface" string into its components.
 func splitEndpoint(endpoint string) []string {
-	for i, c := range endpoint {
-		if c == ':' {
-			return []string{endpoint[:i], endpoint[i+1:]}
-		}
-	}
-	return []string{endpoint}
+	return strings.SplitN(endpoint, ":", 2)
 }

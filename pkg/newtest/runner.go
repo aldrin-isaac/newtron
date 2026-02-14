@@ -94,11 +94,8 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	}
 
 	// Validate and topologically sort if any scenario declares requires
-	if opts.All && hasRequires(scenarios) {
-		if err := validateDependencyGraph(scenarios); err != nil {
-			return nil, err
-		}
-		sorted, err := topologicalSort(scenarios)
+	if opts.All && HasRequires(scenarios) {
+		sorted, err := ValidateDependencyGraph(scenarios)
 		if err != nil {
 			return nil, err
 		}
@@ -548,8 +545,8 @@ func computeOverallStatus(steps []StepResult) Status {
 	return StatusPassed
 }
 
-// hasRequires returns true if any scenario declares dependencies.
-func hasRequires(scenarios []*Scenario) bool {
+// HasRequires returns true if any scenario declares dependencies.
+func HasRequires(scenarios []*Scenario) bool {
 	for _, s := range scenarios {
 		if len(s.Requires) > 0 {
 			return true
@@ -577,10 +574,15 @@ func sharedTopology(scenarios []*Scenario, override string) string {
 }
 
 // checkRequires returns a skip reason if any required scenario did not pass,
-// or "" if all requirements are satisfied.
+// or "" if all requirements are satisfied. A required scenario that has not
+// been run yet is treated as not passed.
 func checkRequires(sc *Scenario, status map[string]Status) string {
 	for _, req := range sc.Requires {
-		if st, ok := status[req]; ok && st != StatusPassed {
+		st, ok := status[req]
+		if !ok {
+			return fmt.Sprintf("requires '%s' which has not run yet", req)
+		}
+		if st != StatusPassed {
 			return fmt.Sprintf("requires '%s' which %s", req, statusVerb(st))
 		}
 	}

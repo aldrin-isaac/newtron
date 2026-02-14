@@ -496,15 +496,7 @@ func (l *Lab) Destroy(ctx context.Context) error {
 	errs = append(errs, stopAllBridges(state)...)
 
 	// Clean up remote state directories
-	cleanedHosts := map[string]bool{}
-	for _, node := range state.Nodes {
-		if node.HostIP != "" && !cleanedHosts[node.HostIP] {
-			if err := cleanupRemoteStateDir(l.Name, node.HostIP); err != nil {
-				errs = append(errs, fmt.Errorf("cleanup remote state on %s: %w", node.HostIP, err))
-			}
-			cleanedHosts[node.HostIP] = true
-		}
-	}
+	errs = append(errs, cleanupAllRemoteHosts(l.Name, state)...)
 
 	// Restore profiles
 	if err := RestoreProfiles(l); err != nil {
@@ -698,9 +690,13 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 // refreshBGP SSHs to each device and runs "clear bgp * soft" via vtysh.
 // Errors are logged but not returned — this is a best-effort convergence aid.
 // SSH credentials are read from l.Nodes (already resolved during NewLab).
+// bgpRefreshDelay is the wait time after provisioning before issuing
+// "clear bgp * soft" to allow the last device's BGP session to initialize.
+const bgpRefreshDelay = 5 * time.Second
+
 func (l *Lab) refreshBGP(state *LabState) {
 	// Brief delay for the last-provisioned device's BGP to start.
-	time.Sleep(5 * time.Second)
+	time.Sleep(bgpRefreshDelay)
 
 	for name, nodeState := range state.Nodes {
 		nc := l.Nodes[name]
@@ -770,6 +766,22 @@ func stopAllBridges(state *LabState) []error {
 	return errs
 }
 
+// cleanupAllRemoteHosts removes remote state directories for all unique
+// remote hosts referenced in the lab state. Returns a list of errors.
+func cleanupAllRemoteHosts(labName string, state *LabState) []error {
+	var errs []error
+	cleaned := map[string]bool{}
+	for _, node := range state.Nodes {
+		if node.HostIP != "" && !cleaned[node.HostIP] {
+			if err := cleanupRemoteStateDir(labName, node.HostIP); err != nil {
+				errs = append(errs, fmt.Errorf("cleanup remote state on %s: %w", node.HostIP, err))
+			}
+			cleaned[node.HostIP] = true
+		}
+	}
+	return errs
+}
+
 // destroyExisting tears down a stale deployment found via state.json.
 func (l *Lab) destroyExisting(existing *LabState) error {
 	old := &Lab{
@@ -787,14 +799,8 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 	}
 	// Kill bridge processes (per-host, best effort)
 	stopAllBridges(existing)
-	// Clean up remote state directories
-	cleanedHosts := map[string]bool{}
-	for _, node := range existing.Nodes {
-		if node.HostIP != "" && !cleanedHosts[node.HostIP] {
-			cleanupRemoteStateDir(l.Name, node.HostIP) // best effort
-			cleanedHosts[node.HostIP] = true
-		}
-	}
+	// Clean up remote state directories (best effort)
+	cleanupAllRemoteHosts(l.Name, existing)
 	// Restore profiles (best effort)
 	RestoreProfiles(old)
 	// Remove local state

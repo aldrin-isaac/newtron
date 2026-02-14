@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1196,7 +1197,7 @@ func TestQEMUCommand_KVM(t *testing.T) {
 	qemu := &QEMUCommand{Node: node, StateDir: "/tmp/test", KVM: true}
 	cmd := qemu.Build()
 	args := fmt.Sprintf("%v", cmd.Args)
-	if !containsStr(args, "-enable-kvm") {
+	if !strings.Contains(args, "-enable-kvm") {
 		t.Error("KVM=true should include -enable-kvm")
 	}
 
@@ -1204,7 +1205,7 @@ func TestQEMUCommand_KVM(t *testing.T) {
 	qemu = &QEMUCommand{Node: node, StateDir: "/tmp/test", KVM: false}
 	cmd = qemu.Build()
 	args = fmt.Sprintf("%v", cmd.Args)
-	if containsStr(args, "-enable-kvm") {
+	if strings.Contains(args, "-enable-kvm") {
 		t.Error("KVM=false should not include -enable-kvm")
 	}
 }
@@ -1226,10 +1227,10 @@ func TestQEMUCommand_RelativePaths(t *testing.T) {
 	args := fmt.Sprintf("%v", cmd.Args)
 
 	// Paths should be relative (no leading /)
-	if !containsStr(args, "disks/spine1.qcow2") {
+	if !strings.Contains(args, "disks/spine1.qcow2") {
 		t.Errorf("expected relative overlay path, got args: %s", args)
 	}
-	if !containsStr(args, "qemu/spine1.mon") {
+	if !strings.Contains(args, "qemu/spine1.mon") {
 		t.Errorf("expected relative monitor path, got args: %s", args)
 	}
 }

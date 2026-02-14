@@ -67,13 +67,7 @@ func printSuiteStatus(suite string) error {
 	fmt.Printf("newtest: %s\n", suite)
 
 	// Topology info
-	topology := state.Topology
-	if topology == "" && state.SuiteDir != "" {
-		scenarios, _ := newtest.ParseAllScenarios(state.SuiteDir)
-		if len(scenarios) > 0 {
-			topology = scenarios[0].Topology
-		}
-	}
+	topology := resolveTopologyFromState(state)
 	topoStatus := "unknown"
 	if topology != "" {
 		topoStatus = checkTopologyStatus(topology)
@@ -121,17 +115,7 @@ func printSuiteStatus(suite string) error {
 
 		passed, failed, errored, running := 0, 0, 0, 0
 		for i, sc := range state.Scenarios {
-			status := sc.Status
-			if status == "" {
-				status = "\u2014" // —
-			}
-
-			dur := sc.Duration
-			if dur == "" {
-				dur = ""
-			}
-
-			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(sc.Status), dur)
+			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(sc.Status), sc.Duration)
 
 			switch newtest.Status(sc.Status) {
 			case newtest.StatusPassed:

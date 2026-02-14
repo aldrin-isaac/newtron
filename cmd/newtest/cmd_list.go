@@ -13,6 +13,14 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtest"
 )
 
+// topoSummary is a lightweight view of topology.json for counting
+// devices, links, and showing a description.
+type topoSummary struct {
+	Description string                     `json:"description"`
+	Devices     map[string]json.RawMessage `json:"devices"`
+	Links       []json.RawMessage          `json:"links"`
+}
+
 // topoCounts returns device and link counts from a topology.json.
 func topoCounts(topologiesDir, topology string) (int, int) {
 	path := filepath.Join(topologiesDir, topology, "specs", "topology.json")
@@ -20,10 +28,7 @@ func topoCounts(topologiesDir, topology string) (int, int) {
 	if err != nil {
 		return 0, 0
 	}
-	var topo struct {
-		Devices map[string]json.RawMessage `json:"devices"`
-		Links   []json.RawMessage          `json:"links"`
-	}
+	var topo topoSummary
 	if err := json.Unmarshal(data, &topo); err != nil {
 		return 0, 0
 	}
@@ -121,8 +126,8 @@ func listScenarios(dir string) error {
 	}
 
 	// Sort by dependency order if applicable
-	if newtest.HasRequiresExported(scenarios) {
-		sorted, sortErr := newtest.TopologicalSortExported(scenarios)
+	if newtest.HasRequires(scenarios) {
+		sorted, sortErr := newtest.ValidateDependencyGraph(scenarios)
 		if sortErr == nil {
 			scenarios = sorted
 		}

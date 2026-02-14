@@ -173,6 +173,11 @@ func (l *FileLogger) rotate() error {
 	rotatedPath := l.path + "." + timestamp
 
 	if err := os.Rename(l.path, rotatedPath); err != nil {
+		// Reopen the original file to avoid leaving the logger in a broken state
+		if f, reopenErr := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); reopenErr == nil {
+			l.file = f
+			l.encoder = json.NewEncoder(f)
+		}
 		return err
 	}
 
@@ -226,7 +231,9 @@ func (l *FileLogger) cleanupOldFiles() {
 		// Remove oldest files
 		toRemove := len(files) - l.rotation.MaxBackups
 		for i := 0; i < toRemove; i++ {
-			os.Remove(files[i].path)
+			if err := os.Remove(files[i].path); err != nil {
+				util.Logger.Warnf("audit: failed to remove old log file %s: %v", files[i].path, err)
+			}
 		}
 	}
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/spec"
@@ -177,55 +178,6 @@ func TestChecker_PermissionError(t *testing.T) {
 	}
 }
 
-func TestChecker_ListPermissions(t *testing.T) {
-	network := createTestNetworkSpec()
-	checker := NewChecker(network)
-
-	t.Run("superuser", func(t *testing.T) {
-		checker.SetUser("admin")
-		perms := checker.ListPermissions()
-		if len(perms) != 1 || perms[0] != PermAll {
-			t.Errorf("Superuser should have PermAll only, got %v", perms)
-		}
-	})
-
-	t.Run("regular user", func(t *testing.T) {
-		checker.SetUser("eve") // In viewer
-		perms := checker.ListPermissions()
-
-		// eve should have service.remove and baseline.apply (via viewer group)
-		permMap := make(map[Permission]bool)
-		for _, p := range perms {
-			permMap[p] = true
-		}
-
-		if !permMap[PermServiceRemove] {
-			t.Error("eve should have service.remove")
-		}
-		if !permMap[PermBaselineApply] {
-			t.Error("eve should have baseline.apply")
-		}
-		if permMap[PermServiceApply] {
-			t.Error("eve should not have service.apply")
-		}
-	})
-}
-
-func TestChecker_GetUserGroups(t *testing.T) {
-	network := createTestNetworkSpec()
-	checker := NewChecker(network)
-
-	groups := checker.GetUserGroups("alice")
-	if len(groups) != 1 || groups[0] != "neteng" {
-		t.Errorf("alice groups = %v, want [neteng]", groups)
-	}
-
-	groups = checker.GetUserGroups("unknown")
-	if len(groups) != 0 {
-		t.Errorf("unknown user should have no groups, got %v", groups)
-	}
-}
-
 func TestChecker_DirectUserPermission(t *testing.T) {
 	network := &spec.NetworkSpecFile{
 		Permissions: map[string][]string{
@@ -358,7 +310,7 @@ func TestPermissionError_ContextVariations(t *testing.T) {
 			t.Error("Error message should not be empty")
 		}
 		// Should not contain "for service" or "on device" when context is nil
-		if contains(msg, "for service") || contains(msg, "on device") {
+		if strings.Contains(msg, "for service") || strings.Contains(msg, "on device") {
 			t.Error("Should not mention 'for service'/'on device' when context is nil")
 		}
 	})
@@ -370,7 +322,7 @@ func TestPermissionError_ContextVariations(t *testing.T) {
 			Context:    &Context{Service: "test-svc"},
 		}
 		msg := err.Error()
-		if !contains(msg, "test-svc") {
+		if !strings.Contains(msg, "test-svc") {
 			t.Error("Should mention service name")
 		}
 	})
@@ -382,7 +334,7 @@ func TestPermissionError_ContextVariations(t *testing.T) {
 			Context:    &Context{Device: "leaf1"},
 		}
 		msg := err.Error()
-		if !contains(msg, "leaf1") {
+		if !strings.Contains(msg, "leaf1") {
 			t.Error("Should mention device name")
 		}
 	})
@@ -394,21 +346,9 @@ func TestPermissionError_ContextVariations(t *testing.T) {
 			Context:    &Context{Service: "svc1", Device: "dev1"},
 		}
 		msg := err.Error()
-		if !contains(msg, "svc1") || !contains(msg, "dev1") {
+		if !strings.Contains(msg, "svc1") || !strings.Contains(msg, "dev1") {
 			t.Error("Should mention both service and device")
 		}
 	})
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

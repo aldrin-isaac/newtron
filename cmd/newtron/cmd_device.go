@@ -43,7 +43,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
+			if err := checkExecutePermission(auth.PermDeviceCleanup, authCtx); err != nil {
 				return nil, err
 			}
 

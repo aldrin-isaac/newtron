@@ -2,6 +2,7 @@ package newtlab
 
 import (
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/spec"
@@ -87,7 +88,7 @@ func TestProbeAllPorts_Conflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
-	if got := err.Error(); !contains(got, "test port") || !contains(got, "in use") {
+	if got := err.Error(); !strings.Contains(got, "test port") || !strings.Contains(got, "in use") {
 		t.Errorf("error should mention purpose and 'in use', got: %v", err)
 	}
 }
@@ -120,7 +121,7 @@ func TestProbeAllPorts_MultipleConflicts(t *testing.T) {
 	}
 
 	errMsg := err.Error()
-	if !contains(errMsg, "port A") || !contains(errMsg, "port B") {
+	if !strings.Contains(errMsg, "port A") || !strings.Contains(errMsg, "port B") {
 		t.Errorf("error should report both conflicts, got: %v", err)
 	}
 }
@@ -170,15 +171,3 @@ func TestResolveNewtLabConfig_WithServers(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
-}
-
-func containsStr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

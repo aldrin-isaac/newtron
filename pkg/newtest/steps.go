@@ -567,18 +567,8 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	allPassed := true
 
 	timeout := step.Expect.Timeout
-	if timeout == 0 {
-		timeout = 120 * time.Second
-	}
 	interval := step.Expect.PollInterval
-	if interval == 0 {
-		interval = 5 * time.Second
-	}
-
-	expectedState := "Established"
-	if step.Expect != nil && step.Expect.State != "" {
-		expectedState = step.Expect.State
-	}
+	expectedState := step.Expect.State
 
 	for _, name := range devices {
 		dev, err := r.Network.GetDevice(name)

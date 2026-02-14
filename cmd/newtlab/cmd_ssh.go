@@ -19,11 +19,10 @@ func newSSHCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeName := args[0]
 
-			state, labName, err := findNodeState(nodeName)
+			state, _, err := findNodeState(nodeName)
 			if err != nil {
 				return err
 			}
-			_ = labName
 
 			node, ok := state.Nodes[nodeName]
 			if !ok {

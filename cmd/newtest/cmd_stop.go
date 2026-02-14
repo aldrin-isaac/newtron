@@ -40,14 +40,7 @@ Refuses to stop a suite with a running process — use 'newtest pause' first.`,
 			// Destroy topology if we know the spec dir
 			if state.SuiteDir != "" {
 				topologiesDir := resolveTopologiesDir()
-				topology := state.Topology
-				if topology == "" {
-					// Try to infer from scenarios
-					scenarios, _ := newtest.ParseAllScenarios(state.SuiteDir)
-					if len(scenarios) > 0 {
-						topology = scenarios[0].Topology
-					}
-				}
+				topology := resolveTopologyFromState(state)
 				if topology != "" {
 					specDir := filepath.Join(topologiesDir, topology, "specs")
 					lab, err := newtlab.NewLab(specDir)

@@ -20,27 +20,27 @@ func TestSettings_Defaults(t *testing.T) {
 	}
 }
 
-func TestSettings_SettersGetters(t *testing.T) {
+func TestSettings_FieldAssignment(t *testing.T) {
 	s := &Settings{}
 
-	s.SetNetwork("production")
+	s.DefaultNetwork = "production"
 	if s.DefaultNetwork != "production" {
-		t.Errorf("SetNetwork() failed, got %q", s.DefaultNetwork)
+		t.Errorf("DefaultNetwork = %q, want %q", s.DefaultNetwork, "production")
 	}
 
-	s.SetSpecDir("/custom/path")
+	s.SpecDir = "/custom/path"
 	if s.GetSpecDir() != "/custom/path" {
-		t.Errorf("SetSpecDir() failed, got %q", s.GetSpecDir())
+		t.Errorf("GetSpecDir() = %q, want %q", s.GetSpecDir(), "/custom/path")
 	}
 
-	s.SetDefaultSuite("newtest/suites/2node-incremental")
+	s.DefaultSuite = "newtest/suites/2node-incremental"
 	if s.DefaultSuite != "newtest/suites/2node-incremental" {
-		t.Errorf("SetDefaultSuite() failed, got %q", s.DefaultSuite)
+		t.Errorf("DefaultSuite = %q", s.DefaultSuite)
 	}
 
-	s.SetTopologiesDir("newtest/topologies")
+	s.TopologiesDir = "newtest/topologies"
 	if s.TopologiesDir != "newtest/topologies" {
-		t.Errorf("SetTopologiesDir() failed, got %q", s.TopologiesDir)
+		t.Errorf("TopologiesDir = %q", s.TopologiesDir)
 	}
 }
 
@@ -250,8 +250,8 @@ func TestDefaultSettingsPath(t *testing.T) {
 	if path == "" {
 		t.Error("DefaultSettingsPath() should not be empty")
 	}
-	if !filepath.IsAbs(path) && path != "newtron_settings.json" {
-		t.Errorf("DefaultSettingsPath() should be absolute or fallback, got %q", path)
+	if !filepath.IsAbs(path) {
+		t.Errorf("DefaultSettingsPath() should be absolute, got %q", path)
 	}
 }
 
@@ -264,8 +264,8 @@ func TestDefaultSettingsPath_NoHome(t *testing.T) {
 	os.Unsetenv("HOME")
 
 	path := DefaultSettingsPath()
-	if path != "newtron_settings.json" {
-		t.Errorf("DefaultSettingsPath() with no HOME = %q, want %q", path, "newtron_settings.json")
+	if path != "/tmp/newtron_settings.json" {
+		t.Errorf("DefaultSettingsPath() with no HOME = %q, want %q", path, "/tmp/newtron_settings.json")
 	}
 }
 

@@ -46,7 +46,7 @@ const (
 func DefaultSettingsPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "newtron_settings.json"
+		return "/tmp/newtron_settings.json"
 	}
 	return filepath.Join(home, ".newtron", "settings.json")
 }
@@ -97,32 +97,12 @@ func (s *Settings) SaveTo(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// SetNetwork sets the default network
-func (s *Settings) SetNetwork(network string) {
-	s.DefaultNetwork = network
-}
-
-// SetSpecDir sets the specification directory
-func (s *Settings) SetSpecDir(dir string) {
-	s.SpecDir = dir
-}
-
 // GetSpecDir returns the spec directory (with fallback)
 func (s *Settings) GetSpecDir() string {
 	if s.SpecDir != "" {
 		return s.SpecDir
 	}
 	return DefaultSpecDir
-}
-
-// SetDefaultSuite sets the default newtest suite directory
-func (s *Settings) SetDefaultSuite(dir string) {
-	s.DefaultSuite = dir
-}
-
-// SetTopologiesDir sets the base directory for topologies
-func (s *Settings) SetTopologiesDir(dir string) {
-	s.TopologiesDir = dir
 }
 
 // GetAuditLogPath returns the audit log path with a fallback default.

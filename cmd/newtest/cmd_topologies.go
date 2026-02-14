@@ -37,11 +37,7 @@ func newTopologiesCmd() *cobra.Command {
 					continue
 				}
 
-				var topo struct {
-					Description string                     `json:"description"`
-					Devices     map[string]json.RawMessage `json:"devices"`
-					Links       []json.RawMessage          `json:"links"`
-				}
+				var topo topoSummary
 				if jsonErr := json.Unmarshal(data, &topo); jsonErr != nil {
 					fmt.Fprintf(w, "  %s\t-\t-\t(parse error)\n", e.Name())
 					continue

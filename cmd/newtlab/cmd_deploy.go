@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -49,7 +50,13 @@ func newDeployCmd() *cobra.Command {
 			fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.Name, len(state.Nodes))
 			fmt.Printf("  %-16s %-10s %-12s %s\n", "NODE", "STATUS", "SSH PORT", "CONSOLE")
 			fmt.Printf("  %-16s %-10s %-12s %s\n", "────────────────", "──────────", "────────────", "───────")
-			for name, node := range state.Nodes {
+			nodeNames := make([]string, 0, len(state.Nodes))
+			for name := range state.Nodes {
+				nodeNames = append(nodeNames, name)
+			}
+			sort.Strings(nodeNames)
+			for _, name := range nodeNames {
+				node := state.Nodes[name]
 				fmt.Printf("  %-16s %-10s %-12d %d\n", name, node.Status, node.SSHPort, node.ConsolePort)
 			}
 

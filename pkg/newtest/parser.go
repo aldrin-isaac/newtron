@@ -10,6 +10,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Default timeouts and poll intervals for verify actions.
+const (
+	DefaultVerifyTimeout  = 120 * time.Second
+	DefaultRouteTimeout   = 60 * time.Second
+	DefaultPingTimeout    = 30 * time.Second
+	DefaultPollInterval   = 5 * time.Second
+)
+
 // ParseScenario reads a YAML scenario file and returns a validated Scenario.
 func ParseScenario(path string) (*Scenario, error) {
 	data, err := os.ReadFile(path)
@@ -233,13 +241,13 @@ func validateStepFields(scenario string, index int, step *Step) error {
 	return nil
 }
 
-// validateDependencyGraph checks that all Requires references exist and there
-// are no cycles.
-func validateDependencyGraph(scenarios []*Scenario) error {
+// ValidateDependencyGraph checks that all Requires references exist and there
+// are no cycles. On success it returns scenarios in dependency order.
+func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error) {
 	names := make(map[string]bool, len(scenarios))
 	for _, s := range scenarios {
 		if names[s.Name] {
-			return fmt.Errorf("duplicate scenario name: %s", s.Name)
+			return nil, fmt.Errorf("duplicate scenario name: %s", s.Name)
 		}
 		names[s.Name] = true
 	}
@@ -247,21 +255,19 @@ func validateDependencyGraph(scenarios []*Scenario) error {
 	for _, s := range scenarios {
 		for _, req := range s.Requires {
 			if !names[req] {
-				return fmt.Errorf("scenario %s requires unknown scenario %q", s.Name, req)
+				return nil, fmt.Errorf("scenario %s requires unknown scenario %q", s.Name, req)
 			}
 			if req == s.Name {
-				return fmt.Errorf("scenario %s requires itself", s.Name)
+				return nil, fmt.Errorf("scenario %s requires itself", s.Name)
 			}
 		}
 	}
 
-	// Cycle detection via topological sort
-	_, err := topologicalSort(scenarios)
-	return err
+	return TopologicalSort(scenarios)
 }
 
-// topologicalSort returns scenarios in dependency order using Kahn's algorithm.
-func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
+// TopologicalSort returns scenarios in dependency order using Kahn's algorithm.
+func TopologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	byName := make(map[string]*Scenario, len(scenarios))
 	inDegree := make(map[string]int, len(scenarios))
 	dependents := make(map[string][]string) // name -> scenarios that depend on it
@@ -309,19 +315,6 @@ func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	return sorted, nil
 }
 
-// HasRequiresExported is an exported wrapper for hasRequires.
-func HasRequiresExported(scenarios []*Scenario) bool {
-	return hasRequires(scenarios)
-}
-
-// TopologicalSortExported is an exported wrapper for topologicalSort.
-func TopologicalSortExported(scenarios []*Scenario) ([]*Scenario, error) {
-	if err := validateDependencyGraph(scenarios); err != nil {
-		return nil, err
-	}
-	return topologicalSort(scenarios)
-}
-
 // applyDefaults sets default values for steps.
 func applyDefaults(s *Scenario) {
 	for i := range s.Steps {
@@ -340,34 +333,34 @@ func applyDefaults(s *Scenario) {
 		switch step.Action {
 		case ActionVerifyStateDB:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = 120 * time.Second
+				step.Expect.Timeout = DefaultVerifyTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = 5 * time.Second
+				step.Expect.PollInterval = DefaultPollInterval
 			}
 		case ActionVerifyBGP:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = 120 * time.Second
+				step.Expect.Timeout = DefaultVerifyTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = 5 * time.Second
+				step.Expect.PollInterval = DefaultPollInterval
 			}
 			if step.Expect.State == "" {
 				step.Expect.State = "Established"
 			}
 		case ActionVerifyRoute:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = 60 * time.Second
+				step.Expect.Timeout = DefaultRouteTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = 5 * time.Second
+				step.Expect.PollInterval = DefaultPollInterval
 			}
 			if step.Expect.Source == "" {
 				step.Expect.Source = "app_db"
 			}
 		case ActionVerifyPing:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = 30 * time.Second
+				step.Expect.Timeout = DefaultPingTimeout
 			}
 			if step.Expect.SuccessRate == nil {
 				rate := 1.0

@@ -112,3 +112,18 @@ func resolveSuite(cmd *cobra.Command, dir string, filter func(newtest.RunStatus)
 	}
 	return matched[0], nil
 }
+
+// resolveTopologyFromState infers the topology name from suite state.
+// Falls back to parsing scenario files if state.Topology is empty.
+func resolveTopologyFromState(state *newtest.RunState) string {
+	if state.Topology != "" {
+		return state.Topology
+	}
+	if state.SuiteDir != "" {
+		scenarios, _ := newtest.ParseAllScenarios(state.SuiteDir)
+		if len(scenarios) > 0 {
+			return scenarios[0].Topology
+		}
+	}
+	return ""
+}

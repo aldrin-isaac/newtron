@@ -427,13 +427,6 @@ Examples:
 	},
 }
 
-func defaultStr(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
-}
-
 func init() {
 	aclCreateCmd.Flags().StringVar(&aclType, "type", "", "ACL type (L3, L3V6, MIRROR, MIRRORV6)")
 	aclCreateCmd.Flags().StringVar(&aclStage, "stage", "", "ACL stage (ingress, egress)")
