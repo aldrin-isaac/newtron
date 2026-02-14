@@ -177,20 +177,22 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	// Set up remote state directories (one SSH per unique remote host)
 	remoteHosts := map[string]bool{}
 	for _, node := range l.Nodes {
-		hostIP := resolveHostIP(node, l.Config)
-		if hostIP != "" && !remoteHosts[hostIP] {
-			if err := setupRemoteStateDir(l.Name, hostIP); err != nil {
-				return err
+		if node.Host != "" {
+			hostIP := resolveHostIP(node.Host, l.Config)
+			if !remoteHosts[hostIP] {
+				if err := setupRemoteStateDir(l.Name, hostIP); err != nil {
+					return err
+				}
+				remoteHosts[hostIP] = true
 			}
-			remoteHosts[hostIP] = true
 		}
 	}
 
 	// Create overlay disks (local or remote)
 	for name, node := range l.Nodes {
-		hostIP := resolveHostIP(node, l.Config)
-		if hostIP != "" {
+		if node.Host != "" {
 			// Remote: use ~/-based paths for shell expansion on remote host
+			hostIP := resolveHostIP(node.Host, l.Config)
 			remoteOverlay := fmt.Sprintf("~/.newtlab/labs/%s/disks/%s.qcow2", l.Name, name)
 			remoteImage := unexpandHome(node.Image)
 			if err := CreateOverlayRemote(remoteImage, remoteOverlay, hostIP); err != nil {
@@ -256,7 +258,7 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 		links := hostLinks[host]
 
 		bindAddr := "127.0.0.1"
-		hostIP := resolveWorkerHostIP(host, l.Config)
+		hostIP := resolveHostIP(host, l.Config)
 		if host != "" {
 			bindAddr = "0.0.0.0"
 		}
@@ -310,17 +312,23 @@ func (l *Lab) startNodes(ctx context.Context) error {
 	var firstErr error
 	for _, name := range sortedNodeNames(l.Nodes) {
 		node := l.Nodes[name]
-		hostIP := resolveHostIP(node, l.Config)
+		hostIP := resolveHostIP(node.Host, l.Config)
+
+		// StartNode/StopNode/IsRunning use "" to detect local vs remote
+		remoteIP := ""
+		if node.Host != "" {
+			remoteIP = hostIP
+		}
 
 		util.WithDevice(name).Infof("newtlab: starting VM (ssh=%d, console=%d)", node.SSHPort, node.ConsolePort)
-		pid, err := StartNode(node, l.StateDir, hostIP)
+		pid, err := StartNode(node, l.StateDir, remoteIP)
 		if err != nil {
 			l.State.Nodes[name] = &NodeState{
 				Status:      "error",
 				SSHPort:     node.SSHPort,
 				ConsolePort: node.ConsolePort,
 				Host:        node.Host,
-				HostIP:      hostIP,
+				HostIP:      remoteIP,
 			}
 			if firstErr == nil {
 				firstErr = err
@@ -333,7 +341,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
 			Host:        node.Host,
-			HostIP:      hostIP,
+			HostIP:      remoteIP,
 		}
 	}
 	return firstErr
@@ -352,7 +360,7 @@ func (l *Lab) bootstrapNodes(ctx context.Context) error {
 		if ns.Status != "running" {
 			continue
 		}
-		consoleHost := nodeHostIP(ns)
+		consoleHost := resolveHostIP(node.Host, l.Config)
 		wg.Add(1)
 		go func(name, consoleHost string, node *NodeConfig) {
 			defer wg.Done()
@@ -377,7 +385,7 @@ func (l *Lab) bootstrapNodes(ctx context.Context) error {
 		if ns.Status != "running" {
 			continue
 		}
-		sshHost := nodeHostIP(ns)
+		sshHost := resolveHostIP(node.Host, l.Config)
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig) {
 			defer wg.Done()
@@ -419,7 +427,7 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 		if err != nil || len(patches) == 0 {
 			continue
 		}
-		sshHost := nodeHostIP(ns)
+		sshHost := resolveHostIP(node.Host, l.Config)
 		vars := buildPatchVars(node, platform)
 		wg.Add(1)
 		go func(name, sshHost string, node *NodeConfig, patches []*BootPatch, vars *PatchVars) {
@@ -613,8 +621,8 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	nodeState.PID = pid
 	nodeState.Status = "running"
 
-	// Wait for SSH — use host IP for remote nodes
-	sshHost := nodeHostIP(nodeState)
+	// Wait for SSH — resolve host IP for the node
+	sshHost := resolveHostIP(node.Host, lab.Config)
 	if err := WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 		time.Duration(node.BootTimeout)*time.Second); err != nil {
 		nodeState.Status = "error"
@@ -704,7 +712,7 @@ func (l *Lab) refreshBGP(state *LabState) {
 			continue
 		}
 
-		host := nodeHostIP(nodeState)
+		host := resolveHostIP(nc.Host, l.Config)
 		addr := fmt.Sprintf("%s:%d", host, nodeState.SSHPort)
 
 		config := &ssh.ClientConfig{
@@ -783,28 +791,44 @@ func cleanupAllRemoteHosts(labName string, state *LabState) []error {
 }
 
 // destroyExisting tears down a stale deployment found via state.json.
+// Collects all errors instead of logging to stderr.
 func (l *Lab) destroyExisting(existing *LabState) error {
 	old := &Lab{
 		Name:    l.Name,
 		SpecDir: existing.SpecDir,
 		State:   existing,
 	}
+	var errs []error
+
 	// Kill QEMU processes
 	for name, node := range existing.Nodes {
 		if IsRunning(node.PID, node.HostIP) {
 			if err := StopNode(node.PID, node.HostIP); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: stop %s (pid %d): %v\n", name, node.PID, err)
+				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
 			}
 		}
 	}
-	// Kill bridge processes (per-host, best effort)
-	stopAllBridges(existing)
-	// Clean up remote state directories (best effort)
-	cleanupAllRemoteHosts(l.Name, existing)
-	// Restore profiles (best effort)
-	RestoreProfiles(old)
+
+	// Kill bridge processes (per-host)
+	errs = append(errs, stopAllBridges(existing)...)
+
+	// Clean up remote state directories
+	errs = append(errs, cleanupAllRemoteHosts(l.Name, existing)...)
+
+	// Restore profiles
+	if err := RestoreProfiles(old); err != nil {
+		errs = append(errs, fmt.Errorf("restore profiles: %w", err))
+	}
+
 	// Remove local state
-	return RemoveState(l.Name)
+	if err := RemoveState(l.Name); err != nil {
+		errs = append(errs, fmt.Errorf("remove state: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
 }
 
 // resolveNewtLabConfig returns a VMLabConfig with defaults applied.
@@ -837,35 +861,11 @@ func resolveNewtLabConfig(cfg *spec.NewtLabConfig) *VMLabConfig {
 	return resolved
 }
 
-// nodeHostIP returns the effective host IP for a node state entry.
-// Returns the node's HostIP if set, otherwise "127.0.0.1" for local nodes.
-func nodeHostIP(ns *NodeState) string {
-	if ns.HostIP != "" {
-		return ns.HostIP
-	}
-	return "127.0.0.1"
-}
-
-// resolveHostIP returns the IP address for a node's host.
-// For local nodes (Host==""), returns "" (callers default to 127.0.0.1).
-// For remote nodes, looks up the host name in the lab's Hosts map.
-func resolveHostIP(node *NodeConfig, config *VMLabConfig) string {
-	if node.Host == "" {
-		return ""
-	}
-	if config != nil && config.Hosts != nil {
-		if ip, ok := config.Hosts[node.Host]; ok {
-			return ip
-		}
-	}
-	// Fall back to host name as IP (allows using raw IPs as host names)
-	return node.Host
-}
-
-// resolveWorkerHostIP returns the IP address for a bridge worker's host.
-// For the local host (host==""), returns "127.0.0.1".
-// For remote hosts, looks up the host name in the lab's Hosts map.
-func resolveWorkerHostIP(host string, config *VMLabConfig) string {
+// resolveHostIP returns a usable IP address for a host name.
+// For local hosts (host==""), returns "127.0.0.1".
+// For remote hosts, looks up the host name in the lab's Hosts map,
+// falling back to the host name itself (allows raw IPs as host names).
+func resolveHostIP(host string, config *VMLabConfig) string {
 	if host == "" {
 		return "127.0.0.1"
 	}

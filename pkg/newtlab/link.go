@@ -157,15 +157,10 @@ func connectAddr(vmHost, workerHost string, port int, config *VMLabConfig) strin
 	if vmHost == workerHost {
 		return fmt.Sprintf("127.0.0.1:%d", port)
 	}
-	// VM is on a different host — resolve the worker host's IP
-	ip := workerHost
-	if config != nil && config.Hosts != nil {
-		if resolved, ok := config.Hosts[workerHost]; ok {
-			ip = resolved
-		}
-	}
-	// If worker is local (empty string), use the "local" hosts entry
-	if ip == "" {
+	ip := resolveHostIP(workerHost, config)
+	// If worker is local (empty string), resolveHostIP returns "127.0.0.1"
+	// but cross-host traffic needs the externally-reachable IP.
+	if workerHost == "" {
 		if config != nil && config.Hosts != nil {
 			if resolved, ok := config.Hosts["local"]; ok {
 				ip = resolved

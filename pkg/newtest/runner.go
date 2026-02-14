@@ -35,7 +35,6 @@ type RunOptions struct {
 	Platform  string
 	Keep      bool
 	NoDeploy  bool
-	Parallel  int
 	Verbose   bool
 	JUnitPath string
 

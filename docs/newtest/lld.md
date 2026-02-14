@@ -454,7 +454,6 @@ type RunOptions struct {
     Platform  string // override platform (default: from scenario)
     Keep      bool   // don't destroy after tests
     NoDeploy  bool   // skip deploy/destroy
-    Parallel  int    // parallel provisioning count (default 1)
     Verbose   bool
     JUnitPath string // JUnit XML output path (empty = no JUnit)
 }
@@ -809,19 +808,11 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 
 1. Resolve devices from `step.Devices`
 2. Create `TopologyProvisioner` from `r.Network`: `network.NewTopologyProvisioner(r.Network)`
-3. For each device (respecting `r.opts.Parallel`):
+3. For each device:
    - Call `provisioner.ProvisionDevice(ctx, deviceName)`
    - Extract `ChangeSet` from returned `CompositeDeliveryResult.ChangeSet`
    - Store into `StepOutput.ChangeSets[deviceName]`
 4. Return per-device results with ChangeSets
-
-**Parallel provisioning:** When `r.opts.Parallel > 1`, devices are provisioned
-concurrently using a semaphore (buffered channel) to limit concurrency.
-Errors are collected via a `sync.Mutex`-guarded slice; on completion, all
-per-device errors are joined into a single `StepResult` with `StatusFailed`
-if any device failed. Successful devices still have their ChangeSets stored
-in `StepOutput.ChangeSets` — partial success is visible to subsequent
-verify-provisioning steps.
 
 ### 5.3 waitExecutor
 
@@ -1910,7 +1901,6 @@ func newRunCmd() *cobra.Command {
     cmd.Flags().StringVar(&opts.Platform, "platform", "", "override platform")
     cmd.Flags().BoolVar(&opts.Keep, "keep", false, "don't destroy topology after tests")
     cmd.Flags().BoolVar(&opts.NoDeploy, "no-deploy", false, "skip deploy/destroy")
-    cmd.Flags().IntVar(&opts.Parallel, "parallel", 1, "parallel provisioning count")
     cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", false, "verbose output")
     cmd.Flags().StringVar(&opts.JUnitPath, "junit", "", "JUnit XML output path")
 
@@ -1929,7 +1919,6 @@ func newRunCmd() *cobra.Command {
 | `--platform <name>` | `Platform` | `""` (from scenario) |
 | `--keep` | `Keep` | `false` |
 | `--no-deploy` | `NoDeploy` | `false` |
-| `--parallel <n>` | `Parallel` | `1` |
 | `--junit <path>` | `JUnitPath` | `""` |
 | `-v, --verbose` | `Verbose` | `false` |
 

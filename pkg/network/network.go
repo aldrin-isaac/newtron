@@ -66,159 +66,76 @@ func NewNetwork(specDir string) (*Network, error) {
 // These are available to Device and Interface objects through parent reference
 // ============================================================================
 
-// GetService returns a service definition by name.
-// Services define interface templates (VPN, filters, QoS).
-func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	svc, ok := n.spec.Services[name]
+// getSpec is a generic helper for map-based spec lookups under a read lock.
+func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, error) {
+	mu.RLock()
+	defer mu.RUnlock()
+	v, ok := m[name]
 	if !ok {
-		return nil, fmt.Errorf("service '%s' not found", name)
+		var zero V
+		return zero, fmt.Errorf("%s '%s' not found", kind, name)
 	}
-	return svc, nil
+	return v, nil
+}
+
+// GetService returns a service definition by name.
+func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
+	return getSpec(&n.mu, n.spec.Services, "service", name)
 }
 
 // GetFilterSpec returns a filter specification by name.
-// Filter specs define ACL rules that can be applied to interfaces.
 func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	fs, ok := n.spec.FilterSpecs[name]
-	if !ok {
-		return nil, fmt.Errorf("filter spec '%s' not found", name)
-	}
-	return fs, nil
+	return getSpec(&n.mu, n.spec.FilterSpecs, "filter spec", name)
 }
 
 // GetRegion returns a region definition by name.
 func (n *Network) GetRegion(name string) (*spec.RegionSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	region, ok := n.spec.Regions[name]
-	if !ok {
-		return nil, fmt.Errorf("region '%s' not found", name)
-	}
-	return region, nil
+	return getSpec(&n.mu, n.spec.Regions, "region", name)
 }
 
 // GetSite returns a site specification by name.
 func (n *Network) GetSite(name string) (*spec.SiteSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	site, ok := n.sites.Sites[name]
-	if !ok {
-		return nil, fmt.Errorf("site '%s' not found", name)
-	}
-	return site, nil
+	return getSpec(&n.mu, n.sites.Sites, "site", name)
 }
 
 // GetPlatform returns a platform definition by name.
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	platform, ok := n.platforms.Platforms[name]
-	if !ok {
-		return nil, fmt.Errorf("platform '%s' not found", name)
-	}
-	return platform, nil
+	return getSpec(&n.mu, n.platforms.Platforms, "platform", name)
 }
 
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	prefixes, ok := n.spec.PrefixLists[name]
-	if !ok {
-		return nil, fmt.Errorf("prefix list '%s' not found", name)
-	}
-	return prefixes, nil
+	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", name)
 }
 
 // GetPolicer returns a policer definition by name.
 func (n *Network) GetPolicer(name string) (*spec.PolicerSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	policer, ok := n.spec.Policers[name]
-	if !ok {
-		return nil, fmt.Errorf("policer '%s' not found", name)
-	}
-	return policer, nil
+	return getSpec(&n.mu, n.spec.Policers, "policer", name)
 }
 
 // GetQoSPolicy returns a QoS policy by name.
 func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	if n.spec.QoSPolicies == nil {
-		return nil, fmt.Errorf("QoS policy '%s' not found (no QoS policies defined)", name)
-	}
-	policy, ok := n.spec.QoSPolicies[name]
-	if !ok {
-		return nil, fmt.Errorf("QoS policy '%s' not found", name)
-	}
-	return policy, nil
+	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", name)
 }
 
 // GetQoSProfile returns a QoS profile by name (legacy).
 func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	profile, ok := n.spec.QoSProfiles[name]
-	if !ok {
-		return nil, fmt.Errorf("QoS profile '%s' not found", name)
-	}
-	return profile, nil
+	return getSpec(&n.mu, n.spec.QoSProfiles, "QoS profile", name)
 }
 
 // GetIPVPN returns an IP-VPN definition by name.
-// IP-VPN definitions contain L3VNI and route targets for L3 routing.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	ipvpn, ok := n.spec.IPVPN[name]
-	if !ok {
-		return nil, fmt.Errorf("ipvpn '%s' not found", name)
-	}
-	return ipvpn, nil
+	return getSpec(&n.mu, n.spec.IPVPN, "ipvpn", name)
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
-// MAC-VPN definitions contain VLAN, L2VNI, and ARP suppression for L2 bridging.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	macvpn, ok := n.spec.MACVPN[name]
-	if !ok {
-		return nil, fmt.Errorf("macvpn '%s' not found", name)
-	}
-	return macvpn, nil
+	return getSpec(&n.mu, n.spec.MACVPN, "macvpn", name)
 }
 
 // GetRoutePolicy returns a route policy by name.
-// Route policies define BGP import/export rules for route filtering.
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	if n.spec.RoutePolicies == nil {
-		return nil, fmt.Errorf("route policy '%s' not found (no route policies defined)", name)
-	}
-	policy, ok := n.spec.RoutePolicies[name]
-	if !ok {
-		return nil, fmt.Errorf("route policy '%s' not found", name)
-	}
-	return policy, nil
+	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", name)
 }
 
 // ListServices returns all available service names.

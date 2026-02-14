@@ -173,6 +173,91 @@ pollLoop:
 	return fmt.Errorf("timeout after %s", timeout)
 }
 
+// checkForDevices resolves devices, calls fn for each, and collects results.
+// Use for non-polling verification executors. The callback returns status and message.
+func (r *Runner) checkForDevices(step *Step, fn func(dev *network.Device, name string) (Status, string)) *StepOutput {
+	names := r.resolveDevices(step)
+	details := make([]DeviceResult, 0, len(names))
+	allPassed := true
+
+	for _, name := range names {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{Device: name, Status: StatusError, Message: err.Error()})
+			allPassed = false
+			continue
+		}
+		status, msg := fn(dev, name)
+		details = append(details, DeviceResult{Device: name, Status: status, Message: msg})
+		if status != StatusPassed {
+			allPassed = false
+		}
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+}
+
+// pollForDevices resolves devices, polls fn for each with timeout, and collects results.
+// The callback returns (done, message, error). On done=true, message is the success message.
+// On timeout, the last message is used as the failure detail.
+func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *network.Device, name string) (done bool, msg string, err error)) *StepOutput {
+	names := r.resolveDevices(step)
+	details := make([]DeviceResult, 0, len(names))
+	allPassed := true
+
+	timeout := step.Expect.Timeout
+	interval := step.Expect.PollInterval
+
+	for _, name := range names {
+		dev, err := r.Network.GetDevice(name)
+		if err != nil {
+			details = append(details, DeviceResult{Device: name, Status: StatusError, Message: err.Error()})
+			allPassed = false
+			continue
+		}
+
+		var matched bool
+		var lastMsg string
+		var pollErr error
+
+		pollErr = pollUntil(ctx, timeout, interval, func() (bool, error) {
+			done, msg, err := fn(dev, name)
+			lastMsg = msg
+			if err != nil {
+				return false, err
+			}
+			if done {
+				matched = true
+				return true, nil
+			}
+			return false, nil
+		})
+
+		if pollErr != nil && !strings.HasPrefix(pollErr.Error(), "timeout after") {
+			details = append(details, DeviceResult{Device: name, Status: StatusError, Message: pollErr.Error()})
+			allPassed = false
+		} else if matched {
+			details = append(details, DeviceResult{Device: name, Status: StatusPassed, Message: lastMsg})
+		} else {
+			if lastMsg == "" {
+				lastMsg = fmt.Sprintf("timeout after %s", timeout)
+			}
+			details = append(details, DeviceResult{Device: name, Status: StatusFailed, Message: lastMsg})
+			allPassed = false
+		}
+	}
+
+	status := StatusPassed
+	if !allPassed {
+		status = StatusFailed
+	}
+	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+}
+
 // ============================================================================
 // provisionExecutor
 // ============================================================================
@@ -290,61 +375,21 @@ func (e *waitExecutor) Execute(ctx context.Context, r *Runner, step *Step) *Step
 type verifyProvisioningExecutor struct{}
 
 func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-
-	allPassed := true
-	for _, name := range devices {
+	return r.checkForDevices(step, func(dev *network.Device, name string) (Status, string) {
 		cs, ok := r.ChangeSets[name]
 		if !ok {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: "no ChangeSet accumulated (was provision run first?)",
-			})
-			allPassed = false
-			continue
+			return StatusError, "no ChangeSet accumulated (was provision run first?)"
 		}
-
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
 		if err := cs.Verify(dev); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("verification error: %s", err),
-			})
-			allPassed = false
-			continue
+			return StatusError, fmt.Sprintf("verification error: %s", err)
 		}
-
 		v := cs.Verification
 		total := v.Passed + v.Failed
 		if v.Failed == 0 {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusPassed,
-				Message: fmt.Sprintf("%d/%d CONFIG_DB entries verified", v.Passed, total),
-			})
-		} else {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("%d/%d CONFIG_DB entries verified (%d failed)", v.Passed, total, v.Failed),
-			})
-			allPassed = false
+			return StatusPassed, fmt.Sprintf("%d/%d CONFIG_DB entries verified", v.Passed, total)
 		}
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		return StatusFailed, fmt.Sprintf("%d/%d CONFIG_DB entries verified (%d failed)", v.Passed, total, v.Failed)
+	})
 }
 
 // ============================================================================
@@ -354,45 +399,14 @@ func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, ste
 type verifyConfigDBExecutor struct{}
 
 func (e *verifyConfigDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.checkForDevices(step, func(dev *network.Device, name string) (Status, string) {
 		underlying := dev.Underlying()
 		if underlying.ConfigDB == nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: "CONFIG_DB not loaded",
-			})
-			allPassed = false
-			continue
+			return StatusError, "CONFIG_DB not loaded"
 		}
-
 		result := e.checkDevice(underlying, step)
-		details = append(details, DeviceResult{
-			Device: name, Status: result.status, Message: result.message,
-		})
-		if result.status != StatusPassed {
-			allPassed = false
-		}
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		return result.status, result.message
+	})
 }
 
 type checkResult struct {
@@ -473,77 +487,20 @@ func (e *verifyConfigDBExecutor) checkDevice(d *device.Device, step *Step) check
 type verifyStateDBExecutor struct{}
 
 func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	timeout := step.Expect.Timeout
-	interval := step.Expect.PollInterval
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.pollForDevices(ctx, step, func(dev *network.Device, name string) (bool, string, error) {
 		stateClient := dev.Underlying().StateClient()
 		if stateClient == nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: "STATE_DB client not connected",
-			})
-			allPassed = false
-			continue
+			return false, "", fmt.Errorf("STATE_DB client not connected")
 		}
-
-		matched := false
-		polls := 0
-		var pollErr error
-
-		err = pollUntil(ctx, timeout, interval, func() (bool, error) {
-			polls++
-			vals, err := stateClient.GetEntry(step.Table, step.Key)
-			if err != nil {
-				pollErr = err
-				return false, fmt.Errorf("reading STATE_DB: %s", err)
-			}
-			if vals != nil && matchFields(vals, step.Expect.Fields) {
-				matched = true
-				return true, nil
-			}
-			return false, nil
-		})
-
-		if pollErr != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: pollErr.Error(),
-			})
-			allPassed = false
-		} else if matched {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusPassed,
-				Message: fmt.Sprintf("%s|%s: all fields match (polled %d times)", step.Table, step.Key, polls),
-			})
-		} else {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("%s|%s: timeout after %s (%d polls)", step.Table, step.Key, timeout, polls),
-			})
-			allPassed = false
+		vals, err := stateClient.GetEntry(step.Table, step.Key)
+		if err != nil {
+			return false, "", fmt.Errorf("reading STATE_DB: %s", err)
 		}
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		if vals != nil && matchFields(vals, step.Expect.Fields) {
+			return true, fmt.Sprintf("%s|%s: all fields match", step.Table, step.Key), nil
+		}
+		return false, fmt.Sprintf("%s|%s: fields not matched", step.Table, step.Key), nil
+	})
 }
 
 func matchFields(actual map[string]string, expected map[string]string) bool {
@@ -562,97 +519,35 @@ func matchFields(actual map[string]string, expected map[string]string) bool {
 type verifyBGPExecutor struct{}
 
 func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	timeout := step.Expect.Timeout
-	interval := step.Expect.PollInterval
 	expectedState := step.Expect.State
 
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
+	return r.pollForDevices(ctx, step, func(dev *network.Device, name string) (bool, string, error) {
+		results, err := dev.RunHealthChecks(ctx, "bgp")
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
+			return false, "transient health check error", nil
 		}
 
-		matched := false
-		polls := 0
-		var lastResults []network.HealthCheckResult
-
-		err = pollUntil(ctx, timeout, interval, func() (bool, error) {
-			polls++
-
-			// Run BGP health check
-			results, err := dev.RunHealthChecks(ctx, "bgp")
-			if err != nil {
-				return false, nil // transient error, keep polling
-			}
-			lastResults = results
-
-			// Check if all peers are passing health checks
-			bgpOK := true
-			for _, hc := range results {
-				if hc.Status != "pass" {
-					bgpOK = false
-					break
-				}
-			}
-
-			if !bgpOK {
-				return false, nil
-			}
-
-			// Health checks pass — now verify against expectedState.
-			// The health check messages contain the peer state (e.g.,
-			// "BGP neighbor 10.1.0.1 (vrf default): Established").
-			// If expectedState is "Established" (the default), health check
-			// pass already implies it. For non-default states, check messages.
-			if expectedState != "Established" {
-				for _, hc := range results {
-					if !strings.Contains(hc.Message, expectedState) {
-						return false, nil
-					}
-				}
-			}
-
-			matched = true
-			return true, nil
-		})
-
-		if matched {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusPassed,
-				Message: fmt.Sprintf("BGP %s (polled %d times)", expectedState, polls),
-			})
-		} else {
-			// Build a diagnostic message from last health check results
-			msg := fmt.Sprintf("BGP not converged after %s (%d polls)", timeout, polls)
-			if len(lastResults) > 0 {
+		for _, hc := range results {
+			if hc.Status != "pass" {
 				var states []string
-				for _, hc := range lastResults {
-					states = append(states, hc.Message)
+				for _, r := range results {
+					states = append(states, r.Message)
 				}
-				msg += ": " + strings.Join(states, "; ")
+				return false, "BGP not converged: " + strings.Join(states, "; "), nil
 			}
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: msg,
-			})
-			allPassed = false
 		}
-	}
 
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		// For non-default states, verify messages contain the expected state
+		if expectedState != "Established" {
+			for _, hc := range results {
+				if !strings.Contains(hc.Message, expectedState) {
+					return false, fmt.Sprintf("BGP peer not in state %s", expectedState), nil
+				}
+			}
+		}
+
+		return true, fmt.Sprintf("BGP %s", expectedState), nil
+	})
 }
 
 // ============================================================================
@@ -662,33 +557,12 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type verifyHealthExecutor struct{}
 
 func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.checkForDevices(step, func(dev *network.Device, name string) (Status, string) {
 		results, err := dev.RunHealthChecks(ctx, "")
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("health check error: %s", err),
-			})
-			allPassed = false
-			continue
+			return StatusError, fmt.Sprintf("health check error: %s", err)
 		}
-
-		passed := 0
-		failed := 0
+		passed, failed := 0, 0
 		for _, hc := range results {
 			if hc.Status == "pass" {
 				passed++
@@ -696,26 +570,11 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 				failed++
 			}
 		}
-
 		if failed == 0 {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusPassed,
-				Message: fmt.Sprintf("overall ok (%d checks passed)", passed),
-			})
-		} else {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusFailed,
-				Message: fmt.Sprintf("overall failed (%d passed, %d failed)", passed, failed),
-			})
-			allPassed = false
+			return StatusPassed, fmt.Sprintf("overall ok (%d checks passed)", passed)
 		}
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		return StatusFailed, fmt.Sprintf("overall failed (%d passed, %d failed)", passed, failed)
+	})
 }
 
 // ============================================================================
@@ -725,33 +584,17 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type verifyRouteExecutor struct{}
 
 func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	deviceName := r.resolveDevices(step)[0]
-	dev, err := r.Network.GetDevice(deviceName)
-	if err != nil {
-		return &StepOutput{Result: &StepResult{
-			Status: StatusError, Device: deviceName, Message: err.Error(),
-		}}
-	}
-
-	timeout := step.Expect.Timeout
-	interval := step.Expect.PollInterval
-	polls := 0
-	var matched bool
-	var matchMsg string
-
-	pollErr := pollUntil(ctx, timeout, interval, func() (bool, error) {
-		polls++
+	return r.pollForDevices(ctx, step, func(dev *network.Device, name string) (bool, string, error) {
 		var entry *device.RouteEntry
-		var routeErr error
+		var err error
 
 		if step.Expect.Source == "asic_db" {
-			entry, routeErr = dev.GetRouteASIC(ctx, step.VRF, step.Prefix)
+			entry, err = dev.GetRouteASIC(ctx, step.VRF, step.Prefix)
 		} else {
-			entry, routeErr = dev.GetRoute(ctx, step.VRF, step.Prefix)
+			entry, err = dev.GetRoute(ctx, step.VRF, step.Prefix)
 		}
-
-		if routeErr != nil {
-			return false, routeErr
+		if err != nil {
+			return false, "", err
 		}
 
 		if entry != nil && matchRoute(entry, step.Expect) {
@@ -759,31 +602,11 @@ func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step
 			if step.Expect.Source == "asic_db" {
 				source = "ASIC_DB"
 			}
-			matchMsg = fmt.Sprintf("%s via %s (%s, %s, polled %d times)",
-				step.Prefix, step.Expect.NextHopIP, step.Expect.Protocol, source, polls)
-			matched = true
-			return true, nil
+			return true, fmt.Sprintf("%s via %s (%s, %s)",
+				step.Prefix, step.Expect.NextHopIP, step.Expect.Protocol, source), nil
 		}
-		return false, nil
+		return false, fmt.Sprintf("%s not found", step.Prefix), nil
 	})
-
-	if matched {
-		return &StepOutput{Result: &StepResult{
-			Status: StatusPassed, Device: deviceName, Message: matchMsg,
-		}}
-	}
-
-	if pollErr != nil && !strings.HasPrefix(pollErr.Error(), "timeout after") {
-		return &StepOutput{Result: &StepResult{
-			Status: StatusError, Device: deviceName, Message: pollErr.Error(),
-		}}
-	}
-
-	return &StepOutput{Result: &StepResult{
-		Status:  StatusFailed,
-		Device:  deviceName,
-		Message: fmt.Sprintf("%s not found after %s (%d polls)", step.Prefix, timeout, polls),
-	}}
 }
 
 // matchRoute returns true if the RouteEntry matches all non-empty expect fields.
@@ -991,68 +814,23 @@ func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *St
 type sshCommandExecutor struct{}
 
 func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-	var details []DeviceResult
-	allPassed := true
-
-	for _, name := range devices {
-		dev, err := r.Network.GetDevice(name)
-		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: fmt.Sprintf("getting device: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
+	return r.checkForDevices(step, func(dev *network.Device, name string) (Status, string) {
 		tunnel := dev.Underlying().Tunnel()
 		if tunnel == nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StatusError,
-				Message: "no SSH tunnel available",
-			})
-			allPassed = false
-			continue
+			return StatusError, "no SSH tunnel available"
 		}
-
 		output, err := tunnel.ExecCommand(step.Command)
-		exitOK := err == nil
-
 		if step.Expect != nil && step.Expect.Contains != "" {
 			if strings.Contains(output, step.Expect.Contains) {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusPassed,
-					Message: fmt.Sprintf("output contains %q", step.Expect.Contains),
-				})
-			} else {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusFailed,
-					Message: fmt.Sprintf("output does not contain %q", step.Expect.Contains),
-				})
-				allPassed = false
+				return StatusPassed, fmt.Sprintf("output contains %q", step.Expect.Contains)
 			}
-		} else {
-			if exitOK {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusPassed,
-					Message: "command succeeded",
-				})
-			} else {
-				details = append(details, DeviceResult{
-					Device: name, Status: StatusFailed,
-					Message: fmt.Sprintf("command failed: %s", err),
-				})
-				allPassed = false
-			}
+			return StatusFailed, fmt.Sprintf("output does not contain %q", step.Expect.Contains)
 		}
-	}
-
-	status := StatusPassed
-	if !allPassed {
-		status = StatusFailed
-	}
-	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
+		if err == nil {
+			return StatusPassed, "command succeeded"
+		}
+		return StatusFailed, fmt.Sprintf("command failed: %s", err)
+	})
 }
 
 // ============================================================================

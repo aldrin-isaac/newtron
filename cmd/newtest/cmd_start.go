@@ -20,7 +20,6 @@ func newStartCmd() *cobra.Command {
 		all       bool
 		topology  string
 		platform  string
-		parallel  int
 		junitPath string
 	)
 
@@ -70,7 +69,6 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 				All:       all,
 				Topology:  topology,
 				Platform:  platform,
-				Parallel:  parallel,
 				Verbose:   verboseFlag,
 				JUnitPath: junitPath,
 				Suite:     suite,
@@ -188,7 +186,6 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 	cmd.Flags().BoolVar(&all, "all", false, "run all scenarios in dir")
 	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
-	cmd.Flags().IntVar(&parallel, "parallel", 1, "parallel provisioning count")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
 
 	return cmd

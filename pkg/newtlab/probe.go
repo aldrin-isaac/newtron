@@ -25,7 +25,7 @@ func CollectAllPorts(lab *Lab) []PortAllocation {
 	// Node SSH and console ports
 	for _, name := range sortedNodeNames(lab.Nodes) {
 		node := lab.Nodes[name]
-		hostIP := resolveHostIP(node, lab.Config)
+		hostIP := resolveHostIP(node.Host, lab.Config)
 		allocs = append(allocs, PortAllocation{
 			Host:    node.Host,
 			HostIP:  hostIP,
@@ -42,7 +42,7 @@ func CollectAllPorts(lab *Lab) []PortAllocation {
 
 	// Link A/Z ports
 	for _, lc := range lab.Links {
-		workerIP := resolveWorkerHostIP(lc.WorkerHost, lab.Config)
+		workerIP := resolveHostIP(lc.WorkerHost, lab.Config)
 		allocs = append(allocs, PortAllocation{
 			Host:    lc.WorkerHost,
 			HostIP:  workerIP,
@@ -60,7 +60,7 @@ func CollectAllPorts(lab *Lab) []PortAllocation {
 	// Bridge stats ports (one per unique worker host)
 	statsPorts := allocateBridgeStatsPorts(lab)
 	for host, port := range statsPorts {
-		hostIP := resolveWorkerHostIP(host, lab.Config)
+		hostIP := resolveHostIP(host, lab.Config)
 		allocs = append(allocs, PortAllocation{
 			Host:    host,
 			HostIP:  hostIP,
