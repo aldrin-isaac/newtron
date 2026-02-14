@@ -5,10 +5,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/go-redis/redis/v8"
 )
+
+// HasKey checks whether a table entry exists in the parsed ConfigDB.
+// Uses JSON struct tags to find the map field matching the given table name,
+// then checks for key existence. This avoids a manual switch over every table.
+func (db *ConfigDB) HasKey(table, key string) bool {
+	v := reflect.ValueOf(db).Elem()
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == table {
+			m := v.Field(i)
+			if m.Kind() == reflect.Map && !m.IsNil() {
+				return m.MapIndex(reflect.ValueOf(key)).IsValid()
+			}
+			return false
+		}
+	}
+	return false
+}
 
 // ConfigDB mirrors SONiC's config_db.json structure
 type ConfigDB struct {

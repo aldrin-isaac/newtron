@@ -11,6 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/device"
 	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // StepExecutor executes a single step and returns output.
@@ -88,7 +89,10 @@ func intParam(params map[string]any, key string) int {
 	case float64:
 		return int(val)
 	case string:
-		n, _ := strconv.Atoi(val)
+		n, err := strconv.Atoi(val)
+		if err != nil {
+			util.Logger.Warnf("intParam: invalid integer value for %q: %q (using 0)", key, val)
+		}
 		return n
 	default:
 		return 0
@@ -117,6 +121,12 @@ func boolParam(params map[string]any, key string) bool {
 // it inside fn.
 func (r *Runner) executeForDevices(step *Step, fn func(dev *network.Device, name string) (*network.ChangeSet, string, error)) *StepOutput {
 	names := r.resolveDevices(step)
+	if len(names) == 0 {
+		return &StepOutput{Result: &StepResult{
+			Status:  StepStatusError,
+			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
+		}}
+	}
 	details := make([]DeviceResult, 0, len(names))
 	changeSets := make(map[string]*network.ChangeSet)
 	allPassed := true
@@ -177,6 +187,12 @@ pollLoop:
 // Use for non-polling verification executors. The callback returns status and message.
 func (r *Runner) checkForDevices(step *Step, fn func(dev *network.Device, name string) (StepStatus, string)) *StepOutput {
 	names := r.resolveDevices(step)
+	if len(names) == 0 {
+		return &StepOutput{Result: &StepResult{
+			Status:  StepStatusError,
+			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
+		}}
+	}
 	details := make([]DeviceResult, 0, len(names))
 	allPassed := true
 
@@ -206,6 +222,12 @@ func (r *Runner) checkForDevices(step *Step, fn func(dev *network.Device, name s
 // On timeout, the last message is used as the failure detail.
 func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *network.Device, name string) (done bool, msg string, err error)) *StepOutput {
 	names := r.resolveDevices(step)
+	if len(names) == 0 {
+		return &StepOutput{Result: &StepResult{
+			Status:  StepStatusError,
+			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
+		}}
+	}
 	details := make([]DeviceResult, 0, len(names))
 	allPassed := true
 

@@ -606,6 +606,7 @@ func resolveScenarioPath(dir, name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("scenario %q not found: %w", name, err)
 	}
+	var found string
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
 			continue
@@ -616,8 +617,14 @@ func resolveScenarioPath(dir, name string) (string, error) {
 			continue
 		}
 		if s.Name == name {
-			return path, nil
+			if found != "" {
+				return "", fmt.Errorf("ambiguous scenario name %q: found in %s and %s", name, filepath.Base(found), e.Name())
+			}
+			found = path
 		}
+	}
+	if found != "" {
+		return found, nil
 	}
 
 	return "", fmt.Errorf("scenario %q not found in %s", name, dir)

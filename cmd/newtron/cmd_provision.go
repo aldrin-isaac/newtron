@@ -43,7 +43,7 @@ Examples:
   newtron -S specs provision -d leaf1 -xs    # Execute + save for one device`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !app.net.HasTopology() {
-			return fmt.Errorf("no topology.json found in spec directory %s", app.specDir)
+			return fmt.Errorf("no topology.json found in spec directory %s", app.rootDir)
 		}
 
 		tp, err := network.NewTopologyProvisioner(app.net)

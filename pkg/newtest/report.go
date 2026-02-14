@@ -166,7 +166,7 @@ func (g *ReportGenerator) WriteMarkdown(path string) error {
 	}
 	defer f.Close()
 
-	fmt.Fprintf(f, "# newtest Report — %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(f, "# newtest Report — %s\n\n", time.Now().Format(DateTimeFormat))
 
 	// Summary table
 	fmt.Fprintln(f, "| Scenario | Topology | Platform | Result | Duration | Note |")

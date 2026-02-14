@@ -96,7 +96,7 @@ func printSuiteStatus(suite string) error {
 	// Timing
 	if !state.Started.IsZero() {
 		ago := time.Since(state.Started).Round(time.Second)
-		fmt.Printf("  started:   %s (%s ago)\n", state.Started.Format("2006-01-02 15:04:05"), ago)
+		fmt.Printf("  started:   %s (%s ago)\n", state.Started.Format(newtest.DateTimeFormat), ago)
 	}
 
 	// Scenario table
@@ -115,7 +115,7 @@ func printSuiteStatus(suite string) error {
 
 		passed, failed, errored, running := 0, 0, 0, 0
 		for i, sc := range state.Scenarios {
-			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(sc.Status), sc.Duration)
+			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(newtest.StepStatus(sc.Status)), sc.Duration)
 
 			switch newtest.StepStatus(sc.Status) {
 			case newtest.StepStatusPassed:
@@ -195,8 +195,8 @@ func colorRunStatus(status newtest.SuiteStatus, text string) string {
 	}
 }
 
-func colorScenarioStatus(status string) string {
-	switch newtest.StepStatus(status) {
+func colorScenarioStatus(status newtest.StepStatus) string {
+	switch status {
 	case newtest.StepStatusPassed:
 		return cli.Green(string(newtest.StepStatusPassed))
 	case newtest.StepStatusFailed:
@@ -208,6 +208,6 @@ func colorScenarioStatus(status string) string {
 	case "":
 		return "\u2014" // —
 	default:
-		return status
+		return string(status)
 	}
 }

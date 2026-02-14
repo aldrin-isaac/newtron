@@ -589,20 +589,27 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 	node.SSHPort = nodeState.SSHPort
 	node.ConsolePort = nodeState.ConsolePort
 
-	pid, err := StartNode(node, LabDir(l.Name), nodeState.HostIP)
-	if err != nil {
-		return err
+	// If the old process is still running (e.g., SSH timed out on previous Start),
+	// skip QEMU launch and just re-try SSH connectivity.
+	if nodeState.PID > 0 && IsRunning(nodeState.PID, nodeState.HostIP) {
+		nodeState.Status = "running"
+	} else {
+		pid, err := StartNode(node, LabDir(l.Name), nodeState.HostIP)
+		if err != nil {
+			return err
+		}
+		nodeState.PID = pid
+		nodeState.Status = "running"
 	}
-
-	nodeState.PID = pid
-	nodeState.Status = "running"
 
 	// Wait for SSH — resolve host IP for the node
 	sshHost := resolveHostIP(node.Host, lab.Config)
 	if err := WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 		time.Duration(node.BootTimeout)*time.Second); err != nil {
 		nodeState.Status = "error"
-		SaveState(state)
+		if saveErr := SaveState(state); saveErr != nil {
+			return fmt.Errorf("save state after SSH failure: %w (original: %v)", saveErr, err)
+		}
 		return err
 	}
 

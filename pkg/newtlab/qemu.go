@@ -252,11 +252,3 @@ func kvmAvailable() bool {
 	return true
 }
 
-// quoteArgs shell-quotes each argument using singleQuote.
-func quoteArgs(args []string) []string {
-	quoted := make([]string, len(args))
-	for i, arg := range args {
-		quoted[i] = singleQuote(arg)
-	}
-	return quoted
-}

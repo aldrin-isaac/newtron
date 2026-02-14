@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // ProgressReporter receives lifecycle callbacks during test execution.
@@ -260,7 +261,9 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 	for i, s := range scenarios {
 		r.State.Scenarios[i] = ScenarioState{Name: s.Name}
 	}
-	_ = SaveRunState(r.State)
+	if err := SaveRunState(r.State); err != nil {
+		util.Logger.Warnf("save run state: %v", err)
+	}
 	r.Inner.SuiteStart(scenarios)
 }
 
@@ -273,7 +276,9 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 		r.State.Scenarios[index].Status = string(result.Status)
 		r.State.Scenarios[index].Duration = result.Duration.Round(time.Second).String()
 	}
-	_ = SaveRunState(r.State)
+	if err := SaveRunState(r.State); err != nil {
+		util.Logger.Warnf("save run state: %v", err)
+	}
 	r.Inner.ScenarioEnd(result, index, total)
 }
 
@@ -286,6 +291,8 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 }
 
 func (r *StateReporter) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
-	_ = SaveRunState(r.State)
+	if err := SaveRunState(r.State); err != nil {
+		util.Logger.Warnf("save run state: %v", err)
+	}
 	r.Inner.SuiteEnd(results, duration)
 }

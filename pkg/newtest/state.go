@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// DateTimeFormat is the timestamp format used in reports and status output.
+const DateTimeFormat = "2006-01-02 15:04:05"
+
 // SuiteStatus is the lifecycle state of a suite run.
 type SuiteStatus string
 

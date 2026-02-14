@@ -73,11 +73,8 @@ Examples:
 			}
 			if configDB != nil {
 				for addr, neighbor := range configDB.BGPNeighbor {
-					nType := "indirect"
+					nType := bgpNeighborType(neighbor.LocalAddr, resolved.LoopbackIP)
 					localAddr := neighbor.LocalAddr
-					if localAddr != "" && localAddr != resolved.LoopbackIP {
-						nType = "direct"
-					}
 					adminStatus := neighbor.AdminStatus
 					if adminStatus == "" {
 						adminStatus = "up"
@@ -125,13 +122,10 @@ Examples:
 			fmt.Fprintln(w, "  --------\t----\t---------\t----------\t-----------\t-----")
 
 			for addr, neighbor := range configDB.BGPNeighbor {
-				// Determine neighbor type based on local_addr
-				neighborType := "indirect"
+				neighborType := bgpNeighborType(neighbor.LocalAddr, resolved.LoopbackIP)
 				localAddr := neighbor.LocalAddr
 				if localAddr == "" {
 					localAddr = resolved.LoopbackIP
-				} else if localAddr != resolved.LoopbackIP {
-					neighborType = "direct"
 				}
 
 				adminStatus := neighbor.AdminStatus
@@ -201,6 +195,15 @@ Examples:
 
 		return nil
 	},
+}
+
+// bgpNeighborType classifies a neighbor as "direct" (interface-level peering)
+// or "indirect" (loopback-sourced, typically iBGP overlay).
+func bgpNeighborType(localAddr, loopbackIP string) string {
+	if localAddr != "" && localAddr != loopbackIP {
+		return "direct"
+	}
+	return "indirect"
 }
 
 func init() {

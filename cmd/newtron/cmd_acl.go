@@ -50,6 +50,14 @@ var aclListCmd = &cobra.Command{
 			return nil
 		}
 
+		// Count rules per ACL table (single pass)
+		ruleCounts := make(map[string]int, len(configDB.ACLTable))
+		for ruleKey := range configDB.ACLRule {
+			if i := strings.IndexByte(ruleKey, '|'); i >= 0 {
+				ruleCounts[ruleKey[:i]]++
+			}
+		}
+
 		if app.jsonOutput {
 			type aclSummary struct {
 				Name       string `json:"name"`
@@ -60,18 +68,12 @@ var aclListCmd = &cobra.Command{
 			}
 			var acls []aclSummary
 			for name, table := range configDB.ACLTable {
-				ruleCount := 0
-				for ruleKey := range configDB.ACLRule {
-					if strings.HasPrefix(ruleKey, name+"|") {
-						ruleCount++
-					}
-				}
 				acls = append(acls, aclSummary{
 					Name:       name,
 					Type:       table.Type,
 					Stage:      table.Stage,
 					Interfaces: table.Ports,
-					RuleCount:  ruleCount,
+					RuleCount:  ruleCounts[name],
 				})
 			}
 			return json.NewEncoder(os.Stdout).Encode(acls)
@@ -87,15 +89,8 @@ var aclListCmd = &cobra.Command{
 		fmt.Fprintln(w, "----\t----\t-----\t----------\t-----")
 
 		for name, table := range configDB.ACLTable {
-			// Count rules for this table
-			ruleCount := 0
-			for ruleKey := range configDB.ACLRule {
-				if strings.HasPrefix(ruleKey, name+"|") {
-					ruleCount++
-				}
-			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
-				name, table.Type, table.Stage, table.Ports, ruleCount)
+				name, table.Type, table.Stage, table.Ports, ruleCounts[name])
 		}
 		w.Flush()
 

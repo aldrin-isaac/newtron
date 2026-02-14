@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -29,19 +29,7 @@ Examples:
 }
 
 func getConfigletDir() string {
-	// Try multiple locations
-	locations := []string{
-		app.specDir + "/../configlets",
-		"./configlets",
-		"/etc/newtron/configlets",
-	}
-
-	for _, loc := range locations {
-		if info, err := os.Stat(loc); err == nil && info.IsDir() {
-			return loc
-		}
-	}
-	return locations[0]
+	return filepath.Join(app.rootDir, "configlets")
 }
 
 var baselineListCmd = &cobra.Command{
@@ -177,31 +165,7 @@ func entryExists(dev *network.Device, table, key string) bool {
 	if configDB == nil {
 		return false
 	}
-
-	// Check common tables
-	switch table {
-	case "PORT":
-		_, ok := configDB.Port[key]
-		return ok
-	case "VLAN":
-		_, ok := configDB.VLAN[key]
-		return ok
-	case "VRF":
-		_, ok := configDB.VRF[key]
-		return ok
-	case "INTERFACE":
-		_, ok := configDB.Interface[key]
-		return ok
-	case "LOOPBACK_INTERFACE":
-		_, ok := configDB.LoopbackInterface[key]
-		return ok
-	case "ACL_TABLE":
-		_, ok := configDB.ACLTable[key]
-		return ok
-	default:
-		// For other tables, assume it doesn't exist (will be added)
-		return false
-	}
+	return configDB.HasKey(table, key)
 }
 
 func init() {

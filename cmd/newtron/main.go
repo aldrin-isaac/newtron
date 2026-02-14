@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -51,7 +52,8 @@ type App struct {
 	deviceName string
 
 	// Option flags
-	specDir     string
+	rootDir     string // -S flag: network root dir (contains specs/ and configlets/)
+	specDir     string // resolved: rootDir/specs or rootDir (flat layout)
 	executeMode bool
 	saveMode    bool
 	verbose     bool
@@ -96,6 +98,16 @@ func isKnownCommand(name string) bool {
 	return name == "help" || name == "completion"
 }
 
+// resolveNetworkSpecDir determines the actual specs directory from a root dir.
+// If rootDir/specs/network.json exists, specs live in rootDir/specs/ (nested layout).
+// Otherwise, specs live directly in rootDir (flat layout / backwards compat).
+func resolveNetworkSpecDir(rootDir string) string {
+	if _, err := os.Stat(filepath.Join(rootDir, "specs", "network.json")); err == nil {
+		return filepath.Join(rootDir, "specs")
+	}
+	return rootDir
+}
+
 var rootCmd = &cobra.Command{
 	Use:               "newtron",
 	Short:             "SONiC Network Configuration Tool",
@@ -138,9 +150,12 @@ Each resource takes its natural key as a positional argument:
 		}
 
 		// Apply defaults from settings
-		if app.specDir == "" {
-			app.specDir = app.settings.GetSpecDir()
+		if app.rootDir == "" {
+			app.rootDir = app.settings.GetSpecDir()
 		}
+
+		// Resolve spec dir from root dir (auto-detect nested vs flat layout)
+		app.specDir = resolveNetworkSpecDir(app.rootDir)
 
 		// Set log level: quiet by default, verbose on -v
 		if app.verbose {
@@ -179,7 +194,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&app.specDir, "specs", "S", "", "Specification directory")
+	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (parent of specs/ and configlets/)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
