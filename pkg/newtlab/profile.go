@@ -5,10 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/newtron-network/newtron/pkg/spec"
 )
 
 // PatchProfiles updates device profile JSON files with newtlab runtime values.
 // Called after successful VM deployment.
+//
+// Uses spec.DeviceProfile for type-safe reading/patching instead of untyped
+// map[string]interface{}, since the profile JSON structure matches DeviceProfile.
 func PatchProfiles(lab *Lab) error {
 	for name, node := range lab.Nodes {
 		profilePath := filepath.Join(lab.SpecDir, "profiles", name+".json")
@@ -18,15 +23,15 @@ func PatchProfiles(lab *Lab) error {
 			return fmt.Errorf("newtlab: reading profile %s: %w", name, err)
 		}
 
-		var profile map[string]interface{}
+		var profile spec.DeviceProfile
 		if err := json.Unmarshal(data, &profile); err != nil {
 			return fmt.Errorf("newtlab: parsing profile %s: %w", name, err)
 		}
 
 		// Save original mgmt_ip for restore on destroy
 		if nodeState, ok := lab.State.Nodes[name]; ok {
-			if mgmt, ok := profile["mgmt_ip"].(string); ok {
-				nodeState.OriginalMgmtIP = mgmt
+			if profile.MgmtIP != "" {
+				nodeState.OriginalMgmtIP = profile.MgmtIP
 			}
 		}
 
@@ -35,18 +40,14 @@ func PatchProfiles(lab *Lab) error {
 		if nodeState, ok2 := lab.State.Nodes[name]; ok2 && nodeState.HostIP != "" {
 			mgmtIP = nodeState.HostIP
 		}
-		profile["mgmt_ip"] = mgmtIP
-		profile["ssh_port"] = node.SSHPort
-		profile["console_port"] = node.ConsolePort
-		if node.SSHUser != "" {
-			if _, exists := profile["ssh_user"]; !exists {
-				profile["ssh_user"] = node.SSHUser
-			}
+		profile.MgmtIP = mgmtIP
+		profile.SSHPort = node.SSHPort
+		profile.ConsolePort = node.ConsolePort
+		if node.SSHUser != "" && profile.SSHUser == "" {
+			profile.SSHUser = node.SSHUser
 		}
-		if node.SSHPass != "" {
-			if _, exists := profile["ssh_pass"]; !exists {
-				profile["ssh_pass"] = node.SSHPass
-			}
+		if node.SSHPass != "" && profile.SSHPass == "" {
+			profile.SSHPass = node.SSHPass
 		}
 
 		out, err := json.MarshalIndent(profile, "", "    ")
@@ -73,19 +74,19 @@ func RestoreProfiles(lab *Lab) error {
 			continue
 		}
 
-		var profile map[string]interface{}
+		var profile spec.DeviceProfile
 		if err := json.Unmarshal(data, &profile); err != nil {
 			return fmt.Errorf("newtlab: parsing profile %s: %w", name, err)
 		}
 
 		// Restore original mgmt_ip
 		if nodeState, ok := lab.State.Nodes[name]; ok && nodeState.OriginalMgmtIP != "" {
-			profile["mgmt_ip"] = nodeState.OriginalMgmtIP
+			profile.MgmtIP = nodeState.OriginalMgmtIP
 		}
 
-		// Remove newtlab-written fields
-		delete(profile, "ssh_port")
-		delete(profile, "console_port")
+		// Remove newtlab-written fields by zeroing them
+		profile.SSHPort = 0
+		profile.ConsolePort = 0
 
 		out, err := json.MarshalIndent(profile, "", "    ")
 		if err != nil {

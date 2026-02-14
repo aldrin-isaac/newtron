@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // Lab is the top-level newtlab orchestrator. It reads newtron spec files,
@@ -130,6 +131,8 @@ func NewLab(specDir string) (*Lab, error) {
 // and patches profiles. The context is checked at each major phase and
 // threaded into long-running sub-operations.
 func (l *Lab) Deploy(ctx context.Context) error {
+	util.Infof("newtlab: deploying lab %s from %s", l.Name, l.SpecDir)
+
 	// Check for stale state
 	if existing, err := LoadState(l.Name); err == nil && existing != nil {
 		if !l.Force {
@@ -284,6 +287,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		node := l.Nodes[name]
 		hostIP := resolveHostIP(node, l.Config)
 
+		util.WithDevice(name).Infof("newtlab: starting VM (ssh=%d, console=%d)", node.SSHPort, node.ConsolePort)
 		pid, err := StartNode(node, l.StateDir, hostIP)
 		if err != nil {
 			l.State.Nodes[name] = &NodeState{
@@ -432,6 +436,8 @@ func StartByName(ctx context.Context, labName, nodeName string) error {
 // and restores profiles. The context allows cancellation of the
 // teardown sequence.
 func (l *Lab) Destroy(ctx context.Context) error {
+	util.Infof("newtlab: destroying lab %s", l.Name)
+
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -526,6 +532,7 @@ func (l *Lab) FilterHost(host string) {
 
 // Stop stops a single node by PID.
 func (l *Lab) Stop(ctx context.Context, nodeName string) error {
+	util.WithDevice(nodeName).Infof("newtlab: stopping node")
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -546,6 +553,7 @@ func (l *Lab) Stop(ctx context.Context, nodeName string) error {
 
 // Start restarts a stopped node.
 func (l *Lab) Start(ctx context.Context, nodeName string) error {
+	util.WithDevice(nodeName).Infof("newtlab: starting node")
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
@@ -594,6 +602,7 @@ func (l *Lab) Start(ctx context.Context, nodeName string) error {
 // Provision runs newtron provisioning for all (or specified) devices.
 // The context is threaded into exec.CommandContext for cancellation.
 func (l *Lab) Provision(ctx context.Context, parallel int) error {
+	util.Infof("newtlab: provisioning lab %s (parallel=%d)", l.Name, parallel)
 	state, err := LoadState(l.Name)
 	if err != nil {
 		return err
