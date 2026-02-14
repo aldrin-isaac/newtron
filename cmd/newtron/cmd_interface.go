@@ -74,15 +74,9 @@ var interfaceListCmd = &cobra.Command{
 				ipAddr = strings.Join(addrs, ",")
 			}
 
-			vrf := intf.VRF()
-			if vrf == "" {
-				vrf = "-"
-			}
+			vrf := dash(intf.VRF())
 
-			svc := intf.ServiceName()
-			if svc == "" {
-				svc = "-"
-			}
+			svc := dash(intf.ServiceName())
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				name,

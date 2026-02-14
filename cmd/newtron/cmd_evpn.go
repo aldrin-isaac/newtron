@@ -248,10 +248,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 			if len(ipvpn.ExportRT) > 0 {
 				exportRT = strings.Join(ipvpn.ExportRT, ",")
 			}
-			desc := ipvpn.Description
-			if desc == "" {
-				desc = "-"
-			}
+			desc := dash(ipvpn.Description)
 			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n",
 				name, ipvpn.L3VNI, importRT, exportRT, desc)
 		}
@@ -444,10 +441,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 			if macvpn.ARPSuppression {
 				arpSuppress = "yes"
 			}
-			desc := macvpn.Description
-			if desc == "" {
-				desc = "-"
-			}
+			desc := dash(macvpn.Description)
 			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
 				name, macvpn.L2VNI, arpSuppress, desc)
 		}

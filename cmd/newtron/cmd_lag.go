@@ -217,10 +217,7 @@ Examples:
 				oper = "-"
 			}
 
-			mtu := "-"
-			if s.MTU > 0 {
-				mtu = fmt.Sprintf("%d", s.MTU)
-			}
+			mtu := dashInt(s.MTU)
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d/%d\t%s\n",
 				s.Name,

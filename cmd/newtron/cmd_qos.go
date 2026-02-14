@@ -106,10 +106,7 @@ var qosShowCmd = &cobra.Command{
 		fmt.Fprintln(w, "  -----\t----\t----\t------\t---\t----")
 
 		for i, q := range policy.Queues {
-			weight := "-"
-			if q.Weight > 0 {
-				weight = fmt.Sprintf("%d", q.Weight)
-			}
+			weight := dashInt(q.Weight)
 			ecn := "-"
 			if q.ECN {
 				ecn = "yes"
@@ -122,10 +119,7 @@ var qosShowCmd = &cobra.Command{
 				}
 				dscp = strings.Join(parts, ",")
 			}
-			name := q.Name
-			if name == "" {
-				name = "-"
-			}
+			name := dash(q.Name)
 			fmt.Fprintf(w, "  %d\t%s\t%s\t%s\t%s\t%s\n", i, name, q.Type, weight, ecn, dscp)
 		}
 		w.Flush()

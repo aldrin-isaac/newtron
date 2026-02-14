@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -380,6 +381,17 @@ func defaultStr(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// dash returns s if non-empty, otherwise "-".
+func dash(s string) string { return defaultStr(s, "-") }
+
+// dashInt formats v as a decimal string if > 0, otherwise "-".
+func dashInt(v int) string {
+	if v <= 0 {
+		return "-"
+	}
+	return strconv.Itoa(v)
 }
 
 // formatOperStatus colorizes operational status values.

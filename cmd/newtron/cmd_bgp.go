@@ -140,10 +140,7 @@ Examples:
 				}
 				adminStatus = formatAdminStatus(adminStatus)
 
-				description := neighbor.Name
-				if description == "" {
-					description = "-"
-				}
+				description := dash(neighbor.Name)
 
 				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
 					addr, neighborType, neighbor.ASN, localAddr, description, adminStatus)
@@ -179,10 +176,7 @@ Examples:
 						state = red(state)
 					}
 
-					uptime := neighbor.Uptime
-					if uptime == "" {
-						uptime = "-"
-					}
+					uptime := dash(neighbor.Uptime)
 
 					fmt.Fprintf(w, "  %s\t%d\t%s\t%d\t%d\t%s\n",
 						neighbor.Address,

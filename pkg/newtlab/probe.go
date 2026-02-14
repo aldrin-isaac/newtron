@@ -9,6 +9,19 @@ import (
 	"strings"
 )
 
+// Port allocation scheme:
+//
+//   LinkPortBase (default 20000):
+//     Link A/Z ports:    LinkPortBase + i*2, LinkPortBase + i*2 + 1
+//     Bridge stats:      LinkPortBase - 1, LinkPortBase - 2, ... (one per worker host)
+//   ConsolePortBase (default 30000):
+//     Serial console:    ConsolePortBase + nodeIndex
+//   SSHPortBase (default 40000):
+//     SSH forwarding:    SSHPortBase + nodeIndex
+//
+// Ranges are non-overlapping: links grow upward from 20000, bridge stats
+// grow downward from 19999, consoles start at 30000, SSH starts at 40000.
+
 // PortAllocation describes a single TCP port allocation in the lab.
 type PortAllocation struct {
 	Host    string // host name ("" = local)

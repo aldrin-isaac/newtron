@@ -65,15 +65,9 @@ var vlanListCmd = &cobra.Command{
 				continue
 			}
 
-			vni := "-"
-			if vlan.L2VNI() > 0 {
-				vni = fmt.Sprintf("%d", vlan.L2VNI())
-			}
+			vni := dashInt(vlan.L2VNI())
 
-			svi := "-"
-			if vlan.SVIStatus != "" {
-				svi = vlan.SVIStatus
-			}
+			svi := dash(vlan.SVIStatus)
 
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
 				vlan.ID,
@@ -220,22 +214,13 @@ Examples:
 		fmt.Fprintln(w, "-------\t----\t-----\t---\t-------\t-------")
 
 		for _, s := range statuses {
-			vni := "-"
-			if s.L2VNI > 0 {
-				vni = fmt.Sprintf("%d", s.L2VNI)
-			}
+			vni := dashInt(s.L2VNI)
 			svi := "-"
 			if s.SVI != "" {
 				svi = green(s.SVI)
 			}
-			name := s.Name
-			if name == "" {
-				name = "-"
-			}
-			macvpn := s.MACVPN
-			if macvpn == "" {
-				macvpn = "-"
-			}
+			name := dash(s.Name)
+			macvpn := dash(s.MACVPN)
 			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d\t%s\n", s.ID, name, vni, svi, s.Members, macvpn)
 		}
 		w.Flush()

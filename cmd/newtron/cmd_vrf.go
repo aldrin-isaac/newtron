@@ -75,10 +75,7 @@ var vrfListCmd = &cobra.Command{
 				continue
 			}
 
-			l3vni := "-"
-			if vrf.L3VNI > 0 {
-				l3vni = fmt.Sprintf("%d", vrf.L3VNI)
-			}
+			l3vni := dashInt(vrf.L3VNI)
 
 			intfs := "-"
 			if len(vrf.Interfaces) > 0 {
@@ -147,10 +144,7 @@ var vrfShowCmd = &cobra.Command{
 					// Extract neighbor IP from key "Vrf_CUST1|10.1.1.2"
 					parts := strings.SplitN(key, "|", 2)
 					neighborIP := parts[1]
-					desc := neighbor.Name
-					if desc == "" {
-						desc = "-"
-					}
+					desc := dash(neighbor.Name)
 					fmt.Printf("  %s  AS %s  %s\n", neighborIP, neighbor.ASN, desc)
 				}
 			}
@@ -226,10 +220,7 @@ var vrfStatusCmd = &cobra.Command{
 		fmt.Fprintln(w, "---\t-----\t----------\t-----\t------")
 
 		for _, s := range statuses {
-			l3vni := "-"
-			if s.L3VNI > 0 {
-				l3vni = fmt.Sprintf("%d", s.L3VNI)
-			}
+			l3vni := dashInt(s.L3VNI)
 
 			intfCount := fmt.Sprintf("%d", s.Interfaces)
 
@@ -237,10 +228,7 @@ var vrfStatusCmd = &cobra.Command{
 			if s.State != "" {
 				state = formatOperStatus(s.State)
 			}
-			routeCount := "-"
-			if s.RouteCount > 0 {
-				routeCount = fmt.Sprintf("%d", s.RouteCount)
-			}
+			routeCount := dashInt(s.RouteCount)
 
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 				s.Name, l3vni, intfCount, state, routeCount)
