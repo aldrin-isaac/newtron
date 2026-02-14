@@ -170,15 +170,14 @@ func (d *Device) Connect(ctx context.Context) error {
 		// State DB connection failure is non-fatal - log warning and continue
 		util.WithDevice(d.Name).Warnf("Failed to connect to state_db: %v", err)
 	} else {
-		// Load state_db
 		d.StateDB, err = d.stateClient.GetAll()
 		if err != nil {
 			util.WithDevice(d.Name).Warnf("Failed to load state_db: %v", err)
-		} else {
-			// Populate device state from state_db + config_db
-			PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
 		}
 	}
+
+	// Populate device state from state_db + config_db (works with nil StateDB)
+	PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
 
 	// Connect APP_DB (DB 0) for route verification — non-fatal
 	d.applClient = NewAppDBClient(addr)
@@ -364,11 +363,11 @@ func (d *Device) Reload(ctx context.Context) error {
 		d.StateDB, err = d.stateClient.GetAll()
 		if err != nil {
 			util.WithDevice(d.Name).Warnf("Failed to reload state_db: %v", err)
-		} else {
-			// Re-populate device state
-			PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
 		}
 	}
+
+	// Re-populate device state (works with nil StateDB)
+	PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
 
 	return nil
 }
@@ -543,30 +542,6 @@ const (
 // StateClient returns the underlying StateDB client for direct access
 func (d *Device) StateClient() *StateDBClient {
 	return d.stateClient
-}
-
-// RefreshState reloads only the state_db (not config_db)
-func (d *Device) RefreshState(ctx context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if !d.connected {
-		return util.ErrNotConnected
-	}
-
-	if d.stateClient == nil {
-		return fmt.Errorf("state_db client not connected")
-	}
-
-	var err error
-	d.StateDB, err = d.stateClient.GetAll()
-	if err != nil {
-		return fmt.Errorf("refreshing state_db: %w", err)
-	}
-
-	// Re-populate device state
-	PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
-	return nil
 }
 
 // GetInterfaceOperState returns the operational state of an interface.

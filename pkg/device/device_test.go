@@ -380,6 +380,192 @@ func TestInterfaceSummary_Structure(t *testing.T) {
 	}
 }
 
+func TestPopulateDeviceState_NilStateDB(t *testing.T) {
+	configDB := newEmptyConfigDB()
+	configDB.Port["Ethernet0"] = PortEntry{AdminStatus: "up", Speed: "100000", MTU: "9100"}
+	configDB.Port["Ethernet4"] = PortEntry{AdminStatus: "down", Speed: "25000"}
+	configDB.Interface["Ethernet0"] = InterfaceEntry{VRFName: "Vrf_CUST1"}
+	configDB.Interface["Ethernet0|10.1.1.1/30"] = InterfaceEntry{VRFName: "Vrf_CUST1"}
+	configDB.PortChannel["PortChannel100"] = PortChannelEntry{AdminStatus: "up"}
+	configDB.PortChannelMember["PortChannel100|Ethernet4"] = map[string]string{}
+	configDB.VLAN["Vlan100"] = VLANEntry{VLANID: "100", AdminStatus: "up"}
+	configDB.VLANMember["Vlan100|Ethernet0"] = VLANMemberEntry{TaggingMode: "tagged"}
+	configDB.VXLANTunnelMap["vtep1|map_100"] = VXLANMapEntry{VLAN: "Vlan100", VNI: "10100"}
+	configDB.VLANInterface["Vlan100"] = map[string]string{"vrf_name": "Vrf_CUST1"}
+	configDB.VRF["Vrf_CUST1"] = VRFEntry{VNI: "10001"}
+	configDB.NewtronServiceBinding["Ethernet0"] = ServiceBindingEntry{ServiceName: "svc1"}
+	configDB.ACLTable["ACL1"] = ACLTableEntry{Stage: "ingress", Ports: "Ethernet0"}
+	configDB.BGPGlobals["default"] = BGPGlobalsEntry{LocalASN: "65000", RouterID: "10.0.0.1"}
+
+	state := &DeviceState{
+		Interfaces:   make(map[string]*InterfaceState),
+		PortChannels: make(map[string]*PortChannelState),
+		VLANs:        make(map[int]*VLANState),
+		VRFs:         make(map[string]*VRFState),
+	}
+
+	PopulateDeviceState(state, nil, configDB)
+
+	// Interfaces
+	if len(state.Interfaces) != 2 {
+		t.Fatalf("Interfaces count = %d, want 2", len(state.Interfaces))
+	}
+	eth0 := state.Interfaces["Ethernet0"]
+	if eth0 == nil {
+		t.Fatal("Ethernet0 not in state")
+	}
+	if eth0.AdminStatus != "up" {
+		t.Errorf("Ethernet0 AdminStatus = %q", eth0.AdminStatus)
+	}
+	if eth0.MTU != 9100 {
+		t.Errorf("Ethernet0 MTU = %d", eth0.MTU)
+	}
+	if eth0.VRF != "Vrf_CUST1" {
+		t.Errorf("Ethernet0 VRF = %q", eth0.VRF)
+	}
+	if len(eth0.IPAddresses) != 1 || eth0.IPAddresses[0] != "10.1.1.1/30" {
+		t.Errorf("Ethernet0 IPs = %v", eth0.IPAddresses)
+	}
+	if eth0.Service != "svc1" {
+		t.Errorf("Ethernet0 Service = %q", eth0.Service)
+	}
+	if eth0.IngressACL != "ACL1" {
+		t.Errorf("Ethernet0 IngressACL = %q", eth0.IngressACL)
+	}
+	eth4 := state.Interfaces["Ethernet4"]
+	if eth4.LAGMember != "PortChannel100" {
+		t.Errorf("Ethernet4 LAGMember = %q", eth4.LAGMember)
+	}
+
+	// PortChannels
+	pc := state.PortChannels["PortChannel100"]
+	if pc == nil {
+		t.Fatal("PortChannel100 not in state")
+	}
+	if pc.AdminStatus != "up" {
+		t.Errorf("PortChannel100 AdminStatus = %q", pc.AdminStatus)
+	}
+	if len(pc.Members) != 1 || pc.Members[0] != "Ethernet4" {
+		t.Errorf("PortChannel100 Members = %v", pc.Members)
+	}
+
+	// VLANs
+	vlan := state.VLANs[100]
+	if vlan == nil {
+		t.Fatal("Vlan100 not in state")
+	}
+	if vlan.L2VNI != 10100 {
+		t.Errorf("Vlan100 L2VNI = %d", vlan.L2VNI)
+	}
+	if vlan.SVIStatus != "configured" {
+		t.Errorf("Vlan100 SVIStatus = %q", vlan.SVIStatus)
+	}
+	if len(vlan.Members) != 1 {
+		t.Errorf("Vlan100 Members = %v", vlan.Members)
+	}
+
+	// VRFs
+	vrf := state.VRFs["Vrf_CUST1"]
+	if vrf == nil {
+		t.Fatal("Vrf_CUST1 not in state")
+	}
+	if vrf.L3VNI != 10001 {
+		t.Errorf("Vrf_CUST1 L3VNI = %d", vrf.L3VNI)
+	}
+	if len(vrf.Interfaces) == 0 {
+		t.Error("Vrf_CUST1 has no interfaces")
+	}
+
+	// BGP
+	if state.BGP == nil {
+		t.Fatal("BGP state is nil")
+	}
+	if state.BGP.LocalAS != 65000 {
+		t.Errorf("BGP LocalAS = %d", state.BGP.LocalAS)
+	}
+	if state.BGP.RouterID != "10.0.0.1" {
+		t.Errorf("BGP RouterID = %q", state.BGP.RouterID)
+	}
+
+	// EVPN
+	if state.EVPN == nil {
+		t.Fatal("EVPN state is nil")
+	}
+}
+
+func TestPopulateDeviceState_WithStateDB(t *testing.T) {
+	configDB := newEmptyConfigDB()
+	configDB.PortChannel["PortChannel100"] = PortChannelEntry{AdminStatus: "up"}
+	configDB.VRF["Vrf_CUST1"] = VRFEntry{VNI: "10001"}
+	configDB.BGPGlobals["default"] = BGPGlobalsEntry{LocalASN: "65000"}
+
+	stateDB := &StateDB{
+		PortTable: map[string]PortStateEntry{
+			"Ethernet0": {AdminStatus: "up", OperStatus: "up", Speed: "100G", MTU: "9100"},
+		},
+		LAGTable:          map[string]LAGStateEntry{"PortChannel100": {OperStatus: "up"}},
+		LAGMemberTable:    map[string]LAGMemberStateEntry{},
+		VLANTable:         map[string]VLANStateEntry{"Vlan200": {OperStatus: "up"}},
+		VRFTable:          map[string]VRFStateEntry{"Vrf_CUST1": {State: "active"}},
+		VXLANTunnelTable:  map[string]VXLANTunnelStateEntry{},
+		BGPNeighborTable:  map[string]BGPNeighborStateEntry{"default|10.0.0.2": {State: "Established", RemoteAS: "65001"}},
+		InterfaceTable:    map[string]InterfaceStateEntry{},
+		NeighTable:        map[string]NeighStateEntry{},
+		FDBTable:          map[string]FDBStateEntry{},
+		RouteTable:        map[string]RouteStateEntry{},
+		TransceiverInfo:   map[string]TransceiverInfoEntry{},
+		TransceiverStatus: map[string]TransceiverStatusEntry{},
+	}
+
+	state := &DeviceState{
+		Interfaces:   make(map[string]*InterfaceState),
+		PortChannels: make(map[string]*PortChannelState),
+		VLANs:        make(map[int]*VLANState),
+		VRFs:         make(map[string]*VRFState),
+	}
+
+	PopulateDeviceState(state, stateDB, configDB)
+
+	// Interfaces from StateDB
+	eth0 := state.Interfaces["Ethernet0"]
+	if eth0 == nil {
+		t.Fatal("Ethernet0 not populated from StateDB")
+	}
+	if eth0.OperStatus != "up" {
+		t.Errorf("Ethernet0 OperStatus = %q", eth0.OperStatus)
+	}
+
+	// PortChannels from StateDB
+	if state.PortChannels["PortChannel100"] == nil {
+		t.Fatal("PortChannel100 not populated from StateDB")
+	}
+
+	// VLANs from StateDB
+	if state.VLANs[200] == nil {
+		t.Fatal("Vlan200 not populated from StateDB")
+	}
+
+	// VRFs from StateDB with ConfigDB enrichment
+	vrf := state.VRFs["Vrf_CUST1"]
+	if vrf == nil {
+		t.Fatal("Vrf_CUST1 not populated")
+	}
+	if vrf.State != "active" {
+		t.Errorf("Vrf_CUST1 State = %q", vrf.State)
+	}
+	if vrf.L3VNI != 10001 {
+		t.Errorf("Vrf_CUST1 L3VNI = %d", vrf.L3VNI)
+	}
+
+	// BGP neighbors from StateDB
+	if state.BGP.Neighbors["10.0.0.2"] == nil {
+		t.Fatal("BGP neighbor 10.0.0.2 not populated")
+	}
+	if state.BGP.Neighbors["10.0.0.2"].State != "Established" {
+		t.Errorf("BGP neighbor state = %q", state.BGP.Neighbors["10.0.0.2"].State)
+	}
+}
+
 func TestConfigDB_EmptyInit(t *testing.T) {
 	// Test that empty ConfigDB can be created and used
 	cfg := &ConfigDB{}

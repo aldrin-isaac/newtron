@@ -599,94 +599,295 @@ func (c *StateDBClient) GetLockHolder(device string) (string, time.Time, error) 
 	return holder, acquired, nil
 }
 
-// PopulateDeviceState fills DeviceState from StateDB data
+// parseVLANIDFromName extracts the numeric VLAN ID from a SONiC VLAN name
+// like "Vlan100". Returns 0 if the name is not a valid VLAN name.
+func parseVLANIDFromName(name string) int {
+	if strings.HasPrefix(name, "Vlan") {
+		id, _ := strconv.Atoi(name[4:])
+		return id
+	}
+	return 0
+}
+
+// PopulateDeviceState fills DeviceState from StateDB and/or ConfigDB data.
+// When stateDB is non-nil, operational state (oper_status, speed, etc.) comes
+// from StateDB with config enrichment from ConfigDB. When stateDB is nil,
+// state is built from ConfigDB alone (config-only fallback).
 func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
-	// Populate interface state
-	for name, portState := range stateDB.PortTable {
-		intfState := &InterfaceState{
-			Name:        name,
-			AdminStatus: portState.AdminStatus,
-			OperStatus:  portState.OperStatus,
-			Speed:       portState.Speed,
-		}
+	// Reset state maps
+	state.Interfaces = make(map[string]*InterfaceState)
+	state.PortChannels = make(map[string]*PortChannelState)
+	state.VLANs = make(map[int]*VLANState)
+	state.VRFs = make(map[string]*VRFState)
 
-		// Parse MTU
-		if portState.MTU != "" {
-			intfState.MTU, _ = strconv.Atoi(portState.MTU)
-		}
+	populateInterfaces(state, stateDB, configDB)
+	populatePortChannels(state, stateDB, configDB)
+	populateVLANs(state, stateDB, configDB)
+	populateVRFs(state, stateDB, configDB)
+	populateBGP(state, stateDB, configDB)
+	populateEVPN(state, stateDB, configDB)
+}
 
-		// Get VRF binding from config_db
-		if configDB != nil {
-			if intfEntry, ok := configDB.Interface[name]; ok {
-				intfState.VRF = intfEntry.VRFName
+func populateInterfaces(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	if stateDB != nil {
+		for name, portState := range stateDB.PortTable {
+			intfState := &InterfaceState{
+				Name:        name,
+				AdminStatus: portState.AdminStatus,
+				OperStatus:  portState.OperStatus,
+				Speed:       portState.Speed,
 			}
+			if portState.MTU != "" {
+				intfState.MTU, _ = strconv.Atoi(portState.MTU)
+			}
+			state.Interfaces[name] = intfState
 		}
-
-		state.Interfaces[name] = intfState
+	} else if configDB != nil {
+		for name, port := range configDB.Port {
+			intfState := &InterfaceState{
+				Name:        name,
+				AdminStatus: port.AdminStatus,
+				Speed:       port.Speed,
+			}
+			if mtu, err := strconv.Atoi(port.MTU); err == nil {
+				intfState.MTU = mtu
+			}
+			state.Interfaces[name] = intfState
+		}
 	}
 
-	// Populate PortChannel state
-	for name, lagState := range stateDB.LAGTable {
-		pcState := &PortChannelState{
-			Name:       name,
-			OperStatus: lagState.OperStatus,
-		}
-
-		// Get members from LAG_MEMBER_TABLE
-		for key, memberState := range stateDB.LAGMemberTable {
+	// Enrich with ConfigDB: VRF bindings, IP addresses
+	if configDB != nil {
+		for key, entry := range configDB.Interface {
 			parts := strings.SplitN(key, "|", 2)
-			if len(parts) == 2 && parts[0] == name {
-				memberName := parts[1]
-				pcState.Members = append(pcState.Members, memberName)
-				if memberState.OperStatus == "up" && memberState.Selected == "true" {
-					pcState.ActiveMembers = append(pcState.ActiveMembers, memberName)
+			name := parts[0]
+			if intf, ok := state.Interfaces[name]; ok {
+				intf.VRF = entry.VRFName
+				if len(parts) == 2 {
+					intf.IPAddresses = append(intf.IPAddresses, parts[1])
 				}
 			}
 		}
 
-		// Get admin status from config_db
-		if configDB != nil {
-			if pcEntry, ok := configDB.PortChannel[name]; ok {
-				pcState.AdminStatus = pcEntry.AdminStatus
+		// Mark LAG members
+		for key := range configDB.PortChannelMember {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) == 2 {
+				if intf, ok := state.Interfaces[parts[1]]; ok {
+					intf.LAGMember = parts[0]
+				}
 			}
 		}
 
-		state.PortChannels[name] = pcState
-	}
+		// Add service bindings
+		for intfName, binding := range configDB.NewtronServiceBinding {
+			if intf, ok := state.Interfaces[intfName]; ok {
+				intf.Service = binding.ServiceName
+			}
+		}
 
-	// Populate VLAN state
-	for name, vlanState := range stateDB.VLANTable {
-		var id int
-		fmt.Sscanf(name, "Vlan%d", &id)
-		if id > 0 {
-			state.VLANs[id] = &VLANState{
-				ID:         id,
-				OperStatus: vlanState.OperStatus,
+		// Add ACL bindings
+		for name, acl := range configDB.ACLTable {
+			for _, port := range strings.Split(acl.Ports, ",") {
+				port = strings.TrimSpace(port)
+				if intf, ok := state.Interfaces[port]; ok {
+					if acl.Stage == "ingress" {
+						intf.IngressACL = name
+					} else if acl.Stage == "egress" {
+						intf.EgressACL = name
+					}
+				}
+			}
+		}
+	}
+}
+
+func populatePortChannels(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	if stateDB != nil {
+		for name, lagState := range stateDB.LAGTable {
+			pcState := &PortChannelState{
+				Name:       name,
+				OperStatus: lagState.OperStatus,
+			}
+
+			// Get members from LAG_MEMBER_TABLE
+			for key, memberState := range stateDB.LAGMemberTable {
+				parts := strings.SplitN(key, "|", 2)
+				if len(parts) == 2 && parts[0] == name {
+					pcState.Members = append(pcState.Members, parts[1])
+					if memberState.OperStatus == "up" && memberState.Selected == "true" {
+						pcState.ActiveMembers = append(pcState.ActiveMembers, parts[1])
+					}
+				}
+			}
+
+			// Get admin status from config_db
+			if configDB != nil {
+				if pcEntry, ok := configDB.PortChannel[name]; ok {
+					pcState.AdminStatus = pcEntry.AdminStatus
+				}
+			}
+
+			state.PortChannels[name] = pcState
+		}
+	} else if configDB != nil {
+		for name, pc := range configDB.PortChannel {
+			pcState := &PortChannelState{
+				Name:        name,
+				AdminStatus: pc.AdminStatus,
+				Members:     []string{},
+			}
+			state.PortChannels[name] = pcState
+		}
+
+		// Find members from PORTCHANNEL_MEMBER
+		for key := range configDB.PortChannelMember {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) == 2 {
+				if pc, ok := state.PortChannels[parts[0]]; ok {
+					pc.Members = append(pc.Members, parts[1])
+				}
+			}
+		}
+	}
+}
+
+func populateVLANs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	if stateDB != nil {
+		for name, vlanState := range stateDB.VLANTable {
+			id := parseVLANIDFromName(name)
+			if id > 0 {
+				state.VLANs[id] = &VLANState{
+					ID:         id,
+					Name:       name,
+					OperStatus: vlanState.OperStatus,
+				}
+			}
+		}
+	} else if configDB != nil {
+		for name, vlan := range configDB.VLAN {
+			vlanID, err := strconv.Atoi(vlan.VLANID)
+			if err != nil {
+				vlanID = parseVLANIDFromName(name)
+			}
+			if vlanID == 0 {
+				continue
+			}
+			state.VLANs[vlanID] = &VLANState{
+				ID:         vlanID,
+				Name:       name,
+				OperStatus: vlan.AdminStatus,
+				Members:    []string{},
 			}
 		}
 	}
 
-	// Populate VRF state
-	for name, vrfState := range stateDB.VRFTable {
-		state.VRFs[name] = &VRFState{
-			Name:  name,
-			State: vrfState.State,
+	// Enrich VLANs from ConfigDB: members, VNI mappings, SVI status
+	if configDB != nil {
+		for key, member := range configDB.VLANMember {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) == 2 {
+				vlanID := parseVLANIDFromName(parts[0])
+				if vlan, ok := state.VLANs[vlanID]; ok {
+					memberName := parts[1]
+					if member.TaggingMode == "tagged" {
+						vlan.Members = append(vlan.Members, memberName+"(t)")
+					} else {
+						vlan.Members = append(vlan.Members, memberName)
+					}
+				}
+			}
 		}
 
-		// Get L3VNI from config_db
-		if configDB != nil {
-			if vrfEntry, ok := configDB.VRF[name]; ok && vrfEntry.VNI != "" {
-				state.VRFs[name].L3VNI, _ = strconv.Atoi(vrfEntry.VNI)
+		for _, mapping := range configDB.VXLANTunnelMap {
+			if vlanID := parseVLANIDFromName(mapping.VLAN); vlanID > 0 {
+				if vlan, ok := state.VLANs[vlanID]; ok {
+					vni, _ := strconv.Atoi(mapping.VNI)
+					vlan.L2VNI = vni
+				}
+			}
+		}
+
+		for key := range configDB.VLANInterface {
+			parts := strings.SplitN(key, "|", 2)
+			if vlanID := parseVLANIDFromName(parts[0]); vlanID > 0 {
+				if vlan, ok := state.VLANs[vlanID]; ok {
+					vlan.SVIStatus = "configured"
+				}
+			}
+		}
+	}
+}
+
+func populateVRFs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	if stateDB != nil {
+		for name, vrfState := range stateDB.VRFTable {
+			state.VRFs[name] = &VRFState{
+				Name:  name,
+				State: vrfState.State,
+			}
+		}
+	} else if configDB != nil {
+		for name := range configDB.VRF {
+			state.VRFs[name] = &VRFState{
+				Name:       name,
+				State:      "up",
+				Interfaces: []string{},
 			}
 		}
 	}
 
-	// Populate BGP state
+	// Enrich from ConfigDB: L3VNI, interface memberships
+	if configDB != nil {
+		for name, vrfEntry := range configDB.VRF {
+			if vrf, ok := state.VRFs[name]; ok {
+				if vrfEntry.VNI != "" {
+					vrf.L3VNI, _ = strconv.Atoi(vrfEntry.VNI)
+				}
+			}
+		}
+
+		// Collect VRF interface memberships using a set to avoid duplicates
+		vrfInterfaces := make(map[string]map[string]bool)
+		for vrfName := range state.VRFs {
+			vrfInterfaces[vrfName] = make(map[string]bool)
+		}
+
+		for key, intf := range configDB.Interface {
+			if intf.VRFName != "" {
+				parts := strings.SplitN(key, "|", 2)
+				intfName := parts[0]
+				if members, ok := vrfInterfaces[intf.VRFName]; ok {
+					members[intfName] = true
+				}
+			}
+		}
+
+		for key := range configDB.VLANInterface {
+			parts := strings.SplitN(key, "|", 2)
+			vlanName := parts[0]
+			if vlanIntf, ok := configDB.VLANInterface[vlanName]; ok {
+				if vrfName, exists := vlanIntf["vrf_name"]; exists && vrfName != "" {
+					if members, ok := vrfInterfaces[vrfName]; ok {
+						members[vlanName] = true
+					}
+				}
+			}
+		}
+
+		for vrfName, members := range vrfInterfaces {
+			for intfName := range members {
+				state.VRFs[vrfName].Interfaces = append(state.VRFs[vrfName].Interfaces, intfName)
+			}
+		}
+	}
+}
+
+func populateBGP(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	state.BGP = &BGPState{
 		Neighbors: make(map[string]*BGPNeighborState),
 	}
 
-	// Get local AS and router ID from config_db
 	if configDB != nil {
 		if globals, ok := configDB.BGPGlobals["default"]; ok {
 			state.BGP.LocalAS, _ = strconv.Atoi(globals.LocalASN)
@@ -694,49 +895,47 @@ func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigD
 		}
 	}
 
-	// Populate BGP neighbor states
-	for key, neighborState := range stateDB.BGPNeighborTable {
-		// Key format could be "vrf|ip" or just "ip"
-		parts := strings.SplitN(key, "|", 2)
-		var neighborIP string
-		if len(parts) == 2 {
-			neighborIP = parts[1]
-		} else {
-			neighborIP = parts[0]
-		}
+	if stateDB != nil {
+		for key, neighborState := range stateDB.BGPNeighborTable {
+			parts := strings.SplitN(key, "|", 2)
+			var neighborIP string
+			if len(parts) == 2 {
+				neighborIP = parts[1]
+			} else {
+				neighborIP = parts[0]
+			}
 
-		remoteAS, _ := strconv.Atoi(neighborState.RemoteAS)
-		pfxRcvd, _ := strconv.Atoi(neighborState.PfxRcvd)
-		pfxSent, _ := strconv.Atoi(neighborState.PfxSent)
+			remoteAS, _ := strconv.Atoi(neighborState.RemoteAS)
+			pfxRcvd, _ := strconv.Atoi(neighborState.PfxRcvd)
+			pfxSent, _ := strconv.Atoi(neighborState.PfxSent)
 
-		state.BGP.Neighbors[neighborIP] = &BGPNeighborState{
-			Address:  neighborIP,
-			RemoteAS: remoteAS,
-			State:    neighborState.State,
-			PfxRcvd:  pfxRcvd,
-			PfxSent:  pfxSent,
-			Uptime:   neighborState.Uptime,
+			state.BGP.Neighbors[neighborIP] = &BGPNeighborState{
+				Address:  neighborIP,
+				RemoteAS: remoteAS,
+				State:    neighborState.State,
+				PfxRcvd:  pfxRcvd,
+				PfxSent:  pfxSent,
+				Uptime:   neighborState.Uptime,
+			}
 		}
 	}
+}
 
-	// Populate EVPN state
+func populateEVPN(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	state.EVPN = &EVPNState{}
 
-	// Get VTEP state
-	for name, tunnelState := range stateDB.VXLANTunnelTable {
-		// Check if this is a remote VTEP (learned via EVPN) or local VTEP
-		if configDB != nil {
-			if _, ok := configDB.VXLANTunnel[name]; ok {
-				// Local VTEP
-				state.EVPN.VTEPState = tunnelState.OperStatus
-			} else {
-				// Remote VTEP
-				state.EVPN.RemoteVTEPs = append(state.EVPN.RemoteVTEPs, name)
+	if stateDB != nil {
+		for name, tunnelState := range stateDB.VXLANTunnelTable {
+			if configDB != nil {
+				if _, ok := configDB.VXLANTunnel[name]; ok {
+					state.EVPN.VTEPState = tunnelState.OperStatus
+				} else {
+					state.EVPN.RemoteVTEPs = append(state.EVPN.RemoteVTEPs, name)
+				}
 			}
 		}
 	}
 
-	// Count VNIs from config_db
 	if configDB != nil {
 		state.EVPN.VNICount = len(configDB.VXLANTunnelMap)
 	}
