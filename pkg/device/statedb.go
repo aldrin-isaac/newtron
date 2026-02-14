@@ -188,21 +188,7 @@ func (c *StateDBClient) GetAll() (*StateDB, error) {
 		return nil, err
 	}
 
-	db := &StateDB{
-		PortTable:         make(map[string]PortStateEntry),
-		LAGTable:          make(map[string]LAGStateEntry),
-		LAGMemberTable:    make(map[string]LAGMemberStateEntry),
-		VLANTable:         make(map[string]VLANStateEntry),
-		VRFTable:          make(map[string]VRFStateEntry),
-		VXLANTunnelTable:  make(map[string]VXLANTunnelStateEntry),
-		BGPNeighborTable:  make(map[string]BGPNeighborStateEntry),
-		InterfaceTable:    make(map[string]InterfaceStateEntry),
-		NeighTable:        make(map[string]NeighStateEntry),
-		FDBTable:          make(map[string]FDBStateEntry),
-		RouteTable:        make(map[string]RouteStateEntry),
-		TransceiverInfo:   make(map[string]TransceiverInfoEntry),
-		TransceiverStatus: make(map[string]TransceiverStatusEntry),
-	}
+	db := newEmptyStateDB()
 
 	for _, key := range keys {
 		parts := strings.SplitN(key, "|", 2)
@@ -218,109 +204,12 @@ func (c *StateDBClient) GetAll() (*StateDB, error) {
 			continue
 		}
 
-		c.parseEntry(db, table, entry, vals)
+		if parser, ok := stateTableParsers[table]; ok {
+			parser(db, entry, vals)
+		}
 	}
 
 	return db, nil
-}
-
-func (c *StateDBClient) parseEntry(db *StateDB, table, entry string, vals map[string]string) {
-	switch table {
-	case "PORT_TABLE":
-		db.PortTable[entry] = PortStateEntry{
-			AdminStatus:  vals["admin_status"],
-			OperStatus:   vals["oper_status"],
-			Speed:        vals["speed"],
-			MTU:          vals["mtu"],
-			LinkTraining: vals["link_training"],
-		}
-	case "LAG_TABLE":
-		db.LAGTable[entry] = LAGStateEntry{
-			OperStatus: vals["oper_status"],
-			Speed:      vals["speed"],
-			MTU:        vals["mtu"],
-		}
-	case "LAG_MEMBER_TABLE":
-		db.LAGMemberTable[entry] = LAGMemberStateEntry{
-			OperStatus:     vals["oper_status"],
-			CollectingDist: vals["collecting_distributing"],
-			Selected:       vals["selected"],
-			ActorPortNum:   vals["actor_port_num"],
-			PartnerPortNum: vals["partner_port_num"],
-		}
-	case "VLAN_TABLE":
-		db.VLANTable[entry] = VLANStateEntry{
-			OperStatus: vals["oper_status"],
-			State:      vals["state"],
-		}
-	case "VRF_TABLE":
-		db.VRFTable[entry] = VRFStateEntry{
-			State: vals["state"],
-		}
-	case "VXLAN_TUNNEL_TABLE":
-		db.VXLANTunnelTable[entry] = VXLANTunnelStateEntry{
-			SrcIP:      vals["src_ip"],
-			OperStatus: vals["operstatus"],
-		}
-	case "BGP_NEIGHBOR_TABLE", "NEIGH_STATE_TABLE":
-		// BGP neighbor state - key is VRF|neighbor_ip
-		db.BGPNeighborTable[entry] = BGPNeighborStateEntry{
-			State:           vals["state"],
-			RemoteAS:        vals["remote_asn"],
-			LocalAS:         vals["local_asn"],
-			PeerGroup:       vals["peer_group"],
-			PfxRcvd:         vals["prefixes_received"],
-			PfxSent:         vals["prefixes_sent"],
-			MsgRcvd:         vals["msg_rcvd"],
-			MsgSent:         vals["msg_sent"],
-			Uptime:          vals["uptime"],
-			HoldTime:        vals["holdtime"],
-			KeepaliveTime:   vals["keepalive"],
-			ConnectRetry:    vals["connect_retry"],
-			LastResetReason: vals["last_reset_reason"],
-		}
-	case "INTERFACE_TABLE":
-		db.InterfaceTable[entry] = InterfaceStateEntry{
-			VRF:      vals["vrf"],
-			ProxyArp: vals["proxy_arp"],
-		}
-	case "NEIGH_TABLE":
-		db.NeighTable[entry] = NeighStateEntry{
-			Family: vals["family"],
-			MAC:    vals["neigh"],
-			State:  vals["state"],
-		}
-	case "FDB_TABLE":
-		db.FDBTable[entry] = FDBStateEntry{
-			Port:       vals["port"],
-			Type:       vals["type"],
-			VNI:        vals["vni"],
-			RemoteVTEP: vals["remote_vtep"],
-		}
-	case "ROUTE_TABLE":
-		db.RouteTable[entry] = RouteStateEntry{
-			NextHop:   vals["nexthop"],
-			Interface: vals["ifname"],
-			Protocol:  vals["protocol"],
-		}
-	case "TRANSCEIVER_INFO":
-		db.TransceiverInfo[entry] = TransceiverInfoEntry{
-			Vendor:          vals["vendor_name"],
-			Model:           vals["model"],
-			SerialNum:       vals["serial_num"],
-			HardwareVersion: vals["hardware_version"],
-			Type:            vals["type"],
-			MediaInterface:  vals["media_interface"],
-		}
-	case "TRANSCEIVER_STATUS":
-		db.TransceiverStatus[entry] = TransceiverStatusEntry{
-			Present:     vals["present"],
-			Temperature: vals["temperature"],
-			Voltage:     vals["voltage"],
-			TxPower:     vals["tx_power"],
-			RxPower:     vals["rx_power"],
-		}
-	}
 }
 
 // GetPortState returns operational state for a specific interface from PORT_TABLE.

@@ -1,5 +1,7 @@
 package device
 
+import "reflect"
+
 // tableParser populates a single ConfigDB field from a Redis hash entry.
 type tableParser func(db *ConfigDB, entry string, vals map[string]string)
 
@@ -351,48 +353,17 @@ func mergeParser(getMap func(*ConfigDB) map[string]map[string]string) tableParse
 
 // newEmptyConfigDB returns a ConfigDB with all map fields initialized.
 func newEmptyConfigDB() *ConfigDB {
-	return &ConfigDB{
-		DeviceMetadata:        make(map[string]map[string]string),
-		Port:                  make(map[string]PortEntry),
-		VLAN:                  make(map[string]VLANEntry),
-		VLANMember:            make(map[string]VLANMemberEntry),
-		VLANInterface:         make(map[string]map[string]string),
-		Interface:             make(map[string]InterfaceEntry),
-		PortChannel:           make(map[string]PortChannelEntry),
-		PortChannelMember:     make(map[string]map[string]string),
-		LoopbackInterface:     make(map[string]map[string]string),
-		VRF:                   make(map[string]VRFEntry),
-		VXLANTunnel:           make(map[string]VXLANTunnelEntry),
-		VXLANTunnelMap:        make(map[string]VXLANMapEntry),
-		VXLANEVPNNVO:          make(map[string]EVPNNVOEntry),
-		SuppressVLANNeigh:     make(map[string]map[string]string),
-		SAG:                   make(map[string]map[string]string),
-		SAGGlobal:             make(map[string]map[string]string),
-		BGPNeighbor:           make(map[string]BGPNeighborEntry),
-		BGPNeighborAF:         make(map[string]BGPNeighborAFEntry),
-		BGPGlobals:            make(map[string]BGPGlobalsEntry),
-		BGPGlobalsAF:          make(map[string]BGPGlobalsAFEntry),
-		BGPEVPNVNI:            make(map[string]BGPEVPNVNIEntry),
-		RouteTable:            make(map[string]StaticRouteEntry),
-		ACLTable:              make(map[string]ACLTableEntry),
-		ACLRule:               make(map[string]ACLRuleEntry),
-		ACLTableType:          make(map[string]ACLTableTypeEntry),
-		Scheduler:             make(map[string]SchedulerEntry),
-		Queue:                 make(map[string]QueueEntry),
-		WREDProfile:           make(map[string]WREDProfileEntry),
-		PortQoSMap:            make(map[string]PortQoSMapEntry),
-		DSCPToTCMap:           make(map[string]map[string]string),
-		TCToQueueMap:          make(map[string]map[string]string),
-		Policer:               make(map[string]PolicerEntry),
-		RouteRedistribute:     make(map[string]RouteRedistributeEntry),
-		RouteMap:              make(map[string]RouteMapEntry),
-		BGPPeerGroup:          make(map[string]BGPPeerGroupEntry),
-		BGPPeerGroupAF:        make(map[string]BGPPeerGroupAFEntry),
-		BGPGlobalsAFNet:       make(map[string]BGPGlobalsAFNetEntry),
-		BGPGlobalsAFAgg:       make(map[string]BGPGlobalsAFAggEntry),
-		PrefixSet:             make(map[string]PrefixSetEntry),
-		CommunitySet:          make(map[string]CommunitySetEntry),
-		ASPathSet:             make(map[string]ASPathSetEntry),
-		NewtronServiceBinding: make(map[string]ServiceBindingEntry),
+	db := &ConfigDB{}
+	initMaps(reflect.ValueOf(db).Elem())
+	return db
+}
+
+// initMaps initializes all nil map fields on a struct using reflection.
+func initMaps(v reflect.Value) {
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		if f.Kind() == reflect.Map && f.IsNil() {
+			f.Set(reflect.MakeMap(f.Type()))
+		}
 	}
 }
