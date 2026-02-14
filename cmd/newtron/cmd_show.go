@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -34,6 +36,25 @@ Examples:
 }
 
 func showDevice(dev *network.Device) error {
+	if app.jsonOutput {
+		data := map[string]any{
+			"name":            dev.Name(),
+			"mgmt_ip":         dev.Profile().MgmtIP,
+			"loopback_ip":     dev.Profile().LoopbackIP,
+			"platform":        dev.Profile().Platform,
+			"site":            dev.Profile().Site,
+			"bgp_as":          dev.ASNumber(),
+			"router_id":       dev.RouterID(),
+			"vtep_source_ip":  dev.VTEPSourceIP(),
+			"bgp_neighbors":   dev.BGPNeighbors(),
+			"interfaces":      len(dev.ListInterfaces()),
+			"port_channels":   len(dev.ListPortChannels()),
+			"vlans":           len(dev.ListVLANs()),
+			"vrfs":            len(dev.ListVRFs()),
+		}
+		return json.NewEncoder(os.Stdout).Encode(data)
+	}
+
 	fmt.Printf("Device: %s\n", bold(dev.Name()))
 	fmt.Printf("Management IP: %s\n", dev.Profile().MgmtIP)
 	fmt.Printf("Loopback IP: %s\n", dev.Profile().LoopbackIP)

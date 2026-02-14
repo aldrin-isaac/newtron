@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -47,6 +48,33 @@ var aclListCmd = &cobra.Command{
 		if configDB == nil {
 			fmt.Println("Not connected to device config_db")
 			return nil
+		}
+
+		if app.jsonOutput {
+			type aclSummary struct {
+				Name       string `json:"name"`
+				Type       string `json:"type"`
+				Stage      string `json:"stage"`
+				Interfaces string `json:"interfaces"`
+				RuleCount  int    `json:"rule_count"`
+			}
+			var acls []aclSummary
+			for name, table := range configDB.ACLTable {
+				ruleCount := 0
+				for ruleKey := range configDB.ACLRule {
+					if strings.HasPrefix(ruleKey, name+"|") {
+						ruleCount++
+					}
+				}
+				acls = append(acls, aclSummary{
+					Name:       name,
+					Type:       table.Type,
+					Stage:      table.Stage,
+					Interfaces: table.Ports,
+					RuleCount:  ruleCount,
+				})
+			}
+			return json.NewEncoder(os.Stdout).Encode(acls)
 		}
 
 		if len(configDB.ACLTable) == 0 {
@@ -97,6 +125,44 @@ var aclShowCmd = &cobra.Command{
 		table, ok := configDB.ACLTable[aclName]
 		if !ok {
 			return fmt.Errorf("ACL table '%s' not found", aclName)
+		}
+
+		if app.jsonOutput {
+			type ruleDetail struct {
+				Name       string `json:"name"`
+				Priority   string `json:"priority"`
+				Action     string `json:"action"`
+				SrcIP      string `json:"src_ip,omitempty"`
+				DstIP      string `json:"dst_ip,omitempty"`
+				Protocol   string `json:"protocol,omitempty"`
+				SrcPort    string `json:"src_port,omitempty"`
+				DstPort    string `json:"dst_port,omitempty"`
+			}
+			var rules []ruleDetail
+			for ruleKey, rule := range configDB.ACLRule {
+				if !strings.HasPrefix(ruleKey, aclName+"|") {
+					continue
+				}
+				rules = append(rules, ruleDetail{
+					Name:     strings.TrimPrefix(ruleKey, aclName+"|"),
+					Priority: rule.Priority,
+					Action:   rule.PacketAction,
+					SrcIP:    rule.SrcIP,
+					DstIP:    rule.DstIP,
+					Protocol: rule.IPProtocol,
+					SrcPort:  rule.L4SrcPort,
+					DstPort:  rule.L4DstPort,
+				})
+			}
+			data := map[string]any{
+				"name":        aclName,
+				"type":        table.Type,
+				"stage":       table.Stage,
+				"interfaces":  table.Ports,
+				"description": table.PolicyDesc,
+				"rules":       rules,
+			}
+			return json.NewEncoder(os.Stdout).Encode(data)
 		}
 
 		fmt.Printf("ACL Table: %s\n", aclName)
