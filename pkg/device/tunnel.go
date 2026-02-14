@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // SSHTunnel forwards a local TCP port to a remote address through an SSH connection.
@@ -33,12 +35,13 @@ func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
 		Auth: []ssh.AuthMethod{
 			ssh.Password(pass),
 		},
-		// Lab/test environment — production would verify host keys.
+		// Lab/test environment — production would need known_hosts verification.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         30 * time.Second,
 	}
 
 	addr := fmt.Sprintf("%s:%d", host, port)
+	util.Warnf("SSH tunnel to %s: host key verification disabled (InsecureIgnoreHostKey)", addr)
 	sshClient, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
 		return nil, fmt.Errorf("SSH dial %s@%s: %w", user, addr, err)
