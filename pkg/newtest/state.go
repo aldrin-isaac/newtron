@@ -45,9 +45,12 @@ type ScenarioState struct {
 }
 
 // StateDir returns the state directory path for a suite name.
-func StateDir(suite string) string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".newtron", "newtest", suite)
+func StateDir(suite string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("newtest: user home dir: %w", err)
+	}
+	return filepath.Join(home, ".newtron", "newtest", suite), nil
 }
 
 // SuiteName extracts the suite name from a directory path.
@@ -58,7 +61,10 @@ func SuiteName(dir string) string {
 // SaveRunState writes run state to state.json in the suite state directory.
 func SaveRunState(state *RunState) error {
 	state.Updated = time.Now()
-	dir := StateDir(state.Suite)
+	dir, err := StateDir(state.Suite)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("newtest: create state dir: %w", err)
 	}
@@ -77,7 +83,11 @@ func SaveRunState(state *RunState) error {
 
 // LoadRunState reads run state from state.json. Returns nil, nil if not found.
 func LoadRunState(suite string) (*RunState, error) {
-	path := filepath.Join(StateDir(suite), "state.json")
+	dir, err := StateDir(suite)
+	if err != nil {
+		return nil, err
+	}
+	path := filepath.Join(dir, "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -95,12 +105,19 @@ func LoadRunState(suite string) (*RunState, error) {
 
 // RemoveRunState deletes the entire suite state directory.
 func RemoveRunState(suite string) error {
-	return os.RemoveAll(StateDir(suite))
+	dir, err := StateDir(suite)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
 }
 
 // ListSuiteStates returns names of all suites with state directories.
 func ListSuiteStates() ([]string, error) {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("newtest: user home dir: %w", err)
+	}
 	dir := filepath.Join(home, ".newtron", "newtest")
 
 	entries, err := os.ReadDir(dir)
