@@ -137,8 +137,8 @@ These items change public function signatures. Do them one at a time, updating a
 ## MEDIUM Findings Tracker
 
 **Total**: 87 MEDIUM findings across 5 audit documents
-**Addressed**: 81 (93%)
-**Remaining**: 6
+**Addressed**: 82 (94%)
+**Remaining**: 5
 
 ### Backend (`refactor-audit-backend.md`) — 18/19 addressed
 
@@ -203,7 +203,7 @@ These items change public function signatures. Do them one at a time, updating a
 | U-19 | Logger as package-level mutable global | — | Structural rewrite |
 | U-20 | 10 trivial one-line Logger wrappers | — | |
 
-### newtlab (`newtlab/refactor-audit.md`) — 20/22 addressed
+### newtlab (`newtlab/refactor-audit.md`) — 21/22 addressed
 
 | ID | Summary | Status | Addressed By |
 |----|---------|--------|-------------|
@@ -226,7 +226,7 @@ These items change public function signatures. Do them one at a time, updating a
 | BR-1 | RunBridgeFromFile ignores splitLinkEndpoint errors | DONE ✓ | Error checked and returned |
 | PF-1 | PatchProfiles uses map[string]interface{} | DONE ✓ | Uses spec.DeviceProfile |
 | NT-1 | Tests modify global HOME (not parallel-safe) | DONE ✓ | All use t.Setenv() |
-| G-1 | Zero test coverage for cmd/newtlab/ helpers | — | Test coverage |
+| G-1 | Zero test coverage for cmd/newtlab/ helpers | DONE ✓ | humanBytes, topoCounts, resolveTopologyDir |
 | N-1 | Lab struct has too many responsibilities | — | Structural rewrite |
 | PA-1 | ApplyBootPatches creates new SSH session per command | — | Standard SSH pattern; low priority |
 
@@ -252,11 +252,11 @@ These items change public function signatures. Do them one at a time, updating a
 | X-02 | No validActions/executors integration (= SC-01) | DONE ✓ | Phase B 4.8 |
 | TE-02 | No tests for runner.go Run/RunScenario methods | — | Test coverage |
 
-### Remaining MEDIUMs (6)
+### Remaining MEDIUMs (5)
 
 **Structural rewrites** (4): O-03 (PreconditionChecker), N-1 (Lab god object), U-19 (global Logger), U-20 (Logger wrappers)
 
-**Test coverage** (2): G-1 (cmd/newtlab tests), TE-02 (runner tests)
+**Test coverage** (1): TE-02 (runner tests)
 
 **Deferred** (1): PA-1 (SSH session per command — standard pattern, low priority)
 
