@@ -59,10 +59,13 @@ func TestCollectAllPorts(t *testing.T) {
 }
 
 func TestProbeAllPorts_AllFree(t *testing.T) {
-	// Use high ports unlikely to be in use
+	// Get OS-assigned free ports
+	p1 := getFreePort(t)
+	p2 := getFreePort(t)
+
 	allocs := []PortAllocation{
-		{Port: 59991, Purpose: "test SSH"},
-		{Port: 59992, Purpose: "test console"},
+		{Port: p1, Purpose: "test SSH"},
+		{Port: p2, Purpose: "test console"},
 	}
 
 	if err := ProbeAllPorts(allocs); err != nil {
@@ -128,7 +131,8 @@ func TestProbeAllPorts_MultipleConflicts(t *testing.T) {
 
 func TestProbePortLocal(t *testing.T) {
 	// Free port should succeed
-	if err := probePortLocal(59993); err != nil {
+	freePort := getFreePort(t)
+	if err := probePortLocal(freePort); err != nil {
 		t.Errorf("expected free port, got: %v", err)
 	}
 
