@@ -107,14 +107,21 @@ type AliasContext struct {
 	service  string
 }
 
-// NewAliasContext creates a new alias context for a device
+// NewAliasContext creates a new alias context for a device.
+// The context gets a shallow copy of the parent resolver's aliases so that
+// concurrent AliasContext calls on the same Resolver don't race.
 func NewAliasContext(r *Resolver, device string) *AliasContext {
+	// Copy aliases to avoid mutating the shared resolver
+	aliases := make(map[string]string, len(r.aliases)+3)
+	for k, v := range r.aliases {
+		aliases[k] = v
+	}
+	aliases["device"] = device
+
 	ctx := &AliasContext{
-		resolver: r,
+		resolver: NewResolver(aliases, r.prefixLists),
 		device:   device,
 	}
-	// Add device-specific aliases
-	ctx.resolver.SetAlias("device", device)
 	return ctx
 }
 

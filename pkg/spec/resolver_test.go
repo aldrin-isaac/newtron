@@ -212,24 +212,29 @@ func TestAliasContext(t *testing.T) {
 
 	ctx := NewAliasContext(r, "leaf1-ny")
 
-	// Device should be set
-	if v, ok := r.GetAlias("device"); !ok || v != "leaf1-ny" {
-		t.Errorf("Device alias not set: %q", v)
+	// Device should resolve through context
+	if resolved := ctx.Resolve("${device}"); resolved != "leaf1-ny" {
+		t.Errorf("Device alias not set: %q", resolved)
+	}
+
+	// Parent resolver should NOT be mutated (isolation)
+	if _, ok := r.GetAlias("device"); ok {
+		t.Error("Parent resolver should not have device alias set")
 	}
 
 	// Add interface context
 	ctx.WithInterface("Ethernet0")
-	if v, ok := r.GetAlias("interface"); !ok || v != "Ethernet0" {
-		t.Errorf("Interface alias not set: %q", v)
+	if resolved := ctx.Resolve("${interface}"); resolved != "Ethernet0" {
+		t.Errorf("Interface alias not set: %q", resolved)
 	}
 
 	// Add service context
 	ctx.WithService("customer-edge")
-	if v, ok := r.GetAlias("service"); !ok || v != "customer-edge" {
-		t.Errorf("Service alias not set: %q", v)
+	if resolved := ctx.Resolve("${service}"); resolved != "customer-edge" {
+		t.Errorf("Service alias not set: %q", resolved)
 	}
 
-	// Test resolve with context
+	// Test resolve with context — inherited aliases should still work
 	resolved := ctx.Resolve("${base}-${device}-${interface}")
 	if resolved != "prefix-leaf1-ny-Ethernet0" {
 		t.Errorf("Resolve() = %q", resolved)
