@@ -9,6 +9,17 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/util"
+)
+
+const (
+	// frrReadyPollInterval is how often we check whether vtysh is responsive
+	// after a BGP container restart.
+	frrReadyPollInterval = 2 * time.Second
+
+	// frrReadyTimeout is the maximum time to wait for vtysh to become
+	// responsive after a BGP container restart.
+	frrReadyTimeout = 30 * time.Second
 )
 
 var provisionCmd = &cobra.Command{
@@ -116,9 +127,14 @@ Examples:
 					} else {
 						fmt.Println(green("restarted"))
 
-						// Wait for FRR + frrcfgd to finish initial config render,
-						// then apply defaults that frrcfgd doesn't support.
-						time.Sleep(15 * time.Second)
+						// Poll until FRR/vtysh is responsive, then apply
+						// defaults that frrcfgd doesn't support.
+						fmt.Print("  Waiting for FRR... ")
+						if err := waitForFRR(ctx, dev); err != nil {
+							fmt.Printf("%s: %v\n", yellow("WARN"), err)
+						} else {
+							fmt.Println(green("ready"))
+						}
 						fmt.Print("  Applying FRR defaults... ")
 						if err := dev.ApplyFRRDefaults(ctx); err != nil {
 							fmt.Printf("%s: %v\n", red("FAILED"), err)
@@ -139,6 +155,32 @@ Examples:
 
 		return nil
 	},
+}
+
+// waitForFRR polls vtysh until it responds or timeout expires.
+func waitForFRR(ctx context.Context, dev *network.Device) error {
+	deadline := time.After(frrReadyTimeout)
+	ticker := time.NewTicker(frrReadyPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("FRR did not become responsive within %s", frrReadyTimeout)
+		case <-ticker.C:
+			underlying := dev.Underlying()
+			if underlying == nil || underlying.Tunnel() == nil {
+				continue
+			}
+			_, err := underlying.Tunnel().ExecCommand("vtysh -c 'show version'")
+			if err == nil {
+				return nil
+			}
+			util.Debugf("waitForFRR: vtysh not ready yet: %v", err)
+		}
+	}
 }
 
 // provisionCmd is registered via rootCmd.AddCommand in main.go init().
