@@ -185,7 +185,7 @@ func (d *Device) Refresh() error {
 	defer d.mu.Unlock()
 
 	if !d.connected || d.conn == nil {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 
 	configDB, err := d.conn.Client().GetAll()
@@ -249,7 +249,7 @@ func (d *Device) Lock() error {
 // Returns ("", zero, nil) if no lock is held.
 func (d *Device) LockHolder() (string, time.Time, error) {
 	if !d.connected {
-		return "", time.Time{}, fmt.Errorf("device not connected")
+		return "", time.Time{}, util.ErrNotConnected
 	}
 	return d.conn.LockHolder()
 }
@@ -584,7 +584,7 @@ type MACVPNInfo struct {
 // GetVLAN retrieves VLAN information from config_db.
 func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 	if d.configDB == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, util.ErrNotConnected
 	}
 
 	vlanKey := fmt.Sprintf("Vlan%d", id)
@@ -657,7 +657,7 @@ type VRFInfo struct {
 // GetVRF retrieves VRF information from config_db.
 func (d *Device) GetVRF(name string) (*VRFInfo, error) {
 	if d.configDB == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, util.ErrNotConnected
 	}
 
 	vrfEntry, ok := d.configDB.VRF[name]
@@ -727,7 +727,7 @@ type PortChannelInfo struct {
 // GetPortChannel retrieves PortChannel information from config_db.
 func (d *Device) GetPortChannel(name string) (*PortChannelInfo, error) {
 	if d.configDB == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, util.ErrNotConnected
 	}
 
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
@@ -803,7 +803,7 @@ func (d *Device) ListVRFs() []string {
 // This causes SONiC to re-read CONFIG_DB and apply changes via frrcfgd.
 func (d *Device) ReloadConfig(ctx context.Context) error {
 	if !d.connected {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 	return d.conn.ReloadConfig(ctx)
 }
@@ -811,7 +811,7 @@ func (d *Device) ReloadConfig(ctx context.Context) error {
 // SaveConfig persists the device's running CONFIG_DB to disk via SSH.
 func (d *Device) SaveConfig(ctx context.Context) error {
 	if !d.connected {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 	return d.conn.SaveConfig(ctx)
 }
@@ -819,7 +819,7 @@ func (d *Device) SaveConfig(ctx context.Context) error {
 // RestartService restarts a SONiC Docker container by name via SSH.
 func (d *Device) RestartService(ctx context.Context, name string) error {
 	if !d.connected {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 	return d.conn.RestartService(ctx, name)
 }
@@ -827,7 +827,7 @@ func (d *Device) RestartService(ctx context.Context, name string) error {
 // ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
 func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 	if !d.connected {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 	return d.conn.ApplyFRRDefaults(ctx)
 }
@@ -843,7 +843,7 @@ func (d *Device) Underlying() *device.Device {
 // Single-shot read — does not poll or retry.
 func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
 	if !d.connected {
-		return nil, fmt.Errorf("device not connected")
+		return nil, util.ErrNotConnected
 	}
 	return d.conn.GetRoute(ctx, vrf, prefix)
 }
@@ -853,7 +853,7 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*device.Rout
 // Single-shot read — does not poll or retry.
 func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
 	if !d.connected {
-		return nil, fmt.Errorf("device not connected")
+		return nil, util.ErrNotConnected
 	}
 	return d.conn.GetRouteASIC(ctx, vrf, prefix)
 }
@@ -1095,7 +1095,7 @@ type ACLTableInfo struct {
 // GetACLTable retrieves ACL table information by name.
 func (d *Device) GetACLTable(name string) (*ACLTableInfo, error) {
 	if d.configDB == nil {
-		return nil, fmt.Errorf("not connected")
+		return nil, util.ErrNotConnected
 	}
 	acl, ok := d.configDB.ACLTable[name]
 	if !ok {

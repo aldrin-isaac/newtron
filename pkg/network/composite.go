@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/device"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // CompositeMode defines the delivery mode for composite configs.
@@ -248,7 +249,7 @@ func (d *Device) DeliverComposite(composite *CompositeConfig, mode CompositeMode
 // ValidateComposite performs a dry-run validation of composite delivery without applying.
 func (d *Device) ValidateComposite(composite *CompositeConfig, mode CompositeMode) error {
 	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 
 	switch mode {

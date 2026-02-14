@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/device"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // ChangeType is an alias for device.ChangeType, re-exported for convenience.
@@ -136,7 +137,7 @@ func (cs *ChangeSet) Apply(d *Device) error {
 // cs.Verification.
 func (cs *ChangeSet) Verify(d *Device) error {
 	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 
 	result, err := d.Underlying().VerifyChangeSet(context.Background(), cs.toDeviceChanges())

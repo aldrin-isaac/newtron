@@ -1,17 +1,18 @@
 package network
 
 import (
-	"fmt"
 	"strings"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // requireWritable checks that a device is connected and locked for write operations.
 func requireWritable(d *Device) error {
 	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 	if !d.IsLocked() {
-		return fmt.Errorf("device not locked")
+		return util.ErrNotLocked
 	}
 	return nil
 }

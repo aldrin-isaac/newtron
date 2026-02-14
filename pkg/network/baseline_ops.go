@@ -322,7 +322,7 @@ func (d *Device) BreakoutPort(ctx context.Context, cfg device.BreakoutConfig) (*
 // LoadPlatformConfig fetches and caches platform.json from the device via SSH.
 func (d *Device) LoadPlatformConfig(ctx context.Context) error {
 	if !d.IsConnected() {
-		return fmt.Errorf("device not connected")
+		return util.ErrNotConnected
 	}
 
 	underlying := d.Underlying()
@@ -377,9 +377,15 @@ func (d *Device) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, 
 }
 
 // readFileViaSSH reads a file from the device via SSH tunnel.
-// This is a placeholder — the actual implementation uses the device's SSH tunnel.
+// Executes "cat <path>" over the SSH tunnel and returns the output.
 func (d *Device) readFileViaSSH(ctx context.Context, path string) ([]byte, error) {
-	// In production, this would execute "cat <path>" over the SSH tunnel.
-	// For now, return an error indicating SSH file read is not yet implemented.
-	return nil, fmt.Errorf("SSH file read not yet implemented for path: %s", path)
+	underlying := d.Underlying()
+	if underlying == nil || underlying.Tunnel() == nil {
+		return nil, fmt.Errorf("readFileViaSSH: device %s has no SSH tunnel", d.name)
+	}
+	output, err := underlying.Tunnel().ExecCommand(fmt.Sprintf("cat %q", path))
+	if err != nil {
+		return nil, fmt.Errorf("readFileViaSSH %s: %w", path, err)
+	}
+	return []byte(output), nil
 }

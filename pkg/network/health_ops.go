@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -24,7 +26,7 @@ type HealthCheckResult struct {
 // checks (checkBGP, checkInterfaces, etc.) read current CONFIG_DB state.
 func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error) {
 	if !d.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
+		return nil, util.ErrNotConnected
 	}
 
 	// Start a fresh read-only episode

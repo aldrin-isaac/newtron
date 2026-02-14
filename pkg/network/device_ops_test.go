@@ -2,10 +2,12 @@ package network
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/device"
 	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -644,8 +646,8 @@ func TestDevice_NotLocked(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error")
 			}
-			if err.Error() != "device not locked" {
-				t.Errorf("error = %q, want 'device not locked'", err.Error())
+			if !errors.Is(err, util.ErrNotLocked) {
+				t.Errorf("error = %q, want ErrNotLocked", err.Error())
 			}
 		})
 	}
