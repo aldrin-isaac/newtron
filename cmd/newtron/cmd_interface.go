@@ -124,6 +124,24 @@ Examples:
 			return err
 		}
 
+		if app.jsonOutput {
+			data := map[string]interface{}{
+				"name":         intfName,
+				"admin_status": intf.AdminStatus(),
+				"oper_status":  intf.OperStatus(),
+				"speed":        intf.Speed(),
+				"mtu":          intf.MTU(),
+				"ip_addresses": intf.IPAddresses(),
+				"vrf":          intf.VRF(),
+				"service":      intf.ServiceName(),
+				"lag_member":   intf.IsLAGMember(),
+				"lag_parent":   intf.LAGParent(),
+				"ingress_acl":  intf.IngressACL(),
+				"egress_acl":   intf.EgressACL(),
+			}
+			return json.NewEncoder(os.Stdout).Encode(data)
+		}
+
 		fmt.Printf("Interface: %s\n", bold(intfName))
 
 		// Show status with color coding

@@ -131,16 +131,23 @@ func (d *Device) parsePortChannels() map[string]*PortChannelState {
 	return portChannels
 }
 
+// parseVLANIDFromName extracts the numeric VLAN ID from a SONiC VLAN name
+// like "Vlan100". Returns 0 if the name is not a valid VLAN name.
+func parseVLANIDFromName(name string) int {
+	if strings.HasPrefix(name, "Vlan") {
+		id, _ := strconv.Atoi(name[4:])
+		return id
+	}
+	return 0
+}
+
 func (d *Device) parseVLANs() map[int]*VLANState {
 	vlans := make(map[int]*VLANState)
 
 	for name, vlan := range d.ConfigDB.VLAN {
 		vlanID, err := strconv.Atoi(vlan.VLANID)
 		if err != nil {
-			// Try parsing from name (Vlan100)
-			if strings.HasPrefix(name, "Vlan") {
-				vlanID, _ = strconv.Atoi(name[4:])
-			}
+			vlanID = parseVLANIDFromName(name)
 		}
 		if vlanID == 0 {
 			continue
@@ -159,17 +166,13 @@ func (d *Device) parseVLANs() map[int]*VLANState {
 	for key, member := range d.ConfigDB.VLANMember {
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) == 2 {
-			vlanName := parts[0]
-			memberName := parts[1]
-			// Parse VLAN ID from name (Vlan100)
-			if strings.HasPrefix(vlanName, "Vlan") {
-				vlanID, _ := strconv.Atoi(vlanName[4:])
-				if vlan, ok := vlans[vlanID]; ok {
-					if member.TaggingMode == "tagged" {
-						vlan.Members = append(vlan.Members, memberName+"(t)")
-					} else {
-						vlan.Members = append(vlan.Members, memberName)
-					}
+			vlanID := parseVLANIDFromName(parts[0])
+			if vlan, ok := vlans[vlanID]; ok {
+				memberName := parts[1]
+				if member.TaggingMode == "tagged" {
+					vlan.Members = append(vlan.Members, memberName+"(t)")
+				} else {
+					vlan.Members = append(vlan.Members, memberName)
 				}
 			}
 		}
@@ -177,14 +180,10 @@ func (d *Device) parseVLANs() map[int]*VLANState {
 
 	// Find L2VNI mappings
 	for _, mapping := range d.ConfigDB.VXLANTunnelMap {
-		if mapping.VLAN != "" {
-			// Parse VLAN ID from name (Vlan100)
-			if strings.HasPrefix(mapping.VLAN, "Vlan") {
-				vlanID, _ := strconv.Atoi(mapping.VLAN[4:])
-				if vlan, ok := vlans[vlanID]; ok {
-					vni, _ := strconv.Atoi(mapping.VNI)
-					vlan.L2VNI = vni
-				}
+		if vlanID := parseVLANIDFromName(mapping.VLAN); vlanID > 0 {
+			if vlan, ok := vlans[vlanID]; ok {
+				vni, _ := strconv.Atoi(mapping.VNI)
+				vlan.L2VNI = vni
 			}
 		}
 	}
@@ -192,9 +191,7 @@ func (d *Device) parseVLANs() map[int]*VLANState {
 	// Find SVI status
 	for key := range d.ConfigDB.VLANInterface {
 		parts := strings.SplitN(key, "|", 2)
-		vlanName := parts[0]
-		if strings.HasPrefix(vlanName, "Vlan") {
-			vlanID, _ := strconv.Atoi(vlanName[4:])
+		if vlanID := parseVLANIDFromName(parts[0]); vlanID > 0 {
 			if vlan, ok := vlans[vlanID]; ok {
 				vlan.SVIStatus = "configured"
 			}
@@ -219,23 +216,19 @@ func (d *Device) parseVRFs() map[string]*VRFState {
 		vrfs[name] = state
 	}
 
+	// Collect VRF interface memberships using a set to avoid duplicates.
+	vrfInterfaces := make(map[string]map[string]bool)
+	for vrfName := range vrfs {
+		vrfInterfaces[vrfName] = make(map[string]bool)
+	}
+
 	// Find interfaces in VRFs
 	for key, intf := range d.ConfigDB.Interface {
 		if intf.VRFName != "" {
 			parts := strings.SplitN(key, "|", 2)
 			intfName := parts[0]
-			if vrf, ok := vrfs[intf.VRFName]; ok {
-				// Avoid duplicates
-				found := false
-				for _, i := range vrf.Interfaces {
-					if i == intfName {
-						found = true
-						break
-					}
-				}
-				if !found {
-					vrf.Interfaces = append(vrf.Interfaces, intfName)
-				}
+			if members, ok := vrfInterfaces[intf.VRFName]; ok {
+				members[intfName] = true
 			}
 		}
 	}
@@ -244,23 +237,19 @@ func (d *Device) parseVRFs() map[string]*VRFState {
 	for key := range d.ConfigDB.VLANInterface {
 		parts := strings.SplitN(key, "|", 2)
 		vlanName := parts[0]
-		// Check if VLAN has VRF binding
 		if vlanIntf, ok := d.ConfigDB.VLANInterface[vlanName]; ok {
 			if vrfName, exists := vlanIntf["vrf_name"]; exists && vrfName != "" {
-				if vrf, found := vrfs[vrfName]; found {
-					// Avoid duplicates
-					hasIt := false
-					for _, i := range vrf.Interfaces {
-						if i == vlanName {
-							hasIt = true
-							break
-						}
-					}
-					if !hasIt {
-						vrf.Interfaces = append(vrf.Interfaces, vlanName)
-					}
+				if members, ok := vrfInterfaces[vrfName]; ok {
+					members[vlanName] = true
 				}
 			}
+		}
+	}
+
+	// Flatten sets into slices
+	for vrfName, members := range vrfInterfaces {
+		for intfName := range members {
+			vrfs[vrfName].Interfaces = append(vrfs[vrfName].Interfaces, intfName)
 		}
 	}
 

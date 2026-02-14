@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -218,14 +219,9 @@ func (l *FileLogger) cleanupOldFiles() {
 
 	// Keep only MaxBackups files
 	if len(files) > l.rotation.MaxBackups {
-		// Sort by age (oldest first)
-		for i := 0; i < len(files)-1; i++ {
-			for j := i + 1; j < len(files); j++ {
-				if files[i].modTime.After(files[j].modTime) {
-					files[i], files[j] = files[j], files[i]
-				}
-			}
-		}
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].modTime.Before(files[j].modTime)
+		})
 
 		// Remove oldest files
 		toRemove := len(files) - l.rotation.MaxBackups

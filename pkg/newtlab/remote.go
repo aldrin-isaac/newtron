@@ -52,6 +52,17 @@ func sshCommand(hostIP string, remoteCmd string) *exec.Cmd {
 	)
 }
 
+// scpCommand creates an exec.Cmd for copying a file to a remote host via SCP.
+// Uses the same SSH options as sshCommand for consistency.
+func scpCommand(hostIP, localPath, remotePath string) *exec.Cmd {
+	return exec.Command("scp",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "ConnectTimeout=10",
+		localPath,
+		hostIP+":"+remotePath,
+	)
+}
+
 // parseUname parses "uname -s -m" output to Go's GOOS/GOARCH.
 // Examples: "Linux x86_64" → ("linux", "amd64"), "Linux aarch64" → ("linux", "arm64"),
 // "Darwin arm64" → ("darwin", "arm64").
@@ -175,7 +186,7 @@ func uploadNewtlink(hostIP string) (string, error) {
 	}
 
 	// Upload via scp
-	scpCmd := exec.Command("scp", "-o", "StrictHostKeyChecking=no", localPath, hostIP+":~/.newtlab/bin/newtlink")
+	scpCmd := scpCommand(hostIP, localPath, "~/.newtlab/bin/newtlink")
 	if out, err := scpCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("upload newtlink to %s: %w\n%s", hostIP, err, out)
 	}
