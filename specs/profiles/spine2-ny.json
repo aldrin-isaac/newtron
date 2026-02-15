@@ -1,7 +1,10 @@
 {
   "mgmt_ip": "172.17.190.32",
   "loopback_ip": "10.0.0.3",
-  "site": "ny",
+  "zone": "amer",
   "platform": "accton-as7726-32x",
-  "is_route_reflector": true
+  "evpn": {
+    "route_reflector": true,
+    "peers": ["spine1-ny"]
+  }
 }

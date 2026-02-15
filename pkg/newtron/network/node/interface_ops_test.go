@@ -38,7 +38,7 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 
 	// Register service in network spec
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
-		ServiceType: spec.ServiceTypeL3,
+		ServiceType: spec.ServiceTypeEVPNRouted,
 		VRFType:     spec.VRFTypeInterface,
 	}
 
@@ -72,7 +72,7 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	intf.ingressACL = "ACL_CUST_IN"
 
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
-		ServiceType: spec.ServiceTypeL3,
+		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 
 	// ACL only bound to this interface → last user
@@ -104,7 +104,7 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	intf.ingressACL = "ACL_CUST_IN"
 
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
-		ServiceType: spec.ServiceTypeL3,
+		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 
 	// ACL bound to both Ethernet0 and Ethernet4 → not last user
@@ -330,7 +330,7 @@ func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
 	intf.serviceName = "existing-service"
 	d.SpecProvider.(*testSpecProvider).services["new-service"] = &spec.ServiceSpec{
-		ServiceType: spec.ServiceTypeL3,
+		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 	ctx := context.Background()
 

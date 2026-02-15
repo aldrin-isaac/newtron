@@ -18,6 +18,16 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
+// filterTypeToSONiC translates spec filter types to SONiC ACL_TABLE type values.
+func filterTypeToSONiC(specType string) string {
+	switch specType {
+	case "ipv6":
+		return "L3V6"
+	default:
+		return "L3"
+	}
+}
+
 // CompositeEntry is a single CONFIG_DB entry (table + key + fields).
 // Used by GenerateServiceEntries and the QoS generators to return entries
 // without coupling to the CompositeBuilder or ChangeSet types.
@@ -33,6 +43,7 @@ type ServiceEntryParams struct {
 	ServiceName   string
 	InterfaceName string
 	IPAddress     string
+	VLAN          int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
 	Params        map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 	PeerAS        int               // CLI peer-as (interface_ops path only)
 	LocalAS       int               // device AS number
@@ -68,27 +79,41 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 		}
 	}
 
-	// VLAN creation (for L2/IRB)
-	if (svc.ServiceType == spec.ServiceTypeL2 || svc.ServiceType == spec.ServiceTypeIRB) && svc.VLAN > 0 {
-		vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
+	// Resolve VLAN ID: overlay types use macvpnDef, local types use params
+	vlanID := 0
+	if macvpnDef != nil {
+		vlanID = macvpnDef.VlanID
+	} else if p.VLAN > 0 {
+		vlanID = p.VLAN
+	}
+
+	// Determine which layers this service uses
+	hasL2 := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
+		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
+	hasL3 := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNRouted ||
+		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeRouted
+
+	// VLAN creation (for L2 types)
+	if hasL2 && vlanID > 0 {
+		vlanName := fmt.Sprintf("Vlan%d", vlanID)
 		entries = append(entries, CompositeEntry{
 			Table:  "VLAN",
 			Key:    vlanName,
-			Fields: map[string]string{"vlanid": fmt.Sprintf("%d", svc.VLAN)},
+			Fields: map[string]string{"vlanid": fmt.Sprintf("%d", vlanID)},
 		})
 
-		// L2VNI mapping
-		if macvpnDef.L2VNI > 0 {
-			mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.L2VNI, vlanName)
+		// VNI mapping (overlay types only)
+		if macvpnDef != nil && macvpnDef.VNI > 0 {
+			mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.VNI, vlanName)
 			entries = append(entries, CompositeEntry{
 				Table:  "VXLAN_TUNNEL_MAP",
 				Key:    mapKey,
-				Fields: map[string]string{"vlan": vlanName, "vni": fmt.Sprintf("%d", macvpnDef.L2VNI)},
+				Fields: map[string]string{"vlan": vlanName, "vni": fmt.Sprintf("%d", macvpnDef.VNI)},
 			})
 		}
 
 		// ARP suppression
-		if macvpnDef.ARPSuppression {
+		if macvpnDef != nil && macvpnDef.ARPSuppression {
 			entries = append(entries, CompositeEntry{
 				Table:  "SUPPRESS_VLAN_NEIGH",
 				Key:    vlanName,
@@ -97,10 +122,9 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 		}
 	}
 
-	// VRF creation (for L3/IRB with per-interface VRF)
+	// VRF creation (for L3 types with per-interface VRF)
 	vrfName := ""
-	if (svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB) &&
-		svc.VRFType == spec.VRFTypeInterface {
+	if hasL3 && svc.VRFType == spec.VRFTypeInterface {
 		vrfName = util.DeriveVRFName(svc.VRFType, p.ServiceName, p.InterfaceName)
 		vrfFields := map[string]string{}
 		if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
@@ -124,42 +148,42 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 			// BGP EVPN route targets for the VRF
 			entries = append(entries, generateRouteTargetEntries(vrfName, ipvpnDef)...)
 		}
-	} else if svc.VRFType == spec.VRFTypeShared {
-		vrfName = svc.IPVPN
+	} else if svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil {
+		vrfName = ipvpnDef.VRF
 	}
 
-	// Shared VRF creation (for L3/IRB with shared VRF)
+	// Shared VRF creation (for L3 types with shared VRF)
 	// The topology provisioner always emits these entries (idempotent overwrite).
 	// The interface_ops caller filters them out when the VRF already exists.
-	if (svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB) &&
-		svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
+	if hasL3 && svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && ipvpnDef.VRF != "" {
 		vrfFields := map[string]string{}
-		if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
+		if ipvpnDef.L3VNI > 0 {
 			vrfFields["vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
 		}
 		entries = append(entries, CompositeEntry{
 			Table:  "VRF",
-			Key:    svc.IPVPN,
+			Key:    ipvpnDef.VRF,
 			Fields: vrfFields,
 		})
 
-		if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-			mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, svc.IPVPN)
+		if ipvpnDef.L3VNI > 0 {
+			mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, ipvpnDef.VRF)
 			entries = append(entries, CompositeEntry{
 				Table:  "VXLAN_TUNNEL_MAP",
 				Key:    mapKey,
-				Fields: map[string]string{"vrf": svc.IPVPN, "vni": fmt.Sprintf("%d", ipvpnDef.L3VNI)},
+				Fields: map[string]string{"vrf": ipvpnDef.VRF, "vni": fmt.Sprintf("%d", ipvpnDef.L3VNI)},
 			})
 
-			entries = append(entries, generateRouteTargetEntries(svc.IPVPN, ipvpnDef)...)
+			entries = append(entries, generateRouteTargetEntries(ipvpnDef.VRF, ipvpnDef)...)
 		}
 	}
 
 	// Interface configuration based on service type
 	switch svc.ServiceType {
-	case spec.ServiceTypeL2:
-		if svc.VLAN > 0 {
-			vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
+	case spec.ServiceTypeEVPNBridged, spec.ServiceTypeBridged:
+		// L2 access: untagged VLAN member
+		if vlanID > 0 {
+			vlanName := fmt.Sprintf("Vlan%d", vlanID)
 			memberKey := fmt.Sprintf("%s|%s", vlanName, p.InterfaceName)
 			entries = append(entries, CompositeEntry{
 				Table:  "VLAN_MEMBER",
@@ -168,7 +192,8 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 			})
 		}
 
-	case spec.ServiceTypeL3:
+	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
+		// L3 routed: interface with VRF and IP
 		// Bug fix #3: always emit base INTERFACE entry (SONiC intfmgrd requires it)
 		intfFields := map[string]string{}
 		if vrfName != "" {
@@ -188,9 +213,10 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 			})
 		}
 
-	case spec.ServiceTypeIRB:
-		if svc.VLAN > 0 {
-			vlanName := fmt.Sprintf("Vlan%d", svc.VLAN)
+	case spec.ServiceTypeEVPNIRB:
+		// L2+L3 overlay: tagged VLAN member + SVI with anycast gateway
+		if vlanID > 0 {
+			vlanName := fmt.Sprintf("Vlan%d", vlanID)
 			memberKey := fmt.Sprintf("%s|%s", vlanName, p.InterfaceName)
 			entries = append(entries, CompositeEntry{
 				Table:  "VLAN_MEMBER",
@@ -208,8 +234,8 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 				Fields: vlanIntfFields,
 			})
 
-			if svc.AnycastGateway != "" {
-				sviIPKey := fmt.Sprintf("%s|%s", vlanName, svc.AnycastGateway)
+			if macvpnDef != nil && macvpnDef.AnycastIP != "" {
+				sviIPKey := fmt.Sprintf("%s|%s", vlanName, macvpnDef.AnycastIP)
 				entries = append(entries, CompositeEntry{
 					Table:  "VLAN_INTERFACE",
 					Key:    sviIPKey,
@@ -217,11 +243,42 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 				})
 			}
 
-			if svc.AnycastMAC != "" {
+			if macvpnDef != nil && macvpnDef.AnycastMAC != "" {
 				entries = append(entries, CompositeEntry{
 					Table:  "SAG_GLOBAL",
 					Key:    "IPv4",
-					Fields: map[string]string{"gwmac": svc.AnycastMAC},
+					Fields: map[string]string{"gwmac": macvpnDef.AnycastMAC},
+				})
+			}
+		}
+
+	case spec.ServiceTypeIRB:
+		// Local L2+L3: tagged VLAN member + SVI with IP from params
+		if vlanID > 0 {
+			vlanName := fmt.Sprintf("Vlan%d", vlanID)
+			memberKey := fmt.Sprintf("%s|%s", vlanName, p.InterfaceName)
+			entries = append(entries, CompositeEntry{
+				Table:  "VLAN_MEMBER",
+				Key:    memberKey,
+				Fields: map[string]string{"tagging_mode": "tagged"},
+			})
+
+			vlanIntfFields := map[string]string{}
+			if vrfName != "" {
+				vlanIntfFields["vrf_name"] = vrfName
+			}
+			entries = append(entries, CompositeEntry{
+				Table:  "VLAN_INTERFACE",
+				Key:    vlanName,
+				Fields: vlanIntfFields,
+			})
+
+			if p.IPAddress != "" {
+				sviIPKey := fmt.Sprintf("%s|%s", vlanName, p.IPAddress)
+				entries = append(entries, CompositeEntry{
+					Table:  "VLAN_INTERFACE",
+					Key:    sviIPKey,
+					Fields: map[string]string{},
 				})
 			}
 		}
@@ -276,7 +333,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 
 	// BGP routing configuration
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpEntries, err := generateBGPEntries(svc, p)
+		bgpEntries, err := generateBGPEntries(svc, p, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("interface %s: BGP routing: %w", p.InterfaceName, err)
 		}
@@ -313,7 +370,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 // Bug fixes vs prior duplicated code:
 //   - Uses UnderlayASN with fallback to LocalAS (fix #2)
 //   - Uses "admin_status": "true" for BGP_NEIGHBOR_AF activation (fix #1)
-func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams) ([]CompositeEntry, error) {
+func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]CompositeEntry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
 	}
@@ -365,14 +422,6 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams) ([]Composit
 
 	localIP, _ := util.SplitIPMask(p.IPAddress)
 
-	// Determine VRF name for BGP key
-	vrfName := ""
-	if (svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB) &&
-		svc.VRFType == spec.VRFTypeInterface {
-		vrfName = util.DeriveVRFName(svc.VRFType, p.ServiceName, p.InterfaceName)
-	} else if svc.VRFType == spec.VRFTypeShared {
-		vrfName = svc.IPVPN
-	}
 
 	// BGP neighbor
 	neighborFields := map[string]string{
@@ -417,10 +466,10 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams) ([]Composit
 }
 
 // generateServiceACLEntries generates ACL table and rule entries for a service filter.
-func generateServiceACLEntries(sp SpecProvider, serviceName, filterSpecName, interfaceName, stage string) ([]CompositeEntry, error) {
-	filterSpec, err := sp.GetFilterSpec(filterSpecName)
+func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfaceName, stage string) ([]CompositeEntry, error) {
+	filterSpec, err := sp.GetFilter(filterName)
 	if err != nil {
-		return nil, fmt.Errorf("filter spec '%s' not found", filterSpecName)
+		return nil, fmt.Errorf("filter spec '%s' not found", filterName)
 	}
 
 	var entries []CompositeEntry
@@ -435,7 +484,7 @@ func generateServiceACLEntries(sp SpecProvider, serviceName, filterSpecName, int
 		Table: "ACL_TABLE",
 		Key:   aclName,
 		Fields: map[string]string{
-			"type":        "L3",
+			"type":        filterTypeToSONiC(filterSpec.Type),
 			"stage":       stage,
 			"ports":       interfaceName,
 			"policy_desc": fmt.Sprintf("%s filter for %s", capitalizeFirst(stage), serviceName),
@@ -495,9 +544,6 @@ func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]s
 	if rule.DSCP != "" {
 		fields["DSCP"] = rule.DSCP
 	}
-	if rule.Policer != "" {
-		fields["POLICER"] = rule.Policer
-	}
 
 	// CoS/TC marking — previously only in interface_ops (fix #4)
 	if rule.CoS != "" {
@@ -514,6 +560,7 @@ func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]s
 }
 
 // generateRouteTargetEntries generates BGP EVPN route target entries for a VRF.
+// RouteTargets are used for both import and export (symmetric by default).
 func generateRouteTargetEntries(vrfName string, ipvpnDef *spec.IPVPNSpec) []CompositeEntry {
 	var entries []CompositeEntry
 
@@ -521,11 +568,10 @@ func generateRouteTargetEntries(vrfName string, ipvpnDef *spec.IPVPNSpec) []Comp
 	afFields := map[string]string{
 		"advertise_ipv4_unicast": "true",
 	}
-	if len(ipvpnDef.ImportRT) > 0 {
-		afFields["route_target_import_evpn"] = strings.Join(ipvpnDef.ImportRT, ",")
-	}
-	if len(ipvpnDef.ExportRT) > 0 {
-		afFields["route_target_export_evpn"] = strings.Join(ipvpnDef.ExportRT, ",")
+	if len(ipvpnDef.RouteTargets) > 0 {
+		rt := strings.Join(ipvpnDef.RouteTargets, ",")
+		afFields["route_target_import_evpn"] = rt
+		afFields["route_target_export_evpn"] = rt
 	}
 	entries = append(entries, CompositeEntry{
 		Table:  "BGP_GLOBALS_AF",
@@ -533,16 +579,13 @@ func generateRouteTargetEntries(vrfName string, ipvpnDef *spec.IPVPNSpec) []Comp
 		Fields: afFields,
 	})
 
-	if ipvpnDef.L3VNI > 0 && (len(ipvpnDef.ImportRT) > 0 || len(ipvpnDef.ExportRT) > 0) {
+	if ipvpnDef.L3VNI > 0 && len(ipvpnDef.RouteTargets) > 0 {
 		vniKey := fmt.Sprintf("%s|%d", vrfName, ipvpnDef.L3VNI)
+		rt := strings.Join(ipvpnDef.RouteTargets, ",")
 		vniFields := map[string]string{
-			"rd": "auto",
-		}
-		if len(ipvpnDef.ImportRT) > 0 {
-			vniFields["route_target_import"] = strings.Join(ipvpnDef.ImportRT, ",")
-		}
-		if len(ipvpnDef.ExportRT) > 0 {
-			vniFields["route_target_export"] = strings.Join(ipvpnDef.ExportRT, ",")
+			"rd":                  "auto",
+			"route_target_import": rt,
+			"route_target_export": rt,
 		}
 		entries = append(entries, CompositeEntry{
 			Table:  "BGP_EVPN_VNI",

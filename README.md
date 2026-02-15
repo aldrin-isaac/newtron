@@ -24,9 +24,9 @@ Three architectural choices define newtron:
 
 newtron manages SONiC devices through CONFIG_DB. A device's full configuration — interfaces, VLANs, VRFs, BGP neighbors, EVPN overlays, ACLs, QoS — is expressed as spec files and translated into CONFIG_DB entries using each device's profile, platform, and site context.
 
-The object model is hierarchical: `Network > Node > Interface`. A Network holds specs (services, filters, VPNs, sites, platforms). A Node holds its profile, resolved config, and Redis connections. An Interface holds its service bindings. Methods live on the smallest object that has the context to execute them — `ApplyService` lives on Interface because the interface's identity is part of the translation context; `VerifyChangeSet` lives on Node because it needs the Redis connection.
+The object model is hierarchical: `Network > Node > Interface`. A Network holds specs (services, filters, VPNs, platforms). A Node holds its profile, resolved config, and Redis connections. An Interface holds its service bindings. Methods live on the smallest object that has the context to execute them — `ApplyService` lives on Interface because the interface's identity is part of the translation context; `VerifyChangeSet` lives on Node because it needs the Redis connection.
 
-newtron reads `network.json` (services, VPNs, filters, routing policy), `site.json` (regions, AS numbers), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, role, credentials). It does not need `topology.json` — that file belongs to newtlab and newtest.
+newtron reads `network.json` (services, VPNs, filters, routing policy, zones), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, zone, EVPN peering, credentials). It does not need `topology.json` — that file belongs to newtlab and newtest.
 
 Key operations:
 
@@ -91,15 +91,14 @@ The rule: return data, not judgments. A method that returns a `RouteEntry` is us
 
 ## Specs
 
-Spec files describe network intent as declarative constraints. newtron resolves them into device-specific CONFIG_DB entries using each device's profile (loopback IP, AS number, role), platform (port count, HWSKU, dataplane capabilities), and site (regions, cluster IDs).
+Spec files describe network intent as declarative constraints. newtron resolves them into device-specific CONFIG_DB entries using each device's profile (loopback IP, AS number, role), platform (port count, HWSKU, dataplane capabilities), and site (zones, cluster IDs).
 
 The same spec applied to different devices produces different config. The same spec applied twice to the same device produces identical config — this is what makes provisioning idempotent.
 
 ```
 specs/
 ├── network.json         # Services, VPNs, filters, routing policy    ← newtron
-├── site.json            # Site topology, regions, AS numbers          ← newtron
-└── profiles/            # Per-device: loopback IP, role, SSH port     ← newtron + newtlab
+└── profiles/            # Per-device: loopback IP, zone, EVPN, SSH ← newtron + newtlab
     ├── spine1.json
     └── leaf1.json
 

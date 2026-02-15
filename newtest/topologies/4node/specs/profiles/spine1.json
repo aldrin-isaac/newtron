@@ -1,9 +1,12 @@
 {
-    "is_route_reflector": true,
     "loopback_ip": "10.0.0.1",
     "mgmt_ip": "127.0.0.1",
+    "zone": "amer",
     "platform": "sonic-vpp",
-    "site": "lab",
+    "evpn": {
+        "peers": ["spine2"],
+        "route_reflector": true
+    },
     "ssh_pass": "YourPaSsWoRd",
     "ssh_user": "admin",
     "underlay_asn": 65001

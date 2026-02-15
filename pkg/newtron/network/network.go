@@ -26,7 +26,6 @@ import (
 type Network struct {
 	// Specs (from JSON files)
 	spec      *spec.NetworkSpecFile
-	sites     *spec.SiteSpecFile
 	platforms *spec.PlatformSpecFile
 
 	// Topology spec (nil if topology.json doesn't exist)
@@ -54,7 +53,6 @@ func NewNetwork(specDir string) (*Network, error) {
 
 	return &Network{
 		spec:      loader.GetNetwork(),
-		sites:     loader.GetSite(),
 		platforms: loader.GetPlatforms(),
 		topology:  loader.GetTopology(),
 		loader:    loader,
@@ -84,14 +82,9 @@ func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
 	return getSpec(&n.mu, n.spec.Services, "service", name)
 }
 
-// GetFilterSpec returns a filter specification by name.
-func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error) {
-	return getSpec(&n.mu, n.spec.FilterSpecs, "filter spec", name)
-}
-
-// GetSite returns a site specification by name.
-func (n *Network) GetSite(name string) (*spec.SiteSpec, error) {
-	return getSpec(&n.mu, n.sites.Sites, "site", name)
+// GetFilter returns a filter specification by name.
+func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
+	return getSpec(&n.mu, n.spec.Filters, "filter", name)
 }
 
 // GetPlatform returns a platform definition by name.
@@ -116,12 +109,12 @@ func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error) {
 
 // GetIPVPN returns an IP-VPN definition by name.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.IPVPN, "ipvpn", name)
+	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", name)
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.MACVPN, "macvpn", name)
+	return getSpec(&n.mu, n.spec.MACVPNs, "macvpn", name)
 }
 
 // GetRoutePolicy returns a route policy by name.
@@ -129,14 +122,14 @@ func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
 	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", name)
 }
 
-// FindMACVPNByL2VNI returns the MACVPN name and spec for a given L2VNI.
+// FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
 // Returns ("", nil) if no MACVPN matches.
-func (n *Network) FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec) {
+func (n *Network) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	for name, def := range n.spec.MACVPN {
-		if def.L2VNI == vni {
+	for name, def := range n.spec.MACVPNs {
+		if def.VNI == vni {
 			return name, def
 		}
 	}
@@ -155,13 +148,13 @@ func (n *Network) ListServices() []string {
 	return names
 }
 
-// ListFilterSpecs returns all available filter spec names.
-func (n *Network) ListFilterSpecs() []string {
+// ListFilters returns all available filter names.
+func (n *Network) ListFilters() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	names := make([]string, 0, len(n.spec.FilterSpecs))
-	for name := range n.spec.FilterSpecs {
+	names := make([]string, 0, len(n.spec.Filters))
+	for name := range n.spec.Filters {
 		names = append(names, name)
 	}
 	return names
@@ -184,10 +177,10 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.spec.IPVPN == nil {
-		n.spec.IPVPN = make(map[string]*spec.IPVPNSpec)
+	if n.spec.IPVPNs == nil {
+		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
 	}
-	n.spec.IPVPN[name] = def
+	n.spec.IPVPNs[name] = def
 	return n.persistSpec()
 }
 
@@ -204,7 +197,7 @@ func (n *Network) DeleteIPVPN(name string) error {
 		}
 	}
 
-	delete(n.spec.IPVPN, name)
+	delete(n.spec.IPVPNs, name)
 	return n.persistSpec()
 }
 
@@ -213,10 +206,10 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.spec.MACVPN == nil {
-		n.spec.MACVPN = make(map[string]*spec.MACVPNSpec)
+	if n.spec.MACVPNs == nil {
+		n.spec.MACVPNs = make(map[string]*spec.MACVPNSpec)
 	}
-	n.spec.MACVPN[name] = def
+	n.spec.MACVPNs[name] = def
 	return n.persistSpec()
 }
 
@@ -233,7 +226,7 @@ func (n *Network) DeleteMACVPN(name string) error {
 		}
 	}
 
-	delete(n.spec.MACVPN, name)
+	delete(n.spec.MACVPNs, name)
 	return n.persistSpec()
 }
 
@@ -266,32 +259,32 @@ func (n *Network) DeleteQoSPolicy(name string) error {
 	return n.persistSpec()
 }
 
-// SaveFilterSpec creates or updates a filter spec in network.json.
-func (n *Network) SaveFilterSpec(name string, def *spec.FilterSpec) error {
+// SaveFilter creates or updates a filter in network.json.
+func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if n.spec.FilterSpecs == nil {
-		n.spec.FilterSpecs = make(map[string]*spec.FilterSpec)
+	if n.spec.Filters == nil {
+		n.spec.Filters = make(map[string]*spec.FilterSpec)
 	}
-	n.spec.FilterSpecs[name] = def
+	n.spec.Filters[name] = def
 	return n.persistSpec()
 }
 
-// DeleteFilterSpec removes a filter spec from network.json.
+// DeleteFilter removes a filter from network.json.
 // Returns error if any service references it.
-func (n *Network) DeleteFilterSpec(name string) error {
+func (n *Network) DeleteFilter(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
 		if svc.IngressFilter == name || svc.EgressFilter == name {
-			return fmt.Errorf("cannot delete filter spec '%s': referenced by service '%s'", name, svcName)
+			return fmt.Errorf("cannot delete filter '%s': referenced by service '%s'", name, svcName)
 		}
 	}
 
-	delete(n.spec.FilterSpecs, name)
+	delete(n.spec.Filters, name)
 	return n.persistSpec()
 }
 
@@ -427,55 +420,51 @@ func (n *Network) loadProfile(name string) (*spec.DeviceProfile, error) {
 
 // resolveProfile applies inheritance to resolve final values.
 func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spec.ResolvedProfile, error) {
-	// Get site (determines region)
-	site, ok := n.sites.Sites[profile.Site]
+	// Get zone directly from profile
+	zone, ok := n.spec.Zones[profile.Zone]
 	if !ok {
-		return nil, fmt.Errorf("site '%s' not found", profile.Site)
-	}
-
-	// Get region
-	region, ok := n.spec.Regions[site.Region]
-	if !ok {
-		return nil, fmt.Errorf("region '%s' not found", site.Region)
+		return nil, fmt.Errorf("zone '%s' not found", profile.Zone)
 	}
 
 	resolved := &spec.ResolvedProfile{
 		DeviceName: name,
 		MgmtIP:     profile.MgmtIP,
 		LoopbackIP: profile.LoopbackIP,
-		Region:     site.Region,
-		Site:       profile.Site,
+		Zone:     profile.Zone,
 		Platform:   profile.Platform,
 		MAC:        profile.MAC,
 	}
 
-	// AS Number: profile > region
+	// AS Number: profile > zone
 	if profile.ASNumber != nil {
 		resolved.ASNumber = *profile.ASNumber
 	} else {
-		resolved.ASNumber = region.ASNumber
+		resolved.ASNumber = zone.ASNumber
 	}
 
 	// Router ID and VTEP from loopback
 	resolved.RouterID = profile.LoopbackIP
 	resolved.VTEPSourceIP = profile.LoopbackIP
 
-	// BGP neighbors from route reflectors
-	resolved.BGPNeighbors = n.deriveBGPNeighbors(site, name)
+	// EVPN config from profile
+	if profile.EVPN != nil {
+		resolved.IsRouteReflector = profile.EVPN.RouteReflector
+		resolved.ClusterID = profile.EVPN.ClusterID
+	}
+	// ClusterID defaults to loopback IP
+	if resolved.ClusterID == "" {
+		resolved.ClusterID = profile.LoopbackIP
+	}
 
-	// Merge maps: global < region < profile
-	resolved.GenericAlias = util.MergeMaps(
-		n.spec.GenericAlias,
-		region.GenericAlias,
-		profile.GenericAlias,
-	)
+	// BGP neighbors from EVPN peers
+	resolved.BGPNeighbors = n.deriveBGPNeighbors(profile, name)
+
+	// Merge maps: global < zone < profile
 	resolved.PrefixLists = util.MergeMaps(
 		n.spec.PrefixLists,
-		region.PrefixLists,
+		zone.PrefixLists,
 		profile.PrefixLists,
 	)
-
-	resolved.IsRouteReflector = profile.IsRouteReflector
 
 	// SSH credentials (for Redis tunnel)
 	resolved.SSHUser = profile.SSHUser
@@ -488,26 +477,29 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	return resolved, nil
 }
 
-// deriveBGPNeighbors looks up route reflector loopback IPs from their profiles.
-// Silently skips RR peers that aren't in the current topology (e.g., spine2 in a 2-node topo).
-func (n *Network) deriveBGPNeighbors(site *spec.SiteSpec, selfName string) []string {
+// deriveBGPNeighbors looks up EVPN peer loopback IPs from their profiles.
+// Silently skips peers that aren't in the current topology (e.g., spine2 in a 2-node topo).
+func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName string) []string {
+	if profile.EVPN == nil {
+		return nil
+	}
 	topo := n.GetTopology()
 	var neighbors []string
-	for _, rrName := range site.RouteReflectors {
-		if rrName == selfName {
+	for _, peerName := range profile.EVPN.Peers {
+		if peerName == selfName {
 			continue // Don't peer with self
 		}
 		// Skip devices not in the current topology
-		if topo != nil && !topo.HasDevice(rrName) {
+		if topo != nil && !topo.HasDevice(peerName) {
 			continue
 		}
-		// Load RR profile to get its loopback IP
-		rrProfile, err := n.loadProfile(rrName)
+		// Load peer profile to get its loopback IP
+		peerProfile, err := n.loadProfile(peerName)
 		if err != nil {
-			util.Logger.Warnf("Could not load route reflector profile %s: %v", rrName, err)
+			util.Logger.Warnf("Could not load EVPN peer profile %s: %v", peerName, err)
 			continue
 		}
-		neighbors = append(neighbors, rrProfile.LoopbackIP)
+		neighbors = append(neighbors, peerProfile.LoopbackIP)
 	}
 	return neighbors
 }

@@ -108,7 +108,6 @@ newtron/
 │   │   │   └── specs/
 │   │   │       ├── topology.json
 │   │   │       ├── network.json
-│   │   │       ├── site.json
 │   │   │       ├── platforms.json
 │   │   │       └── profiles/
 │   │   │           ├── spine1.json
@@ -175,10 +174,9 @@ reproducible and version-controlled.
 
 Each topology directory contains the full set of newtron specs:
 - `topology.json` — devices, interfaces, links (newtlab + newtron read)
-- `network.json` — services, filters, VPNs, regions (newtron reads)
-- `site.json` — site topology, route reflectors (newtron reads)
+- `network.json` — services, filters, VPNs, zones (newtron reads)
 - `platforms.json` — platform definitions with VM settings (newtlab reads)
-- `profiles/*.json` — per-device settings (newtlab writes ports, newtron reads)
+- `profiles/*.json` — per-device settings (newtlab writes ports, newtron reads; EVPN config includes route reflectors and cluster ID)
 
 ---
 

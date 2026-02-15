@@ -101,7 +101,7 @@ has everything it needs through its parent chain.
 ```
 Network
   ├── owns: specs (services, filters, VPNs, sites, platforms)
-  ├── methods: GetService(), GetFilterSpec(), GetRegion()
+  ├── methods: GetService(), GetFilter(), GetZone()
   │
   └── Device (parent: Network)
         ├── owns: profile, resolved config, Redis connections

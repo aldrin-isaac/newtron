@@ -11,10 +11,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
 
-var (
-	jsonOutput      bool
-	showBridgeStats bool
-)
+var jsonOutput bool
 
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -27,7 +24,6 @@ With a topology name, shows detailed status for that lab.
 
   newtlab status                      # all labs
   newtlab status 2node                # detailed view
-  newtlab status 2node --bridge-stats # include link connectivity
   newtlab status --json               # machine-readable output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,7 +42,6 @@ With a topology name, shows detailed status for that lab.
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
-	cmd.Flags().BoolVar(&showBridgeStats, "bridge-stats", false, "include link connectivity and traffic counters")
 	return cmd
 }
 
@@ -122,15 +117,7 @@ func showLabDetail(labName string) error {
 	// Link table
 	if len(state.Links) > 0 {
 		fmt.Println()
-		if showBridgeStats {
-			showLinkTableWithStats(labName, state)
-		} else {
-			lt := cli.NewTable("LINK", "A_PORT", "Z_PORT")
-			for _, link := range state.Links {
-				lt.Row(fmt.Sprintf("%s ↔ %s", link.A, link.Z), fmt.Sprintf("%d", link.APort), fmt.Sprintf("%d", link.ZPort))
-			}
-			lt.Flush()
-		}
+		showLinkTableWithStats(labName, state)
 	}
 
 	return nil

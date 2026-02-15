@@ -6,17 +6,16 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
-func TestGenerateServiceEntries_L2(t *testing.T) {
+func TestGenerateServiceEntries_EVPNBridged(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l2": {
-				ServiceType: spec.ServiceTypeL2,
+				ServiceType: spec.ServiceTypeEVPNBridged,
 				MACVPN:      "cust-mac",
-				VLAN:        100,
 			},
 		},
 		macvpn: map[string]*spec.MACVPNSpec{
-			"cust-mac": {L2VNI: 20100, ARPSuppression: true},
+			"cust-mac": {VlanID: 100, VNI: 20100, ARPSuppression: true},
 		},
 	}
 
@@ -35,11 +34,11 @@ func TestGenerateServiceEntries_L2(t *testing.T) {
 	assertEntry(t, entries, "NEWTRON_SERVICE_BINDING", "Ethernet0", "service_name", "customer-l2")
 }
 
-func TestGenerateServiceEntries_L3_NoVRF(t *testing.T) {
+func TestGenerateServiceEntries_Routed_NoVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"fabric-underlay": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeRouted,
 			},
 		},
 	}
@@ -77,11 +76,11 @@ func TestGenerateServiceEntries_L3_NoVRF(t *testing.T) {
 	}
 }
 
-func TestGenerateServiceEntries_L3_WithVRF(t *testing.T) {
+func TestGenerateServiceEntries_EVPNRouted_WithVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l3": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeInterface,
 				IPVPN:       "customer-vpn",
 			},
@@ -131,24 +130,21 @@ func TestGenerateServiceEntries_L3_WithVRF(t *testing.T) {
 	}
 }
 
-func TestGenerateServiceEntries_IRB(t *testing.T) {
+func TestGenerateServiceEntries_EVPNIRB(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-irb": {
-				ServiceType:    spec.ServiceTypeIRB,
-				VRFType:        spec.VRFTypeInterface,
-				IPVPN:          "cust-vpn",
-				MACVPN:         "cust-mac",
-				VLAN:           100,
-				AnycastGateway: "10.1.100.1/24",
-				AnycastMAC:     "00:00:00:01:02:03",
+				ServiceType: spec.ServiceTypeEVPNIRB,
+				VRFType:     spec.VRFTypeInterface,
+				IPVPN:       "cust-vpn",
+				MACVPN:      "cust-mac",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
 			"cust-vpn": {L3VNI: 10001},
 		},
 		macvpn: map[string]*spec.MACVPNSpec{
-			"cust-mac": {L2VNI: 20100},
+			"cust-mac": {VlanID: 100, VNI: 20100, AnycastIP: "10.1.100.1/24", AnycastMAC: "00:00:00:01:02:03"},
 		},
 	}
 
@@ -181,7 +177,7 @@ func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"svc-with-acl": {
-				ServiceType:   spec.ServiceTypeL3,
+				ServiceType:   spec.ServiceTypeRouted,
 				IngressFilter: "test-filter",
 			},
 		},
@@ -239,7 +235,7 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
 					PeerAS:   "65001",
@@ -278,7 +274,7 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
 					PeerAS:   "65001",
@@ -314,7 +310,7 @@ func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
 					PeerAS:   "65001",
@@ -352,16 +348,15 @@ func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l3": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeInterface,
 				IPVPN:       "customer-vpn",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
 			"customer-vpn": {
-				L3VNI:    10001,
-				ImportRT: []string{"64512:10001"},
-				ExportRT: []string{"64512:10001", "64512:10002"},
+				L3VNI:        10001,
+				RouteTargets: []string{"64512:10001"},
 			},
 		},
 	}
@@ -381,8 +376,8 @@ func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
 			if e.Fields["route_target_import_evpn"] != "64512:10001" {
 				t.Errorf("route_target_import_evpn = %q, want 64512:10001", e.Fields["route_target_import_evpn"])
 			}
-			if e.Fields["route_target_export_evpn"] != "64512:10001,64512:10002" {
-				t.Errorf("route_target_export_evpn = %q, want 64512:10001,64512:10002", e.Fields["route_target_export_evpn"])
+			if e.Fields["route_target_export_evpn"] != "64512:10001" {
+				t.Errorf("route_target_export_evpn = %q, want 64512:10001", e.Fields["route_target_export_evpn"])
 			}
 			return
 		}
@@ -394,13 +389,13 @@ func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"shared-l3": {
-				ServiceType: spec.ServiceTypeL3,
+				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeShared,
 				IPVPN:       "shared-vpn",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
-			"shared-vpn": {L3VNI: 20001},
+			"shared-vpn": {L3VNI: 20001, VRF: "shared-vpn"},
 		},
 	}
 

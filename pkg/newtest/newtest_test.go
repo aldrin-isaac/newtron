@@ -1383,6 +1383,8 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionApplyQoS, ActionRemoveQoS, ActionConfigureSVI,
 		ActionBGPAddNeighbor, ActionBGPRemoveNeighbor,
 		ActionRefreshService, ActionCleanup,
+		ActionCreatePortChannel, ActionDeletePortChannel,
+		ActionAddPortChannelMember, ActionRemovePortChannelMember,
 	}
 
 	if len(executors) != len(allActions) {

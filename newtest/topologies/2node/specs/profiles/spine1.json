@@ -1,9 +1,11 @@
 {
     "mgmt_ip": "127.0.0.1",
     "loopback_ip": "10.0.0.1",
-    "site": "lab",
-    "is_route_reflector": true,
+    "zone": "amer",
     "platform": "sonic-vpp",
+    "evpn": {
+        "route_reflector": true
+    },
     "ssh_user": "admin",
     "ssh_pass": "YourPaSsWoRd",
     "ssh_port": 13001,

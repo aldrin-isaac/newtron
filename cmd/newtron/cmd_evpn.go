@@ -34,7 +34,7 @@ Examples:
   newtron evpn ipvpn list
   newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
   newtron evpn macvpn list
-  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x`,
+  newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --arp-suppress -x`,
 }
 
 // ============================================================================
@@ -222,7 +222,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all IP-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpns := app.net.Spec().IPVPN
+		ipvpns := app.net.Spec().IPVPNs
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(ipvpns)
@@ -233,19 +233,15 @@ var evpnIpvpnListCmd = &cobra.Command{
 			return nil
 		}
 
-		t := cli.NewTable("NAME", "L3VNI", "IMPORT RT", "EXPORT RT", "DESCRIPTION")
+		t := cli.NewTable("NAME", "L3VNI", "VRF", "ROUTE TARGETS", "DESCRIPTION")
 
 		for name, ipvpn := range ipvpns {
-			importRT := "-"
-			if len(ipvpn.ImportRT) > 0 {
-				importRT = strings.Join(ipvpn.ImportRT, ",")
-			}
-			exportRT := "-"
-			if len(ipvpn.ExportRT) > 0 {
-				exportRT = strings.Join(ipvpn.ExportRT, ",")
+			rt := "-"
+			if len(ipvpn.RouteTargets) > 0 {
+				rt = strings.Join(ipvpn.RouteTargets, ",")
 			}
 			desc := dash(ipvpn.Description)
-			t.Row(name, fmt.Sprintf("%d", ipvpn.L3VNI), importRT, exportRT, desc)
+			t.Row(name, fmt.Sprintf("%d", ipvpn.L3VNI), dash(ipvpn.VRF), rt, desc)
 		}
 		t.Flush()
 
@@ -273,11 +269,11 @@ var evpnIpvpnShowCmd = &cobra.Command{
 			fmt.Printf("Description: %s\n", ipvpn.Description)
 		}
 		fmt.Printf("L3VNI: %d\n", ipvpn.L3VNI)
-		if len(ipvpn.ImportRT) > 0 {
-			fmt.Printf("Import RT: %s\n", strings.Join(ipvpn.ImportRT, ", "))
+		if ipvpn.VRF != "" {
+			fmt.Printf("VRF: %s\n", ipvpn.VRF)
 		}
-		if len(ipvpn.ExportRT) > 0 {
-			fmt.Printf("Export RT: %s\n", strings.Join(ipvpn.ExportRT, ", "))
+		if len(ipvpn.RouteTargets) > 0 {
+			fmt.Printf("Route Targets: %s\n", strings.Join(ipvpn.RouteTargets, ", "))
 		}
 
 		return nil
@@ -285,10 +281,10 @@ var evpnIpvpnShowCmd = &cobra.Command{
 }
 
 var (
-	ipvpnL3VNI       int
-	ipvpnImportRT    string
-	ipvpnExportRT    string
-	ipvpnDescription string
+	ipvpnL3VNI        int
+	ipvpnRouteTargets string
+	ipvpnVRF          string
+	ipvpnDescription  string
 )
 
 var evpnIpvpnCreateCmd = &cobra.Command{
@@ -299,8 +295,8 @@ var evpnIpvpnCreateCmd = &cobra.Command{
 This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
-  newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65000:10001 --export-rt 65000:10001 -x`,
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 --vrf Vrf_cust -x
+  newtron evpn ipvpn create customer-vpn --l3vni 10001 --vrf Vrf_cust --route-targets 65000:10001 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -317,21 +313,19 @@ Examples:
 		ipvpnSpec := &spec.IPVPNSpec{
 			Description: ipvpnDescription,
 			L3VNI:       ipvpnL3VNI,
+			VRF:         ipvpnVRF,
 		}
-		if ipvpnImportRT != "" {
-			ipvpnSpec.ImportRT = strings.Split(ipvpnImportRT, ",")
-		}
-		if ipvpnExportRT != "" {
-			ipvpnSpec.ExportRT = strings.Split(ipvpnExportRT, ",")
+		if ipvpnRouteTargets != "" {
+			ipvpnSpec.RouteTargets = strings.Split(ipvpnRouteTargets, ",")
 		}
 
 		fmt.Printf("IP-VPN: %s\n", name)
 		fmt.Printf("  L3VNI: %d\n", ipvpnSpec.L3VNI)
-		if len(ipvpnSpec.ImportRT) > 0 {
-			fmt.Printf("  Import RT: %v\n", ipvpnSpec.ImportRT)
+		if ipvpnSpec.VRF != "" {
+			fmt.Printf("  VRF: %s\n", ipvpnSpec.VRF)
 		}
-		if len(ipvpnSpec.ExportRT) > 0 {
-			fmt.Printf("  Export RT: %v\n", ipvpnSpec.ExportRT)
+		if len(ipvpnSpec.RouteTargets) > 0 {
+			fmt.Printf("  Route Targets: %v\n", ipvpnSpec.RouteTargets)
 		}
 		if ipvpnSpec.Description != "" {
 			fmt.Printf("  Description: %s\n", ipvpnSpec.Description)
@@ -399,16 +393,14 @@ var evpnMacvpnCmd = &cobra.Command{
 	Short: "Manage MAC-VPN definitions (network.json)",
 	Long: `Manage MAC-VPN definitions in network.json.
 
-MAC-VPN defines L2 VPN parameters (L2VNI, ARP suppression) used by services
-and VLAN bindings. These are spec-level objects that do not require a device.
-
-Note: VLAN ID is NOT part of MAC-VPN. VLANs are local bridge domains that
-subscribe to a MAC-VPN via 'vlan bind-macvpn'.
+MAC-VPN defines L2 VPN parameters (VNI, VLAN, anycast gateway, ARP suppression)
+used by services and VLAN bindings. These are spec-level objects that do not
+require a device.
 
 Examples:
   newtron evpn macvpn list
   newtron evpn macvpn show servers-vlan100
-  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x
+  newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --arp-suppress -x
   newtron evpn macvpn delete servers-vlan100 -x`,
 }
 
@@ -416,7 +408,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all MAC-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		macvpns := app.net.Spec().MACVPN
+		macvpns := app.net.Spec().MACVPNs
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(macvpns)
@@ -427,7 +419,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 			return nil
 		}
 
-		t := cli.NewTable("NAME", "L2VNI", "ARP SUPPRESS", "DESCRIPTION")
+		t := cli.NewTable("NAME", "VNI", "VLAN ID", "ANYCAST IP", "ARP SUPPRESS", "DESCRIPTION")
 
 		for name, macvpn := range macvpns {
 			arpSuppress := "no"
@@ -435,7 +427,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 				arpSuppress = "yes"
 			}
 			desc := dash(macvpn.Description)
-			t.Row(name, fmt.Sprintf("%d", macvpn.L2VNI), arpSuppress, desc)
+			t.Row(name, fmt.Sprintf("%d", macvpn.VNI), fmt.Sprintf("%d", macvpn.VlanID), dash(macvpn.AnycastIP), arpSuppress, desc)
 		}
 		t.Flush()
 
@@ -462,7 +454,17 @@ var evpnMacvpnShowCmd = &cobra.Command{
 		if macvpn.Description != "" {
 			fmt.Printf("Description: %s\n", macvpn.Description)
 		}
-		fmt.Printf("L2VNI: %d\n", macvpn.L2VNI)
+		fmt.Printf("VNI: %d\n", macvpn.VNI)
+		fmt.Printf("VLAN ID: %d\n", macvpn.VlanID)
+		if macvpn.AnycastIP != "" {
+			fmt.Printf("Anycast IP: %s\n", macvpn.AnycastIP)
+		}
+		if macvpn.AnycastMAC != "" {
+			fmt.Printf("Anycast MAC: %s\n", macvpn.AnycastMAC)
+		}
+		if len(macvpn.RouteTargets) > 0 {
+			fmt.Printf("Route Targets: %s\n", strings.Join(macvpn.RouteTargets, ", "))
+		}
 		fmt.Printf("ARP Suppression: %v\n", macvpn.ARPSuppression)
 
 		return nil
@@ -470,7 +472,11 @@ var evpnMacvpnShowCmd = &cobra.Command{
 }
 
 var (
-	macvpnL2VNI          int
+	macvpnVNI            int
+	macvpnVlanID         int
+	macvpnAnycastIP      string
+	macvpnAnycastMAC     string
+	macvpnRouteTargets   string
 	macvpnARPSuppress    bool
 	macvpnDescription    string
 )
@@ -483,14 +489,14 @@ var evpnMacvpnCreateCmd = &cobra.Command{
 This is a spec authoring command that does not require a device connection.
 
 Examples:
-  newtron evpn macvpn create servers-vlan100 --l2vni 1100 -x
-  newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress --description "Server VLAN 100" -x`,
+  newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 -x
+  newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --anycast-ip 10.1.100.1/24 --arp-suppress -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		if macvpnL2VNI <= 0 {
-			return fmt.Errorf("--l2vni is required")
+		if macvpnVNI <= 0 {
+			return fmt.Errorf("--vni is required")
 		}
 
 		authCtx := auth.NewContext().WithResource(name)
@@ -500,12 +506,30 @@ Examples:
 
 		macvpnSpec := &spec.MACVPNSpec{
 			Description:    macvpnDescription,
-			L2VNI:          macvpnL2VNI,
+			VNI:            macvpnVNI,
+			VlanID:         macvpnVlanID,
+			AnycastIP:      macvpnAnycastIP,
+			AnycastMAC:     macvpnAnycastMAC,
 			ARPSuppression: macvpnARPSuppress,
+		}
+		if macvpnRouteTargets != "" {
+			macvpnSpec.RouteTargets = strings.Split(macvpnRouteTargets, ",")
 		}
 
 		fmt.Printf("MAC-VPN: %s\n", name)
-		fmt.Printf("  L2VNI: %d\n", macvpnSpec.L2VNI)
+		fmt.Printf("  VNI: %d\n", macvpnSpec.VNI)
+		if macvpnSpec.VlanID > 0 {
+			fmt.Printf("  VLAN ID: %d\n", macvpnSpec.VlanID)
+		}
+		if macvpnSpec.AnycastIP != "" {
+			fmt.Printf("  Anycast IP: %s\n", macvpnSpec.AnycastIP)
+		}
+		if macvpnSpec.AnycastMAC != "" {
+			fmt.Printf("  Anycast MAC: %s\n", macvpnSpec.AnycastMAC)
+		}
+		if len(macvpnSpec.RouteTargets) > 0 {
+			fmt.Printf("  Route Targets: %v\n", macvpnSpec.RouteTargets)
+		}
 		fmt.Printf("  ARP Suppression: %v\n", macvpnSpec.ARPSuppression)
 		if macvpnSpec.Description != "" {
 			fmt.Printf("  Description: %s\n", macvpnSpec.Description)
@@ -570,12 +594,16 @@ func init() {
 
 	// ipvpn create flags
 	evpnIpvpnCreateCmd.Flags().IntVar(&ipvpnL3VNI, "l3vni", 0, "L3VNI for the IP-VPN (required)")
-	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnImportRT, "import-rt", "", "Comma-separated import route targets")
-	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnExportRT, "export-rt", "", "Comma-separated export route targets")
+	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnRouteTargets, "route-targets", "", "Comma-separated route targets")
+	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnVRF, "vrf", "", "VRF name for the IP-VPN")
 	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnDescription, "description", "", "IP-VPN description")
 
 	// macvpn create flags
-	evpnMacvpnCreateCmd.Flags().IntVar(&macvpnL2VNI, "l2vni", 0, "L2VNI for the MAC-VPN (required)")
+	evpnMacvpnCreateCmd.Flags().IntVar(&macvpnVNI, "vni", 0, "VNI for the MAC-VPN (required)")
+	evpnMacvpnCreateCmd.Flags().IntVar(&macvpnVlanID, "vlan-id", 0, "VLAN ID for the MAC-VPN")
+	evpnMacvpnCreateCmd.Flags().StringVar(&macvpnAnycastIP, "anycast-ip", "", "Anycast gateway IP (CIDR)")
+	evpnMacvpnCreateCmd.Flags().StringVar(&macvpnAnycastMAC, "anycast-mac", "", "Anycast gateway MAC")
+	evpnMacvpnCreateCmd.Flags().StringVar(&macvpnRouteTargets, "route-targets", "", "Comma-separated route targets")
 	evpnMacvpnCreateCmd.Flags().BoolVar(&macvpnARPSuppress, "arp-suppress", false, "Enable ARP suppression")
 	evpnMacvpnCreateCmd.Flags().StringVar(&macvpnDescription, "description", "", "MAC-VPN description")
 

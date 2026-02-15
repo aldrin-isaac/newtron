@@ -65,8 +65,12 @@ var executors = map[StepAction]stepExecutor{
 	ActionConfigureSVI:       &configureSVIExecutor{},
 	ActionBGPAddNeighbor:     &bgpAddNeighborExecutor{},
 	ActionBGPRemoveNeighbor:  &bgpRemoveNeighborExecutor{},
-	ActionRefreshService:     &refreshServiceExecutor{},
-	ActionCleanup:            &cleanupExecutor{},
+	ActionRefreshService:          &refreshServiceExecutor{},
+	ActionCleanup:                 &cleanupExecutor{},
+	ActionCreatePortChannel:       &createPortChannelExecutor{},
+	ActionDeletePortChannel:       &deletePortChannelExecutor{},
+	ActionAddPortChannelMember:    &addPortChannelMemberExecutor{},
+	ActionRemovePortChannelMember: &removePortChannelMemberExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -114,6 +118,27 @@ func boolParam(params map[string]any, key string) bool {
 		return val == "true" || val == "1"
 	default:
 		return false
+	}
+}
+
+// strSliceParam extracts a string slice parameter from the step's Params map.
+// Handles []any (YAML default for lists) by converting each element to a string.
+func strSliceParam(params map[string]any, key string) []string {
+	v, ok := params[key]
+	if !ok {
+		return nil
+	}
+	switch val := v.(type) {
+	case []any:
+		result := make([]string, 0, len(val))
+		for _, item := range val {
+			result = append(result, fmt.Sprintf("%v", item))
+		}
+		return result
+	case []string:
+		return val
+	default:
+		return nil
 	}
 }
 
@@ -1148,7 +1173,7 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
-			return dev.MapL2VNI(ctx, vlanID, macvpnDef.L2VNI)
+			return dev.MapL2VNI(ctx, vlanID, macvpnDef.VNI)
 		})
 		if err != nil {
 			return nil, "", fmt.Errorf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err)
@@ -1415,5 +1440,95 @@ func (e *cleanupExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 			msg = fmt.Sprintf("cleanup: %d orphans removed (%d changes)", orphans, len(cs.Changes))
 		}
 		return cs, msg, nil
+	})
+}
+
+// ============================================================================
+// createPortChannelExecutor
+// ============================================================================
+
+type createPortChannelExecutor struct{}
+
+func (e *createPortChannelExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	pcName := strParam(step.Params, "name")
+	members := strSliceParam(step.Params, "members")
+	mtu := intParam(step.Params, "mtu")
+	minLinks := intParam(step.Params, "min_links")
+	fallback := boolParam(step.Params, "fallback")
+	fastRate := boolParam(step.Params, "fast_rate")
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.CreatePortChannel(ctx, pcName, node.PortChannelConfig{
+				Members:  members,
+				MTU:      mtu,
+				MinLinks: minLinks,
+				Fallback: fallback,
+				FastRate: fastRate,
+			})
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("create-portchannel %s: %s", pcName, err)
+		}
+		return cs, fmt.Sprintf("created PortChannel %s (%d changes)", pcName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// deletePortChannelExecutor
+// ============================================================================
+
+type deletePortChannelExecutor struct{}
+
+func (e *deletePortChannelExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	pcName := strParam(step.Params, "name")
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.DeletePortChannel(ctx, pcName)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("delete-portchannel %s: %s", pcName, err)
+		}
+		return cs, fmt.Sprintf("deleted PortChannel %s (%d changes)", pcName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// addPortChannelMemberExecutor
+// ============================================================================
+
+type addPortChannelMemberExecutor struct{}
+
+func (e *addPortChannelMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	pcName := strParam(step.Params, "name")
+	member := strParam(step.Params, "member")
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.AddPortChannelMember(ctx, pcName, member)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("add-portchannel-member %s %s: %s", pcName, member, err)
+		}
+		return cs, fmt.Sprintf("added %s to PortChannel %s (%d changes)", member, pcName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// removePortChannelMemberExecutor
+// ============================================================================
+
+type removePortChannelMemberExecutor struct{}
+
+func (e *removePortChannelMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	pcName := strParam(step.Params, "name")
+	member := strParam(step.Params, "member")
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.RemovePortChannelMember(ctx, pcName, member)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-portchannel-member %s %s: %s", pcName, member, err)
+		}
+		return cs, fmt.Sprintf("removed %s from PortChannel %s (%d changes)", member, pcName, len(cs.Changes)), nil
 	})
 }

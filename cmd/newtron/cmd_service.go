@@ -21,7 +21,6 @@ var (
 	svcCreateIPVPN         string
 	svcCreateMACVPN        string
 	svcCreateVRFType       string
-	svcCreateVLAN          int
 	svcCreateQoSPolicy     string
 	svcCreateIngressFilter string
 	svcCreateEgressFilter  string
@@ -106,70 +105,96 @@ var serviceShowCmd = &cobra.Command{
 		}
 
 		switch svc.ServiceType {
-		case spec.ServiceTypeL2:
-			fmt.Println("L2 Configuration:")
+		case spec.ServiceTypeEVPNIRB:
+			fmt.Println("EVPN IRB Configuration:")
 			if svc.MACVPN != "" {
 				fmt.Printf("  MAC-VPN: %s\n", svc.MACVPN)
 			}
-			if svc.VLAN > 0 {
-				fmt.Printf("  VLAN: %d\n", svc.VLAN)
+			if macvpnDef != nil {
+				if macvpnDef.VlanID > 0 {
+					fmt.Printf("  VLAN: %d\n", macvpnDef.VlanID)
+				}
+				if macvpnDef.VNI > 0 {
+					fmt.Printf("  L2VNI: %d\n", macvpnDef.VNI)
+				}
+				if macvpnDef.AnycastIP != "" {
+					fmt.Printf("  Anycast Gateway: %s\n", macvpnDef.AnycastIP)
+				}
+				if macvpnDef.AnycastMAC != "" {
+					fmt.Printf("  Anycast MAC: %s\n", macvpnDef.AnycastMAC)
+				}
+				if macvpnDef.ARPSuppression {
+					fmt.Println("  ARP Suppression: enabled")
+				}
+			}
+			if svc.IPVPN != "" {
+				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
+			}
+			if ipvpnDef != nil {
+				if ipvpnDef.VRF != "" {
+					fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
+				}
+				if ipvpnDef.L3VNI > 0 {
+					fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
+				}
+				if len(ipvpnDef.RouteTargets) > 0 {
+					fmt.Printf("  Route Targets: %v\n", ipvpnDef.RouteTargets)
+				}
+			}
+			if svc.VRFType != "" {
+				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
+			}
+
+		case spec.ServiceTypeEVPNBridged:
+			fmt.Println("EVPN Bridged Configuration:")
+			if svc.MACVPN != "" {
+				fmt.Printf("  MAC-VPN: %s\n", svc.MACVPN)
 			}
 			if macvpnDef != nil {
-				if macvpnDef.L2VNI > 0 {
-					fmt.Printf("  L2VNI: %d\n", macvpnDef.L2VNI)
+				if macvpnDef.VlanID > 0 {
+					fmt.Printf("  VLAN: %d\n", macvpnDef.VlanID)
+				}
+				if macvpnDef.VNI > 0 {
+					fmt.Printf("  L2VNI: %d\n", macvpnDef.VNI)
 				}
 				if macvpnDef.ARPSuppression {
 					fmt.Println("  ARP Suppression: enabled")
 				}
 			}
 
-		case spec.ServiceTypeL3:
-			fmt.Println("L3 Configuration:")
-			if svc.VRFType != "" {
-				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
-			}
+		case spec.ServiceTypeEVPNRouted:
+			fmt.Println("EVPN Routed Configuration:")
 			if svc.IPVPN != "" {
 				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
 			}
 			if ipvpnDef != nil {
+				if ipvpnDef.VRF != "" {
+					fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
+				}
 				if ipvpnDef.L3VNI > 0 {
 					fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
 				}
-				if len(ipvpnDef.ImportRT) > 0 {
-					fmt.Printf("  Import RT: %v\n", ipvpnDef.ImportRT)
-				}
-				if len(ipvpnDef.ExportRT) > 0 {
-					fmt.Printf("  Export RT: %v\n", ipvpnDef.ExportRT)
-				}
-			}
-
-		case spec.ServiceTypeIRB:
-			fmt.Println("IRB Configuration:")
-			if svc.MACVPN != "" {
-				fmt.Printf("  MAC-VPN: %s\n", svc.MACVPN)
-			}
-			if svc.VLAN > 0 {
-				fmt.Printf("  VLAN: %d\n", svc.VLAN)
-			}
-			if macvpnDef != nil {
-				if macvpnDef.L2VNI > 0 {
-					fmt.Printf("  L2VNI: %d\n", macvpnDef.L2VNI)
+				if len(ipvpnDef.RouteTargets) > 0 {
+					fmt.Printf("  Route Targets: %v\n", ipvpnDef.RouteTargets)
 				}
 			}
 			if svc.VRFType != "" {
 				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
-			if svc.IPVPN != "" {
-				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
+
+		case spec.ServiceTypeIRB:
+			fmt.Println("Local IRB Configuration:")
+			if svc.VRFType != "" {
+				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
-			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
-			}
-			if svc.AnycastGateway != "" {
-				fmt.Printf("  Anycast Gateway: %s\n", svc.AnycastGateway)
-			}
-			if svc.AnycastMAC != "" {
-				fmt.Printf("  Anycast MAC: %s\n", svc.AnycastMAC)
+
+		case spec.ServiceTypeBridged:
+			fmt.Println("Local L2 Configuration:")
+
+		case spec.ServiceTypeRouted:
+			fmt.Println("Local L3 Configuration:")
+			if svc.VRFType != "" {
+				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
 		}
 
@@ -411,30 +436,37 @@ This is a spec-level command (no device needed). The service can then be
 applied to interfaces on devices.
 
 Flags:
-  --type          Service type: l2, l3, or irb (required)
+  --type          Service type (required): evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed
   --ipvpn         IP-VPN reference name
   --macvpn        MAC-VPN reference name
   --vrf-type      VRF instantiation: "interface" or "shared"
-  --vlan          VLAN ID for L2/IRB services
   --qos-policy    QoS policy name
   --ingress-filter Ingress filter spec name
   --egress-filter  Egress filter spec name
-  --unnumbered    Use unnumbered interface (L3)
   --description   Service description
 
 Examples:
-  newtron service create customer-l3 --type l3 --ipvpn cust-vpn --vrf-type shared --description "Customer L3 VPN"
-  newtron service create server-l2 --type l2 --macvpn servers --vlan 100
-  newtron service create fabric-irb --type irb --ipvpn fabric --macvpn fabric-l2 --vlan 200`,
+  newtron service create customer-l3 --type evpn-routed --ipvpn cust-vpn --vrf-type shared --description "Customer L3 VPN"
+  newtron service create server-l2 --type evpn-bridged --macvpn servers
+  newtron service create fabric-irb --type evpn-irb --ipvpn fabric --macvpn fabric-l2`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serviceName := args[0]
 
 		if svcCreateType == "" {
-			return fmt.Errorf("--type is required (l2, l3, irb)")
+			return fmt.Errorf("--type is required (evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed)")
 		}
-		if svcCreateType != spec.ServiceTypeL2 && svcCreateType != spec.ServiceTypeL3 && svcCreateType != spec.ServiceTypeIRB {
-			return fmt.Errorf("--type must be 'l2', 'l3', or 'irb', got '%s'", svcCreateType)
+
+		validTypes := map[string]bool{
+			spec.ServiceTypeEVPNIRB:     true,
+			spec.ServiceTypeEVPNBridged: true,
+			spec.ServiceTypeEVPNRouted:  true,
+			spec.ServiceTypeIRB:         true,
+			spec.ServiceTypeBridged:     true,
+			spec.ServiceTypeRouted:      true,
+		}
+		if !validTypes[svcCreateType] {
+			return fmt.Errorf("--type must be one of: evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed; got '%s'", svcCreateType)
 		}
 
 		// Check if already exists
@@ -453,7 +485,6 @@ Examples:
 			IPVPN:         svcCreateIPVPN,
 			MACVPN:        svcCreateMACVPN,
 			VRFType:       svcCreateVRFType,
-			VLAN:          svcCreateVLAN,
 			QoSPolicy:     svcCreateQoSPolicy,
 			IngressFilter: svcCreateIngressFilter,
 			EgressFilter:  svcCreateEgressFilter,
@@ -521,11 +552,10 @@ func init() {
 	serviceApplyCmd.Flags().StringVar(&applyIP, "ip", "", "IP address for L3 service (CIDR notation)")
 	serviceApplyCmd.Flags().IntVar(&peerAS, "peer-as", 0, "BGP peer AS number")
 
-	serviceCreateCmd.Flags().StringVar(&svcCreateType, "type", "", "Service type (l2, l3, irb)")
+	serviceCreateCmd.Flags().StringVar(&svcCreateType, "type", "", "Service type (evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed)")
 	serviceCreateCmd.Flags().StringVar(&svcCreateIPVPN, "ipvpn", "", "IP-VPN reference name")
 	serviceCreateCmd.Flags().StringVar(&svcCreateMACVPN, "macvpn", "", "MAC-VPN reference name")
 	serviceCreateCmd.Flags().StringVar(&svcCreateVRFType, "vrf-type", "", "VRF instantiation type (interface, shared)")
-	serviceCreateCmd.Flags().IntVar(&svcCreateVLAN, "vlan", 0, "VLAN ID for L2/IRB services")
 	serviceCreateCmd.Flags().StringVar(&svcCreateQoSPolicy, "qos-policy", "", "QoS policy name")
 	serviceCreateCmd.Flags().StringVar(&svcCreateIngressFilter, "ingress-filter", "", "Ingress filter spec name")
 	serviceCreateCmd.Flags().StringVar(&svcCreateEgressFilter, "egress-filter", "", "Egress filter spec name")

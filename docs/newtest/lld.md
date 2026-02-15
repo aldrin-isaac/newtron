@@ -26,7 +26,7 @@ newtron/
 │       ├── scenario.go           # Scenario, Step, StepAction, ExpectBlock types
 │       ├── parser.go             # ParseScenario, ValidateScenario, TopologicalSort
 │       ├── runner.go             # Runner, RunOptions, Run, iterateScenarios
-│       ├── steps.go              # StepExecutor interface, 38 executor implementations
+│       ├── steps.go              # StepExecutor interface, 42 executor implementations
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
 │       ├── progress.go           # ProgressReporter, ConsoleProgress, StateReporter
@@ -144,6 +144,10 @@ const (
     ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
     ActionRefreshService     StepAction = "refresh-service"
     ActionCleanup            StepAction = "cleanup"
+    ActionCreatePortChannel  StepAction = "create-portchannel"
+    ActionDeletePortChannel  StepAction = "delete-portchannel"
+    ActionAddPortChannelMember    StepAction = "add-portchannel-member"
+    ActionRemovePortChannelMember StepAction = "remove-portchannel-member"
 )
 ```
 
@@ -269,6 +273,10 @@ execution rather than upfront.
 | `refresh-service` | `devices`, `interface` |
 | `cleanup` | `devices` |
 | `remove-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
+| `create-portchannel` | `devices`, `params.name`, `params.members` (list) |
+| `delete-portchannel` | `devices`, `params.name` |
+| `add-portchannel-member` | `devices`, `params.name`, `params.member` |
+| `remove-portchannel-member` | `devices`, `params.name`, `params.member` |
 
 ---
 
@@ -590,7 +598,7 @@ than writing directly. The Runner merges ChangeSets after each step.
 ### 7.2 Executor Dispatch
 
 ```go
-var executors = map[StepAction]stepExecutor{ ... } // 38 entries
+var executors = map[StepAction]stepExecutor{ ... } // 42 entries
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
@@ -667,6 +675,10 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 | 36 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
 | 37 | `refreshServiceExecutor` | `refresh-service` | `Interface.RefreshService()` |
 | 38 | `cleanupExecutor` | `cleanup` | `Device.Cleanup()` |
+| 39 | `createPortChannelExecutor` | `create-portchannel` | `Device.CreatePortChannel()` |
+| 40 | `deletePortChannelExecutor` | `delete-portchannel` | `Device.DeletePortChannel()` |
+| 41 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Device.AddPortChannelMember()` |
+| 42 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Device.RemovePortChannelMember()` |
 
 ### 7.6 Verification Executor Detail
 

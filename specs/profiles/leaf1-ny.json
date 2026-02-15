@@ -1,6 +1,9 @@
 {
   "mgmt_ip": "172.17.190.37",
   "loopback_ip": "10.0.0.10",
-  "site": "ny",
-  "platform": "accton-as7726-32x"
+  "zone": "amer",
+  "platform": "accton-as7726-32x",
+  "evpn": {
+    "peers": ["spine1-ny", "spine2-ny"]
+  }
 }

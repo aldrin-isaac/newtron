@@ -60,7 +60,7 @@ func (sp *testSpecProvider) GetQoSProfile(name string) (*spec.QoSProfile, error)
 	return nil, fmt.Errorf("qos profile %q not found", name)
 }
 
-func (sp *testSpecProvider) GetFilterSpec(name string) (*spec.FilterSpec, error) {
+func (sp *testSpecProvider) GetFilter(name string) (*spec.FilterSpec, error) {
 	if s, ok := sp.filterSpecs[name]; ok {
 		return s, nil
 	}
@@ -88,9 +88,9 @@ func (sp *testSpecProvider) GetRoutePolicy(name string) (*spec.RoutePolicy, erro
 	return nil, fmt.Errorf("route policy %q not found", name)
 }
 
-func (sp *testSpecProvider) FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec) {
+func (sp *testSpecProvider) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 	for name, m := range sp.macvpn {
-		if m.L2VNI == vni {
+		if m.VNI == vni {
 			return name, m
 		}
 	}
@@ -120,8 +120,7 @@ func testDevice() *Node {
 			ASNumber:   64512,
 			RouterID:   "10.255.0.1",
 			LoopbackIP: "10.255.0.1",
-			Region:     "us-east",
-			Site:       "dc1",
+			Zone:     "us-east",
 		},
 		interfaces: make(map[string]*Interface),
 		configDB: &sonic.ConfigDB{

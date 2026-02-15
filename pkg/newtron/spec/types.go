@@ -41,11 +41,9 @@ type NetworkSpecFile struct {
 	SuperUsers   []string                     `json:"super_users"`
 	UserGroups   map[string][]string          `json:"user_groups"`   // Group name → user list
 	Permissions  map[string][]string          `json:"permissions"`   // Action → allowed groups
-	GenericAlias map[string]string            `json:"generic_alias"` // Global aliases
-	Regions      map[string]*RegionSpec       `json:"regions"`
+	Zones      map[string]*ZoneSpec       `json:"zones"`
 	PrefixLists  map[string][]string          `json:"prefix_lists"`
-	FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
-	Policers     map[string]*PolicerSpec       `json:"policers"`
+	Filters      map[string]*FilterSpec       `json:"filters"`
 	QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
 	QoSProfiles  map[string]*QoSProfile       `json:"qos_profiles,omitempty"` // Legacy — kept for backward compat
 
@@ -53,47 +51,51 @@ type NetworkSpecFile struct {
 	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
 
 	// VPN definitions (referenced by services)
-	IPVPN  map[string]*IPVPNSpec  `json:"ipvpn"`  // IP-VPN (L3VNI, route targets)
-	MACVPN map[string]*MACVPNSpec `json:"macvpn"` // MAC-VPN (VLAN, L2VNI)
+	IPVPNs  map[string]*IPVPNSpec  `json:"ipvpns"`  // IP-VPN (L3VNI, route targets)
+	MACVPNs map[string]*MACVPNSpec `json:"macvpns"` // MAC-VPN (VLAN, L2VNI)
 
 	// Service definitions (reference ipvpn/macvpn by name)
 	Services map[string]*ServiceSpec `json:"services"`
 }
 
-// RegionSpec defines regional settings (AS number, defaults).
-type RegionSpec struct {
+// ZoneSpec defines zone settings (AS number, defaults).
+type ZoneSpec struct {
 	ASNumber     int                 `json:"as_number"`
-	ASName       string              `json:"as_name,omitempty"`   // TODO(v4): not consumed — use as BGP AS name in DEVICE_METADATA or description fields
 	PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
-	GenericAlias map[string]string   `json:"generic_alias,omitempty"`
 }
 
 // ============================================================================
 // VPN Definitions
 // ============================================================================
 
-// IPVPNSpec defines IP-VPN parameters for L3 routing (Type-5 routes).
+// IPVPNSpec defines IP-VPN parameters for L3 routing (EVPN Type-5 routes).
 // Referenced by services via the "ipvpn" field.
 //
-// For vrf_type "shared": VRF name = ipvpn definition name
-// For vrf_type "interface": VRF name = {service}-{interface}
+// VRF is the explicit SONiC VRF name used on-device.
+// For vrf_type "shared": VRF name = IPVPNSpec.VRF
+// For vrf_type "interface": VRF name = derived from service + interface
 type IPVPNSpec struct {
-	Description string   `json:"description,omitempty"`
-	L3VNI       int      `json:"l3_vni"`
-	ImportRT    []string `json:"import_rt"`
-	ExportRT    []string `json:"export_rt"`
+	Description  string   `json:"description,omitempty"`
+	VRF          string   `json:"vrf"`
+	L3VNI        int      `json:"l3vni"`
+	RouteTargets []string `json:"route_targets"`
 }
 
-// MACVPNSpec defines MAC-VPN parameters for L2 bridging (Type-2 routes).
+// MACVPNSpec defines MAC-VPN parameters for L2 bridging (EVPN Type-2 routes).
 // Referenced by services via the "macvpn" field.
 //
-// Note: VLAN ID is NOT part of MAC-VPN — it's a local bridge domain concept.
-// VLAN IDs live in ServiceSpec (for L2/IRB services) or are specified
-// when binding a VLAN to a MAC-VPN via `vlan bind-macvpn`.
+// VlanID is the local bridge domain ID, identical on all devices where
+// this MAC-VPN is instantiated (opinionated choice for simplicity).
+// AnycastIP is the shared gateway IP configured on all leafs (EVPN
+// symmetric IRB anycast gateway). Omit for pure L2 (no routing).
 type MACVPNSpec struct {
-	Description    string `json:"description,omitempty"`
-	L2VNI          int    `json:"l2_vni"`
-	ARPSuppression bool   `json:"arp_suppression,omitempty"`
+	Description    string   `json:"description,omitempty"`
+	VlanID         int      `json:"vlan_id"`
+	VNI            int      `json:"vni"`
+	AnycastIP      string   `json:"anycast_ip,omitempty"`
+	AnycastMAC     string   `json:"anycast_mac,omitempty"`
+	RouteTargets   []string `json:"route_targets,omitempty"`
+	ARPSuppression bool     `json:"arp_suppression,omitempty"`
 }
 
 // ============================================================================
@@ -102,38 +104,37 @@ type MACVPNSpec struct {
 
 // ServiceSpec defines an interface service type.
 //
-// Services bundle VPN references, routing, filters, QoS, and permissions
-// into a reusable template that can be applied to interfaces.
+// Services are the composition layer — they bind overlay references (ipvpn,
+// macvpn) with routing, filters, QoS, and permissions into a reusable
+// template that can be applied to interfaces.
 //
-// Service Types:
-//   - "l3":  L3 routed interface (requires ipvpn, optional vrf_type)
-//   - "l2":  L2 bridged interface (requires macvpn)
-//   - "irb": Integrated routing and bridging (requires both ipvpn and macvpn)
+// Service Types (overlay-backed — all config from specs):
+//   - "evpn-irb":     EVPN IRB with anycast gateway (requires ipvpn + macvpn)
+//   - "evpn-bridged": EVPN L2 stretch, no routing (requires macvpn)
+//   - "evpn-routed":  EVPN L3VPN, no VLAN (requires ipvpn)
 //
-// VRF Instantiation (vrf_type):
+// Service Types (local — params at apply time):
+//   - "irb":     Local VLAN + SVI gateway (--vlan and --ip at apply time)
+//   - "bridged": Local VLAN, L2 only (--vlan at apply time)
+//   - "routed":  Direct L3 interface (--ip at apply time)
+//
+// VRF Instantiation (vrf_type, overlay types only):
 //   - "interface": Creates per-interface VRF named {service}-{interface}
-//   - "shared":    Uses shared VRF named after the ipvpn definition
-//   - (omitted):   No VRF, uses global routing table (for l3 without EVPN)
+//   - "shared":    Uses VRF named in IPVPNSpec.VRF
+//   - (omitted):   No VRF, uses global routing table
 type ServiceSpec struct {
 	Description string `json:"description"`
-	ServiceType string `json:"service_type"` // l2, l3, irb
+	ServiceType string `json:"service_type"` // evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed
 
 	// VPN references (names from ipvpn/macvpn sections)
 	IPVPN   string `json:"ipvpn,omitempty"`    // Reference to ipvpn definition
 	MACVPN  string `json:"macvpn,omitempty"`   // Reference to macvpn definition
 	VRFType string `json:"vrf_type,omitempty"` // "interface" or "shared"
 
-	// VLAN ID for L2/IRB services (local bridge domain)
-	VLAN int `json:"vlan,omitempty"`
-
 	// Routing protocol specification
 	Routing *RoutingSpec `json:"routing,omitempty"`
 
-	// Anycast gateway (for IRB services)
-	AnycastGateway string `json:"anycast_gateway,omitempty"` // e.g., "10.1.100.1/24"
-	AnycastMAC     string `json:"anycast_mac,omitempty"`     // e.g., "00:00:00:01:02:03"
-
-	// Filters (references to filter_specs)
+	// Filters (references to filters)
 	IngressFilter string `json:"ingress_filter,omitempty"`
 	EgressFilter  string `json:"egress_filter,omitempty"`
 
@@ -175,7 +176,7 @@ type RoutingSpec struct {
 // Referenced by services via ingress_filter/egress_filter fields.
 type FilterSpec struct {
 	Description string        `json:"description"`
-	Type        string        `json:"type"` // L3, L3V6
+	Type        string        `json:"type"` // ipv4, ipv6 (translated to L3, L3V6 for CONFIG_DB)
 	Rules       []*FilterRule `json:"rules"`
 }
 
@@ -192,15 +193,7 @@ type FilterRule struct {
 	DSCP          string `json:"dscp,omitempty"`
 	Action        string `json:"action"` // permit, deny
 	CoS           string `json:"cos,omitempty"`
-	Policer       string `json:"policer,omitempty"`
 	Log           bool   `json:"log,omitempty"` // TODO(v4): not consumed — implement ACL_RULE log action (requires SONiC logging infrastructure)
-}
-
-// PolicerSpec defines a rate limiter.
-type PolicerSpec struct {
-	Bandwidth string `json:"bandwidth"`        // e.g., "10m", "1g"
-	Burst     string `json:"burst"`            // e.g., "1m"
-	Action    string `json:"action,omitempty"` // TODO(v4): not consumed — implement policer exceed action (drop vs remark) in POLICER table
 }
 
 // ============================================================================
@@ -234,25 +227,6 @@ type RoutePolicySet struct {
 	LocalPref int    `json:"local_pref,omitempty"` // Set LOCAL_PREF
 	Community string `json:"community,omitempty"`  // Set/add community
 	MED       int    `json:"med,omitempty"`        // Set MED
-}
-
-// ============================================================================
-// Site Specification
-// ============================================================================
-
-// SiteSpecFile represents the site specification file (site.json).
-// Sites define topology (which devices are route reflectors).
-// Device details (loopback_ip, etc.) come from individual profiles.
-type SiteSpecFile struct {
-	Version string              `json:"version"`
-	Sites   map[string]*SiteSpec `json:"sites"`
-}
-
-// SiteSpec contains site-specific topology specification.
-type SiteSpec struct {
-	Region          string   `json:"region"`                     // Region this site belongs to
-	RouteReflectors []string `json:"route_reflectors,omitempty"` // Device names that are RRs
-	ClusterID       string   `json:"cluster_id,omitempty"`       // BGP RR cluster ID; used by topology provisioner, falls back to loopback IP
 }
 
 // ============================================================================
@@ -310,6 +284,13 @@ type VMCredentials struct {
 // Device Profile
 // ============================================================================
 
+// EVPNConfig defines EVPN overlay peering for a device profile.
+type EVPNConfig struct {
+	Peers          []string `json:"peers,omitempty"`
+	RouteReflector bool     `json:"route_reflector,omitempty"`
+	ClusterID      string   `json:"cluster_id,omitempty"`
+}
+
 // DeviceProfile contains per-device specification.
 // This is the minimal set of device-specific data; everything else
 // is inherited from region/global or derived at runtime.
@@ -317,17 +298,18 @@ type DeviceProfile struct {
 	// REQUIRED - must be specified
 	MgmtIP     string `json:"mgmt_ip"`
 	LoopbackIP string `json:"loopback_ip"`
-	Site       string `json:"site"` // Site name - region is derived from site.json
+	Zone     string `json:"zone"` // Zone name (must exist in network.json zones)
+
+	// OPTIONAL - EVPN overlay peering
+	EVPN *EVPNConfig `json:"evpn,omitempty"`
 
 	// OPTIONAL OVERRIDES - if set, override region/global values
-	ASNumber         *int `json:"as_number,omitempty"`
-	IsRouteReflector bool `json:"is_route_reflector,omitempty"`
+	ASNumber *int `json:"as_number,omitempty"`
 
 	// OPTIONAL - device-specific
 	MAC             string              `json:"mac,omitempty"`
 	Platform        string              `json:"platform,omitempty"`
 	VLANPortMapping map[int][]string    `json:"vlan_port_mapping,omitempty"` // TODO(v4): not consumed — implement VLAN-to-port mapping for pre-provisioned access ports
-	GenericAlias    map[string]string   `json:"generic_alias,omitempty"`
 	PrefixLists     map[string][]string `json:"prefix_lists,omitempty"`
 
 	// OPTIONAL - SSH access for Redis tunnel
@@ -353,25 +335,24 @@ type ResolvedProfile struct {
 	DeviceName string
 	MgmtIP     string
 	LoopbackIP string
-	Region     string
-	Site       string
+	Zone     string
 	Platform   string
 
 	// Resolved from inheritance
 	ASNumber         int
 	IsRouteReflector bool
+	ClusterID        string // RR cluster ID; from profile EVPN config or defaults to loopback IP
 
 	// Derived at runtime
 	RouterID     string   // = LoopbackIP
 	VTEPSourceIP string   // = LoopbackIP
-	BGPNeighbors []string // From site route_reflectors → lookup loopback IPs
+	BGPNeighbors []string // From profile EVPN peers → lookup loopback IPs
 
 	// From profile (optional)
 	MAC string
 
 	// Merged maps (profile > region > global)
-	GenericAlias map[string]string
-	PrefixLists  map[string][]string
+	PrefixLists map[string][]string
 
 	// SSH access (for Redis tunnel)
 	SSHUser string
@@ -391,15 +372,18 @@ type ResolvedProfile struct {
 
 // ServiceType constants
 const (
-	ServiceTypeL2  = "l2"
-	ServiceTypeL3  = "l3"
-	ServiceTypeIRB = "irb"
+	ServiceTypeEVPNIRB     = "evpn-irb"     // L2+L3 overlay: requires ipvpn + macvpn
+	ServiceTypeEVPNBridged = "evpn-bridged"  // L2 overlay: requires macvpn
+	ServiceTypeEVPNRouted  = "evpn-routed"   // L3 overlay: requires ipvpn
+	ServiceTypeIRB         = "irb"           // Local L2+L3: vlan + ip at apply time
+	ServiceTypeBridged     = "bridged"       // Local L2: vlan at apply time
+	ServiceTypeRouted      = "routed"        // Local L3: ip at apply time
 )
 
 // VRFType constants
 const (
 	VRFTypeInterface = "interface" // Per-interface VRF: {service}-{interface}
-	VRFTypeShared    = "shared"    // Shared VRF: name = ipvpn definition name
+	VRFTypeShared    = "shared"    // Shared VRF: name from ipvpn.vrf field
 )
 
 // RoutingProtocol constants

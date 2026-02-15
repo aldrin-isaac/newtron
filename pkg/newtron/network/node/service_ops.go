@@ -15,7 +15,8 @@ import (
 
 // ApplyServiceOpts contains options for applying a service to an interface.
 type ApplyServiceOpts struct {
-	IPAddress string // IP address for L3 services (e.g., "10.1.1.1/30")
+	IPAddress string // IP address for routed/IRB services (e.g., "10.1.1.1/30")
+	VLAN      int    // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
 	PeerAS    int    // BGP peer AS number (for services with routing.peer_as="request")
 }
 
@@ -66,25 +67,47 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// Service-type specific validation
 	switch svc.ServiceType {
-	case spec.ServiceTypeL3:
+	case spec.ServiceTypeEVPNIRB:
+		if macvpnDef == nil {
+			return nil, fmt.Errorf("evpn-irb service requires macvpn reference")
+		}
+		if ipvpnDef == nil {
+			return nil, fmt.Errorf("evpn-irb service requires ipvpn reference")
+		}
+	case spec.ServiceTypeEVPNBridged:
+		if macvpnDef == nil {
+			return nil, fmt.Errorf("evpn-bridged service requires macvpn reference")
+		}
+	case spec.ServiceTypeEVPNRouted:
+		if ipvpnDef == nil {
+			return nil, fmt.Errorf("evpn-routed service requires ipvpn reference")
+		}
 		if opts.IPAddress == "" {
-			return nil, fmt.Errorf("L3 service requires IP address")
+			return nil, fmt.Errorf("evpn-routed service requires IP address")
 		}
 		if !util.IsValidIPv4CIDR(opts.IPAddress) {
 			return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
 		}
-	case spec.ServiceTypeL2, spec.ServiceTypeIRB:
-		if svc.VLAN == 0 {
-			return nil, fmt.Errorf("L2/IRB service requires 'vlan' field in service definition")
+	case spec.ServiceTypeRouted:
+		if opts.IPAddress == "" {
+			return nil, fmt.Errorf("routed service requires IP address")
 		}
-		if macvpnDef == nil {
-			return nil, fmt.Errorf("L2/IRB service requires macvpn reference")
+		if !util.IsValidIPv4CIDR(opts.IPAddress) {
+			return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
+		}
+	case spec.ServiceTypeIRB:
+		if opts.VLAN == 0 {
+			return nil, fmt.Errorf("local irb service requires --vlan parameter")
+		}
+	case spec.ServiceTypeBridged:
+		if opts.VLAN == 0 {
+			return nil, fmt.Errorf("local bridged service requires --vlan parameter")
 		}
 	}
 
 	// EVPN preconditions
-	hasEVPN := (ipvpnDef != nil && ipvpnDef.L3VNI > 0) || (macvpnDef != nil && macvpnDef.L2VNI > 0)
-	if hasEVPN {
+	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
+	if isOverlay {
 		if !n.VTEPExists() {
 			return nil, fmt.Errorf("EVPN requires VTEP configuration")
 		}
@@ -95,12 +118,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// Filter preconditions
 	if svc.IngressFilter != "" {
-		if _, err := i.Node().GetFilterSpec(svc.IngressFilter); err != nil {
+		if _, err := i.Node().GetFilter(svc.IngressFilter); err != nil {
 			return nil, fmt.Errorf("ingress filter '%s' not found", svc.IngressFilter)
 		}
 	}
 	if svc.EgressFilter != "" {
-		if _, err := i.Node().GetFilterSpec(svc.EgressFilter); err != nil {
+		if _, err := i.Node().GetFilter(svc.EgressFilter); err != nil {
 			return nil, fmt.Errorf("egress filter '%s' not found", svc.EgressFilter)
 		}
 	}
@@ -123,6 +146,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		ServiceName:   serviceName,
 		InterfaceName: i.name,
 		IPAddress:     opts.IPAddress,
+		VLAN:          opts.VLAN,
 		PeerAS:        opts.PeerAS,
 		LocalAS:       resolved.ASNumber,
 		UnderlayASN:   resolved.UnderlayASN,
@@ -132,8 +156,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		return nil, fmt.Errorf("generating service entries: %w", err)
 	}
 
-	// Determine VLAN ID for idempotency checks
-	vlanID := svc.VLAN
+	// Determine VLAN ID for idempotency checks (overlay from macvpn, local from opts)
+	vlanID := 0
+	if macvpnDef != nil {
+		vlanID = macvpnDef.VlanID
+	} else if opts.VLAN > 0 {
+		vlanID = opts.VLAN
+	}
 
 	// Build change set with idempotency filtering.
 	// The shared generator always emits all entries (for topology provisioner's
@@ -161,11 +190,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		// Skip shared VRF + L3VNI + RT entries if VRF already exists
 		case e.Table == "VRF" && svc.VRFType == spec.VRFTypeShared && n.VRFExists(e.Key):
 			continue
-		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vrf"] == svc.IPVPN &&
-			svc.VRFType == spec.VRFTypeShared && n.VRFExists(svc.IPVPN):
+		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vrf"] != "" &&
+			svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && n.VRFExists(ipvpnDef.VRF):
 			continue
 		case (e.Table == "BGP_GLOBALS_AF" || e.Table == "BGP_EVPN_VNI") &&
-			svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" && n.VRFExists(svc.IPVPN):
+			svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && n.VRFExists(ipvpnDef.VRF):
 			continue
 
 		// Replace ACL entries with expanded version (prefix list Cartesian product + interface merging)
@@ -186,7 +215,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				if aclName == egressACLName {
 					filterName = svc.EgressFilter
 				}
-				filterSpec, _ := i.Node().GetFilterSpec(filterName)
+				filterSpec, _ := i.Node().GetFilter(filterName)
 				if filterSpec != nil {
 					i.addACLRulesFromFilterSpec(cs, aclName, filterSpec)
 				}
@@ -235,7 +264,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	case spec.VRFTypeInterface:
 		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
 	case spec.VRFTypeShared:
-		vrfName = svc.IPVPN
+		if ipvpnDef != nil {
+			vrfName = ipvpnDef.VRF
+		}
 	}
 
 	// Record service binding with extra fields
@@ -308,8 +339,10 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 	vrfName := ""
 	if svc.VRFType == spec.VRFTypeInterface {
 		vrfName = util.DeriveVRFName(svc.VRFType, svc.Description, i.name)
-	} else if svc.VRFType == spec.VRFTypeShared {
-		vrfName = svc.IPVPN
+	} else if svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
+		if def, err := i.Node().GetIPVPN(svc.IPVPN); err == nil {
+			vrfName = def.VRF
+		}
 	}
 	vrfKey := "default"
 	if vrfName != "" {
@@ -736,9 +769,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// be cleaned up when no service bindings reference the ipvpn anymore.
 		if svc != nil && svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
 			if depCheck.IsLastIPVPNUser(svc.IPVPN) {
-				sharedVRF := svc.IPVPN
+				sharedVRF := ""
+				if ipvpnDef != nil {
+					sharedVRF = ipvpnDef.VRF
+				}
 
-				if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
+				if sharedVRF != "" && ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
 					vniKey := fmt.Sprintf("%s|%d", sharedVRF, ipvpnDef.L3VNI)
 					cs.Add("BGP_EVPN_VNI", vniKey, ChangeDelete, nil, nil)
 
@@ -749,7 +785,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 					cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
 				}
 
-				cs.Add("VRF", sharedVRF, ChangeDelete, nil, nil)
+				if sharedVRF != "" {
+					cs.Add("VRF", sharedVRF, ChangeDelete, nil, nil)
+				}
 			}
 		}
 	}
@@ -758,10 +796,11 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-VLAN resources (delete only if last VLAN member)
 	// =========================================================================
 
-	if svc != nil && macvpnDef != nil {
-		switch svc.ServiceType {
-		case spec.ServiceTypeL2, spec.ServiceTypeIRB:
-			vlanID := svc.VLAN
+	if svc != nil && macvpnDef != nil && macvpnDef.VlanID > 0 {
+		hasL2 := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
+			svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
+		if hasL2 {
+			vlanID := macvpnDef.VlanID
 			vlanName := fmt.Sprintf("Vlan%d", vlanID)
 
 			// Always remove this interface's VLAN membership
@@ -772,10 +811,11 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			if depCheck.IsLastVLANMember(vlanID) {
 				// Last member - clean up all VLAN-related config
 
-				// SVI (for IRB)
-				if svc.ServiceType == spec.ServiceTypeIRB {
-					if svc.AnycastGateway != "" {
-						sviIPKey := fmt.Sprintf("%s|%s", vlanName, svc.AnycastGateway)
+				// SVI (for IRB types)
+				hasIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
+				if hasIRB {
+					if macvpnDef.AnycastIP != "" {
+						sviIPKey := fmt.Sprintf("%s|%s", vlanName, macvpnDef.AnycastIP)
 						cs.Add("VLAN_INTERFACE", sviIPKey, ChangeDelete, nil, nil)
 					}
 					cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil, nil)
@@ -786,9 +826,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 					cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeDelete, nil, nil)
 				}
 
-				// L2VNI mapping
-				if macvpnDef.L2VNI > 0 {
-					mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.L2VNI, vlanName)
+				// VNI mapping
+				if macvpnDef.VNI > 0 {
+					mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.VNI, vlanName)
 					cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
 				}
 

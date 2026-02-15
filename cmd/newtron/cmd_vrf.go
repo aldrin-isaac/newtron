@@ -383,11 +383,11 @@ Examples:
 
 		fmt.Printf("IP-VPN: %s\n", ipvpnName)
 		fmt.Printf("  L3VNI: %d\n", ipvpnDef.L3VNI)
-		if len(ipvpnDef.ImportRT) > 0 {
-			fmt.Printf("  Import RT: %v\n", ipvpnDef.ImportRT)
+		if ipvpnDef.VRF != "" {
+			fmt.Printf("  VRF: %s\n", ipvpnDef.VRF)
 		}
-		if len(ipvpnDef.ExportRT) > 0 {
-			fmt.Printf("  Export RT: %v\n", ipvpnDef.ExportRT)
+		if len(ipvpnDef.RouteTargets) > 0 {
+			fmt.Printf("  Route Targets: %v\n", ipvpnDef.RouteTargets)
 		}
 		fmt.Println()
 

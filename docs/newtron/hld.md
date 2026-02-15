@@ -39,7 +39,7 @@ Specs describe **what you want** - they are declarative, abstract, and policy-dr
 |----------|-------------|
 | **Nature** | Declarative - describes desired state |
 | **Location** | `specs/` directory, `pkg/newtron/spec` package |
-| **Format** | JSON files (network.json, site.json, profiles/*.json) |
+| **Format** | JSON files (network.json, profiles/*.json) |
 | **Content** | Service definitions, filter policies, VPN parameters |
 | **Lifecycle** | Created by network architects, versioned in git |
 
@@ -226,11 +226,10 @@ A related principle: **whatever configuration can be right-shifted to the interf
 |                         Network                                   |
 |  (top-level object - owns all specs)                             |
 |                                                                   |
-|  - NetworkSpecFile (services, filters, regions, permissions)     |
-|  - SiteSpecFile (site topology, route reflector names)           |
+|  - NetworkSpecFile (services, filters, zones, permissions)     |
 |  - PlatformSpecFile (hardware platform definitions)              |
 |                                                                   |
-|  Methods: GetService(), GetFilterSpec(), GetRegion(), etc.       |
+|  Methods: GetService(), GetFilter(), GetZone(), etc.       |
 +------------------------------------------------------------------+
          |
          | creates (with parent reference)
@@ -456,8 +455,7 @@ Loads and resolves specifications from JSON files.
 **Spec Types:**
 | Type | Description |
 |------|-------------|
-| `NetworkSpecFile` | Services, filters, VPNs, regions, permissions |
-| `SiteSpecFile` | Site topology, route reflector assignments |
+| `NetworkSpecFile` | Services, filters, VPNs, zones, permissions |
 | `PlatformSpecFile` | Hardware platform definitions (HWSKU, ports) |
 | `TopologySpecFile` | (optional) Topology: devices, interfaces, service bindings, links |
 | `DeviceProfile` | Per-device settings (mgmt_ip, loopback_ip, site, ssh_user, ssh_pass) |
@@ -1416,8 +1414,7 @@ The `routing` section declares routing intent:
 ```
 /etc/newtron/
 +-- specs/
-|   +-- network.json      # Services, filters, VPNs, regions
-|   +-- site.json         # Site topology
+|   +-- network.json      # Services, filters, VPNs, zones
 |   +-- platforms.json    # Hardware platform definitions
 |   +-- topology.json     # (optional) Topology spec for automated provisioning
 |   +-- profiles/         # Per-device profiles
@@ -1432,8 +1429,8 @@ The `routing` section declares routing intent:
 |------|--------|---------|
 | `loopback_ip` | Device profile | BGP router-id, VTEP source |
 | `mgmt_ip` | Device profile | Redis connection (or SSH tunnel target) |
-| `as_number` | Region (or profile override) | BGP local AS |
-| `route_reflectors` | site.json | BGP neighbor derivation |
+| `as_number` | Zone (or profile override) | BGP local AS |
+| `route_reflectors` | Device profile EVPN config | BGP neighbor derivation |
 | `ssh_user` / `ssh_pass` | Device profile | SSH tunnel for Redis access |
 
 ### 9.3 PlatformSpec Auto-Generation
@@ -1449,28 +1446,28 @@ Device.GeneratePlatformSpec()
 
 This should be run at least on first connect to a new device model, and can be used to prime the spec system for a new hardware platform.
 
-### 9.4 SiteSpec ClusterID
-The `SiteSpec` struct gains a `cluster_id` field for BGP route reflector cluster ID:
+### 9.4 ClusterID Configuration
+BGP route reflector cluster ID is configured in the device profile's `evpn` section:
 
 | Field | Description |
 |-------|-------------|
 | `cluster_id` | BGP RR cluster-id. If not set, defaults to the spine's loopback IP. |
 
-Route reflector configuration reads `cluster_id` from SiteSpec. If not set, it defaults to the spine's loopback IP.
+Route reflector configuration reads `cluster_id` from the device profile's EVPN config. If not set, it defaults to the spine's loopback IP.
 
 ### 9.5 Spec Inheritance
 
 ```
 Global (network.json)
     | overrides
-Region (network.json -> regions.{name})
+Zone (network.json -> zones.{name})
     | overrides
 Device Profile (profiles/{device}.json)
     | resolves to
 ResolvedProfile (runtime)
 ```
 
-| Field | Global | Region | Profile | Resolved |
+| Field | Global | Zone | Profile | Resolved |
 |-------|--------|--------|---------|----------|
 | `as_number` | - | 64512 | (not set) | **64512** |
 | `as_number` | - | 64512 | 65535 | **65535** |
@@ -1846,8 +1843,7 @@ The system maintains this separation to enable:
 
 | Type | File | Purpose |
 |------|------|---------|
-| `NetworkSpecFile` | `network.json` | Global network settings: services, filters, VPNs, regions, prefix lists |
-| `SiteSpecFile` | `site.json` | Site topology: which devices are route reflectors |
+| `NetworkSpecFile` | `network.json` | Global network settings: services, filters, VPNs, zones, prefix lists |
 | `PlatformSpecFile` | `platforms.json` | Hardware definitions: HWSKU, port counts, breakout modes |
 | `TopologySpecFile` | `topology.json` | (optional) Devices, interfaces, service bindings, links |
 | `DeviceProfile` | `profiles/{name}.json` | Per-device settings: IPs, site membership, SSH credentials, overrides |
@@ -1883,8 +1879,8 @@ The system maintains this separation to enable:
 
 | Term | Definition |
 |------|------------|
-| **Inheritance Chain** | Resolution order: Profile > Region > Global. First non-empty value wins. |
-| **Override** | A value in a profile that replaces the inherited region/global value. |
+| **Inheritance Chain** | Resolution order: Profile > Zone > Global. First non-empty value wins. |
+| **Override** | A value in a profile that replaces the inherited zone/global value. |
 | **Derived Value** | A value computed at runtime (e.g., BGP neighbors from route reflector loopbacks). |
 
 ### Connection Types
@@ -1937,7 +1933,7 @@ The system maintains this separation to enable:
 | **Prefix-Set** | IP prefix list used in route-map match clauses. Managed via PREFIX_SET table. |
 | **Community-Set** | BGP community list for matching or setting community attributes. Managed via COMMUNITY_SET table. |
 | **Redistribute** | Injection of connected or static routes into BGP. Controlled per-service via `redistribute` flag with opinionated defaults. |
-| **Cluster-ID** | BGP route reflector cluster identifier. Prevents routing loops when multiple RRs exist in the same cluster. Set in SiteSpec or defaults to spine loopback. |
+| **Cluster-ID** | BGP route reflector cluster identifier. Prevents routing loops when multiple RRs exist in the same cluster. Set in device profile EVPN config or defaults to spine loopback. |
 
 ### Composite Mode
 | Term | Definition |

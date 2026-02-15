@@ -42,8 +42,6 @@ type ConfigDB struct {
 	PortQoSMap        map[string]PortQoSMapEntry    `json:"PORT_QOS_MAP,omitempty"`
 	DSCPToTCMap       map[string]map[string]string  `json:"DSCP_TO_TC_MAP,omitempty"`
 	TCToQueueMap      map[string]map[string]string  `json:"TC_TO_QUEUE_MAP,omitempty"`
-	Policer           map[string]PolicerEntry       `json:"POLICER,omitempty"`
-
 	// v3: BGP management framework (frrcfgd) tables
 	RouteRedistribute  map[string]RouteRedistributeEntry  `json:"ROUTE_REDISTRIBUTE,omitempty"`
 	RouteMap           map[string]RouteMapEntry           `json:"ROUTE_MAP,omitempty"`
@@ -299,18 +297,6 @@ type PortQoSMapEntry struct {
 	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
 }
 
-// PolicerEntry represents a rate limiter
-type PolicerEntry struct {
-	MeterType    string `json:"meter_type,omitempty"`
-	Mode         string `json:"mode,omitempty"`
-	CIR          string `json:"cir,omitempty"`
-	CBS          string `json:"cbs,omitempty"`
-	PIR          string `json:"pir,omitempty"`
-	PBS          string `json:"pbs,omitempty"`
-	GreenAction  string `json:"green_action,omitempty"`
-	YellowAction string `json:"yellow_action,omitempty"`
-	RedAction    string `json:"red_action,omitempty"`
-}
 
 // ============================================================================
 // v3: frrcfgd table entry types

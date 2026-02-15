@@ -76,8 +76,7 @@ static spec directories checked into the repo — no generation needed.
 ```
 newtest/topologies/2node/specs/
 ├── topology.json      # Devices, interfaces, links
-├── network.json       # Services, filters, VPNs, regions
-├── site.json          # Site topology, route reflectors
+├── network.json       # Services, filters, VPNs, zones
 ├── platforms.json     # Platform definitions with VM settings
 └── profiles/
     ├── spine1.json
@@ -93,7 +92,6 @@ health checks, baseline application.
 newtest/topologies/4node/specs/
 ├── topology.json
 ├── network.json
-├── site.json
 ├── platforms.json
 └── profiles/
     ├── spine1.json
@@ -461,7 +459,43 @@ anything else -> `Set(property, value)`.
     vlan_id: 100
 ```
 
-### 12. VRF Operations
+### 12. PortChannel (LAG) Operations
+
+```yaml
+# Create a PortChannel with members
+- name: create-lag
+  action: create-portchannel
+  devices: [leaf1]
+  params:
+    name: PortChannel100
+    members: [Ethernet1, Ethernet2]
+    min_links: 1
+
+# Add a member to existing PortChannel
+- name: add-member
+  action: add-portchannel-member
+  devices: [leaf1]
+  params:
+    name: PortChannel100
+    member: Ethernet3
+
+# Remove a member from a PortChannel
+- name: remove-member
+  action: remove-portchannel-member
+  devices: [leaf1]
+  params:
+    name: PortChannel100
+    member: Ethernet1
+
+# Delete the PortChannel
+- name: delete-lag
+  action: delete-portchannel
+  devices: [leaf1]
+  params:
+    name: PortChannel100
+```
+
+### 13. VRF Operations
 
 ```yaml
 # Create a VRF
@@ -488,7 +522,7 @@ anything else -> `Set(property, value)`.
     vrf: Vrf_test
 ```
 
-### 13. EVPN and VPN Operations
+### 14. EVPN and VPN Operations
 
 ```yaml
 # Set up EVPN overlay (VTEP + NVO + BGP EVPN in one step)
@@ -538,7 +572,7 @@ anything else -> `Set(property, value)`.
     ip: "10.1.50.1/24"
 ```
 
-### 13a. VRF Interface Binding
+### 14a. VRF Interface Binding
 
 ```yaml
 # Add an interface to a VRF
@@ -558,7 +592,7 @@ anything else -> `Set(property, value)`.
     interface: Ethernet2
 ```
 
-### 13b. Static Routes
+### 14b. Static Routes
 
 ```yaml
 # Add a static route
@@ -580,7 +614,7 @@ anything else -> `Set(property, value)`.
     prefix: "10.99.0.0/24"
 ```
 
-### 13c. VLAN Member Removal
+### 14c. VLAN Member Removal
 
 ```yaml
 # Remove an interface from a VLAN
@@ -592,7 +626,7 @@ anything else -> `Set(property, value)`.
     interface: Ethernet2
 ```
 
-### 13d. QoS Operations
+### 14d. QoS Operations
 
 ```yaml
 # Apply a QoS policy to an interface (looks up policy from network spec)
@@ -611,7 +645,7 @@ anything else -> `Set(property, value)`.
     interface: Ethernet1
 ```
 
-### 14. BGP Neighbor Operations
+### 15. BGP Neighbor Operations
 
 ```yaml
 # Add loopback-based BGP neighbor
@@ -639,7 +673,7 @@ anything else -> `Set(property, value)`.
     neighbor_ip: "10.0.0.99"
 ```
 
-### 15. Service Refresh and Cleanup
+### 16. Service Refresh and Cleanup
 
 ```yaml
 # Refresh a service (re-apply without remove)
@@ -654,7 +688,7 @@ anything else -> `Set(property, value)`.
   devices: [leaf1]
 ```
 
-### 16. Incremental Suite Scenarios
+### 17. Incremental Suite Scenarios
 
 Scenarios in a suite directory use `requires` to declare dependencies:
 

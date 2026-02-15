@@ -438,7 +438,7 @@ Examples:
 			}
 
 			fmt.Printf("MAC-VPN: %s\n", macvpnName)
-			fmt.Printf("  L2VNI: %d\n", macvpnDef.L2VNI)
+			fmt.Printf("  VNI: %d\n", macvpnDef.VNI)
 			fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
 			fmt.Println()
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -38,7 +37,7 @@ var filterListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all filter templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filterNames := app.net.ListFilterSpecs()
+		filterNames := app.net.ListFilters()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(filterNames)
@@ -54,7 +53,7 @@ var filterListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "TYPE", "RULES", "DESCRIPTION")
 
 		for _, name := range filterNames {
-			fs, err := app.net.GetFilterSpec(name)
+			fs, err := app.net.GetFilter(name)
 			if err != nil {
 				continue
 			}
@@ -73,7 +72,7 @@ var filterShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		fs, err := app.net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilter(filterName)
 		if err != nil {
 			return err
 		}
@@ -95,7 +94,7 @@ var filterShowCmd = &cobra.Command{
 			return nil
 		}
 
-		t := cli.NewTable("SEQ", "ACTION", "SRC_IP", "DST_IP", "PROTOCOL", "SRC_PORT", "DST_PORT", "DSCP", "POLICER").WithPrefix("  ")
+		t := cli.NewTable("SEQ", "ACTION", "SRC_IP", "DST_IP", "PROTOCOL", "SRC_PORT", "DST_PORT", "DSCP").WithPrefix("  ")
 
 		for _, r := range fs.Rules {
 			t.Row(
@@ -107,7 +106,6 @@ var filterShowCmd = &cobra.Command{
 				defaultStr(r.SrcPort, "-"),
 				defaultStr(r.DstPort, "-"),
 				defaultStr(r.DSCP, "-"),
-				defaultStr(r.Policer, "-"),
 			)
 		}
 		t.Flush()
@@ -136,15 +134,14 @@ Examples:
 		filterName := args[0]
 
 		if filterCreateType == "" {
-			return fmt.Errorf("--type is required (l3, l3v6)")
+			return fmt.Errorf("--type is required (ipv4, ipv6)")
 		}
-		filterCreateType = strings.ToUpper(filterCreateType)
-		if filterCreateType != "L3" && filterCreateType != "L3V6" {
-			return fmt.Errorf("--type must be 'l3' or 'l3v6', got '%s'", strings.ToLower(filterCreateType))
+		if filterCreateType != "ipv4" && filterCreateType != "ipv6" {
+			return fmt.Errorf("--type must be 'ipv4' or 'ipv6'")
 		}
 
 		// Check if already exists
-		if _, err := app.net.GetFilterSpec(filterName); err == nil {
+		if _, err := app.net.GetFilter(filterName); err == nil {
 			return fmt.Errorf("filter '%s' already exists", filterName)
 		}
 
@@ -166,7 +163,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilter(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 
@@ -189,7 +186,7 @@ Examples:
 		filterName := args[0]
 
 		// Verify it exists
-		if _, err := app.net.GetFilterSpec(filterName); err != nil {
+		if _, err := app.net.GetFilter(filterName); err != nil {
 			return err
 		}
 
@@ -205,7 +202,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteFilterSpec(filterName); err != nil {
+		if err := app.net.DeleteFilter(filterName); err != nil {
 			return err
 		}
 
@@ -225,7 +222,6 @@ var (
 	filterRuleDSCP          string
 	filterRuleSrcPrefixList string
 	filterRuleDstPrefixList string
-	filterRulePolicer       string
 )
 
 var filterAddRuleCmd = &cobra.Command{
@@ -239,7 +235,7 @@ Priority determines rule evaluation order (lower = matched first).
 Examples:
   newtron filter add-rule customer-ingress --priority 100 --action permit --src-ip 10.0.0.0/8
   newtron filter add-rule customer-ingress --priority 200 --action deny --protocol tcp --dst-port 22
-  newtron filter add-rule customer-ingress --priority 300 --action permit --src-prefix-list rfc1918 --policer rate-1g`,
+  newtron filter add-rule customer-ingress --priority 300 --action permit --src-prefix-list rfc1918`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
@@ -259,7 +255,7 @@ Examples:
 			return err
 		}
 
-		fs, err := app.net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilter(filterName)
 		if err != nil {
 			return err
 		}
@@ -282,7 +278,6 @@ Examples:
 			DSCP:          filterRuleDSCP,
 			SrcPrefixList: filterRuleSrcPrefixList,
 			DstPrefixList: filterRuleDstPrefixList,
-			Policer:       filterRulePolicer,
 		}
 
 		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
@@ -299,7 +294,7 @@ Examples:
 			return fs.Rules[i].Sequence < fs.Rules[j].Sequence
 		})
 
-		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilter(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 
@@ -329,7 +324,7 @@ Examples:
 			return err
 		}
 
-		fs, err := app.net.GetFilterSpec(filterName)
+		fs, err := app.net.GetFilter(filterName)
 		if err != nil {
 			return err
 		}
@@ -358,7 +353,7 @@ Examples:
 
 		fs.Rules = newRules
 
-		if err := app.net.SaveFilterSpec(filterName, fs); err != nil {
+		if err := app.net.SaveFilter(filterName, fs); err != nil {
 			return fmt.Errorf("saving filter: %w", err)
 		}
 
@@ -381,8 +376,6 @@ func init() {
 	filterAddRuleCmd.Flags().StringVar(&filterRuleDSCP, "dscp", "", "DSCP value")
 	filterAddRuleCmd.Flags().StringVar(&filterRuleSrcPrefixList, "src-prefix-list", "", "Source prefix list name")
 	filterAddRuleCmd.Flags().StringVar(&filterRuleDstPrefixList, "dst-prefix-list", "", "Destination prefix list name")
-	filterAddRuleCmd.Flags().StringVar(&filterRulePolicer, "policer", "", "Policer name")
-
 	filterCmd.AddCommand(filterListCmd)
 	filterCmd.AddCommand(filterShowCmd)
 	filterCmd.AddCommand(filterCreateCmd)

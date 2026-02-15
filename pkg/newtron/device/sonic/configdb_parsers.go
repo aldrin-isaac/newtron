@@ -226,19 +226,6 @@ func init() {
 				TCToQueueMap: vals["tc_to_queue_map"],
 			}
 		},
-		"POLICER": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.Policer[entry] = PolicerEntry{
-				MeterType:    vals["meter_type"],
-				Mode:         vals["mode"],
-				CIR:          vals["cir"],
-				CBS:          vals["cbs"],
-				PIR:          vals["pir"],
-				PBS:          vals["pbs"],
-				GreenAction:  vals["green_action"],
-				YellowAction: vals["yellow_action"],
-				RedAction:    vals["red_action"],
-			}
-		},
 		"NEWTRON_SERVICE_BINDING": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.NewtronServiceBinding[entry] = ServiceBindingEntry{
 				ServiceName: vals["service_name"],

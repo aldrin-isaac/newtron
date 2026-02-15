@@ -1,0 +1,98 @@
+name: portchannel-lifecycle
+description: "PortChannel create/member-add/member-remove/delete lifecycle"
+topology: 2node
+platform: sonic-vpp
+requires: [provision]
+
+steps:
+  - name: create-portchannel
+    action: create-portchannel
+    devices: [leaf1]
+    params:
+      name: PortChannel100
+      members: [Ethernet1, Ethernet2]
+      min_links: 1
+
+  - name: verify-portchannel-exists
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL
+    key: PortChannel100
+    expect:
+      exists: true
+
+  - name: verify-member-eth1
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet1"
+    expect:
+      exists: true
+
+  - name: verify-member-eth2
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet2"
+    expect:
+      exists: true
+
+  - name: remove-member-eth2
+    action: remove-portchannel-member
+    devices: [leaf1]
+    params:
+      name: PortChannel100
+      member: Ethernet2
+
+  - name: verify-member-eth2-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet2"
+    expect:
+      exists: false
+
+  - name: verify-member-eth1-still-present
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet1"
+    expect:
+      exists: true
+
+  - name: add-member-eth2-back
+    action: add-portchannel-member
+    devices: [leaf1]
+    params:
+      name: PortChannel100
+      member: Ethernet2
+
+  - name: verify-member-eth2-readded
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet2"
+    expect:
+      exists: true
+
+  - name: delete-portchannel
+    action: delete-portchannel
+    devices: [leaf1]
+    params:
+      name: PortChannel100
+
+  - name: verify-portchannel-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL
+    key: PortChannel100
+    expect:
+      exists: false
+
+  - name: verify-members-removed
+    action: verify-config-db
+    devices: [leaf1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel100|Ethernet1"
+    expect:
+      exists: false

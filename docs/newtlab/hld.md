@@ -22,8 +22,7 @@ profiles with SSH and console ports so newtron can connect.
 │  ├── topology.json    ← newtlab reads: devices, links, newtlab settings │
 │  ├── platforms.json   ← newtlab reads: VM defaults (image, memory)    │
 │  ├── profiles/*.json  ← newtlab reads/writes: VM overrides, ports     │
-│  ├── network.json     ← newtron reads: services, VPNs, filters      │
-│  └── site.json        ← newtron reads: site topology                │
+│  └── network.json     ← newtron reads: services, VPNs, filters      │
 └─────────────────────────────────────────────────────────────────────┘
          │                                    │
          ▼                                    ▼
@@ -219,10 +218,14 @@ newtlab reads per-device overrides and writes runtime ports after deployment:
 {
   "mgmt_ip": "127.0.0.1",
   "loopback_ip": "10.0.0.1",
-  "site": "lab-site",
+  "zone": "amer",
   "platform": "sonic-vpp",
   "ssh_user": "admin",
   "ssh_pass": "YourPaSsWoRd",
+  "evpn": {
+    "peers": ["10.0.0.2", "10.0.0.3"],
+    "route_reflector": true
+  },
   "vm_memory": 8192,
   "vm_host": "server-a",
   "ssh_port": 40000,
@@ -448,7 +451,7 @@ Example with link_port_base=20000 and 2 hosts:
 The local bridge also listens on a Unix socket (`bridge.sock`) for backward
 compatibility with single-host deployments.
 
-**Stats aggregation:** `newtlab status --bridge-stats` queries all bridge processes
+**Stats aggregation:** `newtlab status <topology>` queries all bridge processes
 and merges their counters into a single table. Local bridges are queried
 via Unix socket; remote bridges via TCP.
 
@@ -690,7 +693,6 @@ Commands:
   newtlab start <node>             Start a stopped VM
   newtlab provision -S <specs>     Provision devices via newtron
   newtlab list                     List all deployed labs
-  newtlab status --bridge-stats    Show VM status with link connectivity
 
 Options:
   -S, --specs <dir>     Spec directory (required for deploy/provision)
@@ -748,7 +750,7 @@ Options:
 - Per-link byte counters and session tracking
 - Multi-host bridge distribution: one bridge process per WorkerHost
 - TCP stats transport for remote bridge queries
-- `status --bridge-stats` flag aggregates counters from all hosts
+- `status` aggregates counters from all hosts (bridge stats shown by default)
 - Legacy `bridge_pid` preserved for backward compatibility
 
 ### Phase 5: Operations (done)

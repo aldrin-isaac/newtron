@@ -7,7 +7,7 @@ import (
 )
 
 // ============================================================================
-// Network ListServices/ListFilterSpecs Tests (minimal)
+// Network ListServices/ListFilters Tests (minimal)
 // ============================================================================
 
 func TestNetwork_ListServicesEmpty(t *testing.T) {
@@ -23,15 +23,15 @@ func TestNetwork_ListServicesEmpty(t *testing.T) {
 	}
 }
 
-func TestNetwork_ListFilterSpecsEmpty(t *testing.T) {
+func TestNetwork_ListFiltersEmpty(t *testing.T) {
 	// Test with minimal network (no specs loaded)
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
-			FilterSpecs: make(map[string]*spec.FilterSpec),
+			Filters: make(map[string]*spec.FilterSpec),
 		},
 	}
-	filters := n.ListFilterSpecs()
+	filters := n.ListFilters()
 	if len(filters) != 0 {
-		t.Errorf("ListFilterSpecs() = %v, want empty", filters)
+		t.Errorf("ListFilters() = %v, want empty", filters)
 	}
 }

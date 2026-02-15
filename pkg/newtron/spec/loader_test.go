@@ -18,7 +18,7 @@ func createTestSpecDir(t *testing.T) string {
 	networkJSON := `{
 		"version": "1.0",
 		"super_users": ["admin"],
-		"regions": {
+		"zones": {
 			"amer": {
 				"as_number": 65000
 			}
@@ -26,38 +26,32 @@ func createTestSpecDir(t *testing.T) string {
 		"prefix_lists": {
 			"rfc1918": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
 		},
-		"filter_specs": {
+		"filters": {
 			"test-filter": {
 				"description": "Test filter",
-				"type": "L3",
+				"type": "ipv4",
 				"rules": [
 					{"seq": 100, "action": "permit"}
 				]
 			}
 		},
-		"policers": {
-			"test-policer": {
-				"bandwidth": "10m",
-				"burst": "1m"
-			}
-		},
-		"ipvpn": {
+		"ipvpns": {
 			"customer-vpn": {
-				"l3_vni": 10001,
-				"import_rt": ["65000:100"],
-				"export_rt": ["65000:100"]
+				"l3vni": 10001,
+				"vrf": "Vrf_customer",
+				"route_targets": ["65000:100"]
 			}
 		},
-		"macvpn": {
+		"macvpns": {
 			"server-vlan": {
-				"vlan": 100,
-				"l2_vni": 1100
+				"vlan_id": 100,
+				"vni": 1100
 			}
 		},
 		"services": {
 			"customer-l3": {
 				"description": "Customer L3 service",
-				"service_type": "l3",
+				"service_type": "evpn-routed",
 				"ipvpn": "customer-vpn",
 				"vrf_type": "interface"
 			}
@@ -65,20 +59,6 @@ func createTestSpecDir(t *testing.T) string {
 	}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
 		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	// Create site.json
-	siteJSON := `{
-		"version": "1.0",
-		"sites": {
-			"ny": {
-				"region": "amer",
-				"route_reflectors": ["spine1-ny", "spine2-ny"]
-			}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
 	}
 
 	// Create platforms.json
@@ -106,19 +86,24 @@ func createTestSpecDir(t *testing.T) string {
 	profileJSON := `{
 		"mgmt_ip": "192.168.1.10",
 		"loopback_ip": "10.0.0.10",
-		"site": "ny",
-		"platform": "as7726"
+		"zone": "amer",
+		"platform": "as7726",
+		"evpn": {
+			"peers": ["spine1-ny", "spine2-ny"]
+		}
 	}`
 	if err := os.WriteFile(filepath.Join(profilesDir, "leaf1-ny.json"), []byte(profileJSON), 0644); err != nil {
 		t.Fatalf("Failed to write profile: %v", err)
 	}
 
-	// Create spine profile for route reflector lookup
+	// Create spine profile for EVPN peer lookup
 	spineProfileJSON := `{
 		"mgmt_ip": "192.168.1.1",
 		"loopback_ip": "10.0.0.1",
-		"site": "ny",
-		"is_route_reflector": true
+		"zone": "amer",
+		"evpn": {
+			"route_reflector": true
+		}
 	}`
 	if err := os.WriteFile(filepath.Join(profilesDir, "spine1-ny.json"), []byte(spineProfileJSON), 0644); err != nil {
 		t.Fatalf("Failed to write spine1 profile: %v", err)
@@ -147,17 +132,8 @@ func TestLoader_Load(t *testing.T) {
 	if network.Version != "1.0" {
 		t.Errorf("Network version = %q, want %q", network.Version, "1.0")
 	}
-	if len(network.Regions) != 1 {
-		t.Errorf("Expected 1 region, got %d", len(network.Regions))
-	}
-
-	// Check site spec loaded
-	site := loader.GetSite()
-	if site == nil {
-		t.Fatal("GetSite() returned nil")
-	}
-	if len(site.Sites) != 1 {
-		t.Errorf("Expected 1 site, got %d", len(site.Sites))
+	if len(network.Zones) != 1 {
+		t.Errorf("Expected 1 zone, got %d", len(network.Zones))
 	}
 
 	// Check platforms loaded
@@ -190,8 +166,8 @@ func TestLoader_LoadProfile(t *testing.T) {
 	if profile.LoopbackIP != "10.0.0.10" {
 		t.Errorf("LoopbackIP = %q, want %q", profile.LoopbackIP, "10.0.0.10")
 	}
-	if profile.Site != "ny" {
-		t.Errorf("Site = %q, want %q", profile.Site, "ny")
+	if profile.Zone != "amer" {
+		t.Errorf("Zone = %q, want %q", profile.Zone, "amer")
 	}
 }
 
@@ -241,8 +217,8 @@ func TestLoader_GetService(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetService() failed: %v", err)
 	}
-	if svc.ServiceType != "l3" {
-		t.Errorf("ServiceType = %q, want %q", svc.ServiceType, "l3")
+	if svc.ServiceType != "evpn-routed" {
+		t.Errorf("ServiceType = %q, want %q", svc.ServiceType, "evpn-routed")
 	}
 }
 
@@ -261,7 +237,7 @@ func TestLoader_GetService_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoader_GetFilterSpec(t *testing.T) {
+func TestLoader_GetFilter(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -270,12 +246,12 @@ func TestLoader_GetFilterSpec(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	filter, err := loader.GetFilterSpec("test-filter")
+	filter, err := loader.GetFilter("test-filter")
 	if err != nil {
-		t.Fatalf("GetFilterSpec() failed: %v", err)
+		t.Fatalf("GetFilter() failed: %v", err)
 	}
-	if filter.Type != "L3" {
-		t.Errorf("Filter type = %q, want %q", filter.Type, "L3")
+	if filter.Type != "ipv4" {
+		t.Errorf("Filter type = %q, want %q", filter.Type, "ipv4")
 	}
 }
 
@@ -330,24 +306,18 @@ func TestLoader_ValidationErrors(t *testing.T) {
 	// Create network.json with invalid service reference
 	networkJSON := `{
 		"version": "1.0",
-		"regions": {},
+		"zones": {},
 		"services": {
 			"bad-service": {
 				"description": "Bad service",
-				"service_type": "l3",
+				"service_type": "routed",
 				"ingress_filter": "nonexistent-filter"
 			}
 		},
-		"filter_specs": {}
+		"filters": {}
 	}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
 		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	// Create site.json
-	siteJSON := `{"version": "1.0", "sites": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
 	}
 
 	// Create platforms.json
@@ -377,26 +347,6 @@ func TestLoader_LoadMissingNetworkSpec(t *testing.T) {
 	}
 }
 
-func TestLoader_LoadMissingSiteSpec(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create network.json only
-	networkJSON := `{"version": "1.0", "regions": {}, "services": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
-		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	loader := NewLoader(tmpDir)
-	err = loader.Load()
-	if err == nil {
-		t.Error("Load() should fail when site.json is missing")
-	}
-}
-
 func TestLoader_LoadMissingPlatformSpec(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
 	if err != nil {
@@ -404,14 +354,10 @@ func TestLoader_LoadMissingPlatformSpec(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create network.json and site.json only
-	networkJSON := `{"version": "1.0", "regions": {}, "services": {}}`
+	// Create network.json only
+	networkJSON := `{"version": "1.0", "zones": {}, "services": {}}`
 	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
 		t.Fatalf("Failed to write network.json: %v", err)
-	}
-	siteJSON := `{"version": "1.0", "sites": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
 	}
 
 	loader := NewLoader(tmpDir)
@@ -440,20 +386,11 @@ func TestLoader_LoadInvalidJSON(t *testing.T) {
 			content: "invalid json {",
 		},
 		{
-			name:    "invalid site.json",
-			file:    "site.json",
-			content: "invalid json {",
-			setup: func() {
-				os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version": "1.0", "regions": {}, "services": {}}`), 0644)
-			},
-		},
-		{
 			name:    "invalid platforms.json",
 			file:    "platforms.json",
 			content: "invalid json {",
 			setup: func() {
-				os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version": "1.0", "regions": {}, "services": {}}`), 0644)
-				os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(`{"version": "1.0", "sites": {}}`), 0644)
+				os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(`{"version": "1.0", "zones": {}, "services": {}}`), 0644)
 			},
 		},
 	}
@@ -520,14 +457,14 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid egress filter",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l3",
+						"service_type": "routed",
 						"egress_filter": "nonexistent-filter"
 					}
 				},
-				"filter_specs": {}
+				"filters": {}
 			}`,
 			expectErr: true,
 		},
@@ -535,10 +472,10 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid qos profile",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l3",
+						"service_type": "routed",
 						"qos_profile": "nonexistent-qos"
 					}
 				},
@@ -550,14 +487,14 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid ipvpn reference",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l3",
+						"service_type": "evpn-routed",
 						"ipvpn": "nonexistent-vpn"
 					}
 				},
-				"ipvpn": {}
+				"ipvpns": {}
 			}`,
 			expectErr: true,
 		},
@@ -565,53 +502,56 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			name: "invalid macvpn reference",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l2",
+						"service_type": "evpn-bridged",
 						"macvpn": "nonexistent-vpn"
 					}
 				},
-				"macvpn": {}
+				"macvpns": {}
 			}`,
 			expectErr: true,
 		},
 		{
-			name: "l2 service without macvpn",
+			name: "evpn-bridged service without macvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l2"
+						"service_type": "evpn-bridged"
 					}
 				}
 			}`,
 			expectErr: true,
 		},
 		{
-			name: "l3 service with vrf_type but no ipvpn",
+			name: "evpn-routed service without ipvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "l3",
-						"vrf_type": "interface"
+						"service_type": "evpn-routed"
 					}
 				}
 			}`,
 			expectErr: true,
 		},
 		{
-			name: "irb service without macvpn",
+			name: "evpn-irb service without macvpn",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-service": {
-						"service_type": "irb"
+						"service_type": "evpn-irb",
+						"ipvpn": "some-vpn"
 					}
+				},
+				"ipvpns": {
+					"some-vpn": {"l3vni": 10001}
 				}
 			}`,
 			expectErr: true,
@@ -626,9 +566,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 
 			if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(tt.networkJSON), 0644); err != nil {
 				t.Fatalf("Failed to write network.json: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(`{"version": "1.0", "sites": {}}`), 0644); err != nil {
-				t.Fatalf("Failed to write site.json: %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644); err != nil {
 				t.Fatalf("Failed to write platforms.json: %v", err)
@@ -662,11 +599,11 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 			name: "invalid src prefix list in filter rule",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
-				"filter_specs": {
+				"filters": {
 					"bad-filter": {
-						"type": "L3",
+						"type": "ipv4",
 						"rules": [{"seq": 100, "src_prefix_list": "nonexistent", "action": "permit"}]
 					}
 				}
@@ -677,30 +614,14 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 			name: "invalid dst prefix list in filter rule",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
-				"filter_specs": {
+				"filters": {
 					"bad-filter": {
-						"type": "L3",
+						"type": "ipv4",
 						"rules": [{"seq": 100, "dst_prefix_list": "nonexistent", "action": "permit"}]
 					}
 				}
-			}`,
-			expectErr: true,
-		},
-		{
-			name: "invalid policer in filter rule",
-			networkJSON: `{
-				"version": "1.0",
-				"regions": {},
-				"services": {},
-				"filter_specs": {
-					"bad-filter": {
-						"type": "L3",
-						"rules": [{"seq": 100, "policer": "nonexistent", "action": "permit"}]
-					}
-				},
-				"policers": {}
 			}`,
 			expectErr: true,
 		},
@@ -713,9 +634,6 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 
 			if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(tt.networkJSON), 0644); err != nil {
 				t.Fatalf("Failed to write network.json: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(`{"version": "1.0", "sites": {}}`), 0644); err != nil {
-				t.Fatalf("Failed to write site.json: %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644); err != nil {
 				t.Fatalf("Failed to write platforms.json: %v", err)
@@ -730,40 +648,29 @@ func TestLoader_ValidateFilterRuleReferences(t *testing.T) {
 	}
 }
 
-func TestLoader_ValidateSiteRegionReference(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+func TestLoader_ValidateProfileZoneReference(t *testing.T) {
+	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
-	// Network without the referenced region
-	networkJSON := `{"version": "1.0", "regions": {}, "services": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
-		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	// Site referencing unknown region
-	siteJSON := `{
-		"version": "1.0",
-		"sites": {
-			"bad-site": {
-				"region": "unknown-region",
-				"route_reflectors": []
-			}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644); err != nil {
-		t.Fatalf("Failed to write platforms.json: %v", err)
-	}
-
 	loader := NewLoader(tmpDir)
-	err = loader.Load()
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Profile referencing unknown zone
+	profileJSON := `{
+		"mgmt_ip": "192.168.1.1",
+		"loopback_ip": "10.0.0.1",
+		"zone": "unknown-zone"
+	}`
+	profilePath := filepath.Join(tmpDir, "profiles", "bad-zone.json")
+	if err := os.WriteFile(profilePath, []byte(profileJSON), 0644); err != nil {
+		t.Fatalf("Failed to write profile: %v", err)
+	}
+
+	_, err := loader.LoadProfile("bad-zone")
 	if err == nil {
-		t.Error("Load() should fail when site references unknown region")
+		t.Error("LoadProfile() should fail when profile references unknown zone")
 	}
 }
 
@@ -783,37 +690,37 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 	}{
 		{
 			name:        "invalid mgmt_ip",
-			profileJSON: `{"mgmt_ip": "invalid-ip", "loopback_ip": "10.0.0.1", "site": "ny"}`,
+			profileJSON: `{"mgmt_ip": "invalid-ip", "loopback_ip": "10.0.0.1", "zone": "amer"}`,
 			expectErr:   true,
 		},
 		{
 			name:        "invalid loopback_ip",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "invalid-ip", "site": "ny"}`,
+			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "invalid-ip", "zone": "amer"}`,
 			expectErr:   true,
 		},
 		{
 			name:        "missing mgmt_ip",
-			profileJSON: `{"loopback_ip": "10.0.0.1", "site": "ny"}`,
+			profileJSON: `{"loopback_ip": "10.0.0.1", "zone": "amer"}`,
 			expectErr:   true,
 		},
 		{
 			name:        "missing loopback_ip",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "site": "ny"}`,
+			profileJSON: `{"mgmt_ip": "192.168.1.1", "zone": "amer"}`,
 			expectErr:   true,
 		},
 		{
-			name:        "missing site",
+			name:        "missing zone",
 			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1"}`,
 			expectErr:   true,
 		},
 		{
-			name:        "unknown site",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "site": "unknown-site"}`,
+			name:        "unknown zone",
+			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "unknown-zone"}`,
 			expectErr:   true,
 		},
 		{
 			name:        "invalid as_number",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "site": "ny", "as_number": -1}`,
+			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "amer", "as_number": -1}`,
 			expectErr:   true,
 		},
 	}
@@ -839,7 +746,7 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 	}
 }
 
-func TestLoader_GetFilterSpec_NotFound(t *testing.T) {
+func TestLoader_GetFilter_NotFound(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
 
@@ -848,9 +755,9 @@ func TestLoader_GetFilterSpec_NotFound(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	_, err := loader.GetFilterSpec("nonexistent")
+	_, err := loader.GetFilter("nonexistent")
 	if err == nil {
-		t.Error("GetFilterSpec() should fail for nonexistent filter")
+		t.Error("GetFilter() should fail for nonexistent filter")
 	}
 }
 
@@ -879,7 +786,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "valid 2-queue policy",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"test": {
@@ -896,7 +803,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "zero queues",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"empty": {
@@ -910,7 +817,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "too many queues (9)",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"big": {
@@ -934,7 +841,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "duplicate DSCP",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"dup": {
@@ -951,7 +858,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "DSCP out of range",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -967,7 +874,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "invalid queue type",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -983,7 +890,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "dwrr without weight",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -999,7 +906,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "strict with weight",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -1015,7 +922,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "duplicate queue name",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -1032,7 +939,7 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "empty queue name",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {},
 				"qos_policies": {
 					"bad": {
@@ -1048,10 +955,10 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 			name: "service references nonexistent qos_policy",
 			networkJSON: `{
 				"version": "1.0",
-				"regions": {},
+				"zones": {},
 				"services": {
 					"bad-svc": {
-						"service_type": "l3",
+						"service_type": "routed",
 						"qos_policy": "nonexistent"
 					}
 				},
@@ -1074,9 +981,6 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 
 			if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(tt.networkJSON), 0644); err != nil {
 				t.Fatalf("Failed to write network.json: %v", err)
-			}
-			if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(`{"version": "1.0", "sites": {}}`), 0644); err != nil {
-				t.Fatalf("Failed to write site.json: %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644); err != nil {
 				t.Fatalf("Failed to write platforms.json: %v", err)

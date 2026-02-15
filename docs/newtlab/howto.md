@@ -454,7 +454,7 @@ local VM and `0.0.0.0` for the remote VM, then bridges frames between them.
 The remote VM connects to the bridge host's IP.
 
 Each bridge process also exposes a TCP stats endpoint for telemetry queries.
-Use `newtlab status --bridge-stats` to see aggregated counters from all hosts.
+Use `newtlab status <topology>` to see aggregated counters from all hosts.
 
 ---
 
@@ -561,7 +561,7 @@ Common causes:
 Check bridge link counters (aggregated across all hosts):
 
 ```bash
-newtlab status --bridge-stats
+newtlab status <topology>
 
 LINK                                     A→Z          Z→A          SESSIONS  CONNECTED
 ────────────────────────────────────────  ────────────  ────────────  ─────────  ─────────
@@ -569,7 +569,7 @@ spine1:Ethernet0 ↔ leaf1:Ethernet0      1.2 MB       856.0 KB     3         ye
 spine1:Ethernet4 ↔ leaf2:Ethernet0      2.5 MB       1.1 MB       2         yes
 ```
 
-If a bridge on a remote host is unreachable, `status --bridge-stats` returns an error
+If a bridge on a remote host is unreachable, `status` returns an error
 for that host. Check that the remote bridge process is running:
 
 ```bash
@@ -607,6 +607,5 @@ Options:
   --host <name>         Multi-host: only deploy nodes for this host
   --parallel <n>        Parallel provisioning
   --force               Force destroy even if inconsistent
-  --bridge-stats        (status only) Include link connectivity and traffic counters
   -v, --verbose         Verbose output
 ```

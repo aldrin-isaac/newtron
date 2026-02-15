@@ -42,7 +42,7 @@ func showDevice(dev *node.Node) error {
 			"mgmt_ip":         dev.Profile().MgmtIP,
 			"loopback_ip":     dev.Profile().LoopbackIP,
 			"platform":        dev.Profile().Platform,
-			"site":            dev.Profile().Site,
+			"zone":            dev.Profile().Zone,
 			"bgp_as":          dev.ASNumber(),
 			"router_id":       dev.RouterID(),
 			"vtep_source_ip":  dev.VTEPSourceIP(),
@@ -59,7 +59,7 @@ func showDevice(dev *node.Node) error {
 	fmt.Printf("Management IP: %s\n", dev.Profile().MgmtIP)
 	fmt.Printf("Loopback IP: %s\n", dev.Profile().LoopbackIP)
 	fmt.Printf("Platform: %s\n", dev.Profile().Platform)
-	fmt.Printf("Site: %s\n", dev.Profile().Site)
+	fmt.Printf("Zone: %s\n", dev.Profile().Zone)
 
 	fmt.Println("\nDerived Configuration:")
 	fmt.Printf("  BGP Local AS: %d\n", dev.ASNumber())

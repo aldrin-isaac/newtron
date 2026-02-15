@@ -225,7 +225,7 @@ cmd/newtlab/
 ├── main.go              # Entry point, root command
 ├── cmd_deploy.go        # deploy subcommand
 ├── cmd_destroy.go       # destroy subcommand
-├── cmd_status.go        # status subcommand (--bridge-stats flag for link stats)
+├── cmd_status.go        # status subcommand (link stats shown by default)
 ├── cmd_ssh.go           # ssh subcommand
 ├── cmd_console.go       # console subcommand
 ├── cmd_stop.go          # stop/start subcommands

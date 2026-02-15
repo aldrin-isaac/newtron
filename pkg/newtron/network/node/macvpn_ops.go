@@ -32,12 +32,12 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 
 	vlanName := i.name // e.g., "Vlan100"
 
-	// Add L2VNI mapping
-	if macvpnDef.L2VNI > 0 {
-		mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.L2VNI, vlanName)
+	// Add VNI mapping
+	if macvpnDef.VNI > 0 {
+		mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.VNI, vlanName)
 		cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
 			"vlan": vlanName,
-			"vni":  fmt.Sprintf("%d", macvpnDef.L2VNI),
+			"vni":  fmt.Sprintf("%d", macvpnDef.VNI),
 		})
 	}
 
@@ -48,7 +48,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 		})
 	}
 
-	util.WithDevice(n.Name()).Infof("Bound MAC-VPN '%s' to %s (L2VNI: %d)", macvpnName, vlanName, macvpnDef.L2VNI)
+	util.WithDevice(n.Name()).Infof("Bound MAC-VPN '%s' to %s (VNI: %d)", macvpnName, vlanName, macvpnDef.VNI)
 	return cs, nil
 }
 

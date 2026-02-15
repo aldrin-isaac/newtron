@@ -108,7 +108,7 @@ SSH credentials are specified in the device profile JSON with the `ssh_user` and
 {
   "mgmt_ip": "172.20.20.2",
   "loopback_ip": "10.0.0.10",
-  "site": "dc1",
+  "zone": "datacenter-east",
   "platform": "accton-as7726-32x",
   "ssh_user": "cisco",
   "ssh_pass": "cisco123"
@@ -184,7 +184,6 @@ sudo mkdir -p /etc/newtron/profiles
 ```
 /etc/newtron/
     ├── network.json        # Service definitions, VPNs, filters, policies
-    ├── site.json           # Site definitions and route reflectors
     ├── platforms.json      # Hardware platform definitions
     ├── topology.json       # (optional) Topology for automated provisioning
     └── profiles/
@@ -218,31 +217,23 @@ sudo vim /etc/newtron/network.json
     "acl.modify": ["neteng"],
     "all": ["neteng"]
   },
-  "regions": {
+  "zones": {
     "datacenter-east": {
-      "as_number": 65001,
-      "as_name": "dc-east"
+      "as_number": 65001
     }
   },
   "prefix_lists": {
     "rfc1918": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
     "bogons": ["0.0.0.0/8", "127.0.0.0/8", "224.0.0.0/4"]
   },
-  "filter_specs": {
+  "filters": {
     "customer-ingress": {
       "description": "Ingress filter for customer interfaces",
-      "type": "L3",
+      "type": "ipv4",
       "rules": [
         {"seq": 100, "src_prefix_list": "bogons", "action": "deny", "log": true},
         {"seq": 9999, "action": "permit"}
       ]
-    }
-  },
-  "policers": {
-    "rate-10m": {
-      "bandwidth": "10m",
-      "burst": "1m",
-      "action": "drop"
     }
   },
   "qos_policies": {
@@ -266,7 +257,7 @@ sudo vim /etc/newtron/network.json
     }
   },
 
-  "ipvpn": {
+  "ipvpns": {
     "customer-vpn": {
       "description": "Customer L3VPN",
       "l3_vni": 10001,
@@ -281,7 +272,7 @@ sudo vim /etc/newtron/network.json
     }
   },
 
-  "macvpn": {
+  "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
       "l2_vni": 10100,
@@ -325,11 +316,10 @@ sudo vim /etc/newtron/network.json
 
 | Section | Purpose |
 |---------|---------|
-| `ipvpn` | IP-VPN definitions (L3VNI, route targets) for L3 routing |
-| `macvpn` | MAC-VPN definitions (L2VNI) for L2 bridging |
+| `ipvpns` | IP-VPN definitions (L3VNI, route targets) for L3 routing |
+| `macvpns` | MAC-VPN definitions (L2VNI) for L2 bridging |
 | `services` | Service templates referencing ipvpn/macvpn by name |
-| `filter_specs` | Reusable ACL rule templates |
-| `policers` | Rate limiter definitions referenced by filter rules |
+| `filters` | Reusable ACL rule templates |
 | `qos_policies` | Declarative queue definitions (DSCP mapping, scheduling, ECN) |
 | `route_policies` | BGP import/export policies |
 | `prefix_lists` | Reusable IP prefix lists (expanded in filter rules and policies) |
@@ -362,33 +352,7 @@ Optional: `ecn: true` on a queue creates a shared WRED profile with ECN marking.
 
 All 64 DSCP values are mapped: explicitly listed values go to their queue, unmapped values default to queue 0.
 
-### 3.3 Site Specification (`site.json`)
-
-Define sites and their route reflectors (by device name only -- IPs come from profiles):
-
-```bash
-sudo vim /etc/newtron/site.json
-```
-
-```json
-{
-  "version": "1.0",
-  "sites": {
-    "dc1": {
-      "region": "datacenter-east",
-      "route_reflectors": ["spine1-dc1", "spine2-dc1"]
-    },
-    "dc2": {
-      "region": "datacenter-west",
-      "route_reflectors": ["spine1-dc2", "spine2-dc2"]
-    }
-  }
-}
-```
-
-**Note:** `route_reflectors` contains device names only. Their loopback IPs are looked up from each device's profile at runtime.
-
-### 3.4 Platform Specification (`platforms.json`)
+### 3.3 Platform Specification (`platforms.json`)
 
 Define supported hardware platforms:
 
@@ -416,7 +380,7 @@ sudo vim /etc/newtron/platforms.json
 }
 ```
 
-### 3.5 Device Profiles
+### 3.4 Device Profiles
 
 Create a profile for each device. The profile is the **single source of truth** for device-specific data (IPs, platform, SSH credentials):
 
@@ -428,7 +392,7 @@ sudo vim /etc/newtron/profiles/leaf1-dc1.json
 {
   "mgmt_ip": "192.168.1.10",
   "loopback_ip": "10.0.0.10",
-  "site": "dc1",
+  "zone": "datacenter-east",
   "platform": "accton-as7726-32x",
   "ssh_user": "admin",
   "ssh_pass": "YourSonicPassword"
@@ -441,7 +405,7 @@ sudo vim /etc/newtron/profiles/leaf1-dc1.json
 |-------|-------------|
 | `mgmt_ip` | Management IP address (for SSH/Redis connection) |
 | `loopback_ip` | Loopback IP (used as router-id, VTEP source, BGP neighbor) |
-| `site` | Site name (region is derived from site.json) |
+| `zone` | Zone name (must exist in network.json zones) |
 
 **Optional Fields:**
 
@@ -450,13 +414,20 @@ sudo vim /etc/newtron/profiles/leaf1-dc1.json
 | `platform` | Platform name (maps to platforms.json for HWSKU) |
 | `ssh_user` | SSH username for Redis tunnel access |
 | `ssh_pass` | SSH password for Redis tunnel access |
-| `as_number` | Override region AS number for this device |
-| `is_route_reflector` | Mark device as route reflector |
+| `as_number` | Override zone AS number for this device |
+| `evpn` | EVPN overlay peering configuration (see below) |
 | `vlan_port_mapping` | Device-specific VLAN-to-port mappings |
-| `generic_alias` | Device-specific aliases (override region/global) |
-| `prefix_lists` | Device-specific prefix lists (merged with region/global) |
+| `prefix_lists` | Device-specific prefix lists (merged with zone/global) |
 
-**Note:** The `region` is derived from `site.json` (site "dc1" maps to region "datacenter-east"). No need to specify it in the profile.
+**EVPN Configuration Fields:**
+
+The optional `evpn` object configures EVPN overlay peering:
+
+| Field | Description |
+|-------|-------------|
+| `peers` | List of loopback IPs for EVPN iBGP peers (explicit peering list) |
+| `route_reflector` | Boolean — mark device as EVPN route reflector |
+| `cluster_id` | Route reflector cluster ID (required if `route_reflector` is true) |
 
 Create profiles for route reflectors too:
 
@@ -468,30 +439,33 @@ sudo vim /etc/newtron/profiles/spine1-dc1.json
 {
   "mgmt_ip": "192.168.1.1",
   "loopback_ip": "10.0.0.1",
-  "site": "dc1",
+  "zone": "datacenter-east",
   "platform": "accton-as7726-32x",
-  "is_route_reflector": true,
+  "evpn": {
+    "route_reflector": true,
+    "cluster_id": "10.0.0.1"
+  },
   "ssh_user": "admin",
   "ssh_pass": "YourSonicPassword"
 }
 ```
 
-### 3.6 Profile Resolution and Inheritance
+### 3.5 Profile Resolution and Inheritance
 
 When a device is loaded, newtron resolves its profile through a three-level inheritance chain:
 
 ```
-Device Profile  >  Region defaults  >  Global defaults
+Device Profile  >  Zone defaults  >  Global defaults
 ```
 
 The `ResolvedProfile` includes:
 
-- **From profile:** device name, mgmt_ip, loopback_ip, site, platform, SSH credentials
+- **From profile:** device name, mgmt_ip, loopback_ip, zone, platform, SSH credentials, EVPN peering config
 - **From inheritance:** AS number, affinity, router/bridge flags
-- **Derived at runtime:** router-id (= loopback_ip), VTEP source IP (= loopback_ip), BGP EVPN neighbors (from site route_reflectors, resolved to loopback IPs)
-- **Merged maps:** generic_alias and prefix_lists are merged (profile > region > global)
+- **Derived at runtime:** router-id (= loopback_ip), VTEP source IP (= loopback_ip), BGP EVPN neighbors (from profile EVPN peers or route reflector config)
+- **Merged maps:** prefix_lists are merged (profile > zone > global)
 
-### 3.7 Topology Specification (Optional)
+### 3.6 Topology Specification (Optional)
 
 ```json
 {
@@ -645,7 +619,7 @@ newtron leaf1 show
 # Platform: accton-as7726-32x (Accton-AS7726-32X)
 #
 # Derived Values (from spec -> device config):
-#   BGP Local AS: 65001 (from region: datacenter-east)
+#   BGP Local AS: 65001 (from zone: datacenter-east)
 #   BGP Router ID: 10.0.0.10
 #   BGP EVPN Neighbors: [10.0.0.1, 10.0.0.2]
 #   VTEP Source: 10.0.0.10 via Loopback0
@@ -786,7 +760,7 @@ newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 --peer-as 651
 - L2/IRB service requires a `macvpn` reference
 - EVPN services require VTEP and BGP to be configured
 - Shared VRF must already exist (for `vrf_type: shared`)
-- All referenced filter_specs, QoS policies, and route policies must exist in the spec
+- All referenced filters, QoS policies, and route policies must exist in the spec
 
 ### 5.6 Apply Service to PortChannel
 
@@ -1198,7 +1172,7 @@ The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
 
 ```json
 {
-  "macvpn": {
+  "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
       "l2_vni": 10100,
@@ -1446,7 +1420,7 @@ newtron leaf1 evpn setup --source-ip 10.0.0.10 -x
 
 1. `VXLAN_TUNNEL|vtep1` with `src_ip` set to the loopback IP
 2. `VXLAN_EVPN_NVO|nvo1` with `source_vtep` pointing to `vtep1`
-3. BGP EVPN sessions with route reflectors from site config
+3. BGP EVPN sessions with peers from profile EVPN config (explicit peers or route reflector settings)
 
 ### 10.2 EVPN Status
 
@@ -1578,7 +1552,7 @@ newtron leaf1 acl show customer-l3-in
 
 ```bash
 newtron leaf1 acl create CUSTOM-ACL \
-  --type L3 \
+  --type ipv4 \
   --stage ingress \
   --interfaces Ethernet0 \
   --description "Custom access control" \
@@ -1654,7 +1628,6 @@ When a service with a filter_spec is applied, newtron:
 Rule expansion handles:
 
 - **Prefix list references:** The `src_prefix_list`/`dst_prefix_list` fields reference entries in `prefix_lists`. Each prefix becomes a separate ACL rule (Cartesian product for src x dst).
-- **Policer references:** The `policer` field adds a `POLICER` field to the ACL rule.
 - **CoS/TC marking:** The `cos` field maps to traffic class values (e.g., `ef` -> TC 5).
 - **Priority calculation:** ACL priority is computed as `10000 - sequence_number`.
 
@@ -2457,7 +2430,7 @@ if err != nil {
 fmt.Printf("Service type: %s\n", svc.ServiceType)
 
 // Get filter spec from Network
-filter, err := intf.Network().GetFilterSpec("customer-edge-in")
+filter, err := intf.Network().GetFilter("customer-edge-in")
 if err != nil {
     log.Fatal(err)
 }
@@ -2511,9 +2484,9 @@ for _, name := range net.ListIPVPNs() {
 prefixes, _ := net.GetPrefixList("rfc1918")
 fmt.Printf("RFC1918 prefixes: %v\n", prefixes)
 
-// Get region
-region, _ := net.GetRegion("amer-wan")
-fmt.Printf("Region AS: %d\n", region.ASNumber)
+// Get zone
+zone, _ := net.GetZone("amer")
+fmt.Printf("Zone AS: %d\n", zone.ASNumber)
 ```
 
 ### 21.7 Performing Operations
@@ -2750,7 +2723,7 @@ Resource Commands
 ├── acl
 │   ├── list
 │   ├── show <acl-name>
-│   ├── create <acl-name> --type <L3|L3V6> --stage <ingress|egress> [--interfaces] [--description]
+│   ├── create <acl-name> --type <ipv4|ipv6> --stage <ingress|egress> [--interfaces] [--description]
 │   ├── delete <acl-name>
 │   ├── add-rule <acl-name> <rule-name> --priority <N> [match flags...] --action <permit|deny>
 │   ├── delete-rule <acl-name> <rule-name>

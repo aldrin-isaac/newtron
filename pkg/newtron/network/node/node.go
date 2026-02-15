@@ -25,11 +25,11 @@ type SpecProvider interface {
 	GetMACVPN(name string) (*spec.MACVPNSpec, error)
 	GetQoSPolicy(name string) (*spec.QoSPolicy, error)
 	GetQoSProfile(name string) (*spec.QoSProfile, error)
-	GetFilterSpec(name string) (*spec.FilterSpec, error)
+	GetFilter(name string) (*spec.FilterSpec, error)
 	GetPlatform(name string) (*spec.PlatformSpec, error)
 	GetPrefixList(name string) ([]string, error)
 	GetRoutePolicy(name string) (*spec.RoutePolicy, error)
-	FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec)
+	FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec)
 }
 
 // Node represents a SONiC switch within the context of a Network.
@@ -111,17 +111,12 @@ func (n *Node) RouterID() string {
 	return n.resolved.RouterID
 }
 
-// Region returns the region name.
-func (n *Node) Region() string {
-	return n.resolved.Region
+// Zone returns the zone name.
+func (n *Node) Zone() string {
+	return n.resolved.Zone
 }
 
-// Site returns the site name.
-func (n *Node) Site() string {
-	return n.resolved.Site
-}
-
-// BGPNeighbors returns the list of BGP neighbor IPs (derived from route reflectors).
+// BGPNeighbors returns the list of BGP neighbor IPs (derived from EVPN peers).
 func (n *Node) BGPNeighbors() []string {
 	return n.resolved.BGPNeighbors
 }
@@ -576,9 +571,9 @@ func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
 		macvpn.ARPSuppression = true
 	}
 
-	// Try to match to a macvpn definition by L2VNI
+	// Try to match to a macvpn definition by VNI
 	if macvpn.L2VNI > 0 && n.SpecProvider != nil {
-		if name, _ := n.FindMACVPNByL2VNI(macvpn.L2VNI); name != "" {
+		if name, _ := n.FindMACVPNByVNI(macvpn.L2VNI); name != "" {
 			macvpn.Name = name
 		}
 	}

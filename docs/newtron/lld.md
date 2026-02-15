@@ -97,8 +97,7 @@ newtron/
 │       ├── log.go                   # Logging utilities
 │       └── strings.go               # String utilities
 ├── specs/                           # Specification files (declarative intent)
-│   ├── network.json                 # Services, filters, VPNs, regions
-│   ├── site.json                    # Site topology
+│   ├── network.json                 # Services, filters, VPNs, zones
 │   └── profiles/                    # Per-device profiles
 └── docs/                            # Documentation
 ```
@@ -138,11 +137,9 @@ type NetworkSpecFile struct {
     SuperUsers   []string                     `json:"super_users"`
     UserGroups   map[string][]string          `json:"user_groups"`
     Permissions  map[string][]string          `json:"permissions"`
-    GenericAlias map[string]string            `json:"generic_alias"`
-    Regions      map[string]*RegionSpec       `json:"regions"`
+    Zones      map[string]*ZoneSpec       `json:"zones"`
     PrefixLists  map[string][]string          `json:"prefix_lists"`
-    FilterSpecs  map[string]*FilterSpec       `json:"filter_specs"`
-    Policers     map[string]*PolicerSpec      `json:"policers"`
+    Filters      map[string]*FilterSpec       `json:"filters"`
     QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
     QoSProfiles  map[string]*QoSProfile `json:"qos_profiles,omitempty"` // Legacy
 
@@ -150,8 +147,8 @@ type NetworkSpecFile struct {
     RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
 
     // VPN definitions (referenced by services)
-    IPVPN  map[string]*IPVPNSpec  `json:"ipvpn"`  // IP-VPN (L3VNI, route targets)
-    MACVPN map[string]*MACVPNSpec `json:"macvpn"` // MAC-VPN (VLAN, L2VNI)
+    IPVPNs  map[string]*IPVPNSpec  `json:"ipvpns"`  // IP-VPN (L3VNI, route targets)
+    MACVPNs map[string]*MACVPNSpec `json:"macvpns"` // MAC-VPN (VLAN, L2VNI)
 
     // Service definitions (reference ipvpn/macvpn by name)
     Services map[string]*ServiceSpec `json:"services"`
@@ -179,27 +176,10 @@ type MACVPNSpec struct {
     ARPSuppression bool   `json:"arp_suppression,omitempty"`
 }
 
-// RegionSpec - Regional network settings
-type RegionSpec struct {
+// ZoneSpec - Zone network settings
+type ZoneSpec struct {
     ASNumber     int                 `json:"as_number"`
-    ASName       string              `json:"as_name,omitempty"`
     PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
-    GenericAlias map[string]string   `json:"generic_alias,omitempty"`
-}
-
-// SiteSpecFile - Site topology specification file (site.json)
-// Sites only define topology (which devices are route reflectors)
-// Device details (loopback_ip, etc.) come from individual profiles
-type SiteSpecFile struct {
-    Version string               `json:"version"`
-    Sites   map[string]*SiteSpec `json:"sites"`
-}
-
-// SiteSpec - Site topology (device names only, never IPs)
-type SiteSpec struct {
-    Region          string   `json:"region"`
-    RouteReflectors []string `json:"route_reflectors,omitempty"`
-    ClusterID       string   `json:"cluster_id,omitempty"`        // BGP RR cluster-id
 }
 
 // ServiceSpec defines an interface service type.
@@ -235,7 +215,7 @@ type ServiceSpec struct {
     AnycastGateway string `json:"anycast_gateway,omitempty"` // e.g., "10.1.100.1/24"
     AnycastMAC     string `json:"anycast_mac,omitempty"`     // e.g., "00:00:00:01:02:03"
 
-    // Filters (references to filter_specs)
+    // Filters (references to filters)
     IngressFilter string `json:"ingress_filter,omitempty"`
     EgressFilter  string `json:"egress_filter,omitempty"`
 
@@ -269,7 +249,7 @@ type RoutingSpec struct {
 // FilterSpec defines a reusable set of ACL rules.
 type FilterSpec struct {
     Description string        `json:"description"`
-    Type        string        `json:"type"` // L3, L3V6
+    Type        string        `json:"type"` // ipv4, ipv6 (translated to L3, L3V6 for CONFIG_DB)
     Rules       []*FilterRule `json:"rules"`
 }
 
@@ -286,15 +266,7 @@ type FilterRule struct {
     DSCP          string `json:"dscp,omitempty"`
     Action        string `json:"action"`
     CoS           string `json:"cos,omitempty"`
-    Policer       string `json:"policer,omitempty"`
     Log           bool   `json:"log,omitempty"`
-}
-
-// PolicerSpec defines a rate limiter.
-type PolicerSpec struct {
-    Bandwidth string `json:"bandwidth"`        // e.g., "10m", "1g"
-    Burst     string `json:"burst"`            // e.g., "1m"
-    Action    string `json:"action,omitempty"` // drop, remark
 }
 
 // QoSPolicy defines a declarative queue policy.
@@ -347,23 +319,21 @@ type RoutePolicySet struct {
 }
 
 // DeviceProfile - Per-device configuration
-// Note: Region is derived from site.json based on the site field
 type DeviceProfile struct {
     // REQUIRED - must be specified
     MgmtIP     string `json:"mgmt_ip"`
     LoopbackIP string `json:"loopback_ip"`
-    Site       string `json:"site"` // Site name - region is derived from site.json
+    Zone     string `json:"zone"` // Zone name - resolved from network.json zones
 
-    // OPTIONAL OVERRIDES - if set, override region/global values
-    ASNumber         *int   `json:"as_number,omitempty"`
-    IsRouteReflector bool   `json:"is_route_reflector,omitempty"`
+    // OPTIONAL OVERRIDES - if set, override zone/global values
+    ASNumber *int         `json:"as_number,omitempty"`
+    EVPN     *EVPNConfig  `json:"evpn,omitempty"` // EVPN peers, route reflector, cluster ID
 
     // OPTIONAL - device-specific
     Platform        string              `json:"platform,omitempty"`
     MAC             string              `json:"mac,omitempty"`
     UnderlayASN     int                 `json:"underlay_asn,omitempty"`
     VLANPortMapping map[int][]string    `json:"vlan_port_mapping,omitempty"`
-    GenericAlias    map[string]string   `json:"generic_alias,omitempty"`
     PrefixLists     map[string][]string `json:"prefix_lists,omitempty"`
 
     // OPTIONAL - SSH access for Redis tunnel
@@ -379,28 +349,34 @@ type DeviceProfile struct {
     VMHost      string `json:"vm_host,omitempty"`      // Remote QEMU host
 }
 
+// EVPNConfig - EVPN peer and route reflector configuration
+type EVPNConfig struct {
+    Peers           []string `json:"peers,omitempty"`            // BGP peer device names (loopbacks resolved at runtime)
+    RouteReflector  bool     `json:"route_reflector,omitempty"`  // Is this device a route reflector?
+    ClusterID       string   `json:"cluster_id,omitempty"`       // BGP RR cluster-id (defaults to loopback if empty)
+}
+
 // ResolvedProfile - Fully resolved device profile
 type ResolvedProfile struct {
     // From profile
     DeviceName string
     MgmtIP     string
     LoopbackIP string
-    Region     string
-    Site       string
+    Zone     string
     Platform   string
 
     // Resolved from inheritance
     ASNumber         int
     IsRouteReflector bool
+    ClusterID        string // BGP RR cluster-id (from profile.EVPN.ClusterID, defaults to loopback)
 
     // Derived at runtime
     RouterID     string   // = LoopbackIP
     VTEPSourceIP string   // = LoopbackIP
-    BGPNeighbors   []string // From site route_reflectors -> lookup loopback IPs
+    BGPNeighbors []string // From profile EVPN peers -> lookup loopback IPs
 
-    // Merged maps (profile > region > global)
-    GenericAlias map[string]string
-    PrefixLists  map[string][]string
+    // Merged maps (profile > zone > global)
+    PrefixLists map[string][]string
 
     // SSH access for Redis tunnel
     SSHUser string
@@ -496,14 +472,13 @@ The `pkg/newtron/spec/` types are a shared coupling surface — all three tools 
 | `PlatformSpec` | VM (`vm_image`, `vm_memory`, `vm_cpus`, `vm_nic_driver`, ...) | | Read | |
 | `PlatformSpec` | `dataplane` | | | Read (skip verify-ping) |
 | `PlatformSpec` | `vm_credentials` | | Read | |
-| `DeviceProfile` | Core (`mgmt_ip`, `loopback_ip`, `platform`, `site`) | Read | | |
+| `DeviceProfile` | Core (`mgmt_ip`, `loopback_ip`, `platform`, `zone`) | Read | | |
 | `DeviceProfile` | SSH (`ssh_user`, `ssh_pass`) | Read | | |
 | `DeviceProfile` | `ssh_port`, `mgmt_ip` | Read | **Write** (profile patching) | |
 | `DeviceProfile` | VM overrides (`vm_memory`, `vm_cpus`, `vm_image`) | | Read | |
 | `TopologySpecFile` | Devices, links | Read (topology provisioner) | Read (VM deployment) | Read (scenario topology) |
 | `TopologySpecFile` | `newtlab` config | | Read (VM defaults) | |
-| `NetworkSpecFile` | Services, VPNs, filters, regions | Read | | |
-| `SiteSpecFile` | Site topology, route reflectors | Read | | |
+| `NetworkSpecFile` | Services, VPNs, filters, zones | Read | | |
 
 **Key insight:** `DeviceProfile.ssh_port` and `DeviceProfile.mgmt_ip` are the only fields that newtlab **writes** — all other spec data flows from JSON files into the tools as read-only input. newtlab writes these into profile JSON during deployment (newtlab LLD §10), and newtron reads them in `sonic.Device.Connect()` (device LLD §5.1).
 
@@ -514,8 +489,7 @@ The system uses an object-oriented design with parent references, mirroring the 
 ```
 Network (top-level)
     |
-    +-- owns: NetworkSpecFile (services, filters, regions, etc.)
-    +-- owns: SiteSpecFile (site topology)
+    +-- owns: NetworkSpecFile (services, filters, zones, etc.)
     +-- owns: PlatformSpecFile (hardware platform definitions)
     +-- owns: TopologySpecFile (topology specification, optional)
     +-- owns: Loader (spec file loading)
@@ -538,8 +512,7 @@ Network (top-level)
 ```go
 // Network is the top-level object (pkg/newtron/network/network.go)
 type Network struct {
-    spec      *spec.NetworkSpecFile    // Services, filters, regions (declarative intent)
-    sites     *spec.SiteSpecFile       // Site topology
+    spec      *spec.NetworkSpecFile    // Services, filters, zones (declarative intent)
     platforms *spec.PlatformSpecFile   // Hardware platform definitions
     topology  *spec.TopologySpecFile   // Topology specification (optional)
     loader    *spec.Loader             // Spec file loading
@@ -571,7 +544,7 @@ type SpecProvider interface {
     GetMACVPN(name string) (*spec.MACVPNSpec, error)
     GetQoSPolicy(name string) (*spec.QoSPolicy, error)
     GetQoSProfile(name string) (*spec.QoSProfile, error)
-    GetFilterSpec(name string) (*spec.FilterSpec, error)
+    GetFilter(name string) (*spec.FilterSpec, error)
     GetPlatform(name string) (*spec.PlatformSpec, error)
     GetPrefixList(name string) ([]string, error)
     GetRoutePolicy(name string) (*spec.RoutePolicy, error)
@@ -701,7 +674,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     asNum := i.Node().ASNumber()
 
     // Access filter spec from Network
-    filter, _ := i.Node().Network().GetFilterSpec(svc.IngressFilter)
+    filter, _ := i.Node().Network().GetFilter(svc.IngressFilter)
 
     // ... apply configuration
 }
@@ -766,8 +739,8 @@ func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error)
 // GetMACVPN returns a MAC-VPN spec by name. Returns error if not found.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error)
 
-// GetFilterSpec returns a filter spec by name. Returns error if not found.
-func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error)
+// GetFilter returns a filter spec by name. Returns error if not found.
+func (n *Network) GetFilter(name string) (*spec.FilterSpec, error)
 
 // GetQoSProfile returns a QoS profile by name. Returns error if not found.
 func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error)
@@ -784,13 +757,12 @@ func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
 // Initialization sequence:
 //   1. Create Loader for specDir
 //   2. Load network.json (required)
-//   3. Load site.json (required)
-//   4. Load platforms.json (required)
-//   5. Load profiles/*.json (one per device, required)
-//   6. Load topology.json (optional — returns nil if absent)
-//   7. Resolve profiles: for each device, merge profile + region + global → ResolvedProfile
-//   8. Validate topology (if loaded) — services, IPs, links
-//   9. Create Node objects with resolved profiles, create Interface objects
+//   3. Load platforms.json (required)
+//   4. Load profiles/*.json (one per device, required)
+//   5. Load topology.json (optional — returns nil if absent)
+//   6. Resolve profiles: for each device, merge profile + zone + global → ResolvedProfile
+//   7. Validate topology (if loaded) — services, IPs, links
+//   8. Create Node objects with resolved profiles, create Interface objects
 //      from CONFIG_DB tables (populated later on Connect)
 //
 // Nodes are created but NOT connected — call Node.Connect() to
@@ -817,13 +789,11 @@ func (l *Loader) Load() error
 
 // Getter methods (available after Load):
 func (l *Loader) GetNetwork() *NetworkSpecFile
-func (l *Loader) GetSite() *SiteSpecFile
 func (l *Loader) GetPlatforms() *PlatformSpecFile
 func (l *Loader) GetTopology() *TopologySpecFile // nil if topology.json absent
 func (l *Loader) GetService(name string) (*ServiceSpec, error)
-func (l *Loader) GetFilterSpec(name string) (*FilterSpec, error)
+func (l *Loader) GetFilter(name string) (*FilterSpec, error)
 func (l *Loader) GetPrefixList(name string) ([]string, error)
-func (l *Loader) GetPolicer(name string) (*PolicerSpec, error)
 
 // loadTopologySpec loads topology.json from the spec directory.
 // Returns (nil, nil) if topology.json does not exist — topology is optional.
@@ -1030,7 +1000,6 @@ type ConfigDB struct {
     PortQoSMap        map[string]PortQoSMapEntry    `json:"PORT_QOS_MAP,omitempty"`
     DSCPToTCMap       map[string]map[string]string  `json:"DSCP_TO_TC_MAP,omitempty"`
     TCToQueueMap      map[string]map[string]string  `json:"TC_TO_QUEUE_MAP,omitempty"`
-    Policer           map[string]PolicerEntry       `json:"POLICER,omitempty"`
 
     // Extended BGP tables (frrcfgd — FRR management framework)
     BGPPeerGroup          map[string]BGPPeerGroupEntry         `json:"BGP_PEER_GROUP,omitempty"`
@@ -1182,19 +1151,6 @@ type WREDProfileEntry struct {
 type PortQoSMapEntry struct {
     DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
     TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
-}
-
-// PolicerEntry represents a rate limiter
-type PolicerEntry struct {
-    MeterType    string `json:"meter_type,omitempty"`
-    Mode         string `json:"mode,omitempty"`
-    CIR          string `json:"cir,omitempty"`
-    CBS          string `json:"cbs,omitempty"`
-    PIR          string `json:"pir,omitempty"`
-    PBS          string `json:"pbs,omitempty"`
-    GreenAction  string `json:"green_action,omitempty"`
-    YellowAction string `json:"yellow_action,omitempty"`
-    RedAction    string `json:"red_action,omitempty"`
 }
 ```
 
@@ -1423,7 +1379,6 @@ type ACLTableTypeEntry struct {
 | PORT_QOS_MAP | `Ethernet0` | Port QoS map binding |
 | DSCP_TO_TC_MAP | `DSCP_TO_TC` | DSCP to traffic class map |
 | TC_TO_QUEUE_MAP | `TC_TO_QUEUE` | Traffic class to queue map |
-| POLICER | `POLICER_1M` | Rate limiter |
 | ROUTE_REDISTRIBUTE | `default\|connected\|bgp\|ipv4` | Route redistribution config |
 | ROUTE_MAP | `ALLOW_LOOPBACK\|10` | Route-map rules |
 | BGP_PEER_GROUP | `SPINE_PEERS` | BGP peer group templates |
@@ -2164,7 +2119,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     // ====================================================================
     if svc.IngressFilter != "" {
         aclName := util.DeriveACLName(serviceName, "in")
-        filterSpec, err := i.Node().GetFilterSpec(svc.IngressFilter)
+        filterSpec, err := i.Node().GetFilter(svc.IngressFilter)
         if err != nil {
             return nil, fmt.Errorf("ingress filter %q: %w", svc.IngressFilter, err)
         }
@@ -2172,7 +2127,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     }
     if svc.EgressFilter != "" {
         aclName := util.DeriveACLName(serviceName, "out")
-        filterSpec, err := i.Node().GetFilterSpec(svc.EgressFilter)
+        filterSpec, err := i.Node().GetFilter(svc.EgressFilter)
         if err != nil {
             return nil, fmt.Errorf("egress filter %q: %w", svc.EgressFilter, err)
         }
@@ -2513,11 +2468,11 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error
 // DeleteQoSPolicy removes a QoS policy definition from network.json.
 func (n *Network) DeleteQoSPolicy(name string) error
 
-// SaveFilterSpec creates or updates a filter spec definition in network.json.
-func (n *Network) SaveFilterSpec(name string, def *spec.FilterSpec) error
+// SaveFilter creates or updates a filter spec definition in network.json.
+func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error
 
-// DeleteFilterSpec removes a filter spec definition from network.json.
-func (n *Network) DeleteFilterSpec(name string) error
+// DeleteFilter removes a filter spec definition from network.json.
+func (n *Network) DeleteFilter(name string) error
 
 // SaveService creates or updates a service definition in network.json.
 func (n *Network) SaveService(name string, def *spec.ServiceSpec) error
@@ -2621,7 +2576,7 @@ type VTEPConfig struct {
 
 // ACLTableConfig holds configuration options for CreateACLTable
 type ACLTableConfig struct {
-    Type        string // L3, L3V6, MIRROR
+    Type        string // ipv4, ipv6 (translated to L3, L3V6 for CONFIG_DB)
     Stage       string // ingress, egress
     Description string
     Ports       string // Comma-separated interface names (maps to CONFIG_DB ACL_TABLE.ports)
@@ -2698,7 +2653,7 @@ type SetupRouteReflectorConfig struct {
     Neighbors    []string // neighbor IPs (loopback addresses)
     LocalASN     int
     RouterID     string
-    ClusterID    string   // from SiteSpec; defaults to loopback if empty
+    ClusterID    string   // from profile EVPN config; defaults to loopback if empty
     MaxIBGPPaths int      // ECMP paths for iBGP
     IPv6Enabled  bool     // enable ipv6_unicast AF
 }
@@ -2947,54 +2902,59 @@ func shouldRedistribute(svc *spec.ServiceSpec, intfType string) bool {
 ### 7.3 Specification Resolution (Network internal method)
 
 ```go
-// ResolveProfile applies inheritance: profile > region > global
-// Note: Region is derived from site.json, not stored in profile
+// ResolveProfile applies inheritance: profile > zone > global
+// Zone is read directly from profile.Zone field
 func ResolveProfile(
     deviceName string,
     profile *DeviceProfile,
     network *NetworkSpecFile,
-    siteSpec *SiteSpecFile,
     loadProfile func(string) (*DeviceProfile, error),
 ) *ResolvedProfile {
-    // Get site - determines the region (single source of truth)
-    site := siteSpec.Sites[profile.Site]
-    regionName := site.Region
-    region := network.Regions[regionName]
+    // Get zone from profile
+    zoneName := profile.Zone
+    zone := network.Zones[zoneName]
 
     r := &ResolvedProfile{
         DeviceName: deviceName,
         MgmtIP:     profile.MgmtIP,
         LoopbackIP: profile.LoopbackIP,
-        Region:     regionName,
-        Site:       profile.Site,
+        Zone:     zoneName,
         Platform:   profile.Platform,
         SSHUser:    profile.SSHUser,
         SSHPass:    profile.SSHPass,
     }
 
-    // AS Number: profile > region
+    // AS Number: profile > zone
     if profile.ASNumber != nil {
         r.ASNumber = *profile.ASNumber
-    } else if region != nil {
-        r.ASNumber = region.ASNumber
+    } else if zone != nil {
+        r.ASNumber = zone.ASNumber
     }
 
     // Router ID and VTEP from loopback
     r.RouterID = profile.LoopbackIP
     r.VTEPSourceIP = profile.LoopbackIP
 
-    // BGP neighbors: lookup route reflector profiles to get their loopback IPs
-    r.BGPNeighbors = []string{}
-    for _, rrName := range site.RouteReflectors {
-        if rrName == deviceName { continue }
-        if rrProfile, err := loadProfile(rrName); err == nil {
-            r.BGPNeighbors = append(r.BGPNeighbors, rrProfile.LoopbackIP)
+    // EVPN configuration: route reflector status and cluster ID
+    if profile.EVPN != nil {
+        r.IsRouteReflector = profile.EVPN.RouteReflector
+        r.ClusterID = profile.EVPN.ClusterID
+        if r.ClusterID == "" {
+            r.ClusterID = profile.LoopbackIP // default to loopback
+        }
+
+        // BGP neighbors: lookup peer profiles to get their loopback IPs
+        r.BGPNeighbors = []string{}
+        for _, peerName := range profile.EVPN.Peers {
+            if peerName == deviceName { continue }
+            if peerProfile, err := loadProfile(peerName); err == nil {
+                r.BGPNeighbors = append(r.BGPNeighbors, peerProfile.LoopbackIP)
+            }
         }
     }
 
-    // Merge maps: profile > region > global
-    r.GenericAlias = mergeMaps(network.GenericAlias, region.GenericAlias, profile.GenericAlias)
-    r.PrefixLists = mergeMaps(network.PrefixLists, region.PrefixLists, profile.PrefixLists)
+    // Merge maps: profile > zone > global
+    r.PrefixLists = mergeMaps(network.PrefixLists, zone.PrefixLists, profile.PrefixLists)
 
     return r
 }

@@ -18,7 +18,6 @@ var SpecDir = "/etc/newtron"
 type Loader struct {
 	specDir   string
 	network   *NetworkSpecFile
-	site      *SiteSpecFile
 	platforms *PlatformSpecFile
 	topology  *TopologySpecFile // nil if topology.json doesn't exist
 	profiles  map[string]*DeviceProfile
@@ -43,12 +42,6 @@ func (l *Loader) Load() error {
 	l.network, err = l.loadNetworkSpec()
 	if err != nil {
 		return fmt.Errorf("loading network spec: %w", err)
-	}
-
-	// Load site spec
-	l.site, err = l.loadSiteSpec()
-	if err != nil {
-		return fmt.Errorf("loading site spec: %w", err)
 	}
 
 	// Load platform spec
@@ -119,21 +112,6 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	return &spec, nil
 }
 
-func (l *Loader) loadSiteSpec() (*SiteSpecFile, error) {
-	path := filepath.Join(l.specDir, "site.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var spec SiteSpecFile
-	if err := json.Unmarshal(data, &spec); err != nil {
-		return nil, err
-	}
-
-	return &spec, nil
-}
-
 func (l *Loader) loadPlatformSpec() (*PlatformSpecFile, error) {
 	path := filepath.Join(l.specDir, "platforms.json")
 	data, err := os.ReadFile(path)
@@ -158,12 +136,12 @@ func (l *Loader) validate() error {
 	// Validate services reference existing filter specs
 	for svcName, svc := range l.network.Services {
 		if svc.IngressFilter != "" {
-			if _, ok := l.network.FilterSpecs[svc.IngressFilter]; !ok {
+			if _, ok := l.network.Filters[svc.IngressFilter]; !ok {
 				v.AddErrorf("service '%s' references unknown ingress filter '%s'", svcName, svc.IngressFilter)
 			}
 		}
 		if svc.EgressFilter != "" {
-			if _, ok := l.network.FilterSpecs[svc.EgressFilter]; !ok {
+			if _, ok := l.network.Filters[svc.EgressFilter]; !ok {
 				v.AddErrorf("service '%s' references unknown egress filter '%s'", svcName, svc.EgressFilter)
 			}
 		}
@@ -181,35 +159,42 @@ func (l *Loader) validate() error {
 		}
 		// Validate ipvpn reference
 		if svc.IPVPN != "" {
-			if _, ok := l.network.IPVPN[svc.IPVPN]; !ok {
+			if _, ok := l.network.IPVPNs[svc.IPVPN]; !ok {
 				v.AddErrorf("service '%s' references unknown ipvpn '%s'", svcName, svc.IPVPN)
 			}
 		}
 		// Validate macvpn reference
 		if svc.MACVPN != "" {
-			if _, ok := l.network.MACVPN[svc.MACVPN]; !ok {
+			if _, ok := l.network.MACVPNs[svc.MACVPN]; !ok {
 				v.AddErrorf("service '%s' references unknown macvpn '%s'", svcName, svc.MACVPN)
 			}
 		}
 		// Validate service type constraints
 		switch svc.ServiceType {
-		case ServiceTypeL2:
+		case ServiceTypeEVPNIRB:
+			if svc.IPVPN == "" {
+				v.AddErrorf("service '%s' (evpn-irb) requires ipvpn reference", svcName)
+			}
 			if svc.MACVPN == "" {
-				v.AddErrorf("service '%s' has type 'l2' but no macvpn reference", svcName)
+				v.AddErrorf("service '%s' (evpn-irb) requires macvpn reference", svcName)
 			}
-		case ServiceTypeL3:
-			if svc.IPVPN == "" && svc.VRFType != "" {
-				v.AddErrorf("service '%s' has vrf_type but no ipvpn reference", svcName)
-			}
-		case ServiceTypeIRB:
+		case ServiceTypeEVPNBridged:
 			if svc.MACVPN == "" {
-				v.AddErrorf("service '%s' has type 'irb' but no macvpn reference", svcName)
+				v.AddErrorf("service '%s' (evpn-bridged) requires macvpn reference", svcName)
 			}
+		case ServiceTypeEVPNRouted:
+			if svc.IPVPN == "" {
+				v.AddErrorf("service '%s' (evpn-routed) requires ipvpn reference", svcName)
+			}
+		case ServiceTypeIRB, ServiceTypeBridged, ServiceTypeRouted:
+			// Local types: no spec-level refs required
+		default:
+			v.AddErrorf("service '%s' has unknown type '%s'", svcName, svc.ServiceType)
 		}
 	}
 
-	// Validate filter rules reference existing prefix lists and policers
-	for specName, spec := range l.network.FilterSpecs {
+	// Validate filter rules reference existing prefix lists
+	for specName, spec := range l.network.Filters {
 		for i, rule := range spec.Rules {
 			if rule.SrcPrefixList != "" {
 				if _, ok := l.network.PrefixLists[rule.SrcPrefixList]; !ok {
@@ -223,19 +208,6 @@ func (l *Loader) validate() error {
 						specName, i, rule.DstPrefixList)
 				}
 			}
-			if rule.Policer != "" {
-				if _, ok := l.network.Policers[rule.Policer]; !ok {
-					v.AddErrorf("filter '%s' rule %d references unknown policer '%s'",
-						specName, i, rule.Policer)
-				}
-			}
-		}
-	}
-
-	// Validate regions referenced in sites exist
-	for siteName, site := range l.site.Sites {
-		if _, ok := l.network.Regions[site.Region]; !ok {
-			v.AddErrorf("site '%s' references unknown region '%s'", siteName, site.Region)
 		}
 	}
 
@@ -296,7 +268,7 @@ func (l *Loader) validateProfile(profile *DeviceProfile) error {
 	// Required fields
 	v.Add(profile.MgmtIP != "", "mgmt_ip is required")
 	v.Add(profile.LoopbackIP != "", "loopback_ip is required")
-	v.Add(profile.Site != "", "site is required")
+	v.Add(profile.Zone != "", "zone is required")
 
 	// Validate IP addresses
 	if profile.MgmtIP != "" && !util.IsValidIPv4(profile.MgmtIP) {
@@ -306,10 +278,10 @@ func (l *Loader) validateProfile(profile *DeviceProfile) error {
 		v.AddErrorf("invalid loopback IP: %s", profile.LoopbackIP)
 	}
 
-	// Validate site exists (region is derived from site)
-	if profile.Site != "" {
-		if _, ok := l.site.Sites[profile.Site]; !ok {
-			v.AddErrorf("unknown site: %s", profile.Site)
+	// Validate zone exists in network.json
+	if profile.Zone != "" {
+		if _, ok := l.network.Zones[profile.Zone]; !ok {
+			v.AddErrorf("unknown zone: %s", profile.Zone)
 		}
 	}
 
@@ -328,11 +300,6 @@ func (l *Loader) GetNetwork() *NetworkSpecFile {
 	return l.network
 }
 
-// GetSite returns the site spec
-func (l *Loader) GetSite() *SiteSpecFile {
-	return l.site
-}
-
 // GetPlatforms returns the platform spec
 func (l *Loader) GetPlatforms() *PlatformSpecFile {
 	return l.platforms
@@ -347,9 +314,9 @@ func (l *Loader) GetService(name string) (*ServiceSpec, error) {
 	return svc, nil
 }
 
-// GetFilterSpec returns a filter spec by name
-func (l *Loader) GetFilterSpec(name string) (*FilterSpec, error) {
-	spec, ok := l.network.FilterSpecs[name]
+// GetFilter returns a filter spec by name
+func (l *Loader) GetFilter(name string) (*FilterSpec, error) {
+	spec, ok := l.network.Filters[name]
 	if !ok {
 		return nil, fmt.Errorf("filter spec '%s' not found", name)
 	}

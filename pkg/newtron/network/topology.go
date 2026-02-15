@@ -284,13 +284,8 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		underlayASN = resolved.UnderlayASN
 	}
 
-	// Determine RR cluster ID: use SiteSpec.ClusterID if set, fall back to loopback IP.
-	clusterID := resolved.LoopbackIP
-	if resolved.Site != "" {
-		if site, err := tp.network.GetSite(resolved.Site); err == nil && site.ClusterID != "" {
-			clusterID = site.ClusterID
-		}
-	}
+	// RR cluster ID: from profile EVPN config, defaults to loopback IP (set during resolution).
+	clusterID := resolved.ClusterID
 
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
 	// log_neighbor_changes are already set in addDeviceEntries for all devices)
@@ -376,7 +371,7 @@ func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice) bool 
 		}
 		if svc.MACVPN != "" {
 			macvpn, err := tp.network.GetMACVPN(svc.MACVPN)
-			if err == nil && macvpn.L2VNI > 0 {
+			if err == nil && macvpn.VNI > 0 {
 				return true
 			}
 		}

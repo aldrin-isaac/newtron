@@ -183,7 +183,7 @@ Examples:
 
 		// --- Expected EVPN Neighbors ---
 		if len(resolved.BGPNeighbors) > 0 {
-			fmt.Printf("\nExpected EVPN neighbors (from site config):\n")
+			fmt.Printf("\nExpected EVPN neighbors (from EVPN peers):\n")
 			for _, neighbor := range resolved.BGPNeighbors {
 				fmt.Printf("  %s\n", neighbor)
 			}

@@ -24,17 +24,12 @@
     "health.check": ["neteng", "netops", "readonly"],
     "audit.view": ["neteng", "netops"]
   },
-  "generic_alias": {
-    "ce-asnum": "65100"
-  },
-  "regions": {
-    "amer-wan": {
-      "as_number": 64512,
-      "as_name": "amer"
+  "zones": {
+    "amer": {
+      "as_number": 64512
     },
-    "emea-wan": {
-      "as_number": 33181,
-      "as_name": "emea"
+    "emea": {
+      "as_number": 64513
     }
   },
   "prefix_lists": {
@@ -43,10 +38,10 @@
     "bogons": ["0.0.0.0/8", "127.0.0.0/8", "224.0.0.0/4"],
     "ospf-multicast": ["224.0.0.5/32", "224.0.0.6/32"]
   },
-  "filter_specs": {
+  "filters": {
     "customer-edge-in": {
       "description": "Ingress filter for customer edge interfaces",
-      "type": "L3",
+      "type": "ipv4",
       "rules": [
         {"seq": 100, "src_prefix_list": "bogons", "action": "deny", "log": true},
         {"seq": 200, "src_prefix_list": "rfc1918", "action": "deny"},
@@ -55,7 +50,7 @@
     },
     "customer-edge-out": {
       "description": "Egress filter for customer edge interfaces",
-      "type": "L3",
+      "type": "ipv4",
       "rules": [
         {"seq": 100, "dst_prefix_list": "mgmt-servers", "action": "deny"},
         {"seq": 9999, "action": "permit"}
@@ -63,7 +58,7 @@
     },
     "transit-protect": {
       "description": "Control plane protection for transit interfaces",
-      "type": "L3",
+      "type": "ipv4",
       "rules": [
         {"seq": 100, "protocol": "vrrp", "dst_ip": "224.0.0.18/32", "action": "permit", "cos": "cs7"},
         {"seq": 110, "protocol": "tcp", "dst_port": "179", "action": "permit", "cos": "cs7"},
@@ -74,48 +69,53 @@
       ]
     }
   },
-  "policers": {
-    "network-control-5m": {"bandwidth": "5m", "burst": "625k"},
-    "term-specific-64k": {"bandwidth": "64k", "burst": "8k"},
-    "term-specific-15m": {"bandwidth": "15m", "burst": "3m"},
-    "customer-rate-limit": {"bandwidth": "100m", "burst": "10m", "action": "drop"}
-  },
-
-  "ipvpn": {
+  "ipvpns": {
     "customer-vpn": {
       "description": "Customer L3VPN with per-interface VRF",
-      "l3_vni": 10001,
-      "import_rt": ["65100:1"],
-      "export_rt": ["65100:1"]
+      "vrf": "Vrf_customer",
+      "l3vni": 10001,
+      "route_targets": ["65100:1"]
     },
     "server-vpn": {
       "description": "Server/datacenter shared VRF",
-      "l3_vni": 10100,
-      "import_rt": ["65100:100"],
-      "export_rt": ["65100:100"]
+      "vrf": "Vrf_server",
+      "l3vni": 10100,
+      "route_targets": ["65100:100"]
     },
     "tenant-vpn": {
       "description": "Multi-tenant isolated VRF",
-      "l3_vni": 20001,
-      "import_rt": ["65100:200"],
-      "export_rt": ["65100:200"]
+      "vrf": "Vrf_tenant",
+      "l3vni": 20001,
+      "route_targets": ["65100:200"]
     }
   },
 
-  "macvpn": {
+  "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
-      "l2_vni": 10100,
+      "vlan_id": 100,
+      "vni": 10100,
+      "anycast_ip": "10.1.100.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "route_targets": ["100:100"],
       "arp_suppression": true
     },
     "storage-vlan200": {
       "description": "Storage VLAN 200",
-      "l2_vni": 10200,
+      "vlan_id": 200,
+      "vni": 10200,
+      "anycast_ip": "10.1.200.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "route_targets": ["200:200"],
       "arp_suppression": true
     },
     "tenant-vlan300": {
       "description": "Tenant VLAN 300",
-      "l2_vni": 10300,
+      "vlan_id": 300,
+      "vni": 10300,
+      "anycast_ip": "10.1.30.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
+      "route_targets": ["300:300"],
       "arp_suppression": false
     }
   },
@@ -123,7 +123,7 @@
   "services": {
     "customer-l3": {
       "description": "L3 routed customer interface with per-interface VRF",
-      "service_type": "l3",
+      "service_type": "evpn-routed",
       "vrf_type": "interface",
       "ipvpn": "customer-vpn",
       "ingress_filter": "customer-edge-in",
@@ -136,45 +136,35 @@
     },
     "server-irb": {
       "description": "Server VLAN with shared VRF for inter-VLAN routing",
-      "service_type": "irb",
+      "service_type": "evpn-irb",
       "vrf_type": "shared",
       "ipvpn": "server-vpn",
       "macvpn": "servers-vlan100",
-      "vlan": 100,
-      "anycast_gateway": "10.1.100.1/24",
-      "anycast_mac": "00:00:00:01:02:03",
       "qos_policy": "8q-datacenter"
     },
     "storage-irb": {
       "description": "Storage VLAN with shared VRF",
-      "service_type": "irb",
+      "service_type": "evpn-irb",
       "vrf_type": "shared",
       "ipvpn": "server-vpn",
       "macvpn": "storage-vlan200",
-      "vlan": 200,
-      "anycast_gateway": "10.1.200.1/24",
-      "anycast_mac": "00:00:00:01:02:03",
       "qos_policy": "8q-datacenter"
     },
     "tenant-isolated": {
       "description": "Tenant VLAN with per-interface VRF isolation",
-      "service_type": "irb",
+      "service_type": "evpn-irb",
       "vrf_type": "interface",
       "ipvpn": "tenant-vpn",
-      "macvpn": "tenant-vlan300",
-      "vlan": 300,
-      "anycast_gateway": "10.1.30.1/24",
-      "anycast_mac": "00:00:00:01:02:03"
+      "macvpn": "tenant-vlan300"
     },
     "l2-extend": {
       "description": "L2 VLAN extension only (no routing)",
-      "service_type": "l2",
-      "macvpn": "servers-vlan100",
-      "vlan": 100
+      "service_type": "evpn-bridged",
+      "macvpn": "servers-vlan100"
     },
     "transit": {
       "description": "Transit interface (global routing table, no VPN)",
-      "service_type": "l3",
+      "service_type": "routed",
       "ingress_filter": "transit-protect",
       "permissions": {
         "all": ["neteng"]

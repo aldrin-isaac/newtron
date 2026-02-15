@@ -99,8 +99,12 @@ const (
 	ActionConfigureSVI       StepAction = "configure-svi"
 	ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
 	ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
-	ActionRefreshService     StepAction = "refresh-service"
-	ActionCleanup            StepAction = "cleanup"
+	ActionRefreshService          StepAction = "refresh-service"
+	ActionCleanup                 StepAction = "cleanup"
+	ActionCreatePortChannel       StepAction = "create-portchannel"
+	ActionDeletePortChannel       StepAction = "delete-portchannel"
+	ActionAddPortChannelMember    StepAction = "add-portchannel-member"
+	ActionRemovePortChannelMember StepAction = "remove-portchannel-member"
 )
 
 // validActions is the set of all recognized step actions, derived from the
