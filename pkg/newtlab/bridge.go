@@ -77,13 +77,6 @@ func buildBridgeConfig(links []*LinkConfig, statsAddr string) BridgeConfig {
 	return cfg
 }
 
-// RunBridge reads bridge.json from the lab's state dir and runs bridge workers
-// until the process receives SIGTERM/SIGINT. This is called by the hidden
-// "newtlab bridge" subcommand.
-func RunBridge(labName string) error {
-	return RunBridgeFromFile(filepath.Join(LabDir(labName), "bridge.json"))
-}
-
 // RunBridgeFromFile reads a bridge config JSON file and runs bridge workers
 // until the process receives SIGTERM/SIGINT. The stateDir for pid/socket files
 // is derived from the config file's directory.
@@ -246,21 +239,15 @@ func QueryAllBridgeStats(labName string) (*BridgeStats, error) {
 	return QueryBridgeStats(sockPath)
 }
 
-// startBridgeProcess spawns a bridge process locally.
-// It prefers the newtlink binary next to the current executable; falls back to
-// "newtlab bridge <labName>" for backward compatibility.
+// startBridgeProcess spawns a newtlink bridge process locally.
 func startBridgeProcess(labName, stateDir string) (int, error) {
 	configPath := filepath.Join(stateDir, "bridge.json")
 
-	// Prefer newtlink binary next to current executable; fall back to newtlab bridge
-	var cmd *exec.Cmd
-	if p := findSiblingBinary("newtlink"); p != "newtlink" {
-		cmd = exec.Command(p, configPath)
-	} else if exe, err := os.Executable(); err == nil {
-		cmd = exec.Command(exe, "bridge", labName)
-	} else {
-		return 0, fmt.Errorf("resolve executable: %w", err)
+	p := findSiblingBinary("newtlink")
+	if p == "newtlink" {
+		return 0, fmt.Errorf("newtlink binary not found next to %s; run 'make build'", os.Args[0])
 	}
+	cmd := exec.Command(p, configPath)
 
 	logPath := filepath.Join(stateDir, "logs", "bridge.log")
 	logFile, err := os.Create(logPath)

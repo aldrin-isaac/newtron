@@ -150,19 +150,49 @@ func showLinkTableWithStats(labName string, state *newtlab.LabState) {
 		}
 	}
 
-	lt := cli.NewTable("LINK", "STATUS", "A→Z", "Z→A", "SESSIONS")
+	// Include HOST column if any link has a non-local worker host.
+	hasRemoteHost := false
+	for _, link := range state.Links {
+		if link.WorkerHost != "" {
+			hasRemoteHost = true
+			break
+		}
+	}
+
+	var lt *cli.Table
+	if hasRemoteHost {
+		lt = cli.NewTable("LINK", "STATUS", "HOST", "A→Z", "Z→A", "SESSIONS")
+	} else {
+		lt = cli.NewTable("LINK", "STATUS", "A→Z", "Z→A", "SESSIONS")
+	}
 	for _, link := range state.Links {
 		label := fmt.Sprintf("%s ↔ %s", link.A, link.Z)
 		key := link.A + "|" + link.Z
+		host := link.WorkerHost
+		if host == "" {
+			host = "local"
+		}
 
 		if ls, ok := statsMap[key]; ok {
 			if ls.Connected {
-				lt.Row(label, green("connected"), humanBytes(ls.AToZBytes), humanBytes(ls.ZToABytes), fmt.Sprintf("%d", ls.Sessions))
+				if hasRemoteHost {
+					lt.Row(label, green("connected"), host, humanBytes(ls.AToZBytes), humanBytes(ls.ZToABytes), fmt.Sprintf("%d", ls.Sessions))
+				} else {
+					lt.Row(label, green("connected"), humanBytes(ls.AToZBytes), humanBytes(ls.ZToABytes), fmt.Sprintf("%d", ls.Sessions))
+				}
 			} else {
-				lt.Row(label, yellow("waiting"), "—", "—", "—")
+				if hasRemoteHost {
+					lt.Row(label, yellow("waiting"), host, "—", "—", "—")
+				} else {
+					lt.Row(label, yellow("waiting"), "—", "—", "—")
+				}
 			}
 		} else {
-			lt.Row(label, "—", "—", "—", "—")
+			if hasRemoteHost {
+				lt.Row(label, "—", host, "—", "—", "—")
+			} else {
+				lt.Row(label, "—", "—", "—", "—")
+			}
 		}
 	}
 	lt.Flush()

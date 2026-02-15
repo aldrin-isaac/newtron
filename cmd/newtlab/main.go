@@ -82,7 +82,6 @@ func init() {
 		newStopCmd(),
 		newStartCmd(),
 		newProvisionCmd(),
-		newBridgeCmd(),
 		newVersionCmd(),
 	)
 }

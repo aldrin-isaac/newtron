@@ -762,16 +762,7 @@ type LinkStats struct {
 // WriteBridgeConfig serializes link config to bridge.json in the state dir.
 func WriteBridgeConfig(stateDir string, links []*LinkConfig, statsAddr string) error
 
-// RunBridge reads bridge.json from the lab's state dir and runs bridge workers
-// until the process receives SIGTERM/SIGINT. This is called by the hidden
-// "newtlab bridge" subcommand.
-// Starts:
-//   1. Bridge workers (TCP listeners for each link)
-//   2. Unix socket stats listener (bridge.sock in state dir)
-//   3. TCP stats listener (if StatsAddr is set in config)
-func RunBridge(labName string) error
-
-// startBridgeProcess spawns "newtlab bridge <labName>" as a local background process.
+// startBridgeProcess spawns a newtlink bridge process locally.
 func startBridgeProcess(labName, stateDir string) (int, error)
 
 // startBridgeProcessRemote starts a bridge process on a remote host via SSH.

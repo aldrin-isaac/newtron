@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -92,5 +94,25 @@ func findNodeState(nodeName string) (*newtlab.LabState, string, error) {
 		}
 	}
 
-	return nil, "", fmt.Errorf("node %q not found in any lab", nodeName)
+	// Collect all known node names for a helpful error message.
+	var available []string
+	for _, labName := range labs {
+		state, err := newtlab.LoadState(labName)
+		if err != nil {
+			continue
+		}
+		for name := range state.Nodes {
+			available = append(available, name)
+		}
+	}
+	if len(available) > 0 {
+		return nil, "", fmt.Errorf("node %q not found; available: %s", nodeName, joinSorted(available))
+	}
+	return nil, "", fmt.Errorf("node %q not found (no deployed labs)", nodeName)
+}
+
+// joinSorted returns names in sorted order, comma-separated.
+func joinSorted(names []string) string {
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
