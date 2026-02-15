@@ -1,8 +1,10 @@
-package device
+package sonic
 
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 )
 
 func TestConfigDB_JSONSerialization(t *testing.T) {
@@ -283,7 +285,7 @@ func TestServiceBindingEntry_Structure(t *testing.T) {
 }
 
 func TestInterfaceState_Structure(t *testing.T) {
-	intf := InterfaceState{
+	intf := device.InterfaceState{
 		Name:        "Ethernet0",
 		AdminStatus: "up",
 		OperStatus:  "up",
@@ -309,7 +311,7 @@ func TestInterfaceState_Structure(t *testing.T) {
 }
 
 func TestPortChannelState_Structure(t *testing.T) {
-	pc := PortChannelState{
+	pc := device.PortChannelState{
 		Name:          "PortChannel100",
 		AdminStatus:   "up",
 		Members:       []string{"Ethernet0", "Ethernet4"},
@@ -325,7 +327,7 @@ func TestPortChannelState_Structure(t *testing.T) {
 }
 
 func TestVLANState_Structure(t *testing.T) {
-	vlan := VLANState{
+	vlan := device.VLANState{
 		ID:         100,
 		Name:       "Vlan100",
 		OperStatus: "up",
@@ -343,7 +345,7 @@ func TestVLANState_Structure(t *testing.T) {
 }
 
 func TestVRFState_Structure(t *testing.T) {
-	vrf := VRFState{
+	vrf := device.VRFState{
 		Name:       "Vrf_CUST1",
 		State:      "up",
 		L3VNI:      10001,
@@ -362,7 +364,7 @@ func TestVRFState_Structure(t *testing.T) {
 }
 
 func TestInterfaceSummary_Structure(t *testing.T) {
-	summary := InterfaceSummary{
+	summary := device.InterfaceSummary{
 		Name:        "Ethernet0",
 		AdminStatus: "up",
 		Speed:       "100G",
@@ -397,11 +399,11 @@ func TestPopulateDeviceState_NilStateDB(t *testing.T) {
 	configDB.ACLTable["ACL1"] = ACLTableEntry{Stage: "ingress", Ports: "Ethernet0"}
 	configDB.BGPGlobals["default"] = BGPGlobalsEntry{LocalASN: "65000", RouterID: "10.0.0.1"}
 
-	state := &DeviceState{
-		Interfaces:   make(map[string]*InterfaceState),
-		PortChannels: make(map[string]*PortChannelState),
-		VLANs:        make(map[int]*VLANState),
-		VRFs:         make(map[string]*VRFState),
+	state := &device.DeviceState{
+		Interfaces:   make(map[string]*device.InterfaceState),
+		PortChannels: make(map[string]*device.PortChannelState),
+		VLANs:        make(map[int]*device.VLANState),
+		VRFs:         make(map[string]*device.VRFState),
 	}
 
 	PopulateDeviceState(state, nil, configDB)
@@ -517,11 +519,11 @@ func TestPopulateDeviceState_WithStateDB(t *testing.T) {
 		TransceiverStatus: map[string]TransceiverStatusEntry{},
 	}
 
-	state := &DeviceState{
-		Interfaces:   make(map[string]*InterfaceState),
-		PortChannels: make(map[string]*PortChannelState),
-		VLANs:        make(map[int]*VLANState),
-		VRFs:         make(map[string]*VRFState),
+	state := &device.DeviceState{
+		Interfaces:   make(map[string]*device.InterfaceState),
+		PortChannels: make(map[string]*device.PortChannelState),
+		VLANs:        make(map[int]*device.VLANState),
+		VRFs:         make(map[string]*device.VRFState),
 	}
 
 	PopulateDeviceState(state, stateDB, configDB)

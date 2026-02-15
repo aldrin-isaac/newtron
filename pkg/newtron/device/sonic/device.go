@@ -1,4 +1,4 @@
-package device
+package sonic
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -17,7 +18,7 @@ type Device struct {
 	Profile  *spec.ResolvedProfile
 	ConfigDB *ConfigDB
 	StateDB  *StateDB
-	State    *DeviceState
+	State    *device.DeviceState
 
 	// v3: Platform configuration from device's platform.json
 	PlatformConfig *SonicPlatformConfig
@@ -27,7 +28,7 @@ type Device struct {
 	stateClient *StateDBClient
 	applClient  *AppDBClient  // APP_DB (DB 0) for route verification
 	asicClient  *AsicDBClient // ASIC_DB (DB 1) for ASIC-level verification
-	tunnel      *SSHTunnel    // SSH tunnel for Redis access (nil if direct)
+	tunnel      *device.SSHTunnel    // SSH tunnel for Redis access (nil if direct)
 	connected   bool
 	locked      bool
 	lockHolder  string // holder identity for distributed lock
@@ -36,95 +37,16 @@ type Device struct {
 	mu sync.RWMutex
 }
 
-// DeviceState holds the current operational state of the device
-type DeviceState struct {
-	Interfaces   map[string]*InterfaceState
-	PortChannels map[string]*PortChannelState
-	VLANs        map[int]*VLANState
-	VRFs         map[string]*VRFState
-	BGP          *BGPState
-	EVPN         *EVPNState
-}
-
-// InterfaceState represents interface operational state
-type InterfaceState struct {
-	Name        string
-	AdminStatus string
-	OperStatus  string
-	Speed       string
-	MTU         int
-	VRF         string
-	IPAddresses []string
-	Service     string
-	IngressACL  string
-	EgressACL   string
-	LAGMember   string // Parent LAG if member
-}
-
-// PortChannelState represents LAG operational state
-type PortChannelState struct {
-	Name          string
-	AdminStatus   string
-	OperStatus    string
-	Members       []string
-	ActiveMembers []string
-}
-
-// VLANState represents VLAN operational state
-type VLANState struct {
-	ID         int
-	Name       string
-	OperStatus string
-	Members    []string
-	SVIStatus  string
-	L2VNI      int
-}
-
-// VRFState represents VRF operational state
-type VRFState struct {
-	Name       string
-	State      string
-	Interfaces []string
-	L3VNI      int
-	RouteCount int
-}
-
-// BGPState represents BGP operational state
-type BGPState struct {
-	LocalAS   int
-	RouterID  string
-	Neighbors map[string]*BGPNeighborState
-}
-
-// BGPNeighborState represents BGP neighbor state
-type BGPNeighborState struct {
-	Address  string
-	RemoteAS int
-	State    string
-	PfxRcvd  int
-	PfxSent  int
-	Uptime   string
-}
-
-// EVPNState represents EVPN operational state
-type EVPNState struct {
-	VTEPState   string
-	RemoteVTEPs []string
-	VNICount    int
-	Type2Routes int
-	Type5Routes int
-}
-
 // NewDevice creates a new device instance
 func NewDevice(name string, profile *spec.ResolvedProfile) *Device {
 	return &Device{
 		Name:    name,
 		Profile: profile,
-		State: &DeviceState{
-			Interfaces:   make(map[string]*InterfaceState),
-			PortChannels: make(map[string]*PortChannelState),
-			VLANs:        make(map[int]*VLANState),
-			VRFs:         make(map[string]*VRFState),
+		State: &device.DeviceState{
+			Interfaces:   make(map[string]*device.InterfaceState),
+			PortChannels: make(map[string]*device.PortChannelState),
+			VLANs:        make(map[int]*device.VLANState),
+			VRFs:         make(map[string]*device.VRFState),
 		},
 	}
 }
@@ -140,7 +62,7 @@ func (d *Device) Connect(ctx context.Context) error {
 
 	var addr string
 	if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
-		tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
+		tun, err := device.NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
 		if err != nil {
 			return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
 		}
@@ -373,7 +295,7 @@ func (d *Device) Reload(ctx context.Context) error {
 }
 
 // GetInterface returns interface state by name.
-func (d *Device) GetInterface(name string) (*InterfaceState, error) {
+func (d *Device) GetInterface(name string) (*device.InterfaceState, error) {
 	if err := d.RequireConnected(); err != nil {
 		return nil, err
 	}
@@ -389,7 +311,7 @@ func (d *Device) GetInterface(name string) (*InterfaceState, error) {
 }
 
 // GetPortChannel returns LAG state by name.
-func (d *Device) GetPortChannel(name string) (*PortChannelState, error) {
+func (d *Device) GetPortChannel(name string) (*device.PortChannelState, error) {
 	if err := d.RequireConnected(); err != nil {
 		return nil, err
 	}
@@ -405,7 +327,7 @@ func (d *Device) GetPortChannel(name string) (*PortChannelState, error) {
 }
 
 // GetVLAN returns VLAN state by ID
-func (d *Device) GetVLAN(id int) (*VLANState, error) {
+func (d *Device) GetVLAN(id int) (*device.VLANState, error) {
 	if err := d.RequireConnected(); err != nil {
 		return nil, err
 	}
@@ -421,7 +343,7 @@ func (d *Device) GetVLAN(id int) (*VLANState, error) {
 }
 
 // GetVRF returns VRF state by name
-func (d *Device) GetVRF(name string) (*VRFState, error) {
+func (d *Device) GetVRF(name string) (*device.VRFState, error) {
 	if err := d.RequireConnected(); err != nil {
 		return nil, err
 	}
@@ -496,7 +418,7 @@ func (d *Device) Client() *ConfigDBClient {
 // This is a pure write — it does not reload the CONFIG_DB cache afterward.
 // Cache refresh is the caller's responsibility via Lock() (for write episodes)
 // or Refresh() (for read-only episodes). See HLD §4.10 for the episode model.
-func (d *Device) ApplyChanges(changes []ConfigChange) error {
+func (d *Device) ApplyChanges(changes []device.ConfigChange) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -510,9 +432,9 @@ func (d *Device) ApplyChanges(changes []ConfigChange) error {
 	for _, change := range changes {
 		var err error
 		switch change.Type {
-		case ChangeTypeAdd, ChangeTypeModify:
+		case device.ChangeTypeAdd, device.ChangeTypeModify:
 			err = d.client.Set(change.Table, change.Key, change.Fields)
-		case ChangeTypeDelete:
+		case device.ChangeTypeDelete:
 			err = d.client.Delete(change.Table, change.Key)
 		}
 		if err != nil {
@@ -523,22 +445,6 @@ func (d *Device) ApplyChanges(changes []ConfigChange) error {
 	return nil
 }
 
-// ConfigChange represents a single configuration change
-type ConfigChange struct {
-	Table  string
-	Key    string
-	Type   ChangeType
-	Fields map[string]string
-}
-
-// ChangeType represents the type of configuration change
-type ChangeType string
-
-const (
-	ChangeTypeAdd    ChangeType = "add"
-	ChangeTypeModify ChangeType = "modify"
-	ChangeTypeDelete ChangeType = "delete"
-)
 
 // StateClient returns the underlying StateDB client for direct access
 func (d *Device) StateClient() *StateDBClient {
@@ -561,7 +467,7 @@ func (d *Device) GetInterfaceOperState(name string) (string, error) {
 }
 
 // GetBGPNeighborOperState returns the operational state of a BGP neighbor
-func (d *Device) GetBGPNeighborOperState(neighbor string) (*BGPNeighborState, error) {
+func (d *Device) GetBGPNeighborOperState(neighbor string) (*device.BGPNeighborState, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -576,7 +482,7 @@ func (d *Device) GetBGPNeighborOperState(neighbor string) (*BGPNeighborState, er
 }
 
 // GetPortChannelOperState returns the operational state of a PortChannel
-func (d *Device) GetPortChannelOperState(name string) (*PortChannelState, error) {
+func (d *Device) GetPortChannelOperState(name string) (*device.PortChannelState, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -591,7 +497,7 @@ func (d *Device) GetPortChannelOperState(name string) (*PortChannelState, error)
 }
 
 // GetVRFOperState returns the operational state of a VRF
-func (d *Device) GetVRFOperState(name string) (*VRFState, error) {
+func (d *Device) GetVRFOperState(name string) (*device.VRFState, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -606,7 +512,7 @@ func (d *Device) GetVRFOperState(name string) (*VRFState, error) {
 }
 
 // GetEVPNState returns the EVPN operational state
-func (d *Device) GetEVPNState() *EVPNState {
+func (d *Device) GetEVPNState() *device.EVPNState {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -667,10 +573,10 @@ func (d *Device) SaveConfig(ctx context.Context) error {
 }
 
 // GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.
-// Parses the comma-separated nexthop/ifname fields into []NextHop.
-// Returns nil RouteEntry (not error) if the prefix is not present.
+// Parses the comma-separated nexthop/ifname fields into []device.NextHop.
+// Returns nil device.RouteEntry (not error) if the prefix is not present.
 // Single-shot read — does not poll or retry.
-func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error) {
+func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -685,9 +591,9 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 
 // GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
 // object chain: SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
-// Returns nil RouteEntry (not error) if not programmed in ASIC.
+// Returns nil device.RouteEntry (not error) if not programmed in ASIC.
 // Single-shot read — does not poll or retry.
-func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error) {
+func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -709,7 +615,7 @@ func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEn
 //
 // Uses a fresh ConfigDBClient on the existing SSH tunnel to avoid reading from
 // the cached d.ConfigDB that was updated by Apply().
-func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*VerificationResult, error) {
+func (d *Device) VerifyChangeSet(ctx context.Context, changes []device.ConfigChange) (*device.VerificationResult, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
@@ -732,11 +638,11 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*
 	}
 	defer freshClient.Close()
 
-	result := &VerificationResult{}
+	result := &device.VerificationResult{}
 
 	for _, change := range changes {
 		switch change.Type {
-		case ChangeTypeAdd, ChangeTypeModify:
+		case device.ChangeTypeAdd, device.ChangeTypeModify:
 			// Read the table/key from fresh Redis and verify fields
 			actual, err := freshClient.Get(change.Table, change.Key)
 			if err != nil {
@@ -744,7 +650,7 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*
 			}
 			if len(actual) == 0 {
 				result.Failed++
-				result.Errors = append(result.Errors, VerificationError{
+				result.Errors = append(result.Errors, device.VerificationError{
 					Table:    change.Table,
 					Key:      change.Key,
 					Field:    "(all)",
@@ -763,7 +669,7 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*
 					if ok {
 						actualVal = got
 					}
-					result.Errors = append(result.Errors, VerificationError{
+					result.Errors = append(result.Errors, device.VerificationError{
 						Table:    change.Table,
 						Key:      change.Key,
 						Field:    field,
@@ -775,14 +681,14 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*
 			if allMatch {
 				result.Passed++
 			}
-		case ChangeTypeDelete:
+		case device.ChangeTypeDelete:
 			exists, err := freshClient.Exists(change.Table, change.Key)
 			if err != nil {
 				return nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
 			}
 			if exists {
 				result.Failed++
-				result.Errors = append(result.Errors, VerificationError{
+				result.Errors = append(result.Errors, device.VerificationError{
 					Table:    change.Table,
 					Key:      change.Key,
 					Field:    "(all)",
@@ -900,7 +806,7 @@ func (d *Device) RestartService(ctx context.Context, name string) error {
 
 // Tunnel returns the SSH tunnel for direct access (e.g., newtest SSH commands).
 // Returns nil if no SSH tunnel is configured (direct Redis connection).
-func (d *Device) Tunnel() *SSHTunnel {
+func (d *Device) Tunnel() *device.SSHTunnel {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.tunnel

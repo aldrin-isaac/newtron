@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -43,12 +43,12 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	}
 
 	// ConfigDB state: service binding + VRF
-	d.configDB.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{
+	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 		IPAddress:   "10.1.0.0/31",
 		VRFName:     "Vrf_CUST1",
 	}
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 
 	cs, err := intf.RemoveService(ctx)
 	if err != nil {
@@ -76,12 +76,12 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	}
 
 	// ACL only bound to this interface → last user
-	d.configDB.ACLTable["ACL_CUST_IN"] = device.ACLTableEntry{
+	d.configDB.ACLTable["ACL_CUST_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0",
 	}
-	d.configDB.ACLRule["ACL_CUST_IN|RULE_10"] = device.ACLRuleEntry{Priority: "10"}
-	d.configDB.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{
+	d.configDB.ACLRule["ACL_CUST_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
+	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 		IngressACL:  "ACL_CUST_IN",
 	}
@@ -108,11 +108,11 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	}
 
 	// ACL bound to both Ethernet0 and Ethernet4 → not last user
-	d.configDB.ACLTable["ACL_CUST_IN"] = device.ACLTableEntry{
+	d.configDB.ACLTable["ACL_CUST_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
-	d.configDB.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{
+	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 		IngressACL:  "ACL_CUST_IN",
 	}
@@ -159,7 +159,7 @@ func TestSetIP_Invalid(t *testing.T) {
 
 func TestSetVRF(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 	ctx := context.Background()
 
 	cs, err := intf.SetVRF(ctx, "Vrf_CUST1")
@@ -183,7 +183,7 @@ func TestSetVRF_NotFound(t *testing.T) {
 
 func TestBindACL(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet4",
 	}
@@ -202,7 +202,7 @@ func TestBindACL(t *testing.T) {
 func TestBindACL_EmptyBindingList(t *testing.T) {
 	d, intf := testInterface()
 	// ACL exists but has no interfaces bound yet
-	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{
 		Type: "L3",
 	}
 	ctx := context.Background()
@@ -252,7 +252,7 @@ func TestRemoveBGPNeighbor(t *testing.T) {
 	d, intf := testInterface()
 	intf.ipAddresses = []string{"10.1.0.0/31"}
 	// Pre-existing neighbor
-	d.configDB.BGPNeighbor["default|10.1.0.1"] = device.BGPNeighborEntry{
+	d.configDB.BGPNeighbor["default|10.1.0.1"] = sonic.BGPNeighborEntry{
 		ASN: "64513", LocalAddr: "10.1.0.0",
 	}
 	ctx := context.Background()

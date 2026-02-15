@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -39,34 +39,34 @@ func testDevice() *Device {
 			Site:       "dc1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB: &device.ConfigDB{
+		configDB: &sonic.ConfigDB{
 			DeviceMetadata:        map[string]map[string]string{},
-			Port:                  map[string]device.PortEntry{"Ethernet0": {}, "Ethernet4": {}},
-			VLAN:                  map[string]device.VLANEntry{},
-			VLANMember:            map[string]device.VLANMemberEntry{},
+			Port:                  map[string]sonic.PortEntry{"Ethernet0": {}, "Ethernet4": {}},
+			VLAN:                  map[string]sonic.VLANEntry{},
+			VLANMember:            map[string]sonic.VLANMemberEntry{},
 			VLANInterface:         map[string]map[string]string{},
-			Interface:             map[string]device.InterfaceEntry{},
-			PortChannel:           map[string]device.PortChannelEntry{},
+			Interface:             map[string]sonic.InterfaceEntry{},
+			PortChannel:           map[string]sonic.PortChannelEntry{},
 			PortChannelMember:     map[string]map[string]string{},
 			LoopbackInterface:     map[string]map[string]string{},
-			VRF:                   map[string]device.VRFEntry{},
-			VXLANTunnel:           map[string]device.VXLANTunnelEntry{},
-			VXLANTunnelMap:        map[string]device.VXLANMapEntry{},
-			VXLANEVPNNVO:          map[string]device.EVPNNVOEntry{},
+			VRF:                   map[string]sonic.VRFEntry{},
+			VXLANTunnel:           map[string]sonic.VXLANTunnelEntry{},
+			VXLANTunnelMap:        map[string]sonic.VXLANMapEntry{},
+			VXLANEVPNNVO:          map[string]sonic.EVPNNVOEntry{},
 			SuppressVLANNeigh:     map[string]map[string]string{},
 			SAG:                   map[string]map[string]string{},
 			SAGGlobal:             map[string]map[string]string{},
-			BGPNeighbor:           map[string]device.BGPNeighborEntry{},
-			BGPNeighborAF:         map[string]device.BGPNeighborAFEntry{},
-			BGPGlobals:            map[string]device.BGPGlobalsEntry{},
-			BGPGlobalsAF:          map[string]device.BGPGlobalsAFEntry{},
-			BGPEVPNVNI:            map[string]device.BGPEVPNVNIEntry{},
-			RouteTable:            map[string]device.StaticRouteEntry{},
-			ACLTable:              map[string]device.ACLTableEntry{},
-			ACLRule:               map[string]device.ACLRuleEntry{},
-			ACLTableType:          map[string]device.ACLTableTypeEntry{},
-			RouteRedistribute:     map[string]device.RouteRedistributeEntry{},
-			NewtronServiceBinding: map[string]device.ServiceBindingEntry{},
+			BGPNeighbor:           map[string]sonic.BGPNeighborEntry{},
+			BGPNeighborAF:         map[string]sonic.BGPNeighborAFEntry{},
+			BGPGlobals:            map[string]sonic.BGPGlobalsEntry{},
+			BGPGlobalsAF:          map[string]sonic.BGPGlobalsAFEntry{},
+			BGPEVPNVNI:            map[string]sonic.BGPEVPNVNIEntry{},
+			RouteTable:            map[string]sonic.StaticRouteEntry{},
+			ACLTable:              map[string]sonic.ACLTableEntry{},
+			ACLRule:               map[string]sonic.ACLRuleEntry{},
+			ACLTableType:          map[string]sonic.ACLTableTypeEntry{},
+			RouteRedistribute:     map[string]sonic.RouteRedistributeEntry{},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 		},
 	}
 }
@@ -148,7 +148,7 @@ func TestCreateVLAN_WithL2VNI(t *testing.T) {
 
 func TestCreateVLAN_AlreadyExists(t *testing.T) {
 	d := testDevice()
-	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	ctx := context.Background()
 
 	_, err := d.CreateVLAN(ctx, 100, VLANConfig{})
@@ -162,10 +162,10 @@ func TestCreateVLAN_AlreadyExists(t *testing.T) {
 
 func TestDeleteVLAN_WithMembers(t *testing.T) {
 	d := testDevice()
-	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
-	d.configDB.VLANMember["Vlan100|Ethernet0"] = device.VLANMemberEntry{TaggingMode: "untagged"}
-	d.configDB.VLANMember["Vlan100|Ethernet4"] = device.VLANMemberEntry{TaggingMode: "tagged"}
-	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = device.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
+	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	d.configDB.VLANMember["Vlan100|Ethernet0"] = sonic.VLANMemberEntry{TaggingMode: "untagged"}
+	d.configDB.VLANMember["Vlan100|Ethernet4"] = sonic.VLANMemberEntry{TaggingMode: "tagged"}
+	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = sonic.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVLAN(ctx, 100)
@@ -210,7 +210,7 @@ func TestCreatePortChannel_Basic(t *testing.T) {
 
 func TestAddPortChannelMember(t *testing.T) {
 	d := testDevice()
-	d.configDB.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
+	d.configDB.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
 	ctx := context.Background()
 
 	cs, err := d.AddPortChannelMember(ctx, "PortChannel100", "Ethernet0")
@@ -226,7 +226,7 @@ func TestAddPortChannelMember(t *testing.T) {
 
 func TestRemovePortChannelMember(t *testing.T) {
 	d := testDevice()
-	d.configDB.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
+	d.configDB.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
 	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
 	ctx := context.Background()
 
@@ -261,8 +261,8 @@ func TestCreateVRF_WithL3VNI(t *testing.T) {
 
 func TestDeleteVRF_NoInterfaces(t *testing.T) {
 	d := testDevice()
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
-	d.configDB.VXLANTunnelMap["vtep1|map_30001_Vrf_CUST1"] = device.VXLANMapEntry{VRF: "Vrf_CUST1", VNI: "30001"}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
+	d.configDB.VXLANTunnelMap["vtep1|map_30001_Vrf_CUST1"] = sonic.VXLANMapEntry{VRF: "Vrf_CUST1", VNI: "30001"}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVRF(ctx, "Vrf_CUST1")
@@ -278,8 +278,8 @@ func TestDeleteVRF_NoInterfaces(t *testing.T) {
 
 func TestDeleteVRF_BoundInterfacesBlocks(t *testing.T) {
 	d := testDevice()
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
-	d.configDB.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	ctx := context.Background()
 
 	_, err := d.DeleteVRF(ctx, "Vrf_CUST1")
@@ -315,11 +315,11 @@ func TestCreateACLTable_Basic(t *testing.T) {
 
 func TestDeleteACLTable_RemovesRules(t *testing.T) {
 	d := testDevice()
-	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{Type: "L3", Stage: "ingress"}
-	d.configDB.ACLRule["EDGE_IN|RULE_10"] = device.ACLRuleEntry{Priority: "10", PacketAction: "FORWARD"}
-	d.configDB.ACLRule["EDGE_IN|RULE_20"] = device.ACLRuleEntry{Priority: "20", PacketAction: "DROP"}
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	d.configDB.ACLRule["EDGE_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10", PacketAction: "FORWARD"}
+	d.configDB.ACLRule["EDGE_IN|RULE_20"] = sonic.ACLRuleEntry{Priority: "20", PacketAction: "DROP"}
 	// A rule in a different table — should NOT be deleted
-	d.configDB.ACLRule["OTHER_TABLE|RULE_10"] = device.ACLRuleEntry{Priority: "10"}
+	d.configDB.ACLRule["OTHER_TABLE|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
 	ctx := context.Background()
 
 	cs, err := d.DeleteACLTable(ctx, "EDGE_IN")
@@ -335,7 +335,7 @@ func TestDeleteACLTable_RemovesRules(t *testing.T) {
 
 func TestUnbindACLFromInterface(t *testing.T) {
 	d := testDevice()
-	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
@@ -353,7 +353,7 @@ func TestUnbindACLFromInterface(t *testing.T) {
 
 func TestAddACLRule(t *testing.T) {
 	d := testDevice()
-	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{Type: "L3", Stage: "ingress"}
 	ctx := context.Background()
 
 	cs, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
@@ -397,8 +397,8 @@ func TestCreateVTEP(t *testing.T) {
 
 func TestMapL2VNI(t *testing.T) {
 	d := testDevice()
-	d.configDB.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
-	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
+	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	ctx := context.Background()
 
 	cs, err := d.MapL2VNI(ctx, 100, 20100)
@@ -413,8 +413,8 @@ func TestMapL2VNI(t *testing.T) {
 
 func TestMapL3VNI(t *testing.T) {
 	d := testDevice()
-	d.configDB.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{}
+	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 	ctx := context.Background()
 
 	cs, err := d.MapL3VNI(ctx, "Vrf_CUST1", 30001)
@@ -434,8 +434,8 @@ func TestMapL3VNI(t *testing.T) {
 
 func TestConfigureSVI(t *testing.T) {
 	d := testDevice()
-	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
-	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
+	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
 	ctx := context.Background()
 
 	cs, err := d.ConfigureSVI(ctx, 100, SVIConfig{
@@ -461,7 +461,7 @@ func TestConfigureSVI(t *testing.T) {
 
 func TestUnmapVNI(t *testing.T) {
 	d := testDevice()
-	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = device.VXLANMapEntry{
+	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = sonic.VXLANMapEntry{
 		VLAN: "Vlan100", VNI: "20100",
 	}
 	ctx := context.Background()

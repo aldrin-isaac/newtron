@@ -1,6 +1,6 @@
 // Package device handles SONiC device connection and configuration via config_db/Redis.
 // This file implements State DB access (Redis DB 6) for operational state.
-package device
+package sonic
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -498,16 +499,16 @@ func parseVLANIDFromName(name string) int {
 	return 0
 }
 
-// PopulateDeviceState fills DeviceState from StateDB and/or ConfigDB data.
+// PopulateDeviceState fills device.DeviceState from StateDB and/or ConfigDB data.
 // When stateDB is non-nil, operational state (oper_status, speed, etc.) comes
 // from StateDB with config enrichment from ConfigDB. When stateDB is nil,
 // state is built from ConfigDB alone (config-only fallback).
-func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+func PopulateDeviceState(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	// Reset state maps
-	state.Interfaces = make(map[string]*InterfaceState)
-	state.PortChannels = make(map[string]*PortChannelState)
-	state.VLANs = make(map[int]*VLANState)
-	state.VRFs = make(map[string]*VRFState)
+	state.Interfaces = make(map[string]*device.InterfaceState)
+	state.PortChannels = make(map[string]*device.PortChannelState)
+	state.VLANs = make(map[int]*device.VLANState)
+	state.VRFs = make(map[string]*device.VRFState)
 
 	populateInterfaces(state, stateDB, configDB)
 	populatePortChannels(state, stateDB, configDB)
@@ -517,10 +518,10 @@ func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigD
 	populateEVPN(state, stateDB, configDB)
 }
 
-func populateInterfaces(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+func populateInterfaces(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	if stateDB != nil {
 		for name, portState := range stateDB.PortTable {
-			intfState := &InterfaceState{
+			intfState := &device.InterfaceState{
 				Name:        name,
 				AdminStatus: portState.AdminStatus,
 				OperStatus:  portState.OperStatus,
@@ -533,7 +534,7 @@ func populateInterfaces(state *DeviceState, stateDB *StateDB, configDB *ConfigDB
 		}
 	} else if configDB != nil {
 		for name, port := range configDB.Port {
-			intfState := &InterfaceState{
+			intfState := &device.InterfaceState{
 				Name:        name,
 				AdminStatus: port.AdminStatus,
 				Speed:       port.Speed,
@@ -591,10 +592,10 @@ func populateInterfaces(state *DeviceState, stateDB *StateDB, configDB *ConfigDB
 	}
 }
 
-func populatePortChannels(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+func populatePortChannels(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	if stateDB != nil {
 		for name, lagState := range stateDB.LAGTable {
-			pcState := &PortChannelState{
+			pcState := &device.PortChannelState{
 				Name:       name,
 				OperStatus: lagState.OperStatus,
 			}
@@ -621,7 +622,7 @@ func populatePortChannels(state *DeviceState, stateDB *StateDB, configDB *Config
 		}
 	} else if configDB != nil {
 		for name, pc := range configDB.PortChannel {
-			pcState := &PortChannelState{
+			pcState := &device.PortChannelState{
 				Name:        name,
 				AdminStatus: pc.AdminStatus,
 				Members:     []string{},
@@ -641,12 +642,12 @@ func populatePortChannels(state *DeviceState, stateDB *StateDB, configDB *Config
 	}
 }
 
-func populateVLANs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+func populateVLANs(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	if stateDB != nil {
 		for name, vlanState := range stateDB.VLANTable {
 			id := parseVLANIDFromName(name)
 			if id > 0 {
-				state.VLANs[id] = &VLANState{
+				state.VLANs[id] = &device.VLANState{
 					ID:         id,
 					Name:       name,
 					OperStatus: vlanState.OperStatus,
@@ -662,7 +663,7 @@ func populateVLANs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 			if vlanID == 0 {
 				continue
 			}
-			state.VLANs[vlanID] = &VLANState{
+			state.VLANs[vlanID] = &device.VLANState{
 				ID:         vlanID,
 				Name:       name,
 				OperStatus: vlan.AdminStatus,
@@ -708,17 +709,17 @@ func populateVLANs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	}
 }
 
-func populateVRFs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+func populateVRFs(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	if stateDB != nil {
 		for name, vrfState := range stateDB.VRFTable {
-			state.VRFs[name] = &VRFState{
+			state.VRFs[name] = &device.VRFState{
 				Name:  name,
 				State: vrfState.State,
 			}
 		}
 	} else if configDB != nil {
 		for name := range configDB.VRF {
-			state.VRFs[name] = &VRFState{
+			state.VRFs[name] = &device.VRFState{
 				Name:       name,
 				State:      "up",
 				Interfaces: []string{},
@@ -772,9 +773,9 @@ func populateVRFs(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	}
 }
 
-func populateBGP(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
-	state.BGP = &BGPState{
-		Neighbors: make(map[string]*BGPNeighborState),
+func populateBGP(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	state.BGP = &device.BGPState{
+		Neighbors: make(map[string]*device.BGPNeighborState),
 	}
 
 	if configDB != nil {
@@ -798,7 +799,7 @@ func populateBGP(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 			pfxRcvd, _ := strconv.Atoi(neighborState.PfxRcvd)
 			pfxSent, _ := strconv.Atoi(neighborState.PfxSent)
 
-			state.BGP.Neighbors[neighborIP] = &BGPNeighborState{
+			state.BGP.Neighbors[neighborIP] = &device.BGPNeighborState{
 				Address:  neighborIP,
 				RemoteAS: remoteAS,
 				State:    neighborState.State,
@@ -810,8 +811,8 @@ func populateBGP(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
 	}
 }
 
-func populateEVPN(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
-	state.EVPN = &EVPNState{}
+func populateEVPN(state *device.DeviceState, stateDB *StateDB, configDB *ConfigDB) {
+	state.EVPN = &device.EVPNState{}
 
 	if stateDB != nil {
 		for name, tunnelState := range stateDB.VXLANTunnelTable {

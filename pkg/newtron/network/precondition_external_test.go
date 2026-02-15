@@ -4,34 +4,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // testDevice creates a minimal Device for precondition testing.
-func testDevice(configDB *device.ConfigDB, connected, locked bool) *network.Device {
+func testDevice(configDB *sonic.ConfigDB, connected, locked bool) *network.Device {
 	return network.NewTestDevice("test-leaf", configDB, connected, locked)
 }
 
 // emptyConfigDB creates a ConfigDB with all maps initialized to empty.
-func emptyConfigDB() *device.ConfigDB {
-	return &device.ConfigDB{
+func emptyConfigDB() *sonic.ConfigDB {
+	return &sonic.ConfigDB{
 		DeviceMetadata:        make(map[string]map[string]string),
-		Port:                  make(map[string]device.PortEntry),
-		VLAN:                  make(map[string]device.VLANEntry),
-		VLANMember:            make(map[string]device.VLANMemberEntry),
+		Port:                  make(map[string]sonic.PortEntry),
+		VLAN:                  make(map[string]sonic.VLANEntry),
+		VLANMember:            make(map[string]sonic.VLANMemberEntry),
 		VLANInterface:         make(map[string]map[string]string),
-		Interface:             make(map[string]device.InterfaceEntry),
-		PortChannel:           make(map[string]device.PortChannelEntry),
+		Interface:             make(map[string]sonic.InterfaceEntry),
+		PortChannel:           make(map[string]sonic.PortChannelEntry),
 		PortChannelMember:     make(map[string]map[string]string),
 		LoopbackInterface:     make(map[string]map[string]string),
-		VRF:                   make(map[string]device.VRFEntry),
-		VXLANTunnel:           make(map[string]device.VXLANTunnelEntry),
-		BGPNeighbor:           make(map[string]device.BGPNeighborEntry),
-		ACLTable:              make(map[string]device.ACLTableEntry),
-		NewtronServiceBinding: make(map[string]device.ServiceBindingEntry),
-		BGPPeerGroup:          make(map[string]device.BGPPeerGroupEntry),
+		VRF:                   make(map[string]sonic.VRFEntry),
+		VXLANTunnel:           make(map[string]sonic.VXLANTunnelEntry),
+		BGPNeighbor:           make(map[string]sonic.BGPNeighborEntry),
+		ACLTable:              make(map[string]sonic.ACLTableEntry),
+		NewtronServiceBinding: make(map[string]sonic.ServiceBindingEntry),
+		BGPPeerGroup:          make(map[string]sonic.BGPPeerGroupEntry),
 	}
 }
 
@@ -119,7 +119,7 @@ func TestPreconditionChecker_ChainedChecks_MultipleFailures(t *testing.T) {
 
 func TestPreconditionChecker_RequireVLANExists_Pass(t *testing.T) {
 	db := emptyConfigDB()
-	db.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	db.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -152,7 +152,7 @@ func TestPreconditionChecker_RequireVLANNotExists_Pass(t *testing.T) {
 
 func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
 	db := emptyConfigDB()
-	db.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	db.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -165,7 +165,7 @@ func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
 
 func TestPreconditionChecker_RequireVRFExists(t *testing.T) {
 	db := emptyConfigDB()
-	db.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "10001"}
+	db.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "10001"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -185,7 +185,7 @@ func TestPreconditionChecker_RequireVRFExists(t *testing.T) {
 
 func TestPreconditionChecker_RequirePortChannelExists(t *testing.T) {
 	db := emptyConfigDB()
-	db.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
+	db.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -205,7 +205,7 @@ func TestPreconditionChecker_RequirePortChannelExists(t *testing.T) {
 
 func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
 	db := emptyConfigDB()
-	db.ACLTable["CUSTOMER-IN"] = device.ACLTableEntry{
+	db.ACLTable["CUSTOMER-IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Stage: "ingress",
 		Ports: "Ethernet0",
@@ -229,7 +229,7 @@ func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
 
 func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 	db := emptyConfigDB()
-	db.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
+	db.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -250,7 +250,7 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 
 func TestPreconditionChecker_RequireBGPConfigured(t *testing.T) {
 	db := emptyConfigDB()
-	db.BGPNeighbor["10.0.0.2"] = device.BGPNeighborEntry{ASN: "65002"}
+	db.BGPNeighbor["10.0.0.2"] = sonic.BGPNeighborEntry{ASN: "65002"}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -304,7 +304,7 @@ func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
 
 func TestPreconditionChecker_RequireNoExistingService(t *testing.T) {
 	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{
+	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 	}
 	dev := testDevice(db, true, false)
@@ -326,7 +326,7 @@ func TestPreconditionChecker_RequireNoExistingService(t *testing.T) {
 
 func TestPreconditionChecker_RequirePeerGroupExists(t *testing.T) {
 	db := emptyConfigDB()
-	db.BGPPeerGroup["FABRIC"] = device.BGPPeerGroupEntry{}
+	db.BGPPeerGroup["FABRIC"] = sonic.BGPPeerGroupEntry{}
 	dev := testDevice(db, true, false)
 
 	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -387,7 +387,7 @@ func TestPreconditionChecker_NoErrors(t *testing.T) {
 
 func TestDependencyChecker_IsLastACLUser_OnlyPort(t *testing.T) {
 	db := emptyConfigDB()
-	db.ACLTable["CUST-IN"] = device.ACLTableEntry{
+	db.ACLTable["CUST-IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0",
 	}
@@ -401,7 +401,7 @@ func TestDependencyChecker_IsLastACLUser_OnlyPort(t *testing.T) {
 
 func TestDependencyChecker_IsLastACLUser_MultiplePorts(t *testing.T) {
 	db := emptyConfigDB()
-	db.ACLTable["CUST-IN"] = device.ACLTableEntry{
+	db.ACLTable["CUST-IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
@@ -423,7 +423,7 @@ func TestDependencyChecker_IsLastACLUser_NonexistentACL(t *testing.T) {
 
 func TestDependencyChecker_IsLastVLANMember_OnlyMember(t *testing.T) {
 	db := emptyConfigDB()
-	db.VLANMember["Vlan100|Ethernet0"] = device.VLANMemberEntry{TaggingMode: "untagged"}
+	db.VLANMember["Vlan100|Ethernet0"] = sonic.VLANMemberEntry{TaggingMode: "untagged"}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -434,8 +434,8 @@ func TestDependencyChecker_IsLastVLANMember_OnlyMember(t *testing.T) {
 
 func TestDependencyChecker_IsLastVLANMember_MultipleMembers(t *testing.T) {
 	db := emptyConfigDB()
-	db.VLANMember["Vlan100|Ethernet0"] = device.VLANMemberEntry{TaggingMode: "untagged"}
-	db.VLANMember["Vlan100|Ethernet4"] = device.VLANMemberEntry{TaggingMode: "tagged"}
+	db.VLANMember["Vlan100|Ethernet0"] = sonic.VLANMemberEntry{TaggingMode: "untagged"}
+	db.VLANMember["Vlan100|Ethernet4"] = sonic.VLANMemberEntry{TaggingMode: "tagged"}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -446,7 +446,7 @@ func TestDependencyChecker_IsLastVLANMember_MultipleMembers(t *testing.T) {
 
 func TestDependencyChecker_IsLastVRFUser_OnlyUser(t *testing.T) {
 	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -457,8 +457,8 @@ func TestDependencyChecker_IsLastVRFUser_OnlyUser(t *testing.T) {
 
 func TestDependencyChecker_IsLastVRFUser_MultipleUsers(t *testing.T) {
 	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	db.Interface["Ethernet4"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	db.Interface["Ethernet4"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -469,9 +469,9 @@ func TestDependencyChecker_IsLastVRFUser_MultipleUsers(t *testing.T) {
 
 func TestDependencyChecker_IsLastVRFUser_SkipsCompositeKeys(t *testing.T) {
 	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	// Composite key (IP binding) — should be skipped
-	db.Interface["Ethernet0|10.1.1.1/30"] = device.InterfaceEntry{}
+	db.Interface["Ethernet0|10.1.1.1/30"] = sonic.InterfaceEntry{}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -482,7 +482,7 @@ func TestDependencyChecker_IsLastVRFUser_SkipsCompositeKeys(t *testing.T) {
 
 func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{
+	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 	}
 	dev := testDevice(db, true, false)
@@ -495,8 +495,8 @@ func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 
 func TestDependencyChecker_IsLastServiceUser_MultipleUsers(t *testing.T) {
 	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = device.ServiceBindingEntry{ServiceName: "customer-l3"}
-	db.NewtronServiceBinding["Ethernet4"] = device.ServiceBindingEntry{ServiceName: "customer-l3"}
+	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
+	db.NewtronServiceBinding["Ethernet4"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
 	dev := testDevice(db, true, false)
 
 	dc := network.NewDependencyChecker(dev, "Ethernet0")
@@ -507,7 +507,7 @@ func TestDependencyChecker_IsLastServiceUser_MultipleUsers(t *testing.T) {
 
 func TestDependencyChecker_GetACLRemainingInterfaces(t *testing.T) {
 	db := emptyConfigDB()
-	db.ACLTable["CUST-IN"] = device.ACLTableEntry{
+	db.ACLTable["CUST-IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4,Ethernet8",
 	}

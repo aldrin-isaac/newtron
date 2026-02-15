@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -167,7 +167,7 @@ func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *
 // ============================================================================
 
 // CreatePort creates a PORT entry validated against the device's platform.json.
-func (d *Device) CreatePort(ctx context.Context, cfg device.CreatePortConfig) (*ChangeSet, error) {
+func (d *Device) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*ChangeSet, error) {
 	if err := d.precondition("create-port", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error
 }
 
 // BreakoutPort applies a breakout mode to a port, creating child ports and removing the parent.
-func (d *Device) BreakoutPort(ctx context.Context, cfg device.BreakoutConfig) (*ChangeSet, error) {
+func (d *Device) BreakoutPort(ctx context.Context, cfg sonic.BreakoutConfig) (*ChangeSet, error) {
 	if err := d.precondition("breakout-port", cfg.ParentPort).Result(); err != nil {
 		return nil, err
 	}
@@ -349,7 +349,7 @@ func (d *Device) LoadPlatformConfig(ctx context.Context) error {
 		return fmt.Errorf("reading platform.json: %w", err)
 	}
 
-	config, err := device.ParsePlatformJSON(data)
+	config, err := sonic.ParsePlatformJSON(data)
 	if err != nil {
 		return err
 	}

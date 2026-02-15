@@ -1,5 +1,5 @@
 // Package device handles SONiC device connection and configuration via config_db/Redis.
-package device
+package sonic
 
 import (
 	"context"

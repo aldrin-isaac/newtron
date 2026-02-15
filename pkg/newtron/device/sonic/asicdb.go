@@ -1,7 +1,7 @@
 // Package device — ASIC_DB client for ASIC-level route verification (Redis DB 1).
 // ASIC_DB contains SAI objects that represent what is programmed in hardware.
 // Reading routes from ASIC_DB confirms data-plane programming, not just control-plane.
-package device
+package sonic
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/go-redis/redis/v8"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 )
 
 // AsicDBClient wraps Redis client for ASIC_DB access (DB 1).
@@ -114,8 +116,8 @@ func (c *AsicDBClient) ResolveVROID(vrfName string, configDB *ConfigDB) (string,
 // GetRouteASIC reads a route from ASIC_DB by resolving the SAI object chain:
 // SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
 // Returns nil (not error) if the route is not programmed in ASIC.
-// Returns RouteEntry with Source: RouteSourceAsicDB.
-func (c *AsicDBClient) GetRouteASIC(vrf, prefix string, configDB *ConfigDB) (*RouteEntry, error) {
+// Returns device.RouteEntry with Source: device.RouteSourceAsicDB.
+func (c *AsicDBClient) GetRouteASIC(vrf, prefix string, configDB *ConfigDB) (*device.RouteEntry, error) {
 	vrOID, err := c.ResolveVROID(vrf, configDB)
 	if err != nil {
 		return nil, err
@@ -139,10 +141,10 @@ func (c *AsicDBClient) GetRouteASIC(vrf, prefix string, configDB *ConfigDB) (*Ro
 		return nil, nil // no next-hop (e.g., blackhole or trap)
 	}
 
-	entry := &RouteEntry{
+	entry := &device.RouteEntry{
 		Prefix: prefix,
 		VRF:    vrf,
-		Source: RouteSourceAsicDB,
+		Source: device.RouteSourceAsicDB,
 	}
 
 	// Determine if this points to a single next-hop or a next-hop group
@@ -155,10 +157,10 @@ func (c *AsicDBClient) GetRouteASIC(vrf, prefix string, configDB *ConfigDB) (*Ro
 	return entry, nil
 }
 
-// resolveNextHops resolves a next-hop OID to a list of NextHop entries.
+// resolveNextHops resolves a next-hop OID to a list of device.NextHop entries.
 // If the OID is a SAI_NEXT_HOP_GROUP, resolves all group members.
 // If the OID is a SAI_NEXT_HOP directly, returns a single entry.
-func (c *AsicDBClient) resolveNextHops(oid string) ([]NextHop, error) {
+func (c *AsicDBClient) resolveNextHops(oid string) ([]device.NextHop, error) {
 	// Try as single next-hop first
 	nhKey := fmt.Sprintf("ASIC_STATE:SAI_OBJECT_TYPE_NEXT_HOP:%s", oid)
 	nhVals, err := c.client.HGetAll(c.ctx, nhKey).Result()
@@ -167,7 +169,7 @@ func (c *AsicDBClient) resolveNextHops(oid string) ([]NextHop, error) {
 	}
 	if len(nhVals) > 0 {
 		// Single next-hop
-		return []NextHop{{
+		return []device.NextHop{{
 			IP: nhVals["SAI_NEXT_HOP_ATTR_IP"],
 		}}, nil
 	}
@@ -188,7 +190,7 @@ func (c *AsicDBClient) resolveNextHops(oid string) ([]NextHop, error) {
 		return nil, fmt.Errorf("scanning next hop group members: %w", err)
 	}
 
-	var nextHops []NextHop
+	var nextHops []device.NextHop
 	for _, mk := range memberKeys {
 		memberVals, err := c.client.HGetAll(c.ctx, mk).Result()
 		if err != nil {
@@ -211,7 +213,7 @@ func (c *AsicDBClient) resolveNextHops(oid string) ([]NextHop, error) {
 			continue
 		}
 
-		nextHops = append(nextHops, NextHop{
+		nextHops = append(nextHops, device.NextHop{
 			IP: memberNHVals["SAI_NEXT_HOP_ATTR_IP"],
 		})
 	}

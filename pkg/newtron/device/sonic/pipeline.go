@@ -1,11 +1,12 @@
 // pipeline.go implements Redis pipeline operations for atomic batch writes to CONFIG_DB.
-package device
+package sonic
 
 import (
 	"fmt"
 
 	"github.com/go-redis/redis/v8"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -122,9 +123,9 @@ func (c *ConfigDBClient) ReplaceAll(changes []TableChange) error {
 	return c.PipelineSet(changes)
 }
 
-// ApplyChangesPipelined applies a set of ConfigChange entries atomically via pipeline.
+// ApplyChangesPipelined applies a set of device.ConfigChange entries atomically via pipeline.
 // This is the pipeline equivalent of Device.ApplyChanges().
-func (d *Device) ApplyChangesPipelined(changes []ConfigChange) error {
+func (d *Device) ApplyChangesPipelined(changes []device.ConfigChange) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -135,17 +136,17 @@ func (d *Device) ApplyChangesPipelined(changes []ConfigChange) error {
 		return fmt.Errorf("device must be locked for changes")
 	}
 
-	// Convert ConfigChange to TableChange
+	// Convert device.ConfigChange to TableChange
 	var pipelineChanges []TableChange
 	for _, change := range changes {
 		switch change.Type {
-		case ChangeTypeAdd, ChangeTypeModify:
+		case device.ChangeTypeAdd, device.ChangeTypeModify:
 			pipelineChanges = append(pipelineChanges, TableChange{
 				Table:  change.Table,
 				Key:    change.Key,
 				Fields: change.Fields,
 			})
-		case ChangeTypeDelete:
+		case device.ChangeTypeDelete:
 			pipelineChanges = append(pipelineChanges, TableChange{
 				Table:  change.Table,
 				Key:    change.Key,

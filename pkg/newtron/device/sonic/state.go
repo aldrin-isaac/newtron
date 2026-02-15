@@ -1,4 +1,8 @@
-package device
+package sonic
+
+import (
+	"github.com/newtron-network/newtron/pkg/newtron/device"
+)
 
 // ListInterfaces returns all interface names
 func (d *Device) ListInterfaces() []string {
@@ -49,13 +53,13 @@ func (d *Device) ListVRFs() []string {
 }
 
 // GetInterfaceSummary returns a summary of all interfaces
-func (d *Device) GetInterfaceSummary() []InterfaceSummary {
+func (d *Device) GetInterfaceSummary() []device.InterfaceSummary {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	var summary []InterfaceSummary
+	var summary []device.InterfaceSummary
 	for name, intf := range d.State.Interfaces {
-		s := InterfaceSummary{
+		s := device.InterfaceSummary{
 			Name:        name,
 			AdminStatus: intf.AdminStatus,
 			Speed:       intf.Speed,
@@ -71,13 +75,3 @@ func (d *Device) GetInterfaceSummary() []InterfaceSummary {
 	return summary
 }
 
-// InterfaceSummary is a compact interface summary
-type InterfaceSummary struct {
-	Name        string
-	AdminStatus string
-	Speed       string
-	IPAddress   string
-	VRF         string
-	Service     string
-	LAGMember   string
-}

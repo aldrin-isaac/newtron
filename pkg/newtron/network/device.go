@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -36,9 +37,9 @@ type Device struct {
 	// Child objects - Interfaces created in this Device's context
 	interfaces map[string]*Interface
 
-	// Connection and state (delegated to device.Device)
-	conn     *device.Device
-	configDB *device.ConfigDB
+	// Connection and state (delegated to sonic.Device)
+	conn     *sonic.Device
+	configDB *sonic.ConfigDB
 
 	// State
 	connected bool
@@ -122,7 +123,7 @@ func (d *Device) IsRouteReflector() bool {
 }
 
 // ConfigDB returns the config_db state.
-func (d *Device) ConfigDB() *device.ConfigDB {
+func (d *Device) ConfigDB() *sonic.ConfigDB {
 	return d.configDB
 }
 
@@ -139,8 +140,8 @@ func (d *Device) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	// Create connection using device package
-	d.conn = device.NewDevice(d.name, d.resolved)
+	// Create connection using sonic package
+	d.conn = sonic.NewDevice(d.name, d.resolved)
 	if err := d.conn.Connect(ctx); err != nil {
 		return err
 	}
@@ -767,9 +768,9 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 	return d.conn.ApplyFRRDefaults(ctx)
 }
 
-// Underlying returns the underlying device.Device for low-level operations.
+// Underlying returns the underlying sonic.Device for low-level operations.
 // This is used by ChangeSet to apply changes via Redis.
-func (d *Device) Underlying() *device.Device {
+func (d *Device) Underlying() *sonic.Device {
 	return d.conn
 }
 
@@ -1061,7 +1062,7 @@ func (d *Device) GetOrphanedACLs() []string {
 // NewTestDevice creates a Device with pre-configured ConfigDB state for testing.
 // This is intended for use by external test packages (e.g., operations_test)
 // that need to construct Devices without connecting to real SONiC hardware.
-func NewTestDevice(name string, configDB *device.ConfigDB, connected, locked bool) *Device {
+func NewTestDevice(name string, configDB *sonic.ConfigDB, connected, locked bool) *Device {
 	return &Device{
 		name:       name,
 		configDB:   configDB,

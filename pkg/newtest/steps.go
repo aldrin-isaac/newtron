@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -436,7 +437,7 @@ type checkResult struct {
 	message string
 }
 
-func (e *verifyConfigDBExecutor) checkDevice(d *device.Device, step *Step) checkResult {
+func (e *verifyConfigDBExecutor) checkDevice(d *sonic.Device, step *Step) checkResult {
 	client := d.Client()
 	if client == nil {
 		return checkResult{StepStatusError, "no CONFIG_DB client"}

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -186,13 +186,13 @@ func (cc *CompositeConfig) EntryCount() int {
 	return count
 }
 
-// ToTableChanges converts the composite config to a slice of device.TableChange
+// ToTableChanges converts the composite config to a slice of sonic.TableChange
 // for pipeline delivery.
-func (cc *CompositeConfig) ToTableChanges() []device.TableChange {
-	var changes []device.TableChange
+func (cc *CompositeConfig) ToTableChanges() []sonic.TableChange {
+	var changes []sonic.TableChange
 	for table, keys := range cc.Tables {
 		for key, fields := range keys {
-			changes = append(changes, device.TableChange{
+			changes = append(changes, sonic.TableChange{
 				Table:  table,
 				Key:    key,
 				Fields: fields,

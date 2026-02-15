@@ -1,5 +1,5 @@
 // platform.go implements SONiC platform.json parsing and port validation.
-package device
+package sonic
 
 import (
 	"encoding/json"
