@@ -209,7 +209,7 @@ func init() {
 	// (PersistentFlags so subcommands inherit)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, baselineCmd, deviceCmd, qosCmd, filterCmd,
+		vrfCmd, serviceCmd, deviceCmd, qosCmd, filterCmd,
 	} {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
@@ -235,7 +235,7 @@ func init() {
 	// Resource Commands (noun-groups)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, baselineCmd, qosCmd, filterCmd,
+		vrfCmd, serviceCmd, qosCmd, filterCmd,
 	} {
 		cmd.GroupID = "resource"
 		rootCmd.AddCommand(cmd)
