@@ -1,58 +1,67 @@
-# Usability Improvements — Future Work
+# Usability Improvements — Backlog
 
-Remaining usability improvements identified during the cross-tool CLI audit.
-These are larger items that require more design work or have wider blast radius.
+Open items from CLI usability audits. Resolved items have been removed.
 
-## U-1: Bridge visibility in newtlab status
+---
+
+## 1. Bridge visibility in multi-host status
 
 **Tool**: newtlab
-**Effort**: Medium
+**Effort**: Low
 
-The `newtlab status` output shows nodes and links but not bridge processes.
-In multi-host deployments, users can't tell which host runs each link's bridge
-worker, or whether bridge processes are alive.
+`newtlab status --bridge-stats` shows per-link traffic, but in multi-host
+deployments users can't see which host runs each bridge worker or whether
+bridge processes are alive.
 
-**Proposed changes:**
-- Add a "BRIDGES" section to `newtlab status` detail view showing:
-  - Host IP, PID, stats address, alive status per bridge
-- Add a `worker_host` column to the link table
-- In the `--json` output, bridge state is already included via `LabState.Bridges`
+**Remaining work:**
+- Add `worker_host` column to the link table
+- Add a BRIDGES section to the detail view: host IP, PID, alive status
+- JSON output already includes bridge state via `LabState.Bridges`
 
 **Files**: `cmd/newtlab/cmd_status.go`
 
 ---
 
-## U-2: Estimated completion time in newtest status
+## 2. Node discovery for newtlab ssh
 
-**Tool**: newtest
-**Effort**: Medium
+**Tool**: newtlab
+**Effort**: Low
 
-The `newtest status` display shows progress (e.g., "3/31 passed") but no time
-estimate. Users can't tell if a suite will finish in 5 minutes or 2 hours.
+`newtlab ssh <node>` requires knowing exact node names. On "node not found",
+the error gives no hints.
 
-**Proposed changes:**
-- Track per-scenario duration in `RunState.Scenarios` (already stored as string)
-- Compute average duration of completed scenarios
-- Extrapolate remaining time: `avg_duration * remaining_count`
-- Display as "est. remaining: ~Xm" in status output
-- Only show estimate after at least 2 scenarios have completed
+**Changes:**
+- Add `ValidArgsFunction` for shell completion of node names
+- On "not found", list available nodes: `"node 'foo' not found; available: leaf1, spine1"`
+- Prefix matching: `newtlab ssh leaf` matches `leaf1` if unambiguous
 
-**Files**: `cmd/newtest/cmd_status.go`
+**Files**: `cmd/newtlab/cmd_ssh.go`, `cmd/newtlab/cmd_stop.go`, `cmd/newtlab/cmd_console.go`
 
 ---
 
-## U-3: Node discovery for newtlab ssh
+## 3. Remove vestigial newtlab bridge command
 
 **Tool**: newtlab
-**Effort**: Low-Medium
+**Effort**: Low
 
-`newtlab ssh <node>` requires knowing node names. Users must run
-`newtlab status` first to discover available names.
+The hidden `newtlab bridge` subcommand is a leftover from before newtlink
+was extracted as a standalone binary. `startBridgeProcess()` in
+`pkg/newtlab/bridge.go` still falls back to it if the `newtlink` binary
+is not found. Remove the command and the fallback once newtlink is the
+sole bridge mechanism.
 
-**Proposed changes:**
-- Add shell completion for node names (cobra's `ValidArgsFunction`)
-- On "node not found" error, list available nodes:
-  `"node 'foo' not found; available: leaf1, spine1"`
-- Consider prefix matching: `newtlab ssh leaf` matches `leaf1` if unambiguous
+**Files**: `cmd/newtlab/cmd_bridge.go`, `pkg/newtlab/bridge.go`
 
-**Files**: `cmd/newtlab/cmd_ssh.go`, `cmd/newtlab/cmd_stop.go`, `cmd/newtlab/cmd_console.go`
+---
+
+## 4. Consistent -S/--specs flag across tools
+
+**Tool**: newtest
+**Effort**: Low
+
+newtron and newtlab both have a global `-S`/`--specs` flag. newtest does not —
+it uses `--dir` on individual subcommands and hardcodes `newtest/topologies`
+as the default. Either add `-S` globally to newtest or document why the
+resolution differs.
+
+**Files**: `cmd/newtest/main.go`, `cmd/newtest/helpers.go`
