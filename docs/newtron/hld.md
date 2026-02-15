@@ -2,14 +2,16 @@
 
 ## 1. Purpose
 
-Newtron is an opinionated network automation tool for SONiC-based switches. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
+Newtron is an opinionated network automation tool for SONiC-based switches, built on the premise that SONiC is a Redis database with daemons that react to table changes — and should be treated as one. Where other SONiC tools SSH in and parse CLI output, newtron reads and writes CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB directly through an SSH-tunneled Redis client. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
 
 For the architectural principles behind newtron, newtlab, and newtest — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ### Key Features
 
+- **Redis-First**: All device interaction through native Go Redis client — CONFIG_DB writes, APP_DB route reads, ASIC_DB SAI chain traversal, STATE_DB health checks — not CLI command parsing. CLI workarounds are tagged exceptions, not the norm
+- **Typed Domain Model**: `Network > Node > Interface` object hierarchy where operations live on the smallest object that has the context to execute them — not connection wrappers with external helper functions
+- **Built-In Referential Integrity**: Precondition validation on every write operation prevents invalid CONFIG_DB state (nonexistent VRFs, conflicting service bindings, LAG member collisions) — application-level constraints for a database that has none
 - **Noun-Group CLI**: Unified `newtron <device> <noun> <action> [args] [-x]` pattern with implicit device detection — first argument is the device name unless it matches a known command
-- **SONiC-Native**: Direct integration with SONiC's config_db via Redis
 - **Service-Oriented**: Pre-defined service templates for consistent configuration
 - **VRF Management**: First-class VRF noun with 13 subcommands — owns interfaces, BGP neighbors, static routes, and IP-VPN bindings
 - **Spec Authoring**: CLI-authored definitions (services, IP-VPNs, MAC-VPNs, QoS policies, filters) persist atomically to network.json
@@ -22,10 +24,8 @@ For the architectural principles behind newtron, newtlab, and newtest — includ
 - **Built-In Verification**: ChangeSet-based CONFIG_DB verification, routing state observation via APP_DB/ASIC_DB, health checks — single-device primitives that orchestrators compose for fabric-wide assertions
 - **Per-Noun Status**: Each resource noun (`vlan`, `vrf`, `lag`, `bgp`, `evpn`) owns its own `status` subcommand combining CONFIG_DB config with operational state
 - **Safety-First**: Dry-run by default with explicit execution flag
-- **Airtight Validation**: Comprehensive precondition checking prevents misconfigurations
 - **Audit Trail**: All changes logged with user, timestamp, and device context
 - **Access Control**: Permission-based operations at service and action levels
-- **SSH-Tunneled Redis**: Secure access to device Redis through SSH port forwarding
 
 ## 2. Spec vs Config: The Fundamental Distinction
 

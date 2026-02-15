@@ -1,6 +1,6 @@
 # Newtron HOWTO Guide
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+newtron interacts with SONiC devices through Redis, not CLI commands. Every operation in this guide reads or writes CONFIG_DB, APP_DB, ASIC_DB, or STATE_DB through an SSH-tunneled Redis client. All write operations default to dry-run (preview only) — add `-x` to execute. For the architectural principles behind this design, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 

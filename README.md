@@ -4,15 +4,27 @@
   <img src="newt.png" alt="Newt — the newtron mascot" width="280"/>
 </p>
 
-newtron is an opinionated automation tool for SONiC network devices. It reads declarative spec files that describe what the network should look like — services, routing policy, EVPN fabrics — and translates them into CONFIG_DB entries on each device through an SSH tunnel. It operates on one device at a time, verifies its own writes, and exposes observation primitives (routes, ASIC state, health) as structured data for any orchestrator to consume.
+newtron is a SONiC automation system built on a simple premise: SONiC is a Redis database with daemons that react to table changes — so treat it as one.
 
-The goal is a single tool that can provision a SONiC device from a spec directory and prove the result is correct — without requiring the operator to inspect Redis, read FRR output, or trust that automation "probably worked."
+Where other tools SSH into SONiC devices and parse CLI output, newtron connects directly to CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB through an SSH-tunneled Redis client. Where other tools lack referential integrity (SONiC's CONFIG_DB accepts contradictory entries without complaint), newtron validates preconditions before every write — preventing misconfiguration at the source. Where other tools model devices as connection targets, newtron uses a typed object hierarchy (`Network > Node > Interface`) where operations live on the smallest object that has the context to execute them.
+
+The result: a single tool that provisions SONiC devices from declarative specs, verifies its own writes, and exposes observation primitives as structured data for any orchestrator to consume.
+
+## Design Philosophy
+
+Three architectural choices define newtron:
+
+**Redis-first.** SONiC's entire state lives in Redis databases. CONFIG_DB holds desired state, APP_DB holds computed routes, ASIC_DB holds forwarding state, STATE_DB holds operational telemetry. newtron reads and writes these databases directly using a native Go Redis client — not by running `config` commands over SSH and parsing the output. This makes reads precise (typed table entries, not regex-parsed text), writes atomic (Redis pipelines), and verification exact (re-read what you wrote). CLI commands are used only for operations Redis cannot express (like `config save`), and each one is tagged for future elimination.
+
+**A domain model, not a connection wrapper.** `Network > Node > Interface` is a typed object hierarchy where each level holds the context for its operations. A Network holds specs (services, VPNs, filters). A Node holds its device profile, resolved config, and Redis connections. An Interface holds its service bindings. `Interface.ApplyService()` reaches up through the parent chain to resolve everything it needs — the device's AS number, the network's service spec, the interface's IP — and produces a ChangeSet. No external function orchestrates this. The object has the full context.
+
+**Built-in referential integrity.** CONFIG_DB has no constraints — you can write a VLAN member for a nonexistent VLAN, a BGP neighbor in a nonexistent VRF, or a service on a LAG member. SONiC daemons will silently fail or produce undefined behavior. Every newtron write operation runs precondition validation first: interface exists, not a LAG member, VRF exists, VTEP exists for EVPN, no conflicting service. The tool structurally cannot produce invalid CONFIG_DB state.
 
 ## What newtron Provisions
 
 newtron manages SONiC devices through CONFIG_DB. A device's full configuration — interfaces, VLANs, VRFs, BGP neighbors, EVPN overlays, ACLs, QoS — is expressed as spec files and translated into CONFIG_DB entries using each device's profile, platform, and site context.
 
-The object model is hierarchical: `Network > Device > Interface`. A Network holds specs (services, filters, VPNs, sites, platforms). A Device holds its profile, resolved config, and Redis connections. An Interface holds its service bindings. Methods live on the smallest object that has the context to execute them — `ApplyService` lives on Interface because the interface's identity is part of the translation context; `VerifyChangeSet` lives on Device because it needs the Redis connection.
+The object model is hierarchical: `Network > Node > Interface`. A Network holds specs (services, filters, VPNs, sites, platforms). A Node holds its profile, resolved config, and Redis connections. An Interface holds its service bindings. Methods live on the smallest object that has the context to execute them — `ApplyService` lives on Interface because the interface's identity is part of the translation context; `VerifyChangeSet` lives on Node because it needs the Redis connection.
 
 newtron reads `network.json` (services, VPNs, filters, routing policy), `site.json` (regions, AS numbers), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, role, credentials). It does not need `topology.json` — that file belongs to newtlab and newtest.
 
@@ -33,34 +45,35 @@ Proving newtron works requires running it against real SONiC software. This repo
 
 ### newtlab — VM Topology Orchestration
 
-newtlab deploys QEMU virtual machines and wires them into topologies. It reads the same spec files as newtron — `topology.json` for device layout, `platforms.json` for VM defaults, `profiles/` for per-device overrides.
+newtlab deploys QEMU virtual machines and wires them into topologies using **userspace networking** — no root, no Linux bridges, no kernel namespaces, no Docker. Every packet between VMs passes through a Go bridge process (newtlink), which means the interconnect is transparent, observable, and portable.
+
+This is a deliberate alternative to kernel-level wiring (veth pairs, Linux bridges, tc rules). A userspace bridge knows exactly how many bytes crossed each link, because it handles every frame. Rate monitoring, tap-to-wireshark, fault injection — all are straightforward extensions of the bridge loop. Kernel networking is powerful but opaque; when a link breaks, you debug iptables rules and bridge state. When a newtlink bridge has a problem, you look at one process.
 
 Key capabilities:
 
-- **No privileged access** — no root, no sudo, no Docker, no Linux bridges or TAP interfaces. VMs connect through userspace socket links.
-- **Multi-host deployment** — topologies can span multiple servers. Define a server pool in `topology.json` with capacity constraints; newtlab auto-places VMs using a spread algorithm that minimizes maximum load per server. Pinned VMs respect explicit placement; unpinned VMs are distributed automatically. All controlled from a single spec directory.
-- **newtlink bridge agents** — each inter-VM link is served by a bridge worker (a goroutine in the newtlink process) that listens on two TCP ports and bridges Ethernet frames between them. Both QEMU VMs connect outbound to newtlink — no startup ordering, no listen/connect asymmetry. Cross-host links work identically: the local endpoint connects to `127.0.0.1`, the remote endpoint connects across the network. Bridge workers are load-balanced across hosts using a deterministic algorithm that each server computes independently.
-- **Per-link telemetry** — bridge workers track byte counters and session state per link. `newtlab bridge-stats` aggregates counters from all hosts (local via Unix socket, remote via TCP) into a single table.
-- **Platform boot patches** — different SONiC images have platform-specific initialization quirks. A declarative patch framework (JSON descriptors + Go templates) handles post-boot fixups without Go code changes. Patches are organized by dataplane and release version; adding support for a new platform means adding a directory of descriptors.
-- **Port conflict detection** — before starting any process, newtlab probes all allocated ports (SSH, console, link, bridge stats) across all hosts and reports every conflict in a single error.
-- **Multiple SONiC images** — platform definitions in `platforms.json` support VS (control plane only), VPP (full forwarding), Cisco 8000, and vendor images, each with their own NIC driver, interface mapping, CPU features, and credentials.
+- **Userspace socket links** — each inter-VM link is a bridge worker (a goroutine in the newtlink process) that listens on two TCP ports and bridges Ethernet frames between them. Both QEMU VMs connect outbound to newtlink — no startup ordering, no listen/connect asymmetry.
+- **Per-link telemetry** — bridge workers track byte counters and session state per link. `newtlab bridge-stats` aggregates counters from all hosts into a single table.
+- **Multi-host deployment** — topologies span multiple servers. Cross-host links work identically to local links: the local endpoint connects to `127.0.0.1`, the remote endpoint connects across the network. Define a server pool in `topology.json` with capacity constraints; newtlab auto-places VMs using a spread algorithm. All controlled from a single spec directory.
+- **No privileged access** — no root, no sudo, no kernel modules. VMs need KVM for performance, but the interconnect is pure userspace.
+- **Platform boot patches** — different SONiC images have platform-specific initialization quirks. A declarative patch framework (JSON descriptors + Go templates) handles post-boot fixups without Go code changes.
+- **Port conflict detection** — before starting any process, newtlab probes all allocated ports across all hosts and reports every conflict in a single error.
+- **Multiple SONiC images** — platform definitions support VS (control plane only), VPP (full forwarding), Cisco 8000, and vendor images, each with their own NIC driver, interface mapping, CPU features, and credentials.
 
 After deployment, newtlab patches device profiles with SSH and console ports so newtron can connect. On destroy, it restores original profiles. The spec directory is the only coordination surface between the tools.
 
 ### newtest — E2E Test Orchestrator
 
-newtest deploys a topology (via newtlab), provisions devices (via newtron), then runs test scenarios that assert correctness — both on individual devices and across the fabric.
+newtest tests **composed network outcomes**, not individual features. The question is not "does VLAN creation work?" — it's "does the L3VPN service produce reachability across the overlay?" A feature test can pass while the composite multi-feature configuration fails due to ordering issues, missing glue config, or daemon interaction bugs. newtest tests the thing that actually matters: the assembled result.
+
+newtest deploys a topology (via newtlab), provisions devices (via newtron), then runs scenarios that assert correctness — both on individual devices and across the fabric. It observes devices exclusively through newtron's primitives (`GetRoute`, `GetRouteASIC`, `VerifyChangeSet`) — it never accesses Redis directly.
 
 Key capabilities:
 
 - **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 39 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, health checks, data plane verification, service churn.
 - **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run 31 scenarios.
-- **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. It can verify that a route configured on spine1 actually arrives in leaf1's APP_DB, that BGP sessions reach Established state on both ends, that data plane forwarding works end-to-end.
+- **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Report generation** — console output with ANSI formatting, markdown reports, and JUnit XML for CI integration.
-- **Live progress** — a ProgressReporter interface provides real-time callbacks at suite, scenario, and step lifecycle points.
-
-newtest observes devices exclusively through newtron's primitives (`GetRoute`, `GetRouteASIC`, `VerifyChangeSet`). It never accesses Redis directly.
 
 ## Verification Model
 

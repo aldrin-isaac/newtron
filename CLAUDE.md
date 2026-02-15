@@ -96,3 +96,4 @@ Dispatch subagents with `model: "sonnet"` for:
 ## User Preferences
 
 - Never compact away the last 5 prompts and responses during context compression.
+- When agents are running, include a status line in each response showing count, model (opus/sonnet), and status. Example: **Agents: 2 running** (1 opus, 1 sonnet) / 3 completed. Omit when no agents are active.

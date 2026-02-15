@@ -4,11 +4,12 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 
 ## 1. Purpose
 
-newtlab realizes network topologies as connected QEMU virtual machines. It
-reads newtron's spec files (`topology.json`, `platforms.json`,
+newtlab realizes network topologies as connected QEMU virtual machines,
+wired together through **userspace socket bridges** — not kernel networking.
+It reads newtron's spec files (`topology.json`, `platforms.json`,
 `profiles/*.json`) and brings the topology to life — deploying VMs
-(primarily SONiC) and wiring them together using socket-based links
-across one or more servers. No root, no bridges, no Docker.
+(primarily SONiC) and wiring them across one or more servers. No root,
+no Linux bridges, no veth pairs, no network namespaces, no Docker.
 
 newtlab doesn't define the topology or touch device configuration — it
 makes the topology physically exist. After deployment, it patches device
@@ -40,14 +41,21 @@ profiles with SSH and console ports so newtron can connect.
                       └──────────┘
 ```
 
+This is a deliberate alternative to kernel-level wiring (veth pairs, Linux
+bridges, tc rules). A userspace bridge knows exactly how many bytes crossed
+each link, because it handles every frame. Rate monitoring, tap-to-wireshark,
+fault injection — all are straightforward extensions of the bridge loop.
+Kernel networking is powerful but opaque; when a link breaks, you debug
+iptables rules and bridge state. When a newtlink bridge has a problem, you
+look at one process.
+
 Benefits:
-- No root/sudo privileges required
-- No Linux bridges, TAP interfaces, or veth pairs
-- No Docker or container runtime needed
-- Single source of truth for topology (topology.json)
-- Native multi-host support via newtlink TCP bridge agents
-- No VM startup ordering — both sides connect out to newtlink
-- Supports multiple SONiC image types (VS, VPP, vendor)
+- **Observable** — per-link byte counters, session state, and bridge stats aggregated across hosts
+- **Debuggable** — one userspace process per host, not kernel bridge/iptables state
+- **Multi-host native** — cross-host links work identically to local links via TCP
+- **Unprivileged** — no root, no kernel modules, no Docker
+- **No startup ordering** — both VMs connect outbound to newtlink
+- **Multi-platform** — VS, VPP, Cisco 8000, vendor images with per-platform boot patches
 
 ---
 

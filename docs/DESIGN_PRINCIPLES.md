@@ -7,7 +7,36 @@ for understanding *why* things are the way they are.
 
 ---
 
-## 1. Two Tools and an Orchestrator
+## 1. SONiC Is a Database — Treat It as One
+
+SONiC's architecture is a set of Redis databases — CONFIG_DB (desired
+state), APP_DB (computed routes from FRR), ASIC_DB (SAI forwarding
+objects), STATE_DB (operational telemetry) — with daemons that react to
+table changes. This is not an implementation detail; it is the
+architecture.
+
+newtron interacts with SONiC exclusively through Redis. CONFIG_DB writes
+go through a native Go Redis client over an SSH-tunneled connection —
+not through `config` CLI commands. Route verification reads APP_DB
+directly. ASIC programming checks traverse ASIC_DB's SAI object chain.
+Health checks read STATE_DB.
+
+This matters because the alternative — SSHing in and parsing CLI
+output — is fragile in ways that are invisible until they break. `show
+ip route` output varies between SONiC releases. `config vlan add`
+returns exit code 0 even when it silently fails. Text parsing adds a
+translation layer between what the device knows and what the tool sees.
+Redis eliminates that layer: the data structures are the interface.
+
+When Redis cannot express an operation (persisting config to disk,
+restarting daemons, reading platform files), CLI commands are used as
+documented exceptions. Each is tagged `CLI-WORKAROUND` with a resolution
+path — a note on what upstream change would eliminate the workaround.
+The goal is to reduce these over time, not normalize them.
+
+---
+
+## 2. Two Tools and an Orchestrator
 
 The system is split into three programs — newtron (provision devices),
 newtlab (deploy VMs), newtest (E2E testing) — not because three is a
@@ -56,7 +85,7 @@ knowing about device configuration at all?" If no, it belongs in newtlab.
 
 ---
 
-## 2. Objects Own Their Methods
+## 3. Objects Own Their Methods
 
 newtron uses an object-oriented architecture where methods belong to the
 object that has the context to execute them. This is the most important
@@ -121,7 +150,7 @@ interface.
 
 ---
 
-## 3. If You Change It, You Verify It
+## 4. If You Change It, You Verify It
 
 This is the verification principle, and it governs the boundary between
 newtron and any orchestrator that uses it:
@@ -173,7 +202,44 @@ to do* if a check fails is the orchestrator's job.
 
 ---
 
-## 4. Spec vs Config — Intent vs State
+## 5. Prevent Bad Writes, Don't Just Detect Them
+
+Verification happens after a write. But CONFIG_DB has no referential
+integrity — it accepts entries that reference nonexistent tables,
+contradictory bindings, and overlapping resources without complaint.
+SONiC daemons respond to invalid config with silent failures, crashes,
+or undefined behavior.
+
+newtron prevents these writes rather than detecting them after the fact.
+Every mutating operation runs precondition validation before the
+ChangeSet is even generated:
+
+```go
+n.precondition("apply-service", ifName).
+    RequireInterfaceExists(ifName).
+    RequireInterfaceNotLAGMember(ifName).
+    RequireNoExistingService(ifName).
+    RequireVTEPExists().  // if EVPN service
+    Result()
+```
+
+Preconditions are built into the operation, not bolted on by the caller.
+You cannot call `ApplyService` and skip the checks — they run as the
+first step of the operation. This is application-level referential
+integrity for a database that has none.
+
+For removal operations, `DependencyChecker` scans CONFIG_DB to determine
+if shared resources (VRFs, VLANs, ACLs) are still referenced by other
+service bindings before deleting them. A VRF used by three interfaces
+isn't removed until the last interface unbinds from it.
+
+The principle: **it is better to refuse an invalid write than to detect
+the damage afterward**. Preconditions make the invalid states
+unrepresentable at the API level.
+
+---
+
+## 6. Spec vs Config — Intent vs State
 
 The system enforces an absolute separation between what the operator
 *wants* (spec) and what the device *has* (config). These are different
@@ -220,7 +286,7 @@ calls another's API. They communicate through files.
 
 ---
 
-## 5. Don't Repeat Yourself — Across Programs
+## 7. Don't Repeat Yourself — Across Programs
 
 DRY applies not just within a single codebase, but across the entire
 system. Every capability exists in exactly one place:
@@ -266,7 +332,7 @@ each capability.
 
 ---
 
-## 6. Dry-Run as a First-Class Mode
+## 8. Dry-Run as a First-Class Mode
 
 Every mutating operation in newtron supports dry-run mode — not as an
 afterthought, but as the **default behavior**. The `-x` flag is required
@@ -288,7 +354,7 @@ provisioning possible.
 
 ---
 
-## 7. Programs Communicate Through Files, Not APIs
+## 9. Programs Communicate Through Files, Not APIs
 
 newtlab does not expose an API that newtron calls. newtron does not expose
 a service that newtest connects to. The programs are not microservices.
@@ -318,7 +384,7 @@ implementations.
 
 ---
 
-## 8. Observation vs Assertion
+## 10. Observation vs Assertion
 
 newtron's verification primitives fall into two categories, and the
 distinction matters:
@@ -344,7 +410,7 @@ means — assumptions that break when the calling context changes.
 
 ---
 
-## 9. The ChangeSet Is the Universal Contract
+## 11. The ChangeSet Is the Universal Contract
 
 Every mutating operation produces a ChangeSet — an ordered list of
 CONFIG_DB mutations with table, key, operation type, old value, and new
@@ -374,7 +440,7 @@ orchestrator decides the policy.
 
 ---
 
-## 10. Episodic Caching — Fresh Snapshot per Unit of Work
+## 12. Episodic Caching — Fresh Snapshot per Unit of Work
 
 newtron caches CONFIG_DB in memory to batch precondition checks into a
 single `GetAll()` call instead of a Redis round-trip per check. But a
@@ -420,13 +486,15 @@ never carry state across episode boundaries.
 
 ---
 
-## 11. Summary
+## 13. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
+| SONiC is a database | Interact through Redis, not CLI parsing; CLI is an exception, not the norm |
 | One level of abstraction per program | newtlab realizes the topology, newtron translates specs to config, orchestrators decide what gets applied where |
 | Objects own their methods | A method belongs to the smallest object that has all the context to execute it |
 | If you change it, you verify it | The tool that writes the state must be able to verify the write |
+| Prevent bad writes | Application-level referential integrity for a database that has none; refuse invalid state, don't detect damage |
 | Spec vs config | Intent is declarative and version-controlled; state is imperative and generated |
 | DRY across programs | Every capability exists in exactly one place, even across program boundaries |
 | Dry-run as first-class | Default to preview; execution is opt-in; this forces clean separation of compute and apply |

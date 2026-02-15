@@ -2,17 +2,26 @@
 
 ## 1. Purpose
 
-newtest is an E2E testing orchestrator for newtron and SONiC. It tests
-two things: that newtron's automation produces correct device state, and
-that SONiC software on each device behaves correctly in its role (spine,
-leaf, etc.). It uses newtlab to deploy VM topologies, runs newtron against
-them, and validates results.
+newtest is an E2E testing orchestrator that tests **composed network
+outcomes** — not individual features. The question is not "does VLAN
+creation work?" but "does the L3VPN service produce reachability across
+the EVPN overlay?" A feature test can pass while the composite
+multi-feature configuration fails due to ordering issues, missing glue
+config, or daemon interaction bugs. newtest tests the thing that actually
+matters: the assembled result.
+
+It uses newtlab to deploy VM topologies, runs newtron against them, and
+validates that newtron's automation produces correct device state and that
+SONiC software on each device behaves correctly in its role (spine, leaf,
+etc.).
 
 newtest is one orchestrator built on top of newtron and newtlab — not the
 only one. Other orchestrators could be built for different purposes
-(production deployment, CI/CD pipelines, compliance auditing). newtron's
-observation primitives return structured data so that any orchestrator
-can consume them.
+(production deployment, CI/CD pipelines, compliance auditing). newtest
+observes devices exclusively through newtron's primitives (`GetRoute`,
+`GetRouteASIC`, `VerifyChangeSet`) — it never accesses Redis directly.
+newtron returns structured data; newtest decides what "correct" means by
+correlating observations across devices.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
