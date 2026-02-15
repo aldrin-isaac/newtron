@@ -89,11 +89,6 @@ func (n *Network) GetFilterSpec(name string) (*spec.FilterSpec, error) {
 	return getSpec(&n.mu, n.spec.FilterSpecs, "filter spec", name)
 }
 
-// GetRegion returns a region definition by name.
-func (n *Network) GetRegion(name string) (*spec.RegionSpec, error) {
-	return getSpec(&n.mu, n.spec.Regions, "region", name)
-}
-
 // GetSite returns a site specification by name.
 func (n *Network) GetSite(name string) (*spec.SiteSpec, error) {
 	return getSpec(&n.mu, n.sites.Sites, "site", name)
@@ -107,11 +102,6 @@ func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
 	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", name)
-}
-
-// GetPolicer returns a policer definition by name.
-func (n *Network) GetPolicer(name string) (*spec.PolicerSpec, error) {
-	return getSpec(&n.mu, n.spec.Policers, "policer", name)
 }
 
 // GetQoSPolicy returns a QoS policy by name.
@@ -325,30 +315,6 @@ func (n *Network) DeleteService(name string) error {
 
 	delete(n.spec.Services, name)
 	return n.persistSpec()
-}
-
-// ListIPVPN returns all IP-VPN definition names.
-func (n *Network) ListIPVPN() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	names := make([]string, 0, len(n.spec.IPVPN))
-	for name := range n.spec.IPVPN {
-		names = append(names, name)
-	}
-	return names
-}
-
-// ListMACVPN returns all MAC-VPN definition names.
-func (n *Network) ListMACVPN() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	names := make([]string, 0, len(n.spec.MACVPN))
-	for name := range n.spec.MACVPN {
-		names = append(names, name)
-	}
-	return names
 }
 
 // ListQoSPolicies returns all QoS policy names.

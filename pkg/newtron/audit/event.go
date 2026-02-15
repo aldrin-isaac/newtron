@@ -2,8 +2,6 @@
 package audit
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
@@ -41,67 +39,4 @@ type Filter struct {
 	FailureOnly bool
 	Limit       int
 	Offset      int
-}
-
-// NewEvent creates a new audit event
-func NewEvent(user, device, operation string) *Event {
-	return &Event{
-		ID:        generateID(),
-		Timestamp: time.Now(),
-		User:      user,
-		Device:    device,
-		Operation: operation,
-	}
-}
-
-// WithService sets the service name
-func (e *Event) WithService(service string) *Event {
-	e.Service = service
-	return e
-}
-
-// WithInterface sets the interface name
-func (e *Event) WithInterface(iface string) *Event {
-	e.Interface = iface
-	return e
-}
-
-// WithChanges sets the changes
-func (e *Event) WithChanges(changes []node.Change) *Event {
-	e.Changes = changes
-	return e
-}
-
-// WithSuccess marks the event as successful
-func (e *Event) WithSuccess() *Event {
-	e.Success = true
-	return e
-}
-
-// WithError marks the event as failed
-func (e *Event) WithError(err error) *Event {
-	e.Success = false
-	if err != nil {
-		e.Error = err.Error()
-	}
-	return e
-}
-
-// WithDuration sets the operation duration
-func (e *Event) WithDuration(d time.Duration) *Event {
-	e.Duration = d
-	return e
-}
-
-// WithExecuteMode marks if execute mode was used
-func (e *Event) WithExecuteMode(execute bool) *Event {
-	e.ExecuteMode = execute
-	e.DryRun = !execute
-	return e
-}
-
-func generateID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
 }

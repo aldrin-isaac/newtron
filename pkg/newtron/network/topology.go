@@ -1,10 +1,7 @@
 // topology.go implements topology-driven provisioning from topology.json specs.
 //
-// Two provisioning modes:
-//   - ProvisionDevice: generates a complete CONFIG_DB offline and delivers it
-//     atomically via node.CompositeOverwrite (no device interrogation needed)
-//   - ProvisionInterface: provisions a single interface using the topology spec
-//     for parameters, but connects to the device and calls ApplyService()
+// ProvisionDevice generates a complete CONFIG_DB offline and delivers it
+// atomically via node.CompositeOverwrite (no device interrogation needed).
 package network
 
 import (
@@ -30,60 +27,9 @@ func NewTopologyProvisioner(network *Network) (*TopologyProvisioner, error) {
 	return &TopologyProvisioner{network: network}, nil
 }
 
-// ValidateTopologyDevice validates that all references in the topology for a device
-// are resolvable (services exist, IPs valid, required params present).
-func (tp *TopologyProvisioner) ValidateTopologyDevice(deviceName string) error {
-	topoDev, err := tp.network.GetTopologyDevice(deviceName)
-	if err != nil {
-		return err
-	}
-
-	// Verify device profile exists
-	if _, err := tp.network.loadProfile(deviceName); err != nil {
-		return fmt.Errorf("device profile '%s' not found: %w", deviceName, err)
-	}
-
-	for intfName, ti := range topoDev.Interfaces {
-		// Skip interfaces with no service assignment (stub ports)
-		if ti.Service == "" {
-			continue
-		}
-
-		// Verify service exists
-		svc, err := tp.network.GetService(ti.Service)
-		if err != nil {
-			return fmt.Errorf("interface %s: service '%s' not found", intfName, ti.Service)
-		}
-
-		// Validate IP if required by service type
-		if svc.ServiceType == spec.ServiceTypeL3 || svc.ServiceType == spec.ServiceTypeIRB {
-			if ti.IP != "" && !util.IsValidIPv4CIDR(ti.IP) {
-				return fmt.Errorf("interface %s: invalid IP address '%s'", intfName, ti.IP)
-			}
-			if svc.ServiceType == spec.ServiceTypeL3 && ti.IP == "" {
-				return fmt.Errorf("interface %s: L3 service '%s' requires IP address", intfName, ti.Service)
-			}
-		}
-
-		// Validate required params
-		if svc.Routing != nil && svc.Routing.PeerAS == spec.PeerASRequest {
-			if _, ok := ti.Params["peer_as"]; !ok {
-				return fmt.Errorf("interface %s: service '%s' requires 'peer_as' param", intfName, ti.Service)
-			}
-		}
-	}
-
-	return nil
-}
-
 // GenerateDeviceComposite generates a node.CompositeConfig for a device without delivering it.
 // Useful for inspection, serialization, or deferred delivery.
 func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node.CompositeConfig, error) {
-	// Validate first
-	if err := tp.ValidateTopologyDevice(deviceName); err != nil {
-		return nil, fmt.Errorf("validation failed: %w", err)
-	}
-
 	topoDev, _ := tp.network.GetTopologyDevice(deviceName)
 
 	// Load and resolve device profile
@@ -156,55 +102,6 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 
 	util.WithDevice(deviceName).Infof("Provisioned device from topology: %d entries applied", result.Applied)
 	return result, nil
-}
-
-// ProvisionInterface provisions a single interface on a device using topology data.
-//
-// This mode:
-//   - Connects to the device and loads current state
-//   - Reads service name and parameters from topology (not from user)
-//   - Calls Interface.ApplyService() with those parameters
-//   - Returns a node.ChangeSet for dry-run/execute
-func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceName, interfaceName string) (*node.ChangeSet, error) {
-	ti, err := tp.network.GetTopologyInterface(deviceName, interfaceName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Connect and interrogate device
-	dev, err := tp.network.ConnectNode(ctx, deviceName)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to device: %w", err)
-	}
-
-	// Lock for writing
-	if err := dev.Lock(); err != nil {
-		return nil, fmt.Errorf("locking device: %w", err)
-	}
-
-	// Get interface object
-	intf, err := dev.GetInterface(interfaceName)
-	if err != nil {
-		return nil, fmt.Errorf("getting interface: %w", err)
-	}
-
-	// Build node.ApplyServiceOpts from topology
-	opts := node.ApplyServiceOpts{
-		IPAddress: ti.IP,
-	}
-	if peerAS, ok := ti.Params["peer_as"]; ok {
-		fmt.Sscanf(peerAS, "%d", &opts.PeerAS)
-	}
-
-	// Apply service using the standard interface operation
-	cs, err := intf.ApplyService(ctx, ti.Service, opts)
-	if err != nil {
-		return nil, fmt.Errorf("applying service '%s': %w", ti.Service, err)
-	}
-
-	util.WithDevice(deviceName).Infof("Provisioned interface %s with service '%s' from topology",
-		interfaceName, ti.Service)
-	return cs, nil
 }
 
 // ============================================================================

@@ -2,7 +2,6 @@
 package sonic
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -42,15 +41,6 @@ type CreatePortConfig struct {
 type BreakoutConfig struct {
 	ParentPort string // Parent port name (e.g., "Ethernet0")
 	Mode       string // Breakout mode (e.g., "4x25G", "2x50G")
-}
-
-// ParsePlatformJSON parses a SONiC platform.json byte slice.
-func ParsePlatformJSON(data []byte) (*SonicPlatformConfig, error) {
-	var config SonicPlatformConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parsing platform.json: %w", err)
-	}
-	return &config, nil
 }
 
 // ValidatePort checks if a port creation config is valid against this platform.

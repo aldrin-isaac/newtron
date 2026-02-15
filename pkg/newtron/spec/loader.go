@@ -104,97 +104,6 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 	return &profile, nil
 }
 
-// ResolveProfile resolves a device profile with inheritance
-func (l *Loader) ResolveProfile(deviceName string) (*ResolvedProfile, error) {
-	profile, err := l.LoadProfile(deviceName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get site info - this is the source of truth for which region the device is in
-	site, ok := l.site.Sites[profile.Site]
-	if !ok {
-		return nil, fmt.Errorf("site '%s' not found in site spec", profile.Site)
-	}
-
-	// Derive region from site (single source of truth)
-	regionName := site.Region
-	region, ok := l.network.Regions[regionName]
-	if !ok {
-		return nil, fmt.Errorf("region '%s' (from site '%s') not found", regionName, profile.Site)
-	}
-
-	resolved := &ResolvedProfile{
-		DeviceName: deviceName,
-		MgmtIP:     profile.MgmtIP,
-		LoopbackIP: profile.LoopbackIP,
-		Region:     regionName, // Derived from site.json, not profile
-		Site:       profile.Site,
-		Platform:   profile.Platform,
-		MAC:        profile.MAC,
-	}
-
-	// Resolve AS number: profile > region
-	if profile.ASNumber != nil {
-		resolved.ASNumber = *profile.ASNumber
-	} else {
-		resolved.ASNumber = region.ASNumber
-	}
-
-	resolved.IsRouteReflector = profile.IsRouteReflector
-
-	// Derived values
-	resolved.RouterID = profile.LoopbackIP
-	resolved.VTEPSourceIP = profile.LoopbackIP
-
-	// Derive BGP neighbors from route reflectors (lookup their profiles)
-	resolved.BGPNeighbors = l.deriveBGPNeighbors(site, deviceName)
-
-	// Merge maps: profile > region > global
-	resolved.GenericAlias = util.MergeMaps(
-		l.network.GenericAlias,
-		region.GenericAlias,
-		profile.GenericAlias,
-	)
-	resolved.PrefixLists = util.MergeMaps(
-		l.network.PrefixLists,
-		region.PrefixLists,
-		profile.PrefixLists,
-	)
-
-	// SSH credentials (for Redis tunnel)
-	resolved.SSHUser = profile.SSHUser
-	resolved.SSHPass = profile.SSHPass
-	resolved.SSHPort = profile.SSHPort
-
-	// newtlab runtime
-	resolved.ConsolePort = profile.ConsolePort
-
-	// eBGP underlay ASN
-	resolved.UnderlayASN = profile.UnderlayASN
-
-	return resolved, nil
-}
-
-// deriveBGPNeighbors gets loopback IPs of route reflectors from their profiles
-// This ensures single source of truth - loopback_ip is only in the device profile
-func (l *Loader) deriveBGPNeighbors(site *SiteSpec, deviceName string) []string {
-	var neighbors []string
-	for _, rrName := range site.RouteReflectors {
-		if rrName == deviceName {
-			continue // Don't peer with self
-		}
-		// Load the route reflector's profile to get its loopback IP
-		rrProfile, err := l.LoadProfile(rrName)
-		if err != nil {
-			util.Logger.Warnf("deriveBGPNeighbors: failed to load route reflector profile %q: %v", rrName, err)
-			continue
-		}
-		neighbors = append(neighbors, rrProfile.LoopbackIP)
-	}
-	return neighbors
-}
-
 func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	path := filepath.Join(l.specDir, "network.json")
 	data, err := os.ReadFile(path)
@@ -456,29 +365,10 @@ func (l *Loader) GetPrefixList(name string) ([]string, error) {
 	return list, nil
 }
 
-// GetPolicer returns a policer definition by name
-func (l *Loader) GetPolicer(name string) (*PolicerSpec, error) {
-	policer, ok := l.network.Policers[name]
-	if !ok {
-		return nil, fmt.Errorf("policer '%s' not found", name)
-	}
-	return policer, nil
-}
-
 // ListServices returns all service names, sorted for deterministic output.
 func (l *Loader) ListServices() []string {
 	names := make([]string, 0, len(l.network.Services))
 	for name := range l.network.Services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// ListRegions returns all region names, sorted for deterministic output.
-func (l *Loader) ListRegions() []string {
-	names := make([]string, 0, len(l.network.Regions))
-	for name := range l.network.Regions {
 		names = append(names, name)
 	}
 	sort.Strings(names)

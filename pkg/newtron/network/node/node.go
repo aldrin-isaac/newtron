@@ -910,72 +910,6 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 	return cs, nil
 }
 
-// SetupBGPEVPN configures BGP EVPN with route reflectors from site config.
-// This sets up iBGP sessions using loopback IPs (indirect neighbors) for EVPN.
-func (n *Node) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
-	if !n.connected {
-		return nil, util.ErrNotConnected
-	}
-	if !n.locked {
-		return nil, fmt.Errorf("device not locked")
-	}
-
-	resolved := n.Resolved()
-	if len(resolved.BGPNeighbors) == 0 {
-		return nil, fmt.Errorf("no route reflectors defined in site configuration")
-	}
-
-	cs := NewChangeSet(n.name, "bgp.setup-evpn")
-
-	// Configure BGP globals (if not already set)
-	cs.Add("BGP_GLOBALS", "default", ChangeAdd, nil, map[string]string{
-		"local_asn": fmt.Sprintf("%d", resolved.ASNumber),
-		"router_id": resolved.RouterID,
-	})
-
-	// Configure global L2VPN EVPN address-family
-	cs.Add("BGP_GLOBALS_AF", "default|l2vpn_evpn", ChangeAdd, nil, map[string]string{
-		"advertise-all-vni": "true",
-	})
-
-	// Add each route reflector as an iBGP EVPN neighbor (using loopback)
-	for _, rrIP := range resolved.BGPNeighbors {
-		// Skip if this is our own IP
-		if rrIP == resolved.LoopbackIP {
-			continue
-		}
-
-		// Check if neighbor already exists (key format: "default|<IP>")
-		if n.configDB != nil {
-			key := fmt.Sprintf("default|%s", rrIP)
-			if _, ok := n.configDB.BGPNeighbor[key]; ok {
-				// Already exists, skip
-				continue
-			}
-		}
-
-		// Add neighbor entry with loopback as update-source (iBGP)
-		fields := map[string]string{
-			"asn":          fmt.Sprintf("%d", resolved.ASNumber), // iBGP (same AS)
-			"admin_status": "up",
-			"name":         "route-reflector",
-			"local_addr":   resolved.LoopbackIP, // Update-source = loopback
-		}
-		// Key format: vrf|neighborIP (per SONiC Unified FRR Mgmt schema)
-		cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", rrIP), ChangeAdd, nil, fields)
-
-		// Activate L2VPN EVPN for this neighbor
-		afKey := fmt.Sprintf("default|%s|l2vpn_evpn", rrIP)
-		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
-			"activate": "true",
-		})
-	}
-
-	util.WithDevice(n.name).Infof("Setting up BGP EVPN with %d route reflectors (via loopback %s)",
-		len(resolved.BGPNeighbors), resolved.LoopbackIP)
-	return cs, nil
-}
-
 // BGPNeighborExists checks if a BGP neighbor exists.
 // Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
 func (n *Node) BGPNeighborExists(neighborIP string) bool {
@@ -995,57 +929,6 @@ func (n *Node) VTEPSourceIP() string {
 	}
 	// Fall back to resolved loopback IP
 	return n.resolved.LoopbackIP
-}
-
-// ListBGPNeighbors returns all BGP neighbor IPs from config_db.
-func (n *Node) ListBGPNeighbors() []string {
-	if n.configDB == nil {
-		return nil
-	}
-	neighbors := make([]string, 0, len(n.configDB.BGPNeighbor))
-	for ip := range n.configDB.BGPNeighbor {
-		neighbors = append(neighbors, ip)
-	}
-	return neighbors
-}
-
-// ListACLTables returns all ACL table names on this device.
-func (n *Node) ListACLTables() []string {
-	if n.configDB == nil {
-		return nil
-	}
-	names := make([]string, 0, len(n.configDB.ACLTable))
-	for name := range n.configDB.ACLTable {
-		names = append(names, name)
-	}
-	return names
-}
-
-// ACLTableInfo represents ACL table data for display.
-type ACLTableInfo struct {
-	Name            string
-	Type            string
-	Stage           string
-	BoundInterfaces string
-	Policy          string
-}
-
-// GetACLTable retrieves ACL table information by name.
-func (n *Node) GetACLTable(name string) (*ACLTableInfo, error) {
-	if n.configDB == nil {
-		return nil, util.ErrNotConnected
-	}
-	acl, ok := n.configDB.ACLTable[name]
-	if !ok {
-		return nil, fmt.Errorf("ACL table %s not found", name)
-	}
-	return &ACLTableInfo{
-		Name:            name,
-		Type:            acl.Type,
-		Stage:           acl.Stage,
-		BoundInterfaces: acl.Ports,
-		Policy:          acl.PolicyDesc,
-	}, nil
 }
 
 // GetOrphanedACLs returns ACL tables that have no interfaces bound.

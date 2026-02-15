@@ -43,26 +43,3 @@ func ResolveConfiglet(c *Configlet, vars map[string]string) map[string]map[strin
 	return result
 }
 
-// MergeConfigDB deep-merges overlay into base at the table -> key -> field level.
-// Fields in overlay overwrite fields in base for the same table+key.
-func MergeConfigDB(base, overlay map[string]map[string]map[string]string) map[string]map[string]map[string]string {
-	if base == nil {
-		base = make(map[string]map[string]map[string]string)
-	}
-
-	for table, entries := range overlay {
-		if base[table] == nil {
-			base[table] = make(map[string]map[string]string)
-		}
-		for key, fields := range entries {
-			if base[table][key] == nil {
-				base[table][key] = make(map[string]string)
-			}
-			for fk, fv := range fields {
-				base[table][key][fk] = fv
-			}
-		}
-	}
-
-	return base
-}

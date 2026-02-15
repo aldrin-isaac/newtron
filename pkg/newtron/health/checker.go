@@ -62,10 +62,6 @@ func NewChecker() *Checker {
 	}
 }
 
-// AddCheck adds a custom health check
-func (c *Checker) AddCheck(check Check) {
-	c.checks = append(c.checks, check)
-}
 
 // Run executes all health checks and returns a report
 func (c *Checker) Run(ctx context.Context, d *node.Node) (*Report, error) {
@@ -110,14 +106,6 @@ func (c *Checker) RunCheck(ctx context.Context, d *node.Node, name string) (*Res
 	return nil, fmt.Errorf("health check '%s' not found", name)
 }
 
-// ListChecks returns the names of all available checks
-func (c *Checker) ListChecks() []string {
-	names := make([]string, len(c.checks))
-	for i, check := range c.checks {
-		names[i] = check.Name()
-	}
-	return names
-}
 
 // InterfaceCheck verifies interface health
 type InterfaceCheck struct{}

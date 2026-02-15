@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -146,58 +145,4 @@ func (cs *ChangeSet) Verify(n *Node) error {
 	}
 	cs.Verification = result
 	return nil
-}
-
-// Rollback applies the inverse of each applied change in reverse order.
-// ChangeAdd → delete the table/key, ChangeModify → restore OldValue,
-// ChangeDelete → recreate with OldValue. Best-effort: attempts ALL inverse
-// operations, collecting errors via errors.Join(). Caller should verify
-// device state after rollback.
-func (cs *ChangeSet) Rollback(n *Node) error {
-	if cs.AppliedCount == 0 {
-		return nil
-	}
-	if err := n.precondition("rollback-changeset", cs.Operation).Result(); err != nil {
-		return err
-	}
-
-	var errs []error
-
-	// Iterate applied changes in reverse order
-	for i := cs.AppliedCount - 1; i >= 0; i-- {
-		c := cs.Changes[i]
-
-		var inverse device.ConfigChange
-		switch c.Type {
-		case ChangeAdd:
-			// Inverse of add → delete
-			inverse = device.ConfigChange{
-				Table: c.Table,
-				Key:   c.Key,
-				Type:  device.ChangeTypeDelete,
-			}
-		case ChangeModify:
-			// Inverse of modify → restore OldValue
-			inverse = device.ConfigChange{
-				Table:  c.Table,
-				Key:    c.Key,
-				Type:   device.ChangeTypeModify,
-				Fields: c.OldValue,
-			}
-		case ChangeDelete:
-			// Inverse of delete → recreate with OldValue
-			inverse = device.ConfigChange{
-				Table:  c.Table,
-				Key:    c.Key,
-				Type:   device.ChangeTypeAdd,
-				Fields: c.OldValue,
-			}
-		}
-
-		if err := n.Underlying().ApplyChanges([]device.ConfigChange{inverse}); err != nil {
-			errs = append(errs, fmt.Errorf("rollback %s|%s: %w", c.Table, c.Key, err))
-		}
-	}
-
-	return errors.Join(errs...)
 }

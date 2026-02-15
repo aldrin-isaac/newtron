@@ -464,22 +464,6 @@ func TestAddACLRule(t *testing.T) {
 // EVPN/VXLAN Operation Tests
 // ============================================================================
 
-func TestCreateVTEP(t *testing.T) {
-	d := testDevice()
-	ctx := context.Background()
-
-	cs, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "10.255.0.1"})
-	if err != nil {
-		t.Fatalf("CreateVTEP: %v", err)
-	}
-
-	c := assertChange(t, cs, "VXLAN_TUNNEL", "vtep1", ChangeAdd)
-	assertField(t, c, "src_ip", "10.255.0.1")
-
-	nvoC := assertChange(t, cs, "VXLAN_EVPN_NVO", "nvo1", ChangeAdd)
-	assertField(t, nvoC, "source_vtep", "vtep1")
-}
-
 func TestMapL2VNI(t *testing.T) {
 	d := testDevice()
 	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
@@ -494,27 +478,6 @@ func TestMapL2VNI(t *testing.T) {
 	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeAdd)
 	assertField(t, c, "vlan", "Vlan100")
 	assertField(t, c, "vni", "20100")
-}
-
-func TestMapL3VNI(t *testing.T) {
-	d := testDevice()
-	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
-	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
-	ctx := context.Background()
-
-	cs, err := d.MapL3VNI(ctx, "Vrf_CUST1", 30001)
-	if err != nil {
-		t.Fatalf("MapL3VNI: %v", err)
-	}
-
-	// VRF gets VNI field updated
-	vrfC := assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeModify)
-	assertField(t, vrfC, "vni", "30001")
-
-	// VXLAN_TUNNEL_MAP entry
-	mapC := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeAdd)
-	assertField(t, mapC, "vrf", "Vrf_CUST1")
-	assertField(t, mapC, "vni", "30001")
 }
 
 func TestConfigureSVI(t *testing.T) {
@@ -544,125 +507,6 @@ func TestConfigureSVI(t *testing.T) {
 	assertField(t, sagC, "gwmac", "00:00:00:00:01:01")
 }
 
-func TestUnmapVNI(t *testing.T) {
-	d := testDevice()
-	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = sonic.VXLANMapEntry{
-		VLAN: "Vlan100", VNI: "20100",
-	}
-	ctx := context.Background()
-
-	cs, err := d.UnmapVNI(ctx, 20100)
-	if err != nil {
-		t.Fatalf("UnmapVNI: %v", err)
-	}
-
-	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeDelete)
-}
-
-func TestUnmapVNI_NotFound(t *testing.T) {
-	d := testDevice()
-	ctx := context.Background()
-
-	_, err := d.UnmapVNI(ctx, 99999)
-	if err == nil {
-		t.Fatal("expected error for missing VNI mapping")
-	}
-}
-
-// ============================================================================
-// BGP Operation Tests
-// ============================================================================
-
-func TestSetBGPGlobals(t *testing.T) {
-	d := testDevice()
-	ctx := context.Background()
-
-	cs, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{
-		LocalASN:           64512,
-		RouterID:           "10.255.0.1",
-		LoadBalanceMPRelax: true,
-		LogNeighborChanges: true,
-	})
-	if err != nil {
-		t.Fatalf("SetBGPGlobals: %v", err)
-	}
-
-	c := assertChange(t, cs, "BGP_GLOBALS", "default", ChangeAdd)
-	assertField(t, c, "local_asn", "64512")
-	assertField(t, c, "router_id", "10.255.0.1")
-	assertField(t, c, "load_balance_mp_relax", "true")
-	assertField(t, c, "log_neighbor_changes", "true")
-}
-
-func TestSetupRouteReflector(t *testing.T) {
-	d := testDevice()
-	ctx := context.Background()
-
-	neighbors := []string{"10.255.1.1", "10.255.1.2"}
-	cs, err := d.SetupRouteReflector(ctx, SetupRouteReflectorConfig{
-		Neighbors: neighbors,
-		ClusterID: "10.255.0.1",
-	})
-	if err != nil {
-		t.Fatalf("SetupRouteReflector: %v", err)
-	}
-
-	// BGP_GLOBALS
-	globC := assertChange(t, cs, "BGP_GLOBALS", "default", ChangeAdd)
-	assertField(t, globC, "local_asn", "64512")
-	assertField(t, globC, "rr_cluster_id", "10.255.0.1")
-
-	// Each neighbor gets BGP_NEIGHBOR + 3 AFs = 4 entries
-	for _, nip := range neighbors {
-		nKey := "default|" + nip
-		nc := assertChange(t, cs, "BGP_NEIGHBOR", nKey, ChangeAdd)
-		assertField(t, nc, "asn", "64512")
-		assertField(t, nc, "admin_status", "up")
-
-		// IPv4 unicast
-		afC := assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|ipv4_unicast", ChangeAdd)
-		assertField(t, afC, "route_reflector_client", "true")
-
-		// IPv6 unicast
-		assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|ipv6_unicast", ChangeAdd)
-
-		// L2VPN EVPN
-		assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|l2vpn_evpn", ChangeAdd)
-	}
-
-	// BGP_GLOBALS_AF entries (3 AFs)
-	assertChange(t, cs, "BGP_GLOBALS_AF", "default|ipv4_unicast", ChangeAdd)
-	assertChange(t, cs, "BGP_GLOBALS_AF", "default|ipv6_unicast", ChangeAdd)
-	evpnAF := assertChange(t, cs, "BGP_GLOBALS_AF", "default|l2vpn_evpn", ChangeAdd)
-	assertField(t, evpnAF, "advertise-all-vni", "true")
-
-	// Route redistribution
-	assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeAdd)
-	assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv6", ChangeAdd)
-
-	// Total: 1 (globals) + 2*(1+3) (neighbors) + 3 (globals_af) + 2 (redistribute) = 14
-	if len(cs.Changes) != 14 {
-		t.Errorf("expected 14 changes, got %d", len(cs.Changes))
-	}
-}
-
-func TestAddRouteRedistribution(t *testing.T) {
-	d := testDevice()
-	ctx := context.Background()
-
-	cs, err := d.AddRouteRedistribution(ctx, RouteRedistributionConfig{
-		SrcProtocol:   "connected",
-		AddressFamily: "ipv4",
-		RouteMap:      "RM_CONNECTED",
-	})
-	if err != nil {
-		t.Fatalf("AddRouteRedistribution: %v", err)
-	}
-
-	c := assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeAdd)
-	assertField(t, c, "route_map", "RM_CONNECTED")
-}
-
 // ============================================================================
 // Precondition Tests
 // ============================================================================
@@ -683,11 +527,6 @@ func TestDevice_NotConnected(t *testing.T) {
 			return err
 		}},
 		{"CreateVRF", func() error { _, err := d.CreateVRF(ctx, "Vrf_TEST", VRFConfig{}); return err }},
-		{"CreateVTEP", func() error { _, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "1.2.3.4"}); return err }},
-		{"SetBGPGlobals", func() error {
-			_, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{LocalASN: 65000, RouterID: "1.1.1.1"})
-			return err
-		}},
 	}
 
 	for _, op := range ops {
@@ -721,11 +560,6 @@ func TestDevice_NotLocked(t *testing.T) {
 			return err
 		}},
 		{"CreateVRF", func() error { _, err := d.CreateVRF(ctx, "Vrf_TEST", VRFConfig{}); return err }},
-		{"CreateVTEP", func() error { _, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "1.2.3.4"}); return err }},
-		{"SetBGPGlobals", func() error {
-			_, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{LocalASN: 65000, RouterID: "1.1.1.1"})
-			return err
-		}},
 	}
 
 	for _, op := range ops {

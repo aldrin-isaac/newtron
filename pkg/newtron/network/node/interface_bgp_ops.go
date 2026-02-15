@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -140,93 +139,8 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 	return cs, nil
 }
 
-// GetBGPNeighborIP returns the BGP neighbor IP for this interface (if any).
-// Returns empty string if no BGP neighbor is configured on this interface.
-func (i *Interface) GetBGPNeighborIP() string {
-	n := i.node
-	if n.ConfigDB() == nil || len(i.ipAddresses) == 0 {
-		return ""
-	}
 
-	localIP, _ := util.SplitIPMask(i.ipAddresses[0])
 
-	// Find a BGP neighbor that uses this interface's IP as local_addr
-	for neighborIP, neighbor := range n.ConfigDB().BGPNeighbor {
-		if neighbor.LocalAddr == localIP {
-			return neighborIP
-		}
-	}
-
-	return ""
-}
-
-// ============================================================================
-// v3: Route Map Binding
-// ============================================================================
-
-// SetRouteMap binds a route-map to a BGP neighbor's address-family (in/out direction).
-// Used to apply import/export policies from the service routing spec.
-func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, routeMapName string) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("set-route-map", i.name).Result(); err != nil {
-		return nil, err
-	}
-	if direction != "in" && direction != "out" {
-		return nil, fmt.Errorf("direction must be 'in' or 'out'")
-	}
-
-	// Verify neighbor exists
-	if !n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
-	}
-
-	// Verify route-map exists in CONFIG_DB
-	configDB := n.ConfigDB()
-	if configDB != nil {
-		found := false
-		prefix := routeMapName + "|"
-		for key := range configDB.RouteMap {
-			if key == routeMapName || len(key) > len(prefix) && key[:len(prefix)] == prefix {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, fmt.Errorf("route-map '%s' not found in CONFIG_DB", routeMapName)
-		}
-	}
-
-	cs := NewChangeSet(n.Name(), "interface.set-route-map")
-
-	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
-	afKey := fmt.Sprintf("default|%s|%s", neighborIP, af)
-	field := "route_map_in"
-	if direction == "out" {
-		field = "route_map_out"
-	}
-
-	cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeModify, nil, map[string]string{
-		field: routeMapName,
-	})
-
-	util.WithDevice(n.Name()).Infof("Set route-map %s %s on neighbor %s AF %s",
-		routeMapName, direction, neighborIP, af)
-	return cs, nil
-}
-
-// ============================================================================
-// BGP Neighbor Helpers
-// ============================================================================
-
-// BGPNeighborConfig holds configuration for adding a BGP neighbor.
-type BGPNeighborConfig struct {
-	NeighborIP  string // Neighbor IP address
-	RemoteASN   int    // Remote AS number
-	Passive     bool   // Passive mode (wait for incoming connection)
-	TTL         int    // eBGP multihop TTL
-	Description string // Optional description
-}
 
 // DeriveNeighborIP derives the BGP neighbor IP from this interface's IP address.
 // Only works for point-to-point links (/30 or /31 subnets).
@@ -237,25 +151,4 @@ func (i *Interface) DeriveNeighborIP() (string, error) {
 	return util.DeriveNeighborIP(i.ipAddresses[0])
 }
 
-// AddBGPNeighborWithConfig adds a BGP neighbor using the provided config.
-// This is an alternative to AddBGPNeighbor with more options.
-func (i *Interface) AddBGPNeighborWithConfig(ctx context.Context, cfg BGPNeighborConfig) (*ChangeSet, error) {
-	// Convert to DirectBGPNeighborConfig and delegate
-	directCfg := DirectBGPNeighborConfig{
-		NeighborIP:  cfg.NeighborIP,
-		RemoteAS:    cfg.RemoteASN,
-		Description: cfg.Description,
-		Multihop:    cfg.TTL,
-	}
 
-	// Handle passive mode - note: SONiC may not support this directly
-	// For now, we'll create the neighbor but it won't be passive
-	if cfg.Passive && cfg.NeighborIP == "" {
-		return nil, fmt.Errorf("passive mode requires a neighbor IP in SONiC")
-	}
-
-	return i.AddBGPNeighbor(ctx, directCfg)
-}
-
-// Ensure strings import is used.
-var _ = strings.HasPrefix

@@ -228,38 +228,6 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoader_ResolveProfile(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	resolved, err := loader.ResolveProfile("leaf1-ny")
-	if err != nil {
-		t.Fatalf("ResolveProfile() failed: %v", err)
-	}
-
-	// Check inherited values
-	if resolved.ASNumber != 65000 {
-		t.Errorf("ASNumber = %d, want %d (inherited from region)", resolved.ASNumber, 65000)
-	}
-	if resolved.Region != "amer" {
-		t.Errorf("Region = %q, want %q (derived from site)", resolved.Region, "amer")
-	}
-
-	// Check derived values
-	if resolved.RouterID != "10.0.0.10" {
-		t.Errorf("RouterID = %q, want %q (derived from loopback)", resolved.RouterID, "10.0.0.10")
-	}
-	if resolved.VTEPSourceIP != "10.0.0.10" {
-		t.Errorf("VTEPSourceIP = %q, want %q", resolved.VTEPSourceIP, "10.0.0.10")
-	}
-
-}
-
 func TestLoader_GetService(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
@@ -329,24 +297,6 @@ func TestLoader_GetPrefixList(t *testing.T) {
 	}
 }
 
-func TestLoader_GetPolicer(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	policer, err := loader.GetPolicer("test-policer")
-	if err != nil {
-		t.Fatalf("GetPolicer() failed: %v", err)
-	}
-	if policer.Bandwidth != "10m" {
-		t.Errorf("Bandwidth = %q, want %q", policer.Bandwidth, "10m")
-	}
-}
-
 func TestLoader_ListServices(t *testing.T) {
 	tmpDir := createTestSpecDir(t)
 	defer os.RemoveAll(tmpDir)
@@ -359,21 +309,6 @@ func TestLoader_ListServices(t *testing.T) {
 	services := loader.ListServices()
 	if len(services) != 1 {
 		t.Errorf("Expected 1 service, got %d", len(services))
-	}
-}
-
-func TestLoader_ListRegions(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	regions := loader.ListRegions()
-	if len(regions) != 1 {
-		t.Errorf("Expected 1 region, got %d", len(regions))
 	}
 }
 
@@ -566,126 +501,6 @@ func TestLoader_LoadProfile_InvalidJSON(t *testing.T) {
 	_, err := loader.LoadProfile("bad-profile")
 	if err == nil {
 		t.Error("LoadProfile() should fail with invalid JSON")
-	}
-}
-
-func TestLoader_ResolveProfile_MissingSite(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Create profile with non-existent site
-	profileJSON := `{
-		"mgmt_ip": "192.168.1.100",
-		"loopback_ip": "10.0.0.100",
-		"site": "nonexistent-site"
-	}`
-	profilePath := filepath.Join(tmpDir, "profiles", "bad-site-device.json")
-	if err := os.WriteFile(profilePath, []byte(profileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write profile: %v", err)
-	}
-
-	_, err := loader.ResolveProfile("bad-site-device")
-	if err == nil {
-		t.Error("ResolveProfile() should fail with missing site")
-	}
-}
-
-func TestLoader_ResolveProfile_MissingRegion(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "newtron-spec-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// Create network.json without the region
-	networkJSON := `{"version": "1.0", "regions": {}, "services": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644); err != nil {
-		t.Fatalf("Failed to write network.json: %v", err)
-	}
-
-	// Create site.json with site referencing non-existent region
-	siteJSON := `{
-		"version": "1.0",
-		"sites": {
-			"test-site": {
-				"region": "nonexistent-region",
-				"route_reflectors": []
-			}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
-	}
-
-	platformsJSON := `{"version": "1.0", "platforms": {}}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(platformsJSON), 0644); err != nil {
-		t.Fatalf("Failed to write platforms.json: %v", err)
-	}
-
-	// Create profiles directory and profile
-	profilesDir := filepath.Join(tmpDir, "profiles")
-	os.MkdirAll(profilesDir, 0755)
-	profileJSON := `{
-		"mgmt_ip": "192.168.1.100",
-		"loopback_ip": "10.0.0.100",
-		"site": "test-site"
-	}`
-	if err := os.WriteFile(filepath.Join(profilesDir, "test-device.json"), []byte(profileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write profile: %v", err)
-	}
-
-	loader := NewLoader(tmpDir)
-	// Load will fail because site references unknown region - that's OK for this test
-	// We need to bypass validation to test ResolveProfile's region check
-	loader.network, _ = loader.loadNetworkSpec()
-	loader.site, _ = loader.loadSiteSpec()
-	loader.platforms, _ = loader.loadPlatformSpec()
-
-	_, err = loader.ResolveProfile("test-device")
-	if err == nil {
-		t.Error("ResolveProfile() should fail when region is not found")
-	}
-}
-
-func TestLoader_ResolveProfile_WithOverrides(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Create profile with explicit overrides
-	asNum := 65100
-	profileJSON := `{
-		"mgmt_ip": "192.168.1.200",
-		"loopback_ip": "10.0.0.200",
-		"site": "ny",
-		"as_number": 65100,
-		"is_route_reflector": true
-	}`
-	profilePath := filepath.Join(tmpDir, "profiles", "override-device.json")
-	if err := os.WriteFile(profilePath, []byte(profileJSON), 0644); err != nil {
-		t.Fatalf("Failed to write profile: %v", err)
-	}
-
-	resolved, err := loader.ResolveProfile("override-device")
-	if err != nil {
-		t.Fatalf("ResolveProfile() failed: %v", err)
-	}
-
-	// Check that overrides are applied
-	if resolved.ASNumber != asNum {
-		t.Errorf("ASNumber = %d, want %d (from profile override)", resolved.ASNumber, asNum)
-	}
-	if !resolved.IsRouteReflector {
-		t.Error("IsRouteReflector should be true")
 	}
 }
 
@@ -1051,79 +866,6 @@ func TestLoader_GetPrefixList_NotFound(t *testing.T) {
 	_, err := loader.GetPrefixList("nonexistent")
 	if err == nil {
 		t.Error("GetPrefixList() should fail for nonexistent prefix list")
-	}
-}
-
-func TestLoader_GetPolicer_NotFound(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	_, err := loader.GetPolicer("nonexistent")
-	if err == nil {
-		t.Error("GetPolicer() should fail for nonexistent policer")
-	}
-}
-
-func TestLoader_DeriveBGPNeighbors_MissingProfile(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	// Remove one of the spine profiles to test the skip path
-	os.Remove(filepath.Join(tmpDir, "profiles", "spine2-ny.json"))
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	resolved, err := loader.ResolveProfile("leaf1-ny")
-	if err != nil {
-		t.Fatalf("ResolveProfile() failed: %v", err)
-	}
-
-	// Should only have one BGP neighbor (spine1-ny), not spine2-ny
-	if len(resolved.BGPNeighbors) != 1 {
-		t.Errorf("Expected 1 BGP neighbor (missing profile skipped), got %d", len(resolved.BGPNeighbors))
-	}
-}
-
-func TestLoader_DeriveBGPNeighbors_SelfPeering(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	// Modify site.json to include spine1-ny as its own route reflector
-	siteJSON := `{
-		"version": "1.0",
-		"sites": {
-			"ny": {
-				"region": "amer",
-				"route_reflectors": ["spine1-ny"]
-			}
-		}
-	}`
-	if err := os.WriteFile(filepath.Join(tmpDir, "site.json"), []byte(siteJSON), 0644); err != nil {
-		t.Fatalf("Failed to write site.json: %v", err)
-	}
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	// Resolve spine1-ny which is listed as its own route reflector
-	resolved, err := loader.ResolveProfile("spine1-ny")
-	if err != nil {
-		t.Fatalf("ResolveProfile() failed: %v", err)
-	}
-
-	// Should have no BGP neighbors since the only RR is itself
-	if len(resolved.BGPNeighbors) != 0 {
-		t.Errorf("Expected 0 BGP neighbors (self-peering excluded), got %d: %v", len(resolved.BGPNeighbors), resolved.BGPNeighbors)
 	}
 }
 

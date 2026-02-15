@@ -401,36 +401,6 @@ func TestPortChannelInfo_Structure(t *testing.T) {
 }
 
 // ============================================================================
-// ACLTableInfo Tests
-// ============================================================================
-
-func TestACLTableInfo_Structure(t *testing.T) {
-	info := ACLTableInfo{
-		Name:            "customer-edge-in",
-		Type:            "L3",
-		Stage:           "ingress",
-		BoundInterfaces: "Ethernet0,Ethernet4",
-		Policy:          "Customer edge ingress filter",
-	}
-
-	if info.Name != "customer-edge-in" {
-		t.Errorf("Name = %q, want %q", info.Name, "customer-edge-in")
-	}
-	if info.Type != "L3" {
-		t.Errorf("Type = %q, want %q", info.Type, "L3")
-	}
-	if info.Stage != "ingress" {
-		t.Errorf("Stage = %q, want %q", info.Stage, "ingress")
-	}
-	if info.BoundInterfaces != "Ethernet0,Ethernet4" {
-		t.Errorf("BoundInterfaces = %q, want %q", info.BoundInterfaces, "Ethernet0,Ethernet4")
-	}
-	if info.Policy != "Customer edge ingress filter" {
-		t.Errorf("Policy = %q, want %q", info.Policy, "Customer edge ingress filter")
-	}
-}
-
-// ============================================================================
 // Interface Type Detection Tests (using minimal mock)
 // ============================================================================
 

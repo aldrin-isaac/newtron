@@ -444,42 +444,6 @@ func TestDependencyChecker_IsLastVLANMember_MultipleMembers(t *testing.T) {
 	}
 }
 
-func TestDependencyChecker_IsLastVRFUser_OnlyUser(t *testing.T) {
-	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	dev := testNode(db, true, false)
-
-	dc := node.NewDependencyChecker(dev, "Ethernet0")
-	if !dc.IsLastVRFUser("Vrf_CUST1") {
-		t.Error("IsLastVRFUser should be true when Ethernet0 is only user")
-	}
-}
-
-func TestDependencyChecker_IsLastVRFUser_MultipleUsers(t *testing.T) {
-	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	db.Interface["Ethernet4"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	dev := testNode(db, true, false)
-
-	dc := node.NewDependencyChecker(dev, "Ethernet0")
-	if dc.IsLastVRFUser("Vrf_CUST1") {
-		t.Error("IsLastVRFUser should be false when other interfaces use VRF")
-	}
-}
-
-func TestDependencyChecker_IsLastVRFUser_SkipsCompositeKeys(t *testing.T) {
-	db := emptyConfigDB()
-	db.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	// Composite key (IP binding) — should be skipped
-	db.Interface["Ethernet0|10.1.1.1/30"] = sonic.InterfaceEntry{}
-	dev := testNode(db, true, false)
-
-	dc := node.NewDependencyChecker(dev, "Ethernet0")
-	if !dc.IsLastVRFUser("Vrf_CUST1") {
-		t.Error("IsLastVRFUser should skip composite keys")
-	}
-}
-
 func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 	db := emptyConfigDB()
 	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
@@ -538,9 +502,6 @@ func TestDependencyChecker_NilConfigDB(t *testing.T) {
 	}
 	if !dc.IsLastVLANMember(100) {
 		t.Error("IsLastVLANMember with nil configDB should return true")
-	}
-	if !dc.IsLastVRFUser("any") {
-		t.Error("IsLastVRFUser with nil configDB should return true")
 	}
 	if !dc.IsLastServiceUser("any") {
 		t.Error("IsLastServiceUser with nil configDB should return true")

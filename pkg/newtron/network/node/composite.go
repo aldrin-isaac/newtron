@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // CompositeMode defines the delivery mode for composite configs.
@@ -68,12 +67,6 @@ func NewCompositeBuilder(deviceName string, mode CompositeMode) *CompositeBuilde
 	}
 }
 
-// SetNetwork sets the network name in metadata.
-func (cb *CompositeBuilder) SetNetwork(name string) *CompositeBuilder {
-	cb.metadata.NetworkName = name
-	return cb
-}
-
 // SetDescription sets the description in metadata.
 func (cb *CompositeBuilder) SetDescription(desc string) *CompositeBuilder {
 	cb.metadata.Description = desc
@@ -125,28 +118,9 @@ func (cb *CompositeBuilder) AddBGPNeighborAF(vrf, neighborIP, af string, fields 
 	return cb.AddEntry("BGP_NEIGHBOR_AF", key, fields)
 }
 
-// AddPeerGroup adds a BGP peer group to the composite.
-func (cb *CompositeBuilder) AddPeerGroup(name string, fields map[string]string) *CompositeBuilder {
-	return cb.AddEntry("BGP_PEER_GROUP", name, fields)
-}
-
 // AddPortConfig adds a PORT entry to the composite.
 func (cb *CompositeBuilder) AddPortConfig(portName string, fields map[string]string) *CompositeBuilder {
 	return cb.AddEntry("PORT", portName, fields)
-}
-
-// AddService adds all CONFIG_DB entries for a service application to an interface.
-// This builds the same entries that Interface.ApplyService() would create,
-// but without requiring a device connection.
-func (cb *CompositeBuilder) AddService(interfaceName, serviceName string, fields map[string]string) *CompositeBuilder {
-	// Record the service binding
-	bindingFields := map[string]string{
-		"service_name": serviceName,
-	}
-	for k, v := range fields {
-		bindingFields[k] = v
-	}
-	return cb.AddEntry("NEWTRON_SERVICE_BINDING", interfaceName, bindingFields)
 }
 
 // AddRouteRedistribution adds a route redistribution entry.
@@ -244,23 +218,6 @@ func (n *Node) DeliverComposite(composite *CompositeConfig, mode CompositeMode) 
 	}
 
 	return result, nil
-}
-
-// ValidateComposite performs a dry-run validation of composite delivery without applying.
-func (n *Node) ValidateComposite(composite *CompositeConfig, mode CompositeMode) error {
-	if !n.IsConnected() {
-		return util.ErrNotConnected
-	}
-
-	switch mode {
-	case CompositeOverwrite:
-		// Overwrite always valid (replaces everything)
-		return nil
-	case CompositeMerge:
-		return n.validateMerge(composite)
-	default:
-		return fmt.Errorf("unknown composite mode: %s", mode)
-	}
 }
 
 // validateMerge checks that merge won't conflict with existing config.

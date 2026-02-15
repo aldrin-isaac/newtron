@@ -329,23 +329,3 @@ func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
 	return count == 0
 }
 
-// IsLastVRFUser returns true if this is the last interface bound to the VRF
-func (dc *DependencyChecker) IsLastVRFUser(vrfName string) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	// Count interfaces bound to this VRF
-	count := 0
-	for intfName, intf := range configDB.Interface {
-		// Skip composite keys (with |) - those are IP bindings
-		if strings.Contains(intfName, "|") {
-			continue
-		}
-		if intf.VRFName == vrfName && intfName != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}

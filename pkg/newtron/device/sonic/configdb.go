@@ -3,7 +3,6 @@ package sonic
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -501,11 +500,6 @@ func (c *ConfigDBClient) Delete(table, key string) error {
 	return c.client.Del(c.ctx, redisKey).Err()
 }
 
-// DeleteField removes a specific field from an entry
-func (c *ConfigDBClient) DeleteField(table, key, field string) error {
-	redisKey := fmt.Sprintf("%s|%s", table, key)
-	return c.client.HDel(c.ctx, redisKey, field).Err()
-}
 
 // Get reads a table entry
 func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
@@ -527,10 +521,6 @@ func (c *ConfigDBClient) Exists(table, key string) (bool, error) {
 	return n > 0, err
 }
 
-// ToJSON exports config_db as JSON
-func (db *ConfigDB) ToJSON() ([]byte, error) {
-	return json.MarshalIndent(db, "", "  ")
-}
 
 // ============================================================================
 // Nil-safe query methods — called by network.Device to avoid nil-check boilerplate

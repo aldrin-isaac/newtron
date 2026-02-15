@@ -6,97 +6,24 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
-func TestEvent_New(t *testing.T) {
-	event := NewEvent("alice", "leaf1-ny", "service.apply")
-
-	if event.User != "alice" {
-		t.Errorf("User = %q, want %q", event.User, "alice")
-	}
-	if event.Device != "leaf1-ny" {
-		t.Errorf("Device = %q, want %q", event.Device, "leaf1-ny")
-	}
-	if event.Operation != "service.apply" {
-		t.Errorf("Operation = %q, want %q", event.Operation, "service.apply")
-	}
-	if event.ID == "" {
-		t.Error("ID should not be empty")
-	}
-	if event.Timestamp.IsZero() {
-		t.Error("Timestamp should be set")
+// testEvent creates an Event for testing (replaces deleted NewEvent builder).
+func testEvent(user, device, operation string) *Event {
+	return &Event{
+		ID:        "test",
+		User:      user,
+		Device:    device,
+		Operation: operation,
+		Timestamp: time.Now(),
 	}
 }
 
-func TestEvent_Chaining(t *testing.T) {
-	changes := []node.Change{
-		{Table: "VRF", Key: "test", Type: node.ChangeAdd},
-	}
-
-	event := NewEvent("alice", "leaf1-ny", "service.apply").
-		WithService("customer-l3").
-		WithInterface("Ethernet0").
-		WithChanges(changes).
-		WithSuccess().
-		WithDuration(time.Second).
-		WithExecuteMode(true)
-
-	if event.Service != "customer-l3" {
-		t.Errorf("Service = %q", event.Service)
-	}
-	if event.Interface != "Ethernet0" {
-		t.Errorf("Interface = %q", event.Interface)
-	}
-	if len(event.Changes) != 1 {
-		t.Errorf("Expected 1 change, got %d", len(event.Changes))
-	}
-	if !event.Success {
-		t.Error("Success should be true")
-	}
-	if event.Duration != time.Second {
-		t.Errorf("Duration = %v", event.Duration)
-	}
-	if !event.ExecuteMode {
-		t.Error("ExecuteMode should be true")
-	}
-	if event.DryRun {
-		t.Error("DryRun should be false when ExecuteMode is true")
-	}
-}
-
-func TestEvent_WithError(t *testing.T) {
-	event := NewEvent("alice", "leaf1-ny", "service.apply").
-		WithError(errors.New("test error"))
-
-	if event.Success {
-		t.Error("Success should be false")
-	}
-	if event.Error != "test error" {
-		t.Errorf("Error = %q", event.Error)
-	}
-
-	// Test with nil error
-	event2 := NewEvent("alice", "leaf1-ny", "test").WithError(nil)
-	if event2.Success {
-		t.Error("Success should be false even with nil error")
-	}
-	if event2.Error != "" {
-		t.Errorf("Error should be empty with nil error, got %q", event2.Error)
-	}
-}
-
-func TestEvent_ExecuteMode(t *testing.T) {
-	event := NewEvent("alice", "leaf1-ny", "test").WithExecuteMode(false)
-
-	if event.ExecuteMode {
-		t.Error("ExecuteMode should be false")
-	}
-	if !event.DryRun {
-		t.Error("DryRun should be true when ExecuteMode is false")
-	}
-}
+// Test-only builder methods (lowercase — not exported, only used in tests).
+func (e *Event) withService(s string) *Event    { e.Service = s; return e }
+func (e *Event) withInterface(i string) *Event   { e.Interface = i; return e }
+func (e *Event) withSuccess() *Event             { e.Success = true; return e }
+func (e *Event) withError(err error) *Event      { e.Error = err.Error(); return e }
 
 func TestFileLogger_Basic(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "audit-test-*")
@@ -113,9 +40,9 @@ func TestFileLogger_Basic(t *testing.T) {
 	defer logger.Close()
 
 	// Log an event
-	event := NewEvent("alice", "leaf1-ny", "service.apply").
-		WithService("customer-l3").
-		WithSuccess()
+	event := testEvent("alice", "leaf1-ny", "service.apply").
+		withService("customer-l3").
+		withSuccess()
 
 	if err := logger.Log(event); err != nil {
 		t.Fatalf("Log failed: %v", err)
@@ -155,10 +82,10 @@ func TestFileLogger_QueryFilters(t *testing.T) {
 
 	// Log multiple events
 	events := []*Event{
-		NewEvent("alice", "leaf1-ny", "service.apply").WithService("svc1").WithSuccess(),
-		NewEvent("bob", "leaf1-ny", "vlan.create").WithSuccess(),
-		NewEvent("alice", "spine1-ny", "bgp.modify").WithError(errors.New("failed")),
-		NewEvent("charlie", "leaf2-ny", "service.apply").WithService("svc2").WithSuccess(),
+		testEvent("alice", "leaf1-ny", "service.apply").withService("svc1").withSuccess(),
+		testEvent("bob", "leaf1-ny", "vlan.create").withSuccess(),
+		testEvent("alice", "spine1-ny", "bgp.modify").withError(errors.New("failed")),
+		testEvent("charlie", "leaf2-ny", "service.apply").withService("svc2").withSuccess(),
 	}
 
 	for _, e := range events {
@@ -239,7 +166,7 @@ func TestFileLogger_QueryTimeFilter(t *testing.T) {
 	defer logger.Close()
 
 	// Log an event
-	logger.Log(NewEvent("alice", "leaf1-ny", "test").WithSuccess())
+	logger.Log(testEvent("alice", "leaf1-ny", "test").withSuccess())
 
 	// Query with time filters
 	results, _ := logger.Query(Filter{
@@ -312,7 +239,7 @@ func TestDefaultLogger(t *testing.T) {
 	SetDefaultLogger(nil)
 
 	// Log with no default should not error
-	if err := Log(NewEvent("test", "test", "test")); err != nil {
+	if err := Log(testEvent("test", "test", "test")); err != nil {
 		t.Errorf("Log with nil default should not error: %v", err)
 	}
 
@@ -342,7 +269,7 @@ func TestDefaultLogger(t *testing.T) {
 	SetDefaultLogger(logger)
 
 	// Now log and query should work
-	if err := Log(NewEvent("alice", "leaf1", "test").WithSuccess()); err != nil {
+	if err := Log(testEvent("alice", "leaf1", "test").withSuccess()); err != nil {
 		t.Errorf("Log failed: %v", err)
 	}
 
@@ -378,9 +305,9 @@ func TestFileLogger_LogRotation(t *testing.T) {
 
 	// Log multiple events to trigger rotation
 	for i := 0; i < 5; i++ {
-		event := NewEvent("alice", "leaf1-ny", "service.apply").
-			WithService("customer-l3").
-			WithSuccess()
+		event := testEvent("alice", "leaf1-ny", "service.apply").
+			withService("customer-l3").
+			withSuccess()
 		if err := logger.Log(event); err != nil {
 			t.Fatalf("Log failed on iteration %d: %v", i, err)
 		}
@@ -418,7 +345,7 @@ func TestFileLogger_RotationWithCleanup(t *testing.T) {
 
 	// Log many events to trigger multiple rotations and cleanups
 	for i := 0; i < 10; i++ {
-		event := NewEvent("alice", "leaf1-ny", "test")
+		event := testEvent("alice", "leaf1-ny", "test")
 		if err := logger.Log(event); err != nil {
 			t.Fatalf("Log failed on iteration %d: %v", i, err)
 		}
@@ -513,9 +440,9 @@ func TestFileLogger_QueryInterfaceFilter(t *testing.T) {
 	defer logger.Close()
 
 	// Log events with different interfaces
-	logger.Log(NewEvent("alice", "leaf1", "test").WithInterface("Ethernet0").WithSuccess())
-	logger.Log(NewEvent("alice", "leaf1", "test").WithInterface("Ethernet4").WithSuccess())
-	logger.Log(NewEvent("alice", "leaf1", "test").WithInterface("Ethernet0").WithSuccess())
+	logger.Log(testEvent("alice", "leaf1", "test").withInterface("Ethernet0").withSuccess())
+	logger.Log(testEvent("alice", "leaf1", "test").withInterface("Ethernet4").withSuccess())
+	logger.Log(testEvent("alice", "leaf1", "test").withInterface("Ethernet0").withSuccess())
 
 	results, err := logger.Query(Filter{Interface: "Ethernet0"})
 	if err != nil {
@@ -541,7 +468,7 @@ func TestFileLogger_QueryEndTimeFilter(t *testing.T) {
 	}
 	defer logger.Close()
 
-	logger.Log(NewEvent("alice", "leaf1", "test").WithSuccess())
+	logger.Log(testEvent("alice", "leaf1", "test").withSuccess())
 
 	// Query with end time in the past (should find nothing)
 	results, err := logger.Query(Filter{
@@ -572,7 +499,7 @@ func TestFileLogger_QueryOffsetBeyondEvents(t *testing.T) {
 
 	// Log a few events
 	for i := 0; i < 3; i++ {
-		logger.Log(NewEvent("alice", "leaf1", "test").WithSuccess())
+		logger.Log(testEvent("alice", "leaf1", "test").withSuccess())
 	}
 
 	// Query with offset beyond total events — should return empty

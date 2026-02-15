@@ -5,9 +5,6 @@ import (
 	"fmt"
 
 	"github.com/go-redis/redis/v8"
-
-	"github.com/newtron-network/newtron/pkg/newtron/device"
-	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // TableChange represents a single change for pipeline execution.
@@ -57,25 +54,6 @@ func (c *ConfigDBClient) PipelineSet(changes []TableChange) error {
 	return nil
 }
 
-// PipelineDelete removes multiple entries atomically via Redis MULTI/EXEC pipeline.
-func (c *ConfigDBClient) PipelineDelete(keys []TableKey) error {
-	if len(keys) == 0 {
-		return nil
-	}
-
-	pipe := c.client.TxPipeline()
-
-	for _, key := range keys {
-		redisKey := fmt.Sprintf("%s|%s", key.Table, key.Key)
-		pipe.Del(c.ctx, redisKey)
-	}
-
-	_, err := pipe.Exec(c.ctx)
-	if err != nil && err != redis.Nil {
-		return fmt.Errorf("pipeline delete: %w", err)
-	}
-	return nil
-}
 
 // platformMergeTables are CONFIG_DB tables managed by the SONiC platform
 // (portsyncd, port_config.ini). Newtron merges its settings into these
@@ -121,51 +99,4 @@ func (c *ConfigDBClient) ReplaceAll(changes []TableChange) error {
 	// Write all new entries (PipelineSet uses HSet which merges fields
 	// for platform tables, and creates fresh entries for replaced tables)
 	return c.PipelineSet(changes)
-}
-
-// ApplyChangesPipelined applies a set of device.ConfigChange entries atomically via pipeline.
-// This is the pipeline equivalent of Device.ApplyChanges().
-func (d *Device) ApplyChangesPipelined(changes []device.ConfigChange) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if !d.connected {
-		return fmt.Errorf("device not connected")
-	}
-	if !d.locked {
-		return fmt.Errorf("device must be locked for changes")
-	}
-
-	// Convert device.ConfigChange to TableChange
-	var pipelineChanges []TableChange
-	for _, change := range changes {
-		switch change.Type {
-		case device.ChangeTypeAdd, device.ChangeTypeModify:
-			pipelineChanges = append(pipelineChanges, TableChange{
-				Table:  change.Table,
-				Key:    change.Key,
-				Fields: change.Fields,
-			})
-		case device.ChangeTypeDelete:
-			pipelineChanges = append(pipelineChanges, TableChange{
-				Table:  change.Table,
-				Key:    change.Key,
-				Fields: nil, // nil signals delete
-			})
-		}
-	}
-
-	if err := d.client.PipelineSet(pipelineChanges); err != nil {
-		return fmt.Errorf("pipeline apply: %w", err)
-	}
-
-	// Reload config_db to reflect changes
-	var err error
-	d.ConfigDB, err = d.client.GetAll()
-	if err != nil {
-		// Non-fatal — changes were applied but reload failed
-		util.WithDevice(d.Name).Warnf("Failed to reload config_db after pipeline apply: %v", err)
-	}
-
-	return nil
 }
