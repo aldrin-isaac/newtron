@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
@@ -246,52 +245,11 @@ func (d *Device) unlock() error {
 	return nil
 }
 
-// LockHolder returns the current lock holder and acquisition time.
-// Returns ("", zero, nil) if no lock is held.
-func (d *Device) LockHolder() (string, time.Time, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.stateClient == nil {
-		return "", time.Time{}, fmt.Errorf("state_db client not connected")
-	}
-	return d.stateClient.GetLockHolder(d.Name)
-}
-
 // IsLocked returns true if the device is locked
 func (d *Device) IsLocked() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.locked
-}
-
-// Reload reloads the config_db and state_db from the device
-func (d *Device) Reload(ctx context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if !d.connected {
-		return util.ErrNotConnected
-	}
-
-	var err error
-	d.ConfigDB, err = d.client.GetAll()
-	if err != nil {
-		return fmt.Errorf("reloading config_db: %w", err)
-	}
-
-	// Reload state_db if connected
-	if d.stateClient != nil {
-		d.StateDB, err = d.stateClient.GetAll()
-		if err != nil {
-			util.WithDevice(d.Name).Warnf("Failed to reload state_db: %v", err)
-		}
-	}
-
-	// Re-populate device state (works with nil StateDB)
-	PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
-
-	return nil
 }
 
 // GetInterface returns interface state by name.
@@ -449,106 +407,6 @@ func (d *Device) ApplyChanges(changes []device.ConfigChange) error {
 // StateClient returns the underlying StateDB client for direct access
 func (d *Device) StateClient() *StateDBClient {
 	return d.stateClient
-}
-
-// GetInterfaceOperState returns the operational state of an interface.
-func (d *Device) GetInterfaceOperState(name string) (string, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.StateDB == nil {
-		return "", fmt.Errorf("state_db not loaded")
-	}
-
-	if state, ok := d.StateDB.PortTable[name]; ok {
-		return state.OperStatus, nil
-	}
-	return "", fmt.Errorf("interface %s not found in state_db", name)
-}
-
-// GetBGPNeighborOperState returns the operational state of a BGP neighbor
-func (d *Device) GetBGPNeighborOperState(neighbor string) (*device.BGPNeighborState, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.State == nil || d.State.BGP == nil {
-		return nil, fmt.Errorf("BGP state not loaded")
-	}
-
-	if state, ok := d.State.BGP.Neighbors[neighbor]; ok {
-		return state, nil
-	}
-	return nil, fmt.Errorf("BGP neighbor %s not found", neighbor)
-}
-
-// GetPortChannelOperState returns the operational state of a PortChannel
-func (d *Device) GetPortChannelOperState(name string) (*device.PortChannelState, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.State == nil {
-		return nil, fmt.Errorf("state not loaded")
-	}
-
-	if state, ok := d.State.PortChannels[name]; ok {
-		return state, nil
-	}
-	return nil, fmt.Errorf("PortChannel %s not found", name)
-}
-
-// GetVRFOperState returns the operational state of a VRF
-func (d *Device) GetVRFOperState(name string) (*device.VRFState, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.State == nil {
-		return nil, fmt.Errorf("state not loaded")
-	}
-
-	if state, ok := d.State.VRFs[name]; ok {
-		return state, nil
-	}
-	return nil, fmt.Errorf("VRF %s not found", name)
-}
-
-// GetEVPNState returns the EVPN operational state
-func (d *Device) GetEVPNState() *device.EVPNState {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if d.State == nil {
-		return nil
-	}
-	return d.State.EVPN
-}
-
-// HasStateDB returns true if state_db is available
-func (d *Device) HasStateDB() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.StateDB != nil
-}
-
-// ReloadConfig triggers a config reload on the SONiC device by executing
-// `sudo config reload -y` via SSH. This causes SONiC to re-read CONFIG_DB
-// and apply any changes (e.g., new BGP neighbors added by frrcfgd).
-// Requires an active SSH tunnel (SSHUser/SSHPass in profile).
-func (d *Device) ReloadConfig(ctx context.Context) error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if !d.connected {
-		return fmt.Errorf("device not connected")
-	}
-	if d.tunnel == nil {
-		return fmt.Errorf("config reload requires SSH connection (no SSH credentials configured)")
-	}
-
-	output, err := d.tunnel.ExecCommand("sudo config reload -y")
-	if err != nil {
-		return fmt.Errorf("config reload failed: %w (output: %s)", err, output)
-	}
-	return nil
 }
 
 // SaveConfig persists the running CONFIG_DB to disk by executing `sudo config save -y`

@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // Interface represents a network interface within the context of a Device.
@@ -117,19 +115,6 @@ func (i *Interface) ServiceName() string {
 // HasService returns true if a service is bound to this interface.
 func (i *Interface) HasService() bool {
 	return i.serviceName != ""
-}
-
-// Service returns the service definition for the bound service.
-// Returns nil if no service is bound.
-func (i *Interface) Service() *spec.ServiceSpec {
-	if i.serviceName == "" {
-		return nil
-	}
-	svc, err := i.Node().GetService(i.serviceName)
-	if err != nil {
-		return nil
-	}
-	return svc
 }
 
 // ServiceIP returns the IP address assigned by the service.
@@ -396,55 +381,6 @@ func (i *Interface) extractServiceFromACL(aclName string) string {
 		return strings.TrimSuffix(aclName, "-out")
 	}
 	return ""
-}
-
-// ============================================================================
-// MAC-VPN (L2 EVPN) Information
-// ============================================================================
-
-// MACVPNInfo returns MAC-VPN binding information for this interface.
-// Only valid for VLAN interfaces. Returns nil for non-VLAN interfaces.
-func (i *Interface) MACVPNInfo() *MACVPNInfo {
-	if !i.IsVLAN() {
-		return nil
-	}
-
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return nil
-	}
-
-	vlanName := i.name // e.g., "Vlan100"
-
-	info := &MACVPNInfo{}
-
-	// Get L2VNI from VXLAN_TUNNEL_MAP
-	for key, mapping := range configDB.VXLANTunnelMap {
-		if mapping.VLAN == vlanName {
-			vni, _ := strconv.Atoi(mapping.VNI)
-			info.L2VNI = vni
-
-			// Try to match to a macvpn definition by L2VNI
-			if n := i.Node(); n != nil && n.SpecProvider != nil {
-				if name, _ := n.FindMACVPNByL2VNI(vni); name != "" {
-					info.Name = name
-				}
-			}
-			_ = key // suppress unused warning
-			break
-		}
-	}
-
-	// Check ARP suppression
-	if _, ok := configDB.SuppressVLANNeigh[vlanName]; ok {
-		info.ARPSuppression = true
-	}
-
-	if info.L2VNI == 0 {
-		return nil
-	}
-
-	return info
 }
 
 // ============================================================================

@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/user"
 	"sync"
-	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
@@ -125,11 +124,6 @@ func (n *Node) Site() string {
 // BGPNeighbors returns the list of BGP neighbor IPs (derived from route reflectors).
 func (n *Node) BGPNeighbors() []string {
 	return n.resolved.BGPNeighbors
-}
-
-// IsRouteReflector returns true if this device is a route reflector.
-func (n *Node) IsRouteReflector() bool {
-	return n.resolved.IsRouteReflector
 }
 
 // ConfigDB returns the config_db state.
@@ -257,15 +251,6 @@ func (n *Node) Lock() error {
 	n.loadInterfaces()
 
 	return nil
-}
-
-// LockHolder returns the current lock holder and acquisition time.
-// Returns ("", zero, nil) if no lock is held.
-func (n *Node) LockHolder() (string, time.Time, error) {
-	if !n.connected {
-		return "", time.Time{}, util.ErrNotConnected
-	}
-	return n.conn.LockHolder()
 }
 
 // lockHolder constructs a holder identity string: "user@hostname".
@@ -740,15 +725,6 @@ func (n *Node) ListVRFs() []string {
 		names = append(names, name)
 	}
 	return names
-}
-
-// ReloadConfig triggers a config reload on the SONiC device via SSH.
-// This causes SONiC to re-read CONFIG_DB and apply changes via frrcfgd.
-func (n *Node) ReloadConfig(ctx context.Context) error {
-	if !n.connected {
-		return util.ErrNotConnected
-	}
-	return n.conn.ReloadConfig(ctx)
 }
 
 // SaveConfig persists the device's running CONFIG_DB to disk via SSH.

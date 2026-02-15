@@ -2,10 +2,8 @@
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X github.com/newtron-network/newtron/pkg/version.Version=$(VERSION) \
-           -X github.com/newtron-network/newtron/pkg/version.GitCommit=$(GIT_COMMIT) \
-           -X github.com/newtron-network/newtron/pkg/version.BuildDate=$(BUILD_DATE)
+           -X github.com/newtron-network/newtron/pkg/version.GitCommit=$(GIT_COMMIT)
 
 BINARIES := newtron newtlab newtest newtlink
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64

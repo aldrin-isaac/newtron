@@ -14,12 +14,6 @@ type TableChange struct {
 	Fields map[string]string // nil means delete
 }
 
-// TableKey identifies a CONFIG_DB entry for deletion.
-type TableKey struct {
-	Table string
-	Key   string
-}
-
 // PipelineSet writes multiple entries atomically via Redis MULTI/EXEC pipeline.
 // All changes are applied in a single transaction — either all succeed or none.
 func (c *ConfigDBClient) PipelineSet(changes []TableChange) error {

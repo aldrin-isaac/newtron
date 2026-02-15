@@ -131,18 +131,6 @@ func (cb *CompositeBuilder) AddRouteRedistribution(vrf, protocol, af string, fie
 	return cb.AddEntry("ROUTE_REDISTRIBUTE", key, fields)
 }
 
-// AddRouteMap adds a route-map entry.
-func (cb *CompositeBuilder) AddRouteMap(name string, seq int, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%d", name, seq)
-	return cb.AddEntry("ROUTE_MAP", key, fields)
-}
-
-// AddPrefixSet adds a prefix-set entry.
-func (cb *CompositeBuilder) AddPrefixSet(name string, seq int, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%d", name, seq)
-	return cb.AddEntry("PREFIX_SET", key, fields)
-}
-
 // Build returns the completed CompositeConfig.
 func (cb *CompositeBuilder) Build() *CompositeConfig {
 	return &CompositeConfig{

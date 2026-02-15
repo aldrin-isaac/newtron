@@ -44,8 +44,6 @@ const (
 
 	PermFilterCreate Permission = "filter.create"
 	PermFilterDelete Permission = "filter.delete"
-
-	PermAll Permission = "all" // Superuser — allows everything
 )
 
 // Context provides context for permission checks

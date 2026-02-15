@@ -2,7 +2,6 @@ package newtlab
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -34,14 +33,6 @@ func CreateOverlayRemote(baseImage, overlayPath, hostIP string) error {
 	if err != nil {
 		return fmt.Errorf("newtlab: create remote overlay %s on %s: %w\n%s",
 			overlayPath, hostIP, err, output)
-	}
-	return nil
-}
-
-// RemoveOverlay deletes an overlay disk file.
-func RemoveOverlay(overlayPath string) error {
-	if err := os.Remove(overlayPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("newtlab: remove overlay %s: %w", overlayPath, err)
 	}
 	return nil
 }

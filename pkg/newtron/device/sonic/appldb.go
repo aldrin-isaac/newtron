@@ -13,14 +13,6 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/device"
 )
 
-// AppDBRouteEntry represents a route in APP_DB's ROUTE_TABLE.
-// Multi-path (ECMP) routes use comma-separated values in nexthop and ifname.
-type AppDBRouteEntry struct {
-	NextHop   string `json:"nexthop"`  // "10.0.0.1" or "10.0.0.1,10.0.0.3" (ECMP)
-	Interface string `json:"ifname"`   // "Ethernet0" or "Ethernet0,Ethernet4" (ECMP)
-	Protocol  string `json:"protocol"` // "bgp", "connected", "static"
-}
-
 // AppDBClient wraps Redis client for APP_DB access (DB 0).
 type AppDBClient struct {
 	client *redis.Client

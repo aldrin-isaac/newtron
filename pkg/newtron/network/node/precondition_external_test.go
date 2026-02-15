@@ -248,38 +248,6 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 	}
 }
 
-func TestPreconditionChecker_RequireBGPConfigured(t *testing.T) {
-	db := emptyConfigDB()
-	db.BGPNeighbor["10.0.0.2"] = sonic.BGPNeighborEntry{ASN: "65002"}
-	dev := testNode(db, true, false)
-
-	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireBGPConfigured().
-		Result()
-	if err != nil {
-		t.Errorf("RequireBGPConfigured should pass with BGP neighbor: %v", err)
-	}
-
-	// Test via device metadata ASN
-	db2 := emptyConfigDB()
-	db2.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
-	dev2 := testNode(db2, true, false)
-	err = node.NewPreconditionChecker(dev2, "test-op", "test-res").
-		RequireBGPConfigured().
-		Result()
-	if err != nil {
-		t.Errorf("RequireBGPConfigured should pass with device metadata ASN: %v", err)
-	}
-
-	devNoBGP := testNode(emptyConfigDB(), true, false)
-	err = node.NewPreconditionChecker(devNoBGP, "test-op", "test-res").
-		RequireBGPConfigured().
-		Result()
-	if err == nil {
-		t.Error("RequireBGPConfigured should fail when no BGP")
-	}
-}
-
 func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
 	db := emptyConfigDB()
 	db.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
@@ -299,48 +267,6 @@ func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
 		Result()
 	if err != nil {
 		t.Errorf("RequireInterfaceNotLAGMember should pass: %v", err)
-	}
-}
-
-func TestPreconditionChecker_RequireNoExistingService(t *testing.T) {
-	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
-	}
-	dev := testNode(db, true, false)
-
-	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireNoExistingService("Ethernet0").
-		Result()
-	if err == nil {
-		t.Error("RequireNoExistingService should fail for bound interface")
-	}
-
-	err = node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireNoExistingService("Ethernet4").
-		Result()
-	if err != nil {
-		t.Errorf("RequireNoExistingService should pass for unbound interface: %v", err)
-	}
-}
-
-func TestPreconditionChecker_RequirePeerGroupExists(t *testing.T) {
-	db := emptyConfigDB()
-	db.BGPPeerGroup["FABRIC"] = sonic.BGPPeerGroupEntry{}
-	dev := testNode(db, true, false)
-
-	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequirePeerGroupExists("FABRIC").
-		Result()
-	if err != nil {
-		t.Errorf("RequirePeerGroupExists should pass: %v", err)
-	}
-
-	err = node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequirePeerGroupExists("NONEXISTENT").
-		Result()
-	if err == nil {
-		t.Error("RequirePeerGroupExists should fail for missing peer group")
 	}
 }
 

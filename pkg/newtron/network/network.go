@@ -359,19 +359,6 @@ func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error) {
 	return dev, nil
 }
 
-// GetTopologyInterface returns the topology definition for an interface on a device.
-func (n *Network) GetTopologyInterface(device, intf string) (*spec.TopologyInterface, error) {
-	dev, err := n.GetTopologyDevice(device)
-	if err != nil {
-		return nil, err
-	}
-	ti, ok := dev.Interfaces[intf]
-	if !ok {
-		return nil, fmt.Errorf("interface '%s' not found in topology for device '%s'", intf, device)
-	}
-	return ti, nil
-}
-
 // ============================================================================
 // Device (Node) Management
 // ============================================================================

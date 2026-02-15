@@ -465,13 +465,6 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 	return err
 }
 
-// DestroyByName destroys a lab identified only by name, loading all
-// necessary state from disk. This avoids constructing a partial Lab struct.
-func DestroyByName(ctx context.Context, name string) error {
-	lab := &Lab{Name: name}
-	return lab.Destroy(ctx)
-}
-
 // StopByName stops a node in a lab identified only by lab name and node name,
 // loading all necessary state from disk.
 func StopByName(ctx context.Context, labName, nodeName string) error {

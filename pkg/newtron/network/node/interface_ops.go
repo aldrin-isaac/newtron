@@ -12,14 +12,6 @@ import (
 // Interface Property Operations
 // ============================================================================
 
-// InterfaceConfig holds configuration options for Configure().
-type InterfaceConfig struct {
-	Description string
-	MTU         int
-	Speed       string
-	AdminStatus string
-}
-
 // SetIP configures an IP address on this interface.
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
 	n := i.node
@@ -108,50 +100,6 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	}
 
 	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
-	return cs, nil
-}
-
-// Configure sets basic interface properties.
-func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*ChangeSet, error) {
-	n := i.node
-
-	if err := n.precondition("configure", i.name).Result(); err != nil {
-		return nil, err
-	}
-	if i.IsLAGMember() {
-		return nil, fmt.Errorf("cannot configure LAG member directly")
-	}
-
-	if opts.MTU > 0 {
-		if err := util.ValidateMTU(opts.MTU); err != nil {
-			return nil, err
-		}
-	}
-
-	cs := NewChangeSet(n.Name(), "interface.configure")
-	fields := make(map[string]string)
-
-	if opts.Description != "" {
-		fields["description"] = opts.Description
-	}
-	if opts.MTU > 0 {
-		fields["mtu"] = fmt.Sprintf("%d", opts.MTU)
-		i.mtu = opts.MTU
-	}
-	if opts.Speed != "" {
-		fields["speed"] = opts.Speed
-		i.speed = opts.Speed
-	}
-	if opts.AdminStatus != "" {
-		fields["admin_status"] = opts.AdminStatus
-		i.adminStatus = opts.AdminStatus
-	}
-
-	if len(fields) > 0 {
-		cs.Add("PORT", i.name, ChangeModify, nil, fields)
-	}
-
-	util.WithDevice(n.Name()).Infof("Configured interface %s: %v", i.name, fields)
 	return cs, nil
 }
 
