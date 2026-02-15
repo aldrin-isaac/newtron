@@ -602,7 +602,7 @@ type DeviceProfile struct {
 }
 ```
 
-**pkg/device/tunnel.go**:
+**pkg/newtron/device/tunnel.go**:
 ```go
 func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
     if port == 0 {

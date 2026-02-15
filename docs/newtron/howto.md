@@ -115,11 +115,11 @@ SSH credentials are specified in the device profile JSON with the `ssh_user` and
 }
 ```
 
-When both `ssh_user` and `ssh_pass` are set, `Device.Connect()` creates an SSH tunnel automatically. When either is empty, it connects directly to `<mgmt_ip>:6379`.
+When both `ssh_user` and `ssh_pass` are set, `Node.Connect()` creates an SSH tunnel automatically. When either is empty, it connects directly to `<mgmt_ip>:6379`.
 
 ### 2.4 Connection Flow (Code Reference)
 
-From `pkg/device/device.go`, the `Connect()` method implements this logic:
+From `pkg/newtron/device/sonic/device.go`, the `Connect()` method implements this logic:
 
 ```go
 func (d *Device) Connect(ctx context.Context) error {
@@ -145,7 +145,7 @@ func (d *Device) Connect(ctx context.Context) error {
 
 ### 2.5 Host Key Verification
 
-The SSH tunnel currently uses `InsecureIgnoreHostKey()` for the host key callback. This is appropriate for lab and test environments but **must be replaced with proper host key verification for production deployments**. The relevant code is in `pkg/device/tunnel.go`:
+The SSH tunnel currently uses `InsecureIgnoreHostKey()` for the host key callback. This is appropriate for lab and test environments but **must be replaced with proper host key verification for production deployments**. The relevant code is in `pkg/newtron/device/tunnel.go`:
 
 ```go
 config := &ssh.ClientConfig{
@@ -2440,7 +2440,7 @@ import (
     "fmt"
     "log"
 
-    "github.com/newtron-network/newtron/pkg/network"
+    "github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 func main() {
@@ -2452,16 +2452,16 @@ func main() {
         log.Fatal(err)
     }
 
-    // Connect to a device (Device is created in Network's context)
+    // Connect to a node (Node is created in Network's context)
     // If the profile has ssh_user/ssh_pass, an SSH tunnel is established
     // automatically for Redis access
-    dev, err := net.ConnectDevice(ctx, "leaf1-dc1")
+    dev, err := net.ConnectNode(ctx, "leaf1-dc1")
     if err != nil {
         log.Fatal(err)
     }
     defer dev.Disconnect()
 
-    // Device has access to Network configuration through parent reference
+    // Node has access to Network configuration through parent reference
     fmt.Printf("Device: %s\n", dev.Name())
     fmt.Printf("AS Number: %d\n", dev.ASNumber())
     fmt.Printf("BGP Neighbors: %v\n", dev.BGPNeighbors())
@@ -2470,7 +2470,7 @@ func main() {
 
 ### 21.3 Connecting with SSH Tunnel (Explicit)
 
-The SSH tunnel is established automatically by `Device.Connect()` when the device profile contains `ssh_user` and `ssh_pass`. You do not need to create the tunnel manually. However, understanding the flow is useful for debugging:
+The SSH tunnel is established automatically by `Node.Connect()` when the device profile contains `ssh_user` and `ssh_pass`. You do not need to create the tunnel manually. However, understanding the flow is useful for debugging:
 
 ```go
 // The profile determines the connection method:
@@ -3041,7 +3041,7 @@ Composite mode generates a complete CONFIG_DB configuration offline (without a d
 ### 24.1 Building a Composite Config (Go API)
 
 ```go
-cb := network.NewCompositeBuilder("leaf1-dc1", network.CompositeOverwrite).
+cb := node.NewCompositeBuilder("leaf1-dc1", node.CompositeOverwrite).
     SetGeneratedBy("my-tool").
     SetDescription("Initial provisioning")
 
@@ -3071,7 +3071,7 @@ fmt.Printf("Composite has %d entries\n", composite.EntryCount())
 
 ```go
 // Connect to device
-dev, err := net.ConnectDevice(ctx, "leaf1-dc1")
+dev, err := net.ConnectNode(ctx, "leaf1-dc1")
 if err != nil {
     log.Fatal(err)
 }
@@ -3079,7 +3079,7 @@ defer dev.Disconnect()
 
 // Lock is acquired/released automatically by DeliverComposite
 // Deliver with overwrite (replaces entire CONFIG_DB)
-result, err := dev.DeliverComposite(composite, network.CompositeOverwrite)
+result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 if err != nil {
     log.Fatal(err)
 }

@@ -34,7 +34,7 @@ ignored — no error, no warning in logs.
 ## Fix
 
 Updated all CONFIG_DB field names in the newtron topology provisioner
-(`pkg/network/topology.go`) to use the actual frrcfgd-expected names:
+(`pkg/newtron/network/topology.go`) to use the actual frrcfgd-expected names:
 
 ```go
 // BGP_NEIGHBOR_AF entries

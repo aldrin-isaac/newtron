@@ -35,7 +35,7 @@ When Redis does not expose the required data or operation, CLI/SSH commands may 
 - **Workaround** — Redis could provide this but doesn't today. Tag with `CLI-WORKAROUND`.
 - **Inherent** — Will always require CLI (e.g., `config save`, `docker restart`, filesystem reads). No tag needed, but add a brief comment explaining why CLI is required.
 
-Before adding any `session.Run()`, `ExecCommand()`, or shell command construction in `pkg/device/` or `pkg/network/`:
+Before adding any `session.Run()`, `ExecCommand()`, or shell command construction in `pkg/newtron/device/` or `pkg/newtron/network/`:
 
 1. Check if the data is available in CONFIG_DB, APP_DB, ASIC_DB, or STATE_DB
 2. If it is, use the Redis path

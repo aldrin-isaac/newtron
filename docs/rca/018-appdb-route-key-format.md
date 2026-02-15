@@ -28,7 +28,7 @@ Two key format issues in `AppDBClient.GetRoute()`:
 
 ## Fix
 
-Rewrote `AppDBClient.GetRoute()` in `pkg/device/appldb.go`:
+Rewrote `AppDBClient.GetRoute()` in `pkg/newtron/device/sonic/appldb.go`:
 
 1. Default VRF key: `ROUTE_TABLE:<prefix>` (no VRF segment)
 2. Non-default VRF key: `ROUTE_TABLE:<vrf>:<prefix>`

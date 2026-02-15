@@ -41,7 +41,7 @@ increase TTL is rejected because FRR thinks it's iBGP.
 
 ## Fix
 
-Changed `ApplyFRRDefaults` in `pkg/device/device.go` to use `ttl-security`
+Changed `ApplyFRRDefaults` in `pkg/newtron/device/sonic/device.go` to use `ttl-security`
 instead of `ebgp-multihop`. Unlike `ebgp-multihop`, `ttl-security` is
 accepted regardless of eBGP/iBGP classification:
 

@@ -1,16 +1,16 @@
 # Newtron Device Layer LLD
 
-The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/device/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
+The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/` (NOS-independent shared types) and `pkg/newtron/device/sonic/` (SONiC-specific Redis implementation) — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
 For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
 
 ---
 
-## 1. SSH Tunnel (`pkg/device/tunnel.go`)
+## 1. SSH Tunnel (`pkg/newtron/device/tunnel.go`)
 
 SONiC devices in the lab run inside QEMU VMs managed by newtlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
 
-**Consumer note:** newtest's `Runner.connectDevices()` calls `Device.Connect()` (§5.1), which creates an SSH tunnel per device using the newtlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
+**Consumer note:** newtest's `Runner.connectDevices()` calls `Node.Connect()` which delegates to `sonic.Device.Connect()` (§5.1), creating an SSH tunnel per device using the newtlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
 
 ### 1.1 When Tunnels Are Used
 
@@ -20,7 +20,7 @@ SONiC devices in the lab run inside QEMU VMs managed by newtlab. Redis listens o
 | Integration tests (standalone Redis) | No | Yes - Redis exposed directly |
 | Production (if ever) | Would use proper auth | N/A |
 
-The decision is made in `Device.Connect()` (§5.1) based on the presence of `SSHUser` and `SSHPass` in the resolved profile. When these fields are empty, a direct `<mgmt_ip>:6379` connection is used. This allows integration tests to run against a standalone Redis instance without SSH.
+The decision is made in `sonic.Device.Connect()` (§5.1) based on the presence of `SSHUser` and `SSHPass` in the resolved profile. When these fields are empty, a direct `<mgmt_ip>:6379` connection is used. This allows integration tests to run against a standalone Redis instance without SSH.
 
 ### 1.2 SSHTunnel Implementation
 
@@ -74,7 +74,7 @@ func (t *SSHTunnel) ExecCommand(cmd string) (string, error)
 **Timeouts:**
 - Dial timeout: 30 seconds (`ssh.ClientConfig.Timeout`)
 
-**Reconnection policy:** No automatic reconnection. If the SSH tunnel or any Redis client disconnects, the caller must call `Device.Disconnect()` and then `Device.Connect()` again. This is a deliberate simplicity choice — reconnection with state recovery adds complexity that isn't needed for lab/test workloads where a connection drop typically means the VM crashed.
+**Reconnection policy:** No automatic reconnection. If the SSH tunnel or any Redis client disconnects, the caller must call `Disconnect()` and then `Connect()` again. This is a deliberate simplicity choice — reconnection with state recovery adds complexity that isn't needed for lab/test workloads where a connection drop typically means the VM crashed.
 
 ```go
 func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
@@ -133,7 +133,7 @@ func (t *SSHTunnel) forward(local net.Conn) {
 
 ---
 
-## 2. StateDB (`pkg/device/statedb.go`)
+## 2. StateDB (`pkg/newtron/device/sonic/statedb.go`)
 
 STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. Where CONFIG_DB represents what you asked for, STATE_DB represents what the system is actually doing.
 
@@ -349,13 +349,13 @@ NEWTRON_LOCK|spine1
 
 The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holder crashes.
 
-**Lock delegation from device.Device (newtron LLD §3.3):**
+**Lock delegation from sonic.Device (newtron LLD §3.3):**
 
-`device.Device.Lock(holder, ttl)` stores the holder string in `d.lockHolder` and calls `d.stateClient.AcquireLock(d.Name, holder, ttl)`. `device.Device.Unlock()` reads `d.lockHolder` and calls `d.stateClient.ReleaseLock(d.Name, d.lockHolder)` — the caller does not need to pass the holder string again. The `network.Device.Lock()` wrapper (newtron LLD §3.2) constructs the holder string as `"user@hostname"` and delegates to `d.conn.Lock(holder, ttl)`.
+`sonic.Device.Lock(holder, ttl)` stores the holder string in `d.lockHolder` and calls `d.stateClient.AcquireLock(d.Name, holder, ttl)`. `sonic.Device.Unlock()` reads `d.lockHolder` and calls `d.stateClient.ReleaseLock(d.Name, d.lockHolder)` — the caller does not need to pass the holder string again. The `node.Node.Lock()` wrapper (newtron LLD §3.2) constructs the holder string as `"user@hostname"` and delegates to `n.conn.Lock(holder, ttl)`.
 
 **CONFIG_DB cache refresh on Lock (HLD §4.10):**
 
-`network.Device.Lock()` refreshes the CONFIG_DB cache immediately after acquiring the distributed lock. This starts a **write episode**: precondition checks within the subsequent `ExecuteOp` `fn()` read from this fresh snapshot. If `GetAll()` fails after lock acquisition, the lock is released and an error is returned — operating with a stale cache under lock is worse than failing the operation.
+`node.Node.Lock()` refreshes the CONFIG_DB cache immediately after acquiring the distributed lock. This starts a **write episode**: precondition checks within the subsequent `ExecuteOp` `fn()` read from this fresh snapshot. If `GetAll()` fails after lock acquisition, the lock is released and an error is returned — operating with a stale cache under lock is worse than failing the operation.
 
 **ExecuteOp write episode lifecycle:**
 
@@ -446,7 +446,7 @@ func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigD
 
 ---
 
-## 3. APP_DB (`pkg/device/appldb.go`)
+## 3. APP_DB (`pkg/newtron/device/sonic/appldb.go`)
 
 APP_DB (Redis DB 0) contains application-level state written by SONiC daemons. For route verification, newtron reads `ROUTE_TABLE` entries written by `fpmsyncd` (the FPM-to-Redis daemon that syncs FRR's RIB into APP_DB).
 
@@ -498,7 +498,7 @@ func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error)
 
 ---
 
-## 4. ASIC_DB (`pkg/device/asicdb.go`)
+## 4. ASIC_DB (`pkg/newtron/device/sonic/asicdb.go`)
 
 ASIC_DB (Redis DB 1) contains SAI (Switch Abstraction Interface) objects that represent what is actually programmed in hardware. Reading routes from ASIC_DB confirms that the data plane is programmed, not just the control plane.
 
@@ -534,7 +534,7 @@ ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:{"dest":"10.1.0.0/31","switch_id":"oid:0x
 
 1. **Default VRF**: Scan `ASIC_STATE:SAI_OBJECT_TYPE_VIRTUAL_ROUTER:oid:*` keys. The default VR is the one referenced by the switch object's `SAI_SWITCH_ATTR_DEFAULT_VIRTUAL_ROUTER_ID`. Cache this OID on connect.
 2. **Named VRF** (e.g., "Vrf_CUST1"): SONiC creates a VR OID for each VRF. To find it:
-   - Read the VRF's connected loopback/interface prefix from CONFIG_DB (available via the `ConfigDB` snapshot on `device.Device` — e.g., the first IP entry in `INTERFACE|<vrf-member>|<ip>`)
+   - Read the VRF's connected loopback/interface prefix from CONFIG_DB (available via the `ConfigDB` snapshot on `sonic.Device` — e.g., the first IP entry in `INTERFACE|<vrf-member>|<ip>`)
    - Scan `ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:*` keys for a JSON key whose `dest` matches the known connected prefix
    - Extract the `vr` OID from the matching JSON key — this is the VR OID for the named VRF
    - This avoids depending on COUNTERS_DB (DB 2) which newtron does not connect to
@@ -585,11 +585,11 @@ Key scanning uses cursor-based `SCAN` (via `scanKeys()`) to avoid O(N) `KEYS` co
 
 ## 5. Redis Integration
 
-### 5.1 Connection (`pkg/device/device.go`)
+### 5.1 Connection (`pkg/newtron/device/sonic/device.go`)
 
 The connection logic uses SSH tunnels when `SSHUser` and `SSHPass` are present in the resolved profile. When these are absent (e.g., integration tests with standalone Redis), a direct connection is made.
 
-**Consumer note:** newtlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (newtlab LLD §10). `Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct newtlab-allocated port. newtest calls `Device.Connect()` in `Runner.connectDevices()` after newtlab deploy — see newtest LLD §4.5.
+**Consumer note:** newtlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (newtlab LLD §10). `sonic.Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct newtlab-allocated port. newtest calls `Node.Connect()` (which delegates to `sonic.Device.Connect()`) in `Runner.connectDevices()` after newtlab deploy — see newtest LLD §4.5.
 
 ```go
 func (d *Device) Connect(ctx context.Context) error {
@@ -662,7 +662,7 @@ func (d *Device) Connect(ctx context.Context) error {
 - APP_DB and ASIC_DB clients connect but do not bulk-load — routes are read on demand via `GetRoute`/`GetRouteASIC`
 - A single SSH tunnel multiplexes DB 0, DB 1, DB 4, and DB 6 connections
 
-### 5.2 State Loading (`pkg/device/state.go`)
+### 5.2 State Loading (`pkg/newtron/device/sonic/state.go`)
 
 State is loaded from CONFIG_DB for structural information (VRF bindings, VLAN members, ACL bindings), and from STATE_DB for operational state (oper_status, BGP sessions, LACP state).
 
@@ -699,7 +699,7 @@ func (d *Device) parseVLANs() map[int]*VLANState
 func (d *Device) parseVRFs() map[string]*VRFState
 ```
 
-**State query helpers** (`pkg/device/state.go`):
+**State query helpers** (`pkg/newtron/device/sonic/state.go`):
 
 ```go
 func (d *Device) ListInterfaces() []string

@@ -33,7 +33,7 @@ can consume them.
 └─────────────────┘          └─────────────────┘
 ```
 
-The Runner holds a `*network.Network` object (not individual device references). Devices are accessed via `r.Network.GetDevice(name)`.
+The Runner holds a `*network.Network` object (not individual node references). Nodes are accessed via `r.Network.GetNode(name)`.
 
 ---
 

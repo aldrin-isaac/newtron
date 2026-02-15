@@ -7,13 +7,13 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 
 ## 1. Spec vs Config: Fundamental Architecture
 
-Newtron separates **specification** (declarative intent in `pkg/spec`) from **configuration** (imperative device state in `pkg/device`). The `pkg/network` layer translates specs into config. See HLD §2 for the full rationale.
+Newtron separates **specification** (declarative intent in `pkg/newtron/spec`) from **configuration** (imperative device state in `pkg/newtron/device/sonic`). The `pkg/newtron/network` layer translates specs into config. See HLD §2 for the full rationale.
 
 | Layer | Package | Data | Edited by |
 |-------|---------|------|-----------|
-| Specification | `pkg/spec` | `specs/*.json` — policies, references | Network architects |
-| Translation | `pkg/network` | In-memory — ChangeSet generation | Auto (newtron) |
-| Configuration | `pkg/device` | Redis CONFIG_DB — concrete values | Auto (newtron) |
+| Specification | `pkg/newtron/spec` | `specs/*.json` — policies, references | Network architects |
+| Translation | `pkg/newtron/network` | In-memory — ChangeSet generation | Auto (newtron) |
+| Configuration | `pkg/newtron/device/sonic` | Redis CONFIG_DB — concrete values | Auto (newtron) |
 
 ## 2. Package Structure
 
@@ -41,36 +41,42 @@ newtron/
 │   │   ├── cmd_provision.go         # Topology provisioning commands
 │   │   └── shell.go                 # Interactive shell with readline
 ├── pkg/
-│   ├── network/                     # OO hierarchy + spec->config translation
-│   │   ├── network.go               # Top-level Network object (owns specs + spec persistence)
-│   │   ├── device.go                # Device with parent reference to Network
-│   │   ├── interface.go             # Interface with parent reference to Device
-│   │   ├── interface_ops.go         # Operations as methods on Interface
-│   │   ├── device_ops.go            # Operations as methods on Device
-│   │   ├── changeset.go             # ChangeSet for tracking config changes
-│   │   ├── composite.go            # CompositeBuilder, CompositeConfig, CompositeMode types
-│   │   ├── service_gen.go          # Service CONFIG_DB entry generation (GenerateServiceEntries)
-│   │   ├── qos.go                  # QoS CONFIG_DB entry generation (generateQoSDeviceEntries, generateQoSInterfaceEntries)
-│   │   └── topology.go             # TopologyProvisioner, ProvisionDevice, ProvisionInterface
-│   ├── spec/                        # Specification loading (declarative intent)
-│   │   ├── types.go                 # Spec structs (NetworkSpecFile, ServiceSpec, etc.)
-│   │   ├── loader.go                # JSON loading and validation
-│   │   └── resolver.go              # Inheritance resolution
-│   ├── device/                      # Low-level device connection (imperative config)
-│   │   ├── device.go                # Device struct, Connect, Disconnect, Lock
-│   │   ├── configdb.go              # CONFIG_DB (DB 4) mapping + client
-│   │   ├── statedb.go               # STATE_DB (DB 6) mapping + client
-│   │   ├── appldb.go               # APP_DB (DB 0) mapping + client
-│   │   ├── asicdb.go               # ASIC_DB (DB 1) mapping + client
-│   │   ├── verify.go               # VerifyChangeSet, verification types
-│   │   ├── state.go                 # State loading from config_db
-│   │   └── tunnel.go                # SSH tunnel for Redis access
+│   └── newtron/
+│       ├── network/                     # Network struct, topology, spec->config translation
+│       │   ├── network.go               # Top-level Network object (owns specs + spec persistence)
+│       │   ├── topology.go              # TopologyProvisioner, ProvisionDevice, ProvisionInterface
+│       │   └── node/                    # Node (formerly Device), Interface, operations
+│       │       ├── node.go              # Node with parent reference to Network
+│       │       ├── interface.go         # Interface with parent reference to Node
+│       │       ├── interface_ops.go     # Operations as methods on Interface
+│       │       ├── device_ops.go        # Operations as methods on Node
+│       │       ├── changeset.go         # ChangeSet for tracking config changes
+│       │       ├── composite.go         # CompositeBuilder, CompositeConfig, CompositeMode types
+│       │       ├── service_gen.go       # Service CONFIG_DB entry generation (GenerateServiceEntries)
+│       │       └── qos.go              # QoS CONFIG_DB entry generation (generateQoSDeviceEntries, generateQoSInterfaceEntries)
+│       ├── spec/                        # Specification loading (declarative intent)
+│       │   ├── types.go                 # Spec structs (NetworkSpecFile, ServiceSpec, etc.)
+│       │   ├── loader.go                # JSON loading and validation
+│       │   └── resolver.go              # Inheritance resolution
+│       ├── device/                      # NOS-independent shared types
+│       │   ├── types.go                 # Shared device types
+│       │   ├── verify.go               # VerifyChangeSet, verification types
+│       │   ├── tunnel.go                # SSH tunnel for Redis access
+│       │   └── sonic/                   # SONiC-specific Redis implementation
+│       │       ├── device.go            # Device struct, Connect, Disconnect, Lock
+│       │       ├── configdb.go          # CONFIG_DB (DB 4) mapping + client
+│       │       ├── statedb.go           # STATE_DB (DB 6) mapping + client
+│       │       ├── appldb.go            # APP_DB (DB 0) mapping + client
+│       │       ├── asicdb.go            # ASIC_DB (DB 1) mapping + client
+│       │       ├── state.go             # State loading from config_db
+│       │       ├── pipeline.go          # Redis MULTI/EXEC pipeline client
+│       │       └── platform.go          # SonicPlatformConfig, port validation
 │   ├── operations/                  # Precondition checking utilities
 │   │   └── precondition.go          # PreconditionChecker, DependencyChecker
 │   ├── health/                      # Health checks
 │   │   └── checker.go
 │   ├── audit/                       # Audit logging
-│   │   ├── event.go                 # Event types (uses network.Change)
+│   │   ├── event.go                 # Event types (uses node.Change)
 │   │   └── logger.go                # Logger implementation
 │   ├── auth/                        # Authorization
 │   │   ├── permission.go            # Permission definitions
@@ -105,23 +111,23 @@ newtron/
 
 | File | Purpose |
 |------|---------|
-| `pkg/device/tunnel.go` | SSH tunnel for Redis access through QEMU VMs |
-| `pkg/device/statedb.go` | STATE_DB (Redis DB 6) operational state access |
+| `pkg/newtron/device/tunnel.go` | SSH tunnel for Redis access through QEMU VMs |
+| `pkg/newtron/device/sonic/statedb.go` | STATE_DB (Redis DB 6) operational state access |
 
 **Platform and pipeline files:**
 
 | File | Purpose |
 |------|---------|
-| `pkg/device/platform.go` | SonicPlatformConfig struct, platform.json parsing via SSH, port validation, GeneratePlatformSpec |
-| `pkg/device/pipeline.go` | Redis MULTI/EXEC pipeline client for atomic batch writes (PipelineSet, ReplaceAll) |
-| `pkg/network/composite.go` | CompositeBuilder, CompositeConfig, CompositeMode types; offline composite CONFIG_DB generation and delivery |
+| `pkg/newtron/device/sonic/platform.go` | SonicPlatformConfig struct, platform.json parsing via SSH, port validation, GeneratePlatformSpec |
+| `pkg/newtron/device/sonic/pipeline.go` | Redis MULTI/EXEC pipeline client for atomic batch writes (PipelineSet, ReplaceAll) |
+| `pkg/newtron/network/node/composite.go` | CompositeBuilder, CompositeConfig, CompositeMode types; offline composite CONFIG_DB generation and delivery |
 
 **Topology files:**
 
 | File | Purpose |
 |------|---------|
-| `pkg/network/topology.go` | TopologyProvisioner, ProvisionDevice, ProvisionInterface, generateServiceEntries |
-| `pkg/network/qos.go` | generateQoSDeviceEntries, generateQoSInterfaceEntries, resolveServiceQoSPolicy |
+| `pkg/newtron/network/topology.go` | TopologyProvisioner, ProvisionDevice, ProvisionInterface, generateServiceEntries |
+| `pkg/newtron/network/node/qos.go` | generateQoSDeviceEntries, generateQoSInterfaceEntries, resolveServiceQoSPolicy |
 
 ## 3. Core Data Structures
 
@@ -503,9 +509,9 @@ The `pkg/spec/` types are a shared coupling surface — all three tools read fro
 | `NetworkSpecFile` | Services, VPNs, filters, regions | Read | | |
 | `SiteSpecFile` | Site topology, route reflectors | Read | | |
 
-**Key insight:** `DeviceProfile.ssh_port` and `DeviceProfile.mgmt_ip` are the only fields that newtlab **writes** — all other spec data flows from JSON files into the tools as read-only input. newtlab writes these into profile JSON during deployment (newtlab LLD §10), and newtron reads them in `Device.Connect()` (device LLD §5.1).
+**Key insight:** `DeviceProfile.ssh_port` and `DeviceProfile.mgmt_ip` are the only fields that newtlab **writes** — all other spec data flows from JSON files into the tools as read-only input. newtlab writes these into profile JSON during deployment (newtlab LLD §10), and newtron reads them in `sonic.Device.Connect()` (device LLD §5.1).
 
-### 3.2 Object Hierarchy (`pkg/network/`)
+### 3.2 Object Hierarchy (`pkg/newtron/network/`, `pkg/newtron/network/node/`)
 
 The system uses an object-oriented design with parent references, mirroring the original Perl architecture. This provides hierarchical access where child objects can access their parent's configuration:
 
@@ -518,42 +524,42 @@ Network (top-level)
     +-- owns: TopologySpecFile (topology specification, optional)
     +-- owns: Loader (spec file loading)
     |
-    +-- creates: Device instances (in Network's context)
+    +-- creates: Node instances (in Network's context)
                      |
                      +-- has: parent reference to Network
                      +-- owns: DeviceProfile
                      +-- owns: ResolvedProfile
-                     +-- delegates: device.Device (low-level Redis connection)
+                     +-- delegates: sonic.Device (low-level Redis connection)
                      |
-                     +-- creates: Interface instances (in Device's context)
+                     +-- creates: Interface instances (in Node's context)
                                       |
-                                      +-- has: parent reference to Device
-                                      +-- can access: Device -> Network -> Services, Filters, etc.
+                                      +-- has: parent reference to Node
+                                      +-- can access: Node -> Network -> Services, Filters, etc.
 ```
 
 **Key Design Pattern: Parent References**
 
 ```go
-// Network is the top-level object
+// Network is the top-level object (pkg/newtron/network/network.go)
 type Network struct {
     spec      *spec.NetworkSpecFile    // Services, filters, regions (declarative intent)
     sites     *spec.SiteSpecFile       // Site topology
     platforms *spec.PlatformSpecFile   // Hardware platform definitions
     topology  *spec.TopologySpecFile   // Topology specification (optional)
     loader    *spec.Loader             // Spec file loading
-    devices   map[string]*Device       // Child objects
+    nodes     map[string]*Node         // Child objects
     mu        sync.RWMutex
 }
 
-// Device has parent reference to Network
-type Device struct {
+// Node has parent reference to Network (pkg/newtron/network/node/node.go)
+type Node struct {
     network    *Network               // Parent reference
     name       string
     profile    *spec.DeviceProfile
     resolved   *spec.ResolvedProfile  // Resolved from inheritance
     interfaces map[string]*Interface  // Child objects
-    conn       *device.Device         // Low-level device connection
-    configDB   *device.ConfigDB       // Cached config_db snapshot
+    conn       *sonic.Device          // Low-level device connection
+    configDB   *sonic.ConfigDB        // Cached config_db snapshot
     connected  bool
     locked     bool
     mu         sync.RWMutex
@@ -563,75 +569,75 @@ type Device struct {
 // on the device itself (NEWTRON_LOCK|<deviceName>). Uses SET NX + EX for atomic
 // acquisition with automatic TTL-based expiry.
 // Not re-entrant — returns util.ErrDeviceLocked on contention.
-func (d *Device) Lock() error {
+func (n *Node) Lock() error {
     holder := fmt.Sprintf("%s@%s", currentUser(), hostname())
-    return d.conn.Lock(holder)
+    return n.conn.Lock(holder)
 }
 
 // Unlock releases the distributed lock by deleting the NEWTRON_LOCK entry
 // from STATE_DB on the device.
-func (d *Device) Unlock() error {
-    return d.conn.Unlock()
+func (n *Node) Unlock() error {
+    return n.conn.Unlock()
 }
 
 // IsLocked returns true if this device is currently locked by this process.
-func (d *Device) IsLocked() bool {
-    return d.conn.IsLocked()
+func (n *Node) IsLocked() bool {
+    return n.conn.IsLocked()
 }
 
 // LockHolder returns the current lock holder string (e.g. "aldrin@workstation1")
 // and acquisition time, or empty string if unlocked. Reads STATE_DB on the device.
-func (d *Device) LockHolder() (holder string, acquired time.Time, err error) {
-    return d.conn.LockHolder()
+func (n *Node) LockHolder() (holder string, acquired time.Time, err error) {
+    return n.conn.LockHolder()
 }
 
 // IsConnected returns true if this device has an active connection.
-func (d *Device) IsConnected() bool { return d.connected }
+func (n *Node) IsConnected() bool { return n.connected }
 
 // SetConnected sets the connected state. Test helper only.
-func (d *Device) SetConnected(v bool) { d.connected = v }
+func (n *Node) SetConnected(v bool) { n.connected = v }
 
 // SetLocked sets the locked state. Test helper only.
-func (d *Device) SetLocked(v bool) { d.locked = v }
+func (n *Node) SetLocked(v bool) { n.locked = v }
 
-// --- Device accessors and bridging ---
+// --- Node accessors and bridging ---
 
 // Name returns the device name.
-func (d *Device) Name() string { return d.name }
+func (n *Node) Name() string { return n.name }
 
 // Network returns the parent Network.
-func (d *Device) Network() *Network { return d.network }
+func (n *Node) Network() *Network { return n.network }
 
 // ASNumber returns the device's AS number from the resolved profile.
-func (d *Device) ASNumber() int { return d.resolved.ASNumber }
+func (n *Node) ASNumber() int { return n.resolved.ASNumber }
 
-// Underlying returns the low-level device.Device for Redis operations.
+// Underlying returns the low-level sonic.Device for Redis operations.
 // Panics if not connected (use Connect() first).
-func (d *Device) Underlying() *device.Device { return d.conn }
+func (n *Node) Underlying() *sonic.Device { return n.conn }
 
-// GetInterface returns an Interface by name from the device's interface map.
+// GetInterface returns an Interface by name from the node's interface map.
 // Returns error if the interface name is not in the topology or CONFIG_DB.
-func (d *Device) GetInterface(name string) (*Interface, error)
+func (n *Node) GetInterface(name string) (*Interface, error)
 
-// InterfaceNames returns sorted names of all interfaces on this device.
-func (d *Device) ListInterfaces() []string
+// InterfaceNames returns sorted names of all interfaces on this node.
+func (n *Node) ListInterfaces() []string
 
 // Connect establishes the connection to the device:
-//   1. Creates device.Device with the resolved profile
-//   2. Calls device.Device.Connect() (SSH tunnel + Redis clients)
+//   1. Creates sonic.Device with the resolved profile
+//   2. Calls sonic.Device.Connect() (SSH tunnel + Redis clients)
 //   3. Populates Interface objects from CONFIG_DB PORT table and
 //      NEWTRON_SERVICE_BINDING table (service bindings)
-//   4. Sets d.configDB from the device.Device's CONFIG_DB snapshot
+//   4. Sets n.configDB from the sonic.Device's CONFIG_DB snapshot
 // After Connect, all Interface fields (adminStatus, vrf, ipAddresses,
 // serviceName, etc.) are populated from CONFIG_DB.
-func (d *Device) Connect(ctx context.Context) error
+func (n *Node) Connect(ctx context.Context) error
 
 // Disconnect closes the low-level connection and SSH tunnel.
-func (d *Device) Disconnect() error
+func (n *Node) Disconnect() error
 
-// Interface has parent reference to Device
+// Interface has parent reference to Node
 type Interface struct {
-    device        *Device             // Parent reference
+    node          *Node               // Parent reference
     name          string
 
     // Current state (from config_db)
@@ -658,8 +664,8 @@ type Interface struct {
 // Name returns the interface name (e.g. "Ethernet0").
 func (i *Interface) Name() string { return i.name }
 
-// Device returns the parent Device.
-func (i *Interface) Device() *Device { return i.device }
+// Node returns the parent Node.
+func (i *Interface) Node() *Node { return i.node }
 
 // HasService returns true if a service is currently bound to this interface.
 func (i *Interface) HasService() bool { return i.serviceName != "" }
@@ -673,7 +679,7 @@ func (i *Interface) IPAddresses() []string
 
 **Interface population from CONFIG_DB:**
 
-During `Device.Connect()`, interfaces are populated by scanning CONFIG_DB tables:
+During `Node.Connect()`, interfaces are populated by scanning CONFIG_DB tables:
 
 | Interface field | Source table | Key/field |
 |----------------|-------------|-----------|
@@ -695,17 +701,17 @@ During `Device.Connect()`, interfaces are populated by scanning CONFIG_DB tables
 ```go
 // Interface can access Network-level specs through parent chain
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-    // Access Network through Device parent
-    svc, err := i.Device().Network().GetService(serviceName)
+    // Access Network through Node parent
+    svc, err := i.Node().Network().GetService(serviceName)
     if err != nil {
         return nil, err
     }
 
-    // Access Device properties
-    asNum := i.Device().ASNumber()
+    // Access Node properties
+    asNum := i.Node().ASNumber()
 
     // Access filter spec from Network
-    filter, _ := i.Device().Network().GetFilterSpec(svc.IngressFilter)
+    filter, _ := i.Node().Network().GetFilterSpec(svc.IngressFilter)
 
     // ... apply configuration
 }
@@ -716,7 +722,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 ```go
 // Interface provides convenience method for Network access
 func (i *Interface) Network() *Network {
-    return i.device.Network()
+    return i.node.Network()
 }
 
 // Usage: simplifies access pattern
@@ -746,19 +752,19 @@ func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error)
 // GetTopologyInterface returns a topology interface for a given device and interface name.
 func (n *Network) GetTopologyInterface(device, intf string) (*spec.TopologyInterface, error)
 
-// --- Device connection ---
+// --- Node connection ---
 
-// ConnectDevice retrieves a device by name, calls Connect() on it, and returns it.
-// Convenience method used by CLI helpers — equivalent to GetDevice + dev.Connect.
-func (n *Network) ConnectDevice(ctx context.Context, name string) (*Device, error)
+// ConnectNode retrieves a node by name, calls Connect() on it, and returns it.
+// Convenience method used by CLI helpers — equivalent to GetNode + node.Connect.
+func (n *Network) ConnectNode(ctx context.Context, name string) (*Node, error)
 
-// --- Device and spec accessors ---
+// --- Node and spec accessors ---
 
-// DeviceNames returns sorted names of all loaded devices.
-func (n *Network) ListDevices() []string
+// ListNodes returns sorted names of all loaded nodes.
+func (n *Network) ListNodes() []string
 
-// GetDevice returns a network.Device by name, or error if not found.
-func (n *Network) GetDevice(name string) (*Device, error)
+// GetNode returns a node.Node by name, or error if not found.
+func (n *Network) GetNode(name string) (*Node, error)
 
 // GetService returns a service spec by name from the network spec.
 // Returns error if the service name does not exist.
@@ -780,7 +786,7 @@ func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error)
 func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
 ```
 
-**Network Constructor (`pkg/network/network.go`):**
+**Network Constructor (`pkg/newtron/network/network.go`):**
 
 ```go
 // NewNetwork loads specs from the given directory and creates the Network.
@@ -794,10 +800,10 @@ func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
 //   6. Load topology.json (optional — returns nil if absent)
 //   7. Resolve profiles: for each device, merge profile + region + global → ResolvedProfile
 //   8. Validate topology (if loaded) — services, IPs, links
-//   9. Create Device objects with resolved profiles, create Interface objects
+//   9. Create Node objects with resolved profiles, create Interface objects
 //      from CONFIG_DB tables (populated later on Connect)
 //
-// Devices are created but NOT connected — call Device.Connect() to
+// Nodes are created but NOT connected — call Node.Connect() to
 // establish SSH tunnels and load CONFIG_DB/STATE_DB.
 func NewNetwork(specDir string) (*Network, error)
 ```
@@ -845,9 +851,9 @@ func (l *Loader) validateTopology(
 ) error
 ```
 
-### 3.3 Low-Level Device Types (`pkg/device/device.go`)
+### 3.3 Low-Level Device Types (`pkg/newtron/device/sonic/device.go`)
 
-The `device.Device` struct in `pkg/device` is the low-level representation that handles the actual Redis connection, while `network.Device` in `pkg/network` wraps it with the OO hierarchy.
+The `sonic.Device` struct in `pkg/newtron/device/sonic` is the low-level representation that handles the actual Redis connection, while `node.Node` in `pkg/newtron/network/node` wraps it with the OO hierarchy.
 
 ```go
 // Device represents a SONiC switch (low-level, imperative)
@@ -992,7 +998,7 @@ type EVPNState struct {
 }
 ```
 
-### 3.4 ConfigDB Mapping (`pkg/device/configdb.go`)
+### 3.4 ConfigDB Mapping (`pkg/newtron/device/sonic/configdb.go`)
 
 The ConfigDB struct mirrors SONiC's config_db.json structure. In v2, this has been expanded significantly with BGP globals, QoS, and the custom NEWTRON_SERVICE_BINDING table.
 
@@ -1442,7 +1448,7 @@ type ACLTableTypeEntry struct {
 | AS_PATH_SET | `SHORT_PATHS` | AS-path regex filters |
 | NEWTRON_SERVICE_BINDING | `Ethernet0` | Newtron service tracking (custom) |
 
-### 3.5 ConfigDB Client (`pkg/device/configdb.go`)
+### 3.5 ConfigDB Client (`pkg/newtron/device/sonic/configdb.go`)
 
 The ConfigDBClient wraps a Redis client configured for CONFIG_DB (DB 4).
 
@@ -1500,7 +1506,7 @@ func (c *ConfigDBClient) DeleteField(table, key, field string) error
 
 The `Set` method handles the SONiC convention for entries that have no fields (such as IP address bindings or member entries). These require a `"NULL":"NULL"` sentinel hash field to create the Redis key, because SONiC's subscriber infrastructure relies on key existence.
 
-**Pipeline methods** (`pkg/device/pipeline.go`):
+**Pipeline methods** (`pkg/newtron/device/sonic/pipeline.go`):
 
 ```go
 // TableChange represents a single table entry change for pipeline operations
@@ -1537,7 +1543,7 @@ func (c *ConfigDBClient) PipelineSet(sets []TableChange, dels []TableKey) error
 func (c *ConfigDBClient) ReplaceAll(config *ConfigDB) error
 ```
 
-### 3.6 ChangeSet Types (`pkg/network/changeset.go`)
+### 3.6 ChangeSet Types (`pkg/newtron/network/node/changeset.go`)
 
 Operations return ChangeSets that can be previewed or applied:
 
@@ -1585,8 +1591,8 @@ func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key
 //
 // On full success, cs.AppliedCount = len(cs.Changes).
 //
-// The `d` parameter is the low-level device.Device (accessed via network.Device.Underlying()).
-func (cs *ChangeSet) Apply(d *device.Device) error
+// The `d` parameter is the low-level sonic.Device (accessed via node.Node.Underlying()).
+func (cs *ChangeSet) Apply(d *sonic.Device) error
 
 // Rollback applies the inverse of each applied change in reverse order
 // (changes 0..AppliedCount-1):
@@ -1597,12 +1603,12 @@ func (cs *ChangeSet) Apply(d *device.Device) error
 // Rollback is best-effort: it attempts ALL inverse operations, collecting
 // errors into a combined errors.Join() error. It does not stop on first
 // failure. The caller should verify device state after rollback.
-func (cs *ChangeSet) Rollback(d *device.Device) error
+func (cs *ChangeSet) Rollback(d *sonic.Device) error
 ```
 
-### 3.6A Verification Types (`pkg/device/verify.go`)
+### 3.6A Verification Types (`pkg/newtron/device/verify.go`)
 
-These types live in `pkg/device/verify.go` because `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/network` would create an import cycle (`pkg/device` → `pkg/network`). The `pkg/network` layer re-exports these types for convenience.
+These types live in `pkg/newtron/device/verify.go` as NOS-independent shared types. `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/newtron/network/node` would create an import cycle. The `pkg/newtron/network/node` layer re-exports these types for convenience.
 
 These types support the verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
 
@@ -1647,9 +1653,9 @@ type NextHop struct {
 }
 ```
 
-### 3.7 Platform Config (`pkg/device/platform.go`)
+### 3.7 Platform Config (`pkg/newtron/device/sonic/platform.go`)
 
-Newtron reads the device's SONiC `platform.json` for port validation. The platform config is fetched via SSH and cached on `device.Device`.
+Newtron reads the device's SONiC `platform.json` for port validation. The platform config is fetched via SSH and cached on `sonic.Device`.
 
 ```go
 // SonicPlatformConfig represents a parsed SONiC platform.json file.
@@ -1684,9 +1690,9 @@ type CreatePortConfig struct {
 /usr/share/sonic/device/<DEVICE_METADATA.localhost.platform>/platform.json
 ```
 
-The parsed result is cached as `device.Device.PlatformConfig`. `LoadPlatformConfig()` fetches and caches it. `GeneratePlatformSpec()` creates a `spec.PlatformSpec` from the parsed data for priming the spec system on first connect to a new hardware platform.
+The parsed result is cached as `sonic.Device.PlatformConfig`. `LoadPlatformConfig()` fetches and caches it. `GeneratePlatformSpec()` creates a `spec.PlatformSpec` from the parsed data for priming the spec system on first connect to a new hardware platform.
 
-### 3.8 Composite Types (`pkg/network/composite.go`)
+### 3.8 Composite Types (`pkg/newtron/network/node/composite.go`)
 
 Composite mode generates a composite CONFIG_DB offline and delivers it atomically.
 
@@ -1776,12 +1782,12 @@ Operations are methods on the objects they operate on. This follows true OO desi
 
 ### Execution Model
 
-All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(d.Underlying())` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
+All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(n.Underlying())` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
 
 **Caller execution pattern:**
 
 ```
-Lock → cs.Apply(d.Underlying()) → VerifyChangeSet → Unlock → return
+Lock → cs.Apply(n.Underlying()) → VerifyChangeSet → Unlock → return
 ```
 
 The lock is scoped to a single operation — not held across multiple operations or for the duration of a session. This ensures:
@@ -1792,8 +1798,8 @@ The lock is scoped to a single operation — not held across multiple operations
 ```go
 // Pattern: operation returns ChangeSet, caller applies it.
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-    d := i.Device()
-    cs := NewChangeSet(d.Name(), "interface.apply-service")
+    n := i.Node()
+    cs := NewChangeSet(n.Name(), "interface.apply-service")
     // ... build ChangeSet entries ...
     return cs, nil
 }
@@ -1801,15 +1807,15 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 // Caller applies the ChangeSet:
 //   cs, err := intf.ApplyService(ctx, "customer-l3", opts)
 //   // preview cs.String() ...
-//   d.Lock()
-//   cs.Apply(d.Underlying())
-//   d.Underlying().VerifyChangeSet(ctx, cs)
-//   d.Unlock()
+//   n.Lock()
+//   cs.Apply(n.Underlying())
+//   n.Underlying().VerifyChangeSet(ctx, cs)
+//   n.Unlock()
 ```
 
-**Disconnect safety net:** `Device.Disconnect()` releases the lock if still held (e.g., after a panic during operation execution). This is a safety measure — normal operation always releases the lock within the operation method.
+**Disconnect safety net:** `Node.Disconnect()` releases the lock if still held (e.g., after a panic during operation execution). This is a safety measure — normal operation always releases the lock within the operation method.
 
-### 5.1 Interface Operations (`pkg/network/interface_ops.go`)
+### 5.1 Interface Operations (`pkg/newtron/network/node/interface_ops.go`)
 
 Interface operations are methods on the `Interface` type. All operations return a `*ChangeSet` for preview/execution.
 
@@ -1836,12 +1842,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error)
 
 ```go
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
-    d := i.Device()
-    if d.Underlying() == nil {
+    n := i.Node()
+    if n.Underlying() == nil {
         return nil, util.ErrNotConnected
     }
 
-    binding, ok := d.Underlying().ConfigDB.NewtronServiceBinding[i.name]
+    binding, ok := n.Underlying().ConfigDB.NewtronServiceBinding[i.name]
     if !ok {
         return nil, fmt.Errorf("no service bound to %s", i.name)
     }
@@ -1851,15 +1857,15 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
         return nil, fmt.Errorf("service spec %q: %w", binding.ServiceName, err)
     }
 
-    cs := NewChangeSet(d.Name(), "interface.remove-service")
-    dc := NewDependencyChecker(d.Underlying().ConfigDB)
+    cs := NewChangeSet(n.Name(), "interface.remove-service")
+    dc := NewDependencyChecker(n.Underlying().ConfigDB)
 
     // 1. Remove service binding (always safe — owned by this interface)
     cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeDelete,
         map[string]string{"service": binding.ServiceName}, nil)
 
     // 2. Remove IP binding entries (INTERFACE|<name>|<ip>)
-    for key := range d.Underlying().ConfigDB.Interface {
+    for key := range n.Underlying().ConfigDB.Interface {
         if strings.HasPrefix(key, i.name+"|") {
             cs.Add("INTERFACE", key, ChangeDelete, nil, nil)
         }
@@ -1871,7 +1877,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
         vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
         bgpKey := fmt.Sprintf("%s|%s", vrfName, neighborIP)
         // Delete BGP_NEIGHBOR_AF entries first (child before parent)
-        for afKey := range d.Underlying().ConfigDB.BGPNeighborAF {
+        for afKey := range n.Underlying().ConfigDB.BGPNeighborAF {
             if strings.HasPrefix(afKey, bgpKey+"|") {
                 cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
             }
@@ -1887,7 +1893,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
     for _, aclName := range []string{aclInName, aclOutName} {
         if dc.CanDeleteACL(aclName, i.name) {
             // No other interfaces reference this ACL — delete rules then table
-            for ruleKey := range d.Underlying().ConfigDB.ACLRule {
+            for ruleKey := range n.Underlying().ConfigDB.ACLRule {
                 if strings.HasPrefix(ruleKey, aclName+"|") {
                     cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
                 }
@@ -1895,7 +1901,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
             cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
         } else {
             // Other interfaces still reference this ACL — just remove this interface from binding list
-            existing := d.Underlying().ConfigDB.ACLTable[aclName]
+            existing := n.Underlying().ConfigDB.ACLTable[aclName]
             ports := strings.Split(existing.Ports, ",")
             filtered := removeFromSlice(ports, i.name)
             cs.Add("ACL_TABLE", aclName, ChangeModify,
@@ -2022,10 +2028,10 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error)
 
 ```go
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-    d := i.Device()
+    n := i.Node()
     ipAddr := opts.IPAddr
 
-    if !d.IsConnected() {
+    if !n.IsConnected() {
         return nil, util.ErrNotConnected
     }
 
@@ -2043,7 +2049,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
         return nil, fmt.Errorf("unsupported service type %q (must be l2, l3, or irb)", svc.ServiceType)
     }
 
-    cs := NewChangeSet(d.Name(), "interface.apply-service")
+    cs := NewChangeSet(n.Name(), "interface.apply-service")
 
     // ====================================================================
     // L3 service translation (ServiceType == "l3")
@@ -2243,7 +2249,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 // If the ACL already exists in CONFIG_DB, appends this interface to the binding list
 // rather than creating a new ACL_TABLE entry.
 func (i *Interface) generateACLEntries(cs *ChangeSet, aclName string, filter *spec.FilterSpec, stage string) {
-    existing := i.Device().Underlying().ConfigDB.ACLTable[aclName]
+    existing := i.Node().Underlying().ConfigDB.ACLTable[aclName]
     if existing.Type != "" {
         // ACL exists — add this interface to binding list
         ports := strings.Split(existing.Ports, ",")
@@ -2281,7 +2287,7 @@ func (i *Interface) generateACLEntries(cs *ChangeSet, aclName string, filter *sp
 }
 ```
 
-**DependencyChecker** (`pkg/network/interface_ops.go`):
+**DependencyChecker** (`pkg/newtron/network/node/interface_ops.go`):
 
 Used by `RemoveService` to safely clean up shared resources. Reference counting is done via CONFIG_DB scan — no separate tracking database.
 
@@ -2290,11 +2296,11 @@ Used by `RemoveService` to safely clean up shared resources. Reference counting 
 // VNI mappings, BGP neighbors) can be safely deleted when a service is removed
 // from an interface. It scans CONFIG_DB to count remaining references.
 type DependencyChecker struct {
-    configDB *device.ConfigDB
+    configDB *sonic.ConfigDB
 }
 
 // NewDependencyChecker creates a DependencyChecker from the current CONFIG_DB snapshot.
-func NewDependencyChecker(configDB *device.ConfigDB) *DependencyChecker {
+func NewDependencyChecker(configDB *sonic.ConfigDB) *DependencyChecker {
     return &DependencyChecker{configDB: configDB}
 }
 
@@ -2383,9 +2389,9 @@ func (dc *DependencyChecker) CanDeleteServiceBinding(interfaceName string) bool 
 }
 ```
 
-### 5.2 Device Operations (`pkg/network/device_ops.go`)
+### 5.2 Node Operations (`pkg/newtron/network/node/device_ops.go`)
 
-Device operations are methods on the `Device` type. All operations return a `*ChangeSet` for preview/execution.
+Node operations are methods on the `Node` type. All operations return a `*ChangeSet` for preview/execution.
 
 **Complete Method List:**
 
@@ -2394,79 +2400,79 @@ Device operations are methods on the `Device` type. All operations return a `*Ch
 // VLAN Management
 // ============================================================================
 
-func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error)
-func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
-func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error)
+func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error)
+func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
+func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error)
 
 // RemoveVLANMember deletes a VLAN_MEMBER entry for the given VLAN and interface.
-func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error)
+func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error)
 
 // ============================================================================
 // PortChannel (LAG) Management
 // ============================================================================
 
-func (d *Device) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error)
-func (d *Device) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error)
-func (d *Device) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
-func (d *Device) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
+func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error)
+func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
+func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error)
 
 // ============================================================================
 // VRF Management
 // ============================================================================
 
-func (d *Device) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error)
-func (d *Device) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error)
+func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error)
 
 // AddVRFInterface binds an interface to a VRF by setting vrf_name on the
 // INTERFACE table entry. Fails if the interface is already in a different VRF.
-func (d *Device) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
+func (n *Node) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
 
 // RemoveVRFInterface removes an interface from a VRF by clearing vrf_name
 // from the INTERFACE table entry.
-func (d *Device) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
+func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error)
 
 // BindIPVPN maps a VRF to an IP-VPN by setting the L3VNI on the VRF entry
 // and creating a VXLAN_TUNNEL_MAP entry for the VNI-to-VRF mapping.
-func (d *Device) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error)
+func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error)
 
 // UnbindIPVPN removes the L3VNI mapping from a VRF: clears the VNI from
 // the VRF entry and deletes the corresponding VXLAN_TUNNEL_MAP entry.
-func (d *Device) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error)
+func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error)
 
 // AddStaticRoute creates a static route in the STATIC_ROUTE table for
 // the given VRF, prefix, and next-hop.
-func (d *Device) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error)
+func (n *Node) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error)
 
 // RemoveStaticRoute deletes a static route from the STATIC_ROUTE table.
-func (d *Device) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error)
+func (n *Node) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error)
 
 // ============================================================================
 // ACL Management
 // ============================================================================
 
-func (d *Device) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error)
-func (d *Device) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error)
-func (d *Device) AddACLRule(ctx context.Context, tableName string, rule ACLRuleEntry) (*ChangeSet, error)
-func (d *Device) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error)
+func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error)
+func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) AddACLRule(ctx context.Context, tableName string, rule ACLRuleEntry) (*ChangeSet, error)
+func (n *Node) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error)
 
 // ============================================================================
 // EVPN/VTEP Management
 // ============================================================================
 
-func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error)
-func (d *Device) DeleteVTEP(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error)
+func (n *Node) DeleteVTEP(ctx context.Context, name string) (*ChangeSet, error)
 // Deprecated: use SetupRouteReflector instead.
-func (d *Device) SetupBGPEVPN(ctx context.Context, neighbors []string) (*ChangeSet, error)
-func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, cfg LoopbackBGPNeighborConfig) (*ChangeSet, error)
-func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error)
-func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error)
-func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error)
+func (n *Node) SetupBGPEVPN(ctx context.Context, neighbors []string) (*ChangeSet, error)
+func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, cfg LoopbackBGPNeighborConfig) (*ChangeSet, error)
+func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error)
+func (n *Node) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error)
+func (n *Node) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error)
 
 // SetupEVPN is an idempotent composite that configures the full EVPN stack:
 // VXLAN_TUNNEL (VTEP), VXLAN_EVPN_NVO, and BGP EVPN address family.
 // sourceIP defaults to the device's loopback IP if empty.
 // Creates entries only if they don't already exist (idempotent).
-func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error)
+func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error)
 
 // ============================================================================
 // Health Checks and Maintenance
@@ -2475,15 +2481,15 @@ func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, er
 // RunHealthChecks runs health checks on the device.
 // checks is a variadic filter: "bgp", "interfaces", "evpn", "lag", "vxlan".
 // If no checks are specified, all checks run.
-func (d *Device) RunHealthChecks(ctx context.Context, checks ...string) ([]HealthCheckResult, error)
+func (n *Node) RunHealthChecks(ctx context.Context, checks ...string) ([]HealthCheckResult, error)
 
 // ApplyBaseline applies a baseline configlet to the device.
 // vars is a list of "key=value" strings for template substitution.
-func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error)
+func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error)
 
 // Cleanup identifies and removes orphaned configurations.
 // cleanupType can be: "acl", "vrf", "vni", or "" for all.
-func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error)
+func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error)
 
 // ============================================================================
 // QoS Management
@@ -2491,53 +2497,53 @@ func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *
 
 // ApplyQoS configures per-interface QoS: creates SCHEDULER, DSCP_TO_TC_MAP,
 // TC_TO_QUEUE_MAP, QUEUE, and PORT_QOS_MAP entries from a QoS policy.
-func (d *Device) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error)
+func (n *Node) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error)
 
 // RemoveQoS removes QoS configuration from an interface: deletes QUEUE
 // and PORT_QOS_MAP entries for the interface.
-func (d *Device) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error)
+func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error)
 
 // ============================================================================
 // Query Methods (no ChangeSet returned)
 // ============================================================================
 
 // ListVLANs returns VLAN IDs present in CONFIG_DB.
-func (d *Device) ListVLANs() []int
+func (n *Node) ListVLANs() []int
 
 // ListVRFs returns VRF names present in CONFIG_DB.
-func (d *Device) ListVRFs() []string
+func (n *Node) ListVRFs() []string
 
 // ListPortChannels returns PortChannel names present in CONFIG_DB.
-func (d *Device) ListPortChannels() []string
+func (n *Node) ListPortChannels() []string
 
 // ListInterfaces returns interface names (Ethernet*, PortChannel*, Loopback*).
-func (d *Device) ListInterfaces() []string
+func (n *Node) ListInterfaces() []string
 
 // ListACLTables returns ACL table names present in CONFIG_DB.
-func (d *Device) ListACLTables() []string
+func (n *Node) ListACLTables() []string
 
 // ListBGPNeighbors returns BGP neighbor IPs from CONFIG_DB.
-func (d *Device) ListBGPNeighbors() []string
+func (n *Node) ListBGPNeighbors() []string
 
 // GetOrphanedACLs returns ACL tables not bound to any interface.
-func (d *Device) GetOrphanedACLs() []string
+func (n *Node) GetOrphanedACLs() []string
 
 // VTEPSourceIP returns the VTEP source IP (loopback address).
-func (d *Device) VTEPSourceIP() string
+func (n *Node) VTEPSourceIP() string
 
 // --- Client accessors (for newtest executors that need direct DB access) ---
 
 // StateDBClient returns the STATE_DB client for direct queries.
 // Returns nil if STATE_DB connection failed (non-fatal — see device LLD §5.1).
-func (d *Device) StateDBClient() *StateDBClient
+func (n *Node) StateDBClient() *StateDBClient
 
 // SSHClient returns the underlying ssh.Client for opening command sessions.
 // Returns nil if no SSH tunnel (direct connection mode).
-func (d *Device) SSHClient() *ssh.Client {
-    if d.tunnel == nil {
+func (n *Node) SSHClient() *ssh.Client {
+    if n.tunnel == nil {
         return nil
     }
-    return d.tunnel.SSHClient()
+    return n.tunnel.SSHClient()
 }
 
 // ============================================================================
@@ -2562,12 +2568,12 @@ func (d *Device) SSHClient() *ssh.Client {
 // d.ConfigDB that was updated by Apply() — the fresh read confirms that
 // Redis actually persisted the writes. The temporary client is closed after
 // verification.
-func (d *Device) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
+func (n *Node) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
 
 // GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.
 // Parses the comma-separated nexthop/ifname fields into []NextHop.
 // Returns nil RouteEntry (not error) if the prefix is not present.
-func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
 
 // GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
 // object chain: SAI_ROUTE_ENTRY → SAI_NEXT_HOP_GROUP → SAI_NEXT_HOP.
@@ -2582,10 +2588,10 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 //      b. For each member, read "SAI_NEXT_HOP_GROUP_MEMBER_ATTR_NEXT_HOP_ID"
 //      c. For each next_hop OID, read "SAI_NEXT_HOP_ATTR_IP" → nexthop IP
 //   5. Assemble NextHop list and return RouteEntry
-func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
 
 // ============================================================================
-// Spec Persistence (methods on Network, not Device)
+// Spec Persistence (methods on Network, not Node)
 // ============================================================================
 
 // These methods create/delete definitions in network.json. Used by CLI
@@ -2630,7 +2636,7 @@ func (n *Network) DeleteService(name string) error
 // ============================================================================
 
 // SetBGPGlobals configures BGP global settings (ASN, router-id, flags).
-func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error)
+func (n *Node) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error)
 
 // SetupRouteReflector performs full RR setup: all 3 AFs, cluster-id, RR client, next-hop-self.
 // Replaces SetupBGPEVPN (which only did l2vpn_evpn).
@@ -2647,57 +2653,57 @@ func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*Chan
 //   BGP_GLOBALS_AF "default|l2vpn_evpn": advertise-all-vni
 //   ROUTE_REDISTRIBUTE "default|connected|bgp|ipv4": (loopback + service subnets)
 //   ROUTE_REDISTRIBUTE "default|connected|bgp|ipv6": (if IPv6 enabled)
-func (d *Device) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error)
+func (n *Node) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error)
 
 // ConfigurePeerGroup creates or updates a BGP peer group template.
-func (d *Device) ConfigurePeerGroup(ctx context.Context, name string, cfg PeerGroupConfig) (*ChangeSet, error)
+func (n *Node) ConfigurePeerGroup(ctx context.Context, name string, cfg PeerGroupConfig) (*ChangeSet, error)
 
 // DeletePeerGroup removes a BGP peer group.
-func (d *Device) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error)
 
 // AddRouteRedistribution redistributes connected/static into BGP.
-func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error)
+func (n *Node) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error)
 
 // RemoveRouteRedistribution removes redistribution.
-func (d *Device) RemoveRouteRedistribution(ctx context.Context, vrf, protocol, af string) (*ChangeSet, error)
+func (n *Node) RemoveRouteRedistribution(ctx context.Context, vrf, protocol, af string) (*ChangeSet, error)
 
 // AddRouteMap creates a route-map with match/set rules.
-func (d *Device) AddRouteMap(ctx context.Context, name string, cfg RouteMapConfig) (*ChangeSet, error)
+func (n *Node) AddRouteMap(ctx context.Context, name string, cfg RouteMapConfig) (*ChangeSet, error)
 
 // DeleteRouteMap removes a route-map (all sequences).
-func (d *Device) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error)
 
 // AddPrefixSet creates a prefix list for route-map matching.
-func (d *Device) AddPrefixSet(ctx context.Context, name string, cfg PrefixSetConfig) (*ChangeSet, error)
+func (n *Node) AddPrefixSet(ctx context.Context, name string, cfg PrefixSetConfig) (*ChangeSet, error)
 
 // DeletePrefixSet removes a prefix list (all sequences).
-func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error)
 
 // AddBGPNetwork adds a BGP network statement.
-func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error)
+func (n *Node) AddBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error)
 
 // RemoveBGPNetwork removes a BGP network statement.
-func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error)
+func (n *Node) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error)
 
 // ============================================================================
 // Port Management (v3 — platform.json validated)
 // ============================================================================
 
 // CreatePort creates a PORT entry validated against platform.json.
-func (d *Device) CreatePort(ctx context.Context, name string, cfg CreatePortConfig) (*ChangeSet, error)
+func (n *Node) CreatePort(ctx context.Context, name string, cfg CreatePortConfig) (*ChangeSet, error)
 
 // DeletePort removes a PORT entry.
-func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error)
+func (n *Node) DeletePort(ctx context.Context, name string) (*ChangeSet, error)
 
 // BreakoutPort applies a breakout mode (creates child ports, removes parent).
-func (d *Device) BreakoutPort(ctx context.Context, name string, cfg BreakoutConfig) (*ChangeSet, error)
+func (n *Node) BreakoutPort(ctx context.Context, name string, cfg BreakoutConfig) (*ChangeSet, error)
 
 // LoadPlatformConfig fetches and caches platform.json from the device via SSH.
-func (d *Device) LoadPlatformConfig(ctx context.Context) error
+func (n *Node) LoadPlatformConfig(ctx context.Context) error
 
 // GeneratePlatformSpec creates a spec.PlatformSpec from the device's platform.json.
 // Used for priming the spec system on first connect to new hardware.
-func (d *Device) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, error)
+func (n *Node) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, error)
 
 // ============================================================================
 // Composite Delivery
@@ -2719,11 +2725,11 @@ func (d *Device) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, 
 //   4. Entries with same table|key and same values = skipped (no-op)
 //   5. PipelineSet only the differing entries
 //
-func (d *Device) DeliverComposite(ctx context.Context, composite *CompositeConfig, mode CompositeMode) (*CompositeDeliveryResult, error)
+func (n *Node) DeliverComposite(ctx context.Context, composite *CompositeConfig, mode CompositeMode) (*CompositeDeliveryResult, error)
 
 // ValidateComposite validates a composite config before delivery (dry-run).
 // Returns errors for any conflicts or invalid entries.
-func (d *Device) ValidateComposite(ctx context.Context, composite *CompositeConfig, mode CompositeMode) error
+func (n *Node) ValidateComposite(ctx context.Context, composite *CompositeConfig, mode CompositeMode) error
 
 // Composite merge conflict rules:
 //
@@ -2895,7 +2901,7 @@ type BreakoutConfig struct {
 }
 ```
 
-### 5.4 Topology Provisioning Operations (`pkg/network/topology.go`)
+### 5.4 Topology Provisioning Operations (`pkg/newtron/network/topology.go`)
 
 ```go
 // TopologyProvisioner generates and delivers config from topology specs.
@@ -2941,13 +2947,13 @@ func resolveServiceQoSPolicy(n *Network, svc *spec.ServiceSpec) (string, *spec.Q
 ```go
 // PreconditionChecker validates operation preconditions
 type PreconditionChecker struct {
-    device    *device.Device
+    device    *sonic.Device
     operation string
     resource  string
     errors    []error
 }
 
-func NewPreconditionChecker(d *device.Device, op, resource string) *PreconditionChecker
+func NewPreconditionChecker(d *sonic.Device, op, resource string) *PreconditionChecker
 
 func (pc *PreconditionChecker) Check(condition bool, requirement, message string) {
     if !condition {
@@ -2986,7 +2992,7 @@ func (pc *PreconditionChecker) RequireNoExistingService(intf string)   // no ser
 func (pc *PreconditionChecker) RequirePeerGroupExists(name string)     // peer group exists in BGP_PEER_GROUP
 ```
 
-The `device.Device` also provides inline precondition checks:
+The `sonic.Device` also provides inline precondition checks:
 
 ```go
 func (d *Device) RequireConnected() error {
@@ -3530,18 +3536,18 @@ func init() {
 
 ```go
 // requireDevice ensures a device is specified via -d flag or implicit first arg.
-func requireDevice(ctx context.Context) (*network.Device, error) {
+func requireDevice(ctx context.Context) (*node.Node, error) {
     if deviceName == "" {
         return nil, fmt.Errorf("device required: use -d <device> flag")
     }
-    return net.ConnectDevice(ctx, deviceName)
+    return net.ConnectNode(ctx, deviceName)
 }
 
 // withDeviceWrite handles boilerplate for device-level write commands.
-// The callback receives a connected, locked device and returns a changeset.
+// The callback receives a connected, locked node and returns a changeset.
 // If changeset is nil, the helper returns nil (command handled its own output).
 // If changeset is non-nil, the helper prints it and handles execute/dry-run.
-func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
     ctx := context.Background()
     dev, err := requireDevice(ctx)
     if err != nil {
@@ -3658,7 +3664,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
                 property)
         }
     }
-    cs := NewChangeSet(i.Device().Name(), "interface.set")
+    cs := NewChangeSet(i.Node().Name(), "interface.set")
     // ...
     return cs, nil
 }
@@ -3675,7 +3681,7 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
         return nil, err
     }
 
-    cs := NewChangeSet(i.Device().Name(), "interface.refresh-service")
+    cs := NewChangeSet(i.Node().Name(), "interface.refresh-service")
 
     // --- Step 1: Rebuild expected config from current spec ---
     // Generate the full set of CONFIG_DB entries that ApplyService would
@@ -3737,13 +3743,13 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 The `cleanup` command removes orphaned configurations from the device. Philosophy: only active configurations should exist on the device.
 
 ```go
-func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
-    cs := NewChangeSet(d.name, "device.cleanup")
+func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
+    cs := NewChangeSet(n.name, "node.cleanup")
 
     if cleanupType == "" || cleanupType == "acls" {
-        orphanedACLs := d.findOrphanedACLs()
+        orphanedACLs := n.findOrphanedACLs()
         for _, aclName := range orphanedACLs {
-            for _, ruleName := range d.getACLRules(aclName) {
+            for _, ruleName := range n.getACLRules(aclName) {
                 cs.Add("ACL_RULE", fmt.Sprintf("%s|%s", aclName, ruleName), ChangeDelete, nil, nil)
             }
             cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)

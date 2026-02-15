@@ -25,7 +25,7 @@ started correctly.
 
 ## Fix
 
-Changed `RestartService()` in `pkg/device/device.go` from `systemctl restart`
+Changed `RestartService()` in `pkg/newtron/device/sonic/device.go` from `systemctl restart`
 to `docker restart`. Docker restart directly manages the container lifecycle
 without going through systemd's ExecStopPost scripts.
 

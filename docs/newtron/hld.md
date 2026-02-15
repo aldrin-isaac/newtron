@@ -122,7 +122,7 @@ The translation layer interprets specs in context to generate config:
                                   |   - User-provided peer AS: 65100
                                   v
 +-----------------------------------------------------------------------+
-|                      TRANSLATION (pkg/network)                        |
+|                      TRANSLATION (pkg/newtron/network)                |
 |  - Derive peer IP from interface IP (10.1.1.2 for /30)               |
 |  - Generate VRF name: {service}-{interface}                           |
 |  - Expand filter-spec into ACL rules                                  |
@@ -166,7 +166,7 @@ The translation layer interprets specs in context to generate config:
 +------------------+     +------------------+     +------------------+
 |                  |     |                  |     |                  |
 |   CLI Layer      |---->|  Network Layer   |---->|  SONiC Switch    |
-|   (cmd/newtron)  |     |  (pkg/network)   |     |  (Redis/config_db)|
+|   (cmd/newtron)  |     |(pkg/newtron/network)|  |  (Redis/config_db)|
 |                  |     |                  |     |                  |
 +------------------+     +------------------+     +------------------+
            |                    |
@@ -192,7 +192,7 @@ The translation layer interprets specs in context to generate config:
                                            v
              +-----------------------------------------+
              |         Device Layer                     |
-             |  (pkg/device)                            |
+             |  (pkg/newtron/device/sonic)              |
              |                                          |
              |  +---------------------------+           |
              |  | SSH Tunnel (port 22)      |           |
@@ -217,7 +217,7 @@ The translation layer interprets specs in context to generate config:
 
 ### 3.2 Object Hierarchy (OO Design)
 
-The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it**. If an operation needs the interface name, the device profile, and the network specs, it lives on Interface (which can reach all three through its parent chain). If it only needs the Redis connection, it lives on Device.
+The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it**. If an operation needs the interface name, the device profile, and the network specs, it lives on Interface (which can reach all three through its parent chain). If it only needs the Redis connection, it lives on Node.
 
 A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and site topology — so it lives on `Device.SetupRouteReflector()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
 
@@ -236,7 +236,7 @@ A related principle: **whatever configuration can be right-shifted to the interf
          | creates (with parent reference)
          v
 +------------------------------------------------------------------+
-|                         Device                                    |
+|                          Node                                     |
 |  (created in Network's context)                                  |
 |                                                                   |
 |  - parent: *Network  <-- key: access to all Network specs        |
@@ -252,12 +252,12 @@ A related principle: **whatever configuration can be right-shifted to the interf
          v
 +------------------------------------------------------------------+
 |                        Interface                                  |
-|  (created in Device's context)                                   |
+|  (created in Node's context)                                     |
 |                                                                   |
-|  - parent: *Device   <-- key: access to Device AND Network       |
+|  - parent: *Node     <-- key: access to Node AND Network         |
 |  - Interface state (from config_db)                              |
 |                                                                   |
-|  Methods: Device(), Network(), HasService(),                     |
+|  Methods: Node(), Network(), HasService(),                       |
 |           ApplyService(), RemoveService(), RefreshService()      |
 +------------------------------------------------------------------+
 ```
@@ -311,7 +311,7 @@ Device-required commands connect to the device via SSH tunnel, acquire a distrib
 All device-level write commands use the `withDeviceWrite` helper, which encapsulates the standard connect-lock-execute-print-unlock pattern:
 
 ```go
-func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
     // 1. requireDevice(ctx) — connect to device via SSH tunnel
     // 2. dev.Lock() — acquire distributed STATE_DB lock
     // 3. fn(ctx, dev) — execute the operation, returns ChangeSet
@@ -438,16 +438,16 @@ Configuration & Meta
 | `Vl100` | `Vlan100` |
 | `Lo0` | `Loopback0` |
 
-### 4.2 Network Layer (`pkg/network`)
+### 4.2 Network Layer (`pkg/newtron/network`, `pkg/newtron/network/node`)
 
 The top-level object hierarchy that provides OO access to specs and devices.
 
 **Key Types:**
 | Type | Description |
 |------|-------------|
-| `Network` | Top-level object; owns specs, creates Devices |
-| `Device` | Device with parent reference to Network; creates Interfaces |
-| `Interface` | Interface with parent reference to Device |
+| `Network` | Top-level object; owns specs, creates Nodes |
+| `Node` | Node with parent reference to Network; creates Interfaces |
+| `Interface` | Interface with parent reference to Node |
 
 ### 4.3 Spec Layer (`pkg/spec`)
 
@@ -465,12 +465,12 @@ Loads and resolves specifications from JSON files.
 
 **Key Distinction**: The spec layer handles **declarative intent**. It never contains concrete device configuration - only policy definitions and references.
 
-### 4.4 Device Layer (`pkg/device`)
+### 4.4 Device Layer (`pkg/newtron/device`, `pkg/newtron/device/sonic`)
 
 Low-level connection management for SONiC switches.
 
 **Key Components:**
-- `Device`: Holds Redis connections (ConfigDBClient, StateDBClient), optional SSHTunnel, lock state, and thread-safe mutex
+- `sonic.Device`: Holds Redis connections (ConfigDBClient, StateDBClient), optional SSHTunnel, lock state, and thread-safe mutex
 - `ConfigDB`: SONiC config_db structure (PORT, VLAN, VRF, ACL_TABLE, etc.)
 - `ConfigDBClient`: Redis client wrapper for CONFIG_DB (Redis DB 4)
 - `StateDB`: SONiC state_db structure (PortTable, LAGTable, BGPNeighborTable, etc.)
@@ -479,12 +479,12 @@ Low-level connection management for SONiC switches.
 - `AsicDBClient`: Redis client wrapper for ASIC_DB (Redis DB 1) — SAI objects from orchagent
 - `SSHTunnel`: SSH port-forward tunnel for Redis access through port 22
 - `PlatformConfig`: Parsed representation of SONiC's `platform.json`, cached on device; provides port definitions, lane assignments, supported speeds, and breakout modes for port validation
-- `CompositeBuilder`: Builder for offline composite CONFIG_DB generation (in `pkg/network/composite.go`)
+- `CompositeBuilder`: Builder for offline composite CONFIG_DB generation (in `pkg/newtron/network/node/composite.go`)
 - `PipelineClient`: Redis MULTI/EXEC pipeline for atomic multi-entry writes (used by composite delivery)
 
 **Key Distinction**: The device layer handles **imperative config**. It reads/writes the actual device state.
 
-### 4.5 Translation (in `pkg/network`)
+### 4.5 Translation (in `pkg/newtron/network/node`)
 
 The translation from spec to config happens in `Interface.ApplyService()` and related methods:
 
@@ -496,7 +496,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     // 2. Translate with context
     vrfName := deriveVRFName(svc, i.name)           // spec + context -> config
     peerIP, _ := util.DeriveNeighborIP(opts.IPAddress) // derive from interface IP
-    localAS := i.Device().Resolved().ASNumber        // from device profile
+    localAS := i.Node().Resolved().ASNumber           // from device profile
 
     // 3. Generate config (imperative)
     cs.Add("VRF", vrfName, ChangeAdd, nil, vrfConfig)
@@ -646,7 +646,7 @@ Redistribution follows opinionated defaults:
 
 #### 4.6.8 BGP Network-Layer Operations
 
-These operations are methods on `network.Device` and `network.Interface`. They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
+These operations are methods on `node.Node` and `node.Interface`. They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
 
 **Device-level operations:**
 
@@ -892,7 +892,7 @@ CompositeConfig (composite CONFIG_DB)
     +-- Metadata: timestamp, network, device, mode
     |
     v
-Device.DeliverComposite(composite, mode)
+Node.DeliverComposite(composite, mode)
     |
     +-- Overwrite: config reload-from-composite (Redis MULTI/pipeline)
     +-- Merge: validate → pipeline write (atomic)
@@ -1016,7 +1016,7 @@ Every mutating operation (`ApplyService`, `RemoveService`, `RefreshService`, `Cr
 // VerifyChangeSet re-reads CONFIG_DB and confirms every entry in the
 // ChangeSet was applied. Returns a VerificationResult listing any
 // missing or mismatched entries.
-func (d *Device) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
+func (n *Node) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
 ```
 
 This works for all operations — disaggregated (`CreateVLAN`) or composite (`DeliverComposite`) — because they all produce ChangeSets.
@@ -1062,7 +1062,7 @@ type NextHop struct {
 // GetRoute reads a route from APP_DB (Redis DB 0).
 // Returns nil if the prefix is not present (not an error — route
 // may not have converged yet).
-func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
 ```
 
 **ASIC_DB (Redis DB 1)** — routes programmed in the ASIC by `orchagent`:
@@ -1071,7 +1071,7 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 // GetRouteASIC reads a route from ASIC_DB by resolving the SAI
 // object chain (SAI_ROUTE_ENTRY → SAI_NEXT_HOP_GROUP → SAI_NEXT_HOP).
 // Returns nil if not programmed in ASIC.
-func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
 ```
 
 APP_DB tells you what FRR computed. ASIC_DB tells you what the hardware (or ASIC simulator) actually installed. The gap between them is `orchagent` processing.
@@ -1102,7 +1102,7 @@ These require topology-wide context and belong in the orchestrator (newtest).
 
 ### 4.10 CONFIG_DB Cache Architecture
 
-newtron maintains an in-memory snapshot of CONFIG_DB (`network.Device.configDB`) loaded at `Connect()` time. This section documents the cache lifecycle, the invariant that governs it, and its limitations.
+newtron maintains an in-memory snapshot of CONFIG_DB (`node.Node.configDB`) loaded at `Connect()` time. This section documents the cache lifecycle, the invariant that governs it, and its limitations.
 
 #### 4.10.1 Shared-Device Reality
 
@@ -1162,7 +1162,7 @@ Between a refresh and the code that reads the cache, an external actor can modif
 
 ### 5.1 Connection Flow
 
-When `Device.Connect()` is called, the connection path depends on whether SSH credentials are present in the device's `ResolvedProfile`:
+When `Node.Connect()` is called (which delegates to `sonic.Device.Connect()`), the connection path depends on whether SSH credentials are present in the device's `ResolvedProfile`:
 
 ```
                     Connect(ctx)
@@ -1197,7 +1197,7 @@ When `Device.Connect()` is called, the connection path depends on whether SSH cr
 
 ### 5.2 SSH Tunnel Implementation
 
-The `SSHTunnel` struct (`pkg/device/tunnel.go`) implements a TCP port forwarder over SSH:
+The `SSHTunnel` struct (`pkg/newtron/device/tunnel.go`) implements a TCP port forwarder over SSH:
 
 ```
                   Newtron Process                         SONiC Device
@@ -1224,7 +1224,7 @@ The `SSHTunnel` struct (`pkg/device/tunnel.go`) implements a TCP port forwarder 
 
 ### 5.3 Disconnect Sequence
 
-`Device.Disconnect()` tears down in order:
+`Node.Disconnect()` (which delegates to `sonic.Device.Disconnect()`) tears down in order:
 
 1. Release device lock if held (safety net — operations release locks after verify)
 2. Close ConfigDBClient (Redis connection)
@@ -1707,7 +1707,7 @@ All operations logged with:
 ### 12.3 Composite
 - Offline composite CONFIG_DB generation (no device connection required)
 - CompositeBuilder constructs the configuration programmatically
-- Delivery is a separate step: `Device.DeliverComposite(composite, mode)`
+- Delivery is a separate step: `Node.DeliverComposite(composite, mode)`
 - Two delivery modes: **overwrite** (full replace) or **merge** (interface services only)
 - Delivery uses Redis pipeline (MULTI/EXEC) for atomic application
 - Audit log entry created on delivery

@@ -296,7 +296,7 @@ type Runner struct {
 |-------|-------------|
 | `ScenariosDir` | Path to suite directory (e.g., `newtest/suites/2node-incremental`) |
 | `TopologiesDir` | Path to `newtest/topologies/` |
-| `Network` | Top-level `network.Network` object (owns devices, specs). Devices accessed via `r.Network.GetDevice(name)`, platforms via `r.Network.GetPlatform()`. |
+| `Network` | Top-level `network.Network` object (owns nodes, specs). Nodes accessed via `r.Network.GetNode(name)`, platforms via `r.Network.GetPlatform()`. |
 | `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
 | `ChangeSets` | Last ChangeSet per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce ChangeSets for the same device, only the latest is retained. Read by `verify-provisioning`. |
 | `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
@@ -604,9 +604,9 @@ when executors only set `Details`.
 ### 7.3 Multi-Device Helpers
 
 ```go
-func (r *Runner) executeForDevices(step *Step, fn func(dev *network.Device, name string) (*network.ChangeSet, string, error)) *StepOutput
-func (r *Runner) checkForDevices(step *Step, fn func(dev *network.Device, name string) (StepStatus, string)) *StepOutput
-func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *network.Device, name string) (done bool, msg string, err error)) *StepOutput
+func (r *Runner) executeForDevices(step *Step, fn func(dev *node.Node, name string) (*node.ChangeSet, string, error)) *StepOutput
+func (r *Runner) checkForDevices(step *Step, fn func(dev *node.Node, name string) (StepStatus, string)) *StepOutput
+func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *node.Node, name string) (done bool, msg string, err error)) *StepOutput
 ```
 
 Three patterns used by executors:
