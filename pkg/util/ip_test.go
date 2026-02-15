@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestParseIPWithMask(t *testing.T) {
+func Test_parseIPWithMask(t *testing.T) {
 	tests := []struct {
 		name        string
 		cidr        string
@@ -59,17 +59,17 @@ func TestParseIPWithMask(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ip, mask, err := ParseIPWithMask(tt.cidr)
+			ip, mask, err := parseIPWithMask(tt.cidr)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseIPWithMask() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("parseIPWithMask() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantErr {
 				if ip.String() != tt.wantIP {
-					t.Errorf("ParseIPWithMask() IP = %v, want %v", ip.String(), tt.wantIP)
+					t.Errorf("parseIPWithMask() IP = %v, want %v", ip.String(), tt.wantIP)
 				}
 				if mask != tt.wantMask {
-					t.Errorf("ParseIPWithMask() mask = %v, want %v", mask, tt.wantMask)
+					t.Errorf("parseIPWithMask() mask = %v, want %v", mask, tt.wantMask)
 				}
 			}
 		})
@@ -159,7 +159,7 @@ func TestComputeNeighborIP(t *testing.T) {
 	}
 }
 
-func TestComputeNetworkAddr(t *testing.T) {
+func Test_computeNetworkAddr(t *testing.T) {
 	tests := []struct {
 		name    string
 		ipStr   string
@@ -200,15 +200,15 @@ func TestComputeNetworkAddr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ComputeNetworkAddr(tt.ipStr, tt.maskLen)
+			got := computeNetworkAddr(tt.ipStr, tt.maskLen)
 			if got != tt.want {
-				t.Errorf("ComputeNetworkAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
+				t.Errorf("computeNetworkAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestComputeBroadcastAddr(t *testing.T) {
+func Test_computeBroadcastAddr(t *testing.T) {
 	tests := []struct {
 		name    string
 		ipStr   string
@@ -243,9 +243,9 @@ func TestComputeBroadcastAddr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ComputeBroadcastAddr(tt.ipStr, tt.maskLen)
+			got := computeBroadcastAddr(tt.ipStr, tt.maskLen)
 			if got != tt.want {
-				t.Errorf("ComputeBroadcastAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
+				t.Errorf("computeBroadcastAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
 			}
 		})
 	}
@@ -468,19 +468,19 @@ func TestComputeNeighborIP_IPv6(t *testing.T) {
 	}
 }
 
-func TestComputeNetworkAddr_IPv6(t *testing.T) {
+func Test_computeNetworkAddr_IPv6(t *testing.T) {
 	// IPv6 is not supported, should return empty string
-	got := ComputeNetworkAddr("2001:db8::1", 64)
+	got := computeNetworkAddr("2001:db8::1", 64)
 	if got != "" {
-		t.Errorf("ComputeNetworkAddr(IPv6) = %q, want empty", got)
+		t.Errorf("computeNetworkAddr(IPv6) = %q, want empty", got)
 	}
 }
 
-func TestComputeBroadcastAddr_IPv6(t *testing.T) {
+func Test_computeBroadcastAddr_IPv6(t *testing.T) {
 	// IPv6 is not supported, should return empty string
-	got := ComputeBroadcastAddr("2001:db8::1", 64)
+	got := computeBroadcastAddr("2001:db8::1", 64)
 	if got != "" {
-		t.Errorf("ComputeBroadcastAddr(IPv6) = %q, want empty", got)
+		t.Errorf("computeBroadcastAddr(IPv6) = %q, want empty", got)
 	}
 }
 

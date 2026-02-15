@@ -846,12 +846,6 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 	return cs, nil
 }
 
-// AddBGPNeighbor is an alias for AddLoopbackBGPNeighbor for backward compatibility.
-// Deprecated: Use AddLoopbackBGPNeighbor for clarity.
-func (n *Node) AddBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	return n.AddLoopbackBGPNeighbor(ctx, neighborIP, asn, description, evpn)
-}
-
 // RemoveBGPNeighbor removes a BGP neighbor from the device.
 // This works for both direct (interface-level) and indirect (loopback-level) neighbors.
 func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {

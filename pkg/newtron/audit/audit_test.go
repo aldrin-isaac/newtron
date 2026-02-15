@@ -238,11 +238,6 @@ func TestDefaultLogger(t *testing.T) {
 	// Clear default logger
 	SetDefaultLogger(nil)
 
-	// Log with no default should not error
-	if err := Log(testEvent("test", "test", "test")); err != nil {
-		t.Errorf("Log with nil default should not error: %v", err)
-	}
-
 	// Query with no default should return empty
 	results, err := Query(Filter{})
 	if err != nil {
@@ -268,8 +263,8 @@ func TestDefaultLogger(t *testing.T) {
 
 	SetDefaultLogger(logger)
 
-	// Now log and query should work
-	if err := Log(testEvent("alice", "leaf1", "test").withSuccess()); err != nil {
+	// Now log and query should work via default logger
+	if err := logger.Log(testEvent("alice", "leaf1", "test").withSuccess()); err != nil {
 		t.Errorf("Log failed: %v", err)
 	}
 

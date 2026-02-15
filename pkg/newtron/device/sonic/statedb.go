@@ -312,27 +312,6 @@ func (c *StateDBClient) ReleaseLock(device, holder string) error {
 	return nil
 }
 
-// GetLockHolder returns the current lock holder and acquisition time for the device.
-// Returns ("", zero, nil) if no lock is held.
-func (c *StateDBClient) GetLockHolder(device string) (string, time.Time, error) {
-	key := fmt.Sprintf("NEWTRON_LOCK|%s", device)
-
-	vals, err := c.client.HGetAll(c.ctx, key).Result()
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("getting lock holder for %s: %w", device, err)
-	}
-	if len(vals) == 0 {
-		return "", time.Time{}, nil
-	}
-
-	holder := vals["holder"]
-	acquired := time.Time{}
-	if ts, ok := vals["acquired"]; ok {
-		acquired, _ = time.Parse(time.RFC3339, ts)
-	}
-	return holder, acquired, nil
-}
-
 // parseVLANIDFromName extracts the numeric VLAN ID from a SONiC VLAN name
 // like "Vlan100". Returns 0 if the name is not a valid VLAN name.
 func parseVLANIDFromName(name string) int {

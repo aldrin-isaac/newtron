@@ -1,7 +1,6 @@
 package newtest
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -15,11 +14,11 @@ import (
 )
 
 // ============================================================================
-// DeviceSelector Tests
+// deviceSelector Tests
 // ============================================================================
 
 func TestDeviceSelector_Resolve_All(t *testing.T) {
-	ds := DeviceSelector{All: true}
+	ds := deviceSelector{All: true}
 	all := []string{"spine1", "leaf1", "leaf2"}
 	got := ds.Resolve(all)
 
@@ -33,7 +32,7 @@ func TestDeviceSelector_Resolve_All(t *testing.T) {
 }
 
 func TestDeviceSelector_Resolve_Specific(t *testing.T) {
-	ds := DeviceSelector{Devices: []string{"leaf1", "leaf2"}}
+	ds := deviceSelector{Devices: []string{"leaf1", "leaf2"}}
 	got := ds.Resolve(nil)
 
 	if len(got) != 2 || got[0] != "leaf1" || got[1] != "leaf2" {
@@ -43,7 +42,7 @@ func TestDeviceSelector_Resolve_Specific(t *testing.T) {
 
 func TestDeviceSelector_UnmarshalYAML_All(t *testing.T) {
 	// Simulate YAML unmarshaling by calling the method directly
-	ds := &DeviceSelector{}
+	ds := &deviceSelector{}
 	err := ds.UnmarshalYAML(func(v any) error {
 		if sp, ok := v.(*string); ok {
 			*sp = "all"
@@ -164,76 +163,9 @@ steps:
 // Validator Tests
 // ============================================================================
 
-func TestValidateScenario_MissingFields(t *testing.T) {
-	tests := []struct {
-		name    string
-		s       Scenario
-		wantErr bool
-	}{
-		{
-			name:    "empty name",
-			s:       Scenario{},
-			wantErr: true,
-		},
-		{
-			name:    "missing topology",
-			s:       Scenario{Name: "test"},
-			wantErr: true,
-		},
-		{
-			name:    "missing platform",
-			s:       Scenario{Name: "test", Topology: "2node"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateScenario(&tt.s, t.TempDir())
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateScenario() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestValidateScenario_ValidWithTopologyDir(t *testing.T) {
-	dir := t.TempDir()
-	topoDir := filepath.Join(dir, "2node")
-	if err := os.MkdirAll(topoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	s := Scenario{
-		Name:     "test",
-		Topology: "2node",
-		Platform: "sonic-vs",
-		Steps: []Step{
-			{Name: "wait", Action: ActionWait, Duration: 5 * time.Second},
-		},
-	}
-
-	if err := ValidateScenario(&s, dir); err != nil {
-		t.Errorf("ValidateScenario() unexpected error: %v", err)
-	}
-}
-
 func TestValidateStepFields_ProvisionRequiresDevices(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "2node"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	s := Scenario{
-		Name:     "test",
-		Topology: "2node",
-		Platform: "sonic-vs",
-		Steps: []Step{
-			{Name: "bad", Action: ActionProvision}, // no devices
-		},
-	}
-
-	if err := ValidateScenario(&s, dir); err == nil {
+	step := Step{Name: "bad", Action: ActionProvision} // no devices
+	if err := validateStepFields("test", 1, &step); err == nil {
 		t.Error("expected error for provision step without devices")
 	}
 }
@@ -500,32 +432,6 @@ func TestComputeOverallStatus(t *testing.T) {
 }
 
 // ============================================================================
-// Report Tests
-// ============================================================================
-
-func TestStatusSymbol(t *testing.T) {
-	tests := []struct {
-		status StepStatus
-		want   string
-	}{
-		{StepStatusPassed, "\u2713"},
-		{StepStatusFailed, "\u2717"},
-		{StepStatusSkipped, "\u2298"},
-		{StepStatusError, "!"},
-		{StepStatus("unknown"), "?"},
-	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.status), func(t *testing.T) {
-			got := statusSymbol(tt.status)
-			if got != tt.want {
-				t.Errorf("statusSymbol(%s) = %q, want %q", tt.status, got, tt.want)
-			}
-		})
-	}
-}
-
-// ============================================================================
 // topologicalSort Tests
 // ============================================================================
 
@@ -536,9 +442,9 @@ func TestTopologicalSort_Linear(t *testing.T) {
 		{Name: "a"},
 	}
 
-	sorted, err := TopologicalSort(scenarios)
+	sorted, err := topologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("TopologicalSort error: %v", err)
+		t.Fatalf("topologicalSort error: %v", err)
 	}
 
 	if len(sorted) != 3 {
@@ -565,9 +471,9 @@ func TestTopologicalSort_Diamond(t *testing.T) {
 		{Name: "a"},
 	}
 
-	sorted, err := TopologicalSort(scenarios)
+	sorted, err := topologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("TopologicalSort error: %v", err)
+		t.Fatalf("topologicalSort error: %v", err)
 	}
 
 	indexOf := make(map[string]int)
@@ -590,9 +496,9 @@ func TestTopologicalSort_NoDeps(t *testing.T) {
 		{Name: "z"},
 	}
 
-	sorted, err := TopologicalSort(scenarios)
+	sorted, err := topologicalSort(scenarios)
 	if err != nil {
-		t.Fatalf("TopologicalSort error: %v", err)
+		t.Fatalf("topologicalSort error: %v", err)
 	}
 	if len(sorted) != 3 {
 		t.Fatalf("expected 3 scenarios, got %d", len(sorted))
@@ -609,7 +515,7 @@ func TestTopologicalSort_Cycle(t *testing.T) {
 		{Name: "b", Requires: []string{"a"}},
 	}
 
-	_, err := TopologicalSort(scenarios)
+	_, err := topologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -623,7 +529,7 @@ func TestTopologicalSort_SelfCycle(t *testing.T) {
 		{Name: "a", Requires: []string{"a"}},
 	}
 
-	_, err := TopologicalSort(scenarios)
+	_, err := topologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -636,7 +542,7 @@ func TestTopologicalSort_ThreeNodeCycle(t *testing.T) {
 		{Name: "c", Requires: []string{"b"}},
 	}
 
-	_, err := TopologicalSort(scenarios)
+	_, err := topologicalSort(scenarios)
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -875,30 +781,6 @@ func TestSharedTopology(t *testing.T) {
 // Report with SkipReason Tests
 // ============================================================================
 
-func TestPrintConsole_SkipReason(t *testing.T) {
-	results := []*ScenarioResult{
-		{
-			Name:       "skipped-test",
-			Topology:   "2node",
-			Platform:   "sonic-vpp",
-			Status:     StepStatusSkipped,
-			SkipReason: "requires 'provision' which failed",
-		},
-	}
-
-	gen := &ReportGenerator{Results: results}
-	var buf bytes.Buffer
-	gen.PrintConsole(&buf)
-
-	output := buf.String()
-	if !strings.Contains(output, "skipped") {
-		t.Errorf("expected 'skipped' in output, got: %s", output)
-	}
-	if !strings.Contains(output, "requires 'provision' which failed") {
-		t.Errorf("expected skip reason in output, got: %s", output)
-	}
-}
-
 func TestWriteJUnit_SkipReason(t *testing.T) {
 	results := []*ScenarioResult{
 		{
@@ -1014,78 +896,6 @@ steps:
 	}
 	if s.Repeat != 0 {
 		t.Errorf("Repeat = %d, want 0 (default)", s.Repeat)
-	}
-}
-
-func TestPrintConsole_RepeatPass(t *testing.T) {
-	results := []*ScenarioResult{
-		{
-			Name:     "service-churn",
-			Topology: "2node",
-			Platform: "sonic-vpp",
-			Status:   StepStatusPassed,
-			Duration: 5 * time.Minute,
-			Repeat:   10,
-			Steps: func() []StepResult {
-				var steps []StepResult
-				for i := 1; i <= 10; i++ {
-					steps = append(steps,
-						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
-						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
-					)
-				}
-				return steps
-			}(),
-		},
-	}
-
-	gen := &ReportGenerator{Results: results}
-	var buf bytes.Buffer
-	gen.PrintConsole(&buf)
-
-	output := buf.String()
-	if !strings.Contains(output, "10/10 iterations passed") {
-		t.Errorf("expected '10/10 iterations passed' in output, got: %s", output)
-	}
-}
-
-func TestPrintConsole_RepeatFail(t *testing.T) {
-	results := []*ScenarioResult{
-		{
-			Name:            "service-churn",
-			Topology:        "2node",
-			Platform:        "sonic-vpp",
-			Status:          StepStatusFailed,
-			Duration:        2 * time.Minute,
-			Repeat:          10,
-			FailedIteration: 5,
-			Steps: func() []StepResult {
-				var steps []StepResult
-				for i := 1; i <= 4; i++ {
-					steps = append(steps,
-						StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
-						StepResult{Name: "remove", Action: ActionSSHCommand, Status: StepStatusPassed, Iteration: i},
-					)
-				}
-				// Iteration 5 fails on apply
-				steps = append(steps,
-					StepResult{Name: "apply", Action: ActionSSHCommand, Status: StepStatusFailed, Iteration: 5, Message: "service binding not found"},
-				)
-				return steps
-			}(),
-		},
-	}
-
-	gen := &ReportGenerator{Results: results}
-	var buf bytes.Buffer
-	gen.PrintConsole(&buf)
-
-	output := buf.String()
-	if !strings.Contains(output, "failed on iteration 5/10") {
-		t.Errorf("expected 'failed on iteration 5/10' in output, got: %s", output)
-	}
-	if !strings.Contains(output, "service binding not found") {
-		t.Errorf("expected failure message in output, got: %s", output)
 	}
 }
 
@@ -1222,12 +1032,6 @@ func TestBoolParam(t *testing.T) {
 // ============================================================================
 
 func TestValidateStepFields_NewActions(t *testing.T) {
-	dir := t.TempDir()
-	topoDir := filepath.Join(dir, "2node")
-	if err := os.MkdirAll(topoDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	tests := []struct {
 		name    string
 		step    Step
@@ -1237,56 +1041,56 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// set-interface
 		{
 			name:    "set-interface valid",
-			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0", Params: map[string]any{"property": "mtu", "value": "9000"}},
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0", Params: map[string]any{"property": "mtu", "value": "9000"}},
 			wantErr: false,
 		},
 		{
 			name:    "set-interface missing interface",
-			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"property": "mtu"}},
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"property": "mtu"}},
 			wantErr: true, errMsg: "interface is required",
 		},
 		{
 			name:    "set-interface missing property",
-			step:    Step{Name: "s", Action: ActionSetInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			step:    Step{Name: "s", Action: ActionSetInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
 			wantErr: true, errMsg: "params.property is required",
 		},
 		// create-vlan
 		{
 			name:    "create-vlan valid",
-			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: false,
 		},
 		{
 			name:    "create-vlan missing vlan_id",
-			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.vlan_id is required",
 		},
 		// add-vlan-member
 		{
 			name:    "add-vlan-member missing interface",
-			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		// create-vrf
 		{
 			name:    "create-vrf valid",
-			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: false,
 		},
 		{
 			name:    "create-vrf missing vrf",
-			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		// setup-evpn
 		{
 			name:    "setup-evpn valid",
-			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
 			name:    "setup-evpn missing source_ip",
-			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.source_ip is required",
 		},
 		{
@@ -1297,212 +1101,212 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// add-vrf-interface
 		{
 			name:    "add-vrf-interface valid",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
 			wantErr: false,
 		},
 		{
 			name:    "add-vrf-interface missing vrf",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		{
 			name:    "add-vrf-interface missing interface",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		// remove-vrf-interface
 		{
 			name:    "remove-vrf-interface valid",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
 			wantErr: false,
 		},
 		{
 			name:    "remove-vrf-interface missing vrf",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		{
 			name:    "remove-vrf-interface missing interface",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		// bind-ipvpn
 		{
 			name:    "bind-ipvpn valid",
-			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"}},
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"}},
 			wantErr: false,
 		},
 		{
 			name:    "bind-ipvpn missing vrf",
-			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"ipvpn": "customer-a"}},
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"ipvpn": "customer-a"}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		{
 			name:    "bind-ipvpn missing ipvpn",
-			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: true, errMsg: "params.ipvpn is required",
 		},
 		// unbind-ipvpn
 		{
 			name:    "unbind-ipvpn valid",
-			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: false,
 		},
 		{
 			name:    "unbind-ipvpn missing vrf",
-			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		// bind-macvpn
 		{
 			name:    "bind-macvpn valid",
-			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "macvpn": "office-lan"}},
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "macvpn": "office-lan"}},
 			wantErr: false,
 		},
 		{
 			name:    "bind-macvpn missing vlan_id",
-			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"macvpn": "office-lan"}},
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"macvpn": "office-lan"}},
 			wantErr: true, errMsg: "params.vlan_id is required",
 		},
 		{
 			name:    "bind-macvpn missing macvpn",
-			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: true, errMsg: "params.macvpn is required",
 		},
 		// unbind-macvpn
 		{
 			name:    "unbind-macvpn valid",
-			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: false,
 		},
 		{
 			name:    "unbind-macvpn missing vlan_id",
-			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.vlan_id is required",
 		},
 		// add-static-route
 		{
 			name:    "add-static-route valid",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
 			name:    "add-static-route missing vrf",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		{
 			name:    "add-static-route missing prefix",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "next_hop": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "next_hop": "10.0.0.1"}},
 			wantErr: true, errMsg: "params.prefix is required",
 		},
 		{
 			name:    "add-static-route missing next_hop",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
 			wantErr: true, errMsg: "params.next_hop is required",
 		},
 		// remove-static-route
 		{
 			name:    "remove-static-route valid",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
 			wantErr: false,
 		},
 		{
 			name:    "remove-static-route missing vrf",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24"}},
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24"}},
 			wantErr: true, errMsg: "params.vrf is required",
 		},
 		{
 			name:    "remove-static-route missing prefix",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
 			wantErr: true, errMsg: "params.prefix is required",
 		},
 		// remove-vlan-member
 		{
 			name:    "remove-vlan-member valid",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "interface": "Ethernet0"}},
 			wantErr: false,
 		},
 		{
 			name:    "remove-vlan-member missing vlan_id",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
 			wantErr: true, errMsg: "params.vlan_id is required",
 		},
 		{
 			name:    "remove-vlan-member missing interface",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		// apply-qos
 		{
 			name:    "apply-qos valid",
-			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"}},
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"}},
 			wantErr: false,
 		},
 		{
 			name:    "apply-qos missing interface",
-			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"qos_policy": "8q-datacenter"}},
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"qos_policy": "8q-datacenter"}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		{
 			name:    "apply-qos missing qos_policy",
-			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
 			wantErr: true, errMsg: "params.qos_policy is required",
 		},
 		// remove-qos
 		{
 			name:    "remove-qos valid",
-			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
 			wantErr: false,
 		},
 		{
 			name:    "remove-qos missing interface",
-			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.interface is required",
 		},
 		// configure-svi
 		{
 			name:    "configure-svi valid",
-			step:    Step{Name: "s", Action: ActionConfigureSVI, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionConfigureSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
 			wantErr: false,
 		},
 		// bgp-add-neighbor
 		{
 			name:    "bgp-add-neighbor valid",
-			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"remote_asn": 65000, "neighbor_ip": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"remote_asn": 65000, "neighbor_ip": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
 			name:    "bgp-add-neighbor missing remote_asn",
-			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionBGPAddNeighbor, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.remote_asn is required",
 		},
 		// bgp-remove-neighbor
 		{
 			name:    "bgp-remove-neighbor valid",
-			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"neighbor_ip": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"neighbor_ip": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
 			name:    "bgp-remove-neighbor missing neighbor_ip",
-			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionBGPRemoveNeighbor, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "params.neighbor_ip is required",
 		},
 		// refresh-service
 		{
 			name:    "refresh-service valid",
-			step:    Step{Name: "s", Action: ActionRefreshService, Devices: DeviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			step:    Step{Name: "s", Action: ActionRefreshService, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
 			wantErr: false,
 		},
 		{
 			name:    "refresh-service missing interface",
-			step:    Step{Name: "s", Action: ActionRefreshService, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionRefreshService, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: true, errMsg: "interface is required",
 		},
 		// cleanup
 		{
 			name:    "cleanup valid",
-			step:    Step{Name: "s", Action: ActionCleanup, Devices: DeviceSelector{Devices: []string{"leaf1"}}},
+			step:    Step{Name: "s", Action: ActionCleanup, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: false,
 		},
 		{
@@ -1514,13 +1318,7 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := Scenario{
-				Name:     "test",
-				Topology: "2node",
-				Platform: "sonic-vpp",
-				Steps:    []Step{tt.step},
-			}
-			err := ValidateScenario(&s, dir)
+			err := validateStepFields("test", 1, &tt.step)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -1882,7 +1680,7 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 				Action:  action,
 				Name:    "test-" + string(action),
 				Params:  map[string]any{},
-				Devices: DeviceSelector{Devices: []string{"leaf1"}},
+				Devices: deviceSelector{Devices: []string{"leaf1"}},
 			}
 
 			// The executor will panic at r.Network (nil dereference) when
@@ -1917,7 +1715,7 @@ func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
 		Action:  ActionBindIPVPN,
 		Name:    "test-bind-ipvpn",
 		Params:  map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"},
-		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+		Devices: deviceSelector{Devices: []string{"leaf1"}},
 	}
 	func() {
 		defer func() {
@@ -1943,7 +1741,7 @@ func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
 		Action:  ActionBindMACVPN,
 		Name:    "test-bind-macvpn",
 		Params:  map[string]any{"vlan_id": 100, "macvpn": "office-lan"},
-		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+		Devices: deviceSelector{Devices: []string{"leaf1"}},
 	}
 	func() {
 		defer func() {
@@ -1968,7 +1766,7 @@ func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
 		Action:  ActionApplyQoS,
 		Name:    "test-apply-qos",
 		Params:  map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"},
-		Devices: DeviceSelector{Devices: []string{"leaf1"}},
+		Devices: deviceSelector{Devices: []string{"leaf1"}},
 	}
 	func() {
 		defer func() {
@@ -2017,11 +1815,11 @@ func TestWaitExecutor_ContextCancelled(t *testing.T) {
 }
 
 // ============================================================================
-// DeviceSelector Additional Edge Cases (TE-01)
+// deviceSelector Additional Edge Cases (TE-01)
 // ============================================================================
 
 func TestDeviceSelector_Resolve_AllEmpty(t *testing.T) {
-	ds := DeviceSelector{All: true}
+	ds := deviceSelector{All: true}
 	got := ds.Resolve(nil)
 	if len(got) != 0 {
 		t.Errorf("Resolve(all, nil) returned %d devices, want 0", len(got))
@@ -2029,7 +1827,7 @@ func TestDeviceSelector_Resolve_AllEmpty(t *testing.T) {
 }
 
 func TestDeviceSelector_Resolve_AllPreservesOriginal(t *testing.T) {
-	ds := DeviceSelector{All: true}
+	ds := deviceSelector{All: true}
 	original := []string{"spine1", "leaf1", "leaf2"}
 	_ = ds.Resolve(original)
 	// Original should not be modified (Resolve copies before sort)

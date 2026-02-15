@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// ParseIPWithMask parses an IP address with CIDR notation
+// parseIPWithMask parses an IP address with CIDR notation
 // Returns the IP, mask length, and any error
-func ParseIPWithMask(cidr string) (net.IP, int, error) {
+func parseIPWithMask(cidr string) (net.IP, int, error) {
 	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("invalid CIDR notation: %s", cidr)
@@ -54,8 +54,8 @@ func ComputeNeighborIP(localIP string, maskLen int) string {
 	return ip.String()
 }
 
-// ComputeNetworkAddr returns the network address for a given IP and mask
-func ComputeNetworkAddr(ipStr string, maskLen int) string {
+// computeNetworkAddr returns the network address for a given IP and mask
+func computeNetworkAddr(ipStr string, maskLen int) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return ""
@@ -70,8 +70,8 @@ func ComputeNetworkAddr(ipStr string, maskLen int) string {
 	return network.String()
 }
 
-// ComputeBroadcastAddr returns the broadcast address for a given IP and mask
-func ComputeBroadcastAddr(ipStr string, maskLen int) string {
+// computeBroadcastAddr returns the broadcast address for a given IP and mask
+func computeBroadcastAddr(ipStr string, maskLen int) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return ""

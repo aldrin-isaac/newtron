@@ -258,15 +258,6 @@ func getDefaultLogger() Logger {
 	return v.(loggerHolder).logger
 }
 
-// Log logs an event using the default logger
-func Log(event *Event) error {
-	l := getDefaultLogger()
-	if l == nil {
-		return nil // No-op if no logger configured
-	}
-	return l.Log(event)
-}
-
 // Query queries events from the default logger
 func Query(filter Filter) ([]*Event, error) {
 	l := getDefaultLogger()

@@ -135,26 +135,6 @@ func TestDeriveACLName(t *testing.T) {
 	}
 }
 
-func TestIsPointToPoint(t *testing.T) {
-	tests := []struct {
-		maskLen int
-		want    bool
-	}{
-		{30, true},
-		{31, true},
-		{24, false},
-		{32, false},
-		{29, false},
-	}
-
-	for _, tt := range tests {
-		got := IsPointToPoint(tt.maskLen)
-		if got != tt.want {
-			t.Errorf("IsPointToPoint(%d) = %v, want %v", tt.maskLen, got, tt.want)
-		}
-	}
-}
-
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -269,39 +249,6 @@ func TestMergeMaps(t *testing.T) {
 			got := MergeMaps(tt.maps...)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MergeMaps() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMergeStringSlices(t *testing.T) {
-	tests := []struct {
-		name   string
-		slices [][]string
-		want   []string
-	}{
-		{
-			name:   "with duplicates",
-			slices: [][]string{{"a", "b"}, {"b", "c"}, {"c", "d"}},
-			want:   []string{"a", "b", "c", "d"},
-		},
-		{
-			name:   "no duplicates",
-			slices: [][]string{{"a"}, {"b"}, {"c"}},
-			want:   []string{"a", "b", "c"},
-		},
-		{
-			name:   "empty",
-			slices: [][]string{},
-			want:   nil,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := MergeStringSlices(tt.slices...)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("MergeStringSlices() = %v, want %v", got, tt.want)
 			}
 		})
 	}

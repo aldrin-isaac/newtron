@@ -27,14 +27,14 @@ func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, 
 	d := &DerivedValues{}
 
 	if ipWithMask != "" {
-		ip, mask, err := ParseIPWithMask(ipWithMask)
+		ip, mask, err := parseIPWithMask(ipWithMask)
 		if err != nil {
 			return nil, err
 		}
 
 		d.SubnetMask = mask
-		d.NetworkAddr = ComputeNetworkAddr(ip.String(), mask)
-		d.BroadcastAddr = ComputeBroadcastAddr(ip.String(), mask)
+		d.NetworkAddr = computeNetworkAddr(ip.String(), mask)
+		d.BroadcastAddr = computeBroadcastAddr(ip.String(), mask)
 		d.NeighborIP = ComputeNeighborIP(ip.String(), mask)
 	}
 
@@ -76,11 +76,6 @@ func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 // Multiple interfaces using the same service share the same ACL.
 func DeriveACLName(serviceName, direction string) string {
 	return serviceName + "-" + direction
-}
-
-// IsPointToPoint returns true if the mask length indicates a p2p link
-func IsPointToPoint(maskLen int) bool {
-	return maskLen == 30 || maskLen == 31
 }
 
 // ParseInterfaceName extracts interface type and number
@@ -185,17 +180,3 @@ func MergeMaps[K comparable, V any](maps ...map[K]V) map[K]V {
 	return result
 }
 
-// MergeStringSlices merges string slices, removing duplicates
-func MergeStringSlices(slices ...[]string) []string {
-	seen := make(map[string]bool)
-	var result []string
-	for _, slice := range slices {
-		for _, s := range slice {
-			if !seen[s] {
-				seen[s] = true
-				result = append(result, s)
-			}
-		}
-	}
-	return result
-}

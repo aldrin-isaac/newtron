@@ -21,10 +21,10 @@ type ProgressReporter interface {
 	SuiteEnd(results []*ScenarioResult, duration time.Duration)
 }
 
-// ConsoleProgress is an append-only terminal progress reporter.
+// consoleProgress is an append-only terminal progress reporter.
 // It never uses ANSI cursor rewriting, so output is safe for pipes, CI,
 // and scrollback buffers.
-type ConsoleProgress struct {
+type consoleProgress struct {
 	W       io.Writer
 	Verbose bool
 
@@ -32,15 +32,15 @@ type ConsoleProgress struct {
 	dotWidth  int
 }
 
-// NewConsoleProgress creates a ConsoleProgress writing to stdout.
-func NewConsoleProgress(verbose bool) *ConsoleProgress {
-	return &ConsoleProgress{
+// NewConsoleProgress creates a consoleProgress writing to stdout.
+func NewConsoleProgress(verbose bool) ProgressReporter {
+	return &consoleProgress{
 		W:       os.Stdout,
 		Verbose: verbose,
 	}
 }
 
-func (p *ConsoleProgress) SuiteStart(scenarios []*Scenario) {
+func (p *consoleProgress) SuiteStart(scenarios []*Scenario) {
 	if len(scenarios) == 0 {
 		return
 	}
@@ -70,13 +70,13 @@ func (p *ConsoleProgress) SuiteStart(scenarios []*Scenario) {
 	fmt.Fprintln(p.W)
 }
 
-func (p *ConsoleProgress) ScenarioStart(name string, index, total int) {
+func (p *consoleProgress) ScenarioStart(name string, index, total int) {
 	if p.Verbose {
 		fmt.Fprintf(p.W, "  [%d/%d]  %s\n", index+1, total, name)
 	}
 }
 
-func (p *ConsoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) {
+func (p *consoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) {
 	tag := fmt.Sprintf("[%d/%d]", index+1, total)
 
 	if p.Verbose {
@@ -102,11 +102,11 @@ func (p *ConsoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) 
 	}
 }
 
-func (p *ConsoleProgress) StepStart(scenario string, step *Step, index, total int) {
+func (p *consoleProgress) StepStart(scenario string, step *Step, index, total int) {
 	// Only show in verbose mode
 }
 
-func (p *ConsoleProgress) StepEnd(scenario string, result *StepResult, index, total int) {
+func (p *consoleProgress) StepEnd(scenario string, result *StepResult, index, total int) {
 	if !p.Verbose {
 		return
 	}
@@ -128,7 +128,7 @@ func (p *ConsoleProgress) StepEnd(scenario string, result *StepResult, index, to
 	}
 }
 
-func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
+func (p *consoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
 	passed, failed, skipped, errored := 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
@@ -217,7 +217,7 @@ func (p *ConsoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Dura
 	fmt.Fprintln(p.W)
 }
 
-func (p *ConsoleProgress) colorStatus(s StepStatus) string {
+func (p *consoleProgress) colorStatus(s StepStatus) string {
 	switch s {
 	case StepStatusPassed:
 		return cli.Green(string(s))
@@ -232,7 +232,7 @@ func (p *ConsoleProgress) colorStatus(s StepStatus) string {
 	}
 }
 
-func (p *ConsoleProgress) formatDuration(d time.Duration) string {
+func (p *consoleProgress) formatDuration(d time.Duration) string {
 	if d < time.Second {
 		return "<1s"
 	}

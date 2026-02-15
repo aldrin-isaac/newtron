@@ -3,7 +3,6 @@ package newtest
 import (
 	"encoding/xml"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,102 +55,6 @@ type DeviceResult struct {
 // ReportGenerator produces test reports from scenario results.
 type ReportGenerator struct {
 	Results []*ScenarioResult
-}
-
-// statusSymbol returns the console symbol for a status.
-func statusSymbol(s StepStatus) string {
-	switch s {
-	case StepStatusPassed:
-		return "\u2713" // ✓
-	case StepStatusFailed:
-		return "\u2717" // ✗
-	case StepStatusSkipped:
-		return "\u2298" // ⊘
-	case StepStatusError:
-		return "!"
-	default:
-		return "?"
-	}
-}
-
-// PrintConsole writes human-readable output to w.
-func (g *ReportGenerator) PrintConsole(w io.Writer) {
-	for _, r := range g.Results {
-		fmt.Fprintf(w, "\nnewtest: %s (%s topology, %s)\n\n", r.Name, r.Topology, r.Platform)
-
-		if r.Status == StepStatusSkipped && r.SkipReason != "" {
-			fmt.Fprintf(w, "  %s skipped: %s\n\n", statusSymbol(StepStatusSkipped), r.SkipReason)
-			continue
-		}
-
-		if r.DeployError != nil {
-			fmt.Fprintf(w, "  ! Deploy failed: %s\n\n", r.DeployError)
-			continue
-		}
-
-		if r.Repeat > 1 {
-			g.printRepeatConsole(w, r)
-		} else {
-			g.printStepsConsole(w, r)
-		}
-	}
-}
-
-// printStepsConsole prints step details for a single-run scenario.
-func (g *ReportGenerator) printStepsConsole(w io.Writer, r *ScenarioResult) {
-	fmt.Fprintf(w, "Running steps...\n")
-	for i, step := range r.Steps {
-		fmt.Fprintf(w, "  [%d/%d] %s\n", i+1, len(r.Steps), step.Name)
-		if len(step.Details) > 0 {
-			for _, d := range step.Details {
-				fmt.Fprintf(w, "    %s %s: %s\n", statusSymbol(d.Status), d.Device, d.Message)
-			}
-		} else if step.Message != "" {
-			fmt.Fprintf(w, "    %s %s\n", statusSymbol(step.Status), step.Message)
-		}
-		fmt.Fprintln(w)
-	}
-
-	passed := 0
-	for _, s := range r.Steps {
-		if s.Status == StepStatusPassed {
-			passed++
-		}
-	}
-	fmt.Fprintf(w, "%s: %s (%d/%d steps passed, %s)\n\n",
-		r.Status, r.Name, passed, len(r.Steps), r.Duration.Round(time.Second))
-}
-
-// printRepeatConsole prints a concise summary for repeated scenarios.
-// Only shows step details for the failed iteration (if any).
-func (g *ReportGenerator) printRepeatConsole(w io.Writer, r *ScenarioResult) {
-	if r.FailedIteration > 0 {
-		// Show which iteration failed and its step details
-		fmt.Fprintf(w, "Running %d iterations...\n", r.Repeat)
-		fmt.Fprintf(w, "  %s iterations 1-%d passed\n", statusSymbol(StepStatusPassed), r.FailedIteration-1)
-		fmt.Fprintf(w, "  %s iteration %d:\n", statusSymbol(StepStatusFailed), r.FailedIteration)
-
-		for _, step := range r.Steps {
-			if step.Iteration != r.FailedIteration {
-				continue
-			}
-			fmt.Fprintf(w, "    [%s] %s", statusSymbol(step.Status), step.Name)
-			if step.Message != "" && step.Status != StepStatusPassed {
-				fmt.Fprintf(w, ": %s", step.Message)
-			}
-			fmt.Fprintln(w)
-			for _, d := range step.Details {
-				if d.Status != StepStatusPassed {
-					fmt.Fprintf(w, "      %s %s: %s\n", statusSymbol(d.Status), d.Device, d.Message)
-				}
-			}
-		}
-		fmt.Fprintf(w, "\n%s: %s (failed on iteration %d/%d, %s)\n\n",
-			r.Status, r.Name, r.FailedIteration, r.Repeat, r.Duration.Round(time.Second))
-	} else {
-		fmt.Fprintf(w, "%s: %s (%d/%d iterations passed, %s)\n\n",
-			r.Status, r.Name, r.Repeat, r.Repeat, r.Duration.Round(time.Second))
-	}
 }
 
 // WriteMarkdown writes a markdown report to the given path.

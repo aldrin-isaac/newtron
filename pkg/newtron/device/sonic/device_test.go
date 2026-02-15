@@ -363,25 +363,6 @@ func TestVRFState_Structure(t *testing.T) {
 	}
 }
 
-func TestInterfaceSummary_Structure(t *testing.T) {
-	summary := device.InterfaceSummary{
-		Name:        "Ethernet0",
-		AdminStatus: "up",
-		Speed:       "100G",
-		IPAddress:   "10.1.1.1/30",
-		VRF:         "Vrf_CUST1",
-		Service:     "customer-l3",
-		LAGMember:   "",
-	}
-
-	if summary.Name != "Ethernet0" {
-		t.Errorf("Name = %q", summary.Name)
-	}
-	if summary.Service != "customer-l3" {
-		t.Errorf("Service = %q", summary.Service)
-	}
-}
-
 func TestPopulateDeviceState_NilStateDB(t *testing.T) {
 	configDB := newEmptyConfigDB()
 	configDB.Port["Ethernet0"] = PortEntry{AdminStatus: "up", Speed: "100000", MTU: "9100"}

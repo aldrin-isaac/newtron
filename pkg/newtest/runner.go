@@ -312,12 +312,12 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 // Skip propagation is still applied based on requires.
 func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error) {
 	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
-		return r.RunScenario(ctx, sc, opts)
+		return r.runScenario(ctx, sc, opts)
 	})
 }
 
-// RunScenario executes a single scenario end-to-end.
-func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error) {
+// runScenario executes a single scenario end-to-end.
+func (r *Runner) runScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error) {
 	r.opts = opts
 	r.scenario = scenario
 

@@ -37,7 +37,6 @@ const (
 	PermVRFModify Permission = "vrf.modify"
 	PermVRFDelete Permission = "vrf.delete"
 
-	PermBaselineApply  Permission = "baseline.apply"
 	PermDeviceCleanup  Permission = "device.cleanup"
 
 	PermSpecAuthor Permission = "spec.author"

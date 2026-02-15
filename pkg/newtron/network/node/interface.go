@@ -117,26 +117,6 @@ func (i *Interface) HasService() bool {
 	return i.serviceName != ""
 }
 
-// ServiceIP returns the IP address assigned by the service.
-func (i *Interface) ServiceIP() string {
-	return i.serviceIP
-}
-
-// ServiceVRF returns the VRF name created/bound by the service.
-func (i *Interface) ServiceVRF() string {
-	return i.serviceVRF
-}
-
-// ServiceIPVPN returns the IP-VPN name bound by the service.
-func (i *Interface) ServiceIPVPN() string {
-	return i.serviceIPVPN
-}
-
-// ServiceMACVPN returns the MAC-VPN name bound by the service.
-func (i *Interface) ServiceMACVPN() string {
-	return i.serviceMACVPN
-}
-
 // IngressACL returns the name of the ingress ACL bound to this interface.
 func (i *Interface) IngressACL() string {
 	return i.ingressACL
@@ -243,11 +223,6 @@ func (i *Interface) BGPNeighbors() []string {
 // Interface Type Detection
 // ============================================================================
 
-// IsPhysical returns true if this is a physical interface (Ethernet*).
-func (i *Interface) IsPhysical() bool {
-	return strings.HasPrefix(i.name, "Ethernet")
-}
-
 // IsPortChannel returns true if this is a port channel (PortChannel*).
 func (i *Interface) IsPortChannel() bool {
 	return strings.HasPrefix(i.name, "PortChannel")
@@ -256,11 +231,6 @@ func (i *Interface) IsPortChannel() bool {
 // IsVLAN returns true if this is a VLAN interface (Vlan*).
 func (i *Interface) IsVLAN() bool {
 	return strings.HasPrefix(i.name, "Vlan")
-}
-
-// IsLoopback returns true if this is a loopback interface.
-func (i *Interface) IsLoopback() bool {
-	return strings.HasPrefix(i.name, "Loopback")
 }
 
 // ============================================================================

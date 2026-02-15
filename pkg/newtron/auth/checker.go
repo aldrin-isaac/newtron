@@ -28,23 +28,13 @@ func NewChecker(network *spec.NetworkSpecFile) *Checker {
 	}
 }
 
-// SetUser overrides the current user (for testing or sudo)
-func (c *Checker) SetUser(username string) {
-	c.currentUser = username
-}
-
-// CurrentUser returns the current username
-func (c *Checker) CurrentUser() string {
-	return c.currentUser
-}
-
 // Check verifies if the current user has a permission
 func (c *Checker) Check(permission Permission, ctx *Context) error {
-	return c.CheckUser(c.currentUser, permission, ctx)
+	return c.checkUser(c.currentUser, permission, ctx)
 }
 
-// CheckUser verifies if a specific user has a permission
-func (c *Checker) CheckUser(username string, permission Permission, ctx *Context) error {
+// checkUser verifies if a specific user has a permission
+func (c *Checker) checkUser(username string, permission Permission, ctx *Context) error {
 	// Superusers can do anything
 	if c.isSuperUser(username) {
 		return nil
@@ -69,11 +59,6 @@ func (c *Checker) CheckUser(username string, permission Permission, ctx *Context
 		Permission: permission,
 		Context:    ctx,
 	}
-}
-
-// IsSuperUser returns true if the current user is a superuser
-func (c *Checker) IsSuperUser() bool {
-	return c.isSuperUser(c.currentUser)
 }
 
 func (c *Checker) isSuperUser(username string) bool {

@@ -26,7 +26,7 @@ type Scenario struct {
 type Step struct {
 	Name    string         `yaml:"name"`
 	Action  StepAction     `yaml:"action"`
-	Devices DeviceSelector `yaml:"devices,omitempty"`
+	Devices deviceSelector `yaml:"devices,omitempty"`
 
 	// wait
 	Duration time.Duration `yaml:"duration,omitempty"`
@@ -115,17 +115,17 @@ func init() {
 	}
 }
 
-// DeviceSelector handles the two YAML forms for the "devices" field:
+// deviceSelector handles the two YAML forms for the "devices" field:
 //
 //	devices: all           → All: true
 //	devices: [leaf1, leaf2] → Devices: ["leaf1", "leaf2"]
-type DeviceSelector struct {
+type deviceSelector struct {
 	All     bool
 	Devices []string
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler.
-func (ds *DeviceSelector) UnmarshalYAML(unmarshal func(any) error) error {
+func (ds *deviceSelector) UnmarshalYAML(unmarshal func(any) error) error {
 	var s string
 	if err := unmarshal(&s); err == nil {
 		if s == "all" {
@@ -139,7 +139,7 @@ func (ds *DeviceSelector) UnmarshalYAML(unmarshal func(any) error) error {
 
 // Resolve returns the list of device names to target.
 // If All is true, returns allDevices sorted for deterministic ordering.
-func (ds *DeviceSelector) Resolve(allDevices []string) []string {
+func (ds *deviceSelector) Resolve(allDevices []string) []string {
 	if ds.All {
 		sorted := make([]string, len(allDevices))
 		copy(sorted, allDevices)

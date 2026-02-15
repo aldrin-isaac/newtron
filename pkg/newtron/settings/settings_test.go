@@ -44,19 +44,6 @@ func TestSettings_FieldAssignment(t *testing.T) {
 	}
 }
 
-func TestSettings_Clear(t *testing.T) {
-	s := &Settings{
-		DefaultNetwork: "test",
-		SpecDir:        "/path",
-	}
-
-	s.Clear()
-
-	if s.DefaultNetwork != "" || s.SpecDir != "" {
-		t.Error("Clear() should reset all fields to empty")
-	}
-}
-
 func TestSettings_SaveLoad(t *testing.T) {
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "newtron-test-*")

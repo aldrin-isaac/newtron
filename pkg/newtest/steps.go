@@ -16,8 +16,8 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// StepExecutor executes a single step and returns output.
-type StepExecutor interface {
+// stepExecutor executes a single step and returns output.
+type stepExecutor interface {
 	Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
 }
 
@@ -28,7 +28,7 @@ type StepOutput struct {
 }
 
 // executors maps each StepAction to its executor implementation.
-var executors = map[StepAction]StepExecutor{
+var executors = map[StepAction]stepExecutor{
 	ActionProvision:          &provisionExecutor{},
 	ActionWait:               &waitExecutor{},
 	ActionVerifyProvisioning: &verifyProvisioningExecutor{},

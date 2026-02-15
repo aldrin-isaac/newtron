@@ -12,10 +12,10 @@ import (
 
 // Default timeouts and poll intervals for verify actions.
 const (
-	DefaultVerifyTimeout  = 120 * time.Second
-	DefaultRouteTimeout   = 60 * time.Second
-	DefaultPingTimeout    = 30 * time.Second
-	DefaultPollInterval   = 5 * time.Second
+	defaultVerifyTimeout  = 120 * time.Second
+	defaultRouteTimeout   = 60 * time.Second
+	defaultPingTimeout    = 30 * time.Second
+	defaultPollInterval   = 5 * time.Second
 )
 
 // ParseScenario reads a YAML scenario file and returns a validated Scenario.
@@ -53,40 +53,6 @@ func ParseAllScenarios(dir string) ([]*Scenario, error) {
 		scenarios = append(scenarios, s)
 	}
 	return scenarios, nil
-}
-
-// ValidateScenario checks that a scenario is well-formed.
-func ValidateScenario(s *Scenario, topologiesDir string) error {
-	if s.Name == "" {
-		return fmt.Errorf("scenario name is required")
-	}
-	if s.Topology == "" {
-		return fmt.Errorf("scenario %s: topology is required", s.Name)
-	}
-	if s.Platform == "" {
-		return fmt.Errorf("scenario %s: platform is required", s.Name)
-	}
-
-	// Check topology directory exists
-	topoDir := filepath.Join(topologiesDir, s.Topology)
-	if info, err := os.Stat(topoDir); err != nil || !info.IsDir() {
-		return fmt.Errorf("scenario %s: topology directory %s not found", s.Name, topoDir)
-	}
-
-	// Validate each step
-	for i, step := range s.Steps {
-		if step.Name == "" {
-			return fmt.Errorf("scenario %s step %d: name is required", s.Name, i+1)
-		}
-		if !validActions[step.Action] {
-			return fmt.Errorf("scenario %s step %d (%s): unknown action %q", s.Name, i+1, step.Name, step.Action)
-		}
-		if err := validateStepFields(s.Name, i+1, &step); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // requireParam checks that a required key exists in step.Params.
@@ -263,11 +229,11 @@ func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error) {
 		}
 	}
 
-	return TopologicalSort(scenarios)
+	return topologicalSort(scenarios)
 }
 
-// TopologicalSort returns scenarios in dependency order using Kahn's algorithm.
-func TopologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
+// topologicalSort returns scenarios in dependency order using Kahn's algorithm.
+func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	byName := make(map[string]*Scenario, len(scenarios))
 	inDegree := make(map[string]int, len(scenarios))
 	dependents := make(map[string][]string) // name -> scenarios that depend on it
@@ -333,34 +299,34 @@ func applyDefaults(s *Scenario) {
 		switch step.Action {
 		case ActionVerifyStateDB:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = DefaultVerifyTimeout
+				step.Expect.Timeout = defaultVerifyTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = DefaultPollInterval
+				step.Expect.PollInterval = defaultPollInterval
 			}
 		case ActionVerifyBGP:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = DefaultVerifyTimeout
+				step.Expect.Timeout = defaultVerifyTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = DefaultPollInterval
+				step.Expect.PollInterval = defaultPollInterval
 			}
 			if step.Expect.State == "" {
 				step.Expect.State = "Established"
 			}
 		case ActionVerifyRoute:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = DefaultRouteTimeout
+				step.Expect.Timeout = defaultRouteTimeout
 			}
 			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = DefaultPollInterval
+				step.Expect.PollInterval = defaultPollInterval
 			}
 			if step.Expect.Source == "" {
 				step.Expect.Source = "app_db"
 			}
 		case ActionVerifyPing:
 			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = DefaultPingTimeout
+				step.Expect.Timeout = defaultPingTimeout
 			}
 			if step.Expect.SuccessRate == nil {
 				rate := 1.0

@@ -122,54 +122,14 @@ func TestValidationBuilder(t *testing.T) {
 	})
 }
 
-func TestDependencyError(t *testing.T) {
-	err := NewDependencyError("ACL binding", "VRF", "customer-vrf")
-
-	msg := err.Error()
-	if !strings.Contains(msg, "ACL binding") {
-		t.Errorf("Error message should contain resource: %s", msg)
-	}
-	if !strings.Contains(msg, "VRF") {
-		t.Errorf("Error message should contain dependency type: %s", msg)
-	}
-	if !strings.Contains(msg, "customer-vrf") {
-		t.Errorf("Error message should contain dependency name: %s", msg)
-	}
-
-	if !errors.Is(err, ErrDependencyMissing) {
-		t.Errorf("DependencyError should unwrap to ErrDependencyMissing")
-	}
-}
-
-func TestInUseError(t *testing.T) {
-	err := NewInUseError("Vlan100", "Ethernet0", "Ethernet4", "PortChannel100")
-
-	msg := err.Error()
-	if !strings.Contains(msg, "Vlan100") {
-		t.Errorf("Error message should contain resource: %s", msg)
-	}
-	if !strings.Contains(msg, "Ethernet0") || !strings.Contains(msg, "Ethernet4") {
-		t.Errorf("Error message should contain users: %s", msg)
-	}
-
-	if !errors.Is(err, ErrInUse) {
-		t.Errorf("InUseError should unwrap to ErrInUse")
-	}
-}
-
 func TestSentinelErrors(t *testing.T) {
 	// Test that sentinel errors are distinct
 	sentinels := []error{
 		ErrNotConnected,
-		ErrNotLocked,
-		ErrAlreadyExists,
-		ErrNotFound,
-		ErrInvalidConfig,
 		ErrPermissionDenied,
 		ErrPreconditionFailed,
 		ErrValidationFailed,
-		ErrInUse,
-		ErrDependencyMissing,
+		ErrDeviceLocked,
 	}
 
 	for i, err1 := range sentinels {
@@ -190,8 +150,6 @@ func TestErrorsIsWrapping(t *testing.T) {
 	}{
 		{"PreconditionError", NewPreconditionError("op", "res", "pre", ""), ErrPreconditionFailed},
 		{"ValidationError", NewValidationError("msg"), ErrValidationFailed},
-		{"DependencyError", NewDependencyError("res", "type", "name"), ErrDependencyMissing},
-		{"InUseError", NewInUseError("res", "user"), ErrInUse},
 	}
 
 	for _, tt := range tests {

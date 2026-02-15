@@ -135,7 +135,3 @@ func (s *Settings) GetAuditMaxBackups() int {
 	return DefaultAuditMaxBackups
 }
 
-// Clear resets all settings to defaults
-func (s *Settings) Clear() {
-	*s = Settings{}
-}

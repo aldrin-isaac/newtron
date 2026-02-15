@@ -19,9 +19,6 @@ type Device struct {
 	StateDB  *StateDB
 	State    *device.DeviceState
 
-	// v3: Platform configuration from device's platform.json
-	PlatformConfig *SonicPlatformConfig
-
 	// Redis connections
 	client      *ConfigDBClient
 	stateClient *StateDBClient
@@ -250,121 +247,6 @@ func (d *Device) IsLocked() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.locked
-}
-
-// GetInterface returns interface state by name.
-func (d *Device) GetInterface(name string) (*device.InterfaceState, error) {
-	if err := d.RequireConnected(); err != nil {
-		return nil, err
-	}
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	intf, ok := d.State.Interfaces[name]
-	if !ok {
-		return nil, fmt.Errorf("interface %s not found", name)
-	}
-	return intf, nil
-}
-
-// GetPortChannel returns LAG state by name.
-func (d *Device) GetPortChannel(name string) (*device.PortChannelState, error) {
-	if err := d.RequireConnected(); err != nil {
-		return nil, err
-	}
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	pc, ok := d.State.PortChannels[name]
-	if !ok {
-		return nil, fmt.Errorf("port channel %s not found", name)
-	}
-	return pc, nil
-}
-
-// GetVLAN returns VLAN state by ID
-func (d *Device) GetVLAN(id int) (*device.VLANState, error) {
-	if err := d.RequireConnected(); err != nil {
-		return nil, err
-	}
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	vlan, ok := d.State.VLANs[id]
-	if !ok {
-		return nil, fmt.Errorf("VLAN %d not found", id)
-	}
-	return vlan, nil
-}
-
-// GetVRF returns VRF state by name
-func (d *Device) GetVRF(name string) (*device.VRFState, error) {
-	if err := d.RequireConnected(); err != nil {
-		return nil, err
-	}
-
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	vrf, ok := d.State.VRFs[name]
-	if !ok {
-		return nil, fmt.Errorf("VRF %s not found", name)
-	}
-	return vrf, nil
-}
-
-// InterfaceHasService checks if an interface has a service bound
-func (d *Device) InterfaceHasService(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	if intf, ok := d.State.Interfaces[name]; ok {
-		return intf.Service != ""
-	}
-	return false
-}
-
-// InterfaceIsLAGMember checks if an interface is a LAG member.
-func (d *Device) InterfaceIsLAGMember(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	for key := range d.ConfigDB.PortChannelMember {
-		// Key format: PortChannel100|Ethernet0
-		parts := splitKey(key)
-		if len(parts) == 2 && parts[1] == name {
-			return true
-		}
-	}
-	return false
-}
-
-// GetInterfaceLAG returns the LAG that an interface belongs to.
-func (d *Device) GetInterfaceLAG(name string) string {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
-	for key := range d.ConfigDB.PortChannelMember {
-		if len(key) > len(name)+1 {
-			parts := splitKey(key)
-			if len(parts) == 2 && parts[1] == name {
-				return parts[0]
-			}
-		}
-	}
-	return ""
-}
-
-func splitKey(key string) []string {
-	for i := range key {
-		if key[i] == '|' {
-			return []string{key[:i], key[i+1:]}
-		}
-	}
-	return []string{key}
 }
 
 // Client returns the underlying ConfigDB client for direct access

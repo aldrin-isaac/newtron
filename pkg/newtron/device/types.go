@@ -82,17 +82,6 @@ type EVPNState struct {
 	Type5Routes int
 }
 
-// InterfaceSummary is a compact interface summary
-type InterfaceSummary struct {
-	Name        string
-	AdminStatus string
-	Speed       string
-	IPAddress   string
-	VRF         string
-	Service     string
-	LAGMember   string
-}
-
 // ConfigChange represents a single configuration change
 type ConfigChange struct {
 	Table  string

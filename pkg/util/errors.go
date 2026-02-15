@@ -10,15 +10,9 @@ import (
 // Sentinel errors for precondition failures
 var (
 	ErrNotConnected       = errors.New("device not connected")
-	ErrNotLocked          = errors.New("device not locked for changes")
-	ErrAlreadyExists      = errors.New("resource already exists")
-	ErrNotFound           = errors.New("resource not found")
-	ErrInvalidConfig      = errors.New("invalid configuration")
 	ErrPermissionDenied   = errors.New("permission denied")
 	ErrPreconditionFailed = errors.New("precondition not met")
 	ErrValidationFailed   = errors.New("validation failed")
-	ErrInUse              = errors.New("resource in use")
-	ErrDependencyMissing  = errors.New("required dependency missing")
 	ErrDeviceLocked       = errors.New("device is locked by another process")
 )
 
@@ -111,48 +105,3 @@ func (v *ValidationBuilder) Build() error {
 	return &ValidationError{Errors: v.errors}
 }
 
-// DependencyError represents a missing dependency
-type DependencyError struct {
-	Resource      string
-	DependsOn     string
-	DependsOnType string
-}
-
-func (e *DependencyError) Error() string {
-	return fmt.Sprintf("%s requires %s '%s' to exist", e.Resource, e.DependsOnType, e.DependsOn)
-}
-
-func (e *DependencyError) Unwrap() error {
-	return ErrDependencyMissing
-}
-
-// NewDependencyError creates a dependency error
-func NewDependencyError(resource, dependsOnType, dependsOn string) *DependencyError {
-	return &DependencyError{
-		Resource:      resource,
-		DependsOn:     dependsOn,
-		DependsOnType: dependsOnType,
-	}
-}
-
-// InUseError represents a resource that cannot be modified because it's in use
-type InUseError struct {
-	Resource string
-	UsedBy   []string
-}
-
-func (e *InUseError) Error() string {
-	return fmt.Sprintf("%s is in use by: %s", e.Resource, strings.Join(e.UsedBy, ", "))
-}
-
-func (e *InUseError) Unwrap() error {
-	return ErrInUse
-}
-
-// NewInUseError creates an in-use error
-func NewInUseError(resource string, usedBy ...string) *InUseError {
-	return &InUseError{
-		Resource: resource,
-		UsedBy:   usedBy,
-	}
-}

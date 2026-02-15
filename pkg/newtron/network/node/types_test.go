@@ -407,19 +407,17 @@ func TestPortChannelInfo_Structure(t *testing.T) {
 func TestInterface_TypeDetection(t *testing.T) {
 	tests := []struct {
 		name          string
-		isPhysical    bool
 		isPortChannel bool
 		isVLAN        bool
-		isLoopback    bool
 	}{
-		{"Ethernet0", true, false, false, false},
-		{"Ethernet48", true, false, false, false},
-		{"PortChannel100", false, true, false, false},
-		{"PortChannel1", false, true, false, false},
-		{"Vlan100", false, false, true, false},
-		{"Vlan1", false, false, true, false},
-		{"Loopback0", false, false, false, true},
-		{"Loopback1", false, false, false, true},
+		{"Ethernet0", false, false},
+		{"Ethernet48", false, false},
+		{"PortChannel100", true, false},
+		{"PortChannel1", true, false},
+		{"Vlan100", false, true},
+		{"Vlan1", false, true},
+		{"Loopback0", false, false},
+		{"Loopback1", false, false},
 	}
 
 	for _, tt := range tests {
@@ -427,17 +425,11 @@ func TestInterface_TypeDetection(t *testing.T) {
 			// Create minimal interface with just the name
 			intf := &Interface{name: tt.name}
 
-			if intf.IsPhysical() != tt.isPhysical {
-				t.Errorf("IsPhysical() = %v, want %v", intf.IsPhysical(), tt.isPhysical)
-			}
 			if intf.IsPortChannel() != tt.isPortChannel {
 				t.Errorf("IsPortChannel() = %v, want %v", intf.IsPortChannel(), tt.isPortChannel)
 			}
 			if intf.IsVLAN() != tt.isVLAN {
 				t.Errorf("IsVLAN() = %v, want %v", intf.IsVLAN(), tt.isVLAN)
-			}
-			if intf.IsLoopback() != tt.isLoopback {
-				t.Errorf("IsLoopback() = %v, want %v", intf.IsLoopback(), tt.isLoopback)
 			}
 		})
 	}
@@ -518,17 +510,8 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 		egressACL:     "customer-edge-out",
 	}
 
-	if intf.ServiceIP() != "10.1.1.1/30" {
-		t.Errorf("ServiceIP() = %q, want %q", intf.ServiceIP(), "10.1.1.1/30")
-	}
-	if intf.ServiceVRF() != "customer-l3-Ethernet0" {
-		t.Errorf("ServiceVRF() = %q, want %q", intf.ServiceVRF(), "customer-l3-Ethernet0")
-	}
-	if intf.ServiceIPVPN() != "mgmt-spoke-global" {
-		t.Errorf("ServiceIPVPN() = %q, want %q", intf.ServiceIPVPN(), "mgmt-spoke-global")
-	}
-	if intf.ServiceMACVPN() != "server-vlan" {
-		t.Errorf("ServiceMACVPN() = %q, want %q", intf.ServiceMACVPN(), "server-vlan")
+	if intf.ServiceName() != "customer-l3" {
+		t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "customer-l3")
 	}
 	if intf.IngressACL() != "customer-edge-in" {
 		t.Errorf("IngressACL() = %q, want %q", intf.IngressACL(), "customer-edge-in")
