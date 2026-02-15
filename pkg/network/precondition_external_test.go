@@ -1,4 +1,4 @@
-package operations
+package network_test
 
 import (
 	"strings"
@@ -41,7 +41,7 @@ func emptyConfigDB() *device.ConfigDB {
 
 func TestPreconditionChecker_RequireConnected_Pass(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireConnected().
 		Result()
 	if err != nil {
@@ -51,7 +51,7 @@ func TestPreconditionChecker_RequireConnected_Pass(t *testing.T) {
 
 func TestPreconditionChecker_RequireConnected_Fail(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), false, false)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireConnected().
 		Result()
 	if err == nil {
@@ -64,7 +64,7 @@ func TestPreconditionChecker_RequireConnected_Fail(t *testing.T) {
 
 func TestPreconditionChecker_RequireLocked_Pass(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, true)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireLocked().
 		Result()
 	if err != nil {
@@ -74,7 +74,7 @@ func TestPreconditionChecker_RequireLocked_Pass(t *testing.T) {
 
 func TestPreconditionChecker_RequireLocked_Fail(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireLocked().
 		Result()
 	if err == nil {
@@ -87,7 +87,7 @@ func TestPreconditionChecker_RequireLocked_Fail(t *testing.T) {
 
 func TestPreconditionChecker_ChainedChecks_AllPass(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, true)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireConnected().
 		RequireLocked().
 		Result()
@@ -98,7 +98,7 @@ func TestPreconditionChecker_ChainedChecks_AllPass(t *testing.T) {
 
 func TestPreconditionChecker_ChainedChecks_MultipleFailures(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), false, false)
-	checker := NewPreconditionChecker(dev, "test-op", "test-res").
+	checker := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireConnected().
 		RequireLocked()
 
@@ -122,7 +122,7 @@ func TestPreconditionChecker_RequireVLANExists_Pass(t *testing.T) {
 	db.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVLANExists(100).
 		Result()
 	if err != nil {
@@ -132,7 +132,7 @@ func TestPreconditionChecker_RequireVLANExists_Pass(t *testing.T) {
 
 func TestPreconditionChecker_RequireVLANExists_Fail(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVLANExists(100).
 		Result()
 	if err == nil {
@@ -142,7 +142,7 @@ func TestPreconditionChecker_RequireVLANExists_Fail(t *testing.T) {
 
 func TestPreconditionChecker_RequireVLANNotExists_Pass(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVLANNotExists(100).
 		Result()
 	if err != nil {
@@ -155,7 +155,7 @@ func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
 	db.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVLANNotExists(100).
 		Result()
 	if err == nil {
@@ -168,14 +168,14 @@ func TestPreconditionChecker_RequireVRFExists(t *testing.T) {
 	db.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "10001"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVRFExists("Vrf_CUST1").
 		Result()
 	if err != nil {
 		t.Errorf("RequireVRFExists should pass: %v", err)
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVRFExists("Vrf_MISSING").
 		Result()
 	if err == nil {
@@ -188,14 +188,14 @@ func TestPreconditionChecker_RequirePortChannelExists(t *testing.T) {
 	db.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequirePortChannelExists("PortChannel100").
 		Result()
 	if err != nil {
 		t.Errorf("RequirePortChannelExists should pass: %v", err)
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequirePortChannelExists("PortChannel999").
 		Result()
 	if err == nil {
@@ -212,14 +212,14 @@ func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireACLTableExists("CUSTOMER-IN").
 		Result()
 	if err != nil {
 		t.Errorf("RequireACLTableExists should pass: %v", err)
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireACLTableExists("NONEXISTENT").
 		Result()
 	if err == nil {
@@ -232,7 +232,7 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 	db.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireVTEPConfigured().
 		Result()
 	if err != nil {
@@ -240,7 +240,7 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 	}
 
 	devNoVTEP := testDevice(emptyConfigDB(), true, false)
-	err = NewPreconditionChecker(devNoVTEP, "test-op", "test-res").
+	err = network.NewPreconditionChecker(devNoVTEP, "test-op", "test-res").
 		RequireVTEPConfigured().
 		Result()
 	if err == nil {
@@ -253,7 +253,7 @@ func TestPreconditionChecker_RequireBGPConfigured(t *testing.T) {
 	db.BGPNeighbor["10.0.0.2"] = device.BGPNeighborEntry{ASN: "65002"}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireBGPConfigured().
 		Result()
 	if err != nil {
@@ -264,7 +264,7 @@ func TestPreconditionChecker_RequireBGPConfigured(t *testing.T) {
 	db2 := emptyConfigDB()
 	db2.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
 	dev2 := testDevice(db2, true, false)
-	err = NewPreconditionChecker(dev2, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev2, "test-op", "test-res").
 		RequireBGPConfigured().
 		Result()
 	if err != nil {
@@ -272,7 +272,7 @@ func TestPreconditionChecker_RequireBGPConfigured(t *testing.T) {
 	}
 
 	devNoBGP := testDevice(emptyConfigDB(), true, false)
-	err = NewPreconditionChecker(devNoBGP, "test-op", "test-res").
+	err = network.NewPreconditionChecker(devNoBGP, "test-op", "test-res").
 		RequireBGPConfigured().
 		Result()
 	if err == nil {
@@ -286,7 +286,7 @@ func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
 	dev := testDevice(db, true, false)
 
 	// Ethernet0 IS a LAG member — should fail
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireInterfaceNotLAGMember("Ethernet0").
 		Result()
 	if err == nil {
@@ -294,7 +294,7 @@ func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
 	}
 
 	// Ethernet4 is NOT a LAG member — should pass
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireInterfaceNotLAGMember("Ethernet4").
 		Result()
 	if err != nil {
@@ -309,14 +309,14 @@ func TestPreconditionChecker_RequireNoExistingService(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireNoExistingService("Ethernet0").
 		Result()
 	if err == nil {
 		t.Error("RequireNoExistingService should fail for bound interface")
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequireNoExistingService("Ethernet4").
 		Result()
 	if err != nil {
@@ -329,14 +329,14 @@ func TestPreconditionChecker_RequirePeerGroupExists(t *testing.T) {
 	db.BGPPeerGroup["FABRIC"] = device.BGPPeerGroupEntry{}
 	dev := testDevice(db, true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequirePeerGroupExists("FABRIC").
 		Result()
 	if err != nil {
 		t.Errorf("RequirePeerGroupExists should pass: %v", err)
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		RequirePeerGroupExists("NONEXISTENT").
 		Result()
 	if err == nil {
@@ -347,14 +347,14 @@ func TestPreconditionChecker_RequirePeerGroupExists(t *testing.T) {
 func TestPreconditionChecker_CustomCheck(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
 
-	err := NewPreconditionChecker(dev, "test-op", "test-res").
+	err := network.NewPreconditionChecker(dev, "test-op", "test-res").
 		Check(true, "must be true", "").
 		Result()
 	if err != nil {
 		t.Errorf("Check(true) should pass: %v", err)
 	}
 
-	err = NewPreconditionChecker(dev, "test-op", "test-res").
+	err = network.NewPreconditionChecker(dev, "test-op", "test-res").
 		Check(false, "must be true", "condition was false").
 		Result()
 	if err == nil {
@@ -364,7 +364,7 @@ func TestPreconditionChecker_CustomCheck(t *testing.T) {
 
 func TestPreconditionChecker_NoErrors(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, true)
-	checker := NewPreconditionChecker(dev, "test-op", "test-res")
+	checker := network.NewPreconditionChecker(dev, "test-op", "test-res")
 
 	if checker.HasErrors() {
 		t.Error("new checker should not have errors")
@@ -393,7 +393,7 @@ func TestDependencyChecker_IsLastACLUser_OnlyPort(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastACLUser("CUST-IN") {
 		t.Error("IsLastACLUser should be true when Ethernet0 is the only port")
 	}
@@ -407,7 +407,7 @@ func TestDependencyChecker_IsLastACLUser_MultiplePorts(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if dc.IsLastACLUser("CUST-IN") {
 		t.Error("IsLastACLUser should be false when other ports remain")
 	}
@@ -415,7 +415,7 @@ func TestDependencyChecker_IsLastACLUser_MultiplePorts(t *testing.T) {
 
 func TestDependencyChecker_IsLastACLUser_NonexistentACL(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastACLUser("NONEXISTENT") {
 		t.Error("IsLastACLUser should be true for nonexistent ACL")
 	}
@@ -426,7 +426,7 @@ func TestDependencyChecker_IsLastVLANMember_OnlyMember(t *testing.T) {
 	db.VLANMember["Vlan100|Ethernet0"] = device.VLANMemberEntry{TaggingMode: "untagged"}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastVLANMember(100) {
 		t.Error("IsLastVLANMember should be true when Ethernet0 is only member")
 	}
@@ -438,7 +438,7 @@ func TestDependencyChecker_IsLastVLANMember_MultipleMembers(t *testing.T) {
 	db.VLANMember["Vlan100|Ethernet4"] = device.VLANMemberEntry{TaggingMode: "tagged"}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if dc.IsLastVLANMember(100) {
 		t.Error("IsLastVLANMember should be false when other members remain")
 	}
@@ -449,7 +449,7 @@ func TestDependencyChecker_IsLastVRFUser_OnlyUser(t *testing.T) {
 	db.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastVRFUser("Vrf_CUST1") {
 		t.Error("IsLastVRFUser should be true when Ethernet0 is only user")
 	}
@@ -461,7 +461,7 @@ func TestDependencyChecker_IsLastVRFUser_MultipleUsers(t *testing.T) {
 	db.Interface["Ethernet4"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if dc.IsLastVRFUser("Vrf_CUST1") {
 		t.Error("IsLastVRFUser should be false when other interfaces use VRF")
 	}
@@ -474,7 +474,7 @@ func TestDependencyChecker_IsLastVRFUser_SkipsCompositeKeys(t *testing.T) {
 	db.Interface["Ethernet0|10.1.1.1/30"] = device.InterfaceEntry{}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastVRFUser("Vrf_CUST1") {
 		t.Error("IsLastVRFUser should skip composite keys")
 	}
@@ -487,7 +487,7 @@ func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if !dc.IsLastServiceUser("customer-l3") {
 		t.Error("IsLastServiceUser should be true when Ethernet0 is only user")
 	}
@@ -499,7 +499,7 @@ func TestDependencyChecker_IsLastServiceUser_MultipleUsers(t *testing.T) {
 	db.NewtronServiceBinding["Ethernet4"] = device.ServiceBindingEntry{ServiceName: "customer-l3"}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	if dc.IsLastServiceUser("customer-l3") {
 		t.Error("IsLastServiceUser should be false when other interfaces use service")
 	}
@@ -513,7 +513,7 @@ func TestDependencyChecker_GetACLRemainingInterfaces(t *testing.T) {
 	}
 	dev := testDevice(db, true, false)
 
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	remaining := dc.GetACLRemainingInterfaces("CUST-IN")
 	if remaining != "Ethernet4,Ethernet8" {
 		t.Errorf("GetACLRemainingInterfaces = %q, want %q", remaining, "Ethernet4,Ethernet8")
@@ -522,7 +522,7 @@ func TestDependencyChecker_GetACLRemainingInterfaces(t *testing.T) {
 
 func TestDependencyChecker_GetACLRemainingInterfaces_NonexistentACL(t *testing.T) {
 	dev := testDevice(emptyConfigDB(), true, false)
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 	remaining := dc.GetACLRemainingInterfaces("NONEXISTENT")
 	if remaining != "" {
 		t.Errorf("GetACLRemainingInterfaces for nonexistent ACL = %q, want empty", remaining)
@@ -531,7 +531,7 @@ func TestDependencyChecker_GetACLRemainingInterfaces_NonexistentACL(t *testing.T
 
 func TestDependencyChecker_NilConfigDB(t *testing.T) {
 	dev := network.NewTestDevice("test-leaf", nil, true, false)
-	dc := NewDependencyChecker(dev, "Ethernet0")
+	dc := network.NewDependencyChecker(dev, "Ethernet0")
 
 	if !dc.IsLastACLUser("any") {
 		t.Error("IsLastACLUser with nil configDB should return true")
