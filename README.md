@@ -87,7 +87,6 @@ specs/
 ├── network.json         # Services, VPNs, filters, routing policy    ← newtron
 ├── site.json            # Site topology, regions, AS numbers          ← newtron
 ├── platforms.json       # Platform capabilities, VM defaults          ← newtron + newtlab
-├── node.json            # Node-level defaults                         ← newtron
 ├── profiles/            # Per-device: loopback IP, role, SSH port     ← newtron + newtlab
 │   ├── spine1.json
 │   └── leaf1.json
@@ -166,8 +165,6 @@ pkg/
   network/       Device and Interface types, ChangeSet, topology graph,
                  composite provisioning — where newtron's operations live
   spec/          Spec types and loader
-  model/         Domain models (BGP, EVPN, VLAN, VRF, ACL, LAG, QoS, policy)
-  configlet/     Configuration template engine
   operations/    Precondition and dependency checking
   newtlab/       QEMU, multi-host placement, socket bridges, port probing,
                  boot patch framework
@@ -179,7 +176,6 @@ pkg/
   settings/      Settings resolution (flag > env > file)
 
 specs/           Network and topology specifications
-configlets/      SONiC config templates (baseline, EVPN, ACL, QoS)
 newtest/
   topologies/    Test topologies (2node, 4node)
   suites/        Test suites (25 incremental + 8 standalone scenarios)
