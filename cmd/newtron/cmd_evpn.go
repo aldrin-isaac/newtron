@@ -11,7 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -61,7 +61,7 @@ Examples:
   newtron leaf1 evpn setup -x
   newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("evpn")
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
 				return nil, err

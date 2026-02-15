@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var deviceCmd = &cobra.Command{
@@ -41,7 +41,7 @@ Examples:
   newtron -d leaf1-ny device cleanup -x
   newtron -d leaf1-ny device cleanup --type acls -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName)
 			if err := checkExecutePermission(auth.PermDeviceCleanup, authCtx); err != nil {
 				return nil, err

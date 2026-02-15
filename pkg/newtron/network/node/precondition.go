@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"fmt"
@@ -7,19 +7,19 @@ import (
 )
 
 // PreconditionChecker helps build precondition checks.
-// It uses *Device which provides access to both device state
+// It uses *Node which provides access to both device state
 // and network-level configuration through parent references.
 type PreconditionChecker struct {
-	device    *Device
+	node    *Node
 	operation string
 	resource  string
 	errors    []error
 }
 
 // NewPreconditionChecker creates a new precondition checker
-func NewPreconditionChecker(d *Device, operation, resource string) *PreconditionChecker {
+func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionChecker {
 	return &PreconditionChecker{
-		device:    d,
+		node:    d,
 		operation: operation,
 		resource:  resource,
 	}
@@ -27,15 +27,15 @@ func NewPreconditionChecker(d *Device, operation, resource string) *Precondition
 
 // precondition returns a PreconditionChecker with RequireConnected + RequireLocked
 // already called, since every write op needs both. This replaces requireWritable(d).
-func (d *Device) precondition(operation, resource string) *PreconditionChecker {
-	return NewPreconditionChecker(d, operation, resource).
+func (n *Node) precondition(operation, resource string) *PreconditionChecker {
+	return NewPreconditionChecker(n, operation, resource).
 		RequireConnected().
 		RequireLocked()
 }
 
 // RequireConnected checks that the device is connected
 func (p *PreconditionChecker) RequireConnected() *PreconditionChecker {
-	if !p.device.IsConnected() {
+	if !p.node.IsConnected() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "device must be connected", ""))
 	}
@@ -44,7 +44,7 @@ func (p *PreconditionChecker) RequireConnected() *PreconditionChecker {
 
 // RequireLocked checks that the device is locked
 func (p *PreconditionChecker) RequireLocked() *PreconditionChecker {
-	if !p.device.IsLocked() {
+	if !p.node.IsLocked() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "device must be locked for changes", "use Lock() first"))
 	}
@@ -53,7 +53,7 @@ func (p *PreconditionChecker) RequireLocked() *PreconditionChecker {
 
 // RequireInterfaceExists checks that an interface exists
 func (p *PreconditionChecker) RequireInterfaceExists(name string) *PreconditionChecker {
-	if !p.device.InterfaceExists(name) {
+	if !p.node.InterfaceExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "interface must exist", fmt.Sprintf("interface '%s' not found", name)))
 	}
@@ -62,7 +62,7 @@ func (p *PreconditionChecker) RequireInterfaceExists(name string) *PreconditionC
 
 // RequireInterfaceNotExists checks that an interface does not exist
 func (p *PreconditionChecker) RequireInterfaceNotExists(name string) *PreconditionChecker {
-	if p.device.InterfaceExists(name) {
+	if p.node.InterfaceExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "interface must not exist", fmt.Sprintf("interface '%s' already exists", name)))
 	}
@@ -71,8 +71,8 @@ func (p *PreconditionChecker) RequireInterfaceNotExists(name string) *Preconditi
 
 // RequireInterfaceNotLAGMember checks that an interface is not a LAG member
 func (p *PreconditionChecker) RequireInterfaceNotLAGMember(name string) *PreconditionChecker {
-	if p.device.InterfaceIsLAGMember(name) {
-		lag := p.device.GetInterfaceLAG(name)
+	if p.node.InterfaceIsLAGMember(name) {
+		lag := p.node.GetInterfaceLAG(name)
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "interface must not be a LAG member",
 			fmt.Sprintf("interface '%s' is member of %s", name, lag)))
@@ -82,7 +82,7 @@ func (p *PreconditionChecker) RequireInterfaceNotLAGMember(name string) *Precond
 
 // RequireInterfaceIsLAGMember checks that an interface is a LAG member
 func (p *PreconditionChecker) RequireInterfaceIsLAGMember(name, lag string) *PreconditionChecker {
-	actualLAG := p.device.GetInterfaceLAG(name)
+	actualLAG := p.node.GetInterfaceLAG(name)
 	if actualLAG != lag {
 		if actualLAG == "" {
 			p.errors = append(p.errors, util.NewPreconditionError(
@@ -99,7 +99,7 @@ func (p *PreconditionChecker) RequireInterfaceIsLAGMember(name, lag string) *Pre
 
 // RequireInterfaceNoService checks that no service is bound to the interface
 func (p *PreconditionChecker) RequireInterfaceNoService(name string) *PreconditionChecker {
-	if p.device.InterfaceHasService(name) {
+	if p.node.InterfaceHasService(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "interface must have no service bound",
 			fmt.Sprintf("interface '%s' has a service bound - remove it first", name)))
@@ -109,7 +109,7 @@ func (p *PreconditionChecker) RequireInterfaceNoService(name string) *Preconditi
 
 // RequireVLANExists checks that a VLAN exists
 func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker {
-	if !p.device.VLANExists(id) {
+	if !p.node.VLANExists(id) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VLAN must exist",
 			fmt.Sprintf("VLAN %d not found - create it first", id)))
@@ -119,7 +119,7 @@ func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker {
 
 // RequireVLANNotExists checks that a VLAN does not exist
 func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker {
-	if p.device.VLANExists(id) {
+	if p.node.VLANExists(id) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VLAN must not exist",
 			fmt.Sprintf("VLAN %d already exists", id)))
@@ -129,7 +129,7 @@ func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker 
 
 // RequireVRFExists checks that a VRF exists
 func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker {
-	if !p.device.VRFExists(name) {
+	if !p.node.VRFExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VRF must exist",
 			fmt.Sprintf("VRF '%s' not found - create it first", name)))
@@ -139,7 +139,7 @@ func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker
 
 // RequireVRFNotExists checks that a VRF does not exist
 func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChecker {
-	if p.device.VRFExists(name) {
+	if p.node.VRFExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VRF must not exist",
 			fmt.Sprintf("VRF '%s' already exists", name)))
@@ -149,7 +149,7 @@ func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChec
 
 // RequirePortChannelExists checks that a PortChannel exists
 func (p *PreconditionChecker) RequirePortChannelExists(name string) *PreconditionChecker {
-	if !p.device.PortChannelExists(name) {
+	if !p.node.PortChannelExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "PortChannel must exist",
 			fmt.Sprintf("PortChannel '%s' not found - create it first", name)))
@@ -159,7 +159,7 @@ func (p *PreconditionChecker) RequirePortChannelExists(name string) *Preconditio
 
 // RequirePortChannelNotExists checks that a PortChannel does not exist
 func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *PreconditionChecker {
-	if p.device.PortChannelExists(name) {
+	if p.node.PortChannelExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "PortChannel must not exist",
 			fmt.Sprintf("PortChannel '%s' already exists", name)))
@@ -169,7 +169,7 @@ func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *Precondi
 
 // RequireVTEPConfigured checks that VTEP is configured (for EVPN)
 func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
-	if !p.device.VTEPExists() {
+	if !p.node.VTEPExists() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VTEP must be configured",
 			"EVPN requires VTEP - configure baseline first"))
@@ -179,7 +179,7 @@ func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
 
 // RequireBGPConfigured checks that BGP is configured
 func (p *PreconditionChecker) RequireBGPConfigured() *PreconditionChecker {
-	if !p.device.BGPConfigured() {
+	if !p.node.BGPConfigured() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "BGP must be configured",
 			"EVPN requires BGP - configure baseline first"))
@@ -189,7 +189,7 @@ func (p *PreconditionChecker) RequireBGPConfigured() *PreconditionChecker {
 
 // RequireACLTableExists checks that an ACL table exists
 func (p *PreconditionChecker) RequireACLTableExists(name string) *PreconditionChecker {
-	if !p.device.ACLTableExists(name) {
+	if !p.node.ACLTableExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "ACL table must exist",
 			fmt.Sprintf("ACL table '%s' not found - create it first", name)))
@@ -199,7 +199,7 @@ func (p *PreconditionChecker) RequireACLTableExists(name string) *PreconditionCh
 
 // RequireACLTableNotExists checks that an ACL table does not exist
 func (p *PreconditionChecker) RequireACLTableNotExists(name string) *PreconditionChecker {
-	if p.device.ACLTableExists(name) {
+	if p.node.ACLTableExists(name) {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "ACL table must not exist",
 			fmt.Sprintf("ACL table '%s' already exists", name)))
@@ -210,7 +210,7 @@ func (p *PreconditionChecker) RequireACLTableNotExists(name string) *Preconditio
 // RequirePortAllowed checks that port creation is allowed by validating the port
 // name against the device's platform.json (if loaded).
 func (p *PreconditionChecker) RequirePortAllowed(portName string) *PreconditionChecker {
-	underlying := p.device.Underlying()
+	underlying := p.node.Underlying()
 	if underlying.PlatformConfig != nil {
 		if _, ok := underlying.PlatformConfig.Interfaces[portName]; !ok {
 			p.errors = append(p.errors, util.NewPreconditionError(
@@ -223,7 +223,7 @@ func (p *PreconditionChecker) RequirePortAllowed(portName string) *PreconditionC
 
 // RequirePlatformLoaded checks that the device's platform.json has been loaded.
 func (p *PreconditionChecker) RequirePlatformLoaded() *PreconditionChecker {
-	underlying := p.device.Underlying()
+	underlying := p.node.Underlying()
 	if underlying.PlatformConfig == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "platform config must be loaded",
@@ -235,7 +235,7 @@ func (p *PreconditionChecker) RequirePlatformLoaded() *PreconditionChecker {
 // RequireNoExistingService checks that no service is bound to an interface.
 // Used by composite merge to ensure no conflicts.
 func (p *PreconditionChecker) RequireNoExistingService(interfaceName string) *PreconditionChecker {
-	configDB := p.device.ConfigDB()
+	configDB := p.node.ConfigDB()
 	if configDB != nil {
 		if binding, ok := configDB.NewtronServiceBinding[interfaceName]; ok {
 			p.errors = append(p.errors, util.NewPreconditionError(
@@ -248,7 +248,7 @@ func (p *PreconditionChecker) RequireNoExistingService(interfaceName string) *Pr
 
 // RequirePeerGroupExists checks that a BGP peer group exists.
 func (p *PreconditionChecker) RequirePeerGroupExists(name string) *PreconditionChecker {
-	configDB := p.device.ConfigDB()
+	configDB := p.node.ConfigDB()
 	if configDB != nil {
 		if _, ok := configDB.BGPPeerGroup[name]; !ok {
 			p.errors = append(p.errors, util.NewPreconditionError(
@@ -261,7 +261,7 @@ func (p *PreconditionChecker) RequirePeerGroupExists(name string) *PreconditionC
 
 // RequireServiceExists checks that a service definition exists in network config
 func (p *PreconditionChecker) RequireServiceExists(name string) *PreconditionChecker {
-	_, err := p.device.Network().GetService(name)
+	_, err := p.node.GetService(name)
 	if err != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "service must exist",
@@ -272,7 +272,7 @@ func (p *PreconditionChecker) RequireServiceExists(name string) *PreconditionChe
 
 // RequireFilterSpecExists checks that a filter spec exists in network config
 func (p *PreconditionChecker) RequireFilterSpecExists(name string) *PreconditionChecker {
-	_, err := p.device.Network().GetFilterSpec(name)
+	_, err := p.node.GetFilterSpec(name)
 	if err != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "filter spec must exist",

@@ -11,7 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -222,7 +222,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		serviceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithService(serviceName).WithInterface(intfName)
 			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
 				return nil, err
@@ -255,7 +255,7 @@ Examples:
 			}
 			fmt.Println()
 
-			cs, err := intf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
+			cs, err := intf.ApplyService(ctx, serviceName, node.ApplyServiceOpts{
 				IPAddress: applyIP,
 				PeerAS:    peerAS,
 			})
@@ -279,7 +279,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithInterface(intfName)
 			if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
 				return nil, err
@@ -362,7 +362,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			intf, err := dev.GetInterface(intfName)
 			if err != nil {
 				return nil, fmt.Errorf("interface not found: %w", err)

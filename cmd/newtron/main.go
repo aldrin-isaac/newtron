@@ -41,6 +41,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/settings"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
@@ -279,11 +280,11 @@ func printVersion(tool string) {
 // ============================================================================
 
 // requireDevice ensures a device is specified via -d flag
-func requireDevice(ctx context.Context) (*network.Device, error) {
+func requireDevice(ctx context.Context) (*node.Node, error) {
 	if app.deviceName == "" {
 		return nil, fmt.Errorf("device required: use -d <device> flag")
 	}
-	return app.net.ConnectDevice(ctx, app.deviceName)
+	return app.net.ConnectNode(ctx, app.deviceName)
 }
 
 // ============================================================================
@@ -299,7 +300,7 @@ func printDryRunNotice() {
 
 // executeAndSave applies a changeset and optionally saves the config.
 // This is the standard post-apply flow for all CLI write commands.
-func executeAndSave(ctx context.Context, cs *network.ChangeSet, dev *network.Device) error {
+func executeAndSave(ctx context.Context, cs *node.ChangeSet, dev *node.Node) error {
 	if err := cs.Apply(dev); err != nil {
 		return fmt.Errorf("execution failed: %w", err)
 	}
@@ -329,7 +330,7 @@ func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
 // The callback receives a connected, locked device and returns a changeset.
 // If changeset is nil, the helper returns nil (command handled its own output).
 // If changeset is non-nil, the helper prints it and handles execute/dry-run.
-func withDeviceWrite(fn func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error)) error {
+func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
 	ctx := context.Background()
 	dev, err := requireDevice(ctx)
 	if err != nil {

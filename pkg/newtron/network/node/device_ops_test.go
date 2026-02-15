@@ -1,14 +1,101 @@
-package network
+package node
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
+
+// testSpecProvider implements SpecProvider for unit tests, using simple maps
+// for each spec type. Methods return a "not found" error when a key is absent.
+type testSpecProvider struct {
+	services      map[string]*spec.ServiceSpec
+	filterSpecs   map[string]*spec.FilterSpec
+	ipvpn         map[string]*spec.IPVPNSpec
+	macvpn        map[string]*spec.MACVPNSpec
+	qosPolicies   map[string]*spec.QoSPolicy
+	qosProfiles   map[string]*spec.QoSProfile
+	platforms     map[string]*spec.PlatformSpec
+	prefixLists   map[string][]string
+	routePolicies map[string]*spec.RoutePolicy
+}
+
+func (sp *testSpecProvider) GetService(name string) (*spec.ServiceSpec, error) {
+	if s, ok := sp.services[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("service %q not found", name)
+}
+
+func (sp *testSpecProvider) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
+	if s, ok := sp.ipvpn[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("ipvpn %q not found", name)
+}
+
+func (sp *testSpecProvider) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
+	if s, ok := sp.macvpn[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("macvpn %q not found", name)
+}
+
+func (sp *testSpecProvider) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
+	if s, ok := sp.qosPolicies[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("qos policy %q not found", name)
+}
+
+func (sp *testSpecProvider) GetQoSProfile(name string) (*spec.QoSProfile, error) {
+	if s, ok := sp.qosProfiles[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("qos profile %q not found", name)
+}
+
+func (sp *testSpecProvider) GetFilterSpec(name string) (*spec.FilterSpec, error) {
+	if s, ok := sp.filterSpecs[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("filter spec %q not found", name)
+}
+
+func (sp *testSpecProvider) GetPlatform(name string) (*spec.PlatformSpec, error) {
+	if s, ok := sp.platforms[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("platform %q not found", name)
+}
+
+func (sp *testSpecProvider) GetPrefixList(name string) ([]string, error) {
+	if s, ok := sp.prefixLists[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("prefix list %q not found", name)
+}
+
+func (sp *testSpecProvider) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
+	if s, ok := sp.routePolicies[name]; ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("route policy %q not found", name)
+}
+
+func (sp *testSpecProvider) FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec) {
+	for name, m := range sp.macvpn {
+		if m.L2VNI == vni {
+			return name, m
+		}
+	}
+	return "", nil
+}
 
 // ============================================================================
 // Test Helpers
@@ -18,19 +105,17 @@ import (
 // connected and locked so that operations pass precondition checks. The
 // configDB is pre-populated with two physical interfaces and empty maps for
 // all tables that operations inspect.
-func testDevice() *Device {
-	return &Device{
+func testDevice() *Node {
+	return &Node{
+		SpecProvider: &testSpecProvider{
+			services:    map[string]*spec.ServiceSpec{},
+			filterSpecs: map[string]*spec.FilterSpec{},
+			ipvpn:       map[string]*spec.IPVPNSpec{},
+			macvpn:      map[string]*spec.MACVPNSpec{},
+		},
 		name:      "test-dev",
 		connected: true,
 		locked:    true,
-		network: &Network{
-			spec: &spec.NetworkSpecFile{
-				Services:    map[string]*spec.ServiceSpec{},
-				FilterSpecs: map[string]*spec.FilterSpec{},
-				IPVPN:       map[string]*spec.IPVPNSpec{},
-				MACVPN:      map[string]*spec.MACVPNSpec{},
-			},
-		},
 		resolved: &spec.ResolvedProfile{
 			ASNumber:   64512,
 			RouterID:   "10.255.0.1",

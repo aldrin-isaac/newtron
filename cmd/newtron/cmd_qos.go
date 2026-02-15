@@ -12,7 +12,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -384,7 +384,7 @@ Examples:
 			return err
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
 				return nil, err
@@ -411,7 +411,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
 				return nil, err

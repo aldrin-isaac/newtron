@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"fmt"
@@ -10,13 +10,13 @@ import (
 
 // Interface represents a network interface within the context of a Device.
 //
-// Key design: Interface has a parent reference to Device, which in turn has
+// Key design: Interface has a parent reference to Node, which in turn has
 // a parent reference to Network. This provides hierarchical access:
 //
-//	intf.Device()                          // Get parent Device
-//	intf.Device().Network()                // Get Network from Device
-//	intf.Device().Network().GetService()   // Access Network-level config
-//	intf.Device().ASNumber()               // Access Device-level config
+//	intf.Node()                          // Get parent Node
+//	intf.Node().Network()                // Get Network from Node
+//	intf.Node().Network().GetService()   // Access Network-level config
+//	intf.Node().ASNumber()               // Access Device-level config
 //
 // This mirrors the original Perl design where interface operations had
 // implicit access to node and network-level configuration.
@@ -24,7 +24,7 @@ import (
 // Hierarchy: Network -> Device -> Interface
 type Interface struct {
 	// Parent reference - provides access to Device and Network configuration
-	device *Device
+	node *Node
 
 	// Interface identity
 	name string
@@ -59,22 +59,12 @@ type Interface struct {
 //
 // Example usage:
 //
-//	asNum := intf.Device().ASNumber()
-//	neighbors := intf.Device().BGPNeighbors()
-func (i *Interface) Device() *Device {
-	return i.device
+//	asNum := intf.Node().ASNumber()
+//	neighbors := intf.Node().BGPNeighbors()
+func (i *Interface) Node() *Node {
+	return i.node
 }
 
-// Network returns the Network object (via Device parent).
-// Convenience method for accessing Network-level configuration.
-//
-// Example usage:
-//
-//	svc, _ := intf.Network().GetService("customer-l3")
-//	filter, _ := intf.Network().GetFilterSpec("customer-edge-in")
-func (i *Interface) Network() *Network {
-	return i.device.Network()
-}
 
 // ============================================================================
 // Interface Properties
@@ -135,7 +125,7 @@ func (i *Interface) Service() *spec.ServiceSpec {
 	if i.serviceName == "" {
 		return nil
 	}
-	svc, err := i.Network().GetService(i.serviceName)
+	svc, err := i.Node().GetService(i.serviceName)
 	if err != nil {
 		return nil
 	}
@@ -188,7 +178,7 @@ func (i *Interface) LAGParent() string {
 
 // Description returns the interface description (from PORT table).
 func (i *Interface) Description() string {
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return ""
 	}
@@ -206,7 +196,7 @@ func (i *Interface) LAGMembers() []string {
 	if !i.IsPortChannel() {
 		return nil
 	}
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return nil
 	}
@@ -226,7 +216,7 @@ func (i *Interface) VLANMembers() []string {
 	if !i.IsVLAN() {
 		return nil
 	}
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return nil
 	}
@@ -244,7 +234,7 @@ func (i *Interface) VLANMembers() []string {
 // BGPNeighbors returns BGP neighbors configured on this interface.
 // For direct peering, this looks for neighbors using this interface's IP as local_addr.
 func (i *Interface) BGPNeighbors() []string {
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil || len(i.ipAddresses) == 0 {
 		return nil
 	}
@@ -294,7 +284,7 @@ func (i *Interface) IsLoopback() bool {
 
 // loadState populates interface state from config_db and state_db.
 func (i *Interface) loadState() {
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return
 	}
@@ -317,8 +307,8 @@ func (i *Interface) loadState() {
 	}
 
 	// Load operational state from state_db (if available)
-	if i.device.Underlying() != nil && i.device.Underlying().StateDB != nil {
-		stateDB := i.device.Underlying().StateDB
+	if i.node.Underlying() != nil && i.node.Underlying().StateDB != nil {
+		stateDB := i.node.Underlying().StateDB
 		// Get operational status from PORT_TABLE in state_db
 		if portState, ok := stateDB.PortTable[i.name]; ok {
 			i.operStatus = portState.OperStatus
@@ -419,7 +409,7 @@ func (i *Interface) MACVPNInfo() *MACVPNInfo {
 		return nil
 	}
 
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return nil
 	}
@@ -435,13 +425,9 @@ func (i *Interface) MACVPNInfo() *MACVPNInfo {
 			info.L2VNI = vni
 
 			// Try to match to a macvpn definition by L2VNI
-			network := i.Network()
-			if network != nil && network.spec != nil {
-				for macvpnName, macvpnDef := range network.spec.MACVPN {
-					if macvpnDef.L2VNI == vni {
-						info.Name = macvpnName
-						break
-					}
+			if n := i.Node(); n != nil && n.SpecProvider != nil {
+				if name, _ := n.FindMACVPNByL2VNI(vni); name != "" {
+					info.Name = name
 				}
 			}
 			_ = key // suppress unused warning

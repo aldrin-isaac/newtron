@@ -11,7 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var aclCmd = &cobra.Command{
@@ -211,12 +211,12 @@ Examples:
 			return fmt.Errorf("--stage is required (ingress, egress)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
 			}
-			cs, err := dev.CreateACLTable(ctx, aclName, network.ACLTableConfig{
+			cs, err := dev.CreateACLTable(ctx, aclName, node.ACLTableConfig{
 				Type:        aclType,
 				Stage:       aclStage,
 				Ports:       aclInterfaces,
@@ -258,7 +258,7 @@ Examples:
 			return fmt.Errorf("--action is required (permit, deny)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
@@ -266,7 +266,7 @@ Examples:
 			if !dev.ACLTableExists(aclName) {
 				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			cs, err := dev.AddACLRule(ctx, aclName, ruleName, network.ACLRuleConfig{
+			cs, err := dev.AddACLRule(ctx, aclName, ruleName, node.ACLRuleConfig{
 				Priority: rulePriority,
 				SrcIP:    ruleSrcIP,
 				DstIP:    ruleDstIP,
@@ -296,7 +296,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		ruleName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
@@ -325,7 +325,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
@@ -362,7 +362,7 @@ Examples:
 			aclBindDirection = "ingress"
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err
@@ -399,7 +399,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
 				return nil, err

@@ -9,7 +9,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/newtron/configlet"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var baselineCmd = &cobra.Command{
@@ -100,7 +100,7 @@ Examples:
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		templates := args
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("baseline")
 			if err := checkExecutePermission(auth.PermBaselineApply, authCtx); err != nil {
 				return nil, err
@@ -116,7 +116,7 @@ Examples:
 				"site":        dev.Site(),
 			}
 
-			allChanges := network.NewChangeSet(dev.Name(), "baseline.apply")
+			allChanges := node.NewChangeSet(dev.Name(), "baseline.apply")
 			configletDir := getConfigletDir()
 			for _, templateName := range templates {
 				c, err := configlet.LoadConfiglet(configletDir, templateName)
@@ -143,15 +143,15 @@ Examples:
 	},
 }
 
-func configletToChangeSet(c *configlet.Configlet, vars map[string]string, dev *network.Device) (*network.ChangeSet, error) {
-	cs := network.NewChangeSet(dev.Name(), "baseline."+c.Name)
+func configletToChangeSet(c *configlet.Configlet, vars map[string]string, dev *node.Node) (*node.ChangeSet, error) {
+	cs := node.NewChangeSet(dev.Name(), "baseline."+c.Name)
 
 	resolved := configlet.ResolveConfiglet(c, vars)
 	for table, entries := range resolved {
 		for key, fields := range entries {
-			changeType := network.ChangeAdd
+			changeType := node.ChangeAdd
 			if entryExists(dev, table, key) {
-				changeType = network.ChangeModify
+				changeType = node.ChangeModify
 			}
 			cs.Add(table, key, changeType, nil, fields)
 		}
@@ -160,7 +160,7 @@ func configletToChangeSet(c *configlet.Configlet, vars map[string]string, dev *n
 	return cs, nil
 }
 
-func entryExists(dev *network.Device, table, key string) bool {
+func entryExists(dev *node.Node, table, key string) bool {
 	configDB := dev.ConfigDB()
 	if configDB == nil {
 		return false

@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -32,9 +32,9 @@ type DirectBGPNeighborConfig struct {
 // The BGP session will use this interface's IP as the update-source.
 // For point-to-point links (/30, /31), the neighbor IP is auto-derived if not specified.
 func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborConfig) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("add-bgp-neighbor", i.name).Result(); err != nil {
+	if err := n.precondition("add-bgp-neighbor", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
@@ -65,11 +65,11 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 	}
 
 	// Check if neighbor already exists
-	if d.BGPNeighborExists(neighborIP) {
+	if n.BGPNeighborExists(neighborIP) {
 		return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.add-bgp-neighbor")
+	cs := NewChangeSet(n.Name(), "interface.add-bgp-neighbor")
 
 	// Extract local IP without mask for update-source
 	localIPOnly, _ := util.SplitIPMask(localIP)
@@ -97,16 +97,16 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 		"activate": "true",
 	})
 
-	util.WithDevice(d.Name()).Infof("Adding direct BGP neighbor %s (AS %d) on interface %s",
+	util.WithDevice(n.Name()).Infof("Adding direct BGP neighbor %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)
 	return cs, nil
 }
 
 // RemoveBGPNeighbor removes a direct BGP neighbor from this interface.
 func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("remove-bgp-neighbor", i.name).Result(); err != nil {
+	if err := n.precondition("remove-bgp-neighbor", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -120,11 +120,11 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 	}
 
 	// Check neighbor exists
-	if !d.BGPNeighborExists(neighborIP) {
+	if !n.BGPNeighborExists(neighborIP) {
 		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.remove-bgp-neighbor")
+	cs := NewChangeSet(n.Name(), "interface.remove-bgp-neighbor")
 
 	// Remove address-family entries first
 	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
@@ -136,22 +136,22 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 	// Remove neighbor entry
 	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeDelete, nil, nil)
 
-	util.WithDevice(d.Name()).Infof("Removing direct BGP neighbor %s from interface %s", neighborIP, i.name)
+	util.WithDevice(n.Name()).Infof("Removing direct BGP neighbor %s from interface %s", neighborIP, i.name)
 	return cs, nil
 }
 
 // GetBGPNeighborIP returns the BGP neighbor IP for this interface (if any).
 // Returns empty string if no BGP neighbor is configured on this interface.
 func (i *Interface) GetBGPNeighborIP() string {
-	d := i.device
-	if d.ConfigDB() == nil || len(i.ipAddresses) == 0 {
+	n := i.node
+	if n.ConfigDB() == nil || len(i.ipAddresses) == 0 {
 		return ""
 	}
 
 	localIP, _ := util.SplitIPMask(i.ipAddresses[0])
 
 	// Find a BGP neighbor that uses this interface's IP as local_addr
-	for neighborIP, neighbor := range d.ConfigDB().BGPNeighbor {
+	for neighborIP, neighbor := range n.ConfigDB().BGPNeighbor {
 		if neighbor.LocalAddr == localIP {
 			return neighborIP
 		}
@@ -167,9 +167,9 @@ func (i *Interface) GetBGPNeighborIP() string {
 // SetRouteMap binds a route-map to a BGP neighbor's address-family (in/out direction).
 // Used to apply import/export policies from the service routing spec.
 func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, routeMapName string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("set-route-map", i.name).Result(); err != nil {
+	if err := n.precondition("set-route-map", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if direction != "in" && direction != "out" {
@@ -177,12 +177,12 @@ func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, 
 	}
 
 	// Verify neighbor exists
-	if !d.BGPNeighborExists(neighborIP) {
+	if !n.BGPNeighborExists(neighborIP) {
 		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
 	}
 
 	// Verify route-map exists in CONFIG_DB
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB != nil {
 		found := false
 		prefix := routeMapName + "|"
@@ -197,7 +197,7 @@ func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, 
 		}
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.set-route-map")
+	cs := NewChangeSet(n.Name(), "interface.set-route-map")
 
 	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
 	afKey := fmt.Sprintf("default|%s|%s", neighborIP, af)
@@ -210,7 +210,7 @@ func (i *Interface) SetRouteMap(ctx context.Context, neighborIP, af, direction, 
 		field: routeMapName,
 	})
 
-	util.WithDevice(d.Name()).Infof("Set route-map %s %s on neighbor %s AF %s",
+	util.WithDevice(n.Name()).Infof("Set route-map %s %s on neighbor %s AF %s",
 		routeMapName, direction, neighborIP, af)
 	return cs, nil
 }

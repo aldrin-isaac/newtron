@@ -12,7 +12,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var vlanCmd = &cobra.Command{
@@ -245,12 +245,12 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANCreate, authCtx); err != nil {
 				return nil, err
 			}
-			cs, err := dev.CreateVLAN(ctx, vlanID, network.VLANConfig{
+			cs, err := dev.CreateVLAN(ctx, vlanID, node.VLANConfig{
 				Description: vlanDescription,
 			})
 			if err != nil {
@@ -280,7 +280,7 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
 				return nil, err
@@ -311,7 +311,7 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
 				return nil, err
@@ -340,7 +340,7 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANDelete, authCtx); err != nil {
 				return nil, err
@@ -384,12 +384,12 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
 				return nil, err
 			}
-			cs, err := dev.ConfigureSVI(ctx, vlanID, network.SVIConfig{
+			cs, err := dev.ConfigureSVI(ctx, vlanID, node.SVIConfig{
 				VRF:        sviVRF,
 				IPAddress:  sviIP,
 				AnycastMAC: sviAnycastGW,
@@ -425,7 +425,7 @@ Examples:
 			return fmt.Errorf("macvpn '%s' not found in network.json", macvpnName)
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
 				return nil, err
@@ -468,7 +468,7 @@ Examples:
 			return err
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
 				return nil, err

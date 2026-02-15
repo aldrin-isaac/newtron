@@ -2,7 +2,7 @@
 //
 // Two provisioning modes:
 //   - ProvisionDevice: generates a complete CONFIG_DB offline and delivers it
-//     atomically via CompositeOverwrite (no device interrogation needed)
+//     atomically via node.CompositeOverwrite (no device interrogation needed)
 //   - ProvisionInterface: provisions a single interface using the topology spec
 //     for parameters, but connects to the device and calls ApplyService()
 package network
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -75,9 +76,9 @@ func (tp *TopologyProvisioner) ValidateTopologyDevice(deviceName string) error {
 	return nil
 }
 
-// GenerateDeviceComposite generates a CompositeConfig for a device without delivering it.
+// GenerateDeviceComposite generates a node.CompositeConfig for a device without delivering it.
 // Useful for inspection, serialization, or deferred delivery.
-func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*CompositeConfig, error) {
+func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node.CompositeConfig, error) {
 	// Validate first
 	if err := tp.ValidateTopologyDevice(deviceName); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
@@ -96,7 +97,7 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*Comp
 	}
 
 	// Create composite builder in overwrite mode
-	cb := NewCompositeBuilder(deviceName, CompositeOverwrite).
+	cb := node.NewCompositeBuilder(deviceName, node.CompositeOverwrite).
 		SetGeneratedBy("topology-provisioner").
 		SetDescription(fmt.Sprintf("Full device provisioning from topology.json for %s", deviceName))
 
@@ -120,14 +121,14 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*Comp
 }
 
 // ProvisionDevice generates a complete CONFIG_DB for the named device from the
-// topology spec and delivers it atomically with CompositeOverwrite mode.
+// topology spec and delivers it atomically with node.CompositeOverwrite mode.
 //
 // This mode:
 //   - Does NOT interrogate the device for existing configuration
 //   - Generates all CONFIG_DB entries offline from specs + topology
 //   - Connects to the device only for delivery
 //   - Wipes existing CONFIG_DB and replaces with generated config
-func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName string) (*CompositeDeliveryResult, error) {
+func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName string) (*node.CompositeDeliveryResult, error) {
 	// Generate the composite config offline
 	composite, err := tp.GenerateDeviceComposite(deviceName)
 	if err != nil {
@@ -135,7 +136,7 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	}
 
 	// Connect to device for delivery only
-	dev, err := tp.network.ConnectDevice(ctx, deviceName)
+	dev, err := tp.network.ConnectNode(ctx, deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to device: %w", err)
 	}
@@ -148,7 +149,7 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	defer dev.Unlock()
 
 	// Deliver with overwrite mode (replace entire CONFIG_DB)
-	result, err := dev.DeliverComposite(composite, CompositeOverwrite)
+	result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 	if err != nil {
 		return nil, fmt.Errorf("delivering composite: %w", err)
 	}
@@ -163,15 +164,15 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 //   - Connects to the device and loads current state
 //   - Reads service name and parameters from topology (not from user)
 //   - Calls Interface.ApplyService() with those parameters
-//   - Returns a ChangeSet for dry-run/execute
-func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceName, interfaceName string) (*ChangeSet, error) {
+//   - Returns a node.ChangeSet for dry-run/execute
+func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceName, interfaceName string) (*node.ChangeSet, error) {
 	ti, err := tp.network.GetTopologyInterface(deviceName, interfaceName)
 	if err != nil {
 		return nil, err
 	}
 
 	// Connect and interrogate device
-	dev, err := tp.network.ConnectDevice(ctx, deviceName)
+	dev, err := tp.network.ConnectNode(ctx, deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to device: %w", err)
 	}
@@ -187,8 +188,8 @@ func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceNam
 		return nil, fmt.Errorf("getting interface: %w", err)
 	}
 
-	// Build ApplyServiceOpts from topology
-	opts := ApplyServiceOpts{
+	// Build node.ApplyServiceOpts from topology
+	opts := node.ApplyServiceOpts{
 		IPAddress: ti.IP,
 	}
 	if peerAS, ok := ti.Params["peer_as"]; ok {
@@ -211,7 +212,7 @@ func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceNam
 // ============================================================================
 
 // addDeviceEntries adds device-level CONFIG_DB entries to the composite builder.
-func (tp *TopologyProvisioner) addDeviceEntries(cb *CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice) {
+func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice) {
 	// Determine underlay ASN (unique per device for eBGP fabric)
 	underlayASN := resolved.ASNumber
 	if resolved.UnderlayASN > 0 {
@@ -379,7 +380,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *CompositeBuilder, deviceName
 }
 
 // addRouteReflectorEntries adds route reflector configuration to the composite.
-func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *CompositeBuilder, resolved *spec.ResolvedProfile, _ *spec.TopologyDevice) {
+func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilder, resolved *spec.ResolvedProfile, _ *spec.TopologyDevice) {
 	// Determine underlay ASN for RR globals
 	underlayASN := resolved.ASNumber
 	if resolved.UnderlayASN > 0 {
@@ -492,9 +493,9 @@ func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice) bool 
 
 // addInterfaceEntries generates all CONFIG_DB entries for an interface service
 // and adds them to the composite builder.  Delegates to the shared
-// GenerateServiceEntries function in service_gen.go.
-func (tp *TopologyProvisioner) addInterfaceEntries(cb *CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile) error {
-	entries, err := GenerateServiceEntries(tp.network, ServiceEntryParams{
+// node.GenerateServiceEntries function in service_gen.go.
+func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile) error {
+	entries, err := node.GenerateServiceEntries(tp.network, node.ServiceEntryParams{
 		ServiceName:   ti.Service,
 		InterfaceName: intfName,
 		IPAddress:     ti.IP,
@@ -516,7 +517,7 @@ func (tp *TopologyProvisioner) addInterfaceEntries(cb *CompositeBuilder, intfNam
 
 // addQoSDeviceEntries scans all services in the topology, collects distinct QoS
 // policy names, and adds device-wide CONFIG_DB tables (DSCP maps, schedulers, WRED).
-func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *CompositeBuilder, topoDev *spec.TopologyDevice) {
+func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, topoDev *spec.TopologyDevice) {
 	seen := make(map[string]bool)
 	for _, ti := range topoDev.Interfaces {
 		if ti.Service == "" {
@@ -526,7 +527,7 @@ func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *CompositeBuilder, topoDev
 		if err != nil {
 			continue
 		}
-		policyName, policy := resolveServiceQoSPolicy(tp.network, svc)
+		policyName, policy := node.ResolveServiceQoSPolicy(tp.network, svc)
 		if policy == nil {
 			continue
 		}
@@ -534,7 +535,7 @@ func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *CompositeBuilder, topoDev
 			continue
 		}
 		seen[policyName] = true
-		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
+		for _, entry := range node.GenerateQoSDeviceEntries(policyName, policy) {
 			cb.AddEntry(entry.Table, entry.Key, entry.Fields)
 		}
 	}

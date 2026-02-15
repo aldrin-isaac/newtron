@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ func TestGenerateQoSDeviceEntries_TwoQueue(t *testing.T) {
 		},
 	}
 
-	entries := generateQoSDeviceEntries("test-2q", policy)
+	entries := GenerateQoSDeviceEntries("test-2q", policy)
 
 	// Expect: 1 DSCP_TO_TC_MAP + 1 TC_TO_QUEUE_MAP + 2 SCHEDULER = 4 entries
 	if len(entries) != 4 {
@@ -88,7 +88,7 @@ func TestGenerateQoSDeviceEntries_EightQueueWithECN(t *testing.T) {
 		},
 	}
 
-	entries := generateQoSDeviceEntries("8q-dc", policy)
+	entries := GenerateQoSDeviceEntries("8q-dc", policy)
 
 	// 1 DSCP + 1 TC + 8 SCHEDULER + 1 WRED = 11
 	if len(entries) != 11 {
@@ -113,7 +113,7 @@ func TestGenerateQoSDeviceEntries_NoECN(t *testing.T) {
 		},
 	}
 
-	entries := generateQoSDeviceEntries("no-ecn", policy)
+	entries := GenerateQoSDeviceEntries("no-ecn", policy)
 
 	// 1 DSCP + 1 TC + 2 SCHEDULER = 4 (no WRED)
 	if len(entries) != 4 {
@@ -184,7 +184,7 @@ func TestDSCPDefaultMapping(t *testing.T) {
 		},
 	}
 
-	entries := generateQoSDeviceEntries("dscp-test", policy)
+	entries := GenerateQoSDeviceEntries("dscp-test", policy)
 	dscpMap := entries[0]
 
 	// Explicitly mapped

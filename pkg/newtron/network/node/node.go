@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -17,24 +17,38 @@ import (
 // defaultLockTTL is the TTL in seconds for distributed device locks.
 const defaultLockTTL = 3600 // 1 hour
 
-// Device represents a SONiC switch within the context of a Network.
+// SpecProvider is the interface that Node uses to access Network-level specs.
+// Network implements this interface; Node embeds it so that callers can write
+// node.GetService("x") directly.
+type SpecProvider interface {
+	GetService(name string) (*spec.ServiceSpec, error)
+	GetIPVPN(name string) (*spec.IPVPNSpec, error)
+	GetMACVPN(name string) (*spec.MACVPNSpec, error)
+	GetQoSPolicy(name string) (*spec.QoSPolicy, error)
+	GetQoSProfile(name string) (*spec.QoSProfile, error)
+	GetFilterSpec(name string) (*spec.FilterSpec, error)
+	GetPlatform(name string) (*spec.PlatformSpec, error)
+	GetPrefixList(name string) ([]string, error)
+	GetRoutePolicy(name string) (*spec.RoutePolicy, error)
+	FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec)
+}
+
+// Node represents a SONiC switch within the context of a Network.
 //
-// Key design: Device has a parent reference to Network, allowing it to access
-// all Network-level configuration (services, filters, regions, etc.).
-// This mirrors the original Perl design where Node objects had access to
-// the parent Netconf object's configuration.
+// Key design: Node embeds a SpecProvider (implemented by Network), giving it
+// direct access to all Network-level configuration (services, filters, etc.)
+// without importing the network package (avoiding circular imports).
 //
-// Hierarchy: Network -> Device -> Interface
-type Device struct {
-	// Parent reference - provides access to Network-level configuration
-	network *Network
+// Hierarchy: Network -> Node -> Interface
+type Node struct {
+	SpecProvider // embedded — n.GetService() just works
 
 	// Device identity
 	name     string
 	profile  *spec.DeviceProfile
 	resolved *spec.ResolvedProfile
 
-	// Child objects - Interfaces created in this Device's context
+	// Child objects - Interfaces created in this Node's context
 	interfaces map[string]*Interface
 
 	// Connection and state (delegated to sonic.Device)
@@ -48,19 +62,15 @@ type Device struct {
 	mu sync.RWMutex
 }
 
-// ============================================================================
-// Parent Accessor - Key to OO Design
-// ============================================================================
-
-// Network returns the parent Network object.
-// This allows access to all Network-level configuration from Device operations.
-//
-// Example usage in operations:
-//
-//	svc, _ := dev.Network().GetService("customer-l3")
-//	filter, _ := dev.Network().GetFilterSpec("customer-edge-in")
-func (d *Device) Network() *Network {
-	return d.network
+// New creates a new Node with the given SpecProvider and profile.
+func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
+	return &Node{
+		SpecProvider: sp,
+		name:         name,
+		profile:      profile,
+		resolved:     resolved,
+		interfaces:   make(map[string]*Interface),
+	}
 }
 
 // ============================================================================
@@ -68,63 +78,63 @@ func (d *Device) Network() *Network {
 // ============================================================================
 
 // Name returns the device name.
-func (d *Device) Name() string {
-	return d.name
+func (n *Node) Name() string {
+	return n.name
 }
 
 // Profile returns the device profile.
-func (d *Device) Profile() *spec.DeviceProfile {
-	return d.profile
+func (n *Node) Profile() *spec.DeviceProfile {
+	return n.profile
 }
 
 // Resolved returns the resolved configuration (after inheritance).
-func (d *Device) Resolved() *spec.ResolvedProfile {
-	return d.resolved
+func (n *Node) Resolved() *spec.ResolvedProfile {
+	return n.resolved
 }
 
 // MgmtIP returns the management IP address.
-func (d *Device) MgmtIP() string {
-	return d.resolved.MgmtIP
+func (n *Node) MgmtIP() string {
+	return n.resolved.MgmtIP
 }
 
 // LoopbackIP returns the loopback IP address.
-func (d *Device) LoopbackIP() string {
-	return d.resolved.LoopbackIP
+func (n *Node) LoopbackIP() string {
+	return n.resolved.LoopbackIP
 }
 
 // ASNumber returns the BGP AS number.
-func (d *Device) ASNumber() int {
-	return d.resolved.ASNumber
+func (n *Node) ASNumber() int {
+	return n.resolved.ASNumber
 }
 
 // RouterID returns the BGP router ID.
-func (d *Device) RouterID() string {
-	return d.resolved.RouterID
+func (n *Node) RouterID() string {
+	return n.resolved.RouterID
 }
 
 // Region returns the region name.
-func (d *Device) Region() string {
-	return d.resolved.Region
+func (n *Node) Region() string {
+	return n.resolved.Region
 }
 
 // Site returns the site name.
-func (d *Device) Site() string {
-	return d.resolved.Site
+func (n *Node) Site() string {
+	return n.resolved.Site
 }
 
 // BGPNeighbors returns the list of BGP neighbor IPs (derived from route reflectors).
-func (d *Device) BGPNeighbors() []string {
-	return d.resolved.BGPNeighbors
+func (n *Node) BGPNeighbors() []string {
+	return n.resolved.BGPNeighbors
 }
 
 // IsRouteReflector returns true if this device is a route reflector.
-func (d *Device) IsRouteReflector() bool {
-	return d.resolved.IsRouteReflector
+func (n *Node) IsRouteReflector() bool {
+	return n.resolved.IsRouteReflector
 }
 
 // ConfigDB returns the config_db state.
-func (d *Device) ConfigDB() *sonic.ConfigDB {
-	return d.configDB
+func (n *Node) ConfigDB() *sonic.ConfigDB {
+	return n.configDB
 }
 
 // ============================================================================
@@ -132,76 +142,76 @@ func (d *Device) ConfigDB() *sonic.ConfigDB {
 // ============================================================================
 
 // Connect establishes connection to the device via Redis/config_db.
-func (d *Device) Connect(ctx context.Context) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) Connect(ctx context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-	if d.connected {
+	if n.connected {
 		return nil
 	}
 
 	// Create connection using sonic package
-	d.conn = sonic.NewDevice(d.name, d.resolved)
-	if err := d.conn.Connect(ctx); err != nil {
+	n.conn = sonic.NewDevice(n.name, n.resolved)
+	if err := n.conn.Connect(ctx); err != nil {
 		return err
 	}
 
-	d.configDB = d.conn.ConfigDB
-	d.connected = true
+	n.configDB = n.conn.ConfigDB
+	n.connected = true
 
 	// Load interfaces
-	d.loadInterfaces()
+	n.loadInterfaces()
 
-	util.WithDevice(d.name).Info("Connected")
+	util.WithDevice(n.name).Info("Connected")
 	return nil
 }
 
 // Disconnect closes the connection.
-func (d *Device) Disconnect() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) Disconnect() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-	if !d.connected {
+	if !n.connected {
 		return nil
 	}
 
-	if d.conn != nil {
-		d.conn.Disconnect()
+	if n.conn != nil {
+		n.conn.Disconnect()
 	}
 
-	d.connected = false
-	util.WithDevice(d.name).Info("Disconnected")
+	n.connected = false
+	util.WithDevice(n.name).Info("Disconnected")
 	return nil
 }
 
 // IsConnected returns true if connected.
-func (d *Device) IsConnected() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.connected
+func (n *Node) IsConnected() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.connected
 }
 
 // Refresh reloads CONFIG_DB from Redis and rebuilds the interface list.
 // Call after operations that write to CONFIG_DB outside the normal device flow
 // (e.g., composite provisioning).
-func (d *Device) Refresh() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) Refresh() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-	if !d.connected || d.conn == nil {
+	if !n.connected || n.conn == nil {
 		return util.ErrNotConnected
 	}
 
-	configDB, err := d.conn.Client().GetAll()
+	configDB, err := n.conn.Client().GetAll()
 	if err != nil {
 		return fmt.Errorf("reloading config_db: %w", err)
 	}
-	d.conn.ConfigDB = configDB
-	d.configDB = configDB
+	n.conn.ConfigDB = configDB
+	n.configDB = configDB
 
 	// Rebuild interfaces from the refreshed CONFIG_DB
-	d.interfaces = make(map[string]*Interface)
-	d.loadInterfaces()
+	n.interfaces = make(map[string]*Interface)
+	n.loadInterfaces()
 
 	return nil
 }
@@ -215,47 +225,47 @@ func (d *Device) Refresh() error {
 // made by prior lock holders. If the cache refresh fails, the lock is released
 // and an error is returned — operating with a stale cache under lock is worse
 // than failing the operation.
-func (d *Device) Lock() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) Lock() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-	if !d.connected {
+	if !n.connected {
 		return util.ErrNotConnected
 	}
-	if d.locked {
+	if n.locked {
 		return nil
 	}
 
 	holder := lockHolder()
-	if err := d.conn.Lock(holder, defaultLockTTL); err != nil {
+	if err := n.conn.Lock(holder, defaultLockTTL); err != nil {
 		return err
 	}
-	d.locked = true
+	n.locked = true
 
 	// Refresh CONFIG_DB cache — guarantees precondition checks see
 	// all changes made by prior lock holders.
-	configDB, err := d.conn.Client().GetAll()
+	configDB, err := n.conn.Client().GetAll()
 	if err != nil {
 		// Release lock on refresh failure — don't hold a lock with stale cache
-		d.conn.Unlock()
-		d.locked = false
+		n.conn.Unlock()
+		n.locked = false
 		return fmt.Errorf("refresh config_db after lock: %w", err)
 	}
-	d.conn.ConfigDB = configDB
-	d.configDB = configDB
-	d.interfaces = make(map[string]*Interface)
-	d.loadInterfaces()
+	n.conn.ConfigDB = configDB
+	n.configDB = configDB
+	n.interfaces = make(map[string]*Interface)
+	n.loadInterfaces()
 
 	return nil
 }
 
 // LockHolder returns the current lock holder and acquisition time.
 // Returns ("", zero, nil) if no lock is held.
-func (d *Device) LockHolder() (string, time.Time, error) {
-	if !d.connected {
+func (n *Node) LockHolder() (string, time.Time, error) {
+	if !n.connected {
 		return "", time.Time{}, util.ErrNotConnected
 	}
-	return d.conn.LockHolder()
+	return n.conn.LockHolder()
 }
 
 // lockHolder constructs a holder identity string: "user@hostname".
@@ -272,27 +282,27 @@ func lockHolder() string {
 }
 
 // Unlock releases the lock.
-func (d *Device) Unlock() error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) Unlock() error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
-	if !d.locked {
+	if !n.locked {
 		return nil
 	}
 
-	if err := d.conn.Unlock(); err != nil {
+	if err := n.conn.Unlock(); err != nil {
 		return err
 	}
 
-	d.locked = false
+	n.locked = false
 	return nil
 }
 
 // IsLocked returns true if locked.
-func (d *Device) IsLocked() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.locked
+func (n *Node) IsLocked() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.locked
 }
 
 // ExecuteOp locks the device, runs the operation function, applies the
@@ -308,18 +318,18 @@ func (d *Device) IsLocked() bool {
 // episode) → fn() reads preconditions from cache → Apply() writes to Redis →
 // Unlock() ends the episode. No post-Apply refresh — the next episode
 // (whether write or read-only) will refresh itself.
-func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
-	if err := d.Lock(); err != nil {
+func (n *Node) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
+	if err := n.Lock(); err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
 	}
-	defer d.Unlock()
+	defer n.Unlock()
 
 	cs, err := fn()
 	if err != nil {
 		return nil, err
 	}
 
-	if err := cs.Apply(d); err != nil {
+	if err := cs.Apply(n); err != nil {
 		return nil, fmt.Errorf("apply: %w", err)
 	}
 
@@ -333,50 +343,50 @@ func (d *Device) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
 // GetInterface returns an Interface object created in this Device's context.
 // The Interface has access to Device properties AND Network configuration.
 // Accepts both short (Eth0, Po100) and full (Ethernet0, PortChannel100) interface names.
-func (d *Device) GetInterface(name string) (*Interface, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+func (n *Node) GetInterface(name string) (*Interface, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
 	// Normalize interface name (e.g., Eth0 -> Ethernet0, Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
 	// Return existing interface if already loaded
-	if intf, ok := d.interfaces[name]; ok {
+	if intf, ok := n.interfaces[name]; ok {
 		return intf, nil
 	}
 
 	// Verify interface exists in config_db
-	if !d.interfaceExistsInConfigDB(name) {
-		return nil, fmt.Errorf("interface %s not found on device %s", name, d.name)
+	if !n.interfaceExistsInConfigDB(name) {
+		return nil, fmt.Errorf("interface %s not found on device %s", name, n.name)
 	}
 
-	// Create Interface with parent reference to this Device
+	// Create Interface with parent reference to this Node
 	intf := &Interface{
-		device: d, // Parent reference - key to OO design
+		node: n, // Parent reference - key to OO design
 		name:   name,
 	}
 
 	// Load interface state from config_db
 	intf.loadState()
 
-	d.interfaces[name] = intf
+	n.interfaces[name] = intf
 	return intf, nil
 }
 
 // ListInterfaces returns all interface names.
-func (d *Device) ListInterfaces() []string {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func (n *Node) ListInterfaces() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 
 	var names []string
 
 	// Physical interfaces from PORT table
-	if d.configDB != nil {
-		for name := range d.configDB.Port {
+	if n.configDB != nil {
+		for name := range n.configDB.Port {
 			names = append(names, name)
 		}
 		// Port channels
-		for name := range d.configDB.PortChannel {
+		for name := range n.configDB.PortChannel {
 			names = append(names, name)
 		}
 	}
@@ -385,32 +395,32 @@ func (d *Device) ListInterfaces() []string {
 }
 
 // interfaceExistsInConfigDB checks if interface exists.
-func (d *Device) interfaceExistsInConfigDB(name string) bool {
-	return d.configDB.HasInterface(name)
+func (n *Node) interfaceExistsInConfigDB(name string) bool {
+	return n.configDB.HasInterface(name)
 }
 
 // loadInterfaces populates the interfaces map from config_db.
-func (d *Device) loadInterfaces() {
-	if d.configDB == nil {
+func (n *Node) loadInterfaces() {
+	if n.configDB == nil {
 		return
 	}
 
-	for name := range d.configDB.Port {
+	for name := range n.configDB.Port {
 		intf := &Interface{
-			device: d,
+			node: n,
 			name:   name,
 		}
 		intf.loadState()
-		d.interfaces[name] = intf
+		n.interfaces[name] = intf
 	}
 
-	for name := range d.configDB.PortChannel {
+	for name := range n.configDB.PortChannel {
 		intf := &Interface{
-			device: d,
+			node: n,
 			name:   name,
 		}
 		intf.loadState()
-		d.interfaces[name] = intf
+		n.interfaces[name] = intf
 	}
 }
 
@@ -420,41 +430,41 @@ func (d *Device) loadInterfaces() {
 
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-func (d *Device) InterfaceExists(name string) bool {
-	return d.configDB.HasInterface(util.NormalizeInterfaceName(name))
+func (n *Node) InterfaceExists(name string) bool {
+	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
 }
 
 // VLANExists checks if a VLAN exists.
-func (d *Device) VLANExists(id int) bool { return d.configDB.HasVLAN(id) }
+func (n *Node) VLANExists(id int) bool { return n.configDB.HasVLAN(id) }
 
 // VRFExists checks if a VRF exists.
-func (d *Device) VRFExists(name string) bool { return d.configDB.HasVRF(name) }
+func (n *Node) VRFExists(name string) bool { return n.configDB.HasVRF(name) }
 
 // PortChannelExists checks if a PortChannel exists.
 // Accepts both short (Po100) and full (PortChannel100) names.
-func (d *Device) PortChannelExists(name string) bool {
-	return d.configDB.HasPortChannel(util.NormalizeInterfaceName(name))
+func (n *Node) PortChannelExists(name string) bool {
+	return n.configDB.HasPortChannel(util.NormalizeInterfaceName(name))
 }
 
 // VTEPExists checks if VTEP is configured.
-func (d *Device) VTEPExists() bool { return d.configDB.HasVTEP() }
+func (n *Node) VTEPExists() bool { return n.configDB.HasVTEP() }
 
 // BGPConfigured checks if BGP is configured.
 // Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
 // DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
-func (d *Device) BGPConfigured() bool { return d.configDB.BGPConfigured() }
+func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
 
 // ACLTableExists checks if an ACL table exists.
-func (d *Device) ACLTableExists(name string) bool { return d.configDB.HasACLTable(name) }
+func (n *Node) ACLTableExists(name string) bool { return n.configDB.HasACLTable(name) }
 
 // InterfaceIsLAGMember checks if an interface is a LAG member.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-func (d *Device) InterfaceIsLAGMember(name string) bool {
-	if d.configDB == nil {
+func (n *Node) InterfaceIsLAGMember(name string) bool {
+	if n.configDB == nil {
 		return false
 	}
 	name = util.NormalizeInterfaceName(name)
-	for key := range d.configDB.PortChannelMember {
+	for key := range n.configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
 		parts := splitConfigDBKey(key)
 		if len(parts) == 2 && parts[1] == name {
@@ -466,12 +476,12 @@ func (d *Device) InterfaceIsLAGMember(name string) bool {
 
 // GetInterfaceLAG returns the LAG that an interface belongs to (empty if not a member).
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-func (d *Device) GetInterfaceLAG(name string) string {
-	if d.configDB == nil {
+func (n *Node) GetInterfaceLAG(name string) string {
+	if n.configDB == nil {
 		return ""
 	}
 	name = util.NormalizeInterfaceName(name)
-	for key := range d.configDB.PortChannelMember {
+	for key := range n.configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
 		parts := splitConfigDBKey(key)
 		if len(parts) == 2 && parts[1] == name {
@@ -493,12 +503,12 @@ func splitConfigDBKey(key string) []string {
 
 // InterfaceHasService checks if an interface has a service bound.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
-func (d *Device) InterfaceHasService(name string) bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+func (n *Node) InterfaceHasService(name string) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
 
 	name = util.NormalizeInterfaceName(name)
-	if intf, ok := d.interfaces[name]; ok {
+	if intf, ok := n.interfaces[name]; ok {
 		return intf.HasService()
 	}
 	return false
@@ -534,13 +544,13 @@ type MACVPNInfo struct {
 }
 
 // GetVLAN retrieves VLAN information from config_db.
-func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
-	if d.configDB == nil {
+func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
+	if n.configDB == nil {
 		return nil, util.ErrNotConnected
 	}
 
 	vlanKey := fmt.Sprintf("Vlan%d", id)
-	vlanEntry, ok := d.configDB.VLAN[vlanKey]
+	vlanEntry, ok := n.configDB.VLAN[vlanKey]
 	if !ok {
 		return nil, fmt.Errorf("VLAN %d not found", id)
 	}
@@ -548,7 +558,7 @@ func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 	info := &VLANInfo{ID: id, Name: vlanEntry.Description}
 
 	// Collect member interfaces from VLAN_MEMBER
-	for key, member := range d.configDB.VLANMember {
+	for key, member := range n.configDB.VLANMember {
 		parts := splitConfigDBKey(key)
 		if len(parts) == 2 && parts[0] == vlanKey {
 			iface := parts[1]
@@ -561,7 +571,7 @@ func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 	}
 
 	// Check for SVI (VLAN_INTERFACE)
-	if _, ok := d.configDB.VLANInterface[vlanKey]; ok {
+	if _, ok := n.configDB.VLANInterface[vlanKey]; ok {
 		info.SVIStatus = "up"
 	}
 
@@ -569,7 +579,7 @@ func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 	macvpn := &MACVPNInfo{}
 
 	// Find L2VNI from VXLAN_TUNNEL_MAP
-	for _, mapping := range d.configDB.VXLANTunnelMap {
+	for _, mapping := range n.configDB.VXLANTunnelMap {
 		if mapping.VLAN == vlanKey && mapping.VNI != "" {
 			fmt.Sscanf(mapping.VNI, "%d", &macvpn.L2VNI)
 			break
@@ -577,17 +587,14 @@ func (d *Device) GetVLAN(id int) (*VLANInfo, error) {
 	}
 
 	// Check ARP suppression
-	if _, ok := d.configDB.SuppressVLANNeigh[vlanKey]; ok {
+	if _, ok := n.configDB.SuppressVLANNeigh[vlanKey]; ok {
 		macvpn.ARPSuppression = true
 	}
 
 	// Try to match to a macvpn definition by L2VNI
-	if macvpn.L2VNI > 0 && d.network != nil && d.network.spec != nil {
-		for macvpnName, macvpnDef := range d.network.spec.MACVPN {
-			if macvpnDef.L2VNI == macvpn.L2VNI {
-				macvpn.Name = macvpnName
-				break
-			}
+	if macvpn.L2VNI > 0 && n.SpecProvider != nil {
+		if name, _ := n.FindMACVPNByL2VNI(macvpn.L2VNI); name != "" {
+			macvpn.Name = name
 		}
 	}
 
@@ -607,12 +614,12 @@ type VRFInfo struct {
 }
 
 // GetVRF retrieves VRF information from config_db.
-func (d *Device) GetVRF(name string) (*VRFInfo, error) {
-	if d.configDB == nil {
+func (n *Node) GetVRF(name string) (*VRFInfo, error) {
+	if n.configDB == nil {
 		return nil, util.ErrNotConnected
 	}
 
-	vrfEntry, ok := d.configDB.VRF[name]
+	vrfEntry, ok := n.configDB.VRF[name]
 	if !ok {
 		return nil, fmt.Errorf("VRF %s not found", name)
 	}
@@ -626,7 +633,7 @@ func (d *Device) GetVRF(name string) (*VRFInfo, error) {
 
 	// Find interfaces bound to this VRF from INTERFACE table
 	seen := make(map[string]bool)
-	for key, intf := range d.configDB.Interface {
+	for key, intf := range n.configDB.Interface {
 		// Key could be "Ethernet0" or "Ethernet0|10.1.1.1/24"
 		parts := splitConfigDBKey(key)
 		intfName := parts[0]
@@ -637,11 +644,11 @@ func (d *Device) GetVRF(name string) (*VRFInfo, error) {
 	}
 
 	// Also check VLAN_INTERFACE for SVIs in this VRF
-	for key := range d.configDB.VLANInterface {
+	for key := range n.configDB.VLANInterface {
 		parts := splitConfigDBKey(key)
 		vlanName := parts[0]
 		// VLANInterface value contains vrf_name
-		if vals, ok := d.configDB.VLANInterface[vlanName]; ok {
+		if vals, ok := n.configDB.VLANInterface[vlanName]; ok {
 			if vals["vrf_name"] == name && !seen[vlanName] {
 				seen[vlanName] = true
 				info.Interfaces = append(info.Interfaces, vlanName)
@@ -661,15 +668,15 @@ type PortChannelInfo struct {
 }
 
 // GetPortChannel retrieves PortChannel information from config_db.
-func (d *Device) GetPortChannel(name string) (*PortChannelInfo, error) {
-	if d.configDB == nil {
+func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
+	if n.configDB == nil {
 		return nil, util.ErrNotConnected
 	}
 
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
-	pcEntry, ok := d.configDB.PortChannel[name]
+	pcEntry, ok := n.configDB.PortChannel[name]
 	if !ok {
 		return nil, fmt.Errorf("PortChannel %s not found", name)
 	}
@@ -680,7 +687,7 @@ func (d *Device) GetPortChannel(name string) (*PortChannelInfo, error) {
 	}
 
 	// Collect members from PORTCHANNEL_MEMBER
-	for key := range d.configDB.PortChannelMember {
+	for key := range n.configDB.PortChannelMember {
 		parts := splitConfigDBKey(key)
 		if len(parts) == 2 && parts[0] == name {
 			info.Members = append(info.Members, parts[1])
@@ -694,26 +701,26 @@ func (d *Device) GetPortChannel(name string) (*PortChannelInfo, error) {
 }
 
 // ListPortChannels returns all PortChannel names on this device.
-func (d *Device) ListPortChannels() []string {
-	if d.configDB == nil {
+func (n *Node) ListPortChannels() []string {
+	if n.configDB == nil {
 		return nil
 	}
 
-	names := make([]string, 0, len(d.configDB.PortChannel))
-	for name := range d.configDB.PortChannel {
+	names := make([]string, 0, len(n.configDB.PortChannel))
+	for name := range n.configDB.PortChannel {
 		names = append(names, name)
 	}
 	return names
 }
 
 // ListVLANs returns all VLAN IDs on this device.
-func (d *Device) ListVLANs() []int {
-	if d.configDB == nil {
+func (n *Node) ListVLANs() []int {
+	if n.configDB == nil {
 		return nil
 	}
 
 	var ids []int
-	for name := range d.configDB.VLAN {
+	for name := range n.configDB.VLAN {
 		var id int
 		if _, err := fmt.Sscanf(name, "Vlan%d", &id); err == nil {
 			ids = append(ids, id)
@@ -723,13 +730,13 @@ func (d *Device) ListVLANs() []int {
 }
 
 // ListVRFs returns all VRF names on this device.
-func (d *Device) ListVRFs() []string {
-	if d.configDB == nil {
+func (n *Node) ListVRFs() []string {
+	if n.configDB == nil {
 		return nil
 	}
 
-	names := make([]string, 0, len(d.configDB.VRF))
-	for name := range d.configDB.VRF {
+	names := make([]string, 0, len(n.configDB.VRF))
+	for name := range n.configDB.VRF {
 		names = append(names, name)
 	}
 	return names
@@ -737,61 +744,61 @@ func (d *Device) ListVRFs() []string {
 
 // ReloadConfig triggers a config reload on the SONiC device via SSH.
 // This causes SONiC to re-read CONFIG_DB and apply changes via frrcfgd.
-func (d *Device) ReloadConfig(ctx context.Context) error {
-	if !d.connected {
+func (n *Node) ReloadConfig(ctx context.Context) error {
+	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return d.conn.ReloadConfig(ctx)
+	return n.conn.ReloadConfig(ctx)
 }
 
 // SaveConfig persists the device's running CONFIG_DB to disk via SSH.
-func (d *Device) SaveConfig(ctx context.Context) error {
-	if !d.connected {
+func (n *Node) SaveConfig(ctx context.Context) error {
+	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return d.conn.SaveConfig(ctx)
+	return n.conn.SaveConfig(ctx)
 }
 
 // RestartService restarts a SONiC Docker container by name via SSH.
-func (d *Device) RestartService(ctx context.Context, name string) error {
-	if !d.connected {
+func (n *Node) RestartService(ctx context.Context, name string) error {
+	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return d.conn.RestartService(ctx, name)
+	return n.conn.RestartService(ctx, name)
 }
 
 // ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
-func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
-	if !d.connected {
+func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
+	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return d.conn.ApplyFRRDefaults(ctx)
+	return n.conn.ApplyFRRDefaults(ctx)
 }
 
 // Underlying returns the underlying sonic.Device for low-level operations.
 // This is used by ChangeSet to apply changes via Redis.
-func (d *Device) Underlying() *sonic.Device {
-	return d.conn
+func (n *Node) Underlying() *sonic.Device {
+	return n.conn
 }
 
 // GetRoute reads a route from APP_DB (Redis DB 0).
 // Returns nil RouteEntry (not error) if the prefix is not present.
 // Single-shot read — does not poll or retry.
-func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
-	if !d.connected {
+func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	return d.conn.GetRoute(ctx, vrf, prefix)
+	return n.conn.GetRoute(ctx, vrf, prefix)
 }
 
 // GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
 // object chain. Returns nil RouteEntry (not error) if not programmed in ASIC.
 // Single-shot read — does not poll or retry.
-func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
-	if !d.connected {
+func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	return d.conn.GetRouteASIC(ctx, vrf, prefix)
+	return n.conn.GetRouteASIC(ctx, vrf, prefix)
 }
 
 // ============================================================================
@@ -808,11 +815,11 @@ func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.
 
 // AddLoopbackBGPNeighbor adds an indirect BGP neighbor using loopback as update-source.
 // This is used for iBGP or multi-hop eBGP sessions.
-func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if !d.connected {
+func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
+	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	if !d.locked {
+	if !n.locked {
 		return nil, fmt.Errorf("device not locked")
 	}
 
@@ -822,20 +829,20 @@ func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, 
 	}
 
 	// Check if neighbor already exists (key format: "default|<IP>")
-	if d.configDB != nil {
+	if n.configDB != nil {
 		key := fmt.Sprintf("default|%s", neighborIP)
-		if _, ok := d.configDB.BGPNeighbor[key]; ok {
+		if _, ok := n.configDB.BGPNeighbor[key]; ok {
 			return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
 		}
 	}
 
-	cs := NewChangeSet(d.name, "bgp.add-loopback-neighbor")
+	cs := NewChangeSet(n.name, "bgp.add-loopback-neighbor")
 
 	// Add BGP neighbor entry with loopback as update-source
 	fields := map[string]string{
 		"asn":          fmt.Sprintf("%d", asn),
 		"admin_status": "up",
-		"local_addr":   d.resolved.LoopbackIP, // Update-source = loopback
+		"local_addr":   n.resolved.LoopbackIP, // Update-source = loopback
 	}
 	if description != "" {
 		fields["name"] = description
@@ -843,7 +850,7 @@ func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, 
 
 	// For iBGP (same AS), no special config needed
 	// For eBGP with loopback, would need ebgp_multihop
-	if asn != d.resolved.ASNumber {
+	if asn != n.resolved.ASNumber {
 		fields["ebgp_multihop"] = "255" // Enable multihop for eBGP via loopback
 	}
 
@@ -858,36 +865,36 @@ func (d *Device) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, 
 		})
 	}
 
-	util.WithDevice(d.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
-		neighborIP, asn, d.resolved.LoopbackIP)
+	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
+		neighborIP, asn, n.resolved.LoopbackIP)
 	return cs, nil
 }
 
 // AddBGPNeighbor is an alias for AddLoopbackBGPNeighbor for backward compatibility.
 // Deprecated: Use AddLoopbackBGPNeighbor for clarity.
-func (d *Device) AddBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	return d.AddLoopbackBGPNeighbor(ctx, neighborIP, asn, description, evpn)
+func (n *Node) AddBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
+	return n.AddLoopbackBGPNeighbor(ctx, neighborIP, asn, description, evpn)
 }
 
 // RemoveBGPNeighbor removes a BGP neighbor from the device.
 // This works for both direct (interface-level) and indirect (loopback-level) neighbors.
-func (d *Device) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	if !d.connected {
+func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
+	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	if !d.locked {
+	if !n.locked {
 		return nil, fmt.Errorf("device not locked")
 	}
 
 	// Check if neighbor exists (key format: "default|<IP>")
-	if d.configDB != nil {
+	if n.configDB != nil {
 		key := fmt.Sprintf("default|%s", neighborIP)
-		if _, ok := d.configDB.BGPNeighbor[key]; !ok {
+		if _, ok := n.configDB.BGPNeighbor[key]; !ok {
 			return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
 		}
 	}
 
-	cs := NewChangeSet(d.name, "bgp.remove-neighbor")
+	cs := NewChangeSet(n.name, "bgp.remove-neighbor")
 
 	// Remove all address-family entries first
 	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
@@ -899,26 +906,26 @@ func (d *Device) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Cha
 	// Remove neighbor entry
 	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeDelete, nil, nil)
 
-	util.WithDevice(d.name).Infof("Removing BGP neighbor %s", neighborIP)
+	util.WithDevice(n.name).Infof("Removing BGP neighbor %s", neighborIP)
 	return cs, nil
 }
 
 // SetupBGPEVPN configures BGP EVPN with route reflectors from site config.
 // This sets up iBGP sessions using loopback IPs (indirect neighbors) for EVPN.
-func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
-	if !d.connected {
+func (n *Node) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
+	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	if !d.locked {
+	if !n.locked {
 		return nil, fmt.Errorf("device not locked")
 	}
 
-	resolved := d.Resolved()
+	resolved := n.Resolved()
 	if len(resolved.BGPNeighbors) == 0 {
 		return nil, fmt.Errorf("no route reflectors defined in site configuration")
 	}
 
-	cs := NewChangeSet(d.name, "bgp.setup-evpn")
+	cs := NewChangeSet(n.name, "bgp.setup-evpn")
 
 	// Configure BGP globals (if not already set)
 	cs.Add("BGP_GLOBALS", "default", ChangeAdd, nil, map[string]string{
@@ -939,9 +946,9 @@ func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
 		}
 
 		// Check if neighbor already exists (key format: "default|<IP>")
-		if d.configDB != nil {
+		if n.configDB != nil {
 			key := fmt.Sprintf("default|%s", rrIP)
-			if _, ok := d.configDB.BGPNeighbor[key]; ok {
+			if _, ok := n.configDB.BGPNeighbor[key]; ok {
 				// Already exists, skip
 				continue
 			}
@@ -964,51 +971,51 @@ func (d *Device) SetupBGPEVPN(ctx context.Context) (*ChangeSet, error) {
 		})
 	}
 
-	util.WithDevice(d.name).Infof("Setting up BGP EVPN with %d route reflectors (via loopback %s)",
+	util.WithDevice(n.name).Infof("Setting up BGP EVPN with %d route reflectors (via loopback %s)",
 		len(resolved.BGPNeighbors), resolved.LoopbackIP)
 	return cs, nil
 }
 
 // BGPNeighborExists checks if a BGP neighbor exists.
 // Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
-func (d *Device) BGPNeighborExists(neighborIP string) bool {
-	return d.configDB.HasBGPNeighbor(fmt.Sprintf("default|%s", neighborIP))
+func (n *Node) BGPNeighborExists(neighborIP string) bool {
+	return n.configDB.HasBGPNeighbor(fmt.Sprintf("default|%s", neighborIP))
 }
 
 // VTEPSourceIP returns the VTEP source IP (from loopback).
-func (d *Device) VTEPSourceIP() string {
-	if d.configDB == nil {
-		return d.resolved.LoopbackIP
+func (n *Node) VTEPSourceIP() string {
+	if n.configDB == nil {
+		return n.resolved.LoopbackIP
 	}
 	// Check if VTEP is configured
-	for _, vtep := range d.configDB.VXLANTunnel {
+	for _, vtep := range n.configDB.VXLANTunnel {
 		if vtep.SrcIP != "" {
 			return vtep.SrcIP
 		}
 	}
 	// Fall back to resolved loopback IP
-	return d.resolved.LoopbackIP
+	return n.resolved.LoopbackIP
 }
 
 // ListBGPNeighbors returns all BGP neighbor IPs from config_db.
-func (d *Device) ListBGPNeighbors() []string {
-	if d.configDB == nil {
+func (n *Node) ListBGPNeighbors() []string {
+	if n.configDB == nil {
 		return nil
 	}
-	neighbors := make([]string, 0, len(d.configDB.BGPNeighbor))
-	for ip := range d.configDB.BGPNeighbor {
+	neighbors := make([]string, 0, len(n.configDB.BGPNeighbor))
+	for ip := range n.configDB.BGPNeighbor {
 		neighbors = append(neighbors, ip)
 	}
 	return neighbors
 }
 
 // ListACLTables returns all ACL table names on this device.
-func (d *Device) ListACLTables() []string {
-	if d.configDB == nil {
+func (n *Node) ListACLTables() []string {
+	if n.configDB == nil {
 		return nil
 	}
-	names := make([]string, 0, len(d.configDB.ACLTable))
-	for name := range d.configDB.ACLTable {
+	names := make([]string, 0, len(n.configDB.ACLTable))
+	for name := range n.configDB.ACLTable {
 		names = append(names, name)
 	}
 	return names
@@ -1024,11 +1031,11 @@ type ACLTableInfo struct {
 }
 
 // GetACLTable retrieves ACL table information by name.
-func (d *Device) GetACLTable(name string) (*ACLTableInfo, error) {
-	if d.configDB == nil {
+func (n *Node) GetACLTable(name string) (*ACLTableInfo, error) {
+	if n.configDB == nil {
 		return nil, util.ErrNotConnected
 	}
-	acl, ok := d.configDB.ACLTable[name]
+	acl, ok := n.configDB.ACLTable[name]
 	if !ok {
 		return nil, fmt.Errorf("ACL table %s not found", name)
 	}
@@ -1042,12 +1049,12 @@ func (d *Device) GetACLTable(name string) (*ACLTableInfo, error) {
 }
 
 // GetOrphanedACLs returns ACL tables that have no interfaces bound.
-func (d *Device) GetOrphanedACLs() []string {
-	if d.configDB == nil {
+func (n *Node) GetOrphanedACLs() []string {
+	if n.configDB == nil {
 		return nil
 	}
 	var orphans []string
-	for name, acl := range d.configDB.ACLTable {
+	for name, acl := range n.configDB.ACLTable {
 		if acl.Ports == "" {
 			orphans = append(orphans, name)
 		}
@@ -1059,11 +1066,11 @@ func (d *Device) GetOrphanedACLs() []string {
 // Test Helpers
 // ============================================================================
 
-// NewTestDevice creates a Device with pre-configured ConfigDB state for testing.
+// NewTestNode creates a Node with pre-configured ConfigDB state for testing.
 // This is intended for use by external test packages (e.g., operations_test)
 // that need to construct Devices without connecting to real SONiC hardware.
-func NewTestDevice(name string, configDB *sonic.ConfigDB, connected, locked bool) *Device {
-	return &Device{
+func NewTestNode(name string, configDB *sonic.ConfigDB, connected, locked bool) *Node {
+	return &Node{
 		name:       name,
 		configDB:   configDB,
 		connected:  connected,

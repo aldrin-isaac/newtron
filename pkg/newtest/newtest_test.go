@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // ============================================================================
@@ -1605,7 +1605,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 
 func TestExecuteStep_UnknownAction(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
 	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
@@ -1628,7 +1628,7 @@ func TestExecuteStep_SetsNameAndAction(t *testing.T) {
 	// The wait executor is the simplest — it just sleeps.
 	// With 0 duration it returns immediately.
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	step := &Step{
 		Action:   ActionWait,
@@ -1901,7 +1901,7 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 					}
 				}()
 				r := &Runner{
-					ChangeSets: make(map[string]*network.ChangeSet),
+					ChangeSets: make(map[string]*node.ChangeSet),
 				}
 				executor.Execute(context.Background(), r, step)
 			}()
@@ -1929,7 +1929,7 @@ func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*network.ChangeSet),
+			ChangeSets: make(map[string]*node.ChangeSet),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -1955,7 +1955,7 @@ func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*network.ChangeSet),
+			ChangeSets: make(map[string]*node.ChangeSet),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -1980,7 +1980,7 @@ func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*network.ChangeSet),
+			ChangeSets: make(map[string]*node.ChangeSet),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -2186,7 +2186,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 
 func TestRunScenarioSteps_SingleStep(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2210,7 +2210,7 @@ func TestRunScenarioSteps_SingleStep(t *testing.T) {
 
 func TestRunScenarioSteps_FailFast(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2232,7 +2232,7 @@ func TestRunScenarioSteps_FailFast(t *testing.T) {
 
 func TestRunScenarioSteps_Repeat(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	scenario := &Scenario{
 		Name:   "test",
@@ -2262,7 +2262,7 @@ func TestRunScenarioSteps_Repeat(t *testing.T) {
 
 func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*network.ChangeSet),
+		ChangeSets: make(map[string]*node.ChangeSet),
 	}
 	scenario := &Scenario{
 		Name:   "test",

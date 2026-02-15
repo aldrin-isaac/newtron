@@ -3,7 +3,7 @@
 // A QoSPolicy is a self-contained queue definition from which newtron derives
 // all CONFIG_DB tables: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER,
 // WRED_PROFILE, PORT_QOS_MAP, and QUEUE entries.
-package network
+package node
 
 import (
 	"fmt"
@@ -24,7 +24,7 @@ const (
 //   - 1 TC_TO_QUEUE_MAP entry (identity mapping)
 //   - N SCHEDULER entries (one per queue)
 //   - 0 or 1 WRED_PROFILE entry (if any queue has ECN)
-func generateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []CompositeEntry {
+func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []CompositeEntry {
 	var entries []CompositeEntry
 
 	// DSCP_TO_TC_MAP: map all 64 DSCP values to their traffic class.
@@ -134,12 +134,10 @@ func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, inte
 // resolveServiceQoSPolicy returns the QoS policy name and definition for a service.
 // It checks QoSPolicy (new-style) first, then falls back to legacy QoSProfile.
 // Returns ("", nil) if neither is set.
-func resolveServiceQoSPolicy(n *Network, svc *spec.ServiceSpec) (string, *spec.QoSPolicy) {
+func ResolveServiceQoSPolicy(sp SpecProvider, svc *spec.ServiceSpec) (string, *spec.QoSPolicy) {
 	if svc.QoSPolicy != "" {
-		if n.spec.QoSPolicies != nil {
-			if policy, ok := n.spec.QoSPolicies[svc.QoSPolicy]; ok {
-				return svc.QoSPolicy, policy
-			}
+		if policy, err := sp.GetQoSPolicy(svc.QoSPolicy); err == nil {
+			return svc.QoSPolicy, policy
 		}
 	}
 	return "", nil

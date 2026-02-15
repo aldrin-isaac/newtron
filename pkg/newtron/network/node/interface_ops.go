@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -22,9 +22,9 @@ type InterfaceConfig struct {
 
 // SetIP configures an IP address on this interface.
 func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("set-ip", i.name).Result(); err != nil {
+	if err := n.precondition("set-ip", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !util.IsValidIPv4CIDR(ipAddr) {
@@ -34,60 +34,60 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 		return nil, fmt.Errorf("cannot configure IP on LAG member")
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.set-ip")
+	cs := NewChangeSet(n.Name(), "interface.set-ip")
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
 	cs.Add("INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
 
 	i.ipAddresses = append(i.ipAddresses, ipAddr)
 
-	util.WithDevice(d.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
+	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
 }
 
 // SetVRF binds this interface to a VRF.
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("set-vrf", i.name).Result(); err != nil {
+	if err := n.precondition("set-vrf", i.name).Result(); err != nil {
 		return nil, err
 	}
-	if vrfName != "" && vrfName != "default" && !d.VRFExists(vrfName) {
+	if vrfName != "" && vrfName != "default" && !n.VRFExists(vrfName) {
 		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
 	}
 	if i.IsLAGMember() {
 		return nil, fmt.Errorf("cannot bind LAG member to VRF")
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.set-vrf")
+	cs := NewChangeSet(n.Name(), "interface.set-vrf")
 	cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
 		"vrf_name": vrfName,
 	})
 
 	i.vrf = vrfName
 
-	util.WithDevice(d.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
+	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
 	return cs, nil
 }
 
 // BindACL binds an ACL to this interface.
 // ACLs are shared - adds this interface to the ACL's binding list.
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("bind-acl", i.name).Result(); err != nil {
+	if err := n.precondition("bind-acl", i.name).Result(); err != nil {
 		return nil, err
 	}
-	if !d.ACLTableExists(aclName) {
+	if !n.ACLTableExists(aclName) {
 		return nil, fmt.Errorf("ACL table '%s' does not exist", aclName)
 	}
 	if direction != "ingress" && direction != "egress" {
 		return nil, fmt.Errorf("direction must be 'ingress' or 'egress'")
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.bind-acl")
+	cs := NewChangeSet(n.Name(), "interface.bind-acl")
 
 	// ACLs are shared - add this interface to existing binding list
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	existingACL, ok := configDB.ACLTable[aclName]
 	var newBindings string
 	if ok && existingACL.Ports != "" {
@@ -107,15 +107,15 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 		i.egressACL = aclName
 	}
 
-	util.WithDevice(d.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
+	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
 	return cs, nil
 }
 
 // Configure sets basic interface properties.
 func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("configure", i.name).Result(); err != nil {
+	if err := n.precondition("configure", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsLAGMember() {
@@ -128,7 +128,7 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*Chang
 		}
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.configure")
+	cs := NewChangeSet(n.Name(), "interface.configure")
 	fields := make(map[string]string)
 
 	if opts.Description != "" {
@@ -151,7 +151,7 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*Chang
 		cs.Add("PORT", i.name, ChangeModify, nil, fields)
 	}
 
-	util.WithDevice(d.Name()).Infof("Configured interface %s: %v", i.name, fields)
+	util.WithDevice(n.Name()).Infof("Configured interface %s: %v", i.name, fields)
 	return cs, nil
 }
 
@@ -162,16 +162,16 @@ func (i *Interface) Configure(ctx context.Context, opts InterfaceConfig) (*Chang
 // Set sets a property on this interface.
 // Supported properties: mtu, speed, admin-status, description
 func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("set-property", i.name).Result(); err != nil {
+	if err := n.precondition("set-property", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsLAGMember() {
 		return nil, fmt.Errorf("cannot configure LAG member directly - configure the parent LAG")
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.set")
+	cs := NewChangeSet(n.Name(), "interface.set")
 	fields := make(map[string]string)
 
 	switch property {
@@ -219,7 +219,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 
 	cs.Add(tableName, i.name, ChangeModify, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Set %s=%s on interface %s", property, value, i.name)
+	util.WithDevice(n.Name()).Infof("Set %s=%s on interface %s", property, value, i.name)
 	return cs, nil
 }
 
@@ -232,21 +232,21 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 // (ACLs, VLANs, VRFs) can be deleted vs just having this interface removed.
 // This is the single source of truth; pkg/operations re-exports it as a type alias.
 type DependencyChecker struct {
-	device           *Device
+	node           *Node
 	excludeInterface string
 }
 
 // NewDependencyChecker creates a dependency checker for the given interface
-func NewDependencyChecker(d *Device, excludeInterface string) *DependencyChecker {
+func NewDependencyChecker(d *Node, excludeInterface string) *DependencyChecker {
 	return &DependencyChecker{
-		device:           d,
+		node:           d,
 		excludeInterface: excludeInterface,
 	}
 }
 
 // IsLastACLUser returns true if this is the last interface using the ACL
 func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return true
 	}
@@ -262,7 +262,7 @@ func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
 
 // GetACLRemainingInterfaces returns interfaces remaining after removing this one
 func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return ""
 	}
@@ -277,7 +277,7 @@ func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 
 // IsLastVLANMember returns true if this is the last member of the VLAN
 func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return true
 	}
@@ -297,7 +297,7 @@ func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool {
 
 // IsLastServiceUser returns true if this is the last interface using the service
 func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return true
 	}
@@ -315,7 +315,7 @@ func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
 // that references the given ipvpn name. Used for shared VRF cleanup — the VRF
 // is only deleted when no service binding references the ipvpn.
 func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return true
 	}
@@ -331,7 +331,7 @@ func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
 
 // IsLastVRFUser returns true if this is the last interface bound to the VRF
 func (dc *DependencyChecker) IsLastVRFUser(vrfName string) bool {
-	configDB := dc.device.ConfigDB()
+	configDB := dc.node.ConfigDB()
 	if configDB == nil {
 		return true
 	}

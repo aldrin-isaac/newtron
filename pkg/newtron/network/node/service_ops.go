@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -22,15 +22,15 @@ type ApplyServiceOpts struct {
 // ApplyService applies a service definition to this interface.
 // This is the main high-level operation that configures VPN, routing, filters, and QoS.
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
 	// Validate preconditions
-	if err := d.precondition("apply-service", i.name).Result(); err != nil {
+	if err := n.precondition("apply-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 
 	// Get service definition via parent reference
-	svc, err := i.Network().GetService(serviceName)
+	svc, err := i.Node().GetService(serviceName)
 	if err != nil {
 		return nil, fmt.Errorf("service '%s' not found", serviceName)
 	}
@@ -51,14 +51,14 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	if svc.IPVPN != "" {
 		var err error
-		ipvpnDef, err = i.Network().GetIPVPN(svc.IPVPN)
+		ipvpnDef, err = i.Node().GetIPVPN(svc.IPVPN)
 		if err != nil {
 			return nil, fmt.Errorf("ipvpn '%s' not found", svc.IPVPN)
 		}
 	}
 	if svc.MACVPN != "" {
 		var err error
-		macvpnDef, err = i.Network().GetMACVPN(svc.MACVPN)
+		macvpnDef, err = i.Node().GetMACVPN(svc.MACVPN)
 		if err != nil {
 			return nil, fmt.Errorf("macvpn '%s' not found", svc.MACVPN)
 		}
@@ -85,41 +85,41 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// EVPN preconditions
 	hasEVPN := (ipvpnDef != nil && ipvpnDef.L3VNI > 0) || (macvpnDef != nil && macvpnDef.L2VNI > 0)
 	if hasEVPN {
-		if !d.VTEPExists() {
+		if !n.VTEPExists() {
 			return nil, fmt.Errorf("EVPN requires VTEP configuration")
 		}
-		if !d.BGPConfigured() {
+		if !n.BGPConfigured() {
 			return nil, fmt.Errorf("EVPN requires BGP configuration")
 		}
 	}
 
 	// Filter preconditions
 	if svc.IngressFilter != "" {
-		if _, err := i.Network().GetFilterSpec(svc.IngressFilter); err != nil {
+		if _, err := i.Node().GetFilterSpec(svc.IngressFilter); err != nil {
 			return nil, fmt.Errorf("ingress filter '%s' not found", svc.IngressFilter)
 		}
 	}
 	if svc.EgressFilter != "" {
-		if _, err := i.Network().GetFilterSpec(svc.EgressFilter); err != nil {
+		if _, err := i.Node().GetFilterSpec(svc.EgressFilter); err != nil {
 			return nil, fmt.Errorf("egress filter '%s' not found", svc.EgressFilter)
 		}
 	}
 
 	// QoS validation
 	if svc.QoSPolicy != "" {
-		if _, err := i.Network().GetQoSPolicy(svc.QoSPolicy); err != nil {
+		if _, err := i.Node().GetQoSPolicy(svc.QoSPolicy); err != nil {
 			return nil, fmt.Errorf("QoS policy '%s' not found", svc.QoSPolicy)
 		}
 	} else if svc.QoSProfile != "" {
-		if _, err := i.Network().GetQoSProfile(svc.QoSProfile); err != nil {
+		if _, err := i.Node().GetQoSProfile(svc.QoSProfile); err != nil {
 			return nil, fmt.Errorf("QoS profile '%s' not found", svc.QoSProfile)
 		}
 	}
 
 	// Generate base CONFIG_DB entries via shared generator (service_gen.go).
 	// This is the single source of truth for service → CONFIG_DB translation.
-	resolved := d.Resolved()
-	baseEntries, err := GenerateServiceEntries(i.Network(), ServiceEntryParams{
+	resolved := n.Resolved()
+	baseEntries, err := GenerateServiceEntries(i.Node(), ServiceEntryParams{
 		ServiceName:   serviceName,
 		InterfaceName: i.name,
 		IPAddress:     opts.IPAddress,
@@ -138,8 +138,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// Build change set with idempotency filtering.
 	// The shared generator always emits all entries (for topology provisioner's
 	// overwrite mode).  Here we skip entries that already exist on the device.
-	cs := NewChangeSet(d.Name(), "interface.apply-service")
-	configDB := d.ConfigDB()
+	cs := NewChangeSet(n.Name(), "interface.apply-service")
+	configDB := n.ConfigDB()
 
 	// Track ACL names from generated entries for interface-merging
 	var ingressACLName, egressACLName string
@@ -153,19 +153,19 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	for _, e := range baseEntries {
 		switch {
 		// Skip VLAN + L2VNI + SUPPRESS entries if VLAN already exists
-		case (e.Table == "VLAN" || e.Table == "SUPPRESS_VLAN_NEIGH") && vlanID > 0 && d.VLANExists(vlanID):
+		case (e.Table == "VLAN" || e.Table == "SUPPRESS_VLAN_NEIGH") && vlanID > 0 && n.VLANExists(vlanID):
 			continue
-		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vlan"] != "" && vlanID > 0 && d.VLANExists(vlanID):
+		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vlan"] != "" && vlanID > 0 && n.VLANExists(vlanID):
 			continue
 
 		// Skip shared VRF + L3VNI + RT entries if VRF already exists
-		case e.Table == "VRF" && svc.VRFType == spec.VRFTypeShared && d.VRFExists(e.Key):
+		case e.Table == "VRF" && svc.VRFType == spec.VRFTypeShared && n.VRFExists(e.Key):
 			continue
 		case e.Table == "VXLAN_TUNNEL_MAP" && e.Fields["vrf"] == svc.IPVPN &&
-			svc.VRFType == spec.VRFTypeShared && d.VRFExists(svc.IPVPN):
+			svc.VRFType == spec.VRFTypeShared && n.VRFExists(svc.IPVPN):
 			continue
 		case (e.Table == "BGP_GLOBALS_AF" || e.Table == "BGP_EVPN_VNI") &&
-			svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" && d.VRFExists(svc.IPVPN):
+			svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" && n.VRFExists(svc.IPVPN):
 			continue
 
 		// Replace ACL entries with expanded version (prefix list Cartesian product + interface merging)
@@ -186,7 +186,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				if aclName == egressACLName {
 					filterName = svc.EgressFilter
 				}
-				filterSpec, _ := i.Network().GetFilterSpec(filterName)
+				filterSpec, _ := i.Node().GetFilterSpec(filterName)
 				if filterSpec != nil {
 					i.addACLRulesFromFilterSpec(cs, aclName, filterSpec)
 				}
@@ -213,8 +213,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// QoS device-wide tables (not in shared generator, which only emits per-interface entries)
-	if policyName, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
-		for _, entry := range generateQoSDeviceEntries(policyName, policy) {
+	if policyName, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
+		for _, entry := range GenerateQoSDeviceEntries(policyName, policy) {
 			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
 		}
 	}
@@ -278,7 +278,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 	i.vrf = vrfName
 
-	util.WithDevice(d.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
+	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
 	return cs, nil
 }
 
@@ -373,9 +373,9 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 // addRoutePolicyConfig translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
 // PREFIX_SET, and COMMUNITY_SET entries. Returns the generated route-map name.
 func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, policyName, extraCommunity, extraPrefixList string) string {
-	policy, err := i.Network().GetRoutePolicy(policyName)
+	policy, err := i.Node().GetRoutePolicy(policyName)
 	if err != nil {
-		util.WithDevice(i.device.Name()).Warnf("Route policy '%s' not found: %v", policyName, err)
+		util.WithDevice(i.node.Name()).Warnf("Route policy '%s' not found: %v", policyName, err)
 		return ""
 	}
 
@@ -486,9 +486,9 @@ func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, 
 
 // addPrefixSetFromList resolves a prefix list and creates PREFIX_SET entries.
 func (i *Interface) addPrefixSetFromList(cs *ChangeSet, prefixSetName, prefixListName string) {
-	prefixes, err := i.Network().GetPrefixList(prefixListName)
+	prefixes, err := i.Node().GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
-		util.WithDevice(i.device.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
+		util.WithDevice(i.node.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
 		return
 	}
 	for seq, prefix := range prefixes {
@@ -558,7 +558,7 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 		return nil
 	}
 
-	prefixes, err := i.Network().GetPrefixList(prefixListName)
+	prefixes, err := i.Node().GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
 		return nil
 	}
@@ -596,7 +596,7 @@ func removeInterfaceFromList(list, interfaceName string) string {
 
 // removeSharedACL removes an ACL, handling the shared case
 func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, aclName string) {
-	configDB := i.device.ConfigDB()
+	configDB := i.node.ConfigDB()
 	if configDB == nil {
 		return
 	}
@@ -628,38 +628,38 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 // what was applied and needs to be removed.
 // Shared resources (ACLs, VLANs) are only deleted when this is the last user.
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("remove-service", i.name).Result(); err != nil {
+	if err := n.precondition("remove-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.HasService() {
 		return nil, fmt.Errorf("interface %s has no service to remove", i.name)
 	}
 
-	cs := NewChangeSet(d.Name(), "interface.remove-service")
-	configDB := d.ConfigDB()
+	cs := NewChangeSet(n.Name(), "interface.remove-service")
+	configDB := n.ConfigDB()
 
 	// Create dependency checker to determine what can be safely deleted
-	depCheck := NewDependencyChecker(d, i.name)
+	depCheck := NewDependencyChecker(n, i.name)
 
 	// Get service definition for cleanup logic
-	svc, _ := i.Network().GetService(i.serviceName)
+	svc, _ := i.Node().GetService(i.serviceName)
 
 	// Resolve VPN definitions - prefer stored binding, fall back to service lookup
 	var ipvpnDef *spec.IPVPNSpec
 	var macvpnDef *spec.MACVPNSpec
 
 	if i.serviceIPVPN != "" {
-		ipvpnDef, _ = i.Network().GetIPVPN(i.serviceIPVPN)
+		ipvpnDef, _ = i.Node().GetIPVPN(i.serviceIPVPN)
 	} else if svc != nil && svc.IPVPN != "" {
-		ipvpnDef, _ = i.Network().GetIPVPN(svc.IPVPN)
+		ipvpnDef, _ = i.Node().GetIPVPN(svc.IPVPN)
 	}
 
 	if i.serviceMACVPN != "" {
-		macvpnDef, _ = i.Network().GetMACVPN(i.serviceMACVPN)
+		macvpnDef, _ = i.Node().GetMACVPN(i.serviceMACVPN)
 	} else if svc != nil && svc.MACVPN != "" {
-		macvpnDef, _ = i.Network().GetMACVPN(svc.MACVPN)
+		macvpnDef, _ = i.Node().GetMACVPN(svc.MACVPN)
 	}
 
 	// Check if this is the last interface using this service (for shared resources)
@@ -677,7 +677,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	}
 	// Delete QUEUE entries for this interface (QUEUE|{intf}|{N})
 	if svc != nil {
-		if _, policy := resolveServiceQoSPolicy(i.Network(), svc); policy != nil {
+		if _, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
 			for qi := range policy.Queues {
 				queueKey := fmt.Sprintf("%s|%d", i.name, qi)
 				cs.Add("QUEUE", queueKey, ChangeDelete, nil, nil)
@@ -806,7 +806,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Log if this was the last user of the service
 	if isLastServiceUser {
-		util.WithDevice(d.Name()).Infof("Last interface removed from service '%s' - all service resources cleaned up", i.serviceName)
+		util.WithDevice(n.Name()).Infof("Last interface removed from service '%s' - all service resources cleaned up", i.serviceName)
 	}
 
 	// Clear local state
@@ -821,16 +821,16 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	i.ipAddresses = nil
 	i.vrf = ""
 
-	util.WithDevice(d.Name()).Infof("Removed service '%s' from interface %s", prevService, i.name)
+	util.WithDevice(n.Name()).Infof("Removed service '%s' from interface %s", prevService, i.name)
 	return cs, nil
 }
 
 // RefreshService reapplies the service configuration to sync with the service definition.
 // This is useful when the service definition has changed.
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
-	d := i.device
+	n := i.node
 
-	if err := d.precondition("refresh-service", i.name).Result(); err != nil {
+	if err := n.precondition("refresh-service", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !i.HasService() {
@@ -856,7 +856,7 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	// Merge the change sets
-	cs := NewChangeSet(d.Name(), "interface.refresh-service")
+	cs := NewChangeSet(n.Name(), "interface.refresh-service")
 	for _, change := range removeCS.Changes {
 		cs.Changes = append(cs.Changes, change)
 	}
@@ -864,6 +864,6 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 		cs.Changes = append(cs.Changes, change)
 	}
 
-	util.WithDevice(d.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)
+	util.WithDevice(n.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)
 	return cs, nil
 }

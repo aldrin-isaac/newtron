@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -26,16 +26,16 @@ type BGPGlobalsConfig struct {
 }
 
 // SetBGPGlobals configures BGP global settings via CONFIG_DB (frrcfgd).
-func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error) {
+func (n *Node) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*ChangeSet, error) {
 	vrf := cfg.VRF
 	if vrf == "" {
 		vrf = "default"
 	}
-	if err := d.precondition("set-bgp-globals", vrf).Result(); err != nil {
+	if err := n.precondition("set-bgp-globals", vrf).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.set-bgp-globals")
+	cs := NewChangeSet(n.Name(), "device.set-bgp-globals")
 
 	fields := map[string]string{
 		"local_asn": fmt.Sprintf("%d", cfg.LocalASN),
@@ -63,7 +63,7 @@ func (d *Device) SetBGPGlobals(ctx context.Context, cfg BGPGlobalsConfig) (*Chan
 
 	cs.Add("BGP_GLOBALS", vrf, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Set BGP globals for VRF %s (ASN %d)", vrf, cfg.LocalASN)
+	util.WithDevice(n.Name()).Infof("Set BGP globals for VRF %s (ASN %d)", vrf, cfg.LocalASN)
 	return cs, nil
 }
 
@@ -77,17 +77,17 @@ type SetupRouteReflectorConfig struct {
 // SetupRouteReflector performs full route reflector setup with all 3 AFs
 // (ipv4_unicast, ipv6_unicast, l2vpn_evpn). Replaces the v2 SetupBGPEVPN
 // with comprehensive multi-AF route reflection.
-func (d *Device) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error) {
-	if err := d.precondition("setup-route-reflector", "bgp").Result(); err != nil {
+func (n *Node) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflectorConfig) (*ChangeSet, error) {
+	if err := n.precondition("setup-route-reflector", "bgp").Result(); err != nil {
 		return nil, err
 	}
 
-	resolved := d.Resolved()
+	resolved := n.Resolved()
 	if resolved == nil {
 		return nil, fmt.Errorf("device has no resolved profile")
 	}
 
-	cs := NewChangeSet(d.Name(), "device.setup-route-reflector")
+	cs := NewChangeSet(n.Name(), "device.setup-route-reflector")
 
 	// Determine cluster ID
 	clusterID := cfg.ClusterID
@@ -157,7 +157,7 @@ func (d *Device) SetupRouteReflector(ctx context.Context, cfg SetupRouteReflecto
 	cs.Add("ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeAdd, nil, map[string]string{})
 	cs.Add("ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv6", ChangeAdd, nil, map[string]string{})
 
-	util.WithDevice(d.Name()).Infof("Setup route reflector with %d neighbors, cluster-id %s",
+	util.WithDevice(n.Name()).Infof("Setup route reflector with %d neighbors, cluster-id %s",
 		len(cfg.Neighbors), clusterID)
 	return cs, nil
 }
@@ -174,12 +174,12 @@ type PeerGroupConfig struct {
 }
 
 // ConfigurePeerGroup creates or updates a BGP peer group template.
-func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*ChangeSet, error) {
-	if err := d.precondition("configure-peer-group", cfg.Name).Result(); err != nil {
+func (n *Node) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*ChangeSet, error) {
+	if err := n.precondition("configure-peer-group", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.configure-peer-group")
+	cs := NewChangeSet(n.Name(), "device.configure-peer-group")
 
 	fields := map[string]string{}
 	if cfg.ASN > 0 {
@@ -205,20 +205,20 @@ func (d *Device) ConfigurePeerGroup(ctx context.Context, cfg PeerGroupConfig) (*
 
 	cs.Add("BGP_PEER_GROUP", cfg.Name, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Configured peer group %s", cfg.Name)
+	util.WithDevice(n.Name()).Infof("Configured peer group %s", cfg.Name)
 	return cs, nil
 }
 
 // DeletePeerGroup removes a BGP peer group.
-func (d *Device) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := d.precondition("delete-peer-group", name).Result(); err != nil {
+func (n *Node) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, error) {
+	if err := n.precondition("delete-peer-group", name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.delete-peer-group")
+	cs := NewChangeSet(n.Name(), "device.delete-peer-group")
 
 	// Delete AF entries first
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB != nil {
 		prefix := name + "|"
 		for key := range configDB.BGPPeerGroupAF {
@@ -230,7 +230,7 @@ func (d *Device) DeletePeerGroup(ctx context.Context, name string) (*ChangeSet, 
 
 	cs.Add("BGP_PEER_GROUP", name, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.Name()).Infof("Deleted peer group %s", name)
+	util.WithDevice(n.Name()).Infof("Deleted peer group %s", name)
 	return cs, nil
 }
 
@@ -244,12 +244,12 @@ type RouteRedistributionConfig struct {
 }
 
 // AddRouteRedistribution configures route redistribution into BGP.
-func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error) {
-	if err := d.precondition("add-route-redistribution", cfg.SrcProtocol).Result(); err != nil {
+func (n *Node) AddRouteRedistribution(ctx context.Context, cfg RouteRedistributionConfig) (*ChangeSet, error) {
+	if err := n.precondition("add-route-redistribution", cfg.SrcProtocol).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.add-route-redistribution")
+	cs := NewChangeSet(n.Name(), "device.add-route-redistribution")
 
 	vrf := cfg.VRF
 	if vrf == "" {
@@ -268,18 +268,18 @@ func (d *Device) AddRouteRedistribution(ctx context.Context, cfg RouteRedistribu
 
 	cs.Add("ROUTE_REDISTRIBUTE", key, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Added route redistribution %s %s in VRF %s",
+	util.WithDevice(n.Name()).Infof("Added route redistribution %s %s in VRF %s",
 		cfg.SrcProtocol, cfg.AddressFamily, vrf)
 	return cs, nil
 }
 
 // RemoveRouteRedistribution removes a route redistribution entry.
-func (d *Device) RemoveRouteRedistribution(ctx context.Context, vrf, srcProtocol, af string) (*ChangeSet, error) {
-	if err := d.precondition("remove-route-redistribution", srcProtocol).Result(); err != nil {
+func (n *Node) RemoveRouteRedistribution(ctx context.Context, vrf, srcProtocol, af string) (*ChangeSet, error) {
+	if err := n.precondition("remove-route-redistribution", srcProtocol).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.remove-route-redistribution")
+	cs := NewChangeSet(n.Name(), "device.remove-route-redistribution")
 
 	if vrf == "" {
 		vrf = "default"
@@ -288,7 +288,7 @@ func (d *Device) RemoveRouteRedistribution(ctx context.Context, vrf, srcProtocol
 	key := fmt.Sprintf("%s|%s|bgp|%s", vrf, srcProtocol, af)
 	cs.Add("ROUTE_REDISTRIBUTE", key, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.Name()).Infof("Removed route redistribution %s %s in VRF %s", srcProtocol, af, vrf)
+	util.WithDevice(n.Name()).Infof("Removed route redistribution %s %s in VRF %s", srcProtocol, af, vrf)
 	return cs, nil
 }
 
@@ -306,12 +306,12 @@ type RouteMapConfig struct {
 }
 
 // AddRouteMap creates a route-map with match/set rules.
-func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSet, error) {
-	if err := d.precondition("add-route-map", cfg.Name).Result(); err != nil {
+func (n *Node) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSet, error) {
+	if err := n.precondition("add-route-map", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.add-route-map")
+	cs := NewChangeSet(n.Name(), "device.add-route-map")
 
 	key := fmt.Sprintf("%s|%d", cfg.Name, cfg.Sequence)
 	fields := map[string]string{
@@ -338,19 +338,19 @@ func (d *Device) AddRouteMap(ctx context.Context, cfg RouteMapConfig) (*ChangeSe
 
 	cs.Add("ROUTE_MAP", key, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Added route-map %s seq %d", cfg.Name, cfg.Sequence)
+	util.WithDevice(n.Name()).Infof("Added route-map %s seq %d", cfg.Name, cfg.Sequence)
 	return cs, nil
 }
 
 // DeleteRouteMap removes a route-map.
-func (d *Device) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := d.precondition("delete-route-map", name).Result(); err != nil {
+func (n *Node) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, error) {
+	if err := n.precondition("delete-route-map", name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.delete-route-map")
+	cs := NewChangeSet(n.Name(), "device.delete-route-map")
 
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB != nil {
 		prefix := name + "|"
 		for key := range configDB.RouteMap {
@@ -360,7 +360,7 @@ func (d *Device) DeleteRouteMap(ctx context.Context, name string) (*ChangeSet, e
 		}
 	}
 
-	util.WithDevice(d.Name()).Infof("Deleted route-map %s", name)
+	util.WithDevice(n.Name()).Infof("Deleted route-map %s", name)
 	return cs, nil
 }
 
@@ -374,12 +374,12 @@ type PrefixSetConfig struct {
 }
 
 // AddPrefixSet creates a prefix list for route-map matching.
-func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*ChangeSet, error) {
-	if err := d.precondition("add-prefix-set", cfg.Name).Result(); err != nil {
+func (n *Node) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*ChangeSet, error) {
+	if err := n.precondition("add-prefix-set", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.add-prefix-set")
+	cs := NewChangeSet(n.Name(), "device.add-prefix-set")
 
 	key := fmt.Sprintf("%s|%d", cfg.Name, cfg.Sequence)
 	fields := map[string]string{
@@ -392,19 +392,19 @@ func (d *Device) AddPrefixSet(ctx context.Context, cfg PrefixSetConfig) (*Change
 
 	cs.Add("PREFIX_SET", key, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Added prefix-set %s seq %d", cfg.Name, cfg.Sequence)
+	util.WithDevice(n.Name()).Infof("Added prefix-set %s seq %d", cfg.Name, cfg.Sequence)
 	return cs, nil
 }
 
 // DeletePrefixSet removes a prefix list.
-func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := d.precondition("delete-prefix-set", name).Result(); err != nil {
+func (n *Node) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, error) {
+	if err := n.precondition("delete-prefix-set", name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.delete-prefix-set")
+	cs := NewChangeSet(n.Name(), "device.delete-prefix-set")
 
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB != nil {
 		prefix := name + "|"
 		for key := range configDB.PrefixSet {
@@ -414,17 +414,17 @@ func (d *Device) DeletePrefixSet(ctx context.Context, name string) (*ChangeSet, 
 		}
 	}
 
-	util.WithDevice(d.Name()).Infof("Deleted prefix-set %s", name)
+	util.WithDevice(n.Name()).Infof("Deleted prefix-set %s", name)
 	return cs, nil
 }
 
 // AddBGPNetwork adds a BGP network statement.
-func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, policy string) (*ChangeSet, error) {
-	if err := d.precondition("add-bgp-network", prefix).Result(); err != nil {
+func (n *Node) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, policy string) (*ChangeSet, error) {
+	if err := n.precondition("add-bgp-network", prefix).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.add-bgp-network")
+	cs := NewChangeSet(n.Name(), "device.add-bgp-network")
 
 	if vrf == "" {
 		vrf = "default"
@@ -437,17 +437,17 @@ func (d *Device) AddBGPNetwork(ctx context.Context, vrf, af, prefix string, poli
 
 	cs.Add("BGP_GLOBALS_AF_NETWORK", key, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Added BGP network %s in %s/%s", prefix, vrf, af)
+	util.WithDevice(n.Name()).Infof("Added BGP network %s in %s/%s", prefix, vrf, af)
 	return cs, nil
 }
 
 // RemoveBGPNetwork removes a BGP network statement.
-func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error) {
-	if err := d.precondition("remove-bgp-network", prefix).Result(); err != nil {
+func (n *Node) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (*ChangeSet, error) {
+	if err := n.precondition("remove-bgp-network", prefix).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.Name(), "device.remove-bgp-network")
+	cs := NewChangeSet(n.Name(), "device.remove-bgp-network")
 
 	if vrf == "" {
 		vrf = "default"
@@ -455,6 +455,6 @@ func (d *Device) RemoveBGPNetwork(ctx context.Context, vrf, af, prefix string) (
 	key := fmt.Sprintf("%s|%s|%s", vrf, af, prefix)
 	cs.Add("BGP_GLOBALS_AF_NETWORK", key, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.Name()).Infof("Removed BGP network %s from %s/%s", prefix, vrf, af)
+	util.WithDevice(n.Name()).Infof("Removed BGP network %s from %s/%s", prefix, vrf, af)
 	return cs, nil
 }

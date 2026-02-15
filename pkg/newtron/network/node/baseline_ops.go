@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 // ============================================================================
 
 // ApplyBaseline applies a baseline configlet to the device.
-func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error) {
-	if err := d.precondition("apply-baseline", configletName).Result(); err != nil {
+func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error) {
+	if err := n.precondition("apply-baseline", configletName).Result(); err != nil {
 		return nil, err
 	}
 
@@ -30,16 +30,16 @@ func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars [
 	}
 
 	// Add default variables from resolved config
-	if d.resolved != nil {
+	if n.resolved != nil {
 		if _, ok := varMap["loopback_ip"]; !ok {
-			varMap["loopback_ip"] = d.resolved.LoopbackIP
+			varMap["loopback_ip"] = n.resolved.LoopbackIP
 		}
 		if _, ok := varMap["device_name"]; !ok {
-			varMap["device_name"] = d.name
+			varMap["device_name"] = n.name
 		}
 	}
 
-	cs := NewChangeSet(d.name, "device.apply-baseline")
+	cs := NewChangeSet(n.name, "device.apply-baseline")
 
 	// Load configlet based on name (simplified - in production would load from file)
 	switch configletName {
@@ -67,7 +67,7 @@ func (d *Device) ApplyBaseline(ctx context.Context, configletName string, vars [
 		return nil, fmt.Errorf("unknown configlet: %s", configletName)
 	}
 
-	util.WithDevice(d.name).Infof("Applied baseline configlet '%s'", configletName)
+	util.WithDevice(n.name).Infof("Applied baseline configlet '%s'", configletName)
 	return cs, nil
 }
 
@@ -84,15 +84,15 @@ type CleanupSummary struct {
 
 // Cleanup identifies and removes orphaned configurations.
 // Returns a changeset to remove them and a summary of what was found.
-func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
-	if err := d.precondition("cleanup", cleanupType).Result(); err != nil {
+func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
+	if err := n.precondition("cleanup", cleanupType).Result(); err != nil {
 		return nil, nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.cleanup")
+	cs := NewChangeSet(n.name, "device.cleanup")
 	summary := &CleanupSummary{}
 
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB == nil {
 		return cs, summary, nil
 	}
@@ -167,12 +167,12 @@ func (d *Device) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *
 // ============================================================================
 
 // CreatePort creates a PORT entry validated against the device's platform.json.
-func (d *Device) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*ChangeSet, error) {
-	if err := d.precondition("create-port", cfg.Name).Result(); err != nil {
+func (n *Node) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*ChangeSet, error) {
+	if err := n.precondition("create-port", cfg.Name).Result(); err != nil {
 		return nil, err
 	}
 
-	underlying := d.Underlying()
+	underlying := n.Underlying()
 
 	// Validate against platform.json if loaded
 	if underlying.PlatformConfig != nil {
@@ -181,7 +181,7 @@ func (d *Device) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*C
 		}
 
 		// Check for conflicting ports (shared lanes)
-		conflicts := underlying.PlatformConfig.HasConflictingPorts(cfg.Name, d.ConfigDB().Port)
+		conflicts := underlying.PlatformConfig.HasConflictingPorts(cfg.Name, n.ConfigDB().Port)
 		if len(conflicts) > 0 {
 			return nil, fmt.Errorf("port %s conflicts with existing ports: %s (shared lanes)",
 				cfg.Name, strings.Join(conflicts, ", "))
@@ -189,11 +189,11 @@ func (d *Device) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*C
 	}
 
 	// Check port doesn't already exist
-	if _, ok := d.ConfigDB().Port[cfg.Name]; ok {
+	if _, ok := n.ConfigDB().Port[cfg.Name]; ok {
 		return nil, fmt.Errorf("port %s already exists", cfg.Name)
 	}
 
-	cs := NewChangeSet(d.Name(), "device.create-port")
+	cs := NewChangeSet(n.Name(), "device.create-port")
 
 	fields := map[string]string{
 		"admin_status": "up",
@@ -229,39 +229,39 @@ func (d *Device) CreatePort(ctx context.Context, cfg sonic.CreatePortConfig) (*C
 
 	cs.Add("PORT", cfg.Name, ChangeAdd, nil, fields)
 
-	util.WithDevice(d.Name()).Infof("Created port %s", cfg.Name)
+	util.WithDevice(n.Name()).Infof("Created port %s", cfg.Name)
 	return cs, nil
 }
 
 // DeletePort removes a PORT entry.
-func (d *Device) DeletePort(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := d.precondition("delete-port", name).Result(); err != nil {
+func (n *Node) DeletePort(ctx context.Context, name string) (*ChangeSet, error) {
+	if err := n.precondition("delete-port", name).Result(); err != nil {
 		return nil, err
 	}
 
-	if _, ok := d.ConfigDB().Port[name]; !ok {
+	if _, ok := n.ConfigDB().Port[name]; !ok {
 		return nil, fmt.Errorf("port %s does not exist", name)
 	}
 
 	// Check no services bound
-	if binding, ok := d.ConfigDB().NewtronServiceBinding[name]; ok {
+	if binding, ok := n.ConfigDB().NewtronServiceBinding[name]; ok {
 		return nil, fmt.Errorf("port %s has service '%s' bound — remove it first", name, binding.ServiceName)
 	}
 
-	cs := NewChangeSet(d.Name(), "device.delete-port")
+	cs := NewChangeSet(n.Name(), "device.delete-port")
 	cs.Add("PORT", name, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.Name()).Infof("Deleted port %s", name)
+	util.WithDevice(n.Name()).Infof("Deleted port %s", name)
 	return cs, nil
 }
 
 // BreakoutPort applies a breakout mode to a port, creating child ports and removing the parent.
-func (d *Device) BreakoutPort(ctx context.Context, cfg sonic.BreakoutConfig) (*ChangeSet, error) {
-	if err := d.precondition("breakout-port", cfg.ParentPort).Result(); err != nil {
+func (n *Node) BreakoutPort(ctx context.Context, cfg sonic.BreakoutConfig) (*ChangeSet, error) {
+	if err := n.precondition("breakout-port", cfg.ParentPort).Result(); err != nil {
 		return nil, err
 	}
 
-	underlying := d.Underlying()
+	underlying := n.Underlying()
 	if underlying.PlatformConfig == nil {
 		return nil, fmt.Errorf("platform config not loaded — call LoadPlatformConfig first")
 	}
@@ -278,12 +278,12 @@ func (d *Device) BreakoutPort(ctx context.Context, cfg sonic.BreakoutConfig) (*C
 	}
 
 	// Parent port must not have services
-	if binding, ok := d.ConfigDB().NewtronServiceBinding[cfg.ParentPort]; ok {
+	if binding, ok := n.ConfigDB().NewtronServiceBinding[cfg.ParentPort]; ok {
 		return nil, fmt.Errorf("parent port %s has service '%s' bound — remove it first",
 			cfg.ParentPort, binding.ServiceName)
 	}
 
-	cs := NewChangeSet(d.Name(), "device.breakout-port")
+	cs := NewChangeSet(n.Name(), "device.breakout-port")
 
 	// Delete parent port
 	cs.Add("PORT", cfg.ParentPort, ChangeDelete, nil, nil)
@@ -314,21 +314,21 @@ func (d *Device) BreakoutPort(ctx context.Context, cfg sonic.BreakoutConfig) (*C
 		})
 	}
 
-	util.WithDevice(d.Name()).Infof("Breakout port %s into %s (%d child ports)",
+	util.WithDevice(n.Name()).Infof("Breakout port %s into %s (%d child ports)",
 		cfg.ParentPort, cfg.Mode, len(childPorts))
 	return cs, nil
 }
 
 // LoadPlatformConfig fetches and caches platform.json from the device via SSH.
-func (d *Device) LoadPlatformConfig(ctx context.Context) error {
-	if !d.IsConnected() {
+func (n *Node) LoadPlatformConfig(ctx context.Context) error {
+	if !n.IsConnected() {
 		return util.ErrNotConnected
 	}
 
-	underlying := d.Underlying()
+	underlying := n.Underlying()
 
 	// Get platform identifier from DEVICE_METADATA
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	if configDB == nil {
 		return fmt.Errorf("config_db not loaded")
 	}
@@ -344,7 +344,7 @@ func (d *Device) LoadPlatformConfig(ctx context.Context) error {
 
 	// Read platform.json via SSH
 	path := fmt.Sprintf("/usr/share/sonic/device/%s/platform.json", platform)
-	data, err := d.readFileViaSSH(ctx, path)
+	data, err := n.readFileViaSSH(ctx, path)
 	if err != nil {
 		return fmt.Errorf("reading platform.json: %w", err)
 	}
@@ -355,19 +355,19 @@ func (d *Device) LoadPlatformConfig(ctx context.Context) error {
 	}
 
 	underlying.PlatformConfig = config
-	util.WithDevice(d.Name()).Infof("Loaded platform config: %d interfaces", len(config.Interfaces))
+	util.WithDevice(n.Name()).Infof("Loaded platform config: %d interfaces", len(config.Interfaces))
 	return nil
 }
 
 // GeneratePlatformSpec creates a spec.PlatformSpec from the device's platform.json.
 // Used to prime the spec system on first connect to a new hardware platform.
-func (d *Device) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, error) {
-	underlying := d.Underlying()
+func (n *Node) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, error) {
+	underlying := n.Underlying()
 	if underlying.PlatformConfig == nil {
 		return nil, fmt.Errorf("platform config not loaded — call LoadPlatformConfig first")
 	}
 
-	configDB := d.ConfigDB()
+	configDB := n.ConfigDB()
 	hwsku := ""
 	if meta, ok := configDB.DeviceMetadata["localhost"]; ok {
 		hwsku = meta["hwsku"]
@@ -378,10 +378,10 @@ func (d *Device) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, 
 
 // readFileViaSSH reads a file from the device via SSH tunnel.
 // Executes "cat <path>" over the SSH tunnel and returns the output.
-func (d *Device) readFileViaSSH(ctx context.Context, path string) ([]byte, error) {
-	underlying := d.Underlying()
+func (n *Node) readFileViaSSH(ctx context.Context, path string) ([]byte, error) {
+	underlying := n.Underlying()
 	if underlying == nil || underlying.Tunnel() == nil {
-		return nil, fmt.Errorf("readFileViaSSH: device %s has no SSH tunnel", d.name)
+		return nil, fmt.Errorf("readFileViaSSH: device %s has no SSH tunnel", n.name)
 	}
 	output, err := underlying.Tunnel().ExecCommand(fmt.Sprintf("cat %q", path))
 	if err != nil {

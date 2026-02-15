@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -35,7 +36,7 @@ type Network struct {
 	loader *spec.Loader
 
 	// Connected devices (created in this Network's context)
-	devices map[string]*Device
+	devices map[string]*node.Node
 
 	// Mutex for thread safety
 	mu sync.RWMutex
@@ -57,7 +58,7 @@ func NewNetwork(specDir string) (*Network, error) {
 		platforms: loader.GetPlatforms(),
 		topology:  loader.GetTopology(),
 		loader:    loader,
-		devices:   make(map[string]*Device),
+		devices:   make(map[string]*node.Node),
 	}, nil
 }
 
@@ -136,6 +137,20 @@ func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
 // GetRoutePolicy returns a route policy by name.
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
 	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", name)
+}
+
+// FindMACVPNByL2VNI returns the MACVPN name and spec for a given L2VNI.
+// Returns ("", nil) if no MACVPN matches.
+func (n *Network) FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	for name, def := range n.spec.MACVPN {
+		if def.L2VNI == vni {
+			return name, def
+		}
+	}
+	return "", nil
 }
 
 // ListServices returns all available service names.
@@ -398,7 +413,7 @@ func (n *Network) GetTopologyInterface(device, intf string) (*spec.TopologyInter
 // GetDevice returns an existing device or loads it from profile.
 // The Device is created in this Network's context and has access to all
 // Network-level specs through its parent reference.
-func (n *Network) GetDevice(name string) (*Device, error) {
+func (n *Network) GetNode(name string) (*node.Node, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -419,22 +434,16 @@ func (n *Network) GetDevice(name string) (*Device, error) {
 		return nil, fmt.Errorf("resolving profile for %s: %w", name, err)
 	}
 
-	// Create Device with parent reference to this Network
-	dev := &Device{
-		network:    n, // Parent reference - key to OO design
-		name:       name,
-		profile:    profile,
-		resolved:   resolved,
-		interfaces: make(map[string]*Interface),
-	}
+	// Create Node with SpecProvider (this Network) for spec access
+	dev := node.New(n, name, profile, resolved)
 
 	n.devices[name] = dev
 	return dev, nil
 }
 
 // ConnectDevice loads a device and establishes connection.
-func (n *Network) ConnectDevice(ctx context.Context, name string) (*Device, error) {
-	dev, err := n.GetDevice(name)
+func (n *Network) ConnectNode(ctx context.Context, name string) (*node.Node, error) {
+	dev, err := n.GetNode(name)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +456,7 @@ func (n *Network) ConnectDevice(ctx context.Context, name string) (*Device, erro
 }
 
 // ListDevices returns names of all loaded devices.
-func (n *Network) ListDevices() []string {
+func (n *Network) ListNodes() []string {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 

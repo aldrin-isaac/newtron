@@ -12,7 +12,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var vrfCmd = &cobra.Command{
@@ -49,7 +49,7 @@ var vrfListCmd = &cobra.Command{
 		vrfNames := dev.ListVRFs()
 
 		if app.jsonOutput {
-			var vrfs []*network.VRFInfo
+			var vrfs []*node.VRFInfo
 			skipped := 0
 			for _, name := range vrfNames {
 				vrf, err := dev.GetVRF(name)
@@ -263,12 +263,12 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFCreate, authCtx); err != nil {
 				return nil, err
 			}
-			cs, err := dev.CreateVRF(ctx, vrfName, network.VRFConfig{})
+			cs, err := dev.CreateVRF(ctx, vrfName, node.VRFConfig{})
 			if err != nil {
 				return nil, fmt.Errorf("creating VRF: %w", err)
 			}
@@ -291,7 +291,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFDelete, authCtx); err != nil {
 				return nil, err
@@ -319,7 +319,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		intfName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -346,7 +346,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		intfName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -391,7 +391,7 @@ Examples:
 		}
 		fmt.Println()
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -417,7 +417,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -457,7 +457,7 @@ Examples:
 			return fmt.Errorf("invalid ASN: %s", args[2])
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -472,7 +472,7 @@ Examples:
 				return nil, fmt.Errorf("interface %s is not in VRF %s (current VRF: %q)", intfName, vrfName, intf.VRF())
 			}
 
-			cs, err := intf.AddBGPNeighbor(ctx, network.DirectBGPNeighborConfig{
+			cs, err := intf.AddBGPNeighbor(ctx, node.DirectBGPNeighborConfig{
 				NeighborIP:  vrfNeighborIP,
 				RemoteAS:    asn,
 				Description: vrfNeighborDescription,
@@ -503,7 +503,7 @@ Examples:
 		vrfName := args[0]
 		target := args[1]
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -548,7 +548,7 @@ Examples:
 		prefix := args[1]
 		nextHop := args[2]
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err
@@ -576,7 +576,7 @@ Examples:
 		vrfName := args[0]
 		prefix := args[1]
 
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
 			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
 				return nil, err

@@ -9,26 +9,26 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // Shell provides an interactive REPL with persistent device connection.
 type Shell struct {
-	dev        *network.Device
+	dev        *node.Node
 	deviceName string
-	currentIntf *network.Interface // nil = device scope
-	intfName    string             // "" = device scope
+	currentIntf *node.Interface // nil = device scope
+	intfName    string          // "" = device scope
 	reader     *bufio.Reader
 	dirty      bool // true if changes applied since last save
 	commands   map[string]func(args []string)
 
 	// Composite build mode
-	composite    *network.CompositeBuilder // non-nil when in composite mode
-	compositeFor string                    // "overwrite" or "merge"
+	composite    *node.CompositeBuilder // non-nil when in composite mode
+	compositeFor string                 // "overwrite" or "merge"
 }
 
 // NewShell creates a new interactive shell for the given device.
-func NewShell(dev *network.Device, deviceName string) *Shell {
+func NewShell(dev *node.Node, deviceName string) *Shell {
 	s := &Shell{
 		dev:        dev,
 		deviceName: deviceName,
@@ -242,7 +242,7 @@ func (s *Shell) cmdApplyService(args []string) {
 	}
 	defer s.dev.Unlock()
 
-	changeSet, err := s.currentIntf.ApplyService(ctx, serviceName, network.ApplyServiceOpts{
+	changeSet, err := s.currentIntf.ApplyService(ctx, serviceName, node.ApplyServiceOpts{
 		IPAddress: ipAddress,
 	})
 	if err != nil {
@@ -349,11 +349,11 @@ func (s *Shell) cmdComposite(args []string) {
 			fmt.Println("Already in composite mode. Use 'composite commit' or 'composite discard' first.")
 			return
 		}
-		mode := network.CompositeMerge
+		mode := node.CompositeMerge
 		if len(args) > 1 && args[1] == "overwrite" {
-			mode = network.CompositeOverwrite
+			mode = node.CompositeOverwrite
 		}
-		s.composite = network.NewCompositeBuilder(s.deviceName, mode)
+		s.composite = node.NewCompositeBuilder(s.deviceName, mode)
 		s.compositeFor = string(mode)
 		fmt.Printf("Composite mode (%s). Changes will be batched.\n", mode)
 		fmt.Println("Use 'composite commit' to apply, 'composite discard' to cancel.")
@@ -388,7 +388,7 @@ func (s *Shell) cmdComposite(args []string) {
 			fmt.Printf("Error locking device: %v\n", err)
 			return
 		}
-		result, err := s.dev.DeliverComposite(config, network.CompositeMode(s.compositeFor))
+		result, err := s.dev.DeliverComposite(config, node.CompositeMode(s.compositeFor))
 		s.dev.Unlock()
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
@@ -459,7 +459,7 @@ Examples:
 			return fmt.Errorf("device required: use -d <device> flag")
 		}
 		ctx := context.Background()
-		dev, err := app.net.ConnectDevice(ctx, app.deviceName)
+		dev, err := app.net.ConnectNode(ctx, app.deviceName)
 		if err != nil {
 			return err
 		}

@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -24,15 +24,15 @@ type SVIConfig struct {
 }
 
 // CreateVTEP creates a VXLAN Tunnel Endpoint.
-func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error) {
-	if err := d.precondition("create-vtep", "vtep1").
-		Check(!d.VTEPExists(), "VTEP must not exist", "VTEP already configured").
+func (n *Node) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, error) {
+	if err := n.precondition("create-vtep", "vtep1").
+		Check(!n.VTEPExists(), "VTEP must not exist", "VTEP already configured").
 		Check(opts.SourceIP != "", "source IP required", "source IP must be specified").
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.create-vtep")
+	cs := NewChangeSet(n.name, "device.create-vtep")
 
 	// Create VXLAN tunnel
 	cs.Add("VXLAN_TUNNEL", "vtep1", ChangeAdd, nil, map[string]string{
@@ -44,49 +44,49 @@ func (d *Device) CreateVTEP(ctx context.Context, opts VTEPConfig) (*ChangeSet, e
 		"source_vtep": "vtep1",
 	})
 
-	util.WithDevice(d.name).Infof("Created VTEP with source IP %s", opts.SourceIP)
+	util.WithDevice(n.name).Infof("Created VTEP with source IP %s", opts.SourceIP)
 	return cs, nil
 }
 
 // DeleteVTEP removes the VXLAN Tunnel Endpoint.
-func (d *Device) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
-	if err := d.precondition("delete-vtep", "vtep1").
+func (n *Node) DeleteVTEP(ctx context.Context) (*ChangeSet, error) {
+	if err := n.precondition("delete-vtep", "vtep1").
 		RequireVTEPConfigured().
 		Result(); err != nil {
 		return nil, err
 	}
 
 	// Check for existing VNI mappings
-	if d.configDB != nil && len(d.configDB.VXLANTunnelMap) > 0 {
+	if n.configDB != nil && len(n.configDB.VXLANTunnelMap) > 0 {
 		return nil, fmt.Errorf("cannot delete VTEP with existing VNI mappings")
 	}
 
-	cs := NewChangeSet(d.name, "device.delete-vtep")
+	cs := NewChangeSet(n.name, "device.delete-vtep")
 
 	// Remove NVO first
-	for name := range d.configDB.VXLANEVPNNVO {
+	for name := range n.configDB.VXLANEVPNNVO {
 		cs.Add("VXLAN_EVPN_NVO", name, ChangeDelete, nil, nil)
 	}
 
 	// Remove tunnel
-	for name := range d.configDB.VXLANTunnel {
+	for name := range n.configDB.VXLANTunnel {
 		cs.Add("VXLAN_TUNNEL", name, ChangeDelete, nil, nil)
 	}
 
-	util.WithDevice(d.name).Info("Deleted VTEP")
+	util.WithDevice(n.name).Info("Deleted VTEP")
 	return cs, nil
 }
 
 // MapL2VNI maps a VLAN to an L2VNI for EVPN.
-func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	if err := d.precondition("map-l2vni", vlanResource(vlanID)).
+func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
+	if err := n.precondition("map-l2vni", vlanResource(vlanID)).
 		RequireVTEPConfigured().
 		RequireVLANExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.map-l2vni")
+	cs := NewChangeSet(n.name, "device.map-l2vni")
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
 	mapKey := fmt.Sprintf("vtep1|map_%d_%s", vni, vlanName)
@@ -96,20 +96,20 @@ func (d *Device) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, err
 		"vni":  fmt.Sprintf("%d", vni),
 	})
 
-	util.WithDevice(d.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
+	util.WithDevice(n.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
 	return cs, nil
 }
 
 // MapL3VNI maps a VRF to an L3VNI for EVPN.
-func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error) {
-	if err := d.precondition("map-l3vni", vrfName).
+func (n *Node) MapL3VNI(ctx context.Context, vrfName string, vni int) (*ChangeSet, error) {
+	if err := n.precondition("map-l3vni", vrfName).
 		RequireVTEPConfigured().
 		RequireVRFExists(vrfName).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.map-l3vni")
+	cs := NewChangeSet(n.name, "device.map-l3vni")
 
 	// Update VRF with VNI
 	cs.Add("VRF", vrfName, ChangeModify, nil, map[string]string{
@@ -123,21 +123,21 @@ func (d *Device) MapL3VNI(ctx context.Context, vrfName string, vni int) (*Change
 		"vni": fmt.Sprintf("%d", vni),
 	})
 
-	util.WithDevice(d.name).Infof("Mapped VRF %s to L3VNI %d", vrfName, vni)
+	util.WithDevice(n.name).Infof("Mapped VRF %s to L3VNI %d", vrfName, vni)
 	return cs, nil
 }
 
 // UnmapVNI removes a VNI mapping.
-func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
-	if err := d.precondition("unmap-vni", fmt.Sprintf("VNI-%d", vni)).Result(); err != nil {
+func (n *Node) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
+	if err := n.precondition("unmap-vni", fmt.Sprintf("VNI-%d", vni)).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.unmap-vni")
+	cs := NewChangeSet(n.name, "device.unmap-vni")
 
 	// Find and remove the mapping
-	if d.configDB != nil {
-		for key, mapping := range d.configDB.VXLANTunnelMap {
+	if n.configDB != nil {
+		for key, mapping := range n.configDB.VXLANTunnelMap {
 			if mapping.VNI == fmt.Sprintf("%d", vni) {
 				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
 				break
@@ -149,24 +149,24 @@ func (d *Device) UnmapVNI(ctx context.Context, vni int) (*ChangeSet, error) {
 		return nil, fmt.Errorf("VNI %d mapping not found", vni)
 	}
 
-	util.WithDevice(d.name).Infof("Unmapped VNI %d", vni)
+	util.WithDevice(n.name).Infof("Unmapped VNI %d", vni)
 	return cs, nil
 }
 
 // UnmapL2VNI removes the L2VNI mapping for a VLAN.
-func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := d.precondition("unmap-l2vni", vlanResource(vlanID)).
+func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	if err := n.precondition("unmap-l2vni", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	cs := NewChangeSet(d.name, "device.unmap-l2vni")
+	cs := NewChangeSet(n.name, "device.unmap-l2vni")
 
 	// Find the tunnel map entry for this VLAN
-	if d.configDB != nil {
-		for key, mapping := range d.configDB.VXLANTunnelMap {
+	if n.configDB != nil {
+		for key, mapping := range n.configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
 				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
 				break
@@ -178,15 +178,15 @@ func (d *Device) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error)
 		return nil, fmt.Errorf("no L2VNI mapping found for VLAN %d", vlanID)
 	}
 
-	util.WithDevice(d.name).Infof("Unmapped L2VNI for VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Unmapped L2VNI for VLAN %d", vlanID)
 	return cs, nil
 }
 
 // ConfigureSVI configures a VLAN's SVI (Layer 3 interface).
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
-func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	pc := d.precondition("configure-svi", vlanResource(vlanID)).
+func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
+	pc := n.precondition("configure-svi", vlanResource(vlanID)).
 		RequireVLANExists(vlanID)
 	if opts.VRF != "" {
 		pc.RequireVRFExists(opts.VRF)
@@ -196,7 +196,7 @@ func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (
 	}
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	cs := NewChangeSet(d.name, "device.configure-svi")
+	cs := NewChangeSet(n.name, "device.configure-svi")
 
 	// VLAN_INTERFACE entry with optional VRF binding
 	fields := map[string]string{}
@@ -218,18 +218,18 @@ func (d *Device) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (
 		})
 	}
 
-	util.WithDevice(d.name).Infof("Configured SVI for VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
 	return cs, nil
 }
 
 // SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
 // If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
-func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
-	if err := d.precondition("setup-evpn", "evpn").Result(); err != nil {
+func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
+	if err := n.precondition("setup-evpn", "evpn").Result(); err != nil {
 		return nil, err
 	}
 
-	resolved := d.Resolved()
+	resolved := n.Resolved()
 	if sourceIP == "" {
 		sourceIP = resolved.VTEPSourceIP
 	}
@@ -237,10 +237,10 @@ func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, er
 		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
 	}
 
-	cs := NewChangeSet(d.name, "device.setup-evpn")
+	cs := NewChangeSet(n.name, "device.setup-evpn")
 
 	// Create VTEP (skip if exists)
-	if !d.VTEPExists() {
+	if !n.VTEPExists() {
 		cs.Add("VXLAN_TUNNEL", "vtep1", ChangeAdd, nil, map[string]string{
 			"src_ip": sourceIP,
 		})
@@ -267,7 +267,7 @@ func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, er
 				continue
 			}
 			// Skip if neighbor already exists
-			if d.BGPNeighborExists(rrIP) {
+			if n.BGPNeighborExists(rrIP) {
 				continue
 			}
 
@@ -286,6 +286,6 @@ func (d *Device) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, er
 		}
 	}
 
-	util.WithDevice(d.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
+	util.WithDevice(n.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
 	return cs, nil
 }

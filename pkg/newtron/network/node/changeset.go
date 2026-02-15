@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -120,12 +120,12 @@ func (cs *ChangeSet) toDeviceChanges() []device.ConfigChange {
 }
 
 // Apply writes the changes to the device's config_db via Redis.
-func (cs *ChangeSet) Apply(d *Device) error {
-	if err := d.precondition("apply-changeset", cs.Operation).Result(); err != nil {
+func (cs *ChangeSet) Apply(n *Node) error {
+	if err := n.precondition("apply-changeset", cs.Operation).Result(); err != nil {
 		return err
 	}
 
-	if err := d.Underlying().ApplyChanges(cs.toDeviceChanges()); err != nil {
+	if err := n.Underlying().ApplyChanges(cs.toDeviceChanges()); err != nil {
 		return err
 	}
 	cs.AppliedCount = len(cs.Changes)
@@ -135,12 +135,12 @@ func (cs *ChangeSet) Apply(d *Device) error {
 // Verify re-reads CONFIG_DB via a fresh connection and compares against the
 // ChangeSet to confirm that writes were persisted. Stores the result in
 // cs.Verification.
-func (cs *ChangeSet) Verify(d *Device) error {
-	if !d.IsConnected() {
+func (cs *ChangeSet) Verify(n *Node) error {
+	if !n.IsConnected() {
 		return util.ErrNotConnected
 	}
 
-	result, err := d.Underlying().VerifyChangeSet(context.Background(), cs.toDeviceChanges())
+	result, err := n.Underlying().VerifyChangeSet(context.Background(), cs.toDeviceChanges())
 	if err != nil {
 		return err
 	}
@@ -153,11 +153,11 @@ func (cs *ChangeSet) Verify(d *Device) error {
 // ChangeDelete → recreate with OldValue. Best-effort: attempts ALL inverse
 // operations, collecting errors via errors.Join(). Caller should verify
 // device state after rollback.
-func (cs *ChangeSet) Rollback(d *Device) error {
+func (cs *ChangeSet) Rollback(n *Node) error {
 	if cs.AppliedCount == 0 {
 		return nil
 	}
-	if err := d.precondition("rollback-changeset", cs.Operation).Result(); err != nil {
+	if err := n.precondition("rollback-changeset", cs.Operation).Result(); err != nil {
 		return err
 	}
 
@@ -194,7 +194,7 @@ func (cs *ChangeSet) Rollback(d *Device) error {
 			}
 		}
 
-		if err := d.Underlying().ApplyChanges([]device.ConfigChange{inverse}); err != nil {
+		if err := n.Underlying().ApplyChanges([]device.ConfigChange{inverse}); err != nil {
 			errs = append(errs, fmt.Errorf("rollback %s|%s: %w", c.Table, c.Key, err))
 		}
 	}

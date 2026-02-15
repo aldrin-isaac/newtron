@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 func TestStatusConstants(t *testing.T) {
@@ -225,7 +225,7 @@ func (c *customCheck) Name() string {
 	return c.name
 }
 
-func (c *customCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *customCheck) Run(ctx context.Context, d *node.Node) Result {
 	return Result{
 		Check:   c.name,
 		Status:  StatusOK,

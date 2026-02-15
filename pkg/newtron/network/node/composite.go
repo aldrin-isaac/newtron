@@ -1,5 +1,5 @@
 // composite.go implements offline composite CONFIG_DB generation and atomic delivery.
-package network
+package node
 
 import (
 	"fmt"
@@ -205,15 +205,15 @@ func (cc *CompositeConfig) ToTableChanges() []sonic.TableChange {
 // DeliverComposite delivers a composite config to a device.
 // For overwrite mode: replaces entire CONFIG_DB.
 // For merge mode: validates no conflicts, then pipeline-writes new entries.
-func (d *Device) DeliverComposite(composite *CompositeConfig, mode CompositeMode) (*CompositeDeliveryResult, error) {
-	if err := d.precondition("deliver-composite", string(mode)).Result(); err != nil {
+func (n *Node) DeliverComposite(composite *CompositeConfig, mode CompositeMode) (*CompositeDeliveryResult, error) {
+	if err := n.precondition("deliver-composite", string(mode)).Result(); err != nil {
 		return nil, err
 	}
 
 	result := &CompositeDeliveryResult{Mode: mode}
 	changes := composite.ToTableChanges()
 
-	client := d.Underlying().Client()
+	client := n.Underlying().Client()
 
 	switch mode {
 	case CompositeOverwrite:
@@ -227,7 +227,7 @@ func (d *Device) DeliverComposite(composite *CompositeConfig, mode CompositeMode
 
 	case CompositeMerge:
 		// Validate: no existing service bindings for merge targets
-		if err := d.validateMerge(composite); err != nil {
+		if err := n.validateMerge(composite); err != nil {
 			return nil, err
 		}
 
@@ -247,8 +247,8 @@ func (d *Device) DeliverComposite(composite *CompositeConfig, mode CompositeMode
 }
 
 // ValidateComposite performs a dry-run validation of composite delivery without applying.
-func (d *Device) ValidateComposite(composite *CompositeConfig, mode CompositeMode) error {
-	if !d.IsConnected() {
+func (n *Node) ValidateComposite(composite *CompositeConfig, mode CompositeMode) error {
+	if !n.IsConnected() {
 		return util.ErrNotConnected
 	}
 
@@ -257,7 +257,7 @@ func (d *Device) ValidateComposite(composite *CompositeConfig, mode CompositeMod
 		// Overwrite always valid (replaces everything)
 		return nil
 	case CompositeMerge:
-		return d.validateMerge(composite)
+		return n.validateMerge(composite)
 	default:
 		return fmt.Errorf("unknown composite mode: %s", mode)
 	}
@@ -266,8 +266,8 @@ func (d *Device) ValidateComposite(composite *CompositeConfig, mode CompositeMod
 // validateMerge checks that merge won't conflict with existing config.
 // Merge is only supported for interface-level service configuration,
 // and only if the target interface has no existing service binding.
-func (d *Device) validateMerge(composite *CompositeConfig) error {
-	configDB := d.ConfigDB()
+func (n *Node) validateMerge(composite *CompositeConfig) error {
+	configDB := n.ConfigDB()
 	if configDB == nil {
 		return fmt.Errorf("config_db not loaded")
 	}

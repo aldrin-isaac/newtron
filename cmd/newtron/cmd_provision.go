@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -110,7 +111,7 @@ Examples:
 			// up via Redis keyspace notifications, but bgpcfgd cannot change the
 			// BGP ASN dynamically — it requires a container restart.
 			if app.saveMode {
-				dev, err := app.net.ConnectDevice(ctx, name)
+				dev, err := app.net.ConnectNode(ctx, name)
 				if err != nil {
 					fmt.Printf("  Save: %s (could not connect: %v)\n", red("FAILED"), err)
 				} else {
@@ -158,7 +159,7 @@ Examples:
 }
 
 // waitForFRR polls vtysh until it responds or timeout expires.
-func waitForFRR(ctx context.Context, dev *network.Device) error {
+func waitForFRR(ctx context.Context, dev *node.Node) error {
 	deadline := time.After(frrReadyTimeout)
 	ticker := time.NewTicker(frrReadyPollInterval)
 	defer ticker.Stop()

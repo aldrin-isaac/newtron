@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // Status represents the health status of a component
@@ -41,7 +41,7 @@ type Report struct {
 // Check defines the interface for health checks
 type Check interface {
 	Name() string
-	Run(ctx context.Context, d *network.Device) Result
+	Run(ctx context.Context, d *node.Node) Result
 }
 
 // Checker runs health checks on a device
@@ -68,7 +68,7 @@ func (c *Checker) AddCheck(check Check) {
 }
 
 // Run executes all health checks and returns a report
-func (c *Checker) Run(ctx context.Context, d *network.Device) (*Report, error) {
+func (c *Checker) Run(ctx context.Context, d *node.Node) (*Report, error) {
 	if !d.IsConnected() {
 		return nil, fmt.Errorf("device not connected")
 	}
@@ -100,7 +100,7 @@ func (c *Checker) Run(ctx context.Context, d *network.Device) (*Report, error) {
 }
 
 // RunCheck runs a specific health check by name
-func (c *Checker) RunCheck(ctx context.Context, d *network.Device, name string) (*Result, error) {
+func (c *Checker) RunCheck(ctx context.Context, d *node.Node, name string) (*Result, error) {
 	for _, check := range c.checks {
 		if check.Name() == name {
 			result := check.Run(ctx, d)
@@ -128,7 +128,7 @@ func (c *InterfaceCheck) Name() string {
 }
 
 // Run executes the interface health check
-func (c *InterfaceCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *InterfaceCheck) Run(ctx context.Context, d *node.Node) Result {
 	start := time.Now()
 	result := Result{
 		Check:     c.Name(),
@@ -179,7 +179,7 @@ func (c *LAGCheck) Name() string {
 }
 
 // Run executes the LAG health check
-func (c *LAGCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *LAGCheck) Run(ctx context.Context, d *node.Node) Result {
 	start := time.Now()
 	result := Result{
 		Check:     c.Name(),
@@ -231,7 +231,7 @@ func (c *BGPCheck) Name() string {
 }
 
 // Run executes the BGP health check
-func (c *BGPCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *BGPCheck) Run(ctx context.Context, d *node.Node) Result {
 	start := time.Now()
 	result := Result{
 		Check:     c.Name(),
@@ -263,7 +263,7 @@ func (c *VXLANCheck) Name() string {
 }
 
 // Run executes the VXLAN health check
-func (c *VXLANCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *VXLANCheck) Run(ctx context.Context, d *node.Node) Result {
 	start := time.Now()
 	result := Result{
 		Check:     c.Name(),
@@ -294,7 +294,7 @@ func (c *EVPNCheck) Name() string {
 }
 
 // Run executes the EVPN health check
-func (c *EVPNCheck) Run(ctx context.Context, d *network.Device) Result {
+func (c *EVPNCheck) Run(ctx context.Context, d *node.Node) Result {
 	start := time.Now()
 	result := Result{
 		Check:     c.Name(),

@@ -8,7 +8,7 @@
 //   - Prefix-list expansion for ACLs (Cartesian product)
 //   - Route policy generation (ROUTE_MAP, COMMUNITY_SET, PREFIX_SET)
 //   - Local state updates (Interface field mutations)
-package network
+package node
 
 import (
 	"fmt"
@@ -43,8 +43,8 @@ type ServiceEntryParams struct {
 // GenerateServiceEntries produces the CONFIG_DB entries for applying a service
 // to an interface.  The returned slice is ordered by table dependency (VLANs
 // before members, VRFs before interfaces, etc.).
-func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry, error) {
-	svc, err := n.GetService(p.ServiceName)
+func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeEntry, error) {
+	svc, err := sp.GetService(p.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("service '%s' not found", p.ServiceName)
 	}
@@ -56,13 +56,13 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 	var macvpnDef *spec.MACVPNSpec
 
 	if svc.IPVPN != "" {
-		ipvpnDef, err = n.GetIPVPN(svc.IPVPN)
+		ipvpnDef, err = sp.GetIPVPN(svc.IPVPN)
 		if err != nil {
 			return nil, fmt.Errorf("ipvpn '%s' not found", svc.IPVPN)
 		}
 	}
 	if svc.MACVPN != "" {
-		macvpnDef, err = n.GetMACVPN(svc.MACVPN)
+		macvpnDef, err = sp.GetMACVPN(svc.MACVPN)
 		if err != nil {
 			return nil, fmt.Errorf("macvpn '%s' not found", svc.MACVPN)
 		}
@@ -230,20 +230,20 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 	// ACL configuration — skip if the platform does not support ACLs.
 	skipACL := false
 	if p.PlatformName != "" {
-		if platform, err := n.GetPlatform(p.PlatformName); err == nil {
+		if platform, err := sp.GetPlatform(p.PlatformName); err == nil {
 			skipACL = !platform.SupportsFeature("acl")
 		}
 	}
 	if !skipACL {
 		if svc.IngressFilter != "" {
-			filterEntries, err := generateServiceACLEntries(n, p.ServiceName, svc.IngressFilter, p.InterfaceName, "ingress")
+			filterEntries, err := generateServiceACLEntries(sp, p.ServiceName, svc.IngressFilter, p.InterfaceName, "ingress")
 			if err != nil {
 				return nil, err
 			}
 			entries = append(entries, filterEntries...)
 		}
 		if svc.EgressFilter != "" {
-			filterEntries, err := generateServiceACLEntries(n, p.ServiceName, svc.EgressFilter, p.InterfaceName, "egress")
+			filterEntries, err := generateServiceACLEntries(sp, p.ServiceName, svc.EgressFilter, p.InterfaceName, "egress")
 			if err != nil {
 				return nil, err
 			}
@@ -252,10 +252,10 @@ func GenerateServiceEntries(n *Network, p ServiceEntryParams) ([]CompositeEntry,
 	}
 
 	// QoS configuration: new-style policy takes precedence over legacy profile
-	if policyName, policy := resolveServiceQoSPolicy(n, svc); policy != nil {
+	if policyName, policy := ResolveServiceQoSPolicy(sp, svc); policy != nil {
 		entries = append(entries, generateQoSInterfaceEntries(policyName, policy, p.InterfaceName)...)
 	} else if svc.QoSProfile != "" {
-		qosProfile, err := n.GetQoSProfile(svc.QoSProfile)
+		qosProfile, err := sp.GetQoSProfile(svc.QoSProfile)
 		if err == nil && qosProfile != nil {
 			qosFields := map[string]string{}
 			if qosProfile.DSCPToTCMap != "" {
@@ -417,8 +417,8 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams) ([]Composit
 }
 
 // generateServiceACLEntries generates ACL table and rule entries for a service filter.
-func generateServiceACLEntries(n *Network, serviceName, filterSpecName, interfaceName, stage string) ([]CompositeEntry, error) {
-	filterSpec, err := n.GetFilterSpec(filterSpecName)
+func generateServiceACLEntries(sp SpecProvider, serviceName, filterSpecName, interfaceName, stage string) ([]CompositeEntry, error) {
+	filterSpec, err := sp.GetFilterSpec(filterSpecName)
 	if err != nil {
 		return nil, fmt.Errorf("filter spec '%s' not found", filterSpecName)
 	}

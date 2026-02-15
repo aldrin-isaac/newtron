@@ -11,7 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var interfaceCmd = &cobra.Command{
@@ -269,7 +269,7 @@ Examples:
 		intfName := args[0]
 		property := args[1]
 		value := strings.Join(args[2:], " ")
-		return withDeviceWrite(func(ctx context.Context, dev *network.Device) (*network.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
 				return nil, err

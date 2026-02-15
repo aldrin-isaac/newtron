@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
 
@@ -19,7 +20,7 @@ type Runner struct {
 	TopologiesDir string
 	Network       *network.Network
 	Lab           *newtlab.Lab
-	ChangeSets    map[string]*network.ChangeSet
+	ChangeSets    map[string]*node.ChangeSet
 	Verbose       bool
 	Progress      ProgressReporter
 
@@ -283,7 +284,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 		return results, nil
 	}
 
-	r.ChangeSets = make(map[string]*network.ChangeSet)
+	r.ChangeSets = make(map[string]*node.ChangeSet)
 
 	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
 		r.opts = RunOptions{
@@ -379,7 +380,7 @@ func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOp
 // number of iterations. Execution stops on the first failed iteration.
 func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
 	if r.ChangeSets == nil {
-		r.ChangeSets = make(map[string]*network.ChangeSet)
+		r.ChangeSets = make(map[string]*node.ChangeSet)
 	}
 
 	repeat := scenario.Repeat
@@ -442,7 +443,7 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	}
 
 	for _, name := range topo.DeviceNames() {
-		dev, err := net.GetDevice(name)
+		dev, err := net.GetNode(name)
 		if err != nil {
 			return &InfraError{Op: "connect", Device: name, Err: err}
 		}
@@ -507,7 +508,7 @@ func (r *Runner) allDeviceNames() []string {
 	if topo := r.Network.GetTopology(); topo != nil {
 		return topo.DeviceNames()
 	}
-	return r.Network.ListDevices()
+	return r.Network.ListNodes()
 }
 
 // resolveDevices resolves step.Devices to concrete device names.

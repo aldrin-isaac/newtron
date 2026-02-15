@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -25,13 +25,13 @@ type HealthCheckResult struct {
 //
 // Starts a fresh read-only episode by calling Refresh() to ensure health
 // checks (checkBGP, checkInterfaces, etc.) read current CONFIG_DB state.
-func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error) {
-	if !d.IsConnected() {
+func (n *Node) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error) {
+	if !n.IsConnected() {
 		return nil, util.ErrNotConnected
 	}
 
 	// Start a fresh read-only episode
-	if err := d.Refresh(); err != nil {
+	if err := n.Refresh(); err != nil {
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
@@ -39,33 +39,33 @@ func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]Healt
 
 	// Run checks based on type
 	if checkType == "" || checkType == "bgp" {
-		results = append(results, d.checkBGP()...)
+		results = append(results, n.checkBGP()...)
 	}
 	if checkType == "" || checkType == "interfaces" {
-		results = append(results, d.checkInterfaces()...)
+		results = append(results, n.checkInterfaces()...)
 	}
 	if checkType == "" || checkType == "evpn" {
-		results = append(results, d.checkEVPN()...)
+		results = append(results, n.checkEVPN()...)
 	}
 	if checkType == "" || checkType == "lag" {
-		results = append(results, d.checkLAG()...)
+		results = append(results, n.checkLAG()...)
 	}
 
 	return results, nil
 }
 
-func (d *Device) checkBGP() []HealthCheckResult {
-	if d.configDB == nil {
+func (n *Node) checkBGP() []HealthCheckResult {
+	if n.configDB == nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}
 	}
 
-	if len(d.configDB.BGPNeighbor) == 0 {
+	if len(n.configDB.BGPNeighbor) == 0 {
 		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}
 	}
 
 	// Build expected neighbor set from CONFIG_DB: vrf → []ip
 	expected := make(map[string][]string)
-	for key := range d.configDB.BGPNeighbor {
+	for key := range n.configDB.BGPNeighbor {
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) != 2 {
 			continue
@@ -74,18 +74,18 @@ func (d *Device) checkBGP() []HealthCheckResult {
 	}
 
 	// Try STATE_DB first (populated by bgpmon on hardware SONiC)
-	if results := d.checkBGPFromStateDB(expected); results != nil {
+	if results := n.checkBGPFromStateDB(expected); results != nil {
 		return results
 	}
 
 	// Fall back to vtysh (VPP and images without bgpmon)
-	return d.checkBGPFromVtysh(expected)
+	return n.checkBGPFromVtysh(expected)
 }
 
 // checkBGPFromStateDB checks BGP state via STATE_DB BGP_NEIGHBOR_TABLE.
 // Returns nil if STATE_DB has no BGP neighbor entries (caller should fall back).
-func (d *Device) checkBGPFromStateDB(expected map[string][]string) []HealthCheckResult {
-	stateClient := d.conn.StateClient()
+func (n *Node) checkBGPFromStateDB(expected map[string][]string) []HealthCheckResult {
+	stateClient := n.conn.StateClient()
 	var results []HealthCheckResult
 	anyFound := false
 
@@ -122,8 +122,8 @@ func (d *Device) checkBGPFromStateDB(expected map[string][]string) []HealthCheck
 // checkBGPFromVtysh checks BGP state via "vtysh -c 'show bgp summary json'".
 // Used when STATE_DB has no BGP_NEIGHBOR_TABLE entries (e.g., SONiC VPP
 // images that don't ship bgpmon).
-func (d *Device) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResult {
-	tunnel := d.conn.Tunnel()
+func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResult {
+	tunnel := n.conn.Tunnel()
 	if tunnel == nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "no SSH tunnel for vtysh fallback"}}
 	}
@@ -183,16 +183,16 @@ func (d *Device) checkBGPFromVtysh(expected map[string][]string) []HealthCheckRe
 	return results
 }
 
-func (d *Device) checkInterfaces() []HealthCheckResult {
+func (n *Node) checkInterfaces() []HealthCheckResult {
 	var results []HealthCheckResult
 
-	if d.configDB == nil {
+	if n.configDB == nil {
 		return []HealthCheckResult{{Check: "interfaces", Status: "fail", Message: "Config not loaded"}}
 	}
 
-	total := len(d.configDB.Port)
+	total := len(n.configDB.Port)
 	adminDown := 0
-	for _, port := range d.configDB.Port {
+	for _, port := range n.configDB.Port {
 		if port.AdminStatus == "down" {
 			adminDown++
 		}
@@ -215,21 +215,21 @@ func (d *Device) checkInterfaces() []HealthCheckResult {
 	return results
 }
 
-func (d *Device) checkEVPN() []HealthCheckResult {
+func (n *Node) checkEVPN() []HealthCheckResult {
 	var results []HealthCheckResult
 
-	if d.configDB == nil {
+	if n.configDB == nil {
 		return []HealthCheckResult{{Check: "evpn", Status: "fail", Message: "Config not loaded"}}
 	}
 
-	if !d.VTEPExists() {
+	if !n.VTEPExists() {
 		results = append(results, HealthCheckResult{
 			Check:   "evpn",
 			Status:  "warn",
 			Message: "No VTEP configured",
 		})
 	} else {
-		vniCount := len(d.configDB.VXLANTunnelMap)
+		vniCount := len(n.configDB.VXLANTunnelMap)
 		results = append(results, HealthCheckResult{
 			Check:   "evpn",
 			Status:  "pass",
@@ -240,14 +240,14 @@ func (d *Device) checkEVPN() []HealthCheckResult {
 	return results
 }
 
-func (d *Device) checkLAG() []HealthCheckResult {
+func (n *Node) checkLAG() []HealthCheckResult {
 	var results []HealthCheckResult
 
-	if d.configDB == nil {
+	if n.configDB == nil {
 		return []HealthCheckResult{{Check: "lag", Status: "fail", Message: "Config not loaded"}}
 	}
 
-	lagCount := len(d.configDB.PortChannel)
+	lagCount := len(n.configDB.PortChannel)
 	if lagCount == 0 {
 		results = append(results, HealthCheckResult{
 			Check:   "lag",
@@ -256,7 +256,7 @@ func (d *Device) checkLAG() []HealthCheckResult {
 		})
 	} else {
 		// Count members
-		memberCount := len(d.configDB.PortChannelMember)
+		memberCount := len(n.configDB.PortChannelMember)
 		results = append(results, HealthCheckResult{
 			Check:   "lag",
 			Status:  "pass",

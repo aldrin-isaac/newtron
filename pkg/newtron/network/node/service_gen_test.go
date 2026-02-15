@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"testing"
@@ -7,22 +7,20 @@ import (
 )
 
 func TestGenerateServiceEntries_L2(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"customer-l2": {
-					ServiceType: spec.ServiceTypeL2,
-					MACVPN:      "cust-mac",
-					VLAN:        100,
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"customer-l2": {
+				ServiceType: spec.ServiceTypeL2,
+				MACVPN:      "cust-mac",
+				VLAN:        100,
 			},
-			MACVPN: map[string]*spec.MACVPNSpec{
-				"cust-mac": {L2VNI: 20100, ARPSuppression: true},
-			},
+		},
+		macvpn: map[string]*spec.MACVPNSpec{
+			"cust-mac": {L2VNI: 20100, ARPSuppression: true},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "customer-l2",
 		InterfaceName: "Ethernet0",
 	})
@@ -38,17 +36,15 @@ func TestGenerateServiceEntries_L2(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_L3_NoVRF(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"fabric-underlay": {
-					ServiceType: spec.ServiceTypeL3,
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"fabric-underlay": {
+				ServiceType: spec.ServiceTypeL3,
 			},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "fabric-underlay",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
@@ -82,22 +78,20 @@ func TestGenerateServiceEntries_L3_NoVRF(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_L3_WithVRF(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"customer-l3": {
-					ServiceType: spec.ServiceTypeL3,
-					VRFType:     spec.VRFTypeInterface,
-					IPVPN:       "customer-vpn",
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"customer-l3": {
+				ServiceType: spec.ServiceTypeL3,
+				VRFType:     spec.VRFTypeInterface,
+				IPVPN:       "customer-vpn",
 			},
-			IPVPN: map[string]*spec.IPVPNSpec{
-				"customer-vpn": {L3VNI: 10001},
-			},
+		},
+		ipvpn: map[string]*spec.IPVPNSpec{
+			"customer-vpn": {L3VNI: 10001},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "customer-l3",
 		InterfaceName: "Ethernet4",
 		IPAddress:     "10.2.0.1/30",
@@ -138,29 +132,27 @@ func TestGenerateServiceEntries_L3_WithVRF(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_IRB(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"customer-irb": {
-					ServiceType:    spec.ServiceTypeIRB,
-					VRFType:        spec.VRFTypeInterface,
-					IPVPN:          "cust-vpn",
-					MACVPN:         "cust-mac",
-					VLAN:           100,
-					AnycastGateway: "10.1.100.1/24",
-					AnycastMAC:     "00:00:00:01:02:03",
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"customer-irb": {
+				ServiceType:    spec.ServiceTypeIRB,
+				VRFType:        spec.VRFTypeInterface,
+				IPVPN:          "cust-vpn",
+				MACVPN:         "cust-mac",
+				VLAN:           100,
+				AnycastGateway: "10.1.100.1/24",
+				AnycastMAC:     "00:00:00:01:02:03",
 			},
-			IPVPN: map[string]*spec.IPVPNSpec{
-				"cust-vpn": {L3VNI: 10001},
-			},
-			MACVPN: map[string]*spec.MACVPNSpec{
-				"cust-mac": {L2VNI: 20100},
-			},
+		},
+		ipvpn: map[string]*spec.IPVPNSpec{
+			"cust-vpn": {L3VNI: 10001},
+		},
+		macvpn: map[string]*spec.MACVPNSpec{
+			"cust-mac": {L2VNI: 20100},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "customer-irb",
 		InterfaceName: "Ethernet8",
 	})
@@ -186,36 +178,34 @@ func TestGenerateServiceEntries_IRB(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"svc-with-acl": {
-					ServiceType:   spec.ServiceTypeL3,
-					IngressFilter: "test-filter",
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"svc-with-acl": {
+				ServiceType:   spec.ServiceTypeL3,
+				IngressFilter: "test-filter",
 			},
-			FilterSpecs: map[string]*spec.FilterSpec{
-				"test-filter": {
-					Rules: []*spec.FilterRule{
-						{
-							Sequence: 10,
-							SrcIP:    "10.0.0.0/8",
-							Protocol: "tcp",
-							DstPort:  "80",
-							Action:   "permit",
-							CoS:      "ef",
-						},
-						{
-							Sequence: 20,
-							Action:   "deny",
-						},
+		},
+		filterSpecs: map[string]*spec.FilterSpec{
+			"test-filter": {
+				Rules: []*spec.FilterRule{
+					{
+						Sequence: 10,
+						SrcIP:    "10.0.0.0/8",
+						Protocol: "tcp",
+						DstPort:  "80",
+						Action:   "permit",
+						CoS:      "ef",
+					},
+					{
+						Sequence: 20,
+						Action:   "deny",
 					},
 				},
 			},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "svc-with-acl",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
@@ -246,22 +236,20 @@ func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"transit": {
-					ServiceType: spec.ServiceTypeL3,
-					Routing: &spec.RoutingSpec{
-						Protocol: spec.RoutingProtocolBGP,
-						PeerAS:   "65001",
-					},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"transit": {
+				ServiceType: spec.ServiceTypeL3,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   "65001",
 				},
 			},
 		},
 	}
 
 	// Bug fix #2: UnderlayASN should be used when set
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
@@ -287,22 +275,20 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"transit": {
-					ServiceType: spec.ServiceTypeL3,
-					Routing: &spec.RoutingSpec{
-						Protocol: spec.RoutingProtocolBGP,
-						PeerAS:   "65001",
-					},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"transit": {
+				ServiceType: spec.ServiceTypeL3,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   "65001",
 				},
 			},
 		},
 	}
 
 	// When UnderlayASN is 0, should fall back to LocalAS
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
@@ -325,21 +311,19 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"transit": {
-					ServiceType: spec.ServiceTypeL3,
-					Routing: &spec.RoutingSpec{
-						Protocol: spec.RoutingProtocolBGP,
-						PeerAS:   "65001",
-					},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"transit": {
+				ServiceType: spec.ServiceTypeL3,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   "65001",
 				},
 			},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
@@ -365,26 +349,24 @@ func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"customer-l3": {
-					ServiceType: spec.ServiceTypeL3,
-					VRFType:     spec.VRFTypeInterface,
-					IPVPN:       "customer-vpn",
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"customer-l3": {
+				ServiceType: spec.ServiceTypeL3,
+				VRFType:     spec.VRFTypeInterface,
+				IPVPN:       "customer-vpn",
 			},
-			IPVPN: map[string]*spec.IPVPNSpec{
-				"customer-vpn": {
-					L3VNI:    10001,
-					ImportRT: []string{"64512:10001"},
-					ExportRT: []string{"64512:10001", "64512:10002"},
-				},
+		},
+		ipvpn: map[string]*spec.IPVPNSpec{
+			"customer-vpn": {
+				L3VNI:    10001,
+				ImportRT: []string{"64512:10001"},
+				ExportRT: []string{"64512:10001", "64512:10002"},
 			},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "customer-l3",
 		InterfaceName: "Ethernet4",
 		IPAddress:     "10.2.0.1/30",
@@ -409,22 +391,20 @@ func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
 }
 
 func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
-	n := &Network{
-		spec: &spec.NetworkSpecFile{
-			Services: map[string]*spec.ServiceSpec{
-				"shared-l3": {
-					ServiceType: spec.ServiceTypeL3,
-					VRFType:     spec.VRFTypeShared,
-					IPVPN:       "shared-vpn",
-				},
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"shared-l3": {
+				ServiceType: spec.ServiceTypeL3,
+				VRFType:     spec.VRFTypeShared,
+				IPVPN:       "shared-vpn",
 			},
-			IPVPN: map[string]*spec.IPVPNSpec{
-				"shared-vpn": {L3VNI: 20001},
-			},
+		},
+		ipvpn: map[string]*spec.IPVPNSpec{
+			"shared-vpn": {L3VNI: 20001},
 		},
 	}
 
-	entries, err := GenerateServiceEntries(n, ServiceEntryParams{
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
 		ServiceName:   "shared-l3",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.3.0.0/31",

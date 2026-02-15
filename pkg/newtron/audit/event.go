@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // Event represents an auditable configuration change event
@@ -18,7 +18,7 @@ type Event struct {
 	Operation   string           `json:"operation"`
 	Service     string           `json:"service,omitempty"`
 	Interface   string           `json:"interface,omitempty"`
-	Changes     []network.Change `json:"changes"`
+	Changes     []node.Change `json:"changes"`
 	Success     bool                `json:"success"`
 	Error       string              `json:"error,omitempty"`
 	ExecuteMode bool                `json:"execute_mode"` // true if -x was used
@@ -67,7 +67,7 @@ func (e *Event) WithInterface(iface string) *Event {
 }
 
 // WithChanges sets the changes
-func (e *Event) WithChanges(changes []network.Change) *Event {
+func (e *Event) WithChanges(changes []node.Change) *Event {
 	e.Changes = changes
 	return e
 }

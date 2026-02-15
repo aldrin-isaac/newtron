@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -13,10 +13,10 @@ import (
 // testInterface builds a Device + Interface pair ready for interface-level
 // operation tests. The device is connected and locked; configDB has Ethernet0
 // in the PORT table with an Interface entry.
-func testInterface() (*Device, *Interface) {
+func testInterface() (*Node, *Interface) {
 	d := testDevice()
 	intf := &Interface{
-		device: d,
+		node: d,
 		name:   "Ethernet0",
 	}
 	d.interfaces["Ethernet0"] = intf
@@ -37,7 +37,7 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	intf.vrf = "Vrf_CUST1"
 
 	// Register service in network spec
-	d.network.spec.Services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeL3,
 		VRFType:     spec.VRFTypeInterface,
 	}
@@ -71,7 +71,7 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	intf.serviceName = "customer-l3"
 	intf.ingressACL = "ACL_CUST_IN"
 
-	d.network.spec.Services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeL3,
 	}
 
@@ -103,7 +103,7 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	intf.serviceName = "customer-l3"
 	intf.ingressACL = "ACL_CUST_IN"
 
-	d.network.spec.Services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeL3,
 	}
 
@@ -276,7 +276,7 @@ func TestRemoveBGPNeighbor(t *testing.T) {
 
 func TestInterface_NotConnected(t *testing.T) {
 	_, intf := testInterface()
-	intf.device.connected = false
+	intf.node.connected = false
 	ctx := context.Background()
 
 	ops := []struct {
@@ -329,7 +329,7 @@ func TestInterface_LAGMemberBlocksConfig(t *testing.T) {
 func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
 	intf.serviceName = "existing-service"
-	d.network.spec.Services["new-service"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["new-service"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeL3,
 	}
 	ctx := context.Background()

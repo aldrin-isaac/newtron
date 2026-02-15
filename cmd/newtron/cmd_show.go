@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // showCmd displays device details.
@@ -35,7 +35,7 @@ Examples:
 	},
 }
 
-func showDevice(dev *network.Device) error {
+func showDevice(dev *node.Node) error {
 	if app.jsonOutput {
 		data := map[string]any{
 			"name":            dev.Name(),

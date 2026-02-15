@@ -1,4 +1,4 @@
-package network
+package node
 
 import (
 	"context"
@@ -22,15 +22,15 @@ type VLANConfig struct {
 }
 
 // CreateVLAN creates a new VLAN on this device.
-func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error) {
-	if err := d.precondition("create-vlan", vlanResource(vlanID)).
+func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error) {
+	if err := n.precondition("create-vlan", vlanResource(vlanID)).
 		Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
 		RequireVLANNotExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.create-vlan")
+	cs := NewChangeSet(n.name, "device.create-vlan")
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
 
 	fields := map[string]string{
@@ -51,24 +51,24 @@ func (d *Device) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*
 		})
 	}
 
-	util.WithDevice(d.name).Infof("Created VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Created VLAN %d", vlanID)
 	return cs, nil
 }
 
 // DeleteVLAN removes a VLAN from this device.
-func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := d.precondition("delete-vlan", vlanResource(vlanID)).
+func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	if err := n.precondition("delete-vlan", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.delete-vlan")
+	cs := NewChangeSet(n.name, "device.delete-vlan")
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
 
 	// Remove VLAN members first
-	if d.configDB != nil {
-		for key := range d.configDB.VLANMember {
+	if n.configDB != nil {
+		for key := range n.configDB.VLANMember {
 			parts := splitConfigDBKey(key)
 			if len(parts) == 2 && parts[0] == vlanName {
 				cs.Add("VLAN_MEMBER", key, ChangeDelete, nil, nil)
@@ -77,8 +77,8 @@ func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 	}
 
 	// Remove VNI mapping if exists
-	if d.configDB != nil {
-		for key, mapping := range d.configDB.VXLANTunnelMap {
+	if n.configDB != nil {
+		for key, mapping := range n.configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
 				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
 			}
@@ -87,23 +87,23 @@ func (d *Device) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error)
 
 	cs.Add("VLAN", vlanName, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.name).Infof("Deleted VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Deleted VLAN %d", vlanID)
 	return cs, nil
 }
 
 // AddVLANMember adds an interface to a VLAN as a tagged or untagged member.
-func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
+func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
 	// Normalize interface name (e.g., Eth0 -> Ethernet0)
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if err := d.precondition("add-vlan-member", vlanResource(vlanID)).
+	if err := n.precondition("add-vlan-member", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
 		RequireInterfaceExists(interfaceName).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.add-vlan-member")
+	cs := NewChangeSet(n.name, "device.add-vlan-member")
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
 	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
 
@@ -116,26 +116,26 @@ func (d *Device) AddVLANMember(ctx context.Context, vlanID int, interfaceName st
 		"tagging_mode": taggingMode,
 	})
 
-	util.WithDevice(d.name).Infof("Added %s to VLAN %d (%s)", interfaceName, vlanID, taggingMode)
+	util.WithDevice(n.name).Infof("Added %s to VLAN %d (%s)", interfaceName, vlanID, taggingMode)
 	return cs, nil
 }
 
 // RemoveVLANMember removes an interface from a VLAN.
-func (d *Device) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
+func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if err := d.precondition("remove-vlan-member", vlanResource(vlanID)).
+	if err := n.precondition("remove-vlan-member", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(d.name, "device.remove-vlan-member")
+	cs := NewChangeSet(n.name, "device.remove-vlan-member")
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
 	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
 
 	cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
 
-	util.WithDevice(d.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
+	util.WithDevice(n.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
 	return cs, nil
 }
