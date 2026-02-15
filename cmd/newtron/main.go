@@ -53,7 +53,7 @@ type App struct {
 	deviceName string
 
 	// Option flags
-	rootDir     string // -S flag: network root dir (contains specs/ and configlets/)
+	rootDir     string // -S flag: network root dir (contains specs/)
 	specDir     string // resolved: rootDir/specs or rootDir (flat layout)
 	executeMode bool
 	saveMode    bool
@@ -202,7 +202,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
 
 	// Option flags (global)
-	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/ and configlets/)")
+	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
