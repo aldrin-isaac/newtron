@@ -80,6 +80,19 @@ Always `go build -o bin/<tool> ./cmd/<tool>` before testing — `go run` compile
 
 golangci-lint is not installed. Use `go vet` for static analysis.
 
+## Model Routing
+
+Use the primary model (Opus) for:
+- Architectural decisions, audits, and planning
+- Determining what to change and why
+- Code review and correctness reasoning
+
+Dispatch subagents with `model: "sonnet"` for:
+- Applying known edits across files (renames, import path updates, deletions)
+- Running build/test/commit cycles
+- Grep/read research tasks with clear search criteria
+- Doc updates where the changes are already specified
+
 ## User Preferences
 
 - Never compact away the last 5 prompts and responses during context compression.

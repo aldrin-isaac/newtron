@@ -74,22 +74,22 @@ newtron/
 │       ├── cmd_suites.go   # suites subcommand (hidden alias for list)
 │       └── cmd_topologies.go # topologies subcommand
 ├── pkg/
-│   ├── network/            # newtron core (Device, Interface, CompositeBuilder,
-│   │                       #   TopologyProvisioner)
-│   ├── spec/               # Shared spec types
-│   ├── device/             # Device connection layer (SSH tunnel, Redis)
-│   ├── health/             # Health checker (interfaces, BGP, EVPN, LAG, VXLAN)
-│   ├── audit/              # Audit logger (FileLogger, event filtering)
-│   ├── configlet/          # Configlet loading and variable resolution
+│   ├── newtron/
+│   │   ├── network/        # newtron core (Device, Interface, CompositeBuilder,
+│   │   │                   #   TopologyProvisioner)
+│   │   ├── spec/           # Shared spec types
+│   │   ├── device/         # Device connection layer (SSH tunnel, Redis)
+│   │   ├── health/         # Health checker (interfaces, BGP, EVPN, LAG, VXLAN)
+│   │   └── audit/          # Audit logger (FileLogger, event filtering)
 │   ├── newtlab/            # newtlab core library
 │   └── newtest/            # newtest core library
 │       ├── scenario.go     # Scenario, Step, StepAction, ExpectBlock types
 │       ├── parser.go       # ParseScenario, validation, dependency graph
 │       ├── runner.go       # Runner, RunOptions, iterateScenarios
-│       ├── steps.go        # StepExecutor interface, 38 executor implementations
+│       ├── steps.go        # stepExecutor interface, 38 executor implementations
 │       ├── deploy.go       # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go        # RunState, ScenarioState, SuiteStatus, persistence
-│       ├── progress.go     # ProgressReporter, ConsoleProgress, StateReporter
+│       ├── progress.go     # ProgressReporter, consoleProgress, StateReporter
 │       ├── errors.go       # InfraError, StepError, PauseError
 │       ├── report.go       # ScenarioResult, StepResult, StepStatus, ReportGenerator
 │       └── newtest_test.go # Unit tests
@@ -118,13 +118,6 @@ newtron/
 │   ├── images/             # VM images or symlinks
 │   └── .generated/         # Runtime output (gitignored)
 │       └── report.md
-├── configlets/             # Baseline config templates (shared with newtron)
-│   ├── sonic-baseline.json
-│   ├── sonic-evpn.json
-│   ├── sonic-evpn-leaf.json
-│   ├── sonic-evpn-spine.json
-│   ├── sonic-acl-copp.json
-│   └── sonic-qos-8q.json
 └── docs/
     ├── newtlab/
     └── newtest/
@@ -152,7 +145,7 @@ spine1 ── Ethernet0 ─── Ethernet0 ── leaf1
 ```
 
 Tests: basic BGP peering, interface configuration, service apply/remove,
-health checks, configlet application, CONFIG_DB writes.
+health checks, baseline application, CONFIG_DB writes.
 
 ### 4.2 4-Node (2 spines + 2 leaves)
 

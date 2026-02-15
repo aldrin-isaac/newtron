@@ -46,7 +46,7 @@ git clone https://github.com/newtron-network/newtron.git
 cd newtron
 
 # Build the binary
-go build -o newtron ./cmd/newtron
+go build -o bin/newtron ./cmd/newtron
 
 # Install to PATH
 sudo mv newtron /usr/local/bin/
@@ -126,7 +126,7 @@ func (d *Device) Connect(ctx context.Context) error {
     var addr string
     if d.Profile.SSHUser != "" && d.Profile.SSHPass != "" {
         // SSH tunnel path: connect SSH to device:22, forward to 127.0.0.1:6379
-        tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass)
+        tun, err := NewSSHTunnel(d.Profile.MgmtIP, d.Profile.SSHUser, d.Profile.SSHPass, d.Profile.SSHPort)
         if err != nil {
             return fmt.Errorf("SSH tunnel to %s: %w", d.Name, err)
         }
@@ -179,7 +179,6 @@ Create the specification directory:
 
 ```bash
 sudo mkdir -p /etc/newtron/profiles
-sudo mkdir -p /etc/newtron/configlets
 ```
 
 ```
@@ -188,11 +187,9 @@ sudo mkdir -p /etc/newtron/configlets
     ├── site.json           # Site definitions and route reflectors
     ├── platforms.json      # Hardware platform definitions
     ├── topology.json       # (optional) Topology for automated provisioning
-    ├── profiles/
-    │   ├── leaf1-dc1.json
-    │   └── spine1-dc1.json
-    └── configlets/
-        └── sonic-baseline.json
+    └── profiles/
+        ├── leaf1-dc1.json
+        └── spine1-dc1.json
 ```
 
 For lab environments, newtlab generates specs per topology (see `docs/newtlab/`).
@@ -455,7 +452,6 @@ sudo vim /etc/newtron/profiles/leaf1-dc1.json
 | `ssh_pass` | SSH password for Redis tunnel access |
 | `as_number` | Override region AS number for this device |
 | `is_route_reflector` | Mark device as route reflector |
-| `is_border_router` | Mark as border router |
 | `vlan_port_mapping` | Device-specific VLAN-to-port mappings |
 | `generic_alias` | Device-specific aliases (override region/global) |
 | `prefix_lists` | Device-specific prefix lists (merged with region/global) |
@@ -1988,82 +1984,24 @@ The JSON output uses `HealthCheckResult` objects with `check`, `status`, and `me
 
 ## 16. Baseline Configuration
 
-### 16.1 List Available Configlets
+The baseline functionality in newtron is implemented through the `ApplyBaseline()` method on `node.Node`. This method applies hardcoded baseline configuration logic directly, rather than loading configuration from external template files.
 
-No device needed:
+### 16.1 How Baseline Works
 
-```bash
-newtron baseline list
+The baseline operation:
+- Sets the device hostname from the device profile
+- Configures the loopback interface with the IP from the device profile
+- Uses inline logic in `pkg/newtron/network/node/baseline_ops.go`
 
-# Output:
-# Available baseline templates:
-#
-# Name              Version   Description
-# ----              -------   -----------
-# sonic-baseline    1.0       Base SONiC configuration
-# sonic-evpn        1.0       EVPN/VXLAN baseline
-# sonic-qos-8q      1.0       8-queue QoS configuration
-```
+This is an internal operation typically called during topology provisioning, not directly exposed as a standalone CLI command.
 
-### 16.2 Show Configlet Details
+### 16.2 Integration with Provisioning
 
-```bash
-newtron baseline show sonic-baseline
+Baseline configuration is applied automatically during:
+- Topology provisioning via `newtron provision topology`
+- Individual device provisioning flows
 
-# Output:
-# Configlet: sonic-baseline
-# Version: 1.0
-# Description: Base SONiC configuration for all switches
-#
-# Variables Required:
-#   - device_name (from profile)
-#   - hwsku (from platform)
-#   - platform (from profile)
-#   - loopback_ip (from profile)
-#   - ntp_server_1
-#   - ntp_server_2
-#   - syslog_server
-#
-# Tables Modified:
-#   - DEVICE_METADATA
-#   - LOOPBACK_INTERFACE
-#   - NTP_SERVER
-#   - SYSLOG_SERVER
-#   - FEATURE
-#   - MGMT_VRF_CONFIG
-```
-
-### 16.3 Apply Baseline Configuration
-
-The `apply` command automatically provides default variables from the device's resolved profile:
-
-```bash
-# Preview
-newtron leaf1 baseline apply sonic-baseline
-
-# Execute
-newtron leaf1 baseline apply sonic-baseline -x
-
-# Apply multiple configlets
-newtron leaf1 baseline apply sonic-baseline sonic-evpn -x
-```
-
-### 16.4 Provide Missing Variables
-
-```bash
-newtron leaf1 baseline apply sonic-baseline \
-  --var ntp_server_1=10.100.1.1 \
-  --var ntp_server_2=10.100.1.2 \
-  --var syslog_server=10.100.2.1 \
-  -x
-```
-
-### 16.5 Built-in Configlets
-
-| Configlet | Tables Modified | Description |
-|-----------|----------------|-------------|
-| `sonic-baseline` | `DEVICE_METADATA`, `LOOPBACK_INTERFACE` | Sets hostname and loopback IP |
-| `sonic-evpn` | `VXLAN_TUNNEL`, `VXLAN_EVPN_NVO` | Creates VTEP with loopback as source |
+The baseline logic is embedded in the provisioner and uses the device's resolved profile to derive all configuration values.
 
 ---
 
@@ -2828,10 +2766,6 @@ Resource Commands
 │   ├── remove <interface>
 │   ├── get <interface>
 │   └── refresh <interface>
-└── baseline
-    ├── list
-    ├── show <configlet-name>
-    └── apply <configlet...> [--var key=value]
 
 Device Operations
 ├── show

@@ -226,13 +226,11 @@ DRY applies not just within a single codebase, but across the entire
 system. Every capability exists in exactly one place:
 
 **One spec directory.** newtlab, newtron, and newtest all read from the
-same `specs/` directory. `topology.json` belongs to newtron — it defines
-the network's devices, interfaces, and links. newtlab reads the same file
-because it needs to realize that topology as running VMs for testing.
-The `newtlab` section in `topology.json` is newtlab borrowing space in
-newtron's file, not the other way around. newtlab reads the `devices`
-and `links` sections. newtron reads the `devices` and `interfaces`
-sections. Neither maintains its own copy.
+same `specs/` directory. `topology.json` belongs to newtlab and newtest —
+it defines the physical topology for VM deployment and test orchestration.
+newtron does not require it. newtlab reads the `devices` and `links`
+sections to deploy VMs. newtest reads the topology to understand device
+layout for test scenarios. Neither maintains its own copy.
 
 **One connection mechanism.** SSH-tunneled Redis access is implemented in
 newtron's device layer. When an orchestrator needs to read a device's

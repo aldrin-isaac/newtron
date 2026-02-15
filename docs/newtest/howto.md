@@ -85,7 +85,7 @@ newtest/topologies/2node/specs/
 ```
 
 Good for: basic BGP peering, interface config, service apply/remove,
-health checks, configlet application.
+health checks, baseline application.
 
 ### 4-Node (2 spines + 2 leaves)
 
@@ -503,15 +503,15 @@ anything else -> `Set(property, value)`.
   action: bind-ipvpn
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
-    ipvpn_name: customer-ipvpn
+    vrf: Vrf_customer
+    ipvpn: customer-ipvpn
 
 # Unbind IP-VPN from a VRF
 - name: unbind-ipvpn
   action: unbind-ipvpn
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
+    vrf: Vrf_customer
 
 # Bind a MAC-VPN to a VLAN (looks up VPN definition from network spec)
 - name: bind-macvpn
@@ -519,7 +519,7 @@ anything else -> `Set(property, value)`.
   devices: [leaf1]
   params:
     vlan_id: 200
-    macvpn_name: customer-macvpn
+    macvpn: customer-macvpn
 
 # Unbind MAC-VPN from a VLAN
 - name: unbind-macvpn
@@ -546,7 +546,7 @@ anything else -> `Set(property, value)`.
   action: add-vrf-interface
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
+    vrf: Vrf_customer
     interface: Ethernet2
 
 # Remove an interface from a VRF
@@ -554,7 +554,7 @@ anything else -> `Set(property, value)`.
   action: remove-vrf-interface
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
+    vrf: Vrf_customer
     interface: Ethernet2
 ```
 
@@ -566,7 +566,7 @@ anything else -> `Set(property, value)`.
   action: add-static-route
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
+    vrf: Vrf_customer
     prefix: "10.99.0.0/24"
     next_hop: "192.168.1.254"
     metric: 100    # optional, defaults to 0
@@ -576,7 +576,7 @@ anything else -> `Set(property, value)`.
   action: remove-static-route
   devices: [leaf1]
   params:
-    vrf_name: Vrf_customer
+    vrf: Vrf_customer
     prefix: "10.99.0.0/24"
 ```
 
@@ -601,7 +601,7 @@ anything else -> `Set(property, value)`.
   devices: [leaf1]
   params:
     interface: Ethernet1
-    policy_name: 4q-customer
+    qos_policy: 4q-customer
 
 # Remove QoS policy from an interface
 - name: remove-qos
@@ -734,7 +734,7 @@ newtest start 2node-incremental --platform sonic-vs
 ```
 
 Data plane tests (`verify-ping`) are automatically skipped when the platform
-has `dataplane: false` in `platforms.json`.
+has `dataplane: ""` in `platforms.json`.
 
 ### Override Topology
 

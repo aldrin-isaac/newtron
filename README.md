@@ -53,8 +53,8 @@ newtest deploys a topology (via newtlab), provisions devices (via newtron), then
 
 Key capabilities:
 
-- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 31 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, health checks, data plane verification, service churn.
-- **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run 25 scenarios.
+- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 39 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, health checks, data plane verification, service churn.
+- **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run 31 scenarios.
 - **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. It can verify that a route configured on spine1 actually arrives in leaf1's APP_DB, that BGP sessions reach Established state on both ends, that data plane forwarding works end-to-end.
 - **Report generation** — console output with ANSI formatting, markdown reports, and JUnit XML for CI integration.
@@ -86,11 +86,13 @@ The same spec applied to different devices produces different config. The same s
 specs/
 ├── network.json         # Services, VPNs, filters, routing policy    ← newtron
 ├── site.json            # Site topology, regions, AS numbers          ← newtron
-├── platforms.json       # Platform capabilities, VM defaults          ← newtron + newtlab
-├── profiles/            # Per-device: loopback IP, role, SSH port     ← newtron + newtlab
-│   ├── spine1.json
-│   └── leaf1.json
-└── topology.json        # Devices, interfaces, links                  ← newtlab + newtest
+└── profiles/            # Per-device: loopback IP, role, SSH port     ← newtron + newtlab
+    ├── spine1.json
+    └── leaf1.json
+
+# Test topologies (newtest/topologies/*/) include additional specs:
+# ├── platforms.json   # Platform capabilities, VM defaults          ← newtron + newtlab
+# └── topology.json    # Devices, interfaces, links                  ← newtlab + newtest
 ```
 
 ## Quick Start
@@ -119,7 +121,7 @@ newtlab deploy -S specs/          # Deploy QEMU VMs, wire links
 newtlab status                    # Check VM and link state
 newtlab ssh spine1                # SSH into a device
 newtlab bridge-stats              # Live link telemetry
-newtlab provision                 # Provision all devices
+newtlab provision specs/          # Provision all devices
 newtlab destroy                   # Tear down
 ```
 
@@ -144,10 +146,10 @@ newtlab ssh leaf1                           # SSH to any node regardless of host
 ### Run E2E tests
 
 ```bash
-newtest run --dir newtest/suites/2node-incremental    # 25-scenario incremental suite
-newtest run --scenario health.yaml                     # Single scenario
-newtest suites                                         # Discover available suites
-newtest topologies                                     # List topologies with device/link counts
+newtest start --dir newtest/suites/2node-incremental    # 31-scenario incremental suite
+newtest start --scenario health.yaml                    # Single scenario
+newtest list                                            # Discover available suites
+newtest topologies                                      # List topologies with device/link counts
 ```
 
 ## Repository Layout
@@ -160,25 +162,28 @@ cmd/
   newtlink/      Bridge traffic agent (standalone, deployed by newtlab to remote hosts)
 
 pkg/
-  device/        SONiC device layer — SSH tunnels, Redis DB 0/1/4/6 clients,
-                 distributed locking, changeset verification
-  network/       Device and Interface types, ChangeSet, topology graph,
-                 composite provisioning — where newtron's operations live
-  spec/          Spec types and loader
-  operations/    Precondition and dependency checking
+  cli/           Shared CLI formatting
+  newtest/       Scenario parser, dependency ordering, 39 step executors,
+                 progress reporting, JUnit/markdown output
   newtlab/       QEMU, multi-host placement, socket bridges, port probing,
                  boot patch framework
-  newtest/       Scenario parser, dependency ordering, 31 step executors,
-                 progress reporting, JUnit/markdown output
-  audit/         Audit event logging
-  health/        Health checks
-  cli/           Shared CLI formatting
-  settings/      Settings resolution (flag > env > file)
+  newtron/
+    audit/       Audit event logging
+    auth/        Permission checking and user authorization
+    device/      Shared device types
+      sonic/     SONiC device layer — SSH tunnels, Redis DB 0/1/4/6, locking
+    health/      Health checks
+    network/     Network type, topology graph, spec access
+      node/      Node and Interface types, all operations, composite provisioning
+    settings/    Settings resolution (flag > env > file)
+    spec/        Spec types and loader
+  util/          Errors, logging, IP/string helpers
+  version/       Build version info
 
 specs/           Network and topology specifications
 newtest/
   topologies/    Test topologies (2node, 4node)
-  suites/        Test suites (25 incremental + 8 standalone scenarios)
+  suites/        Test suites (31 incremental + 9 standalone scenarios)
 ```
 
 ## Documentation

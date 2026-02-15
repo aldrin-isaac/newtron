@@ -55,7 +55,7 @@ func (t *SSHTunnel) Close() error
 func (t *SSHTunnel) SSHClient() *ssh.Client { return t.sshClient }
 
 // ExecCommand runs a command on the device via SSH session and returns the output.
-// Used internally by ReloadConfig() and SaveConfig().
+// Used internally by SaveConfig().
 // For arbitrary command execution, newtest uses SSHClient() directly.
 func (t *SSHTunnel) ExecCommand(cmd string) (string, error)
 ```
@@ -662,54 +662,7 @@ func (d *Device) Connect(ctx context.Context) error {
 - APP_DB and ASIC_DB clients connect but do not bulk-load — routes are read on demand via `GetRoute`/`GetRouteASIC`
 - A single SSH tunnel multiplexes DB 0, DB 1, DB 4, and DB 6 connections
 
-### 5.2 State Loading (`pkg/newtron/device/sonic/state.go`)
-
-State is loaded from CONFIG_DB for structural information (VRF bindings, VLAN members, ACL bindings), and from STATE_DB for operational state (oper_status, BGP sessions, LACP state).
-
-```go
-func (d *Device) LoadState(ctx context.Context) error {
-    if err := d.RequireConnected(); err != nil {
-        return err
-    }
-
-    d.mu.Lock()
-    defer d.mu.Unlock()
-
-    var err error
-    d.ConfigDB, err = d.client.GetAll()
-    if err != nil {
-        return fmt.Errorf("loading config_db: %w", err)
-    }
-
-    d.State.Interfaces = d.parseInterfaces()
-    d.State.PortChannels = d.parsePortChannels()
-    d.State.VLANs = d.parseVLANs()
-    d.State.VRFs = d.parseVRFs()
-
-    return nil
-}
-```
-
-**Parse functions** called by `LoadState()`:
-
-```go
-func (d *Device) parseInterfaces() map[string]*InterfaceState
-func (d *Device) parsePortChannels() map[string]*PortChannelState
-func (d *Device) parseVLANs() map[int]*VLANState
-func (d *Device) parseVRFs() map[string]*VRFState
-```
-
-**State query helpers** (`pkg/newtron/device/sonic/state.go`):
-
-```go
-func (d *Device) ListInterfaces() []string
-func (d *Device) ListPortChannels() []string
-func (d *Device) ListVLANs() []int
-func (d *Device) ListVRFs() []string
-func (d *Device) GetInterfaceSummary() []InterfaceSummary
-```
-
-### 5.3 Writing Changes
+### 5.2 Writing Changes
 
 `ApplyChanges` is a **pure write** — it writes entries to Redis and returns. It does not reload the CONFIG_DB cache afterward. Cache refresh is the caller's responsibility: `Lock()` refreshes at the start of each write episode, and `Refresh()` is available for read-only episodes. See HLD §4.10 for the episode model.
 
@@ -722,27 +675,7 @@ func (d *Device) ApplyChanges(changes []ConfigChange) error
 
 The method requires the device to be connected and locked. It iterates over changes, calling `client.Set()` for add/modify and `client.Delete()` for delete operations.
 
-### 5.4 Pipeline-Based Write Path
-
-Alongside the sequential `ApplyChanges()` path, there is a pipeline-based write path for atomic multi-entry operations:
-
-```go
-// ApplyChangesPipelined writes a set of changes atomically via Redis MULTI/EXEC.
-// Used when atomicity is required (composite delivery, bulk operations).
-// Converts ConfigChange entries to TableChange format and delegates to
-// ConfigDBClient.PipelineSet().
-func (d *Device) ApplyChangesPipelined(changes []ConfigChange) error
-```
-
-**When to use each write path:**
-
-| Path | Method | Use Case |
-|------|--------|----------|
-| Sequential | `ApplyChanges()` | Normal operations (dry-run preview, individual changes) |
-| Pipeline | `ApplyChangesPipelined()` | Composite delivery, bulk operations requiring atomicity |
-| Full replace | `ReplaceAll()` | Composite overwrite mode (flush + pipeline write) |
-
-### 5.5 Disconnect with Tunnel Cleanup
+### 5.3 Disconnect with Tunnel Cleanup
 
 ```go
 func (d *Device) Disconnect() error
@@ -756,24 +689,20 @@ Disconnect tears down in order:
 5. Close AsicDBClient
 6. Close SSHTunnel (if present): stops accept loop, waits for goroutines, closes SSH
 
-### 5.6 Config Persistence
+### 5.4 Config Persistence
 
-These methods execute shell commands over the SSH tunnel to reload or save the running CONFIG_DB.
+The `SaveConfig` method executes shell commands over the SSH tunnel to persist the running CONFIG_DB to disk.
 
 ```go
-// ReloadConfig triggers "sudo config reload -y" on the SONiC device.
-// Used after bulk spec-driven provisioning to apply a full config snapshot.
-func (d *Device) ReloadConfig(ctx context.Context) error
-
 // SaveConfig persists the running CONFIG_DB to disk by running:
 //   sudo config save -y
 // Used after incremental changes to ensure they survive a reboot.
 func (d *Device) SaveConfig(ctx context.Context) error
 ```
 
-Both methods use `SSHTunnel.ExecCommand()` internally.
+This method uses `SSHTunnel.ExecCommand()` internally.
 
-### 5.7 SONiC Redis Database Layout
+### 5.5 SONiC Redis Database Layout
 
 SONiC uses multiple Redis databases within a single Redis instance:
 
@@ -787,7 +716,7 @@ SONiC uses multiple Redis databases within a single Redis instance:
 | 5 | FLEX_COUNTER_DB | Flexible counters | Not used |
 | 6 | STATE_DB | Operational state (oper_status, BGP state) | **Read** + distributed lock |
 
-### 5.8 Verification Methods
+### 5.6 Verification Methods
 
 These methods expose DB 0 and DB 1 reads at the `Device` level. They are observation primitives — they return structured data, not pass/fail verdicts. Orchestrators (newtest) decide correctness.
 
@@ -812,7 +741,7 @@ func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEn
 func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*VerificationResult, error)
 ```
 
-### 5.9 Pipeline Operations
+### 5.7 Pipeline Operations
 
 Composite delivery and bulk operations use Redis pipelines for atomicity and performance.
 

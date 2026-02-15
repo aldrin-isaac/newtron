@@ -15,7 +15,7 @@ For the architectural principles behind newtron, newtlab, and newtest — includ
 - **Spec Authoring**: CLI-authored definitions (services, IP-VPNs, MAC-VPNs, QoS policies, filters) persist atomically to network.json
 - **EVPN/VXLAN**: Modern overlay networking with idempotent composite setup and IP-VPN/MAC-VPN spec authoring
 - **Full BGP via frrcfgd**: Underlay, IPv6, and L2/L3 EVPN overlays managed through CONFIG_DB using SONiC's FRR management framework
-- **Multi-AF Route Reflection**: Single `SetupRouteReflector` operation configures IPv4, IPv6, and L2VPN EVPN address families with cluster-id
+- **Multi-AF Route Reflection**: BGP neighbor and EVPN configuration via `AddLoopbackBGPNeighbor` and `SetupEVPN` methods supporting IPv4, IPv6, and L2VPN EVPN address families
 - **Composite Mode**: Offline composite config generation with atomic delivery (overwrite or merge)
 - **Topology Provisioning**: Automated device provisioning from topology.json specs — full-device overwrite or per-interface service application
 - **Platform-Validated Port Creation**: PORT entries validated against SONiC's on-device `platform.json`
@@ -38,7 +38,7 @@ Specs describe **what you want** - they are declarative, abstract, and policy-dr
 | Property | Description |
 |----------|-------------|
 | **Nature** | Declarative - describes desired state |
-| **Location** | `specs/` directory, `pkg/spec` package |
+| **Location** | `specs/` directory, `pkg/newtron/spec` package |
 | **Format** | JSON files (network.json, site.json, profiles/*.json) |
 | **Content** | Service definitions, filter policies, VPN parameters |
 | **Lifecycle** | Created by network architects, versioned in git |
@@ -219,7 +219,7 @@ The translation layer interprets specs in context to generate config:
 
 The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it**. If an operation needs the interface name, the device profile, and the network specs, it lives on Interface (which can reach all three through its parent chain). If it only needs the Redis connection, it lives on Node.
 
-A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and site topology — so it lives on `Device.SetupRouteReflector()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
+A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and site topology — so it lives on `Node.AddLoopbackBGPNeighbor()` and `Node.SetupEVPN()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
 
 ```
 +------------------------------------------------------------------+
@@ -245,7 +245,7 @@ A related principle: **whatever configuration can be right-shifted to the interf
 |  - ConfigDB (from Redis) <-- actual device config                |
 |                                                                   |
 |  Methods: Network(), ASNumber(), BGPNeighbors(),                 |
-|           SetupRouteReflector(), VerifyChangeSet(), etc.         |
+|           AddLoopbackBGPNeighbor(), SetupEVPN(), VerifyChangeSet(), etc. |
 +------------------------------------------------------------------+
          |
          | creates (with parent reference)
@@ -449,7 +449,7 @@ The top-level object hierarchy that provides OO access to specs and devices.
 | `Node` | Node with parent reference to Network; creates Interfaces |
 | `Interface` | Interface with parent reference to Node |
 
-### 4.3 Spec Layer (`pkg/spec`)
+### 4.3 Spec Layer (`pkg/newtron/spec`)
 
 Loads and resolves specifications from JSON files.
 
@@ -609,32 +609,14 @@ The FRR management framework (`frrcfgd`) provides:
 - `default_originate` — advertise default route to neighbor
 - `addpath_tx_all_paths` — send all paths to neighbor
 
-#### 4.6.6 SetupRouteReflector
+#### 4.6.6 BGP Route Reflection
 
-`SetupRouteReflector` configures full multi-AF route reflection. It is used by the topology provisioner (not directly by the CLI — the CLI equivalent is `evpn setup` which calls different underlying methods):
+BGP route reflection is configured through two `Node` methods:
 
-```
-SetupRouteReflector(ctx, neighbors []string)
-  |
-  +-- BGP_GLOBALS "default":
-  |     local_asn, router_id, rr_cluster_id (from SiteSpec)
-  |
-  +-- For each neighbor:
-  |     BGP_NEIGHBOR: asn, local_addr (loopback), admin_status
-  |     BGP_NEIGHBOR_AF "<ip>|ipv4_unicast":
-  |       activate, route_reflector_client, next_hop_self
-  |     BGP_NEIGHBOR_AF "<ip>|ipv6_unicast":
-  |       activate, route_reflector_client, next_hop_self
-  |     BGP_NEIGHBOR_AF "<ip>|l2vpn_evpn":
-  |       activate, route_reflector_client
-  |
-  +-- BGP_GLOBALS_AF "default|ipv4_unicast": max_ibgp_paths
-  +-- BGP_GLOBALS_AF "default|ipv6_unicast": max_ibgp_paths
-  +-- BGP_GLOBALS_AF "default|l2vpn_evpn": advertise-all-vni
-  |
-  +-- ROUTE_REDISTRIBUTE "default|connected|bgp|ipv4": (loopback + service subnets)
-  +-- ROUTE_REDISTRIBUTE "default|connected|bgp|ipv6": (if IPv6 enabled)
-```
+- `AddLoopbackBGPNeighbor(ctx, neighborIP, asn, description, evpn)` — adds an iBGP neighbor on the loopback interface with optional EVPN address family activation
+- `SetupEVPN(ctx, sourceIP)` — creates the VXLAN tunnel (VTEP) and activates EVPN address family in BGP
+
+The CLI equivalent is `evpn setup`, which combines VTEP creation and EVPN activation. BGP neighbors are added via `vrf add-neighbor` or implicitly during topology provisioning.
 
 #### 4.6.7 Route Redistribution Defaults
 
@@ -648,28 +630,19 @@ Redistribution follows opinionated defaults:
 
 These operations are methods on `node.Node` and `node.Interface`. They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
 
-**Device-level operations:**
+**Node-level operations:**
 
 | Operation | Description |
 |-----------|-------------|
-| `SetBGPGlobals` | Configure BGP global settings (ASN, router-id, flags) |
-| `SetupRouteReflector` | Full RR setup: all 3 AFs, cluster-id, RR client, next-hop-self |
-| `ConfigurePeerGroup` | Create/update a BGP peer group template |
-| `DeletePeerGroup` | Remove a peer group |
-| `AddRouteRedistribution` | Redistribute connected/static into BGP |
-| `RemoveRouteRedistribution` | Remove redistribution |
-| `AddRouteMap` | Create route-map with match/set rules |
-| `DeleteRouteMap` | Remove route-map |
-| `AddPrefixSet` | Create prefix list for route-map matching |
-| `DeletePrefixSet` | Remove prefix list |
-| `AddBGPNetwork` | Add BGP `network` statement |
-| `RemoveBGPNetwork` | Remove BGP `network` statement |
+| `AddLoopbackBGPNeighbor` | Add iBGP neighbor on loopback with optional EVPN AF |
+| `RemoveBGPNeighbor` | Remove BGP neighbor by IP |
+| `BGPNeighborExists` | Check if BGP neighbor exists |
+| `BGPConfigured` | Check if BGP is configured |
+| `SetupEVPN` | Create VTEP and activate EVPN address family |
 
 **Interface-level operations:**
 
-| Operation | Description |
-|-----------|-------------|
-| `SetRouteMap` | Bind route-map to BGP neighbor in/out direction |
+BGP neighbor configuration for eBGP peering is handled by `Interface.ApplyService()` when a service spec includes `routing.protocol = "bgp"`. The service spec drives neighbor creation, route-maps, and redistribution policies.
 
 ### 4.6a VRF Architecture
 
@@ -854,7 +827,7 @@ The `status` subcommand always requires a device connection (`-d` flag or implic
 
 #### 4.7.1 Concept
 
-Composite mode generates a composite CONFIG_DB configuration offline (without connecting to a device), then delivers it to the device as a single atomic operation once the device is up. This replaces the configlet-based baseline approach with a newtron-native mechanism.
+Composite mode generates a composite CONFIG_DB configuration offline (without connecting to a device), then delivers it to the device as a single atomic operation once the device is up. This provides a newtron-native mechanism for bulk configuration delivery.
 
 #### 4.7.2 Two Delivery Modes
 
@@ -1008,7 +981,7 @@ Orchestrators like newtest then build on newtron's self-verification: they use n
 
 #### 4.9.2 ChangeSet Verification
 
-Every mutating operation (`ApplyService`, `RemoveService`, `RefreshService`, `CreateVLAN`, `SetupRouteReflector`, `DeliverComposite`, etc.) returns a `ChangeSet` — a list of CONFIG_DB entries that were written. The ChangeSet is the operation's own contract for what the device state should look like after execution.
+Every mutating operation (`ApplyService`, `RemoveService`, `RefreshService`, `CreateVLAN`, `AddLoopbackBGPNeighbor`, `SetupEVPN`, `DeliverComposite`, etc.) returns a `ChangeSet` — a list of CONFIG_DB entries that were written. The ChangeSet is the operation's own contract for what the device state should look like after execution.
 
 `VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly:
 
@@ -1451,7 +1424,6 @@ The `routing` section declares routing intent:
 |       +-- leaf1-ny.json
 |       +-- leaf2-ny.json
 |       +-- spine1-ny.json
-+-- configlets/           # Baseline templates
 ```
 
 ### 9.2 Single Source of Truth
@@ -1484,7 +1456,7 @@ The `SiteSpec` struct gains a `cluster_id` field for BGP route reflector cluster
 |-------|-------------|
 | `cluster_id` | BGP RR cluster-id. If not set, defaults to the spine's loopback IP. |
 
-`SetupRouteReflector` reads `cluster_id` from SiteSpec. If not set, it defaults to the spine's loopback IP.
+Route reflector configuration reads `cluster_id` from SiteSpec. If not set, it defaults to the spine's loopback IP.
 
 ### 9.5 Spec Inheritance
 
@@ -1505,7 +1477,7 @@ ResolvedProfile (runtime)
 
 ## 10. EVPN/VXLAN Architecture
 
-BGP EVPN is managed via CONFIG_DB through frrcfgd. `SetupRouteReflector` (topology provisioner) and `evpn setup` (CLI) activate the overlay stack. VNIs are never manipulated directly through CLI commands — they are properties of VPN definitions (IP-VPN defines L3VNI, MAC-VPN defines L2VNI) and are brought into CONFIG_DB through binding operations:
+BGP EVPN is managed via CONFIG_DB through frrcfgd. The topology provisioner uses `AddLoopbackBGPNeighbor` and `SetupEVPN` methods, while the CLI uses `evpn setup`, to activate the overlay stack. VNIs are never manipulated directly through CLI commands — they are properties of VPN definitions (IP-VPN defines L3VNI, MAC-VPN defines L2VNI) and are brought into CONFIG_DB through binding operations:
 
 - **L2VNI**: `vlan bind-macvpn <vlan-id> <macvpn-name>` reads the L2VNI from the MAC-VPN definition and creates the `VXLAN_TUNNEL_MAP` entry
 - **L3VNI**: `vrf bind-ipvpn <vrf-name> <ipvpn-name>` reads the L3VNI from the IP-VPN definition and creates the mapping
@@ -1835,7 +1807,7 @@ learnings from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-l
 
 ## 16. Summary: Spec vs Config
 
-| Aspect | Spec (pkg/spec) | Config (config_db) |
+| Aspect | Spec (pkg/newtron/spec) | Config (config_db) |
 |--------|-----------------|-------------------|
 | **Nature** | Declarative intent | Imperative state |
 | **Content** | Policy, references | Concrete values |

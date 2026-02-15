@@ -77,7 +77,7 @@ type Scenario struct {
 type Step struct {
     Name      string         `yaml:"name"`
     Action    StepAction     `yaml:"action"`
-    Devices   DeviceSelector `yaml:"devices,omitempty"`
+    Devices   deviceSelector `yaml:"devices,omitempty"`
 
     Duration  time.Duration  `yaml:"duration,omitempty"`      // wait
     Table     string         `yaml:"table,omitempty"`          // verify-config-db, verify-state-db
@@ -97,8 +97,8 @@ type Step struct {
 ```
 
 Step is intentionally a flat union — all action-specific fields live on one
-struct. Validation of which fields are required for which action lives in
-`ValidateScenario` (see §3.2).
+struct. Validation of which fields are required for which action happens
+lazily via `validateStepFields` during execution (see §3.2).
 
 ### 2.3 StepAction Constants
 
@@ -147,16 +147,16 @@ const (
 )
 ```
 
-### 2.4 DeviceSelector
+### 2.4 deviceSelector
 
 ```go
-type DeviceSelector struct {
+type deviceSelector struct {
     All     bool
     Devices []string
 }
 
-func (ds *DeviceSelector) UnmarshalYAML(unmarshal func(any) error) error
-func (ds *DeviceSelector) Resolve(allDevices []string) []string
+func (ds *deviceSelector) UnmarshalYAML(unmarshal func(any) error) error
+func (ds *deviceSelector) Resolve(allDevices []string) []string
 ```
 
 Handles two YAML forms: `devices: all` sets `All: true`; `devices: [leaf1, leaf2]`
@@ -200,9 +200,8 @@ type ExpectBlock struct {
 ```go
 func ParseScenario(path string) (*Scenario, error)
 func ParseAllScenarios(dir string) ([]*Scenario, error)
-func ValidateScenario(s *Scenario, topologiesDir string) error
 func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error)
-func TopologicalSort(scenarios []*Scenario) ([]*Scenario, error)
+func topologicalSort(scenarios []*Scenario) ([]*Scenario, error)
 ```
 
 **ParseScenario flow:**
@@ -210,23 +209,23 @@ func TopologicalSort(scenarios []*Scenario) ([]*Scenario, error)
 1. Read file at `path`
 2. `yaml.Unmarshal` into `Scenario`
 3. Apply defaults to steps (timeout, poll_interval, count)
-4. Call `ValidateScenario`
-5. Return `*Scenario`
+4. Return `*Scenario`
 
 **ParseAllScenarios**: reads all `.yaml` files in `dir`, returns parsed scenarios.
-Used by both `--all` mode and `--dir` mode.
+Used when running all scenarios in a suite and when resolving a specific scenario.
 
 **ValidateDependencyGraph**: validates all `requires` references exist and there are
 no cycles. Returns scenarios in topological order (Kahn's algorithm) on success.
 
-**TopologicalSort**: returns scenarios sorted in dependency order. Scenarios with
+**topologicalSort**: returns scenarios sorted in dependency order. Scenarios with
 no dependencies come first.
 
-### 3.2 ValidateScenario
+### 3.2 validateStepFields
 
 Checks that a scenario is well-formed: name is non-empty, topology directory
 exists, platform exists in `platforms.json`, each step has a valid action, and
-required fields are present per action type.
+required fields are present per action type. Validation happens lazily during
+execution rather than upfront.
 
 **Required fields per action:**
 
@@ -334,7 +333,6 @@ type RunOptions struct {
 ```go
 func NewRunner(scenariosDir, topologiesDir string) *Runner
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error)
-func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error)
 ```
 
 **Run** determines execution mode based on options:
@@ -366,7 +364,7 @@ Encapsulates the common scenario iteration loop used by both `runShared` and
 **runShared**: deploys once via `deployTopology`, connects once, then iterates
 all scenarios. Each scenario reuses the same `Runner.Network` and `Runner.Lab`.
 
-**runIndependent**: iterates scenarios, calling `RunScenario` for each. Each
+**runIndependent**: iterates scenarios, calling the internal runner for each. Each
 scenario gets its own deploy/connect cycle.
 
 ### 4.6 deployTopology
@@ -526,17 +524,17 @@ type ProgressReporter interface {
 The Runner calls these via `r.progress(func(p) { p.Method(...) })`, which
 no-ops if `r.Progress` is nil.
 
-### 6.2 ConsoleProgress
+### 6.2 consoleProgress
 
 ```go
-type ConsoleProgress struct {
+type consoleProgress struct {
     W       io.Writer
     Verbose bool
     suiteName string
     dotWidth  int
 }
 
-func NewConsoleProgress(verbose bool) *ConsoleProgress
+func NewConsoleProgress(verbose bool) ProgressReporter
 ```
 
 Append-only terminal progress reporter. Never uses ANSI cursor rewriting,
@@ -575,13 +573,13 @@ as warnings but do not abort execution.
 ### 7.1 Executor Interface
 
 ```go
-type StepExecutor interface {
+type stepExecutor interface {
     Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
 }
 
 type StepOutput struct {
     Result     *StepResult
-    ChangeSets map[string]*network.ChangeSet
+    ChangeSets map[string]*node.ChangeSet
 }
 ```
 
@@ -592,7 +590,7 @@ than writing directly. The Runner merges ChangeSets after each step.
 ### 7.2 Executor Dispatch
 
 ```go
-var executors = map[StepAction]StepExecutor{ ... } // 38 entries
+var executors = map[StepAction]stepExecutor{ ... } // 38 entries
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
@@ -823,13 +821,9 @@ type ReportGenerator struct {
     Results []*ScenarioResult
 }
 
-func (g *ReportGenerator) PrintConsole(w io.Writer)
 func (g *ReportGenerator) WriteMarkdown(path string) error
 func (g *ReportGenerator) WriteJUnit(path string) error
 ```
-
-**PrintConsole**: human-readable output. Shows step details for single-run
-scenarios, concise iteration summary for repeated scenarios.
 
 **WriteMarkdown**: summary table with scenario/topology/platform/result/duration/note
 columns, followed by a failures section with per-step details.

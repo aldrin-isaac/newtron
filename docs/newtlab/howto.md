@@ -162,17 +162,6 @@ Links (1):
 ```bash
 newtlab stop leaf1      # Stop (preserves disk)
 newtlab start leaf1     # Start
-newtlab reset leaf1     # Hard reset via QEMU monitor
-```
-
----
-
-## Snapshots
-
-```bash
-newtlab snapshot --name baseline    # Create
-newtlab snapshot --list             # List
-newtlab restore --name baseline     # Restore
 ```
 
 ---
@@ -465,7 +454,7 @@ local VM and `0.0.0.0` for the remote VM, then bridges frames between them.
 The remote VM connects to the bridge host's IP.
 
 Each bridge process also exposes a TCP stats endpoint for telemetry queries.
-Use `newtlab bridge-stats` to see aggregated counters from all hosts.
+Use `newtlab status --bridge-stats` to see aggregated counters from all hosts.
 
 ---
 
@@ -560,7 +549,7 @@ ip link show                    # Check interfaces
 Common causes:
 - newtlink not running — check that deploy completed successfully. In
   multi-host mode, each host runs its own bridge process; check
-  `newtlab bridge-stats` to see which bridges are reachable.
+  `newtlab status --bridge-stats` to see which bridges are reachable.
 - Port conflict — another process on the newtlink port range
 - Wrong `vm_interface_map` for the SONiC image type (interfaces exist but
   numbered differently than expected)
@@ -572,7 +561,7 @@ Common causes:
 Check bridge link counters (aggregated across all hosts):
 
 ```bash
-newtlab bridge-stats
+newtlab status --bridge-stats
 
 LINK                                     A→Z          Z→A          SESSIONS  CONNECTED
 ────────────────────────────────────────  ────────────  ────────────  ─────────  ─────────
@@ -580,7 +569,7 @@ spine1:Ethernet0 ↔ leaf1:Ethernet0      1.2 MB       856.0 KB     3         ye
 spine1:Ethernet4 ↔ leaf2:Ethernet0      2.5 MB       1.1 MB       2         yes
 ```
 
-If a bridge on a remote host is unreachable, `bridge-stats` returns an error
+If a bridge on a remote host is unreachable, `status --bridge-stats` returns an error
 for that host. Check that the remote bridge process is running:
 
 ```bash
@@ -606,13 +595,11 @@ Commands:
   newtlab provision -S <specs>     Provision devices via newtron
   newtlab destroy                  Stop and remove all VMs
   newtlab status                   Show VM status
+  newtlab list                     List all deployed labs
   newtlab ssh <node>               SSH to a VM
   newtlab console <node>           Attach to serial console
   newtlab stop <node>              Stop a VM (preserves disk)
   newtlab start <node>             Start a stopped VM
-  newtlab bridge-stats             Show live bridge telemetry (all hosts)
-  newtlab snapshot --name <name>   Create snapshot
-  newtlab restore --name <name>    Restore from snapshot
 
 Options:
   -S, --specs <dir>     Spec directory (required for deploy/provision)
@@ -620,5 +607,6 @@ Options:
   --host <name>         Multi-host: only deploy nodes for this host
   --parallel <n>        Parallel provisioning
   --force               Force destroy even if inconsistent
+  --bridge-stats        (status only) Include link connectivity and traffic counters
   -v, --verbose         Verbose output
 ```

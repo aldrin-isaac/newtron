@@ -8,7 +8,7 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 
 ## 1. Spec Type Extensions
 
-Changes to existing newtron types in `pkg/spec/types.go`.
+Changes to existing newtron types in `pkg/newtron/spec/types.go`.
 
 ### 1.1 PlatformSpec — VM Fields
 
@@ -206,8 +206,11 @@ pkg/newtlab/
 ├── probe.go          # Comprehensive port conflict detection (CollectAllPorts, ProbeAllPorts)
 ├── iface_map.go      # Interface mapping (sequential, stride-4, custom)
 ├── disk.go           # COW overlay disk creation
-├── boot.go           # SSH boot wait, serial bootstrap, boot patch engine
+├── boot.go           # SSH boot wait, serial bootstrap
+├── patch.go          # Boot patch engine (ApplyBootPatches, patch descriptors)
 ├── profile.go        # Profile patching (write ssh_port, console_port, mgmt_ip)
+├── remote.go         # Remote host operations via SSH
+├── shell.go          # Shell command execution helpers
 ├── state.go          # state.json persistence
 ├── newtlab_test.go   # Unit tests
 └── patches/          # Platform boot patches (//go:embed)
@@ -222,13 +225,13 @@ cmd/newtlab/
 ├── main.go              # Entry point, root command
 ├── cmd_deploy.go        # deploy subcommand
 ├── cmd_destroy.go       # destroy subcommand
-├── cmd_status.go        # status subcommand
+├── cmd_status.go        # status subcommand (--bridge-stats flag for link stats)
 ├── cmd_ssh.go           # ssh subcommand
 ├── cmd_console.go       # console subcommand
 ├── cmd_stop.go          # stop/start subcommands
 ├── cmd_provision.go     # provision subcommand (calls newtron)
 ├── cmd_bridge.go        # bridge subcommand (hidden, internal)
-└── cmd_bridge_stats.go  # bridge-stats subcommand
+└── exec.go              # External command execution helpers
 ```
 
 ---
@@ -241,17 +244,19 @@ cmd/newtlab/
 // Lab is the top-level newtlab orchestrator. It reads newtron spec files,
 // resolves VM configuration, and manages QEMU processes.
 type Lab struct {
-    Name     string                         // lab name (from spec dir basename)
-    SpecDir  string                         // path to spec directory
-    StateDir string                         // ~/.newtlab/labs/<name>/
-    Topology *spec.TopologySpecFile         // parsed topology.json
-    Platform *spec.PlatformSpecFile         // parsed platforms.json
-    Profiles map[string]*spec.DeviceProfile // per-device profiles
-    Config   *VMLabConfig                   // from topology.json newtlab section
-    Nodes    map[string]*NodeConfig         // resolved VM configs (keyed by device name)
-    Links    []*LinkConfig                  // resolved link configs
-    State    *LabState                      // runtime state (PIDs, ports, status)
-    Force    bool                           // --force flag: destroy existing before deploy
+    Name         string                         // lab name (from spec dir basename)
+    SpecDir      string                         // path to spec directory
+    StateDir     string                         // ~/.newtlab/labs/<name>/
+    Topology     *spec.TopologySpecFile         // parsed topology.json
+    Platform     *spec.PlatformSpecFile         // parsed platforms.json
+    Profiles     map[string]*spec.DeviceProfile // per-device profiles
+    Config       *VMLabConfig                   // from topology.json newtlab section
+    Nodes        map[string]*NodeConfig         // resolved VM configs (keyed by device name)
+    Links        []*LinkConfig                  // resolved link configs
+    State        *LabState                      // runtime state (PIDs, ports, status)
+    Force        bool                           // --force flag: destroy existing before deploy
+    DeviceFilter []string                       // if non-empty, only provision these devices
+    OnProgress   func(phase, detail string)    // optional callback for deploy/destroy progress
 }
 
 // VMLabConfig mirrors spec.NewtLabConfig with resolved defaults.
@@ -284,12 +289,12 @@ func NewLab(specDir string) (*Lab, error)
 // Deploy creates overlay disks, starts QEMU processes, waits for SSH,
 // and patches profiles. Full deployment flow (see §12).
 // Reads l.Force to handle stale state.
-func (l *Lab) Deploy() error
+func (l *Lab) Deploy(ctx context.Context) error
 
 // Destroy kills QEMU processes, removes overlays, cleans state,
 // and restores profiles. Full teardown flow (see §13).
 // Can be called with only Name populated (loads SpecDir from state.json).
-func (l *Lab) Destroy() error
+func (l *Lab) Destroy(ctx context.Context) error
 
 // Status returns the current state by loading state.json, then live-checking
 // each PID via IsRunning() to update node status. Returns fresh LabState.
@@ -302,12 +307,20 @@ func (l *Lab) FilterHost(host string)
 
 // Stop stops a single node by PID (SIGTERM then SIGKILL after 10s).
 // Updates state.json to mark node as "stopped".
-func (l *Lab) Stop(nodeName string) error
+func (l *Lab) Stop(ctx context.Context, nodeName string) error
 
 // Start restarts a stopped node by rebuilding the QEMU command and
 // launching the process. Waits for SSH readiness. Updates state.json
 // with new PID.
-func (l *Lab) Start(nodeName string) error
+func (l *Lab) Start(ctx context.Context, nodeName string) error
+
+// StopByName loads a lab by name and stops the specified node.
+// Convenience function for CLI usage.
+func StopByName(ctx context.Context, labName, nodeName string) error
+
+// StartByName loads a lab by name and starts the specified node.
+// Convenience function for CLI usage.
+func StartByName(ctx context.Context, labName, nodeName string) error
 ```
 
 ### 4.2 NodeConfig — Resolved VM Configuration (`node.go`)
@@ -957,7 +970,7 @@ The base image is never modified. Each VM gets its own overlay in
 // WaitForSSH polls SSH connectivity to host:port with the given credentials.
 // Returns nil when SSH login succeeds, or error if timeout is reached.
 // Polls every 5 seconds.
-func WaitForSSH(host string, port int, user, pass string, timeout time.Duration) error
+func WaitForSSH(ctx context.Context, host string, port int, user, pass string, timeout time.Duration) error
 ```
 
 **Flow:**
@@ -978,7 +991,7 @@ func WaitForSSH(host string, port int, user, pass string, timeout time.Duration)
 //  3. Bring up eth0 with DHCP (QEMU user-mode networking requires this)
 //  4. If sshUser differs from consoleUser, create the SSH user with sudo + bash access
 //  5. Log out
-func BootstrapNetwork(consoleHost string, consolePort int, consoleUser, consolePass, sshUser, sshPass string, timeout time.Duration) error
+func BootstrapNetwork(ctx context.Context, consoleHost string, consolePort int, consoleUser, consolePass, sshUser, sshPass string, timeout time.Duration) error
 ```
 
 **Flow:**
@@ -990,7 +1003,7 @@ func BootstrapNetwork(consoleHost string, consolePort int, consoleUser, consoleP
 5. If `sshUser != consoleUser`: create SSH user via `useradd -m -s /bin/bash`, set password, add to sudo group
 6. Log out with `exit`
 
-### 9.3 Platform Boot Patches
+### 9.3 Platform Boot Patches (`patch.go`)
 
 Different SONiC images have platform-specific initialization quirks that must
 be patched after boot but before provisioning. Rather than hardcoding per-platform
@@ -1074,7 +1087,7 @@ func ResolveBootPatches(dataplane, release string) ([]*BootPatch, error)
 //   5. Execute post_commands
 // All commands run via SSH. Template rendering uses Go text/template.
 // Returns on first error (patches are ordered, later patches may depend on earlier ones).
-func ApplyBootPatches(host string, port int, user, pass string, patches []*BootPatch, vars *PatchVars) error
+func ApplyBootPatches(ctx context.Context, host string, port int, user, pass string, patches []*BootPatch, vars *PatchVars) error
 ```
 
 #### Example: VPP port config patch
@@ -1432,7 +1445,7 @@ Called by `newtlab deploy --provision` or `newtlab provision`. Shells out to `ne
 ```go
 // Provision runs newtron provisioning for all (or specified) devices in the lab.
 // parallel controls concurrency: 1 = sequential, >1 = concurrent with semaphore.
-func (l *Lab) Provision(parallel int) error {
+func (l *Lab) Provision(ctx context.Context, parallel int) error {
     state := LoadState(l.Name)
 
     sem := make(chan struct{}, parallel)
@@ -1513,7 +1526,7 @@ func main() {
 | `newtlab start <node>` | `cmd_stop.go` | (none) | Start a stopped VM |
 | `newtlab provision` | `cmd_provision.go` | `--device` | Run newtron provisioning |
 | `newtlab bridge <lab>` | `cmd_bridge.go` | (none) | Run bridge workers (hidden, internal) |
-| `newtlab bridge-stats` | `cmd_bridge_stats.go` | `-S` | Show live bridge telemetry |
+| `newtlab list` | `main.go` | (none) | List all deployed labs |
 
 ### 14.3 deploy
 

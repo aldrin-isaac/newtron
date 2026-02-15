@@ -440,7 +440,7 @@ Example with link_port_base=20000 and 2 hosts:
 The local bridge also listens on a Unix socket (`bridge.sock`) for backward
 compatibility with single-host deployments.
 
-**Stats aggregation:** `newtlab bridge-stats` queries all bridge processes
+**Stats aggregation:** `newtlab status --bridge-stats` queries all bridge processes
 and merges their counters into a single table. Local bridges are queried
 via Unix socket; remote bridges via TCP.
 
@@ -594,7 +594,7 @@ On destroy, newtlab restores the original `mgmt_ip` from state.json (`original_m
 
 newtron needs one small change: support custom SSH port from profiles.
 
-**pkg/spec/types.go**:
+**pkg/newtron/spec/types.go**:
 ```go
 type DeviceProfile struct {
     // ... existing fields ...
@@ -681,9 +681,8 @@ Commands:
   newtlab stop <node>              Stop a VM (preserves disk)
   newtlab start <node>             Start a stopped VM
   newtlab provision -S <specs>     Provision devices via newtron
-  newtlab bridge-stats             Show live bridge telemetry (aggregated)
-  newtlab snapshot --name <name>   Create snapshot
-  newtlab restore --name <name>    Restore from snapshot
+  newtlab list                     List all deployed labs
+  newtlab status --bridge-stats    Show VM status with link connectivity
 
 Options:
   -S, --specs <dir>     Spec directory (required for deploy/provision)
@@ -741,7 +740,7 @@ Options:
 - Per-link byte counters and session tracking
 - Multi-host bridge distribution: one bridge process per WorkerHost
 - TCP stats transport for remote bridge queries
-- `bridge-stats` CLI aggregates counters from all hosts
+- `status --bridge-stats` flag aggregates counters from all hosts
 - Legacy `bridge_pid` preserved for backward compatibility
 
 ### Phase 5: Operations (done)
@@ -749,6 +748,6 @@ Options:
 - Comprehensive port conflict detection — all ports (SSH, console, link, stats), local and remote (§5.8)
 - Platform boot patches — declarative patch framework (§5.6)
 
-### Phase 6: Advanced
-- Snapshot/restore
-- Image management
+### Phase 6: Advanced (planned)
+- Snapshot/restore (not yet implemented)
+- Image management (not yet implemented)
