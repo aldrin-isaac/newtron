@@ -1,6 +1,0 @@
-- resolve issue with BGP EVPN peering.  Resolve the issue with connected routes not being imported and routes not propogating. consider hop-by-hop propogation over link-local eBGP
-- streamline newtron test code.  it is not elegant.  good code is elegant.  have it create the HLD and LLD for the test code and ask critical questions about the implementation.  then have it create and improved HLD/LLD and implement that.
-- do a full review of newtron and look for any missing or unused functions or data
-- update all documentation
-- improve e2e testing framework. is is a patchwork of scripts.  can this be made better?
-- how does this all lead to workflow engines to generalize workflows?
