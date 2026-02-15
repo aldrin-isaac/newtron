@@ -10,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 var vrfCmd = &cobra.Command{

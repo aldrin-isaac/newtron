@@ -24,7 +24,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtlab"
-	"github.com/newtron-network/newtron/pkg/settings"
+	"github.com/newtron-network/newtron/pkg/newtron/settings"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )

@@ -1,0 +1,680 @@
+package network
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/newtron-network/newtron/pkg/util"
+)
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+// testDevice builds a Device with common test state. The device is marked as
+// connected and locked so that operations pass precondition checks. The
+// configDB is pre-populated with two physical interfaces and empty maps for
+// all tables that operations inspect.
+func testDevice() *Device {
+	return &Device{
+		name:      "test-dev",
+		connected: true,
+		locked:    true,
+		network: &Network{
+			spec: &spec.NetworkSpecFile{
+				Services:    map[string]*spec.ServiceSpec{},
+				FilterSpecs: map[string]*spec.FilterSpec{},
+				IPVPN:       map[string]*spec.IPVPNSpec{},
+				MACVPN:      map[string]*spec.MACVPNSpec{},
+			},
+		},
+		resolved: &spec.ResolvedProfile{
+			ASNumber:   64512,
+			RouterID:   "10.255.0.1",
+			LoopbackIP: "10.255.0.1",
+			Region:     "us-east",
+			Site:       "dc1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB: &device.ConfigDB{
+			DeviceMetadata:        map[string]map[string]string{},
+			Port:                  map[string]device.PortEntry{"Ethernet0": {}, "Ethernet4": {}},
+			VLAN:                  map[string]device.VLANEntry{},
+			VLANMember:            map[string]device.VLANMemberEntry{},
+			VLANInterface:         map[string]map[string]string{},
+			Interface:             map[string]device.InterfaceEntry{},
+			PortChannel:           map[string]device.PortChannelEntry{},
+			PortChannelMember:     map[string]map[string]string{},
+			LoopbackInterface:     map[string]map[string]string{},
+			VRF:                   map[string]device.VRFEntry{},
+			VXLANTunnel:           map[string]device.VXLANTunnelEntry{},
+			VXLANTunnelMap:        map[string]device.VXLANMapEntry{},
+			VXLANEVPNNVO:          map[string]device.EVPNNVOEntry{},
+			SuppressVLANNeigh:     map[string]map[string]string{},
+			SAG:                   map[string]map[string]string{},
+			SAGGlobal:             map[string]map[string]string{},
+			BGPNeighbor:           map[string]device.BGPNeighborEntry{},
+			BGPNeighborAF:         map[string]device.BGPNeighborAFEntry{},
+			BGPGlobals:            map[string]device.BGPGlobalsEntry{},
+			BGPGlobalsAF:          map[string]device.BGPGlobalsAFEntry{},
+			BGPEVPNVNI:            map[string]device.BGPEVPNVNIEntry{},
+			RouteTable:            map[string]device.StaticRouteEntry{},
+			ACLTable:              map[string]device.ACLTableEntry{},
+			ACLRule:               map[string]device.ACLRuleEntry{},
+			ACLTableType:          map[string]device.ACLTableTypeEntry{},
+			RouteRedistribute:     map[string]device.RouteRedistributeEntry{},
+			NewtronServiceBinding: map[string]device.ServiceBindingEntry{},
+		},
+	}
+}
+
+// assertChange searches the ChangeSet for a change matching the given table,
+// key, and change type. Returns the Change on success, calls t.Fatal on failure.
+func assertChange(t *testing.T, cs *ChangeSet, table, key string, ct ChangeType) *Change {
+	t.Helper()
+	for i := range cs.Changes {
+		c := &cs.Changes[i]
+		if c.Table == table && c.Key == key && c.Type == ct {
+			return c
+		}
+	}
+	t.Fatalf("expected change [%s] %s|%s not found in ChangeSet (%d changes)", ct, table, key, len(cs.Changes))
+	return nil
+}
+
+// assertNoChange verifies that no change exists for the given table and key.
+func assertNoChange(t *testing.T, cs *ChangeSet, table, key string) {
+	t.Helper()
+	for _, c := range cs.Changes {
+		if c.Table == table && c.Key == key {
+			t.Fatalf("unexpected change [%s] %s|%s found in ChangeSet", c.Type, table, key)
+		}
+	}
+}
+
+// assertField checks that a change's NewValue contains the expected field/value pair.
+func assertField(t *testing.T, c *Change, field, value string) {
+	t.Helper()
+	if c.NewValue == nil {
+		t.Fatalf("change %s|%s has nil NewValue, expected field %q=%q", c.Table, c.Key, field, value)
+	}
+	got, ok := c.NewValue[field]
+	if !ok {
+		t.Fatalf("change %s|%s missing field %q (have %v)", c.Table, c.Key, field, c.NewValue)
+	}
+	if got != value {
+		t.Errorf("change %s|%s field %q = %q, want %q", c.Table, c.Key, field, got, value)
+	}
+}
+
+// ============================================================================
+// VLAN Operation Tests
+// ============================================================================
+
+func TestCreateVLAN_Basic(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreateVLAN(ctx, 100, VLANConfig{Description: "test-vlan"})
+	if err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+
+	c := assertChange(t, cs, "VLAN", "Vlan100", ChangeAdd)
+	assertField(t, c, "vlanid", "100")
+	assertField(t, c, "description", "test-vlan")
+
+	// No VXLAN_TUNNEL_MAP when L2VNI is 0
+	assertNoChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_0_Vlan100")
+}
+
+func TestCreateVLAN_WithL2VNI(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreateVLAN(ctx, 200, VLANConfig{L2VNI: 20200})
+	if err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+
+	assertChange(t, cs, "VLAN", "Vlan200", ChangeAdd)
+	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20200_Vlan200", ChangeAdd)
+	assertField(t, c, "vlan", "Vlan200")
+	assertField(t, c, "vni", "20200")
+}
+
+func TestCreateVLAN_AlreadyExists(t *testing.T) {
+	d := testDevice()
+	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	ctx := context.Background()
+
+	_, err := d.CreateVLAN(ctx, 100, VLANConfig{})
+	if err == nil {
+		t.Fatal("expected error for existing VLAN")
+	}
+	if !errors.Is(err, util.ErrPreconditionFailed) {
+		t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
+	}
+}
+
+func TestDeleteVLAN_WithMembers(t *testing.T) {
+	d := testDevice()
+	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	d.configDB.VLANMember["Vlan100|Ethernet0"] = device.VLANMemberEntry{TaggingMode: "untagged"}
+	d.configDB.VLANMember["Vlan100|Ethernet4"] = device.VLANMemberEntry{TaggingMode: "tagged"}
+	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = device.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
+	ctx := context.Background()
+
+	cs, err := d.DeleteVLAN(ctx, 100)
+	if err != nil {
+		t.Fatalf("DeleteVLAN: %v", err)
+	}
+
+	// VLAN members deleted
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet4", ChangeDelete)
+	// VNI mapping deleted
+	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeDelete)
+	// VLAN itself deleted
+	assertChange(t, cs, "VLAN", "Vlan100", ChangeDelete)
+}
+
+// ============================================================================
+// PortChannel Operation Tests
+// ============================================================================
+
+func TestCreatePortChannel_Basic(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreatePortChannel(ctx, "PortChannel100", PortChannelConfig{
+		MTU:      9100,
+		MinLinks: 2,
+		Members:  []string{"Ethernet0", "Ethernet4"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePortChannel: %v", err)
+	}
+
+	c := assertChange(t, cs, "PORTCHANNEL", "PortChannel100", ChangeAdd)
+	assertField(t, c, "admin_status", "up")
+	assertField(t, c, "mtu", "9100")
+	assertField(t, c, "min_links", "2")
+
+	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeAdd)
+	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet4", ChangeAdd)
+}
+
+func TestAddPortChannelMember(t *testing.T) {
+	d := testDevice()
+	d.configDB.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
+	ctx := context.Background()
+
+	cs, err := d.AddPortChannelMember(ctx, "PortChannel100", "Ethernet0")
+	if err != nil {
+		t.Fatalf("AddPortChannelMember: %v", err)
+	}
+
+	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeAdd)
+	if len(cs.Changes) != 1 {
+		t.Errorf("expected 1 change, got %d", len(cs.Changes))
+	}
+}
+
+func TestRemovePortChannelMember(t *testing.T) {
+	d := testDevice()
+	d.configDB.PortChannel["PortChannel100"] = device.PortChannelEntry{AdminStatus: "up"}
+	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
+	ctx := context.Background()
+
+	cs, err := d.RemovePortChannelMember(ctx, "PortChannel100", "Ethernet0")
+	if err != nil {
+		t.Fatalf("RemovePortChannelMember: %v", err)
+	}
+
+	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeDelete)
+}
+
+// ============================================================================
+// VRF Operation Tests
+// ============================================================================
+
+func TestCreateVRF_WithL3VNI(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{L3VNI: 30001})
+	if err != nil {
+		t.Fatalf("CreateVRF: %v", err)
+	}
+
+	c := assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeAdd)
+	assertField(t, c, "vni", "30001")
+
+	mapC := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeAdd)
+	assertField(t, mapC, "vrf", "Vrf_CUST1")
+	assertField(t, mapC, "vni", "30001")
+}
+
+func TestDeleteVRF_NoInterfaces(t *testing.T) {
+	d := testDevice()
+	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
+	d.configDB.VXLANTunnelMap["vtep1|map_30001_Vrf_CUST1"] = device.VXLANMapEntry{VRF: "Vrf_CUST1", VNI: "30001"}
+	ctx := context.Background()
+
+	cs, err := d.DeleteVRF(ctx, "Vrf_CUST1")
+	if err != nil {
+		t.Fatalf("DeleteVRF: %v", err)
+	}
+
+	// VNI mapping deleted
+	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeDelete)
+	// VRF deleted
+	assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeDelete)
+}
+
+func TestDeleteVRF_BoundInterfacesBlocks(t *testing.T) {
+	d := testDevice()
+	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
+	d.configDB.Interface["Ethernet0"] = device.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	ctx := context.Background()
+
+	_, err := d.DeleteVRF(ctx, "Vrf_CUST1")
+	if err == nil {
+		t.Fatal("expected error when VRF has interfaces bound")
+	}
+}
+
+// ============================================================================
+// ACL Operation Tests
+// ============================================================================
+
+func TestCreateACLTable_Basic(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreateACLTable(ctx, "EDGE_IN", ACLTableConfig{
+		Type:        "L3",
+		Stage:       "ingress",
+		Description: "Edge ingress filter",
+		Ports:       "Ethernet0",
+	})
+	if err != nil {
+		t.Fatalf("CreateACLTable: %v", err)
+	}
+
+	c := assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeAdd)
+	assertField(t, c, "type", "L3")
+	assertField(t, c, "stage", "ingress")
+	assertField(t, c, "policy_desc", "Edge ingress filter")
+	assertField(t, c, "ports", "Ethernet0")
+}
+
+func TestDeleteACLTable_RemovesRules(t *testing.T) {
+	d := testDevice()
+	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	d.configDB.ACLRule["EDGE_IN|RULE_10"] = device.ACLRuleEntry{Priority: "10", PacketAction: "FORWARD"}
+	d.configDB.ACLRule["EDGE_IN|RULE_20"] = device.ACLRuleEntry{Priority: "20", PacketAction: "DROP"}
+	// A rule in a different table — should NOT be deleted
+	d.configDB.ACLRule["OTHER_TABLE|RULE_10"] = device.ACLRuleEntry{Priority: "10"}
+	ctx := context.Background()
+
+	cs, err := d.DeleteACLTable(ctx, "EDGE_IN")
+	if err != nil {
+		t.Fatalf("DeleteACLTable: %v", err)
+	}
+
+	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
+	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_20", ChangeDelete)
+	assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeDelete)
+	assertNoChange(t, cs, "ACL_RULE", "OTHER_TABLE|RULE_10")
+}
+
+func TestUnbindACLFromInterface(t *testing.T) {
+	d := testDevice()
+	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{
+		Type:  "L3",
+		Ports: "Ethernet0,Ethernet4",
+	}
+	ctx := context.Background()
+
+	cs, err := d.UnbindACLFromInterface(ctx, "EDGE_IN", "Ethernet0")
+	if err != nil {
+		t.Fatalf("UnbindACLFromInterface: %v", err)
+	}
+
+	c := assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeModify)
+	// After removing Ethernet0, only Ethernet4 should remain
+	assertField(t, c, "ports", "Ethernet4")
+}
+
+func TestAddACLRule(t *testing.T) {
+	d := testDevice()
+	d.configDB.ACLTable["EDGE_IN"] = device.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	ctx := context.Background()
+
+	cs, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 10,
+		Action:   "permit",
+		SrcIP:    "10.0.0.0/8",
+		Protocol: "tcp",
+		DstPort:  "179",
+	})
+	if err != nil {
+		t.Fatalf("AddACLRule: %v", err)
+	}
+
+	c := assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeAdd)
+	assertField(t, c, "PRIORITY", "10")
+	assertField(t, c, "PACKET_ACTION", "FORWARD")
+	assertField(t, c, "SRC_IP", "10.0.0.0/8")
+	assertField(t, c, "IP_PROTOCOL", "6") // tcp = 6
+	assertField(t, c, "L4_DST_PORT", "179")
+}
+
+// ============================================================================
+// EVPN/VXLAN Operation Tests
+// ============================================================================
+
+func TestCreateVTEP(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "10.255.0.1"})
+	if err != nil {
+		t.Fatalf("CreateVTEP: %v", err)
+	}
+
+	c := assertChange(t, cs, "VXLAN_TUNNEL", "vtep1", ChangeAdd)
+	assertField(t, c, "src_ip", "10.255.0.1")
+
+	nvoC := assertChange(t, cs, "VXLAN_EVPN_NVO", "nvo1", ChangeAdd)
+	assertField(t, nvoC, "source_vtep", "vtep1")
+}
+
+func TestMapL2VNI(t *testing.T) {
+	d := testDevice()
+	d.configDB.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
+	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	ctx := context.Background()
+
+	cs, err := d.MapL2VNI(ctx, 100, 20100)
+	if err != nil {
+		t.Fatalf("MapL2VNI: %v", err)
+	}
+
+	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeAdd)
+	assertField(t, c, "vlan", "Vlan100")
+	assertField(t, c, "vni", "20100")
+}
+
+func TestMapL3VNI(t *testing.T) {
+	d := testDevice()
+	d.configDB.VXLANTunnel["vtep1"] = device.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
+	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{}
+	ctx := context.Background()
+
+	cs, err := d.MapL3VNI(ctx, "Vrf_CUST1", 30001)
+	if err != nil {
+		t.Fatalf("MapL3VNI: %v", err)
+	}
+
+	// VRF gets VNI field updated
+	vrfC := assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeModify)
+	assertField(t, vrfC, "vni", "30001")
+
+	// VXLAN_TUNNEL_MAP entry
+	mapC := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeAdd)
+	assertField(t, mapC, "vrf", "Vrf_CUST1")
+	assertField(t, mapC, "vni", "30001")
+}
+
+func TestConfigureSVI(t *testing.T) {
+	d := testDevice()
+	d.configDB.VLAN["Vlan100"] = device.VLANEntry{VLANID: "100"}
+	d.configDB.VRF["Vrf_CUST1"] = device.VRFEntry{VNI: "30001"}
+	ctx := context.Background()
+
+	cs, err := d.ConfigureSVI(ctx, 100, SVIConfig{
+		VRF:        "Vrf_CUST1",
+		IPAddress:  "10.1.100.1/24",
+		AnycastMAC: "00:00:00:00:01:01",
+	})
+	if err != nil {
+		t.Fatalf("ConfigureSVI: %v", err)
+	}
+
+	// Base VLAN_INTERFACE with VRF binding
+	baseC := assertChange(t, cs, "VLAN_INTERFACE", "Vlan100", ChangeAdd)
+	assertField(t, baseC, "vrf_name", "Vrf_CUST1")
+
+	// IP address entry
+	assertChange(t, cs, "VLAN_INTERFACE", "Vlan100|10.1.100.1/24", ChangeAdd)
+
+	// SAG global
+	sagC := assertChange(t, cs, "SAG_GLOBAL", "IPv4", ChangeAdd)
+	assertField(t, sagC, "gwmac", "00:00:00:00:01:01")
+}
+
+func TestUnmapVNI(t *testing.T) {
+	d := testDevice()
+	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = device.VXLANMapEntry{
+		VLAN: "Vlan100", VNI: "20100",
+	}
+	ctx := context.Background()
+
+	cs, err := d.UnmapVNI(ctx, 20100)
+	if err != nil {
+		t.Fatalf("UnmapVNI: %v", err)
+	}
+
+	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeDelete)
+}
+
+func TestUnmapVNI_NotFound(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	_, err := d.UnmapVNI(ctx, 99999)
+	if err == nil {
+		t.Fatal("expected error for missing VNI mapping")
+	}
+}
+
+// ============================================================================
+// BGP Operation Tests
+// ============================================================================
+
+func TestSetBGPGlobals(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{
+		LocalASN:           64512,
+		RouterID:           "10.255.0.1",
+		LoadBalanceMPRelax: true,
+		LogNeighborChanges: true,
+	})
+	if err != nil {
+		t.Fatalf("SetBGPGlobals: %v", err)
+	}
+
+	c := assertChange(t, cs, "BGP_GLOBALS", "default", ChangeAdd)
+	assertField(t, c, "local_asn", "64512")
+	assertField(t, c, "router_id", "10.255.0.1")
+	assertField(t, c, "load_balance_mp_relax", "true")
+	assertField(t, c, "log_neighbor_changes", "true")
+}
+
+func TestSetupRouteReflector(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	neighbors := []string{"10.255.1.1", "10.255.1.2"}
+	cs, err := d.SetupRouteReflector(ctx, SetupRouteReflectorConfig{
+		Neighbors: neighbors,
+		ClusterID: "10.255.0.1",
+	})
+	if err != nil {
+		t.Fatalf("SetupRouteReflector: %v", err)
+	}
+
+	// BGP_GLOBALS
+	globC := assertChange(t, cs, "BGP_GLOBALS", "default", ChangeAdd)
+	assertField(t, globC, "local_asn", "64512")
+	assertField(t, globC, "rr_cluster_id", "10.255.0.1")
+
+	// Each neighbor gets BGP_NEIGHBOR + 3 AFs = 4 entries
+	for _, nip := range neighbors {
+		nKey := "default|" + nip
+		nc := assertChange(t, cs, "BGP_NEIGHBOR", nKey, ChangeAdd)
+		assertField(t, nc, "asn", "64512")
+		assertField(t, nc, "admin_status", "up")
+
+		// IPv4 unicast
+		afC := assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|ipv4_unicast", ChangeAdd)
+		assertField(t, afC, "route_reflector_client", "true")
+
+		// IPv6 unicast
+		assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|ipv6_unicast", ChangeAdd)
+
+		// L2VPN EVPN
+		assertChange(t, cs, "BGP_NEIGHBOR_AF", nKey+"|l2vpn_evpn", ChangeAdd)
+	}
+
+	// BGP_GLOBALS_AF entries (3 AFs)
+	assertChange(t, cs, "BGP_GLOBALS_AF", "default|ipv4_unicast", ChangeAdd)
+	assertChange(t, cs, "BGP_GLOBALS_AF", "default|ipv6_unicast", ChangeAdd)
+	evpnAF := assertChange(t, cs, "BGP_GLOBALS_AF", "default|l2vpn_evpn", ChangeAdd)
+	assertField(t, evpnAF, "advertise-all-vni", "true")
+
+	// Route redistribution
+	assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeAdd)
+	assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv6", ChangeAdd)
+
+	// Total: 1 (globals) + 2*(1+3) (neighbors) + 3 (globals_af) + 2 (redistribute) = 14
+	if len(cs.Changes) != 14 {
+		t.Errorf("expected 14 changes, got %d", len(cs.Changes))
+	}
+}
+
+func TestAddRouteRedistribution(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	cs, err := d.AddRouteRedistribution(ctx, RouteRedistributionConfig{
+		SrcProtocol:   "connected",
+		AddressFamily: "ipv4",
+		RouteMap:      "RM_CONNECTED",
+	})
+	if err != nil {
+		t.Fatalf("AddRouteRedistribution: %v", err)
+	}
+
+	c := assertChange(t, cs, "ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeAdd)
+	assertField(t, c, "route_map", "RM_CONNECTED")
+}
+
+// ============================================================================
+// Precondition Tests
+// ============================================================================
+
+func TestDevice_NotConnected(t *testing.T) {
+	d := testDevice()
+	d.connected = false
+	ctx := context.Background()
+
+	ops := []struct {
+		name string
+		fn   func() error
+	}{
+		{"CreateVLAN", func() error { _, err := d.CreateVLAN(ctx, 100, VLANConfig{}); return err }},
+		{"DeleteVLAN", func() error { _, err := d.DeleteVLAN(ctx, 100); return err }},
+		{"CreatePortChannel", func() error {
+			_, err := d.CreatePortChannel(ctx, "PortChannel100", PortChannelConfig{})
+			return err
+		}},
+		{"CreateVRF", func() error { _, err := d.CreateVRF(ctx, "Vrf_TEST", VRFConfig{}); return err }},
+		{"CreateVTEP", func() error { _, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "1.2.3.4"}); return err }},
+		{"SetBGPGlobals", func() error {
+			_, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{LocalASN: 65000, RouterID: "1.1.1.1"})
+			return err
+		}},
+	}
+
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			err := op.fn()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			// Single-error preconditions wrap ErrPreconditionFailed;
+			// multi-error results (e.g., disconnected + missing resource)
+			// wrap ErrValidationFailed. Both are acceptable.
+			if !errors.Is(err, util.ErrPreconditionFailed) && !errors.Is(err, util.ErrValidationFailed) {
+				t.Errorf("error = %q, want ErrPreconditionFailed or ErrValidationFailed", err.Error())
+			}
+		})
+	}
+}
+
+func TestDevice_NotLocked(t *testing.T) {
+	d := testDevice()
+	d.locked = false
+	ctx := context.Background()
+
+	ops := []struct {
+		name string
+		fn   func() error
+	}{
+		{"CreateVLAN", func() error { _, err := d.CreateVLAN(ctx, 100, VLANConfig{}); return err }},
+		{"CreatePortChannel", func() error {
+			_, err := d.CreatePortChannel(ctx, "PortChannel100", PortChannelConfig{})
+			return err
+		}},
+		{"CreateVRF", func() error { _, err := d.CreateVRF(ctx, "Vrf_TEST", VRFConfig{}); return err }},
+		{"CreateVTEP", func() error { _, err := d.CreateVTEP(ctx, VTEPConfig{SourceIP: "1.2.3.4"}); return err }},
+		{"SetBGPGlobals", func() error {
+			_, err := d.SetBGPGlobals(ctx, BGPGlobalsConfig{LocalASN: 65000, RouterID: "1.1.1.1"})
+			return err
+		}},
+	}
+
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			err := op.fn()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !errors.Is(err, util.ErrPreconditionFailed) {
+				t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
+			}
+		})
+	}
+}
+
+func TestCreateVLAN_InvalidID(t *testing.T) {
+	d := testDevice()
+	ctx := context.Background()
+
+	tests := []struct {
+		name   string
+		vlanID int
+	}{
+		{"zero", 0},
+		{"negative", -1},
+		{"too_high", 4095},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := d.CreateVLAN(ctx, tt.vlanID, VLANConfig{})
+			if err == nil {
+				t.Fatal("expected error for invalid VLAN ID")
+			}
+		})
+	}
+}

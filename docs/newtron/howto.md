@@ -661,36 +661,26 @@ newtron leaf1 show
 #   PortChannels: 2
 ```
 
-### 4.6 Interactive Mode
+### 4.6 Interactive Shell
 
-Enter interactive menu mode:
+Start an interactive REPL shell with a persistent device connection:
 
 ```bash
-# Without device (select later)
-newtron interactive
+# Start shell for a device
+newtron leaf1 shell
 
-# With device
-newtron leaf1 interactive
+# Alias
+newtron leaf1 sh
 ```
 
 ```
-=== Newtron Interactive Mode ===
-Device: leaf1-dc1
-
-Main Menu:
-  1. Service Management
-  2. Interface Configuration
-  3. Link Aggregation (LAG)
-  4. VLANs
-  5. ACL/Filters
-  6. EVPN/VXLAN
-  7. BGP
-  8. Health Checks
-  9. Baseline Configuration
-  q. Quit
-
-Select option:
+newtron(leaf1-dc1)> interface list
+newtron(leaf1-dc1)> vrf show Vrf-customer
+newtron(leaf1-dc1)> service apply Ethernet0 l3-transit --ip 10.1.0.0/31 --peer-as 65001 -x
+newtron(leaf1-dc1)> exit
 ```
+
+The shell maintains a persistent SSH tunnel and Redis connection, avoiding reconnection overhead for each command. All noun-group commands are available.
 
 ---
 
@@ -2374,7 +2364,7 @@ newtron -v leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
 Check what changes were made:
 
 ```bash
-newtron audit --last 24h
+newtron audit list --last 24h
 
 # Output:
 # Timestamp            User    Operation          Device      Status
@@ -2847,6 +2837,7 @@ Device Operations
 ├── show
 ├── provision [-d <device>] [-x] [-s]
 ├── health check [--check <name>]
+├── shell (alias: sh)
 └── device
     └── cleanup [--type]
 
@@ -2855,7 +2846,8 @@ Configuration & Meta
 │   ├── show
 │   ├── set <key> <value>
 │   └── clear
-├── audit [--last <duration>]
+├── audit
+│   └── list [--last <duration>] [--device] [--user] [--failures]
 └── version
 ```
 

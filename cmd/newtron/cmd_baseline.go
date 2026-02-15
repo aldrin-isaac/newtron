@@ -7,9 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/auth"
-	"github.com/newtron-network/newtron/pkg/configlet"
-	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/newtron/auth"
+	"github.com/newtron-network/newtron/pkg/newtron/configlet"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 var baselineCmd = &cobra.Command{

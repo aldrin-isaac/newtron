@@ -14,7 +14,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"golang.org/x/crypto/ssh"
 )
 

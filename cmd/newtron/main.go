@@ -37,11 +37,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/audit"
-	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/newtron/audit"
+	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/network"
-	"github.com/newtron-network/newtron/pkg/settings"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/settings"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )

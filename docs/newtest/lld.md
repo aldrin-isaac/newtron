@@ -2,7 +2,7 @@
 
 newtest is an E2E test orchestrator for newtron and SONiC. It parses YAML scenario files, deploys VM topologies via newtlab, provisions devices via newtron, and runs multi-step verification sequences. This document covers `pkg/newtest/` and `cmd/newtest/`.
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
+For the high-level architecture, see [newtest HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 
@@ -12,20 +12,27 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 newtron/
 ├── cmd/
 │   └── newtest/
-│       ├── main.go               # Entry point, root command
-│       ├── cmd_run.go            # run subcommand
-│       ├── cmd_list.go           # list subcommand
+│       ├── main.go               # Entry point, root command, exit code mapping
+│       ├── helpers.go            # resolveDir, resolveSuite, suitesBaseDir
+│       ├── cmd_start.go          # start subcommand (+ deprecated run alias)
+│       ├── cmd_pause.go          # pause subcommand
+│       ├── cmd_stop.go           # stop subcommand
+│       ├── cmd_status.go         # status subcommand
+│       ├── cmd_list.go           # list subcommand (suites + scenarios)
+│       ├── cmd_suites.go         # suites subcommand (hidden alias for list)
 │       └── cmd_topologies.go     # topologies subcommand
 ├── pkg/
 │   └── newtest/
 │       ├── scenario.go           # Scenario, Step, StepAction, ExpectBlock types
-│       ├── parser.go             # ParseScenario, ValidateScenario, topologicalSort
-│       ├── runner.go             # Runner, RunOptions, RunScenario, runShared
-│       ├── steps.go              # StepExecutor interface, all 38 executor implementations
-│       ├── deploy.go             # DeployTopology, DestroyTopology (newtlab wrapper)
-│       ├── errors.go             # InfraError, StepError
-│       ├── report.go             # ScenarioResult, StepResult, ReportGenerator
-│       └── newtest_test.go       # Unit tests (81 tests)
+│       ├── parser.go             # ParseScenario, ValidateScenario, TopologicalSort
+│       ├── runner.go             # Runner, RunOptions, Run, iterateScenarios
+│       ├── steps.go              # StepExecutor interface, 38 executor implementations
+│       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
+│       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
+│       ├── progress.go           # ProgressReporter, ConsoleProgress, StateReporter
+│       ├── errors.go             # InfraError, StepError, PauseError
+│       ├── report.go             # ScenarioResult, StepResult, StepStatus, ReportGenerator
+│       └── newtest_test.go       # Unit tests
 └── newtest/                      # E2E test assets
     ├── topologies/
     │   ├── 2node/specs/          # 2-node topology spec dir
@@ -38,20 +45,18 @@ newtron/
 
 ---
 
-## 2. Core Types (`pkg/newtest/scenario.go`)
+## 2. Core Types (`scenario.go`)
 
-### 2.1 Scenario — Parsed Test Definition
+### 2.1 Scenario
 
 ```go
-// Scenario is a parsed test scenario from a YAML file.
-// Each scenario targets a single topology and platform.
 type Scenario struct {
     Name        string   `yaml:"name"`
     Description string   `yaml:"description"`
-    Topology    string   `yaml:"topology"`    // "2node", "4node"
-    Platform    string   `yaml:"platform"`    // "sonic-vpp", "sonic-vs"
-    Requires    []string `yaml:"requires"`    // dependency names (suite mode only)
-    Repeat      int      `yaml:"repeat"`      // run all steps N times (0 = once)
+    Topology    string   `yaml:"topology"`
+    Platform    string   `yaml:"platform"`
+    Requires    []string `yaml:"requires,omitempty"`
+    Repeat      int      `yaml:"repeat,omitempty"`
     Steps       []Step   `yaml:"steps"`
 }
 ```
@@ -66,55 +71,34 @@ type Scenario struct {
 | `repeat` | no | Run all steps N times; 0 or omitted means once. Fail-fast per iteration. |
 | `steps` | yes | Ordered list of test steps |
 
-### 2.2 Step — Single Test Step
+### 2.2 Step
 
 ```go
-// Step is a single action within a scenario.
-// Fields are action-specific — the parser validates that only relevant
-// fields are set for each action type.
-//
-// Design note: Step is intentionally a flat union — all action-specific fields
-// live on one struct. This is a deliberate trade-off for clean YAML unmarshaling.
-// Go types can't enforce "if action is verify-route then prefix is required" —
-// that validation lives in ValidateScenario (§3.2). The alternative (per-action
-// types with a YAML discriminator) adds unmarshaling complexity without
-// meaningful safety, since the YAML is the source of truth.
 type Step struct {
     Name      string         `yaml:"name"`
     Action    StepAction     `yaml:"action"`
-    Devices   DeviceSelector `yaml:"devices,omitempty"`   // "all", ["leaf1"], or ["leaf1", "leaf2"]
+    Devices   DeviceSelector `yaml:"devices,omitempty"`
 
-    // wait
-    Duration  time.Duration  `yaml:"duration,omitempty"`
-
-    // verify-config-db, verify-state-db
-    Table     string         `yaml:"table,omitempty"`
-    Key       string         `yaml:"key,omitempty"`
-
-    // verify-route (single-device: parser validates len(Devices) == 1)
-    Prefix    string         `yaml:"prefix,omitempty"`
-    VRF       string         `yaml:"vrf,omitempty"`
-
-    // apply-service, remove-service
-    Interface string         `yaml:"interface,omitempty"`
-    Service   string         `yaml:"service,omitempty"`
-    Params    map[string]any `yaml:"params,omitempty"`
-
-    // apply-baseline
-    Configlet string            `yaml:"configlet,omitempty"`
-    Vars      map[string]string `yaml:"vars,omitempty"`
-
-    // ssh-command
-    Command   string         `yaml:"command,omitempty"`
-
-    // verify-ping (single-device: parser validates len(Devices) == 1)
-    Target    string         `yaml:"target,omitempty"`
-    Count     int            `yaml:"count,omitempty"`
-
-    // All verify-* actions, ssh-command
-    Expect    *ExpectBlock   `yaml:"expect,omitempty"`
+    Duration  time.Duration  `yaml:"duration,omitempty"`      // wait
+    Table     string         `yaml:"table,omitempty"`          // verify-config-db, verify-state-db
+    Key       string         `yaml:"key,omitempty"`            // verify-config-db, verify-state-db
+    Prefix    string         `yaml:"prefix,omitempty"`         // verify-route
+    VRF       string         `yaml:"vrf,omitempty"`            // verify-route
+    Interface string         `yaml:"interface,omitempty"`      // apply-service, remove-service, etc.
+    Service   string         `yaml:"service,omitempty"`        // apply-service, restart-service
+    Params    map[string]any `yaml:"params,omitempty"`         // action-specific parameters
+    Configlet string         `yaml:"configlet,omitempty"`      // apply-baseline
+    Vars      map[string]string `yaml:"vars,omitempty"`        // apply-baseline
+    Command   string         `yaml:"command,omitempty"`        // ssh-command
+    Target    string         `yaml:"target,omitempty"`         // verify-ping
+    Count     int            `yaml:"count,omitempty"`          // verify-ping
+    Expect    *ExpectBlock   `yaml:"expect,omitempty"`         // verify-*, ssh-command
 }
 ```
+
+Step is intentionally a flat union — all action-specific fields live on one
+struct. Validation of which fields are required for which action lives in
+`ValidateScenario` (see §3.2).
 
 ### 2.3 StepAction Constants
 
@@ -163,113 +147,38 @@ const (
 )
 ```
 
-**Owner mapping** (see newtest HLD §5.1):
-
-| Action | Implemented By | newtron Method |
-|--------|----------------|----------------|
-| `provision` | newtron | `TopologyProvisioner.ProvisionDevice()` |
-| `verify-provisioning` | newtron | `Device.VerifyChangeSet()` |
-| `verify-config-db` | newtron | `ConfigDBClient.Get*()` |
-| `verify-state-db` | newtron | `StateDBClient.Get*()` |
-| `verify-bgp` | newtron | `Device.RunHealthChecks("bgp")` |
-| `verify-health` | newtron | `Device.RunHealthChecks()` |
-| `verify-route` | newtron | `Device.GetRoute()` / `GetRouteASIC()` |
-| `verify-ping` | **newtest native** | SSH ping |
-| `apply-service` | newtron | `Interface.ApplyService()` |
-| `remove-service` | newtron | `Interface.RemoveService()` |
-| `apply-baseline` | newtron | `Device.ApplyBaseline()` |
-| `ssh-command` | **newtest native** | SSH exec |
-| `wait` | **newtest native** | `time.Sleep` |
-| `restart-service` | newtron | `Device.RestartService()` |
-| `apply-frr-defaults` | newtron | `Device.ApplyFRRDefaults()` |
-| `set-interface` | newtron | `Interface.Set()` / `SetIP()` / `SetVRF()` |
-| `create-vlan` | newtron | `Device.CreateVLAN()` |
-| `delete-vlan` | newtron | `Device.DeleteVLAN()` |
-| `add-vlan-member` | newtron | `Device.AddVLANMember()` |
-| `create-vrf` | newtron | `Device.CreateVRF()` |
-| `delete-vrf` | newtron | `Device.DeleteVRF()` |
-| `setup-evpn` | newtron | `Device.SetupEVPN()` |
-| `add-vrf-interface` | newtron | `Device.AddVRFInterface()` |
-| `remove-vrf-interface` | newtron | `Device.RemoveVRFInterface()` |
-| `bind-ipvpn` | newtron | `Device.BindIPVPN()` |
-| `unbind-ipvpn` | newtron | `Device.UnbindIPVPN()` |
-| `bind-macvpn` | newtron | `Device.BindMACVPN()` |
-| `unbind-macvpn` | newtron | `Device.UnbindMACVPN()` |
-| `add-static-route` | newtron | `Device.AddStaticRoute()` |
-| `remove-static-route` | newtron | `Device.RemoveStaticRoute()` |
-| `remove-vlan-member` | newtron | `Device.RemoveVLANMember()` |
-| `apply-qos` | newtron | `Device.ApplyQoS()` |
-| `remove-qos` | newtron | `Device.RemoveQoS()` |
-| `configure-svi` | newtron | `Device.ConfigureSVI()` |
-| `bgp-add-neighbor` | newtron | `Interface.AddBGPNeighbor()` / `Device.AddLoopbackBGPNeighbor()` |
-| `bgp-remove-neighbor` | newtron | `Interface.RemoveBGPNeighbor()` / `Device.RemoveBGPNeighbor()` |
-| `refresh-service` | newtron | `Interface.RefreshService()` |
-| `cleanup` | newtron | `Device.Cleanup()` |
-
 ### 2.4 DeviceSelector
 
 ```go
-// DeviceSelector handles the two YAML forms for the "devices" field:
-//   devices: all           → All: true
-//   devices: [leaf1, leaf2] → Devices: ["leaf1", "leaf2"]
 type DeviceSelector struct {
     All     bool
     Devices []string
 }
 
-// UnmarshalYAML implements yaml.Unmarshaler.
-// Accepts a bare string "all" or a list of device names.
-func (ds *DeviceSelector) UnmarshalYAML(unmarshal func(interface{}) error) error {
-    // Try string first
-    var s string
-    if err := unmarshal(&s); err == nil {
-        if s == "all" {
-            ds.All = true
-            return nil
-        }
-        return fmt.Errorf("invalid device selector string: %q (expected \"all\")", s)
-    }
-    // Try list
-    return unmarshal(&ds.Devices)
-}
-
-// Resolve returns the list of device names to target, given the full
-// set of devices in the topology. If All is true, returns all devices
-// sorted by name for deterministic ordering.
+func (ds *DeviceSelector) UnmarshalYAML(unmarshal func(any) error) error
 func (ds *DeviceSelector) Resolve(allDevices []string) []string
 ```
 
-### 2.5 ExpectBlock — Action-Specific Assertions
+Handles two YAML forms: `devices: all` sets `All: true`; `devices: [leaf1, leaf2]`
+populates `Devices`. `Resolve` returns the concrete device list — if `All` is true,
+returns all devices sorted by name for deterministic ordering.
+
+### 2.5 ExpectBlock
 
 ```go
-// ExpectBlock is a union of all action-specific expectation fields.
-// Each action uses a subset of fields; the parser validates this.
 type ExpectBlock struct {
-    // verify-config-db: three assertion modes
-    MinEntries *int              `yaml:"min_entries,omitempty"` // mode 1: count keys ≥ min
-    Exists     *bool             `yaml:"exists,omitempty"`      // mode 2: key exists or not
-    Fields     map[string]string `yaml:"fields,omitempty"`      // mode 3: field value match
-
-    // Polling (verify-state-db, verify-bgp, verify-route, verify-ping)
-    Timeout      time.Duration   `yaml:"timeout,omitempty"`       // max wait (default varies)
-    PollInterval time.Duration   `yaml:"poll_interval,omitempty"` // poll interval (default 5s)
-
-    // verify-bgp
-    State string `yaml:"state,omitempty"` // "Established"
-
-    // verify-health
-    Overall string `yaml:"overall,omitempty"` // "ok"
-
-    // verify-route
-    Protocol  string `yaml:"protocol,omitempty"`   // "bgp", "connected"
-    NextHopIP string `yaml:"nexthop_ip,omitempty"` // "10.0.0.1"
-    Source    string `yaml:"source,omitempty"`      // "app_db" or "asic_db"
-
-    // verify-ping
-    SuccessRate *float64 `yaml:"success_rate,omitempty"` // 0.0-1.0 (default 1.0)
-
-    // ssh-command
-    Contains string `yaml:"contains,omitempty"` // substring match
+    MinEntries   *int              `yaml:"min_entries,omitempty"`
+    Exists       *bool             `yaml:"exists,omitempty"`
+    Fields       map[string]string `yaml:"fields,omitempty"`
+    Timeout      time.Duration     `yaml:"timeout,omitempty"`
+    PollInterval time.Duration     `yaml:"poll_interval,omitempty"`
+    State        string            `yaml:"state,omitempty"`
+    Overall      string            `yaml:"overall,omitempty"`
+    Protocol     string            `yaml:"protocol,omitempty"`
+    NextHopIP    string            `yaml:"nexthop_ip,omitempty"`
+    Source       string            `yaml:"source,omitempty"`
+    SuccessRate  *float64          `yaml:"success_rate,omitempty"`
+    Contains     string            `yaml:"contains,omitempty"`
 }
 ```
 
@@ -284,17 +193,19 @@ type ExpectBlock struct {
 
 ---
 
-## 3. Scenario Parser (`pkg/newtest/parser.go`)
+## 3. Parser (`parser.go`)
 
 ### 3.1 ParseScenario
 
 ```go
-// ParseScenario reads a YAML scenario file and returns a validated Scenario.
-// Returns an error if the file cannot be read, parsed, or fails validation.
 func ParseScenario(path string) (*Scenario, error)
+func ParseAllScenarios(dir string) ([]*Scenario, error)
+func ValidateScenario(s *Scenario, topologiesDir string) error
+func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error)
+func TopologicalSort(scenarios []*Scenario) ([]*Scenario, error)
 ```
 
-**Flow:**
+**ParseScenario flow:**
 
 1. Read file at `path`
 2. `yaml.Unmarshal` into `Scenario`
@@ -302,34 +213,20 @@ func ParseScenario(path string) (*Scenario, error)
 4. Call `ValidateScenario`
 5. Return `*Scenario`
 
-```go
-// ParseAllScenarios reads all .yaml files in dir and returns parsed scenarios.
-// Stops on first parse error. Used by both --all and --dir modes.
-// In suite mode (--dir), scenarios are sorted by topological order based on
-// their Requires field using validateDependencyGraph + topologicalSort.
-func ParseAllScenarios(dir string) ([]*Scenario, error)
+**ParseAllScenarios**: reads all `.yaml` files in `dir`, returns parsed scenarios.
+Used by both `--all` mode and `--dir` mode.
 
-// validateDependencyGraph checks that all requires references exist and
-// there are no cycles. Returns error on first cycle detected.
-func validateDependencyGraph(scenarios []*Scenario) error
+**ValidateDependencyGraph**: validates all `requires` references exist and there are
+no cycles. Returns scenarios in topological order (Kahn's algorithm) on success.
 
-// topologicalSort returns scenario names in dependency order (Kahn's algorithm).
-// Scenarios with no dependencies come first.
-func topologicalSort(scenarios []*Scenario) ([]string, error)
-```
+**TopologicalSort**: returns scenarios sorted in dependency order. Scenarios with
+no dependencies come first.
 
 ### 3.2 ValidateScenario
 
-```go
-// ValidateScenario checks that a scenario is well-formed:
-//   - Name is non-empty
-//   - Topology directory exists under topologyDir
-//   - Platform exists in platforms.json
-//   - Each step has a valid action
-//   - Required fields are present for each action type
-//   - Device names (when explicit) exist in topology.json
-func ValidateScenario(s *Scenario, topologiesDir string) error
-```
+Checks that a scenario is well-formed: name is non-empty, topology directory
+exists, platform exists in `platforms.json`, each step has a valid action, and
+required fields are present per action type.
 
 **Required fields per action:**
 
@@ -348,7 +245,7 @@ func ValidateScenario(s *Scenario, topologiesDir string) error
 | `remove-service` | `devices`, `interface` |
 | `apply-baseline` | `devices`, `configlet` |
 | `ssh-command` | `devices`, `command` |
-| `restart-service` | `devices`, `params.service` |
+| `restart-service` | `devices`, `service` |
 | `apply-frr-defaults` | `devices` |
 | `set-interface` | `devices`, `interface`, `params.property` |
 | `create-vlan` | `devices`, `params.vlan_id` |
@@ -356,78 +253,40 @@ func ValidateScenario(s *Scenario, topologiesDir string) error
 | `add-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
 | `create-vrf` | `devices`, `params.vrf` |
 | `delete-vrf` | `devices`, `params.vrf` |
-| `setup-evpn` | `devices` |
-| `add-vrf-interface` | `devices`, `params.vrf_name`, `params.interface` |
-| `remove-vrf-interface` | `devices`, `params.vrf_name`, `params.interface` |
-| `bind-ipvpn` | `devices`, `params.vrf_name`, `params.ipvpn_name` |
-| `unbind-ipvpn` | `devices`, `params.vrf_name` |
-| `bind-macvpn` | `devices`, `params.vlan_id`, `params.macvpn_name` |
+| `setup-evpn` | `devices`, `params.source_ip` |
+| `add-vrf-interface` | `devices`, `params.vrf`, `params.interface` |
+| `remove-vrf-interface` | `devices`, `params.vrf`, `params.interface` |
+| `bind-ipvpn` | `devices`, `params.vrf`, `params.ipvpn` |
+| `unbind-ipvpn` | `devices`, `params.vrf` |
+| `bind-macvpn` | `devices`, `params.vlan_id`, `params.macvpn` |
 | `unbind-macvpn` | `devices`, `params.vlan_id` |
-| `add-static-route` | `devices`, `params.vrf_name`, `params.prefix`, `params.next_hop` |
-| `remove-static-route` | `devices`, `params.vrf_name`, `params.prefix` |
-| `remove-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
-| `apply-qos` | `devices`, `params.interface`, `params.policy_name` |
+| `add-static-route` | `devices`, `params.vrf`, `params.prefix`, `params.next_hop` |
+| `remove-static-route` | `devices`, `params.vrf`, `params.prefix` |
+| `apply-qos` | `devices`, `params.interface`, `params.qos_policy` |
 | `remove-qos` | `devices`, `params.interface` |
 | `configure-svi` | `devices`, `params.vlan_id` |
 | `bgp-add-neighbor` | `devices`, `params.remote_asn` |
 | `bgp-remove-neighbor` | `devices`, `params.neighbor_ip` |
 | `refresh-service` | `devices`, `interface` |
 | `cleanup` | `devices` |
-
-**Validation helpers** (used by `validateStepFields`):
-
-```go
-// requireParam checks that params[key] exists.
-func requireParam(prefix string, params map[string]any, key string) error
-
-// requireDevices checks that step.Devices is non-empty.
-func requireDevices(prefix string, step *Step) error
-```
-
-### 3.3 YAML Field Mapping
-
-Maps YAML keys to Go struct fields for each action:
-
-| YAML Key | Go Field | Actions |
-|----------|----------|---------|
-| `name` | `Step.Name` | all |
-| `action` | `Step.Action` | all |
-| `devices` | `Step.Devices` | all actions (single-device actions validate len == 1) |
-| `duration` | `Step.Duration` | wait |
-| `table` | `Step.Table` | verify-config-db, verify-state-db |
-| `key` | `Step.Key` | verify-config-db, verify-state-db |
-| `prefix` | `Step.Prefix` | verify-route |
-| `vrf` | `Step.VRF` | verify-route |
-| `interface` | `Step.Interface` | apply-service, remove-service, set-interface, refresh-service, bgp-add-neighbor, bgp-remove-neighbor |
-| `service` | `Step.Service` | apply-service |
-| `params` | `Step.Params` | apply-service, set-interface, create-vlan, delete-vlan, add-vlan-member, remove-vlan-member, create-vrf, delete-vrf, setup-evpn, add-vrf-interface, remove-vrf-interface, bind-ipvpn, unbind-ipvpn, bind-macvpn, unbind-macvpn, add-static-route, remove-static-route, apply-qos, remove-qos, configure-svi, bgp-add-neighbor, bgp-remove-neighbor, restart-service, cleanup |
-| `configlet` | `Step.Configlet` | apply-baseline |
-| `vars` | `Step.Vars` | apply-baseline |
-| `command` | `Step.Command` | ssh-command |
-| `target` | `Step.Target` | verify-ping |
-| `count` | `Step.Count` | verify-ping |
-| `expect` | `Step.Expect` | verify-*, ssh-command |
+| `remove-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
 
 ---
 
-## 4. Runner (`pkg/newtest/runner.go`)
+## 4. Runner (`runner.go`)
 
-### 4.1 Runner — Top-Level Orchestrator
+### 4.1 Runner
 
 ```go
-// Runner is the top-level newtest orchestrator. It loads scenarios, deploys
-// topologies via newtlab, provisions devices via newtron, runs test steps,
-// and collects results.
 type Runner struct {
-    ScenariosDir  string                        // newtest/suites/2node-standalone/
-    TopologiesDir string                        // newtest/topologies/
-    Network       *network.Network              // OO hierarchy (owns devices, specs)
-    Lab           *newtlab.Lab                    // newtlab Lab (nil if --no-deploy)
-    ChangeSets    map[string]*network.ChangeSet // last ChangeSet per device
+    ScenariosDir  string
+    TopologiesDir string
+    Network       *network.Network
+    Lab           *newtlab.Lab
+    ChangeSets    map[string]*network.ChangeSet
     Verbose       bool
+    Progress      ProgressReporter
 
-    // Set per-scenario in RunScenario before executing steps.
-    // Executors access these via r.opts and r.scenario.
     opts     RunOptions
     scenario *Scenario
 }
@@ -435,1702 +294,715 @@ type Runner struct {
 
 | Field | Description |
 |-------|-------------|
-| `ScenariosDir` | Path to `newtest/suites/2node-standalone/` |
+| `ScenariosDir` | Path to suite directory (e.g., `newtest/suites/2node-incremental`) |
 | `TopologiesDir` | Path to `newtest/topologies/` |
-| `Network` | Top-level `network.Network` object (owns devices, specs, OO hierarchy). Replaces the previous `Devices` + `Platforms` fields — devices are accessed via `r.Network.GetDevice(name)`, platforms via `r.Network.GetPlatform()`. |
-| `Lab` | newtlab Lab instance from `DeployTopology()` (nil when `--no-deploy`) |
-| `ChangeSets` | Accumulated by the runner from executor `StepOutput`; maps device name to last ChangeSet from `provision` or `apply-*` steps; read by `verify-provisioning`. **Last-write-wins**: if multiple steps produce ChangeSets for the same device, only the latest is retained. |
-| `Verbose` | Enables detailed output during step execution |
+| `Network` | Top-level `network.Network` object (owns devices, specs). Devices accessed via `r.Network.GetDevice(name)`, platforms via `r.Network.GetPlatform()`. |
+| `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
+| `ChangeSets` | Last ChangeSet per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce ChangeSets for the same device, only the latest is retained. Read by `verify-provisioning`. |
+| `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
 
 ### 4.2 RunOptions
 
 ```go
-// RunOptions controls Runner behavior from CLI flags.
 type RunOptions struct {
-    Scenario  string // scenario name (or "" for --all)
-    All       bool   // run all scenarios
-    Dir       string // suite directory (--dir mode)
-    Topology  string // override topology (default: from scenario)
-    Platform  string // override platform (default: from scenario)
-    Keep      bool   // don't destroy after tests
-    NoDeploy  bool   // skip deploy/destroy
+    Scenario  string
+    All       bool
+    Topology  string
+    Platform  string
+    Keep      bool
+    NoDeploy  bool
     Verbose   bool
-    JUnitPath string // JUnit XML output path (empty = no JUnit)
+    JUnitPath string
+
+    // Lifecycle fields (set by `start` command, not by `run`)
+    Suite     string                // suite name for state tracking; empty disables lifecycle
+    Resume    bool                  // true when resuming a paused run
+    Completed map[string]StepStatus // scenario → status from previous run (resume)
 }
 ```
 
-### 4.3 RunScenario Flow
+| Field | Description |
+|-------|-------------|
+| `Suite` | Suite name for state tracking. When non-empty, enables lifecycle mode: `EnsureTopology` for deploy, `CheckPausing` for pause, state persistence. |
+| `Resume` | True when resuming a paused suite. Already-passed scenarios are skipped. |
+| `Completed` | Status map from the previous run's state. Seeds `scenarioStatus` in `iterateScenarios` so resume knows which scenarios already passed. |
+| `Keep` | Implicitly true in lifecycle mode (`start`). When true, topology is not destroyed after completion. |
+| `NoDeploy` | Skip deploy/destroy. Used with `--no-deploy` flag (deprecated `run` command). |
+
+### 4.3 Run
 
 ```go
 func NewRunner(scenariosDir, topologiesDir string) *Runner
-
-// Run executes one or all scenarios and returns results.
-// Three modes:
-//   - opts.Scenario: runs a single scenario (independent deploy/destroy)
-//   - opts.All: runs all scenarios in ParseAllScenarios order (each gets own deploy/destroy)
-//   - opts.Dir: suite mode — ParseAllScenarios from dir, shared deploy, dependency ordering,
-//     skip propagation on failure. Uses runShared() internally.
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error)
-
-// RunScenario executes a single scenario end-to-end.
-// ctx is context.Background() from Run(); wrapped with signal.NotifyContext internally.
 func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error)
 ```
 
-**RunScenario pseudocode:**
+**Run** determines execution mode based on options:
+
+1. **Single scenario** (`opts.Scenario` set): parse one scenario, run via `runIndependent`
+2. **All scenarios** (`opts.All` set): parse all from `ScenariosDir`, validate dependency graph if any scenario has `Requires`, then:
+   - If all scenarios share the same topology → `runShared` (deploy once)
+   - Otherwise → `runIndependent` (per-scenario deploy)
+
+### 4.4 iterateScenarios
 
 ```go
-func (r *Runner) RunScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error) {
-    // Store opts and scenario on Runner so executors can access them.
-    r.opts = opts
-    r.scenario = scenario
+type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error)
 
-    result := &ScenarioResult{
-        Name:     scenario.Name,
-        Topology: scenario.Topology,
-        Platform: scenario.Platform,
-    }
-    start := time.Now()
-
-    // 1. Resolve topology spec dir
-    topology := opts.Topology
-    if topology == "" {
-        topology = scenario.Topology
-    }
-    specDir := filepath.Join(r.TopologiesDir, topology, "specs")
-
-    // 2. Deploy topology (unless --no-deploy)
-    if !opts.NoDeploy {
-        lab, err := DeployTopology(specDir)
-        if err != nil {
-            result.DeployError = err
-            result.Status = StatusError
-            result.Duration = time.Since(start)
-            return result, nil
-        }
-        r.Lab = lab
-
-        // VM leak prevention: register deferred destroy on successful deploy.
-        // This ensures VMs are cleaned up even if the runner panics or returns early.
-        // The --keep flag and normal destroy path both skip if already destroyed.
-        if !opts.Keep {
-            defer DestroyTopology(r.Lab)
-        }
-    }
-
-    // 2a. SIGINT handling: signal.NotifyContext ensures Ctrl-C triggers
-    // deferred destroy rather than leaving orphaned VMs.
-    ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-    defer cancel()
-
-    // 3. Connect to all devices via newtron (builds Network OO hierarchy, connects)
-    if err := r.connectDevices(ctx, specDir); err != nil {
-        result.DeployError = err
-        result.Status = StatusError
-        result.Duration = time.Since(start)
-        return result, nil
-    }
-
-    // 5. Execute steps sequentially, accumulate ChangeSets from output
-    r.ChangeSets = make(map[string]*network.ChangeSet)
-    for i, step := range scenario.Steps {
-        output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
-
-        // Merge any ChangeSets returned by the executor.
-        // Last-write-wins: if a later step produces a ChangeSet for the same
-        // device, it replaces the earlier one. This is correct because
-        // verify-provisioning should verify the most recent ChangeSet
-        // (the one matching the current CONFIG_DB state).
-        for name, cs := range output.ChangeSets {
-            r.ChangeSets[name] = cs
-        }
-
-        result.Steps = append(result.Steps, *output.Result)
-
-        // Stop on first failure (fail-fast)
-        if output.Result.Status == StatusFailed || output.Result.Status == StatusError {
-            break
-        }
-    }
-
-    // 6. Compute overall status
-    result.Status = computeOverallStatus(result.Steps)
-    result.Duration = time.Since(start)
-
-    // 7. Destroy topology
-    // Handled by defer above. The deferred DestroyTopology runs on:
-    //   - Normal completion
-    //   - Early return (deploy error, connect error)
-    //   - SIGINT (via signal.NotifyContext)
-    //   - Panic
-    // Skipped when --keep or --no-deploy (defer not registered).
-
-    return result, nil
-}
+func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, run scenarioRunner) ([]*ScenarioResult, error)
 ```
 
-### 4.3a Suite Mode (`--dir`)
+Encapsulates the common scenario iteration loop used by both `runShared` and
+`runIndependent`. For each scenario:
 
-When `opts.Dir` is set, the runner uses `runShared()` — a shared-deployment
-execution mode:
+1. **Resume**: skip already-passed scenarios from `opts.Completed`
+2. **Pause check**: if `CheckPausing(opts.Suite)` returns true, return `PauseError`
+3. **Requires check**: if any dependency failed/skipped → mark as `SKIP`
+4. **Execute**: call the `run` callback
+5. **Report**: emit progress events via `r.Progress`
+
+### 4.5 Shared vs Independent Mode
+
+**runShared**: deploys once via `deployTopology`, connects once, then iterates
+all scenarios. Each scenario reuses the same `Runner.Network` and `Runner.Lab`.
+
+**runIndependent**: iterates scenarios, calling `RunScenario` for each. Each
+scenario gets its own deploy/connect cycle.
+
+### 4.6 deployTopology
 
 ```go
-// runShared deploys the topology once, runs all scenarios in dependency order,
-// and propagates skip on failure.
-func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error)
+func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error)
 ```
 
-**Suite execution flow:**
+Dual behavior:
+- **Lifecycle mode** (`opts.Suite != ""`): calls `EnsureTopology` — reuses running topology or deploys fresh. Returns nil cleanup (topology stays up; `stop` command handles teardown).
+- **Legacy mode** (`opts.Suite == ""`): calls `DeployTopology` — always deploys fresh. Returns a deferred `DestroyTopology` cleanup unless `opts.Keep` is true.
 
-1. Parse all scenarios from `opts.Dir` via `ParseAllScenarios(dir)`
-2. Validate dependency graph: `validateDependencyGraph(scenarios)` — checks for
-   missing references and cycles
-3. Sort scenarios in topological order: `topologicalSort(scenarios)` — Kahn's algorithm
-4. Deploy topology once (from first scenario's topology/platform)
-5. Connect devices once
-6. For each scenario in topological order:
-   - Check if all `requires` passed. If any dependency failed/skipped → mark as `SKIP`
-   - Execute `runScenarioSteps()` — handles `repeat` loop
-7. Destroy topology once
-
-**Repeat loop** (`runScenarioSteps`):
-
-When `scenario.Repeat > 0`, all steps execute N times. Each iteration is
-fail-fast — a failure in any iteration stops the scenario. The
-`ScenarioResult.FailedIteration` field records which iteration failed (0-based).
-
-**Skip propagation:**
-
-If scenario A fails and scenario B has `requires: [A]`, B gets
-`StatusSkipped` with message `"dependency A failed"`. This cascades
-transitively — if C requires B, and B was skipped, C is also skipped.
-
-### 4.3b ScenarioResult Extensions
+### 4.7 runScenarioSteps
 
 ```go
-type ScenarioResult struct {
-    // ... existing fields (§7.1) ...
-    Repeat          int  // scenario.Repeat value (0 = not a repeat scenario)
-    FailedIteration int  // which iteration failed (0-based, -1 if passed)
-}
-
-type StepResult struct {
-    // ... existing fields (§7.2) ...
-    Iteration int  // which repeat iteration (0-based)
-}
+func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult)
 ```
 
-### 4.4 Step Dispatch
+Executes steps within a scenario. When `scenario.Repeat > 1`, all steps execute
+in a loop for N iterations. Each iteration is fail-fast. The
+`ScenarioResult.FailedIteration` field records which iteration failed (1-based).
+
+### 4.8 Device Connection
 
 ```go
-// executors maps each StepAction to its executor implementation.
-var executors = map[StepAction]StepExecutor{
-    ActionProvision:          &provisionExecutor{},
-    ActionWait:               &waitExecutor{},
-    ActionVerifyProvisioning: &verifyProvisioningExecutor{},
-    ActionVerifyConfigDB:     &verifyConfigDBExecutor{},
-    ActionVerifyStateDB:      &verifyStateDBExecutor{},
-    ActionVerifyBGP:          &verifyBGPExecutor{},
-    ActionVerifyHealth:       &verifyHealthExecutor{},
-    ActionVerifyRoute:        &verifyRouteExecutor{},
-    ActionVerifyPing:         &verifyPingExecutor{},
-    ActionApplyService:       &applyServiceExecutor{},
-    ActionRemoveService:      &removeServiceExecutor{},
-    ActionApplyBaseline:      &applyBaselineExecutor{},
-    ActionSSHCommand:         &sshCommandExecutor{},
-    ActionRestartService:     &restartServiceExecutor{},
-    ActionApplyFRRDefaults:   &applyFRRDefaultsExecutor{},
-    ActionSetInterface:       &setInterfaceExecutor{},
-    ActionCreateVLAN:         &createVLANExecutor{},
-    ActionDeleteVLAN:         &deleteVLANExecutor{},
-    ActionAddVLANMember:      &addVLANMemberExecutor{},
-    ActionCreateVRF:          &createVRFExecutor{},
-    ActionDeleteVRF:          &deleteVRFExecutor{},
-    ActionSetupEVPN:          &setupEVPNExecutor{},
-    ActionAddVRFInterface:    &addVRFInterfaceExecutor{},
-    ActionRemoveVRFInterface: &removeVRFInterfaceExecutor{},
-    ActionBindIPVPN:          &bindIPVPNExecutor{},
-    ActionUnbindIPVPN:        &unbindIPVPNExecutor{},
-    ActionBindMACVPN:         &bindMACVPNExecutor{},
-    ActionUnbindMACVPN:       &unbindMACVPNExecutor{},
-    ActionAddStaticRoute:     &addStaticRouteExecutor{},
-    ActionRemoveStaticRoute:  &removeStaticRouteExecutor{},
-    ActionRemoveVLANMember:   &removeVLANMemberExecutor{},
-    ActionApplyQoS:           &applyQoSExecutor{},
-    ActionRemoveQoS:          &removeQoSExecutor{},
-    ActionConfigureSVI:       &configureSVIExecutor{},
-    ActionBGPAddNeighbor:     &bgpAddNeighborExecutor{},
-    ActionBGPRemoveNeighbor:  &bgpRemoveNeighborExecutor{},
-    ActionRefreshService:     &refreshServiceExecutor{},
-    ActionCleanup:            &cleanupExecutor{},
-}
-
-// executeStep dispatches a step to its executor and wraps the result
-// with step index formatting for console output.
-func (r *Runner) executeStep(
-    ctx context.Context,
-    step *Step,
-    index, total int,
-    opts RunOptions,
-) *StepOutput {
-    executor, ok := executors[step.Action]
-    if !ok {
-        return &StepOutput{
-            Result: &StepResult{
-                Name:    step.Name,
-                Action:  step.Action,
-                Status:  StatusError,
-                Message: fmt.Sprintf("unknown action: %s", step.Action),
-            },
-        }
-    }
-    return executor.Execute(ctx, r, step)
-}
+func (r *Runner) connectDevices(ctx context.Context, specDir string) error
 ```
 
-### 4.5 Device Connection — newtron Integration
+Builds the `network.Network` from the spec directory and connects all devices
+via SSH. Uses `network.NewNetwork(specDir)` to load specs, then `dev.Connect(ctx)`
+for each device. Connection failures are wrapped in `InfraError`.
+
+### 4.9 Runner Helpers
 
 ```go
-// connectDevices builds the Network OO hierarchy from the topology spec dir
-// and connects all devices via SSH. Locking is not done here — newtron
-// operations acquire/release the device lock per-operation (lock → apply →
-// verify → unlock). See newtron LLD §5 Execution Model.
-//
-// Uses the same connection path as `newtron provision` — reuses
-// pkg/network/, pkg/device/, and pkg/spec/.
-func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
-    // 1. Build Network from spec dir (loads all specs, creates device hierarchy)
-    net, err := network.NewNetwork(specDir)
-    if err != nil {
-        return fmt.Errorf("loading specs: %w", err)
-    }
-    r.Network = net
-
-    // 2. Connect each device in topology (no locking — operations lock internally)
-    //    Profile has ssh_port, mgmt_ip from newtlab patching (see newtlab LLD §10)
-    for _, name := range net.DeviceNames() {
-        dev, err := net.GetDevice(name)
-        if err != nil {
-            return fmt.Errorf("getting device %s: %w", name, err)
-        }
-        if err := dev.Connect(ctx); err != nil {
-            return fmt.Errorf("connecting to %s: %w", name, err)
-        }
-    }
-
-    return nil
-}
+func (r *Runner) allDeviceNames() []string
+func (r *Runner) resolveDevices(step *Step) []string
+func (r *Runner) hasDataplane() bool
+func HasRequires(scenarios []*Scenario) bool
 ```
 
-**Connection flow** (see device LLD §5.1):
-
-1. `device.NewDevice(name, profile)` — creates Device from resolved profile
-2. `dev.Connect(ctx)` — opens SSH tunnel using `profile.SSHPort` (newtlab-allocated),
-   connects to CONFIG_DB (DB 4), STATE_DB (DB 6), APP_DB (DB 0), ASIC_DB (DB 1)
-3. All Redis clients share the same SSH tunnel
-4. STATE_DB, APP_DB, ASIC_DB failure is non-fatal (verification-only clients)
+`hasDataplane` checks if the scenario platform supports data plane forwarding.
+Reads `PlatformSpec.Dataplane` — returns true when non-empty.
 
 ---
 
-## 5. Step Executors (`pkg/newtest/steps.go`)
+## 5. Lifecycle (`state.go`)
 
-> **Convention:** Throughout executor code, `dev` refers to `*network.Device` obtained via `r.Network.GetDevice(name)`. To access device-layer methods (ConfigDBClient, GetRoute, VerifyChangeSet), use `dev.Underlying()` which returns `*device.Device`. Methods on `network.Device` that delegate to the device layer (e.g., `RunHealthChecks`, `GetRoute`, `GetRouteASIC`, `VerifyChangeSet`) are called directly on `dev`.
-
-### 5.1 Executor Interface
+### 5.1 SuiteStatus
 
 ```go
-// StepExecutor executes a single step and returns output.
-// Each executor is stateless — all mutable state lives in the Runner.
-// Executors read from Runner (e.g. Devices, ChangeSets) but never write
-// to it directly; they return StepOutput and the Runner merges state.
+type SuiteStatus string
+
+const (
+    SuiteStatusRunning  SuiteStatus = "running"
+    SuiteStatusPausing  SuiteStatus = "pausing"
+    SuiteStatusPaused   SuiteStatus = "paused"
+    SuiteStatusComplete SuiteStatus = "complete"
+    SuiteStatusAborted  SuiteStatus = "aborted"
+    SuiteStatusFailed   SuiteStatus = "failed"
+)
+```
+
+### 5.2 RunState
+
+```go
+type RunState struct {
+    Suite     string          `json:"suite"`
+    SuiteDir  string          `json:"suite_dir"`
+    Topology  string          `json:"topology"`
+    Platform  string          `json:"platform"`
+    LabName   string          `json:"lab_name"`
+    PID       int             `json:"pid"`
+    Status    SuiteStatus     `json:"status"`
+    Started   time.Time       `json:"started"`
+    Updated   time.Time       `json:"updated"`
+    Scenarios []ScenarioState `json:"scenarios"`
+}
+```
+
+Persisted to `~/.newtron/newtest/<suite>/state.json` via `SaveRunState`.
+
+### 5.3 ScenarioState
+
+```go
+type ScenarioState struct {
+    Name             string   `json:"name"`
+    Status           string   `json:"status"`                       // "PASS","FAIL","SKIP","ERROR","running","" (pending)
+    Duration         string   `json:"duration"`                     // e.g. "2s", "15s"
+    CurrentStep      string   `json:"current_step,omitempty"`       // step name while in-progress
+    CurrentStepIndex int      `json:"current_step_index,omitempty"` // 0-based step index
+    TotalSteps       int      `json:"total_steps,omitempty"`        // total steps in scenario
+    Requires         []string `json:"requires,omitempty"`           // dependency scenario names
+    SkipReason       string   `json:"skip_reason,omitempty"`        // reason for skip
+}
+```
+
+### 5.4 State Functions
+
+```go
+func StateDir(suite string) (string, error)
+func SuiteName(dir string) string
+func SaveRunState(state *RunState) error
+func LoadRunState(suite string) (*RunState, error)
+func RemoveRunState(suite string) error
+func ListSuiteStates() ([]string, error)
+func AcquireLock(state *RunState) error
+func ReleaseLock(state *RunState) error
+func CheckPausing(suite string) bool
+func IsProcessAlive(pid int) bool
+```
+
+| Function | Description |
+|----------|-------------|
+| `StateDir` | Returns `~/.newtron/newtest/<suite>/` |
+| `SuiteName` | Extracts suite name from directory path via `filepath.Base` |
+| `SaveRunState` | Writes state to `state.json`, updating `Updated` timestamp |
+| `LoadRunState` | Reads state from `state.json`. Returns `nil, nil` if not found. |
+| `RemoveRunState` | Deletes the entire suite state directory |
+| `ListSuiteStates` | Returns names of all suites with state directories |
+| `AcquireLock` | Checks for live PID in existing state; sets `state.PID = os.Getpid()` |
+| `ReleaseLock` | Clears PID and saves state |
+| `CheckPausing` | Returns true if the suite's status is `"pausing"` |
+| `IsProcessAlive` | Checks if PID exists via `syscall.Kill(pid, 0)` |
+
+### 5.5 Pause Flow
+
+1. User runs `newtest pause` → reads state, sets `Status = SuiteStatusPausing`, saves
+2. Running `iterateScenarios` checks `CheckPausing(suite)` before each scenario
+3. When pausing detected, returns `PauseError{Completed: len(results)}`
+4. `cmd_start.go` catches `PauseError`, sets `Status = SuiteStatusPaused`, saves
+
+### 5.6 Resume Flow
+
+1. User runs `newtest start <suite>` → `LoadRunState` finds paused state
+2. CLI builds `RunOptions{Resume: true, Completed: map[name]status}` from saved state
+3. `iterateScenarios` skips scenarios that already passed in `opts.Completed`
+4. Execution continues from first non-passed scenario
+
+---
+
+## 6. Progress Reporting (`progress.go`)
+
+### 6.1 ProgressReporter Interface
+
+```go
+type ProgressReporter interface {
+    SuiteStart(scenarios []*Scenario)
+    ScenarioStart(name string, index, total int)
+    ScenarioEnd(result *ScenarioResult, index, total int)
+    StepStart(scenario string, step *Step, index, total int)
+    StepEnd(scenario string, result *StepResult, index, total int)
+    SuiteEnd(results []*ScenarioResult, duration time.Duration)
+}
+```
+
+The Runner calls these via `r.progress(func(p) { p.Method(...) })`, which
+no-ops if `r.Progress` is nil.
+
+### 6.2 ConsoleProgress
+
+```go
+type ConsoleProgress struct {
+    W       io.Writer
+    Verbose bool
+    suiteName string
+    dotWidth  int
+}
+
+func NewConsoleProgress(verbose bool) *ConsoleProgress
+```
+
+Append-only terminal progress reporter. Never uses ANSI cursor rewriting,
+so output is safe for pipes, CI, and scrollback buffers.
+
+- **SuiteStart**: prints scenario roster table (index, name, step count)
+- **ScenarioEnd**: one dot-padded line per scenario with PASS/FAIL/SKIP/ERROR
+- **StepEnd**: only shown in verbose mode; includes per-device failure details
+- **SuiteEnd**: summary line with pass/fail/skip/error counts and total duration
+
+### 6.3 StateReporter
+
+```go
+type StateReporter struct {
+    Inner ProgressReporter
+    State *RunState
+    scenarioIndex int
+}
+```
+
+Wraps a `ProgressReporter` and persists `RunState` after each lifecycle event:
+
+- **SuiteStart**: initializes `ScenarioState` entries with metadata (name, total steps, requires)
+- **ScenarioStart**: sets scenario status to `"running"`
+- **ScenarioEnd**: records final status, duration, skip reason
+- **StepStart**: records current step name and index (enables progress display in `status`)
+- **SuiteEnd**: final state save
+
+All callbacks delegate to `Inner` after saving state. Save failures are logged
+as warnings but do not abort execution.
+
+---
+
+## 7. Step Executors (`steps.go`)
+
+### 7.1 Executor Interface
+
+```go
 type StepExecutor interface {
     Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
 }
 
-// --- Runner helpers available to executors ---
-
-// allDeviceNames returns sorted names of all topology devices from r.Network.
-// Used by DeviceSelector.Resolve() when step.Devices.All is true.
-func (r *Runner) allDeviceNames() []string {
-    return r.Network.DeviceNames()
-}
-
-// resolveDevices resolves step.Devices to concrete device names.
-func (r *Runner) resolveDevices(step *Step) []string {
-    return step.Devices.Resolve(r.allDeviceNames())
-}
-
-// hasDataplane checks if the scenario platform supports dataplane forwarding.
-// Used by verifyPingExecutor to skip on platforms without dataplane (e.g., sonic-vs).
-func (r *Runner) hasDataplane() bool {
-    platformName := r.scenario.Platform
-    if r.opts.Platform != "" {
-        platformName = r.opts.Platform
-    }
-    p, err := r.Network.GetPlatform(platformName)
-    if err != nil {
-        return false
-    }
-    return p.Dataplane != ""
-}
-
-// StepOutput is the return value from every executor.
-// Result is always set. ChangeSets is non-nil only for mutating actions
-// (provision, apply-service, remove-service, apply-baseline) — the Runner
-// accumulates these for later use by verify-provisioning.
 type StepOutput struct {
     Result     *StepResult
-    ChangeSets map[string]*network.ChangeSet // per-device, nil for read-only steps
+    ChangeSets map[string]*network.ChangeSet
 }
 ```
 
-All executors follow the same pattern:
+All executors are stateless — mutable state lives in the Runner. Executors
+read from Runner (e.g., Network, ChangeSets) but return `StepOutput` rather
+than writing directly. The Runner merges ChangeSets after each step.
 
-1. Resolve target devices from `step.Devices`
-2. Call the appropriate newtron method on each device
-3. Interpret results against `step.Expect`
-4. Return `*StepOutput` with result status and optional ChangeSets
-
-For multi-device steps, per-device results are collected in `StepResult.Details`.
-The step status is `StatusPassed` only if all devices pass.
-
-### 5.2 provisionExecutor
+### 7.2 Executor Dispatch
 
 ```go
-type provisionExecutor struct{}
+var executors = map[StepAction]StepExecutor{ ... } // 38 entries
 
-func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
+func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
 
-**Wraps:** `network.TopologyProvisioner.ProvisionDevice()` (see newtron LLD §5.4)
+`executeStep` looks up the executor, calls `Execute`, sets duration and name
+on the result, and aggregates per-device error details into the `Message` field
+when executors only set `Details`.
 
-**Flow:**
-
-1. Resolve devices from `step.Devices`
-2. Create `TopologyProvisioner` from `r.Network`: `network.NewTopologyProvisioner(r.Network)`
-3. For each device:
-   - Call `provisioner.ProvisionDevice(ctx, deviceName)`
-   - Extract `ChangeSet` from returned `CompositeDeliveryResult.ChangeSet`
-   - Store into `StepOutput.ChangeSets[deviceName]`
-4. Return per-device results with ChangeSets
-
-### 5.3 waitExecutor
+### 7.3 Multi-Device Helpers
 
 ```go
-type waitExecutor struct{}
-
-func (e *waitExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
+func (r *Runner) executeForDevices(step *Step, fn func(dev *network.Device, name string) (*network.ChangeSet, string, error)) *StepOutput
+func (r *Runner) checkForDevices(step *Step, fn func(dev *network.Device, name string) (StepStatus, string)) *StepOutput
+func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *network.Device, name string) (done bool, msg string, err error)) *StepOutput
 ```
 
-**Wraps:** `time.Sleep(step.Duration)`
+Three patterns used by executors:
 
-No newtron integration. Returns `StatusPassed` after the duration elapses.
+- **executeForDevices**: for mutating actions (provision, apply-service, create-vlan, etc.). Collects ChangeSets per device.
+- **checkForDevices**: for single-shot verification (verify-health, verify-config-db). Returns per-device status.
+- **pollForDevices**: for polling verification (verify-bgp, verify-state-db, verify-route). Polls until timeout.
 
-### 5.4 verifyProvisioningExecutor
-
-```go
-type verifyProvisioningExecutor struct{}
-
-func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Device.VerifyChangeSet(cs)` (see device LLD §5.7, newtron LLD §5.2)
-
-**Flow:**
-
-1. Resolve devices from `step.Devices`
-2. For each device:
-   - Read `r.ChangeSets[deviceName]` — error if no ChangeSet accumulated
-   - Call `dev.VerifyChangeSet(ctx, cs)`
-   - Returns `VerificationResult` (see newtron LLD §3.6A):
-     - `result.Failed == 0` → `StatusPassed`
-     - `result.Failed > 0` → `StatusFailed` with error details
-3. Message format: `"24/24 CONFIG_DB entries verified"` or
-   `"22/24 CONFIG_DB entries verified (2 failed)"`
-
-### 5.5 verifyConfigDBExecutor
+### 7.4 Param Helpers
 
 ```go
-type verifyConfigDBExecutor struct{}
-
-func (e *verifyConfigDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `device.ConfigDBClient.Get*()` — direct Redis read (see newtron LLD §3.5)
-
-**Three assertion modes** (see newtest HLD §5.2):
-
-**Mode 1: `expect.MinEntries`** — count keys matching table
-
-```go
-keys := dev.Underlying().ConfigDB.GetTableKeys(step.Table)
-if len(keys) >= *step.Expect.MinEntries {
-    // StatusPassed
-} else {
-    // StatusFailed: "BGP_NEIGHBOR: 1 entries (expected ≥ 2)"
-}
-```
-
-**Mode 2: `expect.Exists`** — check if table/key exists
-
-```go
-entry := dev.Underlying().ConfigDB.GetEntry(step.Table, step.Key)
-exists := entry != nil
-if exists == *step.Expect.Exists {
-    // StatusPassed
-} else {
-    // StatusFailed: "LOOPBACK_INTERFACE|Loopback0|10.0.0.11/32: expected exists=true, got false"
-}
-```
-
-**Mode 3: `expect.Fields`** — read table/key, compare each field value
-
-```go
-entry := dev.Underlying().ConfigDB.GetEntry(step.Table, step.Key)
-for field, expected := range step.Expect.Fields {
-    actual := entry[field]
-    if actual != expected {
-        // StatusFailed: "DEVICE_METADATA|localhost: field hostname: expected leaf1, got leaf2"
-    }
-}
-```
-
-### 5.6 verifyStateDBExecutor
-
-```go
-type verifyStateDBExecutor struct{}
-
-func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `device.StateDBClient.GetEntry()` — generic STATE_DB read with polling
-
-**Flow:**
-
-1. Resolve devices via `r.resolveDevices(step)`
-2. For each device, poll until timeout:
-   - Call `dev.Underlying().StateDBClient().GetEntry(step.Table, step.Key)`
-     (returns `map[string]string` — the generic accessor added to
-     StateDBClient in device LLD §2.3)
-   - Compare each field in `step.Expect.Fields` against the returned map
-   - If all fields match → `StatusPassed`
-   - Sleep `step.Expect.PollInterval` (default 5s) and retry
-3. On timeout → `StatusFailed`
-
-### 5.7 verifyBGPExecutor
-
-```go
-type verifyBGPExecutor struct{}
-
-func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Device.RunHealthChecks("bgp")` (see newtron LLD §5.2)
-
-**Flow:**
-
-1. Resolve devices
-2. For each device, poll until `step.Expect.Timeout` (default 120s):
-   - **Health check first (fast fail):** Call `dev.RunHealthChecks(ctx, "bgp")`.
-     Returns `[]HealthCheckResult` (see newtron LLD §5.2).
-     Check if all BGP check results have `Status == "pass"`.
-   - **State check second (if configured):** When `step.Expect.State` is set
-     (e.g. `"Established"`), additionally reads STATE_DB per-neighbor state via
-     `dev.Underlying().StateDBClient().GetBGPNeighborState(vrf, neighborIP)` for each
-     BGP_NEIGHBOR key in CONFIG_DB. Compares the `State` field (e.g.,
-     `"Established"`, `"Active"`) against `step.Expect.State`. VRF is extracted
-     from the BGP_NEIGHBOR key prefix (e.g., `"default|10.0.0.2"` → vrf=`"default"`).
-   - **Both must pass.** Health check runs first because it's faster and catches
-     gross failures (daemon not running, no neighbors). State check runs second
-     for per-neighbor granularity.
-   - If all pass → `StatusPassed`
-   - Sleep `step.Expect.PollInterval` (default 5s) and retry
-3. On timeout → `StatusFailed`
-
-### 5.8 verifyHealthExecutor
-
-```go
-type verifyHealthExecutor struct{}
-
-func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Device.RunHealthChecks()` — no filter, runs all checks (see newtron LLD §5.2)
-
-**Flow:**
-
-1. Resolve devices
-2. For each device:
-   - Call `dev.RunHealthChecks(ctx)` — runs all 5 check types
-     (interfaces, BGP, EVPN, LAG, VXLAN)
-   - Returns `[]HealthCheckResult`
-   - When `step.Expect.Overall == "ok"`: all checks must have `Status == "pass"`
-   - Count pass/fail, report `"overall ok (5 checks passed)"`
-3. Any check with `Status == "fail"` → `StatusFailed`
-
-**Single-shot semantics:** `verify-health` performs a single read — it does not poll with timeout. Health checks read STATE_DB and CONFIG_DB which reflect the current device state. If convergence time is needed (e.g., waiting for BGP sessions to establish), use a `wait` step before `verify-health`. This is intentional: `verify-bgp` and `verify-state-db` poll because they wait for asynchronous state changes, but `verify-health` is a point-in-time snapshot.
-
-### 5.9 verifyRouteExecutor
-
-```go
-type verifyRouteExecutor struct{}
-
-func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Device.GetRoute()` or `Device.GetRouteASIC()` (see device LLD §5.7)
-
-Single-device action: parser validates `len(step.Devices) == 1`.
-
-**Polling flow:**
-
-```go
-func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-    deviceName := step.Devices.Resolve(r.allDeviceNames())[0] // validated single by parser
-    dev, err := r.Network.GetDevice(deviceName)
-    if err != nil {
-        return &StepOutput{Result: &StepResult{
-            Status: StatusError, Device: deviceName, Message: err.Error(),
-        }}
-    }
-    timeout := step.Expect.Timeout       // default 60s
-    interval := step.Expect.PollInterval // default 5s
-    deadline := time.Now().Add(timeout)
-    polls := 0
-
-    for time.Now().Before(deadline) {
-        polls++
-        var entry *device.RouteEntry
-        var err error
-
-        if step.Expect.Source == "asic_db" {
-            entry, err = dev.GetRouteASIC(ctx, step.VRF, step.Prefix)
-        } else {
-            entry, err = dev.GetRoute(ctx, step.VRF, step.Prefix)
-        }
-
-        if err != nil {
-            // Infrastructure error — don't retry
-            return &StepOutput{Result: &StepResult{
-                Status: StatusError, Device: deviceName, Message: err.Error(),
-            }}
-        }
-
-        if entry != nil && matchRoute(entry, step.Expect) {
-            source := "APP_DB"
-            if step.Expect.Source == "asic_db" {
-                source = "ASIC_DB"
-            }
-            return &StepOutput{Result: &StepResult{
-                Status:  StatusPassed,
-                Device:  deviceName,
-                Message: fmt.Sprintf("%s via %s (%s, %s, polled %d times)",
-                    step.Prefix, step.Expect.NextHopIP, step.Expect.Protocol, source, polls),
-            }}
-        }
-
-        time.Sleep(interval)
-    }
-
-    return &StepOutput{Result: &StepResult{
-        Status:  StatusFailed,
-        Device:  deviceName,
-        Message: fmt.Sprintf("%s not found after %s (%d polls)", step.Prefix, timeout, polls),
-    }}
-}
-```
-
-**matchRoute** checks RouteEntry against ExpectBlock:
-
-```go
-// matchRoute returns true if the RouteEntry matches all non-empty expect fields.
-func matchRoute(entry *device.RouteEntry, expect *ExpectBlock) bool {
-    if expect.Protocol != "" && entry.Protocol != expect.Protocol {
-        return false
-    }
-    if expect.NextHopIP != "" {
-        found := false
-        for _, nh := range entry.NextHops {
-            if nh.IP == expect.NextHopIP {
-                found = true
-                break
-            }
-        }
-        if !found {
-            return false
-        }
-    }
-    return true
-}
-```
-
-**RouteEntry fields** (from newtron LLD §3.6A):
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `Prefix` | string | `"10.1.0.0/31"` |
-| `VRF` | string | `"default"`, `"Vrf-customer"` |
-| `Protocol` | string | `"bgp"`, `"connected"`, `"static"` |
-| `NextHops` | []NextHop | IP + interface pairs |
-| `Source` | RouteSource | `"APP_DB"` or `"ASIC_DB"` |
-
-### 5.10 verifyPingExecutor
-
-```go
-type verifyPingExecutor struct{}
-
-func (e *verifyPingExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**newtest native** — not backed by a newtron method.
-
-Single-device action: parser validates `len(step.Devices) == 1`.
-
-**Flow:**
-
-1. Check platform capability: `r.hasDataplane()`
-   - If `false` → return `StatusSkipped` with message
-     `"platform sonic-vs has dataplane: false"`
-2. Resolve source device: `r.resolveDevices(step)[0]`
-3. Resolve target IP from `step.Target`:
-   - If `step.Target` is a valid IP, use it directly
-   - Otherwise, treat it as a device name and resolve to its loopback IP:
-     ```go
-     targetDev, err := r.Network.GetDevice(step.Target)
-     if err != nil {
-         return &StepOutput{Result: &StepResult{
-             Status: StatusError, Message: fmt.Sprintf("target device %q: %s", step.Target, err),
-         }}
-     }
-     targetIP := targetDev.Underlying().Profile.LoopbackIP
-     ```
-4. SSH to source device using the separate command SSH session (not the Redis
-   tunnel). Opens a new `ssh.Session` on the device's existing tunnel SSH
-   client (`dev.Underlying().SSHClient()`) and runs:
-   ```go
-   session, err := dev.Underlying().SSHClient().NewSession()
-   if err != nil {
-       return &StepOutput{Result: &StepResult{
-           Status: StatusError, Device: deviceName,
-           Message: fmt.Sprintf("SSH session: %s", err),
-       }}
-   }
-   defer session.Close()
-
-   output, err := session.CombinedOutput(fmt.Sprintf("ping -c %d -W 5 %s", step.Count, targetIP))
-   if err != nil {
-       // ping returns exit code 1 on partial loss — check output, not just error
-       if len(output) == 0 {
-           return &StepOutput{Result: &StepResult{
-               Status: StatusError, Device: deviceName,
-               Message: fmt.Sprintf("ping command failed: %s", err),
-           }}
-       }
-   }
-   ```
-5. Parse ping output: match `(\d+)% packet loss` from stdout and compute
-   success rate as `1.0 - (loss / 100.0)`
-6. Compare against `step.Expect.SuccessRate` (default 1.0)
-   - If actual ≥ expected → `StatusPassed`
-   - Otherwise → `StatusFailed`
-
-### 5.11 applyServiceExecutor
-
-```go
-type applyServiceExecutor struct{}
-
-func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Interface.ApplyService()` (see newtron LLD §5.1)
-
-**Flow:**
-
-1. Resolve devices
-2. For each device:
-   - Get interface from `r.Network.GetDevice(name).GetInterface(step.Interface)`
-   - Extract `ipAddr` from `step.Params["ip"]` if present
-   - Call `iface.ApplyService(ctx, step.Service, ipAddr, false)` (execute mode):
-     ```go
-     cs, err := iface.ApplyService(ctx, step.Service, ipAddr, false)
-     if err != nil {
-         return &StepOutput{Result: &StepResult{
-             Status: StatusError, Device: name,
-             Message: fmt.Sprintf("apply-service %s: %s", step.Service, err),
-         }}
-     }
-     ```
-   - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
-3. Return per-device results with ChangeSets
-
-### 5.12 removeServiceExecutor
-
-```go
-type removeServiceExecutor struct{}
-
-func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Interface.RemoveService()` (see newtron LLD §5.1)
-
-**Flow:**
-
-1. Resolve devices
-2. For each device:
-   - Get interface from `r.Network.GetDevice(name).GetInterface(step.Interface)`
-   - Call `iface.RemoveService(ctx, false)` (execute mode):
-     ```go
-     cs, err := iface.RemoveService(ctx, false)
-     if err != nil {
-         return &StepOutput{Result: &StepResult{
-             Status: StatusError, Device: name,
-             Message: fmt.Sprintf("remove-service: %s", err),
-         }}
-     }
-     ```
-   - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
-3. Return per-device results with ChangeSets
-
-### 5.13 applyBaselineExecutor
-
-```go
-type applyBaselineExecutor struct{}
-
-func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**Wraps:** `Device.ApplyBaseline()` (see newtron LLD §5.2)
-
-**Flow:**
-
-1. Resolve devices
-2. For each device:
-   - Convert `step.Vars` (map) to `[]string` (`"key=value"` format)
-   - Call `dev.ApplyBaseline(ctx, step.Configlet, vars)`:
-     ```go
-     cs, err := dev.ApplyBaseline(ctx, step.Configlet, vars, false)
-     if err != nil {
-         return &StepOutput{Result: &StepResult{
-             Status: StatusError, Device: name,
-             Message: fmt.Sprintf("apply-baseline %s: %s", step.Configlet, err),
-         }}
-     }
-     ```
-   - Collect returned ChangeSet into `StepOutput.ChangeSets[deviceName]`
-3. Return per-device results with ChangeSets
-
-### 5.14 sshCommandExecutor
-
-```go
-type sshCommandExecutor struct{}
-
-func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-```
-
-**newtest native** — uses SSH exec directly.
-
-**Flow:**
-
-1. Resolve devices
-2. For each device:
-   - Open SSH session using device profile credentials (SSHUser, SSHPass, SSHPort)
-   - Run `step.Command` via `session.CombinedOutput()`
-   - If `step.Expect.Contains` is set: check if output contains substring
-     - Contains → `StatusPassed`
-     - Not found → `StatusFailed` with output snippet
-   - If no expect: pass if exit code is 0
-
-### 5.15 Param Helpers
-
-Three helpers extract typed values from `step.Params map[string]any`:
-
-```go
-// strParam returns params[key] as a string via fmt.Sprintf.
-// Returns "" if key is missing.
 func strParam(params map[string]any, key string) string
-
-// intParam returns params[key] as an int.
-// Handles int, float64 (from YAML), and string (via strconv).
-// Returns 0 if key is missing or unparseable.
 func intParam(params map[string]any, key string) int
-
-// boolParam returns params[key] as a bool.
-// Handles bool and string ("true"/"1").
-// Returns false if key is missing.
 func boolParam(params map[string]any, key string) bool
 ```
 
-These are used by all operation executors (§5.17–§5.40) to read action-specific parameters from YAML.
-
-### 5.16 restartServiceExecutor
-
-```go
-type restartServiceExecutor struct{}
-```
-
-**Wraps:** `Device.RestartService(ctx, serviceName)`
-
-Reads `params.service` (e.g., `"bgp"`, `"swss"`). Calls `RestartService` on each resolved device. Returns `StatusPassed` on success.
-
-### 5.17 applyFRRDefaultsExecutor
-
-```go
-type applyFRRDefaultsExecutor struct{}
-```
-
-**Wraps:** `Device.ApplyFRRDefaults(ctx)`
-
-Applies FRR runtime defaults via vtysh: disables `ebgp_requires_policy`, disables `suppress_fib_pending`, configures `ttl-security`, and runs `clear bgp * soft out`. No params needed.
-
-### 5.18 setInterfaceExecutor
-
-```go
-type setInterfaceExecutor struct{}
-```
-
-**Wraps:** `Interface.Set()` / `Interface.SetIP()` / `Interface.SetVRF()`
-
-Dispatches on `params.property`:
-- `"ip"` → `iface.SetIP(ctx, value)` — via `ExecuteOp`
-- `"vrf"` → `iface.SetVRF(ctx, value)` — via `ExecuteOp`
-- anything else → `iface.Set(ctx, property, value)` — via `ExecuteOp`
-
-All paths return a ChangeSet via `dev.ExecuteOp(func() (*network.ChangeSet, error) { ... })`.
-
-### 5.19 createVLANExecutor
-
-```go
-type createVLANExecutor struct{}
-```
-
-**Wraps:** `Device.CreateVLAN(ctx, vlanID, VLANConfig{})`
-
-Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
-
-### 5.20 deleteVLANExecutor
-
-```go
-type deleteVLANExecutor struct{}
-```
-
-**Wraps:** `Device.DeleteVLAN(ctx, vlanID)`
-
-Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
-
-### 5.21 addVLANMemberExecutor
-
-```go
-type addVLANMemberExecutor struct{}
-```
-
-**Wraps:** `Device.AddVLANMember(ctx, vlanID, interfaceName, tagged)`
-
-Reads `params.vlan_id` (int), `params.interface` (string), `params.tagged` (bool, defaults to true). Returns ChangeSet.
-
-### 5.22 createVRFExecutor
-
-```go
-type createVRFExecutor struct{}
-```
-
-**Wraps:** `Device.CreateVRF(ctx, vrfName, VRFConfig{})`
-
-Reads `params.vrf` via `strParam`. Returns ChangeSet.
-
-### 5.23 deleteVRFExecutor
-
-```go
-type deleteVRFExecutor struct{}
-```
-
-**Wraps:** `Device.DeleteVRF(ctx, vrfName)`
-
-Reads `params.vrf` via `strParam`. Returns ChangeSet.
-
-### 5.24 setupEVPNExecutor
-
-```go
-type setupEVPNExecutor struct{}
-```
-
-**Wraps:** `Device.SetupEVPN(ctx, sourceIP)`
-
-Sets up the full EVPN overlay: VTEP, NVO, and BGP EVPN configuration. Reads optional `params.source_ip` via `strParam` (defaults to device loopback IP if empty). Returns ChangeSet.
-
-### 5.25 addVRFInterfaceExecutor
-
-```go
-type addVRFInterfaceExecutor struct{}
-```
-
-**Wraps:** `Device.AddVRFInterface(ctx, vrfName, intfName)`
-
-Binds an interface to a VRF. Reads `params.vrf_name` and `params.interface` via `strParam`. Returns ChangeSet.
-
-### 5.26 removeVRFInterfaceExecutor
-
-```go
-type removeVRFInterfaceExecutor struct{}
-```
-
-**Wraps:** `Device.RemoveVRFInterface(ctx, vrfName, intfName)`
-
-Removes an interface from a VRF. Reads `params.vrf_name` and `params.interface` via `strParam`. Returns ChangeSet.
-
-### 5.27 bindIPVPNExecutor
-
-```go
-type bindIPVPNExecutor struct{}
-```
-
-**Wraps:** `Device.BindIPVPN(ctx, vrfName, ipvpnName, ipvpnDef)`
-
-Binds an IP-VPN definition to a VRF. Reads `params.vrf_name` and `params.ipvpn_name` via `strParam`. The IP-VPN definition is resolved from the network spec by name. Returns ChangeSet.
-
-### 5.28 unbindIPVPNExecutor
-
-```go
-type unbindIPVPNExecutor struct{}
-```
-
-**Wraps:** `Device.UnbindIPVPN(ctx, vrfName)`
-
-Unbinds the IP-VPN from a VRF. Reads `params.vrf_name` via `strParam`. Returns ChangeSet.
-
-### 5.29 bindMACVPNExecutor
-
-```go
-type bindMACVPNExecutor struct{}
-```
-
-**Wraps:** `Device.BindMACVPN(ctx, vlanID, macvpnName, macvpnDef)`
-
-Binds a MAC-VPN definition to a VLAN. Reads `params.vlan_id` via `intParam` and `params.macvpn_name` via `strParam`. The MAC-VPN definition is resolved from the network spec by name. Returns ChangeSet.
-
-### 5.30 unbindMACVPNExecutor
-
-```go
-type unbindMACVPNExecutor struct{}
-```
-
-**Wraps:** `Device.UnbindMACVPN(ctx, vlanID)`
-
-Unbinds the MAC-VPN from a VLAN. Reads `params.vlan_id` via `intParam`. Returns ChangeSet.
-
-### 5.31 addStaticRouteExecutor
-
-```go
-type addStaticRouteExecutor struct{}
-```
-
-**Wraps:** `Device.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)`
-
-Adds a static route to a VRF. Reads `params.vrf_name`, `params.prefix`, `params.next_hop` via `strParam` and optional `params.metric` via `intParam` (defaults to 0). Returns ChangeSet.
-
-### 5.32 removeStaticRouteExecutor
-
-```go
-type removeStaticRouteExecutor struct{}
-```
-
-**Wraps:** `Device.RemoveStaticRoute(ctx, vrfName, prefix)`
-
-Removes a static route from a VRF. Reads `params.vrf_name` and `params.prefix` via `strParam`. Returns ChangeSet.
-
-### 5.33 removeVLANMemberExecutor
-
-```go
-type removeVLANMemberExecutor struct{}
-```
-
-**Wraps:** `Device.RemoveVLANMember(ctx, vlanID, intfName)`
-
-Removes an interface from a VLAN. Reads `params.vlan_id` via `intParam` and `params.interface` via `strParam`. Returns ChangeSet.
-
-### 5.34 applyQoSExecutor
-
-```go
-type applyQoSExecutor struct{}
-```
-
-**Wraps:** `Device.ApplyQoS(ctx, intfName, policyName, policy)`
-
-Applies a QoS policy to an interface. Reads `params.interface` and `params.policy_name` via `strParam`. The QoS policy definition is resolved from the network spec by name. Returns ChangeSet.
-
-### 5.35 removeQoSExecutor
-
-```go
-type removeQoSExecutor struct{}
-```
-
-**Wraps:** `Device.RemoveQoS(ctx, intfName)`
-
-Removes QoS policy from an interface. Reads `params.interface` via `strParam`. Returns ChangeSet.
-
-### 5.36 configureSVIExecutor
-
-```go
-type configureSVIExecutor struct{}
-```
-
-**Wraps:** `Device.ConfigureSVI(ctx, vlanID, SVIConfig{})`
-
-Reads `params.vlan_id` (int), optionally `params.vrf` (string) and `params.ip` (string) into `SVIConfig`. Returns ChangeSet.
-
-### 5.37 bgpAddNeighborExecutor
-
-```go
-type bgpAddNeighborExecutor struct{}
-```
-
-**Dispatches** based on `step.Interface`:
-- **Interface set** → direct BGP neighbor via `Interface.AddBGPNeighbor(ctx, DirectBGPNeighborConfig{NeighborIP, RemoteAS})` — via `ExecuteOp`
-- **Interface empty** → loopback BGP neighbor via `Device.AddLoopbackBGPNeighbor(ctx, neighborIP, remoteASN, "", false)` — via `ExecuteOp`
-
-Reads `params.neighbor_ip` and `params.remote_asn` (int). Returns ChangeSet.
-
-### 5.38 bgpRemoveNeighborExecutor
-
-```go
-type bgpRemoveNeighborExecutor struct{}
-```
-
-**Dispatches** based on `step.Interface`:
-- **Interface set** → `Interface.RemoveBGPNeighbor(ctx, neighborIP)` — via `ExecuteOp`
-- **Interface empty** → `Device.RemoveBGPNeighbor(ctx, neighborIP)` — via `ExecuteOp`
-
-Reads `params.neighbor_ip` via `strParam`. Returns ChangeSet.
-
-### 5.39 refreshServiceExecutor
-
-```go
-type refreshServiceExecutor struct{}
-```
-
-**Wraps:** `Interface.RefreshService(ctx)`
-
-Requires `step.Interface`. Calls via `ExecuteOp`. Returns ChangeSet.
-
-### 5.40 cleanupExecutor
-
-```go
-type cleanupExecutor struct{}
-```
-
-**Wraps:** `Device.Cleanup(ctx, cleanupType)` — returns `(*ChangeSet, *CleanupSummary, error)`
-
-Since `ExecuteOp` expects `func() (*ChangeSet, error)`, the 3-return-value `Cleanup` is wrapped via closure capture:
-
-```go
-var summary *network.CleanupSummary
-cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
-    cs, s, err := dev.Cleanup(ctx, cleanupType)
-    summary = s
-    return cs, err
-})
-```
-
-Reads optional `params.type` for cleanup scope. Returns ChangeSet.
+Extract typed values from `step.Params`. Used by all operation executors to
+read action-specific parameters from YAML. `intParam` handles int, float64
+(from YAML), and string (via strconv).
+
+### 7.5 Executor Summary
+
+| # | Executor | Action | Wraps |
+|---|----------|--------|-------|
+| 1 | `provisionExecutor` | `provision` | `TopologyProvisioner.ProvisionDevice()` |
+| 2 | `waitExecutor` | `wait` | `time.Sleep` |
+| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `Device.VerifyChangeSet()` |
+| 4 | `verifyConfigDBExecutor` | `verify-config-db` | `ConfigDBClient.Get*()` |
+| 5 | `verifyStateDBExecutor` | `verify-state-db` | `StateDBClient.GetEntry()` with polling |
+| 6 | `verifyBGPExecutor` | `verify-bgp` | `RunHealthChecks("bgp")` with polling |
+| 7 | `verifyHealthExecutor` | `verify-health` | `RunHealthChecks()` (single-shot) |
+| 8 | `verifyRouteExecutor` | `verify-route` | `GetRoute()` / `GetRouteASIC()` with polling |
+| 9 | `verifyPingExecutor` | `verify-ping` | SSH ping (newtest native) |
+| 10 | `applyServiceExecutor` | `apply-service` | `Interface.ApplyService()` |
+| 11 | `removeServiceExecutor` | `remove-service` | `Interface.RemoveService()` |
+| 12 | `applyBaselineExecutor` | `apply-baseline` | `Device.ApplyBaseline()` |
+| 13 | `sshCommandExecutor` | `ssh-command` | SSH exec (newtest native) |
+| 14 | `restartServiceExecutor` | `restart-service` | `Device.RestartService()` |
+| 15 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Device.ApplyFRRDefaults()` |
+| 16 | `setInterfaceExecutor` | `set-interface` | `Interface.Set/SetIP/SetVRF()` |
+| 17 | `createVLANExecutor` | `create-vlan` | `Device.CreateVLAN()` |
+| 18 | `deleteVLANExecutor` | `delete-vlan` | `Device.DeleteVLAN()` |
+| 19 | `addVLANMemberExecutor` | `add-vlan-member` | `Device.AddVLANMember()` |
+| 20 | `createVRFExecutor` | `create-vrf` | `Device.CreateVRF()` |
+| 21 | `deleteVRFExecutor` | `delete-vrf` | `Device.DeleteVRF()` |
+| 22 | `setupEVPNExecutor` | `setup-evpn` | `Device.SetupEVPN()` |
+| 23 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `Device.AddVRFInterface()` |
+| 24 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `Device.RemoveVRFInterface()` |
+| 25 | `bindIPVPNExecutor` | `bind-ipvpn` | `Device.BindIPVPN()` |
+| 26 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `Device.UnbindIPVPN()` |
+| 27 | `bindMACVPNExecutor` | `bind-macvpn` | `Device.BindMACVPN()` |
+| 28 | `unbindMACVPNExecutor` | `unbind-macvpn` | `Device.UnbindMACVPN()` |
+| 29 | `addStaticRouteExecutor` | `add-static-route` | `Device.AddStaticRoute()` |
+| 30 | `removeStaticRouteExecutor` | `remove-static-route` | `Device.RemoveStaticRoute()` |
+| 31 | `removeVLANMemberExecutor` | `remove-vlan-member` | `Device.RemoveVLANMember()` |
+| 32 | `applyQoSExecutor` | `apply-qos` | `Device.ApplyQoS()` |
+| 33 | `removeQoSExecutor` | `remove-qos` | `Device.RemoveQoS()` |
+| 34 | `configureSVIExecutor` | `configure-svi` | `Device.ConfigureSVI()` |
+| 35 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `Interface.AddBGPNeighbor` / `Device.AddLoopbackBGPNeighbor` |
+| 36 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
+| 37 | `refreshServiceExecutor` | `refresh-service` | `Interface.RefreshService()` |
+| 38 | `cleanupExecutor` | `cleanup` | `Device.Cleanup()` |
+
+### 7.6 Verification Executor Detail
+
+**verifyConfigDBExecutor** — three assertion modes:
+1. `expect.MinEntries`: count keys in table, pass if `≥ min`
+2. `expect.Exists`: check if table/key exists or not
+3. `expect.Fields`: read table/key, compare each field value
+
+**verifyStateDBExecutor** — polls `StateDBClient.GetEntry(table, key)` until all
+`expect.Fields` match or timeout is reached.
+
+**verifyBGPExecutor** — polls `RunHealthChecks("bgp")` and optionally checks
+per-neighbor state via STATE_DB. Health check runs first (fast fail); state
+check runs second (per-neighbor granularity).
+
+**verifyHealthExecutor** — single-shot read. Does **not** poll. Use a `wait`
+step before `verify-health` if convergence time is needed.
+
+**verifyRouteExecutor** — polls `GetRoute` (APP_DB) or `GetRouteASIC` (ASIC_DB)
+until the route matches expected protocol, next-hop, and source.
+
+**verifyPingExecutor** — checks `hasDataplane()` first; skips on platforms
+without data plane. Resolves target to IP (device name → loopback IP), runs
+`ping -c N -W 5 <target>` via SSH, parses packet loss from output.
+
+### 7.7 BGP Neighbor Executor Dispatch
+
+`bgpAddNeighborExecutor` dispatches based on `step.Interface`:
+- **Interface set** → direct BGP neighbor via `Interface.AddBGPNeighbor`
+- **Interface empty** → loopback BGP neighbor via `Device.AddLoopbackBGPNeighbor`
+
+Same pattern for `bgpRemoveNeighborExecutor`.
 
 ---
 
-## 6. newtlab Integration (`pkg/newtest/deploy.go`)
+## 8. newtlab Integration (`deploy.go`)
 
-### 6.1 DeployTopology
-
-```go
-// DeployTopology deploys a VM topology using newtlab.
-// Creates a newtlab.Lab from the spec directory, calls Lab.Deploy(),
-// and returns the Lab for later destroy.
-//
-// See newtlab LLD §4.1 (Lab type), §12 (deploy flow).
-func DeployTopology(specDir string) (*newtlab.Lab, error) {
-    lab, err := newtlab.NewLab(specDir)
-    if err != nil {
-        return nil, fmt.Errorf("newtest: load topology: %w", err)
-    }
-    if err := lab.Deploy(); err != nil {
-        return nil, fmt.Errorf("newtest: deploy topology: %w", err)
-    }
-    return lab, nil
-}
-```
-
-After `Deploy()` returns:
-
-- All VMs are running and SSH-reachable
-- Device profiles have been patched with `ssh_port`, `console_port`, `mgmt_ip`
-  (see newtlab LLD §10)
-- newtest can now connect to devices using the patched profiles
-
-### 6.2 DestroyTopology
+### 8.1 DeployTopology
 
 ```go
-// DestroyTopology tears down a deployed topology.
-// Kills QEMU processes, removes overlay disks, restores profiles.
-//
-// See newtlab LLD §4.1 (Lab type), §13 (destroy flow).
-func DestroyTopology(lab *newtlab.Lab) error {
-    if lab == nil {
-        return nil
-    }
-    if err := lab.Destroy(); err != nil {
-        return fmt.Errorf("newtest: destroy topology: %w", err)
-    }
-    return nil
-}
+func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error)
 ```
 
-### 6.3 Platform Capability Check
+Creates a `newtlab.Lab` from the spec directory, sets `lab.Force = true`,
+calls `lab.Deploy(ctx)`, and returns the lab. After deploy, all VMs are
+running and SSH-reachable with patched profiles.
 
-`hasDataplane()` is defined in §5.1. It takes no arguments and reads the scenario's platform from `r.scenario.Platform` (overridden by `r.opts.Platform` if set). Returns true when `PlatformSpec.Dataplane != ""`.
+### 8.2 EnsureTopology
 
-**Platform dataplane values** (from `platforms.json`):
+```go
+func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, bool, error)
+```
 
-| Platform | Dataplane | verify-ping |
-|----------|-----------|-------------|
-| `sonic-vpp` | `"vpp"` | Executes |
-| `sonic-vs` | `""` | Skipped |
+Reuses an existing lab if all nodes are running, otherwise deploys fresh.
+Returns `(lab, deployed, error)` where `deployed` indicates whether a new
+deploy was performed.
+
+**Flow:**
+1. Create `newtlab.Lab` from spec dir
+2. Check `lab.Status()` — if all nodes are `"running"`, return lab with `deployed=false`
+3. Otherwise, set `lab.Force = true`, call `lab.Deploy(ctx)`, return `deployed=true`
+
+Used by `start` command via `deployTopology()` when `opts.Suite` is set.
+
+### 8.3 DestroyTopology
+
+```go
+func DestroyTopology(ctx context.Context, lab *newtlab.Lab) error
+```
+
+Calls `lab.Destroy(ctx)`. Returns nil if `lab` is nil. Used by the `stop`
+command and by deferred cleanup in legacy (`run`) mode.
 
 ---
 
-## 7. Results and Reporting (`pkg/newtest/report.go`)
+## 9. Results & Reporting (`report.go`)
 
-### 7.1 ScenarioResult
+### 9.1 StepStatus
 
 ```go
-// ScenarioResult holds the result of a single scenario execution.
+type StepStatus string
+
+const (
+    StepStatusPassed  StepStatus = "PASS"
+    StepStatusFailed  StepStatus = "FAIL"
+    StepStatusSkipped StepStatus = "SKIP"
+    StepStatusError   StepStatus = "ERROR"
+)
+```
+
+| Status | Meaning |
+|--------|---------|
+| `PASS` | Assertion matched |
+| `FAIL` | Assertion failed (expected value mismatch, timeout) |
+| `SKIP` | Skipped (platform lacks data plane, dependency failed) |
+| `ERROR` | Infrastructure error (SSH failure, Redis timeout) |
+
+`FAIL` vs `ERROR`: `FAIL` means the test ran but the assertion didn't hold.
+`ERROR` means the test could not run. At the scenario level, `FAIL` takes
+priority over `ERROR`.
+
+### 9.2 ScenarioResult
+
+```go
 type ScenarioResult struct {
-    Name        string       // scenario name
-    Topology    string       // topology name
-    Platform    string       // platform name
-    Status      Status       // overall: PASS if all passed, FAIL if any failed
-    Duration    time.Duration
-    Steps       []StepResult
-    DeployError error        // non-nil if newtlab deploy failed
+    Name            string
+    Topology        string
+    Platform        string
+    Status          StepStatus
+    Duration        time.Duration
+    Steps           []StepResult
+    DeployError     error
+    SkipReason      string
+    Repeat          int  // total iterations requested (0 = no repeat)
+    FailedIteration int  // which iteration failed (0 = none; 1-based when Repeat > 1)
 }
 ```
 
-**Overall status computation:**
+**Overall status** via `computeOverallStatus`:
+- Any step `FAIL` → scenario `FAIL`
+- Any step `ERROR` (no `FAIL`) → scenario `ERROR`
+- All `PASS`/`SKIP` → scenario `PASS`
+
+### 9.3 StepResult
 
 ```go
-func computeOverallStatus(steps []StepResult) Status {
-    hasError := false
-    for _, s := range steps {
-        if s.Status == StatusError {
-            hasError = true
-        }
-        if s.Status == StatusFailed {
-            return StatusFailed
-        }
-    }
-    if hasError {
-        return StatusError // infrastructure errors propagate, not downgraded to FAIL
-    }
-    return StatusPassed
-}
-```
-
-Skipped steps do not affect overall status — a scenario with all steps
-passed or skipped is `PASS`. `ERROR` takes priority over `PASS` but not
-over `FAIL`, since a test failure is a definitive signal while an
-infrastructure error means "unknown".
-
-### 7.2 StepResult
-
-```go
-// StepResult holds the result of a single step execution.
 type StepResult struct {
-    Name     string         // from Step.Name
-    Action   StepAction     // from Step.Action
-    Status   Status
-    Duration time.Duration
-    Message  string         // human-readable detail
-    Device   string         // which device (single-device steps)
-    Details  []DeviceResult // per-device results (multi-device steps)
+    Name      string
+    Action    StepAction
+    Status    StepStatus
+    Duration  time.Duration
+    Message   string
+    Device    string
+    Details   []DeviceResult
+    Iteration int  // 1-based iteration number (0 = no repeat)
 }
 
-// DeviceResult holds the result for a single device within a multi-device step.
 type DeviceResult struct {
     Device  string
-    Status  Status
+    Status  StepStatus
     Message string
 }
 ```
 
-### 7.3 Status
+Single-device steps set `Device` and `Message`. Multi-device steps populate
+`Details` with per-device results.
+
+### 9.4 ReportGenerator
 
 ```go
-type Status string
-
-const (
-    StatusPassed  Status = "PASS"
-    StatusFailed  Status = "FAIL"
-    StatusSkipped Status = "SKIP"
-    StatusError   Status = "ERROR" // infrastructure error (not test failure)
-)
-```
-
-| Status | Meaning | Causes |
-|--------|---------|--------|
-| `PASS` | Step/scenario succeeded | Assertions matched |
-| `FAIL` | Assertion failed | Expected value mismatch, timeout |
-| `SKIP` | Skipped | Platform lacks dataplane |
-| `ERROR` | Infrastructure error | SSH connection failure, Redis timeout |
-
-`FAIL` vs `ERROR`: A `FAIL` means the test ran but the assertion didn't hold.
-An `ERROR` means the test could not run due to infrastructure problems.
-At the scenario level, `FAIL` takes priority over `ERROR` (see §7.1).
-
-### 7.4 ReportGenerator
-
-```go
-// ReportGenerator produces test reports from scenario results.
 type ReportGenerator struct {
     Results []*ScenarioResult
 }
 
-// WriteMarkdown writes a markdown report to the given path.
-// Format matches newtest HLD §9.
-func (g *ReportGenerator) WriteMarkdown(path string) error
-
-// WriteJUnit writes a JUnit XML report for CI integration.
-func (g *ReportGenerator) WriteJUnit(path string) error
-
-// PrintConsole writes human-readable output to w.
-// Format matches newtest HLD §8.
 func (g *ReportGenerator) PrintConsole(w io.Writer)
+func (g *ReportGenerator) WriteMarkdown(path string) error
+func (g *ReportGenerator) WriteJUnit(path string) error
 ```
 
-### 7.5 Console Output Format
+**PrintConsole**: human-readable output. Shows step details for single-run
+scenarios, concise iteration summary for repeated scenarios.
 
-Matches newtest HLD §8:
+**WriteMarkdown**: summary table with scenario/topology/platform/result/duration/note
+columns, followed by a failures section with per-step details.
 
-```
-newtest: bgp-underlay (4node topology, sonic-vpp)
-
-Deploying topology...
-  ✓ spine1 (SSH :40000)
-  ✓ spine2 (SSH :40001)
-  ✓ leaf1 (SSH :40002)
-  ✓ leaf2 (SSH :40003)
-
-Running steps...
-  [1/5] provision-all
-    ✓ spine1 provisioned (3.2s)
-    ✓ spine2 provisioned (2.9s)
-    ✓ leaf1 provisioned (3.1s)
-    ✓ leaf2 provisioned (3.0s)
-
-  [2/5] wait-convergence
-    ✓ 30s elapsed
-
-  [3/5] verify-provisioning
-    ✓ spine1: 24/24 CONFIG_DB entries verified
-    ✓ spine2: 24/24 CONFIG_DB entries verified
-    ✓ leaf1: 31/31 CONFIG_DB entries verified
-    ✓ leaf2: 31/31 CONFIG_DB entries verified
-
-  [4/5] verify-underlay-route
-    ✓ spine1: 10.1.0.0/31 via 10.1.0.1 (bgp, APP_DB, polled 3 times)
-
-  [5/5] verify-health
-    ✓ spine1: overall ok (5 checks passed)
-    ✓ spine2: overall ok (5 checks passed)
-    ✓ leaf1: overall ok (5 checks passed)
-    ✓ leaf2: overall ok (5 checks passed)
-
-Destroying topology...
-  ✓ All VMs stopped
-
-PASS: bgp-underlay (5/5 steps passed, 68s)
-```
-
-**Status symbols:**
-
-| Symbol | Status |
-|--------|--------|
-| `✓` | PASS |
-| `✗` | FAIL |
-| `⊘` | SKIP |
-| `!` | ERROR |
-
-### 7.6 Markdown Report Format
-
-Written to `newtest/.generated/report.md`. Format matches newtest HLD §9:
-
-```markdown
-# newtest Report — 2026-02-05 10:30:00
-
-| Scenario | Topology | Platform | Result | Duration |
-|----------|----------|----------|--------|----------|
-| bgp-underlay | 4node | sonic-vpp | PASS | 68s |
-| full-fabric | 4node | sonic-vpp | FAIL | 140s |
-
-## Failures
-
-### full-fabric
-Step 7 (verify-ping): leaf1 → leaf2 ping failed
-  Expected: 5/5 packets received
-  Got: 0/5 packets received
-
-## Skipped
-
-### full-fabric (when run with --platform sonic-vs)
-Step 7 (verify-ping): SKIP — platform sonic-vs has dataplane: false
-```
-
-### 7.7 JUnit XML Format
-
-For CI systems that parse JUnit XML:
-
-```go
-// junitTestSuites represents the top-level JUnit XML structure.
-type junitTestSuites struct {
-    XMLName  xml.Name         `xml:"testsuites"`
-    Suites   []junitTestSuite `xml:"testsuite"`
-}
-
-// junitTestSuite maps to a single scenario.
-type junitTestSuite struct {
-    Name     string          `xml:"name,attr"`
-    Tests    int             `xml:"tests,attr"`
-    Failures int             `xml:"failures,attr"`
-    Errors   int             `xml:"errors,attr"`
-    Skipped  int             `xml:"skipped,attr"`
-    Time     float64         `xml:"time,attr"`
-    Cases    []junitTestCase `xml:"testcase"`
-}
-
-// junitTestCase maps to a single step.
-type junitTestCase struct {
-    Name      string        `xml:"name,attr"`
-    ClassName string        `xml:"classname,attr"` // scenario name
-    Time      float64       `xml:"time,attr"`
-    Failure   *junitFailure `xml:"failure,omitempty"`
-    Skipped   *junitSkipped `xml:"skipped,omitempty"`
-    Error     *junitError   `xml:"error,omitempty"`
-}
-```
-
-Each `ScenarioResult` maps to a `junitTestSuite`. Each `StepResult` maps to
-a `junitTestCase`. The `classname` attribute is set to the scenario name for
-grouping in CI dashboards.
+**WriteJUnit**: JUnit XML. Each `ScenarioResult` → `<testsuite>`, each
+`StepResult` → `<testcase>`. Iteration number is prepended to step names for
+repeated scenarios.
 
 ---
 
-## 8. CLI Implementation (`cmd/newtest/`)
+## 10. Error Handling (`errors.go`)
 
-### 8.1 Command Tree
-
-Same Cobra pattern as `cmd/newtron/` and `cmd/newtlab/`:
+### 10.1 Error Types
 
 ```go
-// main.go
-func main() {
-    rootCmd := &cobra.Command{
-        Use:   "newtest",
-        Short: "E2E testing for newtron",
-    }
-
-    rootCmd.AddCommand(
-        newRunCmd(),
-        newListCmd(),
-        newTopologiesCmd(),
-    )
-
-    if err := rootCmd.Execute(); err != nil {
-        os.Exit(1)
-    }
-}
-```
-
-### 8.2 run Command
-
-```go
-// cmd_run.go
-func newRunCmd() *cobra.Command {
-    var opts RunOptions
-
-    cmd := &cobra.Command{
-        Use:   "run",
-        Short: "Run test scenarios",
-        RunE: func(cmd *cobra.Command, args []string) error {
-            runner := NewRunner("newtest/suites/2node-standalone", "newtest/topologies")
-            results, err := runner.Run(opts)
-            if err != nil {
-                return err
-            }
-
-            // Print console output
-            gen := &ReportGenerator{Results: results}
-            gen.PrintConsole(os.Stdout)
-
-            // Write markdown report
-            gen.WriteMarkdown("newtest/.generated/report.md")
-
-            // Write JUnit if requested
-            if opts.JUnitPath != "" {
-                gen.WriteJUnit(opts.JUnitPath)
-            }
-
-            // Exit code based on results (infra errors take priority)
-            hasFailure, hasInfraError := false, false
-            for _, r := range results {
-                if r.DeployError != nil || r.Status == StatusError {
-                    hasInfraError = true
-                }
-                if r.Status == StatusFailed {
-                    hasFailure = true
-                }
-            }
-            if hasInfraError {
-                os.Exit(2)
-            }
-            if hasFailure {
-                os.Exit(1)
-            }
-            return nil
-        },
-    }
-
-    cmd.Flags().StringVar(&opts.Scenario, "scenario", "", "run specific scenario")
-    cmd.Flags().BoolVar(&opts.All, "all", false, "run all scenarios")
-    cmd.Flags().StringVar(&opts.Dir, "dir", "", "run incremental suite from directory")
-    cmd.Flags().StringVar(&opts.Topology, "topology", "", "override topology")
-    cmd.Flags().StringVar(&opts.Platform, "platform", "", "override platform")
-    cmd.Flags().BoolVar(&opts.Keep, "keep", false, "don't destroy topology after tests")
-    cmd.Flags().BoolVar(&opts.NoDeploy, "no-deploy", false, "skip deploy/destroy")
-    cmd.Flags().BoolVarP(&opts.Verbose, "verbose", "v", false, "verbose output")
-    cmd.Flags().StringVar(&opts.JUnitPath, "junit", "", "JUnit XML output path")
-
-    return cmd
-}
-```
-
-**Flag to RunOptions mapping:**
-
-| Flag | RunOptions Field | Default |
-|------|-----------------|---------|
-| `--scenario <name>` | `Scenario` | `""` |
-| `--all` | `All` | `false` |
-| `--dir <path>` | `Dir` | `""` |
-| `--topology <name>` | `Topology` | `""` (from scenario) |
-| `--platform <name>` | `Platform` | `""` (from scenario) |
-| `--keep` | `Keep` | `false` |
-| `--no-deploy` | `NoDeploy` | `false` |
-| `--junit <path>` | `JUnitPath` | `""` |
-| `-v, --verbose` | `Verbose` | `false` |
-
-### 8.3 list Command
-
-```go
-// cmd_list.go
-func newListCmd() *cobra.Command {
-    return &cobra.Command{
-        Use:   "list",
-        Short: "List available scenarios",
-        RunE: func(cmd *cobra.Command, args []string) error {
-            scenarios, err := ParseAllScenarios("newtest/suites/2node-standalone")
-            if err != nil {
-                return err
-            }
-            fmt.Println("Available scenarios:")
-            for _, s := range scenarios {
-                fmt.Printf("  %-16s %s (%s, %s)\n",
-                    s.Name, s.Description, s.Topology, s.Platform)
-            }
-            return nil
-        },
-    }
-}
-```
-
-**Output format:**
-
-```
-Available scenarios:
-  bgp-underlay     Verify eBGP underlay sessions establish (4node, sonic-vpp)
-  bgp-overlay      Verify iBGP overlay sessions (4node, sonic-vpp)
-  service-l3       L3 service apply/remove (2node, sonic-vpp)
-  health           Health checks after provisioning (2node, sonic-vpp)
-```
-
-### 8.4 topologies Command
-
-```go
-// cmd_topologies.go
-func newTopologiesCmd() *cobra.Command {
-    return &cobra.Command{
-        Use:   "topologies",
-        Short: "List available topologies",
-        RunE: func(cmd *cobra.Command, args []string) error {
-            // Read subdirectories of newtest/topologies/
-            entries, err := os.ReadDir("newtest/topologies")
-            if err != nil {
-                return err
-            }
-            fmt.Println("Available topologies:")
-            for _, e := range entries {
-                if e.IsDir() {
-                    fmt.Printf("  %s\n", e.Name())
-                }
-            }
-            return nil
-        },
-    }
-}
-```
-
----
-
-## 9. Error Handling
-
-### 9.1 Error Types
-
-```go
-// InfraError indicates an infrastructure failure (VM, SSH, Redis)
-// that prevented a test from running.
 type InfraError struct {
-    Op      string // "deploy", "connect", "ssh"
-    Device  string // device name (or "" for topology-level)
-    Err     error
+    Op     string // "deploy", "connect", "ssh"
+    Device string // device name (or "" for topology-level)
+    Err    error
 }
 
-func (e *InfraError) Error() string {
-    if e.Device != "" {
-        return fmt.Sprintf("newtest: %s %s: %s", e.Op, e.Device, e.Err)
-    }
-    return fmt.Sprintf("newtest: %s: %s", e.Op, e.Err)
-}
-
-func (e *InfraError) Unwrap() error { return e.Err }
-
-// StepError indicates a step execution failure (not an assertion failure).
 type StepError struct {
     Step   string
     Action StepAction
     Err    error
 }
 
-func (e *StepError) Error() string {
-    return fmt.Sprintf("newtest: step %s (%s): %s", e.Step, e.Action, e.Err)
+type PauseError struct {
+    Completed int
 }
-
-func (e *StepError) Unwrap() error { return e.Err }
 ```
 
-All errors use `fmt.Errorf` with `%w` wrapping for context, following the
-same pattern as newtlab (see newtlab LLD §15.1):
+| Type | When | Message Format |
+|------|------|---------------|
+| `InfraError` | Deploy fails, SSH connect fails | `"newtest: deploy: <err>"` or `"newtest: connect leaf1: <err>"` |
+| `StepError` | Unknown action, internal executor error | `"newtest: step provision-all (provision): <err>"` |
+| `PauseError` | Suite paused between scenarios | `"paused after N scenarios"` |
+
+All error types implement `error`. `InfraError` and `StepError` implement
+`Unwrap() error` for `errors.Is`/`errors.As` compatibility.
+
+### 10.2 Exit Codes
+
+| Code | Trigger | Sentinel |
+|------|---------|----------|
+| 0 | All passed | `nil` |
+| 1 | Test failure or unknown error | `errTestFailure` |
+| 2 | Infrastructure error | `errInfraError` |
+
+The `start` command's `RunE` returns sentinel errors (`errTestFailure`,
+`errInfraError`) which `main()` maps to exit codes. Deferred cleanup
+(lock release) runs before exit.
+
+---
+
+## 11. CLI (`cmd/newtest/`)
+
+### 11.1 Command Tree
 
 ```go
-return fmt.Errorf("newtest: deploy topology: %w", err)
-return fmt.Errorf("newtest: connect to %s: %w", deviceName, err)
-return fmt.Errorf("newtest: step %s: no ChangeSet for device %s", step.Name, deviceName)
+func main() {
+    rootCmd := &cobra.Command{Use: "newtest", ...}
+    rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
+
+    rootCmd.AddCommand(
+        newStartCmd(),     // start [suite]
+        newPauseCmd(),     // pause
+        newStopCmd(),      // stop
+        newStatusCmd(),    // status
+        &runCmd,           // run [suite] (hidden, deprecated alias for start)
+        newListCmd(),      // list [suite]
+        newSuitesCmd(),    // suites (hidden alias for list)
+        newTopologiesCmd(),// topologies
+        versionCmd,        // version
+    )
+}
 ```
 
-### 9.2 Exit Codes
+### 11.2 start Command
 
-| Exit Code | Meaning | Trigger |
-|-----------|---------|---------|
-| 0 | All scenarios passed | All steps PASS or SKIP |
-| 1 | One or more scenarios failed | Any step FAIL |
-| 2 | Infrastructure error | VM boot failure, SSH connection failure, deploy error |
+```go
+func newStartCmd() *cobra.Command
+```
 
-Exit codes are set in the `run` command (§8.2) based on `ScenarioResult.Status` and `ScenarioResult.DeployError`.
+**Flags:** `--dir`, `--scenario`, `--topology`, `--platform`, `--junit`
 
-### 9.3 Scenario Execution Order
+**Flow:**
+1. Resolve suite directory from positional arg or `--dir`
+2. Check for paused state → set `Resume: true` and populate `Completed` map
+3. Build `RunState`, `AcquireLock`
+4. Create `StateReporter` wrapping `ConsoleProgress`
+5. Call `runner.Run(opts)`
+6. Handle `PauseError` → save paused state
+7. Determine final status (complete/failed), save state
+8. Write markdown report and JUnit (if requested)
+9. Return sentinel error for exit code mapping
 
-**Scenarios are strictly sequential.** When `--all` is used, scenarios run one at a time in `ParseAllScenarios` order (alphabetical by filename). Each scenario gets its own newtlab deploy/destroy cycle. There is no parallel scenario execution — this is intentional because:
+**Lifecycle integration:**
+- Always sets `Keep: true` (topology stays up)
+- Always sets `NoDeploy: false` (EnsureTopology handles reuse)
+- State is persisted at every lifecycle boundary
 
-1. newtlab port allocations (SSH, console, link ports) would conflict between concurrent topologies
-2. Resource consumption (QEMU VMs) makes parallelism impractical on a single host
-3. Test isolation is simpler to reason about with sequential execution
+### 11.3 pause Command
 
-**Steps within a scenario** are also strictly sequential. The fail-fast model (§4.3) means a failing step stops the scenario immediately. Step-level parallelism only applies to `provision` (multi-device provisioning within a single step, controlled by `--parallel`).
+```go
+func newPauseCmd() *cobra.Command
+```
 
----
+**Flags:** `--dir`
 
-## Cross-References
+Sets `state.Status = SuiteStatusPausing` and saves. The running `iterateScenarios`
+loop detects this via `CheckPausing` and stops after the current scenario.
 
-### References to newtron LLD
+Validates: suite must exist, must be `running`, runner PID must be alive.
 
-| newtron LLD Section | How newtest Uses It |
-|----------------------|---------------------|
-| §3.1 `spec.NewLoader()` | Loading topology specs in `Runner.connectDevices()` |
-| §3.1A Spec type ownership | Shows which fields newtest reads (e.g., `PlatformSpec.Dataplane`) |
-| §3.6 `ChangeSet` | Stored per-device in `Runner.ChangeSets` for `verify-provisioning` |
-| §3.6A `VerificationResult`, `RouteEntry` | Step result formatting in verifyProvisioningExecutor and verifyRouteExecutor |
-| §5.1 `Interface.ApplyService()`, `RemoveService()` | applyServiceExecutor, removeServiceExecutor |
-| §5.2 `Device.VerifyChangeSet()` | verifyProvisioningExecutor |
-| §5.2 `Device.GetRoute()` | verifyRouteExecutor (source: `app_db`) |
-| §5.2 `Device.GetRouteASIC()` | verifyRouteExecutor (source: `asic_db`) |
-| §5.2 `Device.RunHealthChecks()` | verifyHealthExecutor, verifyBGPExecutor |
-| §5.2 `Device.ApplyBaseline()` | applyBaselineExecutor |
-| §5.3 `HealthCheckResult` (within Operation Configuration Types) | Health check status interpretation |
-| §5.4 `TopologyProvisioner.ProvisionDevice()` | provisionExecutor |
-| §5.1 `Interface.Set/SetIP/SetVRF()` | setInterfaceExecutor (§5.18) |
-| §5.1 `Interface.AddBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.37), bgpRemoveNeighborExecutor (§5.38) |
-| §5.1 `Interface.RefreshService()` | refreshServiceExecutor (§5.39) |
-| §5.2 `Device.CreateVLAN/DeleteVLAN/AddVLANMember()` | §5.19–§5.21 |
-| §5.2 `Device.RemoveVLANMember()` | removeVLANMemberExecutor (§5.33) |
-| §5.2 `Device.CreateVRF/DeleteVRF()` | §5.22–§5.23 |
-| §5.2 `Device.SetupEVPN()` | setupEVPNExecutor (§5.24) |
-| §5.2 `Device.AddVRFInterface/RemoveVRFInterface()` | §5.25–§5.26 |
-| §5.2 `Device.BindIPVPN/UnbindIPVPN()` | §5.27–§5.28 |
-| §5.2 `Device.BindMACVPN/UnbindMACVPN()` | §5.29–§5.30 |
-| §5.2 `Device.AddStaticRoute/RemoveStaticRoute()` | §5.31–§5.32 |
-| §5.2 `Device.ApplyQoS/RemoveQoS()` | §5.34–§5.35 |
-| §5.2 `Device.ConfigureSVI()` | configureSVIExecutor (§5.36) |
-| §5.2 `Device.Cleanup()` | cleanupExecutor (§5.40) |
-| §5.2 `Device.RestartService()` | restartServiceExecutor (§5.16) |
-| §5.2 `Device.ApplyFRRDefaults()` | applyFRRDefaultsExecutor (§5.17) |
-| §5.2 `Device.AddLoopbackBGPNeighbor/RemoveBGPNeighbor()` | bgpAddNeighborExecutor (§5.37), bgpRemoveNeighborExecutor (§5.38) |
+### 11.4 stop Command
 
-### References to Device Layer LLD
+```go
+func newStopCmd() *cobra.Command
+```
 
-| Device LLD Section | How newtest Uses It |
-|--------------------|---------------------|
-| §5.1 `Device.Connect()` | `Runner.connectDevices()` — SSH tunnel, multi-DB connection |
-| §5.7 Verification methods | `GetRoute()` / `GetRouteASIC()` called by verifyRouteExecutor |
-| §3 APP_DB | Route reads for verify-route (source: `app_db`) |
-| §4 ASIC_DB | Route reads for verify-route (source: `asic_db`) |
+**Flags:** `--dir`
 
-### References to newtlab LLD
+1. Load state, refuse if runner PID is alive (use `pause` first)
+2. Resolve topology from state, destroy via `lab.Destroy(ctx)`
+3. Remove state directory via `RemoveRunState`
 
-| newtlab LLD Section | How newtest Uses It |
-|--------------------|---------------------|
-| §1.1 `PlatformSpec.Dataplane` | `Runner.hasDataplane()` for verify-ping skip logic |
-| §1.2 `DeviceProfile.SSHPort` | Used by `Device.Connect()` after newtlab profile patching |
-| §4.1 `newtlab.Lab` | `Runner.Lab` field, `DeployTopology()` return type |
-| §4.1 `newtlab.NewLab(specDir)` | Called in `DeployTopology()` |
-| §4.1 `newtlab.Lab.Deploy()` | Called in `DeployTopology()` |
-| §4.1 `newtlab.Lab.Destroy()` | Called in `DestroyTopology()` |
-| §10 Profile patching | newtest relies on newtlab having patched `ssh_port`/`mgmt_ip` into profiles before connecting devices |
+### 11.5 status Command
 
-### References to newtest HLD
+```go
+func newStatusCmd() *cobra.Command
+```
 
-| newtest HLD Section | LLD Section |
-|---------------------|-------------|
-| §5 Step actions | §2.3 StepAction constants, §5 Step executors |
-| §6 Verification tiers | §5 executor-to-newtron method mapping |
-| §8 Output format | §7.5 Console output format |
-| §9 Report format | §7.6 Markdown report format |
-| §10 CLI | §8 CLI implementation |
-| §12 Implementation phases | All sections (phased delivery) |
+**Flags:** `--dir`, `--json`
 
----
+Without `--dir`: lists all suites from `ListSuiteStates()`. With `--dir`: shows
+detailed status for one suite including topology liveness check, per-scenario
+table with progress/step info, and summary counts.
 
-## Appendix A: Changelog
+JSON mode outputs `RunState` (single suite) or `[]RunState` (all suites).
 
-### v8 — V2 CLI Action Alignment
+### 11.6 list Command
 
-| Change | Details |
-|--------|---------|
-| Deleted 5 actions | `create-vtep`, `delete-vtep`, `map-l2vni`, `map-l3vni`, `unmap-vni` — replaced by higher-level V2 CLI operations |
-| Added 12 actions | `setup-evpn`, `add-vrf-interface`, `remove-vrf-interface`, `bind-ipvpn`, `unbind-ipvpn`, `bind-macvpn`, `unbind-macvpn`, `add-static-route`, `remove-static-route`, `remove-vlan-member`, `apply-qos`, `remove-qos` |
-| Action count | 31 &rarr; 38 |
-| Executor sections | §5.24–§5.28 replaced; §5.24–§5.35 are new executors; §5.36–§5.40 renumbered from §5.29–§5.33 |
-| Suite scenarios | 27 &rarr; 31 incremental (added 27-30: vrf-interface-binding, static-route, vlan-member-remove, qos-apply-remove); renamed 08 vtep-lifecycle &rarr; evpn-setup, 09 evpn-vni-mapping &rarr; evpn-vpn-binding |
-| Standalone scenarios | Added `evpn-overlay` (end-to-end overlay test) |
+```go
+func newListCmd() *cobra.Command
+```
 
+**Flags:** `--dir`
+
+- No args: `listSuites()` — tabwriter table with suite name, scenario count, topology, devices, links
+- With suite name: `listScenarios(dir)` — tabwriter table with index, scenario name, steps, topology, requires
+
+### 11.7 topologies Command
+
+Lists directories under `newtest/topologies/`.
+
+### 11.8 version Command
+
+Prints version and git commit from `pkg/version/`.
+
+### 11.9 Helpers (`helpers.go`)
+
+```go
+func resolveDir(cmd *cobra.Command, flagVal string, args ...string) string
+func resolveSuiteName(name string) string
+func suitesBaseDir() string
+func resolveTopologiesDir() string
+func resolveSuite(cmd *cobra.Command, dir string, filter func(SuiteStatus) bool) (string, error)
+func resolveTopologyFromState(state *RunState) string
+```
+
+`resolveDir` handles positional arg → `--dir` override → default. Suite names
+are resolved under `newtest/suites/` or used as paths directly.
+
+`resolveSuite` auto-detects the active suite when `--dir` is omitted by
+scanning `ListSuiteStates()` and filtering by status.

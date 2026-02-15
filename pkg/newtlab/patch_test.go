@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 func TestQEMUPCIAddrs(t *testing.T) {

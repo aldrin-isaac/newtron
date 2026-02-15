@@ -72,8 +72,7 @@ func (t *SSHTunnel) ExecCommand(cmd string) (string, error)
 **Security note:** `HostKeyCallback: ssh.InsecureIgnoreHostKey()` is used because this is a lab/test environment only. SONiC-VS VMs regenerate host keys on each boot.
 
 **Timeouts:**
-- Dial timeout: 30 seconds (`ssh.ClientConfig.Timeout`) — *not yet implemented; code uses Go default*
-- Keepalive interval: 60 seconds (sent by the SSH client to detect dead connections) — *not yet implemented*
+- Dial timeout: 30 seconds (`ssh.ClientConfig.Timeout`)
 
 **Reconnection policy:** No automatic reconnection. If the SSH tunnel or any Redis client disconnects, the caller must call `Device.Disconnect()` and then `Device.Connect()` again. This is a deliberate simplicity choice — reconnection with state recovery adds complexity that isn't needed for lab/test workloads where a connection drop typically means the VM crashed.
 
@@ -301,17 +300,10 @@ func (c *StateDBClient) GetFDBCount(vlan int) (int, error)
 func (c *StateDBClient) GetTransceiverInfo(port string) (*TransceiverInfoEntry, error)
 func (c *StateDBClient) GetTransceiverStatus(port string) (*TransceiverStatusEntry, error)
 
-// --- Generic accessor (for newtest's verifyStateDBExecutor) ---
-// Status: not yet implemented. No StateDBClient code exists.
-
 // GetEntry reads a single STATE_DB entry as raw map[string]string.
 // Returns (nil, nil) if the entry does not exist.
 // Used by newtest's verifyStateDBExecutor for generic table/key/field assertions.
 func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error)
-
-// --- Locking (write path) ---
-// Status: not yet implemented. Current code uses a stub:
-// Lock(ctx) sets d.locked = true without Redis STATE_DB interaction.
 
 // AcquireLock atomically sets NEWTRON_LOCK|<device> in STATE_DB.
 // Returns ErrDeviceLocked (with current holder) if the key already exists.
@@ -357,7 +349,7 @@ NEWTRON_LOCK|spine1
 
 The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holder crashes.
 
-**Lock delegation from device.Device (newtron LLD §3.4):**
+**Lock delegation from device.Device (newtron LLD §3.3):**
 
 `device.Device.Lock(holder, ttl)` stores the holder string in `d.lockHolder` and calls `d.stateClient.AcquireLock(d.Name, holder, ttl)`. `device.Device.Unlock()` reads `d.lockHolder` and calls `d.stateClient.ReleaseLock(d.Name, d.lockHolder)` — the caller does not need to pass the holder string again. The `network.Device.Lock()` wrapper (newtron LLD §3.2) constructs the holder string as `"user@hostname"` and delegates to `d.conn.Lock(holder, ttl)`.
 
@@ -390,12 +382,12 @@ The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holde
 
 ### 2.4 Redis Serialization
 
-Redis hashes store field names and values as strings. SONiC uses these hash field names directly (e.g., `admin_status`, `oper_status`). The Go structs use `json` tags but these map to Redis hash field names via **manual copy** (not `json.Unmarshal`).
+Redis hashes store field names and values as strings. SONiC uses these hash field names directly (e.g., `admin_status`, `oper_status`). The Go structs use `json` tags but these map to Redis hash field names via table-driven parsers in `statedb_parsers.go` (15 registered table parsers).
 
 The serialization path is:
 1. `HGETALL <table>|<key>` returns `map[string]string` from Redis
-2. Each field is manually assigned to the corresponding struct field by matching the json tag name
-3. This is done via a helper function, not via `json.Unmarshal` or `mapstructure` — it's a simple switch/map lookup
+2. Each field is assigned to the corresponding struct field via a registered parser function
+3. This is done via `statedb_parsers.go` — a registry-driven approach matching the `configdb_parsers.go` pattern
 
 **Why not json.Unmarshal:** Redis hashes are flat `map[string]string`, not JSON objects. There's no JSON to unmarshal. The `json` tags on structs serve double duty: they define both the Redis hash field name and the JSON serialization format (for when structs are marshaled to JSON for display/logging).
 
@@ -456,27 +448,11 @@ func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigD
 
 ## 3. APP_DB (`pkg/device/appldb.go`)
 
-> **Status: not yet implemented.** No `appldb.go` exists in the codebase. The types and client
-> below are forward design for route verification. See also B6 (GetRoute) in §5.7.
-
 APP_DB (Redis DB 0) contains application-level state written by SONiC daemons. For route verification, newtron reads `ROUTE_TABLE` entries written by `fpmsyncd` (the FPM-to-Redis daemon that syncs FRR's RIB into APP_DB).
 
-**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRoute()` (§5.7) to observe routes from APP_DB; it interprets the returned `RouteEntry` (newtron LLD §3.6A) to assert protocol, next-hop, and presence.
+**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRoute()` (§5.8) to observe routes from APP_DB; it interprets the returned `RouteEntry` (newtron LLD §3.6A) to assert protocol, next-hop, and presence.
 
 ### 3.1 AppDB Struct
-
-```go
-// AppDB mirrors the route-relevant portion of SONiC's APP_DB (Redis DB 0).
-type AppDB struct {
-    RouteTable map[string]AppDBRouteEntry `json:"ROUTE_TABLE,omitempty"`
-}
-```
-
-Key format: `ROUTE_TABLE:<vrf>:<prefix>` — for example:
-- `ROUTE_TABLE:default:10.1.0.0/31` — route in the default VRF
-- `ROUTE_TABLE:Vrf-customer:192.168.1.0/24` — route in a named VRF
-
-### 3.2 Route Entry Type
 
 ```go
 // AppDBRouteEntry represents a route in APP_DB's ROUTE_TABLE.
@@ -488,6 +464,10 @@ type AppDBRouteEntry struct {
 }
 ```
 
+Key format: `ROUTE_TABLE:<vrf>:<prefix>` — for example:
+- `ROUTE_TABLE:default:10.1.0.0/31` — route in the default VRF
+- `ROUTE_TABLE:Vrf-customer:192.168.1.0/24` — route in a named VRF
+
 **ECMP convention:** For multi-path routes, `nexthop` and `ifname` are comma-separated with positional correspondence:
 ```
 nexthop:  "10.0.0.1,10.0.0.3"
@@ -496,7 +476,7 @@ ifname:   "Ethernet0,Ethernet4"
 -> NextHop{IP: "10.0.0.3", Interface: "Ethernet4"}
 ```
 
-### 3.3 AppDBClient
+### 3.2 AppDBClient
 
 ```go
 // AppDBClient wraps Redis client for APP_DB access (DB 0).
@@ -512,6 +492,7 @@ func (c *AppDBClient) Close() error
 // GetRoute reads a single route from ROUTE_TABLE by VRF and prefix.
 // Returns nil (not error) if the prefix does not exist.
 // Parses comma-separated nexthop/ifname into []NextHop.
+// For /32 host routes, retries without the mask if the initial lookup fails.
 func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error)
 ```
 
@@ -519,13 +500,9 @@ func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error)
 
 ## 4. ASIC_DB (`pkg/device/asicdb.go`)
 
-> **Status: not yet implemented.** No `asicdb.go` exists in the codebase. The types, client,
-> and OID resolution logic below are forward design for ASIC-level route verification.
-> See also B7 (GetRouteASIC) in §5.7.
-
 ASIC_DB (Redis DB 1) contains SAI (Switch Abstraction Interface) objects that represent what is actually programmed in hardware. Reading routes from ASIC_DB confirms that the data plane is programmed, not just the control plane.
 
-**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRouteASIC()` (§5.7) when `expect.source == "asic_db"` to confirm data-plane programming. See newtest LLD §5.9.
+**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRouteASIC()` (§5.8) when `expect.source == "asic_db"` to confirm data-plane programming. See newtest LLD §7.6.
 
 ### 4.1 SAI Object Chain
 
@@ -543,7 +520,7 @@ Step 3: ASIC_STATE:SAI_OBJECT_TYPE_NEXT_HOP:oid:0x4000...
         -> SAI_NEXT_HOP_ATTR_ROUTER_INTERFACE_ID = "oid:0x6000..."
 ```
 
-For single-path routes, step 1 points directly to a `SAI_OBJECT_TYPE_NEXT_HOP` (skipping the group). The client handles both cases.
+For single-path routes, step 1 points directly to a `SAI_OBJECT_TYPE_NEXT_HOP` (skipping the group). The client handles both cases via `resolveNextHops()`.
 
 **ASIC_DB key format:** Route entry keys are JSON-encoded with canonical formatting (sorted keys, no whitespace):
 
@@ -585,84 +562,24 @@ func (c *AsicDBClient) Close() error
 
 // Connect establishes the Redis connection and discovers the switch and
 // default VR OIDs that are required for all subsequent route lookups.
-func (c *AsicDBClient) Connect() error {
-    c.client = redis.NewClient(&redis.Options{Addr: addr, DB: 1})
-    if err := c.client.Ping(c.ctx).Err(); err != nil {
-        return fmt.Errorf("asic_db ping: %w", err)
-    }
-
-    // 1. Discover switch OID: scan for the single SAI_OBJECT_TYPE_SWITCH key
-    keys, err := c.scanKeys("ASIC_STATE:SAI_OBJECT_TYPE_SWITCH:*")
-    if err != nil || len(keys) == 0 {
-        return fmt.Errorf("asic_db: cannot discover switch OID: %w", err)
-    }
-    // Key format: "ASIC_STATE:SAI_OBJECT_TYPE_SWITCH:oid:0x..."
-    c.switchOID = strings.TrimPrefix(keys[0], "ASIC_STATE:SAI_OBJECT_TYPE_SWITCH:")
-
-    // 2. Discover default VR OID from the switch object's attribute
-    defaultVR, err := c.client.HGet(c.ctx, keys[0], "SAI_SWITCH_ATTR_DEFAULT_VIRTUAL_ROUTER_ID").Result()
-    if err != nil {
-        return fmt.Errorf("asic_db: cannot read default VR from switch: %w", err)
-    }
-    c.defaultVR = defaultVR
-
-    c.vrfOIDs = map[string]string{"default": c.defaultVR}
-    return nil
-}
+func (c *AsicDBClient) Connect() error
 
 // ResolveVROID returns the VR OID for a given VRF name. Returns the cached
 // value if available; otherwise performs the CONFIG_DB-based discovery described
 // in §4.1 (scan ASIC_DB route entries for a known connected prefix in the VRF).
 // The configDB parameter provides the CONFIG_DB snapshot for finding a connected
 // prefix belonging to the VRF.
-func (c *AsicDBClient) ResolveVROID(vrfName string, configDB *ConfigDB) (string, error) {
-    if oid, ok := c.vrfOIDs[vrfName]; ok {
-        return oid, nil
-    }
-
-    // Find a connected prefix in this VRF from CONFIG_DB INTERFACE table
-    var knownPrefix string
-    for key := range configDB.Interface {
-        // Look for IP binding entries (e.g., "Ethernet0|10.1.1.1/30")
-        parts := strings.SplitN(key, "|", 2)
-        if len(parts) != 2 { continue } // base entry, skip
-        baseName := parts[0]
-        // Check if this interface belongs to the target VRF
-        if base, ok := configDB.Interface[baseName]; ok && base.VRFName == vrfName {
-            knownPrefix = parts[1]
-            break
-        }
-    }
-    if knownPrefix == "" {
-        return "", fmt.Errorf("no connected prefix found for VRF %s in CONFIG_DB", vrfName)
-    }
-
-    // Scan ASIC_DB route entries for the known prefix and extract the VR OID
-    keys, err := c.scanKeys("ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:*")
-    if err != nil {
-        return "", fmt.Errorf("scanning route entries: %w", err)
-    }
-    for _, key := range keys {
-        jsonPart := strings.TrimPrefix(key, "ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:")
-        var entry struct {
-            Dest     string `json:"dest"`
-            SwitchID string `json:"switch_id"`
-            VR       string `json:"vr"`
-        }
-        if json.Unmarshal([]byte(jsonPart), &entry) == nil && entry.Dest == knownPrefix {
-            c.vrfOIDs[vrfName] = entry.VR
-            return entry.VR, nil
-        }
-    }
-    return "", fmt.Errorf("VR OID not found for VRF %s (prefix %s not in ASIC_DB)", vrfName, knownPrefix)
-}
+func (c *AsicDBClient) ResolveVROID(vrfName string, configDB *ConfigDB) (string, error)
 
 // GetRouteASIC reads a route from ASIC_DB by resolving the SAI object chain:
 // SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
 // Returns nil (not error) if the route is not programmed in ASIC.
 // Returns RouteEntry with Source: RouteSourceAsicDB.
-func (c *AsicDBClient) GetRouteASIC(vrf, prefix string) (*RouteEntry, error)
+// The configDB parameter is needed for VR OID resolution of named VRFs.
+func (c *AsicDBClient) GetRouteASIC(vrf, prefix string, configDB *ConfigDB) (*RouteEntry, error)
 ```
+
+Key scanning uses cursor-based `SCAN` (via `scanKeys()`) to avoid O(N) `KEYS` commands.
 
 ---
 
@@ -718,9 +635,6 @@ func (d *Device) Connect(ctx context.Context) error {
         if err != nil {
             util.WithDevice(d.Name).Warnf("Failed to load state_db: %v", err)
         } else {
-            // DeviceState and its nested types (InterfaceState, PortChannelState,
-            // VLANState, VRFState) are defined in the newtron LLD §3.2.
-            // PopulateDeviceState fills this struct from STATE_DB operational data.
             PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
         }
     }
@@ -779,26 +693,20 @@ func (d *Device) LoadState(ctx context.Context) error {
 **Parse functions** called by `LoadState()`:
 
 ```go
-// parseInterfaces iterates d.ConfigDB.Port and d.ConfigDB.Interface tables,
-// building map[string]*InterfaceState. For each PORT entry: creates InterfaceState
-// with AdminStatus, Speed, MTU from PORT fields. Then overlays VRF from INTERFACE
-// base entry, IP addresses from INTERFACE|<name>|<ip> entries, and service binding
-// from NEWTRON_SERVICE_BINDING.
 func (d *Device) parseInterfaces() map[string]*InterfaceState
-
-// parsePortChannels iterates d.ConfigDB.PortChannel and PortChannelMember tables.
-// For each PORTCHANNEL entry: creates PortChannelState, collects members from
-// PORTCHANNEL_MEMBER keys matching "<lag>|*".
 func (d *Device) parsePortChannels() map[string]*PortChannelState
-
-// parseVLANs iterates d.ConfigDB.VLAN and VLANMember tables.
-// For each VLAN entry: creates VLANState with ID parsed from key ("Vlan100" → 100),
-// collects member ports from VLAN_MEMBER keys.
 func (d *Device) parseVLANs() map[int]*VLANState
-
-// parseVRFs iterates d.ConfigDB.VRF table.
-// For each VRF entry: creates VRFState with L3VNI from vni field.
 func (d *Device) parseVRFs() map[string]*VRFState
+```
+
+**State query helpers** (`pkg/device/state.go`):
+
+```go
+func (d *Device) ListInterfaces() []string
+func (d *Device) ListPortChannels() []string
+func (d *Device) ListVLANs() []int
+func (d *Device) ListVRFs() []string
+func (d *Device) GetInterfaceSummary() []InterfaceSummary
 ```
 
 ### 5.3 Writing Changes
@@ -809,33 +717,10 @@ func (d *Device) parseVRFs() map[string]*VRFState
 // ApplyChanges writes a set of changes to config_db via Redis.
 // Pure write — does not reload CONFIG_DB cache. Cache refresh is the
 // caller's responsibility via Lock() or Refresh().
-func (d *Device) ApplyChanges(changes []Change) error {
-    d.mu.Lock()
-    defer d.mu.Unlock()
-
-    if !d.connected {
-        return util.ErrNotConnected
-    }
-    if !d.locked {
-        return fmt.Errorf("device must be locked for changes")
-    }
-
-    for _, change := range changes {
-        var err error
-        switch change.Type {
-        case ChangeAdd, ChangeModify:
-            err = d.client.Set(change.Table, change.Key, change.NewValue)
-        case ChangeDelete:
-            err = d.client.Delete(change.Table, change.Key)
-        }
-        if err != nil {
-            return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
-        }
-    }
-
-    return nil
-}
+func (d *Device) ApplyChanges(changes []ConfigChange) error
 ```
+
+The method requires the device to be connected and locked. It iterates over changes, calling `client.Set()` for add/modify and `client.Delete()` for delete operations.
 
 ### 5.4 Pipeline-Based Write Path
 
@@ -844,34 +729,9 @@ Alongside the sequential `ApplyChanges()` path, there is a pipeline-based write 
 ```go
 // ApplyChangesPipelined writes a set of changes atomically via Redis MULTI/EXEC.
 // Used when atomicity is required (composite delivery, bulk operations).
-func (d *Device) ApplyChangesPipelined(changes []Change) error {
-    d.mu.Lock()
-    defer d.mu.Unlock()
-
-    if !d.connected || !d.locked {
-        return fmt.Errorf("device must be connected and locked")
-    }
-
-    // Convert changes to pipeline format (see newtron LLD §3.5 pipeline.go)
-    var sets []TableChange
-    var dels []TableKey
-    for _, c := range changes {
-        switch c.Type {
-        case ChangeAdd, ChangeModify:
-            sets = append(sets, TableChange{Table: c.Table, Key: c.Key, Fields: c.NewValue})
-        case ChangeDelete:
-            dels = append(dels, TableKey{Table: c.Table, Key: c.Key})
-        }
-    }
-
-    // Execute atomically via ConfigDBClient's unified pipeline method.
-    // PipelineSet(sets, dels) is declared in newtron LLD §3.5.
-    if err := d.client.PipelineSet(sets, dels); err != nil {
-        return fmt.Errorf("pipeline exec: %w", err)
-    }
-
-    return nil
-}
+// Converts ConfigChange entries to TableChange format and delegates to
+// ConfigDBClient.PipelineSet().
+func (d *Device) ApplyChangesPipelined(changes []ConfigChange) error
 ```
 
 **When to use each write path:**
@@ -885,58 +745,23 @@ func (d *Device) ApplyChangesPipelined(changes []Change) error {
 ### 5.5 Disconnect with Tunnel Cleanup
 
 ```go
-func (d *Device) Disconnect() error {
-    d.mu.Lock()
-    defer d.mu.Unlock()
-
-    if !d.connected {
-        return nil
-    }
-
-    // unlock() is private because Disconnect() already holds d.mu.
-    // Public Unlock() also acquires d.mu, which would deadlock.
-    // unlock() releases the STATE_DB lock without acquiring d.mu.
-    if d.locked {
-        if err := d.unlock(); err != nil {
-            util.WithDevice(d.Name).Warnf("Failed to release lock: %v", err)
-        }
-    }
-
-    if d.client != nil {
-        d.client.Close()
-    }
-
-    if d.stateClient != nil {
-        d.stateClient.Close()
-    }
-
-    if d.applClient != nil {
-        d.applClient.Close()
-    }
-
-    if d.asicClient != nil {
-        d.asicClient.Close()
-    }
-
-    // Close SSH tunnel last (after Redis clients)
-    if d.tunnel != nil {
-        d.tunnel.Close()
-        d.tunnel = nil
-    }
-
-    d.connected = false
-    return nil
-}
+func (d *Device) Disconnect() error
 ```
+
+Disconnect tears down in order:
+1. Release device lock if held (via private `unlock()` to avoid mutex deadlock)
+2. Close ConfigDBClient
+3. Close StateDBClient
+4. Close AppDBClient
+5. Close AsicDBClient
+6. Close SSHTunnel (if present): stops accept loop, waits for goroutines, closes SSH
 
 ### 5.6 Config Persistence
 
-These methods execute shell commands over the SSH tunnel to reload or save the
-running CONFIG_DB.
+These methods execute shell commands over the SSH tunnel to reload or save the running CONFIG_DB.
 
 ```go
-// ReloadConfig triggers a config reload on the SONiC device by running:
-//   sonic-cfggen -j /etc/sonic/config_db.json | redis-cli -n 4 -x RESTORE CONFIG_DB 0 REPLACE
+// ReloadConfig triggers "sudo config reload -y" on the SONiC device.
 // Used after bulk spec-driven provisioning to apply a full config snapshot.
 func (d *Device) ReloadConfig(ctx context.Context) error
 
@@ -960,16 +785,13 @@ SONiC uses multiple Redis databases within a single Redis instance:
 | 3 | LOGLEVEL_DB | Logging configuration | Not used |
 | 4 | CONFIG_DB | Configuration (ports, VLANs, BGP, etc.) | **Read/Write** |
 | 5 | FLEX_COUNTER_DB | Flexible counters | Not used |
-| 6 | STATE_DB | Operational state (oper_status, BGP state) | **Read** |
+| 6 | STATE_DB | Operational state (oper_status, BGP state) | **Read** + distributed lock |
 
 ### 5.8 Verification Methods
 
-> **Status: not yet implemented.** `GetRoute` and `GetRouteASIC` have no code. They depend on
-> `AppDBClient` (§3) and `AsicDBClient` (§4) which are also not yet implemented.
-
 These methods expose DB 0 and DB 1 reads at the `Device` level. They are observation primitives — they return structured data, not pass/fail verdicts. Orchestrators (newtest) decide correctness.
 
-**Single-shot reads:** Both `GetRoute` and `GetRouteASIC` perform a single Redis read and return immediately. They do not poll or retry. If the caller needs to wait for route convergence (e.g., waiting for BGP to install a route), the caller must implement its own polling loop with timeout. newtest's `verifyRouteExecutor` (newtest LLD §5.9) does exactly this.
+**Single-shot reads:** Both `GetRoute` and `GetRouteASIC` perform a single Redis read and return immediately. They do not poll or retry. If the caller needs to wait for route convergence (e.g., waiting for BGP to install a route), the caller must implement its own polling loop with timeout. newtest's `verifyRouteExecutor` (newtest LLD §7.6) does exactly this.
 
 ```go
 // GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.
@@ -981,6 +803,13 @@ func (d *Device) GetRoute(ctx context.Context, vrf, prefix string) (*RouteEntry,
 // object chain: SAI_ROUTE_ENTRY -> SAI_NEXT_HOP_GROUP -> SAI_NEXT_HOP.
 // Returns nil RouteEntry (not error) if not programmed in ASIC.
 func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntry, error)
+
+// VerifyChangeSet re-reads CONFIG_DB through a fresh ConfigDBClient connection
+// and confirms every entry in the ChangeSet was applied correctly.
+// Uses superset matching for ADD/MODIFY (actual may have more fields than expected)
+// and absence checking for DELETE.
+// Returns VerificationResult with pass count, fail count, and per-entry errors.
+func (d *Device) VerifyChangeSet(ctx context.Context, changes []ConfigChange) (*VerificationResult, error)
 ```
 
 ### 5.9 Pipeline Operations
@@ -1010,12 +839,10 @@ EXEC                            -- execute atomically
 
 **ReplaceAll for overwrite mode:**
 ```go
-func (c *ConfigDBClient) ReplaceAll(config *ConfigDB) error {
-    // 1. FLUSHDB — clear all keys in DB 4
-    // 2. Build pipeline of all HSET commands from config
-    // 3. MULTI/EXEC the pipeline
-    // This is used by composite overwrite mode only
-}
+// ReplaceAll deletes all existing keys in affected tables, then writes the
+// new entries via PipelineSet. PORT table entries are merged instead of replaced
+// (preserving platform-specific port config). Used by composite overwrite mode.
+func (c *ConfigDBClient) ReplaceAll(changes []TableChange) error
 ```
 
 ---
@@ -1034,36 +861,4 @@ To persist configuration across reboots, the SONiC command `config save -y` must
 | Integration tests | Ephemeral (standalone Redis) | Fresh Redis per test |
 | E2E lab tests | Runtime only (SONiC-VS) | `ResetLabBaseline()` deletes stale keys |
 
-E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function (newtron LLD §12.5) cleans known stale keys before each test suite run. Tests do not call `config save -y`, so a simple VM restart restores the baseline.
-
----
-
-## Cross-References
-
-### References to newtron LLD
-
-| newtron LLD Section | Relationship |
-|----------------------|-------------|
-| §3.5 ConfigDBClient | All Redis clients (§2.3, §3.3, §4.2) follow the same pattern |
-| §3.6 ChangeSet | Write paths (§5.3) apply ChangeSet entries to CONFIG_DB |
-| §3.6A VerificationResult, RouteEntry | Returned by verification methods (§5.7); consumed by newtest |
-| §5.2 Device operations | Device operations use the connection and write infrastructure documented here |
-| §12 Testing strategy | Tests use the SSH tunnel (§1) and write paths (§5.3) |
-
-### References to newtlab LLD
-
-| newtlab LLD Section | Relationship |
-|--------------------|-------------|
-| §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (§5.1) to target newtlab-allocated SSH port |
-| §1.1 PlatformSpec.VMCredentials | Source of SSHUser/SSHPass; resolved into DeviceProfile (§1.2) via profile patching (§10), then read by §5.1 |
-| §10 Profile patching | newtlab writes ssh_port/mgmt_ip into profiles; Device.Connect() reads them |
-
-### References to newtest LLD
-
-| newtest LLD Section | Relationship |
-|---------------------|-------------|
-| §4.5 Device connection | newtest calls `Device.Connect()` (§5.1) after newtlab deploy |
-| §5.2 provisionExecutor | Uses write paths (§5.3) via TopologyProvisioner |
-| §5.4 verifyProvisioningExecutor | Calls `Device.VerifyChangeSet()` which re-reads CONFIG_DB via a fresh ConfigDBClient on the same tunnel |
-| §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.7) |
-
+E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function cleans known stale keys before each test suite run. Tests do not call `config save -y`, so a simple VM restart restores the baseline.

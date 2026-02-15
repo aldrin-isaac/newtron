@@ -1,15 +1,6 @@
-# Newtron High-Level Design (HLD) — v6
+# Newtron High-Level Design (HLD)
 
-### Changelog
-
-| Version | Changes |
-|---------|---------|
-| **v6** | V2 CLI: pure noun-group pattern with implicit device detection. VRF as first-class noun (13 subcommands). BGP simplified to visibility-only (single `status` subcommand); peer management moved to `vrf add-neighbor`. EVPN restructured: `setup` (idempotent composite) + `status` + `ipvpn`/`macvpn` spec authoring sub-nouns. QoS and Filter nouns for spec authoring. Service `create`/`delete` for spec authoring. Per-noun `status` replaces old `state` command. Spec authoring with atomic persistence to network.json. New permissions: PermVRFCreate/Modify/Delete/View, PermSpecAuthor, PermFilterCreate/Modify/Delete/View, PermQoSCreate/PermQoSDelete. |
-| **v5** | Verification architecture: ChangeSet-based CONFIG_DB verification, APP_DB/ASIC_DB routing state observation primitives, four-tier verification strategy. |
-| **v4** | Topology provisioning: `topology.json` spec, `ProvisionDevice` (offline composite + atomic delivery), `ProvisionInterface` (online per-interface). |
-| **v3** | Composite mode, frrcfgd BGP management, platform.json port validation, route policy engine, Redis pipeline delivery, SiteSpec ClusterID. |
-
-## 1. Executive Summary
+## 1. Purpose
 
 Newtron is an opinionated network automation tool for SONiC-based switches. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
 
@@ -180,12 +171,12 @@ The translation layer interprets specs in context to generate config:
 +------------------+     +------------------+     +------------------+
            |                    |
            v                    +-----------+-----------+
-   +---------------+            |           |           |
-   |CompositeBuilder|           v           v           v
-   | (offline      |     +----------+ +----------+ +----------+
-   |  composite    |     | Spec     | | Device   | | Model    |
-   |  config gen)  |     | Layer    | | Layer    | | Layer    |
-   +---------------+     +----------+ +----------+ +----------+
+   +---------------+            |           |
+   |CompositeBuilder|           v           v
+   | (offline      |     +----------+ +----------+
+   |  composite    |     | Spec     | | Device   |
+   |  config gen)  |     | Layer    | | Layer    |
+   +---------------+     +----------+ +----------+
    +---------------+
    |Topology       |
    |Provisioner    |
@@ -211,13 +202,13 @@ The translation layer interprets specs in context to generate config:
              |           v                              |
              |  +---------------------------+           |
              |  | ConfigDBClient (DB 4)     |           |
-             |  | + PipelineClient (v3)     |           |
+             |  | + PipelineClient          |           |
              |  +---------------------------+           |
              |  +---------------------------+           |
              |  | StateDBClient  (DB 6)     |           |
              |  +---------------------------+           |
              |  +---------------------------+           |
-             |  | PlatformConfig (v3)       |           |
+             |  | PlatformConfig            |           |
              |  | (from device platform.json|           |
              |  |  via SSH)                 |           |
              |  +---------------------------+           |
@@ -472,19 +463,6 @@ Loads and resolves specifications from JSON files.
 | `DeviceProfile` | Per-device settings (mgmt_ip, loopback_ip, site, ssh_user, ssh_pass) |
 | `ResolvedProfile` | Profile after inheritance resolution |
 
-**v3 additions to spec types:**
-
-| Type | Addition | Description |
-|------|----------|-------------|
-| `RoutingSpec` | `ImportCommunity` | BGP community for import filtering |
-| `RoutingSpec` | `ExportCommunity` | BGP community to attach on export |
-| `RoutingSpec` | `ImportPrefixList` | Prefix-list reference for import filtering |
-| `RoutingSpec` | `ExportPrefixList` | Prefix-list reference for export filtering |
-| `RoutingSpec` | `Redistribute` | Override default redistribution (service=true, transit=false) |
-| `SiteSpec` | `ClusterID` | BGP route reflector cluster ID (defaults to spine loopback if unset) |
-
-Community and prefix-list compose as AND conditions — a route must match both to be accepted.
-
 **Key Distinction**: The spec layer handles **declarative intent**. It never contains concrete device configuration - only policy definitions and references.
 
 ### 4.4 Device Layer (`pkg/device`)
@@ -497,12 +475,12 @@ Low-level connection management for SONiC switches.
 - `ConfigDBClient`: Redis client wrapper for CONFIG_DB (Redis DB 4)
 - `StateDB`: SONiC state_db structure (PortTable, LAGTable, BGPNeighborTable, etc.)
 - `StateDBClient`: Redis client wrapper for STATE_DB (Redis DB 6)
-- `AppDBClient` (v5): Redis client wrapper for APP_DB (Redis DB 0) — routing state from FRR/fpmsyncd
-- `AsicDBClient` (v5): Redis client wrapper for ASIC_DB (Redis DB 1) — SAI objects from orchagent
+- `AppDBClient`: Redis client wrapper for APP_DB (Redis DB 0) — routing state from FRR/fpmsyncd
+- `AsicDBClient`: Redis client wrapper for ASIC_DB (Redis DB 1) — SAI objects from orchagent
 - `SSHTunnel`: SSH port-forward tunnel for Redis access through port 22
-- `PlatformConfig` (v3): Parsed representation of SONiC's `platform.json`, cached on device; provides port definitions, lane assignments, supported speeds, and breakout modes for port validation
-- `CompositeBuilder` (v3): Builder for offline composite CONFIG_DB generation (in `pkg/network/composite.go`)
-- `PipelineClient` (v3): Redis MULTI/EXEC pipeline for atomic multi-entry writes (used by composite delivery)
+- `PlatformConfig`: Parsed representation of SONiC's `platform.json`, cached on device; provides port definitions, lane assignments, supported speeds, and breakout modes for port validation
+- `CompositeBuilder`: Builder for offline composite CONFIG_DB generation (in `pkg/network/composite.go`)
+- `PipelineClient`: Redis MULTI/EXEC pipeline for atomic multi-entry writes (used by composite delivery)
 
 **Key Distinction**: The device layer handles **imperative config**. It reads/writes the actual device state.
 
@@ -1423,15 +1401,15 @@ The `routing` section declares routing intent:
 | `peer_as` | Number or `"request"` | Peer AS (fixed or user-provided) |
 | `import_policy` | Policy name | BGP import route policy |
 | `export_policy` | Policy name | BGP export route policy |
-| `import_community` | Community string | BGP community for import filtering (v3) |
-| `export_community` | Community string | BGP community to attach on export (v3) |
-| `import_prefix_list` | Prefix-list name | Prefix-list reference for import filtering (v3) |
-| `export_prefix_list` | Prefix-list name | Prefix-list reference for export filtering (v3) |
-| `redistribute` | `true` / `false` / omit | Override default redistribution behavior (v3) |
+| `import_community` | Community string | BGP community for import filtering |
+| `export_community` | Community string | BGP community to attach on export |
+| `import_prefix_list` | Prefix-list name | Prefix-list reference for import filtering |
+| `export_prefix_list` | Prefix-list name | Prefix-list reference for export filtering |
+| `redistribute` | `true` / `false` / omit | Override default redistribution behavior |
 
-**v3 filtering composition**: Community and prefix-list can be used together. They compose as AND conditions — a route must match both the community and the prefix-list to be accepted. Policies are defined in NetworkSpecFile (`route_policies`, `prefix_lists`), referenced by name in the RoutingSpec struct.
+**Filtering composition**: Community and prefix-list can be used together. They compose as AND conditions — a route must match both the community and the prefix-list to be accepted. Policies are defined in NetworkSpecFile (`route_policies`, `prefix_lists`), referenced by name in the RoutingSpec struct.
 
-**v3 redistribution defaults**:
+**Redistribution defaults**:
 - Service interfaces: redistribute connected subnets into BGP (default `true`)
 - Transit interfaces: do NOT redistribute (default `false`)
 - Loopback: always redistributed
@@ -1486,8 +1464,7 @@ The `routing` section declares routing intent:
 | `route_reflectors` | site.json | BGP neighbor derivation |
 | `ssh_user` / `ssh_pass` | Device profile | SSH tunnel for Redis access |
 
-### 9.3 PlatformSpec Auto-Generation (v3)
-
+### 9.3 PlatformSpec Auto-Generation
 The newtron `PlatformSpec` is an abstraction (HWSKU, port_count, default_speed, breakouts). Detailed per-port lane/speed information comes from the device's own `platform.json` at runtime. A new `GeneratePlatformSpec()` device method creates/updates the PlatformSpec from the device's platform.json on first connect to a new device model:
 
 ```
@@ -1500,8 +1477,7 @@ Device.GeneratePlatformSpec()
 
 This should be run at least on first connect to a new device model, and can be used to prime the spec system for a new hardware platform.
 
-### 9.4 SiteSpec ClusterID (v3)
-
+### 9.4 SiteSpec ClusterID
 The `SiteSpec` struct gains a `cluster_id` field for BGP route reflector cluster ID:
 
 | Field | Description |
@@ -1728,8 +1704,7 @@ All operations logged with:
 - Changes written to config_db
 - Audit log entry created
 
-### 12.3 Composite (v3)
-
+### 12.3 Composite
 - Offline composite CONFIG_DB generation (no device connection required)
 - CompositeBuilder constructs the configuration programmatically
 - Delivery is a separate step: `Device.DeliverComposite(composite, mode)`
@@ -1744,8 +1719,7 @@ All operations logged with:
 | Composite generate | No | No | N/A |
 | Composite deliver | Yes | Yes (writes) | Yes (pipeline) |
 
-### 12.4 Topology Provisioning (v4)
-
+### 12.4 Topology Provisioning
 - Automated device configuration from `topology.json` spec file
 - Two modes: **full device** (`ProvisionDevice`) and **per-interface** (`ProvisionInterface`)
 - Full device mode builds a `CompositeConfig` offline and delivers via `CompositeOverwrite`
@@ -1757,8 +1731,7 @@ All operations logged with:
 | ProvisionDevice | No (build) + Yes (deliver) | Yes (for delivery) | Yes (pipeline) |
 | ProvisionInterface | Yes | Yes (reads + writes) | Per-entry |
 
-### 12.5 Verify (`--verify` flag) (v5)
-
+### 12.5 Verify (`--verify` flag)
 The `--verify` flag can be appended to any execute-mode operation. After writing changes, newtron reconnects (fresh CONFIG_DB read) and runs `VerifyChangeSet` against the ChangeSet that was just applied:
 
 ```
@@ -1878,138 +1851,6 @@ The system maintains this separation to enable:
 3. **Auditability**: Intent is documented separately from implementation
 4. **Flexibility**: Implementation details can change without changing intent
 
-## 17. Design Decisions
-
-### 17.1 SSH Tunnel vs Direct Redis
-
-**Decision**: Access device Redis through an SSH tunnel (port 22) rather than exposing Redis directly.
-
-**Rationale**: SONiC's Redis has no authentication. Exposing port 6379 on the management interface would allow unauthenticated access to the entire device configuration. SSH provides authentication, encryption, and is already available on every SONiC device. The QEMU virtual machines used by vrnetlab do not forward port 6379, making SSH the only available path. The SSH tunnel approach uses a random local port (`127.0.0.1:0`) to avoid port conflicts when managing multiple devices concurrently.
-
-### 17.2 Dry-Run by Default
-
-**Decision**: All operations default to dry-run mode. The `-x` flag is required for execution.
-
-**Rationale**: Network changes are high-impact. A typo in a VRF name or a misapplied ACL can cause outages. Defaulting to dry-run means the operator always sees what will happen before it happens. This eliminates "fat-finger" mistakes from accidental execution.
-
-### 17.3 Go Build Tags for Test Isolation
-
-**Decision**: Unit tests run with `go test ./...` (no dependencies). E2E tests use the newtest framework with newtlab VMs.
-
-**Rationale**: Unit tests must run instantly with zero infrastructure. E2E tests need QEMU VMs (minutes to start, gigabytes of RAM). This separation ensures `go test ./...` runs only fast unit tests by default.
-
-### 17.4 Precondition Checking Before Execution
-
-**Decision**: Every operation validates preconditions (interface exists, VLAN not in use, VRF present) before writing any changes.
-
-**Rationale**: SONiC does not reject invalid CONFIG_DB entries at write time. Writing an invalid entry (e.g. a VLAN member referencing a non-existent VLAN) silently succeeds in Redis but causes orchagent errors or crashes. Newtron checks all preconditions in-memory before issuing any Redis writes, turning silent corruption into clear error messages.
-
-### 17.5 Fresh Connections for Verification
-
-**Decision**: E2E tests create a fresh device connection to verify operation results rather than reading from the same connection.
-
-**Rationale**: After `Device.ApplyChanges()`, the in-memory `ConfigDB` struct is reloaded from Redis. However, to verify that changes actually persisted to Redis (not just to an in-memory cache), verification uses `LabConnectedDevice(t, nodeName)` which creates a new `Network`, loads a fresh profile, establishes a new SSH tunnel, and reads CONFIG_DB from scratch. This catches bugs where changes appear applied in-memory but were not written to Redis.
-
-### 17.6 Non-Fatal StateDB
-
-**Decision**: STATE_DB connection failure is logged as a warning; the system continues operating.
-
-**Rationale**: STATE_DB provides supplementary operational visibility (interface oper-status, BGP session state, route counts) but is not required for configuration management. During device boot, STATE_DB may be empty or unavailable. Making it non-fatal allows Newtron to configure devices even when operational state is not yet available.
-
-### 17.7 frrcfgd over bgpcfgd/Split Config
-
-**Decision**: Use SONiC's FRR management framework (`frrcfgd`) for BGP management instead of `bgpcfgd` or split config (`frr.conf`).
-
-**Rationale**: Split config requires managing `frr.conf` files directly, which sits outside CONFIG_DB and cannot be managed atomically with other SONiC tables. `bgpcfgd` uses Jinja templates with limited feature coverage — missing peer groups, route-maps, redistribute, max-paths, and cluster-id. `frrcfgd` provides full CONFIG_DB → FRR translation, supports all needed features, and has been stable since SONiC 202305+. This aligns with newtron's CONFIG_DB-centric architecture where all device state flows through Redis.
-
-### 17.8 Composite Merge Restrictions
-
-**Decision**: Merge mode is only supported for interface-level service configuration, and only when the target interface has no existing service binding.
-
-**Rationale**: Unrestricted merge creates a combinatorial explosion of conflict scenarios: what happens when a composite sets a VRF that conflicts with an existing VRF? What if ACL rules overlap? Rather than implementing complex merge conflict resolution, the restriction limits merge to the well-defined case of adding a service to an unbound interface. For full device reprovisioning, overwrite mode replaces everything atomically. This keeps the merge semantics simple and predictable.
-
-### 17.9 Platform.json Port Validation
-
-**Decision**: Port creation requires validation against the device's `platform.json`, fetched via SSH at runtime.
-
-**Rationale**: SONiC does not validate PORT entries at write time — writing a port with invalid lanes or unsupported speeds silently succeeds in Redis but causes syncd/orchagent failures. The `platform.json` file (located at `/usr/share/sonic/device/<platform>/platform.json`) is the authoritative source for valid port configurations on each hardware platform. Validating against it at creation time catches invalid configurations before they reach the ASIC layer.
-
-### 17.10 Redistribution Defaults (Opinionated)
-
-**Decision**: Service interfaces redistribute connected by default; transit interfaces do not; loopback is always redistributed.
-
-**Rationale**: In a spine-leaf fabric, the underlay uses direct BGP peering on transit links — redistributing transit connected subnets into BGP creates redundant routes and potential loops. Service interfaces need their subnets in BGP for reachability across the fabric. Loopback must always be redistributed because it's the BGP router-id and VTEP source. These defaults match standard DC fabric design; the `redistribute` flag allows per-service override for edge cases.
-
-### 17.11 Single SetupRouteReflector vs Per-AF Granularity
-
-**Decision**: Provide a single `SetupRouteReflector` operation that configures all three address families (ipv4_unicast, ipv6_unicast, l2vpn_evpn) at once, rather than per-AF operations.
-
-**Rationale**: In our DC fabric, a route reflector always reflects all three AFs — there is no operational scenario where you'd want IPv4 but not IPv6, or IPv6 but not EVPN. Separate per-AF operations would require the operator to make three calls for the standard case and create risk of partial configuration (e.g., forgetting to enable ipv6_unicast). The single operation enforces the architectural invariant that all AFs are configured together. Individual BGP operations (`AddBGPNeighbor`, `SetBGPGlobals`) still exist for fine-grained control outside the RR pattern.
-
-### 17.12 Topology-First Provisioning over Imperative Scripts
-
-**Decision**: Provide a declarative `topology.json` spec for device provisioning rather than relying on imperative CLI scripts or sequential command execution.
-
-**Rationale**: Imperative provisioning scripts are fragile — they encode ordering assumptions, require error handling at each step, and drift from the desired state over time. A declarative topology spec describes the end state (which services bind to which interfaces with what parameters), and the provisioner handles the translation to CONFIG_DB entries. This aligns with newtron's spec-vs-config philosophy: the topology file is intent, the generated CONFIG_DB is implementation. It also enables idempotent reprovisioning — running `ProvisionDevice` again produces the same result regardless of current device state (in overwrite mode).
-
-### 17.13 Full-Device vs Per-Interface Provisioning Modes
-
-**Decision**: Provide two distinct provisioning modes — `ProvisionDevice` (offline build + atomic overwrite) and `ProvisionInterface` (online connect + apply) — rather than a single unified mode.
-
-**Rationale**: Full-device provisioning is an offline operation that builds the entire CONFIG_DB without connecting to the device, then delivers it atomically. This is ideal for initial provisioning and lab setup where the device starts from a clean state. Per-interface provisioning connects to a running device, validates preconditions, and applies a single service — this is the safe path for incremental changes on production devices where you need dependency checking and conflict detection. Combining both into one mode would either sacrifice the offline capability of full-device provisioning or skip the safety checks of per-interface provisioning.
-
-### 17.14 Built-In Verification Primitives over External Test Assertions
-
-**Decision**: Verification methods (`VerifyChangeSet`, `GetRoute`, `GetRouteASIC`) live on the `Device` object rather than in test helpers or external tools.
-
-**Rationale**: If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect. The caller should not need a second tool to find out if the first tool worked. newtron writes CONFIG_DB, configures BGP, sets up EVPN — so newtron must be able to confirm these changes produced the intended local effects (entries landed, routes appeared, ASIC programmed).
-
-The ChangeSet-based approach is universal: it works for disaggregated operations (`CreateVLAN`, `AddBGPNeighbor`) and composite operations (`DeliverComposite`) alike, because they all produce ChangeSets. No per-operation verify methods are needed.
-
-Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron configured BGP redistribution, so newtron can read APP_DB to confirm the route appeared locally. This is still single-device self-verification — confirming the intended effect of newtron's own change. Cross-device assertions (did the route reach the neighbor) require topology-wide context and belong in the orchestrator (newtest).
-
-### 17.15 Why No MAC-VRF Noun
-
-**Decision**: VLANs bind directly to MAC-VPNs via `vlan bind-macvpn` rather than through a MAC-VRF intermediary noun.
-
-**Rationale**: SONiC has no `MAC_VRF` table in CONFIG_DB. A MAC-VRF in EVPN parlance is a layer 2 forwarding domain, but SONiC models this as VLAN + VXLAN_TUNNEL_MAP (L2VNI binding). Introducing a MAC-VRF noun would create an abstraction with no backing CONFIG_DB table, requiring newtron to maintain a synthetic mapping layer. Instead, the VLAN noun directly manages the concrete CONFIG_DB tables (VLAN, VLAN_MEMBER, VXLAN_TUNNEL_MAP), and MAC-VPN definitions in network.json provide the overlay parameters (L2VNI, ARP suppression) that get applied when a VLAN is bound to a MAC-VPN.
-
-**Alternative considered**: A `macvrf` noun that wraps VLAN + L2VNI + ARP suppression as a single entity. Rejected because it would obscure the CONFIG_DB reality and create confusion about what is a config object vs. a spec object.
-
-### 17.16 Why VRF Owns BGP Neighbors
-
-**Decision**: BGP neighbor management lives under the `vrf` noun (`add-neighbor`, `remove-neighbor`) rather than under `bgp`.
-
-**Rationale**: A VRF is a routing context. BGP neighbors exist within a routing context — the neighbor IP, remote AS, and local address are properties of a specific VRF + interface combination. In CONFIG_DB, BGP_NEIGHBOR entries reference VRF-bound interfaces for their local address. Placing neighbor management under VRF makes the ownership explicit: the VRF owns its interfaces and its neighbors. The BGP noun becomes a read-only visibility surface that shows the aggregate state across all VRFs.
-
-**Alternative considered**: A `bgp add-neighbor` command with a `--vrf` flag. Rejected because it inverts the ownership — the VRF is the container, the neighbor is the content. The command `vrf add-neighbor Vrf_CUST1 Ethernet4 65100` reads naturally as "add a neighbor to this VRF's routing domain via this interface."
-
-### 17.17 Why EVPN Setup is Composite and Idempotent
-
-**Decision**: `evpn setup` is a single composite command that creates VTEP + NVO + BGP EVPN sessions together, and skips components that already exist.
-
-**Rationale**: The EVPN overlay requires all three components (VTEP, NVO, BGP EVPN peers) to function. Creating them separately risks partial configuration — a VTEP without NVO or NVO without BGP EVPN peers is non-functional. Making it a composite ensures the overlay is either fully configured or not at all. Idempotency (skipping existing components) enables safe re-runs: if BGP EVPN peers are already configured but VTEP was missed, `evpn setup` creates only the VTEP. This is critical for operational safety — operators can run it without worrying about duplicating entries.
-
-**Alternative considered**: Separate `evpn create-vtep`, `evpn create-nvo`, `evpn add-peer` commands. Rejected because they require the operator to know the correct ordering and component dependencies, and partial execution leaves the overlay broken.
-
-### 17.18 Why MAC-VPN Has No VLAN Field
-
-**Decision**: The MACVPNSpec contains L2VNI and ARP suppression but no VLAN ID. VLAN ID is in ServiceSpec for L2/IRB services.
-
-**Rationale**: The overlay definition (MAC-VPN) and the local bridge domain (VLAN) are separate concepts. The same MAC-VPN can be used by different VLANs on different devices — VLAN 100 on leaf1 and VLAN 200 on leaf2 can both participate in the same L2VNI. Putting the VLAN ID in MACVPNSpec would couple overlay identity to local bridge domain, preventing this flexibility. By placing VLAN ID in the ServiceSpec (which is instantiated per-interface), each device can map its own local VLAN to the shared overlay.
-
-**Alternative considered**: MACVPNSpec with an optional `vlan` field. Rejected because it creates ambiguity — if both MACVPNSpec and ServiceSpec have VLAN IDs, which one wins? The clean separation eliminates this question.
-
-### 17.19 Why Spec Authoring via CLI
-
-**Decision**: Definitions (IP-VPN, MAC-VPN, QoS policies, filters, services) can be created, modified, and deleted through CLI commands that persist changes to network.json.
-
-**Rationale**: Operators should be able to author definitions without editing JSON files directly. Direct JSON editing is error-prone (syntax errors, missing required fields, invalid values) and bypasses validation. CLI commands validate inputs before writing and use atomic file operations (temp file + rename) to prevent partial writes. The `-x` flag applies to spec authoring too — operators see what will be written before committing. This aligns with the dry-run-by-default principle.
-
-**Alternative considered**: A web UI or separate spec-editing tool. Rejected for complexity — the CLI already has the spec loader, validation, and atomic write infrastructure. Adding create/delete subcommands to existing nouns is a natural extension.
-
----
-
 ## Appendix A: Glossary
 
 ### Core Terminology
@@ -2090,8 +1931,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | 4 | CONFIG_DB | Device configuration (read/write by Newtron) |
 | 6 | STATE_DB | Operational state (read-only by Newtron via `RunHealthChecks`) |
 
-### CLI Architecture (v6)
-
+### CLI Architecture
 | Term | Definition |
 |------|------------|
 | **Noun-Group CLI** | CLI pattern `newtron <device> <noun> <action> [args] [-x]`. All commands are organized by resource noun (vlan, vrf, bgp, etc.). |
@@ -2116,8 +1956,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **Device Lock** | Per-operation distributed lock in STATE_DB (Redis) with TTL. Each mutating operation acquires the lock, applies changes, verifies, and releases. Prevents concurrent modifications to the same device. |
 | **Baseline Reset** | Pre-test cleanup that deletes stale CONFIG_DB entries from previous test runs on all SONiC nodes. |
 
-### BGP Management (v3)
-
+### BGP Management
 | Term | Definition |
 |------|------------|
 | **frrcfgd** | SONiC's FRR management framework daemon. Translates CONFIG_DB BGP tables to FRR commands. Enabled via `frr_mgmt_framework_config=true` in DEVICE_METADATA. |
@@ -2128,8 +1967,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **Redistribute** | Injection of connected or static routes into BGP. Controlled per-service via `redistribute` flag with opinionated defaults. |
 | **Cluster-ID** | BGP route reflector cluster identifier. Prevents routing loops when multiple RRs exist in the same cluster. Set in SiteSpec or defaults to spine loopback. |
 
-### Composite Mode (v3)
-
+### Composite Mode
 | Term | Definition |
 |------|------------|
 | **Composite** | A composite CONFIG_DB configuration generated offline, delivered to a device as a single atomic operation. |
@@ -2139,8 +1977,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **CompositeConfig** | The composite CONFIG_DB representation with metadata (timestamp, network, device, mode). |
 | **Redis Pipeline** | MULTI/EXEC transaction used by composite delivery for atomic application of multiple CONFIG_DB changes. |
 
-### Port Management (v3)
-
+### Port Management
 | Term | Definition |
 |------|------------|
 | **platform.json** | SONiC device file at `/usr/share/sonic/device/<platform>/platform.json`. Defines available ports, lane assignments, supported speeds, and breakout modes. |
@@ -2149,8 +1986,7 @@ Routing state observations (`GetRoute`, `GetRouteASIC`) extend this: newtron con
 | **PlatformConfig** | Parsed representation of platform.json cached on device. Used for port validation. |
 | **GeneratePlatformSpec** | Device method that creates a `spec.PlatformSpec` from the device's platform.json, for priming specs on first connect to new hardware. |
 
-### Topology Provisioning (v4)
-
+### Topology Provisioning
 | Term | Definition |
 |------|------------|
 | **topology.json** | Optional spec file declaring complete desired state: devices, interfaces, service bindings, links, and per-interface parameters. |

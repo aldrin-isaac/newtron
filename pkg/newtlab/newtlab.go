@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 

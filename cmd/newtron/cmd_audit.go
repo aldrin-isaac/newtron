@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/audit"
+	"github.com/newtron-network/newtron/pkg/newtron/audit"
 	"github.com/newtron-network/newtron/pkg/cli"
 )
 

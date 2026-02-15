@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // countingWriter wraps an io.Writer and counts bytes written.

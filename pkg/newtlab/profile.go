@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // PatchProfiles updates device profile JSON files with newtlab runtime values.

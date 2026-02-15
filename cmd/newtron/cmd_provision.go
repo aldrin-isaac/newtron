@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 

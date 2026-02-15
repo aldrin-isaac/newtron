@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 // Shell provides an interactive REPL with persistent device connection.

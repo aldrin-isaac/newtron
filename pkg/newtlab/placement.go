@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // serverLoad tracks current node count for a server during placement.

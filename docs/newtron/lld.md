@@ -39,7 +39,6 @@ newtron/
 │   │   ├── cmd_audit.go             # Audit subcommands
 │   │   ├── cmd_settings.go          # Settings management
 │   │   ├── cmd_provision.go         # Topology provisioning commands
-│   │   ├── interactive.go           # Interactive menu mode
 │   │   └── shell.go                 # Interactive shell with readline
 ├── pkg/
 │   ├── network/                     # OO hierarchy + spec->config translation
@@ -66,16 +65,6 @@ newtron/
 │   │   ├── verify.go               # VerifyChangeSet, verification types
 │   │   ├── state.go                 # State loading from config_db
 │   │   └── tunnel.go                # SSH tunnel for Redis access
-│   ├── model/                       # Domain models
-│   │   ├── interface.go
-│   │   ├── lag.go
-│   │   ├── vlan.go
-│   │   ├── vrf.go
-│   │   ├── evpn.go
-│   │   ├── bgp.go
-│   │   ├── acl.go
-│   │   ├── policy.go
-│   │   └── qos.go
 │   ├── operations/                  # Precondition checking utilities
 │   │   └── precondition.go          # PreconditionChecker, DependencyChecker
 │   ├── health/                      # Health checks
@@ -208,7 +197,7 @@ type SiteSpecFile struct {
 type SiteSpec struct {
     Region          string   `json:"region"`
     RouteReflectors []string `json:"route_reflectors,omitempty"`
-    ClusterID       string   `json:"cluster_id,omitempty"`        // v3: BGP RR cluster-id
+    ClusterID       string   `json:"cluster_id,omitempty"`        // BGP RR cluster-id
 }
 
 // ServiceSpec defines an interface service type.
@@ -268,7 +257,6 @@ type RoutingSpec struct {
     ImportPolicy string `json:"import_policy,omitempty"` // Reference to route_policies
     ExportPolicy string `json:"export_policy,omitempty"` // Reference to route_policies
 
-    // v3 additions:
     ImportCommunity  string `json:"import_community,omitempty"`   // BGP community for import filtering
     ExportCommunity  string `json:"export_community,omitempty"`   // BGP community to attach on export
     ImportPrefixList string `json:"import_prefix_list,omitempty"` // prefix-list ref for import filtering
@@ -325,7 +313,7 @@ type QoSQueue struct {
 }
 
 // QoSProfile defines a legacy QoS configuration (backward compat).
-// Lives in pkg/model/qos.go. Superseded by QoSPolicy.
+// Lives in pkg/spec/types.go. Superseded by QoSPolicy.
 type QoSProfile struct {
     Description  string `json:"description,omitempty"`
     SchedulerMap string `json:"scheduler_map"`
@@ -593,7 +581,6 @@ func (d *Device) IsLocked() bool {
 
 // LockHolder returns the current lock holder string (e.g. "aldrin@workstation1")
 // and acquisition time, or empty string if unlocked. Reads STATE_DB on the device.
-// Status: not yet implemented. Depends on StateDBClient.GetLockHolder (device-lld §2.3).
 func (d *Device) LockHolder() (holder string, acquired time.Time, err error) {
     return d.conn.LockHolder()
 }
@@ -602,11 +589,9 @@ func (d *Device) LockHolder() (holder string, acquired time.Time, err error) {
 func (d *Device) IsConnected() bool { return d.connected }
 
 // SetConnected sets the connected state. Test helper only.
-// Status: not yet implemented.
 func (d *Device) SetConnected(v bool) { d.connected = v }
 
 // SetLocked sets the locked state. Test helper only.
-// Status: not yet implemented.
 func (d *Device) SetLocked(v bool) { d.locked = v }
 
 // --- Device accessors and bridging ---
@@ -1034,18 +1019,18 @@ type ConfigDB struct {
     ACLTableType      map[string]ACLTableTypeEntry  `json:"ACL_TABLE_TYPE,omitempty"`
     RouteTable        map[string]RouteEntry         `json:"ROUTE_TABLE,omitempty"`
 
-    // v2: Static Anycast Gateway
+    // Static Anycast Gateway
     SAG               map[string]map[string]string  `json:"SAG,omitempty"`
     SAGGlobal         map[string]map[string]string  `json:"SAG_GLOBAL,omitempty"`
 
-    // v2: BGP tables (CONFIG_DB-managed BGP)
+    // BGP tables (CONFIG_DB-managed BGP)
     BGPNeighbor       map[string]BGPNeighborEntry   `json:"BGP_NEIGHBOR,omitempty"`
     BGPNeighborAF     map[string]BGPNeighborAFEntry `json:"BGP_NEIGHBOR_AF,omitempty"`
     BGPGlobals        map[string]BGPGlobalsEntry    `json:"BGP_GLOBALS,omitempty"`
     BGPGlobalsAF      map[string]BGPGlobalsAFEntry  `json:"BGP_GLOBALS_AF,omitempty"`
     BGPEVPNVNI        map[string]BGPEVPNVNIEntry    `json:"BGP_EVPN_VNI,omitempty"`
 
-    // v2: QoS tables
+    // QoS tables
     Scheduler         map[string]SchedulerEntry     `json:"SCHEDULER,omitempty"`
     Queue             map[string]QueueEntry         `json:"QUEUE,omitempty"`
     WREDProfile       map[string]WREDProfileEntry   `json:"WRED_PROFILE,omitempty"`
@@ -1054,7 +1039,7 @@ type ConfigDB struct {
     TCToQueueMap      map[string]map[string]string  `json:"TC_TO_QUEUE_MAP,omitempty"`
     Policer           map[string]PolicerEntry       `json:"POLICER,omitempty"`
 
-    // v3: Extended BGP tables (frrcfgd — FRR management framework)
+    // Extended BGP tables (frrcfgd — FRR management framework)
     BGPPeerGroup          map[string]BGPPeerGroupEntry         `json:"BGP_PEER_GROUP,omitempty"`
     BGPPeerGroupAF        map[string]BGPPeerGroupAFEntry       `json:"BGP_PEER_GROUP_AF,omitempty"`
     BGPGlobalsAFNet    map[string]BGPGlobalsAFNetEntry  `json:"BGP_GLOBALS_AF_NETWORK,omitempty"`
@@ -1065,7 +1050,7 @@ type ConfigDB struct {
     CommunitySet          map[string]CommunitySetEntry         `json:"COMMUNITY_SET,omitempty"`
     ASPathSet             map[string]ASPathSetEntry             `json:"AS_PATH_SET,omitempty"`
 
-    // v2: Newtron custom table (NOT standard SONiC)
+    // Newtron custom table (NOT standard SONiC)
     NewtronServiceBinding map[string]ServiceBindingEntry `json:"NEWTRON_SERVICE_BINDING,omitempty"`
 }
 
@@ -1092,7 +1077,7 @@ type BGPGlobalsEntry struct {
     ConfedID            string `json:"confed_id,omitempty"`
     ConfedPeers         string `json:"confed_peers,omitempty"`
     GracefulRestart     string `json:"graceful_restart,omitempty"`
-    // v3 additions (frrcfgd):
+    // frrcfgd extensions:
     LoadBalanceMPRelax  string `json:"load_balance_mp_relax,omitempty"`  // multipath relax for ECMP
     RRClusterID         string `json:"rr_cluster_id,omitempty"`          // route reflector cluster ID
     EBGPRequiresPolicy  string `json:"ebgp_requires_policy,omitempty"`   // disable mandatory eBGP policy
@@ -1114,7 +1099,6 @@ type BGPGlobalsAFEntry struct {
     RTExport           string `json:"rt_export,omitempty"`
     RTImportEVPN       string `json:"route_target_import_evpn,omitempty"`
     RTExportEVPN       string `json:"route_target_export_evpn,omitempty"`
-    // v3 additions:
     MaxEBGPPaths       string `json:"max_ebgp_paths,omitempty"`  // maximum ECMP paths for eBGP
     MaxIBGPPaths       string `json:"max_ibgp_paths,omitempty"`  // maximum ECMP paths for iBGP
 }
@@ -1130,7 +1114,7 @@ type BGPEVPNVNIEntry struct {
 
 // BGPNeighborEntry represents a BGP neighbor
 // Key format: "vrf|neighbor_ip" (e.g., "default|10.0.0.2", "Vrf_CUST1|10.0.0.2")
-// v3: added peer_group, ebgp_multihop, password fields
+// Fields: peer_group, ebgp_multihop, password
 type BGPNeighborEntry struct {
     LocalAddr     string `json:"local_addr,omitempty"`
     Name          string `json:"name,omitempty"`
@@ -1138,7 +1122,6 @@ type BGPNeighborEntry struct {
     HoldTime      string `json:"holdtime,omitempty"`
     KeepaliveTime string `json:"keepalive,omitempty"`
     AdminStatus   string `json:"admin_status,omitempty"`
-    // v3 additions:
     PeerGroup    string `json:"peer_group,omitempty"`
     EBGPMultihop string `json:"ebgp_multihop,omitempty"`
     Password     string `json:"password,omitempty"`
@@ -1151,7 +1134,6 @@ type BGPNeighborAFEntry struct {
     RouteReflectorClient string `json:"route_reflector_client,omitempty"`
     NextHopSelf          string `json:"next_hop_self,omitempty"`
     SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
-    // v3 additions:
     AllowasIn            string `json:"allowas_in,omitempty"`            // allow local AS in received path
     RouteMapIn           string `json:"route_map_in,omitempty"`          // inbound route-map
     RouteMapOut          string `json:"route_map_out,omitempty"`         // outbound route-map
@@ -1606,8 +1588,7 @@ func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key
 // The `d` parameter is the low-level device.Device (accessed via network.Device.Underlying()).
 func (cs *ChangeSet) Apply(d *device.Device) error
 
-// Rollback applies the inverse of each applied change in reverse order.
-// Status: not yet implemented. No Rollback code exists.
+// Rollback applies the inverse of each applied change in reverse order
 // (changes 0..AppliedCount-1):
 //   - ChangeAdd → delete the table/key
 //   - ChangeModify → restore OldValue (Set with OldValue fields)
@@ -1623,14 +1604,9 @@ func (cs *ChangeSet) Rollback(d *device.Device) error
 
 These types live in `pkg/device/verify.go` because `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/network` would create an import cycle (`pkg/device` → `pkg/network`). The `pkg/network` layer re-exports these types for convenience.
 
-These types support the v5 verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
+These types support the verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
 
-> **Status: not yet implemented.** `VerificationResult`, `VerificationError`, `RouteEntry`,
-> `NextHop`, and `RouteSource` types have no code in `pkg/device/verify.go` (file does not exist).
-> `VerifyChangeSet`, `GetRoute`, and `GetRouteASIC` methods are also not yet implemented.
-> See also device-lld §3 (AppDBClient), §4 (AsicDBClient), §5.7 (verification methods).
-
-**Consumers:** newtest's step executors are the primary consumers — `verifyProvisioningExecutor` reads `VerificationResult`, `verifyRouteExecutor` reads `RouteEntry`. See newtest LLD §5.4, §5.9.
+**Consumers:** newtest's step executors are the primary consumers — `verifyProvisioningExecutor` reads `VerificationResult`, `verifyRouteExecutor` reads `RouteEntry`. See newtest LLD §7.5, §7.6.
 
 ```go
 // VerificationResult reports ChangeSet verification outcome.
@@ -2566,7 +2542,6 @@ func (d *Device) SSHClient() *ssh.Client {
 
 // ============================================================================
 // Verification Methods
-// Status: not yet implemented. No verify.go exists in pkg/network/.
 // ============================================================================
 
 // VerifyChangeSet re-reads CONFIG_DB through a fresh connection and confirms
@@ -3005,7 +2980,6 @@ func (pc *PreconditionChecker) RequireVLANExists(vlanID int)
 func (pc *PreconditionChecker) RequireACLTableExists(name string)
 func (pc *PreconditionChecker) RequireFilterSpecExists(name string)
 
-// v3 precondition methods:
 func (pc *PreconditionChecker) RequirePortAllowed(portName string)     // port name exists in platform.json
 func (pc *PreconditionChecker) RequirePlatformLoaded()                 // PlatformConfig has been fetched
 func (pc *PreconditionChecker) RequireNoExistingService(intf string)   // no service binding on interface (for merge)
@@ -3169,8 +3143,8 @@ func ResolveProfile(
         Region:     regionName,
         Site:       profile.Site,
         Platform:   profile.Platform,
-        SSHUser:    profile.SSHUser,  // v2: pass through SSH credentials
-        SSHPass:    profile.SSHPass,  // v2: pass through SSH credentials
+        SSHUser:    profile.SSHUser,
+        SSHPass:    profile.SSHPass,
     }
 
     // AS Number: profile > region
@@ -3201,9 +3175,7 @@ func ResolveProfile(
 }
 ```
 
-## 8. Audit Logging (Phase 2)
-
-> **Phase 2 — deferred.** Operations currently log actions, success/failure via standard `slog` logging. A structured audit trail (AuditLogger, AuditEvent, FileAuditLogger) and permission checking (PermissionChecker) are designed but deferred to Phase 2. The types below define the target interface.
+## 8. Audit Logging
 
 ### 8.1 Event Types (`pkg/audit/event.go`)
 
@@ -3250,9 +3222,7 @@ type FileAuditLogger struct {
 }
 ```
 
-## 9. Permission System (Phase 2)
-
-> **Phase 2 — deferred.** Permission checking is designed but not yet integrated into the operation call path. Operations currently execute without permission checks. The types below define the target interface.
+## 9. Permission System
 
 ### 9.1 Permission Definitions (`pkg/auth/permission.go`)
 
@@ -3301,31 +3271,25 @@ const (
 
     PermAuditView Permission = "audit.view"
 
-    // v3: Port and BGP configuration permissions
     PermPortCreate   Permission = "port.create"
     PermPortDelete   Permission = "port.delete"
     PermBGPConfigure Permission = "bgp.configure"
 
-    // v4: Composite delivery and topology provisioning permissions
     PermCompositeDeliver  Permission = "composite.deliver"
     PermTopologyProvision Permission = "topology.provision"
 
-    // v5: VRF management permissions
     PermVRFCreate Permission = "vrf.create"
     PermVRFModify Permission = "vrf.modify"
     PermVRFDelete Permission = "vrf.delete"
     PermVRFView   Permission = "vrf.view"
 
-    // v5: Spec authoring — create/delete definitions in network.json
     PermSpecAuthor Permission = "spec.author"
 
-    // v5: Filter management
     PermFilterCreate Permission = "filter.create"
     PermFilterModify Permission = "filter.modify"
     PermFilterDelete Permission = "filter.delete"
     PermFilterView   Permission = "filter.view"
 
-    // v5: QoS create/delete (extends existing QoSModify/QoSView)
     PermQoSCreate Permission = "qos.create"
     PermQoSDelete Permission = "qos.delete"
 
@@ -3912,64 +3876,4 @@ func TestComputeNeighborIP(t *testing.T) {
 E2E testing uses the newtest framework (see `docs/newtest/`). Patterns and learnings
 from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.md`.
 
----
-
-## Cross-References
-
-### References to Device Layer LLD
-
-| Device LLD Section | How This LLD Uses It |
-|--------------------|----------------------|
-| §1 SSH Tunnel | Used by `Device.Connect()` when SSHUser/SSHPass present |
-| §2 StateDB | Populated on connect; read by health checks (§5.2) |
-| §3 APP_DB | Read by `Device.GetRoute()` — observation primitive (§5.2) |
-| §4 ASIC_DB | Read by `Device.GetRouteASIC()` — observation primitive (§5.2) |
-| §5.1 Connection | Entry point for all device operations; shared tunnel for all DBs |
-| §5.3 Write paths | Used by `ChangeSet.Apply()` and composite delivery (§5.2) |
-| §5.8 Pipeline ops | Used by `DeliverComposite()` for atomic writes |
-
-### References to newtlab LLD
-
-| newtlab LLD Section | How This LLD Uses It |
-|--------------------|----------------------|
-| §1.1 PlatformSpec VM fields | newtron ignores VM fields; they're newtlab-only (see §3.1A ownership table) |
-| §1.2 DeviceProfile.SSHPort | Read by `Device.Connect()` (device LLD §5.1) |
-| §10 Profile patching | newtlab writes `ssh_port`/`mgmt_ip` that newtron reads at connect time |
-
-### References to newtest LLD
-
-| newtest LLD Section | How This LLD Relates |
-|---------------------|----------------------|
-| §4.5 Device connection | newtest calls `Device.Connect()` after newtlab deploy |
-| §5 Step executors | Executors call newtron device operations (§5.2) and verification methods |
-| §5.2 provisionExecutor | Calls `TopologyProvisioner.ProvisionDevice()` (§5.4) |
-| §5.9 verifyRouteExecutor | Calls `Device.GetRoute()` / `GetRouteASIC()` (§5.2) |
-
-### References to newtron HLD
-
-| HLD Section | LLD Section |
-|-------------|-------------|
-| §2 Spec vs Config | §1 Architecture, §3.1 Spec types |
-| §4 Component description | §5 Operation implementations |
-| §4.9 Verification architecture | §3.6A Verification types |
-| §12 Execution modes | §11 CLI implementation |
-| §13 Verification strategy | §3.6A types, §5.2 verification methods |
-
----
-
-## Appendix A: Changelog
-
-### v8 -- V2 CLI Redesign
-
-| Area | Change |
-|------|--------|
-| §2 Package structure | `cmd_verbs.go` and `cmd_state.go` deleted. Added `cmd_vrf.go`, `cmd_qos.go`, `cmd_filter.go`, `cmd_show.go`, `cmd_device.go`. Added `service_gen.go` and `qos.go` to `pkg/network/`. |
-| §3.1 MACVPNSpec | Removed `VLAN` field (moved to ServiceSpec). |
-| §3.1 ServiceSpec | Added `VLAN int` field. |
-| §5.2 Device operations | Added: `AddVRFInterface`, `RemoveVRFInterface`, `BindIPVPN`, `UnbindIPVPN`, `AddStaticRoute`, `RemoveStaticRoute`, `RemoveVLANMember`, `SetupEVPN`, `ApplyQoS`, `RemoveQoS`. |
-| §5.2 Spec persistence | Added Network methods: `SaveIPVPN`/`DeleteIPVPN`, `SaveMACVPN`/`DeleteMACVPN`, `SaveQoSPolicy`/`DeleteQoSPolicy`, `SaveFilterSpec`/`DeleteFilterSpec`, `SaveService`/`DeleteService`. |
-| §9 Permissions | Added: `PermVRFCreate`/`Modify`/`Delete`/`View`, `PermSpecAuthor`, `PermFilterCreate`/`Modify`/`Delete`/`View`, `PermQoSCreate`/`Delete`. Full permission list expanded to match code. |
-| §11 CLI implementation | Complete rewrite: noun-group pattern (`newtron <device> <noun> <action>`), implicit device detection, `withDeviceWrite` helper, per-noun status commands replace `cmd_state.go`, `-s` is `--save` (not `--specs`), `-S` is `--specs`. |
-| §11.3 Command mapping | Replaced symmetric read/write verb table with noun-group command mapping table. |
-| §11.4 BGP/VRF | Neighbor management moved from BGP commands to `vrf add-neighbor`. BGP simplified to `status` only. |
 

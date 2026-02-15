@@ -3,7 +3,7 @@ package newtlab
 import (
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/spec"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // NodeConfig holds the fully resolved VM configuration for a single device.

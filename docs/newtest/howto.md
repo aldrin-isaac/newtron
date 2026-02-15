@@ -4,19 +4,20 @@ newtest is an E2E testing orchestrator for newtron and SONiC. It deploys
 VM topologies via newtlab, provisions devices via newtron, and validates
 the results.
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For architecture and design, see the [HLD](hld.md). For type definitions
+and internals, see the [LLD](lld.md).
 
 ---
 
-## Prerequisites
+## Prerequisites & Build
 
 ### Required Tools
 
 ```bash
-# Build newtron, newtlab, and newtest
-go build ./cmd/newtron/
-go build ./cmd/newtlab/
-go build ./cmd/newtest/
+# Build all three binaries
+go build -o bin/newtron ./cmd/newtron
+go build -o bin/newtlab ./cmd/newtlab
+go build -o bin/newtest ./cmd/newtest
 ```
 
 ### newtlab Must Be Working
@@ -41,14 +42,26 @@ See `docs/newtlab/howto.md` for newtlab setup details.
 ## Quick Start
 
 ```bash
-# List available scenarios
+# List available suites
 newtest list
 
-# Run a single scenario
-newtest run -scenario bgp-underlay
+# Run all scenarios in a suite
+newtest start 2node-incremental
 
-# Run all scenarios
-newtest run --all
+# Run a single scenario from a suite
+newtest start 2node-incremental --scenario boot-ssh
+
+# Check progress
+newtest status
+
+# Pause after current scenario
+newtest pause
+
+# Resume
+newtest start 2node-incremental
+
+# Tear down when done
+newtest stop
 ```
 
 ---
@@ -67,7 +80,7 @@ newtest/topologies/2node/specs/
 ├── site.json          # Site topology, route reflectors
 ├── platforms.json     # Platform definitions with VM settings
 └── profiles/
-    ├── spine1.json    # newtlab writes ssh_port, console_port after deploy
+    ├── spine1.json
     └── leaf1.json
 ```
 
@@ -92,29 +105,15 @@ newtest/topologies/4node/specs/
 Good for: route reflection, ECMP, EVPN, iBGP overlay, shared VRF,
 full fabric provisioning.
 
+See [HLD §4](hld.md) for topology diagrams and spec file details.
+
 ---
 
-## Test Scenarios
+## Writing Scenarios
 
 Scenarios are YAML files that define what to test against a deployed topology.
 They live in `newtest/suites/` — either `2node-standalone/` (independent tests)
 or `2node-incremental/` (dependency-ordered suite).
-
-### Listing Scenarios
-
-```bash
-newtest list
-
-Available scenarios:
-  bgp-underlay    eBGP underlay sessions (4node, sonic-vpp)
-  bgp-overlay     iBGP overlay with route reflection (4node, sonic-vpp)
-  service-l3      L3 service apply/remove (2node, sonic-vpp)
-  service-irb     IRB service with VXLAN (4node, sonic-vpp)
-  service-l2      L2 VLAN extension (2node, sonic-vpp)
-  health          Health checks after provisioning (2node, sonic-vpp)
-  baseline        Configlet application (2node, sonic-vpp)
-  full-fabric     Full fabric: underlay + overlay + services (4node, sonic-vpp)
-```
 
 ### Scenario Format
 
@@ -145,249 +144,7 @@ steps:
       overall: ok
 ```
 
-### Step Actions
-
-| Action | What It Does | Implemented By |
-|--------|-------------|----------------|
-| `provision` | Run `newtron provision -d <device> -x` for each device | newtron |
-| `verify-provisioning` | Verify CONFIG_DB matches expected state from provisioning | newtron `VerifyChangeSet` |
-| `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | newtron Redis read |
-| `verify-state-db` | Assert STATE_DB entries match (polls with timeout) | newtron STATE_DB read |
-| `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `RunHealthChecks` |
-| `verify-health` | Run health checks (interfaces, BGP, EVPN, LAG, VXLAN) | newtron `RunHealthChecks` |
-| `verify-route` | Check route exists on device with expected next-hops | newtron `GetRoute` / `GetRouteASIC` |
-| `verify-ping` | Ping between devices (requires `dataplane: true`) | **newtest native** |
-| `apply-service` | Apply a named service to a device interface | newtron |
-| `remove-service` | Remove a service from a device interface | newtron |
-| `apply-baseline` | Apply a configlet baseline to a device | newtron |
-| `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
-| `wait` | Pause for a specified duration | newtest native |
-| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron |
-| `apply-frr-defaults` | Apply FRR runtime defaults via vtysh | newtron |
-| `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron |
-| `create-vlan` | Create a VLAN | newtron |
-| `delete-vlan` | Delete a VLAN | newtron |
-| `add-vlan-member` | Add an interface to a VLAN | newtron |
-| `create-vrf` | Create a VRF | newtron |
-| `delete-vrf` | Delete a VRF | newtron |
-| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron |
-| `add-vrf-interface` | Bind an interface to a VRF | newtron |
-| `remove-vrf-interface` | Remove an interface from a VRF | newtron |
-| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron |
-| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron |
-| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron |
-| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron |
-| `add-static-route` | Add a static route to a VRF | newtron |
-| `remove-static-route` | Remove a static route from a VRF | newtron |
-| `remove-vlan-member` | Remove an interface from a VLAN | newtron |
-| `apply-qos` | Apply a QoS policy to an interface | newtron |
-| `remove-qos` | Remove QoS policy from an interface | newtron |
-| `configure-svi` | Configure a VLAN interface (SVI) | newtron |
-| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback) | newtron |
-| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron |
-| `refresh-service` | Refresh a service binding on an interface | newtron |
-| `cleanup` | Run device cleanup to remove orphaned resources | newtron |
-
-Most verification steps delegate to newtron's built-in methods (see newtron
-HLD §4.9). newtest provides the orchestration — which device, what parameters,
-pass/fail reporting. Steps marked **newtest native** require capabilities
-newtron doesn't have (cross-device data plane, arbitrary SSH with output
-matching).
-
----
-
-## Running Tests
-
-### Run a Specific Scenario
-
-```bash
-newtest run -scenario bgp-underlay
-```
-
-This does everything automatically:
-1. Deploys the 4-node topology via newtlab
-2. Waits for all VMs to boot (SSH ready)
-3. Provisions all devices via newtron
-4. Waits for protocol convergence
-5. Verifies BGP sessions are Established (polls STATE_DB)
-6. Verifies CONFIG_DB entries on leaves
-7. Runs health checks on all devices
-8. Reports results
-9. Destroys the topology
-
-### Run All Scenarios
-
-```bash
-newtest run --all
-```
-
-Runs every scenario in `newtest/suites/2node-standalone/` sequentially. Each gets its own
-topology deploy/destroy cycle.
-
-### Override Platform
-
-```bash
-# Use sonic-vs instead of the scenario's default
-newtest run -scenario bgp-underlay --platform sonic-vs
-```
-
-Data plane tests (`verify-ping`) are automatically skipped when the platform
-has `dataplane: false` in `platforms.json`.
-
-### Verbose Output
-
-```bash
-newtest run -scenario bgp-underlay -v
-```
-
-Shows newtron provisioning output, Redis commands, STATE_DB polling progress,
-and full verification details.
-
----
-
-## Keeping Topologies Running
-
-### Inspect After Tests
-
-```bash
-newtest run -scenario bgp-underlay --keep
-```
-
-The topology stays up after tests complete. You can SSH into devices to
-debug:
-
-```bash
-newtlab ssh leaf1
-newtlab console spine1
-```
-
-Clean up when done:
-
-```bash
-newtlab destroy
-```
-
-### Run Against Existing Topology
-
-If you already have a topology deployed (from newtlab or a previous `--keep`
-run):
-
-```bash
-# Deploy topology manually
-newtlab deploy -S newtest/topologies/4node/specs/
-
-# Run tests without deploy/destroy
-newtest run -scenario bgp-underlay --no-deploy
-
-# Iterate: modify scenario, run again
-newtest run -scenario bgp-underlay --no-deploy
-
-# Clean up when done
-newtlab destroy
-```
-
-This is useful for iterating on test scenarios without waiting for VM boot
-each time.
-
----
-
-## Test Output
-
-### Console Output
-
-```
-$ newtest run -scenario bgp-underlay
-
-newtest: bgp-underlay (4node topology, sonic-vpp)
-
-Deploying topology...
-  ✓ spine1 (SSH :40000)
-  ✓ spine2 (SSH :40001)
-  ✓ leaf1 (SSH :40002)
-  ✓ leaf2 (SSH :40003)
-
-Running steps...
-  [1/5] provision-all
-    ✓ spine1 provisioned (3.2s)
-    ✓ spine2 provisioned (2.9s)
-    ✓ leaf1 provisioned (3.1s)
-    ✓ leaf2 provisioned (3.0s)
-
-  [2/5] wait-convergence
-    ✓ 30s elapsed
-
-  [3/5] verify-provisioning
-    ✓ spine1: 24/24 CONFIG_DB entries verified
-    ✓ spine2: 24/24 CONFIG_DB entries verified
-    ✓ leaf1: 31/31 CONFIG_DB entries verified
-    ✓ leaf2: 31/31 CONFIG_DB entries verified
-
-  [4/5] verify-underlay-route
-    ✓ spine1: 10.1.0.0/31 via 10.1.0.1 (bgp, APP_DB, polled 3 times)
-
-  [5/5] verify-health
-    ✓ spine1: overall ok (5 checks passed)
-    ✓ spine2: overall ok (5 checks passed)
-    ✓ leaf1: overall ok (5 checks passed)
-    ✓ leaf2: overall ok (5 checks passed)
-
-Destroying topology...
-  ✓ All VMs stopped
-
-PASS: bgp-underlay (5/5 steps passed, 68s)
-```
-
-### Test Report
-
-After running scenarios, newtest writes a report to
-`newtest/.generated/report.md`:
-
-```markdown
-# newtest Report — 2026-02-05 10:30:00
-
-| Scenario | Topology | Platform | Result | Duration |
-|----------|----------|----------|--------|----------|
-| bgp-underlay | 4node | sonic-vpp | PASS | 68s |
-| bgp-overlay | 4node | sonic-vpp | PASS | 72s |
-| service-l3 | 2node | sonic-vpp | PASS | 45s |
-| service-irb | 4node | sonic-vpp | PASS | 55s |
-| service-l2 | 2node | sonic-vpp | PASS | 38s |
-| health | 2node | sonic-vpp | PASS | 30s |
-| baseline | 2node | sonic-vpp | PASS | 35s |
-| full-fabric | 4node | sonic-vpp | FAIL | 140s |
-
-## Failures
-
-### full-fabric
-Step 7 (verify-ping): leaf1 → leaf2 ping failed
-  Expected: 5/5 packets received
-  Got: 0/5 packets received
-
-## Skipped
-
-### full-fabric (when run with --platform sonic-vs)
-Step 7 (verify-ping): SKIP — platform sonic-vs has dataplane: false
-```
-
----
-
-## Verification Tiers
-
-newtest validates at four tiers, delegating to newtron for single-device checks:
-
-| Tier | What | Owner | newtron Method | Failure Mode |
-|------|------|-------|---------------|-------------|
-| **CONFIG_DB** | Redis entries match ChangeSet | newtron | `VerifyChangeSet` | Hard fail |
-| **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | newtron | `GetRoute`, `GetRouteASIC` | Observation |
-| **Operational state** | BGP sessions, interface health | newtron | `RunHealthChecks` | Observation |
-| **Cross-device / data plane** | Route propagation, ping | newtest | Composes newtron primitives | Topology-dependent |
-
-When using `sonic-vs` (no dataplane), data-plane tests are automatically
-skipped based on the platform's `dataplane: false` in `platforms.json`.
-
----
-
-## Writing Custom Scenarios
+For the full list of 38 step actions, see [HLD §5](hld.md).
 
 ### 1. Choose a Topology
 
@@ -441,7 +198,7 @@ steps:
 ### 3. Run It
 
 ```bash
-newtest run -scenario my-test
+newtest start 2node-standalone --scenario my-test
 ```
 
 ### 4. Verify Provisioning Results
@@ -637,8 +394,8 @@ newtest determines the expected values from the topology spec — newtron's
 ### 10. Set Interface Properties
 
 Use `set-interface` to change interface attributes. The `params.property` field
-dispatches to the appropriate method: `ip` → `SetIP`, `vrf` → `SetVRF`,
-anything else → `Set(property, value)`.
+dispatches to the appropriate method: `ip` -> `SetIP`, `vrf` -> `SetVRF`,
+anything else -> `Set(property, value)`.
 
 ```yaml
 # Change MTU
@@ -942,23 +699,216 @@ steps:
     interface: Ethernet1
 ```
 
-Run a suite:
+---
+
+## Running Tests
+
+### Run All Scenarios in a Suite
 
 ```bash
-newtest run --dir newtest/suites/2node-incremental
+newtest start 2node-incremental
+```
+
+This deploys the topology via newtlab (or reuses an existing one), runs all
+scenarios in dependency order, and leaves the topology running. Scenarios
+with `requires` dependencies are skipped if their prerequisites failed.
+
+The suite name resolves to `newtest/suites/2node-incremental/`. You can also
+pass a full path with `--dir`:
+
+```bash
+newtest start --dir newtest/suites/2node-incremental
+```
+
+### Run a Specific Scenario
+
+```bash
+newtest start 2node-incremental --scenario boot-ssh
+```
+
+### Override Platform
+
+```bash
+# Use sonic-vs instead of the scenario's default
+newtest start 2node-incremental --platform sonic-vs
+```
+
+Data plane tests (`verify-ping`) are automatically skipped when the platform
+has `dataplane: false` in `platforms.json`.
+
+### Override Topology
+
+```bash
+newtest start 2node-incremental --topology 4node
+```
+
+### Verbose Output
+
+```bash
+newtest start 2node-incremental -v
+```
+
+Shows per-step results with timing, failure details, and device-level messages.
+
+### JUnit Output
+
+```bash
+newtest start 2node-incremental --junit results.xml
 ```
 
 ---
 
-## Parallel Provisioning
+## Suite Lifecycle
 
-For topologies with many nodes, provision in parallel:
+newtest manages suite runs as stateful lifecycles. State is persisted at
+`~/.newtron/newtest/<suite>/state.json` so you can pause, resume, and monitor
+suites across terminal sessions.
+
+### Start a Suite
 
 ```bash
-newtest run -scenario full-fabric --parallel 4
+newtest start 2node-incremental
 ```
 
-This provisions up to 4 devices simultaneously during `provision` steps.
+This:
+1. Acquires a lock (prevents concurrent runs of the same suite)
+2. Deploys the topology via `EnsureTopology` (reuses if already running)
+3. Runs scenarios in dependency order
+4. Persists state after each scenario completes
+5. Reports results
+
+### Check Progress
+
+From another terminal:
+
+```bash
+newtest status
+```
+
+Output:
+
+```
+newtest: 2node-incremental
+  topology:  2node (deployed, 2 nodes running)
+  platform:  sonic-vpp
+  status:    running (pid 12345)
+  started:   2026-02-14 10:30:00 (5m ago)
+
+  #  SCENARIO              STATUS   REQUIRES  DURATION
+  1  boot-ssh              PASS     —         3s
+  2  provision             PASS     boot-ssh  12s
+  3  verify-provisioning   running  provision step 2/3: verify-health
+  4  bgp-underlay          —        provision —
+  5  service-lifecycle     —        provision —
+
+  progress: 2/5 passed
+```
+
+### Pause a Running Suite
+
+```bash
+newtest pause
+```
+
+The runner finishes the current scenario, then stops. The topology stays
+deployed. State is saved as `paused`.
+
+### Resume a Paused Suite
+
+```bash
+newtest start 2node-incremental
+```
+
+newtest detects the paused state and resumes from where it left off. Already
+completed scenarios are not re-run.
+
+### Stop and Tear Down
+
+```bash
+newtest stop
+```
+
+This destroys the topology and removes all state. The suite must be paused
+or completed first — `stop` refuses to kill a running process.
+
+### Full Lifecycle Example
+
+```bash
+# Terminal 1: start the suite
+newtest start 2node-incremental
+
+# Terminal 2: check progress
+newtest status
+
+# Terminal 2: pause after current scenario
+newtest pause
+
+# Terminal 1: runner finishes current scenario and exits
+# "paused after 3/5 scenarios; resume with: newtest start 2node-incremental"
+
+# Later: resume
+newtest start 2node-incremental
+
+# When done: tear down
+newtest stop
+```
+
+---
+
+## Test Output & Reports
+
+### Console Output (Normal)
+
+```
+newtest: 5 scenarios, topology: 2node, platform: sonic-vpp
+
+  #     SCENARIO              STEPS
+  1     boot-ssh              2
+  2     provision             3
+  3     verify-provisioning   4
+  4     bgp-underlay          5
+  5     service-lifecycle     6
+
+  [1/5]  boot-ssh .................. PASS  (3s)
+  [2/5]  provision ................. PASS  (12s)
+  [3/5]  verify-provisioning ....... PASS  (8s)
+  [4/5]  bgp-underlay .............. PASS  (25s)
+  [5/5]  service-lifecycle ......... FAIL  (18s)
+
+---
+newtest: 5 scenarios: 4 passed, 1 failed  (1m06s)
+
+  FAILED:
+    [5]  service-lifecycle
+         step "check-binding" (verify-config-db): leaf1: key not found
+```
+
+### Console Output (Verbose)
+
+With `-v`, each step within a scenario is shown:
+
+```
+  [3/5]  verify-provisioning
+          [1/4] verify-spine1 ........ PASS  (2s)
+          [2/4] verify-leaf1 ......... PASS  (2s)
+          [3/4] verify-health ........ PASS  (3s)
+          [4/4] verify-bgp ........... PASS  (1s)
+          PASS  (8s)
+```
+
+### Markdown Report
+
+After a suite completes, newtest writes a report to
+`newtest/.generated/report.md` with a summary table and failure/skip details.
+
+### JUnit XML
+
+```bash
+newtest start 2node-incremental --junit results.xml
+```
+
+Produces a JUnit XML file compatible with CI systems (GitHub Actions,
+Jenkins, GitLab CI).
 
 ---
 
@@ -970,15 +920,22 @@ This provisions up to 4 devices simultaneously during `provision` steps.
 |------|---------|
 | 0 | All scenarios passed |
 | 1 | One or more scenarios failed |
-| 2 | Infrastructure error (VM boot failure, etc.) |
+| 2 | Infrastructure error (VM boot failure, SSH unreachable, etc.) |
 
 ### GitHub Actions Example
 
 ```yaml
 - name: Run newtest
   run: |
-    newtest run --all
+    newtest start 2node-incremental --junit results.xml
   timeout-minutes: 30
+
+- name: Upload JUnit results
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: newtest-results
+    path: results.xml
 
 - name: Upload report
   if: always()
@@ -986,14 +943,6 @@ This provisions up to 4 devices simultaneously during `provision` steps.
   with:
     name: newtest-report
     path: newtest/.generated/report.md
-```
-
-### JUnit XML Output
-
-For CI systems that parse JUnit:
-
-```bash
-newtest run --all --junit newtest/.generated/results.xml
 ```
 
 ---
@@ -1057,7 +1006,7 @@ If one fails:
 
 ```bash
 # Run verbose to see which check failed
-newtest run -scenario health -v
+newtest start 2node-standalone --scenario health -v
 
 # SSH in and inspect
 newtlab ssh leaf1
@@ -1071,7 +1020,7 @@ Only `sonic-vpp` images support actual packet forwarding. If using `sonic-vs`:
 
 ```bash
 # Override platform to skip data plane tests
-newtest run -scenario full-fabric --platform sonic-vs
+newtest start 2node-incremental --platform sonic-vs
 ```
 
 ### Wrong Interface Names
@@ -1083,27 +1032,118 @@ platform's `vm_interface_map` in `platforms.json` matches the SONiC image:
 
 The topology spec's interface names must match the mapping.
 
+### Suite Already Running
+
+If you see `suite X already running (pid Y)` but no runner is active:
+
+```bash
+# Check if the process is actually alive
+ps -p <pid>
+
+# If not, the state is stale — stop and retry
+newtest stop
+newtest start <suite>
+```
+
 ---
 
 ## Command Reference
 
-```
-newtest - E2E testing for newtron
+### `newtest start [suite]`
 
-Commands:
-  newtest run                      Run test scenarios
-  newtest list                     List available scenarios
-  newtest topologies               List available topologies
+Deploy topology (if needed), run scenarios, leave topology running.
 
-Run Options:
-  -scenario <name>       Run specific scenario
-  --all                  Run all scenarios
-  --dir <path>           Run incremental suite from directory
-  --topology <name>      Override topology (default: from scenario)
-  --platform <name>      Override platform (default: from scenario)
-  --keep                 Don't destroy topology after tests
-  --no-deploy            Skip deploy (use existing topology)
-  --parallel <n>         Provision n devices in parallel
-  --junit <path>         Write JUnit XML results
-  -v, --verbose          Verbose output
 ```
+newtest start 2node-incremental                        # all scenarios
+newtest start 2node-incremental --scenario boot-ssh    # single scenario
+newtest start --dir path/to/suite                      # explicit path
+```
+
+If a previous run was paused, `start` resumes from where it left off.
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Suite directory (alternative to positional arg) |
+| `--scenario <name>` | Run a single scenario (default: all) |
+| `--topology <name>` | Override topology |
+| `--platform <name>` | Override platform |
+| `--junit <path>` | Write JUnit XML results |
+| `-v, --verbose` | Verbose output |
+
+### `newtest pause`
+
+Signal the running suite to stop after the current scenario completes.
+The topology stays deployed and state is saved as `paused`.
+
+```
+newtest pause
+newtest pause --dir <path>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Suite directory (auto-detected if omitted) |
+
+### `newtest stop`
+
+Destroy the topology and remove suite state. Refuses if the suite has a
+running process — use `newtest pause` first.
+
+```
+newtest stop
+newtest stop --dir <path>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Suite directory (auto-detected if omitted) |
+
+### `newtest status`
+
+Show suite run status. Without `--dir`, shows all suites with state.
+
+```
+newtest status                 # all suites
+newtest status --dir <path>    # specific suite
+newtest status --json          # machine-readable output
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Suite directory |
+| `--json` | JSON output |
+
+### `newtest list [suite]`
+
+Without arguments, lists all available test suites. With a suite name,
+lists the scenarios in that suite with dependency order.
+
+```
+newtest list                       # show all suites
+newtest list 2node-incremental     # show scenarios in suite
+newtest list --dir path/to/suite   # explicit path
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Suite directory (alternative to positional arg) |
+
+### `newtest topologies`
+
+List available topologies with device and link counts.
+
+```
+newtest topologies
+```
+
+No flags.
+
+### `newtest version`
+
+Print version information.
+
+```
+newtest version
+```
+
+No flags.

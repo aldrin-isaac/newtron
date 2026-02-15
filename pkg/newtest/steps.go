@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/device"
-	"github.com/newtron-network/newtron/pkg/network"
+	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
