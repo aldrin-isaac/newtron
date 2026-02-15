@@ -30,6 +30,22 @@ convergence delay.
 
 ## Fix
 
+Two changes:
+
+### 1. Per-device: `ApplyFRRDefaults` — `clear bgp * soft` (both directions)
+
+`ApplyFRRDefaults()` in `pkg/device/device.go` originally ran
+`clear bgp * soft out` (outbound only). This was insufficient: when device A
+runs before device B, device A re-advertises to B, but B still has
+`suppress-fib-pending` active and silently suppresses the routes. When B later
+runs its own `ApplyFRRDefaults`, it only clears outbound — never reprocessing
+the inbound routes it suppressed from A.
+
+Changed to `clear bgp * soft` (both inbound and outbound) so each device also
+reprocesses received routes after `no bgp suppress-fib-pending` takes effect.
+
+### 2. Global: `refreshBGP` — post-provision convergence pass
+
 Added a post-provision BGP refresh step in `Lab.Provision()` in
 `pkg/newtlab/newtlab.go`. After all devices complete provisioning, the
 function waits 5 seconds then SSHs to each device and runs
@@ -48,7 +64,11 @@ This ensures all devices re-advertise routes after all peers are ready.
 
 ## Lesson
 
-When provisioning multiple BGP speakers in parallel, always include a
-global convergence step after all individual provisions complete. Per-device
-soft clears during provisioning are insufficient because peers may not be
-ready yet. A single post-all-provision pass ensures symmetric route exchange.
+1. `suppress-fib-pending` in FRR suppresses route advertisement until the
+   route is confirmed in the FIB. When disabling it (`no bgp suppress-fib-pending`),
+   routes already received while it was active remain suppressed. A `clear bgp *
+   soft` (both directions) is required to reprocess them.
+
+2. When provisioning multiple BGP speakers, always include a global convergence
+   step after all individual provisions complete. Per-device soft clears during
+   provisioning are insufficient because peers may not be ready yet.

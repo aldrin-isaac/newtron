@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -132,19 +133,29 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 	if len(state.Scenarios) > 0 {
 		fmt.Println()
 
-		// Compute column widths
-		maxName := 8 // "SCENARIO"
-		for _, sc := range state.Scenarios {
-			if len(sc.Name) > maxName {
-				maxName = len(sc.Name)
-			}
-		}
-
-		fmt.Printf("  %-4s  %-*s  %-8s  %s\n", "#", maxName, "SCENARIO", "STATUS", "DURATION")
+		t := cli.NewTable("#", "SCENARIO", "STATUS", "REQUIRES", "DURATION").WithPrefix("  ")
 
 		passed, failed, errored, running := 0, 0, 0, 0
 		for i, sc := range state.Scenarios {
-			fmt.Printf("  %-4d  %-*s  %-8s  %s\n", i+1, maxName, sc.Name, colorScenarioStatus(newtest.StepStatus(sc.Status)), sc.Duration)
+			requires := "\u2014" // —
+			if len(sc.Requires) > 0 {
+				requires = strings.Join(sc.Requires, ", ")
+			}
+
+			duration := sc.Duration
+			status := colorScenarioStatus(newtest.StepStatus(sc.Status))
+
+			// Show step progress for running scenarios
+			if sc.Status == "running" && sc.CurrentStep != "" {
+				duration = fmt.Sprintf("step %d/%d: %s", sc.CurrentStepIndex+1, sc.TotalSteps, sc.CurrentStep)
+			}
+
+			// Show skip reason for skipped scenarios
+			if newtest.StepStatus(sc.Status) == newtest.StepStatusSkipped && sc.SkipReason != "" {
+				duration = sc.SkipReason
+			}
+
+			t.Row(fmt.Sprintf("%d", i+1), sc.Name, status, requires, duration)
 
 			switch newtest.StepStatus(sc.Status) {
 			case newtest.StepStatusPassed:
@@ -159,6 +170,7 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 				running++
 			}
 		}
+		t.Flush()
 
 		// Summary line
 		fmt.Printf("\n  progress: %d/%d passed", passed, len(state.Scenarios))

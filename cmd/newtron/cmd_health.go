@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/health"
 )
 
@@ -68,20 +68,13 @@ var healthCheckCmd = &cobra.Command{
 		fmt.Printf("Timestamp: %s\n", report.Timestamp.Format("2006-01-02 15:04:05"))
 		fmt.Printf("Duration: %s\n\n", report.Duration)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "CHECK\tSTATUS\tMESSAGE\tDURATION")
-		fmt.Fprintln(w, "-----\t------\t-------\t--------")
+		t := cli.NewTable("CHECK", "STATUS", "MESSAGE", "DURATION")
 
 		for _, result := range report.Results {
 			status := formatStatus(result.Status)
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				result.Check,
-				status,
-				result.Message,
-				result.Duration,
-			)
+			t.Row(result.Check, status, result.Message, result.Duration.String())
 		}
-		w.Flush()
+		t.Flush()
 
 		fmt.Printf("\nOverall Status: %s\n", formatStatus(report.Overall))
 

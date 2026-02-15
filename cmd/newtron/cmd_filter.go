@@ -6,11 +6,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/spec"
 )
 
@@ -51,18 +51,16 @@ var filterListCmd = &cobra.Command{
 
 		sort.Strings(filterNames)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTYPE\tRULES\tDESCRIPTION")
-		fmt.Fprintln(w, "----\t----\t-----\t-----------")
+		t := cli.NewTable("NAME", "TYPE", "RULES", "DESCRIPTION")
 
 		for _, name := range filterNames {
 			fs, err := app.net.GetFilterSpec(name)
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", name, fs.Type, len(fs.Rules), fs.Description)
+			t.Row(name, fs.Type, fmt.Sprintf("%d", len(fs.Rules)), fs.Description)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},
@@ -97,13 +95,11 @@ var filterShowCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  SEQ\tACTION\tSRC_IP\tDST_IP\tPROTOCOL\tSRC_PORT\tDST_PORT\tDSCP\tPOLICER")
-		fmt.Fprintln(w, "  ---\t------\t------\t------\t--------\t--------\t--------\t----\t-------")
+		t := cli.NewTable("SEQ", "ACTION", "SRC_IP", "DST_IP", "PROTOCOL", "SRC_PORT", "DST_PORT", "DSCP", "POLICER").WithPrefix("  ")
 
 		for _, r := range fs.Rules {
-			fmt.Fprintf(w, "  %d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				r.Sequence,
+			t.Row(
+				fmt.Sprintf("%d", r.Sequence),
 				r.Action,
 				defaultStr(r.SrcIP, defaultStr(r.SrcPrefixList, "-")),
 				defaultStr(r.DstIP, defaultStr(r.DstPrefixList, "-")),
@@ -114,7 +110,7 @@ var filterShowCmd = &cobra.Command{
 				defaultStr(r.Policer, "-"),
 			)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

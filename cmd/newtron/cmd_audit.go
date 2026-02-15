@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/audit"
+	"github.com/newtron-network/newtron/pkg/cli"
 )
 
 var auditCmd = &cobra.Command{
@@ -72,9 +72,7 @@ var auditListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "TIMESTAMP\tUSER\tDEVICE\tOPERATION\tSTATUS")
-		fmt.Fprintln(w, "---------\t----\t------\t---------\t------")
+		t := cli.NewTable("TIMESTAMP", "USER", "DEVICE", "OPERATION", "STATUS")
 
 		for _, event := range events {
 			status := green("ok")
@@ -85,7 +83,7 @@ var auditListCmd = &cobra.Command{
 				status = yellow("dry-run")
 			}
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			t.Row(
 				event.Timestamp.Format("2006-01-02 15:04:05"),
 				event.User,
 				event.Device,
@@ -93,7 +91,7 @@ var auditListCmd = &cobra.Command{
 				status,
 			)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
 
@@ -35,6 +36,9 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 			lab.Force = force
+			lab.OnProgress = func(phase, detail string) {
+				fmt.Printf("  [%s] %s\n", phase, detail)
+			}
 
 			if host != "" {
 				lab.FilterHost(host)
@@ -48,8 +52,7 @@ func newDeployCmd() *cobra.Command {
 			// Print summary
 			state := lab.State
 			fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.Name, len(state.Nodes))
-			fmt.Printf("  %-16s %-10s %-12s %s\n", "NODE", "STATUS", "SSH PORT", "CONSOLE")
-			fmt.Printf("  %-16s %-10s %-12s %s\n", "────────────────", "──────────", "────────────", "───────")
+			t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE").WithPrefix("  ")
 			nodeNames := make([]string, 0, len(state.Nodes))
 			for name := range state.Nodes {
 				nodeNames = append(nodeNames, name)
@@ -57,8 +60,9 @@ func newDeployCmd() *cobra.Command {
 			sort.Strings(nodeNames)
 			for _, name := range nodeNames {
 				node := state.Nodes[name]
-				fmt.Printf("  %-16s %-10s %-12d %d\n", name, node.Status, node.SSHPort, node.ConsolePort)
+				t.Row(name, node.Status, fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort))
 			}
+			t.Flush()
 
 			if provision {
 				fmt.Println("\nProvisioning devices...")

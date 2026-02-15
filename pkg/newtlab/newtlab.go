@@ -33,6 +33,15 @@ type Lab struct {
 	State        *LabState
 	Force        bool
 	DeviceFilter []string // if non-empty, only provision these devices
+
+	// OnProgress is an optional callback for reporting deploy/destroy progress.
+	OnProgress func(phase, detail string)
+}
+
+func (l *Lab) progress(phase, detail string) {
+	if l.OnProgress != nil {
+		l.OnProgress(phase, detail)
+	}
 }
 
 // NewLab loads specs from specDir and returns a configured Lab.
@@ -207,9 +216,11 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		}
 	}
 
+	l.progress("bridges", fmt.Sprintf("starting %d bridge workers", len(l.Links)))
 	if err := l.setupBridges(ctx); err != nil {
 		return err
 	}
+	SaveState(l.State)
 
 	// Check for cancellation before starting VMs
 	select {
@@ -219,22 +230,35 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	default:
 	}
 
+	l.progress("start", fmt.Sprintf("booting %d VMs", len(l.Nodes)))
 	var deployErr error
 	if err := l.startNodes(ctx); err != nil {
 		deployErr = err
 	}
+
+	l.progress("bootstrap", fmt.Sprintf("configuring %d nodes via serial", len(l.Nodes)))
+	l.setNodePhase("bootstrapping")
+	SaveState(l.State)
 	if err := l.bootstrapNodes(ctx); err != nil && deployErr == nil {
 		deployErr = err
 	}
+	l.setNodePhase("")
+	SaveState(l.State)
+
+	l.progress("patch", "applying boot patches")
+	l.setNodePhase("patching")
+	SaveState(l.State)
 	if err := l.applyNodePatches(ctx); err != nil && deployErr == nil {
 		deployErr = err
 	}
+	l.setNodePhase("")
 
 	// Save state (always, even on error — enables cleanup)
 	if err := SaveState(l.State); err != nil {
 		return err
 	}
 
+	l.progress("ready", "all nodes ready")
 	return deployErr
 }
 
@@ -338,13 +362,25 @@ func (l *Lab) startNodes(ctx context.Context) error {
 		l.State.Nodes[name] = &NodeState{
 			PID:         pid,
 			Status:      "running",
+			Phase:       "booting",
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
 			Host:        node.Host,
 			HostIP:      remoteIP,
 		}
+		SaveState(l.State)
+		l.progress("start", fmt.Sprintf("booted %s (pid %d)", name, pid))
 	}
 	return firstErr
+}
+
+// setNodePhase sets the Phase field on all running nodes.
+func (l *Lab) setNodePhase(phase string) {
+	for _, ns := range l.State.Nodes {
+		if ns.Status == "running" {
+			ns.Phase = phase
+		}
+	}
 }
 
 // parallelForNodes runs fn for each node with status "running" in parallel.
@@ -470,6 +506,7 @@ func (l *Lab) Destroy(ctx context.Context) error {
 	// Kill QEMU processes
 	for name, node := range state.Nodes {
 		if IsRunning(node.PID, node.HostIP) {
+			l.progress("stop", fmt.Sprintf("stopping %s", name))
 			if err := StopNode(node.PID, node.HostIP); err != nil {
 				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))
 			}
@@ -477,6 +514,7 @@ func (l *Lab) Destroy(ctx context.Context) error {
 	}
 
 	// Stop bridge processes (per-host)
+	l.progress("bridges", "stopping bridge workers")
 	errs = append(errs, stopAllBridges(state)...)
 
 	// Clean up remote state directories

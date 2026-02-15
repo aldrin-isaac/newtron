@@ -7,11 +7,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 )
 
@@ -73,9 +73,7 @@ var vrfListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tL3VNI\tINTERFACES")
-		fmt.Fprintln(w, "----\t-----\t----------")
+		t := cli.NewTable("NAME", "L3VNI", "INTERFACES")
 
 		skipped := 0
 		for _, name := range vrfNames {
@@ -92,9 +90,9 @@ var vrfListCmd = &cobra.Command{
 				intfs = strings.Join(vrf.Interfaces, ",")
 			}
 
-			fmt.Fprintf(w, "%s\t%s\t%s\n", name, l3vni, intfs)
+			t.Row(name, l3vni, intfs)
 		}
-		w.Flush()
+		t.Flush()
 
 		if skipped > 0 {
 			fmt.Fprintf(os.Stderr, "warning: %d VRF(s) could not be read\n", skipped)
@@ -229,9 +227,7 @@ var vrfStatusCmd = &cobra.Command{
 		fmt.Printf("VRF Status for %s\n\n", bold(app.deviceName))
 
 		// Config view
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "VRF\tL3VNI\tINTERFACES\tSTATE\tROUTES")
-		fmt.Fprintln(w, "---\t-----\t----------\t-----\t------")
+		t := cli.NewTable("VRF", "L3VNI", "INTERFACES", "STATE", "ROUTES")
 
 		for _, s := range statuses {
 			l3vni := dashInt(s.L3VNI)
@@ -244,10 +240,9 @@ var vrfStatusCmd = &cobra.Command{
 			}
 			routeCount := dashInt(s.RouteCount)
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				s.Name, l3vni, intfCount, state, routeCount)
+			t.Row(s.Name, l3vni, intfCount, state, routeCount)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

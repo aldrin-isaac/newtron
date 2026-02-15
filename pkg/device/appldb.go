@@ -46,17 +46,45 @@ func (c *AppDBClient) Close() error {
 	return c.client.Close()
 }
 
+// getRouteHash returns the raw hash for a ROUTE_TABLE key. Default VRF
+// routes are stored without a VRF segment (ROUTE_TABLE:<prefix>); non-default
+// VRF routes include the VRF name (ROUTE_TABLE:<vrf>:<prefix>).
+func (c *AppDBClient) getRouteHash(vrf, prefix string) (map[string]string, error) {
+	var key string
+	if vrf == "" || vrf == "default" {
+		key = "ROUTE_TABLE:" + prefix
+	} else {
+		key = fmt.Sprintf("ROUTE_TABLE:%s:%s", vrf, prefix)
+	}
+	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("reading APP_DB route %s: %w", key, err)
+	}
+	return vals, nil
+}
+
 // GetRoute reads a single route from ROUTE_TABLE by VRF and prefix.
 // Returns nil (not error) if the prefix does not exist.
 // Parses comma-separated nexthop/ifname into []NextHop.
 //
-// APP_DB key format: ROUTE_TABLE:<vrf>:<prefix>
-// Note: APP_DB uses colon separator, unlike CONFIG_DB/STATE_DB which use pipe.
+// APP_DB key format:
+//   - Default VRF: ROUTE_TABLE:<prefix>
+//   - Non-default: ROUTE_TABLE:<vrf>:<prefix>
+//
+// fpmsyncd may omit the /32 suffix for host routes, so if the initial
+// lookup fails and the prefix is a /32, a second lookup is attempted
+// without the mask.
 func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error) {
-	key := fmt.Sprintf("ROUTE_TABLE:%s:%s", vrf, prefix)
-	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	vals, err := c.getRouteHash(vrf, prefix)
 	if err != nil {
-		return nil, fmt.Errorf("reading APP_DB route %s: %w", key, err)
+		return nil, err
+	}
+	// Retry without /32 — fpmsyncd sometimes omits the mask for host routes.
+	if len(vals) == 0 && strings.HasSuffix(prefix, "/32") {
+		vals, err = c.getRouteHash(vrf, strings.TrimSuffix(prefix, "/32"))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(vals) == 0 {
 		return nil, nil

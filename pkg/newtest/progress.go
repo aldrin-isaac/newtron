@@ -253,13 +253,19 @@ func (p *ConsoleProgress) formatDuration(d time.Duration) string {
 type StateReporter struct {
 	Inner ProgressReporter
 	State *RunState
+
+	scenarioIndex int // tracks current scenario index for StepStart
 }
 
 func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
-	// Initialize scenario states
+	// Initialize scenario states with metadata
 	r.State.Scenarios = make([]ScenarioState, len(scenarios))
 	for i, s := range scenarios {
-		r.State.Scenarios[i] = ScenarioState{Name: s.Name}
+		r.State.Scenarios[i] = ScenarioState{
+			Name:       s.Name,
+			TotalSteps: len(s.Steps),
+			Requires:   s.Requires,
+		}
 	}
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
@@ -268,6 +274,13 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 }
 
 func (r *StateReporter) ScenarioStart(name string, index, total int) {
+	r.scenarioIndex = index
+	if index < len(r.State.Scenarios) {
+		r.State.Scenarios[index].Status = "running"
+	}
+	if err := SaveRunState(r.State); err != nil {
+		util.Logger.Warnf("save run state: %v", err)
+	}
 	r.Inner.ScenarioStart(name, index, total)
 }
 
@@ -275,6 +288,9 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 	if index < len(r.State.Scenarios) {
 		r.State.Scenarios[index].Status = string(result.Status)
 		r.State.Scenarios[index].Duration = result.Duration.Round(time.Second).String()
+		r.State.Scenarios[index].CurrentStep = ""
+		r.State.Scenarios[index].CurrentStepIndex = 0
+		r.State.Scenarios[index].SkipReason = result.SkipReason
 	}
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
@@ -283,6 +299,13 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 }
 
 func (r *StateReporter) StepStart(scenario string, step *Step, index, total int) {
+	if r.scenarioIndex < len(r.State.Scenarios) {
+		r.State.Scenarios[r.scenarioIndex].CurrentStep = step.Name
+		r.State.Scenarios[r.scenarioIndex].CurrentStepIndex = index
+	}
+	if err := SaveRunState(r.State); err != nil {
+		util.Logger.Warnf("save run state: %v", err)
+	}
 	r.Inner.StepStart(scenario, step, index, total)
 }
 

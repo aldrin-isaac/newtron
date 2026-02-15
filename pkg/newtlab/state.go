@@ -22,7 +22,8 @@ type LabState struct {
 // NodeState tracks per-node runtime state.
 type NodeState struct {
 	PID            int    `json:"pid"`
-	Status         string `json:"status"` // "running", "stopped", "error"
+	Status         string `json:"status"`          // "running", "stopped", "error"
+	Phase          string `json:"phase,omitempty"` // deploy phase: "booting", "bootstrapping", "patching"
 	SSHPort        int    `json:"ssh_port"`
 	ConsolePort    int    `json:"console_port"`
 	OriginalMgmtIP string `json:"original_mgmt_ip"`

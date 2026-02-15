@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+
+	"github.com/newtron-network/newtron/pkg/cli"
 )
 
 var bgpCmd = &cobra.Command{
@@ -117,9 +118,7 @@ Examples:
 		// --- Configured Neighbors Table ---
 		if configDB != nil && len(configDB.BGPNeighbor) > 0 {
 			fmt.Println("\nConfigured Neighbors:")
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  NEIGHBOR\tTYPE\tREMOTE AS\tLOCAL ADDR\tDESCRIPTION\tADMIN")
-			fmt.Fprintln(w, "  --------\t----\t---------\t----------\t-----------\t-----")
+			t := cli.NewTable("NEIGHBOR", "TYPE", "REMOTE AS", "LOCAL ADDR", "DESCRIPTION", "ADMIN").WithPrefix("  ")
 
 			for addr, neighbor := range configDB.BGPNeighbor {
 				neighborType := bgpNeighborType(neighbor.LocalAddr, resolved.LoopbackIP)
@@ -136,10 +135,9 @@ Examples:
 
 				description := dash(neighbor.Name)
 
-				fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\n",
-					addr, neighborType, neighbor.ASN, localAddr, description, adminStatus)
+				t.Row(addr, neighborType, neighbor.ASN, localAddr, description, adminStatus)
 			}
-			w.Flush()
+			t.Flush()
 		}
 
 		// --- Operational State ---
@@ -158,9 +156,7 @@ Examples:
 
 			if len(bgp.Neighbors) > 0 {
 				fmt.Println()
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(w, "  NEIGHBOR\tREMOTE AS\tSTATE\tPFX RCVD\tPFX SENT\tUPTIME")
-				fmt.Fprintln(w, "  --------\t---------\t-----\t--------\t--------\t------")
+				t := cli.NewTable("NEIGHBOR", "REMOTE AS", "STATE", "PFX RCVD", "PFX SENT", "UPTIME").WithPrefix("  ")
 
 				for _, neighbor := range bgp.Neighbors {
 					state := neighbor.State
@@ -172,16 +168,16 @@ Examples:
 
 					uptime := dash(neighbor.Uptime)
 
-					fmt.Fprintf(w, "  %s\t%d\t%s\t%d\t%d\t%s\n",
+					t.Row(
 						neighbor.Address,
-						neighbor.RemoteAS,
+						fmt.Sprintf("%d", neighbor.RemoteAS),
 						state,
-						neighbor.PfxRcvd,
-						neighbor.PfxSent,
+						fmt.Sprintf("%d", neighbor.PfxRcvd),
+						fmt.Sprintf("%d", neighbor.PfxSent),
 						uptime,
 					)
 				}
-				w.Flush()
+				t.Flush()
 			}
 		}
 

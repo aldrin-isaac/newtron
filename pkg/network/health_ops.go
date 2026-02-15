@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -54,8 +55,6 @@ func (d *Device) RunHealthChecks(ctx context.Context, checkType string) ([]Healt
 }
 
 func (d *Device) checkBGP() []HealthCheckResult {
-	var results []HealthCheckResult
-
 	if d.configDB == nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}
 	}
@@ -64,42 +63,120 @@ func (d *Device) checkBGP() []HealthCheckResult {
 		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}
 	}
 
-	stateClient := d.conn.StateClient()
+	// Build expected neighbor set from CONFIG_DB: vrf → []ip
+	expected := make(map[string][]string)
 	for key := range d.configDB.BGPNeighbor {
-		// Key format: "vrf|ip" (e.g., "default|10.1.0.1")
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) != 2 {
-			results = append(results, HealthCheckResult{
-				Check:   "bgp",
-				Status:  "fail",
-				Message: fmt.Sprintf("Malformed BGP neighbor key: %s", key),
-			})
 			continue
 		}
-		vrf, neighbor := parts[0], parts[1]
+		expected[parts[0]] = append(expected[parts[0]], parts[1])
+	}
 
-		entry, err := stateClient.GetBGPNeighborState(vrf, neighbor)
-		if err != nil {
-			results = append(results, HealthCheckResult{
-				Check:   "bgp",
-				Status:  "fail",
-				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): not found in STATE_DB", neighbor, vrf),
-			})
-			continue
+	// Try STATE_DB first (populated by bgpmon on hardware SONiC)
+	if results := d.checkBGPFromStateDB(expected); results != nil {
+		return results
+	}
+
+	// Fall back to vtysh (VPP and images without bgpmon)
+	return d.checkBGPFromVtysh(expected)
+}
+
+// checkBGPFromStateDB checks BGP state via STATE_DB BGP_NEIGHBOR_TABLE.
+// Returns nil if STATE_DB has no BGP neighbor entries (caller should fall back).
+func (d *Device) checkBGPFromStateDB(expected map[string][]string) []HealthCheckResult {
+	stateClient := d.conn.StateClient()
+	var results []HealthCheckResult
+	anyFound := false
+
+	for vrf, neighbors := range expected {
+		for _, neighbor := range neighbors {
+			entry, err := stateClient.GetBGPNeighborState(vrf, neighbor)
+			if err != nil {
+				// Entry not found — might be missing bgpmon, defer to fallback
+				continue
+			}
+			anyFound = true
+			if entry.State == "Established" {
+				results = append(results, HealthCheckResult{
+					Check:   "bgp",
+					Status:  "pass",
+					Message: fmt.Sprintf("BGP neighbor %s (vrf %s): Established", neighbor, vrf),
+				})
+			} else {
+				results = append(results, HealthCheckResult{
+					Check:   "bgp",
+					Status:  "fail",
+					Message: fmt.Sprintf("BGP neighbor %s (vrf %s): %s", neighbor, vrf, entry.State),
+				})
+			}
 		}
+	}
 
-		if entry.State == "Established" {
-			results = append(results, HealthCheckResult{
-				Check:   "bgp",
-				Status:  "pass",
-				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): Established", neighbor, vrf),
-			})
-		} else {
-			results = append(results, HealthCheckResult{
-				Check:   "bgp",
-				Status:  "fail",
-				Message: fmt.Sprintf("BGP neighbor %s (vrf %s): %s", neighbor, vrf, entry.State),
-			})
+	if !anyFound {
+		return nil // No STATE_DB entries at all — fall back to vtysh
+	}
+	return results
+}
+
+// checkBGPFromVtysh checks BGP state via "vtysh -c 'show bgp summary json'".
+// Used when STATE_DB has no BGP_NEIGHBOR_TABLE entries (e.g., SONiC VPP
+// images that don't ship bgpmon).
+func (d *Device) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResult {
+	tunnel := d.conn.Tunnel()
+	if tunnel == nil {
+		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "no SSH tunnel for vtysh fallback"}}
+	}
+
+	output, err := tunnel.ExecCommand("sudo vtysh -c 'show bgp summary json'")
+	if err != nil {
+		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh: %s", err)}}
+	}
+
+	// Parse vtysh JSON: {"ipv4Unicast": {"peers": {"10.1.0.0": {"state": "Established", ...}}}}
+	var summary map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(output), &summary); err != nil {
+		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh parse: %s", err)}}
+	}
+
+	// Collect peer states from all address families
+	peerStates := make(map[string]string) // ip → state
+	for _, afData := range summary {
+		var af struct {
+			Peers map[string]struct {
+				State string `json:"state"`
+			} `json:"peers"`
+		}
+		if json.Unmarshal(afData, &af) == nil {
+			for ip, peer := range af.Peers {
+				peerStates[ip] = peer.State
+			}
+		}
+	}
+
+	var results []HealthCheckResult
+	for vrf, neighbors := range expected {
+		for _, neighbor := range neighbors {
+			state, ok := peerStates[neighbor]
+			if !ok {
+				results = append(results, HealthCheckResult{
+					Check:   "bgp",
+					Status:  "fail",
+					Message: fmt.Sprintf("BGP neighbor %s (vrf %s): not found in FRR", neighbor, vrf),
+				})
+			} else if state == "Established" {
+				results = append(results, HealthCheckResult{
+					Check:   "bgp",
+					Status:  "pass",
+					Message: fmt.Sprintf("BGP neighbor %s (vrf %s): Established", neighbor, vrf),
+				})
+			} else {
+				results = append(results, HealthCheckResult{
+					Check:   "bgp",
+					Status:  "fail",
+					Message: fmt.Sprintf("BGP neighbor %s (vrf %s): %s", neighbor, vrf, state),
+				})
+			}
 		}
 	}
 

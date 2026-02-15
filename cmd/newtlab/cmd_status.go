@@ -7,10 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtlab"
 )
 
-var jsonOutput bool
+var (
+	jsonOutput      bool
+	showBridgeStats bool
+)
 
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,9 +25,10 @@ func newStatusCmd() *cobra.Command {
 Without arguments, shows all deployed labs.
 With a topology name, shows detailed status for that lab.
 
-  newtlab status           # all labs
-  newtlab status 2node     # detailed view
-  newtlab status --json    # machine-readable output`,
+  newtlab status                      # all labs
+  newtlab status 2node                # detailed view
+  newtlab status 2node --bridge-stats # include link connectivity
+  newtlab status --json               # machine-readable output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No args and no -S: show all deployed labs
@@ -41,6 +46,7 @@ With a topology name, shows detailed status for that lab.
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
+	cmd.Flags().BoolVar(&showBridgeStats, "bridge-stats", false, "include link connectivity and traffic counters")
 	return cmd
 }
 
@@ -96,32 +102,68 @@ func showLabDetail(labName string) error {
 	fmt.Printf("Spec dir: %s\n\n", state.SpecDir)
 
 	// Node table
-	fmt.Printf("%-16s %-10s %-12s %-12s %s\n", "NODE", "STATUS", "SSH PORT", "CONSOLE", "PID")
-	fmt.Printf("%-16s %-10s %-12s %-12s %s\n", "────────────────", "──────────", "────────────", "────────────", "──────")
+	t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE", "PID")
 	for name, node := range state.Nodes {
-		status := node.Status
-		switch status {
-		case "running":
-			status = green(status)
-		case "error":
-			status = red(status)
-		case "stopped":
-			status = yellow(status)
+		var displayStatus string
+		switch {
+		case node.Status == "error":
+			displayStatus = red("error")
+		case node.Status == "stopped":
+			displayStatus = yellow("stopped")
+		case node.Phase != "":
+			displayStatus = yellow(node.Phase)
+		default:
+			displayStatus = green(node.Status)
 		}
-		fmt.Printf("%-16s %-10s %-12d %-12d %d\n", name, status, node.SSHPort, node.ConsolePort, node.PID)
+		t.Row(name, displayStatus, fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
 	}
+	t.Flush()
 
 	// Link table
 	if len(state.Links) > 0 {
-		fmt.Printf("\n%-40s %-8s %-8s\n", "LINK", "A_PORT", "Z_PORT")
-		fmt.Printf("%-40s %-8s %-8s\n", "────────────────────────────────────────", "────────", "────────")
-		for _, link := range state.Links {
-			fmt.Printf("%-40s %-8d %-8d\n",
-				fmt.Sprintf("%s ↔ %s", link.A, link.Z),
-				link.APort, link.ZPort,
-			)
+		fmt.Println()
+		if showBridgeStats {
+			showLinkTableWithStats(labName, state)
+		} else {
+			lt := cli.NewTable("LINK", "A_PORT", "Z_PORT")
+			for _, link := range state.Links {
+				lt.Row(fmt.Sprintf("%s ↔ %s", link.A, link.Z), fmt.Sprintf("%d", link.APort), fmt.Sprintf("%d", link.ZPort))
+			}
+			lt.Flush()
 		}
 	}
 
 	return nil
+}
+
+// showLinkTableWithStats prints a link table enriched with live bridge stats.
+func showLinkTableWithStats(labName string, state *newtlab.LabState) {
+	stats, statsErr := newtlab.QueryAllBridgeStats(labName)
+
+	// Build lookup: "A|Z" → LinkStats
+	statsMap := map[string]*newtlab.LinkStats{}
+	if statsErr == nil {
+		for i := range stats.Links {
+			ls := &stats.Links[i]
+			key := ls.A + "|" + ls.Z
+			statsMap[key] = ls
+		}
+	}
+
+	lt := cli.NewTable("LINK", "STATUS", "A→Z", "Z→A", "SESSIONS")
+	for _, link := range state.Links {
+		label := fmt.Sprintf("%s ↔ %s", link.A, link.Z)
+		key := link.A + "|" + link.Z
+
+		if ls, ok := statsMap[key]; ok {
+			if ls.Connected {
+				lt.Row(label, green("connected"), humanBytes(ls.AToZBytes), humanBytes(ls.ZToABytes), fmt.Sprintf("%d", ls.Sessions))
+			} else {
+				lt.Row(label, yellow("waiting"), "—", "—", "—")
+			}
+		} else {
+			lt.Row(label, "—", "—", "—", "—")
+		}
+	}
+	lt.Flush()
 }

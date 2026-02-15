@@ -7,11 +7,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 )
 
@@ -55,9 +55,7 @@ var lagListCmd = &cobra.Command{
 
 		sort.Strings(portChannels)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tSTATUS\tMEMBERS\tACTIVE")
-		fmt.Fprintln(w, "----\t------\t-------\t------")
+		t := cli.NewTable("NAME", "STATUS", "MEMBERS", "ACTIVE")
 
 		for _, pcName := range portChannels {
 			pc, err := dev.GetPortChannel(pcName)
@@ -67,15 +65,14 @@ var lagListCmd = &cobra.Command{
 
 			status := formatAdminStatus(pc.AdminStatus)
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%d/%d\n",
+			t.Row(
 				pc.Name,
 				status,
 				strings.Join(pc.Members, ","),
-				len(pc.ActiveMembers),
-				len(pc.Members),
+				fmt.Sprintf("%d/%d", len(pc.ActiveMembers), len(pc.Members)),
 			)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},
@@ -205,9 +202,7 @@ Examples:
 			return json.NewEncoder(os.Stdout).Encode(statuses)
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tADMIN\tOPER\tMEMBERS\tACTIVE\tMTU")
-		fmt.Fprintln(w, "----\t-----\t----\t-------\t------\t---")
+		t := cli.NewTable("NAME", "ADMIN", "OPER", "MEMBERS", "ACTIVE", "MTU")
 
 		for _, s := range statuses {
 			admin := formatAdminStatus(s.AdminStatus)
@@ -219,17 +214,16 @@ Examples:
 
 			mtu := dashInt(s.MTU)
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d/%d\t%s\n",
+			t.Row(
 				s.Name,
 				admin,
 				oper,
 				strings.Join(s.Members, ","),
-				len(s.ActiveMembers),
-				len(s.Members),
+				fmt.Sprintf("%d/%d", len(s.ActiveMembers), len(s.Members)),
 				mtu,
 			)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

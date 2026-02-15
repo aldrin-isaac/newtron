@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 )
 
@@ -49,9 +49,7 @@ var interfaceListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "INTERFACE\tADMIN\tOPER\tIP ADDRESS\tVRF\tSERVICE")
-		fmt.Fprintln(w, "---------\t-----\t----\t----------\t---\t-------")
+		t := cli.NewTable("INTERFACE", "ADMIN", "OPER", "IP ADDRESS", "VRF", "SERVICE")
 
 		skipped := 0
 		for _, name := range interfaces {
@@ -80,16 +78,9 @@ var interfaceListCmd = &cobra.Command{
 
 			svc := dash(intf.ServiceName())
 
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				name,
-				adminStatus,
-				operStatus,
-				ipAddr,
-				vrf,
-				svc,
-			)
+			t.Row(name, adminStatus, operStatus, ipAddr, vrf, svc)
 		}
-		w.Flush()
+		t.Flush()
 
 		if skipped > 0 {
 			fmt.Fprintf(os.Stderr, "warning: %d interface(s) could not be read\n", skipped)

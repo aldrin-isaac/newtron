@@ -7,11 +7,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/spec"
 )
@@ -56,18 +56,16 @@ var qosListCmd = &cobra.Command{
 
 		sort.Strings(policies)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tQUEUES\tDESCRIPTION")
-		fmt.Fprintln(w, "----\t------\t-----------")
+		t := cli.NewTable("NAME", "QUEUES", "DESCRIPTION")
 
 		for _, name := range policies {
 			policy, err := app.net.GetQoSPolicy(name)
 			if err != nil {
 				continue
 			}
-			fmt.Fprintf(w, "%s\t%d\t%s\n", name, len(policy.Queues), policy.Description)
+			t.Row(name, fmt.Sprintf("%d", len(policy.Queues)), policy.Description)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},
@@ -101,9 +99,7 @@ var qosShowCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  INDEX\tNAME\tTYPE\tWEIGHT\tECN\tDSCP")
-		fmt.Fprintln(w, "  -----\t----\t----\t------\t---\t----")
+		t := cli.NewTable("INDEX", "NAME", "TYPE", "WEIGHT", "ECN", "DSCP").WithPrefix("  ")
 
 		for i, q := range policy.Queues {
 			weight := dashInt(q.Weight)
@@ -120,9 +116,9 @@ var qosShowCmd = &cobra.Command{
 				dscp = strings.Join(parts, ",")
 			}
 			name := dash(q.Name)
-			fmt.Fprintf(w, "  %d\t%s\t%s\t%s\t%s\t%s\n", i, name, q.Type, weight, ecn, dscp)
+			t.Row(fmt.Sprintf("%d", i), name, q.Type, weight, ecn, dscp)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

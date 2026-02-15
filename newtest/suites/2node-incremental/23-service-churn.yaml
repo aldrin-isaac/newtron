@@ -24,13 +24,13 @@ steps:
     key: Ethernet1
     expect:
       fields:
-        service: customer-l3
+        service_name: customer-l3
 
   - name: verify-vrf-exists
     action: verify-config-db
     devices: [leaf1]
     table: VRF
-    key: Vrf_customer-vpn_Ethernet1
+    key: customer-l3-Eth1
     expect:
       exists: true
 
@@ -51,6 +51,6 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VRF
-    key: Vrf_customer-vpn_Ethernet1
+    key: customer-l3-Eth1
     expect:
       exists: false

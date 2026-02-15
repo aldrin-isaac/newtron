@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/spec"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -60,17 +60,15 @@ var serviceListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTYPE\tDESCRIPTION")
-		fmt.Fprintln(w, "----\t----\t-----------")
+		t := cli.NewTable("NAME", "TYPE", "DESCRIPTION")
 
 		for _, name := range services {
 			svc, _ := app.net.GetService(name)
 			if svc != nil {
-				fmt.Fprintf(w, "%s\t%s\t%s\n", name, svc.ServiceType, svc.Description)
+				t.Row(name, svc.ServiceType, svc.Description)
 			}
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

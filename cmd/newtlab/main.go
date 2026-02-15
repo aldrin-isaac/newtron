@@ -83,7 +83,6 @@ func init() {
 		newStartCmd(),
 		newProvisionCmd(),
 		newBridgeCmd(),
-		newBridgeStatsCmd(),
 		newVersionCmd(),
 	)
 }
@@ -206,7 +205,7 @@ func newListCmd() *cobra.Command {
 				}
 			}
 
-			fmt.Printf("  %-20s %-8s %-6s %-10s %s\n", "TOPOLOGY", "DEVICES", "LINKS", "STATUS", "NODES")
+			t := cli.NewTable("TOPOLOGY", "DEVICES", "LINKS", "STATUS", "NODES").WithPrefix("  ")
 			for _, e := range entries {
 				if !e.IsDir() {
 					continue
@@ -244,8 +243,9 @@ func newListCmd() *cobra.Command {
 					}
 				}
 
-				fmt.Printf("  %-20s %-8d %-6d %-10s %s\n", e.Name(), devices, links, status, nodes)
+				t.Row(e.Name(), fmt.Sprintf("%d", devices), fmt.Sprintf("%d", links), status, nodes)
 			}
+			t.Flush()
 			return nil
 		},
 	}
@@ -290,3 +290,22 @@ func newVersionCmd() *cobra.Command {
 func green(s string) string  { return cli.Green(s) }
 func yellow(s string) string { return cli.Yellow(s) }
 func red(s string) string    { return cli.Red(s) }
+
+// humanBytes formats a byte count into a human-readable string.
+func humanBytes(b int64) string {
+	const (
+		KB = 1024
+		MB = 1024 * KB
+		GB = 1024 * MB
+	)
+	switch {
+	case b >= GB:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(GB))
+	case b >= MB:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(MB))
+	case b >= KB:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(KB))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
+}

@@ -2,7 +2,7 @@ name: qos-datacenter
 description: Apply server-irb service and verify 8q-datacenter QoS policy with ECN/WRED
 topology: 2node
 platform: sonic-vpp
-requires: [vlan-lifecycle]
+requires: [vlan-lifecycle, service-remove]
 
 steps:
   - name: apply-server-irb

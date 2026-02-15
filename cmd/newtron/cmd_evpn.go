@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 	"github.com/newtron-network/newtron/pkg/spec"
 )
@@ -143,9 +143,7 @@ var evpnStatusCmd = &cobra.Command{
 		if configDB == nil || len(configDB.VXLANTunnelMap) == 0 {
 			fmt.Println("  (none)")
 		} else {
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "  VNI\tTYPE\tRESOURCE")
-			fmt.Fprintln(w, "  ---\t----\t--------")
+			t := cli.NewTable("VNI", "TYPE", "RESOURCE").WithPrefix("  ")
 			for _, mapping := range configDB.VXLANTunnelMap {
 				resType := "L2"
 				res := mapping.VLAN
@@ -153,9 +151,9 @@ var evpnStatusCmd = &cobra.Command{
 					resType = "L3"
 					res = mapping.VRF
 				}
-				fmt.Fprintf(w, "  %s\t%s\t%s\n", mapping.VNI, resType, res)
+				t.Row(mapping.VNI, resType, res)
 			}
-			w.Flush()
+			t.Flush()
 		}
 
 		// --- VRFs with L3VNI ---
@@ -235,9 +233,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tL3VNI\tIMPORT RT\tEXPORT RT\tDESCRIPTION")
-		fmt.Fprintln(w, "----\t-----\t---------\t---------\t-----------")
+		t := cli.NewTable("NAME", "L3VNI", "IMPORT RT", "EXPORT RT", "DESCRIPTION")
 
 		for name, ipvpn := range ipvpns {
 			importRT := "-"
@@ -249,10 +245,9 @@ var evpnIpvpnListCmd = &cobra.Command{
 				exportRT = strings.Join(ipvpn.ExportRT, ",")
 			}
 			desc := dash(ipvpn.Description)
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n",
-				name, ipvpn.L3VNI, importRT, exportRT, desc)
+			t.Row(name, fmt.Sprintf("%d", ipvpn.L3VNI), importRT, exportRT, desc)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},
@@ -432,9 +427,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tL2VNI\tARP SUPPRESS\tDESCRIPTION")
-		fmt.Fprintln(w, "----\t-----\t------------\t-----------")
+		t := cli.NewTable("NAME", "L2VNI", "ARP SUPPRESS", "DESCRIPTION")
 
 		for name, macvpn := range macvpns {
 			arpSuppress := "no"
@@ -442,10 +435,9 @@ var evpnMacvpnListCmd = &cobra.Command{
 				arpSuppress = "yes"
 			}
 			desc := dash(macvpn.Description)
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n",
-				name, macvpn.L2VNI, arpSuppress, desc)
+			t.Row(name, fmt.Sprintf("%d", macvpn.L2VNI), arpSuppress, desc)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

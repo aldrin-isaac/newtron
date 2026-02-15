@@ -866,18 +866,20 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults failed: %w (output: %s)", err, output)
 	}
 
-	// Force route re-advertisement after changing defaults. Without this,
-	// routes suppressed during initial session establishment (before
-	// suppress-fib-pending was disabled) may remain un-advertised.
-	_, _ = d.tunnel.ExecCommand("vtysh -c 'clear bgp * soft out'")
+	// Force route reprocessing after changing defaults. "soft" (without
+	// direction) clears both inbound and outbound: outbound re-advertises
+	// local routes, inbound reprocesses received routes that may have been
+	// suppressed while suppress-fib-pending was still active on this device.
+	_, _ = d.tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
 
 	return nil
 }
 
 // RestartService restarts a SONiC Docker container by name (e.g., "bgp", "swss",
-// "syncd") via SSH. Use this instead of ReloadConfig for incremental changes —
-// config reload is destructive (flushes CONFIG_DB, stops ALL services, reloads
-// from disk) and breaks VPP syncd.
+// "syncd") via SSH. Uses "docker restart" instead of "systemctl restart" because
+// SONiC VPP's systemd unit has an ExecStopPost script (write_standby.py) that
+// exits with error code 1 on non-Dual-ToR systems, causing systemctl to report
+// failure even though the container restarted successfully.
 func (d *Device) RestartService(ctx context.Context, name string) error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -889,7 +891,7 @@ func (d *Device) RestartService(ctx context.Context, name string) error {
 		return fmt.Errorf("restart service requires SSH connection (no SSH credentials configured)")
 	}
 
-	output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo systemctl restart %s", name))
+	output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo docker restart %s", name))
 	if err != nil {
 		return fmt.Errorf("restart service %s failed: %w (output: %s)", name, err, output)
 	}

@@ -584,15 +584,21 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 		if err != nil {
 			return StepStatusError, fmt.Sprintf("health check error: %s", err)
 		}
-		passed, failed := 0, 0
+		passed, warned, failed := 0, 0, 0
 		for _, hc := range results {
-			if hc.Status == "pass" {
+			switch hc.Status {
+			case "pass":
 				passed++
-			} else {
+			case "warn":
+				warned++
+			default:
 				failed++
 			}
 		}
 		if failed == 0 {
+			if warned > 0 {
+				return StepStatusPassed, fmt.Sprintf("overall ok (%d passed, %d warnings)", passed, warned)
+			}
 			return StepStatusPassed, fmt.Sprintf("overall ok (%d checks passed)", passed)
 		}
 		return StepStatusFailed, fmt.Sprintf("overall failed (%d passed, %d failed)", passed, failed)
@@ -771,11 +777,11 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 		}
 	}
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		iface, err := dev.GetInterface(step.Interface)
-		if err != nil {
-			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
-		}
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			iface, err := dev.GetInterface(step.Interface)
+			if err != nil {
+				return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+			}
 			return iface.ApplyService(ctx, step.Service, opts)
 		})
 		if err != nil {
@@ -793,11 +799,11 @@ type removeServiceExecutor struct{}
 
 func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		iface, err := dev.GetInterface(step.Interface)
-		if err != nil {
-			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
-		}
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			iface, err := dev.GetInterface(step.Interface)
+			if err != nil {
+				return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+			}
 			return iface.RemoveService(ctx)
 		})
 		if err != nil {
@@ -896,26 +902,20 @@ func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 	value := strParam(step.Params, "value")
 
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		iface, err := dev.GetInterface(step.Interface)
-		if err != nil {
-			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
-		}
-
-		var cs *network.ChangeSet
-		switch property {
-		case "ip":
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			iface, err := dev.GetInterface(step.Interface)
+			if err != nil {
+				return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+			}
+			switch property {
+			case "ip":
 				return iface.SetIP(ctx, value)
-			})
-		case "vrf":
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			case "vrf":
 				return iface.SetVRF(ctx, value)
-			})
-		default:
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			default:
 				return iface.Set(ctx, property, value)
-			})
-		}
+			}
+		})
 		if err != nil {
 			return nil, "", fmt.Errorf("set-interface %s %s=%s: %s", step.Interface, property, value, err)
 		}
@@ -1320,25 +1320,19 @@ func (e *bgpAddNeighborExecutor) Execute(ctx context.Context, r *Runner, step *S
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		var cs *network.ChangeSet
-		var err error
-		if step.Interface != "" {
-			iface, ifErr := dev.GetInterface(step.Interface)
-			if ifErr != nil {
-				return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, ifErr)
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			if step.Interface != "" {
+				iface, err := dev.GetInterface(step.Interface)
+				if err != nil {
+					return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+				}
+				return iface.AddBGPNeighbor(ctx, network.DirectBGPNeighborConfig{
+					NeighborIP: neighborIP,
+					RemoteAS:   remoteASN,
+				})
 			}
-			cfg := network.DirectBGPNeighborConfig{
-				NeighborIP: neighborIP,
-				RemoteAS:   remoteASN,
-			}
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
-				return iface.AddBGPNeighbor(ctx, cfg)
-			})
-		} else {
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
-				return dev.AddLoopbackBGPNeighbor(ctx, neighborIP, remoteASN, "", false)
-			})
-		}
+			return dev.AddLoopbackBGPNeighbor(ctx, neighborIP, remoteASN, "", false)
+		})
 		if err != nil {
 			return nil, "", fmt.Errorf("bgp-add-neighbor %s: %s", neighborIP, err)
 		}
@@ -1356,21 +1350,16 @@ func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		var cs *network.ChangeSet
-		var err error
-		if step.Interface != "" {
-			iface, ifErr := dev.GetInterface(step.Interface)
-			if ifErr != nil {
-				return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, ifErr)
-			}
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
+		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			if step.Interface != "" {
+				iface, err := dev.GetInterface(step.Interface)
+				if err != nil {
+					return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+				}
 				return iface.RemoveBGPNeighbor(ctx, neighborIP)
-			})
-		} else {
-			cs, err = dev.ExecuteOp(func() (*network.ChangeSet, error) {
-				return dev.RemoveBGPNeighbor(ctx, neighborIP)
-			})
-		}
+			}
+			return dev.RemoveBGPNeighbor(ctx, neighborIP)
+		})
 		if err != nil {
 			return nil, "", fmt.Errorf("bgp-remove-neighbor %s: %s", neighborIP, err)
 		}
@@ -1386,11 +1375,11 @@ type refreshServiceExecutor struct{}
 
 func (e *refreshServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.executeForDevices(step, func(dev *network.Device, _ string) (*network.ChangeSet, string, error) {
-		iface, err := dev.GetInterface(step.Interface)
-		if err != nil {
-			return nil, "", fmt.Errorf("getting interface %s: %s", step.Interface, err)
-		}
 		cs, err := dev.ExecuteOp(func() (*network.ChangeSet, error) {
+			iface, err := dev.GetInterface(step.Interface)
+			if err != nil {
+				return nil, fmt.Errorf("getting interface %s: %s", step.Interface, err)
+			}
 			return iface.RefreshService(ctx)
 		})
 		if err != nil {

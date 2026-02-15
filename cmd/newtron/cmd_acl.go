@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 )
 
@@ -84,15 +84,12 @@ var aclListCmd = &cobra.Command{
 			return nil
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tTYPE\tSTAGE\tINTERFACES\tRULES")
-		fmt.Fprintln(w, "----\t----\t-----\t----------\t-----")
+		t := cli.NewTable("NAME", "TYPE", "STAGE", "INTERFACES", "RULES")
 
 		for name, table := range configDB.ACLTable {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\n",
-				name, table.Type, table.Stage, table.Ports, ruleCounts[name])
+			t.Row(name, table.Type, table.Stage, table.Ports, fmt.Sprintf("%d", ruleCounts[name]))
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},
@@ -168,23 +165,20 @@ var aclShowCmd = &cobra.Command{
 
 		// Show rules
 		fmt.Println("\nRules:")
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "  RULE\tPRIORITY\tACTION\tSRC_IP\tDST_IP\tPROTOCOL\tDST_PORT")
-		fmt.Fprintln(w, "  ----\t--------\t------\t------\t------\t--------\t--------")
+		t := cli.NewTable("RULE", "PRIORITY", "ACTION", "SRC_IP", "DST_IP", "PROTOCOL", "DST_PORT").WithPrefix("  ")
 
 		for ruleKey, rule := range configDB.ACLRule {
 			if !strings.HasPrefix(ruleKey, aclName+"|") {
 				continue
 			}
 			ruleName := strings.TrimPrefix(ruleKey, aclName+"|")
-			fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				ruleName, rule.Priority, rule.PacketAction,
+			t.Row(ruleName, rule.Priority, rule.PacketAction,
 				defaultStr(rule.SrcIP, "-"),
 				defaultStr(rule.DstIP, "-"),
 				defaultStr(rule.IPProtocol, "-"),
 				defaultStr(rule.L4DstPort, "-"))
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

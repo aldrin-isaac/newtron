@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/settings"
 )
 
@@ -37,15 +36,13 @@ var settingsShowCmd = &cobra.Command{
 
 		fmt.Printf("Settings file: %s\n\n", settings.DefaultSettingsPath())
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "SETTING\tVALUE")
-		fmt.Fprintln(w, "-------\t-----")
+		t := cli.NewTable("SETTING", "VALUE")
 
 		printSetting := func(name, value string) {
 			if value == "" {
 				value = "(not set)"
 			}
-			fmt.Fprintf(w, "%s\t%s\n", name, value)
+			t.Row(name, value)
 		}
 
 		printSetting("default_network", s.DefaultNetwork)
@@ -53,7 +50,7 @@ var settingsShowCmd = &cobra.Command{
 		printSetting("default_suite", s.DefaultSuite)
 		printSetting("topologies_dir", s.TopologiesDir)
 
-		w.Flush()
+		t.Flush()
 		return nil
 	},
 }

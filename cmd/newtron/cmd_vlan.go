@@ -7,11 +7,11 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/auth"
+	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/network"
 )
 
@@ -55,9 +55,7 @@ var vlanListCmd = &cobra.Command{
 
 		sort.Ints(vlanIDs)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "VLAN ID\tL2VNI\tSVI\tMEMBERS")
-		fmt.Fprintln(w, "-------\t-----\t---\t-------")
+		t := cli.NewTable("VLAN ID", "L2VNI", "SVI", "MEMBERS")
 
 		skipped := 0
 		for _, id := range vlanIDs {
@@ -71,14 +69,9 @@ var vlanListCmd = &cobra.Command{
 
 			svi := dash(vlan.SVIStatus)
 
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\n",
-				vlan.ID,
-				vni,
-				svi,
-				strings.Join(vlan.Members, ","),
-			)
+			t.Row(fmt.Sprintf("%d", vlan.ID), vni, svi, strings.Join(vlan.Members, ","))
 		}
-		w.Flush()
+		t.Flush()
 
 		if skipped > 0 {
 			fmt.Fprintf(os.Stderr, "warning: %d VLAN(s) could not be read\n", skipped)
@@ -215,9 +208,7 @@ Examples:
 			return json.NewEncoder(os.Stdout).Encode(statuses)
 		}
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "VLAN ID\tNAME\tL2VNI\tSVI\tMEMBERS\tMAC-VPN")
-		fmt.Fprintln(w, "-------\t----\t-----\t---\t-------\t-------")
+		t := cli.NewTable("VLAN ID", "NAME", "L2VNI", "SVI", "MEMBERS", "MAC-VPN")
 
 		for _, s := range statuses {
 			vni := dashInt(s.L2VNI)
@@ -227,9 +218,9 @@ Examples:
 			}
 			name := dash(s.Name)
 			macvpn := dash(s.MACVPN)
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d\t%s\n", s.ID, name, vni, svi, s.Members, macvpn)
+			t.Row(fmt.Sprintf("%d", s.ID), name, vni, svi, fmt.Sprintf("%d", s.Members), macvpn)
 		}
-		w.Flush()
+		t.Flush()
 
 		return nil
 	},

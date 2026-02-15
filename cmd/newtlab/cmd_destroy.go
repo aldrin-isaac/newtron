@@ -27,7 +27,11 @@ If only one lab is deployed, the topology name can be omitted.
 			}
 
 			fmt.Printf("Destroying lab %s...\n", labName)
-			if err := newtlab.DestroyByName(cmd.Context(), labName); err != nil {
+			lab := &newtlab.Lab{Name: labName}
+			lab.OnProgress = func(phase, detail string) {
+				fmt.Printf("  [%s] %s\n", phase, detail)
+			}
+			if err := lab.Destroy(cmd.Context()); err != nil {
 				return err
 			}
 			fmt.Printf("%s Lab %s destroyed\n", green("✓"), labName)
