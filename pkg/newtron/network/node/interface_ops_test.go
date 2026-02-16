@@ -141,9 +141,10 @@ func TestSetIP(t *testing.T) {
 		t.Fatalf("SetIP: %v", err)
 	}
 
+	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeAdd)
 	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeAdd)
-	if len(cs.Changes) != 1 {
-		t.Errorf("expected 1 change, got %d", len(cs.Changes))
+	if len(cs.Changes) != 2 {
+		t.Errorf("expected 2 changes (base + IP), got %d", len(cs.Changes))
 	}
 }
 

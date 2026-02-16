@@ -37,6 +37,19 @@ steps:
     action: provision
     devices: [leaf1, leaf2]
 
+  # Restart BGP containers to pick up the new CONFIG_DB entries.
+  # config reload breaks VPP syncd (RCA-001), so restart bgp only.
+  - name: restart-bgp
+    action: restart-service
+    devices: [leaf1, leaf2]
+    service: bgp
+
+  # Wait for FRR + frrcfgd to finish initial config render
+  - name: wait-bgp-restart
+    action: wait
+    duration: 15s
+
+  # Apply FRR defaults not supported by frrcfgd templates
   - name: apply-frr-defaults
     action: apply-frr-defaults
     devices: [leaf1, leaf2]

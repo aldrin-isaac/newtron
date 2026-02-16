@@ -27,6 +27,9 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.set-ip")
+	// SONiC requires both the base interface entry and the IP entry.
+	// The base entry enables L3 on the interface; the IP entry assigns the address.
+	cs.Add("INTERFACE", i.name, ChangeAdd, nil, map[string]string{})
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
 	cs.Add("INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
 

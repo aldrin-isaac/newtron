@@ -82,7 +82,7 @@
     "server-vpn": {
       "description": "Server/datacenter shared VRF",
       "vrf": "Vrf_server",
-      "l3vni": 10100,
+      "l3vni": 20100,
       "route_targets": ["65100:100"]
     },
     "tenant-vpn": {

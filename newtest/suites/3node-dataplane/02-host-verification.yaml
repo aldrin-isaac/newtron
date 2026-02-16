@@ -1,8 +1,8 @@
 name: host-verification
-description: Deep host endpoint validation - interfaces, MTU, concurrent traffic
+description: Deep host endpoint validation - interfaces, MTU, sustained bidirectional traffic
 topology: 3node
 platform: sonic-vpp
-requires: [l3-vrf]
+requires: [l3-routing]
 
 steps:
   # Verify host interfaces are up with correct IPs
@@ -18,7 +18,7 @@ steps:
     devices: [host2]
     command: "ip addr show dev eth0"
     expect:
-      contains: "10.1.100.20"
+      contains: "10.1.200.20"
 
   # Verify interface link state
   - name: host1-link-up
@@ -35,11 +35,11 @@ steps:
     expect:
       contains: "1"
 
-  # MTU test: ping with 1400-byte payload (fits default 1500 MTU)
+  # MTU test: 1400-byte payload ping (fits default 1500 MTU)
   - name: mtu-test-1400
     action: host-exec
     devices: [host1]
-    command: "ping -c 3 -W 2 -s 1400 -M do 10.1.100.20"
+    command: "ping -c 3 -W 2 -s 1400 -M do 10.1.200.20"
     expect:
       success_rate: 0.8
 
@@ -47,7 +47,7 @@ steps:
   - name: sustained-host1-to-host2
     action: host-exec
     devices: [host1]
-    command: "ping -c 20 -W 2 -i 0.2 10.1.100.20"
+    command: "ping -c 20 -W 2 -i 0.2 10.1.200.20"
     expect:
       success_rate: 0.9
 
@@ -58,17 +58,17 @@ steps:
     expect:
       success_rate: 0.9
 
-  # Verify loopback is up in each namespace
-  - name: host1-loopback
+  # Verify host routing tables
+  - name: host1-routes
     action: host-exec
     devices: [host1]
-    command: "ping -c 1 -W 1 127.0.0.1"
+    command: "ip route show"
     expect:
-      success_rate: 1.0
+      contains: "default via 10.1.100.1"
 
-  - name: host2-loopback
+  - name: host2-routes
     action: host-exec
     devices: [host2]
-    command: "ping -c 1 -W 1 127.0.0.1"
+    command: "ip route show"
     expect:
-      success_rate: 1.0
+      contains: "default via 10.1.200.1"

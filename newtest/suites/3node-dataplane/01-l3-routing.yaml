@@ -1,0 +1,107 @@
+name: l3-routing
+description: L3 routed connectivity - configure interface IPs, redistribute via BGP, verify cross-leaf ping
+topology: 3node
+platform: sonic-vpp
+requires: [boot-provision]
+
+steps:
+  # Configure IP on host-facing interfaces
+  - name: set-ip-leaf1
+    action: set-interface
+    devices: [leaf1]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "10.1.100.1/24"
+
+  - name: set-ip-leaf2
+    action: set-interface
+    devices: [leaf2]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "10.1.200.1/24"
+
+  # Verify interface IPs in CONFIG_DB
+  - name: verify-ip-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: INTERFACE
+    key: "Ethernet1|10.1.100.1/24"
+    expect:
+      exists: true
+
+  - name: verify-ip-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: INTERFACE
+    key: "Ethernet1|10.1.200.1/24"
+    expect:
+      exists: true
+
+  # Add redistribute connected to BGP so host subnets are advertised
+  - name: redistribute-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "vtysh -c 'configure terminal' -c 'router bgp 65011' -c 'address-family ipv4 unicast' -c 'redistribute connected' -c 'end'"
+    expect:
+      exit_code: 0
+
+  - name: redistribute-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "vtysh -c 'configure terminal' -c 'router bgp 65012' -c 'address-family ipv4 unicast' -c 'redistribute connected' -c 'end'"
+    expect:
+      exit_code: 0
+
+  # Wait for BGP route exchange
+  - name: wait-routes
+    action: wait
+    duration: 5s
+
+  # Verify routes are in BGP table (APP_DB)
+  - name: verify-route-leaf1
+    action: verify-route
+    devices: [leaf1]
+    prefix: "10.1.200.0/24"
+    expect:
+      timeout: 30s
+      poll_interval: 3s
+
+  - name: verify-route-leaf2
+    action: verify-route
+    devices: [leaf2]
+    prefix: "10.1.100.0/24"
+    expect:
+      timeout: 30s
+      poll_interval: 3s
+
+  # Verify hosts can reach their local gateway
+  - name: host1-gateway-ping
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.1.100.1"
+    expect:
+      success_rate: 0.8
+
+  - name: host2-gateway-ping
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 3 -W 2 10.1.200.1"
+    expect:
+      success_rate: 0.8
+
+  # Cross-leaf L3 routing: host1 (10.1.100.10) → leaf1 → leaf2 → host2 (10.1.200.20)
+  - name: ping-host1-to-host2
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 5 -W 2 10.1.200.20"
+    expect:
+      success_rate: 0.8
+
+  - name: ping-host2-to-host1
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 5 -W 2 10.1.100.10"
+    expect:
+      success_rate: 0.8

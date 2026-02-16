@@ -1,0 +1,58 @@
+name: teardown-verify
+description: Ordered teardown with negative verification - remove interface IPs, confirm connectivity breaks
+topology: 3node
+platform: sonic-vpp
+requires: [host-verification]
+
+steps:
+  # Pre-condition: verify connectivity still works
+  - name: pre-teardown-ping
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.1.200.20"
+    expect:
+      success_rate: 0.8
+
+  # Remove interface IPs (remove the CONFIG_DB entries)
+  - name: remove-ip-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 del 'INTERFACE|Ethernet1|10.1.100.1/24' && redis-cli -n 4 del 'INTERFACE|Ethernet1'"
+    expect:
+      exit_code: 0
+
+  - name: remove-ip-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "redis-cli -n 4 del 'INTERFACE|Ethernet1|10.1.200.1/24' && redis-cli -n 4 del 'INTERFACE|Ethernet1'"
+    expect:
+      exit_code: 0
+
+  # Wait for route withdrawal
+  - name: wait-withdrawal
+    action: wait
+    duration: 10s
+
+  # Negative test: host1 should NOT be able to reach host2
+  # (gateway IP is removed, so traffic can't be routed)
+  - name: verify-connectivity-broken
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 1 10.1.200.20 && echo REACHABLE || echo UNREACHABLE"
+    expect:
+      contains: "UNREACHABLE"
+
+  # Remove redistribute connected from BGP
+  - name: remove-redistribute-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "vtysh -c 'configure terminal' -c 'router bgp 65011' -c 'address-family ipv4 unicast' -c 'no redistribute connected' -c 'end'"
+    expect:
+      exit_code: 0
+
+  - name: remove-redistribute-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "vtysh -c 'configure terminal' -c 'router bgp 65012' -c 'address-family ipv4 unicast' -c 'no redistribute connected' -c 'end'"
+    expect:
+      exit_code: 0

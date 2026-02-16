@@ -1,8 +1,8 @@
 name: cleanup
-description: Clean up switch config
+description: Final cleanup pass - remove any remaining orphaned config
 topology: 3node
 platform: sonic-vpp
-requires: [acl-filter]
+requires: [teardown-verify]
 
 steps:
   - name: cleanup-leafs
