@@ -71,6 +71,9 @@ var executors = map[StepAction]stepExecutor{
 	ActionDeletePortChannel:       &deletePortChannelExecutor{},
 	ActionAddPortChannelMember:    &addPortChannelMemberExecutor{},
 	ActionRemovePortChannelMember: &removePortChannelMemberExecutor{},
+
+	// Host test executors
+	ActionHostExec: &hostExecExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.

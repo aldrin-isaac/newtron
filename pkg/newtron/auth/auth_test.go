@@ -45,17 +45,19 @@ func createTestNetworkSpec() *spec.NetworkSpecFile {
 			"vlan.create":     {"neteng"},
 			"device.cleanup":  {"neteng", "netops", "viewer"},
 		},
-		Services: map[string]*spec.ServiceSpec{
-			"customer-l3": {
-				Description: "Customer L3",
-				Permissions: map[string][]string{
-					"service.apply": {"netops"}, // More restrictive
+		OverridableSpecs: spec.OverridableSpecs{
+			Services: map[string]*spec.ServiceSpec{
+				"customer-l3": {
+					Description: "Customer L3",
+					Permissions: map[string][]string{
+						"service.apply": {"netops"}, // More restrictive
+					},
 				},
-			},
-			"transit": {
-				Description: "Transit service",
-				Permissions: map[string][]string{
-					"all": {"neteng"}, // Only neteng
+				"transit": {
+					Description: "Transit service",
+					Permissions: map[string][]string{
+						"all": {"neteng"}, // Only neteng
+					},
 				},
 			},
 		},
@@ -217,10 +219,12 @@ func TestChecker_ServiceWithNilPermissions(t *testing.T) {
 		Permissions: map[string][]string{
 			"service.apply": {"neteng"},
 		},
-		Services: map[string]*spec.ServiceSpec{
-			"no-perms-service": {
-				Description: "Service with nil permissions",
-				Permissions: nil, // Explicitly nil
+		OverridableSpecs: spec.OverridableSpecs{
+			Services: map[string]*spec.ServiceSpec{
+				"no-perms-service": {
+					Description: "Service with nil permissions",
+					Permissions: nil, // Explicitly nil
+				},
 			},
 		},
 	}
@@ -279,11 +283,13 @@ func TestChecker_ServiceAllPermissionNotGranted(t *testing.T) {
 			"users":  {"normal-user"},
 		},
 		Permissions: map[string][]string{},
-		Services: map[string]*spec.ServiceSpec{
-			"restricted": {
-				Description: "Restricted service",
-				Permissions: map[string][]string{
-					"all": {"admins"}, // Only admins have 'all' on this service
+		OverridableSpecs: spec.OverridableSpecs{
+			Services: map[string]*spec.ServiceSpec{
+				"restricted": {
+					Description: "Restricted service",
+					Permissions: map[string][]string{
+						"all": {"admins"}, // Only admins have 'all' on this service
+					},
 				},
 			},
 		},

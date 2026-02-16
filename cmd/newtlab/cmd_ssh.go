@@ -49,7 +49,29 @@ the search to a specific lab.
 				host = node.HostIP
 			}
 
+			// Virtual host: SSH to parent VM and exec into namespace
+			if node.Namespace != "" {
+				user := node.SSHUser
+				if user == "" {
+					user = "root"
+				}
+				sshArgs := []string{"ssh",
+					"-o", "StrictHostKeyChecking=no",
+					"-o", "UserKnownHostsFile=/dev/null",
+					"-o", "LogLevel=ERROR",
+					"-t",
+					"-p", strconv.Itoa(node.SSHPort),
+					user + "@" + host,
+					fmt.Sprintf("ip netns exec %s bash", node.Namespace),
+				}
+				return syscallExec(sshBin, sshArgs, os.Environ())
+			}
+
+			// Regular node or host-vm
 			user := "admin"
+			if node.SSHUser != "" {
+				user = node.SSHUser
+			}
 
 			sshArgs := []string{"ssh",
 				"-o", "StrictHostKeyChecking=no",

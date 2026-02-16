@@ -29,7 +29,11 @@ func NewTopologyProvisioner(network *Network) (*TopologyProvisioner, error) {
 
 // GenerateDeviceComposite generates a node.CompositeConfig for a device without delivering it.
 // Useful for inspection, serialization, or deferred delivery.
+// Returns error for host devices (no SONiC CONFIG_DB).
 func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node.CompositeConfig, error) {
+	if tp.network.IsHostDevice(deviceName) {
+		return nil, fmt.Errorf("device '%s' is a host — cannot generate SONiC composite", deviceName)
+	}
 	topoDev, _ := tp.network.GetTopologyDevice(deviceName)
 
 	// Load and resolve device profile
@@ -42,23 +46,26 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 		return nil, fmt.Errorf("resolving profile: %w", err)
 	}
 
+	// Build per-device ResolvedSpecs for hierarchical spec lookups
+	resolvedSpecs := tp.network.buildResolvedSpecs(profile)
+
 	// Create composite builder in overwrite mode
 	cb := node.NewCompositeBuilder(deviceName, node.CompositeOverwrite).
 		SetGeneratedBy("topology-provisioner").
 		SetDescription(fmt.Sprintf("Full device provisioning from topology.json for %s", deviceName))
 
 	// Step 1: Device-level entries
-	tp.addDeviceEntries(cb, deviceName, resolved, topoDev)
+	tp.addDeviceEntries(cb, deviceName, resolved, topoDev, resolvedSpecs)
 
 	// Step 1b: QoS device-wide tables (DSCP maps, schedulers, WRED profiles)
-	tp.addQoSDeviceEntries(cb, topoDev)
+	tp.addQoSDeviceEntries(cb, topoDev, resolvedSpecs)
 
 	// Step 2: Per-interface service entries (skip stub interfaces with no service)
 	for intfName, ti := range topoDev.Interfaces {
 		if ti.Service == "" {
 			continue
 		}
-		if err := tp.addInterfaceEntries(cb, intfName, ti, resolved); err != nil {
+		if err := tp.addInterfaceEntries(cb, intfName, ti, resolved, resolvedSpecs); err != nil {
 			return nil, fmt.Errorf("interface %s: %w", intfName, err)
 		}
 	}
@@ -109,7 +116,7 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 // ============================================================================
 
 // addDeviceEntries adds device-level CONFIG_DB entries to the composite builder.
-func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice) {
+func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice, resolvedSpecs node.SpecProvider) {
 	// Determine underlay ASN (unique per device for eBGP fabric)
 	underlayASN := resolved.ASNumber
 	if resolved.UnderlayASN > 0 {
@@ -165,7 +172,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 	}
 
 	// Determine if device needs EVPN infrastructure
-	hasEVPN := tp.deviceHasEVPN(topoDev)
+	hasEVPN := tp.deviceHasEVPN(topoDev, resolvedSpecs)
 
 	// VXLAN_TUNNEL + VXLAN_EVPN_NVO (if device has EVPN services)
 	if hasEVPN {
@@ -308,6 +315,9 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		if clientTopoDev.DeviceConfig != nil && clientTopoDev.DeviceConfig.RouteReflector {
 			continue // skip other RRs
 		}
+		if tp.network.IsHostDevice(clientName) {
+			continue // skip host devices
+		}
 		// Load client profile to get its loopback IP
 		clientProfile, err := tp.network.loadProfile(clientName)
 		if err != nil {
@@ -357,20 +367,20 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 }
 
 // deviceHasEVPN checks if any interface service requires EVPN (L3VNI or L2VNI).
-func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice) bool {
+func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice, sp node.SpecProvider) bool {
 	for _, ti := range topoDev.Interfaces {
-		svc, err := tp.network.GetService(ti.Service)
+		svc, err := sp.GetService(ti.Service)
 		if err != nil {
 			continue
 		}
 		if svc.IPVPN != "" {
-			ipvpn, err := tp.network.GetIPVPN(svc.IPVPN)
+			ipvpn, err := sp.GetIPVPN(svc.IPVPN)
 			if err == nil && ipvpn.L3VNI > 0 {
 				return true
 			}
 		}
 		if svc.MACVPN != "" {
-			macvpn, err := tp.network.GetMACVPN(svc.MACVPN)
+			macvpn, err := sp.GetMACVPN(svc.MACVPN)
 			if err == nil && macvpn.VNI > 0 {
 				return true
 			}
@@ -386,8 +396,8 @@ func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice) bool 
 // addInterfaceEntries generates all CONFIG_DB entries for an interface service
 // and adds them to the composite builder.  Delegates to the shared
 // node.GenerateServiceEntries function in service_gen.go.
-func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile) error {
-	entries, err := node.GenerateServiceEntries(tp.network, node.ServiceEntryParams{
+func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile, sp node.SpecProvider) error {
+	entries, err := node.GenerateServiceEntries(sp, node.ServiceEntryParams{
 		ServiceName:   ti.Service,
 		InterfaceName: intfName,
 		IPAddress:     ti.IP,
@@ -409,17 +419,17 @@ func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, in
 
 // addQoSDeviceEntries scans all services in the topology, collects distinct QoS
 // policy names, and adds device-wide CONFIG_DB tables (DSCP maps, schedulers, WRED).
-func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, topoDev *spec.TopologyDevice) {
+func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, topoDev *spec.TopologyDevice, sp node.SpecProvider) {
 	seen := make(map[string]bool)
 	for _, ti := range topoDev.Interfaces {
 		if ti.Service == "" {
 			continue
 		}
-		svc, err := tp.network.GetService(ti.Service)
+		svc, err := sp.GetService(ti.Service)
 		if err != nil {
 			continue
 		}
-		policyName, policy := node.ResolveServiceQoSPolicy(tp.network, svc)
+		policyName, policy := node.ResolveServiceQoSPolicy(sp, svc)
 		if policy == nil {
 			continue
 		}

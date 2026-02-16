@@ -552,7 +552,72 @@ Result:    server-a: 3, server-b: 3
 identical to before — `hosts` map is used directly, and `vm_host` must be
 set manually in each profile.
 
-### 5.8 Port Conflict Detection
+### 5.8 Virtual Hosts with VM Coalescing
+
+Topologies can include first-class virtual hosts (e.g., `host1`, `host2`) defined as devices with platform `alpine-host` (which has `device_type: "host"`). Unlike switches, which each get their own QEMU instance, **multiple host devices are coalesced into a shared VM** to reduce resource overhead.
+
+**VM coalescing model:**
+- All host devices in the topology are grouped by platform
+- Each group shares a single QEMU VM (e.g., `hostvm-0`)
+- Inside the VM, each host gets its own **network namespace** created at deploy time
+- Namespaces are pre-configured with veth pairs for connectivity
+- Host IPs are auto-derived from switch-side interface IPs (or manually specified via `host_ip`/`host_gateway` in the device profile)
+
+**Namespace provisioning** (`provisionHostNamespaces()`):
+- For each host device (e.g., `host1`, `host2`):
+  - Create namespace: `ip netns add host1`
+  - Create veth pair: `veth-host1` (parent) ↔ `eth1` (inside namespace)
+  - Assign IP address from topology or profile
+  - Set default route via `host_gateway` (if specified)
+- All network namespaces share the parent VM's management interface (eth0)
+
+**SSH transparency:**
+- `newtlab ssh host1` automatically enters the correct namespace
+- Implementation: SSH to parent VM (`hostvm-0`), then `ip netns exec host1 sh`
+- From the user's perspective, each host appears as a separate SSH target
+
+**Status display:**
+- `newtlab status` shows a TYPE column: `switch`, `host-vm`, `vhost:hostvm-0/host1`
+- Virtual hosts (vhosts) display their parent VM and namespace
+- The parent VM (`hostvm-0`) appears once as type `host-vm`
+
+**Simplified boot sequence** (BootstrapHostNetwork):
+- Waits for login prompt (no DHCP setup, no user creation)
+- Assumes pre-configured credentials (Alpine cloud-init or preseed)
+- No FRR, no SONiC-specific init
+
+**Skipped operations:**
+- `Provision()` — hosts are not provisioned via newtron
+- `refreshBGP()` — no BGP on hosts
+
+**Interface map:** Host platforms use the `"linux"` interface map, where QEMU NIC index N maps to `ethN` (NIC 0 = eth0 management, NIC 1+ = data interfaces).
+
+Example platform definition:
+
+```json
+{
+  "alpine-host": {
+    "description": "Alpine Linux virtual host (coalesced into shared VM)",
+    "device_type": "host",
+    "vm_image": "~/.newtlab/images/alpine-host.qcow2",
+    "vm_memory": 512,
+    "vm_cpus": 2,
+    "vm_nic_driver": "virtio-net-pci",
+    "vm_interface_map": "linux",
+    "vm_credentials": { "user": "root", "pass": "newtron" },
+    "vm_boot_timeout": 30
+  }
+}
+```
+
+**NodeState tracking** (for virtual hosts):
+- `VMName` field: parent VM name (e.g., `"hostvm-0"`)
+- `Namespace` field: namespace name (e.g., `"host1"`)
+- Switch devices leave these fields empty
+
+Host devices are connected to leaf switches via newtlink the same way switches connect to each other. The difference is behavioral — hosts share a VM with namespaces for isolation, skip provisioning, and are accessed via `newtlab ssh <host>` for data plane testing.
+
+### 5.9 Port Conflict Detection
 
 Before starting any QEMU or bridge process, newtlab probes **all** allocated
 ports to detect conflicts early. This catches issues that would otherwise

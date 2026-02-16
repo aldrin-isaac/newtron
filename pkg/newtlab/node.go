@@ -11,6 +11,7 @@ import (
 type NodeConfig struct {
 	Name         string
 	Platform     string
+	DeviceType   string // "switch" (default) or "host" — from platform
 	Image        string // resolved: profile > platform > error
 	Memory       int    // resolved: profile > platform > 4096
 	CPUs         int    // resolved: profile > platform > 2
@@ -47,6 +48,11 @@ func ResolveNodeConfig(
 	nc := &NodeConfig{
 		Name:     name,
 		Platform: profile.Platform,
+	}
+
+	// DeviceType: from platform (default "switch")
+	if platform != nil && platform.DeviceType != "" {
+		nc.DeviceType = platform.DeviceType
 	}
 
 	// Image: profile > platform > error

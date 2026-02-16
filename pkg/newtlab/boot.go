@@ -72,6 +72,70 @@ func WaitForSSH(ctx context.Context, host string, port int, user, pass string, t
 	return fmt.Errorf("newtlab: SSH timeout after %s for %s", timeout, addr)
 }
 
+// BootstrapHostNetwork connects to the serial console of a host VM (e.g., Alpine Linux)
+// and waits for the login prompt to confirm boot completion. Unlike BootstrapNetwork,
+// it does not log in, run DHCP, or create users — Alpine auto-starts dhcpcd and sshd.
+// SSH readiness is confirmed by the subsequent WaitForSSH() call.
+func BootstrapHostNetwork(ctx context.Context, consoleHost string, consolePort int, consoleUser, consolePass string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	// Poll until we can connect to the serial console
+	var conn net.Conn
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: host bootstrap cancelled for %s:%d: %w", consoleHost, consolePort, ctx.Err())
+		default:
+		}
+
+		var err error
+		conn, err = net.DialTimeout("tcp", fmt.Sprintf("%s:%d", consoleHost, consolePort), 5*time.Second)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("newtlab: host bootstrap cancelled for %s:%d: %w", consoleHost, consolePort, ctx.Err())
+		case <-time.After(5 * time.Second):
+		}
+	}
+	if conn == nil {
+		return fmt.Errorf("newtlab: serial console connect timeout for host %s:%d", consoleHost, consolePort)
+	}
+	defer conn.Close()
+
+	// Wait for login prompt — confirms the VM has booted.
+	// We don't actually log in; Alpine's init scripts handle dhcpcd and sshd.
+	remaining := time.Until(deadline)
+	if remaining < 30*time.Second {
+		remaining = 30 * time.Second
+	}
+
+	var buf []byte
+	tmp := make([]byte, 4096)
+	dl := time.Now().Add(remaining)
+	for time.Now().Before(dl) {
+		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		n, err := conn.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+			if strings.Contains(string(buf), "login:") {
+				return nil
+			}
+		}
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// Send newline periodically to trigger prompt
+				conn.Write([]byte("\r\n"))
+				continue
+			}
+			return fmt.Errorf("newtlab: host bootstrap: serial read error: %w", err)
+		}
+	}
+
+	return fmt.Errorf("newtlab: host bootstrap: timeout waiting for login prompt on %s:%d", consoleHost, consolePort)
+}
+
 // BootstrapNetwork connects to the serial console and prepares the VM for SSH access.
 //
 // Steps:

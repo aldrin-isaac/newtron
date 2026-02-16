@@ -384,6 +384,36 @@ type ResolvedProfile struct {
     SSHPort int // Custom SSH port (0 = default 22)
 }
 
+### OverridableSpecs
+
+`OverridableSpecs` holds the 8 spec map types that participate in hierarchical resolution. Embedded by `NetworkSpecFile`, `ZoneSpec`, and `DeviceProfile`:
+
+```go
+type OverridableSpecs struct {
+    PrefixLists   map[string][]string
+    Filters       map[string]*FilterSpec
+    QoSPolicies   map[string]*QoSPolicy
+    QoSProfiles   map[string]*QoSProfile
+    RoutePolicies map[string]*RoutePolicy
+    IPVPNs        map[string]*IPVPNSpec
+    MACVPNs       map[string]*MACVPNSpec
+    Services      map[string]*ServiceSpec
+}
+```
+
+### ResolvedSpecs (pkg/newtron/network)
+
+`ResolvedSpecs` implements `node.SpecProvider` with pre-merged maps from all three hierarchy levels. Built at Node creation time in `buildResolvedSpecs()`:
+
+```go
+type ResolvedSpecs struct {
+    merged  spec.OverridableSpecs  // pre-merged: network + zone + profile
+    network *Network               // for GetPlatform() only
+}
+```
+
+Resolution chain: `MergeMaps(network.X, zone.X, profile.X)` for each of the 8 map types. `GetPlatform()` delegates to `Network` (platforms don't participate in hierarchy).
+
 // ServiceType constants
 const (
     ServiceTypeL2  = "l2"

@@ -30,6 +30,14 @@ func ResolveNICIndex(interfaceMap, interfaceName string, customMap map[string]in
 		}
 		return idx/4 + 1, nil
 
+	case "linux":
+		// eth1 → NIC 1, eth2 → NIC 2 (eth0 = NIC 0 = mgmt, never in links)
+		idx := parseLinuxEthIndex(interfaceName)
+		if idx < 0 {
+			return 0, fmt.Errorf("newtlab: invalid interface name %q for linux map", interfaceName)
+		}
+		return idx, nil
+
 	case "custom":
 		if customMap == nil {
 			return 0, fmt.Errorf("newtlab: custom interface map requires vm_interface_map_custom")
@@ -56,6 +64,9 @@ func ResolveInterfaceName(interfaceMap string, nicIndex int, customMap map[strin
 	case "stride-4":
 		return fmt.Sprintf("Ethernet%d", (nicIndex-1)*4)
 
+	case "linux":
+		return fmt.Sprintf("eth%d", nicIndex)
+
 	case "custom":
 		for name, idx := range customMap {
 			if idx == nicIndex {
@@ -76,6 +87,19 @@ func parseEthernetIndex(name string) int {
 		return -1
 	}
 	n, err := strconv.Atoi(name[len("Ethernet"):])
+	if err != nil || n < 0 {
+		return -1
+	}
+	return n
+}
+
+// parseLinuxEthIndex extracts the numeric index from "ethN".
+// Returns -1 if the name is not a valid Linux ethernet interface.
+func parseLinuxEthIndex(name string) int {
+	if !strings.HasPrefix(name, "eth") {
+		return -1
+	}
+	n, err := strconv.Atoi(name[len("eth"):])
 	if err != nil || n < 0 {
 		return -1
 	}

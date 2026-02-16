@@ -946,6 +946,98 @@ Jenkins, GitLab CI).
 
 ---
 
+## Writing Data Plane Tests
+
+Data plane tests require host endpoints that can generate and receive traffic. newtest uses **host** devices (Alpine Linux VMs) that are provisioned by newtlab during topology deployment. Each host device runs in its own network namespace, eliminating the need for runtime namespace management in test scenarios.
+
+### Host Execution Model
+
+Host namespaces are created by newtlab during deploy — not by test scenarios. Each host device name corresponds to its network namespace. Tests use `host-exec` to run commands directly within these namespaces.
+
+Use `host-exec` to run commands in a host's namespace. The `devices` field specifies the host device, and the namespace is automatically set to match the device name:
+
+```yaml
+# Ping across VXLAN overlay from host1
+- name: ping-host2
+  action: host-exec
+  devices: [host1]
+  command: "ping -c 3 -W 2 10.1.100.20"
+  expect:
+    success_rate: 0.8
+```
+
+The `expect` field can use `success_rate` (fraction of successful pings) or `contains` (regex pattern match on output):
+
+```yaml
+# Verify iperf3 throughput exceeds 1 Gbps
+- name: check-bandwidth
+  action: host-exec
+  devices: [host1]
+  command: "iperf3 -c 10.1.100.20 -t 5"
+  expect:
+    contains: "\\d\\.\\d+ Gbits/sec"
+    timeout: 15s
+```
+
+### Example: L2 VXLAN Test
+
+```yaml
+name: l2-vxlan-ping
+description: Test L2 VXLAN connectivity across EVPN overlay
+topology: 3node-dataplane
+platform: sonic-vpp
+
+steps:
+  # Provision fabric
+  - name: provision-all
+    action: provision
+    devices: [spine1, leaf1, leaf2]
+
+  - name: wait-convergence
+    action: wait
+    duration: 45s
+
+  # Test connectivity (hosts already provisioned by newtlab)
+  - name: ping-host1-to-host2
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 5 -W 2 10.1.100.20"
+    expect:
+      success_rate: 0.8
+      timeout: 15s
+
+  - name: ping-host2-to-host1
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 5 -W 2 10.1.100.10"
+    expect:
+      success_rate: 0.8
+      timeout: 15s
+```
+
+**Key points:**
+- No `setup-host-endpoint` or `teardown-host-endpoint` actions needed
+- Host devices are first-class topology devices deployed by newtlab
+- Namespace lifecycle is infrastructure concern, not test concern
+- Tests simply specify which host to run commands on via `devices: [hostN]`
+
+### Platform Requirements
+
+Data plane tests require a platform with `dataplane` set in `platforms.json`:
+
+```json
+{
+  "sonic-vpp": {
+    "dataplane": "vpp",
+    "..."
+  }
+}
+```
+
+If `dataplane` is empty (e.g., `sonic-vs`), host-related step actions are automatically skipped with a `SKIP` result instead of failing.
+
+---
+
 ## CI/CD Integration
 
 ### Exit Codes

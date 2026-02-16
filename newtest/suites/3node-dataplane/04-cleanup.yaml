@@ -1,0 +1,10 @@
+name: cleanup
+description: Clean up switch config
+topology: 3node
+platform: sonic-vpp
+requires: [acl-filter]
+
+steps:
+  - name: cleanup-leafs
+    action: cleanup
+    devices: [leaf1, leaf2]

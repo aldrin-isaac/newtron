@@ -1,0 +1,54 @@
+name: boot-provision
+description: Boot, provision leaf switches, verify BGP convergence and host reachability
+topology: 3node
+platform: sonic-vpp
+
+steps:
+  - name: ssh-echo-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: ssh-echo-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  # Verify hosts are reachable via SSH (through parent VM namespace)
+  - name: host1-echo
+    action: host-exec
+    devices: [host1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: host2-echo
+    action: host-exec
+    devices: [host2]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: provision-leafs
+    action: provision
+    devices: [leaf1, leaf2]
+
+  - name: apply-frr-defaults
+    action: apply-frr-defaults
+    devices: [leaf1, leaf2]
+
+  - name: wait-bgp-init
+    action: wait
+    duration: 10s
+
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [leaf1, leaf2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

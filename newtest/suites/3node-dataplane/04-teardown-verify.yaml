@@ -1,0 +1,95 @@
+name: teardown-verify
+description: Ordered EVPN teardown with negative verification - unbind overlay, confirm connectivity breaks
+topology: 3node
+platform: sonic-vpp
+requires: [host-verification]
+
+steps:
+  # Pre-condition: verify connectivity still works
+  - name: pre-teardown-ping
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.1.100.20"
+    expect:
+      success_rate: 0.8
+
+  # Unbind MACVPN from both leafs — breaks L2 VXLAN tunnel
+  - name: unbind-macvpn-leaf1
+    action: unbind-macvpn
+    devices: [leaf1]
+    params:
+      vlan_id: 100
+
+  - name: unbind-macvpn-leaf2
+    action: unbind-macvpn
+    devices: [leaf2]
+    params:
+      vlan_id: 100
+
+  # Wait for EVPN withdrawal
+  - name: wait-withdrawal
+    action: wait
+    duration: 5s
+
+  # Negative test: host1 should NOT be able to reach host2
+  # (VXLAN tunnel is torn down, hosts are on different physical leafs)
+  - name: verify-connectivity-broken
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 1 10.1.100.20 && echo REACHABLE || echo UNREACHABLE"
+    expect:
+      contains: "UNREACHABLE"
+
+  # Unbind IPVPN from VRFs
+  - name: unbind-ipvpn-leaf1
+    action: unbind-ipvpn
+    devices: [leaf1]
+    params:
+      vrf: Vrf_server
+
+  - name: unbind-ipvpn-leaf2
+    action: unbind-ipvpn
+    devices: [leaf2]
+    params:
+      vrf: Vrf_server
+
+  # Remove VLAN members
+  - name: remove-member-leaf1
+    action: remove-vlan-member
+    devices: [leaf1]
+    params:
+      vlan_id: 100
+      interface: Ethernet2
+
+  - name: remove-member-leaf2
+    action: remove-vlan-member
+    devices: [leaf2]
+    params:
+      vlan_id: 100
+      interface: Ethernet2
+
+  # Delete VLANs
+  - name: delete-vlan-leaf1
+    action: delete-vlan
+    devices: [leaf1]
+    params:
+      vlan_id: 100
+
+  - name: delete-vlan-leaf2
+    action: delete-vlan
+    devices: [leaf2]
+    params:
+      vlan_id: 100
+
+  # Delete VRFs
+  - name: delete-vrf-leaf1
+    action: delete-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_server
+
+  - name: delete-vrf-leaf2
+    action: delete-vrf
+    devices: [leaf2]
+    params:
+      vrf: Vrf_server

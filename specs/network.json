@@ -26,7 +26,10 @@
   },
   "zones": {
     "amer": {
-      "as_number": 64512
+      "as_number": 64512,
+      "prefix_lists": {
+        "amer-internal": ["10.10.0.0/16", "10.20.0.0/16"]
+      }
     },
     "emea": {
       "as_number": 64513

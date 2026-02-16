@@ -96,8 +96,22 @@ func showLabDetail(labName string) error {
 	fmt.Printf("Lab: %s (deployed %s)\n", state.Name, state.Created.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Spec dir: %s\n\n", state.SpecDir)
 
-	// Node table
-	t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE", "PID")
+	// Detect if any node is on a remote host
+	hasRemoteHost := false
+	for _, node := range state.Nodes {
+		if node.HostIP != "" {
+			hasRemoteHost = true
+			break
+		}
+	}
+
+	// Node table with conditional HOST column
+	var t *cli.Table
+	if hasRemoteHost {
+		t = cli.NewTable("NODE", "TYPE", "STATUS", "HOST", "SSH", "CONSOLE", "PID")
+	} else {
+		t = cli.NewTable("NODE", "TYPE", "STATUS", "SSH", "CONSOLE", "PID")
+	}
 	for name, node := range state.Nodes {
 		var displayStatus string
 		switch {
@@ -110,7 +124,26 @@ func showLabDetail(labName string) error {
 		default:
 			displayStatus = green(node.Status)
 		}
-		t.Row(name, displayStatus, fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
+
+		nodeType := "switch"
+		switch {
+		case node.DeviceType == "host-vm":
+			nodeType = "host-vm"
+		case node.VMName != "":
+			nodeType = fmt.Sprintf("vhost:%s/%s", node.VMName, node.Namespace)
+		}
+
+		if hasRemoteHost {
+			hostDisplay := "local"
+			if node.HostIP != "" {
+				hostDisplay = node.HostIP
+			}
+			t.Row(name, nodeType, displayStatus, hostDisplay,
+				fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
+		} else {
+			t.Row(name, nodeType, displayStatus,
+				fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
+		}
 	}
 	t.Flush()
 

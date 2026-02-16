@@ -997,3 +997,158 @@ func TestLoader_ValidateQoSPolicies(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Hierarchical Spec Resolution Tests
+// ============================================================================
+
+func TestLoader_ZoneLevelServiceRefsNetworkFilter(t *testing.T) {
+	// Zone-level service references a network-level filter — should pass validation
+	tmpDir, err := os.MkdirTemp("", "newtron-hierarchy-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	networkJSON := `{
+		"version": "1.0",
+		"zones": {
+			"amer": {
+				"as_number": 65000,
+				"services": {
+					"zone-svc": {
+						"description": "Zone-level service using network filter",
+						"service_type": "routed",
+						"ingress_filter": "net-filter"
+					}
+				}
+			}
+		},
+		"filters": {
+			"net-filter": {
+				"description": "Network-level filter",
+				"type": "ipv4",
+				"rules": [{"seq": 100, "action": "permit"}]
+			}
+		},
+		"services": {}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+
+	loader := NewLoader(tmpDir)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() should pass: zone service refs network filter, got: %v", err)
+	}
+}
+
+func TestLoader_ZoneLevelServiceRefsMissing(t *testing.T) {
+	// Zone-level service references a nonexistent filter — should fail
+	tmpDir, err := os.MkdirTemp("", "newtron-hierarchy-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	networkJSON := `{
+		"version": "1.0",
+		"zones": {
+			"amer": {
+				"as_number": 65000,
+				"services": {
+					"zone-svc": {
+						"description": "Zone service with bad ref",
+						"service_type": "routed",
+						"ingress_filter": "nonexistent-filter"
+					}
+				}
+			}
+		},
+		"services": {}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+
+	loader := NewLoader(tmpDir)
+	err = loader.Load()
+	if err == nil {
+		t.Error("Load() should fail: zone service references nonexistent filter")
+	}
+}
+
+func TestLoader_ZoneLevelFilterRefsPrefixList(t *testing.T) {
+	// Zone-level filter references a network-level prefix list — should pass
+	tmpDir, err := os.MkdirTemp("", "newtron-hierarchy-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	networkJSON := `{
+		"version": "1.0",
+		"zones": {
+			"amer": {
+				"as_number": 65000,
+				"filters": {
+					"zone-filter": {
+						"description": "Zone filter using network prefix list",
+						"type": "ipv4",
+						"rules": [{"seq": 100, "src_prefix_list": "rfc1918", "action": "deny"}]
+					}
+				}
+			}
+		},
+		"prefix_lists": {
+			"rfc1918": ["10.0.0.0/8"]
+		},
+		"services": {}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+
+	loader := NewLoader(tmpDir)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() should pass: zone filter refs network prefix list, got: %v", err)
+	}
+}
+
+func TestLoader_ZoneLevelServiceRefsZoneIPVPN(t *testing.T) {
+	// Zone-level service references a zone-level IPVPN — should pass
+	tmpDir, err := os.MkdirTemp("", "newtron-hierarchy-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	networkJSON := `{
+		"version": "1.0",
+		"zones": {
+			"amer": {
+				"as_number": 65000,
+				"ipvpns": {
+					"zone-vpn": {
+						"vrf": "Vrf_zone",
+						"l3vni": 20001,
+						"route_targets": ["65000:200"]
+					}
+				},
+				"services": {
+					"zone-l3": {
+						"description": "Zone L3 service",
+						"service_type": "evpn-routed",
+						"ipvpn": "zone-vpn",
+						"vrf_type": "interface"
+					}
+				}
+			}
+		},
+		"services": {}
+	}`
+	os.WriteFile(filepath.Join(tmpDir, "network.json"), []byte(networkJSON), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "platforms.json"), []byte(`{"version": "1.0", "platforms": {}}`), 0644)
+
+	loader := NewLoader(tmpDir)
+	if err := loader.Load(); err != nil {
+		t.Fatalf("Load() should pass: zone service refs zone ipvpn, got: %v", err)
+	}
+}

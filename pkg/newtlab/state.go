@@ -24,11 +24,15 @@ type NodeState struct {
 	PID            int    `json:"pid"`
 	Status         string `json:"status"`          // "running", "stopped", "error"
 	Phase          string `json:"phase,omitempty"` // deploy phase: "booting", "bootstrapping", "patching"
+	DeviceType     string `json:"device_type,omitempty"` // "host" for non-switch devices, "host-vm" for coalesced VM
 	SSHPort        int    `json:"ssh_port"`
 	ConsolePort    int    `json:"console_port"`
 	OriginalMgmtIP string `json:"original_mgmt_ip"`
-	Host           string `json:"host,omitempty"`   // host name (empty = local)
-	HostIP         string `json:"host_ip,omitempty"` // host IP address (empty = 127.0.0.1)
+	Host           string `json:"host,omitempty"`      // host name (empty = local)
+	HostIP         string `json:"host_ip,omitempty"`   // host IP address (empty = 127.0.0.1)
+	SSHUser        string `json:"ssh_user,omitempty"`   // SSH username (for cmd_ssh.go)
+	VMName         string `json:"vm_name,omitempty"`    // virtual hosts: parent VM name
+	Namespace      string `json:"namespace,omitempty"` // virtual hosts: netns name
 }
 
 // BridgeState tracks a per-host bridge process.

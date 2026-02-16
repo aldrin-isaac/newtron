@@ -105,7 +105,26 @@ Config is **what the device uses** - imperative, concrete, and device-specific.
 }
 ```
 
-### 2.3 Translation: Spec -> Config
+### 2.3 Hierarchical Spec Resolution
+
+Specs participate in a three-level hierarchy: **network → zone → node**. Each level can define or override any of the 8 overridable spec types:
+
+| Spec Type | JSON Field | Description |
+|-----------|-----------|-------------|
+| Services | `services` | Interface service templates |
+| Filters | `filters` | ACL rule sets |
+| IP-VPNs | `ipvpns` | L3VPN definitions |
+| MAC-VPNs | `macvpns` | L2VPN definitions |
+| QoS Policies | `qos_policies` | Queue scheduling policies |
+| QoS Profiles | `qos_profiles` | Legacy scheduler mappings |
+| Route Policies | `route_policies` | BGP import/export policies |
+| Prefix Lists | `prefix_lists` | IP prefix sets |
+
+Resolution is a **union with lower-level-wins**: if the same spec name exists at multiple levels, the most specific level wins (node > zone > network). Specs at different levels with different names are all visible — a zone can add new services without duplicating network-level ones.
+
+**Not participating** in hierarchy (global-only): `zones`, `permissions`, `user_groups`, `super_users`, `version`, `platforms`.
+
+### 2.4 Translation: Spec -> Config
 
 The translation layer interprets specs in context to generate config:
 
@@ -138,7 +157,7 @@ The translation layer interprets specs in context to generate config:
 +-----------------------------------------------------------------------+
 ```
 
-### 2.4 Key Principles
+### 2.5 Key Principles
 
 1. **Specs are minimal**: Only declare what's needed; operational details are derived
 2. **Specs are reusable**: Same service spec applies to any interface
@@ -146,7 +165,7 @@ The translation layer interprets specs in context to generate config:
 4. **Config is derived**: Generated from spec + context, never hand-edited
 5. **Single source of truth**: Each fact exists in exactly one place
 
-### 2.5 What Belongs Where
+### 2.6 What Belongs Where
 
 | In Spec (Declarative) | Derived at Runtime |
 |-----------------------|--------------------|

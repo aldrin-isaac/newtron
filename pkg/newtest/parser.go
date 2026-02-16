@@ -142,6 +142,9 @@ var stepValidations = map[StepAction]stepValidation{
 	ActionConfigureSVI:       {needsDevices: true, params: []string{"vlan_id"}},
 	ActionBGPAddNeighbor:     {needsDevices: true, params: []string{"remote_asn"}},
 	ActionBGPRemoveNeighbor:  {needsDevices: true, params: []string{"neighbor_ip"}},
+
+	// Host test actions
+	ActionHostExec: {singleDevice: true, fields: []string{"command"}},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.

@@ -353,6 +353,33 @@ func (n *Network) GetTopologyDevice(name string) (*spec.TopologyDevice, error) {
 }
 
 // ============================================================================
+// Host Device Detection
+// ============================================================================
+
+// IsHostDevice returns true if the named device uses a host platform
+// (device_type == "host"). Host devices are not SONiC switches and
+// have no CONFIG_DB, APP_DB, or ASIC_DB.
+func (n *Network) IsHostDevice(name string) bool {
+	profile, err := n.loadProfile(name)
+	if err != nil {
+		return false
+	}
+	if profile.Platform == "" {
+		return false
+	}
+	platform, ok := n.platforms.Platforms[profile.Platform]
+	if !ok {
+		return false
+	}
+	return platform.IsHost()
+}
+
+// GetHostProfile returns the device profile for a host device.
+func (n *Network) GetHostProfile(name string) (*spec.DeviceProfile, error) {
+	return n.loadProfile(name)
+}
+
+// ============================================================================
 // Device (Node) Management
 // ============================================================================
 
@@ -368,6 +395,11 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 		return dev, nil
 	}
 
+	// Host devices have no SONiC — cannot create a Node
+	if n.isHostDeviceLocked(name) {
+		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
+	}
+
 	// Load device profile and create new Device in this Network's context
 	profile, err := n.loadProfile(name)
 	if err != nil {
@@ -380,8 +412,11 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 		return nil, fmt.Errorf("resolving profile for %s: %w", name, err)
 	}
 
-	// Create Node with SpecProvider (this Network) for spec access
-	dev := node.New(n, name, profile, resolved)
+	// Build per-device ResolvedSpecs (hierarchical merge: network > zone > profile)
+	resolvedSpecs := n.buildResolvedSpecs(profile)
+
+	// Create Node with ResolvedSpecs as SpecProvider for hierarchical spec access
+	dev := node.New(resolvedSpecs, name, profile, resolved)
 
 	n.devices[name] = dev
 	return dev, nil
@@ -411,6 +446,19 @@ func (n *Network) ListNodes() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// isHostDeviceLocked checks host status without acquiring the mutex (caller must hold lock).
+func (n *Network) isHostDeviceLocked(name string) bool {
+	profile, err := n.loader.LoadProfile(name)
+	if err != nil || profile.Platform == "" {
+		return false
+	}
+	platform, ok := n.platforms.Platforms[profile.Platform]
+	if !ok {
+		return false
+	}
+	return platform.IsHost()
 }
 
 // loadProfile loads a device profile from the profiles directory.
@@ -459,13 +507,6 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	// BGP neighbors from EVPN peers
 	resolved.BGPNeighbors = n.deriveBGPNeighbors(profile, name)
 
-	// Merge maps: global < zone < profile
-	resolved.PrefixLists = util.MergeMaps(
-		n.spec.PrefixLists,
-		zone.PrefixLists,
-		profile.PrefixLists,
-	)
-
 	// SSH credentials (for Redis tunnel)
 	resolved.SSHUser = profile.SSHUser
 	resolved.SSHPass = profile.SSHPass
@@ -475,6 +516,25 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	resolved.UnderlayASN = profile.UnderlayASN
 
 	return resolved, nil
+}
+
+// buildResolvedSpecs merges all 8 overridable spec maps with hierarchical
+// resolution: network → zone → profile (lower-level wins).
+func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs {
+	zone := n.spec.Zones[profile.Zone] // already validated in resolveProfile
+
+	merged := spec.OverridableSpecs{
+		PrefixLists:   util.MergeMaps(n.spec.PrefixLists, zone.PrefixLists, profile.PrefixLists),
+		Filters:       util.MergeMaps(n.spec.Filters, zone.Filters, profile.Filters),
+		Services:      util.MergeMaps(n.spec.Services, zone.Services, profile.Services),
+		IPVPNs:        util.MergeMaps(n.spec.IPVPNs, zone.IPVPNs, profile.IPVPNs),
+		MACVPNs:       util.MergeMaps(n.spec.MACVPNs, zone.MACVPNs, profile.MACVPNs),
+		QoSPolicies:   util.MergeMaps(n.spec.QoSPolicies, zone.QoSPolicies, profile.QoSPolicies),
+		QoSProfiles:   util.MergeMaps(n.spec.QoSProfiles, zone.QoSProfiles, profile.QoSProfiles),
+		RoutePolicies: util.MergeMaps(n.spec.RoutePolicies, zone.RoutePolicies, profile.RoutePolicies),
+	}
+
+	return newResolvedSpecs(merged, n)
 }
 
 // deriveBGPNeighbors looks up EVPN peer loopback IPs from their profiles.
@@ -491,6 +551,10 @@ func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName strin
 		}
 		// Skip devices not in the current topology
 		if topo != nil && !topo.HasDevice(peerName) {
+			continue
+		}
+		// Skip host devices
+		if n.isHostDeviceLocked(peerName) {
 			continue
 		}
 		// Load peer profile to get its loopback IP

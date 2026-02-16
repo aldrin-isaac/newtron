@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtlab"
@@ -21,6 +23,7 @@ type Runner struct {
 	Network       *network.Network
 	Lab           *newtlab.Lab
 	ChangeSets    map[string]*node.ChangeSet
+	HostConns     map[string]*ssh.Client // host device name → SSH client
 	Verbose       bool
 	Progress      ProgressReporter
 
@@ -430,12 +433,14 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 }
 
 // connectDevices builds the Network OO hierarchy and connects all devices.
+// Host devices are connected via plain SSH (no Redis tunnel).
 func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	net, err := network.NewNetwork(specDir)
 	if err != nil {
 		return &InfraError{Op: "connect", Err: fmt.Errorf("loading specs: %w", err)}
 	}
 	r.Network = net
+	r.HostConns = make(map[string]*ssh.Client)
 
 	topo := net.GetTopology()
 	if topo == nil {
@@ -443,6 +448,14 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	}
 
 	for _, name := range topo.DeviceNames() {
+		if net.IsHostDevice(name) {
+			client, err := connectHostSSH(net, name)
+			if err != nil {
+				return &InfraError{Op: "connect", Device: name, Err: err}
+			}
+			r.HostConns[name] = client
+			continue
+		}
 		dev, err := net.GetNode(name)
 		if err != nil {
 			return &InfraError{Op: "connect", Device: name, Err: err}
@@ -453,6 +466,40 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 	}
 
 	return nil
+}
+
+// connectHostSSH establishes a plain SSH connection to a host device.
+func connectHostSSH(net *network.Network, name string) (*ssh.Client, error) {
+	profile, err := net.GetHostProfile(name)
+	if err != nil {
+		return nil, fmt.Errorf("loading host profile: %w", err)
+	}
+
+	user := profile.SSHUser
+	if user == "" {
+		user = "root"
+	}
+	pass := profile.SSHPass
+	port := profile.SSHPort
+	if port == 0 {
+		port = 22
+	}
+
+	config := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.Password(pass),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+
+	addr := fmt.Sprintf("%s:%d", profile.MgmtIP, port)
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return nil, fmt.Errorf("SSH dial %s: %w", addr, err)
+	}
+	return client, nil
 }
 
 // executeStep dispatches a step to its executor.
@@ -503,12 +550,24 @@ func (r *Runner) progress(fn func(ProgressReporter)) {
 	}
 }
 
-// allDeviceNames returns sorted names of all topology devices.
+// allDeviceNames returns sorted names of all topology devices (including hosts).
 func (r *Runner) allDeviceNames() []string {
 	if topo := r.Network.GetTopology(); topo != nil {
 		return topo.DeviceNames()
 	}
 	return r.Network.ListNodes()
+}
+
+// allSwitchDeviceNames returns sorted names of all non-host topology devices.
+func (r *Runner) allSwitchDeviceNames() []string {
+	all := r.allDeviceNames()
+	var switches []string
+	for _, name := range all {
+		if !r.Network.IsHostDevice(name) {
+			switches = append(switches, name)
+		}
+	}
+	return switches
 }
 
 // resolveDevices resolves step.Devices to concrete device names.

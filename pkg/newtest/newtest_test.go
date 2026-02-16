@@ -1385,6 +1385,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionRefreshService, ActionCleanup,
 		ActionCreatePortChannel, ActionDeletePortChannel,
 		ActionAddPortChannelMember, ActionRemovePortChannelMember,
+		ActionHostExec,
 	}
 
 	if len(executors) != len(allActions) {

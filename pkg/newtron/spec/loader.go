@@ -130,88 +130,112 @@ func (l *Loader) loadPlatformSpec() (*PlatformSpecFile, error) {
 func (l *Loader) validate() error {
 	v := &util.ValidationBuilder{}
 
-	// Validate QoS policies
+	// Validate QoS policies (network-level)
 	l.validateQoSPolicies(v)
 
-	// Validate services reference existing filter specs
-	for svcName, svc := range l.network.Services {
+	// Validate network-level cross-references against network-level maps
+	l.validateSpecRefs(v, "", &l.network.OverridableSpecs, &l.network.OverridableSpecs)
+
+	// Validate zone-level cross-references against merged (zone + network) maps
+	for zoneName, zone := range l.network.Zones {
+		merged := mergeOverridableSpecs(&l.network.OverridableSpecs, &zone.OverridableSpecs)
+		l.validateSpecRefs(v, "zone '"+zoneName+"': ", &zone.OverridableSpecs, merged)
+	}
+
+	return v.Build()
+}
+
+// mergeOverridableSpecs merges parent and child spec maps (child wins).
+func mergeOverridableSpecs(parent, child *OverridableSpecs) *OverridableSpecs {
+	return &OverridableSpecs{
+		PrefixLists:   util.MergeMaps(parent.PrefixLists, child.PrefixLists),
+		Filters:       util.MergeMaps(parent.Filters, child.Filters),
+		Services:      util.MergeMaps(parent.Services, child.Services),
+		IPVPNs:        util.MergeMaps(parent.IPVPNs, child.IPVPNs),
+		MACVPNs:       util.MergeMaps(parent.MACVPNs, child.MACVPNs),
+		QoSPolicies:   util.MergeMaps(parent.QoSPolicies, child.QoSPolicies),
+		QoSProfiles:   util.MergeMaps(parent.QoSProfiles, child.QoSProfiles),
+		RoutePolicies: util.MergeMaps(parent.RoutePolicies, child.RoutePolicies),
+	}
+}
+
+// validateSpecRefs validates cross-references within the specs being checked
+// (own) against the resolved set (resolved, which includes parent maps).
+// The prefix is prepended to error messages (e.g. "zone 'amer': ").
+func (l *Loader) validateSpecRefs(v *util.ValidationBuilder, prefix string, own, resolved *OverridableSpecs) {
+	// Validate services reference existing specs in the resolved set
+	for svcName, svc := range own.Services {
 		if svc.IngressFilter != "" {
-			if _, ok := l.network.Filters[svc.IngressFilter]; !ok {
-				v.AddErrorf("service '%s' references unknown ingress filter '%s'", svcName, svc.IngressFilter)
+			if _, ok := resolved.Filters[svc.IngressFilter]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown ingress filter '%s'", prefix, svcName, svc.IngressFilter)
 			}
 		}
 		if svc.EgressFilter != "" {
-			if _, ok := l.network.Filters[svc.EgressFilter]; !ok {
-				v.AddErrorf("service '%s' references unknown egress filter '%s'", svcName, svc.EgressFilter)
+			if _, ok := resolved.Filters[svc.EgressFilter]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown egress filter '%s'", prefix, svcName, svc.EgressFilter)
 			}
 		}
 		if svc.QoSPolicy != "" {
-			if l.network.QoSPolicies == nil {
-				v.AddErrorf("service '%s' references unknown QoS policy '%s'", svcName, svc.QoSPolicy)
-			} else if _, ok := l.network.QoSPolicies[svc.QoSPolicy]; !ok {
-				v.AddErrorf("service '%s' references unknown QoS policy '%s'", svcName, svc.QoSPolicy)
+			if _, ok := resolved.QoSPolicies[svc.QoSPolicy]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown QoS policy '%s'", prefix, svcName, svc.QoSPolicy)
 			}
 		}
 		if svc.QoSProfile != "" {
-			if _, ok := l.network.QoSProfiles[svc.QoSProfile]; !ok {
-				v.AddErrorf("service '%s' references unknown QoS profile '%s'", svcName, svc.QoSProfile)
+			if _, ok := resolved.QoSProfiles[svc.QoSProfile]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown QoS profile '%s'", prefix, svcName, svc.QoSProfile)
 			}
 		}
-		// Validate ipvpn reference
 		if svc.IPVPN != "" {
-			if _, ok := l.network.IPVPNs[svc.IPVPN]; !ok {
-				v.AddErrorf("service '%s' references unknown ipvpn '%s'", svcName, svc.IPVPN)
+			if _, ok := resolved.IPVPNs[svc.IPVPN]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown ipvpn '%s'", prefix, svcName, svc.IPVPN)
 			}
 		}
-		// Validate macvpn reference
 		if svc.MACVPN != "" {
-			if _, ok := l.network.MACVPNs[svc.MACVPN]; !ok {
-				v.AddErrorf("service '%s' references unknown macvpn '%s'", svcName, svc.MACVPN)
+			if _, ok := resolved.MACVPNs[svc.MACVPN]; !ok {
+				v.AddErrorf("%sservice '%s' references unknown macvpn '%s'", prefix, svcName, svc.MACVPN)
 			}
 		}
 		// Validate service type constraints
 		switch svc.ServiceType {
 		case ServiceTypeEVPNIRB:
 			if svc.IPVPN == "" {
-				v.AddErrorf("service '%s' (evpn-irb) requires ipvpn reference", svcName)
+				v.AddErrorf("%sservice '%s' (evpn-irb) requires ipvpn reference", prefix, svcName)
 			}
 			if svc.MACVPN == "" {
-				v.AddErrorf("service '%s' (evpn-irb) requires macvpn reference", svcName)
+				v.AddErrorf("%sservice '%s' (evpn-irb) requires macvpn reference", prefix, svcName)
 			}
 		case ServiceTypeEVPNBridged:
 			if svc.MACVPN == "" {
-				v.AddErrorf("service '%s' (evpn-bridged) requires macvpn reference", svcName)
+				v.AddErrorf("%sservice '%s' (evpn-bridged) requires macvpn reference", prefix, svcName)
 			}
 		case ServiceTypeEVPNRouted:
 			if svc.IPVPN == "" {
-				v.AddErrorf("service '%s' (evpn-routed) requires ipvpn reference", svcName)
+				v.AddErrorf("%sservice '%s' (evpn-routed) requires ipvpn reference", prefix, svcName)
 			}
 		case ServiceTypeIRB, ServiceTypeBridged, ServiceTypeRouted:
 			// Local types: no spec-level refs required
 		default:
-			v.AddErrorf("service '%s' has unknown type '%s'", svcName, svc.ServiceType)
+			v.AddErrorf("%sservice '%s' has unknown type '%s'", prefix, svcName, svc.ServiceType)
 		}
 	}
 
-	// Validate filter rules reference existing prefix lists
-	for specName, spec := range l.network.Filters {
-		for i, rule := range spec.Rules {
+	// Validate filter rules reference existing prefix lists in the resolved set
+	for specName, filterSpec := range own.Filters {
+		for i, rule := range filterSpec.Rules {
 			if rule.SrcPrefixList != "" {
-				if _, ok := l.network.PrefixLists[rule.SrcPrefixList]; !ok {
-					v.AddErrorf("filter '%s' rule %d references unknown src prefix list '%s'",
-						specName, i, rule.SrcPrefixList)
+				if _, ok := resolved.PrefixLists[rule.SrcPrefixList]; !ok {
+					v.AddErrorf("%sfilter '%s' rule %d references unknown src prefix list '%s'",
+						prefix, specName, i, rule.SrcPrefixList)
 				}
 			}
 			if rule.DstPrefixList != "" {
-				if _, ok := l.network.PrefixLists[rule.DstPrefixList]; !ok {
-					v.AddErrorf("filter '%s' rule %d references unknown dst prefix list '%s'",
-						specName, i, rule.DstPrefixList)
+				if _, ok := resolved.PrefixLists[rule.DstPrefixList]; !ok {
+					v.AddErrorf("%sfilter '%s' rule %d references unknown dst prefix list '%s'",
+						prefix, specName, i, rule.DstPrefixList)
 				}
 			}
 		}
 	}
-
-	return v.Build()
 }
 
 // validateQoSPolicies validates all QoS policy definitions.
@@ -262,10 +286,50 @@ func (l *Loader) validateQoSPolicies(v *util.ValidationBuilder) {
 	}
 }
 
+// isHostDevice returns true if the named device uses a host platform.
+func (l *Loader) isHostDevice(deviceName string) bool {
+	profile, ok := l.profiles[deviceName]
+	if !ok {
+		// Try loading — may not be cached yet during topology validation
+		profilePath := filepath.Join(l.specDir, "profiles", deviceName+".json")
+		data, err := os.ReadFile(profilePath)
+		if err != nil {
+			return false
+		}
+		var p DeviceProfile
+		if err := json.Unmarshal(data, &p); err != nil {
+			return false
+		}
+		profile = &p
+	}
+	return l.isHostPlatform(profile.Platform)
+}
+
+// isHostPlatform returns true if the given platform name refers to a host device type.
+func (l *Loader) isHostPlatform(platformName string) bool {
+	if l.platforms == nil || platformName == "" {
+		return false
+	}
+	platform, ok := l.platforms.Platforms[platformName]
+	if !ok {
+		return false
+	}
+	return platform.IsHost()
+}
+
 func (l *Loader) validateProfile(profile *DeviceProfile) error {
 	v := &util.ValidationBuilder{}
 
-	// Required fields
+	// Host devices have relaxed validation — only mgmt_ip is required
+	if l.isHostPlatform(profile.Platform) {
+		v.Add(profile.MgmtIP != "", "mgmt_ip is required")
+		if profile.MgmtIP != "" && !util.IsValidIPv4(profile.MgmtIP) {
+			v.AddErrorf("invalid management IP: %s", profile.MgmtIP)
+		}
+		return v.Build()
+	}
+
+	// Required fields for switch devices
 	v.Add(profile.MgmtIP != "", "mgmt_ip is required")
 	v.Add(profile.LoopbackIP != "", "loopback_ip is required")
 	v.Add(profile.Zone != "", "zone is required")
@@ -414,6 +478,12 @@ func (l *Loader) validateTopology() error {
 		profilePath := filepath.Join(l.specDir, "profiles", deviceName+".json")
 		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
 			v.AddErrorf("topology device '%s' has no profile at %s", deviceName, profilePath)
+		}
+
+		// Skip service/interface validation for host devices —
+		// they have no SONiC services, zones, or loopback IPs
+		if l.isHostDevice(deviceName) {
+			continue
 		}
 
 		for intfName, intf := range device.Interfaces {

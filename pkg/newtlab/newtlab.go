@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +18,13 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
+
+// HostVMGroup represents virtual hosts coalesced into one VM.
+type HostVMGroup struct {
+	VMName  string         // synthetic VM name (e.g., "hostvm-0")
+	Hosts   []string       // sorted logical host names
+	NICBase map[string]int // host name → base NIC index on VM
+}
 
 // Lab is the top-level newtlab orchestrator. It reads newtron spec files,
 // resolves VM configuration, and manages QEMU processes.
@@ -31,6 +39,7 @@ type Lab struct {
 	Nodes        map[string]*NodeConfig
 	Links        []*LinkConfig
 	State        *LabState
+	HostVMs      []*HostVMGroup
 	Force        bool
 	DeviceFilter []string // if non-empty, only provision these devices
 
@@ -120,6 +129,9 @@ func NewLab(specDir string) (*Lab, error) {
 		l.Nodes[name] = nc
 	}
 
+	// Coalesce host devices into shared VMs
+	l.coalesceHostVMs()
+
 	// Auto-place nodes across server pool (if configured)
 	if len(l.Config.Servers) > 0 {
 		if err := PlaceNodes(l.Nodes, l.Config.Servers); err != nil {
@@ -127,13 +139,139 @@ func NewLab(specDir string) (*Lab, error) {
 		}
 	}
 
+	// Build host map for link allocation
+	hostMap := l.buildHostMap()
+
 	// Allocate links
-	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config)
+	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config, hostMap)
 	if err != nil {
 		return nil, err
 	}
 
 	return l, nil
+}
+
+// coalesceHostVMs identifies host devices in the topology, groups them by
+// vm_host (physical server), creates a synthetic VM per group, and removes
+// individual host NodeConfigs from l.Nodes.
+func (l *Lab) coalesceHostVMs() {
+	// Identify host devices
+	type hostInfo struct {
+		name    string
+		vmHost  string
+		profile *spec.DeviceProfile
+	}
+	var hosts []hostInfo
+	for name, nc := range l.Nodes {
+		if nc.DeviceType == "host" {
+			profile := l.Profiles[name]
+			vmHost := ""
+			if profile != nil {
+				vmHost = profile.VMHost
+			}
+			hosts = append(hosts, hostInfo{name: name, vmHost: vmHost, profile: profile})
+		}
+	}
+	if len(hosts) == 0 {
+		return
+	}
+
+	// Sort hosts for deterministic ordering
+	sort.Slice(hosts, func(i, j int) bool { return hosts[i].name < hosts[j].name })
+
+	// Group by vm_host
+	groups := map[string][]hostInfo{}
+	for _, h := range hosts {
+		groups[h.vmHost] = append(groups[h.vmHost], h)
+	}
+
+	// Sort group keys for deterministic VM naming
+	var groupKeys []string
+	for k := range groups {
+		groupKeys = append(groupKeys, k)
+	}
+	sort.Strings(groupKeys)
+
+	vmIndex := 0
+	for _, key := range groupKeys {
+		groupHosts := groups[key]
+		vmName := fmt.Sprintf("hostvm-%d", vmIndex)
+		vmIndex++
+
+		// Use the first host's NodeConfig as template for the VM
+		templateNC := l.Nodes[groupHosts[0].name]
+
+		vmNC := &NodeConfig{
+			Name:         vmName,
+			Platform:     templateNC.Platform,
+			DeviceType:   "host-vm",
+			Image:        templateNC.Image,
+			Memory:       templateNC.Memory,
+			CPUs:         templateNC.CPUs,
+			NICDriver:    templateNC.NICDriver,
+			InterfaceMap: templateNC.InterfaceMap,
+			CPUFeatures:  templateNC.CPUFeatures,
+			SSHUser:      templateNC.SSHUser,
+			SSHPass:      templateNC.SSHPass,
+			ConsoleUser:  templateNC.ConsoleUser,
+			ConsolePass:  templateNC.ConsolePass,
+			BootTimeout:  templateNC.BootTimeout,
+			Host:         templateNC.Host,
+			SSHPort:      templateNC.SSHPort,
+			ConsolePort:  templateNC.ConsolePort,
+			NICs: []NICConfig{{
+				Index:     0,
+				NetdevID:  "mgmt",
+				Interface: "mgmt",
+			}},
+		}
+
+		group := &HostVMGroup{
+			VMName:  vmName,
+			Hosts:   make([]string, 0, len(groupHosts)),
+			NICBase: make(map[string]int),
+		}
+
+		// Compute NIC base per host: count links from topology, allocate sequential ranges
+		nicIdx := 1 // NIC 0 = mgmt
+		for _, h := range groupHosts {
+			group.Hosts = append(group.Hosts, h.name)
+			group.NICBase[h.name] = nicIdx
+
+			// Count how many links this host has
+			linkCount := 0
+			for _, link := range l.Topology.Links {
+				aDevice, _, _ := splitLinkEndpoint(link.A)
+				zDevice, _, _ := splitLinkEndpoint(link.Z)
+				if aDevice == h.name || zDevice == h.name {
+					linkCount++
+				}
+			}
+			nicIdx += linkCount
+		}
+
+		// Remove individual host NodeConfigs, add VM NodeConfig
+		for _, h := range groupHosts {
+			delete(l.Nodes, h.name)
+		}
+		l.Nodes[vmName] = vmNC
+		l.HostVMs = append(l.HostVMs, group)
+	}
+}
+
+// buildHostMap returns a mapping from coalesced host names to their VM name
+// and NIC base index, for use by AllocateLinks.
+func (l *Lab) buildHostMap() map[string]HostMapping {
+	hostMap := make(map[string]HostMapping)
+	for _, group := range l.HostVMs {
+		for _, hostName := range group.Hosts {
+			hostMap[hostName] = HostMapping{
+				VMName:  group.VMName,
+				NICBase: group.NICBase[hostName],
+			}
+		}
+	}
+	return hostMap
 }
 
 // Deploy creates overlay disks, starts QEMU processes, waits for SSH,
@@ -253,6 +391,37 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	}
 	l.setNodePhase("")
 
+	// Provision host namespaces for coalesced VMs
+	if len(l.HostVMs) > 0 && deployErr == nil {
+		l.progress("hosts", "provisioning host namespaces")
+		if err := l.provisionHostNamespaces(ctx); err != nil {
+			deployErr = err
+		}
+	}
+
+	// Create virtual host state entries
+	for _, group := range l.HostVMs {
+		vmState := l.State.Nodes[group.VMName]
+		if vmState == nil {
+			continue
+		}
+		vmNC := l.Nodes[group.VMName]
+		for _, hostName := range group.Hosts {
+			l.State.Nodes[hostName] = &NodeState{
+				PID:         vmState.PID,
+				Status:      vmState.Status,
+				DeviceType:  "host",
+				SSHPort:     vmState.SSHPort,
+				ConsolePort: vmState.ConsolePort,
+				Host:        vmState.Host,
+				HostIP:      vmState.HostIP,
+				SSHUser:     vmNC.SSHUser,
+				VMName:      group.VMName,
+				Namespace:   hostName,
+			}
+		}
+	}
+
 	// Save state (always, even on error — enables cleanup)
 	if err := SaveState(l.State); err != nil {
 		return err
@@ -260,6 +429,133 @@ func (l *Lab) Deploy(ctx context.Context) error {
 
 	l.progress("ready", "all nodes ready")
 	return deployErr
+}
+
+// provisionHostNamespaces creates network namespaces inside coalesced host VMs
+// and configures interfaces and IP addresses.
+func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
+	for _, group := range l.HostVMs {
+		vmNC := l.Nodes[group.VMName]
+		vmNS := l.State.Nodes[group.VMName]
+		if vmNS == nil || vmNS.Status != "running" {
+			continue
+		}
+
+		sshHost := resolveHostIP(vmNC.Host, l.Config)
+		config := &ssh.ClientConfig{
+			User:            vmNC.SSHUser,
+			Auth:            []ssh.AuthMethod{ssh.Password(vmNC.SSHPass)},
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+			Timeout:         10 * time.Second,
+		}
+		addr := fmt.Sprintf("%s:%d", sshHost, vmNS.SSHPort)
+		client, err := ssh.Dial("tcp", addr, config)
+		if err != nil {
+			return fmt.Errorf("newtlab: provision hosts: SSH dial %s: %w", addr, err)
+		}
+		defer client.Close()
+
+		for hostIdx, hostName := range group.Hosts {
+			nicBase := group.NICBase[hostName]
+			profile := l.Profiles[hostName]
+
+			var cmds []string
+			cmds = append(cmds, fmt.Sprintf("ip netns add %s", hostName))
+
+			// Move each data NIC into the namespace
+			// For a host with one link (eth0), NIC = nicBase + 0
+			// The VM sees this as eth<nicBase>
+			ethName := fmt.Sprintf("eth%d", nicBase)
+			cmds = append(cmds,
+				fmt.Sprintf("ip link set %s netns %s", ethName, hostName),
+				fmt.Sprintf("ip netns exec %s ip link set %s name eth0", hostName, ethName),
+				fmt.Sprintf("ip netns exec %s ip link set eth0 up", hostName),
+				fmt.Sprintf("ip netns exec %s ip link set lo up", hostName),
+			)
+
+			// Assign IP and gateway
+			hostIP, gateway := "", ""
+			if profile != nil {
+				hostIP = profile.HostIP
+				gateway = profile.HostGateway
+			}
+			if hostIP == "" {
+				// Auto-derive from switch-side interface IP
+				switchIP, mask := l.findPeerInterfaceIP(hostName)
+				if switchIP != "" {
+					gateway = switchIP
+					hostIP = deriveHostIP(switchIP, mask, hostIdx)
+				}
+			}
+			if hostIP != "" {
+				cmds = append(cmds, fmt.Sprintf("ip netns exec %s ip addr add %s dev eth0", hostName, hostIP))
+			}
+			if gateway != "" {
+				cmds = append(cmds, fmt.Sprintf("ip netns exec %s ip route add default via %s", hostName, gateway))
+			}
+
+			script := strings.Join(cmds, " && ")
+			session, err := client.NewSession()
+			if err != nil {
+				return fmt.Errorf("newtlab: provision %s: SSH session: %w", hostName, err)
+			}
+			output, err := session.CombinedOutput(script)
+			session.Close()
+			if err != nil {
+				return fmt.Errorf("newtlab: provision %s: %w\n%s", hostName, err, output)
+			}
+			util.Logger.Infof("newtlab: provisioned namespace %s in %s", hostName, group.VMName)
+		}
+	}
+	return nil
+}
+
+// findPeerInterfaceIP walks topology links to find the switch-side IP for a
+// host device's connection. Returns the switch IP (without mask) and the mask
+// (e.g., "/24"), or empty strings if not found.
+func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
+	for _, link := range l.Topology.Links {
+		aDevice, aIface, _ := splitLinkEndpoint(link.A)
+		zDevice, zIface, _ := splitLinkEndpoint(link.Z)
+
+		var peerDevice, peerIface string
+		if aDevice == hostName {
+			peerDevice, peerIface = zDevice, zIface
+		} else if zDevice == hostName {
+			peerDevice, peerIface = aDevice, aIface
+		} else {
+			continue
+		}
+
+		// Look up the peer interface's IP in the topology
+		dev, ok := l.Topology.Devices[peerDevice]
+		if !ok {
+			continue
+		}
+		iface, ok := dev.Interfaces[peerIface]
+		if !ok || iface.IP == "" {
+			continue
+		}
+
+		// Parse "10.1.100.1/24" → ip="10.1.100.1", mask="/24"
+		parts := strings.SplitN(iface.IP, "/", 2)
+		if len(parts) == 2 {
+			return parts[0], "/" + parts[1]
+		}
+		return iface.IP, ""
+	}
+	return "", ""
+}
+
+// deriveHostIP derives a host IP from the switch-side IP.
+// hostIndex 0 → .10, 1 → .20, etc. in the same subnet.
+func deriveHostIP(switchIP, mask string, hostIndex int) string {
+	parts := strings.Split(switchIP, ".")
+	if len(parts) != 4 {
+		return ""
+	}
+	hostOctet := (hostIndex + 1) * 10
+	return fmt.Sprintf("%s.%s.%s.%d%s", parts[0], parts[1], parts[2], hostOctet, mask)
 }
 
 // setupBridges starts bridge worker processes for inter-VM networking.
@@ -349,6 +645,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 		if err != nil {
 			l.State.Nodes[name] = &NodeState{
 				Status:      "error",
+				DeviceType:  node.DeviceType,
 				SSHPort:     node.SSHPort,
 				ConsolePort: node.ConsolePort,
 				Host:        node.Host,
@@ -363,6 +660,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 			PID:         pid,
 			Status:      "running",
 			Phase:       "booting",
+			DeviceType:  node.DeviceType,
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
 			Host:        node.Host,
@@ -416,8 +714,14 @@ func (l *Lab) parallelForNodes(fn func(name string, node *NodeConfig, ns *NodeSt
 func (l *Lab) bootstrapNodes(ctx context.Context) error {
 	// Bootstrap network via serial console (parallel).
 	// QEMU user-mode networking requires eth0 up + DHCP before SSH port forwarding works.
+	// Host devices use a simpler bootstrap that only waits for the login prompt.
 	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		consoleHost := resolveHostIP(node.Host, l.Config)
+		if node.DeviceType == "host" || node.DeviceType == "host-vm" {
+			return BootstrapHostNetwork(ctx, consoleHost, node.ConsolePort,
+				node.ConsoleUser, node.ConsolePass,
+				time.Duration(node.BootTimeout)*time.Second)
+		}
 		return BootstrapNetwork(ctx, consoleHost, node.ConsolePort,
 			node.ConsoleUser, node.ConsolePass, node.SSHUser, node.SSHPass,
 			time.Duration(node.BootTimeout)*time.Second)
@@ -439,6 +743,9 @@ func (l *Lab) bootstrapNodes(ctx context.Context) error {
 // then patches device profiles.
 func (l *Lab) applyNodePatches(ctx context.Context) error {
 	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
+		if node.DeviceType == "host" || node.DeviceType == "host-vm" {
+			return nil // host devices have no platform boot patches
+		}
 		profile := l.Profiles[name]
 		platform := l.Platform.Platforms[profile.Platform]
 		if platform == nil {
@@ -496,8 +803,11 @@ func (l *Lab) Destroy(ctx context.Context) error {
 
 	var errs []error
 
-	// Kill QEMU processes
+	// Kill QEMU processes (skip virtual host entries — killed with parent VM)
 	for name, node := range state.Nodes {
+		if node.VMName != "" {
+			continue // virtual host — killed with parent VM
+		}
 		if IsRunning(node.PID, node.HostIP) {
 			l.progress("stop", fmt.Sprintf("stopping %s", name))
 			if err := StopNode(node.PID, node.HostIP); err != nil {
@@ -678,6 +988,10 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 
 	var wg sync.WaitGroup
 	for name := range state.Nodes {
+		// Skip host/host-vm devices — they have no SONiC CONFIG_DB to provision
+		if ns := state.Nodes[name]; ns != nil && (ns.DeviceType == "host" || ns.DeviceType == "host-vm") {
+			continue
+		}
 		wg.Add(1)
 		go func(name string) {
 			defer wg.Done()
@@ -723,6 +1037,10 @@ func (l *Lab) refreshBGP(state *LabState) {
 	for name, nodeState := range state.Nodes {
 		nc := l.Nodes[name]
 		if nc == nil || nc.SSHUser == "" {
+			continue
+		}
+		// Skip host/host-vm devices — they have no FRR/BGP
+		if nc.DeviceType == "host" || nc.DeviceType == "host-vm" {
 			continue
 		}
 
@@ -820,8 +1138,11 @@ func (l *Lab) destroyExisting(existing *LabState) error {
 	}
 	var errs []error
 
-	// Kill QEMU processes
+	// Kill QEMU processes (skip virtual host entries)
 	for name, node := range existing.Nodes {
+		if node.VMName != "" {
+			continue
+		}
 		if IsRunning(node.PID, node.HostIP) {
 			if err := StopNode(node.PID, node.HostIP); err != nil {
 				errs = append(errs, fmt.Errorf("stop %s (pid %d): %w", name, node.PID, err))

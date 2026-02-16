@@ -51,12 +51,21 @@ type VMLabConfig struct {
 	Servers         []*spec.ServerConfig // server pool (nil = single-host mode)
 }
 
+// HostMapping maps a coalesced host device to its parent VM and NIC base.
+type HostMapping struct {
+	VMName  string
+	NICBase int
+}
+
 // AllocateLinks resolves topology links into LinkConfig entries with
 // port allocations, NIC index assignments, and bridge worker placement.
+// hostMap maps coalesced host device names to their parent VM and NIC base;
+// pass nil when no host coalescing is used.
 func AllocateLinks(
 	links []*spec.TopologyLink,
 	nodes map[string]*NodeConfig,
 	config *VMLabConfig,
+	hostMap map[string]HostMapping,
 ) ([]*LinkConfig, error) {
 	var result []*LinkConfig
 
@@ -73,6 +82,29 @@ func AllocateLinks(
 			return nil, fmt.Errorf("newtlab: allocate links: link %d Z: %w", i, err)
 		}
 
+		// Resolve coalesced hosts: remap device name to VM, compute NIC index
+		var aNIC, zNIC int
+		aResolved, zResolved := false, false
+
+		if mapping, ok := hostMap[aDevice]; ok {
+			ethIdx := parseLinuxEthIndex(aIface)
+			if ethIdx < 0 {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d A: invalid host interface %q", i, aIface)
+			}
+			aNIC = mapping.NICBase + ethIdx
+			aDevice = mapping.VMName
+			aResolved = true
+		}
+		if mapping, ok := hostMap[zDevice]; ok {
+			ethIdx := parseLinuxEthIndex(zIface)
+			if ethIdx < 0 {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d Z: invalid host interface %q", i, zIface)
+			}
+			zNIC = mapping.NICBase + ethIdx
+			zDevice = mapping.VMName
+			zResolved = true
+		}
+
 		nodeA, ok := nodes[aDevice]
 		if !ok {
 			return nil, fmt.Errorf("newtlab: allocate links: device %q not found", aDevice)
@@ -82,13 +114,17 @@ func AllocateLinks(
 			return nil, fmt.Errorf("newtlab: allocate links: device %q not found", zDevice)
 		}
 
-		aNIC, err := ResolveNICIndex(nodeA.InterfaceMap, aIface, nil)
-		if err != nil {
-			return nil, fmt.Errorf("newtlab: allocate links: link %d A: %w", i, err)
+		if !aResolved {
+			aNIC, err = ResolveNICIndex(nodeA.InterfaceMap, aIface, nil)
+			if err != nil {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d A: %w", i, err)
+			}
 		}
-		zNIC, err := ResolveNICIndex(nodeZ.InterfaceMap, zIface, nil)
-		if err != nil {
-			return nil, fmt.Errorf("newtlab: allocate links: link %d Z: %w", i, err)
+		if !zResolved {
+			zNIC, err = ResolveNICIndex(nodeZ.InterfaceMap, zIface, nil)
+			if err != nil {
+				return nil, fmt.Errorf("newtlab: allocate links: link %d Z: %w", i, err)
+			}
 		}
 
 		lc := &LinkConfig{

@@ -35,33 +35,36 @@ type QoSProfile struct {
 	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
 }
 
+// OverridableSpecs holds spec maps that participate in hierarchical resolution
+// (network → zone → node). Embedded by NetworkSpecFile, ZoneSpec, and DeviceProfile.
+// Resolution is a union with lower-level-wins: node > zone > network.
+type OverridableSpecs struct {
+	PrefixLists   map[string][]string      `json:"prefix_lists,omitempty"`
+	Filters       map[string]*FilterSpec   `json:"filters,omitempty"`
+	QoSPolicies   map[string]*QoSPolicy    `json:"qos_policies,omitempty"`
+	QoSProfiles   map[string]*QoSProfile   `json:"qos_profiles,omitempty"`
+	RoutePolicies map[string]*RoutePolicy  `json:"route_policies,omitempty"`
+	IPVPNs        map[string]*IPVPNSpec    `json:"ipvpns,omitempty"`
+	MACVPNs       map[string]*MACVPNSpec   `json:"macvpns,omitempty"`
+	Services      map[string]*ServiceSpec  `json:"services,omitempty"`
+}
+
 // NetworkSpecFile represents the global network specification file (network.json).
 type NetworkSpecFile struct {
-	Version      string                       `json:"version"`
-	SuperUsers   []string                     `json:"super_users"`
-	UserGroups   map[string][]string          `json:"user_groups"`   // Group name → user list
-	Permissions  map[string][]string          `json:"permissions"`   // Action → allowed groups
-	Zones      map[string]*ZoneSpec       `json:"zones"`
-	PrefixLists  map[string][]string          `json:"prefix_lists"`
-	Filters      map[string]*FilterSpec       `json:"filters"`
-	QoSPolicies  map[string]*QoSPolicy         `json:"qos_policies,omitempty"`
-	QoSProfiles  map[string]*QoSProfile       `json:"qos_profiles,omitempty"` // Legacy — kept for backward compat
+	Version     string              `json:"version"`
+	SuperUsers  []string            `json:"super_users"`
+	UserGroups  map[string][]string `json:"user_groups"`  // Group name → user list
+	Permissions map[string][]string `json:"permissions"`  // Action → allowed groups
+	Zones       map[string]*ZoneSpec `json:"zones"`
 
-	// Route policies (for BGP import/export)
-	RoutePolicies map[string]*RoutePolicy `json:"route_policies,omitempty"`
-
-	// VPN definitions (referenced by services)
-	IPVPNs  map[string]*IPVPNSpec  `json:"ipvpns"`  // IP-VPN (L3VNI, route targets)
-	MACVPNs map[string]*MACVPNSpec `json:"macvpns"` // MAC-VPN (VLAN, L2VNI)
-
-	// Service definitions (reference ipvpn/macvpn by name)
-	Services map[string]*ServiceSpec `json:"services"`
+	OverridableSpecs // Embedded — all 8 overridable spec maps
 }
 
 // ZoneSpec defines zone settings (AS number, defaults).
 type ZoneSpec struct {
-	ASNumber     int                 `json:"as_number"`
-	PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
+	ASNumber int `json:"as_number"`
+
+	OverridableSpecs // Embedded — zone-level overrides
 }
 
 // ============================================================================
@@ -240,10 +243,11 @@ type PlatformSpecFile struct {
 	Platforms map[string]*PlatformSpec `json:"platforms"`
 }
 
-// PlatformSpec defines a SONiC platform.
+// PlatformSpec defines a SONiC platform or host device type.
 type PlatformSpec struct {
 	HWSKU        string   `json:"hwsku"`
 	Description  string   `json:"description,omitempty"`
+	DeviceType   string   `json:"device_type,omitempty"` // "switch" (default) or "host"
 	PortCount    int      `json:"port_count"`
 	DefaultSpeed string   `json:"default_speed"`
 	Breakouts    []string `json:"breakouts,omitempty"` // Supported breakout modes
@@ -261,6 +265,11 @@ type PlatformSpec struct {
 	Dataplane            string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
 	VMImageRelease       string         `json:"vm_image_release,omitempty"` // e.g. "202405" — selects release-specific boot patches
 	UnsupportedFeatures  []string       `json:"unsupported_features,omitempty"` // features this platform cannot handle (e.g. "acl")
+}
+
+// IsHost returns true if the platform is a host device (not a network switch).
+func (p *PlatformSpec) IsHost() bool {
+	return p.DeviceType == "host"
 }
 
 // SupportsFeature returns true if the platform supports the named feature.
@@ -307,10 +316,11 @@ type DeviceProfile struct {
 	ASNumber *int `json:"as_number,omitempty"`
 
 	// OPTIONAL - device-specific
-	MAC             string              `json:"mac,omitempty"`
-	Platform        string              `json:"platform,omitempty"`
-	VLANPortMapping map[int][]string    `json:"vlan_port_mapping,omitempty"` // TODO(v4): not consumed — implement VLAN-to-port mapping for pre-provisioned access ports
-	PrefixLists     map[string][]string `json:"prefix_lists,omitempty"`
+	MAC             string           `json:"mac,omitempty"`
+	Platform        string           `json:"platform,omitempty"`
+	VLANPortMapping map[int][]string `json:"vlan_port_mapping,omitempty"` // TODO(v4): not consumed — implement VLAN-to-port mapping for pre-provisioned access ports
+
+	OverridableSpecs // Embedded — node-level overrides
 
 	// OPTIONAL - SSH access for Redis tunnel
 	SSHUser string `json:"ssh_user,omitempty"`
@@ -326,6 +336,10 @@ type DeviceProfile struct {
 
 	// OPTIONAL - eBGP underlay ASN (unique per device)
 	UnderlayASN int `json:"underlay_asn,omitempty"`
+
+	// OPTIONAL - virtual host IP assignment (newtlab auto-derives if omitted)
+	HostIP      string `json:"host_ip,omitempty"`      // data-plane IP (e.g., "10.1.100.10/24")
+	HostGateway string `json:"host_gateway,omitempty"` // default gateway
 }
 
 // ResolvedProfile contains fully resolved device values
@@ -350,9 +364,6 @@ type ResolvedProfile struct {
 
 	// From profile (optional)
 	MAC string
-
-	// Merged maps (profile > region > global)
-	PrefixLists map[string][]string
 
 	// SSH access (for Redis tunnel)
 	SSHUser string

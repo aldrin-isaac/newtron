@@ -3168,7 +3168,68 @@ Precondition checks (`VRFExists`, `VLANExists`, `VTEPExists`, etc.) read from th
 
 ---
 
-## 27. Related Documentation
+## 27. Zone-Level and Node-Level Spec Overrides
+
+### Zone-Level Specs
+
+Add specs directly under a zone in `network.json` to make them available only to devices in that zone:
+
+```json
+{
+  "zones": {
+    "amer": {
+      "as_number": 64512,
+      "services": {
+        "amer-transit": {
+          "description": "AMER-specific transit service",
+          "service_type": "routed",
+          "ingress_filter": "transit-protect"
+        }
+      },
+      "prefix_lists": {
+        "amer-internal": ["10.10.0.0/16", "10.20.0.0/16"]
+      }
+    }
+  }
+}
+```
+
+Zone-level specs can reference network-level specs (e.g., the `amer-transit` service references the network-level `transit-protect` filter).
+
+### Node-Level Specs
+
+Add specs to a device profile (`profiles/<device>.json`) for device-specific overrides:
+
+```json
+{
+  "mgmt_ip": "192.168.1.10",
+  "loopback_ip": "10.0.0.10",
+  "zone": "amer",
+  "services": {
+    "customer-l3": {
+      "description": "Customer L3 with device-specific QoS",
+      "service_type": "evpn-routed",
+      "ipvpn": "customer-vpn",
+      "vrf_type": "interface",
+      "qos_policy": "special-4q"
+    }
+  }
+}
+```
+
+### Resolution Order
+
+When a node looks up a spec by name, the merged result follows **lower-level-wins**:
+
+1. **Node (profile)** — highest priority
+2. **Zone** — middle priority
+3. **Network** — lowest priority (fallback)
+
+All specs from all levels are visible. If the same name exists at multiple levels, the most specific level wins.
+
+---
+
+## 28. Related Documentation
 
 The following documents provide additional detail on specific topics:
 

@@ -546,7 +546,50 @@ newtest start 2node-incremental --junit results.xml
 
 ---
 
-## 9. CLI Reference
+## 9. Data Plane Verification
+
+### 9.1 Test Host Concept
+
+Data plane tests require endpoints that can generate and receive packets. newtest uses **testhost** devices — Alpine Linux VMs with multiple NICs connected to leaf port channels via newtlink. These hosts run network namespaces for L2 isolation (one per NIC) and provide standard tools (ping, iperf3, tcpdump, hping3) for testing.
+
+```
+┌────────────────────────────────────────┐
+│  testhost1 (Alpine Linux VM)          │
+│  ┌──────────────┬──────────────────┐   │
+│  │ ns-eth1      │ ns-eth2          │   │
+│  │ (192.168.1.2)│ (192.168.2.2)    │   │
+│  └──────┬───────┴──────┬───────────┘   │
+│         │              │               │
+│      eth1           eth2              │
+└─────────┼──────────────┼───────────────┘
+          │              │
+     newtlink        newtlink
+          │              │
+   ┌──────┴──────┐  ┌───┴──────┐
+   │ leaf1:Po1   │  │ leaf2:Po1│
+   └─────────────┘  └──────────┘
+```
+
+### 9.2 Step Actions for Host Testing
+
+| Action | Description |
+|--------|-------------|
+| `host-exec` | Execute a command in a namespace on a host device (namespace = device name) |
+
+**Note:** Namespaces are created by newtlab during topology deployment (infrastructure concern). Test scenarios do not manage namespace lifecycle — they only execute commands within pre-existing namespaces using `host-exec`.
+
+### 9.3 Host-Based Test Suites
+
+The **3node-dataplane** suite validates:
+- **L2 VXLAN connectivity** — ping across EVPN MAC-VPN overlay with untagged members
+- **L3 VRF routing** — ping across EVPN IP-VPN overlay with routed interfaces
+- **ACL filtering** — verify that deny/permit rules drop/pass traffic
+
+Host namespaces are provisioned by newtlab during topology deployment. Tests use `host-exec` to run commands (ping/iperf3/tcpdump) directly within these namespaces without setup or teardown steps.
+
+---
+
+## 10. CLI Reference
 
 ```
 newtest - E2E testing for newtron

@@ -324,7 +324,7 @@ func TestAllocateLinks(t *testing.T) {
 		SSHPortBase:     40000,
 	}
 
-	result, err := AllocateLinks(links, nodes, config)
+	result, err := AllocateLinks(links, nodes, config, nil)
 	if err != nil {
 		t.Fatalf("AllocateLinks error: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestAllocateLinks_PortSequence(t *testing.T) {
 
 	config := &VMLabConfig{LinkPortBase: 25000}
 
-	result, err := AllocateLinks(links, nodes, config)
+	result, err := AllocateLinks(links, nodes, config, nil)
 	if err != nil {
 		t.Fatalf("AllocateLinks error: %v", err)
 	}

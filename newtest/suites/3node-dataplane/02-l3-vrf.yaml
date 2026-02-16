@@ -1,0 +1,116 @@
+name: l3-vrf
+description: L3 VRF - IRB with shared VRF and anycast gateway, verify routed connectivity
+topology: 3node
+platform: sonic-vpp
+requires: [l2-vxlan]
+
+steps:
+  # Create shared VRF on both leafs
+  - name: create-vrf-leaf1
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_server
+
+  - name: create-vrf-leaf2
+    action: create-vrf
+    devices: [leaf2]
+    params:
+      vrf: Vrf_server
+
+  # Bind IP-VPN to VRF (L3 VXLAN)
+  - name: bind-ipvpn-leaf1
+    action: bind-ipvpn
+    devices: [leaf1]
+    params:
+      vrf: Vrf_server
+      ipvpn: server-vpn
+
+  - name: bind-ipvpn-leaf2
+    action: bind-ipvpn
+    devices: [leaf2]
+    params:
+      vrf: Vrf_server
+      ipvpn: server-vpn
+
+  # Configure SVI with anycast gateway (same IP on both leafs)
+  - name: svi-leaf1
+    action: configure-svi
+    devices: [leaf1]
+    params:
+      vlan_id: 100
+      vrf: Vrf_server
+      ip: 10.1.100.1/24
+
+  - name: svi-leaf2
+    action: configure-svi
+    devices: [leaf2]
+    params:
+      vlan_id: 100
+      vrf: Vrf_server
+      ip: 10.1.100.1/24
+
+  # Wait for IRB convergence
+  - name: wait-irb
+    action: wait
+    duration: 10s
+
+  # Verify hosts can reach the anycast gateway
+  - name: host1-gateway-ping
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.1.100.1"
+    expect:
+      success_rate: 0.8
+
+  - name: host2-gateway-ping
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 3 -W 2 10.1.100.1"
+    expect:
+      success_rate: 0.8
+
+  # Bidirectional ping through VRF (routed via IRB gateway)
+  - name: ping-host1-to-host2
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 5 -W 2 10.1.100.20"
+    expect:
+      success_rate: 0.8
+
+  - name: ping-host2-to-host1
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 5 -W 2 10.1.100.10"
+    expect:
+      success_rate: 0.8
+
+  # Verify host routing tables have expected entries
+  - name: host1-routes
+    action: host-exec
+    devices: [host1]
+    command: "ip route show"
+    expect:
+      contains: "default via 10.1.100.1"
+
+  - name: host2-routes
+    action: host-exec
+    devices: [host2]
+    command: "ip route show"
+    expect:
+      contains: "default via 10.1.100.1"
+
+  # Verify ARP resolution on hosts (gateway MAC should be present)
+  - name: host1-arp
+    action: host-exec
+    devices: [host1]
+    command: "ip neigh show dev eth0"
+    expect:
+      contains: "10.1.100.1"
+
+  - name: host2-arp
+    action: host-exec
+    devices: [host2]
+    command: "ip neigh show dev eth0"
+    expect:
+      contains: "10.1.100.1"

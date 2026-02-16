@@ -105,6 +105,9 @@ const (
 	ActionDeletePortChannel       StepAction = "delete-portchannel"
 	ActionAddPortChannelMember    StepAction = "add-portchannel-member"
 	ActionRemovePortChannelMember StepAction = "remove-portchannel-member"
+
+	// Host test actions
+	ActionHostExec StepAction = "host-exec"
 )
 
 // validActions is the set of all recognized step actions, derived from the

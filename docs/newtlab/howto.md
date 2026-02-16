@@ -458,6 +458,175 @@ Use `newtlab status <topology>` to see aggregated counters from all hosts.
 
 ---
 
+## Virtual Hosts for Data Plane Testing
+
+Data plane tests require virtual hosts (lightweight Alpine Linux VMs) configured as testhost endpoints. Unlike switches, **multiple virtual hosts share a single QEMU VM** via network namespace coalescing, reducing resource overhead.
+
+### How Virtual Hosts Work
+
+**VM coalescing:**
+- Multiple host devices (e.g., `host1`, `host2`) share one QEMU instance (`hostvm-0`)
+- Each host runs in its own **network namespace** inside the VM
+- Namespaces are created at deploy time with pre-configured IPs
+- From the user's perspective, each host appears as a separate SSH target
+
+**SSH transparency:**
+```bash
+newtlab ssh host1    # Automatically enters the host1 namespace
+```
+
+Behind the scenes, this SSHs to the parent VM and runs `ip netns exec host1 sh`.
+
+**Status display:**
+```bash
+newtlab status
+
+  Node      Type                  Status    PID     SSH Port  Console Port
+  ────────  ────────────────────  ────────  ──────  ────────  ────────────
+  host1     vhost:hostvm-0/host1  running   -       40002     -
+  host2     vhost:hostvm-0/host2  running   -       40002     -
+  hostvm-0  host-vm               running   12347   40002     30002
+  leaf1     switch                running   12345   40000     30000
+  spine1    switch                running   12346   40001     30001
+```
+
+### Build the Alpine Host Image
+
+On a machine with internet access, run:
+
+```bash
+tools/build-alpine-host.sh
+```
+
+This creates `~/.newtlab/images/alpine-host.qcow2` with:
+
+**Pre-installed packages:**
+- `iproute2` — ip netns, ip link, ip addr, ip route
+- `iperf3` — bandwidth testing
+- `tcpdump` — packet capture
+- `hping3` — advanced ping/traceroute
+- `curl`, `nc`, `socat` — network utilities
+- `bash`, `vim` — shell and editor
+
+**Configuration:**
+- Root password: `newtron`
+- SSH enabled by default
+- Cloud-init disabled (static config)
+- Serial console on ttyS0
+
+**Image specs:**
+- 512MB disk (QCOW2, grows as needed)
+- Alpine Linux 3.19
+- virtio drivers for fast boot
+
+### Adding Virtual Hosts to Topologies
+
+**1. Define the platform in `platforms.json`:**
+
+```json
+{
+  "alpine-host": {
+    "description": "Alpine Linux virtual host (coalesced into shared VM)",
+    "device_type": "host",
+    "vm_image": "~/.newtlab/images/alpine-host.qcow2",
+    "vm_memory": 512,
+    "vm_cpus": 2,
+    "vm_nic_driver": "virtio-net-pci",
+    "vm_interface_map": "linux",
+    "vm_credentials": { "user": "root", "pass": "newtron" },
+    "vm_boot_timeout": 30
+  }
+}
+```
+
+**2. Add host devices to `topology.json`:**
+
+```json
+{
+  "devices": {
+    "host1": {
+      "interfaces": {
+        "eth1": { "link": "leaf1:Po1", "ip": "10.1.1.1/24" }
+      }
+    },
+    "host2": {
+      "interfaces": {
+        "eth1": { "link": "leaf2:Po1", "ip": "10.1.1.2/24" }
+      }
+    }
+  }
+}
+```
+
+**3. Create device profiles:**
+
+Minimal profile (`profiles/host1.json`):
+```json
+{
+  "mgmt_ip": "PLACEHOLDER",
+  "platform": "alpine-host",
+  "ssh_user": "root",
+  "ssh_pass": "newtron"
+}
+```
+
+Profile with manual IP override (`profiles/host2.json`):
+```json
+{
+  "mgmt_ip": "PLACEHOLDER",
+  "platform": "alpine-host",
+  "ssh_user": "root",
+  "ssh_pass": "newtron",
+  "host_ip": "10.1.1.100/24",
+  "host_gateway": "10.1.1.254"
+}
+```
+
+### IP Address Assignment
+
+Virtual hosts need IPs for their data plane interfaces. newtlab supports two methods:
+
+**1. Auto-derivation (recommended):**
+- newtlab reads the switch-side interface IP from `topology.json`
+- For link `leaf1:Po1 ↔ host1:eth1`, if `leaf1:Po1` has IP `10.1.1.254/24`, the host gets `10.1.1.1/24` (first usable IP in the subnet)
+- Gateway defaults to the switch-side IP (`10.1.1.254`)
+- No profile fields needed — just ensure switch interfaces have IPs
+
+**2. Manual override:**
+- Set `host_ip` and `host_gateway` in the device profile
+- Use this when auto-derivation doesn't match your addressing scheme
+- Example: `"host_ip": "192.168.1.100/24", "host_gateway": "192.168.1.1"`
+
+### Deploy and Access
+
+```bash
+# Deploy topology (creates shared VM + namespaces)
+newtlab deploy -S specs/
+
+# SSH to a virtual host (enters namespace automatically)
+newtlab ssh host1
+
+# Inside the namespace
+ip addr show eth1
+ping 10.1.1.254    # Ping the leaf switch gateway
+```
+
+### Data Plane Testing
+
+Virtual hosts are used for end-to-end data plane validation:
+
+```bash
+# On host1
+iperf3 -s
+
+# On host2
+iperf3 -c 10.1.1.1 -t 10
+```
+
+Or via newtest scenarios (see `docs/newtest/howto.md` for step actions like `host-exec`).
+
+---
+
 ## Multi-User Environments
 
 When multiple developers deploy to the same server pool, follow these
