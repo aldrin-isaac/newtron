@@ -426,7 +426,6 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 	// BGP neighbor
 	neighborFields := map[string]string{
 		"asn":          fmt.Sprintf("%d", peerAS),
-		"local_asn":    fmt.Sprintf("%d", localAS),
 		"local_addr":   localIP,
 		"admin_status": "up",
 	}

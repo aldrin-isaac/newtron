@@ -201,14 +201,10 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 	}
 
 	// BGP neighbors from route reflectors (iBGP overlay via loopback).
-	// These peers use the regional AS (ASNumber) with local-as override.
-	// Since the router bgp uses underlayASN, FRR treats these as eBGP,
-	// so ebgp_multihop is required for loopback-based peering.
 	for _, rrIP := range resolved.BGPNeighbors {
 		cb.AddBGPNeighbor("default", rrIP, map[string]string{
 			"asn":            fmt.Sprintf("%d", resolved.ASNumber),
 			"local_addr":     resolved.LoopbackIP,
-			"local_asn":      fmt.Sprintf("%d", resolved.ASNumber),
 			"admin_status":   "up",
 			"ebgp_multihop":  "true",
 		})
@@ -257,15 +253,9 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 			continue
 		}
 
-		localAS := resolved.ASNumber
-		if resolved.UnderlayASN > 0 {
-			localAS = resolved.UnderlayASN
-		}
-
 		localIP, _ := util.SplitIPMask(ti.IP)
 		cb.AddBGPNeighbor("default", peerIP, map[string]string{
 			"asn":          fmt.Sprintf("%d", peerASN),
-			"local_asn":    fmt.Sprintf("%d", localAS),
 			"local_addr":   localIP,
 			"admin_status": "up",
 		})
@@ -332,7 +322,6 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		// Add iBGP neighbor for this client (loopback-based, needs multihop)
 		cb.AddBGPNeighbor("default", clientLoopback, map[string]string{
 			"asn":            fmt.Sprintf("%d", resolved.ASNumber),
-			"local_asn":      fmt.Sprintf("%d", resolved.ASNumber),
 			"local_addr":     resolved.LoopbackIP,
 			"admin_status":   "up",
 			"ebgp_multihop":  "true",

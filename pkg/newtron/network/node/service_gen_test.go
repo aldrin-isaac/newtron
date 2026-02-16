@@ -258,11 +258,11 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 
 	for _, e := range entries {
 		if e.Table == "BGP_NEIGHBOR" {
-			if e.Fields["local_asn"] != "65100" {
-				t.Errorf("BGP_NEIGHBOR local_asn = %q, want 65100 (UnderlayASN)", e.Fields["local_asn"])
-			}
 			if e.Fields["asn"] != "65001" {
 				t.Errorf("BGP_NEIGHBOR asn = %q, want 65001", e.Fields["asn"])
+			}
+			if _, hasLocalASN := e.Fields["local_asn"]; hasLocalASN {
+				t.Errorf("BGP_NEIGHBOR should not set local_asn (got %q)", e.Fields["local_asn"])
 			}
 			return
 		}
@@ -297,8 +297,8 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 
 	for _, e := range entries {
 		if e.Table == "BGP_NEIGHBOR" {
-			if e.Fields["local_asn"] != "64512" {
-				t.Errorf("BGP_NEIGHBOR local_asn = %q, want 64512 (LocalAS fallback)", e.Fields["local_asn"])
+			if _, hasLocalASN := e.Fields["local_asn"]; hasLocalASN {
+				t.Errorf("BGP_NEIGHBOR should not set local_asn (got %q)", e.Fields["local_asn"])
 			}
 			return
 		}
