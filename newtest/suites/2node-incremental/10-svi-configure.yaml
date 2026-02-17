@@ -1,7 +1,6 @@
 name: svi-configure
 description: "Create VLAN + VRF, configure SVI, verify VLAN_INTERFACE entries"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

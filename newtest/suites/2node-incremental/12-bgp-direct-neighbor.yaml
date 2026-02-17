@@ -1,7 +1,6 @@
 name: bgp-direct-neighbor
 description: "Configure IPs and add/remove a direct eBGP neighbor on Ethernet1"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

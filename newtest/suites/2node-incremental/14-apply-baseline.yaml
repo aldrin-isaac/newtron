@@ -1,7 +1,6 @@
 name: apply-baseline
 description: Apply sonic-baseline configlet and verify CONFIG_DB changes
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

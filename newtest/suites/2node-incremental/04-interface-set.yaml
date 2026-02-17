@@ -1,7 +1,6 @@
 name: interface-set
 description: Test interface property changes via newtron set-interface API
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

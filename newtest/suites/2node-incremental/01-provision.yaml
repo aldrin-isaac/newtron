@@ -1,7 +1,6 @@
 name: provision
 description: Provision all devices, restart BGP, apply FRR defaults, and verify CONFIG_DB state
 topology: 2node
-platform: sonic-vpp
 requires: [boot-ssh]
 
 steps:

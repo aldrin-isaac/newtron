@@ -64,6 +64,7 @@ Discovery:
 		newListCmd(),
 		newSuitesCmd(),
 		newTopologiesCmd(),
+		newActionsCmd(),
 		&cobra.Command{
 			Use:   "version",
 			Short: "Print version information",

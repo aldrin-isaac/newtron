@@ -1,7 +1,6 @@
 name: refresh-service
 description: Apply service, refresh it, verify binding persists, then remove
 topology: 2node
-platform: sonic-vpp
 requires: [service-remove]
 
 steps:

@@ -1,7 +1,6 @@
 name: service-l2
 description: Apply l2-extend service on leaf1:Ethernet2 and verify
 topology: 2node
-platform: sonic-vpp
 requires: [vlan-lifecycle]
 
 steps:

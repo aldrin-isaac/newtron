@@ -1,7 +1,6 @@
 name: vlan-member-remove
 description: "VLAN member add and individual remove"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

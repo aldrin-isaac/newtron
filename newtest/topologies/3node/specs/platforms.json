@@ -15,7 +15,7 @@
       "vm_credentials": {"user": "aldrin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 300,
       "dataplane": "vpp",
-      "unsupported_features": ["acl"]
+      "unsupported_features": ["acl", "evpn-vxlan"]
     },
     "ciscovs": {
       "hwsku": "cisco-8101-p4-32x100-vs",

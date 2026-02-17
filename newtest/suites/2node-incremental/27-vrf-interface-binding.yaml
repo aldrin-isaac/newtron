@@ -1,7 +1,6 @@
 name: vrf-interface-binding
 description: "VRF interface binding: add/remove interface to/from VRF"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

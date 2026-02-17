@@ -1,7 +1,6 @@
 name: interface-ip-vrf
 description: Test interface IP and VRF binding via newtron set-interface API
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

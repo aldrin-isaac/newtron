@@ -4,7 +4,6 @@ description: >
   leaf1:Ethernet1 to detect resource leaks (VRF, interface config,
   service bindings) or CONFIG_DB staleness across cycles.
 topology: 2node
-platform: sonic-vpp
 requires: [verify-provisioning]
 repeat: 10
 

@@ -1,7 +1,6 @@
 name: qos-apply-remove
 description: "QoS policy apply and remove on interface"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

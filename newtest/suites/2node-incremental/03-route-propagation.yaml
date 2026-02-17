@@ -1,7 +1,6 @@
 name: route-propagation
 description: Verify loopback routes propagate between spine and leaf
 topology: 2node
-platform: sonic-vpp
 requires: [bgp-converge]
 
 steps:

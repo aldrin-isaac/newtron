@@ -1,7 +1,6 @@
 name: bgp-converge
 description: Wait for BGP sessions to establish on all devices
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

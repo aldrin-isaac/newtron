@@ -1,7 +1,6 @@
 name: vrf-lifecycle
 description: "VRF create/delete lifecycle via newtron API"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

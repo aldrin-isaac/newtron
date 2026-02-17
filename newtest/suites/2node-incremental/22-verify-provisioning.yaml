@@ -1,7 +1,6 @@
 name: verify-provisioning
 description: Apply a service, then verify the ChangeSet was persisted in CONFIG_DB
 topology: 2node
-platform: sonic-vpp
 requires: [refresh-service]
 
 steps:

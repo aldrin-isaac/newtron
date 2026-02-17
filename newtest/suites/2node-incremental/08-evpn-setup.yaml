@@ -1,7 +1,6 @@
 name: evpn-setup
 description: "EVPN overlay setup via setup-evpn (idempotent composite)"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

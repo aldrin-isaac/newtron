@@ -1,7 +1,6 @@
 name: static-route
 description: "Static route add/remove lifecycle"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

@@ -1,7 +1,6 @@
 name: service-l3
 description: Apply customer-l3 service on leaf1:Ethernet1 and verify
 topology: 2node
-platform: sonic-vpp
 requires: [vrf-lifecycle]
 
 steps:

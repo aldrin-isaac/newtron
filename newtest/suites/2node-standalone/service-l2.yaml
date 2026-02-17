@@ -1,7 +1,6 @@
 name: service-l2
 description: Apply and remove l2-extend service, verify VLAN_MEMBER config
 topology: 2node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

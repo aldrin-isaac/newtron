@@ -270,15 +270,83 @@ func (p *PlatformSpec) IsHost() bool {
 	return p.DeviceType == "host"
 }
 
-// SupportsFeature returns true if the platform supports the named feature.
-// A feature is unsupported only if explicitly listed in UnsupportedFeatures.
+// featureDependencies maps each feature to its required dependencies.
+// A feature is only supported if all its dependencies are also supported.
+// This creates a dependency graph where base features (like evpn-vxlan) are
+// listed once, and dependent features (like macvpn) automatically inherit
+// the unsupported status if their dependencies are unsupported.
+var featureDependencies = map[string][]string{
+	// MAC-VPN requires VXLAN dataplane support
+	"macvpn": {"evpn-vxlan"},
+
+	// IP-VPN (L3 EVPN) requires VXLAN dataplane support
+	"ipvpn": {"evpn-vxlan"},
+
+	// Base features with no dependencies
+	"evpn-vxlan": {},
+	"acl":        {},
+}
+
+// GetAllFeatures returns all known features from the dependency map.
+// Used by platform discovery commands to avoid hardcoding the feature list.
+func GetAllFeatures() []string {
+	features := make([]string, 0, len(featureDependencies))
+	for feat := range featureDependencies {
+		features = append(features, feat)
+	}
+	sort.Strings(features)
+	return features
+}
+
+// SupportsFeature returns true if the platform supports the named feature
+// and all of its dependencies. Features are checked recursively through the
+// dependency graph defined in featureDependencies.
 func (p *PlatformSpec) SupportsFeature(feature string) bool {
-	for _, f := range p.UnsupportedFeatures {
-		if f == feature {
+	// Check if feature is directly unsupported
+	if p.isUnsupported(feature) {
+		return false
+	}
+
+	// Check if any dependencies are unsupported (recursive)
+	for _, dep := range featureDependencies[feature] {
+		if !p.SupportsFeature(dep) {
 			return false
 		}
 	}
+
 	return true
+}
+
+// isUnsupported returns true if the feature is directly listed in
+// UnsupportedFeatures (does not check dependencies).
+func (p *PlatformSpec) isUnsupported(feature string) bool {
+	for _, f := range p.UnsupportedFeatures {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUnsupportedDueTo returns all features that are unsupported due to the
+// given base feature being unsupported. This is useful for documentation and
+// error messages to show the cascade effect of unsupporting a base feature.
+func GetUnsupportedDueTo(baseFeature string) []string {
+	var affected []string
+	for feat, deps := range featureDependencies {
+		for _, dep := range deps {
+			if dep == baseFeature {
+				affected = append(affected, feat)
+			}
+		}
+	}
+	return affected
+}
+
+// GetFeatureDependencies returns the list of features that the given feature
+// depends on. Returns nil if the feature has no dependencies or is not defined.
+func GetFeatureDependencies(feature string) []string {
+	return featureDependencies[feature]
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.

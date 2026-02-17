@@ -1,7 +1,6 @@
 name: vlan-lifecycle
 description: "VLAN create/member/delete lifecycle via newtron API"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

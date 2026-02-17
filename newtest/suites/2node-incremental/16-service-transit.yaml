@@ -1,7 +1,6 @@
 name: service-transit
 description: Verify transit service entries applied by provisioning
 topology: 2node
-platform: sonic-vpp
 requires: [bgp-converge]
 
 steps:

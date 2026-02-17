@@ -1,7 +1,6 @@
 name: teardown-verify
 description: Ordered teardown with negative verification - remove interface IPs, confirm connectivity breaks
 topology: 3node
-platform: sonic-vpp
 requires: [host-verification]
 
 steps:

@@ -1,7 +1,6 @@
 name: boot-ssh
 description: Verify SSH connectivity to all devices
 topology: 2node
-platform: sonic-vpp
 
 steps:
   - name: ssh-echo-spine1

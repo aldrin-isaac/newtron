@@ -1,7 +1,6 @@
 name: qos-l3-service
 description: Apply customer-l3 service and verify 4q-customer QoS policy tables
 topology: 2node
-platform: sonic-vpp
 requires: [vrf-lifecycle, service-remove]
 
 steps:

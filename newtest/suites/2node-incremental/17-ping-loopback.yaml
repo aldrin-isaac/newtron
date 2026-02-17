@@ -1,7 +1,6 @@
 name: ping-loopback
 description: Verify dataplane reachability between spine1 and leaf1 loopbacks
 topology: 2node
-platform: sonic-vpp
 requires: [route-propagation]
 
 steps:

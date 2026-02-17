@@ -1,7 +1,6 @@
 name: service-remove
 description: Remove services from leaf1 interfaces and verify cleanup
 topology: 2node
-platform: sonic-vpp
 requires: [service-l3, service-l2]
 
 steps:

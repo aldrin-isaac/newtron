@@ -1,7 +1,6 @@
 name: bgp-loopback-neighbor
 description: "Add and remove a loopback-based BGP neighbor via newtron API"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

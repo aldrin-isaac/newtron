@@ -1,7 +1,6 @@
 name: evpn-vpn-binding
 description: "VPN binding lifecycle: bind/unbind IP-VPN and MAC-VPN via spec references"
 topology: 2node
-platform: sonic-vpp
 requires: [evpn-setup]
 
 steps:

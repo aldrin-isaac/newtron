@@ -1,7 +1,6 @@
 name: bgp-overlay
 description: Verify EVPN overlay routes propagate between leaves via spines
 topology: 4node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

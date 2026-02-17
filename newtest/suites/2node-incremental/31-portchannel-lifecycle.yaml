@@ -1,7 +1,6 @@
 name: portchannel-lifecycle
 description: "PortChannel create/member-add/member-remove/delete lifecycle"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:

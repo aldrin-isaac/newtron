@@ -92,6 +92,13 @@ func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error) {
 	return getSpec(&n.mu, n.platforms.Platforms, "platform", name)
 }
 
+// Platforms returns all platform definitions.
+func (n *Network) Platforms() map[string]*spec.PlatformSpec {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.platforms.Platforms
+}
+
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
 	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", name)
