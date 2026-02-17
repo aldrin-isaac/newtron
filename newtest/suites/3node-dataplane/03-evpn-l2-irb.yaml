@@ -36,20 +36,21 @@ steps:
     action: cleanup
     devices: [leaf1, leaf2]
 
-  # Clean up any stale IPs on host interfaces from previous runs
-  - name: cleanup-host1-stale-ips
+  # Clean up EVPN-specific IPs from previous runs (keep L3 routing IPs)
+  - name: cleanup-host1-evpn-ips
     action: host-exec
     devices: [host1]
     command: |
-      ip addr flush dev eth0 2>/dev/null || true
+      ip addr del 192.168.100.10/24 dev eth0 2>/dev/null || true
     expect:
       contains: ""
 
-  - name: cleanup-host2-stale-ips
+  - name: cleanup-host2-evpn-ips
     action: host-exec
     devices: [host2]
     command: |
-      ip addr flush dev eth0 2>/dev/null || true
+      ip addr del 192.168.100.20/24 dev eth0 2>/dev/null || true
+      ip addr del 192.168.200.20/24 dev eth0 2>/dev/null || true
     expect:
       contains: ""
 
