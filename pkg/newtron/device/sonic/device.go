@@ -3,7 +3,6 @@ package sonic
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
@@ -448,13 +447,9 @@ func (d *Device) VerifyChangeSet(ctx context.Context, changes []device.ConfigCha
 // support via CONFIG_DB. Currently handles:
 //   - no bgp ebgp-requires-policy (FRR default: enabled)
 //   - no bgp suppress-fib-pending (FRR default: enabled)
-//   - neighbor X ttl-security hops 10 + disable-connected-check
-//     (for CONFIG_DB neighbors with ebgp_multihop: true)
 //
-// We use ttl-security instead of ebgp-multihop because FRR silently ignores
-// ebgp-multihop when local-as == remote-as (classifies as iBGP for that check),
-// while still using eBGP TTL=1 on the socket. ttl-security sets outgoing
-// TTL=255 regardless of eBGP/iBGP classification.
+// Note: ebgp-multihop is now correctly rendered by frrcfgd from CONFIG_DB
+// (BGP_NEIGHBOR.ebgp_multihop) and works as expected for eBGP sessions.
 //
 // Must be called after a BGP container restart since frr.conf is regenerated.
 func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
@@ -479,33 +474,13 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("cannot determine BGP ASN from CONFIG_DB")
 	}
 
-	// Build vtysh commands: global defaults + per-neighbor TTL security
+	// Build vtysh commands for global BGP defaults
 	cmds := fmt.Sprintf(
 		"vtysh -c 'configure terminal' -c 'router bgp %s' "+
 			"-c 'no bgp ebgp-requires-policy' "+
-			"-c 'no bgp suppress-fib-pending'",
+			"-c 'no bgp suppress-fib-pending' "+
+			"-c 'end' -c 'write memory'",
 		asn)
-
-	// Add ttl-security + disable-connected-check for overlay neighbors that
-	// need multi-hop support. frrcfgd doesn't render ebgp_multihop, and FRR
-	// silently ignores the ebgp-multihop command for peers with local-as ==
-	// remote-as. ttl-security works regardless of FRR's eBGP/iBGP classification.
-	if d.ConfigDB != nil {
-		for key, neighbor := range d.ConfigDB.BGPNeighbor {
-			if neighbor.EBGPMultihop == "true" {
-				// Key format: "default|10.0.0.1" — extract the IP
-				parts := strings.SplitN(key, "|", 2)
-				if len(parts) == 2 {
-					cmds += fmt.Sprintf(
-						" -c 'neighbor %s ttl-security hops 10'"+
-							" -c 'neighbor %s disable-connected-check'",
-						parts[1], parts[1])
-				}
-			}
-		}
-	}
-
-	cmds += " -c 'end' -c 'write memory'"
 
 	output, err := d.tunnel.ExecCommand(cmds)
 	if err != nil {
@@ -522,10 +497,7 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 }
 
 // RestartService restarts a SONiC Docker container by name (e.g., "bgp", "swss",
-// "syncd") via SSH. Uses "docker restart" instead of "systemctl restart" because
-// SONiC VPP's systemd unit has an ExecStopPost script (write_standby.py) that
-// exits with error code 1 on non-Dual-ToR systems, causing systemctl to report
-// failure even though the container restarted successfully.
+// "syncd") via SSH. Uses "systemctl restart" to integrate properly with systemd.
 func (d *Device) RestartService(ctx context.Context, name string) error {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
@@ -537,7 +509,7 @@ func (d *Device) RestartService(ctx context.Context, name string) error {
 		return fmt.Errorf("restart service requires SSH connection (no SSH credentials configured)")
 	}
 
-	output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo docker restart %s", name))
+	output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo systemctl restart %s", name))
 	if err != nil {
 		return fmt.Errorf("restart service %s failed: %w (output: %s)", name, err, output)
 	}

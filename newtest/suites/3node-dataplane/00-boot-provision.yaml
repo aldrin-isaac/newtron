@@ -45,9 +45,10 @@ steps:
     service: bgp
 
   # Wait for FRR + frrcfgd to finish initial config render
+  # CiscoVS platform takes longer than VPP to stabilize BGP container
   - name: wait-bgp-restart
     action: wait
-    duration: 15s
+    duration: 30s
 
   # Apply FRR defaults not supported by frrcfgd templates
   - name: apply-frr-defaults
