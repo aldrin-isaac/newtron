@@ -92,7 +92,16 @@ func (p *consoleProgress) ScenarioEnd(result *ScenarioResult, index, total int) 
 
 	switch result.Status {
 	case StepStatusSkipped:
-		fmt.Fprintf(p.W, "  %-7s %s %s\n", tag, padded, cli.Yellow("SKIP"))
+		reason := ""
+		if result.SkipReason != "" {
+			// Show abbreviated reason inline (full details in summary)
+			if len(result.SkipReason) > 40 {
+				reason = "  (" + result.SkipReason[:37] + "...)"
+			} else {
+				reason = "  (" + result.SkipReason + ")"
+			}
+		}
+		fmt.Fprintf(p.W, "  %-7s %s %s%s\n", tag, padded, cli.Yellow("SKIP"), cli.Dim(reason))
 	case StepStatusPassed:
 		fmt.Fprintf(p.W, "  %-7s %s %s  (%s)\n", tag, padded, cli.Green("PASS"), p.formatDuration(result.Duration))
 	case StepStatusFailed:

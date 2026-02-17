@@ -143,7 +143,9 @@ type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform s
 // iterateScenarios encapsulates the common scenario iteration loop used by both
 // runShared and runIndependent. It handles resume, pause, requires checks, and
 // progress reporting. The run callback performs the actual per-scenario execution.
-func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, run scenarioRunner) ([]*ScenarioResult, error) {
+// The deployedPlatform parameter specifies the actual platform used for deployment
+// (for capability checks in shared mode); empty string means use per-scenario platform.
+func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, deployedPlatform string, run scenarioRunner) ([]*ScenarioResult, error) {
 	scenarioStatus := make(map[string]StepStatus)
 	var results []*ScenarioResult
 
@@ -184,6 +186,22 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		}
 
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
+			result := &ScenarioResult{
+				Name:       sc.Name,
+				Topology:   topology,
+				Platform:   platform,
+				Status:     StepStatusSkipped,
+				SkipReason: reason,
+			}
+			results = append(results, result)
+			scenarioStatus[sc.Name] = StepStatusSkipped
+			r.progress(func(p ProgressReporter) { p.ScenarioEnd(result, i, len(scenarios)) })
+			continue
+		}
+
+		// Feature requirements check: skip if platform doesn't support required features
+		// In shared mode (deployedPlatform != ""), use that; otherwise use per-scenario platform
+		if reason := r.checkPlatformFeatures(sc, deployedPlatform, platform); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
 				Topology:   topology,
@@ -240,6 +258,12 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
 	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
 
+	// Determine the deployed platform (used for all scenarios in shared mode)
+	deployedPlatform := opts.Platform
+	if deployedPlatform == "" && len(scenarios) > 0 {
+		deployedPlatform = scenarios[0].Platform
+	}
+
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
 		fmt.Fprintf(os.Stderr, "newtest: deploying topology %s...\n", topology)
@@ -289,7 +313,8 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 
 	r.ChangeSets = make(map[string]*node.ChangeSet)
 
-	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
+	// In shared mode, all capability checks use the deployed platform
+	return r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
 		r.opts = RunOptions{
 			Topology: topology,
 			Platform: platform,
@@ -314,7 +339,8 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 // runIndependent runs each scenario with its own deploy/connect cycle.
 // Skip propagation is still applied based on requires.
 func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error) {
-	return r.iterateScenarios(ctx, scenarios, opts, func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	// Independent mode: each scenario uses its own platform
+	return r.iterateScenarios(ctx, scenarios, opts, "", func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		return r.runScenario(ctx, sc, opts)
 	})
 }
@@ -646,6 +672,43 @@ func checkRequires(sc *Scenario, status map[string]StepStatus) string {
 			return fmt.Sprintf("requires '%s' which %s", req, statusVerb(st))
 		}
 	}
+	return ""
+}
+
+// checkPlatformFeatures checks if the platform supports all required features.
+// Returns a skip reason if any required feature is unsupported, empty string otherwise.
+// If deployedPlatform is non-empty (shared mode), it is used instead of scenarioPlatform.
+func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioPlatform string) string {
+	if len(sc.RequiresFeatures) == 0 {
+		return "" // No feature requirements
+	}
+
+	if r.Network == nil {
+		return "" // Cannot check features without network (proceed and let operations fail)
+	}
+
+	// Use deployed platform (shared mode) if provided, otherwise use per-scenario platform
+	platformName := deployedPlatform
+	if platformName == "" {
+		platformName = scenarioPlatform
+	}
+
+	platform, err := r.Network.GetPlatform(platformName)
+	if err != nil {
+		return "" // Cannot get platform spec (proceed and let operations fail)
+	}
+
+	var unsupported []string
+	for _, feature := range sc.RequiresFeatures {
+		if !platform.SupportsFeature(feature) {
+			unsupported = append(unsupported, feature)
+		}
+	}
+
+	if len(unsupported) > 0 {
+		return fmt.Sprintf("platform '%s' does not support required features: %v", platformName, unsupported)
+	}
+
 	return ""
 }
 

@@ -55,7 +55,9 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 		SetDescription(fmt.Sprintf("Full device provisioning from topology.json for %s", deviceName))
 
 	// Step 1: Device-level entries
-	tp.addDeviceEntries(cb, deviceName, resolved, topoDev, resolvedSpecs)
+	if err := tp.addDeviceEntries(cb, deviceName, resolved, topoDev, resolvedSpecs); err != nil {
+		return nil, fmt.Errorf("adding device entries: %w", err)
+	}
 
 	// Step 1b: QoS device-wide tables (DSCP maps, schedulers, WRED profiles)
 	tp.addQoSDeviceEntries(cb, topoDev, resolvedSpecs)
@@ -116,18 +118,17 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 // ============================================================================
 
 // addDeviceEntries adds device-level CONFIG_DB entries to the composite builder.
-func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice, resolvedSpecs node.SpecProvider) {
-	// Router runs underlay_asn for all-eBGP design (both underlay and overlay)
+func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice, resolvedSpecs node.SpecProvider) error {
+	// All-eBGP design: router runs underlay_asn (required)
 	// Overlay eBGP peers use next-hop-unchanged to preserve VTEP addresses
-	routerAS := resolved.ASNumber
-	if resolved.UnderlayASN > 0 {
-		routerAS = resolved.UnderlayASN
+	if resolved.UnderlayASN == 0 {
+		return fmt.Errorf("underlay_asn required for device %s (all-eBGP design)", deviceName)
 	}
 
 	// DEVICE_METADATA — complete fields for SONiC unified mode
 	metaFields := map[string]string{
 		"hostname":                   deviceName,
-		"bgp_asn":                    fmt.Sprintf("%d", routerAS),
+		"bgp_asn":                    fmt.Sprintf("%d", resolved.UnderlayASN),
 		"docker_routing_config_mode": "unified",
 		"frr_mgmt_framework_config":  "true",
 		"type":                       "LeafRouter",
@@ -187,7 +188,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 
 	// BGP_GLOBALS — underlay AS + eBGP settings
 	cb.AddBGPGlobals("default", map[string]string{
-		"local_asn":            fmt.Sprintf("%d", routerAS),
+		"local_asn":            fmt.Sprintf("%d", resolved.UnderlayASN),
 		"router_id":            resolved.RouterID,
 		"ebgp_requires_policy": "false",
 		"log_neighbor_changes": "true",
@@ -211,20 +212,14 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 			continue
 		}
 
-		// Determine peer's BGP AS (underlay_asn if set, else zone AS)
-		peerAS := peerProfile.UnderlayASN
-		if peerAS == 0 {
-			// Fallback to zone AS if peer has no underlay_asn
-			peerZone, ok := tp.network.spec.Zones[peerProfile.Zone]
-			if !ok {
-				util.Logger.Warnf("Zone '%s' for peer %s not found", peerProfile.Zone, peerName)
-				continue
-			}
-			peerAS = peerZone.ASNumber
+		// All-eBGP: peer must have underlay_asn
+		if peerProfile.UnderlayASN == 0 {
+			util.Logger.Warnf("EVPN peer %s missing underlay_asn, skipping", peerName)
+			continue
 		}
 
 		cb.AddBGPNeighbor("default", peerProfile.LoopbackIP, map[string]string{
-			"asn":            fmt.Sprintf("%d", peerAS),
+			"asn":            fmt.Sprintf("%d", peerProfile.UnderlayASN),
 			"local_addr":     resolved.LoopbackIP,
 			"admin_status":   "up",
 			"ebgp_multihop":  "true",
@@ -293,6 +288,8 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
 		tp.addRouteReflectorEntries(cb, resolved, topoDev)
 	}
+
+	return nil
 }
 
 // addRouteReflectorEntries adds route reflector configuration to the composite.
@@ -300,16 +297,16 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 	// RR cluster ID: from profile EVPN config, defaults to loopback IP (set during resolution).
 	clusterID := resolved.ClusterID
 
-	// Determine RR's BGP AS (underlay_asn if set, else zone AS)
-	rrAS := resolved.ASNumber
-	if resolved.UnderlayASN > 0 {
-		rrAS = resolved.UnderlayASN
+	// RR must have underlay_asn (all-eBGP design)
+	if resolved.UnderlayASN == 0 {
+		util.Logger.Warnf("Route reflector %s missing underlay_asn", resolved.DeviceName)
+		return
 	}
 
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
 	// log_neighbor_changes are already set in addDeviceEntries for all devices)
 	cb.AddBGPGlobals("default", map[string]string{
-		"local_asn":              fmt.Sprintf("%d", rrAS),
+		"local_asn":              fmt.Sprintf("%d", resolved.UnderlayASN),
 		"router_id":             resolved.RouterID,
 		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
@@ -341,20 +338,15 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 			continue
 		}
 
-		// Determine client's BGP AS (underlay_asn if set, else zone AS)
-		clientAS := clientProfile.UnderlayASN
-		if clientAS == 0 {
-			clientZone, ok := tp.network.spec.Zones[clientProfile.Zone]
-			if !ok {
-				util.Logger.Warnf("Zone '%s' for client %s not found", clientProfile.Zone, clientName)
-				continue
-			}
-			clientAS = clientZone.ASNumber
+		// Client must have underlay_asn (all-eBGP design)
+		if clientProfile.UnderlayASN == 0 {
+			util.Logger.Warnf("RR client %s missing underlay_asn, skipping", clientName)
+			continue
 		}
 
 		// Add eBGP neighbor for this client (all-eBGP design)
 		cb.AddBGPNeighbor("default", clientLoopback, map[string]string{
-			"asn":            fmt.Sprintf("%d", clientAS),
+			"asn":            fmt.Sprintf("%d", clientProfile.UnderlayASN),
 			"local_addr":     resolved.LoopbackIP,
 			"admin_status":   "up",
 			"ebgp_multihop":  "true",
@@ -454,7 +446,6 @@ func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, in
 		InterfaceName: intfName,
 		IPAddress:     ti.IP,
 		Params:        ti.Params,
-		LocalAS:       resolved.ASNumber,
 		UnderlayASN:   resolved.UnderlayASN,
 		PlatformName:  resolved.Platform,
 	})

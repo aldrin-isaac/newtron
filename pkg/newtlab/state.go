@@ -25,6 +25,7 @@ type NodeState struct {
 	Status         string `json:"status"`          // "running", "stopped", "error"
 	Phase          string `json:"phase,omitempty"` // deploy phase: "booting", "bootstrapping", "patching"
 	DeviceType     string `json:"device_type,omitempty"` // "host" for non-switch devices, "host-vm" for coalesced VM
+	Image          string `json:"image,omitempty"`       // VM image path
 	SSHPort        int    `json:"ssh_port"`
 	ConsolePort    int    `json:"console_port"`
 	OriginalMgmtIP string `json:"original_mgmt_ip"`

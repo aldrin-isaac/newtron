@@ -68,7 +68,7 @@ Examples:
 				Neighbors  []bgpNeighborJSON  `json:"neighbors,omitempty"`
 			}
 			status := bgpStatusJSON{
-				LocalAS:    resolved.ASNumber,
+				LocalAS:    resolved.UnderlayASN,
 				RouterID:   resolved.RouterID,
 				LoopbackIP: resolved.LoopbackIP,
 			}
@@ -95,7 +95,7 @@ Examples:
 
 		// --- Local BGP Identity ---
 		fmt.Printf("BGP Status for %s\n\n", bold(app.deviceName))
-		fmt.Printf("Local AS: %d\n", resolved.ASNumber)
+		fmt.Printf("Local AS: %d\n", resolved.UnderlayASN)
 		fmt.Printf("Router ID: %s\n", resolved.RouterID)
 		fmt.Printf("Loopback IP: %s\n", resolved.LoopbackIP)
 

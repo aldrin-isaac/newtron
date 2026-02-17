@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -108,9 +110,9 @@ func showLabDetail(labName string) error {
 	// Node table with conditional HOST column
 	var t *cli.Table
 	if hasRemoteHost {
-		t = cli.NewTable("NODE", "TYPE", "STATUS", "HOST", "SSH", "CONSOLE", "PID")
+		t = cli.NewTable("NODE", "TYPE", "STATUS", "HOST", "IMAGE", "SSH", "CONSOLE", "PID")
 	} else {
-		t = cli.NewTable("NODE", "TYPE", "STATUS", "SSH", "CONSOLE", "PID")
+		t = cli.NewTable("NODE", "TYPE", "STATUS", "IMAGE", "SSH", "CONSOLE", "PID")
 	}
 	for name, node := range state.Nodes {
 		var displayStatus string
@@ -133,15 +135,26 @@ func showLabDetail(labName string) error {
 			nodeType = fmt.Sprintf("vhost:%s/%s", node.VMName, node.Namespace)
 		}
 
+		// Display basename of image path, strip common extensions for readability
+		imageDisplay := filepath.Base(node.Image)
+		if imageDisplay == "" || imageDisplay == "." {
+			imageDisplay = "—"
+		} else {
+			// Strip .qcow2, .img, .raw extensions
+			imageDisplay = strings.TrimSuffix(imageDisplay, ".qcow2")
+			imageDisplay = strings.TrimSuffix(imageDisplay, ".img")
+			imageDisplay = strings.TrimSuffix(imageDisplay, ".raw")
+		}
+
 		if hasRemoteHost {
 			hostDisplay := "local"
 			if node.HostIP != "" {
 				hostDisplay = node.HostIP
 			}
-			t.Row(name, nodeType, displayStatus, hostDisplay,
+			t.Row(name, nodeType, displayStatus, hostDisplay, imageDisplay,
 				fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
 		} else {
-			t.Row(name, nodeType, displayStatus,
+			t.Row(name, nodeType, displayStatus, imageDisplay,
 				fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort), fmt.Sprintf("%d", node.PID))
 		}
 	}

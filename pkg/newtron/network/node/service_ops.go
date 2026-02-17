@@ -148,7 +148,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		IPAddress:     opts.IPAddress,
 		VLAN:          opts.VLAN,
 		PeerAS:        opts.PeerAS,
-		LocalAS:       resolved.ASNumber,
 		UnderlayASN:   resolved.UnderlayASN,
 		PlatformName:  resolved.Platform,
 	})

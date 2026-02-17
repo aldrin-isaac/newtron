@@ -46,8 +46,7 @@ type ServiceEntryParams struct {
 	VLAN          int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
 	Params        map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 	PeerAS        int               // CLI peer-as (interface_ops path only)
-	LocalAS       int               // device AS number
-	UnderlayASN   int               // eBGP underlay ASN (0 = use LocalAS)
+	UnderlayASN   int               // device AS number (required in all-eBGP design)
 	PlatformName  string            // for feature gating (ACL skip)
 }
 
@@ -368,7 +367,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 // generateBGPEntries generates BGP_NEIGHBOR and BGP_NEIGHBOR_AF entries.
 //
 // Bug fixes vs prior duplicated code:
-//   - Uses UnderlayASN with fallback to LocalAS (fix #2)
+//   - Uses UnderlayASN (all-eBGP design, no fallback)
 //   - Uses "admin_status": "true" for BGP_NEIGHBOR_AF activation (fix #1)
 func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]CompositeEntry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
@@ -411,13 +410,9 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 		return nil, fmt.Errorf("could not determine BGP peer AS for service routing")
 	}
 
-	// Bug fix #2: use UnderlayASN with fallback to LocalAS
-	localAS := p.UnderlayASN
-	if localAS == 0 {
-		localAS = p.LocalAS
-	}
-	if localAS == 0 {
-		return nil, fmt.Errorf("device has no AS number configured")
+	// All-eBGP design: UnderlayASN is required
+	if p.UnderlayASN == 0 {
+		return nil, fmt.Errorf("device has no AS number configured (underlay_asn required)")
 	}
 
 	localIP, _ := util.SplitIPMask(p.IPAddress)

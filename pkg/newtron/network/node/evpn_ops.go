@@ -27,6 +27,16 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 		return nil, err
 	}
 
+	// Check platform support for EVPN VXLAN
+	resolved := n.Resolved()
+	if resolved.Platform != "" {
+		if platform, err := n.GetPlatform(resolved.Platform); err == nil {
+			if !platform.SupportsFeature("evpn-vxlan") {
+				return nil, fmt.Errorf("platform %s does not support EVPN VXLAN", resolved.Platform)
+			}
+		}
+	}
+
 	cs := NewChangeSet(n.name, "device.map-l2vni")
 
 	vlanName := fmt.Sprintf("Vlan%d", vlanID)
@@ -141,7 +151,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 	if len(resolved.BGPNeighbors) > 0 {
 		// Ensure BGP globals are set
 		cs.Add("BGP_GLOBALS", "default", ChangeAdd, nil, map[string]string{
-			"local_asn": fmt.Sprintf("%d", resolved.ASNumber),
+			"local_asn": fmt.Sprintf("%d", resolved.UnderlayASN),
 			"router_id": resolved.RouterID,
 		})
 
@@ -160,7 +170,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 			}
 
 			fields := map[string]string{
-				"asn":          fmt.Sprintf("%d", resolved.ASNumber),
+				"asn":          fmt.Sprintf("%d", resolved.UnderlayASN),
 				"admin_status": "up",
 				"name":         "route-reflector",
 				"local_addr":   resolved.LoopbackIP,

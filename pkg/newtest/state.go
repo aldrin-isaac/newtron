@@ -35,6 +35,7 @@ type RunState struct {
 	Status    SuiteStatus     `json:"status"`
 	Started   time.Time       `json:"started"`
 	Updated   time.Time       `json:"updated"`
+	Finished  time.Time       `json:"finished,omitempty"` // set when suite completes (pass/fail/error)
 	Scenarios []ScenarioState `json:"scenarios"`
 }
 

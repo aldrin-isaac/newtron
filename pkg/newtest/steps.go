@@ -960,7 +960,7 @@ func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type createVLANExecutor struct{}
 
 func (e *createVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
 			return dev.CreateVLAN(ctx, vlanID, node.VLANConfig{})
@@ -979,7 +979,7 @@ func (e *createVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type deleteVLANExecutor struct{}
 
 func (e *deleteVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
 			return dev.DeleteVLAN(ctx, vlanID)
@@ -998,9 +998,9 @@ func (e *deleteVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type addVLANMemberExecutor struct{}
 
 func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
-	interfaceName := strParam(step.Params, "interface")
-	tagged := boolParam(step.Params, "tagged")
+	vlanID := step.VLANID
+	interfaceName := step.Interface
+	tagged := step.Tagging == "tagged"
 
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
@@ -1164,7 +1164,7 @@ func (e *unbindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step
 type bindMACVPNExecutor struct{}
 
 func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	macvpnName := strParam(step.Params, "macvpn")
 
 	macvpnDef, err := r.Network.GetMACVPN(macvpnName)
@@ -1192,7 +1192,7 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type unbindMACVPNExecutor struct{}
 
 func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
 			return dev.UnmapL2VNI(ctx, vlanID)
@@ -1255,8 +1255,8 @@ func (e *removeStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step
 type removeVLANMemberExecutor struct{}
 
 func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
-	interfaceName := strParam(step.Params, "interface")
+	vlanID := step.VLANID
+	interfaceName := step.Interface
 
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
@@ -1323,7 +1323,7 @@ func (e *removeQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type configureSVIExecutor struct{}
 
 func (e *configureSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	opts := node.SVIConfig{
 		VRF:       strParam(step.Params, "vrf"),
 		IPAddress: strParam(step.Params, "ip"),

@@ -249,7 +249,6 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
-		LocalAS:       64512,
 		UnderlayASN:   65100,
 	})
 	if err != nil {
@@ -288,8 +287,7 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
-		LocalAS:       64512,
-		UnderlayASN:   0,
+		UnderlayASN:   64512,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -323,7 +321,7 @@ func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
 		ServiceName:   "transit",
 		InterfaceName: "Ethernet0",
 		IPAddress:     "10.1.0.0/31",
-		LocalAS:       64512,
+		UnderlayASN:   64512,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

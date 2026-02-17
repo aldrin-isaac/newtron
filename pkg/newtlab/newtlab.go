@@ -113,8 +113,13 @@ func NewLab(specDir string) (*Lab, error) {
 	for i, name := range sortedNames {
 		profile := l.Profiles[name]
 		var platform *spec.PlatformSpec
-		if profile.Platform != "" {
-			platform = l.Platform.Platforms[profile.Platform]
+		platformName := profile.Platform
+		if platformName == "" {
+			// Fallback to topology default platform
+			platformName = l.Topology.Platform
+		}
+		if platformName != "" {
+			platform = l.Platform.Platforms[platformName]
 		}
 
 		nc, err := ResolveNodeConfig(name, profile, platform)
@@ -412,6 +417,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 				PID:         vmState.PID,
 				Status:      vmState.Status,
 				DeviceType:  "host",
+				Image:       vmNC.Image,
 				SSHPort:     vmState.SSHPort,
 				ConsolePort: vmState.ConsolePort,
 				Host:        vmState.Host,
@@ -647,6 +653,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 			l.State.Nodes[name] = &NodeState{
 				Status:      "error",
 				DeviceType:  node.DeviceType,
+				Image:       node.Image,
 				SSHPort:     node.SSHPort,
 				ConsolePort: node.ConsolePort,
 				Host:        node.Host,
@@ -662,6 +669,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 			Status:      "running",
 			Phase:       "booting",
 			DeviceType:  node.DeviceType,
+			Image:       node.Image,
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
 			Host:        node.Host,
@@ -747,8 +755,8 @@ func (l *Lab) applyNodePatches(ctx context.Context) error {
 		if node.DeviceType == "host" || node.DeviceType == "host-vm" {
 			return nil // host devices have no platform boot patches
 		}
-		profile := l.Profiles[name]
-		platform := l.Platform.Platforms[profile.Platform]
+		// Use resolved platform from NodeConfig (may come from profile or topology)
+		platform := l.Platform.Platforms[node.Platform]
 		if platform == nil {
 			return nil
 		}

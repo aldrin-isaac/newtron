@@ -129,6 +129,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 
 			if runErr != nil {
 				state.Status = newtest.SuiteStatusFailed
+				state.Finished = time.Now()
 				if err := newtest.SaveRunState(state); err != nil {
 					util.Logger.Warnf("failed to save run state: %v", err)
 				}
@@ -151,6 +152,7 @@ Use 'newtest pause' to gracefully interrupt, 'newtest stop' to tear down.`,
 			} else {
 				state.Status = newtest.SuiteStatusComplete
 			}
+			state.Finished = time.Now()
 			if err := newtest.SaveRunState(state); err != nil {
 				util.Logger.Warnf("failed to save run state: %v", err)
 			}

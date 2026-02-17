@@ -62,8 +62,6 @@ type NetworkSpecFile struct {
 
 // ZoneSpec defines zone settings (AS number, defaults).
 type ZoneSpec struct {
-	ASNumber int `json:"as_number"`
-
 	OverridableSpecs // Embedded — zone-level overrides
 }
 
@@ -353,7 +351,6 @@ type ResolvedProfile struct {
 	Platform   string
 
 	// Resolved from inheritance
-	ASNumber         int
 	IsRouteReflector bool
 	ClusterID        string // RR cluster ID; from profile EVPN config or defaults to loopback IP
 
@@ -373,7 +370,7 @@ type ResolvedProfile struct {
 	// newtlab runtime (written by newtlab, read by newtron)
 	ConsolePort int
 
-	// eBGP underlay ASN (unique per device; 0 means use ASNumber for iBGP-only)
+	// BGP AS number (required in all-eBGP design)
 	UnderlayASN int
 }
 
@@ -417,6 +414,7 @@ const (
 // automated provisioning.
 type TopologySpecFile struct {
 	Version     string                     `json:"version"`
+	Platform    string                     `json:"platform,omitempty"`    // default platform for all devices
 	Description string                     `json:"description,omitempty"`
 	Devices     map[string]*TopologyDevice `json:"devices"`
 	Links       []*TopologyLink            `json:"links,omitempty"`

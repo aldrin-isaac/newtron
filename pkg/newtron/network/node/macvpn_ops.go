@@ -28,6 +28,16 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 		return nil, fmt.Errorf("MAC-VPN requires VTEP configuration")
 	}
 
+	// Check platform support for MACVPN (EVPN VXLAN)
+	resolved := n.Resolved()
+	if resolved.Platform != "" {
+		if platform, err := n.GetPlatform(resolved.Platform); err == nil {
+			if !platform.SupportsFeature("macvpn") {
+				return nil, fmt.Errorf("platform %s does not support MAC-VPN (EVPN VXLAN)", resolved.Platform)
+			}
+		}
+	}
+
 	cs := NewChangeSet(n.Name(), "interface.bind-macvpn")
 
 	vlanName := i.name // e.g., "Vlan100"
@@ -62,6 +72,16 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 	}
 	if !i.IsVLAN() {
 		return nil, fmt.Errorf("unbind-macvpn only valid for VLAN interfaces")
+	}
+
+	// Check platform support for MACVPN (EVPN VXLAN)
+	resolved := n.Resolved()
+	if resolved.Platform != "" {
+		if platform, err := n.GetPlatform(resolved.Platform); err == nil {
+			if !platform.SupportsFeature("macvpn") {
+				return nil, fmt.Errorf("platform %s does not support MAC-VPN (EVPN VXLAN)", resolved.Platform)
+			}
+		}
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.unbind-macvpn")

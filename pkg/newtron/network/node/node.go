@@ -103,7 +103,7 @@ func (n *Node) LoopbackIP() string {
 
 // ASNumber returns the BGP AS number.
 func (n *Node) ASNumber() int {
-	return n.resolved.ASNumber
+	return n.resolved.UnderlayASN
 }
 
 // RouterID returns the BGP router ID.
@@ -821,7 +821,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 
 	// For iBGP (same AS), no special config needed
 	// For eBGP with loopback, would need ebgp_multihop
-	if asn != n.resolved.ASNumber {
+	if asn != n.resolved.UnderlayASN {
 		fields["ebgp_multihop"] = "255" // Enable multihop for eBGP via loopback
 	}
 

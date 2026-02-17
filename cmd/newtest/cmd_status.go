@@ -128,6 +128,11 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 		ago := time.Since(state.Started).Round(time.Second)
 		fmt.Printf("  started:   %s (%s ago)\n", state.Started.Format(newtest.DateTimeFormat), ago)
 	}
+	if !state.Finished.IsZero() {
+		ago := time.Since(state.Finished).Round(time.Second)
+		duration := state.Finished.Sub(state.Started).Round(time.Second)
+		fmt.Printf("  finished:  %s (%s ago, took %s)\n", state.Finished.Format(newtest.DateTimeFormat), ago, duration)
+	}
 
 	// Scenario table
 	if len(state.Scenarios) > 0 {

@@ -468,9 +468,8 @@ func (n *Network) loadProfile(name string) (*spec.DeviceProfile, error) {
 
 // resolveProfile applies inheritance to resolve final values.
 func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spec.ResolvedProfile, error) {
-	// Get zone directly from profile
-	zone, ok := n.spec.Zones[profile.Zone]
-	if !ok {
+	// Validate zone exists
+	if _, ok := n.spec.Zones[profile.Zone]; !ok {
 		return nil, fmt.Errorf("zone '%s' not found", profile.Zone)
 	}
 
@@ -481,13 +480,6 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 		Zone:     profile.Zone,
 		Platform:   profile.Platform,
 		MAC:        profile.MAC,
-	}
-
-	// AS Number: profile > zone
-	if profile.ASNumber != nil {
-		resolved.ASNumber = *profile.ASNumber
-	} else {
-		resolved.ASNumber = zone.ASNumber
 	}
 
 	// Router ID and VTEP from loopback

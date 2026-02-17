@@ -11,13 +11,14 @@ import (
 
 // Scenario is a parsed test scenario from a YAML file.
 type Scenario struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Topology    string   `yaml:"topology"`
-	Platform    string   `yaml:"platform"`
-	Requires    []string `yaml:"requires,omitempty"`
-	Repeat      int      `yaml:"repeat,omitempty"`
-	Steps       []Step   `yaml:"steps"`
+	Name             string   `yaml:"name"`
+	Description      string   `yaml:"description"`
+	Topology         string   `yaml:"topology"`
+	Platform         string   `yaml:"platform"`
+	Requires         []string `yaml:"requires,omitempty"`
+	RequiresFeatures []string `yaml:"requires_features,omitempty"` // Platform features required (e.g., ["acl", "macvpn"])
+	Repeat           int      `yaml:"repeat,omitempty"`
+	Steps            []Step   `yaml:"steps"`
 }
 
 // Step is a single action within a scenario.
@@ -54,6 +55,10 @@ type Step struct {
 	// verify-ping
 	Target string `yaml:"target,omitempty"`
 	Count  int    `yaml:"count,omitempty"`
+
+	// create-vlan, delete-vlan, add-vlan-member, remove-vlan-member
+	VLANID  int    `yaml:"vlan_id,omitempty"`
+	Tagging string `yaml:"tagging,omitempty"` // "tagged" or "untagged"
 
 	// All verify-* actions, ssh-command
 	Expect *ExpectBlock `yaml:"expect,omitempty"`

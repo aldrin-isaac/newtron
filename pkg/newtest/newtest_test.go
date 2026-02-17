@@ -1850,7 +1850,7 @@ func TestIterateScenarios_Normal(t *testing.T) {
 		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
 	}
 
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		return &ScenarioResult{
 			Name:     sc.Name,
 			Topology: topology,
@@ -1885,7 +1885,7 @@ func TestIterateScenarios_TopologyOverride(t *testing.T) {
 	}
 
 	var gotTopology string
-	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node"}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node"}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		gotTopology = topology
 		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
 	})
@@ -1908,7 +1908,7 @@ func TestIterateScenarios_Resume(t *testing.T) {
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{
 		Resume:    true,
 		Completed: map[string]StepStatus{"sc1": StepStatusPassed},
-	}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		callbackCalls++
 		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
 	})
@@ -1940,7 +1940,7 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp", Requires: []string{"sc1"}},
 	}
 
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusFailed}, nil
 	})
 	if err != nil {
@@ -1966,7 +1966,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 	}
 
 	sentinel := fmt.Errorf("deploy failed")
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, func(_ context.Context, sc *Scenario, _, _ string) (*ScenarioResult, error) {
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, _, _ string) (*ScenarioResult, error) {
 		if sc.Name == "sc1" {
 			return nil, sentinel
 		}

@@ -69,8 +69,8 @@ func (t *Table) Flush() {
 
 	// Print divider.
 	dividers := make([]string, len(t.headers))
-	for i, h := range t.headers {
-		dividers[i] = strings.Repeat("-", visualLen(h))
+	for i := range t.headers {
+		dividers[i] = strings.Repeat("-", widths[i])
 	}
 	t.printRow(dividers, widths)
 
