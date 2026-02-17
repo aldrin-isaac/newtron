@@ -14,6 +14,23 @@ steps:
     action: cleanup
     devices: [leaf1, leaf2]
 
+  # Clean up any stale IPs on host interfaces from previous runs
+  - name: cleanup-host1-stale-ips
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip addr flush dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  - name: cleanup-host2-stale-ips
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip addr flush dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
   - name: wait-cleanup
     action: wait
     duration: 3s
