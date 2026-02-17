@@ -77,15 +77,17 @@ func listActions() error {
 		if len(acts) == 0 {
 			continue
 		}
-		fmt.Printf("%s:\n", cat)
+		// Category header in bold cyan
+		fmt.Printf("\033[1;36m%s:\033[0m\n", cat)
 		for _, name := range acts {
 			meta := actions[name]
-			fmt.Printf("  %-30s %s\n", name, meta.ShortDesc)
+			// Action name in green, description in default
+			fmt.Printf("  \033[32m%-30s\033[0m %s\n", name, meta.ShortDesc)
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("Use 'newtest actions <action>' for detailed information about a specific action.")
+	fmt.Printf("\033[2mUse 'newtest actions <action>' for detailed information about a specific action.\033[0m\n")
 	return nil
 }
 
@@ -96,37 +98,46 @@ func showActionDetails(actionName string) error {
 		return fmt.Errorf("unknown action: %s\n\nUse 'newtest actions' to see available actions", actionName)
 	}
 
-	fmt.Printf("Action: %s\n", actionName)
-	fmt.Printf("Category: %s\n", meta.Category)
+	// Action name in bold green
+	fmt.Printf("\033[1;32mAction:\033[0m %s\n", actionName)
+	// Category in cyan
+	fmt.Printf("\033[36mCategory:\033[0m %s\n", meta.Category)
 	fmt.Printf("Description: %s\n", meta.LongDesc)
 
 	if len(meta.Prerequisites) > 0 {
-		fmt.Println("\nPrerequisites:")
+		// Prerequisites header in bold yellow
+		fmt.Println("\n\033[1;33mPrerequisites:\033[0m")
 		for _, p := range meta.Prerequisites {
-			fmt.Printf("  • %s\n", p)
+			// Bullet in yellow
+			fmt.Printf("  \033[33m•\033[0m %s\n", p)
 		}
 	}
 
 	if len(meta.RequiredParams) > 0 {
-		fmt.Println("\nRequired Parameters:")
+		// Required params header in bold red
+		fmt.Println("\n\033[1;31mRequired Parameters:\033[0m")
 		for _, p := range meta.RequiredParams {
-			fmt.Printf("  %-20s %s\n", p.Name, p.Desc)
+			// Param name in bold
+			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
 		}
 	}
 
 	if len(meta.OptionalParams) > 0 {
-		fmt.Println("\nOptional Parameters:")
+		// Optional params header in bold blue
+		fmt.Println("\n\033[1;34mOptional Parameters:\033[0m")
 		for _, p := range meta.OptionalParams {
-			fmt.Printf("  %-20s %s\n", p.Name, p.Desc)
+			// Param name in bold
+			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
 		}
 	}
 
 	if len(meta.Devices) > 0 {
-		fmt.Printf("\nDevices: %s\n", meta.Devices)
+		fmt.Printf("\n\033[1mDevices:\033[0m %s\n", meta.Devices)
 	}
 
 	if meta.Example != "" {
-		fmt.Printf("\nExample:\n%s\n", meta.Example)
+		// Example header in bold magenta
+		fmt.Printf("\n\033[1;35mExample:\033[0m\n%s\n", meta.Example)
 	}
 
 	return nil
