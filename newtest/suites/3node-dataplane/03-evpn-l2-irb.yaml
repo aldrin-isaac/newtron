@@ -10,6 +10,28 @@ steps:
   # Pre-cleanup: Remove any leftover config from previous failed runs
   # =========================================================================
 
+  # Delete VLANs from previous runs (ignore errors if they don't exist)
+  - name: pre-delete-vlan-100-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 del 'VLAN|Vlan100' 'VLAN_MEMBER|Vlan100|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
+  - name: pre-delete-vlan-100-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "redis-cli -n 4 del 'VLAN|Vlan100' 'VLAN_MEMBER|Vlan100|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
+  - name: pre-delete-vlan-200-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "redis-cli -n 4 del 'VLAN|Vlan200' 'VLAN_MEMBER|Vlan200|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
   - name: pre-cleanup-leafs
     action: cleanup
     devices: [leaf1, leaf2]
