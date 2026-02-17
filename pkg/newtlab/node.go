@@ -1,6 +1,7 @@
 package newtlab
 
 import (
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
@@ -35,6 +36,7 @@ type NICConfig struct {
 	NetdevID    string // "mgmt", "eth1", "eth2", ...
 	Interface   string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
 	ConnectAddr string // "IP:PORT" for data NICs (connects to bridge worker), empty for mgmt
+	MAC         string // MAC address (e.g., "52:54:00:12:34:56")
 }
 
 // ResolveNodeConfig builds a NodeConfig for a device by merging
@@ -140,7 +142,21 @@ func ResolveNodeConfig(
 		Index:     0,
 		NetdevID:  "mgmt",
 		Interface: "mgmt",
+		MAC:       GenerateMAC(name, 0),
 	}}
 
 	return nc, nil
+}
+
+// GenerateMAC creates a deterministic MAC address for a node's NIC.
+// Uses QEMU's OUI prefix (52:54:00) and derives the last 3 octets from
+// a hash of the node name and NIC index for stability across reboots.
+func GenerateMAC(nodeName string, nicIndex int) string {
+	// Hash node name + NIC index to get deterministic bytes
+	input := fmt.Sprintf("%s-%d", nodeName, nicIndex)
+	hash := sha256.Sum256([]byte(input))
+
+	// Use first 3 bytes of hash for last 3 octets of MAC
+	// QEMU OUI: 52:54:00
+	return fmt.Sprintf("52:54:00:%02x:%02x:%02x", hash[0], hash[1], hash[2])
 }

@@ -223,6 +223,7 @@ func (l *Lab) coalesceHostVMs() {
 				Index:     0,
 				NetdevID:  "mgmt",
 				Interface: "mgmt",
+				MAC:       GenerateMAC(vmName, 0),
 			}},
 		}
 

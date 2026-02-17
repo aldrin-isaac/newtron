@@ -62,9 +62,17 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 
 	// Management NIC (NIC 0): user-mode networking with SSH port forward
 	// romfile= disables PXE boot ROM so QEMU boots from disk
+	// Find mgmt NIC to get its MAC
+	mgmtMAC := ""
+	for _, nic := range q.Node.NICs {
+		if nic.Index == 0 {
+			mgmtMAC = nic.MAC
+			break
+		}
+	}
 	args = append(args,
 		"-netdev", fmt.Sprintf("user,id=mgmt,hostfwd=tcp::%d-:22", q.Node.SSHPort),
-		"-device", fmt.Sprintf("%s,netdev=mgmt,romfile=", q.Node.NICDriver),
+		"-device", fmt.Sprintf("%s,netdev=mgmt,mac=%s,romfile=", q.Node.NICDriver, mgmtMAC),
 	)
 
 	// Data NICs (NIC 1..N): all connect outbound to bridge workers
@@ -74,7 +82,7 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 		}
 		args = append(args,
 			"-netdev", fmt.Sprintf("socket,id=%s,connect=%s", nic.NetdevID, nic.ConnectAddr),
-			"-device", fmt.Sprintf("%s,netdev=%s,romfile=", q.Node.NICDriver, nic.NetdevID),
+			"-device", fmt.Sprintf("%s,netdev=%s,mac=%s,romfile=", q.Node.NICDriver, nic.NetdevID, nic.MAC),
 		)
 	}
 

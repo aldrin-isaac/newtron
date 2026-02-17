@@ -174,12 +174,14 @@ func AllocateLinks(
 			NetdevID:    fmt.Sprintf("eth%d", lc.A.NICIndex),
 			Interface:   lc.A.Interface,
 			ConnectAddr: aConnect,
+			MAC:         GenerateMAC(nodeA.Name, 0), // All NICs share system MAC
 		})
 		nodeZ.NICs = append(nodeZ.NICs, NICConfig{
 			Index:       lc.Z.NICIndex,
 			NetdevID:    fmt.Sprintf("eth%d", lc.Z.NICIndex),
 			Interface:   lc.Z.Interface,
 			ConnectAddr: zConnect,
+			MAC:         GenerateMAC(nodeZ.Name, 0), // All NICs share system MAC
 		})
 	}
 
