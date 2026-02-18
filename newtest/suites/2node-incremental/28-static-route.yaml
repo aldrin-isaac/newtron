@@ -6,13 +6,13 @@ requires: [provision]
 steps:
   - name: create-vrf
     action: create-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_route_test
 
   - name: add-route
     action: add-static-route
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_route_test
       prefix: "10.99.0.0/24"
@@ -21,7 +21,7 @@ steps:
 
   - name: verify-route-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: STATIC_ROUTE
     key: "Vrf_route_test|10.99.0.0/24"
     expect:
@@ -29,14 +29,14 @@ steps:
 
   - name: remove-route
     action: remove-static-route
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_route_test
       prefix: "10.99.0.0/24"
 
   - name: verify-route-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: STATIC_ROUTE
     key: "Vrf_route_test|10.99.0.0/24"
     expect:
@@ -44,6 +44,6 @@ steps:
 
   - name: cleanup-vrf
     action: delete-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_route_test

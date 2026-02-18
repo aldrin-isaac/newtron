@@ -3,16 +3,16 @@ description: Verify SSH connectivity to all devices
 topology: 2node
 
 steps:
-  - name: ssh-echo-spine1
+  - name: ssh-echo-switch1
     action: ssh-command
-    devices: [spine1]
+    devices: [switch1]
     command: "echo ok"
     expect:
       contains: "ok"
 
-  - name: ssh-echo-leaf1
+  - name: ssh-echo-switch2
     action: ssh-command
-    devices: [leaf1]
+    devices: [switch2]
     command: "echo ok"
     expect:
       contains: "ok"

@@ -1,1 +1,31 @@
-../../../specs/platforms.json
+{
+  "version": "1.0",
+  "platforms": {
+    "sonic-ciscovs": {
+      "hwsku": "cisco-8101-p4-32x100-vs",
+      "description": "SONiC 202505 with Cisco Silicon One virtual PFE (Gibraltar)",
+      "port_count": 32,
+      "default_speed": "100G",
+      "vm_image": "~/.newtlab/images/sonic-ciscovs.qcow2",
+      "vm_memory": 6144,
+      "vm_cpus": 6,
+      "vm_nic_driver": "e1000",
+      "vm_interface_map": "sequential",
+      "vm_credentials": {"user": "aldrin", "pass": "YourPaSsWoRd"},
+      "vm_boot_timeout": 600,
+      "dataplane": "",
+      "unsupported_features": []
+    },
+    "alpine-host": {
+      "description": "Alpine Linux test host",
+      "device_type": "host",
+      "vm_image": "~/.newtlab/images/alpine-testhost.qcow2",
+      "vm_memory": 256,
+      "vm_cpus": 1,
+      "vm_nic_driver": "virtio-net-pci",
+      "vm_interface_map": "linux",
+      "vm_credentials": {"user": "root", "pass": "root"},
+      "vm_boot_timeout": 60
+    }
+  }
+}

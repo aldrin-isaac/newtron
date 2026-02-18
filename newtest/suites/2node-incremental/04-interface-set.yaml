@@ -6,7 +6,7 @@ requires: [provision]
 steps:
   - name: set-mtu-9000
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: mtu
@@ -14,7 +14,7 @@ steps:
 
   - name: verify-mtu-9000
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT
     key: Ethernet1
     expect:
@@ -23,7 +23,7 @@ steps:
 
   - name: set-description
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: description
@@ -31,7 +31,7 @@ steps:
 
   - name: verify-description
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT
     key: Ethernet1
     expect:
@@ -40,7 +40,7 @@ steps:
 
   - name: set-admin-down
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: admin_status
@@ -48,7 +48,7 @@ steps:
 
   - name: verify-admin-down
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT
     key: Ethernet1
     expect:
@@ -57,7 +57,7 @@ steps:
 
   - name: set-admin-up
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: admin_status
@@ -65,7 +65,7 @@ steps:
 
   - name: verify-admin-up
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT
     key: Ethernet1
     expect:
@@ -75,7 +75,7 @@ steps:
   # Restore default MTU
   - name: restore-mtu
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: mtu

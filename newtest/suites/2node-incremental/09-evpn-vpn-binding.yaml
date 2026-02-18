@@ -7,27 +7,27 @@ steps:
   # Setup: create VLAN and VRF for binding
   - name: create-vlan200
     action: create-vlan
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 200
 
   - name: create-vrf-evpn
     action: create-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_evpn
 
   # Bind MAC-VPN to VLAN (brings L2VNI from spec)
   - name: bind-macvpn-vlan200
     action: bind-macvpn
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 200
       macvpn: storage-vlan200
 
   - name: verify-l2vni-mapping
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_10200_Vlan200"
     expect:
@@ -36,14 +36,14 @@ steps:
   # Bind IP-VPN to VRF (brings L3VNI from spec)
   - name: bind-ipvpn-vrf
     action: bind-ipvpn
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_evpn
       ipvpn: tenant-vpn
 
   - name: verify-l3vni-mapping
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_20001_Vrf_evpn"
     expect:
@@ -52,13 +52,13 @@ steps:
   # Unbind both
   - name: unbind-macvpn-vlan200
     action: unbind-macvpn
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 200
 
   - name: verify-l2vni-unmapped
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_10200_Vlan200"
     expect:
@@ -66,13 +66,13 @@ steps:
 
   - name: unbind-ipvpn-vrf
     action: unbind-ipvpn
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_evpn
 
   - name: verify-l3vni-unmapped
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_20001_Vrf_evpn"
     expect:
@@ -81,12 +81,12 @@ steps:
   # Cleanup
   - name: cleanup-vrf
     action: delete-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_evpn
 
   - name: cleanup-vlan
     action: delete-vlan
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 200

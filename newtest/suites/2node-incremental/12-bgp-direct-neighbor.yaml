@@ -5,26 +5,26 @@ requires: [provision]
 
 steps:
   # Set IPs on both ends of the link
-  - name: set-ip-spine1
+  - name: set-ip-switch1
     action: set-interface
-    devices: [spine1]
+    devices: [switch1]
     interface: Ethernet1
     params:
       property: ip
       value: "10.1.1.0/31"
 
-  - name: set-ip-leaf1
+  - name: set-ip-switch2
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: ip
       value: "10.1.1.1/31"
 
-  # Add direct BGP neighbor on leaf1
+  # Add direct BGP neighbor on switch2
   - name: add-direct-neighbor
     action: bgp-add-neighbor
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       neighbor_ip: "10.1.1.0"
@@ -32,7 +32,7 @@ steps:
 
   - name: verify-neighbor-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: BGP_NEIGHBOR
     key: "default|10.1.1.0"
     expect:
@@ -41,25 +41,25 @@ steps:
   # Remove the neighbor
   - name: remove-direct-neighbor
     action: bgp-remove-neighbor
-    devices: [leaf1]
+    devices: [switch2]
     params:
       neighbor_ip: "10.1.1.0"
 
   - name: verify-neighbor-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: BGP_NEIGHBOR
     key: "default|10.1.1.0"
     expect:
       exists: false
 
   # Clean up IPs via ssh-command (set empty IP to remove)
-  - name: cleanup-ip-spine1
+  - name: cleanup-ip-switch1
     action: ssh-command
-    devices: [spine1]
+    devices: [switch1]
     command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|10.1.1.0/31'"
 
-  - name: cleanup-ip-leaf1
+  - name: cleanup-ip-switch2
     action: ssh-command
-    devices: [leaf1]
+    devices: [switch2]
     command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|10.1.1.1/31'"

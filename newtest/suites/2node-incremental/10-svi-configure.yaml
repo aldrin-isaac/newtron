@@ -6,19 +6,19 @@ requires: [provision]
 steps:
   - name: create-vlan500
     action: create-vlan
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 500
 
   - name: create-vrf-svi
     action: create-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_svi
 
   - name: configure-svi
     action: configure-svi
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 500
       vrf: Vrf_svi
@@ -26,7 +26,7 @@ steps:
 
   - name: verify-svi-vrf
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VLAN_INTERFACE
     key: Vlan500
     expect:
@@ -35,7 +35,7 @@ steps:
 
   - name: verify-svi-ip
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VLAN_INTERFACE
     key: "Vlan500|10.1.50.1/24"
     expect:
@@ -44,22 +44,22 @@ steps:
   # Cleanup: remove SVI entries, then VRF, then VLAN
   - name: cleanup-svi-ip
     action: ssh-command
-    devices: [leaf1]
+    devices: [switch2]
     command: "redis-cli -n 4 DEL 'VLAN_INTERFACE|Vlan500|10.1.50.1/24'"
 
   - name: cleanup-svi-vrf
     action: ssh-command
-    devices: [leaf1]
+    devices: [switch2]
     command: "redis-cli -n 4 DEL 'VLAN_INTERFACE|Vlan500'"
 
   - name: cleanup-vrf
     action: delete-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_svi
 
   - name: cleanup-vlan
     action: delete-vlan
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vlan_id: 500

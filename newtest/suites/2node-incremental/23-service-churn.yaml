@@ -1,7 +1,7 @@
 name: service-churn
 description: >
   Stress test: repeatedly apply and remove customer-l3 service on
-  leaf1:Ethernet1 to detect resource leaks (VRF, interface config,
+  switch2:Ethernet1 to detect resource leaks (VRF, interface config,
   service bindings) or CONFIG_DB staleness across cycles.
 topology: 2node
 requires: [verify-provisioning]
@@ -10,7 +10,7 @@ repeat: 10
 steps:
   - name: apply-customer-l3
     action: apply-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     service: customer-l3
     params:
@@ -18,7 +18,7 @@ steps:
 
   - name: verify-binding-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:
@@ -27,7 +27,7 @@ steps:
 
   - name: verify-vrf-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VRF
     key: customer-l3-Eth1
     expect:
@@ -35,12 +35,12 @@ steps:
 
   - name: remove-customer-l3
     action: remove-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
 
   - name: verify-binding-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:
@@ -48,7 +48,7 @@ steps:
 
   - name: verify-vrf-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VRF
     key: customer-l3-Eth1
     expect:

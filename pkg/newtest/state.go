@@ -120,6 +120,7 @@ func RemoveRunState(suite string) error {
 }
 
 // ListSuiteStates returns names of all suites with state directories.
+// Only returns suites that have actual suite directories in the suites base directory.
 func ListSuiteStates() ([]string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -135,9 +136,20 @@ func ListSuiteStates() ([]string, error) {
 		return nil, fmt.Errorf("newtest: list suites: %w", err)
 	}
 
+	// Determine suites base directory (env > default)
+	suitesBase := os.Getenv("NEWTEST_SUITES_BASE")
+	if suitesBase == "" {
+		suitesBase = "newtest/suites"
+	}
+
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if !e.IsDir() {
+			continue
+		}
+		// Check if actual suite directory exists
+		suitePath := filepath.Join(suitesBase, e.Name())
+		if info, err := os.Stat(suitePath); err == nil && info.IsDir() {
 			names = append(names, e.Name())
 		}
 	}

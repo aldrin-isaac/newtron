@@ -548,3 +548,42 @@ func (t *TopologySpecFile) DeviceNames() []string {
 	sort.Strings(names)
 	return names
 }
+
+// DeriveLinksFromInterfaces builds the links array from interface.link fields.
+// This allows defining topology connectivity directly in interface definitions
+// rather than maintaining a separate links array.
+func DeriveLinksFromInterfaces(topo *TopologySpecFile) []*TopologyLink {
+	var links []*TopologyLink
+	seen := make(map[string]bool) // track bidirectional pairs to avoid duplicates
+
+	for deviceName, device := range topo.Devices {
+		for ifaceName, iface := range device.Interfaces {
+			if iface.Link == "" {
+				continue
+			}
+
+			aEndpoint := deviceName + ":" + ifaceName
+			zEndpoint := iface.Link
+
+			// Create canonical key (alphabetically sorted to detect duplicates)
+			var key string
+			if aEndpoint < zEndpoint {
+				key = aEndpoint + "<->" + zEndpoint
+			} else {
+				key = zEndpoint + "<->" + aEndpoint
+			}
+
+			if seen[key] {
+				continue // Already added from peer side
+			}
+			seen[key] = true
+
+			links = append(links, &TopologyLink{
+				A: aEndpoint,
+				Z: zEndpoint,
+			})
+		}
+	}
+
+	return links
+}

@@ -1,12 +1,12 @@
 name: service-l3
-description: Apply customer-l3 service on leaf1:Ethernet1 and verify
+description: Apply customer-l3 service on switch2:Ethernet1 and verify
 topology: 2node
 requires: [vrf-lifecycle]
 
 steps:
   - name: apply-customer-l3
     action: apply-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     service: customer-l3
     params:
@@ -14,7 +14,7 @@ steps:
 
   - name: verify-l3-binding
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:

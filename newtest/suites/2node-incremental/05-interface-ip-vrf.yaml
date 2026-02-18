@@ -6,13 +6,13 @@ requires: [provision]
 steps:
   - name: create-vrf-test
     action: create-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_test
 
   - name: set-vrf-ethernet1
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: vrf
@@ -20,7 +20,7 @@ steps:
 
   - name: verify-vrf-binding
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: INTERFACE
     key: Ethernet1
     expect:
@@ -29,7 +29,7 @@ steps:
 
   - name: set-ip-ethernet1
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: ip
@@ -37,7 +37,7 @@ steps:
 
   - name: verify-ip-binding
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: INTERFACE
     key: "Ethernet1|192.168.99.1/24"
     expect:
@@ -46,12 +46,12 @@ steps:
   # Cleanup: remove IP, unbind VRF, then delete VRF
   - name: cleanup-ip
     action: ssh-command
-    devices: [leaf1]
+    devices: [switch2]
     command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet1|192.168.99.1/24'"
 
   - name: cleanup-unbind-vrf
     action: set-interface
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     params:
       property: vrf
@@ -59,6 +59,6 @@ steps:
 
   - name: cleanup-vrf
     action: delete-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_test

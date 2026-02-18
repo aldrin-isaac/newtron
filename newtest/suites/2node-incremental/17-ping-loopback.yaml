@@ -1,22 +1,22 @@
 name: ping-loopback
-description: Verify dataplane reachability between spine1 and leaf1 loopbacks
+description: Verify dataplane reachability between switch1 and switch2 loopbacks
 topology: 2node
 requires: [route-propagation]
 
 steps:
-  # Ping leaf1 loopback from spine1
-  - name: ping-spine1-to-leaf1
+  # Ping switch2 loopback from switch1
+  - name: ping-switch1-to-switch2
     action: verify-ping
-    devices: [spine1]
+    devices: [switch1]
     target: "10.0.0.11"
     count: 5
     expect:
       success_rate: 0.8
 
-  # Ping spine1 loopback from leaf1
-  - name: ping-leaf1-to-spine1
+  # Ping switch1 loopback from switch2
+  - name: ping-switch2-to-switch1
     action: verify-ping
-    devices: [leaf1]
+    devices: [switch2]
     target: "10.0.0.1"
     count: 5
     expect:

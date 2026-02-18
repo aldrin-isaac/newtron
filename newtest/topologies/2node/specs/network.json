@@ -1,1 +1,32 @@
-../../../specs/network.json
+{
+  "version": "1.0",
+  "description": "2-node topology network specs - underlay + overlay testing",
+  "ipvpns": {
+    "CUSTOMER": {
+      "description": "Customer overlay VRF for inter-subnet routing",
+      "vrf": "CUSTOMER",
+      "l3vni": 50001,
+      "route_targets": ["65000:50001"]
+    }
+  },
+  "macvpns": {
+    "overlay-vlan100": {
+      "description": "Overlay VLAN 100 - L2 stretch with IRB",
+      "vni": 50100,
+      "route_targets": ["65000:50100"],
+      "arp_suppression": true
+    },
+    "overlay-vlan200": {
+      "description": "Overlay VLAN 200 - IRB",
+      "vni": 50200,
+      "route_targets": ["65000:50200"],
+      "arp_suppression": true
+    }
+  },
+  "services": {
+    "transit": {
+      "description": "Transit interface (global routing table, no VPN)",
+      "service_type": "routed"
+    }
+  }
+}

@@ -7,7 +7,7 @@ steps:
   # Apply the service (QoS tables created as side-effect)
   - name: apply-customer-l3
     action: apply-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     service: customer-l3
     params:
@@ -16,7 +16,7 @@ steps:
   # Verify device-wide QoS tables
   - name: verify-dscp-to-tc-map
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: DSCP_TO_TC_MAP
     key: 4q-customer
     expect:
@@ -28,7 +28,7 @@ steps:
 
   - name: verify-tc-to-queue-map
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: TC_TO_QUEUE_MAP
     key: 4q-customer
     expect:
@@ -40,7 +40,7 @@ steps:
 
   - name: verify-scheduler-dwrr
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: SCHEDULER
     key: "4q-customer.0"
     expect:
@@ -50,7 +50,7 @@ steps:
 
   - name: verify-scheduler-strict
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: SCHEDULER
     key: "4q-customer.2"
     expect:
@@ -60,7 +60,7 @@ steps:
   # Verify per-interface bindings
   - name: verify-port-qos-map
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT_QOS_MAP
     key: Ethernet1
     expect:
@@ -70,7 +70,7 @@ steps:
 
   - name: verify-queue-binding
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: QUEUE
     key: "Ethernet1|1"
     expect:
@@ -80,12 +80,12 @@ steps:
   # Clean up
   - name: remove-service
     action: remove-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
 
   - name: verify-port-qos-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT_QOS_MAP
     key: Ethernet1
     expect:
@@ -93,7 +93,7 @@ steps:
 
   - name: verify-queue-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: QUEUE
     key: "Ethernet1|0"
     expect:

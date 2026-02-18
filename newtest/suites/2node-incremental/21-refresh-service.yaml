@@ -6,7 +6,7 @@ requires: [service-remove]
 steps:
   - name: apply-customer-l3
     action: apply-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     service: customer-l3
     params:
@@ -14,7 +14,7 @@ steps:
 
   - name: verify-binding-after-apply
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:
@@ -23,12 +23,12 @@ steps:
 
   - name: refresh-ethernet1
     action: refresh-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
 
   - name: verify-binding-after-refresh
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:
@@ -37,12 +37,12 @@ steps:
 
   - name: remove-service
     action: remove-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
 
   - name: verify-binding-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:

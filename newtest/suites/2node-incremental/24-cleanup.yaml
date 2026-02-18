@@ -1,16 +1,16 @@
 name: cleanup
-description: Run cleanup on leaf1 to remove orphaned resources and verify
+description: Run cleanup on switch2 to remove orphaned resources and verify
 topology: 2node
 requires: [service-churn]
 
 steps:
   - name: run-cleanup
     action: cleanup
-    devices: [leaf1]
+    devices: [switch2]
 
   - name: verify-no-orphan-bindings
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     expect:
       min_entries: 0

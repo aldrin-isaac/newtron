@@ -1,0 +1,15 @@
+{
+    "mgmt_ip": "127.0.0.1",
+    "loopback_ip": "10.0.0.2",
+    "evpn": {
+        "peers": [
+            "switch1"
+        ]
+    },
+    "platform": "sonic-ciscovs",
+    "ssh_user": "admin",
+    "ssh_pass": "YourPaSsWoRd",
+    "ssh_port": 13007,
+    "console_port": 12007,
+    "underlay_asn": 65002
+}

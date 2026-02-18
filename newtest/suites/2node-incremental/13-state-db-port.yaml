@@ -4,20 +4,20 @@ topology: 2node
 requires: [provision]
 
 steps:
-  # Verify spine1 Ethernet0 exists in CONFIG_DB with admin_status
-  - name: verify-port-config-spine1
+  # Verify switch1 Ethernet0 exists in CONFIG_DB with admin_status
+  - name: verify-port-config-switch1
     action: verify-config-db
-    devices: [spine1]
+    devices: [switch1]
     table: PORT
     key: Ethernet0
     expect:
       fields:
         admin_status: up
 
-  # Verify leaf1 Ethernet0 exists in CONFIG_DB with admin_status
-  - name: verify-port-config-leaf1
+  # Verify switch2 Ethernet0 exists in CONFIG_DB with admin_status
+  - name: verify-port-config-switch2
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT
     key: Ethernet0
     expect:
