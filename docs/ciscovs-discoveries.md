@@ -78,7 +78,42 @@ These must be preserved during debugging (Sonnet: do NOT violate):
 - **Observation:** Provision completed successfully, significantly faster than expected compared to VPP platform
 - **Status:** ✅ VALIDATED
 
-#### Discovery 4: Health Check SSH Command Timeout (FIXING)
+#### Discovery 4: VLAN ID Parameter Format (FIXED - Opus)
+- **Timestamp:** 2026-02-17 17:05
+- **Symptom:** vlan-lifecycle, svi-configure, vlan-member-remove, evpn-vpn-binding all failed with "VLAN ID must be 1-4094, got 0"
+- **Root Cause:**
+  - 2node scenarios nested `vlan_id` under `params:` block
+  - 3node scenarios use top-level `vlan_id` field
+  - Step struct expects top-level `vlan_id: int` (yaml tag on line 60 of scenario.go)
+  - Nested format caused YAML parser to miss the field → default value 0
+- **Delta Analysis:** Compared working 3node vs failing 2node - format mismatch found
+- **Fix:** Converted all 2node scenarios from `params.vlan_id` to top-level `vlan_id`
+  - Fixed: 06-vlan-lifecycle.yaml, 09-evpn-vpn-binding.yaml, 10-svi-configure.yaml, 29-vlan-member-remove.yaml
+- **Status:** ✅ FIXED
+
+#### Discovery 5: Missing Spec Definitions (FIXED - Opus)
+- **Timestamp:** 2026-02-17 17:06
+- **Symptom:** qos-apply-remove failed "QoS policy '4q-customer' not found", service-l3 failed "service 'customer-l3' not found"
+- **Root Cause:**
+  - 3node network.json has comprehensive spec definitions (QoS policies, services, filters, etc.)
+  - 2node network.json only had minimal specs (1 service, 2 MACVPNs, 1 IPVPN)
+  - Test scenarios were copied from 3node but referenced specs that don't exist in 2node
+- **Delta Analysis:** 3node has 199 lines of specs, 2node had only 32 lines
+- **Fix:** Copied missing definitions from 3node network.json:
+  - Added `qos_policies.4q-customer` (4-queue customer-edge policy)
+  - Added `services.customer-l3` (L3 routed customer with IPVPN "CUSTOMER")
+- **Status:** ✅ FIXED
+
+#### Discovery 6: verify-bgp Host Device Check (FIXED - Sonnet)
+- **Timestamp:** 2026-02-17 17:03
+- **Symptom:** bgp-converge hung for 6m38s, failed with "device 'host1' is a host (no SONiC)" errors for all 6 hosts
+- **Root Cause:** Same as Discovery 2 - `verifyBGPExecutor` used `pollForDevices` helper which didn't skip hosts
+- **Fix:** Sonnet agent added host-skip logic to `checkForDevices` and `pollForDevices` helpers in steps.go
+  - Lines 239-242: Skip hosts in checkForDevices
+  - Lines 277-280: Skip hosts in pollForDevices
+- **Status:** ✅ FIXED
+
+#### Discovery 7: BGP Not Establishing on CiscoVS (INVESTIGATING)
 - **Timestamp:** 2026-02-17 17:03
 - **Symptom:** bgp-converge scenario hung indefinitely (ran 7+ minutes despite 180s timeout)
 - **Root Cause:**
@@ -134,8 +169,18 @@ These must be preserved during debugging (Sonnet: do NOT violate):
 
 ## Status
 
-**Current Phase:** Test execution - CiscoVS 2node-incremental suite
-**Progress:** 2/32 scenarios passed (boot-ssh, provision), bgp-converge running
-**Next Step:** Monitor BGP convergence, debug any failures in remaining scenarios
-**Test Started:** 2026-02-17 16:55
-**Monitoring:** Opus will spawn Sonnet agent to continue unattended monitoring and debugging
+**Current Phase:** Fixes applied, ready for re-test
+**First Test Results:** 13/32 passed, 6 failed, 1 errored, 12 skipped (7m09s)
+**Fixes Applied:**
+- ✅ Zone validation (Discovery 1)
+- ✅ Host device provisioning (Discovery 2)
+- ✅ CiscoVS boot & provision (Discovery 3)
+- ✅ VLAN ID parameter format (Discovery 4)
+- ✅ Missing spec definitions (Discovery 5)
+- ✅ verify-bgp host check (Discovery 6)
+
+**Remaining Issue:**
+- ⚠️ BGP not establishing on CiscoVS switches (Discovery 7 - needs investigation)
+
+**Next Step:** Re-run test suite with all fixes applied, investigate BGP convergence
+**Branch:** `ciscovs-2node-debug` (6 commits, ready for Opus review)
