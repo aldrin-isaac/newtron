@@ -1,6 +1,9 @@
 {
   "version": "1.0",
   "description": "2-node topology network specs - underlay + overlay testing",
+  "zones": {
+    "amer": {}
+  },
   "ipvpns": {
     "CUSTOMER": {
       "description": "Customer overlay VRF for inter-subnet routing",
