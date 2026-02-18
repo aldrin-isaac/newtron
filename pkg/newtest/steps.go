@@ -162,6 +162,13 @@ func (r *Runner) executeForDevices(step *Step, fn func(dev *node.Node, name stri
 	allPassed := true
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific operations (provision, restart-service, apply-frr-defaults, etc.)
+		// Host actions use the 'command' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC operation not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
@@ -330,6 +337,15 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	allPassed := true
 
 	for _, name := range devices {
+		// Skip host devices — they don't have SONiC CONFIG_DB to provision
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{
+				Device: name, Status: StepStatusSkipped,
+				Message: "host device (no SONiC provisioning)",
+			})
+			continue
+		}
+
 		// Generate composite config offline, then deliver using the shared
 		// connection (without disconnecting). ProvisionDevice() can't be used
 		// here because it calls defer dev.Disconnect() which kills the shared
