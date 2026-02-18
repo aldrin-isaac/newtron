@@ -1,47 +1,46 @@
 name: vlan-member-remove
-description: "VLAN member add and individual remove"
+description: VLAN member add and individual remove
 topology: 2node
-requires: [provision]
-
+requires:
+- provision
 steps:
-  - name: create-vlan
-    action: create-vlan
-    devices: [switch2]
-    params:
-      vlan_id: 500
-
-  - name: add-member
-    action: add-vlan-member
-    devices: [switch2]
-    params:
-      vlan_id: 500
-      interface: Ethernet2
-
-  - name: verify-member-added
-    action: verify-config-db
-    devices: [switch2]
-    table: VLAN_MEMBER
-    key: "Vlan500|Ethernet2"
-    expect:
-      exists: true
-
-  - name: remove-member
-    action: remove-vlan-member
-    devices: [switch2]
-    params:
-      vlan_id: 500
-      interface: Ethernet2
-
-  - name: verify-member-removed
-    action: verify-config-db
-    devices: [switch2]
-    table: VLAN_MEMBER
-    key: "Vlan500|Ethernet2"
-    expect:
-      exists: false
-
-  - name: cleanup-vlan
-    action: delete-vlan
-    devices: [switch2]
-    params:
-      vlan_id: 500
+- name: create-vlan
+  action: create-vlan
+  devices:
+  - switch2
+  vlan_id: 500
+- name: add-member
+  action: add-vlan-member
+  devices:
+  - switch2
+  params:
+    interface: Ethernet2
+  vlan_id: 500
+- name: verify-member-added
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VLAN_MEMBER
+  key: Vlan500|Ethernet2
+  expect:
+    exists: true
+- name: remove-member
+  action: remove-vlan-member
+  devices:
+  - switch2
+  params:
+    interface: Ethernet2
+  vlan_id: 500
+- name: verify-member-removed
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VLAN_MEMBER
+  key: Vlan500|Ethernet2
+  expect:
+    exists: false
+- name: cleanup-vlan
+  action: delete-vlan
+  devices:
+  - switch2
+  vlan_id: 500

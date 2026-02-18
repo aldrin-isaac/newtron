@@ -67,16 +67,35 @@ These must be preserved during debugging (Sonnet: do NOT violate):
 - **Commit:** 3de720c
 - **Status:** ✅ RESOLVED
 
-#### Discovery 3: CiscoVS Platform Boot & Provision (IN PROGRESS)
+#### Discovery 3: CiscoVS Platform Boot & Provision (VALIDATED)
 - **Timestamp:** 2026-02-17 16:55
-- **Status:** boot-ssh PASS (< 1s), provision PASS (26s), bgp-converge RUNNING (step 2/2: verify-bgp-all)
+- **Status:** boot-ssh PASS (< 1s), provision PASS (26s)
 - **Platform Details:**
   - Image: sonic-ciscovs.qcow2 (2.4GB)
   - HWSKU: cisco-8101-p4-32x100-vs (Gibraltar)
   - 32 ports, 100G, e1000 NIC driver
   - 6GB RAM, 6 vCPUs, 600s boot timeout
 - **Observation:** Provision completed successfully, significantly faster than expected compared to VPP platform
-- **Next:** Waiting for BGP convergence verification
+- **Status:** ✅ VALIDATED
+
+#### Discovery 4: Health Check SSH Command Timeout (FIXING)
+- **Timestamp:** 2026-02-17 17:03
+- **Symptom:** bgp-converge scenario hung indefinitely (ran 7+ minutes despite 180s timeout)
+- **Root Cause:**
+  - `verifyBGPExecutor` calls `node.RunHealthChecks(ctx, "bgp")` with context
+  - `RunHealthChecks` → `checkBGP` → `checkBGPFromVtysh` → `tunnel.ExecCommand()`
+  - **BUG**: `SSHTunnel.ExecCommand()` doesn't accept context, can hang indefinitely
+  - When vtysh command hangs (e.g., on CiscoVS), test timeout is never enforced
+- **Manual Verification:**
+  - BGP status showed peers in "Idle" state with "Remote AS 0"
+  - Suggests FRR/vtysh might be slow or unresponsive on CiscoVS
+- **Architecture Issue:** Context not propagated through SSH command execution layer
+- **Fix Required:**
+  1. Add `ExecCommandContext(ctx context.Context, cmd string)` to SSHTunnel
+  2. Use `session.Start()` + goroutine with context cancellation
+  3. Update health check to use context-aware version
+  4. Preserve existing `ExecCommand()` for backward compatibility
+- **Status:** 🔧 FIXING
 
 ---
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -128,7 +129,11 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "no SSH tunnel for vtysh fallback"}}
 	}
 
-	output, err := tunnel.ExecCommand("sudo vtysh -c 'show bgp summary json'")
+	// Use a 30-second timeout for vtysh command execution to prevent indefinite hangs
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	output, err := tunnel.ExecCommandContext(ctx, "sudo vtysh -c 'show bgp summary json'")
 	if err != nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh: %s", err)}}
 	}

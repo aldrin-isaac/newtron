@@ -234,6 +234,13 @@ func (r *Runner) checkForDevices(step *Step, fn func(dev *node.Node, name string
 	allPassed := true
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific verification (verify-health, verify-config-db, etc.)
+		// Host actions use the 'host-exec' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
@@ -272,6 +279,13 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *no
 	interval := step.Expect.PollInterval
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific verification (verify-bgp, verify-health, etc.)
+		// Host actions use the 'host-exec' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})

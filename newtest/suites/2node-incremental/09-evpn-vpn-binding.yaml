@@ -1,92 +1,85 @@
 name: evpn-vpn-binding
-description: "VPN binding lifecycle: bind/unbind IP-VPN and MAC-VPN via spec references"
+description: 'VPN binding lifecycle: bind/unbind IP-VPN and MAC-VPN via spec references'
 topology: 2node
-requires: [evpn-setup]
-
+requires:
+- evpn-setup
 steps:
-  # Setup: create VLAN and VRF for binding
-  - name: create-vlan200
-    action: create-vlan
-    devices: [switch2]
-    params:
-      vlan_id: 200
-
-  - name: create-vrf-evpn
-    action: create-vrf
-    devices: [switch2]
-    params:
-      vrf: Vrf_evpn
-
-  # Bind MAC-VPN to VLAN (brings L2VNI from spec)
-  - name: bind-macvpn-vlan200
-    action: bind-macvpn
-    devices: [switch2]
-    params:
-      vlan_id: 200
-      macvpn: storage-vlan200
-
-  - name: verify-l2vni-mapping
-    action: verify-config-db
-    devices: [switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10200_Vlan200"
-    expect:
-      exists: true
-
-  # Bind IP-VPN to VRF (brings L3VNI from spec)
-  - name: bind-ipvpn-vrf
-    action: bind-ipvpn
-    devices: [switch2]
-    params:
-      vrf: Vrf_evpn
-      ipvpn: tenant-vpn
-
-  - name: verify-l3vni-mapping
-    action: verify-config-db
-    devices: [switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_20001_Vrf_evpn"
-    expect:
-      exists: true
-
-  # Unbind both
-  - name: unbind-macvpn-vlan200
-    action: unbind-macvpn
-    devices: [switch2]
-    params:
-      vlan_id: 200
-
-  - name: verify-l2vni-unmapped
-    action: verify-config-db
-    devices: [switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10200_Vlan200"
-    expect:
-      exists: false
-
-  - name: unbind-ipvpn-vrf
-    action: unbind-ipvpn
-    devices: [switch2]
-    params:
-      vrf: Vrf_evpn
-
-  - name: verify-l3vni-unmapped
-    action: verify-config-db
-    devices: [switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_20001_Vrf_evpn"
-    expect:
-      exists: false
-
-  # Cleanup
-  - name: cleanup-vrf
-    action: delete-vrf
-    devices: [switch2]
-    params:
-      vrf: Vrf_evpn
-
-  - name: cleanup-vlan
-    action: delete-vlan
-    devices: [switch2]
-    params:
-      vlan_id: 200
+- name: create-vlan200
+  action: create-vlan
+  devices:
+  - switch2
+  vlan_id: 200
+- name: create-vrf-evpn
+  action: create-vrf
+  devices:
+  - switch2
+  params:
+    vrf: Vrf_evpn
+- name: bind-macvpn-vlan200
+  action: bind-macvpn
+  devices:
+  - switch2
+  params:
+    macvpn: storage-vlan200
+  vlan_id: 200
+- name: verify-l2vni-mapping
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VXLAN_TUNNEL_MAP
+  key: vtep1|map_10200_Vlan200
+  expect:
+    exists: true
+- name: bind-ipvpn-vrf
+  action: bind-ipvpn
+  devices:
+  - switch2
+  params:
+    vrf: Vrf_evpn
+    ipvpn: tenant-vpn
+- name: verify-l3vni-mapping
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VXLAN_TUNNEL_MAP
+  key: vtep1|map_20001_Vrf_evpn
+  expect:
+    exists: true
+- name: unbind-macvpn-vlan200
+  action: unbind-macvpn
+  devices:
+  - switch2
+  vlan_id: 200
+- name: verify-l2vni-unmapped
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VXLAN_TUNNEL_MAP
+  key: vtep1|map_10200_Vlan200
+  expect:
+    exists: false
+- name: unbind-ipvpn-vrf
+  action: unbind-ipvpn
+  devices:
+  - switch2
+  params:
+    vrf: Vrf_evpn
+- name: verify-l3vni-unmapped
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VXLAN_TUNNEL_MAP
+  key: vtep1|map_20001_Vrf_evpn
+  expect:
+    exists: false
+- name: cleanup-vrf
+  action: delete-vrf
+  devices:
+  - switch2
+  params:
+    vrf: Vrf_evpn
+- name: cleanup-vlan
+  action: delete-vlan
+  devices:
+  - switch2
+  vlan_id: 200

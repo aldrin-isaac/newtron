@@ -1,6 +1,8 @@
 package device
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -120,6 +122,45 @@ func (t *SSHTunnel) ExecCommand(cmd string) (string, error) {
 		return string(output), fmt.Errorf("SSH exec '%s': %w", cmd, err)
 	}
 	return string(output), nil
+}
+
+// ExecCommandContext runs a command on the remote device via SSH with context cancellation.
+// If the context is cancelled or times out, the SSH session is killed and an error is returned.
+func (t *SSHTunnel) ExecCommandContext(ctx context.Context, cmd string) (string, error) {
+	session, err := t.sshClient.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("SSH session: %w", err)
+	}
+	defer session.Close()
+
+	var outputBuf bytes.Buffer
+	session.Stdout = &outputBuf
+	session.Stderr = &outputBuf
+
+	// Start command in background
+	if err := session.Start(cmd); err != nil {
+		return "", fmt.Errorf("SSH start '%s': %w", cmd, err)
+	}
+
+	// Wait for command or context cancellation
+	done := make(chan error, 1)
+	go func() {
+		done <- session.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Context cancelled — kill session
+		session.Signal(ssh.SIGKILL)
+		session.Close()
+		<-done // wait for goroutine to finish
+		return outputBuf.String(), fmt.Errorf("SSH exec '%s': %w", cmd, ctx.Err())
+	case err := <-done:
+		if err != nil {
+			return outputBuf.String(), fmt.Errorf("SSH exec '%s': %w", cmd, err)
+		}
+		return outputBuf.String(), nil
+	}
 }
 
 func (t *SSHTunnel) forward(local net.Conn) {

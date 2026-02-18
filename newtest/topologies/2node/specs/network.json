@@ -30,6 +30,23 @@
     "transit": {
       "description": "Transit interface (global routing table, no VPN)",
       "service_type": "routed"
+    },
+    "customer-l3": {
+      "description": "L3 routed customer interface with per-interface VRF",
+      "service_type": "evpn-routed",
+      "vrf_type": "interface",
+      "ipvpn": "CUSTOMER"
+    }
+  },
+  "qos_policies": {
+    "4q-customer": {
+      "description": "4-queue customer-edge policy",
+      "queues": [
+        { "name": "best-effort",  "type": "dwrr", "weight": 40, "dscp": [0] },
+        { "name": "business",     "type": "dwrr", "weight": 30, "dscp": [10, 12, 14, 18, 20, 22] },
+        { "name": "voice",        "type": "strict",             "dscp": [46] },
+        { "name": "network-ctrl", "type": "strict",             "dscp": [48, 56] }
+      ]
     }
   }
 }
