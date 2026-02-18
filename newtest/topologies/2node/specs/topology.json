@@ -7,7 +7,7 @@
         "Ethernet0": {
           "link": "switch2:Ethernet0",
           "service": "transit",
-          "ip": "10.0.0.0/31"
+          "ip": "10.1.0.0/31"
         },
         "Ethernet1": {
           "link": "host1:eth0",
@@ -26,7 +26,7 @@
         "Ethernet0": {
           "link": "switch1:Ethernet0",
           "service": "transit",
-          "ip": "10.0.0.1/31"
+          "ip": "10.1.0.1/31"
         },
         "Ethernet1": {
           "link": "host4:eth0"

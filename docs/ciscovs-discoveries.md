@@ -113,24 +113,71 @@ These must be preserved during debugging (Sonnet: do NOT violate):
   - Lines 277-280: Skip hosts in pollForDevices
 - **Status:** ✅ FIXED
 
-#### Discovery 7: BGP Not Establishing on CiscoVS (INVESTIGATING)
-- **Timestamp:** 2026-02-17 17:03
-- **Symptom:** bgp-converge scenario hung indefinitely (ran 7+ minutes despite 180s timeout)
+#### Discovery 7: Loopback IP Range Collision with Underlay Link (FIXED - Sonnet)
+- **Timestamp:** 2026-02-17 17:17
+- **Symptom:** BGP not establishing - switch1 peer in "Connect", switch2 peer in "Active" with wrong neighbor IP
+- **Investigation:**
+  - switch1 CONFIG_DB: correct neighbor 10.0.0.2, local_addr 10.0.0.1
+  - switch2 CONFIG_DB: TWO neighbors:
+    - ✅ Correct: neighbor 10.0.0.1, local_addr 10.0.0.2, ebgp_multihop=true (EVPN peer)
+    - ❌ Wrong: neighbor 10.0.0.0, local_addr 10.0.0.1 (underlay link artifact)
+  - FRR config showed neighbor 10.0.0.0 (should be 10.0.0.1)
 - **Root Cause:**
-  - `verifyBGPExecutor` calls `node.RunHealthChecks(ctx, "bgp")` with context
-  - `RunHealthChecks` → `checkBGP` → `checkBGPFromVtysh` → `tunnel.ExecCommand()`
-  - **BUG**: `SSHTunnel.ExecCommand()` doesn't accept context, can hang indefinitely
-  - When vtysh command hangs (e.g., on CiscoVS), test timeout is never enforced
-- **Manual Verification:**
-  - BGP status showed peers in "Idle" state with "Remote AS 0"
-  - Suggests FRR/vtysh might be slow or unresponsive on CiscoVS
-- **Architecture Issue:** Context not propagated through SSH command execution layer
-- **Fix Required:**
-  1. Add `ExecCommandContext(ctx context.Context, cmd string)` to SSHTunnel
-  2. Use `session.Start()` + goroutine with context cancellation
-  3. Update health check to use context-aware version
-  4. Preserve existing `ExecCommand()` for backward compatibility
-- **Status:** 🔧 FIXING
+  - 2node topology used loopback IP range (10.0.0.0/31) for underlay link between switches
+  - Loopback IPs: switch1=10.0.0.1, switch2=10.0.0.2
+  - Link IPs: switch1 Eth0=10.0.0.0/31, switch2 Eth0=10.0.0.1/31
+  - **Collision**: switch2's Ethernet0 IP (10.0.0.1) is same as switch1's loopback!
+  - Underlay BGP neighbor code (topology.go:267-278) derives peer IP from link IP
+  - For switch2: DeriveNeighborIP(10.0.0.1/31) → 10.0.0.0 (wrong - that's a link IP, not a loopback)
+  - This created bogus BGP neighbor 10.0.0.0 with local_addr 10.0.0.1
+- **Delta Analysis:** 3node topology uses separate IP ranges:
+  - 3node loopbacks: 10.0.0.1, 10.0.0.2
+  - 3node underlay link: 10.1.0.0/31, 10.1.0.1/31 (different /8 prefix)
+  - No collision, works correctly
+- **Fix:** Changed 2node topology.json underlay link IPs:
+  - switch1 Ethernet0: 10.0.0.0/31 → 10.1.0.0/31
+  - switch2 Ethernet0: 10.0.0.1/31 → 10.1.0.1/31
+  - Now matches 3node design pattern
+- **Commit:** [pending]
+- **Status:** ✅ FIXED (rebuild + retest required)
+
+#### Discovery 8: CiscoVS Dataplane Not Forwarding Packets (BLOCKER)
+- **Timestamp:** 2026-02-17 17:27
+- **Symptom:** BGP neighbors stuck in Connect/Active state, underlay BGP cannot establish
+- **Investigation:**
+  - Interfaces show as "up" in STATE_DB and FRR
+  - Link shows traffic in newtlab status (2.8 KB bidirectional)
+  - Ping from switch1 (10.1.0.0) to switch2 (10.1.0.1) fails: "Destination Host Unreachable"
+  - ARP resolution fails: `ip neigh show` shows "10.1.0.1 FAILED"
+  - No BGP packets exchanged (Last write: never, MsgRcvd/MsgSent: 0/0)
+  - Remote router ID shows as 0.0.0.0 (peer never received OPEN message)
+- **ASIC_DB Verification:**
+  - 33 SAI port objects present (32 Ethernet + CPU)
+  - 2 SAI router interfaces: 1 loopback + 1 port (Ethernet0)
+  - Router interface properly configured with PORT_ID and MAC address
+  - **Conclusion:** SAI objects are created, but dataplane forwarding isn't working
+- **Root Cause:**
+  - CiscoVS Silicon One SAI simulator (Palladium2/Gibraltar) not forwarding packets
+  - Possible causes:
+    1. SAI → NGDP simulator path not properly initialized
+    2. Missing platform-specific configuration (e.g., ASIC warm/cold boot state)
+    3. veth pair setup issue between SONiC and NGDP simulator
+    4. Silicon One SAI requires additional initialization beyond standard SONiC provision
+- **Comparison to VPP Platform:**
+  - VPP platform has known EVPN/VXLAN limitation but basic L3 forwarding works
+  - 3node topology on VPP uses direct L3 routing successfully
+  - CiscoVS has opposite limitation: EVPN should work, but L3 forwarding doesn't
+- **Impact:** FUNDAMENTAL BLOCKER
+  - Cannot test any scenario requiring inter-switch communication
+  - BGP (underlay and overlay) cannot establish
+  - EVPN cannot work without BGP
+  - Dataplane tests (ping, route propagation, service validation) all fail
+- **Next Steps:**
+  1. Check if CiscoVS SAI requires specific initialization commands (CLI or Redis)
+  2. Review sonic-platform-ciscovs repo for known issues or setup requirements
+  3. Compare with working CiscoVS deployments (if any exist)
+  4. Consider: May need to revert to VPP platform for testing, accept EVPN limitation
+- **Status:** 🚫 PLATFORM BLOCKER (L3 dataplane non-functional)
 
 ---
 
@@ -169,8 +216,8 @@ These must be preserved during debugging (Sonnet: do NOT violate):
 
 ## Status
 
-**Current Phase:** Fixes applied, ready for re-test
-**First Test Results:** 13/32 passed, 6 failed, 1 errored, 12 skipped (7m09s)
+**Current Phase:** BLOCKED - Platform dataplane non-functional
+**Second Test Results:** 2/32 passed (boot-ssh, provision), bgp-converge hung, remaining skipped
 **Fixes Applied:**
 - ✅ Zone validation (Discovery 1)
 - ✅ Host device provisioning (Discovery 2)
@@ -178,9 +225,26 @@ These must be preserved during debugging (Sonnet: do NOT violate):
 - ✅ VLAN ID parameter format (Discovery 4)
 - ✅ Missing spec definitions (Discovery 5)
 - ✅ verify-bgp host check (Discovery 6)
+- ✅ Loopback/underlay IP range collision (Discovery 7)
 
-**Remaining Issue:**
-- ⚠️ BGP not establishing on CiscoVS switches (Discovery 7 - needs investigation)
+**Blocker Identified:**
+- 🚫 CiscoVS L3 dataplane not forwarding packets (Discovery 8)
+- Ping fails, ARP fails, BGP cannot establish
+- SAI objects created correctly, but Silicon One simulator not forwarding
+- FUNDAMENTAL PLATFORM ISSUE - cannot proceed with testing
 
-**Next Step:** Re-run test suite with all fixes applied, investigate BGP convergence
-**Branch:** `ciscovs-2node-debug` (6 commits, ready for Opus review)
+**Findings:**
+- CiscoVS boots successfully and provisions correctly via Redis
+- CONFIG_DB/APP_DB/ASIC_DB all populate properly
+- FRR BGP configuration generated correctly
+- Topology fix (Discovery 7) resolved IP collision issue
+- **BUT**: Packets don't forward through the ASIC simulator
+
+**Conclusion:**
+- CiscoVS platform integration is partially successful (control plane works)
+- Dataplane forwarding requires additional investigation/configuration
+- May need platform vendor documentation or example configs
+- Alternative: Revert to VPP platform, accept EVPN limitation for now
+
+**Next Step:** Investigate CiscoVS dataplane initialization requirements or consult platform docs
+**Branch:** `ciscovs-2node-debug` (8 commits, 7 discoveries + 1 blocker)
