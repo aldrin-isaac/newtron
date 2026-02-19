@@ -42,12 +42,36 @@ steps:
     devices: [switch2]
     command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.2/32' 'LOOPBACK_INTERFACE|Loopback0'"
 
-  # Spot-check: transit IP entries should be gone.
+  # Verify all removed IP entries are gone from both switches.
   - name: verify-sw1-transit-ip-removed
     action: verify-config-db
     devices: [switch1]
     table: INTERFACE
     key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: false
+
+  - name: verify-sw1-host-ip-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet1|10.1.1.1/31"
+    expect:
+      exists: false
+
+  - name: verify-sw1-loopback-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.1/32"
+    expect:
+      exists: false
+
+  - name: verify-sw2-transit-ip-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.1/31"
     expect:
       exists: false
 
@@ -59,10 +83,10 @@ steps:
     expect:
       exists: false
 
-  - name: verify-sw1-loopback-removed
+  - name: verify-sw2-loopback-removed
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch2]
     table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.1/32"
+    key: "Loopback0|10.0.0.2/32"
     expect:
       exists: false

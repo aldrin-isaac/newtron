@@ -46,3 +46,11 @@ steps:
     key: nvo1
     expect:
       exists: false
+
+  - name: verify-l2vpn-evpn-af-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: false
