@@ -1,14 +1,13 @@
 name: route-propagation
 description: Verify loopback routes propagate between spine and leaf
 topology: 2node
-platform: sonic-vpp
 requires: [bgp-converge]
 
 steps:
-  - name: leaf1-loopback-at-spine1
+  - name: switch2-loopback-at-switch1
     action: verify-route
-    devices: [spine1]
-    prefix: "10.0.0.11/32"
+    devices: [switch1]
+    prefix: "10.0.0.2/32"
     vrf: default
     expect:
       protocol: bgp
@@ -16,9 +15,9 @@ steps:
       timeout: 60s
       poll_interval: 5s
 
-  - name: spine1-loopback-at-leaf1
+  - name: switch1-loopback-at-switch2
     action: verify-route
-    devices: [leaf1]
+    devices: [switch2]
     prefix: "10.0.0.1/32"
     vrf: default
     expect:
@@ -26,3 +25,20 @@ steps:
       source: app_db
       timeout: 60s
       poll_interval: 5s
+
+  # Dataplane: confirm BGP routes are actually forwarding packets
+  - name: ping-switch1-to-switch2-loopback
+    action: verify-ping
+    devices: [switch1]
+    target: "10.0.0.2"
+    count: 5
+    expect:
+      success_rate: 0.8
+
+  - name: ping-switch2-to-switch1-loopback
+    action: verify-ping
+    devices: [switch2]
+    target: "10.0.0.1"
+    count: 5
+    expect:
+      success_rate: 0.8

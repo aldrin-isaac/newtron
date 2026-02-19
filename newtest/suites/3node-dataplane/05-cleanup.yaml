@@ -1,7 +1,6 @@
 name: cleanup
 description: Final cleanup pass - remove any remaining orphaned config
 topology: 3node
-platform: sonic-vpp
 requires: [teardown-verify]
 
 steps:

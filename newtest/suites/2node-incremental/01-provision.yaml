@@ -1,7 +1,6 @@
 name: provision
 description: Provision all devices, restart BGP, apply FRR defaults, and verify CONFIG_DB state
 topology: 2node
-platform: sonic-vpp
 requires: [boot-ssh]
 
 steps:
@@ -9,32 +8,32 @@ steps:
     action: provision
     devices: all
 
-  - name: verify-device-metadata-spine1
+  - name: verify-device-metadata-switch1
     action: verify-config-db
-    devices: [spine1]
+    devices: [switch1]
     table: DEVICE_METADATA
     key: localhost
     expect:
       exists: true
 
-  - name: verify-device-metadata-leaf1
+  - name: verify-device-metadata-switch2
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: DEVICE_METADATA
     key: localhost
     expect:
       exists: true
 
-  - name: verify-loopback-spine1
+  - name: verify-loopback-switch1
     action: verify-config-db
-    devices: [spine1]
+    devices: [switch1]
     table: LOOPBACK_INTERFACE
     expect:
       min_entries: 1
 
-  - name: verify-loopback-leaf1
+  - name: verify-loopback-switch2
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: LOOPBACK_INTERFACE
     expect:
       min_entries: 1

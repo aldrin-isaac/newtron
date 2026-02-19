@@ -1,49 +1,46 @@
 name: vlan-lifecycle
-description: "VLAN create/member/delete lifecycle via newtron API"
+description: VLAN create/member/delete lifecycle via newtron API
 topology: 2node
-platform: sonic-vpp
-requires: [provision]
-
+requires:
+- provision
 steps:
-  - name: create-vlan100
-    action: create-vlan
-    devices: [leaf1]
-    params:
-      vlan_id: 100
-
-  - name: verify-vlan100-exists
-    action: verify-config-db
-    devices: [leaf1]
-    table: VLAN
-    key: Vlan100
-    expect:
-      exists: true
-
-  - name: add-vlan-member
-    action: add-vlan-member
-    devices: [leaf1]
-    params:
-      vlan_id: 100
-      interface: Ethernet2
-
-  - name: verify-vlan-member
-    action: verify-config-db
-    devices: [leaf1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet2"
-    expect:
-      exists: true
-
-  - name: delete-vlan100
-    action: delete-vlan
-    devices: [leaf1]
-    params:
-      vlan_id: 100
-
-  - name: verify-vlan100-removed
-    action: verify-config-db
-    devices: [leaf1]
-    table: VLAN
-    key: Vlan100
-    expect:
-      exists: false
+- name: create-vlan100
+  action: create-vlan
+  devices:
+  - switch2
+  vlan_id: 100
+- name: verify-vlan100-exists
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VLAN
+  key: Vlan100
+  expect:
+    exists: true
+- name: add-vlan-member
+  action: add-vlan-member
+  devices:
+  - switch2
+  interface: Ethernet2
+  vlan_id: 100
+- name: verify-vlan-member
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VLAN_MEMBER
+  key: Vlan100|Ethernet2
+  expect:
+    exists: true
+- name: delete-vlan100
+  action: delete-vlan
+  devices:
+  - switch2
+  vlan_id: 100
+- name: verify-vlan100-removed
+  action: verify-config-db
+  devices:
+  - switch2
+  table: VLAN
+  key: Vlan100
+  expect:
+    exists: false

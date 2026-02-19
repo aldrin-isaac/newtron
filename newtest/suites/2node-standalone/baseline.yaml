@@ -1,7 +1,6 @@
 name: baseline
 description: Verify basic provisioning and DEVICE_METADATA config
 topology: 2node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

@@ -15,7 +15,7 @@
       "vm_credentials": {"user": "aldrin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 300,
       "dataplane": "vpp",
-      "unsupported_features": ["acl"]
+      "unsupported_features": ["acl", "evpn-vxlan"]
     }
   }
 }

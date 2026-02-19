@@ -1,13 +1,12 @@
 name: portchannel-lifecycle
 description: "PortChannel create/member-add/member-remove/delete lifecycle"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:
   - name: create-portchannel
     action: create-portchannel
-    devices: [leaf1]
+    devices: [switch2]
     params:
       name: PortChannel100
       members: [Ethernet1, Ethernet2]
@@ -15,7 +14,7 @@ steps:
 
   - name: verify-portchannel-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL
     key: PortChannel100
     expect:
@@ -23,7 +22,7 @@ steps:
 
   - name: verify-member-eth1
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet1"
     expect:
@@ -31,7 +30,7 @@ steps:
 
   - name: verify-member-eth2
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet2"
     expect:
@@ -39,14 +38,14 @@ steps:
 
   - name: remove-member-eth2
     action: remove-portchannel-member
-    devices: [leaf1]
+    devices: [switch2]
     params:
       name: PortChannel100
       member: Ethernet2
 
   - name: verify-member-eth2-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet2"
     expect:
@@ -54,7 +53,7 @@ steps:
 
   - name: verify-member-eth1-still-present
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet1"
     expect:
@@ -62,14 +61,14 @@ steps:
 
   - name: add-member-eth2-back
     action: add-portchannel-member
-    devices: [leaf1]
+    devices: [switch2]
     params:
       name: PortChannel100
       member: Ethernet2
 
   - name: verify-member-eth2-readded
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet2"
     expect:
@@ -77,13 +76,13 @@ steps:
 
   - name: delete-portchannel
     action: delete-portchannel
-    devices: [leaf1]
+    devices: [switch2]
     params:
       name: PortChannel100
 
   - name: verify-portchannel-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL
     key: PortChannel100
     expect:
@@ -91,7 +90,7 @@ steps:
 
   - name: verify-members-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORTCHANNEL_MEMBER
     key: "PortChannel100|Ethernet1"
     expect:

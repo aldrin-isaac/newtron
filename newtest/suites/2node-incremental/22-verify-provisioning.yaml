@@ -1,14 +1,13 @@
 name: verify-provisioning
 description: Apply a service, then verify the ChangeSet was persisted in CONFIG_DB
 topology: 2node
-platform: sonic-vpp
 requires: [refresh-service]
 
 steps:
   # Apply customer-l3 service — this produces a ChangeSet
   - name: apply-customer-l3
     action: apply-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
     service: customer-l3
     params:
@@ -17,18 +16,18 @@ steps:
   # Verify the ChangeSet was persisted correctly
   - name: verify-changeset
     action: verify-provisioning
-    devices: [leaf1]
+    devices: [switch2]
 
   # Clean up: remove the service
   - name: cleanup-remove
     action: remove-service
-    devices: [leaf1]
+    devices: [switch2]
     interface: Ethernet1
 
   # Verify cleanup
   - name: verify-cleanup
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: NEWTRON_SERVICE_BINDING
     key: Ethernet1
     expect:

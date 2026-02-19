@@ -1,7 +1,6 @@
 name: device-health
 description: Run health checks on all devices after BGP convergence
 topology: 2node
-platform: sonic-vpp
 requires: [bgp-converge]
 
 steps:

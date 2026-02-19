@@ -1,7 +1,6 @@
 name: service-irb
 description: Apply server-irb service on two leaves, verify VXLAN and VRF config
 topology: 4node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

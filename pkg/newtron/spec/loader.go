@@ -505,6 +505,12 @@ func (l *Loader) validateTopology() error {
 		}
 	}
 
+	// Derive links from interface.link fields if not explicitly provided
+	if len(l.topology.Links) == 0 {
+		l.topology.Links = DeriveLinksFromInterfaces(l.topology)
+		util.Logger.Infof("spec: derived %d links from interface.link fields", len(l.topology.Links))
+	}
+
 	// Validate links: both endpoints must be defined in their respective device interfaces
 	for i, link := range l.topology.Links {
 		l.validateLinkEndpoint(v, i, "a", link.A)

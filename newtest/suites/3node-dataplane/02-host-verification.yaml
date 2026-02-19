@@ -1,7 +1,6 @@
 name: host-verification
 description: Deep host endpoint validation - interfaces, MTU, sustained bidirectional traffic
 topology: 3node
-platform: sonic-vpp
 requires: [l3-routing]
 
 steps:

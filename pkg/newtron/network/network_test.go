@@ -52,7 +52,7 @@ func TestResolvedSpecs_MergeNodeWins(t *testing.T) {
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
 			Zones: map[string]*spec.ZoneSpec{
-				"amer": {ASNumber: 65000},
+				"amer": {},
 			},
 			OverridableSpecs: spec.OverridableSpecs{
 				Services: map[string]*spec.ServiceSpec{"svc": netSvc},
@@ -89,7 +89,6 @@ func TestResolvedSpecs_MergeZoneWinsOverNetwork(t *testing.T) {
 		spec: &spec.NetworkSpecFile{
 			Zones: map[string]*spec.ZoneSpec{
 				"amer": {
-					ASNumber: 65000,
 					OverridableSpecs: spec.OverridableSpecs{
 						Filters: map[string]*spec.FilterSpec{"f1": zoneFilter},
 					},
@@ -122,7 +121,6 @@ func TestResolvedSpecs_MergeUnion(t *testing.T) {
 		spec: &spec.NetworkSpecFile{
 			Zones: map[string]*spec.ZoneSpec{
 				"amer": {
-					ASNumber: 65000,
 					OverridableSpecs: spec.OverridableSpecs{
 						IPVPNs: map[string]*spec.IPVPNSpec{
 							"zone-vpn": {VRF: "Vrf_zone", L3VNI: 20001},
@@ -177,7 +175,7 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
 			Zones: map[string]*spec.ZoneSpec{
-				"amer": {ASNumber: 65000},
+				"amer": {},
 			},
 			OverridableSpecs: spec.OverridableSpecs{
 				MACVPNs: map[string]*spec.MACVPNSpec{
@@ -224,7 +222,7 @@ func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 	n := &Network{
 		spec: &spec.NetworkSpecFile{
 			Zones: map[string]*spec.ZoneSpec{
-				"amer": {ASNumber: 65000},
+				"amer": {},
 			},
 		},
 		platforms: &spec.PlatformSpecFile{

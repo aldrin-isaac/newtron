@@ -150,7 +150,7 @@ type ServiceSpec struct {
 // RoutingSpec defines routing protocol specification for a service.
 //
 // For BGP services:
-//   - Local AS is always from device profile (ResolvedProfile.ASNumber)
+//   - Local AS is always from device profile (ResolvedProfile.UnderlayASN)
 //   - Peer AS can be fixed (number), or "request" (provided at apply time)
 //   - Peer IP is derived from interface IP for point-to-point links
 type RoutingSpec struct {
@@ -270,15 +270,83 @@ func (p *PlatformSpec) IsHost() bool {
 	return p.DeviceType == "host"
 }
 
-// SupportsFeature returns true if the platform supports the named feature.
-// A feature is unsupported only if explicitly listed in UnsupportedFeatures.
+// featureDependencies maps each feature to its required dependencies.
+// A feature is only supported if all its dependencies are also supported.
+// This creates a dependency graph where base features (like evpn-vxlan) are
+// listed once, and dependent features (like macvpn) automatically inherit
+// the unsupported status if their dependencies are unsupported.
+var featureDependencies = map[string][]string{
+	// MAC-VPN requires VXLAN dataplane support
+	"macvpn": {"evpn-vxlan"},
+
+	// IP-VPN (L3 EVPN) requires VXLAN dataplane support
+	"ipvpn": {"evpn-vxlan"},
+
+	// Base features with no dependencies
+	"evpn-vxlan": {},
+	"acl":        {},
+}
+
+// GetAllFeatures returns all known features from the dependency map.
+// Used by platform discovery commands to avoid hardcoding the feature list.
+func GetAllFeatures() []string {
+	features := make([]string, 0, len(featureDependencies))
+	for feat := range featureDependencies {
+		features = append(features, feat)
+	}
+	sort.Strings(features)
+	return features
+}
+
+// SupportsFeature returns true if the platform supports the named feature
+// and all of its dependencies. Features are checked recursively through the
+// dependency graph defined in featureDependencies.
 func (p *PlatformSpec) SupportsFeature(feature string) bool {
-	for _, f := range p.UnsupportedFeatures {
-		if f == feature {
+	// Check if feature is directly unsupported
+	if p.isUnsupported(feature) {
+		return false
+	}
+
+	// Check if any dependencies are unsupported (recursive)
+	for _, dep := range featureDependencies[feature] {
+		if !p.SupportsFeature(dep) {
 			return false
 		}
 	}
+
 	return true
+}
+
+// isUnsupported returns true if the feature is directly listed in
+// UnsupportedFeatures (does not check dependencies).
+func (p *PlatformSpec) isUnsupported(feature string) bool {
+	for _, f := range p.UnsupportedFeatures {
+		if f == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// GetUnsupportedDueTo returns all features that are unsupported due to the
+// given base feature being unsupported. This is useful for documentation and
+// error messages to show the cascade effect of unsupporting a base feature.
+func GetUnsupportedDueTo(baseFeature string) []string {
+	var affected []string
+	for feat, deps := range featureDependencies {
+		for _, dep := range deps {
+			if dep == baseFeature {
+				affected = append(affected, feat)
+			}
+		}
+	}
+	return affected
+}
+
+// GetFeatureDependencies returns the list of features that the given feature
+// depends on. Returns nil if the feature has no dependencies or is not defined.
+func GetFeatureDependencies(feature string) []string {
+	return featureDependencies[feature]
 }
 
 // VMCredentials holds default SSH credentials for a VM platform.
@@ -479,4 +547,43 @@ func (t *TopologySpecFile) DeviceNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// DeriveLinksFromInterfaces builds the links array from interface.link fields.
+// This allows defining topology connectivity directly in interface definitions
+// rather than maintaining a separate links array.
+func DeriveLinksFromInterfaces(topo *TopologySpecFile) []*TopologyLink {
+	var links []*TopologyLink
+	seen := make(map[string]bool) // track bidirectional pairs to avoid duplicates
+
+	for deviceName, device := range topo.Devices {
+		for ifaceName, iface := range device.Interfaces {
+			if iface.Link == "" {
+				continue
+			}
+
+			aEndpoint := deviceName + ":" + ifaceName
+			zEndpoint := iface.Link
+
+			// Create canonical key (alphabetically sorted to detect duplicates)
+			var key string
+			if aEndpoint < zEndpoint {
+				key = aEndpoint + "<->" + zEndpoint
+			} else {
+				key = zEndpoint + "<->" + aEndpoint
+			}
+
+			if seen[key] {
+				continue // Already added from peer side
+			}
+			seen[key] = true
+
+			links = append(links, &TopologyLink{
+				A: aEndpoint,
+				Z: zEndpoint,
+			})
+		}
+	}
+
+	return links
 }

@@ -1,7 +1,6 @@
 name: full-fabric
 description: Full fabric test — provision, BGP, services, health, and connectivity
 topology: 4node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

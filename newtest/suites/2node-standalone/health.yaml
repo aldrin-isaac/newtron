@@ -1,7 +1,6 @@
 name: health
 description: Verify device health checks pass after provisioning
 topology: 2node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

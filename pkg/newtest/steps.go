@@ -74,6 +74,14 @@ var executors = map[StepAction]stepExecutor{
 
 	// Host test executors
 	ActionHostExec: &hostExecExecutor{},
+
+	// ACL management executors
+	ActionCreateACLTable: &createACLTableExecutor{},
+	ActionAddACLRule:     &addACLRuleExecutor{},
+	ActionDeleteACLRule:  &deleteACLRuleExecutor{},
+	ActionDeleteACLTable: &deleteACLTableExecutor{},
+	ActionBindACL:        &bindACLExecutor{},
+	ActionUnbindACL:      &unbindACLExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -162,6 +170,13 @@ func (r *Runner) executeForDevices(step *Step, fn func(dev *node.Node, name stri
 	allPassed := true
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific operations (provision, restart-service, apply-frr-defaults, etc.)
+		// Host actions use the 'command' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC operation not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
@@ -227,6 +242,13 @@ func (r *Runner) checkForDevices(step *Step, fn func(dev *node.Node, name string
 	allPassed := true
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific verification (verify-health, verify-config-db, etc.)
+		// Host actions use the 'host-exec' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
@@ -265,6 +287,13 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *no
 	interval := step.Expect.PollInterval
 
 	for _, name := range names {
+		// Skip host devices for SONiC-specific verification (verify-bgp, verify-health, etc.)
+		// Host actions use the 'host-exec' executor which doesn't call this helper.
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			continue
+		}
+
 		dev, err := r.Network.GetNode(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
@@ -330,6 +359,15 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	allPassed := true
 
 	for _, name := range devices {
+		// Skip host devices — they don't have SONiC CONFIG_DB to provision
+		if r.Network.IsHostDevice(name) {
+			details = append(details, DeviceResult{
+				Device: name, Status: StepStatusSkipped,
+				Message: "host device (no SONiC provisioning)",
+			})
+			continue
+		}
+
 		// Generate composite config offline, then deliver using the shared
 		// connection (without disconnecting). ProvisionDevice() can't be used
 		// here because it calls defer dev.Disconnect() which kills the shared
@@ -1175,8 +1213,13 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 	}
 
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		vlanName := fmt.Sprintf("Vlan%d", vlanID)
+		intf, err := dev.GetInterface(vlanName)
+		if err != nil {
+			return nil, "", fmt.Errorf("bind-macvpn: %s", err)
+		}
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
-			return dev.MapL2VNI(ctx, vlanID, macvpnDef.VNI)
+			return intf.BindMACVPN(ctx, macvpnName, macvpnDef)
 		})
 		if err != nil {
 			return nil, "", fmt.Errorf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err)
@@ -1194,8 +1237,13 @@ type unbindMACVPNExecutor struct{}
 func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		vlanName := fmt.Sprintf("Vlan%d", vlanID)
+		intf, err := dev.GetInterface(vlanName)
+		if err != nil {
+			return nil, "", fmt.Errorf("unbind-macvpn: %s", err)
+		}
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
-			return dev.UnmapL2VNI(ctx, vlanID)
+			return intf.UnbindMACVPN(ctx)
 		})
 		if err != nil {
 			return nil, "", fmt.Errorf("unbind-macvpn vlan=%d: %s", vlanID, err)
@@ -1533,5 +1581,156 @@ func (e *removePortChannelMemberExecutor) Execute(ctx context.Context, r *Runner
 			return nil, "", fmt.Errorf("remove-portchannel-member %s %s: %s", pcName, member, err)
 		}
 		return cs, fmt.Sprintf("removed %s from PortChannel %s (%d changes)", member, pcName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// createACLTableExecutor
+// ============================================================================
+
+type createACLTableExecutor struct{}
+
+func (e *createACLTableExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	aclType := strParam(step.Params, "type")
+	stage := strParam(step.Params, "stage")
+	description := strParam(step.Params, "description")
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.CreateACLTable(ctx, name, node.ACLTableConfig{
+				Type:        aclType,
+				Stage:       stage,
+				Description: description,
+			})
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("create-acl-table %s: %s", name, err)
+		}
+		return cs, fmt.Sprintf("created ACL table %s (%d changes)", name, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// addACLRuleExecutor
+// ============================================================================
+
+type addACLRuleExecutor struct{}
+
+func (e *addACLRuleExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	tableName := strParam(step.Params, "name")
+	ruleName := strParam(step.Params, "rule")
+	action := strParam(step.Params, "action")
+	priority := intParam(step.Params, "priority")
+	srcIP := strParam(step.Params, "src_ip")
+	dstIP := strParam(step.Params, "dst_ip")
+	protocol := strParam(step.Params, "protocol")
+	srcPort := strParam(step.Params, "src_port")
+	dstPort := strParam(step.Params, "dst_port")
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.AddACLRule(ctx, tableName, ruleName, node.ACLRuleConfig{
+				Priority: priority,
+				Action:   action,
+				SrcIP:    srcIP,
+				DstIP:    dstIP,
+				Protocol: protocol,
+				SrcPort:  srcPort,
+				DstPort:  dstPort,
+			})
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("add-acl-rule %s|%s: %s", tableName, ruleName, err)
+		}
+		return cs, fmt.Sprintf("added rule %s to ACL table %s (%d changes)", ruleName, tableName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// deleteACLRuleExecutor
+// ============================================================================
+
+type deleteACLRuleExecutor struct{}
+
+func (e *deleteACLRuleExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	tableName := strParam(step.Params, "name")
+	ruleName := strParam(step.Params, "rule")
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.DeleteACLRule(ctx, tableName, ruleName)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("delete-acl-rule %s|%s: %s", tableName, ruleName, err)
+		}
+		return cs, fmt.Sprintf("deleted rule %s from ACL table %s (%d changes)", ruleName, tableName, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// deleteACLTableExecutor
+// ============================================================================
+
+type deleteACLTableExecutor struct{}
+
+func (e *deleteACLTableExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.DeleteACLTable(ctx, name)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("delete-acl-table %s: %s", name, err)
+		}
+		return cs, fmt.Sprintf("deleted ACL table %s (%d changes)", name, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// bindACLExecutor
+// ============================================================================
+
+type bindACLExecutor struct{}
+
+func (e *bindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	aclName := strParam(step.Params, "name")
+	direction := strParam(step.Params, "direction")
+	ifaceName := step.Interface
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		intf, err := dev.GetInterface(ifaceName)
+		if err != nil {
+			return nil, "", fmt.Errorf("bind-acl: %s", err)
+		}
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return intf.BindACL(ctx, aclName, direction)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("bind-acl %s to %s (%s): %s", aclName, ifaceName, direction, err)
+		}
+		return cs, fmt.Sprintf("bound ACL %s to %s (%s, %d changes)", aclName, ifaceName, direction, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// unbindACLExecutor
+// ============================================================================
+
+type unbindACLExecutor struct{}
+
+func (e *unbindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	aclName := strParam(step.Params, "name")
+	ifaceName := step.Interface
+
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.UnbindACLFromInterface(ctx, aclName, ifaceName)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("unbind-acl %s from %s: %s", aclName, ifaceName, err)
+		}
+		return cs, fmt.Sprintf("unbound ACL %s from %s (%d changes)", aclName, ifaceName, len(cs.Changes)), nil
 	})
 }

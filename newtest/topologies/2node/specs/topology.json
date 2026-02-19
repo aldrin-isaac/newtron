@@ -1,46 +1,95 @@
 {
   "version": "1.0",
-  "description": "2-node topology: 1 spine + 1 leaf",
+  "description": "2-node topology: switch1 + switch2 with 6 test hosts (2 underlay, 4 overlay)",
   "devices": {
-    "spine1": {
-      "device_config": {
-        "route_reflector": true
-      },
+    "switch1": {
       "interfaces": {
         "Ethernet0": {
-          "link": "leaf1:Ethernet0",
+          "link": "switch2:Ethernet0",
           "service": "transit",
           "ip": "10.1.0.0/31"
         },
         "Ethernet1": {
-          "link": "leaf1:Ethernet1"
+          "link": "host1:eth0",
+          "ip": "10.1.1.1/31"
         },
         "Ethernet2": {
-          "link": "leaf1:Ethernet2"
+          "link": "host2:eth0"
+        },
+        "Ethernet3": {
+          "link": "host3:eth0"
         }
       }
     },
-    "leaf1": {
+    "switch2": {
       "interfaces": {
         "Ethernet0": {
-          "link": "spine1:Ethernet0",
+          "link": "switch1:Ethernet0",
           "service": "transit",
           "ip": "10.1.0.1/31"
         },
         "Ethernet1": {
-          "link": "spine1:Ethernet1"
+          "link": "host4:eth0"
         },
         "Ethernet2": {
-          "link": "spine1:Ethernet2"
+          "link": "host5:eth0",
+          "ip": "10.10.1.1/31",
+          "vrf": "CUSTOMER"
+        },
+        "Ethernet3": {
+          "link": "host6:eth0"
+        }
+      }
+    },
+    "host1": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch1:Ethernet1"
+        }
+      }
+    },
+    "host2": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch1:Ethernet2"
+        }
+      }
+    },
+    "host3": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch1:Ethernet3"
+        }
+      }
+    },
+    "host4": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch2:Ethernet1"
+        }
+      }
+    },
+    "host5": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch2:Ethernet2"
+        }
+      }
+    },
+    "host6": {
+      "type": "host",
+      "interfaces": {
+        "eth0": {
+          "link": "switch2:Ethernet3"
         }
       }
     }
   },
-  "links": [
-    {"a": "spine1:Ethernet0", "z": "leaf1:Ethernet0"},
-    {"a": "spine1:Ethernet1", "z": "leaf1:Ethernet1"},
-    {"a": "spine1:Ethernet2", "z": "leaf1:Ethernet2"}
-  ],
   "newtlab": {
     "link_port_base": 10000,
     "console_port_base": 12000,

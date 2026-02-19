@@ -1,7 +1,6 @@
 name: bgp-underlay
 description: Verify eBGP underlay sessions establish across 4-node fabric
 topology: 4node
-platform: sonic-vpp
 
 steps:
   - name: provision-all

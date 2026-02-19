@@ -1,0 +1,10 @@
+{
+    "mgmt_ip": "127.0.0.1",
+    "loopback_ip": "",
+    "zone": "",
+    "platform": "alpine-host",
+    "ssh_user": "root",
+    "ssh_pass": "root",
+    "ssh_port": 13000,
+    "console_port": 12000
+}

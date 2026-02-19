@@ -1,0 +1,110 @@
+name: acl-dataplane
+description: "ACL permit enforcement: ICMP permit rule allows host2 traffic to switch1 gateway; verifies ACL actually passes permitted traffic"
+topology: 2node
+requires: [acl-lifecycle, vlan-l2-bridge]
+
+steps:
+  # Assign IP 172.16.50.1/24 to switch1:Ethernet2 (default VRF).
+  # Ethernet2 is free at this point (vlan-l2-bridge cleaned up its VLAN membership).
+  - name: set-ip-switch1-ethernet2
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet2
+    params:
+      property: ip
+      value: "172.16.50.1/24"
+
+  # Create ingress ACL with a single permit-ICMP rule (exercises the full ACL ops path).
+  - name: create-acl-table
+    action: create-acl-table
+    devices: [switch1]
+    params:
+      name: FILTER_ICMP_PERMIT
+      type: L3
+      stage: ingress
+      description: "Dataplane test: permit ICMP ingress"
+
+  - name: add-acl-rule-permit-icmp
+    action: add-acl-rule
+    devices: [switch1]
+    params:
+      name: FILTER_ICMP_PERMIT
+      rule: PERMIT_ICMP
+      priority: 100
+      action: permit
+      protocol: icmp
+
+  # Wait for IP to propagate to kernel before testing connectivity.
+  - name: wait-kernel-propagation
+    action: wait
+    duration: 5s
+
+  # Configure host2 (connected to switch1:Ethernet2) in the same /24 subnet.
+  - name: host2-configure-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr add 172.16.50.2/24 dev eth0 2>/dev/null || true"
+
+  # Baseline: host2→switch1 works before ACL is bound (no filter active yet).
+  - name: host2-ping-preacl
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 3 -W 2 172.16.50.1"
+    expect:
+      success_rate: 0.8
+
+  # Bind the permit-ICMP ACL to Ethernet2 ingress.
+  - name: bind-acl-ethernet2
+    action: bind-acl
+    devices: [switch1]
+    interface: Ethernet2
+    params:
+      name: FILTER_ICMP_PERMIT
+      direction: ingress
+
+  - name: verify-acl-binding
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_TABLE
+    key: FILTER_ICMP_PERMIT
+    expect:
+      exists: true
+
+  # With ACL bound (ICMP permitted), host2 should still reach switch1.
+  - name: host2-ping-with-acl
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 3 -W 2 172.16.50.1"
+    expect:
+      success_rate: 0.8
+
+  # Cleanup: unbind ACL, delete rule+table, remove host2 IP, remove switch1 IP.
+  - name: unbind-acl
+    action: unbind-acl
+    devices: [switch1]
+    interface: Ethernet2
+    params:
+      name: FILTER_ICMP_PERMIT
+
+  - name: delete-acl-rule
+    action: delete-acl-rule
+    devices: [switch1]
+    params:
+      name: FILTER_ICMP_PERMIT
+      rule: PERMIT_ICMP
+
+  - name: delete-acl-table
+    action: delete-acl-table
+    devices: [switch1]
+    params:
+      name: FILTER_ICMP_PERMIT
+
+  - name: host2-cleanup-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr del 172.16.50.2/24 dev eth0 2>/dev/null || true"
+
+  - name: cleanup-switch1-ip
+    action: ssh-command
+    devices: [switch1]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet2|172.16.50.1/24'"

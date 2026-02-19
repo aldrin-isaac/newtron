@@ -1,19 +1,18 @@
 name: vrf-lifecycle
 description: "VRF create/delete lifecycle via newtron API"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:
   - name: create-vrf-cust1
     action: create-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_cust1
 
   - name: verify-vrf-cust1-exists
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VRF
     key: Vrf_cust1
     expect:
@@ -21,13 +20,13 @@ steps:
 
   - name: delete-vrf-cust1
     action: delete-vrf
-    devices: [leaf1]
+    devices: [switch2]
     params:
       vrf: Vrf_cust1
 
   - name: verify-vrf-cust1-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: VRF
     key: Vrf_cust1
     expect:

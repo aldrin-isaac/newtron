@@ -1,7 +1,6 @@
 name: boot-provision
 description: Boot, provision leaf switches, verify BGP convergence and host reachability
 topology: 3node
-platform: sonic-vpp
 
 steps:
   - name: ssh-echo-leaf1

@@ -1,7 +1,6 @@
 name: evpn-overlay
 description: "Full EVPN overlay: setup + VPN binding + teardown"
 topology: 2node
-platform: sonic-vpp
 
 steps:
   - name: provision

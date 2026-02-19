@@ -8,14 +8,15 @@ The platform capability system allows features to be declared as unsupported on 
 
 ### 1. Platform Specification (`platforms.json`)
 
-Each platform declares its `unsupported_features` as a string array:
+Each platform declares its `unsupported_features` as a string array. **Only list base features** - dependent features are automatically unsupported via the dependency graph.
 
 ```json
 {
   "platforms": {
     "sonic-vpp": {
       "hwsku": "Force10-S6000",
-      "unsupported_features": ["acl", "macvpn", "evpn-vxlan"]
+      "unsupported_features": ["acl", "evpn-vxlan"]
+      // Note: macvpn/ipvpn auto-unsupported (depend on evpn-vxlan)
     },
     "ciscovs": {
       "hwsku": "cisco-8101-p4-32x100-vs",
@@ -25,22 +26,56 @@ Each platform declares its `unsupported_features` as a string array:
 }
 ```
 
-### 2. Feature Support Check (`spec/types.go`)
+### 2. Feature Dependency Graph (`spec/types.go`)
 
-The `PlatformSpec` type provides a `SupportsFeature()` method:
+Features can depend on other features. The dependency graph is defined in code:
+
+```go
+var featureDependencies = map[string][]string{
+    // MAC-VPN requires VXLAN dataplane support
+    "macvpn": {"evpn-vxlan"},
+
+    // IP-VPN (L3 EVPN) requires VXLAN dataplane support
+    "ipvpn": {"evpn-vxlan"},
+
+    // Base features with no dependencies
+    "evpn-vxlan": {},
+    "acl":        {},
+}
+```
+
+**Dependency Resolution:**
+- If `evpn-vxlan` is unsupported, `macvpn` and `ipvpn` are automatically unsupported
+- Platforms only need to list base features (e.g., `evpn-vxlan`)
+- Dependent features inherit the unsupported status via the dependency chain
+
+### 3. Feature Support Check (`spec/types.go`)
+
+The `PlatformSpec` type provides a `SupportsFeature()` method that checks both direct unsupported features and dependencies:
 
 ```go
 func (p *PlatformSpec) SupportsFeature(feature string) bool {
-    for _, f := range p.UnsupportedFeatures {
-        if f == feature {
+    // Check if feature is directly unsupported
+    if p.isUnsupported(feature) {
+        return false
+    }
+
+    // Check if any dependencies are unsupported (recursive)
+    for _, dep := range featureDependencies[feature] {
+        if !p.SupportsFeature(dep) {
             return false
         }
     }
+
     return true
 }
 ```
 
-### 3. Configuration Operations
+**Helper Functions:**
+- `GetUnsupportedDueTo(baseFeature)` - Returns features disabled by a base feature
+- `GetFeatureDependencies(feature)` - Returns dependencies for a feature
+
+### 4. Configuration Operations
 
 Operations that depend on specific features check platform support and return errors:
 
@@ -69,7 +104,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, ...) (*ChangeSet, error) {
 - `MapL2VNI()` - checks `"evpn-vxlan"`
 - Service generation with ACLs - checks `"acl"` (existing)
 
-### 4. Test Scenario Filtering
+### 5. Test Scenario Filtering
 
 Test scenarios declare `requires_features` in YAML:
 
@@ -89,22 +124,59 @@ requires_features: [evpn-vxlan, macvpn]
 
 ## Currently Defined Features
 
-| Feature | Description | Unsupported On |
-|---------|-------------|----------------|
-| `acl` | ACL table configuration and rule application | sonic-vpp |
-| `macvpn` | MAC-VPN (EVPN L2VNI) overlay services | sonic-vpp |
-| `evpn-vxlan` | EVPN VXLAN tunnel encapsulation/decapsulation | sonic-vpp |
+| Feature | Description | Dependencies | When to Mark Unsupported |
+|---------|-------------|--------------|--------------------------|
+| `acl` | ACL table configuration and rule application | None | ACL ASIC rules not programmed |
+| `evpn-vxlan` | VXLAN tunnel encapsulation/decapsulation (dataplane) | None | VXLAN tunnels don't work in hardware/SAI |
+| `macvpn` | MAC-VPN (EVPN L2VNI) overlay - Type-2/3 routes | `evpn-vxlan` | L2 EVPN control plane broken (even if VXLAN works) |
+| `ipvpn` | IP-VPN (EVPN L3VNI) overlay - Type-5 routes | `evpn-vxlan` | L3 EVPN control plane broken (even if VXLAN works) |
+
+### Feature Independence
+
+**Important:** `macvpn` and `ipvpn` are **independent** of each other:
+- Marking `evpn-vxlan` unsupported → disables BOTH (cascade via dependency)
+- Marking `macvpn` unsupported → only disables L2 EVPN, `ipvpn` still works
+- Marking `ipvpn` unsupported → only disables L3 EVPN, `macvpn` still works
+
+### Real-World Examples
+
+**VPP Platform** (no VXLAN dataplane):
+```json
+"unsupported_features": ["evpn-vxlan"]
+// Result: macvpn ✗, ipvpn ✗ (both cascaded)
+```
+
+**Platform with broken L2 EVPN** (VXLAN works, only L2 control plane broken):
+```json
+"unsupported_features": ["macvpn"]
+// Result: macvpn ✗, ipvpn ✓, evpn-vxlan ✓
+```
+
+**Platform with broken L3 EVPN** (VXLAN works, only L3 control plane broken):
+```json
+"unsupported_features": ["ipvpn"]
+// Result: ipvpn ✗, macvpn ✓, evpn-vxlan ✓
+```
 
 ## Usage Guidelines
 
-### Adding a New Unsupported Feature
+### Adding a New Feature
 
-1. **Update platform spec** (`topologies/*/specs/platforms.json`):
-   ```json
-   "unsupported_features": ["acl", "macvpn", "new-feature"]
+1. **Define feature dependencies** (`pkg/newtron/spec/types.go`):
+   ```go
+   var featureDependencies = map[string][]string{
+       "new-feature": {"base-feature"},  // If it has dependencies
+       "new-feature": {},                 // If it's a base feature
+   }
    ```
 
-2. **Add platform check to operations** (if applicable):
+2. **Update platform spec** (`topologies/*/specs/platforms.json`):
+   ```json
+   "unsupported_features": ["acl", "evpn-vxlan", "new-feature"]
+   ```
+   **Note:** Only list the feature if it's directly unsupported. If it's unsupported due to a dependency, don't list it.
+
+3. **Add platform check to operations** (if applicable):
    ```go
    if platform, err := n.GetPlatform(resolved.Platform); err == nil {
        if !platform.SupportsFeature("new-feature") {
@@ -113,7 +185,7 @@ requires_features: [evpn-vxlan, macvpn]
    }
    ```
 
-3. **Declare in test scenarios** (if applicable):
+4. **Declare in test scenarios** (if applicable):
    ```yaml
    requires_features: [new-feature]
    ```

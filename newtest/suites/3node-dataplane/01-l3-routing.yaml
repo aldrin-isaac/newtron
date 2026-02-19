@@ -1,7 +1,6 @@
 name: l3-routing
 description: L3 routed connectivity - configure interface IPs, redistribute via BGP, verify cross-leaf ping
 topology: 3node
-platform: sonic-vpp
 requires: [boot-provision]
 
 steps:

@@ -1,27 +1,26 @@
 name: apply-baseline
 description: Apply sonic-baseline configlet and verify CONFIG_DB changes
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:
-  # Apply sonic-baseline configlet to leaf1
+  # Apply sonic-baseline configlet to switch2
   - name: apply-sonic-baseline
     action: apply-baseline
-    devices: [leaf1]
+    devices: [switch2]
     configlet: sonic-baseline
 
   # Verify hostname was updated in DEVICE_METADATA
   - name: verify-hostname
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: DEVICE_METADATA
     key: localhost
     expect:
       fields:
-        hostname: leaf1
+        hostname: switch2
 
   # Verify the ChangeSet was persisted
   - name: verify-baseline-provisioning
     action: verify-provisioning
-    devices: [leaf1]
+    devices: [switch2]

@@ -82,6 +82,12 @@ func NewLab(specDir string) (*Lab, error) {
 		return nil, fmt.Errorf("newtlab: parse topology.json: %w", err)
 	}
 
+	// Derive links from interface.link fields if not explicitly provided
+	if len(l.Topology.Links) == 0 {
+		l.Topology.Links = spec.DeriveLinksFromInterfaces(l.Topology)
+		util.Logger.Infof("newtlab: derived %d links from interface.link fields", len(l.Topology.Links))
+	}
+
 	// Load platforms.json
 	platData, err := os.ReadFile(filepath.Join(absDir, "platforms.json"))
 	if err != nil {
@@ -147,7 +153,7 @@ func NewLab(specDir string) (*Lab, error) {
 	// Build host map for link allocation
 	hostMap := l.buildHostMap()
 
-	// Allocate links
+	// Allocate links (topology.Links populated by loader from interface.link fields)
 	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config, hostMap)
 	if err != nil {
 		return nil, err
@@ -325,6 +331,11 @@ func (l *Lab) Deploy(ctx context.Context) error {
 			ZPort:      lc.ZPort,
 			WorkerHost: lc.WorkerHost,
 		})
+	}
+
+	// Save initial state immediately to prevent stale links showing in status
+	if err := SaveState(l.State); err != nil {
+		return fmt.Errorf("newtlab: save initial state: %w", err)
 	}
 
 	// Set up remote state directories (one SSH per unique remote host)
@@ -517,51 +528,80 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 	return nil
 }
 
-// findPeerInterfaceIP walks topology links to find the switch-side IP for a
-// host device's connection. Returns the switch IP (without mask) and the mask
-// (e.g., "/24"), or empty strings if not found.
+// findPeerInterfaceIP finds the peer interface's IP for a given host device.
+// Searches all devices for an interface with .link pointing to this host.
+// Returns the peer IP (without mask) and the mask (e.g., "/24"), or empty strings if not found.
 func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
-	for _, link := range l.Topology.Links {
-		aDevice, aIface, _ := splitLinkEndpoint(link.A)
-		zDevice, zIface, _ := splitLinkEndpoint(link.Z)
+	// Search all devices for interfaces that link to this host
+	for _, device := range l.Topology.Devices {
+		for _, iface := range device.Interfaces {
+			if iface.Link == "" {
+				continue
+			}
 
-		var peerDevice, peerIface string
-		if aDevice == hostName {
-			peerDevice, peerIface = zDevice, zIface
-		} else if zDevice == hostName {
-			peerDevice, peerIface = aDevice, aIface
-		} else {
-			continue
-		}
+			// Check if this interface links to the target host
+			// Format: "hostName:ethX"
+			peerDevice, _, err := splitLinkEndpoint(iface.Link)
+			if err != nil || peerDevice != hostName {
+				continue
+			}
 
-		// Look up the peer interface's IP in the topology
-		dev, ok := l.Topology.Devices[peerDevice]
-		if !ok {
-			continue
-		}
-		iface, ok := dev.Interfaces[peerIface]
-		if !ok || iface.IP == "" {
-			continue
-		}
+			// Found the peer - return its IP
+			if iface.IP == "" {
+				continue
+			}
 
-		// Parse "10.1.100.1/24" → ip="10.1.100.1", mask="/24"
-		parts := strings.SplitN(iface.IP, "/", 2)
-		if len(parts) == 2 {
-			return parts[0], "/" + parts[1]
+			// Parse "10.1.100.1/24" → ip="10.1.100.1", mask="/24"
+			parts := strings.SplitN(iface.IP, "/", 2)
+			if len(parts) == 2 {
+				return parts[0], "/" + parts[1]
+			}
+			return iface.IP, ""
 		}
-		return iface.IP, ""
 	}
 	return "", ""
 }
 
 // deriveHostIP derives a host IP from the switch-side IP.
-// hostIndex 0 → .10, 1 → .20, etc. in the same subnet.
+// For /30 and /31 (point-to-point): increments by (hostIndex + 1)
+// For /24 and larger: hostIndex 0 → .10, 1 → .20, etc.
 func deriveHostIP(switchIP, mask string, hostIndex int) string {
 	parts := strings.Split(switchIP, ".")
 	if len(parts) != 4 {
 		return ""
 	}
-	hostOctet := (hostIndex + 1) * 10
+
+	// Parse prefix length from mask (e.g., "/30")
+	prefixLen := 24 // default to /24 behavior
+	if len(mask) > 1 && mask[0] == '/' {
+		if n, err := fmt.Sscanf(mask[1:], "%d", &prefixLen); n != 1 || err != nil {
+			prefixLen = 24
+		}
+	}
+
+	lastOctet := 0
+	fmt.Sscanf(parts[3], "%d", &lastOctet)
+
+	// For point-to-point links, derive peer IP based on prefix length
+	// /31: peer is (odd ↔ even) - RFC 3021 point-to-point
+	// /30: peer is +1 from switch IP (assumes switch uses .1, host gets .2)
+	// /24+: use offset pattern (.10, .20, .30...)
+	var hostOctet int
+	if prefixLen == 31 {
+		// For /31, toggle between even and odd (e.g., .0↔.1, .2↔.3)
+		if lastOctet%2 == 0 {
+			hostOctet = lastOctet + 1
+		} else {
+			hostOctet = lastOctet - 1
+		}
+	} else if prefixLen == 30 {
+		// For /30, assume switch uses .1, host gets .2
+		hostOctet = lastOctet + 1
+	} else {
+		// /24 and larger: offset pattern
+		hostOctet = (hostIndex + 1) * 10
+	}
+
 	return fmt.Sprintf("%s.%s.%s.%d%s", parts[0], parts[1], parts[2], hostOctet, mask)
 }
 

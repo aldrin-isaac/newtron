@@ -1,20 +1,19 @@
 name: qos-apply-remove
 description: "QoS policy apply and remove on interface"
 topology: 2node
-platform: sonic-vpp
 requires: [provision]
 
 steps:
   - name: apply-qos
     action: apply-qos
-    devices: [leaf1]
+    devices: [switch2]
     params:
       interface: Ethernet2
       qos_policy: 4q-customer
 
   - name: verify-qos-applied
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT_QOS_MAP
     key: Ethernet2
     expect:
@@ -22,13 +21,13 @@ steps:
 
   - name: remove-qos
     action: remove-qos
-    devices: [leaf1]
+    devices: [switch2]
     params:
       interface: Ethernet2
 
   - name: verify-qos-removed
     action: verify-config-db
-    devices: [leaf1]
+    devices: [switch2]
     table: PORT_QOS_MAP
     key: Ethernet2
     expect:
