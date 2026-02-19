@@ -1,0 +1,35 @@
+name: teardown-bgp-underlay
+description: Remove hop-by-hop underlay BGP neighbors (transit link peers) from both switches
+topology: 2node
+requires: [teardown-bgp-overlay]
+
+steps:
+  # Underlay peer IPs: switch1→10.1.0.1 (sw2 Eth0), switch2→10.1.0.0 (sw1 Eth0).
+  # Must remove overlay before underlay to cleanly unwind BGP session hierarchy.
+  - name: remove-underlay-peer-switch1
+    action: bgp-remove-neighbor
+    devices: [switch1]
+    params:
+      neighbor_ip: "10.1.0.1"
+
+  - name: remove-underlay-peer-switch2
+    action: bgp-remove-neighbor
+    devices: [switch2]
+    params:
+      neighbor_ip: "10.1.0.0"
+
+  - name: verify-underlay-peer-removed-switch1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: false
+
+  - name: verify-underlay-peer-removed-switch2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.0"
+    expect:
+      exists: false

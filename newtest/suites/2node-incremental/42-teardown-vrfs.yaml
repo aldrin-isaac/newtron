@@ -1,0 +1,21 @@
+name: teardown-vrfs
+description: Remove the CUSTOMER VRF from switch2 (final teardown step)
+topology: 2node
+requires: [teardown-interfaces]
+
+steps:
+  # CUSTOMER VRF was provisioned by topology.json (switch2:Ethernet2, vrf: CUSTOMER).
+  # Interface unbinding happened in teardown-interfaces, so delete-vrf can proceed.
+  - name: delete-customer-vrf
+    action: delete-vrf
+    devices: [switch2]
+    params:
+      vrf: CUSTOMER
+
+  - name: verify-customer-vrf-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: CUSTOMER
+    expect:
+      exists: false

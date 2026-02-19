@@ -1,0 +1,48 @@
+name: teardown-evpn
+description: Remove EVPN overlay state from switch2 (VXLAN tunnel, NVO, L2VPN EVPN AF)
+topology: 2node
+requires:
+  - acl-dataplane
+  - apply-baseline
+  - bgp-direct-neighbor
+  - bgp-loopback-neighbor
+  - cleanup
+  - device-health
+  - evpn-vpn-binding
+  - host-connectivity
+  - interface-ip-vrf
+  - interface-set
+  - portchannel-lifecycle
+  - qos-apply-remove
+  - qos-datacenter
+  - qos-l3-service
+  - service-transit
+  - state-db-port
+  - static-route-forwarding
+  - svi-configure
+  - vlan-member-remove
+  - vrf-interface-binding
+
+steps:
+  # Remove VXLAN tunnel, NVO, and L2VPN EVPN address-family in one shot.
+  # setup-evpn only ran on switch2 — no EVPN state on switch1.
+  - name: remove-evpn-overlay
+    action: ssh-command
+    devices: [switch2]
+    command: "redis-cli -n 4 DEL 'VXLAN_TUNNEL|vtep1' 'VXLAN_EVPN_NVO|nvo1' 'BGP_GLOBALS_AF|default|l2vpn_evpn'"
+
+  - name: verify-vtep-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  - name: verify-nvo-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false

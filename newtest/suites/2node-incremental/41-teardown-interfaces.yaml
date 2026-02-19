@@ -1,0 +1,68 @@
+name: teardown-interfaces
+description: Remove all provisioned interface IPs and loopback addresses from both switches
+topology: 2node
+requires: [teardown-bgp-underlay]
+
+steps:
+  # switch2: unbind CUSTOMER VRF from Ethernet2 before removing its IP.
+  # Pattern from 05-interface-ip-vrf: DEL IP entry, then set vrf="", then DEL base entry.
+  - name: sw2-remove-customer-vrf-ip
+    action: ssh-command
+    devices: [switch2]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet2|10.10.1.1/31'"
+
+  - name: sw2-unbind-customer-vrf
+    action: set-interface
+    devices: [switch2]
+    interface: Ethernet2
+    params:
+      property: vrf
+      value: ""
+
+  # switch1: remove transit (Eth0) and host-facing (Eth1) IPs and base entries.
+  - name: sw1-remove-interface-ips
+    action: ssh-command
+    devices: [switch1]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.0/31' 'INTERFACE|Ethernet1|10.1.1.1/31' 'INTERFACE|Ethernet0' 'INTERFACE|Ethernet1'"
+
+  # switch2: remove transit (Eth0), CUSTOMER VRF base entry, loopback.
+  - name: sw2-remove-interface-ips
+    action: ssh-command
+    devices: [switch2]
+    command: "redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.1/31' 'INTERFACE|Ethernet0' 'INTERFACE|Ethernet2'"
+
+  # Remove loopback IPs and base entries from both switches.
+  - name: sw1-remove-loopback
+    action: ssh-command
+    devices: [switch1]
+    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32' 'LOOPBACK_INTERFACE|Loopback0'"
+
+  - name: sw2-remove-loopback
+    action: ssh-command
+    devices: [switch2]
+    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.2/32' 'LOOPBACK_INTERFACE|Loopback0'"
+
+  # Spot-check: transit IP entries should be gone.
+  - name: verify-sw1-transit-ip-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: false
+
+  - name: verify-sw2-customer-vrf-ip-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet2|10.10.1.1/31"
+    expect:
+      exists: false
+
+  - name: verify-sw1-loopback-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.1/32"
+    expect:
+      exists: false
