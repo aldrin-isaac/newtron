@@ -19,28 +19,47 @@ func newStatusCmd() *cobra.Command {
 	var (
 		dir        string
 		jsonOutput bool
+		suiteFilter string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show suite run status",
 		Long: `Show the status of a running, paused, or completed test suite.
-Without --dir, shows all suites with state.
+Without --dir or --suite, shows all suites with state.
 
-  newtest status             # all suites
-  newtest status --json      # machine-readable output`,
+  newtest status                       # all suites
+  newtest status --suite 2node         # suites whose name contains "2node"
+  newtest status --dir /path/to/suite  # specific suite by directory
+  newtest status --json                # machine-readable output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Specific suite
+			// Specific suite by directory path.
 			if cmd.Flags().Changed("dir") {
 				suite := newtest.SuiteName(dir)
 				return printSuiteStatus(suite, jsonOutput)
 			}
 
-			// All suites
+			// All suites (optionally filtered).
 			suites, err := newtest.ListSuiteStates()
 			if err != nil {
 				return err
 			}
+
+			// Apply --suite filter (substring match, case-insensitive).
+			if suiteFilter != "" {
+				lower := strings.ToLower(suiteFilter)
+				var matched []string
+				for _, s := range suites {
+					if strings.Contains(strings.ToLower(s), lower) {
+						matched = append(matched, s)
+					}
+				}
+				if len(matched) == 0 {
+					return fmt.Errorf("no suite matching %q", suiteFilter)
+				}
+				suites = matched
+			}
+
 			if len(suites) == 0 {
 				if jsonOutput {
 					fmt.Println("[]")
@@ -76,6 +95,7 @@ Without --dir, shows all suites with state.
 
 	cmd.Flags().StringVar(&dir, "dir", "", "suite directory")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
+	cmd.Flags().StringVarP(&suiteFilter, "suite", "s", "", "show only suites whose name contains this string")
 
 	return cmd
 }
