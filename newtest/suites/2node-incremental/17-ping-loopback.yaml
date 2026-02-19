@@ -8,7 +8,7 @@ steps:
   - name: ping-switch1-to-switch2
     action: verify-ping
     devices: [switch1]
-    target: "10.0.0.11"
+    target: "10.0.0.2"
     count: 5
     expect:
       success_rate: 0.8

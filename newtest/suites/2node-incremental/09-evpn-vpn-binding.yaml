@@ -20,14 +20,14 @@ steps:
   devices:
   - switch2
   params:
-    macvpn: storage-vlan200
+    macvpn: overlay-vlan200
   vlan_id: 200
 - name: verify-l2vni-mapping
   action: verify-config-db
   devices:
   - switch2
   table: VXLAN_TUNNEL_MAP
-  key: vtep1|map_10200_Vlan200
+  key: vtep1|map_50200_Vlan200
   expect:
     exists: true
 - name: bind-ipvpn-vrf
@@ -36,13 +36,13 @@ steps:
   - switch2
   params:
     vrf: Vrf_evpn
-    ipvpn: tenant-vpn
+    ipvpn: CUSTOMER
 - name: verify-l3vni-mapping
   action: verify-config-db
   devices:
   - switch2
   table: VXLAN_TUNNEL_MAP
-  key: vtep1|map_20001_Vrf_evpn
+  key: vtep1|map_50001_Vrf_evpn
   expect:
     exists: true
 - name: unbind-macvpn-vlan200
@@ -55,7 +55,7 @@ steps:
   devices:
   - switch2
   table: VXLAN_TUNNEL_MAP
-  key: vtep1|map_10200_Vlan200
+  key: vtep1|map_50200_Vlan200
   expect:
     exists: false
 - name: unbind-ipvpn-vrf
@@ -69,7 +69,7 @@ steps:
   devices:
   - switch2
   table: VXLAN_TUNNEL_MAP
-  key: vtep1|map_20001_Vrf_evpn
+  key: vtep1|map_50001_Vrf_evpn
   expect:
     exists: false
 - name: cleanup-vrf

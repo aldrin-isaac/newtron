@@ -13,8 +13,7 @@ steps:
   action: add-vlan-member
   devices:
   - switch2
-  params:
-    interface: Ethernet2
+  interface: Ethernet2
   vlan_id: 500
 - name: verify-member-added
   action: verify-config-db
@@ -28,8 +27,7 @@ steps:
   action: remove-vlan-member
   devices:
   - switch2
-  params:
-    interface: Ethernet2
+  interface: Ethernet2
   vlan_id: 500
 - name: verify-member-removed
   action: verify-config-db

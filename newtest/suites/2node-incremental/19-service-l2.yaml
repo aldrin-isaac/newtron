@@ -1,7 +1,7 @@
 name: service-l2
 description: Apply l2-extend service on switch2:Ethernet2 and verify
 topology: 2node
-requires: [vlan-lifecycle]
+requires: [vlan-lifecycle, evpn-setup]
 
 steps:
   - name: apply-l2-extend

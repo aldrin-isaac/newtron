@@ -7,7 +7,7 @@ steps:
   - name: switch2-loopback-at-switch1
     action: verify-route
     devices: [switch1]
-    prefix: "10.0.0.11/32"
+    prefix: "10.0.0.2/32"
     vrf: default
     expect:
       protocol: bgp

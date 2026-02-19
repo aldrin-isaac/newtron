@@ -13,5 +13,5 @@ steps:
     devices: all
     expect:
       state: Established
-      timeout: 180s
+      timeout: 90s
       poll_interval: 10s

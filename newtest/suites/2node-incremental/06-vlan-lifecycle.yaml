@@ -21,8 +21,7 @@ steps:
   action: add-vlan-member
   devices:
   - switch2
-  params:
-    interface: Ethernet2
+  interface: Ethernet2
   vlan_id: 100
 - name: verify-vlan-member
   action: verify-config-db

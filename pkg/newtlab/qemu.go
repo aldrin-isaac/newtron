@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,8 +76,14 @@ func (q *QEMUCommand) Build() *exec.Cmd {
 		"-device", fmt.Sprintf("%s,netdev=mgmt,mac=%s,romfile=", q.Node.NICDriver, mgmtMAC),
 	)
 
-	// Data NICs (NIC 1..N): all connect outbound to bridge workers
-	for _, nic := range q.Node.NICs {
+	// Data NICs (NIC 1..N): all connect outbound to bridge workers.
+	// Sort by Index so kernel ethN matches NIC index N — QEMU enumerates
+	// NICs in PCI order, so the Nth data device in the command becomes
+	// kernel eth(N), which must equal NIC index N for TC mirred to work.
+	sortedNICs := make([]NICConfig, len(q.Node.NICs))
+	copy(sortedNICs, q.Node.NICs)
+	sort.Slice(sortedNICs, func(i, j int) bool { return sortedNICs[i].Index < sortedNICs[j].Index })
+	for _, nic := range sortedNICs {
 		if nic.Index == 0 {
 			continue // skip mgmt, already handled
 		}
