@@ -46,9 +46,10 @@ steps:
       exists: true
 
   # Wait for orchagent to program the VRF interface and IP into the kernel.
+  # CiscoVS NGDP needs ~30s to initialize the ARP responder for a new VRF interface.
   - name: wait-kernel-propagation
     action: wait
-    duration: 5s
+    duration: 30s
 
   # Configure host6 (connected to switch2:Ethernet3) with IP in the VRF subnet.
   - name: host6-configure-ip
@@ -60,6 +61,19 @@ steps:
     action: host-exec
     devices: [host6]
     command: "ip route add default via 172.16.1.1 dev eth0 2>/dev/null || true"
+
+  # Prime ARP from the switch side first (CiscoVS NGDP cold-start, see RCA-033).
+  # NGDP's ARP responder for a new VRF interface only activates after the interface
+  # sends at least one outgoing ARP request. Pinging host6 from switch2 causes NGDP
+  # to send ARP via Ethernet3, which initialises the responder. After this, host6's
+  # ARP requests for 172.16.1.1 are answered.
+  # This step is intentionally non-failing: its purpose is only to send outbound ARPs
+  # (side effect), not to verify connectivity. The actual test is host6-ping-gateway.
+  # Retry up to 6 times in case NGDP isn't ready yet (30s wait above + up to 30s here).
+  - name: switch2-prime-arp
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5 6; do ping -c 1 -W 5 -I Ethernet3 172.16.1.2 && break; sleep 5; done; true"
 
   # host6 pings switch2's Ethernet3 gateway (verifies VRF L3 forwarding works).
   - name: host6-ping-gateway

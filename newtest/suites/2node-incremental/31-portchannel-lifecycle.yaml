@@ -9,7 +9,7 @@ steps:
     devices: [switch2]
     params:
       name: PortChannel100
-      members: [Ethernet1, Ethernet2]
+      members: [Ethernet1, Ethernet3]
       min_links: 1
 
   - name: verify-portchannel-exists
@@ -28,26 +28,26 @@ steps:
     expect:
       exists: true
 
-  - name: verify-member-eth2
+  - name: verify-member-eth3
     action: verify-config-db
     devices: [switch2]
     table: PORTCHANNEL_MEMBER
-    key: "PortChannel100|Ethernet2"
+    key: "PortChannel100|Ethernet3"
     expect:
       exists: true
 
-  - name: remove-member-eth2
+  - name: remove-member-eth3
     action: remove-portchannel-member
     devices: [switch2]
     params:
       name: PortChannel100
-      member: Ethernet2
+      member: Ethernet3
 
-  - name: verify-member-eth2-removed
+  - name: verify-member-eth3-removed
     action: verify-config-db
     devices: [switch2]
     table: PORTCHANNEL_MEMBER
-    key: "PortChannel100|Ethernet2"
+    key: "PortChannel100|Ethernet3"
     expect:
       exists: false
 
@@ -59,18 +59,18 @@ steps:
     expect:
       exists: true
 
-  - name: add-member-eth2-back
+  - name: add-member-eth3-back
     action: add-portchannel-member
     devices: [switch2]
     params:
       name: PortChannel100
-      member: Ethernet2
+      member: Ethernet3
 
-  - name: verify-member-eth2-readded
+  - name: verify-member-eth3-readded
     action: verify-config-db
     devices: [switch2]
     table: PORTCHANNEL_MEMBER
-    key: "PortChannel100|Ethernet2"
+    key: "PortChannel100|Ethernet3"
     expect:
       exists: true
 

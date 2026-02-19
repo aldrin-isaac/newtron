@@ -15,13 +15,13 @@ steps:
     devices: [switch2]
     params:
       vrf: Vrf_bind_test
-      interface: Ethernet2
+      interface: Ethernet1
 
   - name: verify-interface-vrf
     action: verify-config-db
     devices: [switch2]
     table: INTERFACE
-    key: Ethernet2
+    key: Ethernet1
     expect:
       exists: true
       fields:
@@ -32,13 +32,13 @@ steps:
     devices: [switch2]
     params:
       vrf: Vrf_bind_test
-      interface: Ethernet2
+      interface: Ethernet1
 
   - name: verify-interface-unbound
     action: verify-config-db
     devices: [switch2]
     table: INTERFACE
-    key: Ethernet2
+    key: Ethernet1
     expect:
       exists: true
       fields:

@@ -13,28 +13,28 @@ steps:
   action: add-vlan-member
   devices:
   - switch2
-  interface: Ethernet2
+  interface: Ethernet1
   vlan_id: 500
 - name: verify-member-added
   action: verify-config-db
   devices:
   - switch2
   table: VLAN_MEMBER
-  key: Vlan500|Ethernet2
+  key: Vlan500|Ethernet1
   expect:
     exists: true
 - name: remove-member
   action: remove-vlan-member
   devices:
   - switch2
-  interface: Ethernet2
+  interface: Ethernet1
   vlan_id: 500
 - name: verify-member-removed
   action: verify-config-db
   devices:
   - switch2
   table: VLAN_MEMBER
-  key: Vlan500|Ethernet2
+  key: Vlan500|Ethernet1
   expect:
     exists: false
 - name: cleanup-vlan

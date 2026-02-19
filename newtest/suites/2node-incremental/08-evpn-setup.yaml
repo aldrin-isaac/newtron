@@ -24,3 +24,15 @@ steps:
     devices: [switch2]
     params:
       source_ip: "10.0.0.2"
+
+  # bgpcfgd on CiscoVS regenerates frr.conf when BGP_NEIGHBOR_AF|l2vpn_evpn
+  # is written to CONFIG_DB. The regenerated template drops 'no bgp
+  # ebgp-requires-policy' (bgpcfgd template limitation, see RCA-034).
+  # Wait for bgpcfgd to finish regenerating, then re-apply FRR defaults.
+  - name: wait-bgpcfgd-regenerate
+    action: wait
+    duration: 40s
+
+  - name: reapply-frr-defaults
+    action: apply-frr-defaults
+    devices: all
