@@ -88,7 +88,14 @@ func (t *Table) Flush() {
 		}
 	}
 
-	// Constrain to terminal width when applicable.
+	// Cap each column at maxColWidth, then constrain to terminal width.
+	const maxColWidth = 40
+	for i, h := range t.headers {
+		min := visualLen(h)
+		if widths[i] > maxColWidth && maxColWidth >= min {
+			widths[i] = maxColWidth
+		}
+	}
 	if tw := terminalWidth(); tw > 0 {
 		widths = capWidths(widths, t.headers, tw, visualLen(t.prefix))
 	}
