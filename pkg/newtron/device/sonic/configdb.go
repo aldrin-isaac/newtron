@@ -545,8 +545,8 @@ func (db *ConfigDB) HasBGPNeighbor(key string) bool {
 	return ok
 }
 
-// HasInterface reports whether the named interface exists in either the
-// Port or PortChannel table.
+// HasInterface reports whether the named interface exists in the Port,
+// PortChannel, or VLAN table (for SVI interfaces like Vlan100).
 func (db *ConfigDB) HasInterface(name string) bool {
 	if db == nil {
 		return false
@@ -554,8 +554,17 @@ func (db *ConfigDB) HasInterface(name string) bool {
 	if _, ok := db.Port[name]; ok {
 		return true
 	}
-	_, ok := db.PortChannel[name]
-	return ok
+	if _, ok := db.PortChannel[name]; ok {
+		return true
+	}
+	// VLAN SVI interfaces (Vlan100, Vlan200) live in the VLAN table
+	if strings.HasPrefix(name, "Vlan") {
+		id := 0
+		if n, _ := fmt.Sscanf(name[4:], "%d", &id); n == 1 && id > 0 {
+			return db.HasVLAN(id)
+		}
+	}
+	return false
 }
 
 // BGPConfigured reports whether BGP is configured, checking both the

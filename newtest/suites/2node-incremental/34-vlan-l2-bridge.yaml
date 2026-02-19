@@ -1,0 +1,101 @@
+name: vlan-l2-bridge
+description: "VLAN L2 bridging: host2↔host3 traffic forwarded via VLAN 200 on switch1 (verifies VLAN forwarding plane)"
+topology: 2node
+requires: [vlan-lifecycle]
+
+steps:
+  # Create VLAN 200 on switch1 and add Ethernet2+Ethernet3 as access members.
+  # switch1:Ethernet2→host2 and switch1:Ethernet3→host3 are both free (no topology IPs).
+  - name: create-vlan200
+    action: create-vlan
+    devices: [switch1]
+    vlan_id: 200
+
+  - name: add-member-ethernet2
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 200
+
+  - name: add-member-ethernet3
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet3
+    vlan_id: 200
+
+  - name: verify-vlan200-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan200
+    expect:
+      exists: true
+
+  - name: verify-member-ethernet2
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan200|Ethernet2"
+    expect:
+      exists: true
+
+  - name: verify-member-ethernet3
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan200|Ethernet3"
+    expect:
+      exists: true
+
+  # Wait for orchagent to program VLAN bridging entries in the dataplane.
+  - name: wait-bridging-ready
+    action: wait
+    duration: 5s
+
+  # Assign IPs in the same /24 subnet to host2 and host3.
+  # Traffic between them is L2-bridged (no routing) via switch1 VLAN 200.
+  - name: host2-configure-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr add 192.168.200.2/24 dev eth0 2>/dev/null || true"
+
+  - name: host3-configure-ip
+    action: host-exec
+    devices: [host3]
+    command: "ip addr add 192.168.200.3/24 dev eth0 2>/dev/null || true"
+
+  # host2 pings host3: switch1 bridges Ethernet2↔Ethernet3 through VLAN 200.
+  - name: host2-ping-host3
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 3 -W 2 192.168.200.3"
+    expect:
+      success_rate: 0.8
+
+  # Cleanup: host IPs first, then VLAN members, then VLAN.
+  - name: host2-cleanup-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr del 192.168.200.2/24 dev eth0 2>/dev/null || true"
+
+  - name: host3-cleanup-ip
+    action: host-exec
+    devices: [host3]
+    command: "ip addr del 192.168.200.3/24 dev eth0 2>/dev/null || true"
+
+  - name: remove-member-ethernet2
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 200
+
+  - name: remove-member-ethernet3
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet3
+    vlan_id: 200
+
+  - name: delete-vlan200
+    action: delete-vlan
+    devices: [switch1]
+    vlan_id: 200

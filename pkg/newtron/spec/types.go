@@ -150,7 +150,7 @@ type ServiceSpec struct {
 // RoutingSpec defines routing protocol specification for a service.
 //
 // For BGP services:
-//   - Local AS is always from device profile (ResolvedProfile.ASNumber)
+//   - Local AS is always from device profile (ResolvedProfile.UnderlayASN)
 //   - Peer AS can be fixed (number), or "request" (provided at apply time)
 //   - Peer IP is derived from interface IP for point-to-point links
 type RoutingSpec struct {

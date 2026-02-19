@@ -43,6 +43,30 @@ steps:
     expect:
       exists: true
 
+  # Dataplane: host4 is connected to switch2:Ethernet1.
+  # Wait for orchagent to propagate VRF + IP to kernel, then verify host4 can
+  # reach the switch gateway (traffic ingresses switch2:Ethernet1 in Vrf_test).
+  - name: wait-kernel-propagation
+    action: wait
+    duration: 5s
+
+  - name: host4-configure-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr add 192.168.99.2/24 dev eth0 2>/dev/null || true"
+
+  - name: host4-ping-switch-gateway
+    action: host-exec
+    devices: [host4]
+    command: "ping -c 3 -W 2 192.168.99.1"
+    expect:
+      success_rate: 0.8
+
+  - name: host4-cleanup-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr del 192.168.99.2/24 dev eth0 2>/dev/null || true"
+
   # Cleanup: remove IP, unbind VRF, then delete VRF
   - name: cleanup-ip
     action: ssh-command

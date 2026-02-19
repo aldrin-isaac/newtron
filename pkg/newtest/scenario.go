@@ -113,6 +113,14 @@ const (
 
 	// Host test actions
 	ActionHostExec StepAction = "host-exec"
+
+	// ACL management actions
+	ActionCreateACLTable StepAction = "create-acl-table"
+	ActionAddACLRule     StepAction = "add-acl-rule"
+	ActionDeleteACLRule  StepAction = "delete-acl-rule"
+	ActionDeleteACLTable StepAction = "delete-acl-table"
+	ActionBindACL        StepAction = "bind-acl"
+	ActionUnbindACL      StepAction = "unbind-acl"
 )
 
 // validActions is the set of all recognized step actions, derived from the

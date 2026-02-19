@@ -1,0 +1,65 @@
+name: host-connectivity
+description: Verify host namespace provisioning and underlay L3 reachability
+topology: 2node
+requires:
+- provision
+
+steps:
+- name: host1-interface-has-ip
+  action: host-exec
+  devices:
+  - host1
+  command: "ip addr show dev eth0"
+  expect:
+    contains: "10.1.1.0"
+
+- name: host1-default-route
+  action: host-exec
+  devices:
+  - host1
+  command: "ip route show"
+  expect:
+    contains: "default via 10.1.1.1"
+
+- name: host1-ping-switch
+  action: host-exec
+  devices:
+  - host1
+  command: "ping -c 3 -W 2 10.1.1.1"
+  expect:
+    success_rate: 0.8
+
+# host1 extended: ping switch1's loopback (verifies default route + local routing)
+- name: host1-ping-switch1-loopback
+  action: host-exec
+  devices:
+  - host1
+  command: "ping -c 3 -W 2 10.0.0.1"
+  expect:
+    success_rate: 0.8
+
+# host5: connected to switch2:Ethernet2 (CUSTOMER VRF, 10.10.1.1/31)
+# host5 IP is auto-derived as 10.10.1.0 with default route via 10.10.1.1
+- name: host5-interface-has-ip
+  action: host-exec
+  devices:
+  - host5
+  command: "ip addr show dev eth0"
+  expect:
+    contains: "10.10.1.0"
+
+- name: host5-default-route
+  action: host-exec
+  devices:
+  - host5
+  command: "ip route show"
+  expect:
+    contains: "default via 10.10.1.1"
+
+- name: host5-ping-switch
+  action: host-exec
+  devices:
+  - host5
+  command: "ping -c 3 -W 2 10.10.1.1"
+  expect:
+    success_rate: 0.8

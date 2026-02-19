@@ -40,6 +40,18 @@ steps:
   key: Vlan500|10.1.50.1/24
   expect:
     exists: true
+# Dataplane: wait for orchagent to create Vlan500 kernel interface and assign
+# the IP in Vrf_svi, then confirm the IP is visible in the kernel.
+- name: wait-svi-kernel-propagation
+  action: wait
+  duration: 5s
+- name: verify-svi-kernel-ip
+  action: ssh-command
+  devices:
+  - switch2
+  command: "ip addr show dev Vlan500"
+  expect:
+    contains: "10.1.50.1"
 - name: cleanup-svi-ip
   action: ssh-command
   devices:

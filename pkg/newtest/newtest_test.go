@@ -1386,6 +1386,8 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionCreatePortChannel, ActionDeletePortChannel,
 		ActionAddPortChannelMember, ActionRemovePortChannelMember,
 		ActionHostExec,
+		ActionCreateACLTable, ActionAddACLRule, ActionDeleteACLRule,
+		ActionDeleteACLTable, ActionBindACL, ActionUnbindACL,
 	}
 
 	if len(executors) != len(allActions) {

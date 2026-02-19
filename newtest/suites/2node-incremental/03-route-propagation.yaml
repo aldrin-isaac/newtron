@@ -25,3 +25,20 @@ steps:
       source: app_db
       timeout: 60s
       poll_interval: 5s
+
+  # Dataplane: confirm BGP routes are actually forwarding packets
+  - name: ping-switch1-to-switch2-loopback
+    action: verify-ping
+    devices: [switch1]
+    target: "10.0.0.2"
+    count: 5
+    expect:
+      success_rate: 0.8
+
+  - name: ping-switch2-to-switch1-loopback
+    action: verify-ping
+    devices: [switch2]
+    target: "10.0.0.1"
+    count: 5
+    expect:
+      success_rate: 0.8

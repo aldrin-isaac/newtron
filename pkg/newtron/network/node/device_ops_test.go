@@ -117,7 +117,7 @@ func testDevice() *Node {
 		connected: true,
 		locked:    true,
 		resolved: &spec.ResolvedProfile{
-			ASNumber:   64512,
+			UnderlayASN: 64512,
 			RouterID:   "10.255.0.1",
 			LoopbackIP: "10.255.0.1",
 			Zone:     "us-east",

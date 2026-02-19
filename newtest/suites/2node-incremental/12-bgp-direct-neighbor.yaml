@@ -22,6 +22,9 @@ steps:
       value: "10.1.1.1/31"
 
   # Add direct BGP neighbor on switch2
+  # NOTE: No dataplane test here — switch1:Ethernet1 links to host1 and
+  # switch2:Ethernet1 links to host4; they are on separate physical segments.
+  # This scenario exercises CONFIG_DB BGP neighbor lifecycle only.
   - name: add-direct-neighbor
     action: bgp-add-neighbor
     devices: [switch2]

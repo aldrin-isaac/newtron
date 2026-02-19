@@ -145,6 +145,14 @@ var stepValidations = map[StepAction]stepValidation{
 
 	// Host test actions
 	ActionHostExec: {singleDevice: true, fields: []string{"command"}},
+
+	// ACL management actions
+	ActionCreateACLTable: {needsDevices: true, params: []string{"name"}},
+	ActionAddACLRule:     {needsDevices: true, params: []string{"name", "rule", "action"}},
+	ActionDeleteACLRule:  {needsDevices: true, params: []string{"name", "rule"}},
+	ActionDeleteACLTable: {needsDevices: true, params: []string{"name"}},
+	ActionBindACL:        {needsDevices: true, fields: []string{"interface"}, params: []string{"name", "direction"}},
+	ActionUnbindACL:      {needsDevices: true, fields: []string{"interface"}, params: []string{"name"}},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.

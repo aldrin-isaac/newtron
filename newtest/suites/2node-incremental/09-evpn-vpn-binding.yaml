@@ -30,6 +30,14 @@ steps:
   key: vtep1|map_50200_Vlan200
   expect:
     exists: true
+- name: verify-arp-suppression
+  action: verify-config-db
+  devices:
+  - switch2
+  table: SUPPRESS_VLAN_NEIGH
+  key: Vlan200
+  expect:
+    exists: true
 - name: bind-ipvpn-vrf
   action: bind-ipvpn
   devices:
@@ -56,6 +64,14 @@ steps:
   - switch2
   table: VXLAN_TUNNEL_MAP
   key: vtep1|map_50200_Vlan200
+  expect:
+    exists: false
+- name: verify-arp-suppression-removed
+  action: verify-config-db
+  devices:
+  - switch2
+  table: SUPPRESS_VLAN_NEIGH
+  key: Vlan200
   expect:
     exists: false
 - name: unbind-ipvpn-vrf

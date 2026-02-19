@@ -119,6 +119,10 @@ func TestListSuiteStates(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 
+	// Point NEWTEST_SUITES_BASE at a temp directory so the suite-dir filter works.
+	suitesBase := filepath.Join(tmpDir, "suites")
+	t.Setenv("NEWTEST_SUITES_BASE", suitesBase)
+
 	// No suites yet
 	names, err := ListSuiteStates()
 	if err != nil {
@@ -128,8 +132,11 @@ func TestListSuiteStates(t *testing.T) {
 		t.Errorf("expected 0 suites, got %d", len(names))
 	}
 
-	// Create two suites
+	// Create two suites — both the state file and the matching suite directory.
 	for _, suite := range []string{"suite-a", "suite-b"} {
+		if err := os.MkdirAll(filepath.Join(suitesBase, suite), 0755); err != nil {
+			t.Fatalf("MkdirAll suite dir(%s): %v", suite, err)
+		}
 		state := &RunState{Suite: suite, Status: SuiteStatusComplete}
 		if err := SaveRunState(state); err != nil {
 			t.Fatalf("SaveRunState(%s): %v", suite, err)
