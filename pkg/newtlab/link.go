@@ -174,14 +174,14 @@ func AllocateLinks(
 			NetdevID:    fmt.Sprintf("eth%d", lc.A.NICIndex),
 			Interface:   lc.A.Interface,
 			ConnectAddr: aConnect,
-			MAC:         GenerateMAC(nodeA.Name, 0), // All NICs share system MAC
+			MAC:         dataNICMAC(nodeA, lc.A.NICIndex),
 		})
 		nodeZ.NICs = append(nodeZ.NICs, NICConfig{
 			Index:       lc.Z.NICIndex,
 			NetdevID:    fmt.Sprintf("eth%d", lc.Z.NICIndex),
 			Interface:   lc.Z.Interface,
 			ConnectAddr: zConnect,
-			MAC:         GenerateMAC(nodeZ.Name, 0), // All NICs share system MAC
+			MAC:         dataNICMAC(nodeZ, lc.Z.NICIndex),
 		})
 	}
 
@@ -365,6 +365,19 @@ func (w *BridgeWorker) run() {
 		w.connected.Store(false)
 		// Loop back to accept next pair (VM restart)
 	}
+}
+
+// dataNICMAC returns the MAC address to assign to a data NIC.
+//
+// SONiC requires all interfaces on a switch to share the same system MAC
+// (see RCA-032). Host VMs are Linux and require unique MACs per NIC to
+// avoid L2 flapping when multiple interfaces share a node (see RCA-028).
+func dataNICMAC(node *NodeConfig, nicIndex int) string {
+	if node.DeviceType == "host-vm" {
+		return GenerateMAC(node.Name, nicIndex)
+	}
+	// SONiC switch: all data NICs share the system MAC (same as index 0).
+	return GenerateMAC(node.Name, 0)
 }
 
 // splitLinkEndpoint splits a "device:interface" string.

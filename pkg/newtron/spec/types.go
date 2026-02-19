@@ -523,6 +523,7 @@ type TopologyInterface struct {
 	Link    string            `json:"link,omitempty"`    // "device:interface" (documentation/validation)
 	Service string            `json:"service"`           // service name from network.json
 	IP      string            `json:"ip,omitempty"`      // IP address (e.g., "10.1.1.1/30")
+	VRF     string            `json:"vrf,omitempty"`     // VRF name for non-service interfaces
 	Params  map[string]string `json:"params,omitempty"`  // service-specific params (e.g., peer_as)
 }
 

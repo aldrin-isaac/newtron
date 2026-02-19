@@ -63,7 +63,7 @@ steps:
     key: Ethernet1
     expect:
       fields:
-        oper_status: down
+        netdev_oper_status: down
       timeout: 15s
       poll_interval: 2s
 
@@ -92,7 +92,7 @@ steps:
     key: Ethernet1
     expect:
       fields:
-        oper_status: up
+        netdev_oper_status: up
       timeout: 15s
       poll_interval: 2s
 

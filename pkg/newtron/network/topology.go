@@ -173,6 +173,27 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		}
 	}
 
+	// Write INTERFACE base + IP entries for non-service interfaces with explicit IPs.
+	// Service interfaces get their INTERFACE entries via GenerateServiceEntries.
+	// Host-facing and VRF-bound interfaces need these entries for kernel L3 programming.
+	for intfName, ti := range topoDev.Interfaces {
+		if ti.Service != "" || ti.IP == "" {
+			continue
+		}
+		if !strings.HasPrefix(intfName, "Ethernet") {
+			continue
+		}
+		intfBase := map[string]string{}
+		if ti.VRF != "" {
+			intfBase["vrf_name"] = ti.VRF
+		}
+		cb.AddEntry("INTERFACE", intfName, intfBase)
+		cb.AddEntry("INTERFACE", fmt.Sprintf("%s|%s", intfName, ti.IP), map[string]string{})
+		if ti.VRF != "" {
+			cb.AddEntry("VRF", ti.VRF, map[string]string{})
+		}
+	}
+
 	// Determine if device needs EVPN infrastructure
 	hasEVPN := tp.deviceHasEVPN(topoDev, resolvedSpecs)
 
