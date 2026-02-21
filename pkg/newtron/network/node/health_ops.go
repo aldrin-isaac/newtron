@@ -6,29 +6,31 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // ============================================================================
-// Health Checks
+// Health Checks — operational state helpers
 // ============================================================================
+//
+// Config-presence checks (checkEVPN, checkPortChannels, checkInterfaces counting
+// admin-down) are deleted — they're subsumed by the topology-driven config intent
+// verification in topology.go's VerifyDeviceHealth.
+//
+// What remains here: BGP session state (STATE_DB + vtysh fallback) and interface
+// oper-status checks. These are called by VerifyDeviceHealth for operational state.
 
 // HealthCheckResult represents the result of a single health check.
 type HealthCheckResult struct {
-	Check   string `json:"check"`   // Check name (e.g., "bgp", "interfaces")
+	Check   string `json:"check"`   // Check name (e.g., "bgp", "interface-oper")
 	Status  string `json:"status"`  // "pass", "warn", "fail"
 	Message string `json:"message"` // Human-readable message
 }
 
-// RunHealthChecks runs health checks on the device.
-// If checkType is empty, all checks are run.
-//
-// Starts a fresh read-only episode by calling Refresh() to ensure health
-// checks (checkBGP, checkInterfaces, etc.) read current CONFIG_DB state.
-func (n *Node) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error) {
+// CheckBGPSessions checks that all configured BGP neighbors are Established.
+// Reads expected neighbors from CONFIG_DB, then checks STATE_DB (with vtysh fallback).
+func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error) {
 	if !n.IsConnected() {
-		return nil, util.ErrNotConnected
+		return nil, fmt.Errorf("device not connected")
 	}
 
 	// Start a fresh read-only episode
@@ -36,32 +38,12 @@ func (n *Node) RunHealthChecks(ctx context.Context, checkType string) ([]HealthC
 		return nil, fmt.Errorf("refresh: %w", err)
 	}
 
-	var results []HealthCheckResult
-
-	// Run checks based on type
-	if checkType == "" || checkType == "bgp" {
-		results = append(results, n.checkBGP()...)
-	}
-	if checkType == "" || checkType == "interfaces" {
-		results = append(results, n.checkInterfaces()...)
-	}
-	if checkType == "" || checkType == "evpn" {
-		results = append(results, n.checkEVPN()...)
-	}
-	if checkType == "" || checkType == "lag" {
-		results = append(results, n.checkPortChannels()...)
-	}
-
-	return results, nil
-}
-
-func (n *Node) checkBGP() []HealthCheckResult {
 	if n.configDB == nil {
-		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}
+		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}, nil
 	}
 
 	if len(n.configDB.BGPNeighbor) == 0 {
-		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}
+		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}, nil
 	}
 
 	// Build expected neighbor set from CONFIG_DB: vrf → []ip
@@ -76,11 +58,11 @@ func (n *Node) checkBGP() []HealthCheckResult {
 
 	// Try STATE_DB first (populated by bgpmon on hardware SONiC)
 	if results := n.checkBGPFromStateDB(expected); results != nil {
-		return results
+		return results, nil
 	}
 
 	// Fall back to vtysh (VPP and images without bgpmon)
-	return n.checkBGPFromVtysh(expected)
+	return n.checkBGPFromVtysh(expected), nil
 }
 
 // checkBGPFromStateDB checks BGP state via STATE_DB BGP_NEIGHBOR_TABLE.
@@ -191,85 +173,51 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 	return results
 }
 
-func (n *Node) checkInterfaces() []HealthCheckResult {
-	var results []HealthCheckResult
-
-	if n.configDB == nil {
-		return []HealthCheckResult{{Check: "interfaces", Status: "fail", Message: "Config not loaded"}}
+// CheckInterfaceOper reads STATE_DB PORT_TABLE and checks oper_status for
+// the specified interfaces. Returns one HealthCheckResult per interface.
+func (n *Node) CheckInterfaceOper(interfaces []string) []HealthCheckResult {
+	if !n.IsConnected() {
+		return []HealthCheckResult{{Check: "interface-oper", Status: "fail", Message: "device not connected"}}
 	}
 
-	total := len(n.configDB.Port)
-	adminDown := 0
-	for _, port := range n.configDB.Port {
-		if port.AdminStatus == "down" {
-			adminDown++
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return []HealthCheckResult{{Check: "interface-oper", Status: "fail", Message: "STATE_DB client not connected"}}
+	}
+
+	var results []HealthCheckResult
+	for _, intf := range interfaces {
+		entry, err := stateClient.GetEntry("PORT_TABLE", intf)
+		if err != nil {
+			results = append(results, HealthCheckResult{
+				Check:   "interface-oper",
+				Status:  "fail",
+				Message: fmt.Sprintf("%s: STATE_DB read error: %s", intf, err),
+			})
+			continue
 		}
-	}
-
-	if adminDown > 0 {
-		results = append(results, HealthCheckResult{
-			Check:   "interfaces",
-			Status:  "warn",
-			Message: fmt.Sprintf("%d of %d interfaces admin down", adminDown, total),
-		})
-	} else {
-		results = append(results, HealthCheckResult{
-			Check:   "interfaces",
-			Status:  "pass",
-			Message: fmt.Sprintf("All %d interfaces admin up", total),
-		})
-	}
-
-	return results
-}
-
-func (n *Node) checkEVPN() []HealthCheckResult {
-	var results []HealthCheckResult
-
-	if n.configDB == nil {
-		return []HealthCheckResult{{Check: "evpn", Status: "fail", Message: "Config not loaded"}}
-	}
-
-	if !n.VTEPExists() {
-		results = append(results, HealthCheckResult{
-			Check:   "evpn",
-			Status:  "warn",
-			Message: "No VTEP configured",
-		})
-	} else {
-		vniCount := len(n.configDB.VXLANTunnelMap)
-		results = append(results, HealthCheckResult{
-			Check:   "evpn",
-			Status:  "pass",
-			Message: fmt.Sprintf("VTEP configured with %d VNI mappings", vniCount),
-		})
-	}
-
-	return results
-}
-
-func (n *Node) checkPortChannels() []HealthCheckResult {
-	var results []HealthCheckResult
-
-	if n.configDB == nil {
-		return []HealthCheckResult{{Check: "lag", Status: "fail", Message: "Config not loaded"}}
-	}
-
-	lagCount := len(n.configDB.PortChannel)
-	if lagCount == 0 {
-		results = append(results, HealthCheckResult{
-			Check:   "lag",
-			Status:  "pass",
-			Message: "No PortChannels configured",
-		})
-	} else {
-		// Count members
-		memberCount := len(n.configDB.PortChannelMember)
-		results = append(results, HealthCheckResult{
-			Check:   "lag",
-			Status:  "pass",
-			Message: fmt.Sprintf("%d PortChannels configured with %d total members", lagCount, memberCount),
-		})
+		if entry == nil {
+			results = append(results, HealthCheckResult{
+				Check:   "interface-oper",
+				Status:  "warn",
+				Message: fmt.Sprintf("%s: not found in STATE_DB PORT_TABLE", intf),
+			})
+			continue
+		}
+		operStatus := entry["oper_status"]
+		if operStatus == "up" {
+			results = append(results, HealthCheckResult{
+				Check:   "interface-oper",
+				Status:  "pass",
+				Message: fmt.Sprintf("%s: oper-up", intf),
+			})
+		} else {
+			results = append(results, HealthCheckResult{
+				Check:   "interface-oper",
+				Status:  "fail",
+				Message: fmt.Sprintf("%s: oper-%s", intf, operStatus),
+			})
+		}
 	}
 
 	return results

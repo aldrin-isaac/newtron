@@ -2,13 +2,19 @@
 //
 // ProvisionDevice generates a complete CONFIG_DB offline and delivers it
 // atomically via node.CompositeOverwrite (no device interrogation needed).
+//
+// VerifyDeviceHealth generates the expected CONFIG_DB from the topology (same
+// as the provisioner), then compares against the live device. Operational state
+// checks (BGP sessions, interface oper-up) complement the config intent check.
 package network
 
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -494,5 +500,111 @@ func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, to
 			cb.AddEntry(entry.Table, entry.Key, entry.Fields)
 		}
 	}
+}
+
+// ============================================================================
+// Intent-based health verification
+// ============================================================================
+
+// HealthReport combines config intent verification with operational state checks.
+type HealthReport struct {
+	Device      string                     `json:"device"`
+	Status      string                     `json:"status"` // "pass", "warn", "fail"
+	ConfigCheck *device.VerificationResult `json:"config_check"`
+	OperChecks  []node.HealthCheckResult   `json:"oper_checks"`
+}
+
+// VerifyDeviceHealth generates expected CONFIG_DB entries from the topology,
+// compares them against the live device, and checks operational state.
+//
+// Steps:
+//  1. GenerateDeviceComposite → expected CONFIG_DB entries
+//  2. ToConfigChanges + VerifyChangeSet → config intent verification
+//  3. CheckBGPSessions → BGP operational state
+//  4. CheckInterfaceOper → wired interface oper-up
+//  5. Combine into HealthReport; overall status = worst of all checks
+func (tp *TopologyProvisioner) VerifyDeviceHealth(ctx context.Context, deviceName string) (*HealthReport, error) {
+	// Step 1: Generate expected CONFIG_DB entries from topology
+	composite, err := tp.GenerateDeviceComposite(deviceName)
+	if err != nil {
+		return nil, fmt.Errorf("generating expected config: %w", err)
+	}
+
+	// Get the connected node
+	dev, err := tp.network.GetNode(deviceName)
+	if err != nil {
+		return nil, fmt.Errorf("getting device: %w", err)
+	}
+
+	// Step 2: Convert composite to ConfigChanges and verify against live CONFIG_DB
+	configChanges := composite.ToConfigChanges()
+	configResult, err := dev.Underlying().VerifyChangeSet(ctx, configChanges)
+	if err != nil {
+		return nil, fmt.Errorf("verifying config intent: %w", err)
+	}
+
+	// Step 3: Check BGP operational state
+	bgpResults, err := dev.CheckBGPSessions(ctx)
+	if err != nil {
+		bgpResults = []node.HealthCheckResult{{
+			Check: "bgp", Status: "fail",
+			Message: fmt.Sprintf("BGP check error: %s", err),
+		}}
+	}
+
+	// Step 4: Check interface oper-up for wired interfaces
+	wiredInterfaces := tp.getWiredInterfaces(deviceName)
+	var intfResults []node.HealthCheckResult
+	if len(wiredInterfaces) > 0 {
+		intfResults = dev.CheckInterfaceOper(wiredInterfaces)
+	}
+
+	// Combine oper checks
+	var operChecks []node.HealthCheckResult
+	operChecks = append(operChecks, bgpResults...)
+	operChecks = append(operChecks, intfResults...)
+
+	// Step 5: Derive overall status (worst of config + oper)
+	report := &HealthReport{
+		Device:      deviceName,
+		ConfigCheck: configResult,
+		OperChecks:  operChecks,
+	}
+
+	report.Status = "pass"
+	if configResult.Failed > 0 {
+		report.Status = "fail"
+	}
+	for _, oc := range operChecks {
+		if oc.Status == "fail" {
+			report.Status = "fail"
+			break
+		}
+		if oc.Status == "warn" && report.Status == "pass" {
+			report.Status = "warn"
+		}
+	}
+
+	return report, nil
+}
+
+// getWiredInterfaces returns the sorted list of Ethernet interfaces that have
+// a link or service in the topology (i.e., interfaces that should be oper-up).
+func (tp *TopologyProvisioner) getWiredInterfaces(deviceName string) []string {
+	topoDev, err := tp.network.GetTopologyDevice(deviceName)
+	if err != nil {
+		return nil
+	}
+	var interfaces []string
+	for intfName, ti := range topoDev.Interfaces {
+		if !strings.HasPrefix(intfName, "Ethernet") {
+			continue
+		}
+		if ti.Service != "" || ti.Link != "" {
+			interfaces = append(interfaces, intfName)
+		}
+	}
+	sort.Strings(interfaces)
+	return interfaces
 }
 

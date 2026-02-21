@@ -631,9 +631,9 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	expectedState := step.Expect.State
 
 	return r.pollForDevices(ctx, step, func(dev *node.Node, name string) (bool, string, error) {
-		results, err := dev.RunHealthChecks(ctx, "bgp")
+		results, err := dev.CheckBGPSessions(ctx)
 		if err != nil {
-			return false, "transient health check error", nil
+			return false, "transient BGP check error", nil
 		}
 
 		for _, hc := range results {
@@ -666,32 +666,68 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type verifyHealthExecutor struct{}
 
 func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	provisioner, err := network.NewTopologyProvisioner(r.Network)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{
+			Status: StepStatusError, Message: fmt.Sprintf("creating provisioner: %s", err),
+		}}
+	}
+
 	return r.checkForDevices(step, func(dev *node.Node, name string) (StepStatus, string) {
-		results, err := dev.RunHealthChecks(ctx, "")
+		report, err := provisioner.VerifyDeviceHealth(ctx, name)
 		if err != nil {
 			return StepStatusError, fmt.Sprintf("health check error: %s", err)
 		}
-		passed, warned, failed := 0, 0, 0
-		var failMsgs []string
-		for _, hc := range results {
-			switch hc.Status {
+
+		// Build summary
+		configMsg := fmt.Sprintf("config: %d/%d entries verified",
+			report.ConfigCheck.Passed, report.ConfigCheck.Passed+report.ConfigCheck.Failed)
+		if report.ConfigCheck.Failed > 0 {
+			// Include first few errors for diagnostics
+			var errMsgs []string
+			limit := 5
+			if len(report.ConfigCheck.Errors) < limit {
+				limit = len(report.ConfigCheck.Errors)
+			}
+			for _, ve := range report.ConfigCheck.Errors[:limit] {
+				errMsgs = append(errMsgs, fmt.Sprintf("%s|%s.%s: expected=%q got=%q",
+					ve.Table, ve.Key, ve.Field, ve.Expected, ve.Actual))
+			}
+			if len(report.ConfigCheck.Errors) > 5 {
+				errMsgs = append(errMsgs, fmt.Sprintf("...and %d more", len(report.ConfigCheck.Errors)-5))
+			}
+			configMsg += " (" + strings.Join(errMsgs, "; ") + ")"
+		}
+
+		operPassed, operFailed, operWarn := 0, 0, 0
+		for _, oc := range report.OperChecks {
+			switch oc.Status {
 			case "pass":
-				passed++
+				operPassed++
 			case "warn":
-				warned++
+				operWarn++
 			default:
-				failed++
-				failMsgs = append(failMsgs, hc.Message)
+				operFailed++
 			}
 		}
-		if failed == 0 {
-			if warned > 0 {
-				return StepStatusPassed, fmt.Sprintf("overall ok (%d passed, %d warnings)", passed, warned)
-			}
-			return StepStatusPassed, fmt.Sprintf("overall ok (%d checks passed)", passed)
+		operMsg := fmt.Sprintf("oper: %d passed", operPassed)
+		if operFailed > 0 {
+			operMsg += fmt.Sprintf(", %d failed", operFailed)
 		}
-		return StepStatusFailed, fmt.Sprintf("overall failed (%d passed, %d failed): %s",
-			passed, failed, strings.Join(failMsgs, "; "))
+		if operWarn > 0 {
+			operMsg += fmt.Sprintf(", %d warnings", operWarn)
+		}
+
+		msg := configMsg + "; " + operMsg
+
+		switch report.Status {
+		case "pass":
+			return StepStatusPassed, msg
+		case "warn":
+			return StepStatusPassed, msg
+		default:
+			return StepStatusFailed, msg
+		}
 	})
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
@@ -116,6 +117,23 @@ func (cc *CompositeConfig) EntryCount() int {
 		count += len(keys)
 	}
 	return count
+}
+
+// ToConfigChanges converts the composite config to a slice of device.ConfigChange
+// (all as ChangeTypeAdd) for use with VerifyChangeSet.
+func (cc *CompositeConfig) ToConfigChanges() []device.ConfigChange {
+	var changes []device.ConfigChange
+	for table, keys := range cc.Tables {
+		for key, fields := range keys {
+			changes = append(changes, device.ConfigChange{
+				Table:  table,
+				Key:    key,
+				Type:   device.ChangeTypeAdd,
+				Fields: fields,
+			})
+		}
+	}
+	return changes
 }
 
 // ToTableChanges converts the composite config to a slice of sonic.TableChange

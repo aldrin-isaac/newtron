@@ -9,65 +9,100 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 var healthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Health check operations",
-	Long: `Run health checks on SONiC devices.
+	Long: `Run intent-based health checks on SONiC devices.
+
+Requires a loaded topology. Compares live CONFIG_DB against the topology-derived
+expected config (same entries the provisioner would write), then checks BGP
+session state and interface oper-up status.
 
 Requires -d (device) flag.
 
 Examples:
-  newtron -d leaf1-ny health check
-  newtron -d leaf1-ny health check --check bgp`,
+  newtron -d switch1 health check
+  newtron -d switch1 health check --json`,
 }
-
-var healthCheckName string
 
 var healthCheckCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Run health checks on the device",
+	Short: "Run intent-based health checks on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if app.deviceName == "" {
+			return fmt.Errorf("device required: use -d <device> flag")
+		}
+		if !app.net.HasTopology() {
+			return fmt.Errorf("no topology loaded — health checks require a topology to define expected state")
+		}
+
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+
+		provisioner, err := network.NewTopologyProvisioner(app.net)
+		if err != nil {
+			return fmt.Errorf("creating provisioner: %w", err)
+		}
+
+		// Connect the device (VerifyDeviceHealth needs it connected)
+		dev, err := app.net.ConnectNode(ctx, app.deviceName)
 		if err != nil {
 			return err
 		}
 		defer dev.Disconnect()
 
-		results, err := dev.RunHealthChecks(ctx, healthCheckName)
+		report, err := provisioner.VerifyDeviceHealth(ctx, app.deviceName)
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(results)
+			return json.NewEncoder(os.Stdout).Encode(report)
 		}
 
 		fmt.Printf("\nHealth Report for %s\n\n", bold(app.deviceName))
 
+		// Config intent section
+		cc := report.ConfigCheck
+		total := cc.Passed + cc.Failed
+		fmt.Printf("Config Intent: %s (%d/%d entries match)\n",
+			formatHealthStatus(configStatus(cc.Failed)), cc.Passed, total)
+		if cc.Failed > 0 {
+			t := cli.NewTable("TABLE", "KEY", "FIELD", "EXPECTED", "ACTUAL")
+			limit := 20
+			if len(cc.Errors) < limit {
+				limit = len(cc.Errors)
+			}
+			for _, ve := range cc.Errors[:limit] {
+				t.Row(ve.Table, ve.Key, ve.Field, ve.Expected, ve.Actual)
+			}
+			t.Flush()
+			if len(cc.Errors) > 20 {
+				fmt.Printf("  ... and %d more errors\n", len(cc.Errors)-20)
+			}
+		}
+
+		// Operational checks section
+		fmt.Println()
 		t := cli.NewTable("CHECK", "STATUS", "MESSAGE")
-		for _, r := range results {
-			t.Row(r.Check, formatHealthStatus(r.Status), r.Message)
+		for _, oc := range report.OperChecks {
+			t.Row(oc.Check, formatHealthStatus(oc.Status), oc.Message)
 		}
 		t.Flush()
 
-		// Overall status
-		overall := "pass"
-		for _, r := range results {
-			if r.Status == "fail" {
-				overall = "fail"
-				break
-			}
-			if r.Status == "warn" {
-				overall = "warn"
-			}
-		}
-		fmt.Printf("\nOverall: %s\n", formatHealthStatus(overall))
+		fmt.Printf("\nOverall: %s\n", formatHealthStatus(report.Status))
 
 		return nil
 	},
+}
+
+func configStatus(failed int) string {
+	if failed == 0 {
+		return "pass"
+	}
+	return "fail"
 }
 
 func formatHealthStatus(status string) string {
@@ -84,7 +119,5 @@ func formatHealthStatus(status string) string {
 }
 
 func init() {
-	healthCheckCmd.Flags().StringVar(&healthCheckName, "check", "", "Run specific health check (bgp, interfaces, evpn, lag)")
-
 	healthCmd.AddCommand(healthCheckCmd)
 }
