@@ -1057,19 +1057,19 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// create-vlan
 		{
 			name:    "create-vlan valid",
-			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
 			wantErr: false,
 		},
 		{
 			name:    "create-vlan missing vlan_id",
 			step:    Step{Name: "s", Action: ActionCreateVLAN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vlan_id is required",
+			wantErr: true, errMsg: "vlan_id is required",
 		},
 		// add-vlan-member
 		{
 			name:    "add-vlan-member missing interface",
-			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
-			wantErr: true, errMsg: "params.interface is required",
+			step:    Step{Name: "s", Action: ActionAddVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
+			wantErr: true, errMsg: "interface is required",
 		},
 		// create-vrf
 		{
@@ -1160,29 +1160,29 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// bind-macvpn
 		{
 			name:    "bind-macvpn valid",
-			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "macvpn": "office-lan"}},
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100, Params: map[string]any{"macvpn": "office-lan"}},
 			wantErr: false,
 		},
 		{
 			name:    "bind-macvpn missing vlan_id",
 			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"macvpn": "office-lan"}},
-			wantErr: true, errMsg: "params.vlan_id is required",
+			wantErr: true, errMsg: "vlan_id is required",
 		},
 		{
 			name:    "bind-macvpn missing macvpn",
-			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionBindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
 			wantErr: true, errMsg: "params.macvpn is required",
 		},
 		// unbind-macvpn
 		{
 			name:    "unbind-macvpn valid",
-			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
 			wantErr: false,
 		},
 		{
 			name:    "unbind-macvpn missing vlan_id",
 			step:    Step{Name: "s", Action: ActionUnbindMACVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vlan_id is required",
+			wantErr: true, errMsg: "vlan_id is required",
 		},
 		// add-static-route
 		{
@@ -1224,18 +1224,18 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// remove-vlan-member
 		{
 			name:    "remove-vlan-member valid",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100, "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100, Interface: "Ethernet0"},
 			wantErr: false,
 		},
 		{
 			name:    "remove-vlan-member missing vlan_id",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
-			wantErr: true, errMsg: "params.vlan_id is required",
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: true, errMsg: "vlan_id is required",
 		},
 		{
 			name:    "remove-vlan-member missing interface",
-			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
-			wantErr: true, errMsg: "params.interface is required",
+			step:    Step{Name: "s", Action: ActionRemoveVLANMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
+			wantErr: true, errMsg: "interface is required",
 		},
 		// apply-qos
 		{
@@ -1267,7 +1267,7 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// configure-svi
 		{
 			name:    "configure-svi valid",
-			step:    Step{Name: "s", Action: ActionConfigureSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionConfigureSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
 			wantErr: false,
 		},
 		// bgp-add-neighbor
@@ -1317,13 +1317,13 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// remove-svi
 		{
 			name:    "remove-svi valid",
-			step:    Step{Name: "s", Action: ActionRemoveSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			step:    Step{Name: "s", Action: ActionRemoveSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, VLANID: 100},
 			wantErr: false,
 		},
 		{
 			name:    "remove-svi missing vlan_id",
 			step:    Step{Name: "s", Action: ActionRemoveSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vlan_id is required",
+			wantErr: true, errMsg: "vlan_id is required",
 		},
 		// remove-ip
 		{

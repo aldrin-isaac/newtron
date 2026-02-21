@@ -122,10 +122,10 @@ ActionCleanup:           {needsDevices: true},
 	ActionRestartService:     {needsDevices: true, fields: []string{"service"}},
 	ActionRefreshService:     {needsDevices: true, fields: []string{"interface"}},
 	ActionSetInterface:       {needsDevices: true, fields: []string{"interface"}, params: []string{"property"}},
-	ActionCreateVLAN:         {needsDevices: true, params: []string{"vlan_id"}},
-	ActionDeleteVLAN:         {needsDevices: true, params: []string{"vlan_id"}},
-	ActionAddVLANMember:      {needsDevices: true, params: []string{"vlan_id", "interface"}},
-	ActionRemoveVLANMember:   {needsDevices: true, params: []string{"vlan_id", "interface"}},
+	ActionCreateVLAN:         {needsDevices: true, fields: []string{"vlan_id"}},
+	ActionDeleteVLAN:         {needsDevices: true, fields: []string{"vlan_id"}},
+	ActionAddVLANMember:      {needsDevices: true, fields: []string{"vlan_id", "interface"}},
+	ActionRemoveVLANMember:   {needsDevices: true, fields: []string{"vlan_id", "interface"}},
 	ActionCreateVRF:          {needsDevices: true, params: []string{"vrf"}},
 	ActionDeleteVRF:          {needsDevices: true, params: []string{"vrf"}},
 	ActionSetupEVPN:          {needsDevices: true, params: []string{"source_ip"}},
@@ -133,13 +133,13 @@ ActionCleanup:           {needsDevices: true},
 	ActionRemoveVRFInterface: {needsDevices: true, params: []string{"vrf", "interface"}},
 	ActionBindIPVPN:          {needsDevices: true, params: []string{"vrf", "ipvpn"}},
 	ActionUnbindIPVPN:        {needsDevices: true, params: []string{"vrf"}},
-	ActionBindMACVPN:         {needsDevices: true, params: []string{"vlan_id", "macvpn"}},
-	ActionUnbindMACVPN:       {needsDevices: true, params: []string{"vlan_id"}},
+	ActionBindMACVPN:         {needsDevices: true, fields: []string{"vlan_id"}, params: []string{"macvpn"}},
+	ActionUnbindMACVPN:       {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionAddStaticRoute:     {needsDevices: true, params: []string{"vrf", "prefix", "next_hop"}},
 	ActionRemoveStaticRoute:  {needsDevices: true, params: []string{"vrf", "prefix"}},
 	ActionApplyQoS:           {needsDevices: true, params: []string{"interface", "qos_policy"}},
 	ActionRemoveQoS:          {needsDevices: true, params: []string{"interface"}},
-	ActionConfigureSVI:       {needsDevices: true, params: []string{"vlan_id"}},
+	ActionConfigureSVI:       {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionBGPAddNeighbor:     {needsDevices: true, params: []string{"remote_asn"}},
 	ActionBGPRemoveNeighbor:  {needsDevices: true, params: []string{"neighbor_ip"}},
 
@@ -153,7 +153,7 @@ ActionCleanup:           {needsDevices: true},
 	ActionDeleteACLTable: {needsDevices: true, params: []string{"name"}},
 	ActionBindACL:        {needsDevices: true, fields: []string{"interface"}, params: []string{"name", "direction"}},
 	ActionUnbindACL:      {needsDevices: true, fields: []string{"interface"}, params: []string{"name"}},
-	ActionRemoveSVI:      {needsDevices: true, params: []string{"vlan_id"}},
+	ActionRemoveSVI:      {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
 	ActionTeardownEVPN:     {needsDevices: true},
 	ActionRemoveBGPGlobals: {needsDevices: true},
@@ -170,6 +170,12 @@ var stepFieldGetter = map[string]func(*Step) string{
 	"target":    func(s *Step) string { return s.Target },
 	"configlet": func(s *Step) string { return s.Configlet },
 	"command":   func(s *Step) string { return s.Command },
+	"vlan_id": func(s *Step) string {
+		if s.VLANID == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%d", s.VLANID)
+	},
 }
 
 // validateStepFields checks required fields per action type using the

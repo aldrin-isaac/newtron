@@ -1779,7 +1779,7 @@ func (e *configureBGPExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type removeSVIExecutor struct{}
 
 func (e *removeSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vlanID := intParam(step.Params, "vlan_id")
+	vlanID := step.VLANID
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
 			return dev.RemoveSVI(ctx, vlanID)
