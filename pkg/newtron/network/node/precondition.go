@@ -60,13 +60,13 @@ func (p *PreconditionChecker) RequireInterfaceExists(name string) *PreconditionC
 	return p
 }
 
-// RequireInterfaceNotLAGMember checks that an interface is not a LAG member
-func (p *PreconditionChecker) RequireInterfaceNotLAGMember(name string) *PreconditionChecker {
-	if p.node.InterfaceIsLAGMember(name) {
-		lag := p.node.GetInterfaceLAG(name)
+// RequireInterfaceNotPortChannelMember checks that an interface is not a PortChannel member
+func (p *PreconditionChecker) RequireInterfaceNotPortChannelMember(name string) *PreconditionChecker {
+	if p.node.InterfaceIsPortChannelMember(name) {
+		pc := p.node.GetInterfacePortChannel(name)
 		p.errors = append(p.errors, util.NewPreconditionError(
-			p.operation, p.resource, "interface must not be a LAG member",
-			fmt.Sprintf("interface '%s' is member of %s", name, lag)))
+			p.operation, p.resource, "interface must not be a PortChannel member",
+			fmt.Sprintf("interface '%s' is member of %s", name, pc)))
 	}
 	return p
 }

@@ -1,0 +1,31 @@
+name: device-init
+description: >
+  Minimal device initialization: write system MAC to DEVICE_METADATA (needed for
+  vlanmgrd/vxlanmgrd to start), then start SWSS daemons. No BGP, no overlay config.
+topology: 2node
+requires: [boot-ssh]
+
+steps:
+  # Write system MAC from factory config_db.json into DEVICE_METADATA so that
+  # vlanmgrd and vxlanmgrd can start (they crash at boot if mac is missing, RCA-035).
+  - name: write-device-mac
+    action: ssh-command
+    devices: [switch2]
+    command: >-
+      MAC=$(python3 -c 'import json; d=json.load(open("/etc/sonic/config_db.json")); print(d.get("DEVICE_METADATA",{}).get("localhost",{}).get("mac",""))' 2>/dev/null);
+      [ -n "$MAC" ] && redis-cli -n 4 HSET 'DEVICE_METADATA|localhost' mac "$MAC" || true
+
+  # Start vlanmgrd/vxlanmgrd if in FATAL state (crash without mac, now fixed above).
+  - name: start-swss-daemons
+    action: ssh-command
+    devices: [switch2]
+    command: "sudo docker exec swss supervisorctl start vlanmgrd vxlanmgrd 2>&1 || true"
+
+  # Verify DEVICE_METADATA has mac (indicates device-init succeeded).
+  - name: verify-device-mac
+    action: verify-config-db
+    devices: [switch2]
+    table: DEVICE_METADATA
+    key: localhost
+    expect:
+      exists: true

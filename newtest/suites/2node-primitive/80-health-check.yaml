@@ -1,0 +1,19 @@
+name: health-check
+description: |
+  Run device health checks on both switches after full EVPN IRB setup.
+  Validates that all subsystems (orchagent, syncd, BGP, etc.) report healthy.
+topology: 2node
+requires: [evpn-irb]
+
+steps:
+  - name: verify-health-switch1
+    action: verify-health
+    devices: [switch1]
+    expect:
+      overall: pass
+
+  - name: verify-health-switch2
+    action: verify-health
+    devices: [switch2]
+    expect:
+      overall: pass

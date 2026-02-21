@@ -8,6 +8,21 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
+// InterfaceExists checks if an interface exists.
+// Accepts both short (Eth0) and full (Ethernet0) interface names.
+func (n *Node) InterfaceExists(name string) bool {
+	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
+}
+
+// interfaceIPConfig returns CompositeEntry for configuring an IP on an interface.
+// Creates the INTERFACE base entry + IP sub-entry.
+func interfaceIPConfig(intfName, ipAddr string) []CompositeEntry {
+	return []CompositeEntry{
+		{Table: "INTERFACE", Key: intfName, Fields: map[string]string{}},
+		{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}},
+	}
+}
+
 // ============================================================================
 // Interface Property Operations
 // ============================================================================
@@ -22,8 +37,8 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	if !util.IsValidIPv4CIDR(ipAddr) {
 		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
 	}
-	if i.IsLAGMember() {
-		return nil, fmt.Errorf("cannot configure IP on LAG member")
+	if i.IsPortChannelMember() {
+		return nil, fmt.Errorf("cannot configure IP on PortChannel member")
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.set-ip")
@@ -81,8 +96,8 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 	if vrfName != "" && vrfName != "default" && !n.VRFExists(vrfName) {
 		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
 	}
-	if i.IsLAGMember() {
-		return nil, fmt.Errorf("cannot bind LAG member to VRF")
+	if i.IsPortChannelMember() {
+		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.set-vrf")
@@ -150,8 +165,8 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 	if err := n.precondition("set-property", i.name).Result(); err != nil {
 		return nil, err
 	}
-	if i.IsLAGMember() {
-		return nil, fmt.Errorf("cannot configure LAG member directly - configure the parent LAG")
+	if i.IsPortChannelMember() {
+		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.set")

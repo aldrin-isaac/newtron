@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -299,4 +300,110 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*
 
 	util.WithDevice(n.name).Infof("Removed static route %s (VRF %s)", prefix, vrfName)
 	return cs, nil
+}
+
+// ============================================================================
+// VRF Data Types and Queries
+// ============================================================================
+
+// VRFInfo represents VRF data assembled from config_db for operations.
+type VRFInfo struct {
+	Name       string
+	L3VNI      int
+	Interfaces []string
+}
+
+// VRFExists checks if a VRF exists.
+func (n *Node) VRFExists(name string) bool { return n.configDB.HasVRF(name) }
+
+// GetVRF retrieves VRF information from config_db.
+func (n *Node) GetVRF(name string) (*VRFInfo, error) {
+	if n.configDB == nil {
+		return nil, util.ErrNotConnected
+	}
+
+	vrfEntry, ok := n.configDB.VRF[name]
+	if !ok {
+		return nil, fmt.Errorf("VRF %s not found", name)
+	}
+
+	info := &VRFInfo{Name: name}
+
+	// Parse L3VNI
+	if vrfEntry.VNI != "" {
+		fmt.Sscanf(vrfEntry.VNI, "%d", &info.L3VNI)
+	}
+
+	// Find interfaces bound to this VRF from INTERFACE table
+	seen := make(map[string]bool)
+	for key, intf := range n.configDB.Interface {
+		// Key could be "Ethernet0" or "Ethernet0|10.1.1.1/24"
+		parts := splitConfigDBKey(key)
+		intfName := parts[0]
+		if intf.VRFName == name && !seen[intfName] {
+			seen[intfName] = true
+			info.Interfaces = append(info.Interfaces, intfName)
+		}
+	}
+
+	// Also check VLAN_INTERFACE for SVIs in this VRF
+	for key := range n.configDB.VLANInterface {
+		parts := splitConfigDBKey(key)
+		vlanName := parts[0]
+		// VLANInterface value contains vrf_name
+		if vals, ok := n.configDB.VLANInterface[vlanName]; ok {
+			if vals["vrf_name"] == name && !seen[vlanName] {
+				seen[vlanName] = true
+				info.Interfaces = append(info.Interfaces, vlanName)
+			}
+		}
+	}
+
+	return info, nil
+}
+
+// ListVRFs returns all VRF names on this device.
+func (n *Node) ListVRFs() []string {
+	if n.configDB == nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(n.configDB.VRF))
+	for name := range n.configDB.VRF {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ============================================================================
+// Route and Neighbor Observations (VRF-scoped)
+// ============================================================================
+
+// GetRoute reads a route from APP_DB (Redis DB 0).
+// Returns nil RouteEntry (not error) if the prefix is not present.
+// Single-shot read — does not poll or retry.
+func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !n.connected {
+		return nil, util.ErrNotConnected
+	}
+	return n.conn.GetRoute(ctx, vrf, prefix)
+}
+
+// GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
+// object chain. Returns nil RouteEntry (not error) if not programmed in ASIC.
+// Single-shot read — does not poll or retry.
+func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+	if !n.connected {
+		return nil, util.ErrNotConnected
+	}
+	return n.conn.GetRouteASIC(ctx, vrf, prefix)
+}
+
+// GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB.
+// Returns nil (not error) if the entry does not exist.
+func (n *Node) GetNeighbor(ctx context.Context, iface, ip string) (*device.NeighEntry, error) {
+	if !n.connected {
+		return nil, util.ErrNotConnected
+	}
+	return n.conn.GetNeighbor(ctx, iface, ip)
 }

@@ -17,9 +17,10 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	var (
-		dir        string
-		jsonOutput bool
+		dir         string
+		jsonOutput  bool
 		suiteFilter string
+		detail      bool
 	)
 
 	cmd := &cobra.Command{
@@ -30,13 +31,14 @@ Without --dir or --suite, shows all suites with state.
 
   newtest status                       # all suites
   newtest status --suite 2node         # suites whose name contains "2node"
+  newtest status --detail              # show per-step timing and status
   newtest status --dir /path/to/suite  # specific suite by directory
   newtest status --json                # machine-readable output`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Specific suite by directory path.
 			if cmd.Flags().Changed("dir") {
 				suite := newtest.SuiteName(dir)
-				return printSuiteStatus(suite, jsonOutput)
+				return printSuiteStatus(suite, jsonOutput, detail)
 			}
 
 			// All suites (optionally filtered).
@@ -85,7 +87,7 @@ Without --dir or --suite, shows all suites with state.
 				if i > 0 {
 					fmt.Println()
 				}
-				if err := printSuiteStatus(suite, false); err != nil {
+				if err := printSuiteStatus(suite, false, detail); err != nil {
 					fmt.Printf("  error: %v\n", err)
 				}
 			}
@@ -96,11 +98,12 @@ Without --dir or --suite, shows all suites with state.
 	cmd.Flags().StringVar(&dir, "dir", "", "suite directory")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
 	cmd.Flags().StringVarP(&suiteFilter, "suite", "s", "", "show only suites whose name contains this string")
+	cmd.Flags().BoolVarP(&detail, "detail", "d", false, "show per-step timing and status")
 
 	return cmd
 }
 
-func printSuiteStatus(suite string, jsonMode bool) error {
+func printSuiteStatus(suite string, jsonMode, detail bool) error {
 	state, err := newtest.LoadRunState(suite)
 	if err != nil {
 		return err
@@ -158,7 +161,7 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 	if len(state.Scenarios) > 0 {
 		fmt.Println()
 
-		t := cli.NewTable("#", "SCENARIO", "STATUS", "REQUIRES", "DURATION").WithPrefix("  ")
+		t := cli.NewTable("#", "SCENARIO", "STEPS", "STATUS", "REQUIRES", "DURATION").WithPrefix("  ")
 
 		passed, failed, errored, running := 0, 0, 0, 0
 		for i, sc := range state.Scenarios {
@@ -169,6 +172,7 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 
 			duration := sc.Duration
 			status := colorScenarioStatus(newtest.StepStatus(sc.Status))
+			steps := fmt.Sprintf("%d", sc.TotalSteps)
 
 			// Show step progress for running scenarios
 			if sc.Status == "running" && sc.CurrentStep != "" {
@@ -180,7 +184,7 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 				duration = sc.SkipReason
 			}
 
-			t.Row(fmt.Sprintf("%d", i+1), sc.Name, status, requires, duration)
+			t.Row(fmt.Sprintf("%d", i+1), sc.Name, steps, status, requires, duration)
 
 			switch newtest.StepStatus(sc.Status) {
 			case newtest.StepStatusPassed:
@@ -196,6 +200,11 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 			}
 		}
 		t.Flush()
+
+		// Detail view: expand each scenario to show per-step results
+		if detail {
+			printDetailView(state)
+		}
 
 		// Summary line
 		fmt.Printf("\n  progress: %d/%d passed", passed, len(state.Scenarios))
@@ -213,6 +222,28 @@ func printSuiteStatus(suite string, jsonMode bool) error {
 	}
 
 	return nil
+}
+
+// printDetailView prints per-step results for each scenario that has them.
+func printDetailView(state *newtest.RunState) {
+	for _, sc := range state.Scenarios {
+		if len(sc.Steps) == 0 {
+			continue
+		}
+
+		fmt.Printf("\n  %s:\n", sc.Name)
+		t := cli.NewTable("#", "STEP", "ACTION", "STATUS", "DURATION", "MESSAGE").WithPrefix("    ")
+
+		for i, step := range sc.Steps {
+			status := colorScenarioStatus(newtest.StepStatus(step.Status))
+			msg := step.Message
+			if len(msg) > 60 {
+				msg = msg[:57] + "..."
+			}
+			t.Row(fmt.Sprintf("%d", i+1), step.Name, step.Action, status, step.Duration, msg)
+		}
+		t.Flush()
+	}
 }
 
 func checkTopologyStatus(topology string) string {

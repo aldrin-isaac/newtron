@@ -43,3 +43,12 @@ type VerificationError struct {
 	Expected string
 	Actual   string // "" if missing
 }
+
+// NeighEntry represents a neighbor (ARP/NDP) entry read from a device.
+// Returned by Node.GetNeighbor (STATE_DB NEIGH_TABLE).
+type NeighEntry struct {
+	IP        string // "10.20.0.1"
+	Interface string // "Ethernet1", "Vlan100"
+	MAC       string // "aa:bb:cc:dd:ee:ff"
+	Family    string // "IPv4", "IPv6"
+}

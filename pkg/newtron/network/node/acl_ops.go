@@ -20,6 +20,23 @@ var ProtoMap = map[string]int{
 	"vrrp": 112,
 }
 
+// ACLTableExists checks if an ACL table exists.
+func (n *Node) ACLTableExists(name string) bool { return n.configDB.HasACLTable(name) }
+
+// GetOrphanedACLs returns ACL tables that have no interfaces bound.
+func (n *Node) GetOrphanedACLs() []string {
+	if n.configDB == nil {
+		return nil
+	}
+	var orphans []string
+	for name, acl := range n.configDB.ACLTable {
+		if acl.Ports == "" {
+			orphans = append(orphans, name)
+		}
+	}
+	return orphans
+}
+
 // ============================================================================
 // ACL Config Functions (pure, no Node state)
 // ============================================================================

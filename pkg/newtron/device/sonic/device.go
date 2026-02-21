@@ -346,6 +346,22 @@ func (d *Device) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.
 	return d.asicClient.GetRouteASIC(vrf, prefix, d.ConfigDB)
 }
 
+// GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB NEIGH_TABLE.
+// Returns nil (not error) if the entry does not exist.
+// Single-shot read — does not poll or retry.
+func (d *Device) GetNeighbor(ctx context.Context, iface, ip string) (*device.NeighEntry, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if !d.connected {
+		return nil, fmt.Errorf("device not connected")
+	}
+	if d.stateClient == nil {
+		return nil, fmt.Errorf("STATE_DB client not connected on %s", d.Name)
+	}
+	return d.stateClient.GetNeighbor(iface, ip)
+}
+
 // VerifyChangeSet re-reads CONFIG_DB via a fresh connection and compares against
 // the ChangeSet to confirm that writes were persisted.
 //

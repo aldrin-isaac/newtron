@@ -522,30 +522,30 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 }
 
 // ============================================================================
-// Interface LAG Membership Tests
+// Interface PortChannel Membership Tests
 // ============================================================================
 
-func TestInterface_LAGMembership(t *testing.T) {
+func TestInterface_PortChannelMembership(t *testing.T) {
 	t.Run("is member", func(t *testing.T) {
 		intf := &Interface{
-			name:      "Ethernet0",
-			lagMember: "PortChannel100",
+			name:     "Ethernet0",
+			pcParent: "PortChannel100",
 		}
-		if !intf.IsLAGMember() {
-			t.Error("IsLAGMember() should be true")
+		if !intf.IsPortChannelMember() {
+			t.Error("IsPortChannelMember() should be true")
 		}
-		if intf.LAGParent() != "PortChannel100" {
-			t.Errorf("LAGParent() = %q, want %q", intf.LAGParent(), "PortChannel100")
+		if intf.PortChannelParent() != "PortChannel100" {
+			t.Errorf("PortChannelParent() = %q, want %q", intf.PortChannelParent(), "PortChannel100")
 		}
 	})
 
 	t.Run("not member", func(t *testing.T) {
 		intf := &Interface{name: "Ethernet0"}
-		if intf.IsLAGMember() {
-			t.Error("IsLAGMember() should be false")
+		if intf.IsPortChannelMember() {
+			t.Error("IsPortChannelMember() should be false")
 		}
-		if intf.LAGParent() != "" {
-			t.Errorf("LAGParent() = %q, want empty", intf.LAGParent())
+		if intf.PortChannelParent() != "" {
+			t.Errorf("PortChannelParent() = %q, want empty", intf.PortChannelParent())
 		}
 	})
 }
@@ -639,16 +639,16 @@ func TestInterface_String(t *testing.T) {
 		}
 	})
 
-	t.Run("LAG member", func(t *testing.T) {
+	t.Run("PortChannel member", func(t *testing.T) {
 		intf := &Interface{
 			name:        "Ethernet0",
 			adminStatus: "up",
 			operStatus:  "up",
-			lagMember:   "PortChannel100",
+			pcParent:    "PortChannel100",
 		}
 		str := intf.String()
 		if !strings.Contains(str, "[member of: PortChannel100]") {
-			t.Error("String should contain LAG membership info")
+			t.Error("String should contain PortChannel membership info")
 		}
 	})
 

@@ -1,0 +1,15 @@
+{
+    "description": "Patch frrcfgd.py with VRF-VNI bootstrap loop for EVPN L3VPN support",
+    "pre_commands": [
+        "for i in $(seq 1 60); do docker ps 2>/dev/null | grep -q ' bgp$' && break; sleep 5; done",
+        "for i in $(seq 1 60); do docker exec bgp supervisorctl status frrcfgd 2>&1 | grep -q RUNNING && break; sleep 3; done"
+    ],
+    "files": [
+        { "template": "frrcfgd.py.tmpl", "dest": "/tmp/frrcfgd_patched.py" }
+    ],
+    "post_commands": [
+        "docker cp /tmp/frrcfgd_patched.py bgp:/usr/local/lib/python3.11/dist-packages/frrcfgd/frrcfgd.py",
+        "docker exec bgp find /usr/local/lib/python3.11/dist-packages/frrcfgd/__pycache__ -name '*.pyc' -delete 2>/dev/null || true",
+        "for i in $(seq 1 5); do docker exec bgp supervisorctl restart frrcfgd && break; sleep 3; done"
+    ]
+}

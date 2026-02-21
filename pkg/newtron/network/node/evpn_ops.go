@@ -26,6 +26,24 @@ func BGPEVPNVNIKey(vrfName string, vni int) string {
 // EVPN Operations — Pure config generators
 // ============================================================================
 
+// VTEPExists checks if VTEP is configured.
+func (n *Node) VTEPExists() bool { return n.configDB.HasVTEP() }
+
+// VTEPSourceIP returns the VTEP source IP (from loopback).
+func (n *Node) VTEPSourceIP() string {
+	if n.configDB == nil {
+		return n.resolved.LoopbackIP
+	}
+	// Check if VTEP is configured
+	for _, vtep := range n.configDB.VXLANTunnel {
+		if vtep.SrcIP != "" {
+			return vtep.SrcIP
+		}
+	}
+	// Fall back to resolved loopback IP
+	return n.resolved.LoopbackIP
+}
+
 // VTEPConfig returns the VXLAN_TUNNEL + VXLAN_EVPN_NVO entries for a VTEP.
 func VTEPConfig(sourceIP string) []CompositeEntry {
 	return []CompositeEntry{
@@ -161,22 +179,28 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 			if rrIP == resolved.LoopbackIP {
 				continue
 			}
-			// Skip if neighbor already exists
-			if n.BGPNeighborExists(rrIP) {
-				continue
-			}
 
 			// Use peer's ASN for eBGP overlay (all-eBGP design; docs/rca/026-bgp-all-ebgp-design.md).
 			peerASN := resolved.BGPNeighborASNs[rrIP]
 			if peerASN == 0 {
 				return nil, fmt.Errorf("no ASN found for EVPN peer %s", rrIP)
 			}
-			for _, e := range BGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
-				EBGPMultihop: true,
-				ActivateIPv4: true,
-				ActivateEVPN: true,
-			}) {
-				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+
+			if n.BGPNeighborExists(rrIP) {
+				// Neighbor exists (e.g., provisioner created it without EVPN AF).
+				// Ensure the l2vpn_evpn AF entry is present — ChangeAdd is
+				// idempotent so this is safe even if it already exists.
+				cs.Add("BGP_NEIGHBOR_AF",
+					BGPNeighborAFKey("default", rrIP, "l2vpn_evpn"),
+					ChangeAdd, nil, map[string]string{"admin_status": "true"})
+			} else {
+				for _, e := range BGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
+					EBGPMultihop: true,
+					ActivateIPv4: true,
+					ActivateEVPN: true,
+				}) {
+					cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+				}
 			}
 		}
 	}

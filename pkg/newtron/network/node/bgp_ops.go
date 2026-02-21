@@ -134,15 +134,6 @@ func BGPNeighborDeleteConfig(neighborIP string) []CompositeEntry {
 	return entries
 }
 
-// interfaceIPConfig returns CompositeEntry for configuring an IP on an interface.
-// Creates the INTERFACE base entry + IP sub-entry.
-func interfaceIPConfig(intfName, ipAddr string) []CompositeEntry {
-	return []CompositeEntry{
-		{Table: "INTERFACE", Key: intfName, Fields: map[string]string{}},
-		{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}},
-	}
-}
-
 // BGPGlobalsConfig returns CompositeEntry for BGP_GLOBALS.
 func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []CompositeEntry {
 	fields := map[string]string{
@@ -188,6 +179,17 @@ func RouteRedistributeConfig(vrf, protocol, af string) []CompositeEntry {
 // Used by callers that need to modify an existing AF entry (e.g. adding route-maps).
 func BGPNeighborAFKey(vrf, neighborIP, af string) string {
 	return fmt.Sprintf("%s|%s|%s", vrf, neighborIP, af)
+}
+
+// BGPConfigured checks if BGP is configured.
+// Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
+// DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
+func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
+
+// BGPNeighborExists checks if a BGP neighbor exists.
+// Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
+func (n *Node) BGPNeighborExists(neighborIP string) bool {
+	return n.configDB.HasBGPNeighbor(fmt.Sprintf("default|%s", neighborIP))
 }
 
 // ============================================================================

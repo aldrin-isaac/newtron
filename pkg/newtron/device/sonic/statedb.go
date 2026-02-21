@@ -245,6 +245,26 @@ func (c *StateDBClient) GetBGPNeighborState(vrf, neighbor string) (*BGPNeighborS
 	}, nil
 }
 
+// GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB NEIGH_TABLE.
+// The key format is "NEIGH_TABLE|<interface>|<ip>" with pipe separators.
+// Returns nil (not error) if the entry does not exist.
+func (c *StateDBClient) GetNeighbor(iface, ip string) (*device.NeighEntry, error) {
+	key := fmt.Sprintf("NEIGH_TABLE|%s|%s", iface, ip)
+	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	return &device.NeighEntry{
+		IP:        ip,
+		Interface: iface,
+		MAC:       vals["neigh"],
+		Family:    vals["family"],
+	}, nil
+}
+
 // ============================================================================
 // Distributed Locking — device-lld §2.3
 // ============================================================================

@@ -1,0 +1,39 @@
+name: static-route
+description: |
+  Self-contained static route lifecycle: add a static route to Vrf_local,
+  verify CONFIG_DB entry, then remove it and verify removal.
+topology: 2node
+requires: [l3-routing]
+
+steps:
+  - name: add-static-route
+    action: add-static-route
+    devices: [switch2]
+    params:
+      vrf: Vrf_local
+      prefix: "10.99.0.0/24"
+      next_hop: "10.20.1.0"
+
+  - name: verify-static-route-added
+    action: verify-config-db
+    devices: [switch2]
+    table: STATIC_ROUTE
+    key: "Vrf_local|10.99.0.0/24"
+    expect:
+      fields:
+        nexthop: "10.20.1.0"
+
+  - name: remove-static-route
+    action: remove-static-route
+    devices: [switch2]
+    params:
+      vrf: Vrf_local
+      prefix: "10.99.0.0/24"
+
+  - name: verify-static-route-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: STATIC_ROUTE
+    key: "Vrf_local|10.99.0.0/24"
+    expect:
+      exists: false

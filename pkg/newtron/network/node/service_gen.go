@@ -3,7 +3,7 @@
 // generation) and Interface.ApplyService (online, incremental) delegate here.
 //
 // The function does NOT handle:
-//   - Precondition checks (connected, locked, LAG member, existing service, VTEP)
+//   - Precondition checks (connected, locked, PortChannel member, existing service, VTEP)
 //   - Idempotency guards (VLAN/VRF already exists, ACL port merging)
 //   - Prefix-list expansion for ACLs (Cartesian product)
 //   - Route policy generation (ROUTE_MAP, COMMUNITY_SET, PREFIX_SET)

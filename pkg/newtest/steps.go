@@ -672,6 +672,7 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 			return StepStatusError, fmt.Sprintf("health check error: %s", err)
 		}
 		passed, warned, failed := 0, 0, 0
+		var failMsgs []string
 		for _, hc := range results {
 			switch hc.Status {
 			case "pass":
@@ -680,6 +681,7 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 				warned++
 			default:
 				failed++
+				failMsgs = append(failMsgs, hc.Message)
 			}
 		}
 		if failed == 0 {
@@ -688,7 +690,8 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 			}
 			return StepStatusPassed, fmt.Sprintf("overall ok (%d checks passed)", passed)
 		}
-		return StepStatusFailed, fmt.Sprintf("overall failed (%d passed, %d failed)", passed, failed)
+		return StepStatusFailed, fmt.Sprintf("overall failed (%d passed, %d failed): %s",
+			passed, failed, strings.Join(failMsgs, "; "))
 	})
 }
 

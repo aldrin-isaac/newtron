@@ -7,7 +7,9 @@
         "Ethernet0": { "link": "switch2:Ethernet0" },
         "Ethernet1": { "link": "host1:eth0" },
         "Ethernet2": { "link": "host2:eth0" },
-        "Ethernet3": { "link": "host3:eth0" }
+        "Ethernet3": { "link": "host3:eth0" },
+        "Ethernet4": { "link": "switch2:Ethernet4" },
+        "Ethernet5": { "link": "switch2:Ethernet5" }
       }
     },
     "switch2": {
@@ -15,7 +17,9 @@
         "Ethernet0": { "link": "switch1:Ethernet0" },
         "Ethernet1": { "link": "host4:eth0" },
         "Ethernet2": { "link": "host5:eth0" },
-        "Ethernet3": { "link": "host6:eth0" }
+        "Ethernet3": { "link": "host6:eth0" },
+        "Ethernet4": { "link": "switch1:Ethernet4" },
+        "Ethernet5": { "link": "switch1:Ethernet5" }
       }
     },
     "host1": {

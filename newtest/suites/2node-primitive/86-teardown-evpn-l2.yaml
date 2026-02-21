@@ -1,0 +1,82 @@
+name: teardown-evpn-l2
+description: |
+  Reverse teardown of EVPN L2 bridge (Phase 5a): unbind MAC-VPN, remove VLAN
+  members, delete VLAN 300 on both switches. Reverse of 60-evpn-l2-bridge.
+topology: 2node
+requires: [teardown-evpn-irb]
+
+steps:
+  # 1. Unbind MAC-VPN from VLAN 300 on both switches
+  - name: unbind-macvpn-sw1
+    action: unbind-macvpn
+    devices: [switch1]
+    vlan_id: 300
+
+  - name: unbind-macvpn-sw2
+    action: unbind-macvpn
+    devices: [switch2]
+    vlan_id: 300
+
+  - name: verify-tunnel-map-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_50300_Vlan300"
+    expect:
+      exists: false
+
+  - name: verify-tunnel-map-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_50300_Vlan300"
+    expect:
+      exists: false
+
+  # 2. Remove VLAN members
+  - name: remove-member-sw1-eth2
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 300
+
+  - name: remove-member-sw2-eth2
+    action: remove-vlan-member
+    devices: [switch2]
+    interface: Ethernet2
+    vlan_id: 300
+
+  - name: verify-member-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan300|Ethernet2"
+    expect:
+      exists: false
+
+  # 3. Delete VLAN 300 on both switches
+  - name: delete-vlan300-sw1
+    action: delete-vlan
+    devices: [switch1]
+    vlan_id: 300
+
+  - name: delete-vlan300-sw2
+    action: delete-vlan
+    devices: [switch2]
+    vlan_id: 300
+
+  - name: verify-vlan300-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-vlan300-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: false

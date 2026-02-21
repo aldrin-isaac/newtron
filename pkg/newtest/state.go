@@ -41,14 +41,24 @@ type RunState struct {
 
 // ScenarioState tracks the outcome of a single scenario within a suite run.
 type ScenarioState struct {
-	Name             string   `json:"name"`
-	Status           string   `json:"status"`                        // "PASS","FAIL","SKIP","ERROR","running","" (pending)
-	Duration         string   `json:"duration"`                      // e.g. "2s", "15s"
-	CurrentStep      string   `json:"current_step,omitempty"`        // step name while in-progress
-	CurrentStepIndex int      `json:"current_step_index,omitempty"`  // 0-based step index
-	TotalSteps       int      `json:"total_steps,omitempty"`         // total steps in scenario
-	Requires         []string `json:"requires,omitempty"`            // dependency scenario names
-	SkipReason       string   `json:"skip_reason,omitempty"`         // reason for skip
+	Name             string      `json:"name"`
+	Status           string      `json:"status"`                        // "PASS","FAIL","SKIP","ERROR","running","" (pending)
+	Duration         string      `json:"duration"`                      // e.g. "2s", "15s"
+	CurrentStep      string      `json:"current_step,omitempty"`        // step name while in-progress
+	CurrentStepIndex int         `json:"current_step_index,omitempty"`  // 0-based step index
+	TotalSteps       int         `json:"total_steps,omitempty"`         // total steps in scenario
+	Requires         []string    `json:"requires,omitempty"`            // dependency scenario names
+	SkipReason       string      `json:"skip_reason,omitempty"`         // reason for skip
+	Steps            []StepState `json:"steps,omitempty"`               // per-step results (populated on completion)
+}
+
+// StepState tracks the outcome of a single step within a scenario.
+type StepState struct {
+	Name     string `json:"name"`
+	Action   string `json:"action"`
+	Status   string `json:"status"`   // "PASS","FAIL","SKIP","ERROR"
+	Duration string `json:"duration"` // e.g. "2s", "<1s"
+	Message  string `json:"message,omitempty"`
 }
 
 // StateDir returns the state directory path for a suite name.

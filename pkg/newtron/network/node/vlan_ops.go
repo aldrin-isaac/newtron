@@ -273,3 +273,114 @@ func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	util.WithDevice(n.name).Infof("Removed SVI for VLAN %d", vlanID)
 	return cs, nil
 }
+
+// ============================================================================
+// VLAN Data Types and Queries
+// ============================================================================
+
+// VLANInfo represents VLAN data assembled from config_db for operations.
+type VLANInfo struct {
+	ID         int
+	Name       string      // VLAN name from config
+	Members    []string    // All member interfaces
+	SVIStatus  string      // "up" if VLAN_INTERFACE exists, empty otherwise
+	MACVPNInfo *MACVPNInfo // MAC-VPN binding info (L2VNI, ARP suppression)
+}
+
+// L2VNI returns the L2VNI for this VLAN (0 if not configured).
+func (v *VLANInfo) L2VNI() int {
+	if v.MACVPNInfo != nil {
+		return v.MACVPNInfo.L2VNI
+	}
+	return 0
+}
+
+// MACVPNInfo contains MAC-VPN binding information for a VLAN.
+// This is populated from VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH tables.
+type MACVPNInfo struct {
+	Name           string `json:"name,omitempty"`   // MAC-VPN definition name (from network.json)
+	L2VNI          int    `json:"l2_vni,omitempty"` // L2VNI from VXLAN_TUNNEL_MAP
+	ARPSuppression bool   `json:"arp_suppression"`  // ARP suppression enabled
+}
+
+// VLANExists checks if a VLAN exists.
+func (n *Node) VLANExists(id int) bool { return n.configDB.HasVLAN(id) }
+
+// GetVLAN retrieves VLAN information from config_db.
+func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
+	if n.configDB == nil {
+		return nil, util.ErrNotConnected
+	}
+
+	vlanKey := fmt.Sprintf("Vlan%d", id)
+	vlanEntry, ok := n.configDB.VLAN[vlanKey]
+	if !ok {
+		return nil, fmt.Errorf("VLAN %d not found", id)
+	}
+
+	info := &VLANInfo{ID: id, Name: vlanEntry.Description}
+
+	// Collect member interfaces from VLAN_MEMBER
+	for key, member := range n.configDB.VLANMember {
+		parts := splitConfigDBKey(key)
+		if len(parts) == 2 && parts[0] == vlanKey {
+			iface := parts[1]
+			if member.TaggingMode == "tagged" {
+				info.Members = append(info.Members, iface+"(t)")
+			} else {
+				info.Members = append(info.Members, iface)
+			}
+		}
+	}
+
+	// Check for SVI (VLAN_INTERFACE)
+	if _, ok := n.configDB.VLANInterface[vlanKey]; ok {
+		info.SVIStatus = "up"
+	}
+
+	// Build MAC-VPN info from VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH
+	macvpn := &MACVPNInfo{}
+
+	// Find L2VNI from VXLAN_TUNNEL_MAP
+	for _, mapping := range n.configDB.VXLANTunnelMap {
+		if mapping.VLAN == vlanKey && mapping.VNI != "" {
+			fmt.Sscanf(mapping.VNI, "%d", &macvpn.L2VNI)
+			break
+		}
+	}
+
+	// Check ARP suppression
+	if _, ok := n.configDB.SuppressVLANNeigh[vlanKey]; ok {
+		macvpn.ARPSuppression = true
+	}
+
+	// Try to match to a macvpn definition by VNI
+	if macvpn.L2VNI > 0 && n.SpecProvider != nil {
+		if name, _ := n.FindMACVPNByVNI(macvpn.L2VNI); name != "" {
+			macvpn.Name = name
+		}
+	}
+
+	// Only set MACVPNInfo if there's actually some data
+	if macvpn.L2VNI > 0 || macvpn.ARPSuppression {
+		info.MACVPNInfo = macvpn
+	}
+
+	return info, nil
+}
+
+// ListVLANs returns all VLAN IDs on this device.
+func (n *Node) ListVLANs() []int {
+	if n.configDB == nil {
+		return nil
+	}
+
+	var ids []int
+	for name := range n.configDB.VLAN {
+		var id int
+		if _, err := fmt.Sscanf(name, "Vlan%d", &id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}

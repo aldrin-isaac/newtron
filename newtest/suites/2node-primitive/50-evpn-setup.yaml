@@ -1,0 +1,84 @@
+name: evpn-setup
+description: |
+  EVPN overlay bringup: create VTEP, NVO, and loopback BGP neighbors with
+  L2VPN EVPN address-family. After bgpcfgd rewrites frr.conf, re-apply FRR
+  defaults and verify EVPN BGP sessions reach Established.
+  Includes CONFIG_DB verification for VXLAN_TUNNEL, VXLAN_EVPN_NVO, and
+  BGP_GLOBALS_AF|l2vpn_evpn.
+topology: 2node
+requires: [bgp-underlay]
+
+steps:
+  # Setup EVPN: VTEP (vtep1 + nvo1) + loopback BGP neighbors with l2vpn_evpn AF.
+  - name: setup-evpn-switch1
+    action: setup-evpn
+    devices: [switch1]
+
+  - name: setup-evpn-switch2
+    action: setup-evpn
+    devices: [switch2]
+
+  # CONFIG_DB verification: VXLAN tunnel
+  - name: verify-vxlan-tunnel-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      fields:
+        src_ip: "10.0.0.1"
+
+  - name: verify-vxlan-tunnel-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      fields:
+        src_ip: "10.0.0.2"
+
+  # CONFIG_DB verification: VXLAN NVO
+  - name: verify-vxlan-nvo-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      fields:
+        source_vtep: vtep1
+
+  # CONFIG_DB verification: BGP L2VPN EVPN address-family
+  - name: verify-bgp-l2vpn-af
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: true
+
+  # Wait for frrcfgd to regenerate frr.conf after EVPN config is written (RCA-034).
+  - name: wait-frrcfgd-regen
+    action: wait
+    duration: 10s
+
+  # Re-apply FRR defaults (frrcfgd overwrites them during frr.conf regeneration).
+  - name: apply-frr-defaults
+    action: apply-frr-defaults
+    devices: all
+
+  # Verify EVPN BGP sessions reach Established on both switches.
+  - name: verify-bgp-evpn-switch1
+    action: verify-bgp
+    devices: [switch1]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s
+
+  - name: verify-bgp-evpn-switch2
+    action: verify-bgp
+    devices: [switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

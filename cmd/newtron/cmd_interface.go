@@ -125,8 +125,8 @@ Examples:
 				"ip_addresses": intf.IPAddresses(),
 				"vrf":          intf.VRF(),
 				"service":      intf.ServiceName(),
-				"lag_member":   intf.IsLAGMember(),
-				"lag_parent":   intf.LAGParent(),
+				"pc_member":    intf.IsPortChannelMember(),
+				"pc_parent":    intf.PortChannelParent(),
 				"ingress_acl":  intf.IngressACL(),
 				"egress_acl":   intf.EgressACL(),
 			}
@@ -166,8 +166,8 @@ Examples:
 			fmt.Printf("\nService: %s\n", svc)
 		}
 
-		if intf.IsLAGMember() {
-			fmt.Printf("\nLAG Member of: %s\n", intf.LAGParent())
+		if intf.IsPortChannelMember() {
+			fmt.Printf("\nPortChannel Member of: %s\n", intf.PortChannelParent())
 		}
 
 		if acl := intf.IngressACL(); acl != "" {
@@ -363,8 +363,8 @@ Examples:
 			return err
 		}
 
-		// Check if it's a LAG
-		if members := intf.LAGMembers(); len(members) > 0 {
+		// Check if it's a PortChannel
+		if members := intf.PortChannelMembers(); len(members) > 0 {
 			if app.jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode(members)
 			}

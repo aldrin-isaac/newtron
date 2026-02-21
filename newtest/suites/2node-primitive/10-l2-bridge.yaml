@@ -1,0 +1,117 @@
+name: l2-bridge
+description: |
+  VLAN 100 L2 bridging on switch1: Ethernet1 (→host1) and Ethernet3 (→host3) as
+  untagged members, Ethernet2 as a tagged member (config-only verification).
+  Verifies VLAN creation, member configuration (tagging modes), and that the NGDP
+  dataplane bridges traffic between the two untagged host-facing ports (pure L2).
+topology: 2node
+requires: [device-init]
+
+steps:
+  - name: create-vlan100
+    action: create-vlan
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: add-member-ethernet1-untagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet1
+    vlan_id: 100
+
+  - name: add-member-ethernet3-untagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet3
+    vlan_id: 100
+
+  - name: add-member-ethernet2-tagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 100
+    tagging: tagged
+
+  # CONFIG_DB verification: VLAN exists
+  - name: verify-vlan100-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: true
+
+  # CONFIG_DB verification: untagged member fields
+  - name: verify-member-eth1-untagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet1"
+    expect:
+      fields:
+        tagging_mode: untagged
+
+  # CONFIG_DB verification: tagged member fields
+  - name: verify-member-eth2-tagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet2"
+    expect:
+      fields:
+        tagging_mode: tagged
+
+  # CONFIG_DB verification: second untagged member
+  - name: verify-member-eth3-untagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet3"
+    expect:
+      fields:
+        tagging_mode: untagged
+
+  # Poll ASIC_DB for VLAN 100's SAI object — orchagent programs it after vlanmgrd.
+  # CiscoVS/NGDP SAI bridge programming can take up to 30s on first use.
+  # VLAN 1 (default) is always present; VLAN 100 brings the count to 2.
+  - name: poll-asic-vlan-ready
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+
+  # Wait for VLAN_MEMBER SAI objects (Ethernet1 + Ethernet3 untagged = 2 minimum).
+  - name: poll-asic-vlanmember-ready
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+
+  # Wait for NGDP SAI forwarding plane to activate bridge port flooding.
+  - name: wait-bridge-plane
+    action: wait
+    duration: 45s
+
+  # Assign IPs in a /24 to host1 and host3 — same subnet, traffic is L2 bridged.
+  - name: host1-configure-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr add 10.100.0.1/24 dev eth0 2>/dev/null || true"
+
+  - name: host3-configure-ip
+    action: host-exec
+    devices: [host3]
+    command: "ip addr add 10.100.0.3/24 dev eth0 2>/dev/null || true"
+
+  # host1 pings host3: switch1 bridges Ethernet1↔Ethernet3 through VLAN 100.
+  - name: host1-ping-host3
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.100.0.3"
+    expect:
+      success_rate: 0.8
+
+  - name: host3-ping-host1
+    action: host-exec
+    devices: [host3]
+    command: "ping -c 3 -W 2 10.100.0.1"
+    expect:
+      success_rate: 0.8

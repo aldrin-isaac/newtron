@@ -9,6 +9,19 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
+// InterfaceHasService checks if an interface has a service bound.
+// Accepts both short (Eth0) and full (Ethernet0) interface names.
+func (n *Node) InterfaceHasService(name string) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	name = util.NormalizeInterfaceName(name)
+	if intf, ok := n.interfaces[name]; ok {
+		return intf.HasService()
+	}
+	return false
+}
+
 // ============================================================================
 // Interface Service Operations - Methods on Interface
 // ============================================================================
@@ -37,8 +50,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// Interface must not be a LAG member
-	if i.IsLAGMember() {
-		return nil, fmt.Errorf("interface %s is a LAG member - configure the LAG instead", i.name)
+	if i.IsPortChannelMember() {
+		return nil, fmt.Errorf("interface %s is a PortChannel member - configure the PortChannel instead", i.name)
 	}
 
 	// Interface must not already have a service

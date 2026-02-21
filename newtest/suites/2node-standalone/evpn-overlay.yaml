@@ -41,14 +41,13 @@ steps:
   - name: create-vlan
     action: create-vlan
     devices: [leaf1]
-    params:
-      vlan_id: 100
+    vlan_id: 100
 
   - name: bind-macvpn
     action: bind-macvpn
     devices: [leaf1]
+    vlan_id: 100
     params:
-      vlan_id: 100
       macvpn: servers-vlan100
 
   - name: verify-l2vni
@@ -62,8 +61,7 @@ steps:
   - name: unbind-macvpn
     action: unbind-macvpn
     devices: [leaf1]
-    params:
-      vlan_id: 100
+    vlan_id: 100
 
   - name: unbind-ipvpn
     action: unbind-ipvpn

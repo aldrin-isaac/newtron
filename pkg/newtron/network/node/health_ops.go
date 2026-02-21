@@ -49,7 +49,7 @@ func (n *Node) RunHealthChecks(ctx context.Context, checkType string) ([]HealthC
 		results = append(results, n.checkEVPN()...)
 	}
 	if checkType == "" || checkType == "lag" {
-		results = append(results, n.checkLAG()...)
+		results = append(results, n.checkPortChannels()...)
 	}
 
 	return results, nil
@@ -138,9 +138,12 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh: %s", err)}}
 	}
 
+	// Strip null bytes — CiscoVS/Silicon One vtysh occasionally emits \x00 in JSON output.
+	cleaned := strings.ReplaceAll(output, "\x00", "")
+
 	// Parse vtysh JSON: {"ipv4Unicast": {"peers": {"10.1.0.0": {"state": "Established", ...}}}}
 	var summary map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(output), &summary); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &summary); err != nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh parse: %s", err)}}
 	}
 
@@ -245,7 +248,7 @@ func (n *Node) checkEVPN() []HealthCheckResult {
 	return results
 }
 
-func (n *Node) checkLAG() []HealthCheckResult {
+func (n *Node) checkPortChannels() []HealthCheckResult {
 	var results []HealthCheckResult
 
 	if n.configDB == nil {
@@ -257,7 +260,7 @@ func (n *Node) checkLAG() []HealthCheckResult {
 		results = append(results, HealthCheckResult{
 			Check:   "lag",
 			Status:  "pass",
-			Message: "No LAGs configured",
+			Message: "No PortChannels configured",
 		})
 	} else {
 		// Count members
@@ -265,7 +268,7 @@ func (n *Node) checkLAG() []HealthCheckResult {
 		results = append(results, HealthCheckResult{
 			Check:   "lag",
 			Status:  "pass",
-			Message: fmt.Sprintf("%d LAGs configured with %d total members", lagCount, memberCount),
+			Message: fmt.Sprintf("%d PortChannels configured with %d total members", lagCount, memberCount),
 		})
 	}
 

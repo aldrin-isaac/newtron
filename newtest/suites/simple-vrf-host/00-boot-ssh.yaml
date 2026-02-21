@@ -1,0 +1,11 @@
+name: boot-ssh
+description: Verify SSH connectivity to switch2
+topology: 2node
+
+steps:
+  - name: ssh-echo-switch2
+    action: ssh-command
+    devices: [switch2]
+    command: "echo ok"
+    expect:
+      contains: "ok"

@@ -242,6 +242,11 @@ func (p *consoleProgress) colorStatus(s StepStatus) string {
 }
 
 func (p *consoleProgress) formatDuration(d time.Duration) string {
+	return formatDurationCompact(d)
+}
+
+// formatDurationCompact formats a duration in a human-readable compact form.
+func formatDurationCompact(d time.Duration) string {
 	if d < time.Second {
 		return "<1s"
 	}
@@ -300,6 +305,19 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 		r.State.Scenarios[index].CurrentStep = ""
 		r.State.Scenarios[index].CurrentStepIndex = 0
 		r.State.Scenarios[index].SkipReason = result.SkipReason
+
+		// Persist per-step results for the detail view
+		steps := make([]StepState, 0, len(result.Steps))
+		for _, s := range result.Steps {
+			steps = append(steps, StepState{
+				Name:     s.Name,
+				Action:   string(s.Action),
+				Status:   string(s.Status),
+				Duration: formatDurationCompact(s.Duration),
+				Message:  s.Message,
+			})
+		}
+		r.State.Scenarios[index].Steps = steps
 	}
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)

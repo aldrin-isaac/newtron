@@ -247,25 +247,25 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 	}
 }
 
-func TestPreconditionChecker_RequireInterfaceNotLAGMember(t *testing.T) {
+func TestPreconditionChecker_RequireInterfaceNotPortChannelMember(t *testing.T) {
 	db := emptyConfigDB()
 	db.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
 	dev := testNode(db, true, false)
 
-	// Ethernet0 IS a LAG member — should fail
+	// Ethernet0 IS a PortChannel member — should fail
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireInterfaceNotLAGMember("Ethernet0").
+		RequireInterfaceNotPortChannelMember("Ethernet0").
 		Result()
 	if err == nil {
-		t.Error("RequireInterfaceNotLAGMember should fail for LAG member")
+		t.Error("RequireInterfaceNotPortChannelMember should fail for PortChannel member")
 	}
 
-	// Ethernet4 is NOT a LAG member — should pass
+	// Ethernet4 is NOT a PortChannel member — should pass
 	err = node.NewPreconditionChecker(dev, "test-op", "test-res").
-		RequireInterfaceNotLAGMember("Ethernet4").
+		RequireInterfaceNotPortChannelMember("Ethernet4").
 		Result()
 	if err != nil {
-		t.Errorf("RequireInterfaceNotLAGMember should pass: %v", err)
+		t.Errorf("RequireInterfaceNotPortChannelMember should pass: %v", err)
 	}
 }
 

@@ -1,0 +1,266 @@
+name: portchannel-lifecycle
+description: |
+  PortChannel lifecycle + dataplane: create PortChannel1 on both switches using
+  Ethernet4+Ethernet5, assign IPs, add static routes to redirect host1↔host4
+  traffic through the PortChannel, verify reachability, then clean up.
+topology: 2node
+requires: [cross-switch-routing]
+
+steps:
+  # 1. Create PortChannel on both switches
+  - name: create-portchannel1-sw1
+    action: create-portchannel
+    devices: [switch1]
+    params:
+      name: PortChannel1
+
+  - name: create-portchannel1-sw2
+    action: create-portchannel
+    devices: [switch2]
+    params:
+      name: PortChannel1
+
+  # 2. Add members
+  - name: add-member-eth4-sw1
+    action: add-portchannel-member
+    devices: [switch1]
+    params:
+      name: PortChannel1
+      member: Ethernet4
+
+  - name: add-member-eth5-sw1
+    action: add-portchannel-member
+    devices: [switch1]
+    params:
+      name: PortChannel1
+      member: Ethernet5
+
+  - name: add-member-eth4-sw2
+    action: add-portchannel-member
+    devices: [switch2]
+    params:
+      name: PortChannel1
+      member: Ethernet4
+
+  - name: add-member-eth5-sw2
+    action: add-portchannel-member
+    devices: [switch2]
+    params:
+      name: PortChannel1
+      member: Ethernet5
+
+  # 3. Verify CONFIG_DB entries
+  - name: verify-portchannel-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: true
+
+  - name: verify-portchannel-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: true
+
+  - name: verify-member-eth4-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet4"
+    expect:
+      exists: true
+
+  - name: verify-member-eth5-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet5"
+    expect:
+      exists: true
+
+  - name: verify-member-eth4-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet4"
+    expect:
+      exists: true
+
+  - name: verify-member-eth5-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet5"
+    expect:
+      exists: true
+
+  # 4. Set IPs on PortChannel1
+  - name: set-ip-portchannel1-sw1
+    action: set-interface
+    devices: [switch1]
+    interface: PortChannel1
+    params:
+      property: ip
+      value: "10.30.0.0/31"
+
+  - name: set-ip-portchannel1-sw2
+    action: set-interface
+    devices: [switch2]
+    interface: PortChannel1
+    params:
+      property: ip
+      value: "10.30.0.1/31"
+
+  # 5. Wait for kernel IPs on PortChannel1
+  - name: wait-portchannel1-ip-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show PortChannel1 | grep -q '10.30.0.0' && break; sleep 5; done; true"
+
+  - name: wait-portchannel1-ip-sw2
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show PortChannel1 | grep -q '10.30.0.1' && break; sleep 5; done; true"
+
+  # 6. Prime ARP on PortChannel1
+  - name: prime-arp-portchannel1-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I PortChannel1 10.30.0.1 && break; sleep 2; done || true"
+
+  - name: prime-arp-portchannel1-sw2
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I PortChannel1 10.30.0.0 && break; sleep 2; done || true"
+
+  - name: wait-after-prime
+    action: wait
+    duration: 3s
+
+  # 7. Add static routes to redirect host traffic through PortChannel
+  #    Static routes (AD=1) override BGP-learned routes (AD=20)
+  - name: add-static-route-sw1
+    action: add-static-route
+    devices: [switch1]
+    params:
+      vrf: default
+      prefix: "10.20.1.0/31"
+      next_hop: "10.30.0.1"
+
+  - name: add-static-route-sw2
+    action: add-static-route
+    devices: [switch2]
+    params:
+      vrf: default
+      prefix: "10.20.0.0/31"
+      next_hop: "10.30.0.0"
+
+  # Wait for routes to install
+  - name: wait-routes-install
+    action: wait
+    duration: 5s
+
+  # 8. Host-to-host ping through PortChannel
+  - name: host1-ping-host4-via-portchannel
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 5 -W 2 10.20.1.0"
+    expect:
+      success_rate: 0.8
+
+  - name: host4-ping-host1-via-portchannel
+    action: host-exec
+    devices: [host4]
+    command: "ping -c 5 -W 2 10.20.0.0"
+    expect:
+      success_rate: 0.8
+
+  # 9. Cleanup: reverse order
+  - name: remove-static-route-sw1
+    action: remove-static-route
+    devices: [switch1]
+    params:
+      vrf: default
+      prefix: "10.20.1.0/31"
+
+  - name: remove-static-route-sw2
+    action: remove-static-route
+    devices: [switch2]
+    params:
+      vrf: default
+      prefix: "10.20.0.0/31"
+
+  - name: remove-ip-portchannel1-sw1
+    action: remove-ip
+    devices: [switch1]
+    interface: PortChannel1
+    params:
+      ip: "10.30.0.0/31"
+
+  - name: remove-ip-portchannel1-sw2
+    action: remove-ip
+    devices: [switch2]
+    interface: PortChannel1
+    params:
+      ip: "10.30.0.1/31"
+
+  - name: remove-member-eth5-sw1
+    action: remove-portchannel-member
+    devices: [switch1]
+    params:
+      name: PortChannel1
+      member: Ethernet5
+
+  - name: remove-member-eth4-sw1
+    action: remove-portchannel-member
+    devices: [switch1]
+    params:
+      name: PortChannel1
+      member: Ethernet4
+
+  - name: remove-member-eth5-sw2
+    action: remove-portchannel-member
+    devices: [switch2]
+    params:
+      name: PortChannel1
+      member: Ethernet5
+
+  - name: remove-member-eth4-sw2
+    action: remove-portchannel-member
+    devices: [switch2]
+    params:
+      name: PortChannel1
+      member: Ethernet4
+
+  - name: delete-portchannel1-sw1
+    action: delete-portchannel
+    devices: [switch1]
+    params:
+      name: PortChannel1
+
+  - name: delete-portchannel1-sw2
+    action: delete-portchannel
+    devices: [switch2]
+    params:
+      name: PortChannel1
+
+  # 10. Verify cleanup
+  - name: verify-portchannel-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: false
+
+  - name: verify-portchannel-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: false

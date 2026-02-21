@@ -306,24 +306,24 @@ func TestInterface_NotConnected(t *testing.T) {
 	}
 }
 
-func TestInterface_LAGMemberBlocksConfig(t *testing.T) {
+func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 	d, intf := testInterface()
-	// Make Ethernet0 a LAG member
+	// Make Ethernet0 a PortChannel member
 	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
-	intf.lagMember = "PortChannel100"
+	intf.pcParent = "PortChannel100"
 	intf.serviceName = ""
 	ctx := context.Background()
 
-	// SetIP should fail for LAG member
+	// SetIP should fail for PortChannel member
 	_, err := intf.SetIP(ctx, "10.0.0.1/30")
 	if err == nil {
-		t.Fatal("expected error for LAG member SetIP")
+		t.Fatal("expected error for PortChannel member SetIP")
 	}
 
-	// SetVRF should fail for LAG member
+	// SetVRF should fail for PortChannel member
 	_, err = intf.SetVRF(ctx, "default")
 	if err == nil {
-		t.Fatal("expected error for LAG member SetVRF")
+		t.Fatal("expected error for PortChannel member SetVRF")
 	}
 }
 

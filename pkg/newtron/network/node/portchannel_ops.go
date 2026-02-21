@@ -56,8 +56,8 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		if !n.InterfaceExists(member) {
 			return nil, fmt.Errorf("member interface %s does not exist", member)
 		}
-		if n.InterfaceIsLAGMember(member) {
-			return nil, fmt.Errorf("interface %s is already a LAG member", member)
+		if n.InterfaceIsPortChannelMember(member) {
+			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
 		memberKey := fmt.Sprintf("%s|%s", name, member)
 		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, nil, map[string]string{})
@@ -105,7 +105,7 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 	if err := n.precondition("add-portchannel-member", pcName).
 		RequirePortChannelExists(pcName).
 		RequireInterfaceExists(member).
-		RequireInterfaceNotLAGMember(member).
+		RequireInterfaceNotPortChannelMember(member).
 		Result(); err != nil {
 		return nil, err
 	}
@@ -136,4 +136,102 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member strin
 
 	util.WithDevice(n.name).Infof("Removed %s from PortChannel %s", member, pcName)
 	return cs, nil
+}
+
+// ============================================================================
+// PortChannel Data Types and Queries
+// ============================================================================
+
+// PortChannelInfo represents PortChannel data assembled from config_db.
+type PortChannelInfo struct {
+	Name          string
+	Members       []string
+	ActiveMembers []string
+	AdminStatus   string
+}
+
+// PortChannelExists checks if a PortChannel exists.
+// Accepts both short (Po100) and full (PortChannel100) names.
+func (n *Node) PortChannelExists(name string) bool {
+	return n.configDB.HasPortChannel(util.NormalizeInterfaceName(name))
+}
+
+// GetPortChannel retrieves PortChannel information from config_db.
+func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
+	if n.configDB == nil {
+		return nil, util.ErrNotConnected
+	}
+
+	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
+	name = util.NormalizeInterfaceName(name)
+
+	pcEntry, ok := n.configDB.PortChannel[name]
+	if !ok {
+		return nil, fmt.Errorf("PortChannel %s not found", name)
+	}
+
+	info := &PortChannelInfo{
+		Name:        name,
+		AdminStatus: pcEntry.AdminStatus,
+	}
+
+	// Collect members from PORTCHANNEL_MEMBER
+	for key := range n.configDB.PortChannelMember {
+		parts := splitConfigDBKey(key)
+		if len(parts) == 2 && parts[0] == name {
+			info.Members = append(info.Members, parts[1])
+		}
+	}
+
+	// For now, assume all members are active (would need state_db for real status)
+	info.ActiveMembers = info.Members
+
+	return info, nil
+}
+
+// ListPortChannels returns all PortChannel names on this device.
+func (n *Node) ListPortChannels() []string {
+	if n.configDB == nil {
+		return nil
+	}
+
+	names := make([]string, 0, len(n.configDB.PortChannel))
+	for name := range n.configDB.PortChannel {
+		names = append(names, name)
+	}
+	return names
+}
+
+// InterfaceIsPortChannelMember checks if an interface is a PortChannel member.
+// Accepts both short (Eth0) and full (Ethernet0) interface names.
+func (n *Node) InterfaceIsPortChannelMember(name string) bool {
+	if n.configDB == nil {
+		return false
+	}
+	name = util.NormalizeInterfaceName(name)
+	for key := range n.configDB.PortChannelMember {
+		// Key format: PortChannel100|Ethernet0
+		parts := splitConfigDBKey(key)
+		if len(parts) == 2 && parts[1] == name {
+			return true
+		}
+	}
+	return false
+}
+
+// GetInterfacePortChannel returns the PortChannel that an interface belongs to (empty if not a member).
+// Accepts both short (Eth0) and full (Ethernet0) interface names.
+func (n *Node) GetInterfacePortChannel(name string) string {
+	if n.configDB == nil {
+		return ""
+	}
+	name = util.NormalizeInterfaceName(name)
+	for key := range n.configDB.PortChannelMember {
+		// Key format: PortChannel100|Ethernet0
+		parts := splitConfigDBKey(key)
+		if len(parts) == 2 && parts[1] == name {
+			return parts[0]
+		}
+	}
+	return ""
 }

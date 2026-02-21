@@ -44,8 +44,8 @@ type Interface struct {
 	ingressACL    string
 	egressACL     string
 
-	// LAG membership
-	lagMember string // Parent LAG if this is a member
+	// PortChannel membership
+	pcParent string // Parent PortChannel if this is a member
 }
 
 // ============================================================================
@@ -128,17 +128,17 @@ func (i *Interface) EgressACL() string {
 }
 
 // ============================================================================
-// LAG Membership
+// PortChannel Membership
 // ============================================================================
 
-// IsLAGMember returns true if this interface is a LAG member.
-func (i *Interface) IsLAGMember() bool {
-	return i.lagMember != ""
+// IsPortChannelMember returns true if this interface is a PortChannel member.
+func (i *Interface) IsPortChannelMember() bool {
+	return i.pcParent != ""
 }
 
-// LAGParent returns the name of the parent LAG (if this is a member).
-func (i *Interface) LAGParent() string {
-	return i.lagMember
+// PortChannelParent returns the name of the parent PortChannel (if this is a member).
+func (i *Interface) PortChannelParent() string {
+	return i.pcParent
 }
 
 // Description returns the interface description (from PORT table).
@@ -156,8 +156,8 @@ func (i *Interface) Description() string {
 	return ""
 }
 
-// LAGMembers returns the member interfaces if this is a PortChannel.
-func (i *Interface) LAGMembers() []string {
+// PortChannelMembers returns the member interfaces if this is a PortChannel.
+func (i *Interface) PortChannelMembers() []string {
 	if !i.IsPortChannel() {
 		return nil
 	}
@@ -295,12 +295,12 @@ func (i *Interface) loadState() {
 		}
 	}
 
-	// Check LAG membership
+	// Check PortChannel membership
 	for key := range configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) == 2 && parts[1] == i.name {
-			i.lagMember = parts[0]
+			i.pcParent = parts[0]
 			break
 		}
 	}
@@ -377,8 +377,8 @@ func (i *Interface) String() string {
 	if i.vrf != "" {
 		desc += fmt.Sprintf(" [vrf: %s]", i.vrf)
 	}
-	if i.lagMember != "" {
-		desc += fmt.Sprintf(" [member of: %s]", i.lagMember)
+	if i.pcParent != "" {
+		desc += fmt.Sprintf(" [member of: %s]", i.pcParent)
 	}
 
 	return desc

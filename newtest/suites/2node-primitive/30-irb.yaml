@@ -1,0 +1,62 @@
+name: irb
+description: |
+  Integrated Routing and Bridging (IRB) on switch1: configure a SVI for VLAN 100
+  (created by l2-bridge) in the global routing table, then verify host1 can ping
+  the gateway IP. Demonstrates L3 termination on a bridged VLAN.
+topology: 2node
+requires: [l2-bridge]
+
+steps:
+  - name: configure-svi-vlan100
+    action: configure-svi
+    devices: [switch1]
+    vlan_id: 100
+    params:
+      ip: "10.100.1.1/24"
+
+  # CONFIG_DB verification: VLAN_INTERFACE base entry
+  - name: verify-vlan-interface-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_INTERFACE
+    key: "Vlan100"
+    expect:
+      exists: true
+
+  # CONFIG_DB verification: VLAN_INTERFACE IP entry
+  - name: verify-svi-ip
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_INTERFACE
+    key: "Vlan100|10.100.1.1/24"
+    expect:
+      exists: true
+
+  # Wait for orchagent + NGDP SAI to program the SVI in the kernel and dataplane.
+  - name: wait-svi-ready
+    action: wait
+    duration: 15s
+
+  # Prime NGDP ARP responder from the SVI (RCA-033, RCA-036).
+  - name: prime-ngdp-arp-svi
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I Vlan100 10.100.1.2 && break; sleep 2; done || true"
+
+  - name: wait-after-prime
+    action: wait
+    duration: 3s
+
+  # host1 already has 10.100.0.1/24 from l2-bridge; add the IRB subnet IP.
+  - name: host1-add-irb-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr add 10.100.1.2/24 dev eth0 2>/dev/null || true"
+
+  # host1 pings the SVI gateway (switch1 IRB interface on Vlan100).
+  - name: host1-ping-svi
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.100.1.1"
+    expect:
+      success_rate: 0.8

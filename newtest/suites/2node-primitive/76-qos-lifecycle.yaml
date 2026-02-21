@@ -1,0 +1,50 @@
+name: qos-lifecycle
+description: |
+  Self-contained QoS lifecycle on sw1:Ethernet11 (config-only, no host wired).
+  Tests apply-qos and remove-qos primitives with CONFIG_DB verification for
+  per-interface (PORT_QOS_MAP) and device-wide (DSCP_TO_TC_MAP) entries.
+topology: 2node
+requires: [device-init]
+
+steps:
+  # Apply QoS policy
+  - name: apply-qos-ethernet11
+    action: apply-qos
+    devices: [switch1]
+    params:
+      interface: Ethernet11
+      qos_policy: test-4q
+
+  # Verify per-interface QoS mapping
+  - name: verify-port-qos-map
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT_QOS_MAP
+    key: Ethernet11
+    expect:
+      exists: true
+
+  # Verify device-wide DSCP-to-TC map was created
+  - name: verify-dscp-tc-map
+    action: verify-config-db
+    devices: [switch1]
+    table: DSCP_TO_TC_MAP
+    key: test-4q
+    expect:
+      exists: true
+
+  # Remove QoS from interface
+  - name: remove-qos-ethernet11
+    action: remove-qos
+    devices: [switch1]
+    params:
+      interface: Ethernet11
+
+  # Verify per-interface mapping removed
+  - name: verify-port-qos-map-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT_QOS_MAP
+    key: Ethernet11
+    expect:
+      exists: false
