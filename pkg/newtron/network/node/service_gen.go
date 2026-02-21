@@ -102,7 +102,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 		entries = append(entries, vlanConfig(vlanID, VLANConfig{L2VNI: l2vni})...)
 
 		if macvpnDef != nil && macvpnDef.ARPSuppression {
-			entries = append(entries, arpSuppressionConfig(vlanID)...)
+			entries = append(entries, arpSuppressionConfig(VLANName(vlanID))...)
 		}
 	}
 

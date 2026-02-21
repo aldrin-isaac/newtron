@@ -42,19 +42,18 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 
 	vlanName := i.name // e.g., "Vlan100"
 
-	// Add VNI mapping
+	// Add VNI mapping (delegates to evpn_ops.go config function)
 	if macvpnDef.VNI > 0 {
-		cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(macvpnDef.VNI, vlanName), ChangeAdd, nil, map[string]string{
-			"vlan": vlanName,
-			"vni":  fmt.Sprintf("%d", macvpnDef.VNI),
-		})
+		for _, e := range vniMapConfig(vlanName, macvpnDef.VNI) {
+			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+		}
 	}
 
-	// Configure ARP suppression
+	// Configure ARP suppression (delegates to evpn_ops.go config function)
 	if macvpnDef.ARPSuppression {
-		cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeAdd, nil, map[string]string{
-			"suppress": "on",
-		})
+		for _, e := range arpSuppressionConfig(vlanName) {
+			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+		}
 	}
 
 	util.WithDevice(n.Name()).Infof("Bound MAC-VPN '%s' to %s (VNI: %d)", macvpnName, vlanName, macvpnDef.VNI)

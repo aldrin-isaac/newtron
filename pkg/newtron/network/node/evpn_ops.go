@@ -35,8 +35,9 @@ func VTEPConfig(sourceIP string) []CompositeEntry {
 }
 
 // vniMapConfig returns the VXLAN_TUNNEL_MAP entry that maps a VLAN to an L2VNI.
-func vniMapConfig(vlanID, vni int) []CompositeEntry {
-	vlanName := VLANName(vlanID)
+// vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
+// should pass VLANName(vlanID).
+func vniMapConfig(vlanName string, vni int) []CompositeEntry {
 	return []CompositeEntry{
 		{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(vni, vlanName), Fields: map[string]string{
 			"vlan": vlanName,
@@ -46,9 +47,11 @@ func vniMapConfig(vlanID, vni int) []CompositeEntry {
 }
 
 // arpSuppressionConfig returns the SUPPRESS_VLAN_NEIGH entry for a VLAN.
-func arpSuppressionConfig(vlanID int) []CompositeEntry {
+// vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
+// should pass VLANName(vlanID).
+func arpSuppressionConfig(vlanName string) []CompositeEntry {
 	return []CompositeEntry{
-		{Table: "SUPPRESS_VLAN_NEIGH", Key: VLANName(vlanID), Fields: map[string]string{
+		{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName, Fields: map[string]string{
 			"suppress": "on",
 		}},
 	}
@@ -79,7 +82,7 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 
 	cs := NewChangeSet(n.name, "device.map-l2vni")
 
-	for _, e := range vniMapConfig(vlanID, vni) {
+	for _, e := range vniMapConfig(VLANName(vlanID), vni) {
 		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
 	}
 
