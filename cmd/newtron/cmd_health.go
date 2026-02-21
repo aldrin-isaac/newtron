@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/health"
 )
 
 var healthCmd = &cobra.Command{
@@ -37,77 +36,55 @@ var healthCheckCmd = &cobra.Command{
 		}
 		defer dev.Disconnect()
 
-		checker := health.NewChecker()
-
-		// Run specific check or all checks
-		if healthCheckName != "" {
-			result, err := checker.RunCheck(ctx, dev, healthCheckName)
-			if err != nil {
-				return err
-			}
-
-			if app.jsonOutput {
-				return json.NewEncoder(os.Stdout).Encode(result)
-			}
-
-			printHealthResult(*result)
-			return nil
-		}
-
-		// Run all checks
-		report, err := checker.Run(ctx, dev)
+		results, err := dev.RunHealthChecks(ctx, healthCheckName)
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(report)
+			return json.NewEncoder(os.Stdout).Encode(results)
 		}
 
-		fmt.Printf("\nHealth Report for %s\n", bold(app.deviceName))
-		fmt.Printf("Timestamp: %s\n", report.Timestamp.Format("2006-01-02 15:04:05"))
-		fmt.Printf("Duration: %s\n\n", report.Duration)
+		fmt.Printf("\nHealth Report for %s\n\n", bold(app.deviceName))
 
-		t := cli.NewTable("CHECK", "STATUS", "MESSAGE", "DURATION")
-
-		for _, result := range report.Results {
-			status := formatStatus(result.Status)
-			t.Row(result.Check, status, result.Message, result.Duration.String())
+		t := cli.NewTable("CHECK", "STATUS", "MESSAGE")
+		for _, r := range results {
+			t.Row(r.Check, formatHealthStatus(r.Status), r.Message)
 		}
 		t.Flush()
 
-		fmt.Printf("\nOverall Status: %s\n", formatStatus(report.Overall))
+		// Overall status
+		overall := "pass"
+		for _, r := range results {
+			if r.Status == "fail" {
+				overall = "fail"
+				break
+			}
+			if r.Status == "warn" {
+				overall = "warn"
+			}
+		}
+		fmt.Printf("\nOverall: %s\n", formatHealthStatus(overall))
 
 		return nil
 	},
 }
 
-func printHealthResult(result health.Result) {
-	fmt.Printf("\nHealth Check: %s\n", bold(result.Check))
-	fmt.Printf("Status: %s\n", formatStatus(result.Status))
-	fmt.Printf("Message: %s\n", result.Message)
-	fmt.Printf("Duration: %s\n", result.Duration)
-
-	if result.Details != nil {
-		fmt.Printf("Details: %v\n", result.Details)
-	}
-}
-
-func formatStatus(status health.Status) string {
+func formatHealthStatus(status string) string {
 	switch status {
-	case health.StatusOK:
-		return green("OK")
-	case health.StatusWarning:
-		return yellow("WARNING")
-	case health.StatusCritical:
-		return red("CRITICAL")
+	case "pass":
+		return green("PASS")
+	case "warn":
+		return yellow("WARN")
+	case "fail":
+		return red("FAIL")
 	default:
-		return string(status)
+		return status
 	}
 }
 
 func init() {
-	healthCheckCmd.Flags().StringVar(&healthCheckName, "check", "", "Run specific health check (interfaces, lag, bgp, vxlan, evpn)")
+	healthCheckCmd.Flags().StringVar(&healthCheckName, "check", "", "Run specific health check (bgp, interfaces, evpn, lag)")
 
 	healthCmd.AddCommand(healthCheckCmd)
 }

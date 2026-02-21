@@ -42,6 +42,7 @@ type RunState struct {
 // ScenarioState tracks the outcome of a single scenario within a suite run.
 type ScenarioState struct {
 	Name             string      `json:"name"`
+	Description      string      `json:"description,omitempty"`         // scenario intent (from YAML)
 	Status           string      `json:"status"`                        // "PASS","FAIL","SKIP","ERROR","running","" (pending)
 	Duration         string      `json:"duration"`                      // e.g. "2s", "15s"
 	CurrentStep      string      `json:"current_step,omitempty"`        // step name while in-progress
@@ -49,7 +50,7 @@ type ScenarioState struct {
 	TotalSteps       int         `json:"total_steps,omitempty"`         // total steps in scenario
 	Requires         []string    `json:"requires,omitempty"`            // dependency scenario names
 	SkipReason       string      `json:"skip_reason,omitempty"`         // reason for skip
-	Steps            []StepState `json:"steps,omitempty"`               // per-step results (populated on completion)
+	Steps            []StepState `json:"steps,omitempty"`               // per-step results (populated incrementally)
 }
 
 // StepState tracks the outcome of a single step within a scenario.

@@ -157,6 +157,15 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 		fmt.Printf("  finished:  %s (%s ago, took %s)\n", state.Finished.Format(newtest.DateTimeFormat), ago, duration)
 	}
 
+	// Scenario summary
+	if len(state.Scenarios) > 0 {
+		totalSteps := 0
+		for _, sc := range state.Scenarios {
+			totalSteps += sc.TotalSteps
+		}
+		fmt.Printf("  scenarios: %d (%d steps total)\n", len(state.Scenarios), totalSteps)
+	}
+
 	// Scenario table
 	if len(state.Scenarios) > 0 {
 		fmt.Println()
@@ -232,6 +241,9 @@ func printDetailView(state *newtest.RunState) {
 		}
 
 		fmt.Printf("\n  %s:\n", sc.Name)
+		if sc.Description != "" {
+			fmt.Printf("    %s\n", cli.Dim(sc.Description))
+		}
 		t := cli.NewTable("#", "STEP", "ACTION", "STATUS", "DURATION", "MESSAGE").WithPrefix("    ")
 
 		for i, step := range sc.Steps {

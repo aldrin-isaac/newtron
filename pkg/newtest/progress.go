@@ -276,9 +276,10 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 	r.State.Scenarios = make([]ScenarioState, len(scenarios))
 	for i, s := range scenarios {
 		r.State.Scenarios[i] = ScenarioState{
-			Name:       s.Name,
-			TotalSteps: len(s.Steps),
-			Requires:   s.Requires,
+			Name:        s.Name,
+			Description: s.Description,
+			TotalSteps:  len(s.Steps),
+			Requires:    s.Requires,
 		}
 	}
 	if err := SaveRunState(r.State); err != nil {
@@ -305,19 +306,6 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 		r.State.Scenarios[index].CurrentStep = ""
 		r.State.Scenarios[index].CurrentStepIndex = 0
 		r.State.Scenarios[index].SkipReason = result.SkipReason
-
-		// Persist per-step results for the detail view
-		steps := make([]StepState, 0, len(result.Steps))
-		for _, s := range result.Steps {
-			steps = append(steps, StepState{
-				Name:     s.Name,
-				Action:   string(s.Action),
-				Status:   string(s.Status),
-				Duration: formatDurationCompact(s.Duration),
-				Message:  s.Message,
-			})
-		}
-		r.State.Scenarios[index].Steps = steps
 	}
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
@@ -337,6 +325,23 @@ func (r *StateReporter) StepStart(scenario string, step *Step, index, total int)
 }
 
 func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, total int) {
+	// Incrementally persist each step result so `newtest status --detail`
+	// shows live progress while a scenario is still running.
+	if r.scenarioIndex < len(r.State.Scenarios) {
+		r.State.Scenarios[r.scenarioIndex].Steps = append(
+			r.State.Scenarios[r.scenarioIndex].Steps,
+			StepState{
+				Name:     result.Name,
+				Action:   string(result.Action),
+				Status:   string(result.Status),
+				Duration: formatDurationCompact(result.Duration),
+				Message:  result.Message,
+			},
+		)
+		if err := SaveRunState(r.State); err != nil {
+			util.Logger.Warnf("save run state: %v", err)
+		}
+	}
 	r.Inner.StepEnd(scenario, result, index, total)
 }
 

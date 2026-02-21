@@ -36,33 +36,21 @@ Implemented in three phases:
 Target ownership map in CLAUDE.md "Single-Owner Principle" section.
 Separation of Concerns principle documented in CLAUDE.md.
 
-## 6. Retire `pkg/newtron/health/` package
+## ~~6. Retire `pkg/newtron/health/` package~~ DONE
 
-The standalone `health` package (`pkg/newtron/health/checker.go`) is a legacy stub with
-placeholder implementations (BGP/VXLAN/EVPN checks return dummy "healthy" results without
-querying actual state). The real health checks live in `pkg/newtron/network/node/health_ops.go`
-(used by newtest). The `newtron health check` CLI command (`cmd/newtron/cmd_health.go`)
-should be updated to use `Node.RunHealthChecks()` instead, and the `health/` package deleted.
+Deleted `pkg/newtron/health/` (legacy stub). Rewired `cmd/newtron/cmd_health.go`
+to call `Node.RunHealthChecks()` directly.
 
-## 7. Stream step results in `newtest status --detail`
+## ~~7. Stream step results in `newtest status --detail`~~ DONE
 
-Currently `StateReporter.ScenarioEnd` saves all step results in bulk when a scenario
-finishes. To show up-to-the-moment step progress, `StateReporter.StepEnd` should
-append each step's `StepState` to `ScenarioState.Steps` and call `SaveRunState()`
-incrementally. This allows `newtest status --detail` to show which steps have completed
-(with timing) even while a scenario is still running.
+`StateReporter.StepEnd` now appends each `StepState` incrementally and calls
+`SaveRunState()`. Removed bulk step persistence from `ScenarioEnd`.
 
-## 8. Show total scenarios and steps in `newtest status` summary
+## ~~8. Show total scenarios and steps in `newtest status` summary~~ DONE
 
-The summary section at the top of `newtest status` output should include the total
-number of scenarios and total number of steps (sum of all scenario step counts).
-Example: `  scenarios: 21 (210 steps total)`
+Added `scenarios: N (M steps total)` line to `printSuiteStatus` header section.
 
-## 9. Scenario descriptions in `newtest status --detail`
+## ~~9. Scenario descriptions in `newtest status --detail`~~ DONE
 
-Each scenario YAML should have a `description` field with a detailed explanation of
-the scenario's intent (what it tests and why). The parser should read this into
-`Scenario.Description`. `ScenarioState` should carry the description through to
-`state.json`, and `printDetailView` should display it as a header line under each
-scenario name in the `--detail` output. This gives operators immediate context about
-what each scenario is verifying without reading the YAML source.
+Added `Description` field to `ScenarioState`, populated from `Scenario.Description`
+in `SuiteStart`. `printDetailView` displays it as a dimmed line under each scenario name.
