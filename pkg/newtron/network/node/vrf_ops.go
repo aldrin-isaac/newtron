@@ -80,7 +80,7 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 	// BGP_GLOBALS_AF|ipv4_unicast — opens 'address-family ipv4 unicast' block in FRR.
 	entries = append(entries, CompositeEntry{
 		Table:  "BGP_GLOBALS_AF",
-		Key:    fmt.Sprintf("%s|ipv4_unicast", vrfName),
+		Key:    BGPGlobalsAFKey(vrfName, "ipv4_unicast"),
 		Fields: map[string]string{},
 	})
 
@@ -88,14 +88,14 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 	// (HYPHEN, not underscore) to 'advertise ipv4 unicast' in 'address-family l2vpn evpn'.
 	entries = append(entries, CompositeEntry{
 		Table:  "BGP_GLOBALS_AF",
-		Key:    fmt.Sprintf("%s|l2vpn_evpn", vrfName),
+		Key:    BGPGlobalsAFKey(vrfName, "l2vpn_evpn"),
 		Fields: map[string]string{"advertise-ipv4-unicast": "true"},
 	})
 
 	// ROUTE_REDISTRIBUTE → 'redistribute connected' in ipv4 unicast AF for this VRF.
 	entries = append(entries, CompositeEntry{
 		Table:  "ROUTE_REDISTRIBUTE",
-		Key:    fmt.Sprintf("%s|connected|bgp|ipv4", vrfName),
+		Key:    RouteRedistributeKey(vrfName, "connected", "ipv4"),
 		Fields: map[string]string{},
 	})
 
@@ -236,11 +236,11 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	})
 
 	// Remove BGP_GLOBALS_AF l2vpn_evpn and ipv4_unicast entries.
-	cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|l2vpn_evpn", vrfName), ChangeDelete, nil, nil)
-	cs.Add("BGP_GLOBALS_AF", fmt.Sprintf("%s|ipv4_unicast", vrfName), ChangeDelete, nil, nil)
+	cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(vrfName, "l2vpn_evpn"), ChangeDelete, nil, nil)
+	cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(vrfName, "ipv4_unicast"), ChangeDelete, nil, nil)
 
 	// Remove ROUTE_REDISTRIBUTE entry.
-	cs.Add("ROUTE_REDISTRIBUTE", fmt.Sprintf("%s|connected|bgp|ipv4", vrfName), ChangeDelete, nil, nil)
+	cs.Add("ROUTE_REDISTRIBUTE", RouteRedistributeKey(vrfName, "connected", "ipv4"), ChangeDelete, nil, nil)
 
 	// Remove BGP_GLOBALS_EVPN_RT entries for this VRF (scan configDB for matching keys).
 	if n.configDB != nil {

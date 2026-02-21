@@ -79,6 +79,14 @@ func (cb *CompositeBuilder) SetGeneratedBy(by string) *CompositeBuilder {
 	return cb
 }
 
+// AddEntries adds multiple CompositeEntry values to the composite.
+func (cb *CompositeBuilder) AddEntries(entries []CompositeEntry) *CompositeBuilder {
+	for _, e := range entries {
+		cb.AddEntry(e.Table, e.Key, e.Fields)
+	}
+	return cb
+}
+
 // AddEntry adds a single CONFIG_DB entry to the composite.
 func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string) *CompositeBuilder {
 	if cb.tables[table] == nil {
@@ -91,44 +99,6 @@ func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string
 		cb.tables[table][key][k] = v
 	}
 	return cb
-}
-
-// AddBGPGlobals adds BGP global settings to the composite.
-func (cb *CompositeBuilder) AddBGPGlobals(vrf string, fields map[string]string) *CompositeBuilder {
-	return cb.AddEntry("BGP_GLOBALS", vrf, fields)
-}
-
-// AddBGPGlobalsAF adds BGP address-family settings to the composite.
-func (cb *CompositeBuilder) AddBGPGlobalsAF(vrf, af string, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%s", vrf, af)
-	return cb.AddEntry("BGP_GLOBALS_AF", key, fields)
-}
-
-// AddBGPNeighbor adds a BGP neighbor to the composite.
-// Key format: vrf|neighborIP (per SONiC Unified FRR Mgmt schema for VRF-aware tables).
-func (cb *CompositeBuilder) AddBGPNeighbor(vrf, neighborIP string, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%s", vrf, neighborIP)
-	return cb.AddEntry("BGP_NEIGHBOR", key, fields)
-}
-
-// AddBGPNeighborAF adds BGP neighbor address-family settings.
-// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema for VRF-aware tables).
-func (cb *CompositeBuilder) AddBGPNeighborAF(vrf, neighborIP, af string, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%s|%s", vrf, neighborIP, af)
-	return cb.AddEntry("BGP_NEIGHBOR_AF", key, fields)
-}
-
-// AddPortConfig adds a PORT entry to the composite.
-func (cb *CompositeBuilder) AddPortConfig(portName string, fields map[string]string) *CompositeBuilder {
-	return cb.AddEntry("PORT", portName, fields)
-}
-
-// AddRouteRedistribution adds a route redistribution entry.
-// Key format: vrf|src_protocol|dst_protocol|addr_family (per SONiC Unified FRR Mgmt HLD).
-// dst_protocol is always "bgp" (the only supported destination).
-func (cb *CompositeBuilder) AddRouteRedistribution(vrf, protocol, af string, fields map[string]string) *CompositeBuilder {
-	key := fmt.Sprintf("%s|%s|bgp|%s", vrf, protocol, af)
-	return cb.AddEntry("ROUTE_REDISTRIBUTE", key, fields)
 }
 
 // Build returns the completed CompositeConfig.

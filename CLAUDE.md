@@ -63,6 +63,21 @@ service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
 Current violations are tracked in `docs/refactor-items.md` item 5. When adding new
 CONFIG_DB writes, always check the ownership map — never add a second writer.
 
+## Separation of Concerns — File-Level Ownership
+
+Code should be organized so that a reader can guess where a feature is implemented
+by looking at file names alone.
+
+Rules:
+1. **composite.go** = delivery mechanics (CompositeBuilder, CompositeConfig, DeliverComposite).
+   No CONFIG_DB table or key format knowledge.
+2. **topology.go** = topology-driven provisioning orchestration.
+   Calls config functions from `node/` but never constructs CONFIG_DB keys inline.
+3. **Each `*_ops.go`** = sole owner of its CONFIG_DB tables' entry construction
+   (as defined in the Single-Owner Principle ownership map).
+4. **service_gen.go** = service-to-entries translation. Calls config functions from
+   owning `*_ops.go` files.
+
 ## Redis-First Interaction Principle
 
 newtron is a Redis-centric system. All device interaction MUST go through SONiC Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB). See `docs/newtron/hld.md` for the full interaction model.

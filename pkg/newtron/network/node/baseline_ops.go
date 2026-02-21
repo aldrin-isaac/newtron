@@ -53,9 +53,9 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 		}
 
 	case "sonic-evpn":
-		// EVPN baseline - create VTEP (delegates to evpn_ops.go vtepConfig)
+		// EVPN baseline - create VTEP (delegates to evpn_ops.go VTEPConfig)
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
-			for _, e := range vtepConfig(loopbackIP) {
+			for _, e := range VTEPConfig(loopbackIP) {
 				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
 			}
 		}

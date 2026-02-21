@@ -8,8 +8,21 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// vlanResource returns the canonical resource name for a VLAN.
-func vlanResource(id int) string { return fmt.Sprintf("Vlan%d", id) }
+// VLANName returns the SONiC name for a VLAN (e.g., "Vlan100").
+func VLANName(vlanID int) string { return fmt.Sprintf("Vlan%d", vlanID) }
+
+// VLANMemberKey returns the CONFIG_DB key for a VLAN_MEMBER entry.
+func VLANMemberKey(vlanID int, intfName string) string {
+	return fmt.Sprintf("%s|%s", VLANName(vlanID), intfName)
+}
+
+// SVIIPKey returns the CONFIG_DB key for a VLAN_INTERFACE IP entry.
+func SVIIPKey(vlanID int, ipAddr string) string {
+	return fmt.Sprintf("%s|%s", VLANName(vlanID), ipAddr)
+}
+
+// vlanResource returns the canonical resource name for a VLAN (precondition locking).
+func vlanResource(id int) string { return VLANName(id) }
 
 // ============================================================================
 // VLAN Operations
@@ -32,7 +45,7 @@ type VLANConfig struct {
 // vlanConfig returns CONFIG_DB entries for a VLAN: a VLAN entry and an optional
 // VXLAN_TUNNEL_MAP entry when L2VNI is specified.
 func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	vlanName := VLANName(vlanID)
 	fields := map[string]string{
 		"vlanid": fmt.Sprintf("%d", vlanID),
 	}
@@ -45,10 +58,9 @@ func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
 	}
 
 	if opts.L2VNI > 0 {
-		mapKey := fmt.Sprintf("vtep1|map_%d_%s", opts.L2VNI, vlanName)
 		entries = append(entries, CompositeEntry{
 			Table: "VXLAN_TUNNEL_MAP",
-			Key:   mapKey,
+			Key:   VNIMapKey(opts.L2VNI, vlanName),
 			Fields: map[string]string{
 				"vlan": vlanName,
 				"vni":  fmt.Sprintf("%d", opts.L2VNI),
@@ -62,16 +74,13 @@ func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
 // vlanMemberConfig returns a CONFIG_DB VLAN_MEMBER entry for adding an
 // interface to a VLAN with the specified tagging mode.
 func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []CompositeEntry {
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
-
 	taggingMode := "untagged"
 	if tagged {
 		taggingMode = "tagged"
 	}
 
 	return []CompositeEntry{
-		{Table: "VLAN_MEMBER", Key: memberKey, Fields: map[string]string{
+		{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName), Fields: map[string]string{
 			"tagging_mode": taggingMode,
 		}},
 	}
@@ -81,7 +90,7 @@ func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []Composite
 // with optional VRF binding, an optional IP address entry, and an optional
 // SAG_GLOBAL entry for anycast gateway MAC.
 func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	vlanName := VLANName(vlanID)
 
 	// VLAN_INTERFACE base entry with optional VRF binding
 	fields := map[string]string{}
@@ -94,9 +103,8 @@ func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
 
 	// IP address binding
 	if opts.IPAddress != "" {
-		ipKey := fmt.Sprintf("%s|%s", vlanName, opts.IPAddress)
 		entries = append(entries, CompositeEntry{
-			Table: "VLAN_INTERFACE", Key: ipKey, Fields: map[string]string{},
+			Table: "VLAN_INTERFACE", Key: SVIIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
 		})
 	}
 
@@ -139,7 +147,7 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	}
 
 	cs := NewChangeSet(n.name, "device.delete-vlan")
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	vlanName := VLANName(vlanID)
 
 	// Remove VLAN members first
 	if n.configDB != nil {
@@ -202,10 +210,8 @@ func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName s
 	}
 
 	cs := NewChangeSet(n.name, "device.remove-vlan-member")
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
 
-	cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
+	cs.Add("VLAN_MEMBER", VLANMemberKey(vlanID, interfaceName), ChangeDelete, nil, nil)
 
 	util.WithDevice(n.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
 	return cs, nil
@@ -240,7 +246,7 @@ func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	vlanName := VLANName(vlanID)
 	cs := NewChangeSet(n.name, "device.remove-svi")
 
 	configDB := n.ConfigDB()

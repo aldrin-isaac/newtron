@@ -259,7 +259,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 }
 
 // generateBGPEntries resolves BGP peer parameters from the service spec and
-// topology params, then delegates to bgpNeighborConfig for entry construction.
+// topology params, then delegates to BGPNeighborConfig for entry construction.
 func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]CompositeEntry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
@@ -306,7 +306,7 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 
 	localIP, _ := util.SplitIPMask(p.IPAddress)
 
-	return bgpNeighborConfig(peerIP, peerAS, localIP, bgpNeighborOpts{
+	return BGPNeighborConfig(peerIP, peerAS, localIP, BGPNeighborOpts{
 		VRF:          vrfName,
 		ActivateIPv4: true,
 		RRClient:     p.Params["route_reflector_client"] == "true",

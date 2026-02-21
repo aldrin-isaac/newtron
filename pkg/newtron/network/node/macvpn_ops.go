@@ -44,8 +44,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 
 	// Add VNI mapping
 	if macvpnDef.VNI > 0 {
-		mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.VNI, vlanName)
-		cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
+		cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(macvpnDef.VNI, vlanName), ChangeAdd, nil, map[string]string{
 			"vlan": vlanName,
 			"vni":  fmt.Sprintf("%d", macvpnDef.VNI),
 		})

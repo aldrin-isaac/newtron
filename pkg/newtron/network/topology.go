@@ -180,7 +180,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		}
 		// Only add PORT entries for physical interfaces (Ethernet*)
 		if strings.HasPrefix(intfName, "Ethernet") {
-			cb.AddPortConfig(intfName, map[string]string{
+			cb.AddEntry("PORT", intfName, map[string]string{
 				"admin_status": "up",
 				"mtu":          "9100",
 			})
@@ -220,28 +220,21 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 
 	// VXLAN_TUNNEL + VXLAN_EVPN_NVO (if device has EVPN services)
 	if hasEVPN {
-		cb.AddEntry("VXLAN_TUNNEL", "vtep1", map[string]string{
-			"src_ip": resolved.VTEPSourceIP,
-		})
-		cb.AddEntry("VXLAN_EVPN_NVO", "nvo1", map[string]string{
-			"source_vtep": "vtep1",
-		})
+		cb.AddEntries(node.VTEPConfig(resolved.VTEPSourceIP))
 	}
 
 	// BGP_GLOBALS — underlay AS + eBGP settings
-	cb.AddBGPGlobals("default", map[string]string{
-		"local_asn":            fmt.Sprintf("%d", resolved.UnderlayASN),
-		"router_id":            resolved.RouterID,
+	cb.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"ebgp_requires_policy": "false",
 		"log_neighbor_changes": "true",
-	})
+	}))
 
 	// BGP address-family globals
-	cb.AddBGPGlobalsAF("default", "ipv4_unicast", map[string]string{})
+	cb.AddEntries(node.BGPGlobalsAFConfig("default", "ipv4_unicast", nil))
 	if hasEVPN {
-		cb.AddBGPGlobalsAF("default", "l2vpn_evpn", map[string]string{
+		cb.AddEntries(node.BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
 			"advertise-all-vni": "true",
-		})
+		}))
 	}
 
 	// BGP neighbors from EVPN peers (eBGP overlay via loopback).
@@ -260,25 +253,12 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 			continue
 		}
 
-		cb.AddBGPNeighbor("default", peerProfile.LoopbackIP, map[string]string{
-			"asn":            fmt.Sprintf("%d", peerProfile.UnderlayASN),
-			"local_addr":     resolved.LoopbackIP,
-			"admin_status":   "up",
-			"ebgp_multihop":  "true",
-		})
-
-		// Activate IPv4 unicast (for loopback distribution)
-		cb.AddBGPNeighborAF("default", peerProfile.LoopbackIP, "ipv4_unicast", map[string]string{
-			"admin_status": "true",
-		})
-
-		if hasEVPN {
-			// Activate L2VPN EVPN with next-hop-unchanged (preserve VTEP across eBGP)
-			cb.AddBGPNeighborAF("default", peerProfile.LoopbackIP, "l2vpn_evpn", map[string]string{
-				"admin_status":        "true",
-				"nexthop_unchanged":   "true", // Critical for eBGP overlay
-			})
-		}
+		cb.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+			EBGPMultihop:     true,
+			ActivateIPv4:     true,
+			ActivateEVPN:     hasEVPN,
+			NextHopUnchanged: hasEVPN, // Critical for eBGP overlay
+		}))
 	}
 
 	// eBGP underlay neighbors from topology links (hop-by-hop)
@@ -313,18 +293,13 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		}
 
 		localIP, _ := util.SplitIPMask(ti.IP)
-		cb.AddBGPNeighbor("default", peerIP, map[string]string{
-			"asn":          fmt.Sprintf("%d", peerASN),
-			"local_addr":   localIP,
-			"admin_status": "up",
-		})
-		cb.AddBGPNeighborAF("default", peerIP, "ipv4_unicast", map[string]string{
-			"admin_status": "true",
-		})
+		cb.AddEntries(node.BGPNeighborConfig(peerIP, peerASN, localIP, node.BGPNeighborOpts{
+			ActivateIPv4: true,
+		}))
 	}
 
 	// Route redistribution for connected (loopback + service subnets)
-	cb.AddRouteRedistribution("default", "connected", "ipv4", map[string]string{})
+	cb.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv4"))
 
 	// Route reflector setup if device_config.route_reflector is true
 	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
@@ -347,14 +322,12 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
 	// log_neighbor_changes are already set in addDeviceEntries for all devices)
-	cb.AddBGPGlobals("default", map[string]string{
-		"local_asn":              fmt.Sprintf("%d", resolved.UnderlayASN),
-		"router_id":             resolved.RouterID,
+	cb.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
 		"ebgp_requires_policy":  "false",
 		"log_neighbor_changes":  "true",
-	})
+	}))
 
 	// Discover RR clients: iterate all devices in the topology.
 	// Any device that is NOT a route reflector and is NOT this device is a client.
@@ -387,43 +360,37 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		}
 
 		// Add eBGP neighbor for this client (all-eBGP design)
-		cb.AddBGPNeighbor("default", clientLoopback, map[string]string{
-			"asn":            fmt.Sprintf("%d", clientProfile.UnderlayASN),
-			"local_addr":     resolved.LoopbackIP,
-			"admin_status":   "up",
-			"ebgp_multihop":  "true",
-		})
-		cb.AddBGPNeighborAF("default", clientLoopback, "ipv4_unicast", map[string]string{
-			"admin_status": "true",
-			"rrclient":     "true",
-			"nhself":       "true",
-		})
+		cb.AddEntries(node.BGPNeighborConfig(clientLoopback, clientProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+			EBGPMultihop: true,
+			ActivateIPv4: true,
+			RRClient:     true,
+			NextHopSelf:  true,
+		}))
 	}
 
-	// For RR-to-RR neighbors (from EVPN peers), enable route-reflector-client
+	// For RR-to-RR neighbors (from EVPN peers), overlay RR-specific AF entries.
+	// The base BGP_NEIGHBOR was already created in addDeviceEntries; CompositeBuilder's
+	// AddEntry merges fields per key, so these AF entries layer on top.
 	for _, peerName := range getEVPNPeerNames(tp.network, resolved.DeviceName) {
 		peerProfile, err := tp.network.loadProfile(peerName)
 		if err != nil {
 			continue
 		}
-		cb.AddBGPNeighborAF("default", peerProfile.LoopbackIP, "ipv4_unicast", map[string]string{
-			"admin_status": "true",
-			"rrclient":     "true",
-			"nhself":       "true",
-		})
-		cb.AddBGPNeighborAF("default", peerProfile.LoopbackIP, "ipv6_unicast", map[string]string{
-			"admin_status": "true",
-			"rrclient":     "true",
-			"nhself":       "true",
-		})
-		cb.AddBGPNeighborAF("default", peerProfile.LoopbackIP, "l2vpn_evpn", map[string]string{
-			"admin_status": "true",
-			"rrclient":     "true",
-		})
+		cb.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+			EBGPMultihop:    true,
+			ActivateIPv4:    true,
+			RRClient:        true,
+			NextHopSelf:     true,
+			ActivateIPv6:    true,
+			RRClientIPv6:    true,
+			NextHopSelfIPv6: true,
+			ActivateEVPN:    true,
+			RRClientEVPN:    true,
+		}))
 	}
 
 	// IPv6 route redistribution for RR
-	cb.AddRouteRedistribution("default", "connected", "ipv6", map[string]string{})
+	cb.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv6"))
 }
 
 // getEVPNPeerNames returns the list of EVPN peer device names from profile.

@@ -380,13 +380,12 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 
 	// Merge route-map references into the BGP_NEIGHBOR_AF entry
 	if len(afFields) > 0 && peerIP != "" {
-		afKey := fmt.Sprintf("%s|%s|ipv4_unicast", vrfKey, peerIP)
-		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeModify, nil, afFields)
+		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, peerIP, "ipv4_unicast"), ChangeModify, nil, afFields)
 	}
 
 	// Override default redistribution if specified
 	if routing.Redistribute != nil {
-		redistKey := fmt.Sprintf("%s|ipv4_unicast", vrfKey)
+		redistKey := BGPGlobalsAFKey(vrfKey, "ipv4_unicast")
 		if *routing.Redistribute {
 			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, nil, map[string]string{
 				"redistribute_connected": "true",
@@ -751,14 +750,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 			// Remove BGP EVPN config for this VRF
 			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				vniKey := fmt.Sprintf("%s|%d", vrfName, ipvpnDef.L3VNI)
-				cs.Add("BGP_EVPN_VNI", vniKey, ChangeDelete, nil, nil)
-
-				afKey := fmt.Sprintf("%s|l2vpn_evpn", vrfName)
-				cs.Add("BGP_GLOBALS_AF", afKey, ChangeDelete, nil, nil)
-
-				mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, vrfName)
-				cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+				cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(vrfName, ipvpnDef.L3VNI), ChangeDelete, nil, nil)
+				cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(vrfName, "l2vpn_evpn"), ChangeDelete, nil, nil)
+				cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, vrfName), ChangeDelete, nil, nil)
 			}
 
 			cs.Add("VRF", vrfName, ChangeDelete, nil, nil)
@@ -775,14 +769,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 				}
 
 				if sharedVRF != "" && ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-					vniKey := fmt.Sprintf("%s|%d", sharedVRF, ipvpnDef.L3VNI)
-					cs.Add("BGP_EVPN_VNI", vniKey, ChangeDelete, nil, nil)
-
-					afKey := fmt.Sprintf("%s|l2vpn_evpn", sharedVRF)
-					cs.Add("BGP_GLOBALS_AF", afKey, ChangeDelete, nil, nil)
-
-					mapKey := fmt.Sprintf("vtep1|map_%d_%s", ipvpnDef.L3VNI, sharedVRF)
-					cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+					cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(sharedVRF, ipvpnDef.L3VNI), ChangeDelete, nil, nil)
+					cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(sharedVRF, "l2vpn_evpn"), ChangeDelete, nil, nil)
+					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, sharedVRF), ChangeDelete, nil, nil)
 				}
 
 				if sharedVRF != "" {
@@ -801,11 +790,10 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
 		if hasL2 {
 			vlanID := macvpnDef.VlanID
-			vlanName := fmt.Sprintf("Vlan%d", vlanID)
+			vlanName := VLANName(vlanID)
 
 			// Always remove this interface's VLAN membership
-			memberKey := fmt.Sprintf("%s|%s", vlanName, i.name)
-			cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
+			cs.Add("VLAN_MEMBER", VLANMemberKey(vlanID, i.name), ChangeDelete, nil, nil)
 
 			// Check if this is the last VLAN member
 			if depCheck.IsLastVLANMember(vlanID) {
@@ -815,8 +803,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 				hasIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
 				if hasIRB {
 					if macvpnDef.AnycastIP != "" {
-						sviIPKey := fmt.Sprintf("%s|%s", vlanName, macvpnDef.AnycastIP)
-						cs.Add("VLAN_INTERFACE", sviIPKey, ChangeDelete, nil, nil)
+						cs.Add("VLAN_INTERFACE", SVIIPKey(vlanID, macvpnDef.AnycastIP), ChangeDelete, nil, nil)
 					}
 					cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil, nil)
 				}
@@ -828,8 +815,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 				// VNI mapping
 				if macvpnDef.VNI > 0 {
-					mapKey := fmt.Sprintf("vtep1|map_%d_%s", macvpnDef.VNI, vlanName)
-					cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(macvpnDef.VNI, vlanName), ChangeDelete, nil, nil)
 				}
 
 				// VLAN itself

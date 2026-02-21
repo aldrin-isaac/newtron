@@ -11,20 +11,25 @@ import (
 // BGP Config Functions (pure, no Node state)
 // ============================================================================
 
-// bgpNeighborOpts controls optional aspects of BGP neighbor configuration.
-type bgpNeighborOpts struct {
-	Description  string
-	EBGPMultihop bool   // set ebgp_multihop (value "true" for loopback, TTL string for explicit)
-	MultihopTTL  string // explicit TTL value (e.g., "255"); if empty and EBGPMultihop=true, uses "true"
-	ActivateIPv4 bool   // activate ipv4_unicast AF (default true for direct peers)
-	ActivateEVPN bool   // activate l2vpn_evpn AF
-	VRF          string // VRF name (default "default")
-	RRClient    bool   // route-reflector-client on ipv4_unicast AF
-	NextHopSelf bool   // next-hop-self on ipv4_unicast AF
+// BGPNeighborOpts controls optional aspects of BGP neighbor configuration.
+type BGPNeighborOpts struct {
+	Description      string
+	EBGPMultihop     bool   // set ebgp_multihop (value "true" for loopback, TTL string for explicit)
+	MultihopTTL      string // explicit TTL value (e.g., "255"); if empty and EBGPMultihop=true, uses "true"
+	ActivateIPv4     bool   // activate ipv4_unicast AF (default true for direct peers)
+	ActivateEVPN     bool   // activate l2vpn_evpn AF
+	VRF              string // VRF name (default "default")
+	RRClient         bool   // route-reflector-client on ipv4_unicast AF
+	NextHopSelf      bool   // next-hop-self on ipv4_unicast AF
+	NextHopUnchanged bool   // nexthop_unchanged on l2vpn_evpn AF
+	ActivateIPv6     bool   // activate ipv6_unicast AF
+	RRClientIPv6     bool   // rrclient on ipv6_unicast AF
+	NextHopSelfIPv6  bool   // nhself on ipv6_unicast AF
+	RRClientEVPN     bool   // rrclient on l2vpn_evpn AF
 }
 
-// bgpNeighborConfig returns CompositeEntry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
-func bgpNeighborConfig(neighborIP string, asn int, localAddr string, opts bgpNeighborOpts) []CompositeEntry {
+// BGPNeighborConfig returns CompositeEntry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
+func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []CompositeEntry {
 	var entries []CompositeEntry
 
 	vrf := opts.VRF
@@ -70,21 +75,44 @@ func bgpNeighborConfig(neighborIP string, asn int, localAddr string, opts bgpNei
 		})
 	}
 
+	// Activate IPv6 unicast
+	if opts.ActivateIPv6 {
+		afFields := map[string]string{"admin_status": "true"}
+		if opts.RRClientIPv6 {
+			afFields["rrclient"] = "true"
+		}
+		if opts.NextHopSelfIPv6 {
+			afFields["nhself"] = "true"
+		}
+		entries = append(entries, CompositeEntry{
+			Table:  "BGP_NEIGHBOR_AF",
+			Key:    fmt.Sprintf("%s|%s|ipv6_unicast", vrf, neighborIP),
+			Fields: afFields,
+		})
+	}
+
 	// Activate L2VPN EVPN
 	if opts.ActivateEVPN {
+		evpnFields := map[string]string{"admin_status": "true"}
+		if opts.NextHopUnchanged {
+			evpnFields["nexthop_unchanged"] = "true"
+		}
+		if opts.RRClientEVPN {
+			evpnFields["rrclient"] = "true"
+		}
 		entries = append(entries, CompositeEntry{
 			Table:  "BGP_NEIGHBOR_AF",
 			Key:    fmt.Sprintf("%s|%s|l2vpn_evpn", vrf, neighborIP),
-			Fields: map[string]string{"admin_status": "true"},
+			Fields: evpnFields,
 		})
 	}
 
 	return entries
 }
 
-// bgpNeighborDeleteConfig returns CompositeEntry for deleting a BGP neighbor
+// BGPNeighborDeleteConfig returns CompositeEntry for deleting a BGP neighbor
 // and all its address-family entries.
-func bgpNeighborDeleteConfig(neighborIP string) []CompositeEntry {
+func BGPNeighborDeleteConfig(neighborIP string) []CompositeEntry {
 	var entries []CompositeEntry
 
 	// Remove address-family entries first
@@ -113,6 +141,53 @@ func interfaceIPConfig(intfName, ipAddr string) []CompositeEntry {
 		{Table: "INTERFACE", Key: intfName, Fields: map[string]string{}},
 		{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}},
 	}
+}
+
+// BGPGlobalsConfig returns CompositeEntry for BGP_GLOBALS.
+func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []CompositeEntry {
+	fields := map[string]string{
+		"local_asn": fmt.Sprintf("%d", asn),
+		"router_id": routerID,
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	return []CompositeEntry{
+		{Table: "BGP_GLOBALS", Key: vrf, Fields: fields},
+	}
+}
+
+// BGPGlobalsAFKey returns the CONFIG_DB key for a BGP_GLOBALS_AF entry.
+func BGPGlobalsAFKey(vrf, af string) string {
+	return fmt.Sprintf("%s|%s", vrf, af)
+}
+
+// BGPGlobalsAFConfig returns CompositeEntry for BGP_GLOBALS_AF.
+func BGPGlobalsAFConfig(vrf, af string, fields map[string]string) []CompositeEntry {
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	return []CompositeEntry{
+		{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrf, af), Fields: fields},
+	}
+}
+
+// RouteRedistributeKey returns the CONFIG_DB key for a ROUTE_REDISTRIBUTE entry.
+func RouteRedistributeKey(vrf, protocol, af string) string {
+	return fmt.Sprintf("%s|%s|bgp|%s", vrf, protocol, af)
+}
+
+// RouteRedistributeConfig returns CompositeEntry for ROUTE_REDISTRIBUTE.
+func RouteRedistributeConfig(vrf, protocol, af string) []CompositeEntry {
+	return []CompositeEntry{
+		{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af), Fields: map[string]string{}},
+	}
+}
+
+// BGPNeighborAFKey returns the CONFIG_DB key for a BGP_NEIGHBOR_AF entry.
+// Used by callers that need to modify an existing AF entry (e.g. adding route-maps).
+func BGPNeighborAFKey(vrf, neighborIP, af string) string {
+	return fmt.Sprintf("%s|%s|%s", vrf, neighborIP, af)
 }
 
 // ============================================================================
@@ -167,19 +242,19 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 		"frr_mgmt_framework_config":  "true",
 	})
 
-	// BGP global instance
-	cs.Add("BGP_GLOBALS", "default", ChangeModify, nil, map[string]string{
-		"local_asn":              asnStr,
-		"router_id":              resolved.RouterID,
-		"ebgp_requires_policy":  "false",
-		"log_neighbor_changes":  "true",
-	})
-
-	// Enable IPv4 unicast address-family
-	cs.Add("BGP_GLOBALS_AF", "default|ipv4_unicast", ChangeModify, nil, map[string]string{})
-
-	// Redistribute connected routes (required for loopback reachability)
-	cs.Add("ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeModify, nil, map[string]string{})
+	// BGP global instance + address-family + redistribution via config functions
+	for _, e := range BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+		"ebgp_requires_policy": "false",
+		"log_neighbor_changes": "true",
+	}) {
+		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+	}
+	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
+		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+	}
+	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
+		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+	}
 
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
 	return cs, nil
@@ -207,7 +282,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 	}
 
 	isEBGP := asn != n.resolved.UnderlayASN
-	config := bgpNeighborConfig(neighborIP, asn, n.resolved.LoopbackIP, bgpNeighborOpts{
+	config := BGPNeighborConfig(neighborIP, asn, n.resolved.LoopbackIP, BGPNeighborOpts{
 		Description:  description,
 		EBGPMultihop: isEBGP,
 		MultihopTTL:  "255",
@@ -231,7 +306,7 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
 	}
 
-	config := bgpNeighborDeleteConfig(neighborIP)
+	config := BGPNeighborDeleteConfig(neighborIP)
 	cs := configToChangeSet(n.name, "bgp.remove-neighbor", config, ChangeDelete)
 
 	util.WithDevice(n.name).Infof("Removing BGP neighbor %s", neighborIP)
@@ -255,10 +330,16 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 
 	cs := NewChangeSet(n.name, "device.remove-bgp-globals")
 
-	// Reverse order of ConfigureBGP
-	cs.Add("ROUTE_REDISTRIBUTE", "default|connected|bgp|ipv4", ChangeDelete, nil, nil)
-	cs.Add("BGP_GLOBALS_AF", "default|ipv4_unicast", ChangeDelete, nil, nil)
-	cs.Add("BGP_GLOBALS", "default", ChangeDelete, nil, nil)
+	// Reverse order of ConfigureBGP — use config functions for key consistency
+	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
+		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+	}
+	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
+		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+	}
+	for _, e := range BGPGlobalsConfig("default", 0, "", nil) {
+		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+	}
 
 	// Clear bgp_asn from DEVICE_METADATA (set to empty)
 	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, nil, map[string]string{
