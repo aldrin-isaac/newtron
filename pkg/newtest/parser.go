@@ -97,7 +97,7 @@ var stepValidations = map[StepAction]stepValidation{
 	ActionVerifyBGP:         {needsDevices: true},
 	ActionVerifyHealth:      {needsDevices: true},
 	ActionApplyFRRDefaults:  {needsDevices: true},
-	ActionCleanup:           {needsDevices: true},
+ActionCleanup:           {needsDevices: true},
 	ActionVerifyConfigDB: {needsDevices: true, fields: []string{"table"}, custom: func(prefix string, step *Step) error {
 		if step.Expect == nil {
 			return fmt.Errorf("%s: expect is required", prefix)
@@ -153,6 +153,10 @@ var stepValidations = map[StepAction]stepValidation{
 	ActionDeleteACLTable: {needsDevices: true, params: []string{"name"}},
 	ActionBindACL:        {needsDevices: true, fields: []string{"interface"}, params: []string{"name", "direction"}},
 	ActionUnbindACL:      {needsDevices: true, fields: []string{"interface"}, params: []string{"name"}},
+	ActionRemoveSVI:      {needsDevices: true, params: []string{"vlan_id"}},
+	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
+	ActionTeardownEVPN:     {needsDevices: true},
+	ActionRemoveBGPGlobals: {needsDevices: true},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.

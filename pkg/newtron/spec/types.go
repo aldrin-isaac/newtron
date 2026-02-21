@@ -79,6 +79,7 @@ type IPVPNSpec struct {
 	Description  string   `json:"description,omitempty"`
 	VRF          string   `json:"vrf"`
 	L3VNI        int      `json:"l3vni"`
+	L3VNIVlan    int      `json:"l3vni_vlan,omitempty"` // Dedicated transit VLAN for L3VNI decap (no ports, no IP)
 	RouteTargets []string `json:"route_targets"`
 }
 
@@ -425,7 +426,8 @@ type ResolvedProfile struct {
 	// Derived at runtime
 	RouterID     string   // = LoopbackIP
 	VTEPSourceIP string   // = LoopbackIP
-	BGPNeighbors []string // From profile EVPN peers → lookup loopback IPs
+	BGPNeighbors    []string       // From profile EVPN peers → lookup loopback IPs
+	BGPNeighborASNs map[string]int // peer loopback IP → peer UnderlayASN (for eBGP overlay)
 
 	// From profile (optional)
 	MAC string

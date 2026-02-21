@@ -44,7 +44,7 @@ var executors = map[StepAction]stepExecutor{
 	ActionSSHCommand:         &sshCommandExecutor{},
 	ActionRestartService:     &restartServiceExecutor{},
 	ActionApplyFRRDefaults:   &applyFRRDefaultsExecutor{},
-	ActionSetInterface:       &setInterfaceExecutor{},
+ActionSetInterface:       &setInterfaceExecutor{},
 	ActionCreateVLAN:         &createVLANExecutor{},
 	ActionDeleteVLAN:         &deleteVLANExecutor{},
 	ActionAddVLANMember:      &addVLANMemberExecutor{},
@@ -82,6 +82,11 @@ var executors = map[StepAction]stepExecutor{
 	ActionDeleteACLTable: &deleteACLTableExecutor{},
 	ActionBindACL:        &bindACLExecutor{},
 	ActionUnbindACL:      &unbindACLExecutor{},
+	ActionRemoveSVI:      &removeSVIExecutor{},
+	ActionRemoveIP:       &removeIPExecutor{},
+	ActionTeardownEVPN:     &teardownEVPNExecutor{},
+	ActionConfigureBGP:     &configureBGPExecutor{},
+	ActionRemoveBGPGlobals: &removeBGPGlobalsExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -399,6 +404,20 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			})
 			allPassed = false
 			continue
+		}
+
+		// Inject system MAC into DEVICE_METADATA before delivery.
+		// Inherent: the system MAC is platform-initialized (not user config) and stored in
+		// /etc/sonic/config_db.json. CompositeOverwrite replaces DEVICE_METADATA entirely;
+		// the MAC must be re-injected so vlanmgrd can read it at startup.
+		if mac := dev.ReadSystemMAC(); mac != "" {
+			if composite.Tables != nil {
+				if dm, ok := composite.Tables["DEVICE_METADATA"]; ok {
+					if localhost, ok := dm["localhost"]; ok {
+						localhost["mac"] = mac
+					}
+				}
+			}
 		}
 
 		result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
@@ -1734,3 +1753,100 @@ func (e *unbindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 		return cs, fmt.Sprintf("unbound ACL %s from %s (%d changes)", aclName, ifaceName, len(cs.Changes)), nil
 	})
 }
+
+// ============================================================================
+// configureBGPExecutor
+// ============================================================================
+
+type configureBGPExecutor struct{}
+
+func (e *configureBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.ConfigureBGP(ctx)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("configure-bgp: %s", err)
+		}
+		return cs, fmt.Sprintf("configured BGP (%d changes)", len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// removeSVIExecutor
+// ============================================================================
+
+type removeSVIExecutor struct{}
+
+func (e *removeSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	vlanID := intParam(step.Params, "vlan_id")
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.RemoveSVI(ctx, vlanID)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-svi vlan=%d: %s", vlanID, err)
+		}
+		return cs, fmt.Sprintf("removed SVI for VLAN %d (%d changes)", vlanID, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// removeIPExecutor
+// ============================================================================
+
+type removeIPExecutor struct{}
+
+func (e *removeIPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	ip := strParam(step.Params, "ip")
+	return r.executeForDevices(step, func(dev *node.Node, devName string) (*node.ChangeSet, string, error) {
+		intf, err := dev.GetInterface(step.Interface)
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-ip: %s", err)
+		}
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return intf.RemoveIP(ctx, ip)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-ip %s %s: %s", step.Interface, ip, err)
+		}
+		return cs, fmt.Sprintf("removed IP %s from %s (%d changes)", ip, step.Interface, len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// teardownEVPNExecutor
+// ============================================================================
+
+type teardownEVPNExecutor struct{}
+
+func (e *teardownEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.TeardownEVPN(ctx)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("teardown-evpn: %s", err)
+		}
+		return cs, fmt.Sprintf("tore down EVPN overlay (%d changes)", len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// removeBGPGlobalsExecutor
+// ============================================================================
+
+type removeBGPGlobalsExecutor struct{}
+
+func (e *removeBGPGlobalsExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.RemoveBGPGlobals(ctx)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-bgp-globals: %s", err)
+		}
+		return cs, fmt.Sprintf("removed BGP globals (%d changes)", len(cs.Changes)), nil
+	})
+}
+

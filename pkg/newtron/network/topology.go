@@ -103,6 +103,20 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	}
 	defer dev.Unlock()
 
+	// Read system MAC and inject into DEVICE_METADATA before delivery.
+	// Inherent: the system MAC is platform-initialized (not user config) and stored in
+	// /etc/sonic/config_db.json. CompositeOverwrite replaces DEVICE_METADATA entirely;
+	// the MAC must be re-injected so vlanmgrd can read it at startup.
+	if mac := dev.ReadSystemMAC(); mac != "" {
+		if composite.Tables != nil {
+			if dm, ok := composite.Tables["DEVICE_METADATA"]; ok {
+				if localhost, ok := dm["localhost"]; ok {
+					localhost["mac"] = mac
+				}
+			}
+		}
+	}
+
 	// Deliver with overwrite mode (replace entire CONFIG_DB)
 	result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 	if err != nil {
@@ -176,6 +190,11 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 	// Write INTERFACE base + IP entries for non-service interfaces with explicit IPs.
 	// Service interfaces get their INTERFACE entries via GenerateServiceEntries.
 	// Host-facing and VRF-bound interfaces need these entries for kernel L3 programming.
+	//
+	// ORDERING: VRF entry must be written BEFORE the INTERFACE binding (vrf_name field).
+	// Orchagent receives Redis keyspace notifications in pipeline order. If INTERFACE|EthernetN
+	// with vrf_name is processed before VRF|Name exists, orchagent silently drops the binding.
+	// Writing VRF first ensures the SAI VRF object is created before the interface is bound.
 	for intfName, ti := range topoDev.Interfaces {
 		if ti.Service != "" || ti.IP == "" {
 			continue
@@ -183,15 +202,17 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		if !strings.HasPrefix(intfName, "Ethernet") {
 			continue
 		}
+		// Write VRF entry FIRST so orchagent creates the VRF SAI object before processing
+		// the interface binding below.
+		if ti.VRF != "" {
+			cb.AddEntry("VRF", ti.VRF, map[string]string{})
+		}
 		intfBase := map[string]string{}
 		if ti.VRF != "" {
 			intfBase["vrf_name"] = ti.VRF
 		}
 		cb.AddEntry("INTERFACE", intfName, intfBase)
 		cb.AddEntry("INTERFACE", fmt.Sprintf("%s|%s", intfName, ti.IP), map[string]string{})
-		if ti.VRF != "" {
-			cb.AddEntry("VRF", ti.VRF, map[string]string{})
-		}
 	}
 
 	// Determine if device needs EVPN infrastructure
@@ -468,6 +489,7 @@ func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, in
 		IPAddress:     ti.IP,
 		Params:        ti.Params,
 		UnderlayASN:   resolved.UnderlayASN,
+		RouterID:      resolved.RouterID,
 		PlatformName:  resolved.Platform,
 	})
 	if err != nil {

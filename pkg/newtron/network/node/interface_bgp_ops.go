@@ -68,33 +68,16 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 		return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.add-bgp-neighbor")
-
 	// Extract local IP without mask for update-source
 	localIPOnly, _ := util.SplitIPMask(localIP)
 
-	// Add BGP neighbor entry
-	fields := map[string]string{
-		"asn":          fmt.Sprintf("%d", cfg.RemoteAS),
-		"admin_status": "up",
-		"local_addr":   localIPOnly, // Update source = interface IP
-	}
-	if cfg.Description != "" {
-		fields["name"] = cfg.Description
-	}
-	if cfg.Multihop > 0 {
-		fields["ebgp_multihop"] = fmt.Sprintf("%d", cfg.Multihop)
-	}
-	// Note: Password and BFD would be configured separately in SONiC
-
-	// Key format: vrf|neighborIP (per SONiC Unified FRR Mgmt schema)
-	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeAdd, nil, fields)
-
-	// Activate IPv4 unicast for this neighbor
-	afKey := fmt.Sprintf("default|%s|ipv4_unicast", neighborIP)
-	cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
-		"activate": "true",
+	config := bgpNeighborConfig(neighborIP, cfg.RemoteAS, localIPOnly, bgpNeighborOpts{
+		Description:  cfg.Description,
+		EBGPMultihop: cfg.Multihop > 0,
+		MultihopTTL:  fmt.Sprintf("%d", cfg.Multihop),
+		ActivateIPv4: true,
 	})
+	cs := configToChangeSet(n.Name(), "interface.add-bgp-neighbor", config, ChangeAdd)
 
 	util.WithDevice(n.Name()).Infof("Adding direct BGP neighbor %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)
@@ -118,25 +101,7 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 		}
 	}
 
-	// Check neighbor exists
-	if !n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
-	}
-
-	cs := NewChangeSet(n.Name(), "interface.remove-bgp-neighbor")
-
-	// Remove address-family entries first
-	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
-	for _, af := range []string{"ipv4_unicast", "ipv6_unicast", "l2vpn_evpn"} {
-		afKey := fmt.Sprintf("default|%s|%s", neighborIP, af)
-		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
-	}
-
-	// Remove neighbor entry
-	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeDelete, nil, nil)
-
-	util.WithDevice(n.Name()).Infof("Removing direct BGP neighbor %s from interface %s", neighborIP, i.name)
-	return cs, nil
+	return n.RemoveBGPNeighbor(ctx, neighborIP)
 }
 
 

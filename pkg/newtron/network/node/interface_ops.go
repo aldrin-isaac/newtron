@@ -39,6 +39,38 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	return cs, nil
 }
 
+// RemoveIP removes an IP address from this interface.
+func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, error) {
+	n := i.node
+
+	if err := n.precondition("remove-ip", i.name).Result(); err != nil {
+		return nil, err
+	}
+	if !util.IsValidIPv4CIDR(ipAddr) {
+		return nil, fmt.Errorf("invalid IP address: %s", ipAddr)
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.remove-ip")
+	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
+	cs.Add("INTERFACE", ipKey, ChangeDelete, nil, nil)
+
+	// Remove from tracked addresses
+	for idx, addr := range i.ipAddresses {
+		if addr == ipAddr {
+			i.ipAddresses = append(i.ipAddresses[:idx], i.ipAddresses[idx+1:]...)
+			break
+		}
+	}
+
+	// If no IPs remain, remove the base INTERFACE entry too
+	if len(i.ipAddresses) == 0 {
+		cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+	}
+
+	util.WithDevice(n.Name()).Infof("Removed IP %s from interface %s", ipAddr, i.name)
+	return cs, nil
+}
+
 // SetVRF binds this interface to a VRF.
 func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	n := i.node
@@ -83,12 +115,12 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 
 	// ACLs are shared - add this interface to existing binding list
 	configDB := n.ConfigDB()
-	existingACL, ok := configDB.ACLTable[aclName]
+	dc := NewDependencyChecker(n, "")
 	var newBindings string
-	if ok && existingACL.Ports != "" {
-		newBindings = addInterfaceToList(existingACL.Ports, i.name)
-	} else {
+	if dc.IsFirstACLUser(aclName) {
 		newBindings = i.name
+	} else {
+		newBindings = addInterfaceToList(configDB.ACLTable[aclName].Ports, i.name)
 	}
 
 	cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
@@ -175,16 +207,23 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 }
 
 // ============================================================================
-// DependencyChecker - checks reverse dependencies for safe deletion
+// DependencyChecker - first/last membership checks for shared resources
 // ============================================================================
 
-// DependencyChecker checks if resources can be safely deleted.
-// Used by Interface.RemoveService() to determine when shared resources
-// (ACLs, VLANs, VRFs) can be deleted vs just having this interface removed.
-// This is the single source of truth; pkg/operations re-exports it as a type alias.
+// DependencyChecker answers "is this the first or last user of a shared resource?"
+// from the perspective of a specific interface.
+//
+// IsFirst* methods: the interface is about to be added — it is not yet in the
+// collection, so excludeInterface is not used. These check current state only.
+//
+// IsLast* methods: the interface is about to be removed — it is counted as
+// absent, so remaining users = (total − excludeInterface). These determine
+// whether shared resources (ACLs, VLANs, VRFs) can be safely deleted.
+//
+// Used by Interface.RemoveService() and Interface.BindACL().
 type DependencyChecker struct {
-	node           *Node
-	excludeInterface string
+	node             *Node
+	excludeInterface string // used only by IsLast* methods
 }
 
 // NewDependencyChecker creates a dependency checker for the given interface
@@ -193,6 +232,20 @@ func NewDependencyChecker(d *Node, excludeInterface string) *DependencyChecker {
 		node:           d,
 		excludeInterface: excludeInterface,
 	}
+}
+
+// IsFirstACLUser returns true if no interface is currently bound to the ACL.
+// excludeInterface is not used — the caller has not yet been added.
+func (dc *DependencyChecker) IsFirstACLUser(aclName string) bool {
+	configDB := dc.node.ConfigDB()
+	if configDB == nil {
+		return true
+	}
+	acl, ok := configDB.ACLTable[aclName]
+	if !ok {
+		return true
+	}
+	return acl.Ports == ""
 }
 
 // IsLastACLUser returns true if this is the last interface using the ACL

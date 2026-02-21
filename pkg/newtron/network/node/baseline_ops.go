@@ -47,18 +47,17 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 			"hostname": varMap["device_name"],
 		})
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
+			// Base entry required for intfmgrd to bind the IP (ChangeModify = idempotent create-or-update)
+			cs.Add("LOOPBACK_INTERFACE", "Loopback0", ChangeModify, nil, map[string]string{})
 			cs.Add("LOOPBACK_INTERFACE", fmt.Sprintf("Loopback0|%s/32", loopbackIP), ChangeAdd, nil, map[string]string{})
 		}
 
 	case "sonic-evpn":
-		// EVPN baseline - create VTEP
+		// EVPN baseline - create VTEP (delegates to evpn_ops.go vtepConfig)
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
-			cs.Add("VXLAN_TUNNEL", "vtep1", ChangeAdd, nil, map[string]string{
-				"src_ip": loopbackIP,
-			})
-			cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeAdd, nil, map[string]string{
-				"source_vtep": "vtep1",
-			})
+			for _, e := range vtepConfig(loopbackIP) {
+				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			}
 		}
 
 	default:

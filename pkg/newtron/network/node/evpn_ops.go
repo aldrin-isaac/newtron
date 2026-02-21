@@ -8,15 +8,41 @@ import (
 )
 
 // ============================================================================
-// EVPN Operations
+// EVPN Operations — Pure config generators
 // ============================================================================
 
-// SVIConfig holds configuration options for ConfigureSVI.
-type SVIConfig struct {
-	VRF        string // VRF to bind the SVI to
-	IPAddress  string // IP address with prefix (e.g., "10.1.100.1/24")
-	AnycastMAC string // SAG anycast gateway MAC (e.g., "00:00:00:00:01:01")
+// vtepConfig returns the VXLAN_TUNNEL + VXLAN_EVPN_NVO entries for a VTEP.
+func vtepConfig(sourceIP string) []CompositeEntry {
+	return []CompositeEntry{
+		{Table: "VXLAN_TUNNEL", Key: "vtep1", Fields: map[string]string{"src_ip": sourceIP}},
+		{Table: "VXLAN_EVPN_NVO", Key: "nvo1", Fields: map[string]string{"source_vtep": "vtep1"}},
+	}
 }
+
+// vniMapConfig returns the VXLAN_TUNNEL_MAP entry that maps a VLAN to an L2VNI.
+func vniMapConfig(vlanID, vni int) []CompositeEntry {
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	mapKey := fmt.Sprintf("vtep1|map_%d_%s", vni, vlanName)
+	return []CompositeEntry{
+		{Table: "VXLAN_TUNNEL_MAP", Key: mapKey, Fields: map[string]string{
+			"vlan": vlanName,
+			"vni":  fmt.Sprintf("%d", vni),
+		}},
+	}
+}
+
+// arpSuppressionConfig returns the SUPPRESS_VLAN_NEIGH entry for a VLAN.
+func arpSuppressionConfig(vlanID int) []CompositeEntry {
+	return []CompositeEntry{
+		{Table: "SUPPRESS_VLAN_NEIGH", Key: fmt.Sprintf("Vlan%d", vlanID), Fields: map[string]string{
+			"suppress": "on",
+		}},
+	}
+}
+
+// ============================================================================
+// EVPN Operations
+// ============================================================================
 
 // MapL2VNI maps a VLAN to an L2VNI for EVPN.
 func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
@@ -39,13 +65,9 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 
 	cs := NewChangeSet(n.name, "device.map-l2vni")
 
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	mapKey := fmt.Sprintf("vtep1|map_%d_%s", vni, vlanName)
-
-	cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-		"vlan": vlanName,
-		"vni":  fmt.Sprintf("%d", vni),
-	})
+	for _, e := range vniMapConfig(vlanID, vni) {
+		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+	}
 
 	util.WithDevice(n.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
 	return cs, nil
@@ -80,46 +102,6 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	return cs, nil
 }
 
-// ConfigureSVI configures a VLAN's SVI (Layer 3 interface).
-// This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
-// and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
-func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	pc := n.precondition("configure-svi", vlanResource(vlanID)).
-		RequireVLANExists(vlanID)
-	if opts.VRF != "" {
-		pc.RequireVRFExists(opts.VRF)
-	}
-	if err := pc.Result(); err != nil {
-		return nil, err
-	}
-
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	cs := NewChangeSet(n.name, "device.configure-svi")
-
-	// VLAN_INTERFACE entry with optional VRF binding
-	fields := map[string]string{}
-	if opts.VRF != "" {
-		fields["vrf_name"] = opts.VRF
-	}
-	cs.Add("VLAN_INTERFACE", vlanName, ChangeAdd, nil, fields)
-
-	// IP address binding
-	if opts.IPAddress != "" {
-		ipKey := fmt.Sprintf("%s|%s", vlanName, opts.IPAddress)
-		cs.Add("VLAN_INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
-	}
-
-	// Anycast gateway MAC (SAG)
-	if opts.AnycastMAC != "" {
-		cs.Add("SAG_GLOBAL", "IPv4", ChangeAdd, nil, map[string]string{
-			"gwmac": opts.AnycastMAC,
-		})
-	}
-
-	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
-	return cs, nil
-}
-
 // SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
 // If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
 func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
@@ -139,12 +121,9 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 
 	// Create VTEP (skip if exists)
 	if !n.VTEPExists() {
-		cs.Add("VXLAN_TUNNEL", "vtep1", ChangeAdd, nil, map[string]string{
-			"src_ip": sourceIP,
-		})
-		cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeAdd, nil, map[string]string{
-			"source_vtep": "vtep1",
-		})
+		for _, e := range vtepConfig(sourceIP) {
+			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+		}
 	}
 
 	// Create BGP EVPN sessions with route reflectors (skip if already exist)
@@ -169,21 +148,72 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 				continue
 			}
 
+			// Use peer's ASN for eBGP overlay (all-eBGP design; docs/rca/026-bgp-all-ebgp-design.md).
+			peerASN := resolved.BGPNeighborASNs[rrIP]
+			if peerASN == 0 {
+				return nil, fmt.Errorf("no ASN found for EVPN peer %s", rrIP)
+			}
 			fields := map[string]string{
-				"asn":          fmt.Sprintf("%d", resolved.UnderlayASN),
-				"admin_status": "up",
-				"name":         "route-reflector",
-				"local_addr":   resolved.LoopbackIP,
+				"asn":           fmt.Sprintf("%d", peerASN),
+				"admin_status":  "up",
+				"local_addr":    resolved.LoopbackIP,
+				"ebgp_multihop": "true",
 			}
 			cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", rrIP), ChangeAdd, nil, fields)
 
-			afKey := fmt.Sprintf("default|%s|l2vpn_evpn", rrIP)
-			cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
-				"activate": "true",
+			// Activate IPv4 unicast for the EVPN overlay peer (frrcfgd template
+			// requires "admin_status: true", not "activate: true", to generate
+			// "neighbor X activate" in address-family ipv4 unicast).
+			// EVPN routes are exchanged via BGP capability negotiation once
+			// BGP_GLOBALS_AF|l2vpn_evpn has advertise-all-vni set.
+			ipv4AfKey := fmt.Sprintf("default|%s|ipv4_unicast", rrIP)
+			cs.Add("BGP_NEIGHBOR_AF", ipv4AfKey, ChangeAdd, nil, map[string]string{
+				"admin_status": "true",
+			})
+
+			// Also activate l2vpn_evpn AF for explicit EVPN capability signaling.
+			evpnAfKey := fmt.Sprintf("default|%s|l2vpn_evpn", rrIP)
+			cs.Add("BGP_NEIGHBOR_AF", evpnAfKey, ChangeAdd, nil, map[string]string{
+				"admin_status": "true",
 			})
 		}
 	}
 
 	util.WithDevice(n.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
+	return cs, nil
+}
+
+// TeardownEVPN removes EVPN overlay configuration: BGP overlay neighbors,
+// BGP EVPN address-family, VXLAN NVO, and VXLAN tunnel.
+// This is the reverse of SetupEVPN.
+func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
+	if err := n.precondition("teardown-evpn", "evpn").Result(); err != nil {
+		return nil, err
+	}
+
+	resolved := n.Resolved()
+	cs := NewChangeSet(n.name, "device.teardown-evpn")
+
+	// Remove BGP EVPN overlay neighbors and their address-family entries
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
+		neighborKey := fmt.Sprintf("default|%s", rrIP)
+		cs.Add("BGP_NEIGHBOR", neighborKey, ChangeDelete, nil, nil)
+
+		// Remove address-family entries
+		cs.Add("BGP_NEIGHBOR_AF", fmt.Sprintf("default|%s|ipv4_unicast", rrIP), ChangeDelete, nil, nil)
+		cs.Add("BGP_NEIGHBOR_AF", fmt.Sprintf("default|%s|l2vpn_evpn", rrIP), ChangeDelete, nil, nil)
+	}
+
+	// Remove L2VPN EVPN address-family
+	cs.Add("BGP_GLOBALS_AF", "default|l2vpn_evpn", ChangeDelete, nil, nil)
+
+	// Remove VXLAN NVO and tunnel
+	cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeDelete, nil, nil)
+	cs.Add("VXLAN_TUNNEL", "vtep1", ChangeDelete, nil, nil)
+
+	util.WithDevice(n.name).Infof("Tore down EVPN overlay (%d neighbors removed)", len(resolved.BGPNeighbors))
 	return cs, nil
 }

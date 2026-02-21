@@ -83,7 +83,7 @@ const (
 	ActionSSHCommand         StepAction = "ssh-command"
 	ActionRestartService     StepAction = "restart-service"
 	ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
-	ActionSetInterface       StepAction = "set-interface"
+ActionSetInterface       StepAction = "set-interface"
 	ActionCreateVLAN         StepAction = "create-vlan"
 	ActionDeleteVLAN         StepAction = "delete-vlan"
 	ActionAddVLANMember      StepAction = "add-vlan-member"
@@ -114,6 +114,9 @@ const (
 	// Host test actions
 	ActionHostExec StepAction = "host-exec"
 
+	// BGP global configuration
+	ActionConfigureBGP StepAction = "configure-bgp"
+
 	// ACL management actions
 	ActionCreateACLTable StepAction = "create-acl-table"
 	ActionAddACLRule     StepAction = "add-acl-rule"
@@ -121,6 +124,18 @@ const (
 	ActionDeleteACLTable StepAction = "delete-acl-table"
 	ActionBindACL        StepAction = "bind-acl"
 	ActionUnbindACL      StepAction = "unbind-acl"
+
+	// SVI management
+	ActionRemoveSVI StepAction = "remove-svi"
+
+	// Interface IP management
+	ActionRemoveIP StepAction = "remove-ip"
+
+	// EVPN teardown
+	ActionTeardownEVPN StepAction = "teardown-evpn"
+
+	// BGP globals removal
+	ActionRemoveBGPGlobals StepAction = "remove-bgp-globals"
 )
 
 // validActions is the set of all recognized step actions, derived from the

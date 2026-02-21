@@ -61,9 +61,25 @@ func (cs *ChangeSet) Add(table, key string, changeType device.ChangeType, oldVal
 	})
 }
 
+// Merge appends all changes from other into cs.
+func (cs *ChangeSet) Merge(other *ChangeSet) {
+	cs.Changes = append(cs.Changes, other.Changes...)
+}
+
 // IsEmpty returns true if there are no changes.
 func (cs *ChangeSet) IsEmpty() bool {
 	return len(cs.Changes) == 0
+}
+
+// configToChangeSet wraps config function output into a ChangeSet.
+// Bridges pure config functions (return []CompositeEntry) with the ChangeSet
+// world used by primitives and composites.
+func configToChangeSet(deviceName, operation string, config []CompositeEntry, changeType device.ChangeType) *ChangeSet {
+	cs := NewChangeSet(deviceName, operation)
+	for _, e := range config {
+		cs.Add(e.Table, e.Key, changeType, nil, e.Fields)
+	}
+	return cs
 }
 
 // String returns a human-readable representation of the changes.

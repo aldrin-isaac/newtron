@@ -21,6 +21,61 @@ var ProtoMap = map[string]int{
 }
 
 // ============================================================================
+// ACL Config Functions (pure, no Node state)
+// ============================================================================
+
+// aclTableConfig returns CompositeEntry for an ACL_TABLE.
+func aclTableConfig(name, aclType, stage, ports, description string) []CompositeEntry {
+	fields := map[string]string{
+		"type":  aclType,
+		"stage": stage,
+	}
+	if description != "" {
+		fields["policy_desc"] = description
+	}
+	if ports != "" {
+		fields["ports"] = ports
+	}
+	return []CompositeEntry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
+}
+
+// aclRuleConfig returns CompositeEntry for an ACL_RULE.
+func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []CompositeEntry {
+	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
+
+	action := "DROP"
+	if opts.Action == "permit" || opts.Action == "FORWARD" {
+		action = "FORWARD"
+	}
+
+	fields := map[string]string{
+		"PRIORITY":      fmt.Sprintf("%d", opts.Priority),
+		"PACKET_ACTION": action,
+	}
+	if opts.SrcIP != "" {
+		fields["SRC_IP"] = opts.SrcIP
+	}
+	if opts.DstIP != "" {
+		fields["DST_IP"] = opts.DstIP
+	}
+	if opts.Protocol != "" {
+		if proto, ok := ProtoMap[opts.Protocol]; ok {
+			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
+		} else {
+			fields["IP_PROTOCOL"] = opts.Protocol
+		}
+	}
+	if opts.DstPort != "" {
+		fields["L4_DST_PORT"] = opts.DstPort
+	}
+	if opts.SrcPort != "" {
+		fields["L4_SRC_PORT"] = opts.SrcPort
+	}
+
+	return []CompositeEntry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
+}
+
+// ============================================================================
 // ACL Operations
 // ============================================================================
 
@@ -57,20 +112,8 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 		opts.Stage = "ingress"
 	}
 
-	cs := NewChangeSet(n.name, "device.create-acl-table")
-
-	fields := map[string]string{
-		"type":  opts.Type,
-		"stage": opts.Stage,
-	}
-	if opts.Description != "" {
-		fields["policy_desc"] = opts.Description
-	}
-	if opts.Ports != "" {
-		fields["ports"] = opts.Ports
-	}
-
-	cs.Add("ACL_TABLE", name, ChangeAdd, nil, fields)
+	config := aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description)
+	cs := configToChangeSet(n.name, "device.create-acl-table", config, ChangeAdd)
 
 	util.WithDevice(n.name).Infof("Created ACL table %s", name)
 	return cs, nil
@@ -84,42 +127,8 @@ func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts 
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.add-acl-rule")
-
-	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
-
-	// Map action
-	action := "DROP"
-	if opts.Action == "permit" || opts.Action == "FORWARD" {
-		action = "FORWARD"
-	}
-
-	fields := map[string]string{
-		"PRIORITY":      fmt.Sprintf("%d", opts.Priority),
-		"PACKET_ACTION": action,
-	}
-	if opts.SrcIP != "" {
-		fields["SRC_IP"] = opts.SrcIP
-	}
-	if opts.DstIP != "" {
-		fields["DST_IP"] = opts.DstIP
-	}
-	if opts.Protocol != "" {
-		if proto, ok := ProtoMap[opts.Protocol]; ok {
-			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
-		} else {
-			// Assume it's already a number
-			fields["IP_PROTOCOL"] = opts.Protocol
-		}
-	}
-	if opts.DstPort != "" {
-		fields["L4_DST_PORT"] = opts.DstPort
-	}
-	if opts.SrcPort != "" {
-		fields["L4_SRC_PORT"] = opts.SrcPort
-	}
-
-	cs.Add("ACL_RULE", ruleKey, ChangeAdd, nil, fields)
+	config := aclRuleConfig(tableName, ruleName, opts)
+	cs := configToChangeSet(n.name, "device.add-acl-rule", config, ChangeAdd)
 
 	util.WithDevice(n.name).Infof("Added rule %s to ACL table %s", ruleName, tableName)
 	return cs, nil

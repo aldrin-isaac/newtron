@@ -149,6 +149,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		VLAN:          opts.VLAN,
 		PeerAS:        opts.PeerAS,
 		UnderlayASN:   resolved.UnderlayASN,
+		RouterID:      resolved.RouterID,
 		PlatformName:  resolved.Platform,
 	})
 	if err != nil {
@@ -896,12 +897,8 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 
 	// Merge the change sets
 	cs := NewChangeSet(n.Name(), "interface.refresh-service")
-	for _, change := range removeCS.Changes {
-		cs.Changes = append(cs.Changes, change)
-	}
-	for _, change := range applyCS.Changes {
-		cs.Changes = append(cs.Changes, change)
-	}
+	cs.Merge(removeCS)
+	cs.Merge(applyCS)
 
 	util.WithDevice(n.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)
 	return cs, nil

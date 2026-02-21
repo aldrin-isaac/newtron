@@ -99,11 +99,9 @@ func TestGenerateServiceEntries_EVPNRouted_WithVRF(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// VRF creation — DeriveVRFName shortens Ethernet4 → Eth4
+	// VRF creation — DeriveVRFName shortens Ethernet4 → Eth4.
+	// VRF entry carries vni field for L3VNI.
 	assertEntry(t, entries, "VRF", "customer-l3-Eth4", "vni", "10001")
-
-	// L3VNI mapping
-	assertEntry(t, entries, "VXLAN_TUNNEL_MAP", "vtep1|map_10001_customer-l3-Eth4", "vni", "10001")
 
 	// Base INTERFACE entry should have vrf_name
 	var baseFound, ipFound bool
@@ -368,19 +366,11 @@ func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// BGP_GLOBALS_AF with route targets — VRF name uses shortened interface
-	for _, e := range entries {
-		if e.Table == "BGP_GLOBALS_AF" && e.Key == "customer-l3-Eth4|l2vpn_evpn" {
-			if e.Fields["route_target_import_evpn"] != "64512:10001" {
-				t.Errorf("route_target_import_evpn = %q, want 64512:10001", e.Fields["route_target_import_evpn"])
-			}
-			if e.Fields["route_target_export_evpn"] != "64512:10001" {
-				t.Errorf("route_target_export_evpn = %q, want 64512:10001", e.Fields["route_target_export_evpn"])
-			}
-			return
-		}
-	}
-	t.Error("missing BGP_GLOBALS_AF route target entry for VRF")
+	// BGP_GLOBALS_AF l2vpn_evpn for the VRF — produced by ipvpnConfig
+	assertEntry(t, entries, "BGP_GLOBALS_AF", "customer-l3-Eth4|l2vpn_evpn", "advertise-ipv4-unicast", "true")
+
+	// Route targets are written to BGP_GLOBALS_EVPN_RT (frrcfgd watches this table)
+	assertEntry(t, entries, "BGP_GLOBALS_EVPN_RT", "customer-l3-Eth4|L2VPN_EVPN|64512:10001", "route-target-type", "both")
 }
 
 func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
@@ -406,7 +396,7 @@ func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// VRF name should be the ipvpn name
+	// VRF name should be the ipvpn name; vni field carries the L3VNI.
 	assertEntry(t, entries, "VRF", "shared-vpn", "vni", "20001")
 
 	// INTERFACE should have vrf_name = shared-vpn

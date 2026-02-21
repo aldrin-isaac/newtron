@@ -244,9 +244,9 @@ func TestAddBGPNeighbor(t *testing.T) {
 	assertField(t, nc, "local_addr", "10.1.0.0")
 	assertField(t, nc, "name", "peer-leaf1")
 
-	// IPv4 unicast AF activated
+	// IPv4 unicast AF activated (frrcfgd uses admin_status:true to activate the neighbor in AF)
 	afC := assertChange(t, cs, "BGP_NEIGHBOR_AF", "default|10.1.0.1|ipv4_unicast", ChangeAdd)
-	assertField(t, afC, "activate", "true")
+	assertField(t, afC, "admin_status", "true")
 }
 
 func TestRemoveBGPNeighbor(t *testing.T) {

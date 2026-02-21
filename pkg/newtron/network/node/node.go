@@ -746,6 +746,16 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	return n.conn.ApplyFRRDefaults(ctx)
 }
 
+
+// ReadSystemMAC reads the system MAC from the device's factory config file.
+// Returns an empty string if not connected or if the MAC cannot be read.
+func (n *Node) ReadSystemMAC() string {
+	if !n.connected || n.conn == nil {
+		return ""
+	}
+	return n.conn.ReadSystemMAC()
+}
+
 // Underlying returns the underlying sonic.Device for low-level operations.
 // This is used by ChangeSet to apply changes via Redis.
 func (n *Node) Underlying() *sonic.Device {
@@ -770,109 +780,6 @@ func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.Ro
 		return nil, util.ErrNotConnected
 	}
 	return n.conn.GetRouteASIC(ctx, vrf, prefix)
-}
-
-// ============================================================================
-// BGP Operations (Device-level: Indirect/iBGP neighbors using loopback)
-// ============================================================================
-// Device-level BGP operations are for INDIRECT neighbors that use the device's
-// loopback IP as the update-source. This is typical for:
-//   - iBGP peering (same AS, loopback-to-loopback)
-//   - EVPN route reflector peering
-//   - Multi-hop eBGP using loopback
-//
-// For DIRECT BGP neighbors that use a link IP as the update-source (typical
-// eBGP on point-to-point links), use Interface.AddBGPNeighbor() instead.
-
-// AddLoopbackBGPNeighbor adds an indirect BGP neighbor using loopback as update-source.
-// This is used for iBGP or multi-hop eBGP sessions.
-func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if !n.connected {
-		return nil, util.ErrNotConnected
-	}
-	if !n.locked {
-		return nil, fmt.Errorf("device not locked")
-	}
-
-	// Validate neighbor IP
-	if !util.IsValidIPv4(neighborIP) {
-		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
-	}
-
-	// Check if neighbor already exists (key format: "default|<IP>")
-	if n.configDB != nil {
-		key := fmt.Sprintf("default|%s", neighborIP)
-		if _, ok := n.configDB.BGPNeighbor[key]; ok {
-			return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
-		}
-	}
-
-	cs := NewChangeSet(n.name, "bgp.add-loopback-neighbor")
-
-	// Add BGP neighbor entry with loopback as update-source
-	fields := map[string]string{
-		"asn":          fmt.Sprintf("%d", asn),
-		"admin_status": "up",
-		"local_addr":   n.resolved.LoopbackIP, // Update-source = loopback
-	}
-	if description != "" {
-		fields["name"] = description
-	}
-
-	// For iBGP (same AS), no special config needed
-	// For eBGP with loopback, would need ebgp_multihop
-	if asn != n.resolved.UnderlayASN {
-		fields["ebgp_multihop"] = "255" // Enable multihop for eBGP via loopback
-	}
-
-	// Key format: vrf|neighborIP (per SONiC Unified FRR Mgmt schema)
-	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeAdd, nil, fields)
-
-	// If EVPN enabled, add address-family activation
-	if evpn {
-		afKey := fmt.Sprintf("default|%s|l2vpn_evpn", neighborIP)
-		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeAdd, nil, map[string]string{
-			"activate": "true",
-		})
-	}
-
-	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
-		neighborIP, asn, n.resolved.LoopbackIP)
-	return cs, nil
-}
-
-// RemoveBGPNeighbor removes a BGP neighbor from the device.
-// This works for both direct (interface-level) and indirect (loopback-level) neighbors.
-func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	if !n.connected {
-		return nil, util.ErrNotConnected
-	}
-	if !n.locked {
-		return nil, fmt.Errorf("device not locked")
-	}
-
-	// Check if neighbor exists (key format: "default|<IP>")
-	if n.configDB != nil {
-		key := fmt.Sprintf("default|%s", neighborIP)
-		if _, ok := n.configDB.BGPNeighbor[key]; !ok {
-			return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
-		}
-	}
-
-	cs := NewChangeSet(n.name, "bgp.remove-neighbor")
-
-	// Remove all address-family entries first
-	// Key format: vrf|neighborIP|af (per SONiC Unified FRR Mgmt schema)
-	for _, af := range []string{"ipv4_unicast", "ipv6_unicast", "l2vpn_evpn"} {
-		afKey := fmt.Sprintf("default|%s|%s", neighborIP, af)
-		cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
-	}
-
-	// Remove neighbor entry
-	cs.Add("BGP_NEIGHBOR", fmt.Sprintf("default|%s", neighborIP), ChangeDelete, nil, nil)
-
-	util.WithDevice(n.name).Infof("Removing BGP neighbor %s", neighborIP)
-	return cs, nil
 }
 
 // BGPNeighborExists checks if a BGP neighbor exists.

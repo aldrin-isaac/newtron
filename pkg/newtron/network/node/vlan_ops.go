@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -14,11 +15,101 @@ func vlanResource(id int) string { return fmt.Sprintf("Vlan%d", id) }
 // VLAN Operations
 // ============================================================================
 
+// SVIConfig holds configuration options for ConfigureSVI.
+type SVIConfig struct {
+	VRF        string // VRF to bind the SVI to
+	IPAddress  string // IP address with prefix (e.g., "10.1.100.1/24")
+	AnycastMAC string // SAG anycast gateway MAC (e.g., "00:00:00:00:01:01")
+}
+
 // VLANConfig holds configuration options for CreateVLAN.
 type VLANConfig struct {
 	Name        string // VLAN name (alias for Description)
 	Description string
 	L2VNI       int
+}
+
+// vlanConfig returns CONFIG_DB entries for a VLAN: a VLAN entry and an optional
+// VXLAN_TUNNEL_MAP entry when L2VNI is specified.
+func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	fields := map[string]string{
+		"vlanid": fmt.Sprintf("%d", vlanID),
+	}
+	if opts.Description != "" {
+		fields["description"] = opts.Description
+	}
+
+	entries := []CompositeEntry{
+		{Table: "VLAN", Key: vlanName, Fields: fields},
+	}
+
+	if opts.L2VNI > 0 {
+		mapKey := fmt.Sprintf("vtep1|map_%d_%s", opts.L2VNI, vlanName)
+		entries = append(entries, CompositeEntry{
+			Table: "VXLAN_TUNNEL_MAP",
+			Key:   mapKey,
+			Fields: map[string]string{
+				"vlan": vlanName,
+				"vni":  fmt.Sprintf("%d", opts.L2VNI),
+			},
+		})
+	}
+
+	return entries
+}
+
+// vlanMemberConfig returns a CONFIG_DB VLAN_MEMBER entry for adding an
+// interface to a VLAN with the specified tagging mode.
+func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []CompositeEntry {
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
+
+	taggingMode := "untagged"
+	if tagged {
+		taggingMode = "tagged"
+	}
+
+	return []CompositeEntry{
+		{Table: "VLAN_MEMBER", Key: memberKey, Fields: map[string]string{
+			"tagging_mode": taggingMode,
+		}},
+	}
+}
+
+// sviConfig returns CONFIG_DB entries for an SVI: a VLAN_INTERFACE base entry
+// with optional VRF binding, an optional IP address entry, and an optional
+// SAG_GLOBAL entry for anycast gateway MAC.
+func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+
+	// VLAN_INTERFACE base entry with optional VRF binding
+	fields := map[string]string{}
+	if opts.VRF != "" {
+		fields["vrf_name"] = opts.VRF
+	}
+	entries := []CompositeEntry{
+		{Table: "VLAN_INTERFACE", Key: vlanName, Fields: fields},
+	}
+
+	// IP address binding
+	if opts.IPAddress != "" {
+		ipKey := fmt.Sprintf("%s|%s", vlanName, opts.IPAddress)
+		entries = append(entries, CompositeEntry{
+			Table: "VLAN_INTERFACE", Key: ipKey, Fields: map[string]string{},
+		})
+	}
+
+	// Anycast gateway MAC (SAG)
+	if opts.AnycastMAC != "" {
+		entries = append(entries, CompositeEntry{
+			Table: "SAG_GLOBAL", Key: "IPv4", Fields: map[string]string{
+				"gwmac": opts.AnycastMAC,
+			},
+		})
+	}
+
+	return entries
 }
 
 // CreateVLAN creates a new VLAN on this device.
@@ -31,24 +122,8 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 	}
 
 	cs := NewChangeSet(n.name, "device.create-vlan")
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-
-	fields := map[string]string{
-		"vlanid": fmt.Sprintf("%d", vlanID),
-	}
-	if opts.Description != "" {
-		fields["description"] = opts.Description
-	}
-
-	cs.Add("VLAN", vlanName, ChangeAdd, nil, fields)
-
-	// Configure L2VNI if specified
-	if opts.L2VNI > 0 {
-		mapKey := fmt.Sprintf("vtep1|map_%d_%s", opts.L2VNI, vlanName)
-		cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeAdd, nil, map[string]string{
-			"vlan": vlanName,
-			"vni":  fmt.Sprintf("%d", opts.L2VNI),
-		})
+	for _, e := range vlanConfig(vlanID, opts) {
+		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
 	}
 
 	util.WithDevice(n.name).Infof("Created VLAN %d", vlanID)
@@ -104,18 +179,14 @@ func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName stri
 	}
 
 	cs := NewChangeSet(n.name, "device.add-vlan-member")
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	memberKey := fmt.Sprintf("%s|%s", vlanName, interfaceName)
+	for _, e := range vlanMemberConfig(vlanID, interfaceName, tagged) {
+		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+	}
 
 	taggingMode := "untagged"
 	if tagged {
 		taggingMode = "tagged"
 	}
-
-	cs.Add("VLAN_MEMBER", memberKey, ChangeAdd, nil, map[string]string{
-		"tagging_mode": taggingMode,
-	})
-
 	util.WithDevice(n.name).Infof("Added %s to VLAN %d (%s)", interfaceName, vlanID, taggingMode)
 	return cs, nil
 }
@@ -137,5 +208,62 @@ func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName s
 	cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
 
 	util.WithDevice(n.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
+	return cs, nil
+}
+
+// ConfigureSVI configures a VLAN's SVI (Layer 3 interface).
+// This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
+// and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
+func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
+	pc := n.precondition("configure-svi", vlanResource(vlanID)).
+		RequireVLANExists(vlanID)
+	if opts.VRF != "" {
+		pc.RequireVRFExists(opts.VRF)
+	}
+	if err := pc.Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(n.name, "device.configure-svi")
+	for _, e := range sviConfig(vlanID, opts) {
+		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+	}
+
+	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
+	return cs, nil
+}
+
+// RemoveSVI removes a VLAN's SVI (Layer 3 interface) configuration.
+// This deletes VLAN_INTERFACE entries (base + IP) and SAG_GLOBAL if no other SVIs use it.
+func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	if err := n.precondition("remove-svi", vlanResource(vlanID)).Result(); err != nil {
+		return nil, err
+	}
+
+	vlanName := fmt.Sprintf("Vlan%d", vlanID)
+	cs := NewChangeSet(n.name, "device.remove-svi")
+
+	configDB := n.ConfigDB()
+	if configDB == nil {
+		return nil, fmt.Errorf("no CONFIG_DB available")
+	}
+
+	// Delete all VLAN_INTERFACE IP entries (e.g., Vlan100|10.1.1.1/24)
+	for key := range configDB.VLANInterface {
+		if strings.HasPrefix(key, vlanName+"|") {
+			cs.Add("VLAN_INTERFACE", key, ChangeDelete, nil, nil)
+		}
+	}
+
+	// Delete VLAN_INTERFACE base entry (e.g., Vlan100)
+	if _, ok := configDB.VLANInterface[vlanName]; ok {
+		cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil, nil)
+	}
+
+	if cs.IsEmpty() {
+		return nil, fmt.Errorf("no SVI configuration found for VLAN %d", vlanID)
+	}
+
+	util.WithDevice(n.name).Infof("Removed SVI for VLAN %d", vlanID)
 	return cs, nil
 }

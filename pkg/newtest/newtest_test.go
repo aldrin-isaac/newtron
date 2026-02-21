@@ -1314,6 +1314,55 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 			step:    Step{Name: "s", Action: ActionCleanup},
 			wantErr: true, errMsg: "devices is required",
 		},
+		// remove-svi
+		{
+			name:    "remove-svi valid",
+			step:    Step{Name: "s", Action: ActionRemoveSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vlan_id": 100}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-svi missing vlan_id",
+			step:    Step{Name: "s", Action: ActionRemoveSVI, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.vlan_id is required",
+		},
+		// remove-ip
+		{
+			name:    "remove-ip valid",
+			step:    Step{Name: "s", Action: ActionRemoveIP, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0", Params: map[string]any{"ip": "10.0.0.1/31"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-ip missing interface",
+			step:    Step{Name: "s", Action: ActionRemoveIP, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"ip": "10.0.0.1/31"}},
+			wantErr: true, errMsg: "interface is required",
+		},
+		{
+			name:    "remove-ip missing ip",
+			step:    Step{Name: "s", Action: ActionRemoveIP, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: true, errMsg: "params.ip is required",
+		},
+		// teardown-evpn
+		{
+			name:    "teardown-evpn valid",
+			step:    Step{Name: "s", Action: ActionTeardownEVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "teardown-evpn missing devices",
+			step:    Step{Name: "s", Action: ActionTeardownEVPN},
+			wantErr: true, errMsg: "devices is required",
+		},
+		// remove-bgp-globals
+		{
+			name:    "remove-bgp-globals valid",
+			step:    Step{Name: "s", Action: ActionRemoveBGPGlobals, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-bgp-globals missing devices",
+			step:    Step{Name: "s", Action: ActionRemoveBGPGlobals},
+			wantErr: true, errMsg: "devices is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1386,8 +1435,11 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionCreatePortChannel, ActionDeletePortChannel,
 		ActionAddPortChannelMember, ActionRemovePortChannelMember,
 		ActionHostExec,
+		ActionConfigureBGP,
 		ActionCreateACLTable, ActionAddACLRule, ActionDeleteACLRule,
 		ActionDeleteACLTable, ActionBindACL, ActionUnbindACL,
+		ActionRemoveSVI, ActionRemoveIP, ActionTeardownEVPN,
+		ActionRemoveBGPGlobals,
 	}
 
 	if len(executors) != len(allActions) {
@@ -1671,6 +1723,7 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 		ActionRemoveVLANMember, ActionRemoveQoS,
 		ActionConfigureSVI, ActionBGPAddNeighbor, ActionBGPRemoveNeighbor,
 		ActionSetInterface,
+		ActionRemoveSVI, ActionRemoveIP,
 	}
 
 	for _, action := range paramActions {
