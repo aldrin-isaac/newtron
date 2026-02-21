@@ -1,0 +1,17 @@
+{
+    "description": "Enable frrcfgd (unified config mode) from first boot instead of bgpcfgd",
+    "pre_commands": [
+        "for i in $(seq 1 60); do docker ps 2>/dev/null | grep -q ' bgp$' && break; sleep 5; done"
+    ],
+    "redis": [
+        {
+            "db": 4,
+            "template": "frrcfgd_mode.tmpl"
+        }
+    ],
+    "post_commands": [
+        "sudo systemctl restart bgp",
+        "for i in $(seq 1 60); do docker ps 2>/dev/null | grep -q ' bgp$' && break; sleep 5; done",
+        "for i in $(seq 1 60); do docker exec bgp supervisorctl status frrcfgd 2>&1 | grep -q RUNNING && break; sleep 3; done"
+    ]
+}

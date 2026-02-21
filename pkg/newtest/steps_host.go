@@ -31,8 +31,9 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		}}
 	}
 
-	// Namespace is always the device name
-	cmd := fmt.Sprintf("ip netns exec %s %s", deviceName, step.Command)
+	// Namespace is always the device name. Wrap in sh -c so that compound
+	// commands (semicolons, pipes) execute entirely inside the namespace.
+	cmd := fmt.Sprintf("ip netns exec %s sh -c %s", deviceName, shellQuote(step.Command))
 
 	output, err := runSSHCommand(client, cmd)
 
@@ -77,6 +78,11 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		Device:  deviceName,
 		Message: "command succeeded",
 	}}
+}
+
+// shellQuote wraps s in single quotes, escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
 // runSSHCommand executes a command on an SSH client and returns combined output.
