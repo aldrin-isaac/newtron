@@ -20,6 +20,49 @@ Read these before making design decisions or writing code in unfamiliar areas:
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 18 documented pitfalls with root causes and solutions.
 
+## Platform Patching Principle
+
+When a platform (CiscoVS, VPP, etc.) has a bug that prevents a SONiC feature from working:
+
+- **You MAY patch code that has a bug** — fix the broken behavior so it works as the community intended.
+- **You may NOT reinvent a feature differently from how the community intended it to work.**
+
+Concretely: if frrcfgd's `vrf_handler` has a bug that prevents it from programming VNI into zebra, you MAY add a polling fallback that reads the **same standard signal** (`VRF` table) and performs the **same intended action** (`vtysh vrf X; vni N`) — this is a valid bug fix. But do NOT invent a custom CONFIG_DB table (like `NEWTRON_VNI`) that replaces the standard signal, or change what CONFIG_DB entries callers write to accommodate the workaround. Invented table schemas interact unpredictably with community code and create maintenance debt.
+
+When a CiscoVS SAI call fails: document it as an RCA, and fix it at the SAI layer if possible. Do not route around it by repurposing unrelated SAI paths (e.g., shadow VLANs to work around broken VNI_TO_VIRTUAL_ROUTER_ID).
+
+## Single-Owner Principle for CONFIG_DB Tables (DRY)
+
+Each CONFIG_DB table MUST have exactly one owner — a single file/function responsible
+for writing and deleting entries in that table. Composites (ApplyService, SetupEVPN,
+ApplyBaseline, topology provisioner) MUST call the owning primitives and merge their
+ChangeSets rather than constructing entries inline.
+
+This applies at every layer: if `vlan_ops.go` owns `VLAN` table writes, then
+`service_gen.go` must call into `vlan_ops.go`, not duplicate the entry construction.
+
+Target ownership map:
+
+```
+vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
+vrf_ops.go         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
+bgp_ops.go         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
+                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA
+evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
+                      SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
+acl_ops.go         → ACL_TABLE, ACL_RULE
+qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+                      SCHEDULER, WRED_PROFILE
+interface_ops.go   → INTERFACE
+baseline_ops.go    → LOOPBACK_INTERFACE
+portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
+service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
+                      COMMUNITY_SET
+```
+
+Current violations are tracked in `docs/refactor-items.md` item 5. When adding new
+CONFIG_DB writes, always check the ownership map — never add a second writer.
+
 ## Redis-First Interaction Principle
 
 newtron is a Redis-centric system. All device interaction MUST go through SONiC Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB). See `docs/newtron/hld.md` for the full interaction model.
@@ -92,6 +135,61 @@ Dispatch subagents with `model: "sonnet"` for:
 - Running build/test/commit cycles
 - Grep/read research tasks with clear search criteria
 - Doc updates where the changes are already specified
+
+## Regression Prevention
+
+**Never break a feature that was previously working.**
+
+Before making any change to `service_gen.go`, `*_ops.go`, or any shared code path:
+1. List which service types and test scenarios exercise that code path
+2. Verify that changes to the broken path do not affect the working paths
+3. Run `go test ./...` after every change and confirm all previously passing tests still pass
+4. If a change is required that affects a shared code path, explicitly document which
+   working features are at risk and how they are protected
+
+Tracking what was working (update this as test suites are validated):
+- `evpn-bridged`: WORKS — 2node-incremental, 3node-dataplane (evpn-l2-irb L2 path)
+- `routed`, `irb`, `bridged`: WORKS — 2node-incremental
+- `evpn-irb` (L2 path): WORKS — 3node-dataplane evpn-l2-irb
+- `evpn-irb` (L3 routing), `evpn-routed`: NOT YET WORKING — under active development
+
+## Feature Implementation Protocol (SONiC CONFIG_DB)
+
+Before writing any CONFIG_DB entries to implement a SONiC feature:
+
+1. **CLI-first research**: Find the SONiC CLI command that enables the feature. Read the
+   sonic-utilities / sonic-mgmt-framework source to see exactly what CONFIG_DB tables and
+   fields those commands write, in what order, and what pre/post steps they take.
+
+2. **Empirical verification**: On a freshly deployed (clean) SONiC node, configure the
+   feature using only SONiC CLI commands (NOT newtron). Verify it works end-to-end.
+   Then capture the resulting CONFIG_DB state (`redis-cli -n 4 KEYS '*'` etc.) as the
+   ground truth.
+
+3. **Framework audit**: Read the relevant SONiC daemon source (vrfmgrd, vxlanmgrd,
+   orchagent, frrcfgd) to understand how each CONFIG_DB entry is processed, what
+   APP_DB / ASIC_DB entries it creates, and what ordering constraints exist.
+
+4. **Implement in newtron**: Make newtron write the same CONFIG_DB entries in the same
+   order as the CLI path. Do not invent alternative CONFIG_DB layouts without explicit
+   user authorization.
+
+5. **Targeted test first**: Create a targeted newtest suite (like `2node-l3vpn`) that
+   tests only the specific feature. Debug and pass it before integrating into composite
+   suites (like `2node-primitive`).
+
+**Never assume a CONFIG_DB path works without first verifying it via CLI on a real device.**
+
+## Model Escalation
+
+If using Claude Sonnet and no resolution is reached within 15 minutes, switch to
+Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and debugging.
+
+## Testing Protocol
+
+- **Always start tests on a freshly deployed topology.** Destroy and redeploy before running
+  any test suite. Never attempt to reuse a topology that has run previous tests or has
+  manually applied state. This ensures a clean, reproducible baseline.
 
 ## User Preferences
 

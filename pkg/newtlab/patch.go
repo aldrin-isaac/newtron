@@ -213,10 +213,8 @@ func ApplyBootPatches(ctx context.Context, host string, port int, user, pass str
 				return fmt.Errorf("newtlab: patch %q dest %s: %w", p.Description, fp.Dest, err)
 			}
 
-			// Write via printf | sudo tee (handles paths needing root)
-			escaped := strings.ReplaceAll(content, "'", "'\"'\"'")
-			cmd := fmt.Sprintf("printf '%%s' '%s' | sudo tee %s > /dev/null", escaped, dest)
-			if _, err := run(cmd); err != nil {
+			// Write via stdin pipe — avoids SSH command-line size limits for large files.
+			if err := uploadFile(client, dest, []byte(content)); err != nil {
 				return fmt.Errorf("newtlab: patch %q write %s: %w", p.Description, dest, err)
 			}
 		}
@@ -301,6 +299,34 @@ func renderTemplate(name, dir string, vars *PatchVars) (string, error) {
 		return "", fmt.Errorf("execute template %s: %w", name, err)
 	}
 	return buf.String(), nil
+}
+
+// uploadFile writes content to dest on the VM via SSH stdin pipe.
+// This avoids SSH command-line size limits that break large file transfers.
+func uploadFile(client *ssh.Client, dest string, content []byte) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := sess.Start(fmt.Sprintf("sudo tee %s > /dev/null", dest)); err != nil {
+		stdin.Close()
+		return err
+	}
+
+	if _, err := stdin.Write(content); err != nil {
+		stdin.Close()
+		return err
+	}
+	stdin.Close()
+
+	return sess.Wait()
 }
 
 // renderString renders a string as a Go template with vars.

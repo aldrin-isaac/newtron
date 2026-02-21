@@ -49,21 +49,29 @@ the search to a specific lab.
 				host = node.HostIP
 			}
 
+			// Base SSH args — always disable host key checking for lab VMs.
+			// Use the lab key when available for passwordless access.
+			baseArgs := []string{"ssh",
+				"-o", "StrictHostKeyChecking=no",
+				"-o", "UserKnownHostsFile=/dev/null",
+				"-o", "LogLevel=ERROR",
+			}
+			if state.SSHKeyPath != "" {
+				baseArgs = append(baseArgs, "-i", state.SSHKeyPath, "-o", "PasswordAuthentication=no")
+			}
+
 			// Virtual host: SSH to parent VM and exec into namespace
 			if node.Namespace != "" {
 				user := node.SSHUser
 				if user == "" {
 					user = "root"
 				}
-				sshArgs := []string{"ssh",
-					"-o", "StrictHostKeyChecking=no",
-					"-o", "UserKnownHostsFile=/dev/null",
-					"-o", "LogLevel=ERROR",
+				sshArgs := append(baseArgs,
 					"-t",
 					"-p", strconv.Itoa(node.SSHPort),
-					user + "@" + host,
+					user+"@"+host,
 					fmt.Sprintf("ip netns exec %s bash", node.Namespace),
-				}
+				)
 				return syscallExec(sshBin, sshArgs, os.Environ())
 			}
 
@@ -73,14 +81,10 @@ the search to a specific lab.
 				user = node.SSHUser
 			}
 
-			sshArgs := []string{"ssh",
-				"-o", "StrictHostKeyChecking=no",
-				"-o", "UserKnownHostsFile=/dev/null",
-				"-o", "LogLevel=ERROR",
+			sshArgs := append(baseArgs,
 				"-p", strconv.Itoa(node.SSHPort),
-				user + "@" + host,
-			}
-
+				user+"@"+host,
+			)
 			return syscallExec(sshBin, sshArgs, os.Environ())
 		},
 	}

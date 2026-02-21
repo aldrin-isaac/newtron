@@ -316,12 +316,20 @@ func (l *Lab) Deploy(ctx context.Context) error {
 		}
 	}
 
+	// Generate a lab-specific Ed25519 key for passwordless SSH access.
+	sshKeyPath, sshPubKey, keyErr := GenerateLabSSHKey(l.StateDir)
+	if keyErr != nil {
+		util.Logger.Warnf("newtlab: failed to generate lab SSH key: %v; falling back to password auth", keyErr)
+		sshKeyPath, sshPubKey = "", ""
+	}
+
 	// Initialize state
 	l.State = &LabState{
-		Name:    l.Name,
-		Created: time.Now(),
-		SpecDir: l.SpecDir,
-		Nodes:   make(map[string]*NodeState),
+		Name:       l.Name,
+		Created:    time.Now(),
+		SpecDir:    l.SpecDir,
+		SSHKeyPath: sshKeyPath,
+		Nodes:      make(map[string]*NodeState),
 	}
 	for _, lc := range l.Links {
 		l.State.Links = append(l.State.Links, &LinkState{
@@ -394,7 +402,7 @@ func (l *Lab) Deploy(ctx context.Context) error {
 	l.progress("bootstrap", fmt.Sprintf("configuring %d nodes via serial", len(l.Nodes)))
 	l.setNodePhase("bootstrapping")
 	SaveState(l.State)
-	if err := l.bootstrapNodes(ctx); err != nil && deployErr == nil {
+	if err := l.bootstrapNodes(ctx, sshPubKey); err != nil && deployErr == nil {
 		deployErr = err
 	}
 	l.setNodePhase("")
@@ -760,10 +768,12 @@ func (l *Lab) parallelForNodes(fn func(name string, node *NodeConfig, ns *NodeSt
 }
 
 // bootstrapNodes configures network via serial console and waits for SSH (parallel).
-func (l *Lab) bootstrapNodes(ctx context.Context) error {
-	// Bootstrap network via serial console (parallel).
+// pubKey is the authorized_keys entry to inject for passwordless access; empty = skip injection.
+func (l *Lab) bootstrapNodes(ctx context.Context, pubKey string) error {
+	// Phase 1: Bootstrap network via serial console (parallel).
 	// QEMU user-mode networking requires eth0 up + DHCP before SSH port forwarding works.
 	// Host devices use a simpler bootstrap that only waits for the login prompt.
+	// Switch nodes also receive the lab SSH public key via console injection.
 	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		consoleHost := resolveHostIP(node.Host, l.Config)
 		if node.DeviceType == "host" || node.DeviceType == "host-vm" {
@@ -776,13 +786,28 @@ func (l *Lab) bootstrapNodes(ctx context.Context) error {
 			time.Duration(node.BootTimeout)*time.Second)
 	})
 
-	// Wait for SSH readiness (parallel) — only for nodes still running.
+	// Phase 2: Wait for SSH readiness (parallel) — only for nodes still running.
 	if err2 := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		sshHost := resolveHostIP(node.Host, l.Config)
 		return WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
 			60*time.Second)
 	}); err == nil {
 		err = err2
+	}
+
+	// Phase 3: Inject SSH key into all nodes via SSH (sequential, best-effort).
+	// Console-based injection is unreliable; injecting after SSH is ready is simpler.
+	if pubKey != "" {
+		for name, node := range l.Nodes {
+			ns := l.State.Nodes[name]
+			if ns == nil || ns.Status != "running" {
+				continue
+			}
+			sshHost := resolveHostIP(node.Host, l.Config)
+			if injErr := injectSSHKeyViaSSH(sshHost, ns.SSHPort, node.SSHUser, node.SSHPass, pubKey); injErr != nil {
+				util.Logger.Warnf("newtlab: inject SSH key into %s: %v", name, injErr)
+			}
+		}
 	}
 
 	return err

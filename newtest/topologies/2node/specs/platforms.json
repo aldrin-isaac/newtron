@@ -13,7 +13,7 @@
       "vm_interface_map": "sequential",
       "vm_credentials": {"user": "aldrin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 600,
-      "dataplane": "",
+      "dataplane": "ciscovs",
       "unsupported_features": []
     },
     "alpine-host": {

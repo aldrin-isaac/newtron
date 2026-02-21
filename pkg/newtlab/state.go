@@ -10,13 +10,14 @@ import (
 
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
-	Name      string                   `json:"name"`
-	Created   time.Time                `json:"created"`
-	SpecDir   string                   `json:"spec_dir"`
-	Nodes     map[string]*NodeState    `json:"nodes"`
-	Links     []*LinkState             `json:"links"`
-	BridgePID int                      `json:"bridge_pid,omitempty"` // deprecated: use Bridges
-	Bridges   map[string]*BridgeState  `json:"bridges,omitempty"`   // host ("" = local) → bridge info
+	Name       string                  `json:"name"`
+	Created    time.Time               `json:"created"`
+	SpecDir    string                  `json:"spec_dir"`
+	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key
+	Nodes      map[string]*NodeState   `json:"nodes"`
+	Links      []*LinkState            `json:"links"`
+	BridgePID  int                     `json:"bridge_pid,omitempty"` // deprecated: use Bridges
+	Bridges    map[string]*BridgeState `json:"bridges,omitempty"`    // host ("" = local) → bridge info
 }
 
 // NodeState tracks per-node runtime state.

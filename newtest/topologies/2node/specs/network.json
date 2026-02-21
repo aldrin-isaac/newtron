@@ -1,77 +1,42 @@
 {
   "version": "1.0",
-  "description": "2-node topology network specs - underlay + overlay testing",
+  "description": "2-node topology network specs — overlay VPN definitions for 2node-primitive suite",
   "zones": {
     "amer": {}
   },
-  "ipvpns": {
-    "CUSTOMER": {
-      "description": "Customer overlay VRF for inter-subnet routing",
-      "vrf": "CUSTOMER",
-      "l3vni": 50001,
-      "route_targets": ["65000:50001"]
-    }
-  },
   "macvpns": {
-    "overlay-vlan100": {
-      "description": "Overlay VLAN 100 - L2 stretch with IRB",
-      "vlan_id": 100,
-      "vni": 50100,
-      "route_targets": ["65000:50100"],
-      "arp_suppression": true
-    },
-    "overlay-vlan200": {
-      "description": "Overlay VLAN 200 - IRB",
-      "vni": 50200,
-      "route_targets": ["65000:50200"],
+    "vlan300": {
+      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
+      "vlan_id": 300,
+      "vni": 50300,
+      "route_targets": ["65000:50300"],
       "arp_suppression": true
     }
   },
-  "services": {
-    "transit": {
-      "description": "Transit interface (global routing table, no VPN)",
-      "service_type": "routed"
+  "ipvpns": {
+    "evpn-l3-vrf": {
+      "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
+      "vrf": "Vrf_l3evpn",
+      "l3vni": 50001,
+      "l3vni_vlan": 3999,
+      "route_targets": ["65000:50001"]
     },
-    "customer-l3": {
-      "description": "L3 routed customer interface with per-interface VRF",
-      "service_type": "evpn-routed",
-      "vrf_type": "interface",
-      "ipvpn": "CUSTOMER",
-      "qos_policy": "4q-customer"
-    },
-    "l2-extend": {
-      "description": "L2 extended VLAN over EVPN (bridged, no routing)",
-      "service_type": "evpn-bridged",
-      "macvpn": "overlay-vlan100"
-    },
-    "server-irb": {
-      "description": "Datacenter server port - L2 bridged EVPN with 8q QoS and ECN",
-      "service_type": "evpn-bridged",
-      "macvpn": "overlay-vlan100",
-      "qos_policy": "8q-datacenter"
+    "evpn-irb-vrf": {
+      "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
+      "vrf": "Vrf_irb",
+      "l3vni": 50002,
+      "l3vni_vlan": 3998,
+      "route_targets": ["65000:50002"]
     }
   },
   "qos_policies": {
-    "4q-customer": {
-      "description": "4-queue customer-edge policy",
+    "test-4q": {
+      "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
       "queues": [
-        { "name": "best-effort",  "type": "dwrr", "weight": 40, "dscp": [0] },
-        { "name": "business",     "type": "dwrr", "weight": 30, "dscp": [10, 12, 14, 18, 20, 22] },
-        { "name": "voice",        "type": "strict",             "dscp": [46] },
-        { "name": "network-ctrl", "type": "strict",             "dscp": [48, 56] }
-      ]
-    },
-    "8q-datacenter": {
-      "description": "8-queue datacenter policy with ECN/WRED for lossless traffic (queue 3)",
-      "queues": [
-        { "name": "best-effort",  "type": "dwrr",   "weight": 25, "dscp": [0, 1, 2, 3, 4, 5, 6, 7] },
-        { "name": "low",          "type": "dwrr",   "weight": 20, "dscp": [8, 9, 10, 11, 12, 13, 14, 15] },
-        { "name": "medium",       "type": "dwrr",   "weight": 15, "dscp": [16, 17, 18, 19, 20, 21, 22, 23] },
-        { "name": "lossless",     "type": "strict",               "dscp": [24, 25, 26, 27, 28, 29, 30, 31], "ecn": true },
-        { "name": "high",         "type": "dwrr",   "weight": 15, "dscp": [32, 33, 34, 35, 36, 37, 38, 39] },
-        { "name": "voice",        "type": "strict",               "dscp": [40, 41, 42, 43, 44, 45, 46, 47] },
-        { "name": "control",      "type": "strict",               "dscp": [48, 49, 50, 51, 52, 53, 54, 55] },
-        { "name": "network-ctrl", "type": "strict",               "dscp": [56, 57, 58, 59, 60, 61, 62, 63] }
+        {"name": "best-effort", "type": "dwrr", "weight": 50, "dscp": [0, 1, 2, 3, 4, 5, 6, 7]},
+        {"name": "standard", "type": "dwrr", "weight": 30, "dscp": [8, 9, 10, 11, 12, 13, 14, 15]},
+        {"name": "priority", "type": "dwrr", "weight": 15, "dscp": [16, 17, 18, 19, 20, 21, 22, 23, 24, 25]},
+        {"name": "control", "type": "strict", "dscp": [46, 48]}
       ]
     }
   }

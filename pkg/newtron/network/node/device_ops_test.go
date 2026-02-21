@@ -326,27 +326,30 @@ func TestRemovePortChannelMember(t *testing.T) {
 // VRF Operation Tests
 // ============================================================================
 
-func TestCreateVRF_WithL3VNI(t *testing.T) {
+func TestCreateVRF_Basic(t *testing.T) {
 	d := testDevice()
 	ctx := context.Background()
 
-	cs, err := d.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{L3VNI: 30001})
+	// CreateVRF creates a plain VRF entry without vni.  L3VNI binding is done
+	// separately by BindIPVPN (via VXLAN_TUNNEL_MAP), not by CreateVRF.
+	cs, err := d.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{})
 	if err != nil {
 		t.Fatalf("CreateVRF: %v", err)
 	}
 
-	c := assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeAdd)
-	assertField(t, c, "vni", "30001")
+	assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeAdd)
 
-	mapC := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeAdd)
-	assertField(t, mapC, "vrf", "Vrf_CUST1")
-	assertField(t, mapC, "vni", "30001")
+	// No VXLAN_TUNNEL_MAP or vni field should be emitted by CreateVRF.
+	for _, ch := range cs.Changes {
+		if ch.Table == "VXLAN_TUNNEL_MAP" {
+			t.Errorf("CreateVRF should not emit VXLAN_TUNNEL_MAP; got %+v", ch)
+		}
+	}
 }
 
 func TestDeleteVRF_NoInterfaces(t *testing.T) {
 	d := testDevice()
-	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
-	d.configDB.VXLANTunnelMap["vtep1|map_30001_Vrf_CUST1"] = sonic.VXLANMapEntry{VRF: "Vrf_CUST1", VNI: "30001"}
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVRF(ctx, "Vrf_CUST1")
@@ -354,9 +357,6 @@ func TestDeleteVRF_NoInterfaces(t *testing.T) {
 		t.Fatalf("DeleteVRF: %v", err)
 	}
 
-	// VNI mapping deleted
-	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_30001_Vrf_CUST1", ChangeDelete)
-	// VRF deleted
 	assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeDelete)
 }
 

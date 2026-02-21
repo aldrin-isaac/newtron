@@ -1,9 +1,0 @@
-name: device-health
-description: Run health checks on all devices after BGP convergence
-topology: 2node
-requires: [bgp-converge]
-
-steps:
-  - name: health-check-all
-    action: verify-health
-    devices: all

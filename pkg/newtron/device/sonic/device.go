@@ -3,6 +3,7 @@ package sonic
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device"
@@ -463,11 +464,17 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
 	}
 
-	// Read bgp_asn from CONFIG_DB to build the correct vtysh command
+	// Read BGP ASN from CONFIG_DB — check DEVICE_METADATA first (provision path),
+	// then fall back to BGP_GLOBALS.local_asn (configure-bgp path).
 	asn := ""
 	if d.ConfigDB != nil {
 		if meta, ok := d.ConfigDB.DeviceMetadata["localhost"]; ok {
 			asn = meta["bgp_asn"]
+		}
+		if asn == "" {
+			if globals, ok := d.ConfigDB.BGPGlobals["default"]; ok {
+				asn = globals.LocalASN
+			}
 		}
 	}
 	if asn == "" {
@@ -496,6 +503,7 @@ func (d *Device) ApplyFRRDefaults(ctx context.Context) error {
 	return nil
 }
 
+
 // RestartService restarts a SONiC Docker container by name (e.g., "bgp", "swss",
 // "syncd") via SSH. Uses "systemctl restart" to integrate properly with systemd.
 func (d *Device) RestartService(ctx context.Context, name string) error {
@@ -522,4 +530,27 @@ func (d *Device) Tunnel() *device.SSHTunnel {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.tunnel
+}
+
+// ReadSystemMAC reads the system MAC address from the device's factory config file.
+// Returns an empty string if the MAC cannot be read.
+//
+// Inherent: the system MAC is set by platform initialization at first boot and stored in
+// /etc/sonic/config_db.json. vlanmgrd requires DEVICE_METADATA.localhost.mac to create
+// VLAN bridge interfaces. The CompositeOverwrite provisioner must re-inject this MAC
+// because it replaces the entire DEVICE_METADATA table.
+func (d *Device) ReadSystemMAC() string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	if d.tunnel == nil {
+		return ""
+	}
+
+	cmd := `python3 -c 'import json; d=json.load(open("/etc/sonic/config_db.json")); print(d.get("DEVICE_METADATA",{}).get("localhost",{}).get("mac",""))' 2>/dev/null`
+	output, err := d.tunnel.ExecCommand("sudo " + cmd)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output)
 }

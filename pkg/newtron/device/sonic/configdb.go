@@ -49,6 +49,7 @@ type ConfigDB struct {
 	BGPPeerGroupAF     map[string]BGPPeerGroupAFEntry     `json:"BGP_PEER_GROUP_AF,omitempty"`
 	BGPGlobalsAFNet    map[string]BGPGlobalsAFNetEntry    `json:"BGP_GLOBALS_AF_NETWORK,omitempty"`
 	BGPGlobalsAFAgg    map[string]BGPGlobalsAFAggEntry    `json:"BGP_GLOBALS_AF_AGGREGATE_ADDR,omitempty"`
+	BGPGlobalsEVPNRT   map[string]BGPGlobalsEVPNRTEntry   `json:"BGP_GLOBALS_EVPN_RT,omitempty"`
 	PrefixSet          map[string]PrefixSetEntry          `json:"PREFIX_SET,omitempty"`
 	CommunitySet       map[string]CommunitySetEntry       `json:"COMMUNITY_SET,omitempty"`
 	ASPathSet          map[string]ASPathSetEntry           `json:"AS_PATH_SET,omitempty"`
@@ -176,6 +177,12 @@ type BGPGlobalsAFEntry struct {
 	// v3: frrcfgd extended fields
 	MaxEBGPPaths string `json:"max_ebgp_paths,omitempty"`
 	MaxIBGPPaths string `json:"max_ibgp_paths,omitempty"`
+}
+
+// BGPGlobalsEVPNRTEntry represents a per-VRF EVPN route-target entry (frrcfgd managed).
+// Key format: "vrf_name|L2VPN_EVPN|rt" (e.g., "Vrf_l3evpn|L2VPN_EVPN|65001:50001")
+type BGPGlobalsEVPNRTEntry struct {
+	RouteTargetType string `json:"route-target-type,omitempty"` // "both", "import", "export"
 }
 
 // BGPEVPNVNIEntry represents per-VNI EVPN settings
@@ -451,12 +458,15 @@ func (c *ConfigDBClient) Set(table, key string, fields map[string]string) error 
 	if len(fields) == 0 {
 		return c.client.HSet(c.ctx, redisKey, "NULL", "NULL").Err()
 	}
+	// Write all fields in a single HSET command to fire exactly ONE keyspace
+	// notification. Writing one field at a time fires N notifications, causing
+	// bgpcfgd to receive partial state and attempt BGP neighbor programming
+	// before all fields (asn, local_addr, admin_status) are present.
+	args := make([]interface{}, 0, len(fields)*2)
 	for k, v := range fields {
-		if err := c.client.HSet(c.ctx, redisKey, k, v).Err(); err != nil {
-			return err
-		}
+		args = append(args, k, v)
 	}
-	return nil
+	return c.client.HSet(c.ctx, redisKey, args...).Err()
 }
 
 // Delete removes a table entry

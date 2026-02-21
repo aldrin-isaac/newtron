@@ -149,6 +149,11 @@ func init() {
 				AdvertiseDefaultGW: vals["advertise_default_gw"],
 			}
 		},
+		"BGP_GLOBALS_EVPN_RT": func(db *ConfigDB, entry string, vals map[string]string) {
+			db.BGPGlobalsEVPNRT[entry] = BGPGlobalsEVPNRTEntry{
+				RouteTargetType: vals["route-target-type"],
+			}
+		},
 		"ROUTE_TABLE": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.RouteTable[entry] = StaticRouteEntry{
 				NextHop:    vals["nexthop"],
@@ -308,7 +313,6 @@ func init() {
 				ASPathMember: vals["as_path_member"],
 			}
 		},
-
 		// ---- Hash-merge parsers (9 tables) ----
 
 		"DEVICE_METADATA":     mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.DeviceMetadata }),

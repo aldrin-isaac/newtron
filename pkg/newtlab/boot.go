@@ -2,13 +2,81 @@ package newtlab
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+// GenerateLabSSHKey generates an Ed25519 key pair for passwordless lab SSH access.
+// The private key is saved to dir/lab.key (mode 0600).
+// Returns the private key file path and the public key in authorized_keys format.
+func GenerateLabSSHKey(dir string) (keyPath, pubKey string, err error) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("generate lab SSH key: %w", err)
+	}
+
+	// MarshalPrivateKey produces the OpenSSH PEM block that ssh -i expects.
+	privBlock, err := ssh.MarshalPrivateKey(priv, "newtlab")
+	if err != nil {
+		return "", "", fmt.Errorf("marshal lab SSH key: %w", err)
+	}
+
+	keyPath = filepath.Join(dir, "lab.key")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(privBlock), 0600); err != nil {
+		return "", "", fmt.Errorf("write lab SSH key: %w", err)
+	}
+
+	pubSSH, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal lab SSH public key: %w", err)
+	}
+	// MarshalAuthorizedKey includes a trailing newline; strip it and add a comment.
+	pubKey = strings.TrimRight(string(ssh.MarshalAuthorizedKey(pubSSH)), "\n") + " newtlab"
+	return keyPath, pubKey, nil
+}
+
+// injectSSHKeyViaSSH adds a public key to the user's authorized_keys over SSH.
+// Used for host VMs where console-based injection is unavailable.
+func injectSSHKeyViaSSH(host string, port int, user, pass, pubKey string) error {
+	config := &ssh.ClientConfig{
+		User:            user,
+		Auth:            []ssh.AuthMethod{ssh.Password(pass)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", host, port), config)
+	if err != nil {
+		return fmt.Errorf("SSH dial for key injection: %w", err)
+	}
+	defer client.Close()
+
+	home := "/root"
+	if user != "root" {
+		home = "/home/" + user
+	}
+	cmd := fmt.Sprintf(
+		"mkdir -p %s/.ssh && echo %s >> %s/.ssh/authorized_keys && chmod 700 %s/.ssh && chmod 600 %s/.ssh/authorized_keys",
+		home, singleQuote(pubKey), home, home, home,
+	)
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("SSH session for key injection: %w", err)
+	}
+	defer session.Close()
+	if _, err := session.CombinedOutput(cmd); err != nil {
+		return fmt.Errorf("inject SSH key: %w", err)
+	}
+	return nil
+}
 
 // WaitForSSH polls SSH connectivity to host:port with the given credentials.
 // Returns nil when SSH login succeeds, or error if timeout is reached or context

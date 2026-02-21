@@ -504,7 +504,7 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	}
 
 	// BGP neighbors from EVPN peers
-	resolved.BGPNeighbors = n.deriveBGPNeighbors(profile, name)
+	resolved.BGPNeighbors, resolved.BGPNeighborASNs = n.deriveBGPNeighbors(profile, name)
 
 	// SSH credentials (for Redis tunnel)
 	resolved.SSHUser = profile.SSHUser
@@ -536,14 +536,15 @@ func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs
 	return newResolvedSpecs(merged, n)
 }
 
-// deriveBGPNeighbors looks up EVPN peer loopback IPs from their profiles.
+// deriveBGPNeighbors looks up EVPN peer loopback IPs and ASNs from their profiles.
 // Silently skips peers that aren't in the current topology (e.g., spine2 in a 2-node topo).
-func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName string) []string {
+func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName string) ([]string, map[string]int) {
 	if profile.EVPN == nil {
-		return nil
+		return nil, nil
 	}
 	topo := n.GetTopology()
 	var neighbors []string
+	asns := make(map[string]int)
 	for _, peerName := range profile.EVPN.Peers {
 		if peerName == selfName {
 			continue // Don't peer with self
@@ -556,13 +557,14 @@ func (n *Network) deriveBGPNeighbors(profile *spec.DeviceProfile, selfName strin
 		if n.isHostDeviceLocked(peerName) {
 			continue
 		}
-		// Load peer profile to get its loopback IP
+		// Load peer profile to get its loopback IP and ASN
 		peerProfile, err := n.loadProfile(peerName)
 		if err != nil {
 			util.Logger.Warnf("Could not load EVPN peer profile %s: %v", peerName, err)
 			continue
 		}
 		neighbors = append(neighbors, peerProfile.LoopbackIP)
+		asns[peerProfile.LoopbackIP] = peerProfile.UnderlayASN
 	}
-	return neighbors
+	return neighbors, asns
 }
