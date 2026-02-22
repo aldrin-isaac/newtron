@@ -24,7 +24,6 @@ type Runner struct {
 	Lab           *newtlab.Lab
 	ChangeSets    map[string]*node.ChangeSet
 	HostConns     map[string]*ssh.Client // host device name → SSH client
-	Verbose       bool
 	Progress      ProgressReporter
 
 	opts     RunOptions
@@ -235,7 +234,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 // deferred by the caller; the cleanup is nil when no teardown is needed.
 func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
 	if opts.Suite != "" {
-		lab, _, err := EnsureTopology(ctx, specDir)
+		lab, err := EnsureTopology(ctx, specDir)
 		if err != nil {
 			return nil, err
 		}
@@ -582,18 +581,6 @@ func (r *Runner) allDeviceNames() []string {
 		return topo.DeviceNames()
 	}
 	return r.Network.ListNodes()
-}
-
-// allSwitchDeviceNames returns sorted names of all non-host topology devices.
-func (r *Runner) allSwitchDeviceNames() []string {
-	all := r.allDeviceNames()
-	var switches []string
-	for _, name := range all {
-		if !r.Network.IsHostDevice(name) {
-			switches = append(switches, name)
-		}
-	}
-	return switches
 }
 
 // resolveDevices resolves step.Devices to concrete device names.

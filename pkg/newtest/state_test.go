@@ -36,7 +36,6 @@ func TestSaveLoadRunState(t *testing.T) {
 		SuiteDir: "/tmp/test",
 		Topology: "2node",
 		Platform: "sonic-vpp",
-		LabName:  "2node",
 		PID:      12345,
 		Status:   SuiteStatusRunning,
 		Started:  time.Now().Truncate(time.Second),

@@ -21,11 +21,11 @@ func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
 }
 
 // EnsureTopology reuses an existing lab if all nodes are running, otherwise
-// deploys fresh. Returns the lab and whether a new deploy was performed.
-func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, bool, error) {
+// deploys fresh.
+func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, error) {
 	lab, err := newtlab.NewLab(specDir)
 	if err != nil {
-		return nil, false, fmt.Errorf("newtest: load topology: %w", err)
+		return nil, fmt.Errorf("newtest: load topology: %w", err)
 	}
 
 	// Reuse if all nodes running
@@ -38,15 +38,15 @@ func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, bool, er
 			}
 		}
 		if allRunning {
-			return lab, false, nil
+			return lab, nil
 		}
 	}
 
 	lab.Force = true
 	if err := lab.Deploy(ctx); err != nil {
-		return nil, false, fmt.Errorf("newtest: deploy topology: %w", err)
+		return nil, fmt.Errorf("newtest: deploy topology: %w", err)
 	}
-	return lab, true, nil
+	return lab, nil
 }
 
 // DestroyTopology tears down a deployed topology.
