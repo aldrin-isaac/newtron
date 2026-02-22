@@ -51,13 +51,15 @@ newtron/
 
 ```go
 type Scenario struct {
-    Name        string   `yaml:"name"`
-    Description string   `yaml:"description"`
-    Topology    string   `yaml:"topology"`
-    Platform    string   `yaml:"platform"`
-    Requires    []string `yaml:"requires,omitempty"`
-    Repeat      int      `yaml:"repeat,omitempty"`
-    Steps       []Step   `yaml:"steps"`
+    Name             string   `yaml:"name"`
+    Description      string   `yaml:"description"`
+    Topology         string   `yaml:"topology"`
+    Platform         string   `yaml:"platform"`
+    Requires         []string `yaml:"requires,omitempty"`
+    After            []string `yaml:"after,omitempty"`
+    RequiresFeatures []string `yaml:"requires_features,omitempty"`
+    Repeat           int      `yaml:"repeat,omitempty"`
+    Steps            []Step   `yaml:"steps"`
 }
 ```
 
@@ -251,9 +253,9 @@ execution rather than upfront.
 | `restart-service` | `devices`, `service` |
 | `apply-frr-defaults` | `devices` |
 | `set-interface` | `devices`, `interface`, `params.property` |
-| `create-vlan` | `devices`, `params.vlan_id` |
-| `delete-vlan` | `devices`, `params.vlan_id` |
-| `add-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
+| `create-vlan` | `devices`, `vlan_id` |
+| `delete-vlan` | `devices`, `vlan_id` |
+| `add-vlan-member` | `devices`, `vlan_id`, `params.interface` |
 | `create-vrf` | `devices`, `params.vrf` |
 | `delete-vrf` | `devices`, `params.vrf` |
 | `setup-evpn` | `devices`, `params.source_ip` |
@@ -261,18 +263,18 @@ execution rather than upfront.
 | `remove-vrf-interface` | `devices`, `params.vrf`, `params.interface` |
 | `bind-ipvpn` | `devices`, `params.vrf`, `params.ipvpn` |
 | `unbind-ipvpn` | `devices`, `params.vrf` |
-| `bind-macvpn` | `devices`, `params.vlan_id`, `params.macvpn` |
-| `unbind-macvpn` | `devices`, `params.vlan_id` |
+| `bind-macvpn` | `devices`, `vlan_id`, `params.macvpn` |
+| `unbind-macvpn` | `devices`, `vlan_id` |
 | `add-static-route` | `devices`, `params.vrf`, `params.prefix`, `params.next_hop` |
 | `remove-static-route` | `devices`, `params.vrf`, `params.prefix` |
 | `apply-qos` | `devices`, `params.interface`, `params.qos_policy` |
 | `remove-qos` | `devices`, `params.interface` |
-| `configure-svi` | `devices`, `params.vlan_id` |
+| `configure-svi` | `devices`, `vlan_id` |
 | `bgp-add-neighbor` | `devices`, `params.remote_asn` |
 | `bgp-remove-neighbor` | `devices`, `params.neighbor_ip` |
 | `refresh-service` | `devices`, `interface` |
 | `cleanup` | `devices` |
-| `remove-vlan-member` | `devices`, `params.vlan_id`, `params.interface` |
+| `remove-vlan-member` | `devices`, `vlan_id`, `params.interface` |
 | `create-portchannel` | `devices`, `params.name`, `params.members` (list) |
 | `delete-portchannel` | `devices`, `params.name` |
 | `add-portchannel-member` | `devices`, `params.name`, `params.member` |
@@ -290,8 +292,8 @@ type Runner struct {
     TopologiesDir string
     Network       *network.Network
     Lab           *newtlab.Lab
-    ChangeSets    map[string]*network.ChangeSet
-    Verbose       bool
+    ChangeSets    map[string]*node.ChangeSet
+    HostConns     map[string]*ssh.Client
     Progress      ProgressReporter
 
     opts     RunOptions
@@ -306,6 +308,7 @@ type Runner struct {
 | `Network` | Top-level `network.Network` object (owns nodes, specs). Nodes accessed via `r.Network.GetNode(name)`, platforms via `r.Network.GetPlatform()`. |
 | `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
 | `ChangeSets` | Last ChangeSet per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce ChangeSets for the same device, only the latest is retained. Read by `verify-provisioning`. |
+| `HostConns` | SSH client connections keyed by host name. Used by `host-exec` executor to run commands inside host network namespaces. |
 | `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
 
 ### 4.2 RunOptions
@@ -355,7 +358,7 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error)
 ```go
 type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error)
 
-func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, run scenarioRunner) ([]*ScenarioResult, error)
+func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, deployedPlatform string, run scenarioRunner) ([]*ScenarioResult, error)
 ```
 
 Encapsulates the common scenario iteration loop used by both `runShared` and
@@ -448,6 +451,7 @@ type RunState struct {
     Status    SuiteStatus     `json:"status"`
     Started   time.Time       `json:"started"`
     Updated   time.Time       `json:"updated"`
+    Finished  time.Time       `json:"finished,omitempty"`
     Scenarios []ScenarioState `json:"scenarios"`
 }
 ```
@@ -458,18 +462,32 @@ Persisted to `~/.newtron/newtest/<suite>/state.json` via `SaveRunState`.
 
 ```go
 type ScenarioState struct {
-    Name             string   `json:"name"`
-    Status           string   `json:"status"`                       // "PASS","FAIL","SKIP","ERROR","running","" (pending)
-    Duration         string   `json:"duration"`                     // e.g. "2s", "15s"
-    CurrentStep      string   `json:"current_step,omitempty"`       // step name while in-progress
-    CurrentStepIndex int      `json:"current_step_index,omitempty"` // 0-based step index
-    TotalSteps       int      `json:"total_steps,omitempty"`        // total steps in scenario
-    Requires         []string `json:"requires,omitempty"`           // dependency scenario names
-    SkipReason       string   `json:"skip_reason,omitempty"`        // reason for skip
+    Name             string      `json:"name"`
+    Description      string      `json:"description,omitempty"`
+    Status           string      `json:"status"`                       // "PASS","FAIL","SKIP","ERROR","running","" (pending)
+    Duration         string      `json:"duration"`                     // e.g. "2s", "15s"
+    CurrentStep      string      `json:"current_step,omitempty"`       // step name while in-progress
+    CurrentStepIndex int         `json:"current_step_index,omitempty"` // 0-based step index
+    TotalSteps       int         `json:"total_steps,omitempty"`        // total steps in scenario
+    Requires         []string    `json:"requires,omitempty"`           // dependency scenario names
+    SkipReason       string      `json:"skip_reason,omitempty"`        // reason for skip
+    Steps            []StepState `json:"steps,omitempty"`
 }
 ```
 
-### 5.4 State Functions
+### 5.4 StepState
+
+```go
+type StepState struct {
+    Name     string `json:"name"`
+    Action   string `json:"action"`
+    Status   string `json:"status"`
+    Duration string `json:"duration"`
+    Message  string `json:"message,omitempty"`
+}
+```
+
+### 5.5 State Functions
 
 ```go
 func StateDir(suite string) (string, error)
@@ -740,17 +758,15 @@ running and SSH-reachable with patched profiles.
 ### 8.2 EnsureTopology
 
 ```go
-func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, bool, error)
+func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, error)
 ```
 
 Reuses an existing lab if all nodes are running, otherwise deploys fresh.
-Returns `(lab, deployed, error)` where `deployed` indicates whether a new
-deploy was performed.
 
 **Flow:**
 1. Create `newtlab.Lab` from spec dir
-2. Check `lab.Status()` — if all nodes are `"running"`, return lab with `deployed=false`
-3. Otherwise, set `lab.Force = true`, call `lab.Deploy(ctx)`, return `deployed=true`
+2. Check `lab.Status()` — if all nodes are `"running"`, return the existing lab
+3. Otherwise, set `lab.Force = true`, call `lab.Deploy(ctx)`, and return the lab
 
 Used by `start` command via `deployTopology()` when `opts.Suite` is set.
 

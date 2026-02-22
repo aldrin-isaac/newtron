@@ -67,11 +67,9 @@ newtron/
 │       ├── spec/                        # Specification loading (declarative intent)
 │       │   ├── types.go                 # Spec structs (NetworkSpecFile, ServiceSpec, etc.)
 │       │   └── loader.go                # JSON loading and validation
-│       ├── device/                      # NOS-independent shared types
-│       │   ├── types.go                 # Shared device types
-│       │   ├── verify.go               # VerifyChangeSet, verification types
-│       │   ├── tunnel.go                # SSH tunnel for Redis access
-│       │   └── sonic/                   # SONiC-specific Redis implementation
+│       ├── device/
+│       │   └── sonic/                   # SONiC Redis implementation + shared types
+│       │       ├── types.go             # SSHTunnel, ConfigChange, RouteEntry, VerificationResult, etc.
 │       │       ├── device.go            # Device struct, Connect, Disconnect, Lock
 │       │       ├── configdb.go          # CONFIG_DB (DB 4) mapping + client
 │       │       ├── statedb.go           # STATE_DB (DB 6) mapping + client
@@ -80,8 +78,6 @@ newtron/
 │       │       ├── state.go             # State loading from config_db
 │       │       ├── pipeline.go          # Redis MULTI/EXEC pipeline client
 │       │       └── platform.go          # SonicPlatformConfig, port validation
-│   ├── health/                      # Health checks
-│   │   └── checker.go
 │   ├── audit/                       # Audit logging
 │   │   ├── event.go                 # Event types (uses node.Change)
 │   │   └── logger.go                # Logger implementation
@@ -106,7 +102,6 @@ newtron/
 
 | File | Purpose |
 |------|---------|
-| `pkg/newtron/device/tunnel.go` | SSH tunnel for Redis access through QEMU VMs |
 | `pkg/newtron/device/sonic/statedb.go` | STATE_DB (Redis DB 6) operational state access |
 
 **Platform and pipeline files:**
@@ -578,7 +573,7 @@ type SpecProvider interface {
     GetPlatform(name string) (*spec.PlatformSpec, error)
     GetPrefixList(name string) ([]string, error)
     GetRoutePolicy(name string) (*spec.RoutePolicy, error)
-    FindMACVPNByL2VNI(vni int) (string, *spec.MACVPNSpec)
+    FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec)
 }
 
 // Lock acquires a distributed lock for this device via a Redis STATE_DB entry.
@@ -603,10 +598,6 @@ func (n *Node) Name() string { return n.name }
 
 // ASNumber returns the device's AS number from the resolved profile.
 func (n *Node) ASNumber() int { return n.resolved.ASNumber }
-
-// Underlying returns the low-level sonic.Device for Redis operations.
-// Panics if not connected (use Connect() first).
-func (n *Node) Underlying() *sonic.Device { return n.conn }
 
 // GetInterface returns an Interface by name from the node's interface map.
 // Returns error if the interface name is not in the topology or CONFIG_DB.
@@ -649,7 +640,8 @@ type Interface struct {
     serviceMACVPN string
     ingressACL    string
     egressACL     string
-    lagMember     string
+    bgpNeighbor   string
+    pcParent      string
 }
 
 // --- Interface accessors ---
@@ -852,7 +844,6 @@ type Device struct {
     Profile  *spec.ResolvedProfile
     ConfigDB *ConfigDB                  // Snapshot of CONFIG_DB
     StateDB  *StateDB                   // Snapshot of STATE_DB
-    State    *DeviceState               // Parsed operational state
 
     // Redis connections
     client      *ConfigDBClient         // CONFIG_DB (DB 4) client
@@ -876,8 +867,6 @@ type Device struct {
 | `Connect()` | `mu.Lock()` | `connected`, `tunnel`, all client fields |
 | `Disconnect()` | `mu.Lock()` | `connected`, `tunnel`, all client fields |
 | `Lock()` / `Unlock()` | `mu.Lock()` | `locked` |
-| `GetRoute()` / `GetRouteASIC()` | no lock | Read-only on dedicated clients; safe without mutex |
-| `VerifyChangeSet()` | no lock | Uses a fresh temporary ConfigDBClient (no shared state) |
 
 `Name`, `Profile` are set once at construction and never mutated — safe to read without lock. `ConfigDB` and `StateDB` snapshots are replaced (not mutated in place), so readers must hold `mu.RLock()` or coordinate with the caller. In practice, newtron operations are single-threaded per device (Lock→Apply→Verify→Unlock), so the mutex primarily guards against concurrent Connect/Disconnect.
 
@@ -905,84 +894,6 @@ func (d *Device) IsLocked() bool
 // Returns ("", zero, nil) if no lock is held.
 func (d *Device) LockHolder() (holder string, acquired time.Time, err error)
 
-// DeviceState holds the current operational state of the device
-type DeviceState struct {
-    Interfaces   map[string]*InterfaceState
-    PortChannels map[string]*PortChannelState
-    VLANs        map[int]*VLANState
-    VRFs         map[string]*VRFState
-    BGP          *BGPState
-    EVPN         *EVPNState
-}
-
-// InterfaceState represents interface operational state
-type InterfaceState struct {
-    Name        string
-    AdminStatus string
-    OperStatus  string
-    Speed       string
-    MTU         int
-    VRF         string
-    IPAddresses []string
-    Service     string
-    IngressACL  string
-    EgressACL   string
-    LAGMember   string        // Parent LAG if member
-}
-
-// PortChannelState represents LAG operational state
-type PortChannelState struct {
-    Name          string
-    AdminStatus   string
-    OperStatus    string
-    Members       []string
-    ActiveMembers []string
-}
-
-// VLANState represents VLAN operational state
-type VLANState struct {
-    ID         int
-    Name       string
-    OperStatus string
-    Members    []string
-    SVIStatus  string
-    L2VNI      int
-}
-
-// VRFState represents VRF operational state
-type VRFState struct {
-    Name       string
-    State      string
-    Interfaces []string
-    L3VNI      int
-    RouteCount int
-}
-
-// BGPState represents BGP operational state
-type BGPState struct {
-    LocalAS   int
-    RouterID  string
-    Neighbors map[string]*BGPNeighborState
-}
-
-// BGPNeighborState represents BGP neighbor state
-type BGPNeighborState struct {
-    Address  string
-    RemoteAS int
-    State    string
-    PfxRcvd  int
-    PfxSent  int
-    Uptime   string
-}
-
-// EVPNState represents EVPN operational state
-type EVPNState struct {
-    VTEPState   string
-    RemoteVTEPs []string
-    VNICount    int
-    Type2Routes int
-    Type5Routes int
-}
 ```
 
 ### 3.4 ConfigDB Mapping (`pkg/newtron/device/sonic/configdb.go`)
@@ -1562,9 +1473,7 @@ func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key
 // changes succeeded and call cs.Rollback() if needed.
 //
 // On full success, cs.AppliedCount = len(cs.Changes).
-//
-// The `d` parameter is the low-level sonic.Device (accessed via node.Node.Underlying()).
-func (cs *ChangeSet) Apply(d *sonic.Device) error
+func (cs *ChangeSet) Apply(n *Node) error
 
 // Rollback applies the inverse of each applied change in reverse order
 // (changes 0..AppliedCount-1):
@@ -1575,12 +1484,12 @@ func (cs *ChangeSet) Apply(d *sonic.Device) error
 // Rollback is best-effort: it attempts ALL inverse operations, collecting
 // errors into a combined errors.Join() error. It does not stop on first
 // failure. The caller should verify device state after rollback.
-func (cs *ChangeSet) Rollback(d *sonic.Device) error
+func (cs *ChangeSet) Rollback(n *Node) error
 ```
 
-### 3.6A Verification Types (`pkg/newtron/device/verify.go`)
+### 3.6A Verification Types (`pkg/newtron/device/sonic/types.go`)
 
-These types live in `pkg/newtron/device/verify.go` as NOS-independent shared types. `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/newtron/network/node` would create an import cycle. The `pkg/newtron/network/node` layer re-exports these types for convenience.
+These types live in `pkg/newtron/device/sonic/types.go`. `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/newtron/network/node` would create an import cycle. The `pkg/newtron/network/node` layer re-exports these types for convenience.
 
 These types support the verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
 
@@ -1754,12 +1663,12 @@ Operations are methods on the objects they operate on. This follows true OO desi
 
 ### Execution Model
 
-All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(n.Underlying())` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
+All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(n)` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
 
 **Caller execution pattern:**
 
 ```
-Lock → cs.Apply(n.Underlying()) → VerifyChangeSet → Unlock → return
+Lock → cs.Apply(n) → cs.Verify(n) → Unlock → return
 ```
 
 The lock is scoped to a single operation — not held across multiple operations or for the duration of a session. This ensures:
@@ -1780,8 +1689,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 //   cs, err := intf.ApplyService(ctx, "customer-l3", opts)
 //   // preview cs.String() ...
 //   n.Lock()
-//   cs.Apply(n.Underlying())
-//   n.Underlying().VerifyChangeSet(ctx, cs)
+//   cs.Apply(n)
+//   cs.Verify(n)
 //   n.Unlock()
 ```
 
@@ -1815,11 +1724,11 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error)
 ```go
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
     n := i.Node()
-    if n.Underlying() == nil {
+    if !n.IsConnected() {
         return nil, util.ErrNotConnected
     }
 
-    binding, ok := n.Underlying().ConfigDB.NewtronServiceBinding[i.name]
+    binding, ok := n.ConfigDB().NewtronServiceBinding[i.name]
     if !ok {
         return nil, fmt.Errorf("no service bound to %s", i.name)
     }
@@ -1837,19 +1746,19 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
         map[string]string{"service": binding.ServiceName}, nil)
 
     // 2. Remove IP binding entries (INTERFACE|<name>|<ip>)
-    for key := range n.Underlying().ConfigDB.Interface {
+    for key := range n.ConfigDB().Interface {
         if strings.HasPrefix(key, i.name+"|") {
             cs.Add("INTERFACE", key, ChangeDelete, nil, nil)
         }
     }
 
     // 3. Remove BGP neighbors for this interface
-    neighborIP, _ := i.DeriveNeighborIP()
+    neighborIP, _ := util.DeriveNeighborIP(i.IPAddress())
     if neighborIP != "" {
         vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
         bgpKey := fmt.Sprintf("%s|%s", vrfName, neighborIP)
         // Delete BGP_NEIGHBOR_AF entries first (child before parent)
-        for afKey := range n.Underlying().ConfigDB.BGPNeighborAF {
+        for afKey := range n.ConfigDB().BGPNeighborAF {
             if strings.HasPrefix(afKey, bgpKey+"|") {
                 cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
             }
@@ -1865,7 +1774,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
     for _, aclName := range []string{aclInName, aclOutName} {
         if dc.CanDeleteACL(aclName, i.name) {
             // No other interfaces reference this ACL — delete rules then table
-            for ruleKey := range n.Underlying().ConfigDB.ACLRule {
+            for ruleKey := range n.ConfigDB().ACLRule {
                 if strings.HasPrefix(ruleKey, aclName+"|") {
                     cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
                 }
@@ -1873,7 +1782,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
             cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
         } else {
             // Other interfaces still reference this ACL — just remove this interface from binding list
-            existing := n.Underlying().ConfigDB.ACLTable[aclName]
+            existing := n.ConfigDB().ACLTable[aclName]
             ports := strings.Split(existing.Ports, ",")
             filtered := removeFromSlice(ports, i.name)
             cs.Add("ACL_TABLE", aclName, ChangeModify,
@@ -1971,10 +1880,6 @@ func (i *Interface) AddBGPNeighborWithConfig(ctx context.Context, cfg BGPNeighbo
 
 // RemoveBGPNeighbor removes a direct BGP neighbor from this interface.
 func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error)
-
-// DeriveNeighborIP derives the BGP neighbor IP from this interface's IP.
-// Only works for point-to-point links (/30 or /31 subnets).
-func (i *Interface) DeriveNeighborIP() (string, error)
 
 // ============================================================================
 // Route-Map Binding
@@ -2180,7 +2085,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     // ====================================================================
     if svc.Routing != nil && svc.Routing.Protocol == "bgp" {
         vrfName := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-        neighborIP, _ := i.DeriveNeighborIP()
+        neighborIP, _ := util.DeriveNeighborIP(i.IPAddress())
         peerAS := svc.Routing.PeerAS
         cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfName, neighborIP), ChangeAdd, nil, map[string]string{
             "asn":        peerAS,
@@ -2221,7 +2126,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 // If the ACL already exists in CONFIG_DB, appends this interface to the binding list
 // rather than creating a new ACL_TABLE entry.
 func (i *Interface) generateACLEntries(cs *ChangeSet, aclName string, filter *spec.FilterSpec, stage string) {
-    existing := i.Node().Underlying().ConfigDB.ACLTable[aclName]
+    existing := i.Node().ConfigDB().ACLTable[aclName]
     if existing.Type != "" {
         // ACL exists — add this interface to binding list
         ports := strings.Split(existing.Ports, ",")
@@ -2434,18 +2339,13 @@ func (n *Node) GetOrphanedACLs() []string
 // VTEPSourceIP returns the VTEP source IP (loopback address).
 func (n *Node) VTEPSourceIP() string
 
-// --- Access to underlying sonic.Device for low-level operations ---
-
-// Underlying returns the low-level sonic.Device for Redis operations.
-func (n *Node) Underlying() *sonic.Device
-
 // ============================================================================
 // Verification Methods
 // ============================================================================
 
 // Verify (ChangeSet method) re-reads CONFIG_DB through a fresh connection and
 // confirms every entry in the ChangeSet was applied. The actual verification is
-// performed by calling n.Underlying().VerifyChangeSet() and storing the result
+// performed by calling n.verifyConfigChanges() and storing the result
 // in cs.Verification.
 //
 // Pattern: cs.Verify(n) — method on ChangeSet, not Node.
@@ -2806,7 +2706,7 @@ func (p *PreconditionChecker) Result() error {
     return util.NewValidationError(msgs...)
 }
 
-func (d *Device) RequireLocked() error {
+func (d *sonic.Device) RequireLocked() error {
     if !d.connected {
         return util.NewPreconditionError("operation", d.Name, "device must be connected", "")
     }

@@ -139,7 +139,7 @@ VM can connect across the network (see HLD §5.3).
 
 ## 2. SSH Port Support (newtron change)
 
-### 2.1 tunnel.go Change
+### 2.1 sonic/types.go Change
 
 ```go
 // NewSSHTunnel dials SSH on host:<port> and opens a local listener on a random port.
@@ -230,7 +230,6 @@ cmd/newtlab/
 ├── cmd_console.go       # console subcommand
 ├── cmd_stop.go          # stop/start subcommands
 ├── cmd_provision.go     # provision subcommand (calls newtron)
-├── cmd_bridge.go        # bridge subcommand (hidden, internal)
 └── exec.go              # External command execution helpers
 ```
 
@@ -252,6 +251,7 @@ type Lab struct {
     Profiles     map[string]*spec.DeviceProfile // per-device profiles
     Config       *VMLabConfig                   // from topology.json newtlab section
     Nodes        map[string]*NodeConfig         // resolved VM configs (keyed by device name)
+    HostVMs      []*HostVMGroup                 // coalesced host VMs (virtual hosts)
     Links        []*LinkConfig                  // resolved link configs
     State        *LabState                      // runtime state (PIDs, ports, status)
     Force        bool                           // --force flag: destroy existing before deploy
@@ -344,6 +344,9 @@ type NodeConfig struct {
     SSHPort       int        // allocated
     ConsolePort   int        // allocated
     NICs          []NICConfig // ordered: NIC0=mgmt, NIC1..N=data
+    DeviceType    string     // "switch" or "host", from platform
+    ConsoleUser   string     // resolved: platform vm_credentials user
+    ConsolePass   string     // resolved: platform vm_credentials pass
 }
 ```
 
@@ -384,6 +387,7 @@ type NICConfig struct {
     NetdevID   string // "eth0", "eth1", ...
     Interface  string // SONiC interface name ("Ethernet0", etc.) or "mgmt"
     ConnectAddr string // "IP:PORT" — newtlink endpoint to connect to (empty for mgmt)
+    MAC        string // hardware MAC address assigned to this NIC (empty = QEMU auto)
 }
 ```
 
@@ -419,24 +423,31 @@ type LinkEndpoint struct {
 ```go
 // LabState is persisted to ~/.newtlab/labs/<name>/state.json.
 type LabState struct {
-    Name      string                   `json:"name"`
-    Created   time.Time                `json:"created"`
-    SpecDir   string                   `json:"spec_dir"`
-    Nodes     map[string]*NodeState    `json:"nodes"`
-    Links     []*LinkState             `json:"links"`
-    BridgePID int                      `json:"bridge_pid,omitempty"` // deprecated: use Bridges
-    Bridges   map[string]*BridgeState  `json:"bridges,omitempty"`   // host ("" = local) → bridge info
+    Name       string                   `json:"name"`
+    Created    time.Time                `json:"created"`
+    SpecDir    string                   `json:"spec_dir"`
+    SSHKeyPath string                   `json:"ssh_key_path,omitempty"`
+    Nodes      map[string]*NodeState    `json:"nodes"`
+    Links      []*LinkState             `json:"links"`
+    BridgePID  int                      `json:"bridge_pid,omitempty"` // deprecated: use Bridges
+    Bridges    map[string]*BridgeState  `json:"bridges,omitempty"`   // host ("" = local) → bridge info
 }
 
 // NodeState tracks per-node runtime state.
 type NodeState struct {
     PID            int    `json:"pid"`
     Status         string `json:"status"`            // "running", "stopped", "error"
+    Phase          string `json:"phase,omitempty"`
+    DeviceType     string `json:"device_type,omitempty"`
+    Image          string `json:"image,omitempty"`
     SSHPort        int    `json:"ssh_port"`
+    SSHUser        string `json:"ssh_user,omitempty"`
     ConsolePort    int    `json:"console_port"`
     OriginalMgmtIP string `json:"original_mgmt_ip"`  // saved before patching, restored on destroy
     Host           string `json:"host,omitempty"`     // host name (empty = local)
     HostIP         string `json:"host_ip,omitempty"`  // host IP address (empty = 127.0.0.1)
+    VMName         string `json:"vm_name,omitempty"`
+    Namespace      string `json:"namespace,omitempty"`
 }
 
 // BridgeState tracks a per-host bridge process.
@@ -485,6 +496,7 @@ falling back to `BridgePID` for legacy state files.
 type QEMUCommand struct {
     Node     *NodeConfig
     StateDir string      // lab state directory
+    KVM      bool        // if true, adds -enable-kvm to the command line
 }
 
 // Build returns an exec.Cmd ready to start the QEMU process.
@@ -501,7 +513,7 @@ func (q *QEMUCommand) Build() *exec.Cmd
 | `-m <memory>` | `Node.Memory` | `-m 4096` |
 | `-smp <cpus>` | `Node.CPUs` | `-smp 2` |
 | `-cpu host` or `-cpu host,<features>` | `Node.CPUFeatures` | `-cpu host,+sse4.2` |
-| `-enable-kvm` | auto-detect `/dev/kvm` | `-enable-kvm` |
+| `-enable-kvm` | `KVM` field set by caller (caller checks `/dev/kvm`) | `-enable-kvm` |
 | `-drive file=<overlay>,if=virtio,format=qcow2` | `StateDir/disks/<name>.qcow2` | |
 | `-nographic` | always | `-nographic` |
 | `-serial tcp::<console_port>,server,nowait` | `Node.ConsolePort` | `-serial tcp::30000,server,nowait` |
@@ -529,13 +541,13 @@ port for that endpoint. `romfile=` suppresses PXE ROM loading.
 // StartNode launches the QEMU process for a node.
 // Redirects stdout/stderr to logs/<name>.log.
 // Returns after process is started (does not wait for boot).
-func StartNode(node *NodeConfig, stateDir string) (int, error)
+func StartNode(node *NodeConfig, stateDir, hostIP string) (int, error)
 
 // StopNode sends SIGTERM to the QEMU process, then SIGKILL after 10s.
-func StopNode(pid int) error
+func StopNode(pid int, hostIP string) error
 
 // IsRunning checks if a QEMU process is alive by PID.
-func IsRunning(pid int) bool
+func IsRunning(pid int, hostIP string) bool
 ```
 
 ### 5.4 Helper Functions
@@ -622,6 +634,7 @@ func AllocateLinks(
     links []*spec.TopologyLink,
     nodes map[string]*NodeConfig,
     config *NewtLabConfig,
+    hostMap map[string]HostMapping,
 ) ([]*LinkConfig, error)
 ```
 
@@ -796,9 +809,9 @@ func QueryAllBridgeStats(labName string) (*BridgeStats, error)
 // The assignment is deterministic: links are processed in sorted order
 // and ties are broken by host name sort order.
 //
-// Returns a map of link index → host name. Single-host deployments
-// return all empty strings (local).
-func PlaceWorkers(links []*LinkConfig, nodes map[string]*NodeConfig) map[int]string
+// Mutates LinkConfig.WorkerHost in place. Single-host deployments
+// set all WorkerHost fields to empty string (local).
+func PlaceWorkers(links []*LinkConfig, nodes map[string]*NodeConfig)
 ```
 
 **Algorithm:**
@@ -1496,8 +1509,7 @@ func main() {
         newStopCmd(),
         newStartCmd(),
         newProvisionCmd(),
-        newBridgeCmd(),      // hidden: "newtlab bridge <lab>" (internal)
-        newBridgeStatsCmd(), // "newtlab bridge-stats"
+        newVersionCmd(),
     )
 
     rootCmd.Execute()
@@ -1516,7 +1528,6 @@ func main() {
 | `newtlab stop <node>` | `cmd_stop.go` | (none) | Stop a VM (preserves disk) |
 | `newtlab start <node>` | `cmd_stop.go` | (none) | Start a stopped VM |
 | `newtlab provision` | `cmd_provision.go` | `--device` | Run newtron provisioning |
-| `newtlab bridge <lab>` | `cmd_bridge.go` | (none) | Run bridge workers (hidden, internal) |
 | `newtlab list` | `main.go` | (none) | List all deployed labs |
 
 ### 14.3 deploy
