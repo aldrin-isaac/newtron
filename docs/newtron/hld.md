@@ -1342,12 +1342,18 @@ Services are the primary abstraction - they bundle intent into reusable template
       }
     },
     "access-vlan": {
-      "description": "Local access VLAN (no EVPN)",
-      "service_type": "bridged"
+      "description": "Campus access VLAN with edge filtering",
+      "service_type": "bridged",
+      "ingress_filter": "campus-edge-in",
+      "qos_policy": "campus-4q"
     },
     "local-irb": {
-      "description": "Local IRB (no EVPN)",
-      "service_type": "irb"
+      "description": "Management VLAN with local routing",
+      "service_type": "irb",
+      "vrf_type": "shared",
+      "ingress_filter": "mgmt-protect",
+      "egress_filter": "mgmt-egress",
+      "qos_policy": "mgmt-2q"
     }
   }
 }
@@ -1375,9 +1381,12 @@ Services can be created and deleted via CLI without editing JSON directly:
 newtron service create customer-l3 --type routed --ipvpn cust-vpn --vrf-type shared \
   --qos-policy 8q-datacenter --ingress-filter customer-in --description "Customer L3 VPN" -x
 
-newtron service create access-vlan --type bridged --description "Local access VLAN" -x
+newtron service create access-vlan --type bridged --ingress-filter campus-edge-in \
+  --qos-policy campus-4q --description "Campus access VLAN" -x
 
-newtron service create local-irb --type irb --description "Local IRB" -x
+newtron service create local-irb --type irb --vrf-type shared \
+  --ingress-filter mgmt-protect --egress-filter mgmt-egress \
+  --qos-policy mgmt-2q --description "Management VLAN with local routing" -x
 
 newtron service delete customer-l3 -x
 ```

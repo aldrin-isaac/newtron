@@ -312,12 +312,18 @@ sudo vim /etc/newtron/network.json
       "ingress_filter": "transit-protect"
     },
     "access-vlan": {
-      "description": "Local access VLAN (no EVPN)",
-      "service_type": "bridged"
+      "description": "Campus access VLAN with edge filtering",
+      "service_type": "bridged",
+      "ingress_filter": "campus-edge-in",
+      "qos_policy": "campus-4q"
     },
     "local-irb": {
-      "description": "Local IRB (no EVPN)",
-      "service_type": "irb"
+      "description": "Management VLAN with local routing",
+      "service_type": "irb",
+      "vrf_type": "shared",
+      "ingress_filter": "mgmt-protect",
+      "egress_filter": "mgmt-egress",
+      "qos_policy": "mgmt-2q"
     }
   }
 }
@@ -685,8 +691,8 @@ newtron service list
 # customer-l3    evpn-routed   L3 routed customer interface
 # server-irb     evpn-irb      Server VLAN with IRB routing
 # transit        routed        Transit peering interface
-# access-vlan    bridged       Local access VLAN (no EVPN)
-# local-irb      irb           Local IRB (no EVPN)
+# access-vlan    bridged       Campus access VLAN with edge filtering
+# local-irb      irb           Management VLAN with local routing
 ```
 
 ### 5.2 Show Service Details
@@ -734,9 +740,12 @@ newtron service create my-irb --type evpn-irb --ipvpn server-vpn --macvpn server
 # Local service types (no EVPN overlay):
 newtron service create my-transit --type routed --ingress-filter transit-protect -x
 
-newtron service create my-vlan --type bridged -x
+newtron service create my-vlan --type bridged --ingress-filter campus-edge-in \
+  --qos-policy campus-4q --description "Campus access VLAN" -x
 
-newtron service create my-local-irb --type irb -x
+newtron service create my-local-irb --type irb --vrf-type shared \
+  --ingress-filter mgmt-protect --egress-filter mgmt-egress \
+  --qos-policy mgmt-2q --description "Management VLAN with local routing" -x
 ```
 
 ### 5.4 Delete a Service Definition
