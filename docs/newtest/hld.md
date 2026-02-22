@@ -264,6 +264,21 @@ steps:
 | `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
 | `refresh-service` | Refresh a service binding on an interface | newtron `Interface.RefreshService()` |
 | `cleanup` | Run device cleanup to remove orphaned resources | newtron `Node.Cleanup()` |
+| `configure-bgp` | Write BGP globals from device profile | newtron `Node.ConfigureBGP()` |
+| `remove-bgp-globals` | Remove BGP instance and global config | newtron `Node.RemoveBGPGlobals()` |
+| `create-acl-table` | Create an ACL table | newtron `Node.CreateACLTable()` |
+| `add-acl-rule` | Add a rule to an ACL table | newtron `Node.AddACLRule()` |
+| `delete-acl-rule` | Delete a rule from an ACL table | newtron `Node.DeleteACLRule()` |
+| `delete-acl-table` | Delete an ACL table and all its rules | newtron `Node.DeleteACLTable()` |
+| `bind-acl` | Bind ACL to an interface | newtron `Interface.BindACL()` |
+| `unbind-acl` | Remove interface from ACL binding | newtron `Node.UnbindACLFromInterface()` |
+| `remove-svi` | Remove Layer-3 SVI from a VLAN | newtron `Node.RemoveSVI()` |
+| `remove-ip` | Remove an IP address from an interface | newtron `Interface.RemoveIP()` |
+| `teardown-evpn` | Remove EVPN overlay and VTEP config | newtron `Node.TeardownEVPN()` |
+| `create-portchannel` | Create a port channel (LAG) | newtron `Node.CreatePortChannel()` |
+| `delete-portchannel` | Delete a port channel | newtron `Node.DeletePortChannel()` |
+| `add-portchannel-member` | Add interface to port channel | newtron `Node.AddPortChannelMember()` |
+| `remove-portchannel-member` | Remove interface from port channel | newtron `Node.RemovePortChannelMember()` |
 
 [^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
 

@@ -52,6 +52,7 @@ func listActions() error {
 		"Service":       {},
 		"QoS":           {},
 		"BGP":           {},
+		"ACL":           {},
 		"PortChannel":   {},
 		"Interface":     {},
 		"Routing":       {},
@@ -68,8 +69,8 @@ func listActions() error {
 	fmt.Println()
 
 	categoryOrder := []string{
-		"Provisioning", "Verification", "VLAN", "VRF", "EVPN", "Service", 
-		"QoS", "BGP", "PortChannel", "Interface", "Routing", "Host", "Utility",
+		"Provisioning", "Verification", "VLAN", "VRF", "EVPN", "Service",
+		"QoS", "BGP", "ACL", "PortChannel", "Interface", "Routing", "Host", "Utility",
 	}
 
 	for _, cat := range categoryOrder {
@@ -877,6 +878,185 @@ func getActionMetadata() map[string]ActionMetadata {
   action: restart-service
   devices: [leaf1]
   service: bgp`,
+		},
+
+		// BGP (additional)
+		"configure-bgp": {
+			Category:  "BGP",
+			ShortDesc: "Write BGP globals from device profile",
+			LongDesc:  "Writes BGP_GLOBALS, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, and DEVICE_METADATA from the device profile",
+			Devices:   "required",
+			Example: `- name: configure-bgp
+  action: configure-bgp
+  devices: [switch1]`,
+		},
+		"remove-bgp-globals": {
+			Category:  "BGP",
+			ShortDesc: "Remove BGP instance and global config",
+			LongDesc:  "Deletes BGP_GLOBALS, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, and clears bgp_asn from DEVICE_METADATA (reverse of configure-bgp)",
+			Devices:   "required",
+			Example: `- name: remove-bgp
+  action: remove-bgp-globals
+  devices: [switch1, switch2]`,
+		},
+
+		// ACL
+		"create-acl-table": {
+			Category:  "ACL",
+			ShortDesc: "Create an ACL table",
+			LongDesc:  "Creates an ACL_TABLE entry in CONFIG_DB with type, stage, and optional description",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"name", "ACL table name (e.g., MY_ACL)"},
+			},
+			OptionalParams: []ParamInfo{
+				{"type", "ACL type: L3 (default) or L3V6"},
+				{"stage", "Pipeline stage: ingress (default) or egress"},
+				{"description", "Human-readable description"},
+			},
+			Example: `- name: create-acl
+  action: create-acl-table
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    type: L3
+    stage: ingress`,
+		},
+		"add-acl-rule": {
+			Category:  "ACL",
+			ShortDesc: "Add a rule to an ACL table",
+			LongDesc:  "Adds an ACL_RULE entry with match criteria and FORWARD/DROP action",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"name", "ACL table name"},
+				{"rule", "Rule name (e.g., RULE_10)"},
+				{"action", "Terminal action: permit/FORWARD or deny/DROP"},
+			},
+			OptionalParams: []ParamInfo{
+				{"priority", "Rule priority (higher = evaluated first, default: 0)"},
+				{"src_ip", "Source IP prefix (e.g., 10.0.0.0/8)"},
+				{"dst_ip", "Destination IP prefix"},
+				{"protocol", "Protocol: tcp, udp, icmp, or IP number"},
+				{"src_port", "Layer-4 source port"},
+				{"dst_port", "Layer-4 destination port"},
+			},
+			Example: `- name: add-deny-rule
+  action: add-acl-rule
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    rule: RULE_10
+    action: DROP
+    priority: 10
+    src_ip: "10.0.0.0/8"`,
+		},
+		"delete-acl-rule": {
+			Category:  "ACL",
+			ShortDesc: "Delete a rule from an ACL table",
+			LongDesc:  "Removes a single ACL_RULE entry; the table itself remains",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"name", "ACL table name"},
+				{"rule", "Rule name to delete"},
+			},
+			Example: `- name: delete-rule
+  action: delete-acl-rule
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    rule: RULE_10`,
+		},
+		"delete-acl-table": {
+			Category:  "ACL",
+			ShortDesc: "Delete an ACL table and all its rules",
+			LongDesc:  "Removes the ACL_TABLE entry and all associated ACL_RULE entries",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"name", "ACL table name to delete"},
+			},
+			Example: `- name: delete-acl
+  action: delete-acl-table
+  devices: [leaf1]
+  params:
+    name: MY_ACL`,
+		},
+		"bind-acl": {
+			Category:  "ACL",
+			ShortDesc: "Bind ACL to an interface",
+			LongDesc:  "Adds the interface to the ACL table's port binding list",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"interface", "Interface name"},
+				{"name", "ACL table name"},
+				{"direction", "ingress or egress"},
+			},
+			Example: `- name: bind-acl
+  action: bind-acl
+  devices: [leaf1]
+  interface: Ethernet10
+  params:
+    name: MY_ACL
+    direction: ingress`,
+		},
+		"unbind-acl": {
+			Category:  "ACL",
+			ShortDesc: "Remove interface from ACL binding",
+			LongDesc:  "Removes the interface from the ACL table's port binding list",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"interface", "Interface name"},
+				{"name", "ACL table name"},
+			},
+			Example: `- name: unbind-acl
+  action: unbind-acl
+  devices: [leaf1]
+  interface: Ethernet10
+  params:
+    name: MY_ACL`,
+		},
+
+		// EVPN (additional)
+		"teardown-evpn": {
+			Category:  "EVPN",
+			ShortDesc: "Remove EVPN overlay and VTEP",
+			LongDesc:  "Deletes EVPN overlay neighbors, L2VPN EVPN AF, NVO, and VXLAN tunnel (reverse of setup-evpn)",
+			Devices:   "required",
+			Example: `- name: teardown-evpn
+  action: teardown-evpn
+  devices: [leaf1, leaf2]`,
+		},
+
+		// VLAN (additional)
+		"remove-svi": {
+			Category:  "VLAN",
+			ShortDesc: "Remove SVI from a VLAN",
+			LongDesc:  "Deletes all VLAN_INTERFACE entries for the VLAN (reverse of configure-svi)",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"vlan_id", "VLAN ID whose SVI to remove"},
+			},
+			Example: `- name: remove-svi
+  action: remove-svi
+  devices: [leaf1]
+  vlan_id: 300`,
+		},
+
+		// Interface (additional)
+		"remove-ip": {
+			Category:  "Interface",
+			ShortDesc: "Remove IP address from interface",
+			LongDesc:  "Deletes an IP address entry from an interface; removes the base entry if last IP",
+			Devices:   "required",
+			RequiredParams: []ParamInfo{
+				{"interface", "Interface name"},
+				{"ip", "IP address with prefix length (e.g., 10.1.0.0/31)"},
+			},
+			Example: `- name: remove-ip
+  action: remove-ip
+  devices: [switch1]
+  interface: Ethernet0
+  params:
+    ip: "10.1.0.0/31"`,
 		},
 	}
 }

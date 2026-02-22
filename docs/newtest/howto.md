@@ -688,7 +688,104 @@ anything else -> `Set(property, value)`.
   devices: [leaf1]
 ```
 
-### 17. Incremental Suite Scenarios
+### 17. ACL Operations
+
+```yaml
+# Create an ACL table
+- name: create-acl
+  action: create-acl-table
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    type: L3
+    stage: ingress
+
+# Add a rule
+- name: add-rule
+  action: add-acl-rule
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    rule: RULE_10
+    action: DROP
+    priority: 10
+    src_ip: "10.0.0.0/8"
+
+# Bind ACL to an interface
+- name: bind-acl
+  action: bind-acl
+  devices: [leaf1]
+  interface: Ethernet2
+  params:
+    name: MY_ACL
+    direction: ingress
+
+# Unbind ACL from interface
+- name: unbind-acl
+  action: unbind-acl
+  devices: [leaf1]
+  interface: Ethernet2
+  params:
+    name: MY_ACL
+
+# Delete a rule
+- name: delete-rule
+  action: delete-acl-rule
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+    rule: RULE_10
+
+# Delete the ACL table (removes all rules too)
+- name: delete-acl
+  action: delete-acl-table
+  devices: [leaf1]
+  params:
+    name: MY_ACL
+```
+
+### 18. BGP Configuration and Teardown
+
+```yaml
+# Write BGP globals from device profile (ASN, router-id, redistribute connected)
+- name: configure-bgp
+  action: configure-bgp
+  devices: [switch1, switch2]
+
+# Remove BGP globals (reverse of configure-bgp)
+- name: remove-bgp
+  action: remove-bgp-globals
+  devices: [switch1, switch2]
+```
+
+### 19. EVPN Teardown
+
+```yaml
+# Teardown EVPN overlay (reverse of setup-evpn)
+- name: teardown-evpn
+  action: teardown-evpn
+  devices: [leaf1, leaf2]
+```
+
+### 20. Remove SVI and IP Addresses
+
+```yaml
+# Remove SVI from a VLAN (reverse of configure-svi)
+- name: remove-svi
+  action: remove-svi
+  devices: [leaf1]
+  vlan_id: 300
+
+# Remove an IP address from an interface
+- name: remove-ip
+  action: remove-ip
+  devices: [switch1]
+  interface: Ethernet0
+  params:
+    ip: "10.1.0.0/31"
+```
+
+### 21. Incremental Suite Scenarios
 
 Scenarios in a suite directory use `requires` to declare dependencies:
 

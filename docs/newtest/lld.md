@@ -679,6 +679,18 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 | 40 | `deletePortChannelExecutor` | `delete-portchannel` | `Node.DeletePortChannel()` |
 | 41 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Node.AddPortChannelMember()` |
 | 42 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Node.RemovePortChannelMember()` |
+| 43 | `hostExecExecutor` | `host-exec` | SSH exec in host namespace (newtest native) |
+| 44 | `configureBGPExecutor` | `configure-bgp` | `Node.ConfigureBGP()` |
+| 45 | `createACLTableExecutor` | `create-acl-table` | `Node.CreateACLTable()` |
+| 46 | `addACLRuleExecutor` | `add-acl-rule` | `Node.AddACLRule()` |
+| 47 | `deleteACLRuleExecutor` | `delete-acl-rule` | `Node.DeleteACLRule()` |
+| 48 | `deleteACLTableExecutor` | `delete-acl-table` | `Node.DeleteACLTable()` |
+| 49 | `bindACLExecutor` | `bind-acl` | `Interface.BindACL()` |
+| 50 | `unbindACLExecutor` | `unbind-acl` | `Node.UnbindACLFromInterface()` |
+| 51 | `removeSVIExecutor` | `remove-svi` | `Node.RemoveSVI()` |
+| 52 | `removeIPExecutor` | `remove-ip` | `Interface.RemoveIP()` |
+| 53 | `teardownEVPNExecutor` | `teardown-evpn` | `Node.TeardownEVPN()` |
+| 54 | `removeBGPGlobalsExecutor` | `remove-bgp-globals` | `Node.RemoveBGPGlobals()` |
 
 ### 7.6 Verification Executor Detail
 
