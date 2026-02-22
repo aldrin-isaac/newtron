@@ -363,7 +363,7 @@ Examples:
 }
 
 func init() {
-	filterCreateCmd.Flags().StringVar(&filterCreateType, "type", "", "Filter type (l3, l3v6)")
+	filterCreateCmd.Flags().StringVar(&filterCreateType, "type", "", "Filter type (ipv4, ipv6)")
 	filterCreateCmd.Flags().StringVar(&filterCreateDescription, "description", "", "Filter description")
 
 	filterAddRuleCmd.Flags().IntVar(&filterRulePriority, "priority", 0, "Rule priority/sequence number (required)")
