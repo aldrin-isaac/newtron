@@ -69,7 +69,7 @@ newtron/
 │       │   └── loader.go                # JSON loading and validation
 │       ├── device/
 │       │   └── sonic/                   # SONiC Redis implementation + shared types
-│       │       ├── types.go             # SSHTunnel, ConfigChange, RouteEntry, VerificationResult, etc.
+│       │       ├── types.go             # Entry, SSHTunnel, ConfigChange, RouteEntry, VerificationResult, etc.
 │       │       ├── device.go            # Device struct, Connect, Disconnect, Lock
 │       │       ├── configdb.go          # CONFIG_DB (DB 4) mapping + client
 │       │       ├── statedb.go           # STATE_DB (DB 6) mapping + client
@@ -609,42 +609,27 @@ func (n *Node) ListInterfaces() []string
 // Connect establishes the connection to the device:
 //   1. Creates sonic.Device with the resolved profile
 //   2. Calls sonic.Device.Connect() (SSH tunnel + Redis clients)
-//   3. Populates Interface objects from CONFIG_DB PORT table and
-//      NEWTRON_SERVICE_BINDING table (service bindings)
+//   3. Creates Interface objects from CONFIG_DB PORT and PORTCHANNEL tables
 //   4. Sets n.configDB from the sonic.Device's CONFIG_DB snapshot
-// After Connect, all Interface fields (adminStatus, vrf, ipAddresses,
-// serviceName, etc.) are populated from CONFIG_DB.
+// Interface objects are lightweight (node + name only); all property
+// accessors read on demand from the Node's ConfigDB/StateDB snapshots.
 func (n *Node) Connect(ctx context.Context) error
 
 // Disconnect closes the low-level connection and SSH tunnel.
 func (n *Node) Disconnect() error
 
-// Interface has parent reference to Node
+// Interface represents a network interface within the context of a Node.
+//
+// All state is read on demand from the Node's ConfigDB/StateDB snapshots
+// (refreshed at Lock time), ensuring callers always see the latest data
+// within a write episode. There are no cached fields — the struct is
+// intentionally minimal.
 type Interface struct {
-    node          *Node               // Parent reference
-    name          string
-
-    // Current state (from config_db)
-    adminStatus   string
-    operStatus    string
-    speed         string
-    mtu           int
-    vrf           string
-    ipAddresses   []string
-
-    // Service binding (from NEWTRON_SERVICE_BINDING table)
-    serviceName   string
-    serviceIP     string
-    serviceVRF    string
-    serviceIPVPN  string
-    serviceMACVPN string
-    ingressACL    string
-    egressACL     string
-    bgpNeighbor   string
-    pcParent      string
+    node *Node   // Parent reference — provides access to Node and Network
+    name string  // Interface identity (e.g., "Ethernet0", "PortChannel100")
 }
 
-// --- Interface accessors ---
+// --- Interface accessors (on-demand from ConfigDB/StateDB) ---
 
 // Name returns the interface name (e.g. "Ethernet0").
 func (i *Interface) Name() string { return i.name }
@@ -652,75 +637,82 @@ func (i *Interface) Name() string { return i.name }
 // Node returns the parent Node.
 func (i *Interface) Node() *Node { return i.node }
 
-// HasService returns true if a service is currently bound to this interface.
-func (i *Interface) HasService() bool { return i.serviceName != "" }
+// AdminStatus returns the administrative status from ConfigDB PORT/PORTCHANNEL.
+func (i *Interface) AdminStatus() string
 
-// ServiceName returns the bound service name, or "" if none.
-func (i *Interface) ServiceName() string { return i.serviceName }
+// OperStatus returns the operational status from StateDB PORT_TABLE/LAG_TABLE.
+func (i *Interface) OperStatus() string
+
+// Speed returns the interface speed. Prefers StateDB; falls back to ConfigDB.
+func (i *Interface) Speed() string
+
+// MTU returns the interface MTU. Prefers StateDB; falls back to ConfigDB.
+func (i *Interface) MTU() int
+
+// VRF returns the VRF this interface is bound to (from INTERFACE table).
+func (i *Interface) VRF() string
 
 // IPAddresses returns all IP addresses on this interface.
+// Scans INTERFACE table for keys matching "name|ip/mask".
 func (i *Interface) IPAddresses() []string
+
+// HasService returns true if a service is currently bound to this interface.
+func (i *Interface) HasService() bool { return i.ServiceName() != "" }
+
+// ServiceName returns the bound service name from NEWTRON_SERVICE_BINDING.
+func (i *Interface) ServiceName() string
+
+// IngressACL/EgressACL return the bound ACL names.
+// Prefer NEWTRON_SERVICE_BINDING; fall back to scanning ACL_TABLE.
+func (i *Interface) IngressACL() string
+func (i *Interface) EgressACL() string
+
+// IsPortChannelMember returns true if this interface is a PortChannel member.
+// Scans PORTCHANNEL_MEMBER table for keys containing this interface.
+func (i *Interface) IsPortChannelMember() bool
+
+// PortChannelParent returns the parent PortChannel name (if member).
+func (i *Interface) PortChannelParent() string
 ```
 
-**Interface population from CONFIG_DB:**
+**On-demand accessor pattern:**
 
-During `Node.Connect()`, interfaces are populated by scanning CONFIG_DB tables:
-
-| Interface field | Source table | Key/field |
-|----------------|-------------|-----------|
-| `adminStatus` | `PORT\|<name>` | `admin_status` |
-| `speed` | `PORT\|<name>` | `speed` |
-| `mtu` | `PORT\|<name>` | `mtu` |
-| `vrf` | `INTERFACE\|<name>` | `vrf_name` |
-| `ipAddresses` | `INTERFACE\|<name>\|<ip>` | key existence (IP keys) |
-| `serviceName` | `NEWTRON_SERVICE_BINDING\|<name>` | `service_name` |
-| `serviceIP` | `NEWTRON_SERVICE_BINDING\|<name>` | `ip` |
-| `serviceVRF` | `NEWTRON_SERVICE_BINDING\|<name>` | `vrf_name` |
-| `serviceIPVPN` | `NEWTRON_SERVICE_BINDING\|<name>` | `ipvpn` |
-| `serviceMACVPN` | `NEWTRON_SERVICE_BINDING\|<name>` | `macvpn` |
-| `ingressACL` | `NEWTRON_SERVICE_BINDING\|<name>` | `ingress_acl` |
-| `egressACL` | `NEWTRON_SERVICE_BINDING\|<name>` | `egress_acl` |
-
-**Accessing Network Specs from Interface**
+Every accessor reads from the Node's ConfigDB or StateDB snapshot. There is no
+`loadState()` function and no cached fields. This eliminates stale-field bugs
+where an operation mutates CONFIG_DB but the Interface struct retains old values.
 
 ```go
-// Interface can access Network-level specs through parent chain
-func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-    // Access Network through Node parent
-    svc, err := i.Node().Network().GetService(serviceName)
-    if err != nil {
-        return nil, err
+// Example: VRF() reads from the live ConfigDB snapshot
+func (i *Interface) VRF() string {
+    configDB := i.node.ConfigDB()
+    if configDB == nil { return "" }
+    if intf, ok := configDB.Interface[i.name]; ok {
+        return intf.VRFName
     }
-
-    // Access Node properties
-    asNum := i.Node().ASNumber()
-
-    // Access filter spec from Network
-    filter, _ := i.Node().Network().GetFilter(svc.IngressFilter)
-
-    // ... apply configuration
+    return ""
 }
 ```
 
-**Convenience Methods**
+| Accessor | Source | Table/Key |
+|----------|--------|-----------|
+| `AdminStatus()` | ConfigDB | `PORT\|<name>` or `PORTCHANNEL\|<name>` |
+| `OperStatus()` | StateDB | `PORT_TABLE\|<name>` or `LAG_TABLE\|<name>` |
+| `Speed()` | StateDB → ConfigDB | `PORT_TABLE\|<name>` → `PORT\|<name>` |
+| `MTU()` | StateDB → ConfigDB | `PORT_TABLE\|<name>` → `PORT\|<name>` |
+| `VRF()` | ConfigDB | `INTERFACE\|<name>` → `vrf_name` |
+| `IPAddresses()` | ConfigDB | `INTERFACE\|<name>\|<ip>` (key scan) |
+| `ServiceName()` | ConfigDB | `NEWTRON_SERVICE_BINDING\|<name>` → `service_name` |
+| `IngressACL()` | ConfigDB | `NEWTRON_SERVICE_BINDING` → `ACL_TABLE` fallback |
+| `PortChannelParent()` | ConfigDB | `PORTCHANNEL_MEMBER` (key scan) |
+
+**Accessing Network Specs from Interface:**
 
 ```go
-// Interface provides convenience method for Network access
-func (i *Interface) Network() *Network {
-    return i.node.Network()
-}
-
-// Usage: simplifies access pattern
-svc, _ := intf.Network().GetService("customer-l3")
+// Interface accesses specs through the parent chain — no local caching
+svc, _ := intf.Node().GetService("customer-l3")  // via SpecProvider
+filter, _ := intf.Node().GetFilter(svc.IngressFilter)
+asNum := intf.Node().ASNumber()  // from resolved profile
 ```
-
-**Benefits of This Design**
-
-1. **Natural Access Pattern**: Objects access their context naturally without passing config separately
-2. **Encapsulation**: Specs are owned by the right object level
-3. **Inheritance**: Properties cascade from Network -> Device -> Interface
-4. **No Duplication**: Specs loaded once at Network level, accessed everywhere
-5. **Mirrors Original**: Same pattern as the original Perl implementation
 
 **Network Accessors:**
 
@@ -1392,11 +1384,13 @@ The `Set` method handles the SONiC convention for entries that have no fields (s
 **Pipeline methods** (`pkg/newtron/device/sonic/pipeline.go`):
 
 ```go
-// TableChange represents a single table entry change for pipeline operations
-type TableChange struct {
+// Entry is a single CONFIG_DB entry: table + key + fields.
+// Used by config generators, composite builders, and pipeline delivery.
+// This is the unified entry type — replaces the former CompositeEntry and TableChange types.
+type Entry struct {
     Table  string
     Key    string
-    Fields map[string]string // nil = delete sentinel
+    Fields map[string]string
 }
 
 // TableKey identifies a table entry for deletion
@@ -1408,7 +1402,7 @@ type TableKey struct {
 // PipelineSet writes and deletes multiple entries atomically via Redis MULTI/EXEC pipeline.
 // sets are applied as HSET commands; dels are applied as DEL commands.
 // Used by composite delivery and ChangeSet.Apply for atomic multi-entry writes.
-func (c *ConfigDBClient) PipelineSet(sets []TableChange, dels []TableKey) error
+func (c *ConfigDBClient) PipelineSet(sets []Entry, dels []TableKey) error
 
 // ReplaceAll flushes CONFIG_DB and writes the entire config atomically.
 // Used by composite overwrite mode.
@@ -1485,7 +1479,28 @@ func (cs *ChangeSet) Apply(n *Node) error
 // errors into a combined errors.Join() error. It does not stop on first
 // failure. The caller should verify device state after rollback.
 func (cs *ChangeSet) Rollback(n *Node) error
+
+// configToChangeSet wraps config function output into a ChangeSet.
+// Bridges pure config functions (return []sonic.Entry) with the ChangeSet
+// world used by primitives and composites.
+func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet
+
+// op is a generic helper for simple CRUD operations. It runs precondition
+// checks, calls the entry generator, and wraps the result in a ChangeSet.
+// Use this for operations whose entire body is: preconditions → generate entries → done.
+// Skip it for complex operations that need custom logic between precondition and return
+// (e.g., ApplyService, RemoveService, SetupEVPN).
+func (n *Node) op(name, resource string, changeType sonic.ChangeType,
+    checks func(*PreconditionChecker), gen func() []sonic.Entry) (*ChangeSet, error)
 ```
+
+**Three-layer pattern:** Operations follow a consistent layering:
+
+1. **Config functions** — pure functions in each `*_ops.go` file that take `*sonic.ConfigDB` + identity parameters and return `[]sonic.Entry`. No side effects, no precondition checks, no ChangeSet construction. Example: `vlanDeleteConfig(configDB, vlanID) []sonic.Entry`.
+
+2. **`op()` helper** — wraps the precondition → generate → ChangeSet pattern into a single call for simple CRUD operations. About 19 operations use it.
+
+3. **Direct ChangeSet construction** — complex operations (ApplyService, RemoveService, SetupEVPN) that need custom logic between precondition checks and return build their ChangeSets directly, calling config functions from owning `*_ops.go` files.
 
 ### 3.6A Verification Types (`pkg/newtron/device/sonic/types.go`)
 
@@ -1608,11 +1623,11 @@ type CompositeBuilder struct {
 
 func NewCompositeBuilder(network, device string, mode CompositeMode) *CompositeBuilder
 
-func (cb *CompositeBuilder) AddBGPGlobals(entry BGPGlobalsEntry) *CompositeBuilder
-func (cb *CompositeBuilder) AddPeerGroup(name string, entry BGPPeerGroupEntry) *CompositeBuilder
-func (cb *CompositeBuilder) AddPortConfig(name string, entry PortEntry) *CompositeBuilder
-func (cb *CompositeBuilder) AddService(intf, service string, opts ApplyServiceOpts) *CompositeBuilder
-func (cb *CompositeBuilder) AddRouteRedistribution(vrf, protocol, af string, fields map[string]string) *CompositeBuilder
+// AddEntries accepts output from config functions ([]sonic.Entry) — the primary way
+// to add entries. Callers call config functions from owning *_ops.go files and pass
+// the result here. No typed helpers (AddBGPGlobals, AddPeerGroup, etc.) — the config
+// functions are the API.
+func (cb *CompositeBuilder) AddEntries(entries []sonic.Entry) *CompositeBuilder
 func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string) *CompositeBuilder
 func (cb *CompositeBuilder) Build() *CompositeConfig
 
@@ -2636,26 +2651,18 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*Comp
 func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName string) (*CompositeDeliveryResult, error)
 func (tp *TopologyProvisioner) ProvisionInterface(ctx context.Context, deviceName, interfaceName string) (*ChangeSet, error)
 
-// CompositeEntry represents a single entry within a composite config for generation.
-type CompositeEntry struct {
-    Table  string
-    Key    string
-    Fields map[string]string
-}
-
-// generateServiceEntries generates CompositeEntry values for a service applied to an interface.
-func generateServiceEntries(
-    network *Network,
-    deviceName, interfaceName, serviceName, ipAddr string,
-) ([]CompositeEntry, error)
+// GenerateServiceEntries produces CONFIG_DB entries (as sonic.Entry values)
+// for applying a service to an interface.  Delegates to config functions
+// from the owning *_ops.go files — does not construct entries inline.
+func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entry, error)
 
 // generateQoSDeviceEntries produces device-wide CONFIG_DB entries for a QoS policy:
 // DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER (per queue), WRED_PROFILE (if ECN).
-func generateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []CompositeEntry
+func generateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []sonic.Entry
 
 // generateQoSInterfaceEntries produces per-interface CONFIG_DB entries:
 // PORT_QOS_MAP (bracket-refs to maps) and QUEUE entries (bracket-refs to schedulers).
-func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []CompositeEntry
+func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []sonic.Entry
 
 // resolveServiceQoSPolicy checks QoSPolicy first, falls back to legacy QoSProfile.
 func resolveServiceQoSPolicy(n *Network, svc *spec.ServiceSpec) (string, *spec.QoSPolicy)
@@ -3382,7 +3389,7 @@ When a service definition changes (e.g., filter-spec updated in `network.json`),
 
 ```go
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
-    svc, err := i.Node().GetService(i.serviceName)
+    svc, err := i.Node().GetService(i.ServiceName())
     if err != nil {
         return nil, err
     }

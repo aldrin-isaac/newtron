@@ -130,11 +130,29 @@ knowing about device configuration at all?" If no, it belongs in newtlab.
 
 ---
 
-## 4. Objects Own Their Methods
+## 4. Objects Own Their Methods — The Interface Is the Point of Service
 
 newtron uses an object-oriented architecture where methods belong to the
 object that has the context to execute them. This is the most important
-structural decision in the system.
+structural decision in the system, and it is driven by a networking
+truth: **the interface is the point of service**.
+
+In networking, everything happens at the interface. Policy attaches to
+an interface. VRF binding, VLAN membership, ACL application, QoS
+scheduling, BGP peering — all are per-interface. The interface is where
+abstract service intent meets physical infrastructure. It is:
+
+- **The point of service delivery** — where specs bind to physical ports
+- **The unit of service lifecycle** — apply, remove, refresh happen
+  per-interface
+- **The unit of state** — each interface has exactly one service binding
+  (or none)
+- **The unit of isolation** — services on Ethernet0 and Ethernet4 are
+  independent
+
+This is not a code-organization choice. It is the fundamental
+abstraction of the domain. A network *is*, at its core, services
+applied on interfaces.
 
 An `Interface` knows its parent `Device`, which knows its parent
 `Network`. When you call `Interface.ApplyService()`, the interface
@@ -157,11 +175,18 @@ Network
               └── methods: ApplyService(), RemoveService(), RefreshService()
 ```
 
+Interface delegates to Device for infrastructure (Redis connections,
+CONFIG_DB cache, specs) just as a VLAN interface on a real switch
+delegates to the forwarding ASIC for packet processing. The delegation
+does not make Interface a "forwarding layer" — it makes Interface a
+logical point of attachment that the underlying infrastructure services.
+
 This means:
 
 - **ApplyService lives on Interface**, not on Device or Network, because
-  the interface is the entity being configured. The interface's identity
-  (name, IP, parent device) is part of the translation context.
+  the interface is the entity being configured — the point where a
+  service becomes real. The interface's identity (name, IP, parent
+  device) is part of the translation context.
 
 - **VerifyChangeSet lives on Device**, not on Network or in a utility
   package, because the device holds the Redis connection needed to re-read
@@ -847,14 +872,102 @@ know is wrong.**
 
 ---
 
-## 21. Summary
+## 21. Pure Config Functions — Separate Generation from Orchestration
+
+Entry construction for each CONFIG_DB table is extracted into **pure config
+functions** — functions that take CONFIG_DB state and identity parameters,
+return `[]sonic.Entry`, and have no side effects. They don't check
+preconditions, don't build ChangeSets, don't log, and don't connect to
+devices. They answer one question: "what entries does this operation
+produce?"
+
+```go
+// Pure config function — owned by vlan_ops.go
+func vlanConfig(vlanID int, members []string) []sonic.Entry
+
+// Pure delete config function — scans ConfigDB for related entries
+func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry
+```
+
+Operations call these functions and wrap the result:
+
+```go
+// Simple CRUD — uses the op() helper
+func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, error) {
+    return n.op("create-vlan", vlanName, ChangeAdd,
+        func(pc *PreconditionChecker) { pc.RequireVLANNotExists(vlanID) },
+        func() []sonic.Entry { return vlanConfig(vlanID, members) },
+    )
+}
+```
+
+The `op()` helper handles the common pattern: run preconditions → call
+generator → wrap in ChangeSet. Complex operations (ApplyService,
+RemoveService, SetupEVPN) that need custom logic between steps build their
+ChangeSets directly but still call config functions for entry construction.
+
+`sonic.Entry` is the unified entry type used everywhere — config functions,
+composite builders, and pipeline delivery. It replaced the former separate
+`CompositeEntry` and `TableChange` types, eliminating unnecessary
+conversions between structurally identical representations.
+
+This layering serves three purposes:
+
+1. **Testability.** Config functions can be unit-tested with a fake ConfigDB
+   — no connections, locks, or preconditions. The function's output is
+   deterministic given its inputs.
+
+2. **Reuse.** The same config function is called by the online operation
+   path (Interface.ApplyService → ChangeSet), the offline composite path
+   (TopologyProvisioner → CompositeBuilder), and delete operations.
+   Change the table format once; all paths update.
+
+3. **Clarity.** A reader can open `vlan_ops.go` and see exactly what
+   entries a VLAN operation produces, without wading through precondition
+   checks, logging, and ChangeSet bookkeeping.
+
+**Generate entries in pure functions; orchestrate them in operations.**
+
+---
+
+## 22. On-Demand Interface State — No Cached Fields
+
+The Interface struct contains exactly two fields: a parent pointer (`node`)
+and the interface name. All property accessors — `AdminStatus()`, `VRF()`,
+`IPAddresses()`, `ServiceName()`, etc. — read on demand from the Node's
+ConfigDB and StateDB snapshots, which are refreshed at Lock time.
+
+There is no `loadState()` function. There are no cached private fields that
+operations must remember to update after mutations. An accessor called
+before and after a CONFIG_DB write within the same episode returns the
+same value (the snapshot is immutable within an episode); after the next
+Lock/Refresh, it reflects the new state.
+
+This eliminates a class of bugs where an operation mutates CONFIG_DB (via
+`cs.Apply()`) but forgets to update a cached Interface field, causing
+subsequent reads within the same session to see stale data. The previous
+design had 15 cached fields that required careful synchronization; the
+on-demand design has zero.
+
+The trade-off is clear: on-demand reads are marginally slower (a map
+lookup per call vs. a field read). But Interface accessors are called
+dozens of times per operation, not millions — the overhead is unmeasurable
+against the Redis round-trip cost of any real operation. Correctness
+matters more than nanoseconds.
+
+**Read state from the snapshot, not from cached fields. Snapshots are
+refreshed per episode; fields go stale within one.**
+
+---
+
+## 23. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
 | SONiC is a database | Interact through Redis, not CLI parsing; CLI is an exception, not the norm |
 | Platform patching | Patch what's broken; don't build parallel infrastructure around it |
 | One level of abstraction per program | newtlab realizes the topology, newtron translates specs to config, orchestrators decide what gets applied where |
-| Objects own their methods | A method belongs to the smallest object that has all the context to execute it |
+| Objects own their methods | The interface is the point of service; a method belongs to the smallest object that has all the context to execute it |
 | If you change it, you verify it | The tool that writes the state must be able to verify the write |
 | Prevent bad writes | Application-level referential integrity for a database that has none; refuse invalid state, don't detect damage |
 | Spec vs config | Intent is declarative and version-controlled; state is imperative and generated |
@@ -871,3 +984,5 @@ know is wrong.**
 | Episodic caching | Refresh once at episode start; read many times within; never carry cache across episode boundaries |
 | CLI-first research | Never assume a CONFIG_DB path works without first verifying it via CLI on a real device |
 | Documentation freshness | Grep finds what you already know is wrong; audits find what you don't know is wrong |
+| Pure config functions | Generate entries in pure functions; orchestrate them in operations |
+| On-demand Interface state | Read state from the snapshot, not from cached fields; snapshots are refreshed per episode |
