@@ -54,43 +54,6 @@ func ComputeNeighborIP(localIP string, maskLen int) string {
 	return ip.String()
 }
 
-// computeNetworkAddr returns the network address for a given IP and mask
-func computeNetworkAddr(ipStr string, maskLen int) string {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return ""
-	}
-	ip = ip.To4()
-	if ip == nil {
-		return ""
-	}
-
-	mask := net.CIDRMask(maskLen, 32)
-	network := ip.Mask(mask)
-	return network.String()
-}
-
-// computeBroadcastAddr returns the broadcast address for a given IP and mask
-func computeBroadcastAddr(ipStr string, maskLen int) string {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return ""
-	}
-	ip = ip.To4()
-	if ip == nil {
-		return ""
-	}
-
-	mask := net.CIDRMask(maskLen, 32)
-	network := ip.Mask(mask)
-
-	broadcast := make(net.IP, 4)
-	for i := 0; i < 4; i++ {
-		broadcast[i] = network[i] | ^mask[i]
-	}
-	return broadcast.String()
-}
-
 // IsValidIPv4 checks if a string is a valid IPv4 address
 func IsValidIPv4(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
@@ -125,16 +88,6 @@ func ValidateMTU(mtu int) error {
 		return fmt.Errorf("MTU must be between 68 and 9216, got %d", mtu)
 	}
 	return nil
-}
-
-// FormatRouteDistinguisher generates an RD from router ID and index
-func FormatRouteDistinguisher(routerID string, index int) string {
-	return fmt.Sprintf("%s:%d", routerID, index)
-}
-
-// FormatRouteTarget generates an RT from ASN and value
-func FormatRouteTarget(asn, value int) string {
-	return fmt.Sprintf("%d:%d", asn, value)
 }
 
 // SplitIPMask splits a CIDR notation into IP and mask length

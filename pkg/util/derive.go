@@ -13,13 +13,10 @@ var (
 
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
-	NeighborIP    string // Computed from local IP for point-to-point
-	NetworkAddr   string // Network address of the subnet
-	BroadcastAddr string // Broadcast address (for non-p2p)
-	SubnetMask    int    // Subnet mask length
-	VRFName       string // Auto-generated VRF name
-	Description   string // Auto-generated description
-	ACLPrefix     string // Prefix for per-interface ACL names (append "-in"/"-out")
+	NeighborIP  string // Computed from local IP for point-to-point
+	VRFName     string // Auto-generated VRF name
+	Description string // Auto-generated description
+	ACLPrefix   string // Prefix for per-interface ACL names (append "-in"/"-out")
 }
 
 // DeriveFromInterface derives values from interface name, IP, and service name
@@ -32,9 +29,6 @@ func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, 
 			return nil, err
 		}
 
-		d.SubnetMask = mask
-		d.NetworkAddr = computeNetworkAddr(ip.String(), mask)
-		d.BroadcastAddr = computeBroadcastAddr(ip.String(), mask)
 		d.NeighborIP = ComputeNeighborIP(ip.String(), mask)
 	}
 

@@ -159,98 +159,6 @@ func TestComputeNeighborIP(t *testing.T) {
 	}
 }
 
-func Test_computeNetworkAddr(t *testing.T) {
-	tests := []struct {
-		name    string
-		ipStr   string
-		maskLen int
-		want    string
-	}{
-		{
-			name:    "/24 network",
-			ipStr:   "192.168.1.100",
-			maskLen: 24,
-			want:    "192.168.1.0",
-		},
-		{
-			name:    "/30 network",
-			ipStr:   "10.1.1.2",
-			maskLen: 30,
-			want:    "10.1.1.0",
-		},
-		{
-			name:    "/16 network",
-			ipStr:   "172.16.50.100",
-			maskLen: 16,
-			want:    "172.16.0.0",
-		},
-		{
-			name:    "/32 host",
-			ipStr:   "10.0.0.1",
-			maskLen: 32,
-			want:    "10.0.0.1",
-		},
-		{
-			name:    "invalid IP",
-			ipStr:   "invalid",
-			maskLen: 24,
-			want:    "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := computeNetworkAddr(tt.ipStr, tt.maskLen)
-			if got != tt.want {
-				t.Errorf("computeNetworkAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_computeBroadcastAddr(t *testing.T) {
-	tests := []struct {
-		name    string
-		ipStr   string
-		maskLen int
-		want    string
-	}{
-		{
-			name:    "/24 broadcast",
-			ipStr:   "192.168.1.100",
-			maskLen: 24,
-			want:    "192.168.1.255",
-		},
-		{
-			name:    "/30 broadcast",
-			ipStr:   "10.1.1.1",
-			maskLen: 30,
-			want:    "10.1.1.3",
-		},
-		{
-			name:    "/16 broadcast",
-			ipStr:   "172.16.50.100",
-			maskLen: 16,
-			want:    "172.16.255.255",
-		},
-		{
-			name:    "invalid IP",
-			ipStr:   "invalid",
-			maskLen: 24,
-			want:    "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := computeBroadcastAddr(tt.ipStr, tt.maskLen)
-			if got != tt.want {
-				t.Errorf("computeBroadcastAddr(%q, %d) = %q, want %q", tt.ipStr, tt.maskLen, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestIsValidIPv4(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -351,42 +259,6 @@ func TestValidateMTU(t *testing.T) {
 	}
 }
 
-func TestFormatRouteDistinguisher(t *testing.T) {
-	tests := []struct {
-		routerID string
-		index    int
-		want     string
-	}{
-		{"10.0.0.1", 1, "10.0.0.1:1"},
-		{"192.168.1.1", 100, "192.168.1.1:100"},
-	}
-
-	for _, tt := range tests {
-		got := FormatRouteDistinguisher(tt.routerID, tt.index)
-		if got != tt.want {
-			t.Errorf("FormatRouteDistinguisher(%q, %d) = %q, want %q", tt.routerID, tt.index, got, tt.want)
-		}
-	}
-}
-
-func TestFormatRouteTarget(t *testing.T) {
-	tests := []struct {
-		asn   int
-		value int
-		want  string
-	}{
-		{65000, 100, "65000:100"},
-		{4200000000, 1, "4200000000:1"},
-	}
-
-	for _, tt := range tests {
-		got := FormatRouteTarget(tt.asn, tt.value)
-		if got != tt.want {
-			t.Errorf("FormatRouteTarget(%d, %d) = %q, want %q", tt.asn, tt.value, got, tt.want)
-		}
-	}
-}
-
 func TestSplitIPMask(t *testing.T) {
 	tests := []struct {
 		cidr     string
@@ -465,22 +337,6 @@ func TestComputeNeighborIP_IPv6(t *testing.T) {
 	got := ComputeNeighborIP("::1", 31)
 	if got != "" {
 		t.Errorf("ComputeNeighborIP(IPv6) = %q, want empty", got)
-	}
-}
-
-func Test_computeNetworkAddr_IPv6(t *testing.T) {
-	// IPv6 is not supported, should return empty string
-	got := computeNetworkAddr("2001:db8::1", 64)
-	if got != "" {
-		t.Errorf("computeNetworkAddr(IPv6) = %q, want empty", got)
-	}
-}
-
-func Test_computeBroadcastAddr_IPv6(t *testing.T) {
-	// IPv6 is not supported, should return empty string
-	got := computeBroadcastAddr("2001:db8::1", 64)
-	if got != "" {
-		t.Errorf("computeBroadcastAddr(IPv6) = %q, want empty", got)
 	}
 }
 
