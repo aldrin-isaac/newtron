@@ -123,18 +123,15 @@ func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
 
 // CreateVLAN creates a new VLAN on this device.
 func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*ChangeSet, error) {
-	if err := n.precondition("create-vlan", vlanResource(vlanID)).
-		Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
-		RequireVLANNotExists(vlanID).
-		Result(); err != nil {
+	cs, err := n.op("create-vlan", vlanResource(vlanID), ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
+				RequireVLANNotExists(vlanID)
+		},
+		func() []CompositeEntry { return vlanConfig(vlanID, opts) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.create-vlan")
-	for _, e := range vlanConfig(vlanID, opts) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Created VLAN %d", vlanID)
 	return cs, nil
 }
@@ -169,35 +166,28 @@ func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
 
 // DeleteVLAN removes a VLAN from this device.
 func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := n.precondition("delete-vlan", vlanResource(vlanID)).
-		RequireVLANExists(vlanID).
-		Result(); err != nil {
+	cs, err := n.op("delete-vlan", vlanResource(vlanID), ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequireVLANExists(vlanID) },
+		func() []CompositeEntry { return vlanDeleteConfig(n.configDB, vlanID) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := configToChangeSet(n.name, "device.delete-vlan", vlanDeleteConfig(n.configDB, vlanID), ChangeDelete)
-
 	util.WithDevice(n.name).Infof("Deleted VLAN %d", vlanID)
 	return cs, nil
 }
 
 // AddVLANMember adds an interface to a VLAN as a tagged or untagged member.
 func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName string, tagged bool) (*ChangeSet, error) {
-	// Normalize interface name (e.g., Eth0 -> Ethernet0)
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if err := n.precondition("add-vlan-member", vlanResource(vlanID)).
-		RequireVLANExists(vlanID).
-		RequireInterfaceExists(interfaceName).
-		Result(); err != nil {
+	cs, err := n.op("add-vlan-member", vlanResource(vlanID), ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.RequireVLANExists(vlanID).RequireInterfaceExists(interfaceName)
+		},
+		func() []CompositeEntry { return vlanMemberConfig(vlanID, interfaceName, tagged) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.add-vlan-member")
-	for _, e := range vlanMemberConfig(vlanID, interfaceName, tagged) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	taggingMode := "untagged"
 	if tagged {
 		taggingMode = "tagged"
@@ -210,16 +200,14 @@ func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName stri
 func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName string) (*ChangeSet, error) {
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
 
-	if err := n.precondition("remove-vlan-member", vlanResource(vlanID)).
-		RequireVLANExists(vlanID).
-		Result(); err != nil {
+	cs, err := n.op("remove-vlan-member", vlanResource(vlanID), ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequireVLANExists(vlanID) },
+		func() []CompositeEntry {
+			return []CompositeEntry{{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName)}}
+		})
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.remove-vlan-member")
-
-	cs.Add("VLAN_MEMBER", VLANMemberKey(vlanID, interfaceName), ChangeDelete, nil, nil)
-
 	util.WithDevice(n.name).Infof("Removed %s from VLAN %d", interfaceName, vlanID)
 	return cs, nil
 }
@@ -228,20 +216,17 @@ func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName s
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	pc := n.precondition("configure-svi", vlanResource(vlanID)).
-		RequireVLANExists(vlanID)
-	if opts.VRF != "" {
-		pc.RequireVRFExists(opts.VRF)
-	}
-	if err := pc.Result(); err != nil {
+	cs, err := n.op("configure-svi", vlanResource(vlanID), ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.RequireVLANExists(vlanID)
+			if opts.VRF != "" {
+				pc.RequireVRFExists(opts.VRF)
+			}
+		},
+		func() []CompositeEntry { return sviConfig(vlanID, opts) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.configure-svi")
-	for _, e := range sviConfig(vlanID, opts) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
 	return cs, nil
 }

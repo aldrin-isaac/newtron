@@ -301,17 +301,15 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 // RemoveBGPNeighbor removes a BGP neighbor from the device.
 // This works for both direct (interface-level) and indirect (loopback-level) neighbors.
 func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	if err := n.precondition("remove-bgp-neighbor", neighborIP).Result(); err != nil {
+	cs, err := n.op("remove-bgp-neighbor", neighborIP, ChangeDelete,
+		func(pc *PreconditionChecker) {
+			pc.Check(n.BGPNeighborExists(neighborIP), "BGP neighbor must exist",
+				fmt.Sprintf("BGP neighbor %s not found", neighborIP))
+		},
+		func() []CompositeEntry { return BGPNeighborDeleteConfig(neighborIP) })
+	if err != nil {
 		return nil, err
 	}
-
-	if !n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP neighbor %s not found", neighborIP)
-	}
-
-	config := BGPNeighborDeleteConfig(neighborIP)
-	cs := configToChangeSet(n.name, "bgp.remove-neighbor", config, ChangeDelete)
-
 	util.WithDevice(n.name).Infof("Removing BGP neighbor %s", neighborIP)
 	return cs, nil
 }

@@ -82,6 +82,24 @@ func configToChangeSet(deviceName, operation string, config []CompositeEntry, ch
 	return cs
 }
 
+// op is a generic helper for simple CRUD operations. It runs precondition
+// checks, calls the entry generator, and wraps the result in a ChangeSet.
+// Use this for operations whose entire body is: preconditions → generate entries → done.
+// Skip it for complex operations that need custom logic between precondition and return
+// (e.g., ApplyService, RemoveService, SetupEVPN).
+func (n *Node) op(name, resource string, changeType sonic.ChangeType,
+	checks func(*PreconditionChecker), gen func() []CompositeEntry) (*ChangeSet, error) {
+
+	pc := n.precondition(name, resource)
+	if checks != nil {
+		checks(pc)
+	}
+	if err := pc.Result(); err != nil {
+		return nil, err
+	}
+	return configToChangeSet(n.name, "device."+name, gen(), changeType), nil
+}
+
 // String returns a human-readable representation of the changes.
 func (cs *ChangeSet) String() string {
 	if cs.IsEmpty() {

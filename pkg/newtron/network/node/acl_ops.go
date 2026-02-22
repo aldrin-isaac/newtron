@@ -118,36 +118,30 @@ type ACLRuleConfig struct {
 
 // CreateACLTable creates a new ACL table.
 func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
-	if err := n.precondition("create-acl-table", name).
-		RequireACLTableNotExists(name).
-		Result(); err != nil {
-		return nil, err
-	}
 	if opts.Type == "" {
 		opts.Type = "L3"
 	}
 	if opts.Stage == "" {
 		opts.Stage = "ingress"
 	}
-
-	config := aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description)
-	cs := configToChangeSet(n.name, "device.create-acl-table", config, ChangeAdd)
-
+	cs, err := n.op("create-acl-table", name, ChangeAdd,
+		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
+		func() []CompositeEntry { return aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+	if err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Created ACL table %s", name)
 	return cs, nil
 }
 
 // AddACLRule adds a rule to an ACL table.
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
-	if err := n.precondition("add-acl-rule", tableName).
-		RequireACLTableExists(tableName).
-		Result(); err != nil {
+	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
+		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
+		func() []CompositeEntry { return aclRuleConfig(tableName, ruleName, opts) })
+	if err != nil {
 		return nil, err
 	}
-
-	config := aclRuleConfig(tableName, ruleName, opts)
-	cs := configToChangeSet(n.name, "device.add-acl-rule", config, ChangeAdd)
-
 	util.WithDevice(n.name).Infof("Added rule %s to ACL table %s", ruleName, tableName)
 	return cs, nil
 }
@@ -197,14 +191,12 @@ func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntr
 
 // DeleteACLTable removes an ACL table and all its rules.
 func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := n.precondition("delete-acl-table", name).
-		RequireACLTableExists(name).
-		Result(); err != nil {
+	cs, err := n.op("delete-acl-table", name, ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
+		func() []CompositeEntry { return aclTableDeleteConfig(n.configDB, name) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := configToChangeSet(n.name, "device.delete-acl-table", aclTableDeleteConfig(n.configDB, name), ChangeDelete)
-
 	util.WithDevice(n.name).Infof("Deleted ACL table %s", name)
 	return cs, nil
 }

@@ -72,12 +72,11 @@ func qosDeleteConfig(configDB *sonic.ConfigDB, intfName string) []CompositeEntry
 func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
 	intfName = util.NormalizeInterfaceName(intfName)
 
-	if err := n.precondition("remove-qos", intfName).Result(); err != nil {
+	cs, err := n.op("remove-qos", intfName, ChangeDelete, nil,
+		func() []CompositeEntry { return qosDeleteConfig(n.configDB, intfName) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := configToChangeSet(n.name, "device.remove-qos", qosDeleteConfig(n.configDB, intfName), ChangeDelete)
-
 	util.WithDevice(n.name).Infof("Removed QoS from interface %s", intfName)
 	return cs, nil
 }

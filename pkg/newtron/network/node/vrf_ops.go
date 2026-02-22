@@ -116,17 +116,12 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 
 // CreateVRF creates a new VRF.
 func (n *Node) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
-	if err := n.precondition("create-vrf", name).
-		RequireVRFNotExists(name).
-		Result(); err != nil {
+	cs, err := n.op("create-vrf", name, ChangeAdd,
+		func(pc *PreconditionChecker) { pc.RequireVRFNotExists(name) },
+		func() []CompositeEntry { return vrfConfig(name) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.create-vrf")
-	for _, e := range vrfConfig(name) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Created VRF %s", name)
 	return cs, nil
 }
@@ -165,37 +160,29 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 func (n *Node) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
 	intfName = util.NormalizeInterfaceName(intfName)
 
-	if err := n.precondition("add-vrf-interface", vrfName).
-		RequireVRFExists(vrfName).
-		RequireInterfaceExists(intfName).
-		Result(); err != nil {
+	cs, err := n.op("add-vrf-interface", vrfName, ChangeModify,
+		func(pc *PreconditionChecker) { pc.RequireVRFExists(vrfName).RequireInterfaceExists(intfName) },
+		func() []CompositeEntry {
+			return []CompositeEntry{{Table: "INTERFACE", Key: intfName, Fields: map[string]string{"vrf_name": vrfName}}}
+		})
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.add-vrf-interface")
-
-	cs.Add("INTERFACE", intfName, ChangeModify, nil, map[string]string{
-		"vrf_name": vrfName,
-	})
-
 	util.WithDevice(n.name).Infof("Bound interface %s to VRF %s", intfName, vrfName)
 	return cs, nil
 }
 
 // RemoveVRFInterface removes a VRF binding from an interface.
 func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
-	if err := n.precondition("remove-vrf-interface", vrfName).Result(); err != nil {
-		return nil, err
-	}
-
 	intfName = util.NormalizeInterfaceName(intfName)
 
-	cs := NewChangeSet(n.name, "device.remove-vrf-interface")
-
-	cs.Add("INTERFACE", intfName, ChangeModify, nil, map[string]string{
-		"vrf_name": "",
-	})
-
+	cs, err := n.op("remove-vrf-interface", vrfName, ChangeModify, nil,
+		func() []CompositeEntry {
+			return []CompositeEntry{{Table: "INTERFACE", Key: intfName, Fields: map[string]string{"vrf_name": ""}}}
+		})
+	if err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Removed VRF binding from interface %s", intfName)
 	return cs, nil
 }
@@ -206,20 +193,13 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 
 // BindIPVPN binds a VRF to an IP-VPN definition (creates L3VNI mapping and BGP EVPN config).
 func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error) {
-	if err := n.precondition("bind-ipvpn", vrfName).
-		RequireVTEPConfigured().
-		RequireVRFExists(vrfName).
-		Result(); err != nil {
+	resolved := n.Resolved()
+	cs, err := n.op("bind-ipvpn", vrfName, ChangeModify,
+		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
+		func() []CompositeEntry { return ipvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) })
+	if err != nil {
 		return nil, err
 	}
-
-	resolved := n.Resolved()
-
-	cs := NewChangeSet(n.name, "device.bind-ipvpn")
-	for _, e := range ipvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) {
-		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Bound VRF %s to IP-VPN (L3VNI %d, %d route-targets)", vrfName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
 	return cs, nil
 }
@@ -278,40 +258,34 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 
 // AddStaticRoute adds a static route to a VRF.
 func (n *Node) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop string, metric int) (*ChangeSet, error) {
-	if err := n.precondition("add-static-route", prefix).
-		Check(vrfName == "" || vrfName == "default" || n.VRFExists(vrfName),
-			"VRF must exist", fmt.Sprintf("VRF '%s' not found", vrfName)).
-		Result(); err != nil {
+	cs, err := n.op("add-static-route", prefix, ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.Check(vrfName == "" || vrfName == "default" || n.VRFExists(vrfName),
+				"VRF must exist", fmt.Sprintf("VRF '%s' not found", vrfName))
+		},
+		func() []CompositeEntry { return staticRouteConfig(vrfName, prefix, nextHop, metric) })
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.add-static-route")
-	for _, e := range staticRouteConfig(vrfName, prefix, nextHop, metric) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Added static route %s via %s (VRF %s)", prefix, nextHop, vrfName)
 	return cs, nil
 }
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (n *Node) RemoveStaticRoute(ctx context.Context, vrfName, prefix string) (*ChangeSet, error) {
-	if err := n.precondition("remove-static-route", prefix).Result(); err != nil {
+	cs, err := n.op("remove-static-route", prefix, ChangeDelete, nil,
+		func() []CompositeEntry {
+			var routeKey string
+			if vrfName == "" || vrfName == "default" {
+				routeKey = prefix
+			} else {
+				routeKey = fmt.Sprintf("%s|%s", vrfName, prefix)
+			}
+			return []CompositeEntry{{Table: "STATIC_ROUTE", Key: routeKey}}
+		})
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.remove-static-route")
-
-	// Key format: "vrfName|prefix" for non-default VRF, just "prefix" for default
-	var routeKey string
-	if vrfName == "" || vrfName == "default" {
-		routeKey = prefix
-	} else {
-		routeKey = fmt.Sprintf("%s|%s", vrfName, prefix)
-	}
-
-	cs.Add("STATIC_ROUTE", routeKey, ChangeDelete, nil, nil)
-
 	util.WithDevice(n.name).Infof("Removed static route %s (VRF %s)", prefix, vrfName)
 	return cs, nil
 }

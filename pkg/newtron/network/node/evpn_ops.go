@@ -82,29 +82,24 @@ func arpSuppressionConfig(vlanName string) []CompositeEntry {
 
 // MapL2VNI maps a VLAN to an L2VNI for EVPN.
 func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	if err := n.precondition("map-l2vni", vlanResource(vlanID)).
-		RequireVTEPConfigured().
-		RequireVLANExists(vlanID).
-		Result(); err != nil {
+	cs, err := n.op("map-l2vni", vlanResource(vlanID), ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.RequireVTEPConfigured().RequireVLANExists(vlanID)
+			// Check platform support for EVPN VXLAN
+			resolved := n.Resolved()
+			if resolved.Platform != "" {
+				if platform, err := n.GetPlatform(resolved.Platform); err == nil {
+					if !platform.SupportsFeature("evpn-vxlan") {
+						pc.Check(false, "platform supports EVPN VXLAN",
+							fmt.Sprintf("platform %s does not support EVPN VXLAN", resolved.Platform))
+					}
+				}
+			}
+		},
+		func() []CompositeEntry { return vniMapConfig(VLANName(vlanID), vni) })
+	if err != nil {
 		return nil, err
 	}
-
-	// Check platform support for EVPN VXLAN
-	resolved := n.Resolved()
-	if resolved.Platform != "" {
-		if platform, err := n.GetPlatform(resolved.Platform); err == nil {
-			if !platform.SupportsFeature("evpn-vxlan") {
-				return nil, fmt.Errorf("platform %s does not support EVPN VXLAN", resolved.Platform)
-			}
-		}
-	}
-
-	cs := NewChangeSet(n.name, "device.map-l2vni")
-
-	for _, e := range vniMapConfig(VLANName(vlanID), vni) {
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
-	}
-
 	util.WithDevice(n.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
 	return cs, nil
 }
