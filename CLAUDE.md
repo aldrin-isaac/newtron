@@ -16,9 +16,9 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtlab HLD | `docs/newtlab/hld.md` | VM orchestration, QEMU, bridge networking |
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
-| RCA index | `docs/rca/` | 18 root-cause analyses — SONiC pitfalls and workarounds |
+| RCA index | `docs/rca/` | 40 root-cause analyses — SONiC pitfalls and workarounds |
 
-When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 18 documented pitfalls with root causes and solutions.
+When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
 
 ## Platform Patching Principle
 
@@ -60,7 +60,7 @@ service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
-Current violations are tracked in `docs/refactor-items.md` item 5. When adding new
+All refactor items in `docs/refactor-items.md` are DONE. When adding new
 CONFIG_DB writes, always check the ownership map — never add a second writer.
 
 ## Separation of Concerns — File-Level Ownership
@@ -163,10 +163,11 @@ Before making any change to `service_gen.go`, `*_ops.go`, or any shared code pat
    working features are at risk and how they are protected
 
 Tracking what was working (update this as test suites are validated):
-- `evpn-bridged`: WORKS — 2node-incremental, 3node-dataplane (evpn-l2-irb L2 path)
-- `routed`, `irb`, `bridged`: WORKS — 2node-incremental
+- `evpn-bridged`: WORKS — 2node-primitive, 3node-dataplane (evpn-l2-irb L2 path)
+- `routed`, `irb`, `bridged`: WORKS — 2node-primitive
 - `evpn-irb` (L2 path): WORKS — 3node-dataplane evpn-l2-irb
-- `evpn-irb` (L3 routing), `evpn-routed`: NOT YET WORKING — under active development
+- `evpn-irb` (L3 routing): ABANDONED on CiscoVS/Silicon One (RCA-039)
+- `evpn-routed`: ABANDONED on CiscoVS/Silicon One (RCA-039)
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
 
