@@ -20,6 +20,27 @@ Read these before making design decisions or writing code in unfamiliar areas:
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
 
+## Network Is Source of Truth
+
+The device CONFIG_DB is ground reality. Spec files are templates and intent, but
+once configuration is applied, the device state is what matters. If someone edits
+CONFIG_DB directly (CLI, Redis, another tool), that's the new reality — newtron
+does not fight it or try to reconcile back to spec.
+
+This has concrete design implications:
+
+- **Provisioning** (CompositeOverwrite) is the one operation where intent replaces
+  reality. Every other operation mutates existing reality.
+- **Operations** (service apply/remove, VLAN create/delete) are `Device + Delta → Device`.
+  They must read and respect what's already on the device.
+- **NEWTRON_SERVICE_BINDING** records live on the device, not in spec files. They are
+  ground truth for what was applied and must be consulted during removal.
+- **Idempotency filtering** in `service_ops.go` checks device reality (VLANs, VRFs
+  that already exist from other services), not spec intent.
+- **Do NOT implement a desired-state reconciler** (Terraform/Kubernetes model). There is
+  no canonical "desired state" for incremental operations — only device reality + the
+  requested change.
+
 ## Platform Patching Principle
 
 When a platform (CiscoVS, VPP, etc.) has a bug that prevents a SONiC feature from working:
@@ -62,6 +83,23 @@ service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
 
 All refactor items in `docs/refactor-items.md` are DONE. When adding new
 CONFIG_DB writes, always check the ownership map — never add a second writer.
+
+## The Interface Is the Point of Service
+
+The network is, at a fundamental level, services applied on interfaces. The
+interface is where abstract service intent meets physical infrastructure:
+
+- **Point of service delivery** — where specs bind to physical ports
+- **Unit of service lifecycle** — apply, remove, refresh happen per-interface
+- **Unit of state** — each interface has exactly one service binding (or none)
+- **Unit of isolation** — services on different interfaces are independent
+
+`ApplyService` lives on Interface, not on Device, because the interface is
+the entity being configured. Interface delegates to Device for infrastructure
+(Redis connections, CONFIG_DB cache, specs) — just as a VLAN interface on a
+real switch delegates to the forwarding ASIC. The delegation does not make
+Interface a forwarding layer; it makes Interface a logical point of attachment
+that the underlying infrastructure services.
 
 ## Separation of Concerns — File-Level Ownership
 
@@ -206,6 +244,21 @@ Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and de
 - **Always start tests on a freshly deployed topology.** Destroy and redeploy before running
   any test suite. Never attempt to reuse a topology that has run previous tests or has
   manually applied state. This ensures a clean, reproducible baseline.
+
+## Documentation Freshness Protocol
+
+When updating docs after schema/API changes (renamed fields, new types, changed CLI flags):
+
+1. **Don't rely on targeted grep alone.** Grepping for known stale patterns (`"l3_vni"`,
+   `--import-rt`) gives false confidence — it misses prose descriptions, glossary tables,
+   Go code examples, incomplete flag lists, and contradictory statements.
+
+2. **After the initial fix pass, dispatch a full-file audit agent** that reads the entire
+   document end-to-end and checks every reference against the ground truth schema. Provide
+   the complete ground truth (all field names, all CLI flags, all type values) so the agent
+   can catch staleness in any form — not just the patterns you already know are wrong.
+
+3. **Fix everything the audit finds before committing.** One commit, fully clean.
 
 ## User Preferences
 
