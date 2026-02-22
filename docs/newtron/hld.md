@@ -262,8 +262,12 @@ A related principle: **whatever configuration can be right-shifted to the interf
 |  - ResolvedProfile (after inheritance)                           |
 |  - ConfigDB (from Redis) <-- actual device config                |
 |                                                                   |
-|  Methods: Network(), ASNumber(), BGPNeighbors(),                 |
-|           AddLoopbackBGPNeighbor(), SetupEVPN(), VerifyChangeSet(), etc. |
+|  Methods: ASNumber(), BGPNeighbors(), Tunnel(),                  |
+|           StateDBClient(), ConfigDBClient(), StateDB(),          |
+|           AddLoopbackBGPNeighbor(), SetupEVPN(),                 |
+|           SaveConfig(), RestartService(), ApplyFRRDefaults(),    |
+|           GetRoute(), GetRouteASIC(), GetNeighbor(),             |
+|           VerifyComposite(), etc.                                |
 +------------------------------------------------------------------+
          |
          | creates (with parent reference)
@@ -482,12 +486,12 @@ Loads and resolves specifications from JSON files.
 
 **Key Distinction**: The spec layer handles **declarative intent**. It never contains concrete device configuration - only policy definitions and references.
 
-### 4.4 Device Layer (`pkg/newtron/device`, `pkg/newtron/device/sonic`)
+### 4.4 Device Layer (`pkg/newtron/device/sonic`)
 
-Low-level connection management for SONiC switches.
+Pure connection management for SONiC switches. `sonic.Device` is a connection manager — it owns the SSH tunnel and Redis client lifecycle but contains no domain logic. All domain operations (applying changes, verifying config, reading routes, running SSH commands) live in `node/`.
 
 **Key Components:**
-- `sonic.Device`: Holds Redis connections (ConfigDBClient, StateDBClient), optional SSHTunnel, lock state, and thread-safe mutex
+- `sonic.Device`: Connection manager — holds Redis clients (ConfigDBClient, StateDBClient, AppDBClient, AsicDBClient), optional SSHTunnel, distributed lock state, and thread-safe mutex. Exposes client accessors (`Client()`, `StateClient()`, `AppDBClient()`, `AsicDBClient()`, `Tunnel()`, `ConnAddr()`) for `node.Node` to use
 - `ConfigDB`: SONiC config_db structure (PORT, VLAN, VRF, ACL_TABLE, etc.)
 - `ConfigDBClient`: Redis client wrapper for CONFIG_DB (Redis DB 4)
 - `StateDB`: SONiC state_db structure (PortTable, LAGTable, BGPNeighborTable, etc.)
@@ -499,7 +503,7 @@ Low-level connection management for SONiC switches.
 - `CompositeBuilder`: Builder for offline composite CONFIG_DB generation (in `pkg/newtron/network/node/composite.go`)
 - `PipelineClient`: Redis MULTI/EXEC pipeline for atomic multi-entry writes (used by composite delivery)
 
-**Key Distinction**: The device layer handles **imperative config**. It reads/writes the actual device state.
+**Key Distinction**: The device layer handles **connection infrastructure**. Domain operations (CONFIG_DB writes, verification, route reads, SSH commands) live in `node/`.
 
 ### 4.5 Translation (in `pkg/newtron/network/node`)
 
@@ -890,7 +894,7 @@ Node.DeliverComposite(composite, mode)
 
 #### 4.7.5 Redis Pipeline for Atomic Delivery
 
-Current `ApplyChanges()` writes entries sequentially (one HSet per field). Composite delivery uses a Redis pipeline:
+`ChangeSet.Apply()` writes entries sequentially (one HSet per field) via `ConfigDBClient.Set/Delete`. Composite delivery uses a Redis pipeline for atomicity:
 
 ```
 Pipeline:
@@ -1152,7 +1156,7 @@ Between a refresh and the code that reads the cache, an external actor can modif
 
 ### 5.1 Connection Flow
 
-When `Node.Connect()` is called (which delegates to `sonic.Device.Connect()`), the connection path depends on whether SSH credentials are present in the device's `ResolvedProfile`:
+When `Node.Connect()` is called (which creates a `sonic.Device` and calls its `Connect()` method), the connection path depends on whether SSH credentials are present in the device's `ResolvedProfile`:
 
 ```
                     Connect(ctx)
@@ -1177,8 +1181,15 @@ When `Node.Connect()` is called (which delegates to `sonic.Device.Connect()`), t
                   v
           NewStateDBClient(addr)   -- connects to Redis DB 6
           stateClient.Connect()    -- non-fatal on failure
-          stateClient.GetAll()     -- loads STATE_DB
-          PopulateDeviceState()    -- merges state from both DBs
+          stateClient.GetAll()     -- loads STATE_DB snapshot
+                  |
+                  v
+          NewAppDBClient(addr)     -- connects to Redis DB 0
+          applClient.Connect()     -- non-fatal on failure
+                  |
+                  v
+          NewAsicDBClient(addr)    -- connects to Redis DB 1
+          asicClient.Connect()     -- non-fatal on failure
 ```
 
 **With SSH tunnel (production/E2E)**: SSH credentials (`ssh_user`, `ssh_pass`) are present in the device profile. The tunnel dials the device on port 22 and forwards a local random port to `127.0.0.1:6379` inside the device. Redis on SONiC listens only on localhost; port 6379 is not forwarded by QEMU, so SSH is the only path in.
@@ -1187,7 +1198,7 @@ When `Node.Connect()` is called (which delegates to `sonic.Device.Connect()`), t
 
 ### 5.2 SSH Tunnel Implementation
 
-The `SSHTunnel` struct (`pkg/newtron/device/tunnel.go`) implements a TCP port forwarder over SSH:
+The `SSHTunnel` struct (`pkg/newtron/device/sonic/types.go`) implements a TCP port forwarder over SSH:
 
 ```
                   Newtron Process                         SONiC Device
@@ -1217,15 +1228,19 @@ The `SSHTunnel` struct (`pkg/newtron/device/tunnel.go`) implements a TCP port fo
 `Node.Disconnect()` (which delegates to `sonic.Device.Disconnect()`) tears down in order:
 
 1. Release device lock if held (safety net — operations release locks after verify)
-2. Close ConfigDBClient (Redis connection)
-3. Close StateDBClient (Redis connection)
-4. Close SSHTunnel (if present): stops accept loop, waits for goroutines, closes SSH session
+2. Close ConfigDBClient (Redis DB 4)
+3. Close StateDBClient (Redis DB 6)
+4. Close AppDBClient (Redis DB 0)
+5. Close AsicDBClient (Redis DB 1)
+6. Close SSHTunnel (if present): stops accept loop, waits for goroutines, closes SSH session
 
 ## 6. StateDB Access
 
 ### 6.1 Overview
 
-STATE_DB (Redis DB 6) provides read-only operational state that supplements the configuration view from CONFIG_DB. The device layer reads STATE_DB to populate the `DeviceState` struct which provides a merged view of configuration and operational data.
+STATE_DB (Redis DB 6) provides read-only operational state that supplements the configuration view from CONFIG_DB. A `StateDB` snapshot is loaded at connect time, and the `StateDBClient` is available for fresh targeted queries (e.g., `GetBGPNeighborState`, `GetEntry`, `GetNeighbor`).
+
+CLI status commands (`bgp status`, `vrf status`, `evpn status`) read operational state directly from `StateDBClient` for fresh data rather than relying on the connect-time snapshot.
 
 ### 6.2 Available State Data
 
@@ -1239,17 +1254,25 @@ STATE_DB (Redis DB 6) provides read-only operational state that supplements the 
 
 ### 6.3 Non-Fatal Connection Failure
 
-STATE_DB connection failure is intentionally non-fatal. If `StateDBClient.Connect()` or `GetAll()` fails, the device logs a warning and continues operating with `StateDB == nil`. This means:
+STATE_DB connection failure is intentionally non-fatal. If `StateDBClient.Connect()` or `GetAll()` fails, the device logs a warning and continues operating with `StateDB == nil` and `StateDBClient == nil`. This means:
 
 - The system can still read and write CONFIG_DB
-- Operational state queries (e.g. `GetInterfaceOperState()`) return errors indicating state_db is not loaded
-- `HasStateDB()` returns `false`, allowing callers to check availability before querying
+- `Node.StateDBClient()` returns nil, allowing callers to check availability before querying
+- `Node.StateDB()` returns nil if the snapshot was not loaded
 
 This design supports environments where STATE_DB may not be fully populated (e.g. early boot, minimal test fixtures).
 
-### 6.4 State Refresh
+### 6.4 Access Patterns
 
-`RefreshState(ctx)` reloads only STATE_DB without touching CONFIG_DB or re-establishing the connection. `Reload(ctx)` reloads both CONFIG_DB and STATE_DB. Both methods call `PopulateDeviceState()` to re-merge the state view.
+Operational state is accessed through Node-level accessors:
+
+| Accessor | Returns | Use Case |
+|----------|---------|----------|
+| `Node.StateDB()` | `*sonic.StateDB` (snapshot) | Interface oper-status during loadState |
+| `Node.StateDBClient()` | `*sonic.StateDBClient` | Fresh targeted queries (BGP state, VRF state, neighbor entries) |
+| `Node.StateDBClient().GetBGPNeighborState(vrf, ip)` | `*BGPNeighborStateEntry` | BGP session state for a specific neighbor |
+| `Node.StateDBClient().GetEntry(table, key)` | `map[string]string` | Generic STATE_DB table/key lookup |
+| `Node.StateDBClient().GetNeighbor(iface, ip)` | `*NeighEntry` | ARP/NDP neighbor entry |
 
 ## 7. Config Persistence
 

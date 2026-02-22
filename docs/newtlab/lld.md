@@ -148,7 +148,7 @@ VM can connect across the network (see HLD §5.3).
 func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error)
 ```
 
-Implementation change in `pkg/newtron/device/tunnel.go`:
+Implementation change in `pkg/newtron/device/sonic/types.go`:
 
 ```go
 func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {

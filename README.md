@@ -31,7 +31,7 @@ newtron reads `network.json` (services, VPNs, filters, routing policy, zones), `
 Key operations:
 
 - **Service provisioning** — L2, L3, transit, and IRB services applied per-interface. Each service spec defines routing protocol, VPN binding, ingress/egress filters, and route policy. newtron derives concrete values (peer IP from interface IP, VRF name from service+interface, ACL rules from filter specs) using device context.
-- **BGP management** — Full underlay and overlay BGP via SONiC's frrcfgd framework. eBGP neighbors configured per-interface through service specs. iBGP overlay with multi-AF route reflection (IPv4, IPv6, L2VPN EVPN). FRR defaults applied via vtysh for features frrcfgd doesn't support.
+- **BGP management** — Full underlay and overlay BGP via SONiC's frrcfgd framework. eBGP neighbors configured per-interface through service specs. eBGP overlay (loopback-to-loopback) for multi-AF route exchange (IPv4, IPv6, L2VPN EVPN). FRR defaults applied via vtysh for features frrcfgd doesn't support.
 - **EVPN/VXLAN** — VTEP creation, L2/L3 VNI mapping, SVI configuration, EVPN neighbor activation. Replaces traditional MPLS L3VPN.
 - **Composite provisioning** — Build a full device configuration offline from specs, then deliver it as a single atomic Redis pipeline. Used for initial provisioning; individual operations used for incremental changes.
 
@@ -69,7 +69,7 @@ newtest deploys a topology (via newtlab), provisions devices (via newtron), then
 
 Key capabilities:
 
-- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 39 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, health checks, data plane verification, service churn.
+- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 54 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, ACL management, health checks, data plane verification, service churn.
 - **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run 31 scenarios.
 - **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. It can verify that a route configured on spine1 actually arrives in leaf1's APP_DB, that BGP sessions reach Established state on both ends, that data plane forwarding works end-to-end.
 - **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
@@ -182,9 +182,8 @@ pkg/
   newtron/
     audit/       Audit event logging
     auth/        Permission checking and user authorization
-    device/      Shared device types
-      sonic/     SONiC device layer — SSH tunnels, Redis DB 0/1/4/6, locking
-    health/      Health checks
+    device/
+      sonic/     SONiC connection manager — SSH tunnels, Redis DB 0/1/4/6, locking
     network/     Network type, topology graph, spec access
       node/      Node and Interface types, all operations, composite provisioning
     settings/    Settings resolution (flag > env > file)
@@ -194,8 +193,8 @@ pkg/
 
 specs/           Network and topology specifications
 newtest/
-  topologies/    Test topologies (2node, 4node)
-  suites/        Test suites (31 incremental + 9 standalone scenarios)
+  topologies/    Test topologies (2node, 2node-service, 3node, 4node)
+  suites/        Test suites (5 suites, 46 scenarios)
 ```
 
 ## Documentation

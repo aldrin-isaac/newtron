@@ -639,7 +639,7 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 |---|----------|--------|-------|
 | 1 | `provisionExecutor` | `provision` | `TopologyProvisioner.ProvisionDevice()` |
 | 2 | `waitExecutor` | `wait` | `time.Sleep` |
-| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `Device.VerifyChangeSet()` |
+| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `Node.VerifyChangeSet()` |
 | 4 | `verifyConfigDBExecutor` | `verify-config-db` | `ConfigDBClient.Get*()` |
 | 5 | `verifyStateDBExecutor` | `verify-state-db` | `StateDBClient.GetEntry()` with polling |
 | 6 | `verifyBGPExecutor` | `verify-bgp` | `RunHealthChecks("bgp")` with polling |
@@ -648,37 +648,37 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 | 9 | `verifyPingExecutor` | `verify-ping` | SSH ping (newtest native) |
 | 10 | `applyServiceExecutor` | `apply-service` | `Interface.ApplyService()` |
 | 11 | `removeServiceExecutor` | `remove-service` | `Interface.RemoveService()` |
-| 12 | `applyBaselineExecutor` | `apply-baseline` | `Device.ApplyBaseline()` |
+| 12 | `applyBaselineExecutor` | `apply-baseline` | `Node.ApplyBaseline()` |
 | 13 | `sshCommandExecutor` | `ssh-command` | SSH exec (newtest native) |
-| 14 | `restartServiceExecutor` | `restart-service` | `Device.RestartService()` |
-| 15 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Device.ApplyFRRDefaults()` |
+| 14 | `restartServiceExecutor` | `restart-service` | `Node.RestartService()` |
+| 15 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Node.ApplyFRRDefaults()` |
 | 16 | `setInterfaceExecutor` | `set-interface` | `Interface.Set/SetIP/SetVRF()` |
-| 17 | `createVLANExecutor` | `create-vlan` | `Device.CreateVLAN()` |
-| 18 | `deleteVLANExecutor` | `delete-vlan` | `Device.DeleteVLAN()` |
-| 19 | `addVLANMemberExecutor` | `add-vlan-member` | `Device.AddVLANMember()` |
-| 20 | `createVRFExecutor` | `create-vrf` | `Device.CreateVRF()` |
-| 21 | `deleteVRFExecutor` | `delete-vrf` | `Device.DeleteVRF()` |
-| 22 | `setupEVPNExecutor` | `setup-evpn` | `Device.SetupEVPN()` |
-| 23 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `Device.AddVRFInterface()` |
-| 24 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `Device.RemoveVRFInterface()` |
-| 25 | `bindIPVPNExecutor` | `bind-ipvpn` | `Device.BindIPVPN()` |
-| 26 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `Device.UnbindIPVPN()` |
-| 27 | `bindMACVPNExecutor` | `bind-macvpn` | `Device.BindMACVPN()` |
-| 28 | `unbindMACVPNExecutor` | `unbind-macvpn` | `Device.UnbindMACVPN()` |
-| 29 | `addStaticRouteExecutor` | `add-static-route` | `Device.AddStaticRoute()` |
-| 30 | `removeStaticRouteExecutor` | `remove-static-route` | `Device.RemoveStaticRoute()` |
-| 31 | `removeVLANMemberExecutor` | `remove-vlan-member` | `Device.RemoveVLANMember()` |
-| 32 | `applyQoSExecutor` | `apply-qos` | `Device.ApplyQoS()` |
-| 33 | `removeQoSExecutor` | `remove-qos` | `Device.RemoveQoS()` |
-| 34 | `configureSVIExecutor` | `configure-svi` | `Device.ConfigureSVI()` |
-| 35 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `Interface.AddBGPNeighbor` / `Device.AddLoopbackBGPNeighbor` |
-| 36 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
+| 17 | `createVLANExecutor` | `create-vlan` | `Node.CreateVLAN()` |
+| 18 | `deleteVLANExecutor` | `delete-vlan` | `Node.DeleteVLAN()` |
+| 19 | `addVLANMemberExecutor` | `add-vlan-member` | `Node.AddVLANMember()` |
+| 20 | `createVRFExecutor` | `create-vrf` | `Node.CreateVRF()` |
+| 21 | `deleteVRFExecutor` | `delete-vrf` | `Node.DeleteVRF()` |
+| 22 | `setupEVPNExecutor` | `setup-evpn` | `Node.SetupEVPN()` |
+| 23 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `Node.AddVRFInterface()` |
+| 24 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `Node.RemoveVRFInterface()` |
+| 25 | `bindIPVPNExecutor` | `bind-ipvpn` | `Node.BindIPVPN()` |
+| 26 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `Node.UnbindIPVPN()` |
+| 27 | `bindMACVPNExecutor` | `bind-macvpn` | `Node.BindMACVPN()` |
+| 28 | `unbindMACVPNExecutor` | `unbind-macvpn` | `Node.UnbindMACVPN()` |
+| 29 | `addStaticRouteExecutor` | `add-static-route` | `Node.AddStaticRoute()` |
+| 30 | `removeStaticRouteExecutor` | `remove-static-route` | `Node.RemoveStaticRoute()` |
+| 31 | `removeVLANMemberExecutor` | `remove-vlan-member` | `Node.RemoveVLANMember()` |
+| 32 | `applyQoSExecutor` | `apply-qos` | `Node.ApplyQoS()` |
+| 33 | `removeQoSExecutor` | `remove-qos` | `Node.RemoveQoS()` |
+| 34 | `configureSVIExecutor` | `configure-svi` | `Node.ConfigureSVI()` |
+| 35 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `Interface.AddBGPNeighbor` / `Node.AddLoopbackBGPNeighbor` |
+| 36 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
 | 37 | `refreshServiceExecutor` | `refresh-service` | `Interface.RefreshService()` |
-| 38 | `cleanupExecutor` | `cleanup` | `Device.Cleanup()` |
-| 39 | `createPortChannelExecutor` | `create-portchannel` | `Device.CreatePortChannel()` |
-| 40 | `deletePortChannelExecutor` | `delete-portchannel` | `Device.DeletePortChannel()` |
-| 41 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Device.AddPortChannelMember()` |
-| 42 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Device.RemovePortChannelMember()` |
+| 38 | `cleanupExecutor` | `cleanup` | `Node.Cleanup()` |
+| 39 | `createPortChannelExecutor` | `create-portchannel` | `Node.CreatePortChannel()` |
+| 40 | `deletePortChannelExecutor` | `delete-portchannel` | `Node.DeletePortChannel()` |
+| 41 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Node.AddPortChannelMember()` |
+| 42 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Node.RemovePortChannelMember()` |
 
 ### 7.6 Verification Executor Detail
 
@@ -708,7 +708,7 @@ without data plane. Resolves target to IP (device name → loopback IP), runs
 
 `bgpAddNeighborExecutor` dispatches based on `step.Interface`:
 - **Interface set** → direct BGP neighbor via `Interface.AddBGPNeighbor`
-- **Interface empty** → loopback BGP neighbor via `Device.AddLoopbackBGPNeighbor`
+- **Interface empty** → loopback BGP neighbor via `Node.AddLoopbackBGPNeighbor`
 
 Same pattern for `bgpRemoveNeighborExecutor`.
 

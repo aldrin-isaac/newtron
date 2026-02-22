@@ -100,7 +100,7 @@ newtest/topologies/4node/specs/
     └── leaf2.json
 ```
 
-Good for: route reflection, ECMP, EVPN, iBGP overlay, shared VRF,
+Good for: route reflection, ECMP, EVPN, eBGP overlay, shared VRF,
 full fabric provisioning.
 
 See [HLD §4](hld.md) for topology diagrams and spec file details.
@@ -142,7 +142,7 @@ steps:
       overall: ok
 ```
 
-For the full list of 38 step actions, see [HLD §5](hld.md).
+For the full list of 54 step actions, see [HLD §5](hld.md).
 
 ### 1. Choose a Topology
 
@@ -318,7 +318,7 @@ device and asserts the expected prefix, protocol, and next-hops:
 
 newtest determines the expected values from the topology spec — newtron's
 `GetRoute` only reads the device's routing table and returns a
-`*device.RouteEntry` (prefix, VRF, protocol, next-hops, source).
+`*sonic.RouteEntry` (prefix, VRF, protocol, next-hops, source).
 
 ### 7. Apply and Remove Services
 

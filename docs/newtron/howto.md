@@ -145,7 +145,7 @@ func (d *Device) Connect(ctx context.Context) error {
 
 ### 2.5 Host Key Verification
 
-The SSH tunnel currently uses `InsecureIgnoreHostKey()` for the host key callback. This is appropriate for lab and test environments but **must be replaced with proper host key verification for production deployments**. The relevant code is in `pkg/newtron/device/tunnel.go`:
+The SSH tunnel currently uses `InsecureIgnoreHostKey()` for the host key callback. This is appropriate for lab and test environments but **must be replaced with proper host key verification for production deployments**. The relevant code is in `pkg/newtron/device/sonic/types.go`:
 
 ```go
 config := &ssh.ClientConfig{
@@ -156,16 +156,18 @@ config := &ssh.ClientConfig{
 }
 ```
 
-### 2.6 Dual Database Access
+### 2.6 Four-Database Access
 
-On connection, newtron opens two Redis clients through the same tunnel (or direct address):
+On connection, newtron opens four Redis clients through the same tunnel (or direct address):
 
-| Database | Redis DB Number | Purpose |
-|----------|----------------|---------|
-| CONFIG_DB | 4 | Configuration state (read/write) |
-| STATE_DB | 6 | Operational state (read-only, non-fatal if unavailable) |
+| Database | Redis DB Number | Purpose | Fatal on failure? |
+|----------|----------------|---------|-------------------|
+| CONFIG_DB | 4 | Configuration state (read/write) | Yes |
+| STATE_DB | 6 | Operational state (read-only) | No |
+| APP_DB | 0 | Route verification — routes from FRR/fpmsyncd | No |
+| ASIC_DB | 1 | ASIC-level verification — SAI objects from orchagent | No |
 
-If STATE_DB connection fails, newtron logs a warning and continues. Configuration operations work without STATE_DB; only operational state queries require it.
+Only CONFIG_DB connection failure is fatal. STATE_DB, APP_DB, and ASIC_DB failures are logged as warnings and the system continues. Configuration operations work without them; only routing state queries (`GetRoute`, `GetRouteASIC`) and operational state queries (`bgp status`, health checks) require the non-CONFIG_DB clients.
 
 ---
 
@@ -2328,18 +2330,18 @@ The newtron package provides an object-oriented API for programmatic access. The
 ```
 Network (top-level: loads specs, owns device profiles)
     |
-    +-- Device (has parent reference to Network)
+    +-- Node (has SpecProvider from Network)
             |
-            +-- Interface (has parent reference to Device)
+            +-- Interface (has parent reference to Node)
 ```
 
 Each object level can reach its parent:
 
-- `Interface.Device()` returns the owning Device
-- `Interface.Network()` returns the Network (via Device parent)
-- `Device.Network()` returns the Network that created it
+- `Interface.Node()` returns the owning Node
+- Node embeds `SpecProvider` (implemented by Network) — `node.GetService()` just works
+- Node exposes accessors: `Tunnel()`, `StateDBClient()`, `ConfigDBClient()`, `StateDB()`, `ConfigDB()`
 
-This design means operations on an Interface can access the full specification (services, filter-specs, prefix-lists) without needing specs passed as parameters.
+This design means operations on an Interface can access the full specification (services, filter-specs, prefix-lists) through the Node's embedded SpecProvider without needing specs passed as parameters.
 
 ### 21.2 Creating a Network and Connecting to a Device
 
@@ -2419,18 +2421,18 @@ if err != nil {
     log.Fatal(err)
 }
 
-// Interface can access Device properties
-fmt.Printf("Device AS: %d\n", intf.Device().ASNumber())
+// Interface can access Node properties
+fmt.Printf("Device AS: %d\n", intf.Node().ASNumber())
 
-// Interface can access Network configuration (via Device parent)
-svc, err := intf.Network().GetService("customer-l3")
+// Interface can access Network configuration (via Node's embedded SpecProvider)
+svc, err := intf.Node().GetService("customer-l3")
 if err != nil {
     log.Fatal(err)
 }
 fmt.Printf("Service type: %s\n", svc.ServiceType)
 
-// Get filter spec from Network
-filter, err := intf.Network().GetFilter("customer-edge-in")
+// Get filter spec from Network (via Node)
+filter, err := intf.Node().GetFilter("customer-edge-in")
 if err != nil {
     log.Fatal(err)
 }
@@ -2460,8 +2462,8 @@ intf, _ := dev.GetInterface("Ethernet0")
 if intf.HasService() {
     fmt.Printf("Interface has service: %s\n", intf.ServiceName())
 }
-if intf.IsLAGMember() {
-    fmt.Printf("Interface is member of: %s\n", intf.LAGParent())
+if intf.IsPortChannelMember() {
+    fmt.Printf("Interface is member of: %s\n", intf.PortChannelParent())
 }
 ```
 
@@ -2627,9 +2629,9 @@ SONiC-specific patterns (convergence timing, cleanup ordering, vxlanmgrd pitfall
 
 The parent reference design provides:
 
-1. **Natural Access**: Interface can access `Device.Network().GetService()` naturally
-2. **No Spec Passing**: Operations do not need specs passed separately -- specs are reached via parent references
-3. **Encapsulation**: Specs are owned by the right object level (Network owns services, Device owns state)
+1. **Natural Access**: Interface can access `node.GetService()` naturally via embedded SpecProvider
+2. **No Spec Passing**: Operations do not need specs passed separately — specs are reached via the Node's SpecProvider
+3. **Encapsulation**: Specs are owned by the right object level (Network owns services, Node owns state and connection)
 4. **Single Source of Truth**: Specs loaded once at Network level, translated to config at runtime
 5. **True OO**: Operations are methods on objects (e.g., `intf.ApplyService()`, `dev.CreateVLAN()`), not standalone functions
 

@@ -678,7 +678,7 @@ type DeviceProfile struct {
 }
 ```
 
-**pkg/newtron/device/tunnel.go**:
+**pkg/newtron/device/sonic/types.go**:
 ```go
 func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
     if port == 0 {

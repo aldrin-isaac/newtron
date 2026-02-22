@@ -84,18 +84,18 @@ newtron/
 │       └── cmd_topologies.go # topologies subcommand
 ├── pkg/
 │   ├── newtron/
-│   │   ├── network/        # newtron core (Device, Interface, CompositeBuilder,
-│   │   │                   #   TopologyProvisioner)
+│   │   ├── network/        # newtron core (Network, spec access, TopologyProvisioner)
+│   │   │   └── node/       # Node, Interface, ChangeSet, all operations
 │   │   ├── spec/           # Shared spec types
-│   │   ├── device/         # Device connection layer (SSH tunnel, Redis)
-│   │   ├── health/         # Health checker (interfaces, BGP, EVPN, LAG, VXLAN)
+│   │   ├── device/
+│   │   │   └── sonic/      # SONiC connection manager (SSH tunnel, Redis DB 0/1/4/6)
 │   │   └── audit/          # Audit logger (FileLogger, event filtering)
 │   ├── newtlab/            # newtlab core library
 │   └── newtest/            # newtest core library
 │       ├── scenario.go     # Scenario, Step, StepAction, ExpectBlock types
 │       ├── parser.go       # ParseScenario, validation, dependency graph
 │       ├── runner.go       # Runner, RunOptions, iterateScenarios
-│       ├── steps.go        # stepExecutor interface, 38 executor implementations
+│       ├── steps.go        # stepExecutor interface, 54 executor implementations
 │       ├── deploy.go       # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go        # RunState, ScenarioState, SuiteStatus, persistence
 │       ├── progress.go     # ProgressReporter, consoleProgress, StateReporter
@@ -163,7 +163,7 @@ spine1 ─── leaf1
 spine2 ─── leaf2
 ```
 
-Tests: route reflection, ECMP, EVPN, iBGP overlay, shared VRF across
+Tests: route reflection, ECMP, EVPN, eBGP overlay, shared VRF across
 leaves, multi-path, full fabric provisioning.
 
 ### 4.3 Spec Files Are Static
@@ -239,35 +239,35 @@ steps:
 | `apply-baseline` | Apply a configlet baseline to a device | newtron |
 | `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
 | `wait` | Wait for specified duration | newtest native |
-| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron `Device.RestartService()` |
-| `apply-frr-defaults` | Apply FRR runtime defaults (ebgp_requires_policy, clear bgp) | newtron `Device.ApplyFRRDefaults()` |
+| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron `Node.RestartService()` |
+| `apply-frr-defaults` | Apply FRR runtime defaults (ebgp_requires_policy, clear bgp) | newtron `Node.ApplyFRRDefaults()` |
 | `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron `Interface.Set/SetIP/SetVRF` |
-| `create-vlan` | Create a VLAN | newtron `Device.CreateVLAN()` |
-| `delete-vlan` | Delete a VLAN | newtron `Device.DeleteVLAN()` |
-| `add-vlan-member` | Add an interface to a VLAN as tagged/untagged member | newtron `Device.AddVLANMember()` |
-| `create-vrf` | Create a VRF | newtron `Device.CreateVRF()` |
-| `delete-vrf` | Delete a VRF | newtron `Device.DeleteVRF()` |
-| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron `Device.SetupEVPN()` |
-| `add-vrf-interface` | Bind an interface to a VRF | newtron `Device.AddVRFInterface()` |
-| `remove-vrf-interface` | Remove an interface from a VRF | newtron `Device.RemoveVRFInterface()` |
-| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron `Device.BindIPVPN()` |
-| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron `Device.UnbindIPVPN()` |
-| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron `Device.BindMACVPN()` |
-| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron `Device.UnbindMACVPN()` |
-| `add-static-route` | Add a static route to a VRF | newtron `Device.AddStaticRoute()` |
-| `remove-static-route` | Remove a static route from a VRF | newtron `Device.RemoveStaticRoute()` |
-| `remove-vlan-member` | Remove an interface from a VLAN | newtron `Device.RemoveVLANMember()` |
-| `apply-qos` | Apply a QoS policy to an interface | newtron `Device.ApplyQoS()` |
-| `remove-qos` | Remove QoS policy from an interface | newtron `Device.RemoveQoS()` |
-| `configure-svi` | Configure a Switched Virtual Interface (VLAN interface) | newtron `Device.ConfigureSVI()` |
-| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback-based) | newtron `Interface.AddBGPNeighbor` / `Device.AddLoopbackBGPNeighbor` |
-| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Device.RemoveBGPNeighbor` |
+| `create-vlan` | Create a VLAN | newtron `Node.CreateVLAN()` |
+| `delete-vlan` | Delete a VLAN | newtron `Node.DeleteVLAN()` |
+| `add-vlan-member` | Add an interface to a VLAN as tagged/untagged member | newtron `Node.AddVLANMember()` |
+| `create-vrf` | Create a VRF | newtron `Node.CreateVRF()` |
+| `delete-vrf` | Delete a VRF | newtron `Node.DeleteVRF()` |
+| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron `Node.SetupEVPN()` |
+| `add-vrf-interface` | Bind an interface to a VRF | newtron `Node.AddVRFInterface()` |
+| `remove-vrf-interface` | Remove an interface from a VRF | newtron `Node.RemoveVRFInterface()` |
+| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron `Node.BindIPVPN()` |
+| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron `Node.UnbindIPVPN()` |
+| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron `Node.BindMACVPN()` |
+| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron `Node.UnbindMACVPN()` |
+| `add-static-route` | Add a static route to a VRF | newtron `Node.AddStaticRoute()` |
+| `remove-static-route` | Remove a static route from a VRF | newtron `Node.RemoveStaticRoute()` |
+| `remove-vlan-member` | Remove an interface from a VLAN | newtron `Node.RemoveVLANMember()` |
+| `apply-qos` | Apply a QoS policy to an interface | newtron `Node.ApplyQoS()` |
+| `remove-qos` | Remove QoS policy from an interface | newtron `Node.RemoveQoS()` |
+| `configure-svi` | Configure a Switched Virtual Interface (VLAN interface) | newtron `Node.ConfigureSVI()` |
+| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback-based) | newtron `Interface.AddBGPNeighbor` / `Node.AddLoopbackBGPNeighbor` |
+| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
 | `refresh-service` | Refresh a service binding on an interface | newtron `Interface.RefreshService()` |
-| `cleanup` | Run device cleanup to remove orphaned resources | newtron `Device.Cleanup()` |
+| `cleanup` | Run device cleanup to remove orphaned resources | newtron `Node.Cleanup()` |
 
 [^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
 
-Steps implemented by newtron call newtron's built-in methods on the Device
+Steps implemented by newtron call newtron's built-in methods on the Node
 object. newtest provides the orchestration (which device, what parameters,
 pass/fail reporting) but the observation/assertion logic is in newtron.
 
@@ -330,7 +330,7 @@ The `newtest/suites/2node-incremental/` suite contains 31 scenarios that increme
 |---|----------|----------|---------------|
 | 00 | `boot-ssh` | — | VM boot and SSH connectivity |
 | 01 | `provision` | boot-ssh | Full device provisioning |
-| 02 | `bgp-converge` | provision | eBGP underlay + iBGP overlay convergence |
+| 02 | `bgp-converge` | provision | eBGP underlay + eBGP overlay convergence |
 | 03 | `route-propagation` | bgp-converge | Loopback route visible on remote device |
 | 04 | `interface-set` | provision | Interface property changes (mtu, description, admin-status) |
 | 05 | `interface-ip-vrf` | provision | Interface IP and VRF assignment |
