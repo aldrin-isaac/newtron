@@ -960,7 +960,62 @@ refreshed per episode; fields go stale within one.**
 
 ---
 
-## 23. Summary
+## 23. Symmetric Operations — What You Create, You Can Remove
+
+Every mutating operation in newtron must have a corresponding reverse
+operation. If newtron can create a VRF, it must be able to delete that
+VRF. If it can apply a service, it must be able to remove that service.
+If it can bind an ACL to an interface, it must be able to unbind it. No
+CONFIG_DB state created by newtron should require a human with `redis-cli`
+or `config` commands to clean up.
+
+This is not just an API completeness requirement — it is a correctness
+requirement. CONFIG_DB entries have dependencies: a VRF references
+interfaces, a VLAN references members, an ACL references bound ports.
+Deletion must understand these dependencies just as creation does. A
+`DeleteVLAN` that leaves orphaned `VLAN_MEMBER` entries is worse than no
+delete at all, because the orphaned entries cause silent failures in
+SONiC daemons.
+
+The symmetry extends to composite operations. `SetupEVPN` creates the
+VTEP, NVO, and tunnel map entries; `TeardownEVPN` removes all of them.
+`ApplyService` creates VRFs, VLANs, ACLs, BGP neighbors, and a service
+binding; `RemoveService` reads the binding and removes everything that
+was created, respecting shared resources via `DependencyChecker`.
+
+The current operation pairs:
+
+| Create | Remove |
+|--------|--------|
+| `CreateVLAN` | `DeleteVLAN` |
+| `AddVLANMember` | `RemoveVLANMember` |
+| `ConfigureSVI` | `RemoveSVI` |
+| `CreateVRF` | `DeleteVRF` |
+| `AddVRFInterface` | `RemoveVRFInterface` |
+| `AddStaticRoute` | `RemoveStaticRoute` |
+| `BindIPVPN` | `UnbindIPVPN` |
+| `CreatePortChannel` | `DeletePortChannel` |
+| `AddPortChannelMember` | `RemovePortChannelMember` |
+| `CreateACLTable` | `DeleteACLTable` |
+| `AddACLRule` | `DeleteACLRule` |
+| `SetupEVPN` | `TeardownEVPN` |
+| `MapL2VNI` | `UnmapL2VNI` |
+| `ApplyService` | `RemoveService` |
+| `ApplyQoS` | `RemoveQoS` |
+| `SetIP` | `RemoveIP` |
+| `AddBGPNeighbor` | `RemoveBGPNeighbor` |
+| `BindACL` | `UnbindACLFromInterface` |
+
+When adding a new operation that creates CONFIG_DB state, the
+corresponding removal operation is not optional — it is part of the
+feature. Ship both or ship neither.
+
+**If newtron creates it, newtron must be able to remove it. No orphans,
+no manual cleanup, no `redis-cli` required.**
+
+---
+
+## 24. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -986,3 +1041,4 @@ refreshed per episode; fields go stale within one.**
 | Documentation freshness | Grep finds what you already know is wrong; audits find what you don't know is wrong |
 | Pure config functions | Generate entries in pure functions; orchestrate them in operations |
 | On-demand Interface state | Read state from the snapshot, not from cached fields; snapshots are refreshed per episode |
+| Symmetric operations | If newtron creates it, newtron must be able to remove it; no orphans, no manual cleanup |
