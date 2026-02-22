@@ -262,22 +262,25 @@ sudo vim /etc/newtron/network.json
   "ipvpns": {
     "customer-vpn": {
       "description": "Customer L3VPN",
-      "l3_vni": 10001,
-      "import_rt": ["65001:1"],
-      "export_rt": ["65001:1"]
+      "vrf": "Vrf_customer",
+      "l3vni": 10001,
+      "route_targets": ["65001:1"]
     },
     "server-vpn": {
       "description": "Server/datacenter shared VRF",
-      "l3_vni": 20001,
-      "import_rt": ["65001:100"],
-      "export_rt": ["65001:100"]
+      "vrf": "Vrf_server",
+      "l3vni": 20001,
+      "route_targets": ["65001:100"]
     }
   },
 
   "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
-      "l2_vni": 10100,
+      "vlan_id": 100,
+      "vni": 10100,
+      "anycast_ip": "10.1.100.1/24",
+      "anycast_mac": "00:00:00:01:02:03",
       "arp_suppression": true
     }
   },
@@ -285,7 +288,7 @@ sudo vim /etc/newtron/network.json
   "services": {
     "customer-l3": {
       "description": "L3 routed customer interface",
-      "service_type": "l3",
+      "service_type": "evpn-routed",
       "vrf_type": "interface",
       "ipvpn": "customer-vpn",
       "ingress_filter": "customer-ingress",
@@ -298,16 +301,14 @@ sudo vim /etc/newtron/network.json
     },
     "server-irb": {
       "description": "Server VLAN with shared VRF",
-      "service_type": "irb",
+      "service_type": "evpn-irb",
       "vrf_type": "shared",
       "ipvpn": "server-vpn",
-      "macvpn": "servers-vlan100",
-      "anycast_gateway": "10.1.100.1/24",
-      "anycast_mac": "00:00:00:01:02:03"
+      "macvpn": "servers-vlan100"
     },
     "transit": {
       "description": "Transit (global table, no VPN)",
-      "service_type": "l3",
+      "service_type": "routed",
       "ingress_filter": "transit-protect"
     }
   }
@@ -328,11 +329,14 @@ sudo vim /etc/newtron/network.json
 
 **Service Types:**
 
-| Type | Description | Requires |
-|------|-------------|----------|
-| `l3` | L3 routed interface | `ipvpn` (optional), IP address at apply time |
-| `l2` | L2 bridged interface | `macvpn` |
-| `irb` | Integrated routing and bridging | Both `ipvpn` and `macvpn` |
+| Type            | Description                            | Requires                              |
+|-----------------|----------------------------------------|---------------------------------------|
+| `routed`        | L3 routed interface (local)            | IP address at apply time              |
+| `bridged`       | L2 bridged interface (local)           | VLAN at apply time                    |
+| `irb`           | Integrated routing and bridging (local)| VLAN + IP at apply time               |
+| `evpn-routed`   | L3 routed with EVPN overlay            | `ipvpn` reference                     |
+| `evpn-bridged`  | L2 bridged with EVPN overlay           | `macvpn` reference                    |
+| `evpn-irb`      | IRB with EVPN overlay + anycast GW     | Both `ipvpn` and `macvpn` references  |
 
 **VRF Instantiation (`vrf_type`):**
 
@@ -668,11 +672,11 @@ No device needed -- reads from network.json:
 newtron service list
 
 # Output:
-# NAME           TYPE   DESCRIPTION
-# ----           ----   -----------
-# customer-l3    l3     L3 routed customer interface
-# server-irb     irb    Server VLAN with IRB routing
-# transit        l3     Transit peering interface
+# NAME           TYPE          DESCRIPTION
+# ----           ----          -----------
+# customer-l3    evpn-routed   L3 routed customer interface
+# server-irb     evpn-irb      Server VLAN with IRB routing
+# transit        routed        Transit peering interface
 ```
 
 ### 5.2 Show Service Details
@@ -683,13 +687,12 @@ newtron service show customer-l3
 # Output:
 # Service: customer-l3
 # Description: L3 routed customer interface
-# Type: l3
+# Type: evpn-routed
 #
 # EVPN Configuration:
 #   L3 VNI: 10001
 #   VRF Type: interface (per-interface VRF)
-#   Import RT: [65001:1]
-#   Export RT: [65001:1]
+#   Route Targets: [65001:1]
 #
 # Filters:
 #   Ingress: customer-ingress
@@ -711,11 +714,11 @@ newtron service show customer-l3
 Create a new service definition in network.json (no device needed):
 
 ```bash
-newtron service create my-service --type l3 --ipvpn customer-vpn --vrf-type interface -x
+newtron service create my-service --type evpn-routed --ipvpn customer-vpn --vrf-type interface -x
 
-newtron service create my-l2svc --type l2 --macvpn servers-vlan100 -x
+newtron service create my-l2svc --type evpn-bridged --macvpn servers-vlan100 -x
 
-newtron service create my-irb --type irb --ipvpn server-vpn --macvpn servers-vlan100 \
+newtron service create my-irb --type evpn-irb --ipvpn server-vpn --macvpn servers-vlan100 \
   --qos-policy customer-4q --ingress-filter customer-ingress --description "IRB service" -x
 ```
 
@@ -1177,7 +1180,7 @@ The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
   "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
-      "l2_vni": 10100,
+      "vni": 10100,
       "arp_suppression": true
     }
   }
@@ -1464,7 +1467,7 @@ newtron evpn ipvpn list
 newtron evpn ipvpn show customer-vpn
 
 # Create a new IP-VPN definition
-newtron evpn ipvpn create my-vpn --l3vni 10001 --import-rt 65001:1 --export-rt 65001:1 \
+newtron evpn ipvpn create my-vpn --l3vni 10001 --route-targets 65001:1 \
   --description "Customer VPN" -x
 
 # Delete
@@ -1483,7 +1486,7 @@ newtron evpn macvpn list
 newtron evpn macvpn show servers-vlan100
 
 # Create a new MAC-VPN definition
-newtron evpn macvpn create my-l2vpn --l2vni 10100 --arp-suppress \
+newtron evpn macvpn create my-l2vpn --vni 10100 --vlan-id 100 --arp-suppress \
   --description "Server L2 extension" -x
 
 # Delete
@@ -1496,8 +1499,8 @@ Set up a complete EVPN overlay from scratch:
 
 ```bash
 # 1. Create VPN definitions (no device needed)
-newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65001:1 --export-rt 65001:1 -x
-newtron evpn macvpn create servers-vlan100 --l2vni 10100 --arp-suppress -x
+newtron evpn ipvpn create customer-vpn --l3vni 10001 --route-targets 65001:1 -x
+newtron evpn macvpn create servers-vlan100 --vni 10100 --vlan-id 100 --arp-suppress -x
 
 # 2. Set up overlay on device
 newtron leaf1 evpn setup -x
@@ -1845,7 +1848,7 @@ newtron filter show customer-ingress
 ### 14.3 Create a Filter
 
 ```bash
-newtron filter create my-filter --type l3 --description "Custom filter" -x
+newtron filter create my-filter --type ipv4 --description "Custom filter" -x
 ```
 
 ### 14.4 Add Rules to a Filter
@@ -1879,12 +1882,12 @@ Filters live in network.json and are instantiated on devices when services refer
 
 ```bash
 # 1. Create filter template
-newtron filter create my-filter --type l3 -x
+newtron filter create my-filter --type ipv4 -x
 newtron filter add-rule my-filter --priority 100 --action deny --src-ip 10.0.0.0/8 -x
 newtron filter add-rule my-filter --priority 9999 --action permit -x
 
 # 2. Create service referencing the filter
-newtron service create my-svc --type l3 --ingress-filter my-filter -x
+newtron service create my-svc --type routed --ingress-filter my-filter -x
 
 # 3. Apply service to device interface (filter becomes ACL on device)
 newtron leaf1 service apply Ethernet0 my-svc --ip 10.1.1.1/30 -x
@@ -2598,10 +2601,9 @@ if !changeSet.IsEmpty() {
 ```go
 // Save a new IP-VPN definition
 err := net.SaveIPVPN("my-vpn", spec.IPVPNSpec{
-    Description: "Customer VPN",
-    L3VNI:      10001,
-    ImportRT:    []string{"65001:1"},
-    ExportRT:    []string{"65001:1"},
+    Description:  "Customer VPN",
+    L3VNI:        10001,
+    RouteTargets: []string{"65001:1"},
 })
 
 // Delete an IP-VPN definition
@@ -2609,9 +2611,10 @@ err := net.DeleteIPVPN("my-vpn")
 
 // Save a new MAC-VPN definition
 err := net.SaveMACVPN("my-l2vpn", spec.MACVPNSpec{
-    Description:     "Server L2 extension",
-    L2VNI:           10100,
-    ARPSuppression:  true,
+    Description:    "Server L2 extension",
+    VNI:            10100,
+    VlanID:         100,
+    ARPSuppression: true,
 })
 ```
 
@@ -2699,12 +2702,12 @@ Resource Commands
 │   ├── ipvpn
 │   │   ├── list
 │   │   ├── show <name>
-│   │   ├── create <name> --l3vni <vni> [--import-rt] [--export-rt] [--description]
+│   │   ├── create <name> --l3vni <vni> --vrf <vrf-name> [--route-targets] [--description]
 │   │   └── delete <name>
 │   └── macvpn
 │       ├── list
 │       ├── show <name>
-│       ├── create <name> --l2vni <vni> [--arp-suppress] [--description]
+│       ├── create <name> --vni <vni> --vlan-id <id> [--anycast-ip] [--anycast-mac] [--route-targets] [--arp-suppress] [--description]
 │       └── delete <name>
 ├── qos
 │   ├── list
@@ -2718,7 +2721,7 @@ Resource Commands
 ├── filter
 │   ├── list
 │   ├── show <filter-name>
-│   ├── create <filter-name> --type <l3|l3v6> [--description]
+│   ├── create <filter-name> --type <ipv4|ipv6> [--description]
 │   ├── delete <filter-name>
 │   ├── add-rule <filter-name> --priority <N> --action <permit|deny> [match flags...]
 │   └── remove-rule <filter-name> <priority>
@@ -2734,7 +2737,7 @@ Resource Commands
 ├── service
 │   ├── list
 │   ├── show <service-name>
-│   ├── create <service-name> --type <l2|l3|irb> [--ipvpn] [--macvpn] [--vrf-type]
+│   ├── create <service-name> --type <routed|bridged|irb|evpn-routed|evpn-bridged|evpn-irb> [--ipvpn] [--macvpn] [--vrf-type]
 │   │   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
 │   ├── delete <service-name>
 │   ├── apply <interface> <service> [--ip] [--peer-as]
@@ -3059,8 +3062,8 @@ newtron leaf1 vlan bind-macvpn 100 servers-vlan100 -x
 
 ```bash
 # 1. Create VPN definitions (no device needed)
-newtron evpn ipvpn create my-vpn --l3vni 10001 --import-rt 65100:1 --export-rt 65100:1 -x
-newtron evpn macvpn create my-l2vpn --l2vni 10100 --arp-suppress -x
+newtron evpn ipvpn create my-vpn --l3vni 10001 --route-targets 65100:1 -x
+newtron evpn macvpn create my-l2vpn --vni 10100 --vlan-id 100 --arp-suppress -x
 
 # 2. Set up overlay on device
 newtron leaf1 evpn setup --source-ip 10.0.0.2 -x

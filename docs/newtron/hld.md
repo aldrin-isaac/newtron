@@ -49,7 +49,7 @@ Specs describe **what you want** - they are declarative, abstract, and policy-dr
   "services": {
     "customer-l3": {
       "description": "L3 routed customer interface",
-      "service_type": "l3",
+      "service_type": "routed",
       "ipvpn": "customer-vpn",
       "vrf_type": "interface",
       "routing": {
@@ -169,7 +169,7 @@ The translation layer interprets specs in context to generate config:
 
 | In Spec (Declarative) | Derived at Runtime |
 |-----------------------|--------------------|
-| Service type (l2, l3, irb) | VRF name |
+| Service type (routed, bridged, irb, evpn-*) | VRF name |
 | VPN reference (ipvpn, macvpn) | Peer IP (from interface IP) |
 | Routing protocol (bgp, static) | ACL table name |
 | Peer AS policy ("request" or fixed) | ACL rule sequence numbers |
@@ -398,12 +398,12 @@ Resource Commands
 |   +-- ipvpn
 |   |   +-- list
 |   |   +-- show <name>
-|   |   +-- create <name> --l3vni <vni> [--import-rt] [--export-rt] [--description]
+|   |   +-- create <name> --l3vni <vni> [--route-targets] [--description]
 |   |   +-- delete <name>
 |   +-- macvpn
 |       +-- list
 |       +-- show <name>
-|       +-- create <name> --l2vni <vni> [--arp-suppress] [--description]
+|       +-- create <name> --vni <vni> --vlan-id <id> [--anycast-ip <ip>] [--anycast-mac <mac>] [--route-targets <rt>...] [--arp-suppress] [--description]
 |       +-- delete <name>
 +-- qos
 |   +-- list
@@ -417,7 +417,7 @@ Resource Commands
 +-- filter
 |   +-- list
 |   +-- show <filter-name>
-|   +-- create <filter-name> --type <l3|l3v6> [--description]
+|   +-- create <filter-name> --type <ipv4|ipv6> [--description]
 |   +-- delete <filter-name>
 |   +-- add-rule <filter-name> --priority <N> --action <permit|deny> [match flags...]
 |   +-- remove-rule <filter-name> <priority>
@@ -428,7 +428,7 @@ Resource Commands
 +-- service
 |   +-- list
 |   +-- show <service-name>
-|   +-- create <service-name> --type <l2|l3|irb> [--ipvpn] [--macvpn] [--vrf-type]
+|   +-- create <service-name> --type <routed|bridged|irb|evpn-routed|evpn-bridged|evpn-irb> [--ipvpn] [--macvpn] [--vrf-type]
 |   |   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
 |   +-- delete <service-name>
 |   +-- apply <interface> <service> [--ip] [--peer-as]
@@ -767,18 +767,18 @@ Output includes VTEP configuration, EVPN NVO, VNI mappings (L2/L3 with resource 
 
 ```
 newtron evpn ipvpn list
-newtron evpn ipvpn create customer-vpn --l3vni 10001 --import-rt 65000:10001 -x
+newtron evpn ipvpn create customer-vpn --l3vni 10001 --route-targets 65000:10001 -x
 newtron evpn ipvpn delete customer-vpn -x
 
 newtron evpn macvpn list
-newtron evpn macvpn create servers-vlan100 --l2vni 1100 --arp-suppress -x
+newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --arp-suppress -x
 newtron evpn macvpn delete servers-vlan100 -x
 ```
 
 **IP-VPN** (L3 VPN) contains: L3VNI, import/export route targets, description.
-**MAC-VPN** (L2 VPN) contains: L2VNI, ARP suppression flag, description.
+**MAC-VPN** (L2 VPN) contains: VNI, VLAN ID, anycast IP, anycast MAC, route targets, ARP suppression flag, description.
 
-The MAC-VPN definition does **not** contain a VLAN ID. Overlay definition and local bridge domain are separate concepts — the same MAC-VPN can be used by different VLANs on different devices. VLANs bind to MAC-VPNs via `vlan bind-macvpn`, which brings the L2VNI from the definition.
+The MAC-VPN definition contains a `vlan_id` field — the local bridge domain ID. This allows the same MAC-VPN definition to carry the VLAN binding, with the anycast IP/MAC enabling distributed anycast gateway functionality. VLANs bind to MAC-VPNs via `vlan bind-macvpn`, which brings the VNI and anycast gateway from the definition.
 
 #### 4.6b.4 CONFIG_DB Tables
 
@@ -799,7 +799,7 @@ Several CLI nouns support **spec authoring** — creating, modifying, and deleti
 | Noun | Subcommands | Definition Type |
 |------|-------------|----------------|
 | `evpn ipvpn` | `list`, `show`, `create`, `delete` | IP-VPN (L3VNI, route targets) |
-| `evpn macvpn` | `list`, `show`, `create`, `delete` | MAC-VPN (L2VNI, ARP suppression) |
+| `evpn macvpn` | `list`, `show`, `create`, `delete` | MAC-VPN (VNI, VLAN ID, anycast IP/MAC, route targets, ARP suppression) |
 | `qos` | `list`, `show`, `create`, `delete`, `add-queue`, `remove-queue` | QoS policy (queues, DSCP mappings) |
 | `filter` | `list`, `show`, `create`, `delete`, `add-rule`, `remove-rule` | Filter spec (ACL template rules) |
 | `service` | `list`, `show`, `create`, `delete` | Service (type, VPN refs, filters, QoS) |
@@ -1327,7 +1327,7 @@ Services are the primary abstraction - they bundle intent into reusable template
   "services": {
     "customer-l3": {
       "description": "L3 routed customer interface",
-      "service_type": "l3",
+      "service_type": "routed",
       "ipvpn": "customer-vpn",
       "vrf_type": "interface",
       "vlan": 0,
@@ -1346,14 +1346,12 @@ Services are the primary abstraction - they bundle intent into reusable template
 ```
 
 **What's in the spec (intent):**
-- Service type (l2, l3, irb)
+- Service type (routed, bridged, irb, evpn-routed, evpn-bridged, evpn-irb)
 - VPN reference (name of ipvpn/macvpn definition)
 - VRF instantiation policy (per-interface or shared)
-- VLAN ID (for l2/irb services — the local bridge domain; moved here from MACVPNSpec because overlay definition and local VLAN are separate concerns)
 - Routing protocol and policies
 - Filter references (names, not rules)
 - QoS policy reference (declarative queue definitions)
-- Anycast gateway (for IRB)
 
 **What's NOT in the spec (derived at runtime):**
 - Peer IP (derived from interface IP)
@@ -1366,7 +1364,7 @@ Services are the primary abstraction - they bundle intent into reusable template
 Services can be created and deleted via CLI without editing JSON directly:
 
 ```
-newtron service create customer-l3 --type l3 --ipvpn cust-vpn --vrf-type shared \
+newtron service create customer-l3 --type routed --ipvpn cust-vpn --vrf-type shared \
   --qos-policy 8q-datacenter --ingress-filter customer-in --description "Customer L3 VPN" -x
 
 newtron service delete customer-l3 -x
@@ -1376,7 +1374,7 @@ The `create` command accepts all ServiceSpec fields as flags:
 
 | Flag | Description |
 |------|-------------|
-| `--type` | Service type: `l2`, `l3`, or `irb` (required) |
+| `--type` | Service type: `routed`, `bridged`, `irb`, `evpn-routed`, `evpn-bridged`, or `evpn-irb` (required) |
 | `--ipvpn` | IP-VPN reference name |
 | `--macvpn` | MAC-VPN reference name |
 | `--vrf-type` | VRF instantiation: `interface` or `shared` |
@@ -1435,11 +1433,14 @@ The `routing` section declares routing intent:
 
 ### 8.3 Service Types
 
-| Type | Description | Generated Config |
-|------|-------------|------------------|
-| `l2` | VLAN bridging | VLAN, L2VNI mapping |
-| `l3` | Routed interface | VRF, L3VNI mapping, BGP neighbor |
-| `irb` | VLAN with routing | VLAN + VRF + SVI + anycast gateway |
+| Type            | Description                            | Requires                              |
+|-----------------|----------------------------------------|---------------------------------------|
+| `routed`        | L3 routed interface (local)            | IP address at apply time              |
+| `bridged`       | L2 bridged interface (local)           | VLAN at apply time                    |
+| `irb`           | Integrated routing and bridging (local)| VLAN + IP at apply time               |
+| `evpn-routed`   | L3 routed with EVPN overlay            | `ipvpn` reference                     |
+| `evpn-bridged`  | L2 bridged with EVPN overlay           | `macvpn` reference                    |
+| `evpn-irb`      | IRB with EVPN overlay + anycast GW     | Both `ipvpn` and `macvpn` references  |
 
 ### 8.4 VRF Instantiation (vrf_type)
 
@@ -1471,7 +1472,7 @@ The `routing` section declares routing intent:
 |------|--------|---------|
 | `loopback_ip` | Device profile | BGP router-id, VTEP source |
 | `mgmt_ip` | Device profile | Redis connection (or SSH tunnel target) |
-| `as_number` | Zone (or profile override) | BGP local AS |
+| `underlay_asn` | Device profile | BGP local AS |
 | `route_reflectors` | Device profile EVPN config | BGP neighbor derivation |
 | `ssh_user` / `ssh_pass` | Device profile | SSH tunnel for Redis access |
 
@@ -1511,8 +1512,8 @@ ResolvedProfile (runtime)
 
 | Field | Global | Zone | Profile | Resolved |
 |-------|--------|--------|---------|----------|
-| `as_number` | - | 64512 | (not set) | **64512** |
-| `as_number` | - | 64512 | 65535 | **65535** |
+| `underlay_asn` | - | 64512 | (not set) | **64512** |
+| `underlay_asn` | - | 64512 | 65535 | **65535** |
 
 ## 10. EVPN/VXLAN Architecture
 
@@ -1640,7 +1641,7 @@ The filter spec defines rules abstractly (match conditions + action). The servic
 ```
 newtron filter list
 newtron filter show customer-edge-in
-newtron filter create customer-edge-in --type l3 --description "Customer ingress filter" -x
+newtron filter create customer-edge-in --type ipv4 --description "Customer ingress filter" -x
 newtron filter add-rule customer-edge-in --priority 100 --action deny --src-ip 0.0.0.0/8 -x
 newtron filter add-rule customer-edge-in --priority 200 --action deny --src-ip 10.0.0.0/8 -x
 newtron filter add-rule customer-edge-in --priority 1000 --action permit -x
@@ -1651,8 +1652,8 @@ newtron filter delete customer-edge-in -x
 Filter types correspond to ACL table types:
 | Filter Type | ACL Table Type | Description |
 |------------|----------------|-------------|
-| `l3` | `L3` | IPv4 ACL |
-| `l3v6` | `L3V6` | IPv6 ACL |
+| `ipv4` | `L3` | IPv4 ACL |
+| `ipv6` | `L3V6` | IPv6 ACL |
 
 ### 10b.4 ACL CLI (Device Instances)
 
@@ -1893,18 +1894,21 @@ The system maintains this separation to enable:
 
 ### Service Types
 
-| Type | L2VNI | L3VNI | SVI | Use Case |
-|------|-------|-------|-----|----------|
-| `l2` | Yes | No | No | VLAN extension (bridging only) |
-| `l3` | No | Yes | No | Routed interface (no VLAN) |
-| `irb` | Yes | Yes | Yes | Integrated routing and bridging |
+| Type | VNI | L3VNI | SVI | Use Case |
+|------|-----|-------|-----|----------|
+| `routed` | No | No | No | Local L3 routed interface |
+| `bridged` | No | No | No | Local L2 bridged interface |
+| `irb` | No | No | Yes | Local integrated routing and bridging |
+| `evpn-routed` | No | Yes | No | L3 routed with EVPN overlay |
+| `evpn-bridged` | Yes | No | No | L2 bridged with EVPN overlay |
+| `evpn-irb` | Yes | Yes | Yes | IRB with EVPN overlay + anycast GW |
 
 ### VPN Terminology
 
 | Term | Definition |
 |------|------------|
 | **IPVPN** | IP-VPN definition for L3 routing. Contains L3VNI and route targets. CLI-authorable via `evpn ipvpn create/delete`. |
-| **MACVPN** | MAC-VPN definition for L2 bridging. Contains L2VNI and ARP suppression (no VLAN ID — overlay definition is separate from local bridge domain). CLI-authorable via `evpn macvpn create/delete`. VLANs bind to MAC-VPNs via `vlan bind-macvpn`. |
+| **MACVPN** | MAC-VPN definition for L2 bridging. Contains VNI, VLAN ID, anycast IP, anycast MAC, route targets, and ARP suppression flag. CLI-authorable via `evpn macvpn create/delete`. VLANs bind to MAC-VPNs via `vlan bind-macvpn`. |
 | **L2VNI** | Layer 2 VNI for VXLAN bridging (MAC learning, BUM traffic). |
 | **L3VNI** | Layer 3 VNI for VXLAN routing (inter-subnet traffic). |
 | **VRF** | Virtual Routing and Forwarding instance for traffic isolation. First-class CLI noun with 13 subcommands: owns interfaces, BGP neighbors, static routes, and IP-VPN bindings. |

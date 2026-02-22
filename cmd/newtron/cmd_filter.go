@@ -26,7 +26,7 @@ All commands operate on network.json (no device needed).
 Examples:
   newtron filter list
   newtron filter show customer-ingress
-  newtron filter create customer-ingress --type l3 --description "Customer ingress filter"
+  newtron filter create customer-ingress --type ipv4 --description "Customer ingress filter"
   newtron filter add-rule customer-ingress --priority 100 --action permit --src-ip 10.0.0.0/8
   newtron filter add-rule customer-ingress --priority 200 --action deny --protocol icmp
   newtron filter remove-rule customer-ingress 100
@@ -127,8 +127,8 @@ var filterCreateCmd = &cobra.Command{
 This creates an empty filter. Use 'filter add-rule' to add rules.
 
 Examples:
-  newtron filter create customer-ingress --type l3 --description "Customer ingress filter"
-  newtron filter create customer-v6-ingress --type l3v6`,
+  newtron filter create customer-ingress --type ipv4 --description "Customer ingress filter"
+  newtron filter create customer-v6-ingress --type ipv6`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
