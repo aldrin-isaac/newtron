@@ -49,8 +49,6 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
 	cs.Add("INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
 
-	i.ipAddresses = append(i.ipAddresses, ipAddr)
-
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
 }
@@ -70,16 +68,14 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
 	cs.Add("INTERFACE", ipKey, ChangeDelete, nil, nil)
 
-	// Remove from tracked addresses
-	for idx, addr := range i.ipAddresses {
-		if addr == ipAddr {
-			i.ipAddresses = append(i.ipAddresses[:idx], i.ipAddresses[idx+1:]...)
-			break
+	// If no other IPs remain, remove the base INTERFACE entry too
+	remaining := 0
+	for _, addr := range i.IPAddresses() {
+		if addr != ipAddr {
+			remaining++
 		}
 	}
-
-	// If no IPs remain, remove the base INTERFACE entry too
-	if len(i.ipAddresses) == 0 {
+	if remaining == 0 {
 		cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
 	}
 
@@ -105,8 +101,6 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
 		"vrf_name": vrfName,
 	})
-
-	i.vrf = vrfName
 
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
 	return cs, nil
@@ -144,12 +138,6 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 		"stage": direction,
 	})
 
-	if direction == "ingress" {
-		i.ingressACL = aclName
-	} else {
-		i.egressACL = aclName
-	}
-
 	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
 	return cs, nil
 }
@@ -183,7 +171,6 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 			return nil, err
 		}
 		fields["mtu"] = value
-		i.mtu = mtuVal
 
 	case "speed":
 		// Validate speed format (e.g., 10G, 25G, 40G, 100G)
@@ -194,14 +181,12 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 			return nil, fmt.Errorf("invalid speed: %s (valid: 1G, 10G, 25G, 40G, 50G, 100G, 200G, 400G)", value)
 		}
 		fields["speed"] = value
-		i.speed = value
 
 	case "admin-status", "admin_status":
 		if value != "up" && value != "down" {
 			return nil, fmt.Errorf("admin-status must be 'up' or 'down'")
 		}
 		fields["admin_status"] = value
-		i.adminStatus = value
 
 	case "description":
 		fields["description"] = value

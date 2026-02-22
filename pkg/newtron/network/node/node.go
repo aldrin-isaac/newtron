@@ -376,11 +376,8 @@ func (n *Node) GetInterface(name string) (*Interface, error) {
 	// Create Interface with parent reference to this Node
 	intf := &Interface{
 		node: n, // Parent reference - key to OO design
-		name:   name,
+		name: name,
 	}
-
-	// Load interface state from config_db
-	intf.loadState()
 
 	n.interfaces[name] = intf
 	return intf, nil
@@ -419,21 +416,11 @@ func (n *Node) loadInterfaces() {
 	}
 
 	for name := range n.configDB.Port {
-		intf := &Interface{
-			node: n,
-			name:   name,
-		}
-		intf.loadState()
-		n.interfaces[name] = intf
+		n.interfaces[name] = &Interface{node: n, name: name}
 	}
 
 	for name := range n.configDB.PortChannel {
-		intf := &Interface{
-			node: n,
-			name:   name,
-		}
-		intf.loadState()
-		n.interfaces[name] = intf
+		n.interfaces[name] = &Interface{node: n, name: name}
 	}
 }
 

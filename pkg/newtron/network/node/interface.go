@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
 // Interface represents a network interface within the context of a Device.
@@ -16,8 +18,9 @@ import (
 //	intf.Node().Network().GetService()   // Access Network-level config
 //	intf.Node().ASNumber()               // Access Device-level config
 //
-// This mirrors the original Perl design where interface operations had
-// implicit access to node and network-level configuration.
+// All state is read on demand from the Node's ConfigDB/StateDB snapshots
+// (refreshed at Lock time), ensuring callers always see the latest data
+// within a write episode.
 //
 // Hierarchy: Network -> Device -> Interface
 type Interface struct {
@@ -26,27 +29,6 @@ type Interface struct {
 
 	// Interface identity
 	name string
-
-	// Current state (from config_db)
-	adminStatus string
-	operStatus  string
-	speed       string
-	mtu         int
-	vrf         string
-	ipAddresses []string
-
-	// Service binding (from NEWTRON_SERVICE_BINDING table)
-	serviceName   string
-	serviceIP     string // IP address assigned by service
-	serviceVRF    string // VRF created by service
-	serviceIPVPN  string // IP-VPN name
-	serviceMACVPN string // MAC-VPN name
-	ingressACL    string
-	egressACL     string
-	bgpNeighbor   string // BGP peer IP created by service
-
-	// PortChannel membership
-	pcParent string // Parent PortChannel if this is a member
 }
 
 // ============================================================================
@@ -66,7 +48,7 @@ func (i *Interface) Node() *Node {
 
 
 // ============================================================================
-// Interface Properties
+// Interface Properties (on-demand from ConfigDB/StateDB)
 // ============================================================================
 
 // Name returns the interface name (e.g., "Ethernet0", "PortChannel100").
@@ -76,70 +58,197 @@ func (i *Interface) Name() string {
 
 // AdminStatus returns the administrative status (up/down).
 func (i *Interface) AdminStatus() string {
-	return i.adminStatus
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	if port, ok := configDB.Port[i.name]; ok {
+		return port.AdminStatus
+	}
+	if pc, ok := configDB.PortChannel[i.name]; ok {
+		return pc.AdminStatus
+	}
+	return ""
 }
 
 // OperStatus returns the operational status (up/down).
 func (i *Interface) OperStatus() string {
-	return i.operStatus
+	stateDB := i.node.StateDB()
+	if stateDB == nil {
+		return ""
+	}
+	if ps, ok := stateDB.PortTable[i.name]; ok {
+		return ps.OperStatus
+	}
+	if ls, ok := stateDB.LAGTable[i.name]; ok {
+		return ls.OperStatus
+	}
+	return ""
 }
 
 // Speed returns the interface speed.
+// Prefers operational value from StateDB; falls back to ConfigDB.
 func (i *Interface) Speed() string {
-	return i.speed
+	if stateDB := i.node.StateDB(); stateDB != nil {
+		if ps, ok := stateDB.PortTable[i.name]; ok && ps.Speed != "" {
+			return ps.Speed
+		}
+	}
+	if configDB := i.node.ConfigDB(); configDB != nil {
+		if port, ok := configDB.Port[i.name]; ok {
+			return port.Speed
+		}
+	}
+	return ""
 }
 
 // MTU returns the interface MTU.
+// Prefers operational value from StateDB; falls back to ConfigDB.
 func (i *Interface) MTU() int {
-	return i.mtu
+	if stateDB := i.node.StateDB(); stateDB != nil {
+		if ps, ok := stateDB.PortTable[i.name]; ok && ps.MTU != "" {
+			mtu, _ := strconv.Atoi(ps.MTU)
+			return mtu
+		}
+	}
+	if configDB := i.node.ConfigDB(); configDB != nil {
+		if port, ok := configDB.Port[i.name]; ok && port.MTU != "" {
+			mtu, _ := strconv.Atoi(port.MTU)
+			return mtu
+		}
+		if pc, ok := configDB.PortChannel[i.name]; ok && pc.MTU != "" {
+			mtu, _ := strconv.Atoi(pc.MTU)
+			return mtu
+		}
+	}
+	return 0
 }
 
 // VRF returns the VRF this interface is bound to.
 func (i *Interface) VRF() string {
-	return i.vrf
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	if intf, ok := configDB.Interface[i.name]; ok {
+		return intf.VRFName
+	}
+	return ""
 }
 
 // IPAddresses returns the IP addresses configured on this interface.
 func (i *Interface) IPAddresses() []string {
-	return i.ipAddresses
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return nil
+	}
+	var addrs []string
+	prefix := i.name + "|"
+	for key := range configDB.Interface {
+		if strings.HasPrefix(key, prefix) {
+			addrs = append(addrs, strings.TrimPrefix(key, prefix))
+		}
+	}
+	return addrs
 }
 
 // ============================================================================
-// Service Binding
+// Service Binding (on-demand from NEWTRON_SERVICE_BINDING)
 // ============================================================================
+
+// binding returns the raw service binding entry from CONFIG_DB.
+// Used internally by RemoveService to read all binding fields at once.
+func (i *Interface) binding() sonic.ServiceBindingEntry {
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return sonic.ServiceBindingEntry{}
+	}
+	return configDB.NewtronServiceBinding[i.name]
+}
 
 // ServiceName returns the name of the service bound to this interface.
 func (i *Interface) ServiceName() string {
-	return i.serviceName
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok {
+		return binding.ServiceName
+	}
+	return ""
 }
 
 // HasService returns true if a service is bound to this interface.
 func (i *Interface) HasService() bool {
-	return i.serviceName != ""
+	return i.ServiceName() != ""
 }
 
 // IngressACL returns the name of the ingress ACL bound to this interface.
+// Prefers the service binding record; falls back to scanning ACL_TABLE.
 func (i *Interface) IngressACL() string {
-	return i.ingressACL
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok && binding.IngressACL != "" {
+		return binding.IngressACL
+	}
+	for aclName, acl := range configDB.ACLTable {
+		if acl.Stage == "ingress" {
+			for _, port := range strings.Split(acl.Ports, ",") {
+				if strings.TrimSpace(port) == i.name {
+					return aclName
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // EgressACL returns the name of the egress ACL bound to this interface.
+// Prefers the service binding record; falls back to scanning ACL_TABLE.
 func (i *Interface) EgressACL() string {
-	return i.egressACL
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok && binding.EgressACL != "" {
+		return binding.EgressACL
+	}
+	for aclName, acl := range configDB.ACLTable {
+		if acl.Stage == "egress" {
+			for _, port := range strings.Split(acl.Ports, ",") {
+				if strings.TrimSpace(port) == i.name {
+					return aclName
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // ============================================================================
-// PortChannel Membership
+// PortChannel Membership (on-demand from PORTCHANNEL_MEMBER)
 // ============================================================================
 
 // IsPortChannelMember returns true if this interface is a PortChannel member.
 func (i *Interface) IsPortChannelMember() bool {
-	return i.pcParent != ""
+	return i.PortChannelParent() != ""
 }
 
 // PortChannelParent returns the name of the parent PortChannel (if this is a member).
 func (i *Interface) PortChannelParent() string {
-	return i.pcParent
+	configDB := i.node.ConfigDB()
+	if configDB == nil {
+		return ""
+	}
+	for key := range configDB.PortChannelMember {
+		parts := strings.SplitN(key, "|", 2)
+		if len(parts) == 2 && parts[1] == i.name {
+			return parts[0]
+		}
+	}
+	return ""
 }
 
 // Description returns the interface description (from PORT table).
@@ -201,12 +310,13 @@ func (i *Interface) VLANMembers() []string {
 // For direct peering, this looks for neighbors using this interface's IP as local_addr.
 func (i *Interface) BGPNeighbors() []string {
 	configDB := i.node.ConfigDB()
-	if configDB == nil || len(i.ipAddresses) == 0 {
+	ipAddresses := i.IPAddresses()
+	if configDB == nil || len(ipAddresses) == 0 {
 		return nil
 	}
 
 	// Get the interface's IP without mask
-	localIP := i.ipAddresses[0]
+	localIP := ipAddresses[0]
 	if idx := strings.Index(localIP, "/"); idx > 0 {
 		localIP = localIP[:idx]
 	}
@@ -235,117 +345,12 @@ func (i *Interface) IsVLAN() bool {
 }
 
 // ============================================================================
-// State Loading
+// Helpers
 // ============================================================================
-
-// loadState populates interface state from config_db and state_db.
-func (i *Interface) loadState() {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return
-	}
-
-	// Load from PORT table (config_db)
-	if port, ok := configDB.Port[i.name]; ok {
-		i.adminStatus = port.AdminStatus
-		i.speed = port.Speed
-		if port.MTU != "" {
-			i.mtu, _ = strconv.Atoi(port.MTU)
-		}
-	}
-
-	// Load from PORTCHANNEL table (config_db)
-	if pc, ok := configDB.PortChannel[i.name]; ok {
-		i.adminStatus = pc.AdminStatus
-		if pc.MTU != "" {
-			i.mtu, _ = strconv.Atoi(pc.MTU)
-		}
-	}
-
-	// Load operational state from state_db (if available)
-	if i.node.StateDB() != nil {
-		stateDB := i.node.StateDB()
-		// Get operational status from PORT_TABLE in state_db
-		if portState, ok := stateDB.PortTable[i.name]; ok {
-			i.operStatus = portState.OperStatus
-			// Override speed/MTU with operational values if available
-			if portState.Speed != "" {
-				i.speed = portState.Speed
-			}
-			if portState.MTU != "" {
-				i.mtu, _ = strconv.Atoi(portState.MTU)
-			}
-		}
-		// Get LAG operational status from LAG_TABLE
-		if lagState, ok := stateDB.LAGTable[i.name]; ok {
-			i.operStatus = lagState.OperStatus
-		}
-	}
-
-	// Load VRF binding from INTERFACE table
-	if intf, ok := configDB.Interface[i.name]; ok {
-		i.vrf = intf.VRFName
-	}
-
-	// Load IP addresses from INTERFACE table
-	for key := range configDB.Interface {
-		// Keys can be "Ethernet0" or "Ethernet0|10.1.1.1/30"
-		if strings.HasPrefix(key, i.name+"|") {
-			ipAddr := strings.TrimPrefix(key, i.name+"|")
-			i.ipAddresses = append(i.ipAddresses, ipAddr)
-		}
-	}
-
-	// Check PortChannel membership
-	for key := range configDB.PortChannelMember {
-		// Key format: PortChannel100|Ethernet0
-		parts := strings.SplitN(key, "|", 2)
-		if len(parts) == 2 && parts[1] == i.name {
-			i.pcParent = parts[0]
-			break
-		}
-	}
-
-	// Load ACL bindings from ACL_TABLE
-	for aclName, acl := range configDB.ACLTable {
-		ports := strings.Split(acl.Ports, ",")
-		for _, port := range ports {
-			if strings.TrimSpace(port) == i.name {
-				if acl.Stage == "ingress" {
-					i.ingressACL = aclName
-				} else if acl.Stage == "egress" {
-					i.egressACL = aclName
-				}
-			}
-		}
-	}
-
-	// Load service binding from NEWTRON_SERVICE_BINDING table (preferred)
-	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok {
-		i.serviceName = binding.ServiceName
-		i.serviceIP = binding.IPAddress
-		i.serviceVRF = binding.VRFName
-		i.serviceIPVPN = binding.IPVPN
-		i.serviceMACVPN = binding.MACVPN
-		i.bgpNeighbor = binding.BGPNeighbor
-		// ACLs from binding override detected ones
-		if binding.IngressACL != "" {
-			i.ingressACL = binding.IngressACL
-		}
-		if binding.EgressACL != "" {
-			i.egressACL = binding.EgressACL
-		}
-	} else if i.ingressACL != "" {
-		// Fallback: detect service binding from ACL naming convention
-		// Service name is encoded in ACL name: {service}-{interface}-{direction}
-		i.serviceName = i.extractServiceFromACL(i.ingressACL)
-	}
-}
 
 // extractServiceFromACL extracts service name from ACL naming convention.
 // ACL name format: {service}-{direction} (per-service ACLs, shared across interfaces)
-func (i *Interface) extractServiceFromACL(aclName string) string {
-	// Remove the direction suffix
+func extractServiceFromACL(aclName string) string {
 	if strings.HasSuffix(aclName, "-in") {
 		return strings.TrimSuffix(aclName, "-in")
 	}
@@ -361,26 +366,29 @@ func (i *Interface) extractServiceFromACL(aclName string) string {
 
 // String returns a string representation of the interface.
 func (i *Interface) String() string {
+	adminStatus := i.AdminStatus()
+	operStatus := i.OperStatus()
+
 	status := "down"
-	if i.adminStatus == "up" && i.operStatus == "up" {
+	if adminStatus == "up" && operStatus == "up" {
 		status = "up"
-	} else if i.adminStatus == "up" {
+	} else if adminStatus == "up" {
 		status = "admin-up/oper-down"
 	}
 
 	desc := fmt.Sprintf("%s (%s)", i.name, status)
 
-	if i.serviceName != "" {
-		desc += fmt.Sprintf(" [service: %s]", i.serviceName)
+	if svcName := i.ServiceName(); svcName != "" {
+		desc += fmt.Sprintf(" [service: %s]", svcName)
 	}
-	if len(i.ipAddresses) > 0 {
-		desc += fmt.Sprintf(" [ip: %s]", strings.Join(i.ipAddresses, ", "))
+	if ipAddrs := i.IPAddresses(); len(ipAddrs) > 0 {
+		desc += fmt.Sprintf(" [ip: %s]", strings.Join(ipAddrs, ", "))
 	}
-	if i.vrf != "" {
-		desc += fmt.Sprintf(" [vrf: %s]", i.vrf)
+	if vrf := i.VRF(); vrf != "" {
+		desc += fmt.Sprintf(" [vrf: %s]", vrf)
 	}
-	if i.pcParent != "" {
-		desc += fmt.Sprintf(" [member of: %s]", i.pcParent)
+	if pcParent := i.PortChannelParent(); pcParent != "" {
+		desc += fmt.Sprintf(" [member of: %s]", pcParent)
 	}
 
 	return desc

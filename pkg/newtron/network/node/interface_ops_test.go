@@ -31,23 +31,20 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	d, intf := testInterface()
 	ctx := context.Background()
 
-	// Set up service binding state
-	intf.serviceName = "customer-l3"
-	intf.ipAddresses = []string{"10.1.0.0/31"}
-	intf.vrf = "Vrf_CUST1"
-
 	// Register service in network spec
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 		VRFType:     spec.VRFTypeInterface,
 	}
 
-	// ConfigDB state: service binding + VRF
+	// ConfigDB state: service binding + VRF + IP + INTERFACE base
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "customer-l3",
 		IPAddress:   "10.1.0.0/31",
 		VRFName:     "Vrf_CUST1",
 	}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
 
 	cs, err := intf.RemoveService(ctx)
@@ -68,9 +65,6 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	d, intf := testInterface()
 	ctx := context.Background()
-
-	intf.serviceName = "customer-l3"
-	intf.ingressACL = "ACL_CUST_IN"
 
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
@@ -100,9 +94,6 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	d, intf := testInterface()
 	ctx := context.Background()
-
-	intf.serviceName = "customer-l3"
-	intf.ingressACL = "ACL_CUST_IN"
 
 	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
@@ -225,7 +216,7 @@ func TestBindACL_EmptyBindingList(t *testing.T) {
 
 func TestAddBGPNeighbor(t *testing.T) {
 	d, intf := testInterface()
-	intf.ipAddresses = []string{"10.1.0.0/31"}
+	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
 	// BGP must be configured
 	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "64512"}
 	ctx := context.Background()
@@ -252,7 +243,7 @@ func TestAddBGPNeighbor(t *testing.T) {
 
 func TestRemoveBGPNeighbor(t *testing.T) {
 	d, intf := testInterface()
-	intf.ipAddresses = []string{"10.1.0.0/31"}
+	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
 	// Pre-existing neighbor
 	d.configDB.BGPNeighbor["default|10.1.0.1"] = sonic.BGPNeighborEntry{
 		ASN: "64513", LocalAddr: "10.1.0.0",
@@ -311,8 +302,6 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 	d, intf := testInterface()
 	// Make Ethernet0 a PortChannel member
 	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
-	intf.pcParent = "PortChannel100"
-	intf.serviceName = ""
 	ctx := context.Background()
 
 	// SetIP should fail for PortChannel member
@@ -330,7 +319,7 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 
 func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
-	intf.serviceName = "existing-service"
+	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "existing-service"}
 	d.SpecProvider.(*testSpecProvider).services["new-service"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
