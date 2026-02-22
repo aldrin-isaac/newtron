@@ -55,9 +55,6 @@ func init() {
 		"BGP_NEIGHBOR_TABLE": func(db *StateDB, entry string, vals map[string]string) {
 			db.BGPNeighborTable[entry] = parseBGPNeighborState(vals)
 		},
-		"NEIGH_STATE_TABLE": func(db *StateDB, entry string, vals map[string]string) {
-			db.BGPNeighborTable[entry] = parseBGPNeighborState(vals)
-		},
 		"INTERFACE_TABLE": func(db *StateDB, entry string, vals map[string]string) {
 			db.InterfaceTable[entry] = InterfaceStateEntry{
 				VRF:      vals["vrf"],

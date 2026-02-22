@@ -99,20 +99,6 @@ func TestStateDB_ParseEntry(t *testing.T) {
 			},
 		},
 		{
-			table: "NEIGH_STATE_TABLE",
-			entry: "default|10.0.0.3",
-			vals: map[string]string{
-				"state":      "Active",
-				"remote_asn": "65002",
-			},
-			check: func(t *testing.T, db *StateDB) {
-				n := db.BGPNeighborTable["default|10.0.0.3"]
-				if n.State != "Active" {
-					t.Errorf("State = %q", n.State)
-				}
-			},
-		},
-		{
 			table: "FDB_TABLE",
 			entry: "Vlan100|aa:bb:cc:dd:ee:ff",
 			vals: map[string]string{

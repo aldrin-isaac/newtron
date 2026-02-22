@@ -105,15 +105,3 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 }
 
 
-
-
-// DeriveNeighborIP derives the BGP neighbor IP from this interface's IP address.
-// Only works for point-to-point links (/30 or /31 subnets).
-func (i *Interface) DeriveNeighborIP() (string, error) {
-	if len(i.ipAddresses) == 0 {
-		return "", fmt.Errorf("interface %s has no IP address", i.name)
-	}
-	return util.DeriveNeighborIP(i.ipAddresses[0])
-}
-
-

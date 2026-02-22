@@ -466,8 +466,7 @@ const (
 
 // RoutingProtocol constants
 const (
-	RoutingProtocolBGP    = "bgp"
-	RoutingProtocolStatic = "static"
+	RoutingProtocolBGP = "bgp"
 )
 
 // PeerAS special values
