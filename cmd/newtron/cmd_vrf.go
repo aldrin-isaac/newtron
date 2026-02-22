@@ -190,8 +190,6 @@ var vrfStatusCmd = &cobra.Command{
 			return nil
 		}
 
-		underlying := dev.Underlying()
-
 		type vrfStatusEntry struct {
 			Name       string `json:"name"`
 			L3VNI      int    `json:"l3_vni,omitempty"`
@@ -211,10 +209,11 @@ var vrfStatusCmd = &cobra.Command{
 				L3VNI:      vrf.L3VNI,
 				Interfaces: len(vrf.Interfaces),
 			}
-			if underlying != nil && underlying.State != nil {
-				if vrfState, ok := underlying.State.VRFs[name]; ok {
-					s.State = vrfState.State
-					s.RouteCount = vrfState.RouteCount
+			stateClient := dev.StateDBClient()
+			if stateClient != nil {
+				entry, err := stateClient.GetEntry("VRF_TABLE", name)
+				if err == nil && entry != nil {
+					s.State = entry["state"]
 				}
 			}
 			statuses = append(statuses, s)

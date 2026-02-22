@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
@@ -121,14 +120,14 @@ func (cc *CompositeConfig) EntryCount() int {
 
 // ToConfigChanges converts the composite config to a slice of device.ConfigChange
 // (all as ChangeTypeAdd) for use with VerifyChangeSet.
-func (cc *CompositeConfig) ToConfigChanges() []device.ConfigChange {
-	var changes []device.ConfigChange
+func (cc *CompositeConfig) ToConfigChanges() []sonic.ConfigChange {
+	var changes []sonic.ConfigChange
 	for table, keys := range cc.Tables {
 		for key, fields := range keys {
-			changes = append(changes, device.ConfigChange{
+			changes = append(changes, sonic.ConfigChange{
 				Table:  table,
 				Key:    key,
-				Type:   device.ChangeTypeAdd,
+				Type:   sonic.ChangeTypeAdd,
 				Fields: fields,
 			})
 		}
@@ -163,7 +162,7 @@ func (n *Node) DeliverComposite(composite *CompositeConfig, mode CompositeMode) 
 	result := &CompositeDeliveryResult{Mode: mode}
 	changes := composite.ToTableChanges()
 
-	client := n.Underlying().Client()
+	client := n.conn.Client()
 
 	switch mode {
 	case CompositeOverwrite:

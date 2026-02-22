@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"strings"
 	"sync"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
@@ -123,6 +124,39 @@ func (n *Node) BGPNeighbors() []string {
 // ConfigDB returns the config_db state.
 func (n *Node) ConfigDB() *sonic.ConfigDB {
 	return n.configDB
+}
+
+// Tunnel returns the SSH tunnel for direct command execution.
+// Returns nil if no SSH tunnel is configured.
+func (n *Node) Tunnel() *sonic.SSHTunnel {
+	if n.conn == nil {
+		return nil
+	}
+	return n.conn.Tunnel()
+}
+
+// StateDBClient returns the STATE_DB client for operational state queries.
+func (n *Node) StateDBClient() *sonic.StateDBClient {
+	if n.conn == nil {
+		return nil
+	}
+	return n.conn.StateClient()
+}
+
+// ConfigDBClient returns the CONFIG_DB client for direct Redis access.
+func (n *Node) ConfigDBClient() *sonic.ConfigDBClient {
+	if n.conn == nil {
+		return nil
+	}
+	return n.conn.Client()
+}
+
+// StateDB returns the STATE_DB snapshot loaded at connect time.
+func (n *Node) StateDB() *sonic.StateDB {
+	if n.conn == nil {
+		return nil
+	}
+	return n.conn.StateDB
 }
 
 // ============================================================================
@@ -418,7 +452,15 @@ func (n *Node) SaveConfig(ctx context.Context) error {
 	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return n.conn.SaveConfig(ctx)
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("config save requires SSH connection (no SSH credentials configured)")
+	}
+	output, err := tunnel.ExecCommand("sudo config save -y")
+	if err != nil {
+		return fmt.Errorf("config save failed: %w (output: %s)", err, output)
+	}
+	return nil
 }
 
 // RestartService restarts a SONiC Docker container by name via SSH.
@@ -426,31 +468,80 @@ func (n *Node) RestartService(ctx context.Context, name string) error {
 	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return n.conn.RestartService(ctx, name)
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("restart service requires SSH connection (no SSH credentials configured)")
+	}
+	output, err := tunnel.ExecCommand(fmt.Sprintf("sudo systemctl restart %s", name))
+	if err != nil {
+		return fmt.Errorf("restart service %s failed: %w (output: %s)", name, err, output)
+	}
+	return nil
 }
 
 // ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
+// Handles: no bgp ebgp-requires-policy, no bgp suppress-fib-pending.
+// Must be called after a BGP container restart since frr.conf is regenerated.
 func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	if !n.connected {
 		return util.ErrNotConnected
 	}
-	return n.conn.ApplyFRRDefaults(ctx)
-}
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
+	}
 
+	// Read BGP ASN from CONFIG_DB — check DEVICE_METADATA first (provision path),
+	// then fall back to BGP_GLOBALS.local_asn (configure-bgp path).
+	asn := ""
+	if n.configDB != nil {
+		if meta, ok := n.configDB.DeviceMetadata["localhost"]; ok {
+			asn = meta["bgp_asn"]
+		}
+		if asn == "" {
+			if globals, ok := n.configDB.BGPGlobals["default"]; ok {
+				asn = globals.LocalASN
+			}
+		}
+	}
+	if asn == "" {
+		return fmt.Errorf("cannot determine BGP ASN from CONFIG_DB")
+	}
+
+	cmds := fmt.Sprintf(
+		"vtysh -c 'configure terminal' -c 'router bgp %s' "+
+			"-c 'no bgp ebgp-requires-policy' "+
+			"-c 'no bgp suppress-fib-pending' "+
+			"-c 'end' -c 'write memory'",
+		asn)
+
+	output, err := tunnel.ExecCommand(cmds)
+	if err != nil {
+		return fmt.Errorf("ApplyFRRDefaults failed: %w (output: %s)", err, output)
+	}
+
+	// Force route reprocessing after changing defaults.
+	_, _ = tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
+
+	return nil
+}
 
 // ReadSystemMAC reads the system MAC from the device's factory config file.
 // Returns an empty string if not connected or if the MAC cannot be read.
 func (n *Node) ReadSystemMAC() string {
-	if !n.connected || n.conn == nil {
+	if !n.connected {
 		return ""
 	}
-	return n.conn.ReadSystemMAC()
-}
-
-// Underlying returns the underlying sonic.Device for low-level operations.
-// This is used by ChangeSet to apply changes via Redis.
-func (n *Node) Underlying() *sonic.Device {
-	return n.conn
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return ""
+	}
+	cmd := `python3 -c 'import json; d=json.load(open("/etc/sonic/config_db.json")); print(d.get("DEVICE_METADATA",{}).get("localhost",{}).get("mac",""))' 2>/dev/null`
+	output, err := tunnel.ExecCommand("sudo " + cmd)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output)
 }
 
 // ============================================================================

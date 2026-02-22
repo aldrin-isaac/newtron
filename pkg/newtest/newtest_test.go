@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
@@ -233,10 +233,10 @@ func TestApplyDefaults_PingSuccessRate(t *testing.T) {
 // ============================================================================
 
 func TestMatchRoute(t *testing.T) {
-	entry := &device.RouteEntry{
+	entry := &sonic.RouteEntry{
 		Prefix:   "10.0.0.0/24",
 		Protocol: "bgp",
-		NextHops: []device.NextHop{
+		NextHops: []sonic.NextHop{
 			{IP: "10.0.0.1", Interface: "Ethernet0"},
 			{IP: "10.0.0.2", Interface: "Ethernet4"},
 		},

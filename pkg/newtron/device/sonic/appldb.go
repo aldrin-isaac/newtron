@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
 )
 
 // AppDBClient wraps Redis client for APP_DB access (DB 0).
@@ -59,7 +58,7 @@ func (c *AppDBClient) getRouteHash(vrf, prefix string) (map[string]string, error
 
 // GetRoute reads a single route from ROUTE_TABLE by VRF and prefix.
 // Returns nil (not error) if the prefix does not exist.
-// Parses comma-separated nexthop/ifname into []device.NextHop.
+// Parses comma-separated nexthop/ifname into []NextHop.
 //
 // APP_DB key format:
 //   - Default VRF: ROUTE_TABLE:<prefix>
@@ -68,7 +67,7 @@ func (c *AppDBClient) getRouteHash(vrf, prefix string) (map[string]string, error
 // fpmsyncd may omit the /32 suffix for host routes, so if the initial
 // lookup fails and the prefix is a /32, a second lookup is attempted
 // without the mask.
-func (c *AppDBClient) GetRoute(vrf, prefix string) (*device.RouteEntry, error) {
+func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error) {
 	vals, err := c.getRouteHash(vrf, prefix)
 	if err != nil {
 		return nil, err
@@ -84,18 +83,18 @@ func (c *AppDBClient) GetRoute(vrf, prefix string) (*device.RouteEntry, error) {
 		return nil, nil
 	}
 
-	entry := &device.RouteEntry{
+	entry := &RouteEntry{
 		Prefix:   prefix,
 		VRF:      vrf,
 		Protocol: vals["protocol"],
-		Source:   device.RouteSourceAppDB,
+		Source:   RouteSourceAppDB,
 	}
 
 	// Parse comma-separated ECMP next-hops
 	nexthops := strings.Split(vals["nexthop"], ",")
 	interfaces := strings.Split(vals["ifname"], ",")
 	for i, nh := range nexthops {
-		hop := device.NextHop{IP: strings.TrimSpace(nh)}
+		hop := NextHop{IP: strings.TrimSpace(nh)}
 		if i < len(interfaces) {
 			hop.Interface = strings.TrimSpace(interfaces[i])
 		}

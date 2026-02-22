@@ -6,26 +6,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// ChangeType is an alias for device.ChangeType, re-exported for convenience.
-// All new code should prefer device.ChangeType directly.
-type ChangeType = device.ChangeType
+// ChangeType is an alias for sonic.ChangeType, re-exported for convenience.
+// All new code should prefer sonic.ChangeType directly.
+type ChangeType = sonic.ChangeType
 
-// Re-export device.ChangeType constants so existing code compiles without changes.
+// Re-export sonic.ChangeType constants so existing code compiles without changes.
 const (
-	ChangeAdd    = device.ChangeTypeAdd
-	ChangeModify = device.ChangeTypeModify
-	ChangeDelete = device.ChangeTypeDelete
+	ChangeAdd    = sonic.ChangeTypeAdd
+	ChangeModify = sonic.ChangeTypeModify
+	ChangeDelete = sonic.ChangeTypeDelete
 )
 
 // Change represents a single configuration change.
 type Change struct {
 	Table    string            `json:"table"`
 	Key      string            `json:"key"`
-	Type     device.ChangeType `json:"type"`
+	Type     sonic.ChangeType `json:"type"`
 	OldValue map[string]string `json:"old_value,omitempty"`
 	NewValue map[string]string `json:"new_value,omitempty"`
 }
@@ -37,7 +37,7 @@ type ChangeSet struct {
 	Timestamp    time.Time                  `json:"timestamp"`
 	Changes      []Change                   `json:"changes"`
 	AppliedCount int                        `json:"applied_count"`            // number of changes successfully written by Apply(); 0 before Apply()
-	Verification *device.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
+	Verification *sonic.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
 }
 
 // NewChangeSet creates a new ChangeSet.
@@ -51,7 +51,7 @@ func NewChangeSet(device, operation string) *ChangeSet {
 }
 
 // Add adds a change to the set.
-func (cs *ChangeSet) Add(table, key string, changeType device.ChangeType, oldValue, newValue map[string]string) {
+func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, oldValue, newValue map[string]string) {
 	cs.Changes = append(cs.Changes, Change{
 		Table:    table,
 		Key:      key,
@@ -74,7 +74,7 @@ func (cs *ChangeSet) IsEmpty() bool {
 // configToChangeSet wraps config function output into a ChangeSet.
 // Bridges pure config functions (return []CompositeEntry) with the ChangeSet
 // world used by primitives and composites.
-func configToChangeSet(deviceName, operation string, config []CompositeEntry, changeType device.ChangeType) *ChangeSet {
+func configToChangeSet(deviceName, operation string, config []CompositeEntry, changeType sonic.ChangeType) *ChangeSet {
 	cs := NewChangeSet(deviceName, operation)
 	for _, e := range config {
 		cs.Add(e.Table, e.Key, changeType, nil, e.Fields)
@@ -119,12 +119,12 @@ func (cs *ChangeSet) Preview() string {
 	return sb.String()
 }
 
-// toDeviceChanges converts the ChangeSet's Changes to device.ConfigChange slice.
+// toChanges converts the ChangeSet's Changes to []sonic.ConfigChange for Apply and Verify.
 // Used by both Apply() and Verify() to avoid duplicating the conversion logic.
-func (cs *ChangeSet) toDeviceChanges() []device.ConfigChange {
-	deviceChanges := make([]device.ConfigChange, 0, len(cs.Changes))
+func (cs *ChangeSet) toDeviceChanges() []sonic.ConfigChange {
+	deviceChanges := make([]sonic.ConfigChange, 0, len(cs.Changes))
 	for _, c := range cs.Changes {
-		deviceChanges = append(deviceChanges, device.ConfigChange{
+		deviceChanges = append(deviceChanges, sonic.ConfigChange{
 			Table:  c.Table,
 			Key:    c.Key,
 			Type:   c.Type,
@@ -140,9 +140,24 @@ func (cs *ChangeSet) Apply(n *Node) error {
 		return err
 	}
 
-	if err := n.Underlying().ApplyChanges(cs.toDeviceChanges()); err != nil {
-		return err
+	client := n.ConfigDBClient()
+	if client == nil {
+		return fmt.Errorf("CONFIG_DB client not connected")
 	}
+
+	for _, change := range cs.toDeviceChanges() {
+		var err error
+		switch change.Type {
+		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
+			err = client.Set(change.Table, change.Key, change.Fields)
+		case sonic.ChangeTypeDelete:
+			err = client.Delete(change.Table, change.Key)
+		}
+		if err != nil {
+			return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
+		}
+	}
+
 	cs.AppliedCount = len(cs.Changes)
 	return nil
 }
@@ -155,10 +170,95 @@ func (cs *ChangeSet) Verify(n *Node) error {
 		return util.ErrNotConnected
 	}
 
-	result, err := n.Underlying().VerifyChangeSet(context.Background(), cs.toDeviceChanges())
+	result, err := n.verifyConfigChanges(cs.toDeviceChanges())
 	if err != nil {
 		return err
 	}
 	cs.Verification = result
 	return nil
+}
+
+// verifyConfigChanges re-reads CONFIG_DB via a fresh connection and compares
+// against the given changes. Used by both ChangeSet.Verify and VerifyComposite.
+func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.VerificationResult, error) {
+	if n.conn == nil {
+		return nil, util.ErrNotConnected
+	}
+
+	addr := n.conn.ConnAddr()
+
+	freshClient := sonic.NewConfigDBClient(addr)
+	if err := freshClient.Connect(); err != nil {
+		return nil, fmt.Errorf("fresh config_db connection: %w", err)
+	}
+	defer freshClient.Close()
+
+	result := &sonic.VerificationResult{}
+
+	for _, change := range changes {
+		switch change.Type {
+		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
+			actual, err := freshClient.Get(change.Table, change.Key)
+			if err != nil {
+				return nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)
+			}
+			if len(actual) == 0 {
+				result.Failed++
+				result.Errors = append(result.Errors, sonic.VerificationError{
+					Table:    change.Table,
+					Key:      change.Key,
+					Field:    "(all)",
+					Expected: "present",
+					Actual:   "",
+				})
+				continue
+			}
+			allMatch := true
+			for field, expected := range change.Fields {
+				if got, ok := actual[field]; !ok || got != expected {
+					result.Failed++
+					allMatch = false
+					actualVal := ""
+					if ok {
+						actualVal = got
+					}
+					result.Errors = append(result.Errors, sonic.VerificationError{
+						Table:    change.Table,
+						Key:      change.Key,
+						Field:    field,
+						Expected: expected,
+						Actual:   actualVal,
+					})
+				}
+			}
+			if allMatch {
+				result.Passed++
+			}
+		case sonic.ChangeTypeDelete:
+			exists, err := freshClient.Exists(change.Table, change.Key)
+			if err != nil {
+				return nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
+			}
+			if exists {
+				result.Failed++
+				result.Errors = append(result.Errors, sonic.VerificationError{
+					Table:    change.Table,
+					Key:      change.Key,
+					Field:    "(all)",
+					Expected: "deleted",
+					Actual:   "present",
+				})
+			} else {
+				result.Passed++
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// VerifyComposite verifies a composite config against live CONFIG_DB.
+// Used by topology health checks to verify the expected composite state.
+func (n *Node) VerifyComposite(ctx context.Context, composite *CompositeConfig) (*sonic.VerificationResult, error) {
+	return n.verifyConfigChanges(composite.ToConfigChanges())
 }

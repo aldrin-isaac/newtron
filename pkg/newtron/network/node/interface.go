@@ -263,8 +263,8 @@ func (i *Interface) loadState() {
 	}
 
 	// Load operational state from state_db (if available)
-	if i.node.Underlying() != nil && i.node.Underlying().StateDB != nil {
-		stateDB := i.node.Underlying().StateDB
+	if i.node.StateDB() != nil {
+		stateDB := i.node.StateDB()
 		// Get operational status from PORT_TABLE in state_db
 		if portState, ok := stateDB.PortTable[i.name]; ok {
 			i.operStatus = portState.OperStatus

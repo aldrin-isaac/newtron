@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -51,7 +52,6 @@ Examples:
 
 		resolved := dev.Resolved()
 		configDB := dev.ConfigDB()
-		underlying := dev.Underlying()
 
 		if app.jsonOutput {
 			type bgpNeighborJSON struct {
@@ -89,7 +89,7 @@ Examples:
 					})
 				}
 			}
-			_ = underlying // operational state not yet serialized
+			// operational state not yet serialized in JSON output
 			return json.NewEncoder(os.Stdout).Encode(status)
 		}
 
@@ -141,39 +141,67 @@ Examples:
 		}
 
 		// --- Operational State ---
-		if underlying != nil && underlying.State != nil && underlying.State.BGP != nil {
-			bgp := underlying.State.BGP
-
-			establishedCount := 0
-			for _, neighbor := range bgp.Neighbors {
-				if neighbor.State == "Established" {
-					establishedCount++
-				}
+		stateClient := dev.StateDBClient()
+		if configDB != nil && stateClient != nil && len(configDB.BGPNeighbor) > 0 {
+			type neighborState struct {
+				address  string
+				remoteAS string
+				state    string
+				pfxRcvd  string
+				pfxSent  string
+				uptime   string
 			}
 
-			fmt.Printf("\nOperational State (AS %d, Router ID %s):\n", bgp.LocalAS, bgp.RouterID)
-			fmt.Printf("  Sessions: %d total, %d established\n", len(bgp.Neighbors), establishedCount)
+			var neighbors []neighborState
+			establishedCount := 0
+			for key := range configDB.BGPNeighbor {
+				// Key format: "vrf|neighborIP"
+				parts := strings.SplitN(key, "|", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				vrf, neighborIP := parts[0], parts[1]
+				entry, err := stateClient.GetBGPNeighborState(vrf, neighborIP)
+				if err != nil {
+					continue
+				}
+				ns := neighborState{
+					address:  neighborIP,
+					remoteAS: entry.RemoteAS,
+					state:    entry.State,
+					pfxRcvd:  entry.PfxRcvd,
+					pfxSent:  entry.PfxSent,
+					uptime:   entry.Uptime,
+				}
+				if entry.State == "Established" {
+					establishedCount++
+				}
+				neighbors = append(neighbors, ns)
+			}
 
-			if len(bgp.Neighbors) > 0 {
+			fmt.Printf("\nOperational State:\n")
+			fmt.Printf("  Sessions: %d total, %d established\n", len(neighbors), establishedCount)
+
+			if len(neighbors) > 0 {
 				fmt.Println()
 				t := cli.NewTable("NEIGHBOR", "REMOTE AS", "STATE", "PFX RCVD", "PFX SENT", "UPTIME").WithPrefix("  ")
 
-				for _, neighbor := range bgp.Neighbors {
-					state := neighbor.State
+				for _, ns := range neighbors {
+					state := ns.state
 					if state == "Established" {
 						state = green(state)
 					} else if state != "" {
 						state = red(state)
 					}
 
-					uptime := dash(neighbor.Uptime)
+					uptime := dash(ns.uptime)
 
 					t.Row(
-						neighbor.Address,
-						fmt.Sprintf("%d", neighbor.RemoteAS),
+						ns.address,
+						ns.remoteAS,
 						state,
-						fmt.Sprintf("%d", neighbor.PfxRcvd),
-						fmt.Sprintf("%d", neighbor.PfxSent),
+						ns.pfxRcvd,
+						ns.pfxSent,
 						uptime,
 					)
 				}

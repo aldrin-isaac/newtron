@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -383,28 +383,37 @@ func (n *Node) ListVRFs() []string {
 // GetRoute reads a route from APP_DB (Redis DB 0).
 // Returns nil RouteEntry (not error) if the prefix is not present.
 // Single-shot read — does not poll or retry.
-func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+func (n *Node) GetRoute(ctx context.Context, vrf, prefix string) (*sonic.RouteEntry, error) {
 	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	return n.conn.GetRoute(ctx, vrf, prefix)
+	if n.conn == nil || n.conn.AppDBClient() == nil {
+		return nil, fmt.Errorf("APP_DB client not connected on %s", n.name)
+	}
+	return n.conn.AppDBClient().GetRoute(vrf, prefix)
 }
 
 // GetRouteASIC reads a route from ASIC_DB (Redis DB 1) by resolving the SAI
 // object chain. Returns nil RouteEntry (not error) if not programmed in ASIC.
 // Single-shot read — does not poll or retry.
-func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*device.RouteEntry, error) {
+func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*sonic.RouteEntry, error) {
 	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	return n.conn.GetRouteASIC(ctx, vrf, prefix)
+	if n.conn == nil || n.conn.AsicDBClient() == nil {
+		return nil, fmt.Errorf("ASIC_DB client not connected on %s", n.name)
+	}
+	return n.conn.AsicDBClient().GetRouteASIC(vrf, prefix, n.configDB)
 }
 
 // GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB.
 // Returns nil (not error) if the entry does not exist.
-func (n *Node) GetNeighbor(ctx context.Context, iface, ip string) (*device.NeighEntry, error) {
+func (n *Node) GetNeighbor(ctx context.Context, iface, ip string) (*sonic.NeighEntry, error) {
 	if !n.connected {
 		return nil, util.ErrNotConnected
 	}
-	return n.conn.GetNeighbor(ctx, iface, ip)
+	if n.conn == nil || n.conn.StateClient() == nil {
+		return nil, fmt.Errorf("STATE_DB client not connected on %s", n.name)
+	}
+	return n.conn.StateClient().GetNeighbor(iface, ip)
 }

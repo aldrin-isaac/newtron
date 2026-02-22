@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
@@ -509,11 +508,10 @@ type verifyConfigDBExecutor struct{}
 
 func (e *verifyConfigDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.checkForDevices(step, func(dev *node.Node, name string) (StepStatus, string) {
-		underlying := dev.Underlying()
-		if underlying.ConfigDB == nil {
+		if dev.ConfigDB() == nil {
 			return StepStatusError, "CONFIG_DB not loaded"
 		}
-		result := e.checkDevice(underlying, step)
+		result := e.checkDevice(dev, step)
 		return result.status, result.message
 	})
 }
@@ -523,8 +521,8 @@ type checkResult struct {
 	message string
 }
 
-func (e *verifyConfigDBExecutor) checkDevice(d *sonic.Device, step *Step) checkResult {
-	client := d.Client()
+func (e *verifyConfigDBExecutor) checkDevice(dev *node.Node, step *Step) checkResult {
+	client := dev.ConfigDBClient()
 	if client == nil {
 		return checkResult{StepStatusError, "no CONFIG_DB client"}
 	}
@@ -597,7 +595,7 @@ type verifyStateDBExecutor struct{}
 
 func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.pollForDevices(ctx, step, func(dev *node.Node, name string) (bool, string, error) {
-		stateClient := dev.Underlying().StateClient()
+		stateClient := dev.StateDBClient()
 		if stateClient == nil {
 			return false, "", fmt.Errorf("STATE_DB client not connected")
 		}
@@ -749,7 +747,7 @@ type verifyRouteExecutor struct{}
 
 func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.pollForDevices(ctx, step, func(dev *node.Node, name string) (bool, string, error) {
-		var entry *device.RouteEntry
+		var entry *sonic.RouteEntry
 		var err error
 
 		if step.Expect.Source == "asic_db" {
@@ -774,7 +772,7 @@ func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step
 }
 
 // matchRoute returns true if the RouteEntry matches all non-empty expect fields.
-func matchRoute(entry *device.RouteEntry, expect *ExpectBlock) bool {
+func matchRoute(entry *sonic.RouteEntry, expect *ExpectBlock) bool {
 	if expect.Protocol != "" && entry.Protocol != expect.Protocol {
 		return false
 	}
@@ -831,11 +829,11 @@ func (e *verifyPingExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 				Message: fmt.Sprintf("target device %q: %s", step.Target, err),
 			}}
 		}
-		targetIP = targetDev.Underlying().Profile.LoopbackIP
+		targetIP = targetDev.LoopbackIP()
 	}
 
 	// Get SSH client from tunnel
-	tunnel := dev.Underlying().Tunnel()
+	tunnel := dev.Tunnel()
 	if tunnel == nil {
 		return &StepOutput{Result: &StepResult{
 			Status: StepStatusError, Device: deviceName,
@@ -979,7 +977,7 @@ type sshCommandExecutor struct{}
 
 func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.checkForDevices(step, func(dev *node.Node, name string) (StepStatus, string) {
-		tunnel := dev.Underlying().Tunnel()
+		tunnel := dev.Tunnel()
 		if tunnel == nil {
 			return StepStatusError, "no SSH tunnel available"
 		}

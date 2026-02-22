@@ -91,7 +91,6 @@ var evpnStatusCmd = &cobra.Command{
 		defer dev.Disconnect()
 
 		configDB := dev.ConfigDB()
-		underlying := dev.Underlying()
 
 		if app.jsonOutput {
 			type evpnStatusJSON struct {
@@ -112,7 +111,6 @@ var evpnStatusCmd = &cobra.Command{
 				}
 				status.VNICount = len(configDB.VXLANTunnelMap)
 			}
-			_ = underlying // operational state not yet serialized
 			return json.NewEncoder(os.Stdout).Encode(status)
 		}
 
@@ -171,23 +169,36 @@ var evpnStatusCmd = &cobra.Command{
 		}
 
 		// --- Operational State ---
-		if underlying != nil && underlying.State != nil && underlying.State.EVPN != nil {
-			evpn := underlying.State.EVPN
+		stateDB := dev.StateDB()
+		if stateDB != nil {
 			fmt.Println("\nOperational State:")
 
-			vtepState := formatOperStatus(evpn.VTEPState)
-			if evpn.VTEPState == "" {
-				vtepState = "-"
+			vtepState := "-"
+			var remoteVTEPs []string
+			for name, tunnelState := range stateDB.VXLANTunnelTable {
+				// Check if this is the local VTEP (exists in configDB)
+				if configDB != nil {
+					if _, isLocal := configDB.VXLANTunnel[name]; isLocal {
+						vtepState = formatOperStatus(tunnelState.OperStatus)
+						if tunnelState.OperStatus == "" {
+							vtepState = "-"
+						}
+						continue
+					}
+				}
+				remoteVTEPs = append(remoteVTEPs, name)
 			}
 
 			fmt.Printf("  VTEP Status: %s\n", vtepState)
-			fmt.Printf("  VNI Count: %d\n", evpn.VNICount)
-			fmt.Printf("  Type-2 Routes: %d\n", evpn.Type2Routes)
-			fmt.Printf("  Type-5 Routes: %d\n", evpn.Type5Routes)
+			vniCount := 0
+			if configDB != nil {
+				vniCount = len(configDB.VXLANTunnelMap)
+			}
+			fmt.Printf("  VNI Count: %d\n", vniCount)
 
-			if len(evpn.RemoteVTEPs) > 0 {
-				fmt.Printf("  Remote VTEPs (%d):\n", len(evpn.RemoteVTEPs))
-				for _, vtep := range evpn.RemoteVTEPs {
+			if len(remoteVTEPs) > 0 {
+				fmt.Printf("  Remote VTEPs (%d):\n", len(remoteVTEPs))
+				for _, vtep := range remoteVTEPs {
 					fmt.Printf("    %s\n", vtep)
 				}
 			} else {

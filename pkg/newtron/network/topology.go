@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -568,7 +568,7 @@ func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, to
 type HealthReport struct {
 	Device      string                     `json:"device"`
 	Status      string                     `json:"status"` // "pass", "warn", "fail"
-	ConfigCheck *device.VerificationResult `json:"config_check"`
+	ConfigCheck *sonic.VerificationResult `json:"config_check"`
 	OperChecks  []node.HealthCheckResult   `json:"oper_checks"`
 }
 
@@ -594,9 +594,8 @@ func (tp *TopologyProvisioner) VerifyDeviceHealth(ctx context.Context, deviceNam
 		return nil, fmt.Errorf("getting device: %w", err)
 	}
 
-	// Step 2: Convert composite to ConfigChanges and verify against live CONFIG_DB
-	configChanges := composite.ToConfigChanges()
-	configResult, err := dev.Underlying().VerifyChangeSet(ctx, configChanges)
+	// Step 2: Verify composite against live CONFIG_DB
+	configResult, err := dev.VerifyComposite(ctx, composite)
 	if err != nil {
 		return nil, fmt.Errorf("verifying config intent: %w", err)
 	}

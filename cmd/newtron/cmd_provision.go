@@ -171,11 +171,11 @@ func waitForFRR(ctx context.Context, dev *node.Node) error {
 		case <-deadline:
 			return fmt.Errorf("FRR did not become responsive within %s", frrReadyTimeout)
 		case <-ticker.C:
-			underlying := dev.Underlying()
-			if underlying == nil || underlying.Tunnel() == nil {
+			tunnel := dev.Tunnel()
+			if tunnel == nil {
 				continue
 			}
-			_, err := underlying.Tunnel().ExecCommand("vtysh -c 'show version'")
+			_, err := tunnel.ExecCommand("vtysh -c 'show version'")
 			if err == nil {
 				return nil
 			}
