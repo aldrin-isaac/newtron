@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -28,9 +29,9 @@ type BGPNeighborOpts struct {
 	RRClientEVPN     bool   // rrclient on l2vpn_evpn AF
 }
 
-// BGPNeighborConfig returns CompositeEntry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
-func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []CompositeEntry {
-	var entries []CompositeEntry
+// BGPNeighborConfig returns sonic.Entry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
+func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []sonic.Entry {
+	var entries []sonic.Entry
 
 	vrf := opts.VRF
 	if vrf == "" {
@@ -53,7 +54,7 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 		}
 	}
 
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table:  "BGP_NEIGHBOR",
 		Key:    fmt.Sprintf("%s|%s", vrf, neighborIP),
 		Fields: fields,
@@ -68,7 +69,7 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 		if opts.NextHopSelf {
 			afFields["nhself"] = "true"
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "BGP_NEIGHBOR_AF",
 			Key:    fmt.Sprintf("%s|%s|ipv4_unicast", vrf, neighborIP),
 			Fields: afFields,
@@ -84,7 +85,7 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 		if opts.NextHopSelfIPv6 {
 			afFields["nhself"] = "true"
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "BGP_NEIGHBOR_AF",
 			Key:    fmt.Sprintf("%s|%s|ipv6_unicast", vrf, neighborIP),
 			Fields: afFields,
@@ -100,7 +101,7 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 		if opts.RRClientEVPN {
 			evpnFields["rrclient"] = "true"
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "BGP_NEIGHBOR_AF",
 			Key:    fmt.Sprintf("%s|%s|l2vpn_evpn", vrf, neighborIP),
 			Fields: evpnFields,
@@ -110,14 +111,14 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 	return entries
 }
 
-// BGPNeighborDeleteConfig returns CompositeEntry for deleting a BGP neighbor
+// BGPNeighborDeleteConfig returns sonic.Entry for deleting a BGP neighbor
 // and all its address-family entries.
-func BGPNeighborDeleteConfig(neighborIP string) []CompositeEntry {
-	var entries []CompositeEntry
+func BGPNeighborDeleteConfig(neighborIP string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove address-family entries first
 	for _, af := range []string{"ipv4_unicast", "ipv6_unicast", "l2vpn_evpn"} {
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "BGP_NEIGHBOR_AF",
 			Key:    fmt.Sprintf("default|%s|%s", neighborIP, af),
 			Fields: nil,
@@ -125,7 +126,7 @@ func BGPNeighborDeleteConfig(neighborIP string) []CompositeEntry {
 	}
 
 	// Remove neighbor entry
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table:  "BGP_NEIGHBOR",
 		Key:    fmt.Sprintf("default|%s", neighborIP),
 		Fields: nil,
@@ -134,8 +135,8 @@ func BGPNeighborDeleteConfig(neighborIP string) []CompositeEntry {
 	return entries
 }
 
-// BGPGlobalsConfig returns CompositeEntry for BGP_GLOBALS.
-func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []CompositeEntry {
+// BGPGlobalsConfig returns sonic.Entry for BGP_GLOBALS.
+func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []sonic.Entry {
 	fields := map[string]string{
 		"local_asn": fmt.Sprintf("%d", asn),
 		"router_id": routerID,
@@ -143,7 +144,7 @@ func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]str
 	for k, v := range extra {
 		fields[k] = v
 	}
-	return []CompositeEntry{
+	return []sonic.Entry{
 		{Table: "BGP_GLOBALS", Key: vrf, Fields: fields},
 	}
 }
@@ -153,12 +154,12 @@ func BGPGlobalsAFKey(vrf, af string) string {
 	return fmt.Sprintf("%s|%s", vrf, af)
 }
 
-// BGPGlobalsAFConfig returns CompositeEntry for BGP_GLOBALS_AF.
-func BGPGlobalsAFConfig(vrf, af string, fields map[string]string) []CompositeEntry {
+// BGPGlobalsAFConfig returns sonic.Entry for BGP_GLOBALS_AF.
+func BGPGlobalsAFConfig(vrf, af string, fields map[string]string) []sonic.Entry {
 	if fields == nil {
 		fields = map[string]string{}
 	}
-	return []CompositeEntry{
+	return []sonic.Entry{
 		{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrf, af), Fields: fields},
 	}
 }
@@ -168,9 +169,9 @@ func RouteRedistributeKey(vrf, protocol, af string) string {
 	return fmt.Sprintf("%s|%s|bgp|%s", vrf, protocol, af)
 }
 
-// RouteRedistributeConfig returns CompositeEntry for ROUTE_REDISTRIBUTE.
-func RouteRedistributeConfig(vrf, protocol, af string) []CompositeEntry {
-	return []CompositeEntry{
+// RouteRedistributeConfig returns sonic.Entry for ROUTE_REDISTRIBUTE.
+func RouteRedistributeConfig(vrf, protocol, af string) []sonic.Entry {
+	return []sonic.Entry{
 		{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af), Fields: map[string]string{}},
 	}
 }
@@ -306,7 +307,7 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 			pc.Check(n.BGPNeighborExists(neighborIP), "BGP neighbor must exist",
 				fmt.Sprintf("BGP neighbor %s not found", neighborIP))
 		},
-		func() []CompositeEntry { return BGPNeighborDeleteConfig(neighborIP) })
+		func() []sonic.Entry { return BGPNeighborDeleteConfig(neighborIP) })
 	if err != nil {
 		return nil, err
 	}

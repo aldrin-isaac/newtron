@@ -69,20 +69,20 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 }
 
 // portChannelDeleteConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
-func portChannelDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntry {
-	var entries []CompositeEntry
+func portChannelDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove members first
 	if configDB != nil {
 		for key := range configDB.PortChannelMember {
 			parts := splitConfigDBKey(key)
 			if len(parts) == 2 && parts[0] == name {
-				entries = append(entries, CompositeEntry{Table: "PORTCHANNEL_MEMBER", Key: key})
+				entries = append(entries, sonic.Entry{Table: "PORTCHANNEL_MEMBER", Key: key})
 			}
 		}
 	}
 
-	entries = append(entries, CompositeEntry{Table: "PORTCHANNEL", Key: name})
+	entries = append(entries, sonic.Entry{Table: "PORTCHANNEL", Key: name})
 	return entries
 }
 
@@ -92,7 +92,7 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 
 	cs, err := n.op("delete-portchannel", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
-		func() []CompositeEntry { return portChannelDeleteConfig(n.configDB, name) })
+		func() []sonic.Entry { return portChannelDeleteConfig(n.configDB, name) })
 	if err != nil {
 		return nil, err
 	}
@@ -111,8 +111,8 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 				RequireInterfaceExists(member).
 				RequireInterfaceNotPortChannelMember(member)
 		},
-		func() []CompositeEntry {
-			return []CompositeEntry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
+		func() []sonic.Entry {
+			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
 		})
 	if err != nil {
 		return nil, err
@@ -128,8 +128,8 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member strin
 
 	cs, err := n.op("remove-portchannel-member", pcName, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(pcName) },
-		func() []CompositeEntry {
-			return []CompositeEntry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member)}}
+		func() []sonic.Entry {
+			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member)}}
 		})
 	if err != nil {
 		return nil, err

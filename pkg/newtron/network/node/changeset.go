@@ -72,9 +72,9 @@ func (cs *ChangeSet) IsEmpty() bool {
 }
 
 // configToChangeSet wraps config function output into a ChangeSet.
-// Bridges pure config functions (return []CompositeEntry) with the ChangeSet
+// Bridges pure config functions (return []sonic.Entry) with the ChangeSet
 // world used by primitives and composites.
-func configToChangeSet(deviceName, operation string, config []CompositeEntry, changeType sonic.ChangeType) *ChangeSet {
+func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet {
 	cs := NewChangeSet(deviceName, operation)
 	for _, e := range config {
 		cs.Add(e.Table, e.Key, changeType, nil, e.Fields)
@@ -88,7 +88,7 @@ func configToChangeSet(deviceName, operation string, config []CompositeEntry, ch
 // Skip it for complex operations that need custom logic between precondition and return
 // (e.g., ApplyService, RemoveService, SetupEVPN).
 func (n *Node) op(name, resource string, changeType sonic.ChangeType,
-	checks func(*PreconditionChecker), gen func() []CompositeEntry) (*ChangeSet, error) {
+	checks func(*PreconditionChecker), gen func() []sonic.Entry) (*ChangeSet, error) {
 
 	pc := n.precondition(name, resource)
 	if checks != nil {

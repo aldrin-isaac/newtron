@@ -42,8 +42,8 @@ func (n *Node) GetOrphanedACLs() []string {
 // ACL Config Functions (pure, no Node state)
 // ============================================================================
 
-// aclTableConfig returns CompositeEntry for an ACL_TABLE.
-func aclTableConfig(name, aclType, stage, ports, description string) []CompositeEntry {
+// aclTableConfig returns sonic.Entry for an ACL_TABLE.
+func aclTableConfig(name, aclType, stage, ports, description string) []sonic.Entry {
 	fields := map[string]string{
 		"type":  aclType,
 		"stage": stage,
@@ -54,11 +54,11 @@ func aclTableConfig(name, aclType, stage, ports, description string) []Composite
 	if ports != "" {
 		fields["ports"] = ports
 	}
-	return []CompositeEntry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
+	return []sonic.Entry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
 }
 
-// aclRuleConfig returns CompositeEntry for an ACL_RULE.
-func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []CompositeEntry {
+// aclRuleConfig returns sonic.Entry for an ACL_RULE.
+func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
 	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
 
 	action := "DROP"
@@ -90,7 +90,7 @@ func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []CompositeEn
 		fields["L4_SRC_PORT"] = opts.SrcPort
 	}
 
-	return []CompositeEntry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
+	return []sonic.Entry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
 }
 
 // ============================================================================
@@ -126,7 +126,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 	}
 	cs, err := n.op("create-acl-table", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
-		func() []CompositeEntry { return aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+		func() []sonic.Entry { return aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
 	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
-		func() []CompositeEntry { return aclRuleConfig(tableName, ruleName, opts) })
+		func() []sonic.Entry { return aclRuleConfig(tableName, ruleName, opts) })
 	if err != nil {
 		return nil, err
 	}
@@ -171,21 +171,21 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 }
 
 // aclTableDeleteConfig returns delete entries for an ACL table: all its rules and the table itself.
-func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntry {
-	var entries []CompositeEntry
+func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove all rules first
 	if configDB != nil {
 		prefix := name + "|"
 		for ruleKey := range configDB.ACLRule {
 			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
-				entries = append(entries, CompositeEntry{Table: "ACL_RULE", Key: ruleKey})
+				entries = append(entries, sonic.Entry{Table: "ACL_RULE", Key: ruleKey})
 			}
 		}
 	}
 
 	// Remove the table
-	entries = append(entries, CompositeEntry{Table: "ACL_TABLE", Key: name})
+	entries = append(entries, sonic.Entry{Table: "ACL_TABLE", Key: name})
 	return entries
 }
 
@@ -193,7 +193,7 @@ func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntr
 func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
 	cs, err := n.op("delete-acl-table", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
-		func() []CompositeEntry { return aclTableDeleteConfig(n.configDB, name) })
+		func() []sonic.Entry { return aclTableDeleteConfig(n.configDB, name) })
 	if err != nil {
 		return nil, err
 	}

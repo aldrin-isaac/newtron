@@ -45,7 +45,7 @@ type VLANConfig struct {
 
 // vlanConfig returns CONFIG_DB entries for a VLAN: a VLAN entry and an optional
 // VXLAN_TUNNEL_MAP entry when L2VNI is specified.
-func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
+func vlanConfig(vlanID int, opts VLANConfig) []sonic.Entry {
 	vlanName := VLANName(vlanID)
 	fields := map[string]string{
 		"vlanid": fmt.Sprintf("%d", vlanID),
@@ -54,12 +54,12 @@ func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
 		fields["description"] = opts.Description
 	}
 
-	entries := []CompositeEntry{
+	entries := []sonic.Entry{
 		{Table: "VLAN", Key: vlanName, Fields: fields},
 	}
 
 	if opts.L2VNI > 0 {
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table: "VXLAN_TUNNEL_MAP",
 			Key:   VNIMapKey(opts.L2VNI, vlanName),
 			Fields: map[string]string{
@@ -74,13 +74,13 @@ func vlanConfig(vlanID int, opts VLANConfig) []CompositeEntry {
 
 // vlanMemberConfig returns a CONFIG_DB VLAN_MEMBER entry for adding an
 // interface to a VLAN with the specified tagging mode.
-func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []CompositeEntry {
+func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []sonic.Entry {
 	taggingMode := "untagged"
 	if tagged {
 		taggingMode = "tagged"
 	}
 
-	return []CompositeEntry{
+	return []sonic.Entry{
 		{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName), Fields: map[string]string{
 			"tagging_mode": taggingMode,
 		}},
@@ -90,7 +90,7 @@ func vlanMemberConfig(vlanID int, interfaceName string, tagged bool) []Composite
 // sviConfig returns CONFIG_DB entries for an SVI: a VLAN_INTERFACE base entry
 // with optional VRF binding, an optional IP address entry, and an optional
 // SAG_GLOBAL entry for anycast gateway MAC.
-func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
+func sviConfig(vlanID int, opts SVIConfig) []sonic.Entry {
 	vlanName := VLANName(vlanID)
 
 	// VLAN_INTERFACE base entry with optional VRF binding
@@ -98,20 +98,20 @@ func sviConfig(vlanID int, opts SVIConfig) []CompositeEntry {
 	if opts.VRF != "" {
 		fields["vrf_name"] = opts.VRF
 	}
-	entries := []CompositeEntry{
+	entries := []sonic.Entry{
 		{Table: "VLAN_INTERFACE", Key: vlanName, Fields: fields},
 	}
 
 	// IP address binding
 	if opts.IPAddress != "" {
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table: "VLAN_INTERFACE", Key: SVIIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
 		})
 	}
 
 	// Anycast gateway MAC (SAG)
 	if opts.AnycastMAC != "" {
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table: "SAG_GLOBAL", Key: "IPv4", Fields: map[string]string{
 				"gwmac": opts.AnycastMAC,
 			},
@@ -128,7 +128,7 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 			pc.Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
 				RequireVLANNotExists(vlanID)
 		},
-		func() []CompositeEntry { return vlanConfig(vlanID, opts) })
+		func() []sonic.Entry { return vlanConfig(vlanID, opts) })
 	if err != nil {
 		return nil, err
 	}
@@ -137,16 +137,16 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 }
 
 // vlanDeleteConfig returns delete entries for a VLAN: its members, VNI mapping, and the VLAN itself.
-func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry {
 	vlanName := VLANName(vlanID)
-	var entries []CompositeEntry
+	var entries []sonic.Entry
 
 	// Remove VLAN members first
 	if configDB != nil {
 		for key := range configDB.VLANMember {
 			parts := splitConfigDBKey(key)
 			if len(parts) == 2 && parts[0] == vlanName {
-				entries = append(entries, CompositeEntry{Table: "VLAN_MEMBER", Key: key})
+				entries = append(entries, sonic.Entry{Table: "VLAN_MEMBER", Key: key})
 			}
 		}
 	}
@@ -155,12 +155,12 @@ func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
 	if configDB != nil {
 		for key, mapping := range configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
-				entries = append(entries, CompositeEntry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+				entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: key})
 			}
 		}
 	}
 
-	entries = append(entries, CompositeEntry{Table: "VLAN", Key: vlanName})
+	entries = append(entries, sonic.Entry{Table: "VLAN", Key: vlanName})
 	return entries
 }
 
@@ -168,7 +168,7 @@ func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
 func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	cs, err := n.op("delete-vlan", vlanResource(vlanID), ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireVLANExists(vlanID) },
-		func() []CompositeEntry { return vlanDeleteConfig(n.configDB, vlanID) })
+		func() []sonic.Entry { return vlanDeleteConfig(n.configDB, vlanID) })
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +184,7 @@ func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName stri
 		func(pc *PreconditionChecker) {
 			pc.RequireVLANExists(vlanID).RequireInterfaceExists(interfaceName)
 		},
-		func() []CompositeEntry { return vlanMemberConfig(vlanID, interfaceName, tagged) })
+		func() []sonic.Entry { return vlanMemberConfig(vlanID, interfaceName, tagged) })
 	if err != nil {
 		return nil, err
 	}
@@ -202,8 +202,8 @@ func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName s
 
 	cs, err := n.op("remove-vlan-member", vlanResource(vlanID), ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireVLANExists(vlanID) },
-		func() []CompositeEntry {
-			return []CompositeEntry{{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName)}}
+		func() []sonic.Entry {
+			return []sonic.Entry{{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName)}}
 		})
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*C
 				pc.RequireVRFExists(opts.VRF)
 			}
 		},
-		func() []CompositeEntry { return sviConfig(vlanID, opts) })
+		func() []sonic.Entry { return sviConfig(vlanID, opts) })
 	if err != nil {
 		return nil, err
 	}
@@ -232,9 +232,9 @@ func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*C
 }
 
 // sviDeleteConfig returns delete entries for a VLAN's SVI: IP entries and base entry.
-func sviDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+func sviDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry {
 	vlanName := VLANName(vlanID)
-	var entries []CompositeEntry
+	var entries []sonic.Entry
 
 	if configDB == nil {
 		return nil
@@ -243,13 +243,13 @@ func sviDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
 	// Delete all VLAN_INTERFACE IP entries (e.g., Vlan100|10.1.1.1/24)
 	for key := range configDB.VLANInterface {
 		if strings.HasPrefix(key, vlanName+"|") {
-			entries = append(entries, CompositeEntry{Table: "VLAN_INTERFACE", Key: key})
+			entries = append(entries, sonic.Entry{Table: "VLAN_INTERFACE", Key: key})
 		}
 	}
 
 	// Delete VLAN_INTERFACE base entry (e.g., Vlan100)
 	if _, ok := configDB.VLANInterface[vlanName]; ok {
-		entries = append(entries, CompositeEntry{Table: "VLAN_INTERFACE", Key: vlanName})
+		entries = append(entries, sonic.Entry{Table: "VLAN_INTERFACE", Key: vlanName})
 	}
 
 	return entries

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -14,10 +15,10 @@ func (n *Node) InterfaceExists(name string) bool {
 	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
 }
 
-// interfaceIPConfig returns CompositeEntry for configuring an IP on an interface.
+// interfaceIPConfig returns sonic.Entry for configuring an IP on an interface.
 // Creates the INTERFACE base entry + IP sub-entry.
-func interfaceIPConfig(intfName, ipAddr string) []CompositeEntry {
-	return []CompositeEntry{
+func interfaceIPConfig(intfName, ipAddr string) []sonic.Entry {
+	return []sonic.Entry{
 		{Table: "INTERFACE", Key: intfName, Fields: map[string]string{}},
 		{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}},
 	}

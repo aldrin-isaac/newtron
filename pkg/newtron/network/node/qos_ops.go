@@ -45,15 +45,15 @@ func (n *Node) ApplyQoS(ctx context.Context, intfName, policyName string, policy
 }
 
 // qosDeleteConfig returns delete entries for QoS on an interface: QUEUE entries and PORT_QOS_MAP.
-func qosDeleteConfig(configDB *sonic.ConfigDB, intfName string) []CompositeEntry {
-	var entries []CompositeEntry
+func qosDeleteConfig(configDB *sonic.ConfigDB, intfName string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Find and remove QUEUE entries for this interface
 	if configDB != nil {
 		prefix := intfName + "|"
 		for key := range configDB.Queue {
 			if strings.HasPrefix(key, prefix) {
-				entries = append(entries, CompositeEntry{Table: "QUEUE", Key: key})
+				entries = append(entries, sonic.Entry{Table: "QUEUE", Key: key})
 			}
 		}
 	}
@@ -61,7 +61,7 @@ func qosDeleteConfig(configDB *sonic.ConfigDB, intfName string) []CompositeEntry
 	// Remove PORT_QOS_MAP entry for this interface
 	if configDB != nil {
 		if _, ok := configDB.PortQoSMap[intfName]; ok {
-			entries = append(entries, CompositeEntry{Table: "PORT_QOS_MAP", Key: intfName})
+			entries = append(entries, sonic.Entry{Table: "PORT_QOS_MAP", Key: intfName})
 		}
 	}
 
@@ -73,7 +73,7 @@ func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, erro
 	intfName = util.NormalizeInterfaceName(intfName)
 
 	cs, err := n.op("remove-qos", intfName, ChangeDelete, nil,
-		func() []CompositeEntry { return qosDeleteConfig(n.configDB, intfName) })
+		func() []sonic.Entry { return qosDeleteConfig(n.configDB, intfName) })
 	if err != nil {
 		return nil, err
 	}

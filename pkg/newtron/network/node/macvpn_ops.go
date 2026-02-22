@@ -64,14 +64,14 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 
 // macvpnUnbindConfig returns delete entries for unbinding a MAC-VPN from a VLAN:
 // the L2VNI mapping and ARP suppression entry.
-func macvpnUnbindConfig(configDB *sonic.ConfigDB, vlanName string) []CompositeEntry {
-	var entries []CompositeEntry
+func macvpnUnbindConfig(configDB *sonic.ConfigDB, vlanName string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove L2VNI mapping
 	if configDB != nil {
 		for key, mapping := range configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
-				entries = append(entries, CompositeEntry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+				entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: key})
 				break
 			}
 		}
@@ -80,7 +80,7 @@ func macvpnUnbindConfig(configDB *sonic.ConfigDB, vlanName string) []CompositeEn
 	// Remove ARP suppression
 	if configDB != nil {
 		if _, ok := configDB.SuppressVLANNeigh[vlanName]; ok {
-			entries = append(entries, CompositeEntry{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName})
+			entries = append(entries, sonic.Entry{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName})
 		}
 	}
 

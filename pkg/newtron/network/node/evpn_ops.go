@@ -46,8 +46,8 @@ func (n *Node) VTEPSourceIP() string {
 }
 
 // VTEPConfig returns the VXLAN_TUNNEL + VXLAN_EVPN_NVO entries for a VTEP.
-func VTEPConfig(sourceIP string) []CompositeEntry {
-	return []CompositeEntry{
+func VTEPConfig(sourceIP string) []sonic.Entry {
+	return []sonic.Entry{
 		{Table: "VXLAN_TUNNEL", Key: "vtep1", Fields: map[string]string{"src_ip": sourceIP}},
 		{Table: "VXLAN_EVPN_NVO", Key: "nvo1", Fields: map[string]string{"source_vtep": "vtep1"}},
 	}
@@ -56,8 +56,8 @@ func VTEPConfig(sourceIP string) []CompositeEntry {
 // vniMapConfig returns the VXLAN_TUNNEL_MAP entry that maps a VLAN to an L2VNI.
 // vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
 // should pass VLANName(vlanID).
-func vniMapConfig(vlanName string, vni int) []CompositeEntry {
-	return []CompositeEntry{
+func vniMapConfig(vlanName string, vni int) []sonic.Entry {
+	return []sonic.Entry{
 		{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(vni, vlanName), Fields: map[string]string{
 			"vlan": vlanName,
 			"vni":  fmt.Sprintf("%d", vni),
@@ -68,8 +68,8 @@ func vniMapConfig(vlanName string, vni int) []CompositeEntry {
 // arpSuppressionConfig returns the SUPPRESS_VLAN_NEIGH entry for a VLAN.
 // vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
 // should pass VLANName(vlanID).
-func arpSuppressionConfig(vlanName string) []CompositeEntry {
-	return []CompositeEntry{
+func arpSuppressionConfig(vlanName string) []sonic.Entry {
+	return []sonic.Entry{
 		{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName, Fields: map[string]string{
 			"suppress": "on",
 		}},
@@ -96,7 +96,7 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 				}
 			}
 		},
-		func() []CompositeEntry { return vniMapConfig(VLANName(vlanID), vni) })
+		func() []sonic.Entry { return vniMapConfig(VLANName(vlanID), vni) })
 	if err != nil {
 		return nil, err
 	}
@@ -105,14 +105,14 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 }
 
 // vniUnmapConfig returns the delete entry for a VLAN's L2VNI mapping.
-func vniUnmapConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+func vniUnmapConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry {
 	vlanName := VLANName(vlanID)
-	var entries []CompositeEntry
+	var entries []sonic.Entry
 
 	if configDB != nil {
 		for key, mapping := range configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
-				entries = append(entries, CompositeEntry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+				entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: key})
 				break
 			}
 		}
