@@ -63,15 +63,16 @@ type ConfigDB struct {
 // This provides explicit tracking of what service was applied, enabling
 // proper removal and refresh without relying on naming conventions.
 type ServiceBindingEntry struct {
-	ServiceName string `json:"service_name"`          // Service name from network.json
-	IPAddress   string `json:"ip_address,omitempty"`  // IP assigned (for L3 services)
-	VRFName     string `json:"vrf_name,omitempty"`    // VRF created/bound
-	IPVPN       string `json:"ipvpn,omitempty"`       // IP-VPN name (for L3 EVPN)
-	MACVPN      string `json:"macvpn,omitempty"`      // MAC-VPN name (for L2 EVPN)
-	IngressACL  string `json:"ingress_acl,omitempty"` // Generated ingress ACL name
-	EgressACL   string `json:"egress_acl,omitempty"`  // Generated egress ACL name
-	AppliedAt   string `json:"applied_at,omitempty"`  // Timestamp when applied
-	AppliedBy   string `json:"applied_by,omitempty"`  // User who applied
+	ServiceName string `json:"service_name"`           // Service name from network.json
+	IPAddress   string `json:"ip_address,omitempty"`   // IP assigned (for L3 services)
+	VRFName     string `json:"vrf_name,omitempty"`     // VRF created/bound
+	IPVPN       string `json:"ipvpn,omitempty"`        // IP-VPN name (for L3 EVPN)
+	MACVPN      string `json:"macvpn,omitempty"`       // MAC-VPN name (for L2 EVPN)
+	IngressACL  string `json:"ingress_acl,omitempty"`  // Generated ingress ACL name
+	EgressACL   string `json:"egress_acl,omitempty"`   // Generated egress ACL name
+	BGPNeighbor string `json:"bgp_neighbor,omitempty"` // BGP peer IP created by service
+	AppliedAt   string `json:"applied_at,omitempty"`   // Timestamp when applied
+	AppliedBy   string `json:"applied_by,omitempty"`   // User who applied
 }
 
 // PortEntry represents a physical port configuration

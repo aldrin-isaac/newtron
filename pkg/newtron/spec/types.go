@@ -509,8 +509,19 @@ type NewtLabConfig struct {
 
 // TopologyDevice defines a device's configuration within a topology.
 type TopologyDevice struct {
-	DeviceConfig *TopologyDeviceConfig          `json:"device_config,omitempty"`
-	Interfaces   map[string]*TopologyInterface  `json:"interfaces"`
+	DeviceConfig *TopologyDeviceConfig              `json:"device_config,omitempty"`
+	Interfaces   map[string]*TopologyInterface      `json:"interfaces"`
+	PortChannels map[string]*TopologyPortChannel    `json:"portchannels,omitempty"`
+}
+
+// TopologyPortChannel defines a LAG aggregate within a topology.
+// Members reference physical interfaces from the Interfaces map.
+// Service and IP apply to the aggregate, not individual members.
+type TopologyPortChannel struct {
+	Members []string          `json:"members"`
+	Service string            `json:"service,omitempty"`
+	IP      string            `json:"ip,omitempty"`
+	Params  map[string]string `json:"params,omitempty"`
 }
 
 // TopologyDeviceConfig defines device-level settings for topology provisioning.

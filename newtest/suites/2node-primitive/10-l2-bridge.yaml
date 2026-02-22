@@ -5,7 +5,7 @@ description: |
   Verifies VLAN creation, member configuration (tagging modes), and that the NGDP
   dataplane bridges traffic between the two untagged host-facing ports (pure L2).
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   - name: create-vlan100

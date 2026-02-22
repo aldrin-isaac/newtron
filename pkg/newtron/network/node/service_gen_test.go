@@ -411,6 +411,46 @@ func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
 	t.Error("missing base INTERFACE entry")
 }
 
+func TestGenerateServiceEntries_BGP_PeerASRequest(t *testing.T) {
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"transit": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   spec.PeerASRequest,
+				},
+			},
+		},
+	}
+
+	// PeerAS field should be used when service spec says peer_as:"request"
+	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
+		ServiceName:   "transit",
+		InterfaceName: "Ethernet0",
+		IPAddress:     "10.1.0.0/31",
+		PeerAS:        65002,
+		UnderlayASN:   65001,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, e := range entries {
+		if e.Table == "BGP_NEIGHBOR" {
+			if e.Fields["asn"] != "65002" {
+				t.Errorf("BGP_NEIGHBOR asn = %q, want 65002", e.Fields["asn"])
+			}
+			// Peer IP should be derived from 10.1.0.0/31 → 10.1.0.1
+			if e.Key != "default|10.1.0.1" {
+				t.Errorf("BGP_NEIGHBOR key = %q, want default|10.1.0.1", e.Key)
+			}
+			return
+		}
+	}
+	t.Error("missing BGP_NEIGHBOR entry — peer_as:request with PeerAS should generate neighbor")
+}
+
 // assertEntry checks that an entry with the given table and key exists,
 // and optionally checks a field value (pass empty field to skip field check).
 func assertEntry(t *testing.T, entries []CompositeEntry, table, key, field, value string) {

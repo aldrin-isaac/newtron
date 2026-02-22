@@ -1,5 +1,7 @@
 # RCA-016: Post-provision BGP routes stale until manual soft clear
 
+**Note (Feb 2026):** The `ApplyFRRDefaults` mechanism has been eliminated. FRR configuration is now managed by `frrcfgd` (unified mode) via a patched `frrcfgd.py.tmpl` that includes `newtron-vni-poll`. The config apply ordering issues described here are mitigated by frrcfgd's subscription-based CONFIG_DB processing. The `restart-bgp` step in test suites handles the ASN change (RCA-019).
+
 ## Symptom
 
 After provisioning all 4 nodes in the 4-node topology, eBGP underlay sessions

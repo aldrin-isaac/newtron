@@ -1,5 +1,9 @@
 # RCA-008: frrcfgd has no template support for certain BGP globals
 
+**Status**: RESOLVED
+
+> **Note (Feb 2026):** The `ApplyFRRDefaults` mechanism has been eliminated. FRR configuration is now handled by `frrcfgd` (unified mode) with a patched `frrcfgd.py.tmpl` that includes `newtron-vni-poll`. The timing issues described here no longer apply — frrcfgd handles FRR config synchronization automatically.
+
 ## Symptom
 
 Setting `ebgp_requires_policy` and `suppress_fib_pending` in CONFIG_DB's

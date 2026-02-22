@@ -1,6 +1,9 @@
 # RCA-029: CiscoVS STATE_DB PORT_TABLE Uses `netdev_oper_status` Not `oper_status`
 
 **Status**: Workaround applied (YAML scenarios updated)
+
+**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+
 **Component**: SONiC STATE_DB / CiscoVS platform
 **Affected**: Any newtest scenario using `verify-state-db` on PORT_TABLE
 **Discovered**: 2026-02-19

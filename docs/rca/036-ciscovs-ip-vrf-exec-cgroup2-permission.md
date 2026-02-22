@@ -3,6 +3,8 @@
 ## Status
 Documented workaround in place. Upstream fix would require SONiC SSH session cgroup configuration.
 
+**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+
 ## Symptom
 
 Running `ip vrf exec <VRF> <command>` over an SSH session (without sudo) fails with:

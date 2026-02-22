@@ -142,7 +142,8 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 	// Check no interfaces are bound to this VRF
 	vrfInfo, _ := n.GetVRF(name)
 	if vrfInfo != nil && len(vrfInfo.Interfaces) > 0 {
-		return nil, fmt.Errorf("VRF %s has interfaces bound: %v", name, vrfInfo.Interfaces)
+		return nil, fmt.Errorf("cannot delete VRF %s — %d interface(s) still bound: %v — remove their services or VRF bindings first",
+			name, len(vrfInfo.Interfaces), vrfInfo.Interfaces)
 	}
 
 	cs := NewChangeSet(n.name, "device.delete-vrf")

@@ -19,7 +19,7 @@ Each platform declares its `unsupported_features` as a string array. **Only list
       // Note: macvpn/ipvpn auto-unsupported (depend on evpn-vxlan)
     },
     "ciscovs": {
-      "hwsku": "cisco-8101-p4-32x100-vs",
+      "hwsku": "cisco-p200-32x100-vs",
       "unsupported_features": []
     }
   }

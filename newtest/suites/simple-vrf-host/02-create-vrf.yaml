@@ -4,7 +4,7 @@ description: >
   is programmed in the kernel (vrfmgrd) AND in ASIC_DB (orchagent/SAI).
   Uses polling instead of fixed waits since CiscoVS Silicon One SAI is slow.
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   # Create CUSTOMER VRF via newtron primitive.

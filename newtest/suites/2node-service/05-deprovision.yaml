@@ -1,0 +1,87 @@
+name: deprovision
+description: |
+  Deprovision all services and infrastructure from both switches.
+  This validates the "no config leak" principle: every CONFIG_DB entry
+  written by the provisioner is properly cleaned up.
+  Order: services (reverse dependency), EVPN infra, BGP globals.
+topology: 2node-service
+requires: [provision]
+after: [dataplane]
+
+steps:
+  # =========================================================================
+  # Step 1: Remove all services from interfaces
+  # =========================================================================
+
+  # Remove EVPN overlay service first (has VXLAN dependencies)
+  - name: remove-l2-extend-switch1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet3
+
+  - name: remove-l2-extend-switch2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet3
+
+  # Remove local services
+  - name: remove-local-bridge-switch1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet2
+
+  - name: remove-local-bridge-switch2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet2
+
+  - name: remove-local-irb-switch1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet1
+
+  - name: remove-local-irb-switch2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet1
+
+  # Remove transit (underlay BGP) last
+  - name: remove-transit-switch1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet0
+
+  - name: remove-transit-switch2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet0
+
+  # =========================================================================
+  # Step 2: Teardown EVPN infrastructure (VTEP, NVO, overlay peers)
+  # =========================================================================
+
+  - name: teardown-evpn
+    action: teardown-evpn
+    devices: [switch1, switch2]
+
+  # =========================================================================
+  # Step 3: Remove BGP globals and device metadata
+  # =========================================================================
+
+  - name: remove-bgp-globals
+    action: remove-bgp-globals
+    devices: [switch1, switch2]
+
+  # =========================================================================
+  # Step 4: Remove baseline entries (LOOPBACK)
+  # =========================================================================
+
+  - name: remove-loopback-switch1
+    action: ssh-command
+    devices: [switch1]
+    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32' 'LOOPBACK_INTERFACE|Loopback0'"
+
+  - name: remove-loopback-switch2
+    action: ssh-command
+    devices: [switch2]
+    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.2/32' 'LOOPBACK_INTERFACE|Loopback0'"

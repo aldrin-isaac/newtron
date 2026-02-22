@@ -82,39 +82,45 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	switch svc.ServiceType {
 	case spec.ServiceTypeEVPNIRB:
 		if macvpnDef == nil {
-			return nil, fmt.Errorf("evpn-irb service requires macvpn reference")
+			return nil, fmt.Errorf("service '%s' (evpn-irb) requires a macvpn reference — add 'macvpn' to the service definition via 'newtron evpn macvpn create'",
+				serviceName)
 		}
 		if ipvpnDef == nil {
-			return nil, fmt.Errorf("evpn-irb service requires ipvpn reference")
+			return nil, fmt.Errorf("service '%s' (evpn-irb) requires an ipvpn reference — add 'ipvpn' to the service definition via 'newtron evpn ipvpn create'",
+				serviceName)
 		}
 	case spec.ServiceTypeEVPNBridged:
 		if macvpnDef == nil {
-			return nil, fmt.Errorf("evpn-bridged service requires macvpn reference")
+			return nil, fmt.Errorf("service '%s' (evpn-bridged) requires a macvpn reference — add 'macvpn' to the service definition via 'newtron evpn macvpn create'",
+				serviceName)
 		}
 	case spec.ServiceTypeEVPNRouted:
 		if ipvpnDef == nil {
-			return nil, fmt.Errorf("evpn-routed service requires ipvpn reference")
+			return nil, fmt.Errorf("service '%s' (evpn-routed) requires an ipvpn reference — add 'ipvpn' to the service definition via 'newtron evpn ipvpn create'",
+				serviceName)
 		}
 		if opts.IPAddress == "" {
-			return nil, fmt.Errorf("evpn-routed service requires IP address")
+			return nil, fmt.Errorf("service '%s' (evpn-routed) requires an IP address — use --ip flag", serviceName)
 		}
 		if !util.IsValidIPv4CIDR(opts.IPAddress) {
-			return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
+			return nil, fmt.Errorf("invalid IP address: %s (expected CIDR notation like 10.1.1.1/30)", opts.IPAddress)
 		}
 	case spec.ServiceTypeRouted:
 		if opts.IPAddress == "" {
-			return nil, fmt.Errorf("routed service requires IP address")
+			return nil, fmt.Errorf("service '%s' (routed) requires an IP address — use --ip flag", serviceName)
 		}
 		if !util.IsValidIPv4CIDR(opts.IPAddress) {
-			return nil, fmt.Errorf("invalid IP address: %s", opts.IPAddress)
+			return nil, fmt.Errorf("invalid IP address: %s (expected CIDR notation like 10.1.1.1/30)", opts.IPAddress)
 		}
 	case spec.ServiceTypeIRB:
-		if opts.VLAN == 0 {
-			return nil, fmt.Errorf("local irb service requires --vlan parameter")
+		if opts.VLAN == 0 && macvpnDef == nil {
+			return nil, fmt.Errorf("service '%s' (irb) requires a VLAN — use --vlan flag or add a macvpn reference to the service definition",
+				serviceName)
 		}
 	case spec.ServiceTypeBridged:
-		if opts.VLAN == 0 {
-			return nil, fmt.Errorf("local bridged service requires --vlan parameter")
+		if opts.VLAN == 0 && macvpnDef == nil {
+			return nil, fmt.Errorf("service '%s' (bridged) requires a VLAN — use --vlan flag or add a macvpn reference to the service definition",
+				serviceName)
 		}
 	}
 
@@ -122,33 +128,39 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
 	if isOverlay {
 		if !n.VTEPExists() {
-			return nil, fmt.Errorf("EVPN requires VTEP configuration")
+			return nil, fmt.Errorf("service '%s' (%s) requires EVPN overlay, but no VTEP is configured on %s — run 'newtron -d %s evpn setup' first",
+				serviceName, svc.ServiceType, n.Name(), n.Name())
 		}
 		if !n.BGPConfigured() {
-			return nil, fmt.Errorf("EVPN requires BGP configuration")
+			return nil, fmt.Errorf("service '%s' (%s) requires BGP, but no BGP_GLOBALS found on %s — run 'newtron -d %s evpn setup' or provision the device first",
+				serviceName, svc.ServiceType, n.Name(), n.Name())
 		}
 	}
 
 	// Filter preconditions
 	if svc.IngressFilter != "" {
 		if _, err := i.Node().GetFilter(svc.IngressFilter); err != nil {
-			return nil, fmt.Errorf("ingress filter '%s' not found", svc.IngressFilter)
+			return nil, fmt.Errorf("service '%s' references ingress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section",
+				serviceName, svc.IngressFilter, svc.IngressFilter)
 		}
 	}
 	if svc.EgressFilter != "" {
 		if _, err := i.Node().GetFilter(svc.EgressFilter); err != nil {
-			return nil, fmt.Errorf("egress filter '%s' not found", svc.EgressFilter)
+			return nil, fmt.Errorf("service '%s' references egress filter '%s' which was not found — define it via 'newtron filter create %s' or in network.json filters section",
+				serviceName, svc.EgressFilter, svc.EgressFilter)
 		}
 	}
 
 	// QoS validation
 	if svc.QoSPolicy != "" {
 		if _, err := i.Node().GetQoSPolicy(svc.QoSPolicy); err != nil {
-			return nil, fmt.Errorf("QoS policy '%s' not found", svc.QoSPolicy)
+			return nil, fmt.Errorf("service '%s' references QoS policy '%s' which was not found — define it in network.json qos_policies section",
+				serviceName, svc.QoSPolicy)
 		}
 	} else if svc.QoSProfile != "" {
 		if _, err := i.Node().GetQoSProfile(svc.QoSProfile); err != nil {
-			return nil, fmt.Errorf("QoS profile '%s' not found", svc.QoSProfile)
+			return nil, fmt.Errorf("service '%s' references QoS profile '%s' which was not found — define it in network.json qos_profiles section",
+				serviceName, svc.QoSProfile)
 		}
 	}
 
@@ -317,6 +329,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	i.serviceMACVPN = svc.MACVPN
 	i.ingressACL = ingressACLName
 	i.egressACL = egressACLName
+	i.bgpNeighbor = bgpNeighborIP
 	if opts.IPAddress != "" {
 		i.ipAddresses = append(i.ipAddresses, opts.IPAddress)
 	}
@@ -736,6 +749,23 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		cs.Add("INTERFACE", ipKey, ChangeDelete, nil, nil)
 	}
 
+	// Remove INTERFACE base entry for routed services (created by GenerateServiceEntries).
+	// Must come after IP deletions since intfmgrd enforces parent-child ordering.
+	isRouted := svc != nil && (svc.ServiceType == spec.ServiceTypeRouted || svc.ServiceType == spec.ServiceTypeEVPNRouted)
+	if isRouted && (i.vrf == "" || i.vrf == "default") {
+		cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+	}
+
+	// Remove BGP neighbor created by this service (tracked in binding)
+	if i.bgpNeighbor != "" {
+		vrfKey := "default"
+		if i.vrf != "" && i.vrf != "default" {
+			vrfKey = i.vrf
+		}
+		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, i.bgpNeighbor, "ipv4_unicast"), ChangeDelete, nil, nil)
+		cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, i.bgpNeighbor), ChangeDelete, nil, nil)
+	}
+
 	// =========================================================================
 	// Per-service resources (delete only if last user)
 	// =========================================================================
@@ -753,9 +783,15 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// =========================================================================
 
 	if i.vrf != "" && i.vrf != "default" {
-		cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
-			"vrf_name": "",
-		})
+		// For routed services, delete the INTERFACE base entry entirely.
+		// For non-routed services (IRB, bridged), just clear the VRF binding.
+		if isRouted {
+			cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+		} else {
+			cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
+				"vrf_name": "",
+			})
+		}
 
 		// Per-interface VRF: delete VRF and related config
 		if svc != nil && svc.VRFType == spec.VRFTypeInterface {
@@ -857,6 +893,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	i.serviceMACVPN = ""
 	i.ingressACL = ""
 	i.egressACL = ""
+	i.bgpNeighbor = ""
 	i.ipAddresses = nil
 	i.vrf = ""
 

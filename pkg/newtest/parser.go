@@ -248,6 +248,14 @@ func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error) {
 				return nil, fmt.Errorf("scenario %s requires itself", s.Name)
 			}
 		}
+		for _, after := range s.After {
+			if !names[after] {
+				return nil, fmt.Errorf("scenario %s has after reference to unknown scenario %q", s.Name, after)
+			}
+			if after == s.Name {
+				return nil, fmt.Errorf("scenario %s has after reference to itself", s.Name)
+			}
+		}
 	}
 
 	return topologicalSort(scenarios)
@@ -261,9 +269,12 @@ func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 
 	for _, s := range scenarios {
 		byName[s.Name] = s
-		inDegree[s.Name] = len(s.Requires)
+		inDegree[s.Name] = len(s.Requires) + len(s.After)
 		for _, req := range s.Requires {
 			dependents[req] = append(dependents[req], s.Name)
+		}
+		for _, after := range s.After {
+			dependents[after] = append(dependents[after], s.Name)
 		}
 	}
 

@@ -1811,7 +1811,9 @@ class BGPConfigDaemon:
                       ('confed_id',                                     '{no:no-prefix}bgp confederation identifier {}'),
                       ('confed_peers',                                  '{no:no-prefix}bgp confederation peers {}', hdl_confed_peers),
                       (['keepalive', 'holdtime'],                       '{no:no-prefix}timers bgp {} {}'),
-                      (['max_med_admin', '+max_med_admin_val'],         '{no:no-prefix}bgp max-med administrative {}', ['true', 'false'])
+                      (['max_med_admin', '+max_med_admin_val'],         '{no:no-prefix}bgp max-med administrative {}', ['true', 'false']),
+                      ('ebgp_requires_policy',                          '{no:no-prefix}bgp ebgp-requires-policy', ['true', 'false']),
+                      ('suppress_fib_pending',                          '{no:no-prefix}bgp suppress-fib-pending', ['true', 'false'])
     ]
 
     global_af_key_map = [(['ebgp_route_distance',

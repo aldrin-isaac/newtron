@@ -83,8 +83,8 @@
 ```json
 {
   "ciscovs": {
-    "hwsku": "cisco-8101-p4-32x100-vs",
-    "description": "SONiC 202505 with Cisco Silicon One virtual PFE (Gibraltar)",
+    "hwsku": "cisco-p200-32x100-vs",
+    "description": "SONiC 202505 with Cisco Silicon One virtual PFE (Palladium2)",
     "port_count": 32,
     "default_speed": "100G",
     "vm_image": "~/.newtlab/images/sonic-ciscovs.qcow2",
@@ -94,11 +94,21 @@
     "vm_interface_map": "sequential",
     "vm_credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
     "vm_boot_timeout": 600,
-    "dataplane": "",
+    "dataplane": "ciscovs",
     "unsupported_features": []
   }
 }
 ```
+
+**HWSKU selects PFE mode.** The image ships with three Silicon One ASIC
+models. Changing the `hwsku` field selects which NGDP simulator runs.
+See [RCA-040](../rca/040-ciscovs-pfe-mode-selection.md) for details.
+
+| HWSKU | PFE Mode | Hardware Reference |
+|-------|----------|-------------------|
+| `cisco-p200-32x100-vs` | Palladium2 | Cisco 8223-x |
+| `cisco-8101-p4-32x100-vs` | Gibraltar | Cisco 8101-32FH-O |
+| `cisco-gr2-32x100-vs` | GR2 | Cisco 8122-64EH-O |
 
 **Key Differences from VPP:**
 - Higher memory (6GB vs 4GB)

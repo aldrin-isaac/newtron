@@ -1,5 +1,7 @@
 # RCA-017: systemctl restart fails on SONiC VPP (write_standby.py)
 
+**Note (Feb 2026):** The advice to use `docker restart bgp` applies to VPP only. On CiscoVS, SONiC systemd manages containers — use `systemctl restart bgp` instead. `docker restart` on CiscoVS kills the container and systemd does not bring it back. See frrcfgd boot patch (`patches/ciscovs/always/00-frrcfgd-mode.json`).
+
 ## Symptom
 
 `systemctl restart bgp` fails on SONiC VPP images with exit code 1, even

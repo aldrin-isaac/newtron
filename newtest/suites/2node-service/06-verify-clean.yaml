@@ -1,0 +1,127 @@
+name: verify-clean
+description: |
+  Verify that CONFIG_DB is clean after full deprovision.
+  Every newtron-managed entry should be removed — no config leaks.
+topology: 2node-service
+requires: [deprovision]
+
+steps:
+  # =========================================================================
+  # Service bindings — must be completely empty
+  # =========================================================================
+
+  - name: no-binding-eth0
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet0
+    expect:
+      exists: false
+
+  - name: no-binding-eth1
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet1
+    expect:
+      exists: false
+
+  - name: no-binding-eth2
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet2
+    expect:
+      exists: false
+
+  - name: no-binding-eth3
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet3
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VLANs — all provisioner-created VLANs removed
+  # =========================================================================
+
+  - name: no-vlan100
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: no-vlan200
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VLAN
+    key: Vlan200
+    expect:
+      exists: false
+
+  - name: no-vlan300
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: false
+
+  # =========================================================================
+  # EVPN — VTEP and NVO removed
+  # =========================================================================
+
+  - name: no-vtep
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  - name: no-nvo
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  # =========================================================================
+  # BGP — globals and underlay neighbors removed
+  # =========================================================================
+
+  - name: no-bgp-globals
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      exists: false
+
+  # =========================================================================
+  # Interface — no provisioner-created INTERFACE entries
+  # =========================================================================
+
+  - name: no-interface-eth0
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: INTERFACE
+    key: Ethernet0
+    expect:
+      exists: false
+
+  # =========================================================================
+  # Loopback — baseline entries removed
+  # =========================================================================
+
+  - name: no-loopback
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: LOOPBACK_INTERFACE
+    key: Loopback0
+    expect:
+      exists: false

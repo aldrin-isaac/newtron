@@ -15,8 +15,7 @@ description: |
     5. bgp-add-neighbor — write BGP_NEIGHBOR AFTER bgpcfgd is initialized.
        bgpcfgd receives a fresh CONFIG_DB SET event with all deps met → programs neighbor.
     6. wait-bgpcfgd-settle — 10s for bgpcfgd to regenerate frr.conf after neighbor add.
-    7. apply-frr-defaults — after bgpcfgd's frr.conf generation, apply extra settings.
-    8. verify-bgp — poll until Established.
+    7. verify-bgp — poll until Established.
 
 topology: 2node
 requires: [loopback-setup]
@@ -127,17 +126,7 @@ steps:
     expect:
       exists: true
 
-  # Step 7: Wait for frrcfgd to regenerate frr.conf after programming the neighbor.
-  - name: wait-frrcfgd-settle
-    action: wait
-    duration: 10s
-
-  # Step 8: Apply FRR defaults not supported by bgpcfgd templates (RCA-034).
-  - name: apply-frr-defaults
-    action: apply-frr-defaults
-    devices: [switch1, switch2]
-
-  # Step 9: Verify underlay BGP sessions reach Established.
+  # Step 7: Verify underlay BGP sessions reach Established.
   - name: verify-bgp-underlay-switch1
     action: verify-bgp
     devices: [switch1]

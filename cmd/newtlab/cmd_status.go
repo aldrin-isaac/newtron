@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -107,6 +108,13 @@ func showLabDetail(labName string) error {
 		}
 	}
 
+	// Sort node names for stable output
+	nodeNames := make([]string, 0, len(state.Nodes))
+	for name := range state.Nodes {
+		nodeNames = append(nodeNames, name)
+	}
+	sort.Strings(nodeNames)
+
 	// Node table with conditional HOST column
 	var t *cli.Table
 	if hasRemoteHost {
@@ -114,7 +122,8 @@ func showLabDetail(labName string) error {
 	} else {
 		t = cli.NewTable("NODE", "TYPE", "STATUS", "IMAGE", "SSH", "CONSOLE", "PID")
 	}
-	for name, node := range state.Nodes {
+	for _, name := range nodeNames {
+		node := state.Nodes[name]
 		var displayStatus string
 		switch {
 		case node.Status == "error":
@@ -160,8 +169,14 @@ func showLabDetail(labName string) error {
 	}
 	t.Flush()
 
-	// Link table
+	// Link table (sort for stable output)
 	if len(state.Links) > 0 {
+		sort.Slice(state.Links, func(i, j int) bool {
+			if state.Links[i].A != state.Links[j].A {
+				return state.Links[i].A < state.Links[j].A
+			}
+			return state.Links[i].Z < state.Links[j].Z
+		})
 		fmt.Println()
 		showLinkTableWithStats(labName, state)
 	}

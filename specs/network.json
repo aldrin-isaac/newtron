@@ -166,6 +166,7 @@
     "transit": {
       "description": "Transit interface (global routing table, no VPN)",
       "service_type": "routed",
+      "routing": {"protocol": "bgp", "peer_as": "request"},
       "ingress_filter": "transit-protect",
       "permissions": {
         "all": ["neteng"]

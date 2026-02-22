@@ -78,6 +78,30 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 		}
 	}
 
+	// Step 3: Portchannel service entries
+	for pcName, pc := range topoDev.PortChannels {
+		if pc.Service == "" {
+			continue
+		}
+		peerAS := tp.resolvePortChannelPeerASN(pc, topoDev)
+		entries, err := node.GenerateServiceEntries(resolvedSpecs, node.ServiceEntryParams{
+			ServiceName:   pc.Service,
+			InterfaceName: pcName,
+			IPAddress:     pc.IP,
+			Params:        pc.Params,
+			PeerAS:        peerAS,
+			UnderlayASN:   resolved.UnderlayASN,
+			RouterID:      resolved.RouterID,
+			PlatformName:  resolved.Platform,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("portchannel %s: %w", pcName, err)
+		}
+		for _, e := range entries {
+			cb.AddEntry(e.Table, e.Key, e.Fields)
+		}
+	}
+
 	return cb.Build(), nil
 }
 
@@ -153,9 +177,10 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		"frr_mgmt_framework_config":  "true",
 		"type":                       "LeafRouter",
 	}
-	if resolved.Platform != "" {
-		metaFields["platform"] = resolved.Platform
-	}
+	// Platform is a factory value (baked into the SONiC image) — do NOT
+	// write it to DEVICE_METADATA. SONiC components may read it to find
+	// platform-specific configs; overwriting with our internal label
+	// ("sonic-ciscovs") would be incorrect.
 	if resolved.MAC != "" {
 		metaFields["mac"] = resolved.MAC
 	}
@@ -190,6 +215,16 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 				"admin_status": "up",
 				"mtu":          "9100",
 			})
+		}
+	}
+
+	// PORTCHANNEL + PORTCHANNEL_MEMBER entries for LAG aggregates
+	for pcName, pc := range topoDev.PortChannels {
+		cb.AddEntry("PORTCHANNEL", pcName, map[string]string{
+			"admin_status": "up",
+		})
+		for _, member := range pc.Members {
+			cb.AddEntry("PORTCHANNEL_MEMBER", fmt.Sprintf("%s|%s", pcName, member), map[string]string{})
 		}
 	}
 
@@ -232,6 +267,7 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 	// BGP_GLOBALS — underlay AS + eBGP settings
 	cb.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"ebgp_requires_policy": "false",
+		"suppress_fib_pending": "false",
 		"log_neighbor_changes": "true",
 	}))
 
@@ -267,43 +303,6 @@ func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, devic
 		}))
 	}
 
-	// eBGP underlay neighbors from topology links (hop-by-hop)
-	// For each interface with a link and IP, derive the peer's underlay_asn
-	// and create a BGP_NEIGHBOR entry for the eBGP underlay session.
-	for _, ti := range topoDev.Interfaces {
-		if ti.Link == "" || ti.IP == "" {
-			continue
-		}
-		// Parse "peerDevice:peerInterface" from the link field
-		parts := strings.SplitN(ti.Link, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		peerDeviceName := parts[0]
-
-		// Load peer device's profile to get its underlay_asn
-		peerProfile, err := tp.network.loadProfile(peerDeviceName)
-		if err != nil {
-			util.Logger.Warnf("Could not load peer profile %s for underlay BGP: %v", peerDeviceName, err)
-			continue
-		}
-		peerASN := peerProfile.UnderlayASN
-		if peerASN == 0 {
-			continue // No underlay ASN — skip eBGP neighbor
-		}
-
-		// Derive peer IP from our interface IP (/31 or /30)
-		peerIP, err := util.DeriveNeighborIP(ti.IP)
-		if err != nil {
-			continue
-		}
-
-		localIP, _ := util.SplitIPMask(ti.IP)
-		cb.AddEntries(node.BGPNeighborConfig(peerIP, peerASN, localIP, node.BGPNeighborOpts{
-			ActivateIPv4: true,
-		}))
-	}
-
 	// Route redistribution for connected (loopback + service subnets)
 	cb.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv4"))
 
@@ -332,6 +331,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
 		"ebgp_requires_policy":  "false",
+		"suppress_fib_pending":  "false",
 		"log_neighbor_changes":  "true",
 	}))
 
@@ -425,42 +425,89 @@ func getEVPNPeerNames(network *Network, deviceName string) []string {
 	return peers
 }
 
-// deviceHasEVPN checks if any interface service requires EVPN (L3VNI or L2VNI).
+// serviceHasEVPN checks if a service requires EVPN (L3VNI or L2VNI).
+func serviceHasEVPN(sp node.SpecProvider, serviceName string) bool {
+	svc, err := sp.GetService(serviceName)
+	if err != nil {
+		return false
+	}
+	if svc.IPVPN != "" {
+		ipvpn, err := sp.GetIPVPN(svc.IPVPN)
+		if err == nil && ipvpn.L3VNI > 0 {
+			return true
+		}
+	}
+	if svc.MACVPN != "" {
+		macvpn, err := sp.GetMACVPN(svc.MACVPN)
+		if err == nil && macvpn.VNI > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// deviceHasEVPN checks if any interface or portchannel service requires EVPN.
 func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice, sp node.SpecProvider) bool {
 	for _, ti := range topoDev.Interfaces {
-		svc, err := sp.GetService(ti.Service)
-		if err != nil {
-			continue
+		if serviceHasEVPN(sp, ti.Service) {
+			return true
 		}
-		if svc.IPVPN != "" {
-			ipvpn, err := sp.GetIPVPN(svc.IPVPN)
-			if err == nil && ipvpn.L3VNI > 0 {
-				return true
-			}
-		}
-		if svc.MACVPN != "" {
-			macvpn, err := sp.GetMACVPN(svc.MACVPN)
-			if err == nil && macvpn.VNI > 0 {
-				return true
-			}
+	}
+	for _, pc := range topoDev.PortChannels {
+		if serviceHasEVPN(sp, pc.Service) {
+			return true
 		}
 	}
 	return false
 }
 
 // ============================================================================
-// Per-interface service entry generation
+// Per-interface and portchannel service entry generation
 // ============================================================================
+
+// resolvePortChannelPeerASN derives the peer ASN for a portchannel by looking
+// at member interface links. All members of a LAG connect to the same peer
+// device, so the first member with a resolvable link determines the peer ASN.
+func (tp *TopologyProvisioner) resolvePortChannelPeerASN(pc *spec.TopologyPortChannel, topoDev *spec.TopologyDevice) int {
+	for _, memberName := range pc.Members {
+		memberIntf, ok := topoDev.Interfaces[memberName]
+		if !ok || memberIntf.Link == "" {
+			continue
+		}
+		parts := strings.SplitN(memberIntf.Link, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if peerProfile, err := tp.network.loadProfile(parts[0]); err == nil && peerProfile.UnderlayASN > 0 {
+			return peerProfile.UnderlayASN
+		}
+	}
+	return 0
+}
 
 // addInterfaceEntries generates all CONFIG_DB entries for an interface service
 // and adds them to the composite builder.  Delegates to the shared
 // node.GenerateServiceEntries function in service_gen.go.
 func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile, sp node.SpecProvider) error {
+	// Resolve peer ASN from topology link for service-level BGP routing.
+	// The transit service uses peer_as:"request", so topology.go resolves
+	// the peer's underlay_asn from the wiring diagram and passes it in.
+	var peerAS int
+	if ti.Link != "" {
+		parts := strings.SplitN(ti.Link, ":", 2)
+		if len(parts) == 2 {
+			if peerProfile, err := tp.network.loadProfile(parts[0]); err == nil {
+				peerAS = peerProfile.UnderlayASN
+			}
+		}
+	}
+
 	entries, err := node.GenerateServiceEntries(sp, node.ServiceEntryParams{
 		ServiceName:   ti.Service,
 		InterfaceName: intfName,
 		IPAddress:     ti.IP,
 		Params:        ti.Params,
+		PeerAS:        peerAS,
 		UnderlayASN:   resolved.UnderlayASN,
 		RouterID:      resolved.RouterID,
 		PlatformName:  resolved.Platform,
@@ -476,15 +523,26 @@ func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, in
 	return nil
 }
 
-// addQoSDeviceEntries scans all services in the topology, collects distinct QoS
-// policy names, and adds device-wide CONFIG_DB tables (DSCP maps, schedulers, WRED).
+// addQoSDeviceEntries scans all interface and portchannel services in the topology,
+// collects distinct QoS policy names, and adds device-wide CONFIG_DB tables.
 func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, topoDev *spec.TopologyDevice, sp node.SpecProvider) {
 	seen := make(map[string]bool)
+
+	// Collect all service names from interfaces and portchannels
+	var serviceNames []string
 	for _, ti := range topoDev.Interfaces {
-		if ti.Service == "" {
-			continue
+		if ti.Service != "" {
+			serviceNames = append(serviceNames, ti.Service)
 		}
-		svc, err := sp.GetService(ti.Service)
+	}
+	for _, pc := range topoDev.PortChannels {
+		if pc.Service != "" {
+			serviceNames = append(serviceNames, pc.Service)
+		}
+	}
+
+	for _, svcName := range serviceNames {
+		svc, err := sp.GetService(svcName)
 		if err != nil {
 			continue
 		}
@@ -588,8 +646,8 @@ func (tp *TopologyProvisioner) VerifyDeviceHealth(ctx context.Context, deviceNam
 	return report, nil
 }
 
-// getWiredInterfaces returns the sorted list of Ethernet interfaces that have
-// a link or service in the topology (i.e., interfaces that should be oper-up).
+// getWiredInterfaces returns the sorted list of interfaces that should be
+// oper-up: Ethernet interfaces with a link or service, plus portchannels.
 func (tp *TopologyProvisioner) getWiredInterfaces(deviceName string) []string {
 	topoDev, err := tp.network.GetTopologyDevice(deviceName)
 	if err != nil {
@@ -603,6 +661,9 @@ func (tp *TopologyProvisioner) getWiredInterfaces(deviceName string) []string {
 		if ti.Service != "" || ti.Link != "" {
 			interfaces = append(interfaces, intfName)
 		}
+	}
+	for pcName := range topoDev.PortChannels {
+		interfaces = append(interfaces, pcName)
 	}
 	sort.Strings(interfaces)
 	return interfaces

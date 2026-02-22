@@ -8,6 +8,8 @@
 
 ---
 
+**Note (Feb 2026):** The manual MAC injection workaround described here has been superseded by the boot patch `02-inject-mac.json` (in `pkg/newtlab/patches/ciscovs/always/`), which injects the MAC address at deploy time before SONiC containers start. The `device-init` step in test suites handles this automatically.
+
 ## Problem
 
 `vlanmgrd` (the SONiC VLAN manager daemon) crashes immediately at boot on CiscoVS with error:

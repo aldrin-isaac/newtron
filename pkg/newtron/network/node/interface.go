@@ -43,6 +43,7 @@ type Interface struct {
 	serviceMACVPN string // MAC-VPN name
 	ingressACL    string
 	egressACL     string
+	bgpNeighbor   string // BGP peer IP created by service
 
 	// PortChannel membership
 	pcParent string // Parent PortChannel if this is a member
@@ -326,6 +327,7 @@ func (i *Interface) loadState() {
 		i.serviceVRF = binding.VRFName
 		i.serviceIPVPN = binding.IPVPN
 		i.serviceMACVPN = binding.MACVPN
+		i.bgpNeighbor = binding.BGPNeighbor
 		// ACLs from binding override detected ones
 		if binding.IngressACL != "" {
 			i.ingressACL = binding.IngressACL

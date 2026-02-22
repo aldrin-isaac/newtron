@@ -1,0 +1,34 @@
+name: provision
+description: |
+  Provision both switches via topology provisioner, restart BGP to pick up
+  new ASN (RCA-019), and verify BGP sessions establish.
+  frrcfgd now renders ebgp_requires_policy and suppress_fib_pending from
+  CONFIG_DB directly — no runtime apply-frr-defaults needed.
+topology: 2node-service
+requires: [boot-ssh]
+
+steps:
+  - name: provision-switches
+    action: provision
+    devices: [switch1, switch2]
+
+  # Restart BGP containers to pick up the new CONFIG_DB entries.
+  # Factory FRR has AS 65100; bgpcfgd can't change running ASN (RCA-019).
+  - name: restart-bgp
+    action: restart-service
+    devices: [switch1, switch2]
+    service: bgp
+
+  # Wait for FRR + frrcfgd to finish initial config render.
+  # CiscoVS platform takes longer than VPP to stabilize BGP container.
+  - name: wait-bgp-restart
+    action: wait
+    duration: 40s
+
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

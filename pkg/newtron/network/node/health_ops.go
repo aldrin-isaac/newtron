@@ -123,9 +123,17 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 	// Strip null bytes — CiscoVS/Silicon One vtysh occasionally emits \x00 in JSON output.
 	cleaned := strings.ReplaceAll(output, "\x00", "")
 
+	// Strip non-JSON prefix (MOTD banners, prompts, sudo output).
+	if idx := strings.Index(cleaned, "{"); idx > 0 {
+		cleaned = cleaned[idx:]
+	}
+
 	// Parse vtysh JSON: {"ipv4Unicast": {"peers": {"10.1.0.0": {"state": "Established", ...}}}}
+	// Use json.Decoder to tolerate trailing garbage after the JSON object
+	// (CiscoVS vtysh sometimes appends shell prompt or extra braces).
 	var summary map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(cleaned), &summary); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(cleaned))
+	if err := decoder.Decode(&summary); err != nil {
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh parse: %s", err)}}
 	}
 
@@ -205,6 +213,9 @@ func (n *Node) CheckInterfaceOper(interfaces []string) []HealthCheckResult {
 			continue
 		}
 		operStatus := entry["oper_status"]
+		if operStatus == "" {
+			operStatus = entry["netdev_oper_status"]
+		}
 		if operStatus == "up" {
 			results = append(results, HealthCheckResult{
 				Check:   "interface-oper",

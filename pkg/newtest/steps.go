@@ -713,6 +713,16 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 		operMsg := fmt.Sprintf("oper: %d passed", operPassed)
 		if operFailed > 0 {
 			operMsg += fmt.Sprintf(", %d failed", operFailed)
+			// Include failed check details
+			var failMsgs []string
+			for _, oc := range report.OperChecks {
+				if oc.Status == "fail" {
+					failMsgs = append(failMsgs, oc.Message)
+				}
+			}
+			if len(failMsgs) > 0 {
+				operMsg += " (" + strings.Join(failMsgs, "; ") + ")"
+			}
 		}
 		if operWarn > 0 {
 			operMsg += fmt.Sprintf(", %d warnings", operWarn)

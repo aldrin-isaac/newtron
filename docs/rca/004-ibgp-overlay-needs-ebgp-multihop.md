@@ -1,5 +1,9 @@
 # RCA-004: iBGP overlay sessions require ebgp_multihop
 
+**Status**: SUPERSEDED by RCA-026
+
+> **Note (Feb 2026):** This analysis is superseded by the all-eBGP design documented in RCA-026. The iBGP overlay approach described here was abandoned due to SONiC local-as limitations (frrcfgd missing no-prepend replace-as flags). All topologies now use eBGP overlay with `nexthop_unchanged`.
+
 ## Symptom
 
 iBGP overlay sessions between route reflectors and clients refused to

@@ -247,6 +247,7 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	// BGP global instance + address-family + redistribution via config functions
 	for _, e := range BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"ebgp_requires_policy": "false",
+		"suppress_fib_pending": "false",
 		"log_neighbor_changes": "true",
 	}) {
 		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)

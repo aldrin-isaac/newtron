@@ -5,6 +5,8 @@
 **Status**: Won't fix — Silicon One SAI cannot create L3 DECAP tunnel map entries.
 Use EVPN IRB (type-2) for all L3 EVPN use cases on this platform.
 
+**Note (Feb 2026):** The `2node-incremental` suite referenced here has been replaced by `2node-primitive` (21 scenarios, 20/20 PASS on CiscoVS — the 21st is health-check which now also passes). EVPN IRB (type-2) works end-to-end. EVPN L3VPN (type-5) remains blocked by the Silicon One SAI limitation described here.
+
 ## Symptom
 
 EVPN L3VPN (`host3-ping-host6`, `2node-l3vpn` suite) fails with 100% packet loss.

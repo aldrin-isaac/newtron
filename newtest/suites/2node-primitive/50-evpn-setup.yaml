@@ -56,16 +56,6 @@ steps:
     expect:
       exists: true
 
-  # Wait for frrcfgd to regenerate frr.conf after EVPN config is written (RCA-034).
-  - name: wait-frrcfgd-regen
-    action: wait
-    duration: 10s
-
-  # Re-apply FRR defaults (frrcfgd overwrites them during frr.conf regeneration).
-  - name: apply-frr-defaults
-    action: apply-frr-defaults
-    devices: all
-
   # Verify EVPN BGP sessions reach Established on both switches.
   - name: verify-bgp-evpn-switch1
     action: verify-bgp

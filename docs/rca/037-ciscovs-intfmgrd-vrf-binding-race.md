@@ -4,6 +4,8 @@
 Documented workaround in place. Upstream fix would require intfmgrd to retry VRF binding
 when the kernel VRF device is not yet present.
 
+**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+
 ## Symptom
 
 After provisioning a device where both a VRF and a VRF-bound interface are written to

@@ -631,10 +631,10 @@ func computeOverallStatus(steps []StepResult) StepStatus {
 	return StepStatusPassed
 }
 
-// HasRequires returns true if any scenario declares dependencies.
+// HasRequires returns true if any scenario declares dependencies (requires or after).
 func HasRequires(scenarios []*Scenario) bool {
 	for _, s := range scenarios {
-		if len(s.Requires) > 0 {
+		if len(s.Requires) > 0 || len(s.After) > 0 {
 			return true
 		}
 	}

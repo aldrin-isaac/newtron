@@ -47,16 +47,7 @@ steps:
   # CiscoVS platform takes longer than VPP to stabilize BGP container
   - name: wait-bgp-restart
     action: wait
-    duration: 30s
-
-  # Apply FRR defaults not supported by frrcfgd templates
-  - name: apply-frr-defaults
-    action: apply-frr-defaults
-    devices: [leaf1, leaf2]
-
-  - name: wait-bgp-init
-    action: wait
-    duration: 10s
+    duration: 40s
 
   - name: verify-bgp
     action: verify-bgp

@@ -1,0 +1,21 @@
+name: verify-health
+description: |
+  Capstone: run intent-based health checks on both switches.
+  Verifies CONFIG_DB matches topology-derived expected state including
+  VLANs, VLAN members, SVIs, EVPN VNIs, ARP suppression, service
+  bindings, BGP sessions, and interface oper-up status.
+topology: 2node-service
+requires: [provision]
+
+steps:
+  - name: verify-health-switch1
+    action: verify-health
+    devices: [switch1]
+    expect:
+      overall: pass
+
+  - name: verify-health-switch2
+    action: verify-health
+    devices: [switch2]
+    expect:
+      overall: pass

@@ -3,7 +3,8 @@ description: |
   Reverse teardown of EVPN IRB (Phase 5b): remove SVI, unbind IP-VPN,
   delete VRF on both switches. Reverse of 70-evpn-irb.
 topology: 2node
-requires: [health-check]
+requires: [evpn-irb]
+after: [health-check]
 
 steps:
   # 1. Remove SVI from VLAN 300 on both switches

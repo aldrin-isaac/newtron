@@ -4,7 +4,7 @@ description: |
   Ethernet10 exists but has no host wired). Tests mtu, admin_status, and description
   set/verify primitives.
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   # Set MTU to 9100

@@ -4,7 +4,7 @@ description: |
   (→host4), assign IP, and verify host4 can reach the gateway.
   Demonstrates the full primitive build-up: VRF → interface binding → IP → ping.
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   - name: create-vrf-local

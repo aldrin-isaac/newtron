@@ -57,9 +57,10 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 
 	// IP address removed
 	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeDelete)
-	// VRF unbinding
-	c := assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeModify)
-	assertField(t, c, "vrf_name", "")
+	// INTERFACE base entry deleted (routed service — full cleanup)
+	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeDelete)
+	// Per-interface VRF deleted (derived name: service-interface)
+	assertChange(t, cs, "VRF", "customer-l3-Eth0", ChangeDelete)
 	// Service binding removed
 	assertChange(t, cs, "NEWTRON_SERVICE_BINDING", "Ethernet0", ChangeDelete)
 }

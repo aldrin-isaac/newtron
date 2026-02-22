@@ -1,5 +1,7 @@
 # RCA-019: BGP ASN Mismatch After Provisioning
 
+**Note (Feb 2026):** The `ApplyFRRDefaults` mechanism and `docker restart bgp` references are outdated. FRR configuration is now managed by `frrcfgd` (unified mode). The ASN change still requires `systemctl restart bgp` (on CiscoVS) or `docker restart bgp` (on VPP) after provisioning — this is handled by the `restart-bgp` step in test suites.
+
 ## Symptom
 
 `ApplyFRRDefaults` fails with:

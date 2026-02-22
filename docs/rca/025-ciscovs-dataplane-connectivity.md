@@ -2,7 +2,9 @@
 
 **Date:** 2026-02-16
 **Platform:** SONiC 202505 with Cisco Silicon One Virtual PFE (Palladium2)
-**Status:** 🔍 **IN PROGRESS**
+**Status:** RESOLVED
+
+**Note (Feb 2026):** EVPN L2 dataplane is now fully working on CiscoVS. The 3node-dataplane suite passes 6/6 including evpn-l2-irb. ARP suppression, VXLAN tunnels, and MAC learning all work correctly on Silicon One Palladium2.
 
 ## Summary
 

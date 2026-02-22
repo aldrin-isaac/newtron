@@ -1,5 +1,9 @@
 # RCA-015: FRR silently ignores ebgp-multihop when local-as equals remote-as
 
+**Status**: SUPERSEDED by RCA-026
+
+> **Note (Feb 2026):** This analysis is superseded by the all-eBGP design documented in RCA-026. The iBGP+local-as approach was abandoned; all topologies now use eBGP overlay.
+
 ## Symptom
 
 Inter-RR BGP sessions (spine1 ↔ spine2) in the 4-node topology would not

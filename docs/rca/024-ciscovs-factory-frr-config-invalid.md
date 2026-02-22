@@ -7,6 +7,8 @@
 
 ---
 
+**Note (Feb 2026):** The factory config values described here (platform, default_bgp_status) are now handled correctly. The topology provisioner no longer writes `platform` to DEVICE_METADATA (it's a factory value baked into the SONiC image). Only `hwsku`, `mac`, `hostname`, and `docker_routing_config_mode` are provisioned.
+
 ## Problem
 
 BGP container enters crash-loop on first boot. The container starts, bgpd rejects the configuration, supervisord exits vtysh_b with status 13, and systemd restarts the service every ~15-20 seconds indefinitely.

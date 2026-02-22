@@ -4,7 +4,7 @@ description: |
   Uses primitive apply-baseline (not provision), so only touches DEVICE_METADATA
   hostname and LOOPBACK_INTERFACE — no wipe of CONFIG_DB, no MAC loss.
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   - name: apply-baseline-both

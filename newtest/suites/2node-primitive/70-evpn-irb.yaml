@@ -86,15 +86,6 @@ steps:
     expect:
       exists: true
 
-  # Wait for bgpcfgd to regenerate frr.conf, then re-apply FRR defaults.
-  - name: wait-bgpcfgd-settle
-    action: wait
-    duration: 10s
-
-  - name: apply-frr-defaults
-    action: apply-frr-defaults
-    devices: all
-
   # Configure SVI for VLAN 300 with gateway IP in Vrf_irb on both switches.
   - name: configure-svi-sw1
     action: configure-svi

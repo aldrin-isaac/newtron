@@ -240,6 +240,7 @@ func init() {
 				MACVPN:      vals["macvpn"],
 				IngressACL:  vals["ingress_acl"],
 				EgressACL:   vals["egress_acl"],
+				BGPNeighbor: vals["bgp_neighbor"],
 				AppliedAt:   vals["applied_at"],
 				AppliedBy:   vals["applied_by"],
 			}

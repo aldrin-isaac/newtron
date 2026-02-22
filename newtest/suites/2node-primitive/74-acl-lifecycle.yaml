@@ -4,7 +4,7 @@ description: |
   Tests create-acl-table, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
   and delete-acl-table primitives with full CONFIG_DB verification.
 topology: 2node
-requires: [device-init]
+requires: [boot-ssh]
 
 steps:
   # 1. Create ACL table
