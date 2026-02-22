@@ -310,6 +310,14 @@ sudo vim /etc/newtron/network.json
       "description": "Transit (global table, no VPN)",
       "service_type": "routed",
       "ingress_filter": "transit-protect"
+    },
+    "access-vlan": {
+      "description": "Local access VLAN (no EVPN)",
+      "service_type": "bridged"
+    },
+    "local-irb": {
+      "description": "Local IRB (no EVPN)",
+      "service_type": "irb"
     }
   }
 }
@@ -677,6 +685,8 @@ newtron service list
 # customer-l3    evpn-routed   L3 routed customer interface
 # server-irb     evpn-irb      Server VLAN with IRB routing
 # transit        routed        Transit peering interface
+# access-vlan    bridged       Local access VLAN (no EVPN)
+# local-irb      irb           Local IRB (no EVPN)
 ```
 
 ### 5.2 Show Service Details
@@ -720,6 +730,13 @@ newtron service create my-l2svc --type evpn-bridged --macvpn servers-vlan100 -x
 
 newtron service create my-irb --type evpn-irb --ipvpn server-vpn --macvpn servers-vlan100 \
   --qos-policy customer-4q --ingress-filter customer-ingress --description "IRB service" -x
+
+# Local service types (no EVPN overlay):
+newtron service create my-transit --type routed --ingress-filter transit-protect -x
+
+newtron service create my-vlan --type bridged -x
+
+newtron service create my-local-irb --type irb -x
 ```
 
 ### 5.4 Delete a Service Definition

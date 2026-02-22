@@ -1340,6 +1340,14 @@ Services are the primary abstraction - they bundle intent into reusable template
         "import_policy": "customer-import",
         "export_policy": "customer-export"
       }
+    },
+    "access-vlan": {
+      "description": "Local access VLAN (no EVPN)",
+      "service_type": "bridged"
+    },
+    "local-irb": {
+      "description": "Local IRB (no EVPN)",
+      "service_type": "irb"
     }
   }
 }
@@ -1366,6 +1374,10 @@ Services can be created and deleted via CLI without editing JSON directly:
 ```
 newtron service create customer-l3 --type routed --ipvpn cust-vpn --vrf-type shared \
   --qos-policy 8q-datacenter --ingress-filter customer-in --description "Customer L3 VPN" -x
+
+newtron service create access-vlan --type bridged --description "Local access VLAN" -x
+
+newtron service create local-irb --type irb --description "Local IRB" -x
 
 newtron service delete customer-l3 -x
 ```
