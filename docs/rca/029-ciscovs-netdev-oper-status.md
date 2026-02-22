@@ -62,7 +62,7 @@ CiscoVS. Affected scenarios:
 
 ## Fix
 
-Updated all STATE_DB PORT_TABLE field checks in 2node-incremental scenarios to use
+Updated all STATE_DB PORT_TABLE field checks in 2node-primitive scenarios to use
 `netdev_oper_status`:
 
 ```yaml

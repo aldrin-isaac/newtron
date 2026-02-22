@@ -35,7 +35,7 @@ Added an `ApplyFRRDefaults()` method in the device layer that applies
 these settings directly via `vtysh` after the BGP container restarts:
 
 ```go
-func (d *Device) ApplyFRRDefaults() error {
+func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
     cmds := []string{
         "configure terminal",
         "router bgp " + asn,
@@ -44,7 +44,7 @@ func (d *Device) ApplyFRRDefaults() error {
         "end",
         "write memory",
     }
-    return d.RunVtysh(cmds)
+    return n.RunVtysh(cmds)
 }
 ```
 

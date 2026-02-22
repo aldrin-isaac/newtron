@@ -27,16 +27,16 @@ started correctly.
 
 ## Fix
 
-Changed `RestartService()` in `pkg/newtron/device/sonic/device.go` from `systemctl restart`
+Changed `RestartService()` in `pkg/newtron/network/node/node.go` from `systemctl restart`
 to `docker restart`. Docker restart directly manages the container lifecycle
 without going through systemd's ExecStopPost scripts.
 
 ```go
 // Before:
-output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo systemctl restart %s", name))
+output, err := n.Tunnel().ExecCommand(fmt.Sprintf("sudo systemctl restart %s", name))
 
 // After:
-output, err := d.tunnel.ExecCommand(fmt.Sprintf("sudo docker restart %s", name))
+output, err := n.Tunnel().ExecCommand(fmt.Sprintf("sudo docker restart %s", name))
 ```
 
 This is consistent with the existing workaround documented in project memory:

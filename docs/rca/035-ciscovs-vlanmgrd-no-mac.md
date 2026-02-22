@@ -127,9 +127,9 @@ if systemMAC != "" {
 **Why read from `/etc/sonic/config_db.json`:** The factory image writes the platform-initialized MAC to this file at build time. This file persists across all provisioning runs (newtron never calls `config save`, so it doesn't overwrite the file). Therefore, `config_db.json` is the canonical source for the factory MAC.
 
 **Helper methods:**
-- `pkg/newtron/device/sonic/device.go`: Added `ReadSystemMAC()` method
+- `pkg/newtron/network/node/node.go`: Added `ReadSystemMAC()` method
   ```go
-  func (d *Device) ReadSystemMAC() string {
+  func (n *Node) ReadSystemMAC() string {
       // SSH cat /etc/sonic/config_db.json, parse JSON, extract
       // DEVICE_METADATA.localhost.mac, return it
   }
@@ -139,7 +139,7 @@ if systemMAC != "" {
 
 ### Part 2: Restart vlanmgrd (Since It's Already FATAL)
 
-**File:** `newtest/suites/2node-incremental/01-provision.yaml` after provisioning step
+**File:** `newtest/suites/2node-primitive/01-provision.yaml` after provisioning step
 
 After provisioning completes (and the MAC has been injected), supervisord has already crashed vlanmgrd 4 times and marked it FATAL. Writing the MAC alone doesn't auto-restart it. So the test explicitly restarts vlanmgrd:
 
@@ -155,12 +155,12 @@ This will:
 
 ## Code Changes
 
-### `pkg/newtron/device/sonic/device.go`
+### `pkg/newtron/network/node/node.go`
 
 Added `ReadSystemMAC()` method to read the factory MAC from `/etc/sonic/config_db.json`:
 
 ```go
-func (d *Device) ReadSystemMAC() string {
+func (n *Node) ReadSystemMAC() string {
     // Connect via SSH, read /etc/sonic/config_db.json, parse JSON,
     // extract DEVICE_METADATA.localhost.mac, return it
     // If file doesn't exist or field is missing, return empty string
@@ -199,7 +199,7 @@ if systemMAC != "" {
 }
 ```
 
-### `newtest/suites/2node-incremental/01-provision.yaml`
+### `newtest/suites/2node-primitive/01-provision.yaml`
 
 After provisioning step, added restart of vlanmgrd:
 

@@ -65,7 +65,7 @@ simultaneously. On CiscoVS, orchagent and the SAI Silicon One layer add addition
 
 ## Fix
 
-Kernel-level workaround in `newtest/suites/2node-incremental/01-provision.yaml`:
+Kernel-level workaround in `newtest/suites/2node-primitive/01-provision.yaml`:
 
 ```yaml
 - name: fix-vrf-kernel-binding-switch2

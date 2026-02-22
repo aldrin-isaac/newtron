@@ -25,7 +25,7 @@ and tolerates config reload.
 
 ## Fix
 
-Changed the newtron `-s` flag behavior in `pkg/newtron/device/sonic/device.go` from
+Changed the newtron `-s` flag behavior in `pkg/newtron/network/node/node.go` from
 `config reload -y` to `config save -y` followed by `docker restart bgp`.
 This only restarts the BGP container (which is what needs the config applied)
 without touching syncd or other services.

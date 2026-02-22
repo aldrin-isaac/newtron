@@ -49,7 +49,7 @@ domain, and the SVI bound to the VRF provides L3 routing.  This is the standard
 EVPN IRB path and works end-to-end:
 
 - **3node-dataplane**: 6/6 PASS (including evpn-l2-irb scenario)
-- **2node-incremental**: 32/32 PASS
+- **2node-primitive**: 32/32 PASS
 
 ## Attempted Workarounds (All Failed)
 

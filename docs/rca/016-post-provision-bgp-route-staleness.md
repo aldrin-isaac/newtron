@@ -36,7 +36,7 @@ Two changes:
 
 ### 1. Per-device: `ApplyFRRDefaults` — `clear bgp * soft` (both directions)
 
-`ApplyFRRDefaults()` in `pkg/newtron/device/sonic/device.go` originally ran
+`ApplyFRRDefaults()` in `pkg/newtron/network/node/node.go` originally ran
 `clear bgp * soft out` (outbound only). This was insufficient: when device A
 runs before device B, device A re-advertises to B, but B still has
 `suppress-fib-pending` active and silently suppresses the routes. When B later

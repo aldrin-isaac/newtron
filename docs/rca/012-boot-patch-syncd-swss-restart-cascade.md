@@ -47,7 +47,7 @@ systemd applies `start-limit-hit` and refuses further restarts.
 Key elements: sleep between syncd and swss restarts, `reset-failed` to clear
 systemd's rate-limit counter before restarting swss.
 
-**Service restarts during provisioning** (`pkg/newtron/device/sonic/device.go`):
+**Service restarts during provisioning** (`pkg/newtron/network/node/node.go`):
 Changed `RestartService` from `docker restart` to `systemctl restart` to work
 with systemd's service management rather than against it.
 

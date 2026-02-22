@@ -52,7 +52,7 @@ the same NGDP ARP priming effect without needing VRF exec context:
 
 ### Applied Changes
 
-`newtest/suites/2node-incremental/01-provision.yaml` — `prime-ngdp-arp-customer-vrf` step:
+`newtest/suites/2node-primitive/01-provision.yaml` — `prime-ngdp-arp-customer-vrf` step:
 ```bash
 # Before (broken):
 ip vrf exec CUSTOMER ping -c 1 -W 5 10.10.1.0
@@ -61,7 +61,7 @@ ip vrf exec CUSTOMER ping -c 1 -W 5 10.10.1.0
 sudo ping -c 1 -W 5 -I Ethernet2 10.10.1.0
 ```
 
-`newtest/suites/2node-incremental/35-vrf-routing.yaml` — `switch2-prime-arp` step:
+`newtest/suites/2node-primitive/35-vrf-routing.yaml` — `switch2-prime-arp` step:
 ```bash
 # Before (broken):
 ip vrf exec Vrf_dp_test ping -c 1 -W 5 -I Ethernet3 172.16.1.2
