@@ -2724,13 +2724,10 @@ func (d *sonic.Device) RequireLocked() error {
 ```go
 // DerivedValues contains auto-computed values
 type DerivedValues struct {
-    NeighborIP    string
-    NetworkAddr   string
-    BroadcastAddr string
-    SubnetMask    int
-    VRFName       string
-    ACLPrefix     string
-    Description   string
+    NeighborIP  string
+    VRFName     string
+    Description string
+    ACLPrefix   string
 }
 
 // DeriveFromInterface computes values from interface, IP, and service name.

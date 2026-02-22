@@ -1,12 +1,12 @@
 # Newtron Device Layer LLD
 
-The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/` (NOS-independent shared types) and `pkg/newtron/device/sonic/` (SONiC-specific Redis implementation) — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
+The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/sonic/` (SONiC-specific Redis implementation, including all shared types) — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
 For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
 
 ---
 
-## 1. SSH Tunnel (`pkg/newtron/device/tunnel.go`)
+## 1. SSH Tunnel (`pkg/newtron/device/sonic/types.go`)
 
 SONiC devices in the lab run inside QEMU VMs managed by newtlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
 
@@ -391,59 +391,6 @@ The serialization path is:
 
 **Why not json.Unmarshal:** Redis hashes are flat `map[string]string`, not JSON objects. There's no JSON to unmarshal. The `json` tags on structs serve double duty: they define both the Redis hash field name and the JSON serialization format (for when structs are marshaled to JSON for display/logging).
 
-### 2.5 PopulateDeviceState
-
-The `PopulateDeviceState` function merges data from STATE_DB and CONFIG_DB to build the unified `DeviceState` (pseudocode — comments indicate elided sections):
-
-```go
-// PopulateDeviceState fills DeviceState from StateDB data
-func PopulateDeviceState(state *DeviceState, stateDB *StateDB, configDB *ConfigDB) {
-    // Populate interface state from PORT_TABLE + CONFIG_DB VRF bindings
-    for name, portState := range stateDB.PortTable {
-        intfState := &InterfaceState{
-            Name:        name,
-            AdminStatus: portState.AdminStatus,
-            OperStatus:  portState.OperStatus,
-            Speed:       portState.Speed,
-        }
-        if portState.MTU != "" {
-            intfState.MTU, _ = strconv.Atoi(portState.MTU)
-        }
-        if configDB != nil {
-            if intfEntry, ok := configDB.Interface[name]; ok {
-                intfState.VRF = intfEntry.VRFName
-            }
-        }
-        state.Interfaces[name] = intfState
-    }
-
-    // Populate PortChannel state from LAG_TABLE + LAG_MEMBER_TABLE
-    // ... (active members from member state "selected" field)
-
-    // Populate BGP state
-    state.BGP = &BGPState{Neighbors: make(map[string]*BGPNeighborState)}
-    if configDB != nil {
-        if globals, ok := configDB.BGPGlobals["default"]; ok {
-            state.BGP.LocalAS, _ = strconv.Atoi(globals.LocalASN)
-            state.BGP.RouterID = globals.RouterID
-        }
-    }
-
-    // Populate EVPN state from VXLAN_TUNNEL_TABLE
-    // Distinguishes local VTEP (exists in configDB.VXLANTunnel) from remote VTEPs
-    state.EVPN = &EVPNState{}
-    for name, tunnelState := range stateDB.VXLANTunnelTable {
-        if configDB != nil {
-            if _, ok := configDB.VXLANTunnel[name]; ok {
-                state.EVPN.VTEPState = tunnelState.OperStatus // Local VTEP
-            } else {
-                state.EVPN.RemoteVTEPs = append(state.EVPN.RemoteVTEPs, name)
-            }
-        }
-    }
-}
-```
-
 ---
 
 ## 3. APP_DB (`pkg/newtron/device/sonic/appldb.go`)
@@ -634,8 +581,6 @@ func (d *Device) Connect(ctx context.Context) error {
         d.StateDB, err = d.stateClient.GetAll()
         if err != nil {
             util.WithDevice(d.Name).Warnf("Failed to load state_db: %v", err)
-        } else {
-            PopulateDeviceState(d.State, d.StateDB, d.ConfigDB)
         }
     }
 

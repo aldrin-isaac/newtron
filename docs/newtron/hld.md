@@ -1007,10 +1007,10 @@ Every mutating operation (`ApplyService`, `RemoveService`, `RefreshService`, `Cr
 `VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly:
 
 ```go
-// VerifyChangeSet re-reads CONFIG_DB and confirms every entry in the
+// Verify re-reads CONFIG_DB and confirms every entry in the
 // ChangeSet was applied. Returns a VerificationResult listing any
 // missing or mismatched entries.
-func (n *Node) VerifyChangeSet(ctx context.Context, cs *ChangeSet) (*VerificationResult, error)
+func (cs *ChangeSet) Verify(n *Node) error
 ```
 
 This works for all operations — disaggregated (`CreateVLAN`) or composite (`DeliverComposite`) — because they all produce ChangeSets.
@@ -1074,7 +1074,7 @@ These primitives are building blocks for external orchestrators (newtest) that h
 
 #### 4.9.4 Health Checks
 
-The existing `RunHealthChecks()` method (§4.4) provides operational status: BGP sessions Established, interfaces oper-up, LAG members active, VXLAN tunnels healthy. These are local device observations that complement ChangeSet verification and routing state queries.
+Health checks are composed from two Node-level primitives: `CheckBGPSessions(ctx)` (verifies BGP neighbor states) and `CheckInterfaceOper(interfaces)` (verifies interface oper-up status). The `TopologyProvisioner.VerifyDeviceHealth(ctx, deviceName)` method composes both checks together with CONFIG_DB intent verification. These are local device observations that complement ChangeSet verification and routing state queries.
 
 #### 4.9.5 What newtron Does NOT Verify
 
@@ -1089,10 +1089,10 @@ These require topology-wide context and belong in the orchestrator (newtest).
 
 | Capability | Method | Database | Returns |
 |-----------|--------|----------|---------|
-| CONFIG_DB writes landed | `VerifyChangeSet(cs)` | CONFIG_DB (DB 4) | Pass/fail with diff |
+| CONFIG_DB writes landed | `cs.Verify(n)` | CONFIG_DB (DB 4) | Pass/fail with diff |
 | Route installed by FRR | `GetRoute(vrf, prefix)` | APP_DB (DB 0) | RouteEntry or nil |
 | Route programmed in ASIC | `GetRouteASIC(vrf, prefix)` | ASIC_DB (DB 1) | RouteEntry or nil |
-| Operational health | `RunHealthChecks()` | STATE_DB (DB 6) | Health report |
+| Operational health | `VerifyDeviceHealth(ctx, deviceName)` | STATE_DB (DB 6) | Health report |
 
 ### 4.10 CONFIG_DB Cache Architecture
 
@@ -1123,7 +1123,7 @@ An **episode** is a time-boxed unit of work that reads the cache. Every episode 
 | Episode type | How it refreshes | Examples |
 |-------------|-----------------|---------|
 | **Write episode** | `Lock()` refreshes after acquiring distributed lock | `ExecuteOp` (all mutating operations) |
-| **Read-only episode** | `Refresh()` at the start | `RunHealthChecks`, CLI show commands |
+| **Read-only episode** | `Refresh()` at the start | `CheckBGPSessions` / `CheckInterfaceOper`, CLI show commands |
 | **Composite episode** | `Refresh()` after delivery | Composite provisioning path |
 | **Initial episode** | `Connect()` loads initial snapshot | First use after connection |
 
@@ -1143,7 +1143,7 @@ Within an episode, the cache is a consistent snapshot. Between episodes, the cac
 | `Apply()` | Writes to Redis only (no reload) | Cache stale (episode ending) |
 | `Unlock()` | No cache action | Episode over |
 | `Refresh()` | `GetAll()` + rebuild interfaces | Redis state at call time (starts a new read-only episode) |
-| `RunHealthChecks()` | `Refresh()` at entry | Fresh snapshot for health checks |
+| `CheckBGPSessions()` | `Refresh()` at entry | Fresh snapshot for health checks |
 
 #### 4.10.6 Known Limitation
 
@@ -1779,7 +1779,7 @@ Verification spans four tiers across two owners:
 
 **Why it's reliable**: CONFIG_DB is under Newtron's direct control. When Newtron writes `VLAN|Vlan500` to Redis, it is either there or it is not. There is no intermediate processing layer.
 
-**newtron primitive**: `Device.VerifyChangeSet(cs)` — re-reads CONFIG_DB through a fresh connection, diffs against the ChangeSet. Returns `VerificationResult` with pass count, fail count, and per-entry errors.
+**newtron primitive**: `cs.Verify(n)` — re-reads CONFIG_DB through a fresh connection, diffs against the ChangeSet. Returns `VerificationResult` with pass count, fail count, and per-entry errors.
 
 This works for every operation (disaggregated or composite) because they all produce ChangeSets. It is the only assertion newtron makes — checking its own writes.
 
@@ -1789,7 +1789,7 @@ This works for every operation (disaggregated or composite) because they all pro
 
 **What it checks**: Routes installed by FRR via `fpmsyncd` into APP_DB (Redis DB 0).
 
-**newtron primitives**: `Device.GetRoute(vrf, prefix)` and `Device.GetRouteASIC(vrf, prefix)` return structured `RouteEntry` data (prefix, protocol, next-hops) — or nil if the route is not present. These are observation methods, not assertions. newtron does not know whether a given route is "correct" — that depends on what other devices are advertising, which requires topology-wide context.
+**newtron primitives**: `Node.GetRoute(vrf, prefix)` and `Node.GetRouteASIC(vrf, prefix)` return structured `RouteEntry` data (prefix, protocol, next-hops) — or nil if the route is not present. These are observation methods, not assertions. newtron does not know whether a given route is "correct" — that depends on what other devices are advertising, which requires topology-wide context.
 
 **How orchestrators use it**: newtest connects to a remote device via newtron and calls `GetRoute` to check that an expected route arrived. For example, after provisioning leaf1, newtest connects to spine1 and verifies that leaf1's connected subnet appears in spine1's APP_DB with the expected next-hop. newtron provides the read; newtest knows what to expect.
 
@@ -1799,7 +1799,7 @@ This works for every operation (disaggregated or composite) because they all pro
 
 **What it checks**: BGP session state, interface oper-status, LAG health, VXLAN/EVPN state via STATE_DB (Redis DB 6).
 
-**newtron primitive**: `Device.RunHealthChecks()` returns a health report with per-subsystem status (ok, warning, critical). This is local device health — not fabric correctness.
+**newtron primitive**: `TopologyProvisioner.VerifyDeviceHealth(ctx, deviceName)` composes `Node.CheckBGPSessions(ctx)` and `Node.CheckInterfaceOper(interfaces)` to return a health report with per-subsystem status. This is local device health — not fabric correctness.
 
 **SONiC-VS behavior**: BGP sessions establish reliably. Interface oper-status works for simple topologies. EVPN/VXLAN health depends on `orchagent` convergence.
 
@@ -1817,9 +1817,9 @@ This works for every operation (disaggregated or composite) because they all pro
 
 | Tier | What | Owner | newtron Method | Failure Mode |
 |------|------|-------|---------------|-------------|
-| CONFIG_DB | Redis entries match ChangeSet | **newtron** | `VerifyChangeSet(cs)` | Hard fail (assertion) |
+| CONFIG_DB | Redis entries match ChangeSet | **newtron** | `cs.Verify(n)` | Hard fail (assertion) |
 | APP_DB / ASIC_DB | Routes installed by FRR / ASIC | **newtron** | `GetRoute()`, `GetRouteASIC()` | Observation (data, not verdict) |
-| Operational state | BGP sessions, interface health | **newtron** | `RunHealthChecks()` | Observation (health report) |
+| Operational state | BGP sessions, interface health | **newtron** | `VerifyDeviceHealth()` | Observation (health report) |
 | Cross-device / data plane | Route propagation, ping | **newtest** | Composes newtron primitives | Topology-dependent |
 
 ## 14. Lab Architecture
@@ -1939,7 +1939,7 @@ The system maintains this separation to enable:
 | 0 | APP_DB | Routes installed by FRR/fpmsyncd (read by Newtron via `GetRoute`) |
 | 1 | ASIC_DB | SAI objects programmed by orchagent (read by Newtron via `GetRouteASIC`) |
 | 4 | CONFIG_DB | Device configuration (read/write by Newtron) |
-| 6 | STATE_DB | Operational state (read-only by Newtron via `RunHealthChecks`) |
+| 6 | STATE_DB | Operational state (read-only by Newtron via `VerifyDeviceHealth` / `CheckBGPSessions`) |
 
 ### CLI Architecture
 | Term | Definition |
@@ -1958,8 +1958,8 @@ The system maintains this separation to enable:
 | **Dry-Run** | Preview mode (default). Shows what would change without applying. |
 | **Execute (`-x`)** | Apply mode. Actually writes changes to device config_db. |
 | **Save (`-s`)** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json` after execute. Requires `-x`. |
-| **ChangeSet** | Collection of pending changes to be previewed or applied. Also serves as the verification contract — `VerifyChangeSet` diffs the ChangeSet against live CONFIG_DB. |
-| **VerifyChangeSet** | Re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly. The only assertion newtron makes. |
+| **ChangeSet** | Collection of pending changes to be previewed or applied. Also serves as the verification contract — `cs.Verify(n)` diffs the ChangeSet against live CONFIG_DB. |
+| **ChangeSet.Verify(n \*Node)** | Re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly. The only assertion newtron makes. |
 | **GetRoute** | Reads a route from APP_DB (DB 0) and returns structured data (prefix, protocol, next-hops). Observation primitive — returns data, not a verdict. |
 | **GetRouteASIC** | Reads a route from ASIC_DB (DB 1) by resolving SAI object chain. Confirms the ASIC programmed the route. |
 | **Audit Log** | Record of all executed changes with user, timestamp, and details. |

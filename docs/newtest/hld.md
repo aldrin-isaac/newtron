@@ -230,8 +230,8 @@ steps:
 | `verify-provisioning` | Verify CONFIG_DB matches expected state from provisioning | newtron `VerifyChangeSet` |
 | `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | Direct CONFIG_DB read via newtron's `ConfigDBClient` |
 | `verify-state-db` | Assert STATE_DB entries match expected values (with polling) | newtron STATE_DB read |
-| `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `RunHealthChecks` |
-| `verify-health` | Run health checks (interfaces, BGP, EVPN, LAG, VXLAN) [^1] | newtron `RunHealthChecks` |
+| `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `Node.CheckBGPSessions()` |
+| `verify-health` | Run health checks (CONFIG_DB intent + BGP sessions + interface oper-up) [^1] | newtron `TopologyProvisioner.VerifyDeviceHealth()` |
 | `verify-route` | Check a specific route exists on a device with expected next-hops | newtron `GetRoute` / `GetRouteASIC` |
 | `verify-ping` | Data plane ping between devices (requires `dataplane: true`) | **newtest native** |
 | `apply-service` | Apply a named service to a device interface | newtron |
@@ -298,7 +298,7 @@ primitives; newtest orchestrates them across devices and adds data-plane testing
 |------|------|-------|---------------|-------------|
 | **CONFIG_DB** | Redis entries match ChangeSet | **newtron** | `VerifyChangeSet(cs)` | Hard fail (assertion) |
 | **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | `GetRoute()`, `GetRouteASIC()` | Observation (data) |
-| **Operational state** | BGP sessions, interface health | **newtron** | `RunHealthChecks()` | Observation (report) |
+| **Operational state** | BGP sessions, interface health | **newtron** | `VerifyDeviceHealth()` | Observation (report) |
 | **Cross-device / data plane** | Route propagation, ping | **newtest** | Composes newtron primitives | Topology-dependent |
 
 ### 5.3 Platform-Aware Test Skipping

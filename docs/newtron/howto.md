@@ -2573,11 +2573,11 @@ if err != nil {
 changeSet.Apply(dev)
 
 // Run health checks
-results, err := dev.RunHealthChecks(ctx, "") // "" = all checks
+report, err := provisioner.VerifyDeviceHealth(ctx, deviceName)
 if err != nil {
     log.Fatal(err)
 }
-for _, r := range results {
+for _, r := range report.Results {
     fmt.Printf("[%s] %s: %s\n", r.Status, r.Check, r.Message)
 }
 
@@ -3164,7 +3164,7 @@ Precondition checks (`VRFExists`, `VLANExists`, `VTEPExists`, etc.) read from th
 |-----------|--------|
 | Before a write operation | Not needed -- `ExecuteOp` calls `Lock()` which refreshes |
 | After composite delivery | Call `Refresh()` |
-| Before health checks | Not needed -- `RunHealthChecks()` calls `Refresh()` internally |
+| Before health checks | Not needed -- `CheckBGPSessions()` calls `Refresh()` internally |
 | Before reading cache in custom code | Call `Refresh()` |
 | For one-off Redis reads | Use `ConfigDBClient.Get()` directly (bypasses cache) |
 
