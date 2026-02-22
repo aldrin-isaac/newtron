@@ -224,6 +224,32 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPV
 	return cs, nil
 }
 
+// ipvpnUnbindConfig returns the delete entries for unbinding an IP-VPN from a VRF.
+// Does NOT include the VRF|vni modify (clearing vni) — that's a ChangeModify, not delete.
+func ipvpnUnbindConfig(configDB *sonic.ConfigDB, vrfName string) []CompositeEntry {
+	var entries []CompositeEntry
+
+	// Remove BGP_GLOBALS_AF l2vpn_evpn and ipv4_unicast entries.
+	entries = append(entries, CompositeEntry{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrfName, "l2vpn_evpn")})
+	entries = append(entries, CompositeEntry{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrfName, "ipv4_unicast")})
+
+	// Remove ROUTE_REDISTRIBUTE entry.
+	entries = append(entries, CompositeEntry{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrfName, "connected", "ipv4")})
+
+	// Remove BGP_GLOBALS_EVPN_RT entries for this VRF (scan configDB for matching keys).
+	if configDB != nil {
+		for key := range configDB.BGPGlobalsEVPNRT {
+			// Key format: {vrf}|L2VPN_EVPN|{rt} — prefix-match on VRF.
+			prefix := vrfName + "|"
+			if len(key) > len(prefix) && key[:len(prefix)] == prefix {
+				entries = append(entries, CompositeEntry{Table: "BGP_GLOBALS_EVPN_RT", Key: key})
+			}
+		}
+	}
+
+	return entries
+}
+
 // UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping and BGP EVPN config).
 func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	if err := n.precondition("unbind-ipvpn", vrfName).Result(); err != nil {
@@ -232,27 +258,14 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 
 	cs := NewChangeSet(n.name, "device.unbind-ipvpn")
 
-	// Clear VRF|vni (standard SONiC: clear L3VNI binding).
+	// Clear VRF|vni (standard SONiC: clear L3VNI binding) — this is a modify, not delete.
 	cs.Add("VRF", vrfName, ChangeModify, nil, map[string]string{
 		"vni": "",
 	})
 
-	// Remove BGP_GLOBALS_AF l2vpn_evpn and ipv4_unicast entries.
-	cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(vrfName, "l2vpn_evpn"), ChangeDelete, nil, nil)
-	cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(vrfName, "ipv4_unicast"), ChangeDelete, nil, nil)
-
-	// Remove ROUTE_REDISTRIBUTE entry.
-	cs.Add("ROUTE_REDISTRIBUTE", RouteRedistributeKey(vrfName, "connected", "ipv4"), ChangeDelete, nil, nil)
-
-	// Remove BGP_GLOBALS_EVPN_RT entries for this VRF (scan configDB for matching keys).
-	if n.configDB != nil {
-		for key := range n.configDB.BGPGlobalsEVPNRT {
-			// Key format: {vrf}|L2VPN_EVPN|{rt} — prefix-match on VRF.
-			prefix := vrfName + "|"
-			if len(key) > len(prefix) && key[:len(prefix)] == prefix {
-				cs.Add("BGP_GLOBALS_EVPN_RT", key, ChangeDelete, nil, nil)
-			}
-		}
+	// Delete the remaining IP-VPN entries.
+	for _, e := range ipvpnUnbindConfig(n.configDB, vrfName) {
+		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
 	}
 
 	util.WithDevice(n.name).Infof("Unbound IP-VPN from VRF %s", vrfName)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -108,6 +109,23 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 	return cs, nil
 }
 
+// vniUnmapConfig returns the delete entry for a VLAN's L2VNI mapping.
+func vniUnmapConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+	vlanName := VLANName(vlanID)
+	var entries []CompositeEntry
+
+	if configDB != nil {
+		for key, mapping := range configDB.VXLANTunnelMap {
+			if mapping.VLAN == vlanName {
+				entries = append(entries, CompositeEntry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+				break
+			}
+		}
+	}
+
+	return entries
+}
+
 // UnmapL2VNI removes the L2VNI mapping for a VLAN.
 func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	if err := n.precondition("unmap-l2vni", vlanResource(vlanID)).
@@ -116,18 +134,7 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	vlanName := VLANName(vlanID)
-	cs := NewChangeSet(n.name, "device.unmap-l2vni")
-
-	// Find the tunnel map entry for this VLAN
-	if n.configDB != nil {
-		for key, mapping := range n.configDB.VXLANTunnelMap {
-			if mapping.VLAN == vlanName {
-				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
-				break
-			}
-		}
-	}
+	cs := configToChangeSet(n.name, "device.unmap-l2vni", vniUnmapConfig(n.configDB, vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
 		return nil, fmt.Errorf("no L2VNI mapping found for VLAN %d", vlanID)

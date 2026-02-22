@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -138,6 +139,34 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 	return cs, nil
 }
 
+// vlanDeleteConfig returns delete entries for a VLAN: its members, VNI mapping, and the VLAN itself.
+func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+	vlanName := VLANName(vlanID)
+	var entries []CompositeEntry
+
+	// Remove VLAN members first
+	if configDB != nil {
+		for key := range configDB.VLANMember {
+			parts := splitConfigDBKey(key)
+			if len(parts) == 2 && parts[0] == vlanName {
+				entries = append(entries, CompositeEntry{Table: "VLAN_MEMBER", Key: key})
+			}
+		}
+	}
+
+	// Remove VNI mapping if exists
+	if configDB != nil {
+		for key, mapping := range configDB.VXLANTunnelMap {
+			if mapping.VLAN == vlanName {
+				entries = append(entries, CompositeEntry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+			}
+		}
+	}
+
+	entries = append(entries, CompositeEntry{Table: "VLAN", Key: vlanName})
+	return entries
+}
+
 // DeleteVLAN removes a VLAN from this device.
 func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	if err := n.precondition("delete-vlan", vlanResource(vlanID)).
@@ -146,29 +175,7 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.delete-vlan")
-	vlanName := VLANName(vlanID)
-
-	// Remove VLAN members first
-	if n.configDB != nil {
-		for key := range n.configDB.VLANMember {
-			parts := splitConfigDBKey(key)
-			if len(parts) == 2 && parts[0] == vlanName {
-				cs.Add("VLAN_MEMBER", key, ChangeDelete, nil, nil)
-			}
-		}
-	}
-
-	// Remove VNI mapping if exists
-	if n.configDB != nil {
-		for key, mapping := range n.configDB.VXLANTunnelMap {
-			if mapping.VLAN == vlanName {
-				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
-			}
-		}
-	}
-
-	cs.Add("VLAN", vlanName, ChangeDelete, nil, nil)
+	cs := configToChangeSet(n.name, "device.delete-vlan", vlanDeleteConfig(n.configDB, vlanID), ChangeDelete)
 
 	util.WithDevice(n.name).Infof("Deleted VLAN %d", vlanID)
 	return cs, nil
@@ -239,6 +246,30 @@ func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*C
 	return cs, nil
 }
 
+// sviDeleteConfig returns delete entries for a VLAN's SVI: IP entries and base entry.
+func sviDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []CompositeEntry {
+	vlanName := VLANName(vlanID)
+	var entries []CompositeEntry
+
+	if configDB == nil {
+		return nil
+	}
+
+	// Delete all VLAN_INTERFACE IP entries (e.g., Vlan100|10.1.1.1/24)
+	for key := range configDB.VLANInterface {
+		if strings.HasPrefix(key, vlanName+"|") {
+			entries = append(entries, CompositeEntry{Table: "VLAN_INTERFACE", Key: key})
+		}
+	}
+
+	// Delete VLAN_INTERFACE base entry (e.g., Vlan100)
+	if _, ok := configDB.VLANInterface[vlanName]; ok {
+		entries = append(entries, CompositeEntry{Table: "VLAN_INTERFACE", Key: vlanName})
+	}
+
+	return entries
+}
+
 // RemoveSVI removes a VLAN's SVI (Layer 3 interface) configuration.
 // This deletes VLAN_INTERFACE entries (base + IP) and SAG_GLOBAL if no other SVIs use it.
 func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
@@ -246,25 +277,12 @@ func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	vlanName := VLANName(vlanID)
-	cs := NewChangeSet(n.name, "device.remove-svi")
-
 	configDB := n.ConfigDB()
 	if configDB == nil {
 		return nil, fmt.Errorf("no CONFIG_DB available")
 	}
 
-	// Delete all VLAN_INTERFACE IP entries (e.g., Vlan100|10.1.1.1/24)
-	for key := range configDB.VLANInterface {
-		if strings.HasPrefix(key, vlanName+"|") {
-			cs.Add("VLAN_INTERFACE", key, ChangeDelete, nil, nil)
-		}
-	}
-
-	// Delete VLAN_INTERFACE base entry (e.g., Vlan100)
-	if _, ok := configDB.VLANInterface[vlanName]; ok {
-		cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil, nil)
-	}
+	cs := configToChangeSet(n.name, "device.remove-svi", sviDeleteConfig(configDB, vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
 		return nil, fmt.Errorf("no SVI configuration found for VLAN %d", vlanID)

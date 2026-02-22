@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -43,6 +44,30 @@ func (n *Node) ApplyQoS(ctx context.Context, intfName, policyName string, policy
 	return cs, nil
 }
 
+// qosDeleteConfig returns delete entries for QoS on an interface: QUEUE entries and PORT_QOS_MAP.
+func qosDeleteConfig(configDB *sonic.ConfigDB, intfName string) []CompositeEntry {
+	var entries []CompositeEntry
+
+	// Find and remove QUEUE entries for this interface
+	if configDB != nil {
+		prefix := intfName + "|"
+		for key := range configDB.Queue {
+			if strings.HasPrefix(key, prefix) {
+				entries = append(entries, CompositeEntry{Table: "QUEUE", Key: key})
+			}
+		}
+	}
+
+	// Remove PORT_QOS_MAP entry for this interface
+	if configDB != nil {
+		if _, ok := configDB.PortQoSMap[intfName]; ok {
+			entries = append(entries, CompositeEntry{Table: "PORT_QOS_MAP", Key: intfName})
+		}
+	}
+
+	return entries
+}
+
 // RemoveQoS removes QoS configuration from a specific interface.
 func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
 	intfName = util.NormalizeInterfaceName(intfName)
@@ -51,24 +76,7 @@ func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, erro
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.remove-qos")
-
-	// Find and remove QUEUE entries for this interface
-	if n.configDB != nil {
-		prefix := intfName + "|"
-		for key := range n.configDB.Queue {
-			if strings.HasPrefix(key, prefix) {
-				cs.Add("QUEUE", key, ChangeDelete, nil, nil)
-			}
-		}
-	}
-
-	// Remove PORT_QOS_MAP entry for this interface
-	if n.configDB != nil {
-		if _, ok := n.configDB.PortQoSMap[intfName]; ok {
-			cs.Add("PORT_QOS_MAP", intfName, ChangeDelete, nil, nil)
-		}
-	}
+	cs := configToChangeSet(n.name, "device.remove-qos", qosDeleteConfig(n.configDB, intfName), ChangeDelete)
 
 	util.WithDevice(n.name).Infof("Removed QoS from interface %s", intfName)
 	return cs, nil

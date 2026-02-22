@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -67,6 +68,24 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	return cs, nil
 }
 
+// portChannelDeleteConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
+func portChannelDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntry {
+	var entries []CompositeEntry
+
+	// Remove members first
+	if configDB != nil {
+		for key := range configDB.PortChannelMember {
+			parts := splitConfigDBKey(key)
+			if len(parts) == 2 && parts[0] == name {
+				entries = append(entries, CompositeEntry{Table: "PORTCHANNEL_MEMBER", Key: key})
+			}
+		}
+	}
+
+	entries = append(entries, CompositeEntry{Table: "PORTCHANNEL", Key: name})
+	return entries
+}
+
 // DeletePortChannel removes a LAG/PortChannel.
 func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
@@ -78,19 +97,7 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.delete-portchannel")
-
-	// Remove members first
-	if n.configDB != nil {
-		for key := range n.configDB.PortChannelMember {
-			parts := splitConfigDBKey(key)
-			if len(parts) == 2 && parts[0] == name {
-				cs.Add("PORTCHANNEL_MEMBER", key, ChangeDelete, nil, nil)
-			}
-		}
-	}
-
-	cs.Add("PORTCHANNEL", name, ChangeDelete, nil, nil)
+	cs := configToChangeSet(n.name, "device.delete-portchannel", portChannelDeleteConfig(n.configDB, name), ChangeDelete)
 
 	util.WithDevice(n.name).Infof("Deleted PortChannel %s", name)
 	return cs, nil

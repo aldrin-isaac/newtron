@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -175,6 +176,25 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 	return cs, nil
 }
 
+// aclTableDeleteConfig returns delete entries for an ACL table: all its rules and the table itself.
+func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []CompositeEntry {
+	var entries []CompositeEntry
+
+	// Remove all rules first
+	if configDB != nil {
+		prefix := name + "|"
+		for ruleKey := range configDB.ACLRule {
+			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
+				entries = append(entries, CompositeEntry{Table: "ACL_RULE", Key: ruleKey})
+			}
+		}
+	}
+
+	// Remove the table
+	entries = append(entries, CompositeEntry{Table: "ACL_TABLE", Key: name})
+	return entries
+}
+
 // DeleteACLTable removes an ACL table and all its rules.
 func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
 	if err := n.precondition("delete-acl-table", name).
@@ -183,20 +203,7 @@ func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, err
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.delete-acl-table")
-
-	// Remove all rules first
-	if n.configDB != nil {
-		prefix := name + "|"
-		for ruleKey := range n.configDB.ACLRule {
-			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
-				cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
-			}
-		}
-	}
-
-	// Remove the table
-	cs.Add("ACL_TABLE", name, ChangeDelete, nil, nil)
+	cs := configToChangeSet(n.name, "device.delete-acl-table", aclTableDeleteConfig(n.configDB, name), ChangeDelete)
 
 	util.WithDevice(n.name).Infof("Deleted ACL table %s", name)
 	return cs, nil
