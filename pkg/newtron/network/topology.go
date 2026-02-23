@@ -3,6 +3,12 @@
 // ProvisionDevice generates a complete CONFIG_DB offline and delivers it
 // atomically via node.CompositeOverwrite (no device interrogation needed).
 //
+// Uses the Abstract Node pattern: creates an offline Node with a shadow ConfigDB,
+// calls the same Node/Interface methods used in the online path, and exports the
+// accumulated entries as a CompositeConfig. topology.json represents an abstract
+// topology in which abstract nodes live — the same code path handles both offline
+// provisioning and online operations.
+//
 // VerifyDeviceHealth generates the expected CONFIG_DB from the topology (same
 // as the provisioner), then compares against the live device. Operational state
 // checks (BGP sessions, interface oper-up) complement the config intent check.
@@ -36,6 +42,10 @@ func NewTopologyProvisioner(network *Network) (*TopologyProvisioner, error) {
 // GenerateDeviceComposite generates a node.CompositeConfig for a device without delivering it.
 // Useful for inspection, serialization, or deferred delivery.
 // Returns error for host devices (no SONiC CONFIG_DB).
+//
+// Uses the Abstract Node pattern: creates an offline Node, calls the same
+// Node/Interface methods used by the online CLI path, and exports accumulated
+// entries as a CompositeConfig. Zero inline CONFIG_DB key construction.
 func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node.CompositeConfig, error) {
 	if tp.network.IsHostDevice(deviceName) {
 		return nil, fmt.Errorf("device '%s' is a host — cannot generate SONiC composite", deviceName)
@@ -55,54 +65,222 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 	// Build per-device ResolvedSpecs for hierarchical spec lookups
 	resolvedSpecs := tp.network.buildResolvedSpecs(profile)
 
-	// Create composite builder in overwrite mode
-	cb := node.NewCompositeBuilder(deviceName, node.CompositeOverwrite).
-		SetGeneratedBy("topology-provisioner").
-		SetDescription(fmt.Sprintf("Full device provisioning from topology.json for %s", deviceName))
-
-	// Step 1: Device-level entries
-	if err := tp.addDeviceEntries(cb, deviceName, resolved, topoDev, resolvedSpecs); err != nil {
-		return nil, fmt.Errorf("adding device entries: %w", err)
+	// All-eBGP design: router runs underlay_asn (required)
+	if resolved.UnderlayASN == 0 {
+		return nil, fmt.Errorf("underlay_asn required for device %s (all-eBGP design)", deviceName)
 	}
 
-	// Step 1b: QoS device-wide tables (DSCP maps, schedulers, WRED profiles)
-	tp.addQoSDeviceEntries(cb, topoDev, resolvedSpecs)
+	ctx := context.Background()
 
-	// Step 2: Per-interface service entries (skip stub interfaces with no service)
+	// Create abstract node with empty shadow ConfigDB.
+	// Operations build desired state; BuildComposite exports it.
+	n := node.NewAbstract(resolvedSpecs, deviceName, profile, resolved)
+
+	// =========================================================================
+	// Step 1: Register physical ports (enables GetInterface for later use)
+	// =========================================================================
+	for intfName, ti := range topoDev.Interfaces {
+		if ti.Service == "" && ti.Link == "" {
+			continue
+		}
+		if strings.HasPrefix(intfName, "Ethernet") {
+			n.RegisterPort(intfName, map[string]string{
+				"admin_status": "up",
+				"mtu":          "9100",
+			})
+		}
+	}
+
+	// =========================================================================
+	// Step 2: PortChannel creation (before services, since services bind to them)
+	// =========================================================================
+	for pcName, pc := range topoDev.PortChannels {
+		if _, err := n.CreatePortChannel(ctx, pcName, node.PortChannelConfig{
+			Members: pc.Members,
+		}); err != nil {
+			return nil, fmt.Errorf("portchannel %s: %w", pcName, err)
+		}
+	}
+
+	// =========================================================================
+	// Step 3: Device baseline (loopback IP + hostname)
+	// =========================================================================
+	if _, err := n.ApplyBaseline(ctx, "sonic-baseline", nil); err != nil {
+		return nil, fmt.Errorf("applying baseline: %w", err)
+	}
+
+	// =========================================================================
+	// Step 4: Full device metadata (bgp_asn, hwsku, type, frrcfgd flags)
+	// =========================================================================
+	metaFields := map[string]string{
+		"hostname":                   deviceName,
+		"bgp_asn":                    fmt.Sprintf("%d", resolved.UnderlayASN),
+		"docker_routing_config_mode": "unified",
+		"frr_mgmt_framework_config":  "true",
+		"type":                       "LeafRouter",
+	}
+	// Platform is a factory value (baked into the SONiC image) — do NOT
+	// write it to DEVICE_METADATA. SONiC components may read it to find
+	// platform-specific configs; overwriting with our internal label
+	// ("sonic-ciscovs") would be incorrect.
+	if resolved.MAC != "" {
+		metaFields["mac"] = resolved.MAC
+	}
+	if resolved.Platform != "" {
+		if platform, err := tp.network.GetPlatform(resolved.Platform); err == nil {
+			metaFields["hwsku"] = platform.HWSKU
+		}
+	}
+	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
+		metaFields["type"] = "SpineRouter"
+	}
+	if _, err := n.SetDeviceMetadata(ctx, metaFields); err != nil {
+		return nil, fmt.Errorf("setting device metadata: %w", err)
+	}
+
+	// =========================================================================
+	// Step 5: EVPN infrastructure (VTEP + NVO, if any service needs it)
+	// =========================================================================
+	hasEVPN := tp.deviceHasEVPN(topoDev, resolvedSpecs)
+	if hasEVPN {
+		n.AddEntries(node.VTEPConfig(resolved.VTEPSourceIP))
+	}
+
+	// =========================================================================
+	// Step 6: BGP globals + address families + redistribution
+	// =========================================================================
+	n.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+		"ebgp_requires_policy": "false",
+		"suppress_fib_pending": "false",
+		"log_neighbor_changes": "true",
+	}))
+	n.AddEntries(node.BGPGlobalsAFConfig("default", "ipv4_unicast", nil))
+	if hasEVPN {
+		n.AddEntries(node.BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
+			"advertise-all-vni": "true",
+		}))
+	}
+	n.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv4"))
+
+	// =========================================================================
+	// Step 7: BGP overlay peers (EVPN, from profile evpn.peers)
+	// =========================================================================
+	for _, peerName := range getEVPNPeerNames(tp.network, deviceName) {
+		peerProfile, err := tp.network.loadProfile(peerName)
+		if err != nil {
+			util.Logger.Warnf("Could not load EVPN peer profile %s: %v", peerName, err)
+			continue
+		}
+		if peerProfile.UnderlayASN == 0 {
+			util.Logger.Warnf("EVPN peer %s missing underlay_asn, skipping", peerName)
+			continue
+		}
+		n.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+			EBGPMultihop:     true,
+			ActivateIPv4:     true,
+			ActivateEVPN:     hasEVPN,
+			NextHopUnchanged: hasEVPN, // Critical for eBGP overlay
+		}))
+	}
+
+	// =========================================================================
+	// Step 8: Route reflector configuration (RR clients + RR-to-RR overlays)
+	// =========================================================================
+	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
+		tp.addRouteReflectorEntries(n, resolved, topoDev)
+	}
+
+	// =========================================================================
+	// Step 9: Non-service interfaces with VRF + IP
+	// =========================================================================
+	for intfName, ti := range topoDev.Interfaces {
+		if ti.Service != "" || ti.IP == "" {
+			continue
+		}
+		if !strings.HasPrefix(intfName, "Ethernet") {
+			continue
+		}
+		// Create VRF if specified and not yet in shadow
+		if ti.VRF != "" && !n.VRFExists(ti.VRF) {
+			if _, err := n.CreateVRF(ctx, ti.VRF, node.VRFConfig{}); err != nil {
+				return nil, fmt.Errorf("creating VRF %s: %w", ti.VRF, err)
+			}
+		}
+		iface, err := n.GetInterface(intfName)
+		if err != nil {
+			return nil, fmt.Errorf("interface %s: %w", intfName, err)
+		}
+		if ti.VRF != "" {
+			if _, err := iface.SetVRF(ctx, ti.VRF); err != nil {
+				return nil, fmt.Errorf("interface %s set-vrf: %w", intfName, err)
+			}
+		}
+		if _, err := iface.SetIP(ctx, ti.IP); err != nil {
+			return nil, fmt.Errorf("interface %s set-ip: %w", intfName, err)
+		}
+	}
+
+	// =========================================================================
+	// Step 10: Per-interface service application
+	// =========================================================================
 	for intfName, ti := range topoDev.Interfaces {
 		if ti.Service == "" {
 			continue
 		}
-		if err := tp.addInterfaceEntries(cb, intfName, ti, resolved, resolvedSpecs); err != nil {
+		iface, err := n.GetInterface(intfName)
+		if err != nil {
+			return nil, fmt.Errorf("interface %s: %w", intfName, err)
+		}
+
+		// Resolve peer ASN from topology link
+		var peerAS int
+		if ti.Link != "" {
+			parts := strings.SplitN(ti.Link, ":", 2)
+			if len(parts) == 2 {
+				if peerProfile, err := tp.network.loadProfile(parts[0]); err == nil {
+					peerAS = peerProfile.UnderlayASN
+				}
+			}
+		}
+
+		if _, err := iface.ApplyService(ctx, ti.Service, node.ApplyServiceOpts{
+			IPAddress: ti.IP,
+			Params:    ti.Params,
+			PeerAS:    peerAS,
+		}); err != nil {
 			return nil, fmt.Errorf("interface %s: %w", intfName, err)
 		}
 	}
 
-	// Step 3: Portchannel service entries
+	// =========================================================================
+	// Step 11: Per-portchannel service application
+	// =========================================================================
 	for pcName, pc := range topoDev.PortChannels {
 		if pc.Service == "" {
 			continue
 		}
-		peerAS := tp.resolvePortChannelPeerASN(pc, topoDev)
-		entries, err := node.GenerateServiceEntries(resolvedSpecs, node.ServiceEntryParams{
-			ServiceName:   pc.Service,
-			InterfaceName: pcName,
-			IPAddress:     pc.IP,
-			Params:        pc.Params,
-			PeerAS:        peerAS,
-			UnderlayASN:   resolved.UnderlayASN,
-			RouterID:      resolved.RouterID,
-			PlatformName:  resolved.Platform,
-		})
+		iface, err := n.GetInterface(pcName)
 		if err != nil {
 			return nil, fmt.Errorf("portchannel %s: %w", pcName, err)
 		}
-		for _, e := range entries {
-			cb.AddEntry(e.Table, e.Key, e.Fields)
+		peerAS := tp.resolvePortChannelPeerASN(pc, topoDev)
+		if _, err := iface.ApplyService(ctx, pc.Service, node.ApplyServiceOpts{
+			IPAddress: pc.IP,
+			Params:    pc.Params,
+			PeerAS:    peerAS,
+		}); err != nil {
+			return nil, fmt.Errorf("portchannel %s: %w", pcName, err)
 		}
 	}
 
-	return cb.Build(), nil
+	// =========================================================================
+	// Export accumulated entries as CompositeConfig
+	// =========================================================================
+	composite := n.BuildComposite()
+	composite.Metadata.GeneratedBy = "topology-provisioner"
+	composite.Metadata.Description = fmt.Sprintf("Full device provisioning from topology.json for %s", deviceName)
+
+	return composite, nil
 }
 
 // ProvisionDevice generates a complete CONFIG_DB for the named device from the
@@ -158,164 +336,11 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 }
 
 // ============================================================================
-// Device-level entry generation
+// Route Reflector Configuration
 // ============================================================================
 
-// addDeviceEntries adds device-level CONFIG_DB entries to the composite builder.
-func (tp *TopologyProvisioner) addDeviceEntries(cb *node.CompositeBuilder, deviceName string, resolved *spec.ResolvedProfile, topoDev *spec.TopologyDevice, resolvedSpecs node.SpecProvider) error {
-	// All-eBGP design: router runs underlay_asn (required)
-	// Overlay eBGP peers use next-hop-unchanged to preserve VTEP addresses
-	if resolved.UnderlayASN == 0 {
-		return fmt.Errorf("underlay_asn required for device %s (all-eBGP design)", deviceName)
-	}
-
-	// DEVICE_METADATA — complete fields for SONiC unified mode
-	metaFields := map[string]string{
-		"hostname":                   deviceName,
-		"bgp_asn":                    fmt.Sprintf("%d", resolved.UnderlayASN),
-		"docker_routing_config_mode": "unified",
-		"frr_mgmt_framework_config":  "true",
-		"type":                       "LeafRouter",
-	}
-	// Platform is a factory value (baked into the SONiC image) — do NOT
-	// write it to DEVICE_METADATA. SONiC components may read it to find
-	// platform-specific configs; overwriting with our internal label
-	// ("sonic-ciscovs") would be incorrect.
-	if resolved.MAC != "" {
-		metaFields["mac"] = resolved.MAC
-	}
-	// Lookup HWSKU from platform spec
-	if resolved.Platform != "" {
-		if platform, err := tp.network.GetPlatform(resolved.Platform); err == nil {
-			metaFields["hwsku"] = platform.HWSKU
-		}
-	}
-	// Route reflectors are SpineRouter type
-	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
-		metaFields["type"] = "SpineRouter"
-	}
-	cb.AddEntry("DEVICE_METADATA", "localhost", metaFields)
-
-	// LOOPBACK_INTERFACE with loopback IP
-	cb.AddEntry("LOOPBACK_INTERFACE", "Loopback0", map[string]string{})
-	loopbackIPKey := fmt.Sprintf("Loopback0|%s/32", resolved.LoopbackIP)
-	cb.AddEntry("LOOPBACK_INTERFACE", loopbackIPKey, map[string]string{})
-
-	// PORT entries for each interface in topology.
-	// Skip stub interfaces (no service AND no link) — they may have no
-	// physical backing in VPP and creating PORT entries for non-existent
-	// ports crashes orchagent.
-	for intfName, ti := range topoDev.Interfaces {
-		if ti.Service == "" && ti.Link == "" {
-			continue
-		}
-		// Only add PORT entries for physical interfaces (Ethernet*)
-		if strings.HasPrefix(intfName, "Ethernet") {
-			cb.AddEntry("PORT", intfName, map[string]string{
-				"admin_status": "up",
-				"mtu":          "9100",
-			})
-		}
-	}
-
-	// PORTCHANNEL + PORTCHANNEL_MEMBER entries for LAG aggregates
-	for pcName, pc := range topoDev.PortChannels {
-		cb.AddEntry("PORTCHANNEL", pcName, map[string]string{
-			"admin_status": "up",
-		})
-		for _, member := range pc.Members {
-			cb.AddEntry("PORTCHANNEL_MEMBER", fmt.Sprintf("%s|%s", pcName, member), map[string]string{})
-		}
-	}
-
-	// Write INTERFACE base + IP entries for non-service interfaces with explicit IPs.
-	// Service interfaces get their INTERFACE entries via GenerateServiceEntries.
-	// Host-facing and VRF-bound interfaces need these entries for kernel L3 programming.
-	//
-	// ORDERING: VRF entry must be written BEFORE the INTERFACE binding (vrf_name field).
-	// Orchagent receives Redis keyspace notifications in pipeline order. If INTERFACE|EthernetN
-	// with vrf_name is processed before VRF|Name exists, orchagent silently drops the binding.
-	// Writing VRF first ensures the SAI VRF object is created before the interface is bound.
-	for intfName, ti := range topoDev.Interfaces {
-		if ti.Service != "" || ti.IP == "" {
-			continue
-		}
-		if !strings.HasPrefix(intfName, "Ethernet") {
-			continue
-		}
-		// Write VRF entry FIRST so orchagent creates the VRF SAI object before processing
-		// the interface binding below.
-		if ti.VRF != "" {
-			cb.AddEntry("VRF", ti.VRF, map[string]string{})
-		}
-		intfBase := map[string]string{}
-		if ti.VRF != "" {
-			intfBase["vrf_name"] = ti.VRF
-		}
-		cb.AddEntry("INTERFACE", intfName, intfBase)
-		cb.AddEntry("INTERFACE", fmt.Sprintf("%s|%s", intfName, ti.IP), map[string]string{})
-	}
-
-	// Determine if device needs EVPN infrastructure
-	hasEVPN := tp.deviceHasEVPN(topoDev, resolvedSpecs)
-
-	// VXLAN_TUNNEL + VXLAN_EVPN_NVO (if device has EVPN services)
-	if hasEVPN {
-		cb.AddEntries(node.VTEPConfig(resolved.VTEPSourceIP))
-	}
-
-	// BGP_GLOBALS — underlay AS + eBGP settings
-	cb.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
-		"ebgp_requires_policy": "false",
-		"suppress_fib_pending": "false",
-		"log_neighbor_changes": "true",
-	}))
-
-	// BGP address-family globals
-	cb.AddEntries(node.BGPGlobalsAFConfig("default", "ipv4_unicast", nil))
-	if hasEVPN {
-		cb.AddEntries(node.BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
-			"advertise-all-vni": "true",
-		}))
-	}
-
-	// BGP neighbors from EVPN peers (eBGP overlay via loopback).
-	// Profile-driven: peers specified in profile.evpn.peers
-	// All-eBGP design: overlay uses peer's underlay_asn (no local-as needed)
-	for _, peerName := range getEVPNPeerNames(tp.network, deviceName) {
-		peerProfile, err := tp.network.loadProfile(peerName)
-		if err != nil {
-			util.Logger.Warnf("Could not load EVPN peer profile %s: %v", peerName, err)
-			continue
-		}
-
-		// All-eBGP: peer must have underlay_asn
-		if peerProfile.UnderlayASN == 0 {
-			util.Logger.Warnf("EVPN peer %s missing underlay_asn, skipping", peerName)
-			continue
-		}
-
-		cb.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
-			EBGPMultihop:     true,
-			ActivateIPv4:     true,
-			ActivateEVPN:     hasEVPN,
-			NextHopUnchanged: hasEVPN, // Critical for eBGP overlay
-		}))
-	}
-
-	// Route redistribution for connected (loopback + service subnets)
-	cb.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv4"))
-
-	// Route reflector setup if device_config.route_reflector is true
-	if topoDev.DeviceConfig != nil && topoDev.DeviceConfig.RouteReflector {
-		tp.addRouteReflectorEntries(cb, resolved, topoDev)
-	}
-
-	return nil
-}
-
-// addRouteReflectorEntries adds route reflector configuration to the composite.
-func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilder, resolved *spec.ResolvedProfile, _ *spec.TopologyDevice) {
+// addRouteReflectorEntries adds route reflector configuration to the abstract node.
+func (tp *TopologyProvisioner) addRouteReflectorEntries(n *node.Node, resolved *spec.ResolvedProfile, _ *spec.TopologyDevice) {
 	// RR cluster ID: from profile EVPN config, defaults to loopback IP (set during resolution).
 	clusterID := resolved.ClusterID
 
@@ -326,8 +351,8 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 	}
 
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
-	// log_neighbor_changes are already set in addDeviceEntries for all devices)
-	cb.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+	// log_neighbor_changes are already set in GenerateDeviceComposite for all devices)
+	n.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
 		"ebgp_requires_policy":  "false",
@@ -366,7 +391,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 		}
 
 		// Add eBGP neighbor for this client (all-eBGP design)
-		cb.AddEntries(node.BGPNeighborConfig(clientLoopback, clientProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+		n.AddEntries(node.BGPNeighborConfig(clientLoopback, clientProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
 			EBGPMultihop: true,
 			ActivateIPv4: true,
 			RRClient:     true,
@@ -375,14 +400,14 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 	}
 
 	// For RR-to-RR neighbors (from EVPN peers), overlay RR-specific AF entries.
-	// The base BGP_NEIGHBOR was already created in addDeviceEntries; CompositeBuilder's
+	// The base BGP_NEIGHBOR was already created in step 7; CompositeBuilder's
 	// AddEntry merges fields per key, so these AF entries layer on top.
 	for _, peerName := range getEVPNPeerNames(tp.network, resolved.DeviceName) {
 		peerProfile, err := tp.network.loadProfile(peerName)
 		if err != nil {
 			continue
 		}
-		cb.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+		n.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
 			EBGPMultihop:    true,
 			ActivateIPv4:    true,
 			RRClient:        true,
@@ -396,8 +421,12 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(cb *node.CompositeBuilde
 	}
 
 	// IPv6 route redistribution for RR
-	cb.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv6"))
+	n.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv6"))
 }
+
+// ============================================================================
+// Helper functions (orchestration logic — topology-level, not node-level)
+// ============================================================================
 
 // getEVPNPeerNames returns the list of EVPN peer device names from profile.
 func getEVPNPeerNames(network *Network, deviceName string) []string {
@@ -461,10 +490,6 @@ func (tp *TopologyProvisioner) deviceHasEVPN(topoDev *spec.TopologyDevice, sp no
 	return false
 }
 
-// ============================================================================
-// Per-interface and portchannel service entry generation
-// ============================================================================
-
 // resolvePortChannelPeerASN derives the peer ASN for a portchannel by looking
 // at member interface links. All members of a LAG connect to the same peer
 // device, so the first member with a resolvable link determines the peer ASN.
@@ -483,81 +508,6 @@ func (tp *TopologyProvisioner) resolvePortChannelPeerASN(pc *spec.TopologyPortCh
 		}
 	}
 	return 0
-}
-
-// addInterfaceEntries generates all CONFIG_DB entries for an interface service
-// and adds them to the composite builder.  Delegates to the shared
-// node.GenerateServiceEntries function in service_gen.go.
-func (tp *TopologyProvisioner) addInterfaceEntries(cb *node.CompositeBuilder, intfName string, ti *spec.TopologyInterface, resolved *spec.ResolvedProfile, sp node.SpecProvider) error {
-	// Resolve peer ASN from topology link for service-level BGP routing.
-	// The transit service uses peer_as:"request", so topology.go resolves
-	// the peer's underlay_asn from the wiring diagram and passes it in.
-	var peerAS int
-	if ti.Link != "" {
-		parts := strings.SplitN(ti.Link, ":", 2)
-		if len(parts) == 2 {
-			if peerProfile, err := tp.network.loadProfile(parts[0]); err == nil {
-				peerAS = peerProfile.UnderlayASN
-			}
-		}
-	}
-
-	entries, err := node.GenerateServiceEntries(sp, node.ServiceEntryParams{
-		ServiceName:   ti.Service,
-		InterfaceName: intfName,
-		IPAddress:     ti.IP,
-		Params:        ti.Params,
-		PeerAS:        peerAS,
-		UnderlayASN:   resolved.UnderlayASN,
-		RouterID:      resolved.RouterID,
-		PlatformName:  resolved.Platform,
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, e := range entries {
-		cb.AddEntry(e.Table, e.Key, e.Fields)
-	}
-
-	return nil
-}
-
-// addQoSDeviceEntries scans all interface and portchannel services in the topology,
-// collects distinct QoS policy names, and adds device-wide CONFIG_DB tables.
-func (tp *TopologyProvisioner) addQoSDeviceEntries(cb *node.CompositeBuilder, topoDev *spec.TopologyDevice, sp node.SpecProvider) {
-	seen := make(map[string]bool)
-
-	// Collect all service names from interfaces and portchannels
-	var serviceNames []string
-	for _, ti := range topoDev.Interfaces {
-		if ti.Service != "" {
-			serviceNames = append(serviceNames, ti.Service)
-		}
-	}
-	for _, pc := range topoDev.PortChannels {
-		if pc.Service != "" {
-			serviceNames = append(serviceNames, pc.Service)
-		}
-	}
-
-	for _, svcName := range serviceNames {
-		svc, err := sp.GetService(svcName)
-		if err != nil {
-			continue
-		}
-		policyName, policy := node.ResolveServiceQoSPolicy(sp, svc)
-		if policy == nil {
-			continue
-		}
-		if seen[policyName] {
-			continue
-		}
-		seen[policyName] = true
-		for _, entry := range node.GenerateQoSDeviceEntries(policyName, policy) {
-			cb.AddEntry(entry.Table, entry.Key, entry.Fields)
-		}
-	}
 }
 
 // ============================================================================
@@ -667,4 +617,3 @@ func (tp *TopologyProvisioner) getWiredInterfaces(deviceName string) []string {
 	sort.Strings(interfaces)
 	return interfaces
 }
-

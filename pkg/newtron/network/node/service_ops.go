@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -28,9 +29,10 @@ func (n *Node) InterfaceHasService(name string) bool {
 
 // ApplyServiceOpts contains options for applying a service to an interface.
 type ApplyServiceOpts struct {
-	IPAddress string // IP address for routed/IRB services (e.g., "10.1.1.1/30")
-	VLAN      int    // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
-	PeerAS    int    // BGP peer AS number (for services with routing.peer_as="request")
+	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30")
+	VLAN      int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
+	PeerAS    int               // BGP peer AS number (for services with routing.peer_as="request")
+	Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 }
 
 // ApplyService applies a service definition to this interface.
@@ -172,6 +174,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		InterfaceName: i.name,
 		IPAddress:     opts.IPAddress,
 		VLAN:          opts.VLAN,
+		Params:        opts.Params,
 		PeerAS:        opts.PeerAS,
 		UnderlayASN:   resolved.UnderlayASN,
 		RouterID:      resolved.RouterID,
@@ -321,6 +324,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 	cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeAdd, bindingFields)
 
+	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
 	return cs, nil
 }
@@ -367,24 +371,36 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 	afFields := map[string]string{}
 
 	if routing.ImportPolicy != "" {
-		rmName := i.addRoutePolicyConfig(cs, svc.Description, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
+		entries, rmName := i.routePolicyConfig(svc.Description, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
+		for _, e := range entries {
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
+		}
 		if rmName != "" {
 			afFields["route_map_in"] = rmName
 		}
 	} else if routing.ImportCommunity != "" || routing.ImportPrefixList != "" {
-		rmName := i.addInlineRoutePolicy(cs, svc.Description, "import", routing.ImportCommunity, routing.ImportPrefixList)
+		entries, rmName := i.inlineRoutePolicyConfig(svc.Description, "import", routing.ImportCommunity, routing.ImportPrefixList)
+		for _, e := range entries {
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
+		}
 		if rmName != "" {
 			afFields["route_map_in"] = rmName
 		}
 	}
 
 	if routing.ExportPolicy != "" {
-		rmName := i.addRoutePolicyConfig(cs, svc.Description, "export", routing.ExportPolicy, routing.ExportCommunity, routing.ExportPrefixList)
+		entries, rmName := i.routePolicyConfig(svc.Description, "export", routing.ExportPolicy, routing.ExportCommunity, routing.ExportPrefixList)
+		for _, e := range entries {
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
+		}
 		if rmName != "" {
 			afFields["route_map_out"] = rmName
 		}
 	} else if routing.ExportCommunity != "" || routing.ExportPrefixList != "" {
-		rmName := i.addInlineRoutePolicy(cs, svc.Description, "export", routing.ExportCommunity, routing.ExportPrefixList)
+		entries, rmName := i.inlineRoutePolicyConfig(svc.Description, "export", routing.ExportCommunity, routing.ExportPrefixList)
+		for _, e := range entries {
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
+		}
 		if rmName != "" {
 			afFields["route_map_out"] = rmName
 		}
@@ -414,16 +430,17 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 	return peerIP, nil
 }
 
-// addRoutePolicyConfig translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
-// PREFIX_SET, and COMMUNITY_SET entries. Returns the generated route-map name.
-func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, policyName, extraCommunity, extraPrefixList string) string {
+// routePolicyConfig translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
+// PREFIX_SET, and COMMUNITY_SET entries. Returns entries and the route-map name.
+func (i *Interface) routePolicyConfig(serviceName, direction, policyName, extraCommunity, extraPrefixList string) ([]sonic.Entry, string) {
 	policy, err := i.Node().GetRoutePolicy(policyName)
 	if err != nil {
 		util.WithDevice(i.node.Name()).Warnf("Route policy '%s' not found: %v", policyName, err)
-		return ""
+		return nil, ""
 	}
 
 	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+	var entries []sonic.Entry
 
 	for _, rule := range policy.Rules {
 		ruleKey := fmt.Sprintf("%s|%d", rmName, rule.Sequence)
@@ -433,16 +450,18 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 
 		if rule.PrefixList != "" {
 			prefixSetName := fmt.Sprintf("%s-pl-%d", rmName, rule.Sequence)
-			i.addPrefixSetFromList(cs, prefixSetName, rule.PrefixList)
+			entries = append(entries, i.prefixSetConfig(prefixSetName, rule.PrefixList)...)
 			fields["match_prefix_set"] = prefixSetName
 		}
 
 		if rule.Community != "" {
 			csName := fmt.Sprintf("%s-cs-%d", rmName, rule.Sequence)
-			cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
-				"set_type":         "standard",
-				"match_action":     "any",
-				"community_member": rule.Community,
+			entries = append(entries, sonic.Entry{
+				Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
+					"set_type":         "standard",
+					"match_action":     "any",
+					"community_member": rule.Community,
+				},
 			})
 			fields["match_community"] = csName
 		}
@@ -459,16 +478,18 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 			}
 		}
 
-		cs.Add("ROUTE_MAP", ruleKey, ChangeAdd, fields)
+		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: ruleKey, Fields: fields})
 	}
 
 	// Extra community AND condition from service routing spec
 	if extraCommunity != "" {
 		csName := fmt.Sprintf("%s-extra-cs", rmName)
-		cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
-			"set_type":         "standard",
-			"match_action":     "any",
-			"community_member": extraCommunity,
+		entries = append(entries, sonic.Entry{
+			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
+				"set_type":         "standard",
+				"match_action":     "any",
+				"community_member": extraCommunity,
+			},
 		})
 		extraFields := map[string]string{
 			"route_operation": "permit",
@@ -477,33 +498,39 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 		if direction == "export" {
 			extraFields["set_community"] = extraCommunity
 		}
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9000", rmName), ChangeAdd, extraFields)
+		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|9000", rmName), Fields: extraFields})
 	}
 
 	// Extra prefix list AND condition
 	if extraPrefixList != "" {
 		plName := fmt.Sprintf("%s-extra-pl", rmName)
-		i.addPrefixSetFromList(cs, plName, extraPrefixList)
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9100", rmName), ChangeAdd, map[string]string{
-			"route_operation":  "permit",
-			"match_prefix_set": plName,
+		entries = append(entries, i.prefixSetConfig(plName, extraPrefixList)...)
+		entries = append(entries, sonic.Entry{
+			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|9100", rmName), Fields: map[string]string{
+				"route_operation":  "permit",
+				"match_prefix_set": plName,
+			},
 		})
 	}
 
-	return rmName
+	return entries, rmName
 }
 
-// addInlineRoutePolicy creates a route-map from standalone community/prefix filters.
-func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, community, prefixList string) string {
+// inlineRoutePolicyConfig creates a route-map from standalone community/prefix filters.
+// Returns entries and the route-map name.
+func (i *Interface) inlineRoutePolicyConfig(serviceName, direction, community, prefixList string) ([]sonic.Entry, string) {
 	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+	var entries []sonic.Entry
 	seq := 10
 
 	if community != "" {
 		csName := fmt.Sprintf("%s-cs", rmName)
-		cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
-			"set_type":         "standard",
-			"match_action":     "any",
-			"community_member": community,
+		entries = append(entries, sonic.Entry{
+			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
+				"set_type":         "standard",
+				"match_action":     "any",
+				"community_member": community,
+			},
 		})
 		fields := map[string]string{
 			"route_operation": "permit",
@@ -512,36 +539,42 @@ func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, 
 		if direction == "export" {
 			fields["set_community"] = community
 		}
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, fields)
+		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, seq), Fields: fields})
 		seq += 10
 	}
 
 	if prefixList != "" {
 		plName := fmt.Sprintf("%s-pl", rmName)
-		i.addPrefixSetFromList(cs, plName, prefixList)
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, map[string]string{
-			"route_operation":  "permit",
-			"match_prefix_set": plName,
+		entries = append(entries, i.prefixSetConfig(plName, prefixList)...)
+		entries = append(entries, sonic.Entry{
+			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, seq), Fields: map[string]string{
+				"route_operation":  "permit",
+				"match_prefix_set": plName,
+			},
 		})
 	}
 
-	return rmName
+	return entries, rmName
 }
 
-// addPrefixSetFromList resolves a prefix list and creates PREFIX_SET entries.
-func (i *Interface) addPrefixSetFromList(cs *ChangeSet, prefixSetName, prefixListName string) {
+// prefixSetConfig resolves a prefix list and returns PREFIX_SET entries.
+func (i *Interface) prefixSetConfig(prefixSetName, prefixListName string) []sonic.Entry {
 	prefixes, err := i.Node().GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
 		util.WithDevice(i.node.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
-		return
+		return nil
 	}
+	var entries []sonic.Entry
 	for seq, prefix := range prefixes {
 		entryKey := fmt.Sprintf("%s|%d", prefixSetName, (seq+1)*10)
-		cs.Add("PREFIX_SET", entryKey, ChangeAdd, map[string]string{
-			"ip_prefix": prefix,
-			"action":    "permit",
+		entries = append(entries, sonic.Entry{
+			Table: "PREFIX_SET", Key: entryKey, Fields: map[string]string{
+				"ip_prefix": prefix,
+				"action":    "permit",
+			},
 		})
 	}
+	return entries
 }
 
 // sanitizeName replaces non-alphanumeric chars with hyphens for config key names.
@@ -722,20 +755,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// =========================================================================
 
 	// Remove QoS mapping and per-interface QUEUE entries
-	if configDB != nil {
-		if _, ok := configDB.PortQoSMap[i.name]; ok {
-			cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil)
-		}
-	}
-	// Delete QUEUE entries for this interface (QUEUE|{intf}|{N})
-	if svc != nil {
-		if _, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
-			for qi := range policy.Queues {
-				queueKey := fmt.Sprintf("%s|%d", i.name, qi)
-				cs.Add("QUEUE", queueKey, ChangeDelete, nil)
-			}
-		}
-	}
+	cs.AddDeletes(qosDeleteConfig(configDB, i.name))
 
 	// Remove IP addresses from interface
 	for _, ipAddr := range i.IPAddresses() {
@@ -756,8 +776,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if vrfName != "" && vrfName != "default" {
 			vrfKey = vrfName
 		}
-		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, bgpNeighbor, "ipv4_unicast"), ChangeDelete, nil)
-		cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, bgpNeighbor), ChangeDelete, nil)
+		cs.AddDeletes(BGPNeighborDeleteConfig(vrfKey, bgpNeighbor))
 	}
 
 	// =========================================================================
@@ -790,36 +809,19 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// Per-interface VRF: delete VRF and related config
 		if svc != nil && svc.VRFType == spec.VRFTypeInterface {
 			derivedVRF := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-
-			// Remove BGP EVPN config for this VRF
-			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(derivedVRF, ipvpnDef.L3VNI), ChangeDelete, nil)
-				cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(derivedVRF, "l2vpn_evpn"), ChangeDelete, nil)
-				cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, derivedVRF), ChangeDelete, nil)
+			l3vni := 0
+			if ipvpnDef != nil {
+				l3vni = ipvpnDef.L3VNI
 			}
-
-			cs.Add("VRF", derivedVRF, ChangeDelete, nil)
+			cs.AddDeletes(vrfFullDeleteConfig(n.configDB, derivedVRF, l3vni))
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
 		// The shared VRF was auto-created by the first service apply and should
 		// be cleaned up when no service bindings reference the ipvpn anymore.
 		if svc != nil && svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-			if depCheck.IsLastIPVPNUser(svc.IPVPN) {
-				sharedVRF := ""
-				if ipvpnDef != nil {
-					sharedVRF = ipvpnDef.VRF
-				}
-
-				if sharedVRF != "" && ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-					cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(sharedVRF, ipvpnDef.L3VNI), ChangeDelete, nil)
-					cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(sharedVRF, "l2vpn_evpn"), ChangeDelete, nil)
-					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, sharedVRF), ChangeDelete, nil)
-				}
-
-				if sharedVRF != "" {
-					cs.Add("VRF", sharedVRF, ChangeDelete, nil)
-				}
+			if depCheck.IsLastIPVPNUser(svc.IPVPN) && ipvpnDef != nil && ipvpnDef.VRF != "" {
+				cs.AddDeletes(vrfFullDeleteConfig(n.configDB, ipvpnDef.VRF, ipvpnDef.L3VNI))
 			}
 		}
 	}

@@ -388,6 +388,132 @@ type ASPathSetEntry struct {
 	ASPathMember string `json:"as_path_member,omitempty"` // Regex pattern
 }
 
+// ============================================================================
+// Shadow ConfigDB Updates (for offline/abstract mode)
+// ============================================================================
+
+// ApplyEntries updates the ConfigDB's typed maps from a slice of entries.
+// Used by abstract Node to keep the shadow ConfigDB in sync as operations
+// generate entries. Only tables needed for precondition checks and property
+// accessors are handled — unrecognized tables are silently skipped (entries
+// still accumulate in the abstract Node for composite export).
+func (db *ConfigDB) ApplyEntries(entries []Entry) {
+	for _, e := range entries {
+		db.applyEntry(e.Table, e.Key, e.Fields)
+	}
+}
+
+func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
+	switch table {
+	case "PORT":
+		db.Port[key] = PortEntry{
+			AdminStatus: fields["admin_status"],
+			MTU:         fields["mtu"],
+			Speed:       fields["speed"],
+			Alias:       fields["alias"],
+			Description: fields["description"],
+			Index:       fields["index"],
+			Lanes:       fields["lanes"],
+		}
+	case "PORTCHANNEL":
+		db.PortChannel[key] = PortChannelEntry{
+			AdminStatus: fields["admin_status"],
+			MTU:         fields["mtu"],
+			MinLinks:    fields["min_links"],
+			Fallback:    fields["fallback"],
+			FastRate:    fields["fast_rate"],
+		}
+	case "PORTCHANNEL_MEMBER":
+		db.PortChannelMember[key] = fields
+	case "VLAN":
+		db.VLAN[key] = VLANEntry{
+			VLANID:      fields["vlanid"],
+			Description: fields["description"],
+		}
+	case "VLAN_MEMBER":
+		db.VLANMember[key] = VLANMemberEntry{TaggingMode: fields["tagging_mode"]}
+	case "VRF":
+		db.VRF[key] = VRFEntry{VNI: fields["vni"]}
+	case "INTERFACE":
+		db.Interface[key] = InterfaceEntry{VRFName: fields["vrf_name"]}
+	case "VLAN_INTERFACE":
+		db.VLANInterface[key] = fields
+	case "VXLAN_TUNNEL":
+		db.VXLANTunnel[key] = VXLANTunnelEntry{SrcIP: fields["src_ip"]}
+	case "VXLAN_TUNNEL_MAP":
+		db.VXLANTunnelMap[key] = VXLANMapEntry{
+			VLAN: fields["vlan"],
+			VRF:  fields["vrf"],
+			VNI:  fields["vni"],
+		}
+	case "VXLAN_EVPN_NVO":
+		db.VXLANEVPNNVO[key] = EVPNNVOEntry{SourceVTEP: fields["source_vtep"]}
+	case "BGP_GLOBALS":
+		db.BGPGlobals[key] = BGPGlobalsEntry{
+			LocalASN: fields["local_asn"],
+			RouterID: fields["router_id"],
+		}
+	case "BGP_NEIGHBOR":
+		db.BGPNeighbor[key] = BGPNeighborEntry{
+			ASN:          fields["asn"],
+			LocalAddr:    fields["local_addr"],
+			AdminStatus:  fields["admin_status"],
+			EBGPMultihop: fields["ebgp_multihop"],
+		}
+	case "BGP_NEIGHBOR_AF":
+		db.BGPNeighborAF[key] = BGPNeighborAFEntry{
+			Activate:             fields["admin_status"],
+			RouteReflectorClient: fields["rrclient"],
+			NextHopSelf:          fields["nhself"],
+		}
+	case "BGP_GLOBALS_AF":
+		db.BGPGlobalsAF[key] = BGPGlobalsAFEntry{
+			AdvertiseAllVNI: fields["advertise-all-vni"],
+			AdvertiseIPv4:   fields["advertise_ipv4_unicast"],
+		}
+	case "DEVICE_METADATA":
+		db.DeviceMetadata[key] = copyFields(fields)
+	case "NEWTRON_SERVICE_BINDING":
+		db.NewtronServiceBinding[key] = ServiceBindingEntry{
+			ServiceName: fields["service_name"],
+			IPAddress:   fields["ip_address"],
+			VRFName:     fields["vrf_name"],
+			IPVPN:       fields["ipvpn"],
+			MACVPN:      fields["macvpn"],
+			IngressACL:  fields["ingress_acl"],
+			EgressACL:   fields["egress_acl"],
+			BGPNeighbor: fields["bgp_neighbor"],
+		}
+	case "SUPPRESS_VLAN_NEIGH":
+		db.SuppressVLANNeigh[key] = copyFields(fields)
+	case "ACL_TABLE":
+		db.ACLTable[key] = ACLTableEntry{
+			Type:  fields["type"],
+			Ports: fields["ports"],
+			Stage: fields["stage"],
+		}
+	case "LOOPBACK_INTERFACE":
+		db.LoopbackInterface[key] = copyFields(fields)
+	case "ROUTE_REDISTRIBUTE":
+		db.RouteRedistribute[key] = RouteRedistributeEntry{RouteMap: fields["route_map"]}
+	case "SAG_GLOBAL":
+		db.SAGGlobal[key] = copyFields(fields)
+	// Tables not needed for preconditions: silently skip
+	}
+}
+
+// copyFields returns a shallow copy of the map (avoids aliasing caller's map).
+func copyFields(fields map[string]string) map[string]string {
+	if fields == nil {
+		return map[string]string{}
+	}
+	cp := make(map[string]string, len(fields))
+	for k, v := range fields {
+		cp[k] = v
+	}
+	return cp
+}
+
 // ConfigDBClient wraps Redis client for config_db access
 type ConfigDBClient struct {
 	client *redis.Client

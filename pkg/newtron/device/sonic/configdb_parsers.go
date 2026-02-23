@@ -350,6 +350,10 @@ func newEmptyConfigDB() *ConfigDB {
 	return db
 }
 
+// NewEmptyConfigDB returns a ConfigDB with all map fields initialized.
+// Exported for use by abstract Node (offline mode).
+func NewEmptyConfigDB() *ConfigDB { return newEmptyConfigDB() }
+
 // initMaps initializes all nil map fields on a struct using reflection.
 func initMaps(v reflect.Value) {
 	for i := 0; i < v.NumField(); i++ {

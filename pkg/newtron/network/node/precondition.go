@@ -27,10 +27,14 @@ func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionCh
 
 // precondition returns a PreconditionChecker with RequireConnected + RequireLocked
 // already called, since every write op needs both. This replaces requireWritable(d).
+// In offline mode, connected/locked checks are skipped — the shadow ConfigDB serves
+// as the precondition state.
 func (n *Node) precondition(operation, resource string) *PreconditionChecker {
-	return NewPreconditionChecker(n, operation, resource).
-		RequireConnected().
-		RequireLocked()
+	pc := NewPreconditionChecker(n, operation, resource)
+	if !n.offline {
+		pc.RequireConnected().RequireLocked()
+	}
+	return pc
 }
 
 // RequireConnected checks that the device is connected

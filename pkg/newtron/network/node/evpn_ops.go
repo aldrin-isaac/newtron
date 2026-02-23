@@ -207,6 +207,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 		}
 	}
 
+	n.trackOffline(cs)
 	util.WithDevice(n.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
 	return cs, nil
 }
@@ -227,7 +228,7 @@ func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
 		if rrIP == resolved.LoopbackIP {
 			continue
 		}
-		for _, e := range BGPNeighborDeleteConfig(rrIP) {
+		for _, e := range BGPNeighborDeleteConfig("default", rrIP) {
 			cs.Add(e.Table, e.Key, ChangeDelete, nil)
 		}
 	}

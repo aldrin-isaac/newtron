@@ -64,6 +64,7 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 		return nil, fmt.Errorf("unknown configlet: %s", configletName)
 	}
 
+	n.trackOffline(cs)
 	util.WithDevice(n.name).Infof("Applied baseline configlet '%s'", configletName)
 	return cs, nil
 }

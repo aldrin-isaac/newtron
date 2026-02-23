@@ -113,23 +113,25 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 
 // BGPNeighborDeleteConfig returns sonic.Entry for deleting a BGP neighbor
 // and all its address-family entries.
-func BGPNeighborDeleteConfig(neighborIP string) []sonic.Entry {
+func BGPNeighborDeleteConfig(vrf, neighborIP string) []sonic.Entry {
+	if vrf == "" {
+		vrf = "default"
+	}
+
 	var entries []sonic.Entry
 
 	// Remove address-family entries first
 	for _, af := range []string{"ipv4_unicast", "ipv6_unicast", "l2vpn_evpn"} {
 		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("default|%s|%s", neighborIP, af),
-			Fields: nil,
+			Table: "BGP_NEIGHBOR_AF",
+			Key:   BGPNeighborAFKey(vrf, neighborIP, af),
 		})
 	}
 
 	// Remove neighbor entry
 	entries = append(entries, sonic.Entry{
-		Table:  "BGP_NEIGHBOR",
-		Key:    fmt.Sprintf("default|%s", neighborIP),
-		Fields: nil,
+		Table: "BGP_NEIGHBOR",
+		Key:   fmt.Sprintf("%s|%s", vrf, neighborIP),
 	})
 
 	return entries
@@ -260,6 +262,7 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
 	}
 
+	n.trackOffline(cs)
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
 	return cs, nil
 }
@@ -293,6 +296,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 		ActivateEVPN: evpn,
 	})
 	cs := configToChangeSet(n.name, "bgp.add-loopback-neighbor", config, ChangeAdd)
+	n.trackOffline(cs)
 
 	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
 		neighborIP, asn, n.resolved.LoopbackIP)
@@ -307,7 +311,7 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 			pc.Check(n.BGPNeighborExists(neighborIP), "BGP neighbor must exist",
 				fmt.Sprintf("BGP neighbor %s not found", neighborIP))
 		},
-		func() []sonic.Entry { return BGPNeighborDeleteConfig(neighborIP) })
+		func() []sonic.Entry { return BGPNeighborDeleteConfig("default", neighborIP) })
 	if err != nil {
 		return nil, err
 	}

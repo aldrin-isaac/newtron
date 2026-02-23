@@ -133,17 +133,9 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 		if vrfName != "" {
 			intfFields["vrf_name"] = vrfName
 		}
-		entries = append(entries, sonic.Entry{
-			Table:  "INTERFACE",
-			Key:    p.InterfaceName,
-			Fields: intfFields,
-		})
+		entries = append(entries, interfaceBaseConfig(p.InterfaceName, intfFields)...)
 		if p.IPAddress != "" {
-			entries = append(entries, sonic.Entry{
-				Table:  "INTERFACE",
-				Key:    fmt.Sprintf("%s|%s", p.InterfaceName, p.IPAddress),
-				Fields: map[string]string{},
-			})
+			entries = append(entries, interfaceIPSubEntry(p.InterfaceName, p.IPAddress))
 		}
 
 	case spec.ServiceTypeEVPNIRB:

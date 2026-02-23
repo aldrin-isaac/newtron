@@ -55,6 +55,13 @@ func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, fields 
 	})
 }
 
+// AddDeletes adds delete entries from owning-file delete config functions.
+func (cs *ChangeSet) AddDeletes(entries []sonic.Entry) {
+	for _, e := range entries {
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
+	}
+}
+
 // Merge appends all changes from other into cs.
 func (cs *ChangeSet) Merge(other *ChangeSet) {
 	cs.Changes = append(cs.Changes, other.Changes...)
@@ -81,6 +88,8 @@ func configToChangeSet(deviceName, operation string, config []sonic.Entry, chang
 // Use this for operations whose entire body is: preconditions → generate entries → done.
 // Skip it for complex operations that need custom logic between precondition and return
 // (e.g., ApplyService, RemoveService, SetupEVPN).
+//
+// In offline mode, op() also updates the shadow ConfigDB and accumulates entries.
 func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 	checks func(*PreconditionChecker), gen func() []sonic.Entry) (*ChangeSet, error) {
 
@@ -91,7 +100,17 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 	if err := pc.Result(); err != nil {
 		return nil, err
 	}
-	return configToChangeSet(n.name, "device."+name, gen(), changeType), nil
+
+	entries := gen()
+	cs := configToChangeSet(n.name, "device."+name, entries, changeType)
+
+	// Shadow update + accumulation (offline mode)
+	if n.offline {
+		n.configDB.ApplyEntries(entries)
+		n.accumulated = append(n.accumulated, entries...)
+	}
+
+	return cs, nil
 }
 
 // String returns a human-readable representation of the changes.

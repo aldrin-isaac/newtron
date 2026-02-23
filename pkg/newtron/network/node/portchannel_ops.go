@@ -64,6 +64,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, map[string]string{})
 	}
 
+	n.trackOffline(cs)
 	util.WithDevice(n.name).Infof("Created PortChannel %s with members %v", name, opts.Members)
 	return cs, nil
 }

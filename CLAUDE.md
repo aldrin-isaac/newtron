@@ -101,6 +101,40 @@ real switch delegates to the forwarding ASIC. The delegation does not make
 Interface a forwarding layer; it makes Interface a logical point of attachment
 that the underlying infrastructure services.
 
+## Abstract Node — Same Code Path, Different Initialization
+
+The Node operates in two modes:
+
+- **Physical mode** (`offline=false`): ConfigDB loaded from Redis at Connect/Lock time.
+  Preconditions enforce connected+locked. ChangeSet applied to Redis.
+- **Abstract mode** (`offline=true`): shadow ConfigDB starts empty, operations build
+  desired state. Preconditions check the shadow. Entries accumulate for composite export.
+
+Same code path, different initialization. topology.json represents an abstract topology
+in which abstract nodes live — the abstract Node is the natural object model for it.
+The topology provisioner creates an abstract Node and calls the same methods the CLI
+uses (`iface.ApplyService`, `n.ConfigureBGP`, `n.SetupEVPN`), eliminating the need
+for topology.go to construct CONFIG_DB entries inline. Operations must be called in the
+correct order — the shadow enforces correctness without a physical device:
+
+```
+n := node.NewAbstract(specs, name, profile, resolved)
+n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+n.ConfigureBGP(ctx)                       // shadow now has BGP_GLOBALS
+n.SetupEVPN(ctx, loopbackIP)              // shadow now has VTEP + NVO
+iface, _ := n.GetInterface("Ethernet0")
+iface.ApplyService(ctx, "transit", opts)  // VTEP precondition passes ✓
+composite := n.BuildComposite()           // export all accumulated entries
+```
+
+Key implementation:
+- `NewAbstract()` creates Node with `sonic.NewEmptyConfigDB()` + `offline=true`
+- `precondition()` skips connected/locked checks when offline
+- `op()` updates shadow ConfigDB + appends to `accumulated` when offline
+- Complex ops call `n.trackOffline(cs)` for shadow update
+- `BuildComposite()` feeds accumulated entries through `CompositeBuilder` (merges fields)
+- `AddEntries()` allows orchestrators to add config-function output directly
+
 ## Separation of Concerns — File-Level Ownership
 
 Code should be organized so that a reader can guess where a feature is implemented

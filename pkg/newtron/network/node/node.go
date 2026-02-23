@@ -38,6 +38,12 @@ type SpecProvider interface {
 // direct access to all Network-level configuration (services, filters, etc.)
 // without importing the network package (avoiding circular imports).
 //
+// Two modes of operation:
+//   - Physical mode (offline=false): connected to real device, ConfigDB loaded from Redis
+//   - Abstract mode (offline=true): shadow ConfigDB starts empty, operations build desired state
+//
+// Same code path, different initialization. The Interface is the point of service in both modes.
+//
 // Hierarchy: Network -> Node -> Interface
 type Node struct {
 	SpecProvider // embedded — n.GetService() just works
@@ -58,6 +64,10 @@ type Node struct {
 	connected bool
 	locked    bool
 
+	// Abstract mode — no physical device, operations accumulate entries
+	offline     bool
+	accumulated []sonic.Entry
+
 	mu sync.RWMutex
 }
 
@@ -69,6 +79,100 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 		profile:      profile,
 		resolved:     resolved,
 		interfaces:   make(map[string]*Interface),
+	}
+}
+
+// NewAbstract creates an abstract Node with an empty shadow ConfigDB.
+// Operations work against the shadow and accumulate entries for composite export.
+// Preconditions check the shadow (no connected/locked requirement).
+//
+// Usage:
+//
+//	n := node.NewAbstract(specs, "switch1", profile, resolved)
+//	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+//	iface, _ := n.GetInterface("Ethernet0")
+//	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
+//	composite := n.BuildComposite()
+func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
+	return &Node{
+		SpecProvider: sp,
+		name:         name,
+		profile:      profile,
+		resolved:     resolved,
+		interfaces:   make(map[string]*Interface),
+		configDB:     sonic.NewEmptyConfigDB(),
+		offline:      true,
+	}
+}
+
+// IsOffline returns true if this is an abstract node (no physical device).
+func (n *Node) IsOffline() bool { return n.offline }
+
+// RegisterPort creates a PORT entry in the shadow ConfigDB and accumulates it.
+// This enables GetInterface for offline mode (GetInterface checks PORT table).
+func (n *Node) RegisterPort(name string, fields map[string]string) {
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	entry := sonic.Entry{Table: "PORT", Key: name, Fields: fields}
+	n.configDB.ApplyEntries([]sonic.Entry{entry})
+	if n.offline {
+		n.accumulated = append(n.accumulated, entry)
+	}
+	n.interfaces[name] = &Interface{node: n, name: name}
+}
+
+// BuildComposite exports accumulated entries as a CompositeConfig.
+// Only valid in offline mode.
+func (n *Node) BuildComposite() *CompositeConfig {
+	cb := NewCompositeBuilder(n.name, CompositeOverwrite).
+		SetGeneratedBy("abstract-node")
+	for _, e := range n.accumulated {
+		cb.AddEntry(e.Table, e.Key, e.Fields)
+	}
+	return cb.Build()
+}
+
+// AddEntries accumulates entries and updates the shadow ConfigDB.
+// Used by orchestrators to add entries from config functions that don't
+// have corresponding Node methods (e.g., VTEPConfig, BGPNeighborConfig).
+// Only valid in offline mode; no-op for physical nodes.
+func (n *Node) AddEntries(entries []sonic.Entry) {
+	if !n.offline {
+		return
+	}
+	n.configDB.ApplyEntries(entries)
+	n.accumulated = append(n.accumulated, entries...)
+}
+
+// SetDeviceMetadata writes fields to DEVICE_METADATA|localhost.
+// In offline mode, this accumulates the entry. In online mode,
+// it requires connected+locked and writes to CONFIG_DB.
+func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) (*ChangeSet, error) {
+	if err := n.precondition("set-device-metadata", "localhost").Result(); err != nil {
+		return nil, err
+	}
+	cs := NewChangeSet(n.name, "device.set-device-metadata")
+	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, fields)
+	n.trackOffline(cs)
+	return cs, nil
+}
+
+// trackOffline updates the shadow ConfigDB and accumulates entries for offline mode.
+// Called by operations that build ChangeSets manually (not via op()).
+func (n *Node) trackOffline(cs *ChangeSet) {
+	if !n.offline || cs == nil {
+		return
+	}
+	for _, c := range cs.Changes {
+		if c.Type != sonic.ChangeTypeDelete {
+			entry := sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields}
+			n.configDB.ApplyEntries([]sonic.Entry{entry})
+			n.accumulated = append(n.accumulated, entry)
+		} else {
+			// For deletes in offline mode, just accumulate (shadow doesn't need to remove)
+			n.accumulated = append(n.accumulated, sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields})
+		}
 	}
 }
 

@@ -114,6 +114,30 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 	return entries
 }
 
+// vrfFullDeleteConfig returns all delete entries for fully removing a VRF:
+// BGP EVPN VNI, VXLAN tunnel map, IP-VPN entries (BGP AFs, route redistribution,
+// EVPN RTs), BGP_GLOBALS for the VRF, and the VRF itself.
+func vrfFullDeleteConfig(configDB *sonic.ConfigDB, vrfName string, l3vni int) []sonic.Entry {
+	var entries []sonic.Entry
+
+	// L3VNI EVPN entries (only if L3VNI was configured)
+	if l3vni > 0 {
+		entries = append(entries, sonic.Entry{Table: "BGP_EVPN_VNI", Key: BGPEVPNVNIKey(vrfName, l3vni)})
+		entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(l3vni, vrfName)})
+	}
+
+	// IP-VPN entries (BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, BGP_GLOBALS_EVPN_RT)
+	entries = append(entries, ipvpnUnbindConfig(configDB, vrfName)...)
+
+	// BGP_GLOBALS for this VRF (written by ipvpnConfig)
+	entries = append(entries, sonic.Entry{Table: "BGP_GLOBALS", Key: vrfName})
+
+	// VRF itself
+	entries = append(entries, sonic.Entry{Table: "VRF", Key: vrfName})
+
+	return entries
+}
+
 // CreateVRF creates a new VRF.
 func (n *Node) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
 	cs, err := n.op("create-vrf", name, ChangeAdd,
@@ -163,7 +187,7 @@ func (n *Node) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*
 	cs, err := n.op("add-vrf-interface", vrfName, ChangeModify,
 		func(pc *PreconditionChecker) { pc.RequireVRFExists(vrfName).RequireInterfaceExists(intfName) },
 		func() []sonic.Entry {
-			return []sonic.Entry{{Table: "INTERFACE", Key: intfName, Fields: map[string]string{"vrf_name": vrfName}}}
+			return interfaceBaseConfig(intfName, map[string]string{"vrf_name": vrfName})
 		})
 	if err != nil {
 		return nil, err
@@ -178,7 +202,7 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 
 	cs, err := n.op("remove-vrf-interface", vrfName, ChangeModify, nil,
 		func() []sonic.Entry {
-			return []sonic.Entry{{Table: "INTERFACE", Key: intfName, Fields: map[string]string{"vrf_name": ""}}}
+			return interfaceBaseConfig(intfName, map[string]string{"vrf_name": ""})
 		})
 	if err != nil {
 		return nil, err

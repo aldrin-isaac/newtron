@@ -15,13 +15,30 @@ func (n *Node) InterfaceExists(name string) bool {
 	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
 }
 
+// interfaceBaseConfig returns the base INTERFACE entry with optional fields.
+// This is the single-owner function for creating INTERFACE table base entries.
+func interfaceBaseConfig(intfName string, fields map[string]string) []sonic.Entry {
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	return []sonic.Entry{
+		{Table: "INTERFACE", Key: intfName, Fields: fields},
+	}
+}
+
+// interfaceIPSubEntry returns the INTERFACE IP sub-entry (e.g., "Ethernet0|10.1.1.1/30").
+func interfaceIPSubEntry(intfName, ipAddr string) sonic.Entry {
+	return sonic.Entry{
+		Table:  "INTERFACE",
+		Key:    fmt.Sprintf("%s|%s", intfName, ipAddr),
+		Fields: map[string]string{},
+	}
+}
+
 // interfaceIPConfig returns sonic.Entry for configuring an IP on an interface.
 // Creates the INTERFACE base entry + IP sub-entry.
 func interfaceIPConfig(intfName, ipAddr string) []sonic.Entry {
-	return []sonic.Entry{
-		{Table: "INTERFACE", Key: intfName, Fields: map[string]string{}},
-		{Table: "INTERFACE", Key: fmt.Sprintf("%s|%s", intfName, ipAddr), Fields: map[string]string{}},
-	}
+	return append(interfaceBaseConfig(intfName, nil), interfaceIPSubEntry(intfName, ipAddr))
 }
 
 // ============================================================================
@@ -49,6 +66,7 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
 	cs.Add("INTERFACE", ipKey, ChangeAdd, map[string]string{})
 
+	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
 }
@@ -102,6 +120,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 		"vrf_name": vrfName,
 	})
 
+	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
 	return cs, nil
 }
