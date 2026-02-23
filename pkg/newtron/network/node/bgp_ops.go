@@ -238,7 +238,7 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	// Without these flags, bgpcfgd uses the legacy "general" template which
 	// adds PEER_V4/PEER_V6 peer-groups but does NOT handle local_addr or
 	// ebgp_multihop, causing EVPN loopback sessions to stay "Active".
-	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, nil, map[string]string{
+	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, map[string]string{
 		"bgp_asn":                    asnStr,
 		"type":                       "LeafRouter",
 		"docker_routing_config_mode": "unified",
@@ -251,13 +251,13 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 		"suppress_fib_pending": "false",
 		"log_neighbor_changes": "true",
 	}) {
-		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
 	}
 	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
-		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
 	}
 	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
-		cs.Add(e.Table, e.Key, ChangeModify, nil, e.Fields)
+		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
 	}
 
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
@@ -334,17 +334,17 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 
 	// Reverse order of ConfigureBGP — use config functions for key consistency
 	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
 	}
 	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
 	}
 	for _, e := range BGPGlobalsConfig("default", 0, "", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
 	}
 
 	// Clear bgp_asn from DEVICE_METADATA (set to empty)
-	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, nil, map[string]string{
+	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, map[string]string{
 		"bgp_asn": "",
 	})
 

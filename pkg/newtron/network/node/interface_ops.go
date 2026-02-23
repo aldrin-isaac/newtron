@@ -45,9 +45,9 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	cs := NewChangeSet(n.Name(), "interface.set-ip")
 	// SONiC requires both the base interface entry and the IP entry.
 	// The base entry enables L3 on the interface; the IP entry assigns the address.
-	cs.Add("INTERFACE", i.name, ChangeAdd, nil, map[string]string{})
+	cs.Add("INTERFACE", i.name, ChangeAdd, map[string]string{})
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-	cs.Add("INTERFACE", ipKey, ChangeAdd, nil, map[string]string{})
+	cs.Add("INTERFACE", ipKey, ChangeAdd, map[string]string{})
 
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
@@ -66,7 +66,7 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 
 	cs := NewChangeSet(n.Name(), "interface.remove-ip")
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-	cs.Add("INTERFACE", ipKey, ChangeDelete, nil, nil)
+	cs.Add("INTERFACE", ipKey, ChangeDelete, nil)
 
 	// If no other IPs remain, remove the base INTERFACE entry too
 	remaining := 0
@@ -76,7 +76,7 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 		}
 	}
 	if remaining == 0 {
-		cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+		cs.Add("INTERFACE", i.name, ChangeDelete, nil)
 	}
 
 	util.WithDevice(n.Name()).Infof("Removed IP %s from interface %s", ipAddr, i.name)
@@ -98,7 +98,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.set-vrf")
-	cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
+	cs.Add("INTERFACE", i.name, ChangeModify, map[string]string{
 		"vrf_name": vrfName,
 	})
 
@@ -133,7 +133,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 		newBindings = addInterfaceToList(configDB.ACLTable[aclName].Ports, i.name)
 	}
 
-	cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+	cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
 		"ports": newBindings,
 		"stage": direction,
 	})
@@ -201,7 +201,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 		tableName = "PORTCHANNEL"
 	}
 
-	cs.Add(tableName, i.name, ChangeModify, nil, fields)
+	cs.Add(tableName, i.name, ChangeModify, fields)
 
 	util.WithDevice(n.Name()).Infof("Set %s=%s on interface %s", property, value, i.name)
 	return cs, nil

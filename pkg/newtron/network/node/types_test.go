@@ -38,8 +38,7 @@ func TestChange_Structure(t *testing.T) {
 		Table:    "PORT",
 		Key:      "Ethernet0",
 		Type:     ChangeModify,
-		OldValue: map[string]string{"mtu": "1500"},
-		NewValue: map[string]string{"mtu": "9100"},
+		Fields: map[string]string{"mtu": "9100"},
 	}
 
 	if c.Table != "PORT" {
@@ -51,11 +50,8 @@ func TestChange_Structure(t *testing.T) {
 	if c.Type != ChangeModify {
 		t.Errorf("Type = %q, want %q", c.Type, ChangeModify)
 	}
-	if c.OldValue["mtu"] != "1500" {
-		t.Errorf("OldValue[mtu] = %q, want %q", c.OldValue["mtu"], "1500")
-	}
-	if c.NewValue["mtu"] != "9100" {
-		t.Errorf("NewValue[mtu] = %q, want %q", c.NewValue["mtu"], "9100")
+	if c.Fields["mtu"] != "9100" {
+		t.Errorf("Fields[mtu] = %q, want %q", c.Fields["mtu"], "9100")
 	}
 }
 
@@ -66,11 +62,8 @@ func TestChange_NilValues(t *testing.T) {
 		Type:  ChangeDelete,
 	}
 
-	if c.OldValue != nil {
-		t.Error("OldValue should be nil")
-	}
-	if c.NewValue != nil {
-		t.Error("NewValue should be nil")
+	if c.Fields != nil {
+		t.Error("Fields should be nil")
 	}
 }
 
@@ -108,7 +101,7 @@ func TestChangeSet_Timestamp(t *testing.T) {
 func TestChangeSet_Add(t *testing.T) {
 	cs := NewChangeSet("test", "test")
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
 
 	if len(cs.Changes) != 1 {
 		t.Fatalf("Changes count = %d, want %d", len(cs.Changes), 1)
@@ -124,14 +117,11 @@ func TestChangeSet_Add(t *testing.T) {
 	if c.Type != ChangeAdd {
 		t.Errorf("Type = %q, want %q", c.Type, ChangeAdd)
 	}
-	if c.OldValue != nil {
-		t.Error("OldValue should be nil")
+	if c.Fields == nil {
+		t.Error("Fields should not be nil")
 	}
-	if c.NewValue == nil {
-		t.Error("NewValue should not be nil")
-	}
-	if c.NewValue["mtu"] != "9100" {
-		t.Errorf("NewValue[mtu] = %q, want %q", c.NewValue["mtu"], "9100")
+	if c.Fields["mtu"] != "9100" {
+		t.Errorf("Fields[mtu] = %q, want %q", c.Fields["mtu"], "9100")
 	}
 }
 
@@ -139,19 +129,19 @@ func TestChangeSet_AddMultiple(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "service.apply")
 
 	// Add typical service apply changes
-	cs.Add("VRF", "customer-l3-Ethernet0", ChangeAdd, nil, map[string]string{
+	cs.Add("VRF", "customer-l3-Ethernet0", ChangeAdd, map[string]string{
 		"vni": "10001",
 	})
-	cs.Add("INTERFACE", "Ethernet0", ChangeModify, nil, map[string]string{
+	cs.Add("INTERFACE", "Ethernet0", ChangeModify, map[string]string{
 		"vrf_name": "customer-l3-Ethernet0",
 	})
-	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", ChangeAdd, nil, nil)
-	cs.Add("ACL_TABLE", "customer-l3-in", ChangeAdd, nil, map[string]string{
+	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", ChangeAdd, nil)
+	cs.Add("ACL_TABLE", "customer-l3-in", ChangeAdd, map[string]string{
 		"type":  "L3",
 		"stage": "ingress",
 		"ports": "Ethernet0",
 	})
-	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", ChangeAdd, nil, map[string]string{
+	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", ChangeAdd, map[string]string{
 		"packet_action": "FORWARD",
 	})
 
@@ -175,7 +165,7 @@ func TestChangeSet_IsEmpty(t *testing.T) {
 		t.Error("New ChangeSet should be empty")
 	}
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, nil)
+	cs.Add("PORT", "Ethernet0", ChangeAdd, nil)
 
 	if cs.IsEmpty() {
 		t.Error("ChangeSet with changes should not be empty")
@@ -193,9 +183,9 @@ func TestChangeSet_String_Empty(t *testing.T) {
 
 func TestChangeSet_String_WithChanges(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
-	cs.Add("VLAN", "Vlan100", ChangeModify, nil, map[string]string{"vlanid": "100"})
-	cs.Add("VRF", "Vrf_CUST", ChangeDelete, nil, nil)
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
+	cs.Add("VLAN", "Vlan100", ChangeModify, map[string]string{"vlanid": "100"})
+	cs.Add("VRF", "Vrf_CUST", ChangeDelete, nil)
 
 	str := cs.String()
 
@@ -221,7 +211,7 @@ func TestChangeSet_String_WithChanges(t *testing.T) {
 
 func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
 
 	str := cs.String()
 
@@ -233,7 +223,7 @@ func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 
 func TestChangeSet_Preview(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "vlan.create")
-	cs.Add("VLAN", "Vlan100", ChangeAdd, nil, map[string]string{"vlanid": "100"})
+	cs.Add("VLAN", "Vlan100", ChangeAdd, map[string]string{"vlanid": "100"})
 
 	preview := cs.Preview()
 

@@ -28,10 +28,10 @@ type Entry struct {
 
 // ConfigChange represents a single configuration change
 type ConfigChange struct {
-	Table  string
-	Key    string
-	Type   ChangeType
-	Fields map[string]string
+	Table  string            `json:"table"`
+	Key    string            `json:"key"`
+	Type   ChangeType        `json:"type"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // ChangeType represents the type of configuration change

@@ -43,20 +43,20 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 	switch configletName {
 	case "sonic-baseline":
 		// Basic SONiC baseline
-		cs.Add("DEVICE_METADATA", "localhost", ChangeModify, nil, map[string]string{
+		cs.Add("DEVICE_METADATA", "localhost", ChangeModify, map[string]string{
 			"hostname": varMap["device_name"],
 		})
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
 			// Base entry required for intfmgrd to bind the IP (ChangeModify = idempotent create-or-update)
-			cs.Add("LOOPBACK_INTERFACE", "Loopback0", ChangeModify, nil, map[string]string{})
-			cs.Add("LOOPBACK_INTERFACE", fmt.Sprintf("Loopback0|%s/32", loopbackIP), ChangeAdd, nil, map[string]string{})
+			cs.Add("LOOPBACK_INTERFACE", "Loopback0", ChangeModify, map[string]string{})
+			cs.Add("LOOPBACK_INTERFACE", fmt.Sprintf("Loopback0|%s/32", loopbackIP), ChangeAdd, map[string]string{})
 		}
 
 	case "sonic-evpn":
 		// EVPN baseline - create VTEP (delegates to evpn_ops.go VTEPConfig)
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
 			for _, e := range VTEPConfig(loopbackIP) {
-				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+				cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 			}
 		}
 
@@ -104,10 +104,10 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 				prefix := aclName + "|"
 				for ruleKey := range configDB.ACLRule {
 					if strings.HasPrefix(ruleKey, prefix) {
-						cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+						cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil)
 					}
 				}
-				cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
+				cs.Add("ACL_TABLE", aclName, ChangeDelete, nil)
 			}
 		}
 	}
@@ -130,7 +130,7 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 			}
 			if !hasUsers {
 				summary.OrphanedVRFs = append(summary.OrphanedVRFs, vrfName)
-				cs.Add("VRF", vrfName, ChangeDelete, nil, nil)
+				cs.Add("VRF", vrfName, ChangeDelete, nil)
 			}
 		}
 	}
@@ -151,7 +151,7 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 			}
 			if orphaned {
 				summary.OrphanedVNIMappings = append(summary.OrphanedVNIMappings, mapKey)
-				cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+				cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil)
 			}
 		}
 	}

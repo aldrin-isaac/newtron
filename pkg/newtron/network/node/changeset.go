@@ -21,14 +21,9 @@ const (
 	ChangeDelete = sonic.ChangeTypeDelete
 )
 
-// Change represents a single configuration change.
-type Change struct {
-	Table    string            `json:"table"`
-	Key      string            `json:"key"`
-	Type     sonic.ChangeType `json:"type"`
-	OldValue map[string]string `json:"old_value,omitempty"`
-	NewValue map[string]string `json:"new_value,omitempty"`
-}
+// Change is an alias for sonic.ConfigChange. All external references to
+// node.Change (audit/event.go, test helpers) continue to compile.
+type Change = sonic.ConfigChange
 
 // ChangeSet represents a collection of configuration changes.
 type ChangeSet struct {
@@ -51,13 +46,12 @@ func NewChangeSet(device, operation string) *ChangeSet {
 }
 
 // Add adds a change to the set.
-func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, oldValue, newValue map[string]string) {
+func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, fields map[string]string) {
 	cs.Changes = append(cs.Changes, Change{
-		Table:    table,
-		Key:      key,
-		Type:     changeType,
-		OldValue: oldValue,
-		NewValue: newValue,
+		Table:  table,
+		Key:    key,
+		Type:   changeType,
+		Fields: fields,
 	})
 }
 
@@ -77,7 +71,7 @@ func (cs *ChangeSet) IsEmpty() bool {
 func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet {
 	cs := NewChangeSet(deviceName, operation)
 	for _, e := range config {
-		cs.Add(e.Table, e.Key, changeType, nil, e.Fields)
+		cs.Add(e.Table, e.Key, changeType, e.Fields)
 	}
 	return cs
 }
@@ -119,8 +113,8 @@ func (cs *ChangeSet) String() string {
 		}
 
 		sb.WriteString(fmt.Sprintf("  %s %s|%s", typeStr, c.Table, c.Key))
-		if c.NewValue != nil && len(c.NewValue) > 0 {
-			sb.WriteString(fmt.Sprintf(" → %v", c.NewValue))
+		if c.Fields != nil && len(c.Fields) > 0 {
+			sb.WriteString(fmt.Sprintf(" → %v", c.Fields))
 		}
 		sb.WriteString("\n")
 	}
@@ -137,21 +131,6 @@ func (cs *ChangeSet) Preview() string {
 	return sb.String()
 }
 
-// toChanges converts the ChangeSet's Changes to []sonic.ConfigChange for Apply and Verify.
-// Used by both Apply() and Verify() to avoid duplicating the conversion logic.
-func (cs *ChangeSet) toDeviceChanges() []sonic.ConfigChange {
-	deviceChanges := make([]sonic.ConfigChange, 0, len(cs.Changes))
-	for _, c := range cs.Changes {
-		deviceChanges = append(deviceChanges, sonic.ConfigChange{
-			Table:  c.Table,
-			Key:    c.Key,
-			Type:   c.Type,
-			Fields: c.NewValue,
-		})
-	}
-	return deviceChanges
-}
-
 // Apply writes the changes to the device's config_db via Redis.
 func (cs *ChangeSet) Apply(n *Node) error {
 	if err := n.precondition("apply-changeset", cs.Operation).Result(); err != nil {
@@ -163,7 +142,7 @@ func (cs *ChangeSet) Apply(n *Node) error {
 		return fmt.Errorf("CONFIG_DB client not connected")
 	}
 
-	for _, change := range cs.toDeviceChanges() {
+	for _, change := range cs.Changes {
 		var err error
 		switch change.Type {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
@@ -188,7 +167,7 @@ func (cs *ChangeSet) Verify(n *Node) error {
 		return util.ErrNotConnected
 	}
 
-	result, err := n.verifyConfigChanges(cs.toDeviceChanges())
+	result, err := n.verifyConfigChanges(cs.Changes)
 	if err != nil {
 		return err
 	}

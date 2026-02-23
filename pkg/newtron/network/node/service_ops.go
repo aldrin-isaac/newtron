@@ -229,12 +229,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			if aclExists {
 				// ACL exists - merge this interface into the binding list
 				newBindings := addInterfaceToList(existingACL.Ports, i.name)
-				cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+				cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
 					"ports": newBindings,
 				})
 			} else {
 				// ACL doesn't exist - create table entry from generated fields
-				cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+				cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 				// Add rules with prefix-list expansion
 				filterName := svc.IngressFilter
 				if aclName == egressACLName {
@@ -263,13 +263,13 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			// (only per-interface entries). Generate them here for incremental mode.
 		}
 
-		cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+		cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 	}
 
 	// QoS device-wide tables (not in shared generator, which only emits per-interface entries)
 	if policyName, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
 		for _, entry := range GenerateQoSDeviceEntries(policyName, policy) {
-			cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+			cs.Add(entry.Table, entry.Key, ChangeAdd, entry.Fields)
 		}
 	}
 
@@ -319,7 +319,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	if bgpNeighborIP != "" {
 		bindingFields["bgp_neighbor"] = bgpNeighborIP
 	}
-	cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeAdd, nil, bindingFields)
+	cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeAdd, bindingFields)
 
 	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
 	return cs, nil
@@ -392,19 +392,19 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, svc *spec.ServiceSpec, op
 
 	// Merge route-map references into the BGP_NEIGHBOR_AF entry
 	if len(afFields) > 0 && peerIP != "" {
-		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, peerIP, "ipv4_unicast"), ChangeModify, nil, afFields)
+		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, peerIP, "ipv4_unicast"), ChangeModify, afFields)
 	}
 
 	// Override default redistribution if specified
 	if routing.Redistribute != nil {
 		redistKey := BGPGlobalsAFKey(vrfKey, "ipv4_unicast")
 		if *routing.Redistribute {
-			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, nil, map[string]string{
+			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, map[string]string{
 				"redistribute_connected": "true",
 				"redistribute_static":    "true",
 			})
 		} else {
-			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, nil, map[string]string{
+			cs.Add("BGP_GLOBALS_AF", redistKey, ChangeModify, map[string]string{
 				"redistribute_connected": "false",
 				"redistribute_static":    "false",
 			})
@@ -439,7 +439,7 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 
 		if rule.Community != "" {
 			csName := fmt.Sprintf("%s-cs-%d", rmName, rule.Sequence)
-			cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+			cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
 				"set_type":         "standard",
 				"match_action":     "any",
 				"community_member": rule.Community,
@@ -459,13 +459,13 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 			}
 		}
 
-		cs.Add("ROUTE_MAP", ruleKey, ChangeAdd, nil, fields)
+		cs.Add("ROUTE_MAP", ruleKey, ChangeAdd, fields)
 	}
 
 	// Extra community AND condition from service routing spec
 	if extraCommunity != "" {
 		csName := fmt.Sprintf("%s-extra-cs", rmName)
-		cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+		cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
 			"set_type":         "standard",
 			"match_action":     "any",
 			"community_member": extraCommunity,
@@ -477,14 +477,14 @@ func (i *Interface) addRoutePolicyConfig(cs *ChangeSet, serviceName, direction, 
 		if direction == "export" {
 			extraFields["set_community"] = extraCommunity
 		}
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9000", rmName), ChangeAdd, nil, extraFields)
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9000", rmName), ChangeAdd, extraFields)
 	}
 
 	// Extra prefix list AND condition
 	if extraPrefixList != "" {
 		plName := fmt.Sprintf("%s-extra-pl", rmName)
 		i.addPrefixSetFromList(cs, plName, extraPrefixList)
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9100", rmName), ChangeAdd, nil, map[string]string{
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|9100", rmName), ChangeAdd, map[string]string{
 			"route_operation":  "permit",
 			"match_prefix_set": plName,
 		})
@@ -500,7 +500,7 @@ func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, 
 
 	if community != "" {
 		csName := fmt.Sprintf("%s-cs", rmName)
-		cs.Add("COMMUNITY_SET", csName, ChangeAdd, nil, map[string]string{
+		cs.Add("COMMUNITY_SET", csName, ChangeAdd, map[string]string{
 			"set_type":         "standard",
 			"match_action":     "any",
 			"community_member": community,
@@ -512,14 +512,14 @@ func (i *Interface) addInlineRoutePolicy(cs *ChangeSet, serviceName, direction, 
 		if direction == "export" {
 			fields["set_community"] = community
 		}
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, nil, fields)
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, fields)
 		seq += 10
 	}
 
 	if prefixList != "" {
 		plName := fmt.Sprintf("%s-pl", rmName)
 		i.addPrefixSetFromList(cs, plName, prefixList)
-		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, nil, map[string]string{
+		cs.Add("ROUTE_MAP", fmt.Sprintf("%s|%d", rmName, seq), ChangeAdd, map[string]string{
 			"route_operation":  "permit",
 			"match_prefix_set": plName,
 		})
@@ -537,7 +537,7 @@ func (i *Interface) addPrefixSetFromList(cs *ChangeSet, prefixSetName, prefixLis
 	}
 	for seq, prefix := range prefixes {
 		entryKey := fmt.Sprintf("%s|%d", prefixSetName, (seq+1)*10)
-		cs.Add("PREFIX_SET", entryKey, ChangeAdd, nil, map[string]string{
+		cs.Add("PREFIX_SET", entryKey, ChangeAdd, map[string]string{
 			"ip_prefix": prefix,
 			"action":    "permit",
 		})
@@ -587,7 +587,7 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 				}
 
 				fields := buildACLRuleFields(rule, srcIP, dstIP)
-				cs.Add("ACL_RULE", ruleKey, ChangeAdd, nil, fields)
+				cs.Add("ACL_RULE", ruleKey, ChangeAdd, fields)
 			}
 		}
 	}
@@ -654,14 +654,14 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 		prefix := aclName + "|"
 		for ruleKey := range configDB.ACLRule {
 			if strings.HasPrefix(ruleKey, prefix) {
-				cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+				cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil)
 			}
 		}
-		cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
+		cs.Add("ACL_TABLE", aclName, ChangeDelete, nil)
 	} else {
 		// Other users exist - just remove this interface from the binding list
 		remainingBindings := depCheck.GetACLRemainingInterfaces(aclName)
-		cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+		cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
 			"ports": remainingBindings,
 		})
 	}
@@ -724,7 +724,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Remove QoS mapping and per-interface QUEUE entries
 	if configDB != nil {
 		if _, ok := configDB.PortQoSMap[i.name]; ok {
-			cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil, nil)
+			cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil)
 		}
 	}
 	// Delete QUEUE entries for this interface (QUEUE|{intf}|{N})
@@ -732,7 +732,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if _, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
 			for qi := range policy.Queues {
 				queueKey := fmt.Sprintf("%s|%d", i.name, qi)
-				cs.Add("QUEUE", queueKey, ChangeDelete, nil, nil)
+				cs.Add("QUEUE", queueKey, ChangeDelete, nil)
 			}
 		}
 	}
@@ -740,14 +740,14 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Remove IP addresses from interface
 	for _, ipAddr := range i.IPAddresses() {
 		ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-		cs.Add("INTERFACE", ipKey, ChangeDelete, nil, nil)
+		cs.Add("INTERFACE", ipKey, ChangeDelete, nil)
 	}
 
 	// Remove INTERFACE base entry for routed services (created by GenerateServiceEntries).
 	// Must come after IP deletions since intfmgrd enforces parent-child ordering.
 	isRouted := svc != nil && (svc.ServiceType == spec.ServiceTypeRouted || svc.ServiceType == spec.ServiceTypeEVPNRouted)
 	if isRouted && (vrfName == "" || vrfName == "default") {
-		cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+		cs.Add("INTERFACE", i.name, ChangeDelete, nil)
 	}
 
 	// Remove BGP neighbor created by this service (tracked in binding)
@@ -756,8 +756,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if vrfName != "" && vrfName != "default" {
 			vrfKey = vrfName
 		}
-		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, bgpNeighbor, "ipv4_unicast"), ChangeDelete, nil, nil)
-		cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, bgpNeighbor), ChangeDelete, nil, nil)
+		cs.Add("BGP_NEIGHBOR_AF", BGPNeighborAFKey(vrfKey, bgpNeighbor, "ipv4_unicast"), ChangeDelete, nil)
+		cs.Add("BGP_NEIGHBOR", fmt.Sprintf("%s|%s", vrfKey, bgpNeighbor), ChangeDelete, nil)
 	}
 
 	// =========================================================================
@@ -780,9 +780,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// For routed services, delete the INTERFACE base entry entirely.
 		// For non-routed services (IRB, bridged), just clear the VRF binding.
 		if isRouted {
-			cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+			cs.Add("INTERFACE", i.name, ChangeDelete, nil)
 		} else {
-			cs.Add("INTERFACE", i.name, ChangeModify, nil, map[string]string{
+			cs.Add("INTERFACE", i.name, ChangeModify, map[string]string{
 				"vrf_name": "",
 			})
 		}
@@ -793,12 +793,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 			// Remove BGP EVPN config for this VRF
 			if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-				cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(derivedVRF, ipvpnDef.L3VNI), ChangeDelete, nil, nil)
-				cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(derivedVRF, "l2vpn_evpn"), ChangeDelete, nil, nil)
-				cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, derivedVRF), ChangeDelete, nil, nil)
+				cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(derivedVRF, ipvpnDef.L3VNI), ChangeDelete, nil)
+				cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(derivedVRF, "l2vpn_evpn"), ChangeDelete, nil)
+				cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, derivedVRF), ChangeDelete, nil)
 			}
 
-			cs.Add("VRF", derivedVRF, ChangeDelete, nil, nil)
+			cs.Add("VRF", derivedVRF, ChangeDelete, nil)
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
@@ -812,13 +812,13 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 				}
 
 				if sharedVRF != "" && ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-					cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(sharedVRF, ipvpnDef.L3VNI), ChangeDelete, nil, nil)
-					cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(sharedVRF, "l2vpn_evpn"), ChangeDelete, nil, nil)
-					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, sharedVRF), ChangeDelete, nil, nil)
+					cs.Add("BGP_EVPN_VNI", BGPEVPNVNIKey(sharedVRF, ipvpnDef.L3VNI), ChangeDelete, nil)
+					cs.Add("BGP_GLOBALS_AF", BGPGlobalsAFKey(sharedVRF, "l2vpn_evpn"), ChangeDelete, nil)
+					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(ipvpnDef.L3VNI, sharedVRF), ChangeDelete, nil)
 				}
 
 				if sharedVRF != "" {
-					cs.Add("VRF", sharedVRF, ChangeDelete, nil, nil)
+					cs.Add("VRF", sharedVRF, ChangeDelete, nil)
 				}
 			}
 		}
@@ -836,7 +836,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			vlanName := VLANName(vlanID)
 
 			// Always remove this interface's VLAN membership
-			cs.Add("VLAN_MEMBER", VLANMemberKey(vlanID, i.name), ChangeDelete, nil, nil)
+			cs.Add("VLAN_MEMBER", VLANMemberKey(vlanID, i.name), ChangeDelete, nil)
 
 			// Check if this is the last VLAN member
 			if depCheck.IsLastVLANMember(vlanID) {
@@ -846,23 +846,23 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 				hasIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
 				if hasIRB {
 					if macvpnDef.AnycastIP != "" {
-						cs.Add("VLAN_INTERFACE", SVIIPKey(vlanID, macvpnDef.AnycastIP), ChangeDelete, nil, nil)
+						cs.Add("VLAN_INTERFACE", SVIIPKey(vlanID, macvpnDef.AnycastIP), ChangeDelete, nil)
 					}
-					cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil, nil)
+					cs.Add("VLAN_INTERFACE", vlanName, ChangeDelete, nil)
 				}
 
 				// ARP suppression
 				if macvpnDef.ARPSuppression {
-					cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeDelete, nil, nil)
+					cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeDelete, nil)
 				}
 
 				// VNI mapping
 				if macvpnDef.VNI > 0 {
-					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(macvpnDef.VNI, vlanName), ChangeDelete, nil, nil)
+					cs.Add("VXLAN_TUNNEL_MAP", VNIMapKey(macvpnDef.VNI, vlanName), ChangeDelete, nil)
 				}
 
 				// VLAN itself
-				cs.Add("VLAN", vlanName, ChangeDelete, nil, nil)
+				cs.Add("VLAN", vlanName, ChangeDelete, nil)
 			}
 		}
 	}
@@ -871,7 +871,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Service binding tracking (always delete)
 	// =========================================================================
 
-	cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeDelete, nil, nil)
+	cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeDelete, nil)
 
 	// Log if this was the last user of the service
 	if isLastServiceUser {

@@ -159,7 +159,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 	// Create VTEP (skip if exists)
 	if !n.VTEPExists() {
 		for _, e := range VTEPConfig(sourceIP) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 	}
 
@@ -167,14 +167,14 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 	if len(resolved.BGPNeighbors) > 0 {
 		// Ensure BGP globals are set
 		for _, e := range BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, nil) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 
 		// Enable L2VPN EVPN address-family
 		for _, e := range BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
 			"advertise-all-vni": "true",
 		}) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 
 		for _, rrIP := range resolved.BGPNeighbors {
@@ -194,14 +194,14 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 				// idempotent so this is safe even if it already exists.
 				cs.Add("BGP_NEIGHBOR_AF",
 					BGPNeighborAFKey("default", rrIP, "l2vpn_evpn"),
-					ChangeAdd, nil, map[string]string{"admin_status": "true"})
+					ChangeAdd, map[string]string{"admin_status": "true"})
 			} else {
 				for _, e := range BGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
 					EBGPMultihop: true,
 					ActivateIPv4: true,
 					ActivateEVPN: true,
 				}) {
-					cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+					cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 				}
 			}
 		}
@@ -228,18 +228,18 @@ func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
 			continue
 		}
 		for _, e := range BGPNeighborDeleteConfig(rrIP) {
-			cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+			cs.Add(e.Table, e.Key, ChangeDelete, nil)
 		}
 	}
 
 	// Remove L2VPN EVPN address-family
 	for _, e := range BGPGlobalsAFConfig("default", "l2vpn_evpn", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
 	}
 
 	// Remove VXLAN NVO and tunnel
-	cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeDelete, nil, nil)
-	cs.Add("VXLAN_TUNNEL", "vtep1", ChangeDelete, nil, nil)
+	cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeDelete, nil)
+	cs.Add("VXLAN_TUNNEL", "vtep1", ChangeDelete, nil)
 
 	util.WithDevice(n.name).Infof("Tore down EVPN overlay (%d neighbors removed)", len(resolved.BGPNeighbors))
 	return cs, nil

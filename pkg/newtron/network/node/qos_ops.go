@@ -31,13 +31,13 @@ func (n *Node) ApplyQoS(ctx context.Context, intfName, policyName string, policy
 	// Generate device-wide entries (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE)
 	deviceEntries := GenerateQoSDeviceEntries(policyName, policy)
 	for _, entry := range deviceEntries {
-		cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+		cs.Add(entry.Table, entry.Key, ChangeAdd, entry.Fields)
 	}
 
 	// Generate per-interface entries (PORT_QOS_MAP, QUEUE)
 	intfEntries := generateQoSInterfaceEntries(policyName, policy, intfName)
 	for _, entry := range intfEntries {
-		cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
+		cs.Add(entry.Table, entry.Key, ChangeAdd, entry.Fields)
 	}
 
 	util.WithDevice(n.name).Infof("Applied QoS policy '%s' to interface %s", policyName, intfName)

@@ -50,7 +50,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		fields["fast_rate"] = "true"
 	}
 
-	cs.Add("PORTCHANNEL", name, ChangeAdd, nil, fields)
+	cs.Add("PORTCHANNEL", name, ChangeAdd, fields)
 
 	// Add members
 	for _, member := range opts.Members {
@@ -61,7 +61,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
 		memberKey := fmt.Sprintf("%s|%s", name, member)
-		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, nil, map[string]string{})
+		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, map[string]string{})
 	}
 
 	util.WithDevice(n.name).Infof("Created PortChannel %s with members %v", name, opts.Members)

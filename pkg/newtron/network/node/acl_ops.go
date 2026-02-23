@@ -164,7 +164,7 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 	}
 
 	cs := NewChangeSet(n.name, "device.delete-acl-rule")
-	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil)
 
 	util.WithDevice(n.name).Infof("Deleted rule %s from ACL table %s", ruleName, tableName)
 	return cs, nil
@@ -225,7 +225,7 @@ func (n *Node) UnbindACLFromInterface(ctx context.Context, aclName, interfaceNam
 				}
 			}
 
-			cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+			cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
 				"ports": strings.Join(remaining, ","),
 			})
 		}

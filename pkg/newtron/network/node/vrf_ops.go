@@ -143,10 +143,10 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 
 	cs := NewChangeSet(n.name, "device.delete-vrf")
 
-	cs.Add("VRF", name, ChangeDelete, nil, nil)
+	cs.Add("VRF", name, ChangeDelete, nil)
 
 	// Remove BGP_GLOBALS entry written by BindIPVPN.
-	cs.Add("BGP_GLOBALS", name, ChangeDelete, nil, nil)
+	cs.Add("BGP_GLOBALS", name, ChangeDelete, nil)
 
 	util.WithDevice(n.name).Infof("Deleted VRF %s", name)
 	return cs, nil
@@ -239,13 +239,13 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs := NewChangeSet(n.name, "device.unbind-ipvpn")
 
 	// Clear VRF|vni (standard SONiC: clear L3VNI binding) — this is a modify, not delete.
-	cs.Add("VRF", vrfName, ChangeModify, nil, map[string]string{
+	cs.Add("VRF", vrfName, ChangeModify, map[string]string{
 		"vni": "",
 	})
 
 	// Delete the remaining IP-VPN entries.
 	for _, e := range ipvpnUnbindConfig(n.configDB, vrfName) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil, nil)
+		cs.Add(e.Table, e.Key, ChangeDelete, nil)
 	}
 
 	util.WithDevice(n.name).Infof("Unbound IP-VPN from VRF %s", vrfName)

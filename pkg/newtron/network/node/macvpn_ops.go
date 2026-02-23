@@ -47,14 +47,14 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 	// Add VNI mapping (delegates to evpn_ops.go config function)
 	if macvpnDef.VNI > 0 {
 		for _, e := range vniMapConfig(vlanName, macvpnDef.VNI) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 	}
 
 	// Configure ARP suppression (delegates to evpn_ops.go config function)
 	if macvpnDef.ARPSuppression {
 		for _, e := range arpSuppressionConfig(vlanName) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 	}
 
