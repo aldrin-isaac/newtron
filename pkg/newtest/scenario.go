@@ -137,6 +137,9 @@ ActionSetInterface       StepAction = "set-interface"
 
 	// BGP globals removal
 	ActionRemoveBGPGlobals StepAction = "remove-bgp-globals"
+
+	// Baseline removal
+	ActionRemoveBaseline StepAction = "remove-baseline"
 )
 
 // validActions is the set of all recognized step actions, derived from the

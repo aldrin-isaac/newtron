@@ -277,7 +277,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	var qosPolicyName string
 	if pn, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
 		qosPolicyName = pn
-		for _, entry := range GenerateQoSDeviceEntries(pn, policy) {
+		for _, entry := range GenerateDeviceQoS(pn, policy) {
 			cs.Add(entry.Table, entry.Key, entry.Fields)
 		}
 	}
@@ -361,7 +361,7 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 
 	routing := svc.Routing
 
-	// Derive peer IP (same logic as generateBGPEntries, needed for return value)
+	// Derive peer IP (same logic as generateBGPPeering, needed for return value)
 	var peerIP string
 	if opts.IPAddress != "" {
 		var err error
@@ -794,7 +794,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Remove QoS device-wide entries if no other interface references this policy
 	if b.QoSPolicy != "" {
 		if !isQoSPolicyReferenced(configDB, b.QoSPolicy, i.name) {
-			cs.Deletes(deleteQoSDeviceEntries(configDB, b.QoSPolicy))
+			cs.Deletes(deleteDeviceQoS(configDB, b.QoSPolicy))
 		}
 	}
 

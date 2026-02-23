@@ -157,6 +157,7 @@ ActionCleanup:           {needsDevices: true},
 	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
 	ActionTeardownEVPN:     {needsDevices: true},
 	ActionRemoveBGPGlobals: {needsDevices: true},
+	ActionRemoveBaseline:   {needsDevices: true},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.

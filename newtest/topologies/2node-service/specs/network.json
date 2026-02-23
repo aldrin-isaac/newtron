@@ -6,11 +6,18 @@
     "transit":      { "description": "Inter-switch underlay link", "service_type": "routed", "routing": {"protocol": "bgp", "peer_as": "request"} },
     "local-irb":    { "description": "Local VLAN with SVI gateway", "service_type": "irb", "macvpn": "irb-vlan100" },
     "local-bridge": { "description": "Local L2 bridge (no routing)", "service_type": "bridged", "macvpn": "bridge-vlan200" },
-    "l2-extend":    { "description": "EVPN L2 overlay", "service_type": "evpn-bridged", "macvpn": "extend-vlan300" }
+    "l2-extend":    { "description": "EVPN L2 overlay", "service_type": "evpn-bridged", "macvpn": "extend-vlan300" },
+    "overlay-irb-a": { "description": "EVPN IRB subnet A (10.1.40.0/24)", "service_type": "evpn-irb", "vrf_type": "shared", "ipvpn": "irb-vrf", "macvpn": "irb-vlan400" },
+    "overlay-irb-b": { "description": "EVPN IRB subnet B (10.1.41.0/24)", "service_type": "evpn-irb", "vrf_type": "shared", "ipvpn": "irb-vrf", "macvpn": "irb-vlan401" }
+  },
+  "ipvpns": {
+    "irb-vrf": { "description": "L3 VRF for EVPN IRB routing", "vrf": "Vrf_irb", "l3vni": 50400, "l3vni_vlan": 3998, "route_targets": ["65000:50400"] }
   },
   "macvpns": {
     "irb-vlan100":    { "description": "VLAN 100 for local IRB", "vlan_id": 100 },
     "bridge-vlan200": { "description": "VLAN 200 for local bridge", "vlan_id": 200 },
-    "extend-vlan300": { "description": "VLAN 300 for EVPN L2 extension", "vlan_id": 300, "vni": 10300, "route_targets": ["65000:300"], "arp_suppression": true }
+    "extend-vlan300": { "description": "VLAN 300 for EVPN L2 extension", "vlan_id": 300, "vni": 10300, "route_targets": ["65000:300"], "arp_suppression": true },
+    "irb-vlan400":    { "description": "VLAN 400 subnet A for EVPN IRB", "vlan_id": 400, "vni": 10400, "anycast_ip": "10.1.40.1/24", "anycast_mac": "00:00:00:01:04:00", "route_targets": ["65000:400"], "arp_suppression": true },
+    "irb-vlan401":    { "description": "VLAN 401 subnet B for EVPN IRB", "vlan_id": 401, "vni": 10401, "anycast_ip": "10.1.41.1/24", "anycast_mac": "00:00:00:01:04:00", "route_targets": ["65000:401"], "arp_suppression": true }
   }
 }

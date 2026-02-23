@@ -1,7 +1,8 @@
 name: dataplane
 description: |
   Dataplane connectivity tests for service types provisioned by the topology.
-  Tests EVPN L2 cross-switch forwarding (VXLAN VNI 10300) and IRB gateway
+  Tests EVPN L2 cross-switch forwarding (VXLAN VNI 10300), EVPN IRB inter-subnet
+  routing (VLAN 400 ↔ VLAN 401 via Vrf_irb, L3VNI 50400), and local IRB gateway
   reachability (SVI 10.100.1.1/24 on VLAN 100).
 topology: 2node-service
 requires: [provision]
@@ -49,7 +50,70 @@ steps:
       success_rate: 0.80
 
   # =========================================================================
-  # Test 2: IRB gateway reachability (host1 → SVI on switch1)
+  # Test 2: EVPN IRB inter-subnet routing (host7 ↔ host8, Vrf_irb)
+  # =========================================================================
+
+  # host7 (switch1:Ethernet4) is in VLAN 400 (10.1.40.0/24, VNI 10400).
+  # host8 (switch2:Ethernet4) is in VLAN 401 (10.1.41.0/24, VNI 10401).
+  # Both VLANs are bound to Vrf_irb via the irb-vrf IPVPN (L3VNI 50400).
+  # Each switch has an anycast SVI for its local VLAN only.
+  #
+  # Inter-subnet traffic (10.1.40.x ↔ 10.1.41.x) MUST be routed through
+  # the IRB gateway — it cannot take the L2 bridged path because the hosts
+  # are in different VLANs/subnets. This exercises the full EVPN IRB L3
+  # routing path: host → local SVI → Vrf_irb → VXLAN L3VNI → remote SVI → host.
+
+  - name: configure-host7-vlan
+    action: host-exec
+    devices: [host7]
+    command: "ip addr flush dev eth0; ip link add link eth0 name eth0.400 type vlan id 400; ip link set eth0.400 up; ip addr add 10.1.40.10/24 dev eth0.400; ip route add 10.1.41.0/24 via 10.1.40.1"
+    expect:
+      contains: ""
+
+  - name: configure-host8-vlan
+    action: host-exec
+    devices: [host8]
+    command: "ip addr flush dev eth0; ip link add link eth0 name eth0.401 type vlan id 401; ip link set eth0.401 up; ip addr add 10.1.41.20/24 dev eth0.401; ip route add 10.1.40.0/24 via 10.1.41.1"
+    expect:
+      contains: ""
+
+  - name: wait-evpn-irb-learning
+    action: wait
+    duration: 15s
+
+  # Inter-subnet ping: host7 (10.1.40.10) → host8 (10.1.41.20)
+  # Forces L3 IRB routing through Vrf_irb across VXLAN L3VNI 50400
+  - name: ping-host7-to-host8
+    action: host-exec
+    devices: [host7]
+    command: "ping -c 10 -W 2 10.1.41.20"
+    expect:
+      success_rate: 0.80
+
+  - name: ping-host8-to-host7
+    action: host-exec
+    devices: [host8]
+    command: "ping -c 10 -W 2 10.1.40.10"
+    expect:
+      success_rate: 0.80
+
+  # Verify anycast gateway is reachable from each host's local subnet
+  - name: ping-host7-to-gateway
+    action: host-exec
+    devices: [host7]
+    command: "ping -c 5 -W 2 10.1.40.1"
+    expect:
+      success_rate: 0.80
+
+  - name: ping-host8-to-gateway
+    action: host-exec
+    devices: [host8]
+    command: "ping -c 5 -W 2 10.1.41.1"
+    expect:
+      success_rate: 0.80
+
+  # =========================================================================
+  # Test 3: IRB gateway reachability (host1 → SVI on switch1)
   # =========================================================================
 
   # host1 (switch1:Ethernet1) is in VLAN 100 with tagged membership (IRB
@@ -100,5 +164,19 @@ steps:
     action: host-exec
     devices: [host6]
     command: "ip addr del 192.168.3.20/24 dev eth0 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host7
+    action: host-exec
+    devices: [host7]
+    command: "ip link del eth0.400 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host8
+    action: host-exec
+    devices: [host8]
+    command: "ip link del eth0.401 2>/dev/null || true"
     expect:
       contains: ""

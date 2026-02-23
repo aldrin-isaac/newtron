@@ -25,7 +25,7 @@ const (
 //   - 1 TC_TO_QUEUE_MAP entry (identity mapping)
 //   - N SCHEDULER entries (one per queue)
 //   - 0 or 1 WRED_PROFILE entry (if any queue has ECN)
-func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
+func GenerateDeviceQoS(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// DSCP_TO_TC_MAP: map all 64 DSCP values to their traffic class.
@@ -149,10 +149,10 @@ func (i *Interface) bindQosProfile(profile *spec.QoSProfile) []sonic.Entry {
 	return []sonic.Entry{{Table: "PORT_QOS_MAP", Key: i.name, Fields: fields}}
 }
 
-// deleteQoSDeviceEntries returns delete entries for the device-wide QoS tables
-// created by GenerateQoSDeviceEntries: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+// deleteDeviceQoS returns delete entries for the device-wide QoS tables
+// created by GenerateDeviceQoS: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 // SCHEDULER (prefix scan), and WRED_PROFILE (prefix scan).
-func deleteQoSDeviceEntries(configDB *sonic.ConfigDB, policyName string) []sonic.Entry {
+func deleteDeviceQoS(configDB *sonic.ConfigDB, policyName string) []sonic.Entry {
 	var entries []sonic.Entry
 	// DSCP_TO_TC_MAP and TC_TO_QUEUE_MAP: exact key match
 	entries = append(entries, sonic.Entry{Table: "DSCP_TO_TC_MAP", Key: policyName})

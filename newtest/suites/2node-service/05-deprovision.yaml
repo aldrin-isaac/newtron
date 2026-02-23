@@ -1,19 +1,35 @@
 name: deprovision
 description: |
   Deprovision all services and infrastructure from both switches.
-  This validates the "no config leak" principle: every CONFIG_DB entry
-  written by the provisioner is properly cleaned up.
-  Order: services (reverse dependency), EVPN infra, BGP globals.
+  Uses symmetric reverse actions for every forward action in the provisioner:
+    ApplyService   → RemoveService    (per-interface, reverse dependency order)
+    SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers)
+    ConfigureBGP   → RemoveBGPGlobals (BGP globals, AF, redistribution)
+    ApplyBaseline  → RemoveBaseline   (loopback interface)
+  Validates the "no config leak" principle: every CONFIG_DB entry written
+  by a forward action is removed by its corresponding reverse action.
 topology: 2node-service
 requires: [provision]
 after: [dataplane]
 
 steps:
   # =========================================================================
-  # Step 1: Remove all services from interfaces
+  # Reverse of ApplyService — per-interface, reverse dependency order
+  # Forward:  iface.ApplyService(ctx, serviceName, opts)
+  # Reverse:  iface.RemoveService(ctx)
   # =========================================================================
 
-  # Remove EVPN overlay service first (has VXLAN dependencies)
+  # Remove EVPN overlay services first (have VXLAN dependencies)
+  - name: remove-overlay-irb-switch1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet4
+
+  - name: remove-overlay-irb-switch2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet4
+
   - name: remove-l2-extend-switch1
     action: remove-service
     devices: [switch1]
@@ -57,7 +73,9 @@ steps:
     interface: Ethernet0
 
   # =========================================================================
-  # Step 2: Teardown EVPN infrastructure (VTEP, NVO, overlay peers)
+  # Reverse of SetupEVPN — VTEP, NVO, overlay peers
+  # Forward:  node.SetupEVPN(ctx, loopbackIP)
+  # Reverse:  node.TeardownEVPN(ctx)
   # =========================================================================
 
   - name: teardown-evpn
@@ -65,7 +83,9 @@ steps:
     devices: [switch1, switch2]
 
   # =========================================================================
-  # Step 3: Remove BGP globals and device metadata
+  # Reverse of ConfigureBGP — BGP globals, AF, redistribution
+  # Forward:  node.ConfigureBGP(ctx)
+  # Reverse:  node.RemoveBGPGlobals(ctx)
   # =========================================================================
 
   - name: remove-bgp-globals
@@ -73,15 +93,11 @@ steps:
     devices: [switch1, switch2]
 
   # =========================================================================
-  # Step 4: Remove baseline entries (LOOPBACK)
+  # Reverse of ApplyBaseline — loopback interface
+  # Forward:  node.ApplyBaseline(ctx, "sonic-baseline", vars)
+  # Reverse:  node.RemoveBaseline(ctx)
   # =========================================================================
 
-  - name: remove-loopback-switch1
-    action: ssh-command
-    devices: [switch1]
-    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32' 'LOOPBACK_INTERFACE|Loopback0'"
-
-  - name: remove-loopback-switch2
-    action: ssh-command
-    devices: [switch2]
-    command: "redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.2/32' 'LOOPBACK_INTERFACE|Loopback0'"
+  - name: remove-baseline
+    action: remove-baseline
+    devices: [switch1, switch2]

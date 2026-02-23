@@ -25,7 +25,7 @@ func (i *Interface) ApplyQoS(ctx context.Context, policyName string, policy *spe
 	cs := NewChangeSet(n.Name(), "interface.apply-qos")
 
 	// Generate device-wide entries (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE)
-	for _, entry := range GenerateQoSDeviceEntries(policyName, policy) {
+	for _, entry := range GenerateDeviceQoS(policyName, policy) {
 		cs.Add(entry.Table, entry.Key, entry.Fields)
 	}
 
@@ -87,7 +87,7 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 
 	// Clean up device-wide entries if no other interface references this policy
 	if policyName != "" && !isQoSPolicyReferenced(configDB, policyName, i.name) {
-		cs.Deletes(deleteQoSDeviceEntries(configDB, policyName))
+		cs.Deletes(deleteDeviceQoS(configDB, policyName))
 	}
 
 	n.trackOffline(cs)

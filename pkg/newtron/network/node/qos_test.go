@@ -8,7 +8,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
-func TestGenerateQoSDeviceEntries_TwoQueue(t *testing.T) {
+func TestGenerateDeviceQoS_TwoQueue(t *testing.T) {
 	policy := &spec.QoSPolicy{
 		Queues: []*spec.QoSQueue{
 			{Name: "best-effort", Type: "dwrr", Weight: 70, DSCP: []int{0}},
@@ -16,7 +16,7 @@ func TestGenerateQoSDeviceEntries_TwoQueue(t *testing.T) {
 		},
 	}
 
-	entries := GenerateQoSDeviceEntries("test-2q", policy)
+	entries := GenerateDeviceQoS("test-2q", policy)
 
 	// Expect: 1 DSCP_TO_TC_MAP + 1 TC_TO_QUEUE_MAP + 2 SCHEDULER = 4 entries
 	if len(entries) != 4 {
@@ -75,7 +75,7 @@ func TestGenerateQoSDeviceEntries_TwoQueue(t *testing.T) {
 	}
 }
 
-func TestGenerateQoSDeviceEntries_EightQueueWithECN(t *testing.T) {
+func TestGenerateDeviceQoS_EightQueueWithECN(t *testing.T) {
 	policy := &spec.QoSPolicy{
 		Queues: []*spec.QoSQueue{
 			{Name: "be", Type: "dwrr", Weight: 20, DSCP: []int{0}},
@@ -89,7 +89,7 @@ func TestGenerateQoSDeviceEntries_EightQueueWithECN(t *testing.T) {
 		},
 	}
 
-	entries := GenerateQoSDeviceEntries("8q-dc", policy)
+	entries := GenerateDeviceQoS("8q-dc", policy)
 
 	// 1 DSCP + 1 TC + 8 SCHEDULER + 1 WRED = 11
 	if len(entries) != 11 {
@@ -106,7 +106,7 @@ func TestGenerateQoSDeviceEntries_EightQueueWithECN(t *testing.T) {
 	}
 }
 
-func TestGenerateQoSDeviceEntries_NoECN(t *testing.T) {
+func TestGenerateDeviceQoS_NoECN(t *testing.T) {
 	policy := &spec.QoSPolicy{
 		Queues: []*spec.QoSQueue{
 			{Name: "be", Type: "dwrr", Weight: 50, DSCP: []int{0}},
@@ -114,7 +114,7 @@ func TestGenerateQoSDeviceEntries_NoECN(t *testing.T) {
 		},
 	}
 
-	entries := GenerateQoSDeviceEntries("no-ecn", policy)
+	entries := GenerateDeviceQoS("no-ecn", policy)
 
 	// 1 DSCP + 1 TC + 2 SCHEDULER = 4 (no WRED)
 	if len(entries) != 4 {
@@ -186,7 +186,7 @@ func TestDSCPDefaultMapping(t *testing.T) {
 		},
 	}
 
-	entries := GenerateQoSDeviceEntries("dscp-test", policy)
+	entries := GenerateDeviceQoS("dscp-test", policy)
 	dscpMap := entries[0]
 
 	// Explicitly mapped

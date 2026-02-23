@@ -93,10 +93,10 @@ func createAclRule(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry
 	return []sonic.Entry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
 }
 
-// buildACLRuleFields builds ACL_RULE fields from a filter rule spec.
+// aclRuleFields returns the ACL_RULE field map for a filter rule spec.
 // Takes explicit srcIP/dstIP to support prefix-list expansion (Cartesian product)
 // in the service_ops path.
-func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
+func aclRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
 	fields := map[string]string{
 		"PRIORITY": fmt.Sprintf("%d", 10000-rule.Sequence),
 	}
@@ -151,7 +151,7 @@ func createAclRuleFromFilter(aclName string, rule *spec.FilterRule, srcIP, dstIP
 	return sonic.Entry{
 		Table:  "ACL_RULE",
 		Key:    ruleKey,
-		Fields: buildACLRuleFields(rule, srcIP, dstIP),
+		Fields: aclRuleFields(rule, srcIP, dstIP),
 	}
 }
 

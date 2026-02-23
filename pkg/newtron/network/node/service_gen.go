@@ -198,7 +198,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 
 	// BGP routing configuration
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpEntries, err := generateBGPEntries(svc, p, vrfName)
+		bgpEntries, err := generateBGPPeering(svc, p, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("interface %s: BGP routing: %w", i.name, err)
 		}
@@ -226,9 +226,9 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	return entries, nil
 }
 
-// generateBGPEntries resolves BGP peer parameters from the service spec and
+// generateBGPPeering resolves BGP peer parameters from the service spec and
 // topology params, then delegates to BGPNeighbor for entry construction.
-func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
+func generateBGPPeering(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
 	}
@@ -284,7 +284,7 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 
 // generateAclBinding generates ACL table and rule entries for a service filter on this interface.
 // Delegates to acl_ops.go config functions: aclTable for the ACL_TABLE entry,
-// buildACLRuleFields for the full ACL_RULE field set (including CoS→TC mapping).
+// aclRuleFields for the full ACL_RULE field set (including CoS→TC mapping).
 func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([]sonic.Entry, error) {
 	filterSpec, err := i.node.GetFilter(filterName)
 	if err != nil {

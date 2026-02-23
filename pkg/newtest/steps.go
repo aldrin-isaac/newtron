@@ -86,6 +86,7 @@ ActionSetInterface:       &setInterfaceExecutor{},
 	ActionTeardownEVPN:     &teardownEVPNExecutor{},
 	ActionConfigureBGP:     &configureBGPExecutor{},
 	ActionRemoveBGPGlobals: &removeBGPGlobalsExecutor{},
+	ActionRemoveBaseline:   &removeBaselineExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -1894,6 +1895,24 @@ func (e *removeBGPGlobalsExecutor) Execute(ctx context.Context, r *Runner, step 
 			return nil, "", fmt.Errorf("remove-bgp-globals: %s", err)
 		}
 		return cs, fmt.Sprintf("removed BGP globals (%d changes)", len(cs.Changes)), nil
+	})
+}
+
+// ============================================================================
+// removeBaselineExecutor
+// ============================================================================
+
+type removeBaselineExecutor struct{}
+
+func (e *removeBaselineExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
+			return dev.RemoveBaseline(ctx)
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("remove-baseline: %s", err)
+		}
+		return cs, fmt.Sprintf("removed baseline (%d changes)", len(cs.Changes)), nil
 	})
 }
 

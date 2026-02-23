@@ -1363,6 +1363,17 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 			step:    Step{Name: "s", Action: ActionRemoveBGPGlobals},
 			wantErr: true, errMsg: "devices is required",
 		},
+		// remove-baseline
+		{
+			name:    "remove-baseline valid",
+			step:    Step{Name: "s", Action: ActionRemoveBaseline, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-baseline missing devices",
+			step:    Step{Name: "s", Action: ActionRemoveBaseline},
+			wantErr: true, errMsg: "devices is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1439,7 +1450,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionCreateACLTable, ActionAddACLRule, ActionDeleteACLRule,
 		ActionDeleteACLTable, ActionBindACL, ActionUnbindACL,
 		ActionRemoveSVI, ActionRemoveIP, ActionTeardownEVPN,
-		ActionRemoveBGPGlobals,
+		ActionRemoveBGPGlobals, ActionRemoveBaseline,
 	}
 
 	if len(executors) != len(allActions) {

@@ -66,6 +66,32 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 	return cs, nil
 }
 
+// RemoveBaseline removes baseline configuration from the device.
+// Reverses ApplyBaseline("sonic-baseline"): deletes all LOOPBACK_INTERFACE
+// entries for Loopback0 (base + IP sub-entries).
+func (n *Node) RemoveBaseline(ctx context.Context) (*ChangeSet, error) {
+	if err := n.precondition("remove-baseline", "baseline").Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(n.name, "device.remove-baseline")
+
+	configDB := n.ConfigDB()
+	if configDB == nil {
+		return cs, nil
+	}
+
+	// Delete all LOOPBACK_INTERFACE entries for Loopback0 (IP sub-entries first, then base)
+	for key := range configDB.LoopbackInterface {
+		if key == "Loopback0" || strings.HasPrefix(key, "Loopback0|") {
+			cs.Delete("LOOPBACK_INTERFACE", key)
+		}
+	}
+
+	util.WithDevice(n.name).Infof("Removed baseline configuration")
+	return cs, nil
+}
+
 // ============================================================================
 // Cleanup (Orphaned Resource Removal)
 // ============================================================================
