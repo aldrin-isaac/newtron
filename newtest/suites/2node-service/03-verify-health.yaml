@@ -8,6 +8,17 @@ topology: 2node-service
 requires: [provision]
 
 steps:
+  # Ensure BGP sessions are established before running health checks.
+  # The health check's BGP neighbor read is point-in-time (not polled),
+  # so it races with convergence if run immediately after provision.
+  - name: wait-bgp-established
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s
+
   - name: verify-health-switch1
     action: verify-health
     devices: [switch1]
