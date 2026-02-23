@@ -153,7 +153,7 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 		return nil, err
 	}
 	cs := NewChangeSet(n.name, "device.set-device-metadata")
-	e := updateDeviceMetadata(fields)
+	e := updateDeviceMetadataConfig(fields)
 	cs.Update(e.Table, e.Key, e.Fields)
 	n.trackOffline(cs)
 	return cs, nil

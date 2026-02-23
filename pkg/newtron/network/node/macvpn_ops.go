@@ -46,37 +46,37 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 
 	// Add VNI mapping (delegates to evpn_ops.go config function)
 	if macvpnDef.VNI > 0 {
-		cs.Adds(createVniMap(vlanName, macvpnDef.VNI))
+		cs.Adds(createVniMapConfig(vlanName, macvpnDef.VNI))
 	}
 
 	// Configure ARP suppression (delegates to evpn_ops.go config function)
 	if macvpnDef.ARPSuppression {
-		cs.Adds(enableArpSuppression(vlanName))
+		cs.Adds(enableArpSuppressionConfig(vlanName))
 	}
 
 	util.WithDevice(n.Name()).Infof("Bound MAC-VPN '%s' to %s (VNI: %d)", macvpnName, vlanName, macvpnDef.VNI)
 	return cs, nil
 }
 
-// unbindMacvpn returns delete entries for unbinding a MAC-VPN from a VLAN:
+// unbindMacvpnConfig returns delete entries for unbinding a MAC-VPN from a VLAN:
 // the L2VNI mapping and ARP suppression entry.
-func unbindMacvpn(configDB *sonic.ConfigDB, vlanName string) []sonic.Entry {
+func (n *Node) unbindMacvpnConfig(vlanName string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove L2VNI mapping (delegates to evpn_ops.go)
-	if configDB != nil {
-		for key, mapping := range configDB.VXLANTunnelMap {
+	if n.configDB != nil {
+		for key, mapping := range n.configDB.VXLANTunnelMap {
 			if mapping.VLAN == vlanName {
-				entries = append(entries, deleteVniMapByKey(key)...)
+				entries = append(entries, deleteVniMapByKeyConfig(key)...)
 				break
 			}
 		}
 	}
 
 	// Remove ARP suppression (delegates to evpn_ops.go)
-	if configDB != nil {
-		if _, ok := configDB.SuppressVLANNeigh[vlanName]; ok {
-			entries = append(entries, disableArpSuppression(vlanName)...)
+	if n.configDB != nil {
+		if _, ok := n.configDB.SuppressVLANNeigh[vlanName]; ok {
+			entries = append(entries, disableArpSuppressionConfig(vlanName)...)
 		}
 	}
 
@@ -105,7 +105,7 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	cs := configToChangeSet(n.Name(), "interface.unbind-macvpn", unbindMacvpn(n.ConfigDB(), i.name), ChangeDelete)
+	cs := configToChangeSet(n.Name(), "interface.unbind-macvpn", n.unbindMacvpnConfig(i.name), ChangeDelete)
 
 	util.WithDevice(n.Name()).Infof("Unbound MAC-VPN from %s", i.name)
 	return cs, nil

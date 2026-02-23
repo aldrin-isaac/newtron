@@ -25,7 +25,7 @@ const (
 //   - 1 TC_TO_QUEUE_MAP entry (identity mapping)
 //   - N SCHEDULER entries (one per queue)
 //   - 0 or 1 WRED_PROFILE entry (if any queue has ECN)
-func GenerateDeviceQoS(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
+func GenerateDeviceQoSConfig(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// DSCP_TO_TC_MAP: map all 64 DSCP values to their traffic class.
@@ -149,23 +149,23 @@ func (i *Interface) bindQosProfile(profile *spec.QoSProfile) []sonic.Entry {
 	return []sonic.Entry{{Table: "PORT_QOS_MAP", Key: i.name, Fields: fields}}
 }
 
-// deleteDeviceQoS returns delete entries for the device-wide QoS tables
-// created by GenerateDeviceQoS: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+// deleteDeviceQoSConfig returns delete entries for the device-wide QoS tables
+// created by GenerateDeviceQoSConfig: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 // SCHEDULER (prefix scan), and WRED_PROFILE (prefix scan).
-func deleteDeviceQoS(configDB *sonic.ConfigDB, policyName string) []sonic.Entry {
+func (n *Node) deleteDeviceQoSConfig(policyName string) []sonic.Entry {
 	var entries []sonic.Entry
 	// DSCP_TO_TC_MAP and TC_TO_QUEUE_MAP: exact key match
 	entries = append(entries, sonic.Entry{Table: "DSCP_TO_TC_MAP", Key: policyName})
 	entries = append(entries, sonic.Entry{Table: "TC_TO_QUEUE_MAP", Key: policyName})
 	// SCHEDULER and WRED_PROFILE: scan for policyName.* prefix
-	if configDB != nil {
+	if n.configDB != nil {
 		prefix := policyName + "."
-		for key := range configDB.Scheduler {
+		for key := range n.configDB.Scheduler {
 			if strings.HasPrefix(key, prefix) {
 				entries = append(entries, sonic.Entry{Table: "SCHEDULER", Key: key})
 			}
 		}
-		for key := range configDB.WREDProfile {
+		for key := range n.configDB.WREDProfile {
 			if strings.HasPrefix(key, prefix) {
 				entries = append(entries, sonic.Entry{Table: "WRED_PROFILE", Key: key})
 			}
@@ -176,12 +176,12 @@ func deleteDeviceQoS(configDB *sonic.ConfigDB, policyName string) []sonic.Entry 
 
 // isQoSPolicyReferenced checks if any PORT_QOS_MAP entry (excluding the given
 // interface) references the policy via bracket ref [DSCP_TO_TC_MAP|{policyName}].
-func isQoSPolicyReferenced(configDB *sonic.ConfigDB, policyName, excludeInterface string) bool {
-	if configDB == nil {
+func (n *Node) isQoSPolicyReferenced(policyName, excludeInterface string) bool {
+	if n.configDB == nil {
 		return false
 	}
 	ref := fmt.Sprintf("[DSCP_TO_TC_MAP|%s]", policyName)
-	for intfName, entry := range configDB.PortQoSMap {
+	for intfName, entry := range n.configDB.PortQoSMap {
 		if intfName != excludeInterface && entry.DSCPToTCMap == ref {
 			return true
 		}

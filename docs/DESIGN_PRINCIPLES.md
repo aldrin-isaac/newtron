@@ -895,11 +895,20 @@ preconditions, don't build ChangeSets, don't log, and don't connect to
 devices. They answer one question: "what entries does this operation
 produce?"
 
-Config functions come in two forms:
+Config functions come in three forms:
 
-- **Package-level functions** for tables where the subject is not an
-  interface: `createVlan(vlanID, ...)`, `createVrf(vrfName)`,
-  `CreateBGPNeighbor(peerIP, ...)`.
+- **Package-level functions** for stateless entry construction where the
+  subject is not an interface: `createVlanConfig(vlanID, ...)`,
+  `createVrfConfig(vrfName)`, `CreateBGPNeighborConfig(peerIP, ...)`.
+  These take only the values needed to construct the entry — no device
+  state.
+- **Node methods** for config-scanning functions that need to read
+  ConfigDB to determine what to produce: `n.destroyVlanConfig(vlanID)`,
+  `n.destroyVrfConfig(vrfName, l3vni)`, `n.unbindIpvpnConfig(vrfName)`,
+  `n.deleteAclTableConfig(name)`. These scan `n.configDB` to find
+  dependent entries (members, VNI mappings, route targets) for cascading
+  teardown. Making them Node methods ensures they always scan the correct
+  device's state. See Principle 26.
 - **Interface methods** for tables where the interface is the subject:
   `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`, `i.bindQos(...)`,
   `i.generateAclBinding(...)`, `i.generateServiceEntries(...)`. These use
@@ -908,14 +917,14 @@ Config functions come in two forms:
   Principle 24.
 
 ```go
-// Package-level config function — owned by vlan_ops.go
-func createVlan(vlanID int, opts VLANConfig) []sonic.Entry
+// Package-level config function — stateless, owned by vlan_ops.go
+func createVlanConfig(vlanID int, opts VLANConfig) []sonic.Entry
+
+// Node method config function — scans configDB, owned by vlan_ops.go
+func (n *Node) destroyVlanConfig(vlanID int) []sonic.Entry
 
 // Interface method config function — owned by interface_ops.go
 func (i *Interface) bindVrf(vrfName string) []sonic.Entry
-
-// Package-level cascading teardown — scans ConfigDB for related entries
-func destroyVlan(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry
 ```
 
 Operations call these functions and wrap the result:
@@ -925,7 +934,7 @@ Operations call these functions and wrap the result:
 func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, error) {
     return n.op("create-vlan", vlanName, ChangeAdd,
         func(pc *PreconditionChecker) { pc.RequireVLANNotExists(vlanID) },
-        func() []sonic.Entry { return createVlan(vlanID, opts) },
+        func() []sonic.Entry { return createVlanConfig(vlanID, opts) },
     )
 }
 ```
@@ -1044,11 +1053,11 @@ return `[]sonic.Entry`. Every forward generator must have a reverse:
 
 | Forward verb | Reverse verb | Example |
 |-------------|-------------|---------|
-| `create*` | `delete*` or `destroy*` | `createVlan` / `deleteVlan` / `destroyVlan` |
-| `enable*` | `disable*` | `enableArpSuppression` / `disableArpSuppression` |
-| `bind*` | `unbind*` | `bindIpvpn` / `unbindIpvpn` |
-| `assign*` | `unassign*` or `remove*` | `assignIpAddress` / removal via same key |
-| `add*` | `remove*` or `delete*` | `AddVLANMember` / `RemoveVLANMember` |
+| `create*Config` | `delete*Config` or `destroy*Config` | `createVlanConfig` / `deleteVlanConfig` / `n.destroyVlanConfig` |
+| `enable*Config` | `disable*Config` | `enableArpSuppressionConfig` / `disableArpSuppressionConfig` |
+| `bind*Config` | `unbind*Config` | `bindIpvpnConfig` / `n.unbindIpvpnConfig` |
+| `assign*` | `unassign*` or `remove*` | `i.assignIpAddress` / removal via same key |
+| `Add*` | `Remove*` or `Delete*` | `AddVLANMember` / `RemoveVLANMember` |
 
 `destroy*` is reserved for cascading teardowns that scan ConfigDB for
 dependent entries (members, VNI mappings, etc.) and remove them all.
@@ -1081,7 +1090,7 @@ forces every caller to supply `intfName` — but the Interface already has
 it. The correct form is `i.bindVrf(vrfName)`.
 
 Exception: container membership operations (VLAN members, PortChannel
-members) where the container is the subject — `createVlanMember(vlanID,
+members) where the container is the subject — `createVlanMemberConfig(vlanID,
 intfName, tagged)` is correct because the VLAN is the subject, not the
 interface.
 
@@ -1135,18 +1144,18 @@ imperative statements:
 
 ```go
 // Correct — verb first
-createVlan(vlanID, opts)
-destroyVrf(configDB, vrfName, l3vni)
-enableArpSuppression(vlanName)
-bindIpvpn(vrfName, ipvpnDef, ...)
-deleteVlanMember(vlanID, intfName)
+createVlanConfig(vlanID, opts)
+n.destroyVrfConfig(vrfName, l3vni)
+enableArpSuppressionConfig(vlanName)
+bindIpvpnConfig(vrfName, ipvpnDef, ...)
+deleteVlanMemberConfig(vlanID, intfName)
 i.bindVrf(vrfName)
 i.assignIpAddress(ipAddr)
 i.enableIpRouting()
 
 // Wrong — noun first
 vlanCreate(vlanID, opts)
-vrfDestroy(configDB, vrfName, l3vni)
+vrfDestroy(vrfName, l3vni)
 arpSuppressionEnable(vlanName)
 ipvpnBind(vrfName, ipvpnDef, ...)
 vlanMemberDelete(vlanID, intfName)
@@ -1159,14 +1168,14 @@ The verb vocabulary for config generators:
 
 | Verb | Meaning | Example |
 |------|---------|---------|
-| `create` | Construct entries for a new entity | `createVlan`, `createVrf`, `CreateBGPNeighbor` |
-| `delete` | Remove a single entity's entries | `deleteVlan`, `deleteVlanMember` |
-| `destroy` | Cascading teardown (scans configDB for dependents) | `destroyVlan`, `destroyVrf` |
-| `enable`/`disable` | Toggle a behavior | `enableArpSuppression`, `disableArpSuppression` |
-| `bind`/`unbind` | Establish/remove a relationship | `bindIpvpn`, `unbindIpvpn`, `i.bindVrf` |
+| `create` | Construct entries for a new entity | `createVlanConfig`, `createVrfConfig`, `CreateBGPNeighborConfig` |
+| `delete` | Remove a single entity's entries | `deleteVlanConfig`, `deleteVlanMemberConfig` |
+| `destroy` | Cascading teardown (Node method, scans configDB) | `n.destroyVlanConfig`, `n.destroyVrfConfig` |
+| `enable`/`disable` | Toggle a behavior | `enableArpSuppressionConfig`, `disableArpSuppressionConfig` |
+| `bind`/`unbind` | Establish/remove a relationship | `bindIpvpnConfig`, `n.unbindIpvpnConfig`, `i.bindVrf` |
 | `assign`/`unassign` | Attach/detach a value | `i.assignIpAddress` |
-| `update` | Modify fields on an existing entry | `updateDeviceMetadata` |
-| `generate` | Composite entry generation | `i.generateServiceEntries`, `generateBGPEntries` |
+| `update` | Modify fields on an existing entry | `updateDeviceMetadataConfig` |
+| `generate` | Composite entry generation | `i.generateServiceEntries`, `generateBGPPeeringConfig` |
 
 Noun-only names are reserved for types, constructors, and key helpers —
 never for functions that describe actions.
@@ -1200,7 +1209,61 @@ canBridge / canRoute                    // capability, not layer number
 
 ---
 
-## 26. Summary
+## 26. Node as Device Isolation Boundary
+
+The Node is the device isolation boundary. Every `*Node` instance owns
+its own `configDB`, Redis connection, interface map, and resolved specs.
+All device-scoped operations — config scanning, precondition checking,
+dependency analysis — are methods on Node, ensuring they always operate
+on the correct device's state.
+
+This is designed for a multi-device future. When newtron operates on
+multiple devices simultaneously — whether for coordinated provisioning,
+cross-device validation, or fabric-wide operations — each Node is fully
+self-contained:
+
+```go
+node1, _ := network.ConnectNode(ctx, "switch1")
+node2, _ := network.ConnectNode(ctx, "switch2")
+
+// Each interface knows its parent Node
+iface1, _ := node1.GetInterface("Ethernet0")  // switch1's Ethernet0
+iface2, _ := node2.GetInterface("Ethernet0")  // switch2's Ethernet0
+
+// Operations are device-scoped by construction
+cs1, _ := iface1.ApplyService(ctx, "transit", opts)  // scans switch1's configDB
+cs2, _ := iface2.ApplyService(ctx, "transit", opts)  // scans switch2's configDB
+```
+
+The key architectural choice: **config-scanning functions are Node methods,
+not free functions that take `configDB` as a parameter.** A free function
+like `destroyVrf(configDB, vrfName, l3vni)` requires the caller to pass
+the correct `configDB` — in a multi-device context, passing the wrong one
+is a silent bug that scans the wrong device's state. A Node method like
+`n.destroyVrfConfig(vrfName, l3vni)` eliminates this class of bug
+structurally: the method always operates on `n.configDB`.
+
+The same principle applies transitively through the object hierarchy:
+
+- **`DependencyChecker`** takes a `*Node` and accesses `dc.node.ConfigDB()`
+  — it's device-scoped by construction.
+- **Interface methods** reach `i.node` for device state — no possibility
+  of cross-device contamination between `switch1/Ethernet0` and
+  `switch2/Ethernet0`.
+- **`SpecProvider`** is per-Node — each device sees its own resolved specs
+  (different profiles, different platforms, different overrides).
+
+No shared mutable state crosses the Node boundary. A multi-device
+orchestrator is purely an iteration concern — loop over Nodes, call
+self-contained methods on each. The Node provides the isolation; the
+orchestrator provides the coordination.
+
+**Every device-scoped operation is a Node method. Cross-device
+coordination belongs in the orchestrator, not in the Node.**
+
+---
+
+## 27. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1229,3 +1292,4 @@ canBridge / canRoute                    // capability, not layer number
 | Symmetric operations | If newtron creates it, newtron must be able to remove it; every forward config generator must have a reverse |
 | Respect abstraction boundaries | If an object knows its own identity, callers must not re-supply it |
 | Verb-first, domain-intent naming | Verbs come first (`createVlan` not `vlanCreate`); names describe domain intent, not CONFIG_DB mechanics |
+| Node as device isolation boundary | Every device-scoped operation is a Node method; cross-device coordination belongs in the orchestrator |

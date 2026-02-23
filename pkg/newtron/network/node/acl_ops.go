@@ -43,7 +43,7 @@ func (n *Node) GetOrphanedACLs() []string {
 // ============================================================================
 
 // aclTable returns sonic.Entry for an ACL_TABLE.
-func createAclTable(name, aclType, stage, ports, description string) []sonic.Entry {
+func createAclTableConfig(name, aclType, stage, ports, description string) []sonic.Entry {
 	fields := map[string]string{
 		"type":  aclType,
 		"stage": stage,
@@ -57,8 +57,8 @@ func createAclTable(name, aclType, stage, ports, description string) []sonic.Ent
 	return []sonic.Entry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
 }
 
-// createAclRule returns sonic.Entry for an ACL_RULE.
-func createAclRule(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
+// createAclRuleConfig returns sonic.Entry for an ACL_RULE.
+func createAclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
 	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
 
 	action := "DROP"
@@ -144,9 +144,9 @@ func aclRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string
 	return fields
 }
 
-// createAclRuleFromFilter returns an ACL_RULE entry built from a filter rule spec.
+// createAclRuleFromFilterConfig returns an ACL_RULE entry built from a filter rule spec.
 // The suffix parameter supports prefix-list expansion (e.g., "_0", "_1") — pass "" for single rules.
-func createAclRuleFromFilter(aclName string, rule *spec.FilterRule, srcIP, dstIP, suffix string) sonic.Entry {
+func createAclRuleFromFilterConfig(aclName string, rule *spec.FilterRule, srcIP, dstIP, suffix string) sonic.Entry {
 	ruleKey := fmt.Sprintf("%s|RULE_%d%s", aclName, rule.Sequence, suffix)
 	return sonic.Entry{
 		Table:  "ACL_RULE",
@@ -155,16 +155,16 @@ func createAclRuleFromFilter(aclName string, rule *spec.FilterRule, srcIP, dstIP
 	}
 }
 
-// bindAcl returns the ACL_TABLE entry for binding interfaces with a stage direction.
-func bindAcl(aclName, ports, stage string) sonic.Entry {
+// bindAclConfig returns the ACL_TABLE entry for binding interfaces with a stage direction.
+func bindAclConfig(aclName, ports, stage string) sonic.Entry {
 	return sonic.Entry{Table: "ACL_TABLE", Key: aclName, Fields: map[string]string{
 		"ports": ports,
 		"stage": stage,
 	}}
 }
 
-// unbindAcl returns the ACL_TABLE entry for updating the ports binding list.
-func unbindAcl(aclName, ports string) sonic.Entry {
+// unbindAclConfig returns the ACL_TABLE entry for updating the ports binding list.
+func unbindAclConfig(aclName, ports string) sonic.Entry {
 	return sonic.Entry{Table: "ACL_TABLE", Key: aclName, Fields: map[string]string{
 		"ports": ports,
 	}}
@@ -203,7 +203,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 	}
 	cs, err := n.op("create-acl-table", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
-		func() []sonic.Entry { return createAclTable(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+		func() []sonic.Entry { return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
 	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
-		func() []sonic.Entry { return createAclRule(tableName, ruleName, opts) })
+		func() []sonic.Entry { return createAclRuleConfig(tableName, ruleName, opts) })
 	if err != nil {
 		return nil, err
 	}
@@ -248,13 +248,13 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 }
 
 // deleteAclTable returns delete entries for an ACL table: all its rules and the table itself.
-func deleteAclTable(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+func (n *Node) deleteAclTableConfig(name string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove all rules first
-	if configDB != nil {
+	if n.configDB != nil {
 		prefix := name + "|"
-		for ruleKey := range configDB.ACLRule {
+		for ruleKey := range n.configDB.ACLRule {
 			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
 				entries = append(entries, sonic.Entry{Table: "ACL_RULE", Key: ruleKey})
 			}
@@ -270,7 +270,7 @@ func deleteAclTable(configDB *sonic.ConfigDB, name string) []sonic.Entry {
 func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
 	cs, err := n.op("delete-acl-table", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
-		func() []sonic.Entry { return deleteAclTable(n.configDB, name) })
+		func() []sonic.Entry { return n.deleteAclTableConfig(name) })
 	if err != nil {
 		return nil, err
 	}

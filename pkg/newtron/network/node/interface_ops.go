@@ -138,10 +138,10 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	if dc.IsFirstACLUser(aclName) {
 		newBindings = i.name
 	} else {
-		newBindings = addInterfaceToList(configDB.ACLTable[aclName].Ports, i.name)
+		newBindings = util.AddToCSV(configDB.ACLTable[aclName].Ports, i.name)
 	}
 
-	e := bindAcl(aclName, newBindings, direction)
+	e := bindAclConfig(aclName, newBindings, direction)
 	cs.Update(e.Table, e.Key, e.Fields)
 
 	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
@@ -163,7 +163,7 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 	configDB := n.ConfigDB()
 	if configDB != nil {
 		if table, ok := configDB.ACLTable[aclName]; ok {
-			e := unbindAcl(aclName, removeInterfaceFromList(table.Ports, i.name))
+			e := unbindAclConfig(aclName, util.RemoveFromCSV(table.Ports, i.name))
 			cs.Update(e.Table, e.Key, e.Fields)
 		}
 	}
@@ -291,7 +291,7 @@ func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
 		return true
 	}
 
-	remaining := removeInterfaceFromList(acl.Ports, dc.excludeInterface)
+	remaining := util.RemoveFromCSV(acl.Ports, dc.excludeInterface)
 	return remaining == ""
 }
 
@@ -307,7 +307,7 @@ func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
 		return ""
 	}
 
-	return removeInterfaceFromList(acl.Ports, dc.excludeInterface)
+	return util.RemoveFromCSV(acl.Ports, dc.excludeInterface)
 }
 
 // IsLastVLANMember returns true if this is the last member of the VLAN

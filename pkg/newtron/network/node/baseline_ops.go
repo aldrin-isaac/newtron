@@ -43,7 +43,7 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 	switch configletName {
 	case "sonic-baseline":
 		// Basic SONiC baseline
-		e := updateDeviceMetadata(map[string]string{"hostname": varMap["device_name"]})
+		e := updateDeviceMetadataConfig(map[string]string{"hostname": varMap["device_name"]})
 		cs.Update(e.Table, e.Key, e.Fields)
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
 			// Base entry required for intfmgrd to bind the IP (Update = idempotent create-or-update)
@@ -54,7 +54,7 @@ func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []s
 	case "sonic-evpn":
 		// EVPN baseline - create VTEP (delegates to evpn_ops.go VTEP)
 		if loopbackIP, ok := varMap["loopback_ip"]; ok && loopbackIP != "" {
-			cs.Adds(CreateVTEP(loopbackIP))
+			cs.Adds(CreateVTEPConfig(loopbackIP))
 		}
 
 	default:
@@ -123,7 +123,7 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 		for aclName, acl := range configDB.ACLTable {
 			if acl.Ports == "" {
 				summary.OrphanedACLs = append(summary.OrphanedACLs, aclName)
-				cs.Deletes(deleteAclTable(configDB, aclName))
+				cs.Deletes(n.deleteAclTableConfig(aclName))
 			}
 		}
 	}
@@ -146,7 +146,7 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 			}
 			if !hasUsers {
 				summary.OrphanedVRFs = append(summary.OrphanedVRFs, vrfName)
-				cs.Deletes(createVrf(vrfName))
+				cs.Deletes(createVrfConfig(vrfName))
 			}
 		}
 	}
@@ -167,7 +167,7 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 			}
 			if orphaned {
 				summary.OrphanedVNIMappings = append(summary.OrphanedVNIMappings, mapKey)
-				cs.Deletes(deleteVniMapByKey(mapKey))
+				cs.Deletes(deleteVniMapByKeyConfig(mapKey))
 			}
 		}
 	}

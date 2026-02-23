@@ -13,7 +13,6 @@ package node
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
@@ -92,10 +91,10 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		if macvpnDef != nil && macvpnDef.VNI > 0 {
 			l2vni = macvpnDef.VNI
 		}
-		entries = append(entries, createVlan(vlanID, VLANConfig{L2VNI: l2vni})...)
+		entries = append(entries, createVlanConfig(vlanID, VLANConfig{L2VNI: l2vni})...)
 
 		if macvpnDef != nil && macvpnDef.ARPSuppression {
-			entries = append(entries, enableArpSuppression(VLANName(vlanID))...)
+			entries = append(entries, enableArpSuppressionConfig(VLANName(vlanID))...)
 		}
 	}
 
@@ -104,9 +103,9 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	if canRoute && svc.VRFType == spec.VRFTypeInterface {
 		vrfName = util.DeriveVRFName(svc.VRFType, p.ServiceName, i.name)
 		if ipvpnDef != nil {
-			entries = append(entries, bindIpvpn(vrfName, ipvpnDef, p.UnderlayASN, p.RouterID)...)
+			entries = append(entries, bindIpvpnConfig(vrfName, ipvpnDef, p.UnderlayASN, p.RouterID)...)
 		} else {
-			entries = append(entries, createVrf(vrfName)...)
+			entries = append(entries, createVrfConfig(vrfName)...)
 		}
 	} else if svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil {
 		vrfName = ipvpnDef.VRF
@@ -116,7 +115,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	// The topology provisioner always emits these entries (idempotent overwrite).
 	// The interface_ops caller filters them out when the VRF already exists.
 	if canRoute && svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && ipvpnDef.VRF != "" {
-		entries = append(entries, bindIpvpn(ipvpnDef.VRF, ipvpnDef, p.UnderlayASN, p.RouterID)...)
+		entries = append(entries, bindIpvpnConfig(ipvpnDef.VRF, ipvpnDef, p.UnderlayASN, p.RouterID)...)
 	}
 
 	// Interface configuration based on service type
@@ -124,7 +123,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	case spec.ServiceTypeEVPNBridged, spec.ServiceTypeBridged:
 		// Bridged access: untagged VLAN member
 		if vlanID > 0 {
-			entries = append(entries, createVlanMember(vlanID, i.name, false)...)
+			entries = append(entries, createVlanMemberConfig(vlanID, i.name, false)...)
 		}
 
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
@@ -142,20 +141,20 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	case spec.ServiceTypeEVPNIRB:
 		// IRB overlay: tagged VLAN member + SVI with anycast gateway
 		if vlanID > 0 {
-			entries = append(entries, createVlanMember(vlanID, i.name, true)...)
+			entries = append(entries, createVlanMemberConfig(vlanID, i.name, true)...)
 			sviOpts := SVIConfig{VRF: vrfName}
 			if macvpnDef != nil {
 				sviOpts.IPAddress = macvpnDef.AnycastIP
 				sviOpts.AnycastMAC = macvpnDef.AnycastMAC
 			}
-			entries = append(entries, createSvi(vlanID, sviOpts)...)
+			entries = append(entries, createSviConfig(vlanID, sviOpts)...)
 		}
 
 	case spec.ServiceTypeIRB:
 		// Local IRB: tagged VLAN member + SVI with IP from params
 		if vlanID > 0 {
-			entries = append(entries, createVlanMember(vlanID, i.name, true)...)
-			entries = append(entries, createSvi(vlanID, SVIConfig{
+			entries = append(entries, createVlanMemberConfig(vlanID, i.name, true)...)
+			entries = append(entries, createSviConfig(vlanID, SVIConfig{
 				VRF:       vrfName,
 				IPAddress: p.IPAddress,
 			})...)
@@ -198,7 +197,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 
 	// BGP routing configuration
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpEntries, err := generateBGPPeering(svc, p, vrfName)
+		bgpEntries, err := generateBGPPeeringConfig(svc, p, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("interface %s: BGP routing: %w", i.name, err)
 		}
@@ -221,14 +220,14 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	if svc.MACVPN != "" {
 		bindingFields["macvpn"] = svc.MACVPN
 	}
-	entries = append(entries, createServiceBinding(i.name, bindingFields))
+	entries = append(entries, createServiceBindingConfig(i.name, bindingFields))
 
 	return entries, nil
 }
 
-// generateBGPPeering resolves BGP peer parameters from the service spec and
+// generateBGPPeeringConfig resolves BGP peer parameters from the service spec and
 // topology params, then delegates to BGPNeighbor for entry construction.
-func generateBGPPeering(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
+func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
 	}
@@ -274,7 +273,7 @@ func generateBGPPeering(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 
 	localIP, _ := util.SplitIPMask(p.IPAddress)
 
-	return CreateBGPNeighbor(peerIP, peerAS, localIP, BGPNeighborOpts{
+	return CreateBGPNeighborConfig(peerIP, peerAS, localIP, BGPNeighborOpts{
 		VRF:          vrfName,
 		ActivateIPv4: true,
 		RRClient:     p.Params["route_reflector_client"] == "true",
@@ -296,21 +295,14 @@ func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([
 		direction = "out"
 	}
 	aclName := util.DeriveACLName(serviceName, direction)
-	desc := fmt.Sprintf("%s filter for %s", capitalizeFirst(stage), serviceName)
+	desc := fmt.Sprintf("%s filter for %s", util.CapitalizeFirst(stage), serviceName)
 
-	entries := createAclTable(aclName, filterTypeToSONiC(filterSpec.Type), stage, i.name, desc)
+	entries := createAclTableConfig(aclName, filterTypeToSONiC(filterSpec.Type), stage, i.name, desc)
 
 	for _, rule := range filterSpec.Rules {
-		entries = append(entries, createAclRuleFromFilter(aclName, rule, rule.SrcIP, rule.DstIP, ""))
+		entries = append(entries, createAclRuleFromFilterConfig(aclName, rule, rule.SrcIP, rule.DstIP, ""))
 	}
 
 	return entries, nil
 }
 
-// capitalizeFirst returns s with the first letter uppercased.
-func capitalizeFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}

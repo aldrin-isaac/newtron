@@ -36,9 +36,9 @@ type ApplyServiceOpts struct {
 	Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 }
 
-// createServiceBinding returns the NEWTRON_SERVICE_BINDING entry for tracking what service
+// createServiceBindingConfig returns the NEWTRON_SERVICE_BINDING entry for tracking what service
 // is applied to an interface.
-func createServiceBinding(intfName string, fields map[string]string) sonic.Entry {
+func createServiceBindingConfig(intfName string, fields map[string]string) sonic.Entry {
 	return sonic.Entry{Table: "NEWTRON_SERVICE_BINDING", Key: intfName, Fields: fields}
 }
 
@@ -237,7 +237,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			existingACL, aclExists := configDB.ACLTable[aclName]
 			if aclExists {
 				// ACL exists — merge this interface into the binding list
-				merged := unbindAcl(aclName, addInterfaceToList(existingACL.Ports, i.name))
+				merged := unbindAclConfig(aclName, util.AddToCSV(existingACL.Ports, i.name))
 				cs.Update(merged.Table, merged.Key, merged.Fields)
 			} else {
 				// ACL doesn't exist - create table entry from generated fields
@@ -277,7 +277,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	var qosPolicyName string
 	if pn, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
 		qosPolicyName = pn
-		for _, entry := range GenerateDeviceQoS(pn, policy) {
+		for _, entry := range GenerateDeviceQoSConfig(pn, policy) {
 			cs.Add(entry.Table, entry.Key, entry.Fields)
 		}
 	}
@@ -341,7 +341,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 		bindingFields["redistribute_vrf"] = redistVRF
 	}
-	e := createServiceBinding(i.name, bindingFields)
+	e := createServiceBindingConfig(i.name, bindingFields)
 	cs.Add(e.Table, e.Key, e.Fields)
 
 	n.trackOffline(cs)
@@ -420,7 +420,7 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 
 	// Merge route-map references into the BGP_NEIGHBOR_AF entry
 	if len(afFields) > 0 && peerIP != "" {
-		e := createBgpNeighborAF(vrfKey, peerIP, "ipv4_unicast", afFields)
+		e := createBgpNeighborAFConfig(vrfKey, peerIP, "ipv4_unicast", afFields)
 		cs.Update(e.Table, e.Key, e.Fields)
 	}
 
@@ -438,7 +438,7 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 				"redistribute_static":    "false",
 			}
 		}
-		cs.Updates(CreateBGPGlobalsAF(vrfKey, "ipv4_unicast", fields))
+		cs.Updates(CreateBGPGlobalsAFConfig(vrfKey, "ipv4_unicast", fields))
 	}
 
 	return peerIP, nil
@@ -453,7 +453,7 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 		return nil, ""
 	}
 
-	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+	rmName := fmt.Sprintf("svc-%s-%s", util.SanitizeName(serviceName), direction)
 	var entries []sonic.Entry
 
 	for _, rule := range policy.Rules {
@@ -533,7 +533,7 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 // createInlineRoutePolicy creates a route-map from standalone community/prefix filters.
 // Returns entries and the route-map name.
 func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, prefixList string) ([]sonic.Entry, string) {
-	rmName := fmt.Sprintf("svc-%s-%s", sanitizeName(serviceName), direction)
+	rmName := fmt.Sprintf("svc-%s-%s", util.SanitizeName(serviceName), direction)
 	var entries []sonic.Entry
 	seq := 10
 
@@ -591,31 +591,31 @@ func (i *Interface) createPrefixSet(prefixSetName, prefixListName string) []soni
 	return entries
 }
 
-// deleteRoutePolicies returns delete entries for all ROUTE_MAP, PREFIX_SET, and
+// deleteRoutePoliciesConfig returns delete entries for all ROUTE_MAP, PREFIX_SET, and
 // COMMUNITY_SET entries created by a service (keyed by the deterministic prefix
-// "svc-{sanitizeName(serviceName)}-").
-func deleteRoutePolicies(configDB *sonic.ConfigDB, serviceName string) []sonic.Entry {
+// "svc-{util.SanitizeName(serviceName)}-").
+func (n *Node) deleteRoutePoliciesConfig(serviceName string) []sonic.Entry {
 	var entries []sonic.Entry
-	if configDB == nil {
+	if n.configDB == nil {
 		return entries
 	}
-	prefix := "svc-" + sanitizeName(serviceName) + "-"
+	prefix := "svc-" + util.SanitizeName(serviceName) + "-"
 
-	for key := range configDB.RouteMap {
+	for key := range n.configDB.RouteMap {
 		// RouteMap keys are "rmName|seq" — check if rmName starts with prefix
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) >= 1 && strings.HasPrefix(parts[0], prefix) {
 			entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: key})
 		}
 	}
-	for key := range configDB.PrefixSet {
+	for key := range n.configDB.PrefixSet {
 		// PrefixSet keys are "setName|seq" — check if setName starts with prefix
 		parts := strings.SplitN(key, "|", 2)
 		if len(parts) >= 1 && strings.HasPrefix(parts[0], prefix) {
 			entries = append(entries, sonic.Entry{Table: "PREFIX_SET", Key: key})
 		}
 	}
-	for key := range configDB.CommunitySet {
+	for key := range n.configDB.CommunitySet {
 		if strings.HasPrefix(key, prefix) {
 			entries = append(entries, sonic.Entry{Table: "COMMUNITY_SET", Key: key})
 		}
@@ -623,19 +623,6 @@ func deleteRoutePolicies(configDB *sonic.ConfigDB, serviceName string) []sonic.E
 	return entries
 }
 
-// sanitizeName replaces non-alphanumeric chars with hyphens for config key names.
-func sanitizeName(name string) string {
-	result := make([]byte, 0, len(name))
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
-			result = append(result, c)
-		} else {
-			result = append(result, '-')
-		}
-	}
-	return string(result)
-}
 
 // addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix lists
 func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec) {
@@ -661,7 +648,7 @@ func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, fil
 					suffix = fmt.Sprintf("_%d", ruleIdx)
 					ruleIdx++
 				}
-				e := createAclRuleFromFilter(aclName, rule, srcIP, dstIP, suffix)
+				e := createAclRuleFromFilterConfig(aclName, rule, srcIP, dstIP, suffix)
 				cs.Add(e.Table, e.Key, e.Fields)
 			}
 		}
@@ -684,34 +671,6 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 	return prefixes
 }
 
-// addInterfaceToList adds an interface name to a comma-separated list
-// (used for ACL_TABLE.ports which contains interface names despite the field name).
-func addInterfaceToList(list, interfaceName string) string {
-	if list == "" {
-		return interfaceName
-	}
-	parts := strings.Split(list, ",")
-	for _, p := range parts {
-		if strings.TrimSpace(p) == interfaceName {
-			return list // Already in list
-		}
-	}
-	return list + "," + interfaceName
-}
-
-// removeInterfaceFromList removes an interface name from a comma-separated list
-// (used for ACL_TABLE.ports which contains interface names despite the field name).
-func removeInterfaceFromList(list, interfaceName string) string {
-	parts := strings.Split(list, ",")
-	var result []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" && p != interfaceName {
-			result = append(result, p)
-		}
-	}
-	return strings.Join(result, ",")
-}
 
 // removeSharedACL removes an ACL, handling the shared case
 func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, aclName string) {
@@ -726,10 +685,10 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 
 	if depCheck.IsLastACLUser(aclName) {
 		// Last user — delete all ACL rules and table (delegates to acl_ops.go)
-		cs.Deletes(deleteAclTable(configDB, aclName))
+		cs.Deletes(i.node.deleteAclTableConfig(aclName))
 	} else {
 		// Other users exist — just remove this interface from the binding list
-		e := unbindAcl(aclName, depCheck.GetACLRemainingInterfaces(aclName))
+		e := unbindAclConfig(aclName, depCheck.GetACLRemainingInterfaces(aclName))
 		cs.Update(e.Table, e.Key, e.Fields)
 	}
 }
@@ -760,7 +719,6 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Create dependency checker to determine what can be safely deleted
 	depCheck := NewDependencyChecker(n, i.name)
-	configDB := n.ConfigDB()
 
 	// Get service definition for cleanup logic
 	svc, _ := i.Node().GetService(serviceName)
@@ -793,8 +751,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Remove QoS device-wide entries if no other interface references this policy
 	if b.QoSPolicy != "" {
-		if !isQoSPolicyReferenced(configDB, b.QoSPolicy, i.name) {
-			cs.Deletes(deleteDeviceQoS(configDB, b.QoSPolicy))
+		if !n.isQoSPolicyReferenced(b.QoSPolicy, i.name) {
+			cs.Deletes(n.deleteDeviceQoSConfig(b.QoSPolicy))
 		}
 	}
 
@@ -816,7 +774,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if vrfName != "" && vrfName != "default" {
 			vrfKey = vrfName
 		}
-		cs.Deletes(DeleteBGPNeighbor(vrfKey, bgpNeighbor))
+		cs.Deletes(DeleteBGPNeighborConfig(vrfKey, bgpNeighbor))
 	}
 
 	// =========================================================================
@@ -833,13 +791,13 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Remove route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
 	if isLastServiceUser {
-		cs.Deletes(deleteRoutePolicies(configDB, serviceName))
+		cs.Deletes(n.deleteRoutePoliciesConfig(serviceName))
 	}
 
 	// Revert BGP_GLOBALS_AF redistribution override if this service set it.
 	// For per-interface VRFs, destroyVrf cascades this anyway — harmless redundancy.
 	if b.RedistributeVRF != "" && isLastServiceUser {
-		cs.Updates(revertRedistribution(b.RedistributeVRF))
+		cs.Updates(revertRedistributionConfig(b.RedistributeVRF))
 	}
 
 	// =========================================================================
@@ -862,7 +820,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			if ipvpnDef != nil {
 				l3vni = ipvpnDef.L3VNI
 			}
-			cs.Deletes(destroyVrf(n.configDB, derivedVRF, l3vni))
+			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni))
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
@@ -870,7 +828,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// be cleaned up when no service bindings reference the ipvpn anymore.
 		if svc != nil && svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
 			if depCheck.IsLastIPVPNUser(svc.IPVPN) && ipvpnDef != nil && ipvpnDef.VRF != "" {
-				cs.Deletes(destroyVrf(n.configDB, ipvpnDef.VRF, ipvpnDef.L3VNI))
+				cs.Deletes(n.destroyVrfConfig(ipvpnDef.VRF, ipvpnDef.L3VNI))
 			}
 		}
 	}
@@ -894,7 +852,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			vlanName := VLANName(vlanID)
 
 			// Always remove this interface's VLAN membership
-			cs.Deletes(deleteVlanMember(vlanID, i.name))
+			cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
 
 			// Check if this is the last VLAN member
 			if depCheck.IsLastVLANMember(vlanID) {
@@ -904,31 +862,31 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 				hasIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
 				if hasIRB {
 					if macvpnDef != nil && macvpnDef.AnycastIP != "" {
-						cs.Deletes(deleteSviIP(vlanID, macvpnDef.AnycastIP))
+						cs.Deletes(deleteSviIPConfig(vlanID, macvpnDef.AnycastIP))
 					} else if b.IPAddress != "" {
 						// Local IRB: SVI IP comes from opts.IPAddress (stored in binding)
-						cs.Deletes(deleteSviIP(vlanID, b.IPAddress))
+						cs.Deletes(deleteSviIPConfig(vlanID, b.IPAddress))
 					}
-					cs.Deletes(deleteSviBase(vlanID))
+					cs.Deletes(deleteSviBaseConfig(vlanID))
 
 					// SAG_GLOBAL: clean up when last anycast MAC user is removed
 					if macvpnDef != nil && macvpnDef.AnycastMAC != "" && depCheck.IsLastAnycastMACUser() {
-						cs.Deletes(deleteSagGlobal())
+						cs.Deletes(deleteSagGlobalConfig())
 					}
 				}
 
 				// ARP suppression (only when macvpn defines it)
 				if macvpnDef != nil && macvpnDef.ARPSuppression {
-					cs.Deletes(disableArpSuppression(vlanName))
+					cs.Deletes(disableArpSuppressionConfig(vlanName))
 				}
 
 				// VNI mapping (only when macvpn defines it)
 				if macvpnDef != nil && macvpnDef.VNI > 0 {
-					cs.Deletes(deleteVniMap(macvpnDef.VNI, vlanName))
+					cs.Deletes(deleteVniMapConfig(macvpnDef.VNI, vlanName))
 				}
 
 				// VLAN itself
-				cs.Deletes(deleteVlan(vlanID))
+				cs.Deletes(deleteVlanConfig(vlanID))
 			}
 		}
 	}

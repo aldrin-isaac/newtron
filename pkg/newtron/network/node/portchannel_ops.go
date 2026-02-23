@@ -69,13 +69,13 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	return cs, nil
 }
 
-// destroyPortChannel returns delete entries for a PortChannel: its members and the PortChannel itself.
-func destroyPortChannel(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+// destroyPortChannelConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
+func (n *Node) destroyPortChannelConfig(name string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove members first
-	if configDB != nil {
-		for key := range configDB.PortChannelMember {
+	if n.configDB != nil {
+		for key := range n.configDB.PortChannelMember {
 			parts := splitConfigDBKey(key)
 			if len(parts) == 2 && parts[0] == name {
 				entries = append(entries, sonic.Entry{Table: "PORTCHANNEL_MEMBER", Key: key})
@@ -93,7 +93,7 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 
 	cs, err := n.op("delete-portchannel", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
-		func() []sonic.Entry { return destroyPortChannel(n.configDB, name) })
+		func() []sonic.Entry { return n.destroyPortChannelConfig(name) })
 	if err != nil {
 		return nil, err
 	}
