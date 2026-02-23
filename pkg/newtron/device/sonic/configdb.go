@@ -70,9 +70,12 @@ type ServiceBindingEntry struct {
 	MACVPN      string `json:"macvpn,omitempty"`       // MAC-VPN name (for L2 EVPN)
 	IngressACL  string `json:"ingress_acl,omitempty"`  // Generated ingress ACL name
 	EgressACL   string `json:"egress_acl,omitempty"`   // Generated egress ACL name
-	BGPNeighbor string `json:"bgp_neighbor,omitempty"` // BGP peer IP created by service
-	AppliedAt   string `json:"applied_at,omitempty"`   // Timestamp when applied
-	AppliedBy   string `json:"applied_by,omitempty"`   // User who applied
+	BGPNeighbor      string `json:"bgp_neighbor,omitempty"`      // BGP peer IP created by service
+	QoSPolicy        string `json:"qos_policy,omitempty"`        // QoS policy name (for device-wide cleanup)
+	VlanID           string `json:"vlan_id,omitempty"`           // VLAN ID used (for cleanup without macvpn)
+	RedistributeVRF  string `json:"redistribute_vrf,omitempty"`  // VRF where redistribution was overridden
+	AppliedAt        string `json:"applied_at,omitempty"`        // Timestamp when applied
+	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
 }
 
 // PortEntry represents a physical port configuration
@@ -475,14 +478,17 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 		db.DeviceMetadata[key] = copyFields(fields)
 	case "NEWTRON_SERVICE_BINDING":
 		db.NewtronServiceBinding[key] = ServiceBindingEntry{
-			ServiceName: fields["service_name"],
-			IPAddress:   fields["ip_address"],
-			VRFName:     fields["vrf_name"],
-			IPVPN:       fields["ipvpn"],
-			MACVPN:      fields["macvpn"],
-			IngressACL:  fields["ingress_acl"],
-			EgressACL:   fields["egress_acl"],
-			BGPNeighbor: fields["bgp_neighbor"],
+			ServiceName:     fields["service_name"],
+			IPAddress:       fields["ip_address"],
+			VRFName:         fields["vrf_name"],
+			IPVPN:           fields["ipvpn"],
+			MACVPN:          fields["macvpn"],
+			IngressACL:      fields["ingress_acl"],
+			EgressACL:       fields["egress_acl"],
+			BGPNeighbor:     fields["bgp_neighbor"],
+			QoSPolicy:       fields["qos_policy"],
+			VlanID:          fields["vlan_id"],
+			RedistributeVRF: fields["redistribute_vrf"],
 		}
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)

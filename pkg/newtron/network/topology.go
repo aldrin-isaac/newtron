@@ -143,24 +143,24 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 	// =========================================================================
 	hasEVPN := tp.deviceHasEVPN(topoDev, resolvedSpecs)
 	if hasEVPN {
-		n.AddEntries(node.VTEPConfig(resolved.VTEPSourceIP))
+		n.AddEntries(node.CreateVTEP(resolved.VTEPSourceIP))
 	}
 
 	// =========================================================================
 	// Step 6: BGP globals + address families + redistribution
 	// =========================================================================
-	n.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+	n.AddEntries(node.CreateBGPGlobals("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"ebgp_requires_policy": "false",
 		"suppress_fib_pending": "false",
 		"log_neighbor_changes": "true",
 	}))
-	n.AddEntries(node.BGPGlobalsAFConfig("default", "ipv4_unicast", nil))
+	n.AddEntries(node.CreateBGPGlobalsAF("default", "ipv4_unicast", nil))
 	if hasEVPN {
-		n.AddEntries(node.BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
+		n.AddEntries(node.CreateBGPGlobalsAF("default", "l2vpn_evpn", map[string]string{
 			"advertise-all-vni": "true",
 		}))
 	}
-	n.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv4"))
+	n.AddEntries(node.CreateRouteRedistribute("default", "connected", "ipv4"))
 
 	// =========================================================================
 	// Step 7: BGP overlay peers (EVPN, from profile evpn.peers)
@@ -175,7 +175,7 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 			util.Logger.Warnf("EVPN peer %s missing underlay_asn, skipping", peerName)
 			continue
 		}
-		n.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+		n.AddEntries(node.CreateBGPNeighbor(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
 			EBGPMultihop:     true,
 			ActivateIPv4:     true,
 			ActivateEVPN:     hasEVPN,
@@ -352,7 +352,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(n *node.Node, resolved *
 
 	// Update BGP_GLOBALS with RR-specific settings (ebgp_requires_policy and
 	// log_neighbor_changes are already set in GenerateDeviceComposite for all devices)
-	n.AddEntries(node.BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+	n.AddEntries(node.CreateBGPGlobals("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"rr_cluster_id":         clusterID,
 		"load_balance_mp_relax": "true",
 		"ebgp_requires_policy":  "false",
@@ -391,7 +391,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(n *node.Node, resolved *
 		}
 
 		// Add eBGP neighbor for this client (all-eBGP design)
-		n.AddEntries(node.BGPNeighborConfig(clientLoopback, clientProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+		n.AddEntries(node.CreateBGPNeighbor(clientLoopback, clientProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
 			EBGPMultihop: true,
 			ActivateIPv4: true,
 			RRClient:     true,
@@ -407,7 +407,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(n *node.Node, resolved *
 		if err != nil {
 			continue
 		}
-		n.AddEntries(node.BGPNeighborConfig(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
+		n.AddEntries(node.CreateBGPNeighbor(peerProfile.LoopbackIP, peerProfile.UnderlayASN, resolved.LoopbackIP, node.BGPNeighborOpts{
 			EBGPMultihop:    true,
 			ActivateIPv4:    true,
 			RRClient:        true,
@@ -421,7 +421,7 @@ func (tp *TopologyProvisioner) addRouteReflectorEntries(n *node.Node, resolved *
 	}
 
 	// IPv6 route redistribution for RR
-	n.AddEntries(node.RouteRedistributeConfig("default", "connected", "ipv6"))
+	n.AddEntries(node.CreateRouteRedistribute("default", "connected", "ipv6"))
 }
 
 // ============================================================================

@@ -1,8 +1,9 @@
 // service_gen.go provides a single source of truth for translating a service
 // spec into CONFIG_DB entries.  Both the topology provisioner (offline composite
-// generation) and Interface.ApplyService (online, incremental) delegate here.
+// generation via Interface.ApplyService) and the online CLI path delegate here
+// through Interface.generateServiceEntries().
 //
-// The function does NOT handle:
+// The method does NOT handle:
 //   - Precondition checks (connected, locked, PortChannel member, existing service, VTEP)
 //   - Idempotency guards (VLAN/VRF already exists, ACL port merging)
 //   - Prefix-list expansion for ACLs (Cartesian product)
@@ -32,21 +33,21 @@ func filterTypeToSONiC(specType string) string {
 // ServiceEntryParams contains everything needed to generate CONFIG_DB entries
 // for a service binding on a single interface.
 type ServiceEntryParams struct {
-	ServiceName   string
-	InterfaceName string
-	IPAddress     string
-	VLAN          int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
-	Params        map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
-	PeerAS        int               // CLI peer-as (interface_ops path only)
-	UnderlayASN   int               // device AS number (required in all-eBGP design)
-	RouterID      string            // device router ID (required for per-VRF BGP_GLOBALS)
-	PlatformName  string            // for feature gating (ACL skip)
+	ServiceName  string
+	IPAddress    string
+	VLAN         int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
+	Params       map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
+	PeerAS       int               // CLI peer-as (interface_ops path only)
+	UnderlayASN  int               // device AS number (required in all-eBGP design)
+	RouterID     string            // device router ID (required for per-VRF BGP_GLOBALS)
+	PlatformName string            // for feature gating (ACL skip)
 }
 
-// GenerateServiceEntries produces the CONFIG_DB entries for applying a service
-// to an interface.  The returned slice is ordered by table dependency (VLANs
+// generateServiceEntries produces the CONFIG_DB entries for applying a service
+// to this interface. The returned slice is ordered by table dependency (VLANs
 // before members, VRFs before interfaces, etc.).
-func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entry, error) {
+func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry, error) {
+	sp := i.node
 	svc, err := sp.GetService(p.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("service '%s' not found", p.ServiceName)
@@ -80,81 +81,81 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 	}
 
 	// Determine which layers this service uses
-	hasL2 := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
+	canBridge := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
 		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
-	hasL3 := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNRouted ||
+	canRoute := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNRouted ||
 		svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeRouted
 
-	// VLAN creation (for L2 types)
-	if hasL2 && vlanID > 0 {
+	// VLAN creation (for bridging-capable types)
+	if canBridge && vlanID > 0 {
 		l2vni := 0
 		if macvpnDef != nil && macvpnDef.VNI > 0 {
 			l2vni = macvpnDef.VNI
 		}
-		entries = append(entries, vlanConfig(vlanID, VLANConfig{L2VNI: l2vni})...)
+		entries = append(entries, createVlan(vlanID, VLANConfig{L2VNI: l2vni})...)
 
 		if macvpnDef != nil && macvpnDef.ARPSuppression {
-			entries = append(entries, arpSuppressionConfig(VLANName(vlanID))...)
+			entries = append(entries, enableArpSuppression(VLANName(vlanID))...)
 		}
 	}
 
-	// VRF creation (for L3 types)
+	// VRF creation (for routed types)
 	vrfName := ""
-	if hasL3 && svc.VRFType == spec.VRFTypeInterface {
-		vrfName = util.DeriveVRFName(svc.VRFType, p.ServiceName, p.InterfaceName)
+	if canRoute && svc.VRFType == spec.VRFTypeInterface {
+		vrfName = util.DeriveVRFName(svc.VRFType, p.ServiceName, i.name)
 		if ipvpnDef != nil {
-			entries = append(entries, ipvpnConfig(vrfName, ipvpnDef, p.UnderlayASN, p.RouterID)...)
+			entries = append(entries, bindIpvpn(vrfName, ipvpnDef, p.UnderlayASN, p.RouterID)...)
 		} else {
-			entries = append(entries, vrfConfig(vrfName)...)
+			entries = append(entries, createVrf(vrfName)...)
 		}
 	} else if svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil {
 		vrfName = ipvpnDef.VRF
 	}
 
-	// Shared VRF creation (for L3 types with shared VRF)
+	// Shared VRF creation (for routed types with shared VRF)
 	// The topology provisioner always emits these entries (idempotent overwrite).
 	// The interface_ops caller filters them out when the VRF already exists.
-	if hasL3 && svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && ipvpnDef.VRF != "" {
-		entries = append(entries, ipvpnConfig(ipvpnDef.VRF, ipvpnDef, p.UnderlayASN, p.RouterID)...)
+	if canRoute && svc.VRFType == spec.VRFTypeShared && ipvpnDef != nil && ipvpnDef.VRF != "" {
+		entries = append(entries, bindIpvpn(ipvpnDef.VRF, ipvpnDef, p.UnderlayASN, p.RouterID)...)
 	}
 
 	// Interface configuration based on service type
 	switch svc.ServiceType {
 	case spec.ServiceTypeEVPNBridged, spec.ServiceTypeBridged:
-		// L2 access: untagged VLAN member
+		// Bridged access: untagged VLAN member
 		if vlanID > 0 {
-			entries = append(entries, vlanMemberConfig(vlanID, p.InterfaceName, false)...)
+			entries = append(entries, createVlanMember(vlanID, i.name, false)...)
 		}
 
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
-		// L3 routed: interface with VRF and IP
+		// Routed: interface with VRF and IP
 		// Bug fix #3: always emit base INTERFACE entry (SONiC intfmgrd requires it)
-		intfFields := map[string]string{}
 		if vrfName != "" {
-			intfFields["vrf_name"] = vrfName
+			entries = append(entries, i.bindVrf(vrfName)...)
+		} else {
+			entries = append(entries, i.enableIpRouting()...)
 		}
-		entries = append(entries, interfaceBaseConfig(p.InterfaceName, intfFields)...)
 		if p.IPAddress != "" {
-			entries = append(entries, interfaceIPSubEntry(p.InterfaceName, p.IPAddress))
+			entries = append(entries, i.assignIpAddress(p.IPAddress)...)
 		}
 
 	case spec.ServiceTypeEVPNIRB:
-		// L2+L3 overlay: tagged VLAN member + SVI with anycast gateway
+		// IRB overlay: tagged VLAN member + SVI with anycast gateway
 		if vlanID > 0 {
-			entries = append(entries, vlanMemberConfig(vlanID, p.InterfaceName, true)...)
+			entries = append(entries, createVlanMember(vlanID, i.name, true)...)
 			sviOpts := SVIConfig{VRF: vrfName}
 			if macvpnDef != nil {
 				sviOpts.IPAddress = macvpnDef.AnycastIP
 				sviOpts.AnycastMAC = macvpnDef.AnycastMAC
 			}
-			entries = append(entries, sviConfig(vlanID, sviOpts)...)
+			entries = append(entries, createSvi(vlanID, sviOpts)...)
 		}
 
 	case spec.ServiceTypeIRB:
-		// Local L2+L3: tagged VLAN member + SVI with IP from params
+		// Local IRB: tagged VLAN member + SVI with IP from params
 		if vlanID > 0 {
-			entries = append(entries, vlanMemberConfig(vlanID, p.InterfaceName, true)...)
-			entries = append(entries, sviConfig(vlanID, SVIConfig{
+			entries = append(entries, createVlanMember(vlanID, i.name, true)...)
+			entries = append(entries, createSvi(vlanID, SVIConfig{
 				VRF:       vrfName,
 				IPAddress: p.IPAddress,
 			})...)
@@ -170,14 +171,14 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 	}
 	if !skipACL {
 		if svc.IngressFilter != "" {
-			filterEntries, err := generateServiceACLEntries(sp, p.ServiceName, svc.IngressFilter, p.InterfaceName, "ingress")
+			filterEntries, err := i.generateAclBinding(p.ServiceName, svc.IngressFilter, "ingress")
 			if err != nil {
 				return nil, err
 			}
 			entries = append(entries, filterEntries...)
 		}
 		if svc.EgressFilter != "" {
-			filterEntries, err := generateServiceACLEntries(sp, p.ServiceName, svc.EgressFilter, p.InterfaceName, "egress")
+			filterEntries, err := i.generateAclBinding(p.ServiceName, svc.EgressFilter, "egress")
 			if err != nil {
 				return nil, err
 			}
@@ -187,24 +188,11 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 
 	// QoS configuration: new-style policy takes precedence over legacy profile
 	if policyName, policy := ResolveServiceQoSPolicy(sp, svc); policy != nil {
-		entries = append(entries, generateQoSInterfaceEntries(policyName, policy, p.InterfaceName)...)
+		entries = append(entries, i.bindQos(policyName, policy)...)
 	} else if svc.QoSProfile != "" {
 		qosProfile, err := sp.GetQoSProfile(svc.QoSProfile)
 		if err == nil && qosProfile != nil {
-			qosFields := map[string]string{}
-			if qosProfile.DSCPToTCMap != "" {
-				qosFields["dscp_to_tc_map"] = qosProfile.DSCPToTCMap
-			}
-			if qosProfile.TCToQueueMap != "" {
-				qosFields["tc_to_queue_map"] = qosProfile.TCToQueueMap
-			}
-			if len(qosFields) > 0 {
-				entries = append(entries, sonic.Entry{
-					Table:  "PORT_QOS_MAP",
-					Key:    p.InterfaceName,
-					Fields: qosFields,
-				})
-			}
+			entries = append(entries, i.bindQosProfile(qosProfile)...)
 		}
 	}
 
@@ -212,7 +200,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
 		bgpEntries, err := generateBGPEntries(svc, p, vrfName)
 		if err != nil {
-			return nil, fmt.Errorf("interface %s: BGP routing: %w", p.InterfaceName, err)
+			return nil, fmt.Errorf("interface %s: BGP routing: %w", i.name, err)
 		}
 		entries = append(entries, bgpEntries...)
 	}
@@ -233,17 +221,13 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entr
 	if svc.MACVPN != "" {
 		bindingFields["macvpn"] = svc.MACVPN
 	}
-	entries = append(entries, sonic.Entry{
-		Table:  "NEWTRON_SERVICE_BINDING",
-		Key:    p.InterfaceName,
-		Fields: bindingFields,
-	})
+	entries = append(entries, createServiceBinding(i.name, bindingFields))
 
 	return entries, nil
 }
 
 // generateBGPEntries resolves BGP peer parameters from the service spec and
-// topology params, then delegates to BGPNeighborConfig for entry construction.
+// topology params, then delegates to BGPNeighbor for entry construction.
 func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
@@ -290,7 +274,7 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 
 	localIP, _ := util.SplitIPMask(p.IPAddress)
 
-	return BGPNeighborConfig(peerIP, peerAS, localIP, BGPNeighborOpts{
+	return CreateBGPNeighbor(peerIP, peerAS, localIP, BGPNeighborOpts{
 		VRF:          vrfName,
 		ActivateIPv4: true,
 		RRClient:     p.Params["route_reflector_client"] == "true",
@@ -298,11 +282,11 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 	}), nil
 }
 
-// generateServiceACLEntries generates ACL table and rule entries for a service filter.
-// The ACL_TABLE entry is produced by aclTableConfig (acl_ops.go); rules use
-// buildACLRuleFields for the full field set (including CoS→TC mapping).
-func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfaceName, stage string) ([]sonic.Entry, error) {
-	filterSpec, err := sp.GetFilter(filterName)
+// generateAclBinding generates ACL table and rule entries for a service filter on this interface.
+// Delegates to acl_ops.go config functions: aclTable for the ACL_TABLE entry,
+// buildACLRuleFields for the full ACL_RULE field set (including CoS→TC mapping).
+func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([]sonic.Entry, error) {
+	filterSpec, err := i.node.GetFilter(filterName)
 	if err != nil {
 		return nil, fmt.Errorf("filter spec '%s' not found", filterName)
 	}
@@ -314,72 +298,13 @@ func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfa
 	aclName := util.DeriveACLName(serviceName, direction)
 	desc := fmt.Sprintf("%s filter for %s", capitalizeFirst(stage), serviceName)
 
-	entries := aclTableConfig(aclName, filterTypeToSONiC(filterSpec.Type), stage, interfaceName, desc)
+	entries := createAclTable(aclName, filterTypeToSONiC(filterSpec.Type), stage, i.name, desc)
 
 	for _, rule := range filterSpec.Rules {
-		ruleKey := fmt.Sprintf("%s|RULE_%d", aclName, rule.Sequence)
-		entries = append(entries, sonic.Entry{
-			Table:  "ACL_RULE",
-			Key:    ruleKey,
-			Fields: buildACLRuleFields(rule, rule.SrcIP, rule.DstIP),
-		})
+		entries = append(entries, createAclRuleFromFilter(aclName, rule, rule.SrcIP, rule.DstIP, ""))
 	}
 
 	return entries, nil
-}
-
-// buildACLRuleFields builds ACL rule fields from a filter rule spec.
-// Takes explicit srcIP/dstIP to support prefix-list expansion (Cartesian product)
-// in the interface_ops path.
-//
-// Unified from topology.go's buildACLRuleFields (no CoS) and
-// interface_ops.go's buildACLRuleFieldsExpanded (with CoS) — fix #4.
-func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
-	fields := map[string]string{
-		"PRIORITY": fmt.Sprintf("%d", 10000-rule.Sequence),
-	}
-
-	if rule.Action == "permit" {
-		fields["PACKET_ACTION"] = "FORWARD"
-	} else {
-		fields["PACKET_ACTION"] = "DROP"
-	}
-
-	if srcIP != "" {
-		fields["SRC_IP"] = srcIP
-	}
-	if dstIP != "" {
-		fields["DST_IP"] = dstIP
-	}
-	if rule.Protocol != "" {
-		if proto, ok := ProtoMap[rule.Protocol]; ok {
-			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
-		} else {
-			fields["IP_PROTOCOL"] = rule.Protocol
-		}
-	}
-	if rule.DstPort != "" {
-		fields["L4_DST_PORT"] = rule.DstPort
-	}
-	if rule.SrcPort != "" {
-		fields["L4_SRC_PORT"] = rule.SrcPort
-	}
-	if rule.DSCP != "" {
-		fields["DSCP"] = rule.DSCP
-	}
-
-	// CoS/TC marking — previously only in interface_ops (fix #4)
-	if rule.CoS != "" {
-		cosToTC := map[string]string{
-			"be": "0", "cs1": "1", "cs2": "2", "cs3": "3",
-			"cs4": "4", "ef": "5", "cs6": "6", "cs7": "7",
-		}
-		if tc, ok := cosToTC[rule.CoS]; ok {
-			fields["TC"] = tc
-		}
-	}
-
-	return fields
 }
 
 // capitalizeFirst returns s with the first letter uppercased.

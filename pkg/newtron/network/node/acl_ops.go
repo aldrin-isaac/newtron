@@ -3,9 +3,9 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -42,8 +42,8 @@ func (n *Node) GetOrphanedACLs() []string {
 // ACL Config Functions (pure, no Node state)
 // ============================================================================
 
-// aclTableConfig returns sonic.Entry for an ACL_TABLE.
-func aclTableConfig(name, aclType, stage, ports, description string) []sonic.Entry {
+// aclTable returns sonic.Entry for an ACL_TABLE.
+func createAclTable(name, aclType, stage, ports, description string) []sonic.Entry {
 	fields := map[string]string{
 		"type":  aclType,
 		"stage": stage,
@@ -57,8 +57,8 @@ func aclTableConfig(name, aclType, stage, ports, description string) []sonic.Ent
 	return []sonic.Entry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
 }
 
-// aclRuleConfig returns sonic.Entry for an ACL_RULE.
-func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
+// createAclRule returns sonic.Entry for an ACL_RULE.
+func createAclRule(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
 	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
 
 	action := "DROP"
@@ -91,6 +91,83 @@ func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry
 	}
 
 	return []sonic.Entry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
+}
+
+// buildACLRuleFields builds ACL_RULE fields from a filter rule spec.
+// Takes explicit srcIP/dstIP to support prefix-list expansion (Cartesian product)
+// in the service_ops path.
+func buildACLRuleFields(rule *spec.FilterRule, srcIP, dstIP string) map[string]string {
+	fields := map[string]string{
+		"PRIORITY": fmt.Sprintf("%d", 10000-rule.Sequence),
+	}
+
+	if rule.Action == "permit" {
+		fields["PACKET_ACTION"] = "FORWARD"
+	} else {
+		fields["PACKET_ACTION"] = "DROP"
+	}
+
+	if srcIP != "" {
+		fields["SRC_IP"] = srcIP
+	}
+	if dstIP != "" {
+		fields["DST_IP"] = dstIP
+	}
+	if rule.Protocol != "" {
+		if proto, ok := ProtoMap[rule.Protocol]; ok {
+			fields["IP_PROTOCOL"] = fmt.Sprintf("%d", proto)
+		} else {
+			fields["IP_PROTOCOL"] = rule.Protocol
+		}
+	}
+	if rule.DstPort != "" {
+		fields["L4_DST_PORT"] = rule.DstPort
+	}
+	if rule.SrcPort != "" {
+		fields["L4_SRC_PORT"] = rule.SrcPort
+	}
+	if rule.DSCP != "" {
+		fields["DSCP"] = rule.DSCP
+	}
+
+	// CoS/TC marking for QoS-aware ACL rules
+	if rule.CoS != "" {
+		cosToTC := map[string]string{
+			"be": "0", "cs1": "1", "cs2": "2", "cs3": "3",
+			"cs4": "4", "ef": "5", "cs6": "6", "cs7": "7",
+		}
+		if tc, ok := cosToTC[rule.CoS]; ok {
+			fields["TC"] = tc
+		}
+	}
+
+	return fields
+}
+
+// createAclRuleFromFilter returns an ACL_RULE entry built from a filter rule spec.
+// The suffix parameter supports prefix-list expansion (e.g., "_0", "_1") — pass "" for single rules.
+func createAclRuleFromFilter(aclName string, rule *spec.FilterRule, srcIP, dstIP, suffix string) sonic.Entry {
+	ruleKey := fmt.Sprintf("%s|RULE_%d%s", aclName, rule.Sequence, suffix)
+	return sonic.Entry{
+		Table:  "ACL_RULE",
+		Key:    ruleKey,
+		Fields: buildACLRuleFields(rule, srcIP, dstIP),
+	}
+}
+
+// bindAcl returns the ACL_TABLE entry for binding interfaces with a stage direction.
+func bindAcl(aclName, ports, stage string) sonic.Entry {
+	return sonic.Entry{Table: "ACL_TABLE", Key: aclName, Fields: map[string]string{
+		"ports": ports,
+		"stage": stage,
+	}}
+}
+
+// unbindAcl returns the ACL_TABLE entry for updating the ports binding list.
+func unbindAcl(aclName, ports string) sonic.Entry {
+	return sonic.Entry{Table: "ACL_TABLE", Key: aclName, Fields: map[string]string{
+		"ports": ports,
+	}}
 }
 
 // ============================================================================
@@ -126,7 +203,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 	}
 	cs, err := n.op("create-acl-table", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
-		func() []sonic.Entry { return aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+		func() []sonic.Entry { return createAclTable(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +215,7 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
 	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
-		func() []sonic.Entry { return aclRuleConfig(tableName, ruleName, opts) })
+		func() []sonic.Entry { return createAclRule(tableName, ruleName, opts) })
 	if err != nil {
 		return nil, err
 	}
@@ -164,14 +241,14 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 	}
 
 	cs := NewChangeSet(n.name, "device.delete-acl-rule")
-	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil)
+	cs.Delete("ACL_RULE", ruleKey)
 
 	util.WithDevice(n.name).Infof("Deleted rule %s from ACL table %s", ruleName, tableName)
 	return cs, nil
 }
 
-// aclTableDeleteConfig returns delete entries for an ACL table: all its rules and the table itself.
-func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+// deleteAclTable returns delete entries for an ACL table: all its rules and the table itself.
+func deleteAclTable(configDB *sonic.ConfigDB, name string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove all rules first
@@ -193,7 +270,7 @@ func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
 func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
 	cs, err := n.op("delete-acl-table", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
-		func() []sonic.Entry { return aclTableDeleteConfig(n.configDB, name) })
+		func() []sonic.Entry { return deleteAclTable(n.configDB, name) })
 	if err != nil {
 		return nil, err
 	}
@@ -202,35 +279,12 @@ func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, err
 }
 
 // UnbindACLFromInterface removes an interface from an ACL table's binding.
+// Node convenience method — delegates to Interface.UnbindACL.
 func (n *Node) UnbindACLFromInterface(ctx context.Context, aclName, interfaceName string) (*ChangeSet, error) {
-	// Normalize interface name (e.g., Eth0 -> Ethernet0)
 	interfaceName = util.NormalizeInterfaceName(interfaceName)
-
-	if err := n.precondition("unbind-acl", aclName).
-		RequireACLTableExists(aclName).
-		Result(); err != nil {
+	iface, err := n.GetInterface(interfaceName)
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.unbind-acl")
-
-	// Get current binding list and remove the specified interface
-	if n.configDB != nil {
-		if table, ok := n.configDB.ACLTable[aclName]; ok {
-			currentBindings := table.Ports
-			var remaining []string
-			for _, p := range util.SplitCommaSeparated(currentBindings) {
-				if p != interfaceName {
-					remaining = append(remaining, p)
-				}
-			}
-
-			cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
-				"ports": strings.Join(remaining, ","),
-			})
-		}
-	}
-
-	util.WithDevice(n.name).Infof("Unbound ACL %s from interface %s", aclName, interfaceName)
-	return cs, nil
+	return iface.UnbindACL(ctx, aclName)
 }

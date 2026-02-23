@@ -7,7 +7,14 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
-func TestGenerateServiceEntries_EVPNBridged(t *testing.T) {
+// newTestInterface creates an Interface backed by an offline Node for testing
+// config-generation methods that need i.node (SpecProvider) and i.name.
+func newTestInterface(sp SpecProvider, name string) *Interface {
+	n := &Node{SpecProvider: sp, configDB: sonic.NewEmptyConfigDB(), offline: true}
+	return &Interface{node: n, name: name}
+}
+
+func TestServiceConfig_EVPNBridged(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l2": {
@@ -20,9 +27,9 @@ func TestGenerateServiceEntries_EVPNBridged(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "customer-l2",
-		InterfaceName: "Ethernet0",
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "customer-l2",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -35,7 +42,7 @@ func TestGenerateServiceEntries_EVPNBridged(t *testing.T) {
 	assertEntry(t, entries, "NEWTRON_SERVICE_BINDING", "Ethernet0", "service_name", "customer-l2")
 }
 
-func TestGenerateServiceEntries_Routed_NoVRF(t *testing.T) {
+func TestServiceConfig_Routed_NoVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"fabric-underlay": {
@@ -44,10 +51,10 @@ func TestGenerateServiceEntries_Routed_NoVRF(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "fabric-underlay",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "fabric-underlay",
+		IPAddress:   "10.1.0.0/31",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -77,7 +84,7 @@ func TestGenerateServiceEntries_Routed_NoVRF(t *testing.T) {
 	}
 }
 
-func TestGenerateServiceEntries_EVPNRouted_WithVRF(t *testing.T) {
+func TestServiceConfig_EVPNRouted_WithVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l3": {
@@ -91,10 +98,10 @@ func TestGenerateServiceEntries_EVPNRouted_WithVRF(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "customer-l3",
-		InterfaceName: "Ethernet4",
-		IPAddress:     "10.2.0.1/30",
+	iface := newTestInterface(sp, "Ethernet4")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "customer-l3",
+		IPAddress:   "10.2.0.1/30",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -129,7 +136,7 @@ func TestGenerateServiceEntries_EVPNRouted_WithVRF(t *testing.T) {
 	}
 }
 
-func TestGenerateServiceEntries_EVPNIRB(t *testing.T) {
+func TestServiceConfig_EVPNIRB(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-irb": {
@@ -147,9 +154,9 @@ func TestGenerateServiceEntries_EVPNIRB(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "customer-irb",
-		InterfaceName: "Ethernet8",
+	iface := newTestInterface(sp, "Ethernet8")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "customer-irb",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -172,7 +179,7 @@ func TestGenerateServiceEntries_EVPNIRB(t *testing.T) {
 	}
 }
 
-func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
+func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"svc-with-acl": {
@@ -200,10 +207,10 @@ func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "svc-with-acl",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "svc-with-acl",
+		IPAddress:   "10.1.0.0/31",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -230,7 +237,7 @@ func TestGenerateServiceEntries_ACL_WithCoS(t *testing.T) {
 	t.Error("missing ACL_RULE|svc-with-acl-in|RULE_10 entry")
 }
 
-func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
+func TestServiceConfig_BGP_UnderlayASN(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
@@ -244,11 +251,11 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 	}
 
 	// Bug fix #2: UnderlayASN should be used when set
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "transit",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
-		UnderlayASN:   65100,
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "transit",
+		IPAddress:   "10.1.0.0/31",
+		UnderlayASN: 65100,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -268,7 +275,7 @@ func TestGenerateServiceEntries_BGP_UnderlayASN(t *testing.T) {
 	t.Error("missing BGP_NEIGHBOR entry")
 }
 
-func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
+func TestServiceConfig_BGP_FallbackToLocalAS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
@@ -282,11 +289,11 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 	}
 
 	// When UnderlayASN is 0, should fall back to LocalAS
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "transit",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
-		UnderlayASN:   64512,
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "transit",
+		IPAddress:   "10.1.0.0/31",
+		UnderlayASN: 64512,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -303,7 +310,7 @@ func TestGenerateServiceEntries_BGP_FallbackToLocalAS(t *testing.T) {
 	t.Error("missing BGP_NEIGHBOR entry")
 }
 
-func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
+func TestServiceConfig_BGP_AdminStatus(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
@@ -316,11 +323,11 @@ func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "transit",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
-		UnderlayASN:   64512,
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "transit",
+		IPAddress:   "10.1.0.0/31",
+		UnderlayASN: 64512,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -341,7 +348,7 @@ func TestGenerateServiceEntries_BGP_AdminStatus(t *testing.T) {
 	t.Error("missing BGP_NEIGHBOR_AF entry")
 }
 
-func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
+func TestServiceConfig_RouteTargets(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"customer-l3": {
@@ -358,23 +365,23 @@ func TestGenerateServiceEntries_RouteTargets(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "customer-l3",
-		InterfaceName: "Ethernet4",
-		IPAddress:     "10.2.0.1/30",
+	iface := newTestInterface(sp, "Ethernet4")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "customer-l3",
+		IPAddress:   "10.2.0.1/30",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// BGP_GLOBALS_AF l2vpn_evpn for the VRF — produced by ipvpnConfig
+	// BGP_GLOBALS_AF l2vpn_evpn for the VRF — produced by ipvpn
 	assertEntry(t, entries, "BGP_GLOBALS_AF", "customer-l3-Eth4|l2vpn_evpn", "advertise-ipv4-unicast", "true")
 
 	// Route targets are written to BGP_GLOBALS_EVPN_RT (frrcfgd watches this table)
 	assertEntry(t, entries, "BGP_GLOBALS_EVPN_RT", "customer-l3-Eth4|L2VPN_EVPN|64512:10001", "route-target-type", "both")
 }
 
-func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
+func TestServiceConfig_SharedVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"shared-l3": {
@@ -388,10 +395,10 @@ func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
 		},
 	}
 
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "shared-l3",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.3.0.0/31",
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "shared-l3",
+		IPAddress:   "10.3.0.0/31",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -412,7 +419,7 @@ func TestGenerateServiceEntries_SharedVRF(t *testing.T) {
 	t.Error("missing base INTERFACE entry")
 }
 
-func TestGenerateServiceEntries_BGP_PeerASRequest(t *testing.T) {
+func TestServiceConfig_BGP_PeerASRequest(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"transit": {
@@ -426,12 +433,12 @@ func TestGenerateServiceEntries_BGP_PeerASRequest(t *testing.T) {
 	}
 
 	// PeerAS field should be used when service spec says peer_as:"request"
-	entries, err := GenerateServiceEntries(sp, ServiceEntryParams{
-		ServiceName:   "transit",
-		InterfaceName: "Ethernet0",
-		IPAddress:     "10.1.0.0/31",
-		PeerAS:        65002,
-		UnderlayASN:   65001,
+	iface := newTestInterface(sp, "Ethernet0")
+	entries, err := iface.generateServiceEntries(ServiceEntryParams{
+		ServiceName: "transit",
+		IPAddress:   "10.1.0.0/31",
+		PeerAS:      65002,
+		UnderlayASN: 65001,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

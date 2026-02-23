@@ -135,7 +135,7 @@ func (n *Node) BuildComposite() *CompositeConfig {
 
 // AddEntries accumulates entries and updates the shadow ConfigDB.
 // Used by orchestrators to add entries from config functions that don't
-// have corresponding Node methods (e.g., VTEPConfig, BGPNeighborConfig).
+// have corresponding Node methods (e.g., CreateVTEP, CreateBGPNeighbor).
 // Only valid in offline mode; no-op for physical nodes.
 func (n *Node) AddEntries(entries []sonic.Entry) {
 	if !n.offline {
@@ -153,7 +153,8 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 		return nil, err
 	}
 	cs := NewChangeSet(n.name, "device.set-device-metadata")
-	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, fields)
+	e := updateDeviceMetadata(fields)
+	cs.Update(e.Table, e.Key, e.Fields)
 	n.trackOffline(cs)
 	return cs, nil
 }

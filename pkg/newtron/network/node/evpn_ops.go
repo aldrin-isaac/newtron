@@ -45,18 +45,18 @@ func (n *Node) VTEPSourceIP() string {
 	return n.resolved.LoopbackIP
 }
 
-// VTEPConfig returns the VXLAN_TUNNEL + VXLAN_EVPN_NVO entries for a VTEP.
-func VTEPConfig(sourceIP string) []sonic.Entry {
+// CreateVTEP returns the VXLAN_TUNNEL + VXLAN_EVPN_NVO entries for a VTEP.
+func CreateVTEP(sourceIP string) []sonic.Entry {
 	return []sonic.Entry{
 		{Table: "VXLAN_TUNNEL", Key: "vtep1", Fields: map[string]string{"src_ip": sourceIP}},
 		{Table: "VXLAN_EVPN_NVO", Key: "nvo1", Fields: map[string]string{"source_vtep": "vtep1"}},
 	}
 }
 
-// vniMapConfig returns the VXLAN_TUNNEL_MAP entry that maps a VLAN to an L2VNI.
+// createVniMap returns the VXLAN_TUNNEL_MAP entry that maps a VLAN to an L2VNI.
 // vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
 // should pass VLANName(vlanID).
-func vniMapConfig(vlanName string, vni int) []sonic.Entry {
+func createVniMap(vlanName string, vni int) []sonic.Entry {
 	return []sonic.Entry{
 		{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(vni, vlanName), Fields: map[string]string{
 			"vlan": vlanName,
@@ -65,15 +65,36 @@ func vniMapConfig(vlanName string, vni int) []sonic.Entry {
 	}
 }
 
-// arpSuppressionConfig returns the SUPPRESS_VLAN_NEIGH entry for a VLAN.
+// enableArpSuppression returns the SUPPRESS_VLAN_NEIGH entry for a VLAN.
 // vlanName is the SONiC VLAN name (e.g., "Vlan100"); callers with an integer
 // should pass VLANName(vlanID).
-func arpSuppressionConfig(vlanName string) []sonic.Entry {
+func enableArpSuppression(vlanName string) []sonic.Entry {
 	return []sonic.Entry{
 		{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName, Fields: map[string]string{
 			"suppress": "on",
 		}},
 	}
+}
+
+// disableArpSuppression returns the delete entry for ARP suppression on a VLAN.
+func disableArpSuppression(vlanName string) []sonic.Entry {
+	return []sonic.Entry{{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName}}
+}
+
+// deleteVniMap returns the delete entry for a specific VXLAN_TUNNEL_MAP entry.
+func deleteVniMap(vni int, target string) []sonic.Entry {
+	return []sonic.Entry{{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(vni, target)}}
+}
+
+// deleteVniMapByKey returns the delete entry for a VXLAN_TUNNEL_MAP given a raw key.
+// Used by cleanup paths that iterate configDB and already have the key.
+func deleteVniMapByKey(key string) []sonic.Entry {
+	return []sonic.Entry{{Table: "VXLAN_TUNNEL_MAP", Key: key}}
+}
+
+// deleteBgpEvpnVNI returns the delete entry for a BGP_EVPN_VNI entry.
+func deleteBgpEvpnVNI(vrfName string, vni int) []sonic.Entry {
+	return []sonic.Entry{{Table: "BGP_EVPN_VNI", Key: BGPEVPNVNIKey(vrfName, vni)}}
 }
 
 // ============================================================================
@@ -96,7 +117,7 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 				}
 			}
 		},
-		func() []sonic.Entry { return vniMapConfig(VLANName(vlanID), vni) })
+		func() []sonic.Entry { return createVniMap(VLANName(vlanID), vni) })
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +125,8 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 	return cs, nil
 }
 
-// vniUnmapConfig returns the delete entry for a VLAN's L2VNI mapping.
-func vniUnmapConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry {
+// unmapVni returns the delete entry for a VLAN's L2VNI mapping.
+func unmapVni(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry {
 	vlanName := VLANName(vlanID)
 	var entries []sonic.Entry
 
@@ -129,7 +150,7 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	cs := configToChangeSet(n.name, "device.unmap-l2vni", vniUnmapConfig(n.configDB, vlanID), ChangeDelete)
+	cs := configToChangeSet(n.name, "device.unmap-l2vni", unmapVni(n.configDB, vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
 		return nil, fmt.Errorf("no L2VNI mapping found for VLAN %d", vlanID)
@@ -158,24 +179,18 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 
 	// Create VTEP (skip if exists)
 	if !n.VTEPExists() {
-		for _, e := range VTEPConfig(sourceIP) {
-			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
-		}
+		cs.Adds(CreateVTEP(sourceIP))
 	}
 
 	// Create BGP EVPN sessions with route reflectors (skip if already exist)
 	if len(resolved.BGPNeighbors) > 0 {
 		// Ensure BGP globals are set
-		for _, e := range BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, nil) {
-			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
-		}
+		cs.Adds(CreateBGPGlobals("default", resolved.UnderlayASN, resolved.RouterID, nil))
 
 		// Enable L2VPN EVPN address-family
-		for _, e := range BGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
+		cs.Adds(CreateBGPGlobalsAF("default", "l2vpn_evpn", map[string]string{
 			"advertise-all-vni": "true",
-		}) {
-			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
-		}
+		}))
 
 		for _, rrIP := range resolved.BGPNeighbors {
 			if rrIP == resolved.LoopbackIP {
@@ -190,19 +205,16 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 
 			if n.BGPNeighborExists(rrIP) {
 				// Neighbor exists (e.g., provisioner created it without EVPN AF).
-				// Ensure the l2vpn_evpn AF entry is present — ChangeAdd is
+				// Ensure the l2vpn_evpn AF entry is present — Add is
 				// idempotent so this is safe even if it already exists.
-				cs.Add("BGP_NEIGHBOR_AF",
-					BGPNeighborAFKey("default", rrIP, "l2vpn_evpn"),
-					ChangeAdd, map[string]string{"admin_status": "true"})
+				e := createBgpNeighborAF("default", rrIP, "l2vpn_evpn", map[string]string{"admin_status": "true"})
+				cs.Add(e.Table, e.Key, e.Fields)
 			} else {
-				for _, e := range BGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
+				cs.Adds(CreateBGPNeighbor(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
 					EBGPMultihop: true,
 					ActivateIPv4: true,
 					ActivateEVPN: true,
-				}) {
-					cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
-				}
+				}))
 			}
 		}
 	}
@@ -228,19 +240,15 @@ func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
 		if rrIP == resolved.LoopbackIP {
 			continue
 		}
-		for _, e := range BGPNeighborDeleteConfig("default", rrIP) {
-			cs.Add(e.Table, e.Key, ChangeDelete, nil)
-		}
+		cs.Deletes(DeleteBGPNeighbor("default", rrIP))
 	}
 
 	// Remove L2VPN EVPN address-family
-	for _, e := range BGPGlobalsAFConfig("default", "l2vpn_evpn", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
-	}
+	cs.Deletes(CreateBGPGlobalsAF("default", "l2vpn_evpn", nil))
 
 	// Remove VXLAN NVO and tunnel
-	cs.Add("VXLAN_EVPN_NVO", "nvo1", ChangeDelete, nil)
-	cs.Add("VXLAN_TUNNEL", "vtep1", ChangeDelete, nil)
+	cs.Delete("VXLAN_EVPN_NVO", "nvo1")
+	cs.Delete("VXLAN_TUNNEL", "vtep1")
 
 	util.WithDevice(n.name).Infof("Tore down EVPN overlay (%d neighbors removed)", len(resolved.BGPNeighbors))
 	return cs, nil

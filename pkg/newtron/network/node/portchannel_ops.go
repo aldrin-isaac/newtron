@@ -50,7 +50,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		fields["fast_rate"] = "true"
 	}
 
-	cs.Add("PORTCHANNEL", name, ChangeAdd, fields)
+	cs.Add("PORTCHANNEL", name, fields)
 
 	// Add members
 	for _, member := range opts.Members {
@@ -61,7 +61,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
 		memberKey := fmt.Sprintf("%s|%s", name, member)
-		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, map[string]string{})
+		cs.Add("PORTCHANNEL_MEMBER", memberKey, map[string]string{})
 	}
 
 	n.trackOffline(cs)
@@ -69,8 +69,8 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	return cs, nil
 }
 
-// portChannelDeleteConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
-func portChannelDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+// destroyPortChannel returns delete entries for a PortChannel: its members and the PortChannel itself.
+func destroyPortChannel(configDB *sonic.ConfigDB, name string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove members first
@@ -93,7 +93,7 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 
 	cs, err := n.op("delete-portchannel", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
-		func() []sonic.Entry { return portChannelDeleteConfig(n.configDB, name) })
+		func() []sonic.Entry { return destroyPortChannel(n.configDB, name) })
 	if err != nil {
 		return nil, err
 	}

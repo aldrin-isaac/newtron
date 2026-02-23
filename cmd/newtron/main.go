@@ -56,7 +56,7 @@ type App struct {
 	rootDir     string // -S flag: network root dir (contains specs/)
 	specDir     string // resolved: rootDir/specs or rootDir (flat layout)
 	executeMode bool
-	saveMode    bool
+	noSave      bool
 	verbose     bool
 	jsonOutput  bool
 
@@ -145,8 +145,8 @@ Examples:
 		}
 
 		// Validate flag combinations
-		if app.saveMode && !app.executeMode {
-			return fmt.Errorf("--save (-s) requires --execute (-x): use -xs to execute and save")
+		if app.noSave && !app.executeMode {
+			return fmt.Errorf("--no-save requires --execute (-x)")
 		}
 
 		// Load user settings
@@ -306,7 +306,7 @@ func executeAndSave(ctx context.Context, cs *node.ChangeSet, dev *node.Node) err
 	}
 	fmt.Println("\n" + green("Changes applied successfully."))
 
-	if app.saveMode {
+	if !app.noSave {
 		fmt.Print("Saving configuration... ")
 		if err := dev.SaveConfig(ctx); err != nil {
 			fmt.Println(red("FAILED"))
@@ -371,7 +371,7 @@ func isSettingsOrHelp(cmd *cobra.Command) bool {
 	return false
 }
 
-// addWriteFlags registers -x/--execute and -s/--save as local flags.
+// addWriteFlags registers -x/--execute and --no-save as local flags.
 // For noun-group parent commands, these are PersistentFlags so subcommands inherit.
 func addWriteFlags(cmd *cobra.Command) {
 	flags := cmd.Flags()
@@ -379,7 +379,7 @@ func addWriteFlags(cmd *cobra.Command) {
 		flags = cmd.PersistentFlags()
 	}
 	flags.BoolVarP(&app.executeMode, "execute", "x", false, "Execute changes (default is dry-run)")
-	flags.BoolVarP(&app.saveMode, "save", "s", false, "Save config after changes (requires -x)")
+	flags.BoolVar(&app.noSave, "no-save", false, "Skip config save after execution (requires -x)")
 }
 
 // addOutputFlags registers --json as a local flag.

@@ -1072,7 +1072,7 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-xs")
+			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-x")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()

@@ -101,6 +101,50 @@ real switch delegates to the forwarding ASIC. The delegation does not make
 Interface a forwarding layer; it makes Interface a logical point of attachment
 that the underlying infrastructure services.
 
+## Respect Abstraction Boundaries
+
+When an abstraction exists (Interface, Node), callers MUST use it — not bypass it
+by calling lower-level functions that expose internal schema or require passing
+identity the object already knows.
+
+Rules:
+- **If an operation is scoped to an interface, it is a method on Interface.** The
+  Interface knows its own name — requiring callers to pass it is an abstraction leak.
+  Exception: container membership (VLAN members, PortChannel members) where the
+  container is the subject.
+- **Config methods belong to the object they describe.** `iface.vrfBinding(vrfName)`
+  not `interfaceVRFConfig(intfName, vrfName)`. The object provides its own identity;
+  callers express intent, not identity.
+- **Function names describe domain intent, not implementation structure.** "Sub" and
+  "Entry" are CONFIG_DB concepts. Use domain terms: `vrfBinding`, `ipAddress`,
+  `qosBinding`, `aclBinding`, `serviceConfig`.
+- **Node convenience methods delegate, not duplicate.** `Node.AddVRFInterface`
+  resolves a name string to an Interface and delegates to `Interface.SetVRF`.
+  It never re-implements the operation.
+- **No "absolute blocker" for `i.node` access.** Interface methods that need
+  ConfigDB or SpecProvider use `i.node.ConfigDB()` or `i.node` (SpecProvider).
+  Needing external data is not a reason to avoid being a method.
+
+Abstractions > raw code efficiency.
+
+## Domain-Intent Naming
+
+Function and method names describe **what the operation means in the network domain**,
+not how it is implemented. CONFIG_DB concepts like "Entry", "Sub", "Config", "Base"
+are implementation details — they belong in comments, not in names.
+
+Examples:
+- `vrfBinding` not `interfaceBaseConfig` — binding an interface to a VRF
+- `ipAddress` not `interfaceIPSubEntry` — assigning an IP address
+- `serviceConfig` not `GenerateServiceEntries` — the service configuration for this interface
+- `qosBinding` / `qosUnbinding` not `generateQoSInterfaceEntries` / `qosDeleteConfig`
+- `aclBinding` not `generateServiceACLEntries`
+- `ipRoutingEnable` not `interfaceBaseConfig(intfName, nil)` — enabling IP routing on an interface
+
+This applies at all levels: method names, function names, type names, field names.
+When reading code, the name should tell you the domain purpose without needing to
+read the implementation.
+
 ## Abstract Node — Same Code Path, Different Initialization
 
 The Node operates in two modes:
@@ -149,6 +193,47 @@ Rules:
    (as defined in the Single-Owner Principle ownership map).
 4. **service_gen.go** = service-to-entries translation. Calls config functions from
    owning `*_ops.go` files.
+
+## Verb-First Naming
+
+Function and method names that describe actions MUST put the verb first:
+
+- `createVlan(...)` not `vlanCreate(...)` or `vlan(...)`
+- `deleteVlanMember(...)` not `vlanMemberDelete(...)`
+- `destroyVrf(...)` not `vrfDestroy(...)`
+- `enableArpSuppression(...)` not `arpSuppressionEnable(...)`
+- `bindIpvpn(...)` not `ipvpnBind(...)`
+- `assignIpAddress(...)` not `ipAddress(...)`
+
+Verb vocabulary for config generators:
+- **create** — constructs entries for a new entity (VLAN, VRF, ACL table, BGP neighbor)
+- **delete** — removes a single entity's entries
+- **destroy** — cascading teardown of an entity and all its dependents (scans configDB)
+- **enable/disable** — toggles a behavior (ARP suppression)
+- **bind/unbind** — establishes/removes a relationship (VRF binding, IP-VPN binding, ACL binding)
+- **assign/unassign** — attaches/detaches a value (IP address to interface)
+- **update** — modifies fields on an existing entry (DEVICE_METADATA)
+- **generate** — composite entry generation from multiple config functions (service entries)
+
+Noun-only names are reserved for types, constructors, and key helpers — never for
+functions that describe actions.
+
+## Operational Symmetry
+
+For every forward action there MUST be an equal and opposite reverse action.
+Failure to enforce this causes config leakage — orphaned CONFIG_DB entries that
+accumulate over time and can never be cleaned up.
+
+Required pairs:
+- Every `create*` must have a `delete*` or `destroy*`
+- Every `enable*` must have a `disable*`
+- Every `bind*` must have an `unbind*`
+- Every `assign*` must have an `unassign*` or `remove*`
+- Every `add*` must have a `remove*` or `delete*`
+
+When adding a new forward config generator, you MUST also add its reverse in the
+same commit. When reviewing code, verify that `RemoveService` and other teardown
+paths clean up every entry that the forward path creates.
 
 ## Redis-First Interaction Principle
 

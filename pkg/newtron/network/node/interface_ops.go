@@ -15,30 +15,24 @@ func (n *Node) InterfaceExists(name string) bool {
 	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
 }
 
-// interfaceBaseConfig returns the base INTERFACE entry with optional fields.
-// This is the single-owner function for creating INTERFACE table base entries.
-func interfaceBaseConfig(intfName string, fields map[string]string) []sonic.Entry {
-	if fields == nil {
-		fields = map[string]string{}
-	}
-	return []sonic.Entry{
-		{Table: "INTERFACE", Key: intfName, Fields: fields},
-	}
+// bindVrf returns the INTERFACE entry for binding this interface to a VRF.
+// Always includes the vrf_name field: pass "" to clear the VRF binding.
+func (i *Interface) bindVrf(vrfName string) []sonic.Entry {
+	return []sonic.Entry{{Table: "INTERFACE", Key: i.name,
+		Fields: map[string]string{"vrf_name": vrfName}}}
 }
 
-// interfaceIPSubEntry returns the INTERFACE IP sub-entry (e.g., "Ethernet0|10.1.1.1/30").
-func interfaceIPSubEntry(intfName, ipAddr string) sonic.Entry {
-	return sonic.Entry{
-		Table:  "INTERFACE",
-		Key:    fmt.Sprintf("%s|%s", intfName, ipAddr),
-		Fields: map[string]string{},
-	}
+// enableIpRouting returns the base INTERFACE entry that enables IP routing on this interface.
+// No VRF binding — just empty fields so SONiC intfmgrd creates the routing entry.
+func (i *Interface) enableIpRouting() []sonic.Entry {
+	return []sonic.Entry{{Table: "INTERFACE", Key: i.name,
+		Fields: map[string]string{}}}
 }
 
-// interfaceIPConfig returns sonic.Entry for configuring an IP on an interface.
-// Creates the INTERFACE base entry + IP sub-entry.
-func interfaceIPConfig(intfName, ipAddr string) []sonic.Entry {
-	return append(interfaceBaseConfig(intfName, nil), interfaceIPSubEntry(intfName, ipAddr))
+// assignIpAddress returns the INTERFACE entry for assigning an IP address.
+func (i *Interface) assignIpAddress(ipAddr string) []sonic.Entry {
+	return []sonic.Entry{{Table: "INTERFACE",
+		Key: fmt.Sprintf("%s|%s", i.name, ipAddr), Fields: map[string]string{}}}
 }
 
 // ============================================================================
@@ -59,12 +53,10 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 		return nil, fmt.Errorf("cannot configure IP on PortChannel member")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.set-ip")
 	// SONiC requires both the base interface entry and the IP entry.
-	// The base entry enables L3 on the interface; the IP entry assigns the address.
-	cs.Add("INTERFACE", i.name, ChangeAdd, map[string]string{})
-	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-	cs.Add("INTERFACE", ipKey, ChangeAdd, map[string]string{})
+	// The base entry enables routing on the interface; the IP entry assigns the address.
+	entries := append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
+	cs := configToChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
 	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
@@ -84,7 +76,7 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 
 	cs := NewChangeSet(n.Name(), "interface.remove-ip")
 	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-	cs.Add("INTERFACE", ipKey, ChangeDelete, nil)
+	cs.Delete("INTERFACE", ipKey)
 
 	// If no other IPs remain, remove the base INTERFACE entry too
 	remaining := 0
@@ -94,7 +86,7 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 		}
 	}
 	if remaining == 0 {
-		cs.Add("INTERFACE", i.name, ChangeDelete, nil)
+		cs.Delete("INTERFACE", i.name)
 	}
 
 	util.WithDevice(n.Name()).Infof("Removed IP %s from interface %s", ipAddr, i.name)
@@ -115,10 +107,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.set-vrf")
-	cs.Add("INTERFACE", i.name, ChangeModify, map[string]string{
-		"vrf_name": vrfName,
-	})
+	cs := configToChangeSet(n.Name(), "interface.set-vrf", i.bindVrf(vrfName), ChangeModify)
 
 	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
@@ -152,12 +141,34 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 		newBindings = addInterfaceToList(configDB.ACLTable[aclName].Ports, i.name)
 	}
 
-	cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
-		"ports": newBindings,
-		"stage": direction,
-	})
+	e := bindAcl(aclName, newBindings, direction)
+	cs.Update(e.Table, e.Key, e.Fields)
 
 	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
+	return cs, nil
+}
+
+// UnbindACL removes this interface from an ACL table's binding list.
+func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, error) {
+	n := i.node
+
+	if err := n.precondition("unbind-acl", aclName).
+		RequireACLTableExists(aclName).
+		Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.unbind-acl")
+
+	configDB := n.ConfigDB()
+	if configDB != nil {
+		if table, ok := configDB.ACLTable[aclName]; ok {
+			e := unbindAcl(aclName, removeInterfaceFromList(table.Ports, i.name))
+			cs.Update(e.Table, e.Key, e.Fields)
+		}
+	}
+
+	util.WithDevice(n.Name()).Infof("Unbound ACL %s from interface %s", aclName, i.name)
 	return cs, nil
 }
 
@@ -220,7 +231,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 		tableName = "PORTCHANNEL"
 	}
 
-	cs.Add(tableName, i.name, ChangeModify, fields)
+	cs.Update(tableName, i.name, fields)
 
 	util.WithDevice(n.Name()).Infof("Set %s=%s on interface %s", property, value, i.name)
 	return cs, nil
@@ -351,5 +362,23 @@ func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
 		}
 	}
 	return count == 0
+}
+
+// IsLastAnycastMACUser returns true if no other service binding references a
+// macvpn with AnycastMAC set. Used to gate SAG_GLOBAL cleanup.
+func (dc *DependencyChecker) IsLastAnycastMACUser() bool {
+	configDB := dc.node.ConfigDB()
+	if configDB == nil {
+		return true
+	}
+	for intfName, binding := range configDB.NewtronServiceBinding {
+		if intfName == dc.excludeInterface || binding.MACVPN == "" {
+			continue
+		}
+		if macvpn, err := dc.node.GetMACVPN(binding.MACVPN); err == nil && macvpn.AnycastMAC != "" {
+			return false
+		}
+	}
+	return true
 }
 

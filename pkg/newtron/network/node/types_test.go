@@ -101,7 +101,7 @@ func TestChangeSet_Timestamp(t *testing.T) {
 func TestChangeSet_Add(t *testing.T) {
 	cs := NewChangeSet("test", "test")
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", map[string]string{"mtu": "9100"})
 
 	if len(cs.Changes) != 1 {
 		t.Fatalf("Changes count = %d, want %d", len(cs.Changes), 1)
@@ -129,19 +129,19 @@ func TestChangeSet_AddMultiple(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "service.apply")
 
 	// Add typical service apply changes
-	cs.Add("VRF", "customer-l3-Ethernet0", ChangeAdd, map[string]string{
+	cs.Add("VRF", "customer-l3-Ethernet0", map[string]string{
 		"vni": "10001",
 	})
-	cs.Add("INTERFACE", "Ethernet0", ChangeModify, map[string]string{
+	cs.Update("INTERFACE", "Ethernet0", map[string]string{
 		"vrf_name": "customer-l3-Ethernet0",
 	})
-	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", ChangeAdd, nil)
-	cs.Add("ACL_TABLE", "customer-l3-in", ChangeAdd, map[string]string{
+	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", nil)
+	cs.Add("ACL_TABLE", "customer-l3-in", map[string]string{
 		"type":  "L3",
 		"stage": "ingress",
 		"ports": "Ethernet0",
 	})
-	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", ChangeAdd, map[string]string{
+	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", map[string]string{
 		"packet_action": "FORWARD",
 	})
 
@@ -165,7 +165,7 @@ func TestChangeSet_IsEmpty(t *testing.T) {
 		t.Error("New ChangeSet should be empty")
 	}
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil)
+	cs.Add("PORT", "Ethernet0", nil)
 
 	if cs.IsEmpty() {
 		t.Error("ChangeSet with changes should not be empty")
@@ -183,9 +183,9 @@ func TestChangeSet_String_Empty(t *testing.T) {
 
 func TestChangeSet_String_WithChanges(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
-	cs.Add("VLAN", "Vlan100", ChangeModify, map[string]string{"vlanid": "100"})
-	cs.Add("VRF", "Vrf_CUST", ChangeDelete, nil)
+	cs.Add("PORT", "Ethernet0", map[string]string{"mtu": "9100"})
+	cs.Update("VLAN", "Vlan100", map[string]string{"vlanid": "100"})
+	cs.Delete("VRF", "Vrf_CUST")
 
 	str := cs.String()
 
@@ -211,7 +211,7 @@ func TestChangeSet_String_WithChanges(t *testing.T) {
 
 func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", map[string]string{"mtu": "9100"})
 
 	str := cs.String()
 
@@ -223,7 +223,7 @@ func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 
 func TestChangeSet_Preview(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "vlan.create")
-	cs.Add("VLAN", "Vlan100", ChangeAdd, map[string]string{"vlanid": "100"})
+	cs.Add("VLAN", "Vlan100", map[string]string{"vlanid": "100"})
 
 	preview := cs.Preview()
 

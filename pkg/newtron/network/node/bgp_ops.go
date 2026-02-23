@@ -29,8 +29,8 @@ type BGPNeighborOpts struct {
 	RRClientEVPN     bool   // rrclient on l2vpn_evpn AF
 }
 
-// BGPNeighborConfig returns sonic.Entry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
-func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []sonic.Entry {
+// CreateBGPNeighbor returns sonic.Entry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
+func CreateBGPNeighbor(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []sonic.Entry {
 	var entries []sonic.Entry
 
 	vrf := opts.VRF
@@ -111,9 +111,9 @@ func BGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNei
 	return entries
 }
 
-// BGPNeighborDeleteConfig returns sonic.Entry for deleting a BGP neighbor
+// DeleteBGPNeighbor returns sonic.Entry for deleting a BGP neighbor
 // and all its address-family entries.
-func BGPNeighborDeleteConfig(vrf, neighborIP string) []sonic.Entry {
+func DeleteBGPNeighbor(vrf, neighborIP string) []sonic.Entry {
 	if vrf == "" {
 		vrf = "default"
 	}
@@ -137,8 +137,8 @@ func BGPNeighborDeleteConfig(vrf, neighborIP string) []sonic.Entry {
 	return entries
 }
 
-// BGPGlobalsConfig returns sonic.Entry for BGP_GLOBALS.
-func BGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []sonic.Entry {
+// CreateBGPGlobals returns sonic.Entry for BGP_GLOBALS.
+func CreateBGPGlobals(vrf string, asn int, routerID string, extra map[string]string) []sonic.Entry {
 	fields := map[string]string{
 		"local_asn": fmt.Sprintf("%d", asn),
 		"router_id": routerID,
@@ -156,8 +156,8 @@ func BGPGlobalsAFKey(vrf, af string) string {
 	return fmt.Sprintf("%s|%s", vrf, af)
 }
 
-// BGPGlobalsAFConfig returns sonic.Entry for BGP_GLOBALS_AF.
-func BGPGlobalsAFConfig(vrf, af string, fields map[string]string) []sonic.Entry {
+// CreateBGPGlobalsAF returns sonic.Entry for BGP_GLOBALS_AF.
+func CreateBGPGlobalsAF(vrf, af string, fields map[string]string) []sonic.Entry {
 	if fields == nil {
 		fields = map[string]string{}
 	}
@@ -166,13 +166,22 @@ func BGPGlobalsAFConfig(vrf, af string, fields map[string]string) []sonic.Entry 
 	}
 }
 
+// revertRedistribution resets BGP_GLOBALS_AF redistribution fields to false.
+// This is the reverse of the redistribution override in addBGPRoutePolicies.
+func revertRedistribution(vrfKey string) []sonic.Entry {
+	return CreateBGPGlobalsAF(vrfKey, "ipv4_unicast", map[string]string{
+		"redistribute_connected": "false",
+		"redistribute_static":    "false",
+	})
+}
+
 // RouteRedistributeKey returns the CONFIG_DB key for a ROUTE_REDISTRIBUTE entry.
 func RouteRedistributeKey(vrf, protocol, af string) string {
 	return fmt.Sprintf("%s|%s|bgp|%s", vrf, protocol, af)
 }
 
-// RouteRedistributeConfig returns sonic.Entry for ROUTE_REDISTRIBUTE.
-func RouteRedistributeConfig(vrf, protocol, af string) []sonic.Entry {
+// CreateRouteRedistribute returns sonic.Entry for ROUTE_REDISTRIBUTE.
+func CreateRouteRedistribute(vrf, protocol, af string) []sonic.Entry {
 	return []sonic.Entry{
 		{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af), Fields: map[string]string{}},
 	}
@@ -182,6 +191,31 @@ func RouteRedistributeConfig(vrf, protocol, af string) []sonic.Entry {
 // Used by callers that need to modify an existing AF entry (e.g. adding route-maps).
 func BGPNeighborAFKey(vrf, neighborIP, af string) string {
 	return fmt.Sprintf("%s|%s|%s", vrf, neighborIP, af)
+}
+
+// deleteBgpGlobals returns the delete entry for a BGP_GLOBALS entry.
+func deleteBgpGlobals(vrf string) []sonic.Entry {
+	return []sonic.Entry{{Table: "BGP_GLOBALS", Key: vrf}}
+}
+
+// deleteBgpGlobalsAF returns the delete entry for a BGP_GLOBALS_AF entry.
+func deleteBgpGlobalsAF(vrf, af string) []sonic.Entry {
+	return []sonic.Entry{{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrf, af)}}
+}
+
+// deleteRouteRedistribute returns the delete entry for a ROUTE_REDISTRIBUTE entry.
+func deleteRouteRedistribute(vrf, protocol, af string) []sonic.Entry {
+	return []sonic.Entry{{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af)}}
+}
+
+// updateDeviceMetadata returns a DEVICE_METADATA entry for updating localhost fields.
+func updateDeviceMetadata(fields map[string]string) sonic.Entry {
+	return sonic.Entry{Table: "DEVICE_METADATA", Key: "localhost", Fields: fields}
+}
+
+// createBgpNeighborAF returns a BGP_NEIGHBOR_AF entry for a specific address family.
+func createBgpNeighborAF(vrf, neighborIP, af string, fields map[string]string) sonic.Entry {
+	return sonic.Entry{Table: "BGP_NEIGHBOR_AF", Key: BGPNeighborAFKey(vrf, neighborIP, af), Fields: fields}
 }
 
 // BGPConfigured checks if BGP is configured.
@@ -240,27 +274,22 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	// Without these flags, bgpcfgd uses the legacy "general" template which
 	// adds PEER_V4/PEER_V6 peer-groups but does NOT handle local_addr or
 	// ebgp_multihop, causing EVPN loopback sessions to stay "Active".
-	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, map[string]string{
+	e := updateDeviceMetadata(map[string]string{
 		"bgp_asn":                    asnStr,
 		"type":                       "LeafRouter",
 		"docker_routing_config_mode": "unified",
 		"frr_mgmt_framework_config":  "true",
 	})
+	cs.Update(e.Table, e.Key, e.Fields)
 
 	// BGP global instance + address-family + redistribution via config functions
-	for _, e := range BGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+	cs.Updates(CreateBGPGlobals("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
 		"ebgp_requires_policy": "false",
 		"suppress_fib_pending": "false",
 		"log_neighbor_changes": "true",
-	}) {
-		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
-	}
-	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
-		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
-	}
-	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
-		cs.Add(e.Table, e.Key, ChangeModify, e.Fields)
-	}
+	}))
+	cs.Updates(CreateBGPGlobalsAF("default", "ipv4_unicast", nil))
+	cs.Updates(CreateRouteRedistribute("default", "connected", "ipv4"))
 
 	n.trackOffline(cs)
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
@@ -289,7 +318,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 	}
 
 	isEBGP := asn != n.resolved.UnderlayASN
-	config := BGPNeighborConfig(neighborIP, asn, n.resolved.LoopbackIP, BGPNeighborOpts{
+	config := CreateBGPNeighbor(neighborIP, asn, n.resolved.LoopbackIP, BGPNeighborOpts{
 		Description:  description,
 		EBGPMultihop: isEBGP,
 		MultihopTTL:  "255",
@@ -311,7 +340,7 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 			pc.Check(n.BGPNeighborExists(neighborIP), "BGP neighbor must exist",
 				fmt.Sprintf("BGP neighbor %s not found", neighborIP))
 		},
-		func() []sonic.Entry { return BGPNeighborDeleteConfig("default", neighborIP) })
+		func() []sonic.Entry { return DeleteBGPNeighbor("default", neighborIP) })
 	if err != nil {
 		return nil, err
 	}
@@ -337,20 +366,13 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 	cs := NewChangeSet(n.name, "device.remove-bgp-globals")
 
 	// Reverse order of ConfigureBGP — use config functions for key consistency
-	for _, e := range RouteRedistributeConfig("default", "connected", "ipv4") {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
-	}
-	for _, e := range BGPGlobalsAFConfig("default", "ipv4_unicast", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
-	}
-	for _, e := range BGPGlobalsConfig("default", 0, "", nil) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
-	}
+	cs.Deletes(CreateRouteRedistribute("default", "connected", "ipv4"))
+	cs.Deletes(CreateBGPGlobalsAF("default", "ipv4_unicast", nil))
+	cs.Deletes(CreateBGPGlobals("default", 0, "", nil))
 
 	// Clear bgp_asn from DEVICE_METADATA (set to empty)
-	cs.Add("DEVICE_METADATA", "localhost", ChangeModify, map[string]string{
-		"bgp_asn": "",
-	})
+	e := updateDeviceMetadata(map[string]string{"bgp_asn": ""})
+	cs.Update(e.Table, e.Key, e.Fields)
 
 	util.WithDevice(n.name).Infof("Removed BGP globals")
 	return cs, nil

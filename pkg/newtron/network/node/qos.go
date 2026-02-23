@@ -96,16 +96,16 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []sonic
 	return entries
 }
 
-// generateQoSInterfaceEntries produces per-interface CONFIG_DB entries for a QoS policy:
+// bindQos produces per-interface CONFIG_DB entries for a QoS policy:
 //   - 1 PORT_QOS_MAP entry (bracket-ref to maps)
 //   - N QUEUE entries (one per queue, bracket-ref to SCHEDULER, optionally WRED_PROFILE)
-func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []sonic.Entry {
+func (i *Interface) bindQos(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// PORT_QOS_MAP: bind maps to the port.
 	entries = append(entries, sonic.Entry{
 		Table: "PORT_QOS_MAP",
-		Key:   interfaceName,
+		Key:   i.name,
 		Fields: map[string]string{
 			"dscp_to_tc_map":  fmt.Sprintf("[DSCP_TO_TC_MAP|%s]", policyName),
 			"tc_to_queue_map": fmt.Sprintf("[TC_TO_QUEUE_MAP|%s]", policyName),
@@ -114,10 +114,10 @@ func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, inte
 
 	// QUEUE: one per queue, binding scheduler (and optionally WRED).
 	wredKey := policyName + ".ecn"
-	for i, q := range policy.Queues {
-		queueKey := fmt.Sprintf("%s|%d", interfaceName, i)
+	for idx, q := range policy.Queues {
+		queueKey := fmt.Sprintf("%s|%d", i.name, idx)
 		queueFields := map[string]string{
-			"scheduler": fmt.Sprintf("[SCHEDULER|%s.%d]", policyName, i),
+			"scheduler": fmt.Sprintf("[SCHEDULER|%s.%d]", policyName, idx),
 		}
 		if q.ECN {
 			queueFields["wred_profile"] = fmt.Sprintf("[WRED_PROFILE|%s]", wredKey)
@@ -130,6 +130,73 @@ func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, inte
 	}
 
 	return entries
+}
+
+// bindQosProfile returns a PORT_QOS_MAP entry for a QoS profile.
+// Profiles reference pre-existing maps by name (not bracket-ref like policies).
+// Returns nil if the profile has no map fields set.
+func (i *Interface) bindQosProfile(profile *spec.QoSProfile) []sonic.Entry {
+	fields := map[string]string{}
+	if profile.DSCPToTCMap != "" {
+		fields["dscp_to_tc_map"] = profile.DSCPToTCMap
+	}
+	if profile.TCToQueueMap != "" {
+		fields["tc_to_queue_map"] = profile.TCToQueueMap
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return []sonic.Entry{{Table: "PORT_QOS_MAP", Key: i.name, Fields: fields}}
+}
+
+// deleteQoSDeviceEntries returns delete entries for the device-wide QoS tables
+// created by GenerateQoSDeviceEntries: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+// SCHEDULER (prefix scan), and WRED_PROFILE (prefix scan).
+func deleteQoSDeviceEntries(configDB *sonic.ConfigDB, policyName string) []sonic.Entry {
+	var entries []sonic.Entry
+	// DSCP_TO_TC_MAP and TC_TO_QUEUE_MAP: exact key match
+	entries = append(entries, sonic.Entry{Table: "DSCP_TO_TC_MAP", Key: policyName})
+	entries = append(entries, sonic.Entry{Table: "TC_TO_QUEUE_MAP", Key: policyName})
+	// SCHEDULER and WRED_PROFILE: scan for policyName.* prefix
+	if configDB != nil {
+		prefix := policyName + "."
+		for key := range configDB.Scheduler {
+			if strings.HasPrefix(key, prefix) {
+				entries = append(entries, sonic.Entry{Table: "SCHEDULER", Key: key})
+			}
+		}
+		for key := range configDB.WREDProfile {
+			if strings.HasPrefix(key, prefix) {
+				entries = append(entries, sonic.Entry{Table: "WRED_PROFILE", Key: key})
+			}
+		}
+	}
+	return entries
+}
+
+// isQoSPolicyReferenced checks if any PORT_QOS_MAP entry (excluding the given
+// interface) references the policy via bracket ref [DSCP_TO_TC_MAP|{policyName}].
+func isQoSPolicyReferenced(configDB *sonic.ConfigDB, policyName, excludeInterface string) bool {
+	if configDB == nil {
+		return false
+	}
+	ref := fmt.Sprintf("[DSCP_TO_TC_MAP|%s]", policyName)
+	for intfName, entry := range configDB.PortQoSMap {
+		if intfName != excludeInterface && entry.DSCPToTCMap == ref {
+			return true
+		}
+	}
+	return false
+}
+
+// extractPolicyName extracts the policy name from a PORT_QOS_MAP bracket-ref
+// like "[DSCP_TO_TC_MAP|myPolicy]" → "myPolicy". Returns "" if not a bracket-ref.
+func extractPolicyName(bracketRef string) string {
+	const prefix = "[DSCP_TO_TC_MAP|"
+	if !strings.HasPrefix(bracketRef, prefix) || !strings.HasSuffix(bracketRef, "]") {
+		return ""
+	}
+	return bracketRef[len(prefix) : len(bracketRef)-1]
 }
 
 // resolveServiceQoSPolicy returns the QoS policy name and definition for a service.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -126,7 +127,7 @@ func TestGenerateQoSDeviceEntries_NoECN(t *testing.T) {
 	}
 }
 
-func TestGenerateQoSInterfaceEntries(t *testing.T) {
+func TestQoSBinding(t *testing.T) {
 	policy := &spec.QoSPolicy{
 		Queues: []*spec.QoSQueue{
 			{Name: "be", Type: "dwrr", Weight: 40, DSCP: []int{0}},
@@ -135,7 +136,8 @@ func TestGenerateQoSInterfaceEntries(t *testing.T) {
 		},
 	}
 
-	entries := generateQoSInterfaceEntries("test-3q", policy, "Ethernet0")
+	iface := &Interface{node: &Node{configDB: sonic.NewEmptyConfigDB(), offline: true}, name: "Ethernet0"}
+	entries := iface.bindQos("test-3q", policy)
 
 	// 1 PORT_QOS_MAP + 3 QUEUE = 4
 	if len(entries) != 4 {

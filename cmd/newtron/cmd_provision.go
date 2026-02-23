@@ -35,13 +35,14 @@ it atomically to the device.
 Without -d: provisions ALL devices in topology.json
 With -d:    provisions the specified device only
 Without -x: dry-run (shows generated config summary)
-With -x:    execute (deliver config + save + reload)
+With -x:    execute (deliver config + save + restart BGP)
+With -x --no-save: execute without persisting to disk
 
 Examples:
-  newtron -S specs provision                  # Dry-run all devices
-  newtron -S specs provision -d leaf1         # Dry-run specific device
-  newtron -S specs provision -x              # Execute all devices
-  newtron -S specs provision -d leaf1 -xs    # Execute + save for one device`,
+  newtron -S specs provision                      # Dry-run all devices
+  newtron -S specs provision -d leaf1             # Dry-run specific device
+  newtron -S specs provision -x                   # Execute all devices
+  newtron -S specs provision -x --no-save         # Execute without saving`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !app.net.HasTopology() {
 			return fmt.Errorf("no topology.json found in spec directory %s", app.rootDir)
@@ -110,7 +111,7 @@ Examples:
 			// services) and breaks VPP syncd. Most CONFIG_DB changes are picked
 			// up via Redis keyspace notifications, but bgpcfgd cannot change the
 			// BGP ASN dynamically — it requires a container restart.
-			if app.saveMode {
+			if !app.noSave {
 				dev, err := app.net.ConnectNode(ctx, name)
 				if err != nil {
 					fmt.Printf("  Save: %s (could not connect: %v)\n", red("FAILED"), err)

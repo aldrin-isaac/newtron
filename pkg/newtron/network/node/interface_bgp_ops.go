@@ -72,7 +72,7 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 	// Extract local IP without mask for update-source
 	localIPOnly, _ := util.SplitIPMask(localIP)
 
-	config := BGPNeighborConfig(neighborIP, cfg.RemoteAS, localIPOnly, BGPNeighborOpts{
+	config := CreateBGPNeighbor(neighborIP, cfg.RemoteAS, localIPOnly, BGPNeighborOpts{
 		Description:  cfg.Description,
 		EBGPMultihop: cfg.Multihop > 0,
 		MultihopTTL:  fmt.Sprintf("%d", cfg.Multihop),

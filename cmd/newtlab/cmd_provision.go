@@ -17,7 +17,7 @@ func newProvisionCmd() *cobra.Command {
 		Short: "Provision devices via newtron",
 		Long: `Run newtron provisioning on deployed VMs.
 
-This invokes 'newtron provision -xs' on each device in the topology,
+This invokes 'newtron provision -x' on each device in the topology,
 delivering the CONFIG_DB derived from spec files. Equivalent to the
 --provision flag on 'newtlab deploy'.
 

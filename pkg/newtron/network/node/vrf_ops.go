@@ -16,17 +16,17 @@ import (
 // VRFConfig holds configuration options for CreateVRF.
 type VRFConfig struct{}
 
-// vrfConfig returns the CONFIG_DB entries for creating a VRF.
-// The VRF entry has no vni — L3VNI is added by ipvpnConfig.
-func vrfConfig(name string) []sonic.Entry {
+// createVrf returns the CONFIG_DB entries for creating a VRF.
+// The VRF entry has no vni — L3VNI is added by ipvpn.
+func createVrf(name string) []sonic.Entry {
 	return []sonic.Entry{
 		{Table: "VRF", Key: name, Fields: map[string]string{}},
 	}
 }
 
-// staticRouteConfig returns the CONFIG_DB entries for a static route.
+// createStaticRoute returns the CONFIG_DB entries for a static route.
 // Key format: "vrfName|prefix" for non-default VRF, just "prefix" for default.
-func staticRouteConfig(vrfName, prefix, nextHop string, metric int) []sonic.Entry {
+func createStaticRoute(vrfName, prefix, nextHop string, metric int) []sonic.Entry {
 	var routeKey string
 	if vrfName == "" || vrfName == "default" {
 		routeKey = prefix
@@ -46,10 +46,10 @@ func staticRouteConfig(vrfName, prefix, nextHop string, metric int) []sonic.Entr
 	}
 }
 
-// ipvpnConfig returns the CONFIG_DB entries for binding a VRF to an IP-VPN.
+// bindIpvpn returns the CONFIG_DB entries for binding a VRF to an IP-VPN.
 // This includes VRF|vni, BGP_GLOBALS, BGP_GLOBALS_AF (ipv4 + l2vpn_evpn),
 // ROUTE_REDISTRIBUTE, and BGP_GLOBALS_EVPN_RT entries.
-func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, routerID string) []sonic.Entry {
+func bindIpvpn(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, routerID string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// VRF|vni (standard SONiC L3VNI binding).
@@ -68,37 +68,20 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 
 	// BGP_GLOBALS for the VRF — frrcfgd's __get_vrf_asn() reads local_asn here.
 	if underlayASN != 0 {
-		entries = append(entries, sonic.Entry{
-			Table: "BGP_GLOBALS",
-			Key:   vrfName,
-			Fields: map[string]string{
-				"local_asn": fmt.Sprintf("%d", underlayASN),
-				"router_id": routerID,
-			},
-		})
+		entries = append(entries, CreateBGPGlobals(vrfName, underlayASN, routerID, nil)...)
 	}
 
 	// BGP_GLOBALS_AF|ipv4_unicast — opens 'address-family ipv4 unicast' block in FRR.
-	entries = append(entries, sonic.Entry{
-		Table:  "BGP_GLOBALS_AF",
-		Key:    BGPGlobalsAFKey(vrfName, "ipv4_unicast"),
-		Fields: map[string]string{},
-	})
+	entries = append(entries, CreateBGPGlobalsAF(vrfName, "ipv4_unicast", nil)...)
 
 	// BGP_GLOBALS_AF|l2vpn_evpn — frrcfgd global_af_key_map maps 'advertise-ipv4-unicast'
 	// (HYPHEN, not underscore) to 'advertise ipv4 unicast' in 'address-family l2vpn evpn'.
-	entries = append(entries, sonic.Entry{
-		Table:  "BGP_GLOBALS_AF",
-		Key:    BGPGlobalsAFKey(vrfName, "l2vpn_evpn"),
-		Fields: map[string]string{"advertise-ipv4-unicast": "true"},
-	})
+	entries = append(entries, CreateBGPGlobalsAF(vrfName, "l2vpn_evpn", map[string]string{
+		"advertise-ipv4-unicast": "true",
+	})...)
 
 	// ROUTE_REDISTRIBUTE → 'redistribute connected' in ipv4 unicast AF for this VRF.
-	entries = append(entries, sonic.Entry{
-		Table:  "ROUTE_REDISTRIBUTE",
-		Key:    RouteRedistributeKey(vrfName, "connected", "ipv4"),
-		Fields: map[string]string{},
-	})
+	entries = append(entries, CreateRouteRedistribute(vrfName, "connected", "ipv4")...)
 
 	// BGP_GLOBALS_EVPN_RT → 'route-target both {rt}' in 'address-family l2vpn evpn'.
 	// frrcfgd bgp_globals_evpn_rt_handler watches this table (NOT BGP_EVPN_VNI).
@@ -114,26 +97,26 @@ func ipvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, rout
 	return entries
 }
 
-// vrfFullDeleteConfig returns all delete entries for fully removing a VRF:
+// destroyVrf returns all delete entries for fully removing a VRF:
 // BGP EVPN VNI, VXLAN tunnel map, IP-VPN entries (BGP AFs, route redistribution,
 // EVPN RTs), BGP_GLOBALS for the VRF, and the VRF itself.
-func vrfFullDeleteConfig(configDB *sonic.ConfigDB, vrfName string, l3vni int) []sonic.Entry {
+func destroyVrf(configDB *sonic.ConfigDB, vrfName string, l3vni int) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// L3VNI EVPN entries (only if L3VNI was configured)
 	if l3vni > 0 {
-		entries = append(entries, sonic.Entry{Table: "BGP_EVPN_VNI", Key: BGPEVPNVNIKey(vrfName, l3vni)})
-		entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: VNIMapKey(l3vni, vrfName)})
+		entries = append(entries, deleteBgpEvpnVNI(vrfName, l3vni)...)
+		entries = append(entries, deleteVniMap(l3vni, vrfName)...)
 	}
 
 	// IP-VPN entries (BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, BGP_GLOBALS_EVPN_RT)
-	entries = append(entries, ipvpnUnbindConfig(configDB, vrfName)...)
+	entries = append(entries, unbindIpvpn(configDB, vrfName)...)
 
-	// BGP_GLOBALS for this VRF (written by ipvpnConfig)
-	entries = append(entries, sonic.Entry{Table: "BGP_GLOBALS", Key: vrfName})
+	// BGP_GLOBALS for this VRF (written by ipvpn)
+	entries = append(entries, deleteBgpGlobals(vrfName)...)
 
 	// VRF itself
-	entries = append(entries, sonic.Entry{Table: "VRF", Key: vrfName})
+	entries = append(entries, createVrf(vrfName)...)
 
 	return entries
 }
@@ -142,7 +125,7 @@ func vrfFullDeleteConfig(configDB *sonic.ConfigDB, vrfName string, l3vni int) []
 func (n *Node) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
 	cs, err := n.op("create-vrf", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireVRFNotExists(name) },
-		func() []sonic.Entry { return vrfConfig(name) })
+		func() []sonic.Entry { return createVrf(name) })
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +150,10 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 
 	cs := NewChangeSet(n.name, "device.delete-vrf")
 
-	cs.Add("VRF", name, ChangeDelete, nil)
+	cs.Deletes(createVrf(name))
 
 	// Remove BGP_GLOBALS entry written by BindIPVPN.
-	cs.Add("BGP_GLOBALS", name, ChangeDelete, nil)
+	cs.Deletes(deleteBgpGlobals(name))
 
 	util.WithDevice(n.name).Infof("Deleted VRF %s", name)
 	return cs, nil
@@ -181,34 +164,28 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 // ============================================================================
 
 // AddVRFInterface binds an interface to a VRF.
+// Resolves the interface name and delegates to Interface.SetVRF.
 func (n *Node) AddVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
 	intfName = util.NormalizeInterfaceName(intfName)
-
-	cs, err := n.op("add-vrf-interface", vrfName, ChangeModify,
-		func(pc *PreconditionChecker) { pc.RequireVRFExists(vrfName).RequireInterfaceExists(intfName) },
-		func() []sonic.Entry {
-			return interfaceBaseConfig(intfName, map[string]string{"vrf_name": vrfName})
-		})
+	if !n.VRFExists(vrfName) {
+		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
+	}
+	iface, err := n.GetInterface(intfName)
 	if err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.name).Infof("Bound interface %s to VRF %s", intfName, vrfName)
-	return cs, nil
+	return iface.SetVRF(ctx, vrfName)
 }
 
 // RemoveVRFInterface removes a VRF binding from an interface.
+// Resolves the interface name and delegates to Interface.SetVRF with empty VRF.
 func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string) (*ChangeSet, error) {
 	intfName = util.NormalizeInterfaceName(intfName)
-
-	cs, err := n.op("remove-vrf-interface", vrfName, ChangeModify, nil,
-		func() []sonic.Entry {
-			return interfaceBaseConfig(intfName, map[string]string{"vrf_name": ""})
-		})
+	iface, err := n.GetInterface(intfName)
 	if err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.name).Infof("Removed VRF binding from interface %s", intfName)
-	return cs, nil
+	return iface.SetVRF(ctx, "")
 }
 
 // ============================================================================
@@ -220,7 +197,7 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPV
 	resolved := n.Resolved()
 	cs, err := n.op("bind-ipvpn", vrfName, ChangeModify,
 		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
-		func() []sonic.Entry { return ipvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) })
+		func() []sonic.Entry { return bindIpvpn(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) })
 	if err != nil {
 		return nil, err
 	}
@@ -228,17 +205,17 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPV
 	return cs, nil
 }
 
-// ipvpnUnbindConfig returns the delete entries for unbinding an IP-VPN from a VRF.
+// unbindIpvpn returns the delete entries for unbinding an IP-VPN from a VRF.
 // Does NOT include the VRF|vni modify (clearing vni) — that's a ChangeModify, not delete.
-func ipvpnUnbindConfig(configDB *sonic.ConfigDB, vrfName string) []sonic.Entry {
+func unbindIpvpn(configDB *sonic.ConfigDB, vrfName string) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// Remove BGP_GLOBALS_AF l2vpn_evpn and ipv4_unicast entries.
-	entries = append(entries, sonic.Entry{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrfName, "l2vpn_evpn")})
-	entries = append(entries, sonic.Entry{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrfName, "ipv4_unicast")})
+	entries = append(entries, deleteBgpGlobalsAF(vrfName, "l2vpn_evpn")...)
+	entries = append(entries, deleteBgpGlobalsAF(vrfName, "ipv4_unicast")...)
 
 	// Remove ROUTE_REDISTRIBUTE entry.
-	entries = append(entries, sonic.Entry{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrfName, "connected", "ipv4")})
+	entries = append(entries, deleteRouteRedistribute(vrfName, "connected", "ipv4")...)
 
 	// Remove BGP_GLOBALS_EVPN_RT entries for this VRF (scan configDB for matching keys).
 	if configDB != nil {
@@ -263,14 +240,12 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs := NewChangeSet(n.name, "device.unbind-ipvpn")
 
 	// Clear VRF|vni (standard SONiC: clear L3VNI binding) — this is a modify, not delete.
-	cs.Add("VRF", vrfName, ChangeModify, map[string]string{
+	cs.Update("VRF", vrfName, map[string]string{
 		"vni": "",
 	})
 
 	// Delete the remaining IP-VPN entries.
-	for _, e := range ipvpnUnbindConfig(n.configDB, vrfName) {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
-	}
+	cs.Deletes(unbindIpvpn(n.configDB, vrfName))
 
 	util.WithDevice(n.name).Infof("Unbound IP-VPN from VRF %s", vrfName)
 	return cs, nil
@@ -287,7 +262,7 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop stri
 			pc.Check(vrfName == "" || vrfName == "default" || n.VRFExists(vrfName),
 				"VRF must exist", fmt.Sprintf("VRF '%s' not found", vrfName))
 		},
-		func() []sonic.Entry { return staticRouteConfig(vrfName, prefix, nextHop, metric) })
+		func() []sonic.Entry { return createStaticRoute(vrfName, prefix, nextHop, metric) })
 	if err != nil {
 		return nil, err
 	}

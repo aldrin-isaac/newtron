@@ -154,45 +154,55 @@ This is not a code-organization choice. It is the fundamental
 abstraction of the domain. A network *is*, at its core, services
 applied on interfaces.
 
-An `Interface` knows its parent `Device`, which knows its parent
+An `Interface` knows its parent `Node`, which knows its parent
 `Network`. When you call `Interface.ApplyService()`, the interface
-reaches up to the Device for the AS number, up to the Network for the
-service spec, and combines them with its own identity to produce
-CONFIG_DB entries. No external function orchestrates this — the object
-has everything it needs through its parent chain.
+reaches up to the Node for the AS number, up to the Network (via
+SpecProvider) for the service spec, and combines them with its own
+identity to produce CONFIG_DB entries. No external function orchestrates
+this — the object has everything it needs through its parent chain.
 
 ```
 Network
   ├── owns: specs (services, filters, VPNs, sites, platforms)
   ├── methods: GetService(), GetFilter(), GetZone()
   │
-  └── Device (parent: Network)
-        ├── owns: profile, resolved config, Redis connections
-        ├── methods: ASNumber(), BGPNeighbors(), VerifyChangeSet()
+  └── Node (parent: Network via SpecProvider)
+        ├── owns: profile, resolved config, Redis connections, ConfigDB
+        ├── methods: ConfigureBGP(), SetupEVPN(), CreateVLAN(), VerifyChangeSet()
         │
-        └── Interface (parent: Device)
-              ├── owns: interface state, service bindings
-              └── methods: ApplyService(), RemoveService(), RefreshService()
+        └── Interface (parent: Node)
+              ├── owns: interface identity (name + parent node)
+              └── methods: ApplyService(), RemoveService(), ApplyQoS(),
+                           RemoveQoS(), SetIP(), SetVRF(),
+                           BindACL(), UnbindACL()
+                  config:  generateServiceEntries(), bindVrf(),
+                           enableIpRouting(), assignIpAddress(),
+                           bindQos(), unbindQos(), generateAclBinding()
 ```
 
-Interface delegates to Device for infrastructure (Redis connections,
+Interface delegates to Node for infrastructure (Redis connections,
 CONFIG_DB cache, specs) just as a VLAN interface on a real switch
 delegates to the forwarding ASIC for packet processing. The delegation
 does not make Interface a "forwarding layer" — it makes Interface a
 logical point of attachment that the underlying infrastructure services.
 
+Interface-scoped config functions are methods on Interface, not free
+functions that take an interface name parameter. The Interface knows its
+own name — requiring callers to pass it separately is an abstraction
+leak. See Principle 24 (Respect Abstraction Boundaries).
+
 This means:
 
-- **ApplyService lives on Interface**, not on Device or Network, because
+- **ApplyService lives on Interface**, not on Node or Network, because
   the interface is the entity being configured — the point where a
   service becomes real. The interface's identity (name, IP, parent
-  device) is part of the translation context.
+  node) is part of the translation context.
 
-- **VerifyChangeSet lives on Device**, not on Network or in a utility
-  package, because the device holds the Redis connection needed to re-read
+- **VerifyChangeSet lives on Node**, not on Network or in a utility
+  package, because the node holds the Redis connection needed to re-read
   CONFIG_DB.
 
-- **GetService lives on Network**, not on Device, because services are
+- **GetService lives on Network**, not on Node, because services are
   network-wide definitions that exist independent of any device.
 
 The CLI mirrors this: `newtron -n network -d device -i interface verb`.
@@ -203,7 +213,11 @@ The general principle: **a method belongs to the smallest object that has
 all the context to execute it**. If an operation needs the interface name,
 the device profile, and the network specs, it lives on Interface (which
 can reach all three through its parent chain). If it only needs the Redis
-connection, it lives on Device.
+connection, it lives on Node.
+
+Node convenience methods (e.g., `Node.ApplyQoS(intfName, ...)`) resolve a
+name string to an Interface and delegate — they never re-implement the
+operation. The real logic always lives on Interface.
 
 This principle extends to configuration itself: **whatever can be
 right-shifted to the interface level, should be**. BGP is the clearest
@@ -881,12 +895,27 @@ preconditions, don't build ChangeSets, don't log, and don't connect to
 devices. They answer one question: "what entries does this operation
 produce?"
 
-```go
-// Pure config function — owned by vlan_ops.go
-func vlanConfig(vlanID int, members []string) []sonic.Entry
+Config functions come in two forms:
 
-// Pure delete config function — scans ConfigDB for related entries
-func vlanDeleteConfig(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry
+- **Package-level functions** for tables where the subject is not an
+  interface: `createVlan(vlanID, ...)`, `createVrf(vrfName)`,
+  `CreateBGPNeighbor(peerIP, ...)`.
+- **Interface methods** for tables where the interface is the subject:
+  `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`, `i.bindQos(...)`,
+  `i.generateAclBinding(...)`, `i.generateServiceEntries(...)`. These use
+  `i.name` and `i.node` (for SpecProvider/ConfigDB access), eliminating
+  the interface name parameter that a free function would require. See
+  Principle 24.
+
+```go
+// Package-level config function — owned by vlan_ops.go
+func createVlan(vlanID int, opts VLANConfig) []sonic.Entry
+
+// Interface method config function — owned by interface_ops.go
+func (i *Interface) bindVrf(vrfName string) []sonic.Entry
+
+// Package-level cascading teardown — scans ConfigDB for related entries
+func destroyVlan(configDB *sonic.ConfigDB, vlanID int) []sonic.Entry
 ```
 
 Operations call these functions and wrap the result:
@@ -896,7 +925,7 @@ Operations call these functions and wrap the result:
 func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, error) {
     return n.op("create-vlan", vlanName, ChangeAdd,
         func(pc *PreconditionChecker) { pc.RequireVLANNotExists(vlanID) },
-        func() []sonic.Entry { return vlanConfig(vlanID, members) },
+        func() []sonic.Entry { return createVlan(vlanID, opts) },
     )
 }
 ```
@@ -1004,18 +1033,174 @@ The current operation pairs:
 | `ApplyQoS` | `RemoveQoS` |
 | `SetIP` | `RemoveIP` |
 | `AddBGPNeighbor` | `RemoveBGPNeighbor` |
-| `BindACL` | `UnbindACLFromInterface` |
+| `BindACL` | `UnbindACL` |
 
 When adding a new operation that creates CONFIG_DB state, the
 corresponding removal operation is not optional — it is part of the
 feature. Ship both or ship neither.
+
+This extends to config generator functions — the pure functions that
+return `[]sonic.Entry`. Every forward generator must have a reverse:
+
+| Forward verb | Reverse verb | Example |
+|-------------|-------------|---------|
+| `create*` | `delete*` or `destroy*` | `createVlan` / `deleteVlan` / `destroyVlan` |
+| `enable*` | `disable*` | `enableArpSuppression` / `disableArpSuppression` |
+| `bind*` | `unbind*` | `bindIpvpn` / `unbindIpvpn` |
+| `assign*` | `unassign*` or `remove*` | `assignIpAddress` / removal via same key |
+| `add*` | `remove*` or `delete*` | `AddVLANMember` / `RemoveVLANMember` |
+
+`destroy*` is reserved for cascading teardowns that scan ConfigDB for
+dependent entries (members, VNI mappings, etc.) and remove them all.
+Simple `delete*` removes a single entry.
+
+When adding a new forward config generator, the reverse must be added
+in the same commit. When reviewing code, verify that `RemoveService`
+and other teardown paths clean up every entry that the forward path
+creates.
 
 **If newtron creates it, newtron must be able to remove it. No orphans,
 no manual cleanup, no `redis-cli` required.**
 
 ---
 
-## 24. Summary
+## 24. Respect Abstraction Boundaries
+
+When an abstraction exists — Interface, Node — callers must use it.
+They must not bypass it by calling lower-level functions that expose
+internal schema or require passing identity the object already knows.
+
+This principle is the structural enforcement of Principle 4 (Objects Own
+Their Methods). Principle 4 says *where* methods belong; this principle
+says *callers must respect those boundaries*.
+
+**Rule 1: If an operation is scoped to an interface, it is a method on
+Interface.** The Interface knows its own name — requiring callers to pass
+it is an abstraction leak. A function `interfaceVRFConfig(intfName, vrfName)`
+forces every caller to supply `intfName` — but the Interface already has
+it. The correct form is `i.bindVrf(vrfName)`.
+
+Exception: container membership operations (VLAN members, PortChannel
+members) where the container is the subject — `createVlanMember(vlanID,
+intfName, tagged)` is correct because the VLAN is the subject, not the
+interface.
+
+**Rule 2: Config methods belong to the object they describe.**
+`i.bindVrf(vrfName)` not `interfaceVRFConfig(intfName, vrfName)`.
+The object provides its own identity; callers express intent, not identity.
+
+**Rule 3: Node convenience methods delegate, not duplicate.**
+`Node.ApplyQoS(intfName, ...)` resolves a name string to an Interface
+and calls `iface.ApplyQoS(...)`. It never re-implements the operation.
+The same applies to `Node.RemoveQoS`, `Node.AddVRFInterface`, etc.
+
+**Rule 4: No "absolute blocker" for `i.node` access.** Interface methods
+that need ConfigDB or SpecProvider use `i.node.ConfigDB()` or `i.node`
+(SpecProvider). Needing external data is not a reason to avoid being a
+method — it's the reason the parent pointer exists.
+
+The current Interface methods:
+
+| Method | Purpose |
+|--------|---------|
+| `ApplyService()` | Full service lifecycle — apply |
+| `RemoveService()` | Full service lifecycle — remove |
+| `ApplyQoS()` | QoS lifecycle — apply |
+| `RemoveQoS()` | QoS lifecycle — remove |
+| `SetIP()` | Assign IP address |
+| `SetVRF()` | Bind/unbind VRF |
+| `BindACL()` | Bind ACL to this interface |
+| `UnbindACL()` | Unbind ACL from this interface |
+| `generateServiceEntries()` | Config: full service entries |
+| `bindVrf()` | Config: VRF binding entry |
+| `enableIpRouting()` | Config: enable IP routing (empty INTERFACE entry) |
+| `assignIpAddress()` | Config: IP address entry |
+| `bindQos()` | Config: QoS per-interface entries |
+| `unbindQos()` | Config: QoS removal entries |
+| `generateAclBinding()` | Config: ACL table + rules |
+
+**Abstractions exist to be used, not bypassed. If an object knows its
+own identity, callers must not re-supply it.**
+
+---
+
+## 25. Verb-First, Domain-Intent Naming
+
+Two rules govern function naming:
+
+**Rule 1: Verbs come first.** Functions that describe actions put the
+verb before the noun. This follows Go standard library convention
+(`os.Remove`, `json.Marshal`, `strings.Split`) and makes code read as
+imperative statements:
+
+```go
+// Correct — verb first
+createVlan(vlanID, opts)
+destroyVrf(configDB, vrfName, l3vni)
+enableArpSuppression(vlanName)
+bindIpvpn(vrfName, ipvpnDef, ...)
+deleteVlanMember(vlanID, intfName)
+i.bindVrf(vrfName)
+i.assignIpAddress(ipAddr)
+i.enableIpRouting()
+
+// Wrong — noun first
+vlanCreate(vlanID, opts)
+vrfDestroy(configDB, vrfName, l3vni)
+arpSuppressionEnable(vlanName)
+ipvpnBind(vrfName, ipvpnDef, ...)
+vlanMemberDelete(vlanID, intfName)
+i.vrfBinding(vrfName)
+i.ipAddress(ipAddr)
+i.ipRoutingEnable()
+```
+
+The verb vocabulary for config generators:
+
+| Verb | Meaning | Example |
+|------|---------|---------|
+| `create` | Construct entries for a new entity | `createVlan`, `createVrf`, `CreateBGPNeighbor` |
+| `delete` | Remove a single entity's entries | `deleteVlan`, `deleteVlanMember` |
+| `destroy` | Cascading teardown (scans configDB for dependents) | `destroyVlan`, `destroyVrf` |
+| `enable`/`disable` | Toggle a behavior | `enableArpSuppression`, `disableArpSuppression` |
+| `bind`/`unbind` | Establish/remove a relationship | `bindIpvpn`, `unbindIpvpn`, `i.bindVrf` |
+| `assign`/`unassign` | Attach/detach a value | `i.assignIpAddress` |
+| `update` | Modify fields on an existing entry | `updateDeviceMetadata` |
+| `generate` | Composite entry generation | `i.generateServiceEntries`, `generateBGPEntries` |
+
+Noun-only names are reserved for types, constructors, and key helpers —
+never for functions that describe actions.
+
+**Rule 2: Names describe domain intent, not CONFIG_DB mechanics.**
+"Sub" and "Entry" are implementation concepts. A network engineer should
+understand what a function does without knowing CONFIG_DB table names:
+
+```go
+i.bindVrf(vrfName)                      // "bind this interface to a VRF"
+i.enableIpRouting()                     // "enable IP routing on this interface"
+i.assignIpAddress(ipAddr)               // "assign an IP address"
+i.bindQos(policyName, policy)           // "bind QoS policy to this interface"
+i.unbindQos()                           // "unbind QoS from this interface"
+i.generateAclBinding(svc, filter, stage) // "generate ACL binding for this interface"
+i.generateServiceEntries(params)        // "generate all service entries"
+canBridge / canRoute                    // capability, not layer number
+```
+
+- **Methods on the subject**: `i.bindVrf()` reads as "bind VRF to this
+  interface" — the verb plus the receiver tells the whole story
+- **Parameters express intent**: `bindVrf(vrfName)` says "bind to this
+  VRF". `interfaceBaseConfig(intfName, map[string]string{"vrf_name":
+  vrfName})` says "write these fields to the INTERFACE table for this
+  name" — implementation detail, not intent
+- **Capability over layer**: `canBridge`/`canRoute` describe what a
+  service can do. `hasL2`/`hasL3` describe which OSI layer it uses.
+  Exception: `L2VNI`/`L3VNI` are standard EVPN RFC terms.
+
+**Verbs first; domain language always; implementation terms never.**
+
+---
+
+## 26. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1041,4 +1226,6 @@ no manual cleanup, no `redis-cli` required.**
 | Documentation freshness | Grep finds what you already know is wrong; audits find what you don't know is wrong |
 | Pure config functions | Generate entries in pure functions; orchestrate them in operations |
 | On-demand Interface state | Read state from the snapshot, not from cached fields; snapshots are refreshed per episode |
-| Symmetric operations | If newtron creates it, newtron must be able to remove it; no orphans, no manual cleanup |
+| Symmetric operations | If newtron creates it, newtron must be able to remove it; every forward config generator must have a reverse |
+| Respect abstraction boundaries | If an object knows its own identity, callers must not re-supply it |
+| Verb-first, domain-intent naming | Verbs come first (`createVlan` not `vlanCreate`); names describe domain intent, not CONFIG_DB mechanics |

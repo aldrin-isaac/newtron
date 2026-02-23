@@ -45,8 +45,8 @@ func NewChangeSet(device, operation string) *ChangeSet {
 	}
 }
 
-// Add adds a change to the set.
-func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, fields map[string]string) {
+// add appends a change of any type (internal use by configToChangeSet, op).
+func (cs *ChangeSet) add(table, key string, changeType sonic.ChangeType, fields map[string]string) {
 	cs.Changes = append(cs.Changes, Change{
 		Table:  table,
 		Key:    key,
@@ -55,10 +55,39 @@ func (cs *ChangeSet) Add(table, key string, changeType sonic.ChangeType, fields 
 	})
 }
 
-// AddDeletes adds delete entries from owning-file delete config functions.
-func (cs *ChangeSet) AddDeletes(entries []sonic.Entry) {
+// Add creates a new entry.
+func (cs *ChangeSet) Add(table, key string, fields map[string]string) {
+	cs.add(table, key, ChangeAdd, fields)
+}
+
+// Update modifies an existing entry.
+func (cs *ChangeSet) Update(table, key string, fields map[string]string) {
+	cs.add(table, key, ChangeModify, fields)
+}
+
+// Delete removes an entry.
+func (cs *ChangeSet) Delete(table, key string) {
+	cs.add(table, key, ChangeDelete, nil)
+}
+
+// Adds bridges config function output ([]sonic.Entry) for batch creates.
+func (cs *ChangeSet) Adds(entries []sonic.Entry) {
 	for _, e := range entries {
-		cs.Add(e.Table, e.Key, ChangeDelete, nil)
+		cs.Add(e.Table, e.Key, e.Fields)
+	}
+}
+
+// Updates bridges config function output ([]sonic.Entry) for batch modifies.
+func (cs *ChangeSet) Updates(entries []sonic.Entry) {
+	for _, e := range entries {
+		cs.Update(e.Table, e.Key, e.Fields)
+	}
+}
+
+// Deletes bridges config function output ([]sonic.Entry) for batch deletes.
+func (cs *ChangeSet) Deletes(entries []sonic.Entry) {
+	for _, e := range entries {
+		cs.Delete(e.Table, e.Key)
 	}
 }
 
@@ -78,7 +107,7 @@ func (cs *ChangeSet) IsEmpty() bool {
 func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet {
 	cs := NewChangeSet(deviceName, operation)
 	for _, e := range config {
-		cs.Add(e.Table, e.Key, changeType, e.Fields)
+		cs.add(e.Table, e.Key, changeType, e.Fields)
 	}
 	return cs
 }
