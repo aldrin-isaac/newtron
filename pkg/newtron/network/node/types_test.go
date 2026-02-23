@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
 // ============================================================================
@@ -36,8 +38,7 @@ func TestChange_Structure(t *testing.T) {
 		Table:    "PORT",
 		Key:      "Ethernet0",
 		Type:     ChangeModify,
-		OldValue: map[string]string{"mtu": "1500"},
-		NewValue: map[string]string{"mtu": "9100"},
+		Fields: map[string]string{"mtu": "9100"},
 	}
 
 	if c.Table != "PORT" {
@@ -49,11 +50,8 @@ func TestChange_Structure(t *testing.T) {
 	if c.Type != ChangeModify {
 		t.Errorf("Type = %q, want %q", c.Type, ChangeModify)
 	}
-	if c.OldValue["mtu"] != "1500" {
-		t.Errorf("OldValue[mtu] = %q, want %q", c.OldValue["mtu"], "1500")
-	}
-	if c.NewValue["mtu"] != "9100" {
-		t.Errorf("NewValue[mtu] = %q, want %q", c.NewValue["mtu"], "9100")
+	if c.Fields["mtu"] != "9100" {
+		t.Errorf("Fields[mtu] = %q, want %q", c.Fields["mtu"], "9100")
 	}
 }
 
@@ -64,11 +62,8 @@ func TestChange_NilValues(t *testing.T) {
 		Type:  ChangeDelete,
 	}
 
-	if c.OldValue != nil {
-		t.Error("OldValue should be nil")
-	}
-	if c.NewValue != nil {
-		t.Error("NewValue should be nil")
+	if c.Fields != nil {
+		t.Error("Fields should be nil")
 	}
 }
 
@@ -106,7 +101,7 @@ func TestChangeSet_Timestamp(t *testing.T) {
 func TestChangeSet_Add(t *testing.T) {
 	cs := NewChangeSet("test", "test")
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
 
 	if len(cs.Changes) != 1 {
 		t.Fatalf("Changes count = %d, want %d", len(cs.Changes), 1)
@@ -122,14 +117,11 @@ func TestChangeSet_Add(t *testing.T) {
 	if c.Type != ChangeAdd {
 		t.Errorf("Type = %q, want %q", c.Type, ChangeAdd)
 	}
-	if c.OldValue != nil {
-		t.Error("OldValue should be nil")
+	if c.Fields == nil {
+		t.Error("Fields should not be nil")
 	}
-	if c.NewValue == nil {
-		t.Error("NewValue should not be nil")
-	}
-	if c.NewValue["mtu"] != "9100" {
-		t.Errorf("NewValue[mtu] = %q, want %q", c.NewValue["mtu"], "9100")
+	if c.Fields["mtu"] != "9100" {
+		t.Errorf("Fields[mtu] = %q, want %q", c.Fields["mtu"], "9100")
 	}
 }
 
@@ -137,19 +129,19 @@ func TestChangeSet_AddMultiple(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "service.apply")
 
 	// Add typical service apply changes
-	cs.Add("VRF", "customer-l3-Ethernet0", ChangeAdd, nil, map[string]string{
+	cs.Add("VRF", "customer-l3-Ethernet0", ChangeAdd, map[string]string{
 		"vni": "10001",
 	})
-	cs.Add("INTERFACE", "Ethernet0", ChangeModify, nil, map[string]string{
+	cs.Add("INTERFACE", "Ethernet0", ChangeModify, map[string]string{
 		"vrf_name": "customer-l3-Ethernet0",
 	})
-	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", ChangeAdd, nil, nil)
-	cs.Add("ACL_TABLE", "customer-l3-in", ChangeAdd, nil, map[string]string{
+	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", ChangeAdd, nil)
+	cs.Add("ACL_TABLE", "customer-l3-in", ChangeAdd, map[string]string{
 		"type":  "L3",
 		"stage": "ingress",
 		"ports": "Ethernet0",
 	})
-	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", ChangeAdd, nil, map[string]string{
+	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", ChangeAdd, map[string]string{
 		"packet_action": "FORWARD",
 	})
 
@@ -173,7 +165,7 @@ func TestChangeSet_IsEmpty(t *testing.T) {
 		t.Error("New ChangeSet should be empty")
 	}
 
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, nil)
+	cs.Add("PORT", "Ethernet0", ChangeAdd, nil)
 
 	if cs.IsEmpty() {
 		t.Error("ChangeSet with changes should not be empty")
@@ -191,9 +183,9 @@ func TestChangeSet_String_Empty(t *testing.T) {
 
 func TestChangeSet_String_WithChanges(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
-	cs.Add("VLAN", "Vlan100", ChangeModify, nil, map[string]string{"vlanid": "100"})
-	cs.Add("VRF", "Vrf_CUST", ChangeDelete, nil, nil)
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
+	cs.Add("VLAN", "Vlan100", ChangeModify, map[string]string{"vlanid": "100"})
+	cs.Add("VRF", "Vrf_CUST", ChangeDelete, nil)
 
 	str := cs.String()
 
@@ -219,7 +211,7 @@ func TestChangeSet_String_WithChanges(t *testing.T) {
 
 func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 	cs := NewChangeSet("test", "test")
-	cs.Add("PORT", "Ethernet0", ChangeAdd, nil, map[string]string{"mtu": "9100"})
+	cs.Add("PORT", "Ethernet0", ChangeAdd, map[string]string{"mtu": "9100"})
 
 	str := cs.String()
 
@@ -231,7 +223,7 @@ func TestChangeSet_String_ShowsNewValue(t *testing.T) {
 
 func TestChangeSet_Preview(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "vlan.create")
-	cs.Add("VLAN", "Vlan100", ChangeAdd, nil, map[string]string{"vlanid": "100"})
+	cs.Add("VLAN", "Vlan100", ChangeAdd, map[string]string{"vlanid": "100"})
 
 	preview := cs.Preview()
 
@@ -443,15 +435,28 @@ func TestInterface_Name(t *testing.T) {
 }
 
 func TestInterface_Properties(t *testing.T) {
-	intf := &Interface{
-		name:        "Ethernet0",
-		adminStatus: "up",
-		operStatus:  "up",
-		speed:       "100G",
-		mtu:         9100,
-		vrf:         "Vrf_CUST1",
-		ipAddresses: []string{"10.1.1.1/30"},
+	configDB := &sonic.ConfigDB{
+		Port:                  map[string]sonic.PortEntry{},
+		Interface:             map[string]sonic.InterfaceEntry{},
+		PortChannel:           map[string]sonic.PortChannelEntry{},
+		PortChannelMember:     map[string]map[string]string{},
+		NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
+	configDB.Port["Ethernet0"] = sonic.PortEntry{AdminStatus: "up", Speed: "100G", MTU: "9100"}
+	configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	configDB.Interface["Ethernet0|10.1.1.1/30"] = sonic.InterfaceEntry{}
+	stateDB := &sonic.StateDB{
+		PortTable: map[string]sonic.PortStateEntry{
+			"Ethernet0": {OperStatus: "up", Speed: "100G", MTU: "9100"},
+		},
+	}
+	d := &Node{
+		configDB:   configDB,
+		conn:       &sonic.Device{StateDB: stateDB},
+		interfaces: make(map[string]*Interface),
+	}
+	intf := &Interface{node: d, name: "Ethernet0"}
 
 	if intf.AdminStatus() != "up" {
 		t.Errorf("AdminStatus() = %q, want %q", intf.AdminStatus(), "up")
@@ -479,7 +484,17 @@ func TestInterface_Properties(t *testing.T) {
 
 func TestInterface_HasService(t *testing.T) {
 	t.Run("with service", func(t *testing.T) {
-		intf := &Interface{serviceName: "customer-l3"}
+		configDB := &sonic.ConfigDB{
+		Port:                  map[string]sonic.PortEntry{},
+		Interface:             map[string]sonic.InterfaceEntry{},
+		PortChannel:           map[string]sonic.PortChannelEntry{},
+		PortChannelMember:     map[string]map[string]string{},
+		NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+		ACLTable:              map[string]sonic.ACLTableEntry{},
+	}
+		configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
+		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
+		intf := &Interface{node: d, name: "Ethernet0"}
 		if !intf.HasService() {
 			t.Error("HasService() should be true")
 		}
@@ -489,7 +504,16 @@ func TestInterface_HasService(t *testing.T) {
 	})
 
 	t.Run("without service", func(t *testing.T) {
-		intf := &Interface{}
+		configDB := &sonic.ConfigDB{
+		Port:                  map[string]sonic.PortEntry{},
+		Interface:             map[string]sonic.InterfaceEntry{},
+		PortChannel:           map[string]sonic.PortChannelEntry{},
+		PortChannelMember:     map[string]map[string]string{},
+		NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+		ACLTable:              map[string]sonic.ACLTableEntry{},
+	}
+		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
+		intf := &Interface{node: d, name: "Ethernet0"}
 		if intf.HasService() {
 			t.Error("HasService() should be false")
 		}
@@ -500,15 +524,25 @@ func TestInterface_HasService(t *testing.T) {
 }
 
 func TestInterface_ServiceBindingProperties(t *testing.T) {
-	intf := &Interface{
-		serviceName:   "customer-l3",
-		serviceIP:     "10.1.1.1/30",
-		serviceVRF:    "customer-l3-Ethernet0",
-		serviceIPVPN:  "mgmt-spoke-global",
-		serviceMACVPN: "server-vlan",
-		ingressACL:    "customer-edge-in",
-		egressACL:     "customer-edge-out",
+	configDB := &sonic.ConfigDB{
+		Port:                  map[string]sonic.PortEntry{},
+		Interface:             map[string]sonic.InterfaceEntry{},
+		PortChannel:           map[string]sonic.PortChannelEntry{},
+		PortChannelMember:     map[string]map[string]string{},
+		NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
+	configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
+		ServiceName: "customer-l3",
+		IPAddress:   "10.1.1.1/30",
+		VRFName:     "customer-l3-Ethernet0",
+		IPVPN:       "mgmt-spoke-global",
+		MACVPN:      "server-vlan",
+		IngressACL:  "customer-edge-in",
+		EgressACL:   "customer-edge-out",
+	}
+	d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
+	intf := &Interface{node: d, name: "Ethernet0"}
 
 	if intf.ServiceName() != "customer-l3" {
 		t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "customer-l3")
@@ -527,10 +561,13 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 
 func TestInterface_PortChannelMembership(t *testing.T) {
 	t.Run("is member", func(t *testing.T) {
-		intf := &Interface{
-			name:     "Ethernet0",
-			pcParent: "PortChannel100",
+		configDB := &sonic.ConfigDB{
+			PortChannelMember: map[string]map[string]string{
+				"PortChannel100|Ethernet0": {},
+			},
 		}
+		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
+		intf := &Interface{node: d, name: "Ethernet0"}
 		if !intf.IsPortChannelMember() {
 			t.Error("IsPortChannelMember() should be true")
 		}
@@ -540,7 +577,11 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 	})
 
 	t.Run("not member", func(t *testing.T) {
-		intf := &Interface{name: "Ethernet0"}
+		configDB := &sonic.ConfigDB{
+			PortChannelMember: map[string]map[string]string{},
+		}
+		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
+		intf := &Interface{node: d, name: "Ethernet0"}
 		if intf.IsPortChannelMember() {
 			t.Error("IsPortChannelMember() should be false")
 		}
@@ -554,9 +595,7 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 // Interface extractServiceFromACL Tests
 // ============================================================================
 
-func TestInterface_extractServiceFromACL(t *testing.T) {
-	intf := &Interface{}
-
+func TestExtractServiceFromACL(t *testing.T) {
 	tests := []struct {
 		aclName  string
 		expected string
@@ -571,7 +610,7 @@ func TestInterface_extractServiceFromACL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.aclName, func(t *testing.T) {
-			got := intf.extractServiceFromACL(tt.aclName)
+			got := extractServiceFromACL(tt.aclName)
 			if got != tt.expected {
 				t.Errorf("extractServiceFromACL(%q) = %q, want %q",
 					tt.aclName, got, tt.expected)
@@ -584,13 +623,35 @@ func TestInterface_extractServiceFromACL(t *testing.T) {
 // Interface String Tests
 // ============================================================================
 
+// stringTestIntf creates an Interface backed by ConfigDB+StateDB for String tests.
+func stringTestIntf(port sonic.PortEntry, portState sonic.PortStateEntry, configDB *sonic.ConfigDB) *Interface {
+	if configDB == nil {
+		configDB = &sonic.ConfigDB{
+			Port:                  map[string]sonic.PortEntry{},
+			Interface:             map[string]sonic.InterfaceEntry{},
+			PortChannelMember:     map[string]map[string]string{},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+		}
+	}
+	configDB.Port["Ethernet0"] = port
+	stateDB := &sonic.StateDB{
+		PortTable: map[string]sonic.PortStateEntry{"Ethernet0": portState},
+	}
+	d := &Node{
+		configDB:   configDB,
+		conn:       &sonic.Device{StateDB: stateDB},
+		interfaces: make(map[string]*Interface),
+	}
+	return &Interface{node: d, name: "Ethernet0"}
+}
+
 func TestInterface_String(t *testing.T) {
 	t.Run("basic up interface", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "up",
-		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "up"},
+			nil,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "Ethernet0") {
 			t.Error("String should contain interface name")
@@ -601,12 +662,19 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("interface with service", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "up",
-			serviceName: "customer-l3",
+		configDB := &sonic.ConfigDB{
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{
+				"Ethernet0": {ServiceName: "customer-l3"},
+			},
 		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "up"},
+			configDB,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "[service: customer-l3]") {
 			t.Error("String should contain service info")
@@ -614,12 +682,19 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("interface with IP", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "up",
-			ipAddresses: []string{"10.1.1.1/30"},
+		configDB := &sonic.ConfigDB{
+			Port: map[string]sonic.PortEntry{},
+			Interface: map[string]sonic.InterfaceEntry{
+				"Ethernet0|10.1.1.1/30": {},
+			},
+			PortChannelMember:     map[string]map[string]string{},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "up"},
+			configDB,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "[ip: 10.1.1.1/30]") {
 			t.Error("String should contain IP info")
@@ -627,12 +702,19 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("interface with VRF", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "up",
-			vrf:         "Vrf_CUST1",
+		configDB := &sonic.ConfigDB{
+			Port: map[string]sonic.PortEntry{},
+			Interface: map[string]sonic.InterfaceEntry{
+				"Ethernet0": {VRFName: "Vrf_CUST1"},
+			},
+			PortChannelMember:     map[string]map[string]string{},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "up"},
+			configDB,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "[vrf: Vrf_CUST1]") {
 			t.Error("String should contain VRF info")
@@ -640,12 +722,19 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("PortChannel member", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "up",
-			pcParent:    "PortChannel100",
+		configDB := &sonic.ConfigDB{
+			Port:      map[string]sonic.PortEntry{},
+			Interface: map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{
+				"PortChannel100|Ethernet0": {},
+			},
+			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "up"},
+			configDB,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "[member of: PortChannel100]") {
 			t.Error("String should contain PortChannel membership info")
@@ -653,11 +742,11 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("admin up oper down", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "up",
-			operStatus:  "down",
-		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "up"},
+			sonic.PortStateEntry{OperStatus: "down"},
+			nil,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "admin-up/oper-down") {
 			t.Error("String should show admin-up/oper-down status")
@@ -665,11 +754,11 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("down interface", func(t *testing.T) {
-		intf := &Interface{
-			name:        "Ethernet0",
-			adminStatus: "down",
-			operStatus:  "down",
-		}
+		intf := stringTestIntf(
+			sonic.PortEntry{AdminStatus: "down"},
+			sonic.PortStateEntry{OperStatus: "down"},
+			nil,
+		)
 		str := intf.String()
 		if !strings.Contains(str, "(down)") {
 			t.Error("String should show down status")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -49,7 +50,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		fields["fast_rate"] = "true"
 	}
 
-	cs.Add("PORTCHANNEL", name, ChangeAdd, nil, fields)
+	cs.Add("PORTCHANNEL", name, ChangeAdd, fields)
 
 	// Add members
 	for _, member := range opts.Members {
@@ -60,80 +61,79 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
 		memberKey := fmt.Sprintf("%s|%s", name, member)
-		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, nil, map[string]string{})
+		cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, map[string]string{})
 	}
 
 	util.WithDevice(n.name).Infof("Created PortChannel %s with members %v", name, opts.Members)
 	return cs, nil
 }
 
-// DeletePortChannel removes a LAG/PortChannel.
-func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
-	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
-	name = util.NormalizeInterfaceName(name)
-
-	if err := n.precondition("delete-portchannel", name).
-		RequirePortChannelExists(name).
-		Result(); err != nil {
-		return nil, err
-	}
-
-	cs := NewChangeSet(n.name, "device.delete-portchannel")
+// portChannelDeleteConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
+func portChannelDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove members first
-	if n.configDB != nil {
-		for key := range n.configDB.PortChannelMember {
+	if configDB != nil {
+		for key := range configDB.PortChannelMember {
 			parts := splitConfigDBKey(key)
 			if len(parts) == 2 && parts[0] == name {
-				cs.Add("PORTCHANNEL_MEMBER", key, ChangeDelete, nil, nil)
+				entries = append(entries, sonic.Entry{Table: "PORTCHANNEL_MEMBER", Key: key})
 			}
 		}
 	}
 
-	cs.Add("PORTCHANNEL", name, ChangeDelete, nil, nil)
+	entries = append(entries, sonic.Entry{Table: "PORTCHANNEL", Key: name})
+	return entries
+}
 
+// DeletePortChannel removes a LAG/PortChannel.
+func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, error) {
+	name = util.NormalizeInterfaceName(name)
+
+	cs, err := n.op("delete-portchannel", name, ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
+		func() []sonic.Entry { return portChannelDeleteConfig(n.configDB, name) })
+	if err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Deleted PortChannel %s", name)
 	return cs, nil
 }
 
 // AddPortChannelMember adds a member to a PortChannel.
 func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
 	pcName = util.NormalizeInterfaceName(pcName)
 	member = util.NormalizeInterfaceName(member)
 
-	if err := n.precondition("add-portchannel-member", pcName).
-		RequirePortChannelExists(pcName).
-		RequireInterfaceExists(member).
-		RequireInterfaceNotPortChannelMember(member).
-		Result(); err != nil {
+	cs, err := n.op("add-portchannel-member", pcName, ChangeAdd,
+		func(pc *PreconditionChecker) {
+			pc.RequirePortChannelExists(pcName).
+				RequireInterfaceExists(member).
+				RequireInterfaceNotPortChannelMember(member)
+		},
+		func() []sonic.Entry {
+			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
+		})
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.add-portchannel-member")
-	memberKey := fmt.Sprintf("%s|%s", pcName, member)
-	cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeAdd, nil, map[string]string{})
-
 	util.WithDevice(n.name).Infof("Added %s to PortChannel %s", member, pcName)
 	return cs, nil
 }
 
 // RemovePortChannelMember removes a member from a PortChannel.
 func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member string) (*ChangeSet, error) {
-	// Normalize interface names (e.g., Po100 -> PortChannel100, Eth0 -> Ethernet0)
 	pcName = util.NormalizeInterfaceName(pcName)
 	member = util.NormalizeInterfaceName(member)
 
-	if err := n.precondition("remove-portchannel-member", pcName).
-		RequirePortChannelExists(pcName).
-		Result(); err != nil {
+	cs, err := n.op("remove-portchannel-member", pcName, ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(pcName) },
+		func() []sonic.Entry {
+			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member)}}
+		})
+	if err != nil {
 		return nil, err
 	}
-
-	cs := NewChangeSet(n.name, "device.remove-portchannel-member")
-	memberKey := fmt.Sprintf("%s|%s", pcName, member)
-	cs.Add("PORTCHANNEL_MEMBER", memberKey, ChangeDelete, nil, nil)
-
 	util.WithDevice(n.name).Infof("Removed %s from PortChannel %s", member, pcName)
 	return cs, nil
 }

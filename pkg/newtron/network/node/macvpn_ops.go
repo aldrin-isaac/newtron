@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -46,19 +47,44 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 	// Add VNI mapping (delegates to evpn_ops.go config function)
 	if macvpnDef.VNI > 0 {
 		for _, e := range vniMapConfig(vlanName, macvpnDef.VNI) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 	}
 
 	// Configure ARP suppression (delegates to evpn_ops.go config function)
 	if macvpnDef.ARPSuppression {
 		for _, e := range arpSuppressionConfig(vlanName) {
-			cs.Add(e.Table, e.Key, ChangeAdd, nil, e.Fields)
+			cs.Add(e.Table, e.Key, ChangeAdd, e.Fields)
 		}
 	}
 
 	util.WithDevice(n.Name()).Infof("Bound MAC-VPN '%s' to %s (VNI: %d)", macvpnName, vlanName, macvpnDef.VNI)
 	return cs, nil
+}
+
+// macvpnUnbindConfig returns delete entries for unbinding a MAC-VPN from a VLAN:
+// the L2VNI mapping and ARP suppression entry.
+func macvpnUnbindConfig(configDB *sonic.ConfigDB, vlanName string) []sonic.Entry {
+	var entries []sonic.Entry
+
+	// Remove L2VNI mapping
+	if configDB != nil {
+		for key, mapping := range configDB.VXLANTunnelMap {
+			if mapping.VLAN == vlanName {
+				entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: key})
+				break
+			}
+		}
+	}
+
+	// Remove ARP suppression
+	if configDB != nil {
+		if _, ok := configDB.SuppressVLANNeigh[vlanName]; ok {
+			entries = append(entries, sonic.Entry{Table: "SUPPRESS_VLAN_NEIGH", Key: vlanName})
+		}
+	}
+
+	return entries
 }
 
 // UnbindMACVPN removes the MAC-VPN binding from this VLAN interface.
@@ -83,29 +109,9 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.unbind-macvpn")
+	cs := configToChangeSet(n.Name(), "interface.unbind-macvpn", macvpnUnbindConfig(n.ConfigDB(), i.name), ChangeDelete)
 
-	vlanName := i.name
-	configDB := n.ConfigDB()
-
-	// Remove L2VNI mapping
-	if configDB != nil {
-		for key, mapping := range configDB.VXLANTunnelMap {
-			if mapping.VLAN == vlanName {
-				cs.Add("VXLAN_TUNNEL_MAP", key, ChangeDelete, nil, nil)
-				break
-			}
-		}
-	}
-
-	// Remove ARP suppression
-	if configDB != nil {
-		if _, ok := configDB.SuppressVLANNeigh[vlanName]; ok {
-			cs.Add("SUPPRESS_VLAN_NEIGH", vlanName, ChangeDelete, nil, nil)
-		}
-	}
-
-	util.WithDevice(n.Name()).Infof("Unbound MAC-VPN from %s", vlanName)
+	util.WithDevice(n.Name()).Infof("Unbound MAC-VPN from %s", i.name)
 	return cs, nil
 }
 

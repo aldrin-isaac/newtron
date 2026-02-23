@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -41,8 +42,8 @@ func (n *Node) GetOrphanedACLs() []string {
 // ACL Config Functions (pure, no Node state)
 // ============================================================================
 
-// aclTableConfig returns CompositeEntry for an ACL_TABLE.
-func aclTableConfig(name, aclType, stage, ports, description string) []CompositeEntry {
+// aclTableConfig returns sonic.Entry for an ACL_TABLE.
+func aclTableConfig(name, aclType, stage, ports, description string) []sonic.Entry {
 	fields := map[string]string{
 		"type":  aclType,
 		"stage": stage,
@@ -53,11 +54,11 @@ func aclTableConfig(name, aclType, stage, ports, description string) []Composite
 	if ports != "" {
 		fields["ports"] = ports
 	}
-	return []CompositeEntry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
+	return []sonic.Entry{{Table: "ACL_TABLE", Key: name, Fields: fields}}
 }
 
-// aclRuleConfig returns CompositeEntry for an ACL_RULE.
-func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []CompositeEntry {
+// aclRuleConfig returns sonic.Entry for an ACL_RULE.
+func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []sonic.Entry {
 	ruleKey := fmt.Sprintf("%s|%s", tableName, ruleName)
 
 	action := "DROP"
@@ -89,7 +90,7 @@ func aclRuleConfig(tableName, ruleName string, opts ACLRuleConfig) []CompositeEn
 		fields["L4_SRC_PORT"] = opts.SrcPort
 	}
 
-	return []CompositeEntry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
+	return []sonic.Entry{{Table: "ACL_RULE", Key: ruleKey, Fields: fields}}
 }
 
 // ============================================================================
@@ -117,36 +118,30 @@ type ACLRuleConfig struct {
 
 // CreateACLTable creates a new ACL table.
 func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
-	if err := n.precondition("create-acl-table", name).
-		RequireACLTableNotExists(name).
-		Result(); err != nil {
-		return nil, err
-	}
 	if opts.Type == "" {
 		opts.Type = "L3"
 	}
 	if opts.Stage == "" {
 		opts.Stage = "ingress"
 	}
-
-	config := aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description)
-	cs := configToChangeSet(n.name, "device.create-acl-table", config, ChangeAdd)
-
+	cs, err := n.op("create-acl-table", name, ChangeAdd,
+		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
+		func() []sonic.Entry { return aclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+	if err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Created ACL table %s", name)
 	return cs, nil
 }
 
 // AddACLRule adds a rule to an ACL table.
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
-	if err := n.precondition("add-acl-rule", tableName).
-		RequireACLTableExists(tableName).
-		Result(); err != nil {
+	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
+		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
+		func() []sonic.Entry { return aclRuleConfig(tableName, ruleName, opts) })
+	if err != nil {
 		return nil, err
 	}
-
-	config := aclRuleConfig(tableName, ruleName, opts)
-	cs := configToChangeSet(n.name, "device.add-acl-rule", config, ChangeAdd)
-
 	util.WithDevice(n.name).Infof("Added rule %s to ACL table %s", ruleName, tableName)
 	return cs, nil
 }
@@ -169,35 +164,39 @@ func (n *Node) DeleteACLRule(ctx context.Context, tableName, ruleName string) (*
 	}
 
 	cs := NewChangeSet(n.name, "device.delete-acl-rule")
-	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+	cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil)
 
 	util.WithDevice(n.name).Infof("Deleted rule %s from ACL table %s", ruleName, tableName)
 	return cs, nil
 }
 
-// DeleteACLTable removes an ACL table and all its rules.
-func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
-	if err := n.precondition("delete-acl-table", name).
-		RequireACLTableExists(name).
-		Result(); err != nil {
-		return nil, err
-	}
-
-	cs := NewChangeSet(n.name, "device.delete-acl-table")
+// aclTableDeleteConfig returns delete entries for an ACL table: all its rules and the table itself.
+func aclTableDeleteConfig(configDB *sonic.ConfigDB, name string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// Remove all rules first
-	if n.configDB != nil {
+	if configDB != nil {
 		prefix := name + "|"
-		for ruleKey := range n.configDB.ACLRule {
+		for ruleKey := range configDB.ACLRule {
 			if len(ruleKey) > len(prefix) && ruleKey[:len(prefix)] == prefix {
-				cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
+				entries = append(entries, sonic.Entry{Table: "ACL_RULE", Key: ruleKey})
 			}
 		}
 	}
 
 	// Remove the table
-	cs.Add("ACL_TABLE", name, ChangeDelete, nil, nil)
+	entries = append(entries, sonic.Entry{Table: "ACL_TABLE", Key: name})
+	return entries
+}
 
+// DeleteACLTable removes an ACL table and all its rules.
+func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
+	cs, err := n.op("delete-acl-table", name, ChangeDelete,
+		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
+		func() []sonic.Entry { return aclTableDeleteConfig(n.configDB, name) })
+	if err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Deleted ACL table %s", name)
 	return cs, nil
 }
@@ -226,7 +225,7 @@ func (n *Node) UnbindACLFromInterface(ctx context.Context, aclName, interfaceNam
 				}
 			}
 
-			cs.Add("ACL_TABLE", aclName, ChangeModify, nil, map[string]string{
+			cs.Add("ACL_TABLE", aclName, ChangeModify, map[string]string{
 				"ports": strings.Join(remaining, ","),
 			})
 		}

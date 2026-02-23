@@ -41,12 +41,13 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 	}
 
 	// Interface must have an IP address
-	if len(i.ipAddresses) == 0 {
+	ipAddresses := i.IPAddresses()
+	if len(ipAddresses) == 0 {
 		return nil, fmt.Errorf("interface %s has no IP address configured", i.name)
 	}
 
 	// Get the interface's IP address (use first one)
-	localIP := i.ipAddresses[0]
+	localIP := ipAddresses[0]
 
 	// Auto-derive neighbor IP for point-to-point links if not specified
 	neighborIP := cfg.NeighborIP
@@ -93,9 +94,10 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 	}
 
 	// If no neighbor IP specified, try to derive it
-	if neighborIP == "" && len(i.ipAddresses) > 0 {
+	ipAddresses := i.IPAddresses()
+	if neighborIP == "" && len(ipAddresses) > 0 {
 		var err error
-		neighborIP, err = util.DeriveNeighborIP(i.ipAddresses[0])
+		neighborIP, err = util.DeriveNeighborIP(ipAddresses[0])
 		if err != nil {
 			return nil, fmt.Errorf("specify neighbor IP to remove")
 		}

@@ -277,9 +277,10 @@ A related principle: **whatever configuration can be right-shifted to the interf
 |  (created in Node's context)                                     |
 |                                                                   |
 |  - parent: *Node     <-- key: access to Node AND Network         |
-|  - Interface state (from config_db)                              |
+|  - name: string      <-- interface identity                      |
+|  - All state read on demand from ConfigDB/StateDB snapshots      |
 |                                                                   |
-|  Methods: Node(), Network(), HasService(),                       |
+|  Methods: Node(), HasService(),                                  |
 |           ApplyService(), RemoveService(), RefreshService()      |
 +------------------------------------------------------------------+
 ```
@@ -507,23 +508,30 @@ Pure connection management for SONiC switches. `sonic.Device` is a connection ma
 
 ### 4.5 Translation (in `pkg/newtron/network/node`)
 
-The translation from spec to config happens in `Interface.ApplyService()` and related methods:
+The translation from spec to config follows a three-layer pattern:
+
+1. **Config functions** — pure functions in each `*_ops.go` file that return `[]sonic.Entry`. They take CONFIG_DB state + identity parameters, construct the correct entries, and have no side effects. Example: `vlanConfig(vlanID, members)`, `vrfConfig(vrfName, vni)`.
+
+2. **`service_gen.go`** — `GenerateServiceEntries()` translates a service spec into CONFIG_DB entries by calling config functions from the owning `*_ops.go` files. Both `Interface.ApplyService()` (online) and `TopologyProvisioner` (offline composite) delegate here.
+
+3. **Operations** — methods on Interface/Node that run preconditions, call generators, and wrap results in a ChangeSet. Simple CRUD operations use the `op()` helper; complex operations (ApplyService, RemoveService, SetupEVPN) build ChangeSets directly.
 
 ```go
+// Simple CRUD — uses op() helper
+func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, error) {
+    return n.op("create-vlan", vlanName, ChangeAdd,
+        func(pc *PreconditionChecker) { pc.RequireVLANNotExists(vlanID) },
+        func() []sonic.Entry { return vlanConfig(vlanID, members) },
+    )
+}
+
+// Complex operation — builds ChangeSet directly, calls config functions
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
-    // 1. Load spec (declarative)
-    svc, _ := i.Network().GetService(serviceName)
-
-    // 2. Translate with context
-    vrfName := deriveVRFName(svc, i.name)           // spec + context -> config
-    peerIP, _ := util.DeriveNeighborIP(opts.IPAddress) // derive from interface IP
-    localAS := i.Node().Resolved().ASNumber           // from device profile
-
-    // 3. Generate config (imperative)
-    cs.Add("VRF", vrfName, ChangeAdd, nil, vrfConfig)
-    cs.Add("BGP_NEIGHBOR", peerIP, ChangeAdd, nil, neighborConfig)
-    cs.Add("ACL_TABLE", aclName, ChangeAdd, nil, aclConfig)
-
+    // Preconditions...
+    // Call GenerateServiceEntries (which calls config functions from owning *_ops.go files)
+    entries, _ := GenerateServiceEntries(n.SpecProvider, params)
+    cs := configToChangeSet(n.Name(), "interface.apply-service", entries, ChangeAdd)
+    // Idempotency filtering, route policy generation, binding record...
     return cs, nil
 }
 ```
@@ -1268,7 +1276,7 @@ Operational state is accessed through Node-level accessors:
 
 | Accessor | Returns | Use Case |
 |----------|---------|----------|
-| `Node.StateDB()` | `*sonic.StateDB` (snapshot) | Interface oper-status during loadState |
+| `Node.StateDB()` | `*sonic.StateDB` (snapshot) | Interface oper-status (on-demand accessor reads) |
 | `Node.StateDBClient()` | `*sonic.StateDBClient` | Fresh targeted queries (BGP state, VRF state, neighbor entries) |
 | `Node.StateDBClient().GetBGPNeighborState(vrf, ip)` | `*BGPNeighborStateEntry` | BGP session state for a specific neighbor |
 | `Node.StateDBClient().GetEntry(table, key)` | `map[string]string` | Generic STATE_DB table/key lookup |

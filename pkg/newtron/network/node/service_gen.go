@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -26,15 +27,6 @@ func filterTypeToSONiC(specType string) string {
 	default:
 		return "L3"
 	}
-}
-
-// CompositeEntry is a single CONFIG_DB entry (table + key + fields).
-// Used by GenerateServiceEntries and the QoS generators to return entries
-// without coupling to the CompositeBuilder or ChangeSet types.
-type CompositeEntry struct {
-	Table  string
-	Key    string
-	Fields map[string]string
 }
 
 // ServiceEntryParams contains everything needed to generate CONFIG_DB entries
@@ -54,13 +46,13 @@ type ServiceEntryParams struct {
 // GenerateServiceEntries produces the CONFIG_DB entries for applying a service
 // to an interface.  The returned slice is ordered by table dependency (VLANs
 // before members, VRFs before interfaces, etc.).
-func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeEntry, error) {
+func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]sonic.Entry, error) {
 	svc, err := sp.GetService(p.ServiceName)
 	if err != nil {
 		return nil, fmt.Errorf("service '%s' not found", p.ServiceName)
 	}
 
-	var entries []CompositeEntry
+	var entries []sonic.Entry
 
 	// Resolve VPN definitions
 	var ipvpnDef *spec.IPVPNSpec
@@ -141,13 +133,13 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 		if vrfName != "" {
 			intfFields["vrf_name"] = vrfName
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "INTERFACE",
 			Key:    p.InterfaceName,
 			Fields: intfFields,
 		})
 		if p.IPAddress != "" {
-			entries = append(entries, CompositeEntry{
+			entries = append(entries, sonic.Entry{
 				Table:  "INTERFACE",
 				Key:    fmt.Sprintf("%s|%s", p.InterfaceName, p.IPAddress),
 				Fields: map[string]string{},
@@ -215,7 +207,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 				qosFields["tc_to_queue_map"] = qosProfile.TCToQueueMap
 			}
 			if len(qosFields) > 0 {
-				entries = append(entries, CompositeEntry{
+				entries = append(entries, sonic.Entry{
 					Table:  "PORT_QOS_MAP",
 					Key:    p.InterfaceName,
 					Fields: qosFields,
@@ -249,7 +241,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 	if svc.MACVPN != "" {
 		bindingFields["macvpn"] = svc.MACVPN
 	}
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table:  "NEWTRON_SERVICE_BINDING",
 		Key:    p.InterfaceName,
 		Fields: bindingFields,
@@ -260,7 +252,7 @@ func GenerateServiceEntries(sp SpecProvider, p ServiceEntryParams) ([]CompositeE
 
 // generateBGPEntries resolves BGP peer parameters from the service spec and
 // topology params, then delegates to BGPNeighborConfig for entry construction.
-func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]CompositeEntry, error) {
+func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
 	}
@@ -317,7 +309,7 @@ func generateBGPEntries(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName str
 // generateServiceACLEntries generates ACL table and rule entries for a service filter.
 // The ACL_TABLE entry is produced by aclTableConfig (acl_ops.go); rules use
 // buildACLRuleFields for the full field set (including CoS→TC mapping).
-func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfaceName, stage string) ([]CompositeEntry, error) {
+func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfaceName, stage string) ([]sonic.Entry, error) {
 	filterSpec, err := sp.GetFilter(filterName)
 	if err != nil {
 		return nil, fmt.Errorf("filter spec '%s' not found", filterName)
@@ -334,7 +326,7 @@ func generateServiceACLEntries(sp SpecProvider, serviceName, filterName, interfa
 
 	for _, rule := range filterSpec.Rules {
 		ruleKey := fmt.Sprintf("%s|RULE_%d", aclName, rule.Sequence)
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "ACL_RULE",
 			Key:    ruleKey,
 			Fields: buildACLRuleFields(rule, rule.SrcIP, rule.DstIP),

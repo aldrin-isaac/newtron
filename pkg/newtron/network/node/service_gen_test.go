@@ -3,6 +3,7 @@ package node
 import (
 	"testing"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -453,7 +454,7 @@ func TestGenerateServiceEntries_BGP_PeerASRequest(t *testing.T) {
 
 // assertEntry checks that an entry with the given table and key exists,
 // and optionally checks a field value (pass empty field to skip field check).
-func assertEntry(t *testing.T, entries []CompositeEntry, table, key, field, value string) {
+func assertEntry(t *testing.T, entries []sonic.Entry, table, key, field, value string) {
 	t.Helper()
 	for _, e := range entries {
 		if e.Table == table && e.Key == key {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -24,8 +25,8 @@ const (
 //   - 1 TC_TO_QUEUE_MAP entry (identity mapping)
 //   - N SCHEDULER entries (one per queue)
 //   - 0 or 1 WRED_PROFILE entry (if any queue has ECN)
-func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []CompositeEntry {
-	var entries []CompositeEntry
+func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// DSCP_TO_TC_MAP: map all 64 DSCP values to their traffic class.
 	// Unmapped DSCPs default to TC 0.
@@ -38,7 +39,7 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 			dscpFields[fmt.Sprintf("%d", dscp)] = fmt.Sprintf("%d", queueIdx)
 		}
 	}
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table:  "DSCP_TO_TC_MAP",
 		Key:    policyName,
 		Fields: dscpFields,
@@ -49,7 +50,7 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 	for i := range policy.Queues {
 		tcFields[fmt.Sprintf("%d", i)] = fmt.Sprintf("%d", i)
 	}
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table:  "TC_TO_QUEUE_MAP",
 		Key:    policyName,
 		Fields: tcFields,
@@ -64,7 +65,7 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 		if q.Type == "dwrr" && q.Weight > 0 {
 			schedFields["weight"] = fmt.Sprintf("%d", q.Weight)
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "SCHEDULER",
 			Key:    schedKey,
 			Fields: schedFields,
@@ -80,7 +81,7 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 		}
 	}
 	if hasECN {
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table: "WRED_PROFILE",
 			Key:   policyName + ".ecn",
 			Fields: map[string]string{
@@ -98,11 +99,11 @@ func GenerateQoSDeviceEntries(policyName string, policy *spec.QoSPolicy) []Compo
 // generateQoSInterfaceEntries produces per-interface CONFIG_DB entries for a QoS policy:
 //   - 1 PORT_QOS_MAP entry (bracket-ref to maps)
 //   - N QUEUE entries (one per queue, bracket-ref to SCHEDULER, optionally WRED_PROFILE)
-func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []CompositeEntry {
-	var entries []CompositeEntry
+func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, interfaceName string) []sonic.Entry {
+	var entries []sonic.Entry
 
 	// PORT_QOS_MAP: bind maps to the port.
-	entries = append(entries, CompositeEntry{
+	entries = append(entries, sonic.Entry{
 		Table: "PORT_QOS_MAP",
 		Key:   interfaceName,
 		Fields: map[string]string{
@@ -121,7 +122,7 @@ func generateQoSInterfaceEntries(policyName string, policy *spec.QoSPolicy, inte
 		if q.ECN {
 			queueFields["wred_profile"] = fmt.Sprintf("[WRED_PROFILE|%s]", wredKey)
 		}
-		entries = append(entries, CompositeEntry{
+		entries = append(entries, sonic.Entry{
 			Table:  "QUEUE",
 			Key:    queueKey,
 			Fields: queueFields,

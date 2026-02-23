@@ -15,15 +15,23 @@ import (
 )
 
 // ============================================================================
-// Configuration Change Types
+// Configuration Entry and Change Types
 // ============================================================================
+
+// Entry is a single CONFIG_DB entry: table + key + fields.
+// Used by config generators, composite builders, and pipeline delivery.
+type Entry struct {
+	Table  string
+	Key    string
+	Fields map[string]string
+}
 
 // ConfigChange represents a single configuration change
 type ConfigChange struct {
-	Table  string
-	Key    string
-	Type   ChangeType
-	Fields map[string]string
+	Table  string            `json:"table"`
+	Key    string            `json:"key"`
+	Type   ChangeType        `json:"type"`
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // ChangeType represents the type of configuration change

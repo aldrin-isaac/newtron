@@ -79,8 +79,8 @@ func (cb *CompositeBuilder) SetGeneratedBy(by string) *CompositeBuilder {
 	return cb
 }
 
-// AddEntries adds multiple CompositeEntry values to the composite.
-func (cb *CompositeBuilder) AddEntries(entries []CompositeEntry) *CompositeBuilder {
+// AddEntries adds multiple sonic.Entry values to the composite.
+func (cb *CompositeBuilder) AddEntries(entries []sonic.Entry) *CompositeBuilder {
 	for _, e := range entries {
 		cb.AddEntry(e.Table, e.Key, e.Fields)
 	}
@@ -135,20 +135,20 @@ func (cc *CompositeConfig) ToConfigChanges() []sonic.ConfigChange {
 	return changes
 }
 
-// ToTableChanges converts the composite config to a slice of sonic.TableChange
+// ToEntries converts the composite config to a slice of sonic.Entry
 // for pipeline delivery.
-func (cc *CompositeConfig) ToTableChanges() []sonic.TableChange {
-	var changes []sonic.TableChange
+func (cc *CompositeConfig) ToEntries() []sonic.Entry {
+	var entries []sonic.Entry
 	for table, keys := range cc.Tables {
 		for key, fields := range keys {
-			changes = append(changes, sonic.TableChange{
+			entries = append(entries, sonic.Entry{
 				Table:  table,
 				Key:    key,
 				Fields: fields,
 			})
 		}
 	}
-	return changes
+	return entries
 }
 
 // DeliverComposite delivers a composite config to a device.
@@ -160,7 +160,7 @@ func (n *Node) DeliverComposite(composite *CompositeConfig, mode CompositeMode) 
 	}
 
 	result := &CompositeDeliveryResult{Mode: mode}
-	changes := composite.ToTableChanges()
+	changes := composite.ToEntries()
 
 	client := n.conn.Client()
 

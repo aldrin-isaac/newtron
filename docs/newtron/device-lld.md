@@ -716,7 +716,7 @@ EXEC                            -- execute atomically
 // ReplaceAll deletes all existing keys in affected tables, then writes the
 // new entries via PipelineSet. PORT table entries are merged instead of replaced
 // (preserving platform-specific port config). Used by composite overwrite mode.
-func (c *ConfigDBClient) ReplaceAll(changes []TableChange) error
+func (c *ConfigDBClient) ReplaceAll(changes []Entry) error
 ```
 
 ---

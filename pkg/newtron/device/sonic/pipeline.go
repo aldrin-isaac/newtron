@@ -7,16 +7,9 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// TableChange represents a single change for pipeline execution.
-type TableChange struct {
-	Table  string
-	Key    string
-	Fields map[string]string // nil means delete
-}
-
 // PipelineSet writes multiple entries atomically via Redis MULTI/EXEC pipeline.
 // All changes are applied in a single transaction — either all succeed or none.
-func (c *ConfigDBClient) PipelineSet(changes []TableChange) error {
+func (c *ConfigDBClient) PipelineSet(changes []Entry) error {
 	if len(changes) == 0 {
 		return nil
 	}
@@ -65,7 +58,7 @@ var platformMergeTables = map[string]bool{
 // For most tables, all existing keys are deleted first, then new entries are
 // written. Platform-managed tables (PORT) are merged instead — existing
 // fields are preserved and newtron's fields are overlaid.
-func (c *ConfigDBClient) ReplaceAll(changes []TableChange) error {
+func (c *ConfigDBClient) ReplaceAll(changes []Entry) error {
 	// Collect the set of tables being replaced (excluding merge-only tables)
 	tables := make(map[string]bool)
 	for _, change := range changes {

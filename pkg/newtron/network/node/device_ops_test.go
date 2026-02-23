@@ -179,15 +179,15 @@ func assertNoChange(t *testing.T, cs *ChangeSet, table, key string) {
 	}
 }
 
-// assertField checks that a change's NewValue contains the expected field/value pair.
+// assertField checks that a change's Fields contains the expected field/value pair.
 func assertField(t *testing.T, c *Change, field, value string) {
 	t.Helper()
-	if c.NewValue == nil {
-		t.Fatalf("change %s|%s has nil NewValue, expected field %q=%q", c.Table, c.Key, field, value)
+	if c.Fields == nil {
+		t.Fatalf("change %s|%s has nil Fields, expected field %q=%q", c.Table, c.Key, field, value)
 	}
-	got, ok := c.NewValue[field]
+	got, ok := c.Fields[field]
 	if !ok {
-		t.Fatalf("change %s|%s missing field %q (have %v)", c.Table, c.Key, field, c.NewValue)
+		t.Fatalf("change %s|%s missing field %q (have %v)", c.Table, c.Key, field, c.Fields)
 	}
 	if got != value {
 		t.Errorf("change %s|%s field %q = %q, want %q", c.Table, c.Key, field, got, value)
