@@ -79,7 +79,7 @@ newtron/
 │       │       ├── pipeline.go          # Redis MULTI/EXEC pipeline client
 │       │       └── platform.go          # SonicPlatformConfig, port validation
 │   ├── audit/                       # Audit logging
-│   │   ├── event.go                 # Event types (uses node.Change)
+│   │   ├── event.go                 # Event types (uses node.Change, alias for sonic.ConfigChange)
 │   │   └── logger.go                # Logger implementation
 │   ├── auth/                        # Authorization
 │   │   ├── permission.go            # Permission definitions
@@ -1434,14 +1434,9 @@ const (
     ChangeDelete ChangeType = "delete"
 )
 
-// Change represents a single configuration change
-type Change struct {
-    Table     string            `json:"table"`
-    Key       string            `json:"key"`
-    Type      ChangeType        `json:"type"`
-    OldValue  map[string]string `json:"old_value,omitempty"`
-    NewValue  map[string]string `json:"new_value,omitempty"`
-}
+// Change is a type alias for sonic.ConfigChange. All external references
+// to node.Change (audit/event.go, test helpers) resolve to ConfigChange.
+type Change = sonic.ConfigChange
 
 // ChangeSet is a collection of changes returned by operations
 type ChangeSet struct {
@@ -1454,7 +1449,7 @@ type ChangeSet struct {
 }
 
 func NewChangeSet(device, operation string) *ChangeSet
-func (cs *ChangeSet) Add(table, key string, changeType ChangeType, oldValue, newValue map[string]string)
+func (cs *ChangeSet) Add(table, key string, changeType ChangeType, fields map[string]string)
 func (cs *ChangeSet) IsEmpty() bool
 func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key field=value" / "- TABLE|key" / "~ TABLE|key field: old→new"
 
@@ -1472,8 +1467,8 @@ func (cs *ChangeSet) Apply(n *Node) error
 // Rollback applies the inverse of each applied change in reverse order
 // (changes 0..AppliedCount-1):
 //   - ChangeAdd → delete the table/key
-//   - ChangeModify → restore OldValue (Set with OldValue fields)
-//   - ChangeDelete → recreate with OldValue (Set with OldValue fields)
+//   - ChangeModify → not invertible (no old state stored)
+//   - ChangeDelete → not invertible (no old state stored)
 //
 // Rollback is best-effort: it attempts ALL inverse operations, collecting
 // errors into a combined errors.Join() error. It does not stop on first
@@ -2455,7 +2450,7 @@ func (n *Node) GeneratePlatformSpec(ctx context.Context) (*spec.PlatformSpec, er
 // Overwrite mode:
 //   1. Snapshot current CONFIG_DB (pre-state)
 //   2. ReplaceAll (flush + pipeline write)
-//   3. For each entry in composite: ChangeSet entry = ChangeAdd with OldValue from pre-snapshot
+//   3. For each entry in composite: ChangeSet entry = ChangeAdd
 //   4. For each entry in pre-snapshot missing from composite: ChangeSet entry = ChangeDelete
 //
 // Merge mode:
