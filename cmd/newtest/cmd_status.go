@@ -267,18 +267,16 @@ func printDetailView(state *newtest.RunState) {
 			continue
 		}
 
+		fmt.Printf("\n  %s\n", sc.Name)
 		if sc.Description != "" {
-			fmt.Printf("\n  %s \u2014 %s\n", sc.Name, cli.Dim(sc.Description))
-		} else {
-			fmt.Printf("\n  %s:\n", sc.Name)
+			fmt.Printf("    %s\n", cli.Dim(sc.Description))
 		}
-
-		// Show scenario file path.
 		if state.SuiteDir != "" {
 			if path := resolveScenarioFilePath(state.SuiteDir, sc.Name); path != "" {
-				fmt.Printf("    %s\n", cli.Dim(path))
+				fmt.Printf("    %s %s\n", cli.Dim("file:"), cli.Dim(path))
 			}
 		}
+		fmt.Println()
 
 		t := cli.NewTable("#", "STEP", "ACTION", "STATUS", "DURATION", "MESSAGE").WithPrefix("    ")
 
