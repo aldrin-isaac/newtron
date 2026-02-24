@@ -22,9 +22,7 @@ Three architectural choices define newtron:
 
 ## What newtron Provisions
 
-newtron manages SONiC devices through CONFIG_DB. A device's full configuration — interfaces, VLANs, VRFs, BGP neighbors, EVPN overlays, ACLs, QoS — is expressed as spec files and translated into CONFIG_DB entries using each device's profile, platform, and site context.
-
-The object model is hierarchical: `Network > Node > Interface`. A Network holds specs (services, filters, VPNs, platforms). A Node holds its profile, resolved config, and Redis connections. An Interface holds its service bindings. Methods live on the smallest object that has the context to execute them — `ApplyService` lives on Interface because the interface's identity is part of the translation context; `VerifyChangeSet` lives on Node because it needs the Redis connection.
+newtron manages SONiC devices through CONFIG_DB. A device's full configuration — interfaces, VLANs, VRFs, BGP neighbors, EVPN overlays, ACLs, QoS — is expressed as spec files and translated into CONFIG_DB entries using each device's profile, platform, and site context. Each CONFIG_DB table has a single owning file — one source of truth for how entries are constructed, no duplication across composites or service types.
 
 newtron reads `network.json` (services, VPNs, filters, routing policy, zones), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, zone, EVPN peering, credentials). It does not need `topology.json` — that file belongs to newtlab and newtest.
 
@@ -33,7 +31,7 @@ Key operations:
 - **Service provisioning** — L2, L3, transit, and IRB services applied per-interface. Each service spec defines routing protocol, VPN binding, ingress/egress filters, and route policy. newtron derives concrete values (peer IP from interface IP, VRF name from service+interface, ACL rules from filter specs) using device context.
 - **BGP management** — Full underlay and overlay BGP via SONiC's frrcfgd framework. eBGP neighbors configured per-interface through service specs. eBGP overlay (loopback-to-loopback) for multi-AF route exchange (IPv4, IPv6, L2VPN EVPN). FRR defaults applied via vtysh for features frrcfgd doesn't support.
 - **EVPN/VXLAN** — VTEP creation, L2/L3 VNI mapping, SVI configuration, EVPN neighbor activation. Replaces traditional MPLS L3VPN.
-- **Composite provisioning** — Build a full device configuration offline from specs, then deliver it as a single atomic Redis pipeline. Used for initial provisioning; individual operations used for incremental changes.
+- **Composite provisioning** — Full-device configuration generated offline by running the same operations (`ConfigureBGP`, `SetupEVPN`, `iface.ApplyService`) against a shadow ConfigDB. No template engine — the code that configures a live device also generates offline composites. `BuildComposite()` exports accumulated entries for atomic delivery via Redis pipeline. Delivery merges composite entries on top of existing CONFIG_DB, preserving factory defaults while removing stale keys.
 
 Every mutating operation produces a **ChangeSet** — an ordered list of CONFIG_DB mutations with table, key, operation type, and old/new values. The ChangeSet serves as dry-run preview, execution receipt, and verification contract. `VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and diffs against the ChangeSet. One verification method works for every operation.
 
@@ -59,7 +57,7 @@ Key capabilities:
 - **Port conflict detection** — before starting any process, newtlab probes all allocated ports across all hosts and reports every conflict in a single error.
 - **Multiple SONiC images** — platform definitions support VS (control plane only), VPP (full forwarding), Cisco 8000, and vendor images, each with their own NIC driver, interface mapping, CPU features, and credentials.
 
-After deployment, newtlab patches device profiles with SSH and console ports so newtron can connect. On destroy, it restores original profiles. The spec directory is the only coordination surface between the tools.
+After deployment, newtlab patches device profiles with SSH ports, console ports, and deterministic system MACs so newtron can connect and provision correctly. On destroy, it restores original profiles. The spec directory is the only coordination surface between the tools.
 
 ### newtest — E2E Test Orchestrator
 
@@ -74,6 +72,18 @@ Key capabilities:
 - **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. It can verify that a route configured on spine1 actually arrives in leaf1's APP_DB, that BGP sessions reach Established state on both ends, that data plane forwarding works end-to-end.
 - **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Report generation** — console output with ANSI formatting, markdown reports, and JUnit XML for CI integration.
+
+### Validated
+
+All three test suites pass on Cisco Silicon One (CiscoVS Palladium2):
+
+| Suite | Result | Coverage |
+|-------|--------|----------|
+| 2node-primitive | 20/20 | Health, BGP, VLAN/VRF/VTEP lifecycle, service apply/remove, port channels, ACLs, QoS |
+| 2node-service | 6/6 | Full service lifecycle: provision, health, dataplane, deprovision, verify-clean |
+| 3node-dataplane | 6/6 | L3 routing, EVPN L2 bridging over VXLAN tunnels |
+
+32 scenarios, zero failures. EVPN VXLAN L2 bridging verified end-to-end between virtual switches running Cisco Silicon One SAI.
 
 ## Verification Model
 
@@ -109,11 +119,41 @@ specs/
 
 ## Quick Start
 
-Requires Go 1.24+.
+Requires Go 1.24+. newtlab requires KVM for VM acceleration (`/dev/kvm`).
 
 ```bash
 make build                # → bin/newtron, bin/newtlab, bin/newtest, bin/newtlink
 ```
+
+### VM images
+
+newtlab looks for QCOW2 base images in `~/.newtlab/images/`, referenced by `vm_image` in `platforms.json`:
+
+```bash
+mkdir -p ~/.newtlab/images
+cp sonic-ciscovs.qcow2 ~/.newtlab/images/    # Cisco Silicon One VS
+cp alpine-testhost.qcow2 ~/.newtlab/images/  # lightweight test host
+```
+
+At deploy time, newtlab creates copy-on-write overlay disks — base images are never modified. All runtime state lives under `~/.newtlab/labs/<topology>/`:
+
+```
+~/.newtlab/
+├── images/                          # Base QCOW2 images (user-provided)
+│   ├── sonic-ciscovs.qcow2
+│   └── alpine-testhost.qcow2
+├── labs/                            # Per-lab runtime state (created by deploy)
+│   └── 2node-service/
+│       ├── state.json               # PIDs, ports, node status
+│       ├── disks/                   # COW overlay disks
+│       │   ├── switch1.qcow2
+│       │   └── switch2.qcow2
+│       ├── logs/                    # QEMU console logs
+│       └── bridge.json              # newtlink bridge assignments
+└── bin/                             # newtlink binary (uploaded to remote hosts)
+```
+
+`newtlab destroy` cleans up the lab directory. Base images are never touched.
 
 ### Provision a device
 
@@ -206,6 +246,8 @@ newtest/
 | **newtron** | [Design](docs/newtron/hld.md) | [Types & Methods](docs/newtron/lld.md) | [Usage](docs/newtron/howto.md) |
 | **newtlab** | [Design](docs/newtlab/hld.md) | [Types & Methods](docs/newtlab/lld.md) | [Usage](docs/newtlab/howto.md) |
 | **newtest** | [Design](docs/newtest/hld.md) | [Types & Methods](docs/newtest/lld.md) | [Usage](docs/newtest/howto.md) |
+
+[RCA Index](docs/rca/) — 40+ root-cause analyses documenting SONiC platform bugs, daemon interactions, and workarounds discovered during development. Covers frrcfgd, orchagent, vlanmgrd, SAI behavior, and CiscoVS/VPP platform-specific issues. This is institutional knowledge about SONiC internals that doesn't exist in upstream documentation.
 
 ## Building
 

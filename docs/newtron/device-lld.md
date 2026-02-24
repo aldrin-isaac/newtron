@@ -713,9 +713,10 @@ EXEC                            -- execute atomically
 
 **ReplaceAll for overwrite mode:**
 ```go
-// ReplaceAll deletes all existing keys in affected tables, then writes the
-// new entries via PipelineSet. PORT table entries are merged instead of replaced
-// (preserving platform-specific port config). Used by composite overwrite mode.
+// ReplaceAll merges composite entries on top of existing CONFIG_DB, preserving
+// factory defaults. Only stale keys (present in DB but absent from composite)
+// are deleted from affected tables. PORT table entries are always merged (never
+// deleted). Used by composite overwrite mode.
 func (c *ConfigDBClient) ReplaceAll(changes []Entry) error
 ```
 
@@ -735,4 +736,6 @@ To persist configuration across reboots, the SONiC command `config save -y` must
 | Integration tests | Ephemeral (standalone Redis) | Fresh Redis per test |
 | E2E lab tests | Runtime only (SONiC-VS) | `ResetLabBaseline()` deletes stale keys |
 
-E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function cleans known stale keys before each test suite run. Tests do not call `config save -y`, so a simple VM restart restores the baseline.
+E2E tests rely on ephemeral configuration. The `ResetLabBaseline()` function cleans known stale keys before each test suite run.
+
+**Provisioning flow**: `ProvisionDevice()` performs a best-effort `config reload -y` before composite delivery to restore CONFIG_DB to the saved baseline (clean slate for merge-based ReplaceAll). After delivery, `config save -y` persists the provisioned config so subsequent `config reload` steps re-read it rather than reverting to factory defaults. `ConfigReload()` retries every 5s for up to 90s when SwSS is not ready (common on fresh CiscoVS boot).

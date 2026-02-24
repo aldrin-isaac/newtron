@@ -214,12 +214,17 @@ pkg/newtlab/
 ├── state.go          # state.json persistence
 ├── newtlab_test.go   # Unit tests
 └── patches/          # Platform boot patches (//go:embed)
-    └── vpp/
-        ├── always/
-        │   ├── 01-disable-factory-hook.json
-        │   └── 02-port-config.json
-        └── 202405/
-            └── 01-specific-fix.json
+    ├── vpp/
+    │   ├── always/
+    │   │   ├── 01-disable-factory-hook.json
+    │   │   └── 02-port-config.json
+    │   └── 202405/
+    │       └── 01-specific-fix.json
+    └── ciscovs/
+        └── always/
+            ├── 00-frrcfgd-mode.json         # Enable unified FRR mode + restart bgp
+            ├── 01-frrcfgd-vni-bootstrap.json # L3VNI poll thread for frrcfgd
+            └── 02-wait-swss.json             # Wait for SwSS container readiness
 
 cmd/newtlab/
 ├── main.go              # Entry point, root command
@@ -1147,11 +1152,12 @@ func PatchProfiles(lab *Lab) error
 2. Unmarshal into `map[string]interface{}` (preserves all existing fields)
 3. Save `OriginalMgmtIP` from current profile into `NodeState` (for restore on destroy)
 4. Set `mgmt_ip` = `"127.0.0.1"` (single-host) or host IP (multi-host)
-4. Set `ssh_port` = node's allocated SSH port
-5. Set `console_port` = node's allocated console port
-6. Set `ssh_user` / `ssh_pass` from resolved credentials (if not already set)
-7. Marshal back with `json.MarshalIndent` (4-space indent)
-8. Write to same path
+5. Set `ssh_port` = node's allocated SSH port
+6. Set `console_port` = node's allocated console port
+7. Set `ssh_user` / `ssh_pass` from resolved credentials (if not already set)
+8. Set `mac` = `GenerateMAC(name, 0)` — deterministic MAC using QEMU OUI `52:54:00` + SHA256 of device name. Flows through profile → resolved specs → composite → `DEVICE_METADATA|localhost.mac`
+9. Marshal back with `json.MarshalIndent` (4-space indent)
+10. Write to same path
 
 ### 10.2 RestoreProfiles
 
@@ -1161,7 +1167,7 @@ func PatchProfiles(lab *Lab) error
 func RestoreProfiles(lab *Lab) error
 ```
 
-Removes: `ssh_port`, `console_port`. Resets `mgmt_ip` to the original value saved in `NodeState.OriginalMgmtIP` (captured during `PatchProfiles` before overwriting).
+Removes: `ssh_port`, `console_port`, `mac`. Resets `mgmt_ip` to the original value saved in `NodeState.OriginalMgmtIP` (captured during `PatchProfiles` before overwriting).
 
 ---
 

@@ -1592,7 +1592,7 @@ Composite mode generates a composite CONFIG_DB offline and delivers it atomicall
 type CompositeMode string
 
 const (
-    CompositeOverwrite CompositeMode = "overwrite" // Replace entire CONFIG_DB
+    CompositeOverwrite CompositeMode = "overwrite" // Merge on top of CONFIG_DB, removing stale keys
     CompositeMerge     CompositeMode = "merge"     // Add entries to existing CONFIG_DB
 )
 

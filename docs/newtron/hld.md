@@ -18,7 +18,7 @@ For the architectural principles behind newtron, newtlab, and newtest — includ
 - **EVPN/VXLAN**: Modern overlay networking with idempotent composite setup and IP-VPN/MAC-VPN spec authoring
 - **Full BGP via frrcfgd**: Underlay, IPv6, and L2/L3 EVPN overlays managed through CONFIG_DB using SONiC's FRR management framework
 - **Multi-AF Route Reflection**: BGP neighbor and EVPN configuration via `AddLoopbackBGPNeighbor` and `SetupEVPN` methods supporting IPv4, IPv6, and L2VPN EVPN address families
-- **Composite Mode**: Offline composite config generation with atomic delivery (overwrite or merge)
+- **Composite Mode**: Offline composite config generation with atomic delivery — overwrite (merges on top of CONFIG_DB, preserving factory defaults) or merge (incremental)
 - **Topology Provisioning**: Automated device provisioning from topology.json specs — full-device overwrite or per-interface service application
 - **Platform-Validated Port Creation**: PORT entries validated against SONiC's on-device `platform.json`
 - **Built-In Verification**: ChangeSet-based CONFIG_DB verification, routing state observation via APP_DB/ASIC_DB, health checks — single-device primitives that orchestrators compose for fabric-wide assertions
@@ -862,7 +862,7 @@ Composite mode generates a composite CONFIG_DB configuration offline (without co
 
 | Mode | Behavior | Use case |
 |------|----------|----------|
-| **Overwrite** | Replace entire CONFIG_DB with composite content | Initial device provisioning, lab setup |
+| **Overwrite** | Merge composite on top of CONFIG_DB (stale keys removed, factory defaults preserved) | Initial device provisioning, lab setup |
 | **Merge** | Add entries to existing CONFIG_DB | Incremental service deployment |
 
 #### 4.7.3 Merge Restrictions
@@ -2014,7 +2014,7 @@ The system maintains this separation to enable:
 | Term | Definition |
 |------|------------|
 | **Composite** | A composite CONFIG_DB configuration generated offline, delivered to a device as a single atomic operation. |
-| **Overwrite Mode** | Composite delivery mode that replaces the entire CONFIG_DB with composite content. Used for initial provisioning. |
+| **Overwrite Mode** | Composite delivery mode that merges composite on top of CONFIG_DB, removing stale keys while preserving factory defaults. Used for initial provisioning. |
 | **Merge Mode** | Composite delivery mode that adds entries to existing CONFIG_DB. Restricted to interface-level services with no existing binding. |
 | **CompositeBuilder** | Builder pattern for constructing composite configs offline without device connection. |
 | **CompositeConfig** | The composite CONFIG_DB representation with metadata (timestamp, network, device, mode). |

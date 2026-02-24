@@ -386,10 +386,12 @@ fight it or attempt to reconcile back to the spec.
 
 This shapes every incremental operation in the system. **Provisioning
 (CompositeOverwrite)** is the one exception where intent replaces
-reality — it delivers a full composite config and overwrites whatever
-was there. Every other operation is `Device + Delta → Device`: it reads
-what's on the device, applies a change, and leaves the result on the
-device. The spec provides the intent; the device provides the context.
+reality — it merges a full composite config on top of CONFIG_DB,
+removing stale keys while preserving factory defaults (MAC, platform
+metadata, port config). Every other operation is `Device + Delta →
+Device`: it reads what's on the device, applies a change, and leaves
+the result on the device. The spec provides the intent; the device
+provides the context.
 
 **NEWTRON_SERVICE_BINDING records live on the device**, not in spec
 files. When a service is applied to an interface, newtron writes a
@@ -1263,7 +1265,72 @@ coordination belongs in the orchestrator, not in the Node.**
 
 ---
 
-## 27. Summary
+## 27. Abstract Node — Same Code Path, Different Initialization
+
+The Node operates in two modes:
+
+- **Physical mode** (`offline=false`): ConfigDB loaded from Redis at
+  Connect/Lock time. Preconditions enforce connected+locked. Each
+  ChangeSet is applied to Redis immediately.
+- **Abstract mode** (`offline=true`): Shadow ConfigDB starts empty.
+  Operations build desired state against the shadow. Entries accumulate
+  for composite export via `BuildComposite()`.
+
+Same code path, different initialization. The topology provisioner creates
+an abstract Node and calls the same methods the CLI uses:
+
+```go
+n := node.NewAbstract(specs, name, profile, resolved)
+n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+n.ConfigureLoopback(ctx)
+n.ConfigureBGP(ctx)
+n.SetupEVPN(ctx, loopbackIP)
+iface, _ := n.GetInterface("Ethernet0")
+iface.ApplyService(ctx, "transit", opts)   // VTEP precondition passes ✓
+composite := n.BuildComposite()            // export all accumulated entries
+```
+
+This eliminates the need for topology.go to construct CONFIG_DB entries
+inline — it calls the same Interface and Node methods, and the shadow
+enforces the same ordering constraints that a physical device would.
+
+### Why the shadow matters
+
+Each operation's output must be visible to subsequent operations'
+preconditions. `applyShadow(cs)` updates the shadow ConfigDB after every
+operation so that:
+
+- `CreateVRF("CUSTOMER")` → shadow now has `VRF|CUSTOMER`
+- `iface.SetVRF(ctx, "CUSTOMER")` → precondition `VRFExists` passes ✓
+- `SetupEVPN(ctx, ...)` → shadow now has `VXLAN_TUNNEL`
+- `iface.ApplyService(ctx, ...)` → precondition `VTEPConfigured` passes ✓
+
+Without the shadow, the abstract node would have no state for
+preconditions to check — every operation would either fail or require
+precondition checks to be skipped, losing the correctness guarantees.
+
+### Provisioning vs operations
+
+This design reflects a fundamental distinction:
+
+- **Provisioning** (`CompositeOverwrite`): intent replaces reality.
+  The abstract node builds the complete desired state, then merges it
+  on top of CONFIG_DB — removing stale keys while preserving factory
+  defaults. This is the one case where we know the full picture.
+- **Operations** (`ChangeSet.Apply`): mutations against existing reality.
+  The physical node reads current state from Redis, applies a delta,
+  and verifies the result.
+
+The abstract node exists to serve provisioning. The physical node exists
+to serve operations. Both use the same methods — only initialization and
+delivery differ.
+
+**Same code path, different initialization. The Interface is the point of
+service in both modes.**
+
+---
+
+## 28. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1293,3 +1360,5 @@ coordination belongs in the orchestrator, not in the Node.**
 | Respect abstraction boundaries | If an object knows its own identity, callers must not re-supply it |
 | Verb-first, domain-intent naming | Verbs come first (`createVlan` not `vlanCreate`); names describe domain intent, not CONFIG_DB mechanics |
 | Node as device isolation boundary | Every device-scoped operation is a Node method; cross-device coordination belongs in the orchestrator |
+| Abstract Node | Same code path, different initialization; the shadow enforces the same ordering constraints as a physical device |
+| Factory-default preservation | Provisioning merges on top of CONFIG_DB; stale keys are removed but factory defaults (MAC, platform, ports) survive |

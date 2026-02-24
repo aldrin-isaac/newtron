@@ -7,7 +7,7 @@ Platform-specific documentation capturing idiosyncrasies, limitations, and opera
 | Platform | Description | EVPN Support | Status |
 |----------|-------------|--------------|--------|
 | [sonic-vpp](sonic-vpp.md) | SONiC with VPP dataplane (202505) | ❌ No | Tested |
-| [sonic-ciscovs](sonic-ciscovs.md) | SONiC with Cisco Silicon One VS (Palladium2) | ✅ Yes | In Progress |
+| [sonic-ciscovs](sonic-ciscovs.md) | SONiC with Cisco Silicon One VS (Palladium2) | ✅ Yes | Validated |
 
 ## When to Use Which Platform
 

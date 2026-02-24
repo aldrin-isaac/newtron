@@ -2926,8 +2926,9 @@ fmt.Printf("Applied %d entries\n", result.Applied)
 This mode:
 - Does NOT read existing device config
 - Generates all CONFIG_DB entries from specs + topology
-- Connects only for delivery (CompositeOverwrite)
-- Replaces entire CONFIG_DB
+- Performs best-effort `config reload -y` to restore CONFIG_DB baseline before delivery
+- Connects and delivers via CompositeOverwrite (merges composite on top of existing CONFIG_DB, preserving factory defaults; only stale keys are removed)
+- Runs `config save -y` after delivery to persist provisioned config
 
 ### 23.4 Per-Interface Provisioning (Go API)
 
@@ -3016,7 +3017,7 @@ if err != nil {
 defer dev.Disconnect()
 
 // Lock is acquired/released automatically by DeliverComposite
-// Deliver with overwrite (replaces entire CONFIG_DB)
+// Deliver with overwrite (merges on top of CONFIG_DB, removes stale keys)
 result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 if err != nil {
     log.Fatal(err)
@@ -3028,7 +3029,7 @@ fmt.Printf("Applied: %d, Skipped: %d\n", result.Applied, result.Skipped)
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| **CompositeOverwrite** | Replace entire CONFIG_DB | Initial provisioning, lab setup |
+| **CompositeOverwrite** | Merge composite on top of CONFIG_DB (stale keys removed, factory defaults preserved) | Initial provisioning, lab setup |
 | **CompositeMerge** | Add entries to existing config | Incremental service deployment |
 
 **Merge restrictions**: Only supported for interface-level service configuration, and only if the target interface has no existing service binding.
