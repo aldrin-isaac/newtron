@@ -304,6 +304,7 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 		r.State.Scenarios[index].Status = string(result.Status)
 		r.State.Scenarios[index].Duration = result.Duration.Round(time.Second).String()
 		r.State.Scenarios[index].CurrentStep = ""
+		r.State.Scenarios[index].CurrentStepAction = ""
 		r.State.Scenarios[index].CurrentStepIndex = 0
 		r.State.Scenarios[index].SkipReason = result.SkipReason
 	}
@@ -316,6 +317,7 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 func (r *StateReporter) StepStart(scenario string, step *Step, index, total int) {
 	if r.scenarioIndex < len(r.State.Scenarios) {
 		r.State.Scenarios[r.scenarioIndex].CurrentStep = step.Name
+		r.State.Scenarios[r.scenarioIndex].CurrentStepAction = string(step.Action)
 		r.State.Scenarios[r.scenarioIndex].CurrentStepIndex = index
 	}
 	if err := SaveRunState(r.State); err != nil {

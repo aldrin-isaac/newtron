@@ -44,8 +44,9 @@ type ScenarioState struct {
 	Description      string      `json:"description,omitempty"`         // scenario intent (from YAML)
 	Status           string      `json:"status"`                        // "PASS","FAIL","SKIP","ERROR","running","" (pending)
 	Duration         string      `json:"duration"`                      // e.g. "2s", "15s"
-	CurrentStep      string      `json:"current_step,omitempty"`        // step name while in-progress
-	CurrentStepIndex int         `json:"current_step_index,omitempty"`  // 0-based step index
+	CurrentStep       string      `json:"current_step,omitempty"`        // step name while in-progress
+	CurrentStepAction string      `json:"current_step_action,omitempty"` // step action while in-progress
+	CurrentStepIndex  int         `json:"current_step_index,omitempty"`  // 0-based step index
 	TotalSteps       int         `json:"total_steps,omitempty"`         // total steps in scenario
 	Requires         []string    `json:"requires,omitempty"`            // dependency scenario names
 	SkipReason       string      `json:"skip_reason,omitempty"`         // reason for skip
