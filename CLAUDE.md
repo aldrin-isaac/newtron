@@ -321,9 +321,8 @@ Before making any change to `service_gen.go`, `*_ops.go`, or any shared code pat
 Tracking what was working (update this as test suites are validated):
 - `evpn-bridged`: WORKS — 2node-primitive, 3node-dataplane (evpn-l2-irb L2 path)
 - `routed`, `irb`, `bridged`: WORKS — 2node-primitive
-- `evpn-irb` (L2 path): WORKS — 3node-dataplane evpn-l2-irb
-- `evpn-irb` (L3 routing): ABANDONED on CiscoVS/Silicon One (RCA-039)
-- `evpn-routed`: ABANDONED on CiscoVS/Silicon One (RCA-039)
+- `evpn-irb`: WORKS — 3node-dataplane evpn-l2-irb (L2 + L3 inter-subnet via asymmetric IRB)
+- `evpn-routed`: ABANDONED on CiscoVS/Silicon One (RCA-039, L3VNI DECAP blocked)
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
 
