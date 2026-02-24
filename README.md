@@ -1,5 +1,7 @@
 # newtron
 
+> **Note:** newtron is a SONiC automation demonstrator — a research and learning project exploring Redis-first device management, declarative provisioning, and E2E verification against virtual SONiC topologies. It is not intended for production use.
+
 <p align="center">
   <img src="newt.png" alt="Newt — the newtron mascot" width="280"/>
 </p>
