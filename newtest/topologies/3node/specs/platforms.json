@@ -23,7 +23,7 @@
       "port_count": 32,
       "default_speed": "100G",
       "vm_image": "~/.newtlab/images/sonic-ciscovs.qcow2",
-      "vm_memory": 6144,
+      "vm_memory": 8192,
       "vm_cpus": 6,
       "vm_nic_driver": "e1000",
       "vm_interface_map": "sequential",
