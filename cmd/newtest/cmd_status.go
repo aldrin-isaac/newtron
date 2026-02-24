@@ -264,15 +264,16 @@ func printDetailView(state *newtest.RunState) {
 			continue
 		}
 
-		fmt.Printf("\n  %s:\n", sc.Name)
 		if sc.Description != "" {
-			fmt.Printf("    %s\n", cli.Dim(sc.Description))
+			fmt.Printf("\n  %s \u2014 %s\n", sc.Name, cli.Dim(sc.Description))
+		} else {
+			fmt.Printf("\n  %s:\n", sc.Name)
 		}
 
-		// Show scenario file path for running scenarios.
+		// Show scenario file for running scenarios (suite dir already in header).
 		if sc.Status == "running" && state.SuiteDir != "" {
 			if path := resolveScenarioFilePath(state.SuiteDir, sc.Name); path != "" {
-				fmt.Printf("    %s\n", cli.Dim(path))
+				fmt.Printf("    %s %s\n", cli.Dim("file:"), cli.Dim(filepath.Base(path)))
 			}
 		}
 
