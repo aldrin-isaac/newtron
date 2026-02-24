@@ -1,0 +1,6 @@
+{
+    "description": "Wait for SwSS container to be ready before deploy completes",
+    "pre_commands": [
+        "for i in $(seq 1 60); do docker ps 2>/dev/null | grep -q ' swss$' && break; sleep 5; done"
+    ]
+}

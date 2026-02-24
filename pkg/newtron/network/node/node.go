@@ -7,6 +7,7 @@ import (
 	"os/user"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
@@ -155,13 +156,14 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 	cs := NewChangeSet(n.name, "device.set-device-metadata")
 	e := updateDeviceMetadataConfig(fields)
 	cs.Update(e.Table, e.Key, e.Fields)
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	return cs, nil
 }
 
-// trackOffline updates the shadow ConfigDB and accumulates entries for offline mode.
-// Called by operations that build ChangeSets manually (not via op()).
-func (n *Node) trackOffline(cs *ChangeSet) {
+// applyShadow updates the shadow ConfigDB so subsequent operations see the
+// effects of prior ones.  Also accumulates entries for BuildComposite export.
+// No-op when the Node is connected to a physical device.
+func (n *Node) applyShadow(cs *ChangeSet) {
 	if !n.offline || cs == nil {
 		return
 	}
@@ -341,6 +343,32 @@ func (n *Node) Refresh() error {
 	n.loadInterfaces()
 
 	return nil
+}
+
+// RefreshWithRetry polls Refresh until CONFIG_DB is available or timeout
+// expires. Used after config reload when Redis may be briefly unavailable
+// as services restart.
+func (n *Node) RefreshWithRetry(ctx context.Context, timeout time.Duration) error {
+	if err := n.Refresh(); err == nil {
+		return nil
+	}
+
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return n.Refresh() // final attempt
+		case <-ticker.C:
+			if err := n.Refresh(); err == nil {
+				return nil
+			}
+		}
+	}
 }
 
 // Lock acquires a distributed lock for configuration changes.
@@ -560,6 +588,9 @@ func (n *Node) SaveConfig(ctx context.Context) error {
 // This ensures all daemons process the config from a clean startup state,
 // which is required for proper STATE_DB propagation (e.g., vrfmgrd writing
 // VRF_TABLE entries that intfmgrd depends on for VRF-bound interface setup).
+//
+// If SwSS is not ready (common on fresh boot), retries up to 90 seconds
+// before failing.
 func (n *Node) ConfigReload(ctx context.Context) error {
 	if !n.connected {
 		return util.ErrNotConnected
@@ -568,11 +599,29 @@ func (n *Node) ConfigReload(ctx context.Context) error {
 	if tunnel == nil {
 		return fmt.Errorf("config reload requires SSH connection (no SSH credentials configured)")
 	}
-	output, err := tunnel.ExecCommand("sudo config reload -y")
-	if err != nil {
-		return fmt.Errorf("config reload failed: %w (output: %s)", err, output)
+
+	deadline := time.After(90 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		output, err := tunnel.ExecCommand("sudo config reload -y")
+		if err == nil {
+			return nil
+		}
+		if !strings.Contains(output, "not ready") {
+			return fmt.Errorf("config reload failed: %w (output: %s)", err, output)
+		}
+		// SwSS not ready — retry until deadline
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline:
+			return fmt.Errorf("config reload failed (SwSS not ready after 90s): %w (output: %s)", err, output)
+		case <-ticker.C:
+			// retry
+		}
 	}
-	return nil
 }
 
 // RestartService restarts a SONiC Docker container by name via SSH.
@@ -636,24 +685,6 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	_, _ = tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
 
 	return nil
-}
-
-// ReadSystemMAC reads the system MAC from the device's factory config file.
-// Returns an empty string if not connected or if the MAC cannot be read.
-func (n *Node) ReadSystemMAC() string {
-	if !n.connected {
-		return ""
-	}
-	tunnel := n.Tunnel()
-	if tunnel == nil {
-		return ""
-	}
-	cmd := `python3 -c 'import json; d=json.load(open("/etc/sonic/config_db.json")); print(d.get("DEVICE_METADATA",{}).get("localhost",{}).get("mac",""))' 2>/dev/null`
-	output, err := tunnel.ExecCommand("sudo " + cmd)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(output)
 }
 
 // ============================================================================

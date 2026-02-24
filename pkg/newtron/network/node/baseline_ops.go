@@ -33,7 +33,7 @@ func (n *Node) ConfigureLoopback(ctx context.Context) (*ChangeSet, error) {
 	cs.Update("LOOPBACK_INTERFACE", "Loopback0", map[string]string{})
 	cs.Add("LOOPBACK_INTERFACE", fmt.Sprintf("Loopback0|%s/32", loopbackIP), map[string]string{})
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.name).Infof("Configured Loopback0 with IP %s/32", loopbackIP)
 	return cs, nil
 }

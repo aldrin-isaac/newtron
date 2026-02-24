@@ -58,7 +58,7 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	entries := append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
 	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
 }
@@ -109,7 +109,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 
 	cs := buildChangeSet(n.Name(), "interface.set-vrf", i.bindVrf(vrfName), ChangeModify)
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
 	return cs, nil
 }

@@ -291,7 +291,7 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	cs.Updates(CreateBGPGlobalsAFConfig("default", "ipv4_unicast", nil))
 	cs.Updates(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
 	return cs, nil
 }
@@ -325,7 +325,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 		ActivateEVPN: evpn,
 	})
 	cs := buildChangeSet(n.name, "bgp.add-loopback-neighbor", config, ChangeAdd)
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 
 	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
 		neighborIP, asn, n.resolved.LoopbackIP)

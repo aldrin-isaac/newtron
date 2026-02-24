@@ -50,14 +50,14 @@ var platformMergeTables = map[string]bool{
 	"PORT": true,
 }
 
-// ReplaceAll replaces newtron-managed tables in CONFIG_DB with the given
-// configuration. Only tables present in the changes are affected; platform
-// defaults loaded from init_cfg.json (FEATURE, CRM, FLEX_COUNTER_TABLE, etc.)
-// are preserved.
+// ReplaceAll merges composite entries on top of existing CONFIG_DB, removing
+// only stale keys not present in the composite. Factory defaults (mac, platform,
+// hwsku from init_cfg.json; FEATURE, CRM, FLEX_COUNTER_TABLE, etc.) are preserved
+// because we never delete keys that appear in our composite — HSet merges our
+// fields on top of any surviving factory fields.
 //
-// For most tables, all existing keys are deleted first, then new entries are
-// written. Platform-managed tables (PORT) are merged instead — existing
-// fields are preserved and newtron's fields are overlaid.
+// Platform-managed tables (PORT) are merge-only — their keys are never deleted
+// even if absent from the composite, since port config comes from port_config.ini.
 func (c *ConfigDBClient) ReplaceAll(changes []Entry) error {
 	// Collect the set of tables being replaced (excluding merge-only tables)
 	tables := make(map[string]bool)
@@ -67,7 +67,13 @@ func (c *ConfigDBClient) ReplaceAll(changes []Entry) error {
 		}
 	}
 
-	// Scan for existing keys in replace-mode tables and delete them
+	// Build set of composite keys (table|key format)
+	compositeKeys := make(map[string]bool, len(changes))
+	for _, change := range changes {
+		compositeKeys[fmt.Sprintf("%s|%s", change.Table, change.Key)] = true
+	}
+
+	// Delete only stale keys: exist in DB but NOT in our composite
 	pipe := c.client.TxPipeline()
 	for table := range tables {
 		pattern := fmt.Sprintf("%s|*", table)
@@ -76,14 +82,17 @@ func (c *ConfigDBClient) ReplaceAll(changes []Entry) error {
 			return fmt.Errorf("scanning keys for table %s: %w", table, err)
 		}
 		for _, key := range keys {
-			pipe.Del(c.ctx, key)
+			if !compositeKeys[key] {
+				pipe.Del(c.ctx, key) // Stale — not in composite, remove
+			}
+			// Keys we DO provide: skip delete, HSet will merge fields
 		}
 	}
 	if _, err := pipe.Exec(c.ctx); err != nil && err != redis.Nil {
-		return fmt.Errorf("deleting old table entries: %w", err)
+		return fmt.Errorf("deleting stale table entries: %w", err)
 	}
 
-	// Write all new entries (PipelineSet uses HSet which merges fields
-	// for platform tables, and creates fresh entries for replaced tables)
+	// Write all entries — HSet merges our fields on top of any
+	// surviving factory fields for keys we provide
 	return c.PipelineSet(changes)
 }

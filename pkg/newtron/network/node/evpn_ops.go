@@ -219,7 +219,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 		}
 	}
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.name).Infof("Setup EVPN (source IP %s, %d route reflectors)", sourceIP, len(resolved.BGPNeighbors))
 	return cs, nil
 }

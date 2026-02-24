@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
@@ -286,11 +287,14 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 // ProvisionDevice generates a complete CONFIG_DB for the named device from the
 // topology spec and delivers it atomically with node.CompositeOverwrite mode.
 //
-// This mode:
-//   - Does NOT interrogate the device for existing configuration
-//   - Generates all CONFIG_DB entries offline from specs + topology
-//   - Connects to the device only for delivery
-//   - Wipes existing CONFIG_DB and replaces with generated config
+// Flow:
+//  1. Generate composite offline from specs + topology
+//  2. Connect to device
+//  3. Config reload — reset CONFIG_DB to saved defaults (factory fields intact)
+//  4. Deliver composite — ReplaceAll merges on top of the clean baseline
+//
+// The config reload ensures factory fields (mac, platform, hwsku) are always
+// present and stale fields from any prior provisioning are cleared.
 func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName string) (*node.CompositeDeliveryResult, error) {
 	// Generate the composite config offline
 	composite, err := tp.GenerateDeviceComposite(deviceName)
@@ -298,12 +302,26 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 		return nil, fmt.Errorf("generating composite: %w", err)
 	}
 
-	// Connect to device for delivery only
+	// Connect to device for delivery
 	dev, err := tp.network.ConnectNode(ctx, deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to device: %w", err)
 	}
 	defer dev.Disconnect()
+
+	// Best-effort config reload to restore CONFIG_DB to saved defaults.
+	// On fresh boot: services may still be starting (SwSS not ready), and
+	// CONFIG_DB is already in factory state — failure is expected and safe.
+	// On re-provision: services are running, reload succeeds, giving us a
+	// clean baseline with factory fields (mac, platform, hwsku) intact.
+	util.WithDevice(deviceName).Info("Reloading config to restore defaults before provisioning")
+	if err := dev.ConfigReload(ctx); err != nil {
+		util.WithDevice(deviceName).Warnf("Config reload before provision skipped: %v (CONFIG_DB may already be in factory state)", err)
+	} else {
+		if err := dev.RefreshWithRetry(ctx, 60*time.Second); err != nil {
+			return nil, fmt.Errorf("waiting for CONFIG_DB after reload: %w", err)
+		}
+	}
 
 	// Lock for writing
 	if err := dev.Lock(); err != nil {
@@ -311,21 +329,9 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	}
 	defer dev.Unlock()
 
-	// Read system MAC and inject into DEVICE_METADATA before delivery.
-	// Inherent: the system MAC is platform-initialized (not user config) and stored in
-	// /etc/sonic/config_db.json. CompositeOverwrite replaces DEVICE_METADATA entirely;
-	// the MAC must be re-injected so vlanmgrd can read it at startup.
-	if mac := dev.ReadSystemMAC(); mac != "" {
-		if composite.Tables != nil {
-			if dm, ok := composite.Tables["DEVICE_METADATA"]; ok {
-				if localhost, ok := dm["localhost"]; ok {
-					localhost["mac"] = mac
-				}
-			}
-		}
-	}
-
-	// Deliver with overwrite mode (replace entire CONFIG_DB)
+	// Deliver composite — ReplaceAll merges our fields on top of the
+	// freshly-reloaded CONFIG_DB. Factory fields survive; stale keys
+	// (present in DB but absent from composite) are removed.
 	result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 	if err != nil {
 		return nil, fmt.Errorf("delivering composite: %w", err)

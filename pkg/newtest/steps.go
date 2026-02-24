@@ -398,6 +398,23 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			continue
 		}
 
+		// Best-effort config reload to restore CONFIG_DB to saved defaults.
+		// On fresh boot: services may still be starting (SwSS not ready),
+		// and CONFIG_DB is already in factory state — failure is safe.
+		// On re-provision: reload succeeds, giving a clean baseline.
+		if err := dev.ConfigReload(ctx); err != nil {
+			util.Logger.Warnf("[%s] config reload before provision skipped: %v", name, err)
+		} else {
+			if err := dev.RefreshWithRetry(ctx, 60*time.Second); err != nil {
+				details = append(details, DeviceResult{
+					Device: name, Status: StepStatusFailed,
+					Message: fmt.Sprintf("refresh after config reload: %s", err),
+				})
+				allPassed = false
+				continue
+			}
+		}
+
 		if err := dev.Lock(); err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
@@ -407,20 +424,8 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			continue
 		}
 
-		// Inject system MAC into DEVICE_METADATA before delivery.
-		// Inherent: the system MAC is platform-initialized (not user config) and stored in
-		// /etc/sonic/config_db.json. CompositeOverwrite replaces DEVICE_METADATA entirely;
-		// the MAC must be re-injected so vlanmgrd can read it at startup.
-		if mac := dev.ReadSystemMAC(); mac != "" {
-			if composite.Tables != nil {
-				if dm, ok := composite.Tables["DEVICE_METADATA"]; ok {
-					if localhost, ok := dm["localhost"]; ok {
-						localhost["mac"] = mac
-					}
-				}
-			}
-		}
-
+		// Deliver composite — ReplaceAll merges our fields on top of the
+		// freshly-reloaded CONFIG_DB. Factory fields survive; stale keys removed.
 		result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 		dev.Unlock()
 		if err != nil {
@@ -438,6 +443,17 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
 				Message: fmt.Sprintf("refresh after provision: %s", err),
+			})
+			allPassed = false
+			continue
+		}
+
+		// Persist to config_db.json so subsequent config-reload steps
+		// re-read the provisioned config (not factory defaults).
+		if err := dev.SaveConfig(ctx); err != nil {
+			details = append(details, DeviceResult{
+				Device: name, Status: StepStatusFailed,
+				Message: fmt.Sprintf("config save after provision: %s", err),
 			})
 			allPassed = false
 			continue

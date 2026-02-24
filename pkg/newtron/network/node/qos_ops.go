@@ -90,7 +90,7 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 		cs.Deletes(n.deleteDeviceQoSConfig(policyName))
 	}
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Removed QoS from interface %s", i.name)
 	return cs, nil
 }

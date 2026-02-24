@@ -344,7 +344,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	e := createServiceBindingConfig(i.name, bindingFields)
 	cs.Add(e.Table, e.Key, e.Fields)
 
-	n.trackOffline(cs)
+	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
 	return cs, nil
 }

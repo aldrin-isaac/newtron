@@ -12,8 +12,9 @@ import (
 type CompositeMode string
 
 const (
-	// CompositeOverwrite replaces the entire CONFIG_DB with composite content.
-	// Used for initial device provisioning and lab setup.
+	// CompositeOverwrite merges composite entries on top of existing CONFIG_DB,
+	// preserving factory defaults. Only stale keys (present in DB but absent
+	// from composite) are removed. Used for initial device provisioning.
 	CompositeOverwrite CompositeMode = "overwrite"
 
 	// CompositeMerge adds entries to existing CONFIG_DB.

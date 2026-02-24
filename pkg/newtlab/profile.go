@@ -48,6 +48,9 @@ func PatchProfiles(lab *Lab) error {
 		profile.MgmtIP = mgmtIP
 		profile.SSHPort = node.SSHPort
 		profile.ConsolePort = node.ConsolePort
+		// System MAC: deterministic from device name, same as QEMU mgmt NIC.
+		// Flows through profile → resolved → composite → DEVICE_METADATA.
+		profile.MAC = GenerateMAC(name, 0)
 		if node.SSHUser != "" && profile.SSHUser == "" {
 			profile.SSHUser = node.SSHUser
 		}
@@ -154,6 +157,7 @@ func RestoreProfiles(lab *Lab) error {
 		// here could discard user-set credentials.
 		profile.SSHPort = 0
 		profile.ConsolePort = 0
+		profile.MAC = ""
 
 		out, err := json.MarshalIndent(profile, "", "    ")
 		if err != nil {
