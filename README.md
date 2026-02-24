@@ -3,7 +3,7 @@
 > **Note:** newtron is a SONiC automation demonstrator — a research and learning project exploring Redis-first device management, declarative provisioning, and E2E verification against virtual SONiC topologies. It is not intended for production use.
 
 <p align="center">
-  <img src="newt.jpg" alt="Newt — the newtron mascot" width="280"/>
+  <img src="newt.png" alt="Newt — the newtron mascot" width="280"/>
 </p>
 
 newtron is a SONiC automation system built on a simple premise: SONiC is a Redis database with daemons that react to table changes — so treat it as one.
