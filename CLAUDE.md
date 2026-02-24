@@ -81,8 +81,7 @@ service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
-All refactor items in `docs/refactor-items.md` are DONE. When adding new
-CONFIG_DB writes, always check the ownership map — never add a second writer.
+When adding new CONFIG_DB writes, always check the ownership map — never add a second writer.
 
 ## The Interface Is the Point of Service
 
@@ -175,7 +174,7 @@ Key implementation:
 - `NewAbstract()` creates Node with `sonic.NewEmptyConfigDB()` + `offline=true`
 - `precondition()` skips connected/locked checks when offline
 - `op()` updates shadow ConfigDB + appends to `accumulated` when offline
-- Complex ops call `n.trackOffline(cs)` for shadow update
+- Complex ops call `n.applyShadow(cs)` for shadow update
 - `BuildComposite()` feeds accumulated entries through `CompositeBuilder` (merges fields)
 - `AddEntries()` allows orchestrators to add config-function output directly
 
