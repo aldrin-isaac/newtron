@@ -194,15 +194,15 @@ docker logs bgp | tail -50
 - Underlay BGP (10.1.0.0 ↔ 10.1.0.1): Established
 - Overlay BGP (10.0.0.11 ↔ 10.0.0.12): Idle
 
-**Root Cause**: Underlay and overlay using different AS numbers, but CONFIG_DB has wrong AS for overlay.
+**Root Cause**: CONFIG_DB has wrong peer AS for overlay neighbor.
 
-**Fix**: Use peer's **actual running AS** (DEVICE_METADATA bgp_asn) in BGP_NEIGHBOR config, not zone AS.
+**Fix**: Use peer's `underlay_asn` from its device profile. Both underlay and overlay use all-eBGP (see RCA-026).
 
 **Example**:
 - leaf1 runs AS 65011 (underlay_asn)
 - leaf2 runs AS 65012 (underlay_asn)
-- Both in zone "amer" AS 64512
-- Overlay peering must use 65011 ↔ 65012 (actual running AS), not 64512
+- Underlay peering: 65011 ↔ 65012 (interface IPs)
+- Overlay peering: 65011 ↔ 65012 (loopback IPs, same ASNs)
 
 ### Pattern 2: BGP Container Crash Loop
 
@@ -248,20 +248,20 @@ newtron provides structured verification primitives for automated checks:
 
 ```go
 // Get route from APP_DB (FRR → SONiC)
-route, err := dev.GetRoute("10.0.0.11/32", "default")
+route, err := node.GetRoute(ctx, "default", "10.0.0.11/32")
 
 // Get route from ASIC_DB (SONiC → SAI)
-asicRoute, err := dev.GetRouteASIC("10.0.0.11/32", "default")
+asicRoute, err := node.GetRouteASIC(ctx, "default", "10.0.0.11/32")
 
-// Verify a change was applied
-result, err := dev.VerifyChangeSet(changeSet, verifyOpts)
+// Verify a ChangeSet was applied correctly
+err := cs.Verify(node)
+if cs.Verification.Failed > 0 {
+    // handle failed verification
+}
 
-// Check BGP neighbor state
-neighbors, err := node.GetBGPNeighbors("default")
-for _, n := range neighbors {
-    if n.State != "Established" {
-        // handle non-converged peer
-    }
+// Check BGP neighbor existence
+if node.BGPNeighborExists("10.0.0.12") {
+    // neighbor is configured
 }
 ```
 
