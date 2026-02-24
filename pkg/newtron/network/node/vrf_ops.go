@@ -94,19 +94,38 @@ func bindIpvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, 
 		})
 	}
 
+	// L3VNI transit VLAN infrastructure for VXLAN data plane decap.
+	// FRR knows the VNI (VRF|vni above) but the kernel/SAI needs a bridge domain
+	// and VXLAN tunnel map to actually route encapsulated L3 traffic through the VRF.
+	// Without these entries, 'show evpn vni {l3vni}' shows State: Down.
+	if ipvpnDef.L3VNIVlan > 0 {
+		// Transit VLAN (no ports, no IP — purely for VXLAN decap)
+		entries = append(entries, createVlanConfig(ipvpnDef.L3VNIVlan, VLANConfig{})...)
+		// SVI binding transit VLAN to VRF (enables VRF routing for decapped packets)
+		entries = append(entries, createSviConfig(ipvpnDef.L3VNIVlan, SVIConfig{VRF: vrfName})...)
+		// VXLAN tunnel map for L3VNI
+		entries = append(entries, createVniMapConfig(VLANName(ipvpnDef.L3VNIVlan), ipvpnDef.L3VNI)...)
+	}
+
 	return entries
 }
 
 // destroyVrfConfig returns all delete entries for fully removing a VRF:
-// BGP EVPN VNI, VXLAN tunnel map, IP-VPN entries (BGP AFs, route redistribution,
-// EVPN RTs), BGP_GLOBALS for the VRF, and the VRF itself.
-func (n *Node) destroyVrfConfig(vrfName string, l3vni int) []sonic.Entry {
+// L3VNI transit VLAN, VXLAN tunnel map, BGP EVPN VNI, IP-VPN entries
+// (BGP AFs, route redistribution, EVPN RTs), BGP_GLOBALS for the VRF,
+// and the VRF itself.
+func (n *Node) destroyVrfConfig(vrfName string, l3vni, l3vniVlan int) []sonic.Entry {
 	var entries []sonic.Entry
 
 	// L3VNI EVPN entries (only if L3VNI was configured)
 	if l3vni > 0 {
 		entries = append(entries, deleteBgpEvpnVNIConfig(vrfName, l3vni)...)
-		entries = append(entries, deleteVniMapConfig(l3vni, vrfName)...)
+		// L3VNI transit VLAN infrastructure (reverse of bindIpvpnConfig)
+		if l3vniVlan > 0 {
+			entries = append(entries, deleteVniMapConfig(l3vni, VLANName(l3vniVlan))...)
+			entries = append(entries, deleteSviBaseConfig(l3vniVlan)...)
+			entries = append(entries, deleteVlanConfig(l3vniVlan)...)
+		}
 	}
 
 	// IP-VPN entries (BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, BGP_GLOBALS_EVPN_RT)

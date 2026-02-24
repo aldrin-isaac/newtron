@@ -42,6 +42,7 @@ var executors = map[StepAction]stepExecutor{
 	ActionApplyBaseline:      &applyBaselineExecutor{},
 	ActionSSHCommand:         &sshCommandExecutor{},
 	ActionRestartService:     &restartServiceExecutor{},
+	ActionConfigReload:       &configReloadExecutor{},
 	ActionApplyFRRDefaults:   &applyFRRDefaultsExecutor{},
 ActionSetInterface:       &setInterfaceExecutor{},
 	ActionCreateVLAN:         &createVLANExecutor{},
@@ -1008,6 +1009,21 @@ func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *S
 			return nil, "", fmt.Errorf("restart %s: %s", step.Service, err)
 		}
 		return nil, fmt.Sprintf("restarted %s", step.Service), nil
+	})
+}
+
+// ============================================================================
+// configReloadExecutor
+// ============================================================================
+
+type configReloadExecutor struct{}
+
+func (e *configReloadExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
+		if err := dev.ConfigReload(ctx); err != nil {
+			return nil, "", fmt.Errorf("config reload: %s", err)
+		}
+		return nil, "config reloaded", nil
 	})
 }
 

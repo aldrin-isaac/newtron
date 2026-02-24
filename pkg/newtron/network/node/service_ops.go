@@ -816,11 +816,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// Per-interface VRF: delete VRF and related config
 		if svc != nil && svc.VRFType == spec.VRFTypeInterface {
 			derivedVRF := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-			l3vni := 0
+			l3vni, l3vniVlan := 0, 0
 			if ipvpnDef != nil {
 				l3vni = ipvpnDef.L3VNI
+				l3vniVlan = ipvpnDef.L3VNIVlan
 			}
-			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni))
+			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni, l3vniVlan))
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
@@ -828,7 +829,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// be cleaned up when no service bindings reference the ipvpn anymore.
 		if svc != nil && svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
 			if depCheck.IsLastIPVPNUser(svc.IPVPN) && ipvpnDef != nil && ipvpnDef.VRF != "" {
-				cs.Deletes(n.destroyVrfConfig(ipvpnDef.VRF, ipvpnDef.L3VNI))
+				cs.Deletes(n.destroyVrfConfig(ipvpnDef.VRF, ipvpnDef.L3VNI, ipvpnDef.L3VNIVlan))
 			}
 		}
 	}

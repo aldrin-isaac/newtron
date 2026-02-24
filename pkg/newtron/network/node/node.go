@@ -555,6 +555,26 @@ func (n *Node) SaveConfig(ctx context.Context) error {
 	return nil
 }
 
+// ConfigReload runs 'config reload -y' which stops all SONiC services,
+// flushes CONFIG_DB, re-reads config_db.json, and restarts all services.
+// This ensures all daemons process the config from a clean startup state,
+// which is required for proper STATE_DB propagation (e.g., vrfmgrd writing
+// VRF_TABLE entries that intfmgrd depends on for VRF-bound interface setup).
+func (n *Node) ConfigReload(ctx context.Context) error {
+	if !n.connected {
+		return util.ErrNotConnected
+	}
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("config reload requires SSH connection (no SSH credentials configured)")
+	}
+	output, err := tunnel.ExecCommand("sudo config reload -y")
+	if err != nil {
+		return fmt.Errorf("config reload failed: %w (output: %s)", err, output)
+	}
+	return nil
+}
+
 // RestartService restarts a SONiC Docker container by name via SSH.
 func (n *Node) RestartService(ctx context.Context, name string) error {
 	if !n.connected {

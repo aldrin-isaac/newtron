@@ -1434,7 +1434,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionVerifyConfigDB, ActionVerifyStateDB, ActionVerifyBGP,
 		ActionVerifyHealth, ActionVerifyRoute, ActionVerifyPing,
 		ActionApplyService, ActionRemoveService, ActionApplyBaseline,
-		ActionSSHCommand, ActionRestartService, ActionApplyFRRDefaults,
+		ActionSSHCommand, ActionRestartService, ActionConfigReload, ActionApplyFRRDefaults,
 		ActionSetInterface, ActionCreateVLAN, ActionDeleteVLAN,
 		ActionAddVLANMember, ActionCreateVRF, ActionDeleteVRF,
 		ActionSetupEVPN, ActionAddVRFInterface, ActionRemoveVRFInterface,

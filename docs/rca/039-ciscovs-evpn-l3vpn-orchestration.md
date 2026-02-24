@@ -3,9 +3,9 @@
 **Severity**: High
 **Platform**: CiscoVS (Silicon One SAI, Palladium2 NGDP simulator)
 **Status**: Won't fix — Silicon One SAI cannot create L3 DECAP tunnel map entries.
-Use EVPN IRB (type-2) for all L3 EVPN use cases on this platform.
+EVPN IRB L2 bridging (type-2, same subnet) works. L3 inter-subnet routing via L3VNI is also blocked by the same SAI limitation.
 
-**Note (Feb 2026):** The `2node-incremental` suite referenced here has been replaced by `2node-primitive` (21 scenarios, 20/20 PASS on CiscoVS — the 21st is health-check which now also passes). EVPN IRB (type-2) works end-to-end. EVPN L3VPN (type-5) remains blocked by the Silicon One SAI limitation described here.
+**Note (Feb 2026):** The `2node-incremental` suite referenced here has been replaced by `2node-primitive` (21 scenarios, 20/20 PASS on CiscoVS — the 21st is health-check which now also passes). EVPN IRB (type-2) works end-to-end. EVPN L3VPN (type-5) remains blocked by the Silicon One SAI limitation described here. EVPN IRB L3 inter-subnet routing (different VLANs via L3VNI) confirmed blocked — same SAI limitation (Feb 2026).
 
 ## Symptom
 
@@ -50,6 +50,31 @@ EVPN IRB path and works end-to-end:
 
 - **3node-dataplane**: 6/6 PASS (including evpn-l2-irb scenario)
 - **2node-primitive**: 32/32 PASS
+
+## EVPN IRB L3 Inter-Subnet Routing Also Blocked
+
+While EVPN IRB L2 bridging (same VLAN, same subnet) works via `VNI_TO_VLAN_ID` DECAP,
+**L3 inter-subnet routing through an L3VNI is also blocked** by the same SAI limitation.
+
+EVPN symmetric IRB (different VLANs, different subnets, routed via Vrf with L3VNI)
+requires:
+1. L3VNI transit VLAN + SVI + VXLAN tunnel map (CONFIG_DB entries — newtron now generates these)
+2. `VNI_TO_VIRTUAL_ROUTER_ID` DECAP entry in ASIC_DB (SAI call — **fails on Silicon One**)
+
+FRR control plane is fully functional:
+- VRF routing table shows inter-subnet routes via Vlan3998 (L3VNI transit)
+- `show evpn vni {l3vni}` shows State: Up, SVI-If: Vlan3998, Local Vtep Ip correct
+- Type-5 prefix routes (ip-prefix advertisements) exchanged via BGP EVPN
+
+But ASIC-level L3 VXLAN forwarding fails:
+- SAI error: `sai_tunnel.cpp:954: Failed to create tunnel map entry. index 3`
+- Packets to local SVI (gateway ping) are trapped to CPU — work fine
+- Packets needing L3 VRF routing via L3VNI stay in ASIC fast path — dropped
+
+This means on CiscoVS:
+- **EVPN IRB L2 path (same subnet)**: WORKS
+- **EVPN IRB L3 path (inter-subnet via L3VNI)**: BLOCKED (same SAI limitation)
+- **EVPN L3VPN (type-5, evpn-routed)**: BLOCKED (same SAI limitation)
 
 ## Attempted Workarounds (All Failed)
 

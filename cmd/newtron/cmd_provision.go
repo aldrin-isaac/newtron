@@ -105,12 +105,14 @@ Examples:
 			}
 			fmt.Printf("%s (%d entries applied)\n", green("OK"), result.Applied)
 
-			// Save config and restart BGP container if requested.
-			// We restart only the bgp container instead of a full config reload
-			// because config reload is destructive (flushes CONFIG_DB, stops ALL
-			// services) and breaks VPP syncd. Most CONFIG_DB changes are picked
-			// up via Redis keyspace notifications, but bgpcfgd cannot change the
-			// BGP ASN dynamically — it requires a container restart.
+			// Save config and reload all SONiC services.
+			// config reload stops all daemons, flushes CONFIG_DB, re-reads
+			// config_db.json, and restarts daemons. This ensures:
+			// 1. bgpcfgd picks up the new ASN (RCA-019: can't change dynamically)
+			// 2. vrfmgrd writes VRF_TABLE to STATE_DB (intfmgrd needs this to
+			//    bind VRF-bound VLAN interfaces; the HMSET notification path
+			//    only writes VRF_OBJECT_TABLE, not VRF_TABLE)
+			// 3. All daemons process config from a clean startup state
 			if !app.noSave {
 				dev, err := app.net.ConnectNode(ctx, name)
 				if err != nil {
@@ -123,11 +125,11 @@ Examples:
 						fmt.Println(green("saved"))
 					}
 
-					fmt.Print("  Restarting BGP... ")
-					if err := dev.RestartService(ctx, "bgp"); err != nil {
+					fmt.Print("  Reloading config... ")
+					if err := dev.ConfigReload(ctx); err != nil {
 						fmt.Printf("%s: %v\n", red("FAILED"), err)
 					} else {
-						fmt.Println(green("restarted"))
+						fmt.Println(green("reloaded"))
 
 						// Poll until FRR/vtysh is responsive, then apply
 						// defaults that frrcfgd doesn't support.

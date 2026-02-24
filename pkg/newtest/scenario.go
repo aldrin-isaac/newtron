@@ -83,6 +83,7 @@ const (
 	ActionApplyBaseline      StepAction = "apply-baseline"
 	ActionSSHCommand         StepAction = "ssh-command"
 	ActionRestartService     StepAction = "restart-service"
+	ActionConfigReload       StepAction = "config-reload"
 	ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
 ActionSetInterface       StepAction = "set-interface"
 	ActionCreateVLAN         StepAction = "create-vlan"
