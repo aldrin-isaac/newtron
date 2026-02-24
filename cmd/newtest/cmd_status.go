@@ -269,7 +269,9 @@ func printDetailView(state *newtest.RunState) {
 
 		fmt.Printf("\n  %s\n", sc.Name)
 		if sc.Description != "" {
-			fmt.Printf("    %s\n", cli.Dim(sc.Description))
+			for _, line := range strings.Split(sc.Description, "\n") {
+				fmt.Printf("    %s\n", cli.Dim(line))
+			}
 		}
 		if state.SuiteDir != "" {
 			if path := resolveScenarioFilePath(state.SuiteDir, sc.Name); path != "" {
