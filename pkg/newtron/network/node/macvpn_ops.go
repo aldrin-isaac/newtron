@@ -105,7 +105,7 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	cs := configToChangeSet(n.Name(), "interface.unbind-macvpn", n.unbindMacvpnConfig(i.name), ChangeDelete)
+	cs := buildChangeSet(n.Name(), "interface.unbind-macvpn", n.unbindMacvpnConfig(i.name), ChangeDelete)
 
 	util.WithDevice(n.Name()).Infof("Unbound MAC-VPN from %s", i.name)
 	return cs, nil

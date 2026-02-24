@@ -513,7 +513,7 @@ each capability.
 
 Each CONFIG_DB table has exactly one owner — a single file and function
 responsible for constructing, writing, and deleting entries in that
-table. Composite operations (ApplyService, SetupEVPN, ApplyBaseline,
+table. Composite operations (ApplyService, SetupEVPN, ConfigureLoopback,
 topology provisioning) call the owning primitives and merge their
 ChangeSets rather than constructing entries inline.
 

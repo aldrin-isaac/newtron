@@ -79,11 +79,11 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 	var policyName string
 	if configDB != nil {
 		if entry, ok := configDB.PortQoSMap[i.name]; ok {
-			policyName = extractPolicyName(entry.DSCPToTCMap)
+			policyName = parsePolicyName(entry.DSCPToTCMap)
 		}
 	}
 
-	cs := configToChangeSet(n.Name(), "interface.remove-qos", i.unbindQos(), ChangeDelete)
+	cs := buildChangeSet(n.Name(), "interface.remove-qos", i.unbindQos(), ChangeDelete)
 
 	// Clean up device-wide entries if no other interface references this policy
 	if policyName != "" && !n.isQoSPolicyReferenced(policyName, i.name) {

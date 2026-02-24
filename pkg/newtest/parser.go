@@ -117,7 +117,7 @@ ActionCleanup:           {needsDevices: true},
 	ActionVerifyPing:         {singleDevice: true, fields: []string{"target"}},
 	ActionApplyService:       {needsDevices: true, fields: []string{"interface", "service"}},
 	ActionRemoveService:      {needsDevices: true, fields: []string{"interface"}},
-	ActionApplyBaseline:      {needsDevices: true, fields: []string{"configlet"}},
+	ActionConfigureLoopback:  {needsDevices: true},
 	ActionSSHCommand:         {needsDevices: true, fields: []string{"command"}},
 	ActionRestartService:     {needsDevices: true, fields: []string{"service"}},
 	ActionConfigReload:       {needsDevices: true},
@@ -158,7 +158,7 @@ ActionCleanup:           {needsDevices: true},
 	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
 	ActionTeardownEVPN:     {needsDevices: true},
 	ActionRemoveBGPGlobals: {needsDevices: true},
-	ActionRemoveBaseline:   {needsDevices: true},
+	ActionRemoveLoopback:   {needsDevices: true},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.
@@ -170,7 +170,6 @@ var stepFieldGetter = map[string]func(*Step) string{
 	"prefix":    func(s *Step) string { return s.Prefix },
 	"vrf":       func(s *Step) string { return s.VRF },
 	"target":    func(s *Step) string { return s.Target },
-	"configlet": func(s *Step) string { return s.Configlet },
 	"command":   func(s *Step) string { return s.Command },
 	"vlan_id": func(s *Step) string {
 		if s.VLANID == 0 {

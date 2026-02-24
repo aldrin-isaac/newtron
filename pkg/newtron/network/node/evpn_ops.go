@@ -150,7 +150,7 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	cs := configToChangeSet(n.name, "device.unmap-l2vni", n.unmapVniConfig(vlanID), ChangeDelete)
+	cs := buildChangeSet(n.name, "device.unmap-l2vni", n.unmapVniConfig(vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
 		return nil, fmt.Errorf("no L2VNI mapping found for VLAN %d", vlanID)

@@ -76,7 +76,7 @@ func (n *Node) destroyPortChannelConfig(name string) []sonic.Entry {
 	// Remove members first
 	if n.configDB != nil {
 		for key := range n.configDB.PortChannelMember {
-			parts := splitConfigDBKey(key)
+			parts := splitKey(key)
 			if len(parts) == 2 && parts[0] == name {
 				entries = append(entries, sonic.Entry{Table: "PORTCHANNEL_MEMBER", Key: key})
 			}
@@ -178,7 +178,7 @@ func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
 
 	// Collect members from PORTCHANNEL_MEMBER
 	for key := range n.configDB.PortChannelMember {
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		if len(parts) == 2 && parts[0] == name {
 			info.Members = append(info.Members, parts[1])
 		}
@@ -212,7 +212,7 @@ func (n *Node) InterfaceIsPortChannelMember(name string) bool {
 	name = util.NormalizeInterfaceName(name)
 	for key := range n.configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		if len(parts) == 2 && parts[1] == name {
 			return true
 		}
@@ -229,7 +229,7 @@ func (n *Node) GetInterfacePortChannel(name string) string {
 	name = util.NormalizeInterfaceName(name)
 	for key := range n.configDB.PortChannelMember {
 		// Key format: PortChannel100|Ethernet0
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		if len(parts) == 2 && parts[1] == name {
 			return parts[0]
 		}

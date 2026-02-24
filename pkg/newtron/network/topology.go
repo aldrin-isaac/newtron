@@ -103,10 +103,10 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 	}
 
 	// =========================================================================
-	// Step 3: Device baseline (loopback IP + hostname)
+	// Step 3: Loopback interface
 	// =========================================================================
-	if _, err := n.ApplyBaseline(ctx, "sonic-baseline", nil); err != nil {
-		return nil, fmt.Errorf("applying baseline: %w", err)
+	if _, err := n.ConfigureLoopback(ctx); err != nil {
+		return nil, fmt.Errorf("configuring loopback: %w", err)
 	}
 
 	// =========================================================================

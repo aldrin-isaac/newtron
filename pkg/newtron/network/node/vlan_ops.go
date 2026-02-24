@@ -163,7 +163,7 @@ func (n *Node) destroyVlanConfig(vlanID int) []sonic.Entry {
 	// Remove VLAN members first
 	if n.configDB != nil {
 		for key := range n.configDB.VLANMember {
-			parts := splitConfigDBKey(key)
+			parts := splitKey(key)
 			if len(parts) == 2 && parts[0] == vlanName {
 				entries = append(entries, sonic.Entry{Table: "VLAN_MEMBER", Key: key})
 			}
@@ -285,7 +285,7 @@ func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, fmt.Errorf("no CONFIG_DB available")
 	}
 
-	cs := configToChangeSet(n.name, "device.remove-svi", n.destroySviConfig(vlanID), ChangeDelete)
+	cs := buildChangeSet(n.name, "device.remove-svi", n.destroySviConfig(vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
 		return nil, fmt.Errorf("no SVI configuration found for VLAN %d", vlanID)
@@ -343,7 +343,7 @@ func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
 
 	// Collect member interfaces from VLAN_MEMBER
 	for key, member := range n.configDB.VLANMember {
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		if len(parts) == 2 && parts[0] == vlanKey {
 			iface := parts[1]
 			if member.TaggingMode == "tagged" {

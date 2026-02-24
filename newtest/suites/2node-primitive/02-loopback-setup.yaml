@@ -1,16 +1,15 @@
 name: loopback-setup
 description: |
-  Apply sonic-baseline configlet to set hostname and Loopback0 IP on both switches.
-  Uses primitive apply-baseline (not provision), so only touches DEVICE_METADATA
-  hostname and LOOPBACK_INTERFACE — no wipe of CONFIG_DB, no MAC loss.
+  Configure Loopback0 IP on both switches.
+  Uses primitive configure-loopback (not provision), so only touches
+  LOOPBACK_INTERFACE — no wipe of CONFIG_DB, no MAC loss.
 topology: 2node
 requires: [boot-ssh]
 
 steps:
-  - name: apply-baseline-both
-    action: apply-baseline
+  - name: configure-loopback
+    action: configure-loopback
     devices: all
-    configlet: sonic-baseline
 
   - name: verify-loopback-switch1
     action: verify-config-db

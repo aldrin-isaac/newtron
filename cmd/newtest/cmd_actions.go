@@ -186,21 +186,14 @@ func getActionMetadata() map[string]ActionMetadata {
   action: provision
   devices: [leaf1]`,
 		},
-		"apply-baseline": {
+		"configure-loopback": {
 			Category:  "Provisioning",
-			ShortDesc: "Apply baseline configlet",
-			LongDesc:  "Applies a named baseline configlet from the network spec",
-			Prerequisites: []string{
-				"Baseline configlet defined in network.json under 'baselines' section",
-			},
-			Devices: "required",
-			RequiredParams: []ParamInfo{
-				{"configlet", "Configlet name (e.g., 'vxlan-base', 'bgp-rr')"},
-			},
-			Example: `- name: apply-vxlan-base
-  action: apply-baseline
-  devices: [leaf1]
-  configlet: vxlan-base`,
+			ShortDesc: "Configure Loopback0 interface",
+			LongDesc:  "Creates Loopback0 with the device's loopback IP from the resolved profile",
+			Devices:   "required",
+			Example: `- name: configure-loopback
+  action: configure-loopback
+  devices: all`,
 		},
 		"verify-provisioning": {
 			Category:  "Verification",
@@ -897,6 +890,17 @@ func getActionMetadata() map[string]ActionMetadata {
 			Devices:   "required",
 			Example: `- name: remove-bgp
   action: remove-bgp-globals
+  devices: [switch1, switch2]`,
+		},
+
+		// Loopback removal
+		"remove-loopback": {
+			Category:  "Provisioning",
+			ShortDesc: "Remove Loopback0 interface",
+			LongDesc:  "Deletes all LOOPBACK_INTERFACE entries for Loopback0 (reverse of configure-loopback)",
+			Devices:   "required",
+			Example: `- name: remove-loopback
+  action: remove-loopback
   devices: [switch1, switch2]`,
 		},
 

@@ -487,9 +487,9 @@ steps:
       exists: false
 
   # =========================================================================
-  # LOOPBACK_INTERFACE — baseline loopback
-  # Forward: ApplyBaseline → LOOPBACK_INTERFACE entries
-  # Reverse: RemoveBaseline → delete all Loopback0 entries
+  # LOOPBACK_INTERFACE — loopback interface
+  # Forward: ConfigureLoopback → LOOPBACK_INTERFACE entries
+  # Reverse: RemoveLoopback → delete all Loopback0 entries
   # =========================================================================
 
   - name: no-loopback
