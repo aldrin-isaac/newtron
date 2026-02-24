@@ -10,9 +10,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtest"
 	"github.com/newtron-network/newtron/pkg/newtlab"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -359,7 +362,11 @@ func checkTopologyStatus(topology string) string {
 	topologiesDir := resolveTopologiesDir()
 	specDir := filepath.Join(topologiesDir, topology, "specs")
 
+	// Suppress info logs from NewLab (e.g., "derived N links").
+	prev := util.Logger.GetLevel()
+	util.Logger.SetLevel(logrus.WarnLevel)
 	lab, err := newtlab.NewLab(specDir)
+	util.Logger.SetLevel(prev)
 	if err != nil {
 		return "not found"
 	}
