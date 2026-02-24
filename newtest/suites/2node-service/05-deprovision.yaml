@@ -5,7 +5,7 @@ description: |
     ApplyService   → RemoveService    (per-interface, reverse dependency order)
     SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers)
     ConfigureBGP   → RemoveBGPGlobals (BGP globals, AF, redistribution)
-    ApplyBaseline  → RemoveBaseline   (loopback interface)
+    ConfigureLoopback → RemoveLoopback (loopback interface)
   Validates the "no config leak" principle: every CONFIG_DB entry written
   by a forward action is removed by its corresponding reverse action.
 topology: 2node-service
@@ -93,11 +93,11 @@ steps:
     devices: [switch1, switch2]
 
   # =========================================================================
-  # Reverse of ApplyBaseline — loopback interface
-  # Forward:  node.ApplyBaseline(ctx, "sonic-baseline", vars)
-  # Reverse:  node.RemoveBaseline(ctx)
+  # Reverse of ConfigureLoopback — loopback interface
+  # Forward:  node.ConfigureLoopback(ctx)
+  # Reverse:  node.RemoveLoopback(ctx)
   # =========================================================================
 
-  - name: remove-baseline
-    action: remove-baseline
+  - name: remove-loopback
+    action: remove-loopback
     devices: [switch1, switch2]

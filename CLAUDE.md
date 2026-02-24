@@ -56,7 +56,7 @@ When a CiscoVS SAI call fails: document it as an RCA, and fix it at the SAI laye
 
 Each CONFIG_DB table MUST have exactly one owner — a single file/function responsible
 for writing and deleting entries in that table. Composites (ApplyService, SetupEVPN,
-ApplyBaseline, topology provisioner) MUST call the owning primitives and merge their
+ConfigureLoopback, topology provisioner) MUST call the owning primitives and merge their
 ChangeSets rather than constructing entries inline.
 
 This applies at every layer: if `vlan_ops.go` owns `VLAN` table writes, then

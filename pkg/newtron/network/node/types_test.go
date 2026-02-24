@@ -242,7 +242,7 @@ func TestChangeSet_Preview(t *testing.T) {
 }
 
 // ============================================================================
-// splitConfigDBKey Tests
+// splitKey Tests
 // ============================================================================
 
 func TestSplitConfigDBKey(t *testing.T) {
@@ -259,15 +259,15 @@ func TestSplitConfigDBKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := splitConfigDBKey(tt.input)
+			got := splitKey(tt.input)
 			if len(got) != len(tt.expected) {
-				t.Errorf("splitConfigDBKey(%q) = %v (len %d), want %v (len %d)",
+				t.Errorf("splitKey(%q) = %v (len %d), want %v (len %d)",
 					tt.input, got, len(got), tt.expected, len(tt.expected))
 				return
 			}
 			for i, v := range got {
 				if v != tt.expected[i] {
-					t.Errorf("splitConfigDBKey(%q)[%d] = %q, want %q",
+					t.Errorf("splitKey(%q)[%d] = %q, want %q",
 						tt.input, i, v, tt.expected[i])
 				}
 			}
@@ -592,7 +592,7 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 }
 
 // ============================================================================
-// Interface extractServiceFromACL Tests
+// Interface parseServiceFromACL Tests
 // ============================================================================
 
 func TestExtractServiceFromACL(t *testing.T) {
@@ -610,9 +610,9 @@ func TestExtractServiceFromACL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.aclName, func(t *testing.T) {
-			got := extractServiceFromACL(tt.aclName)
+			got := parseServiceFromACL(tt.aclName)
 			if got != tt.expected {
-				t.Errorf("extractServiceFromACL(%q) = %q, want %q",
+				t.Errorf("parseServiceFromACL(%q) = %q, want %q",
 					tt.aclName, got, tt.expected)
 			}
 		})

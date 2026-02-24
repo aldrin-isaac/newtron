@@ -1988,7 +1988,7 @@ The JSON output uses `HealthCheckResult` objects with `check`, `status`, and `me
 
 ## 16. Baseline Configuration
 
-The baseline functionality in newtron is implemented through the `ApplyBaseline()` method on `node.Node`. This method applies hardcoded baseline configuration logic directly, rather than loading configuration from external template files.
+The loopback configuration functionality in newtron is implemented through the `ConfigureLoopback()` method on `node.Node`. This method applies loopback interface configuration directly from the device profile.
 
 ### 16.1 How Baseline Works
 

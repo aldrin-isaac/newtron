@@ -1363,15 +1363,15 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 			step:    Step{Name: "s", Action: ActionRemoveBGPGlobals},
 			wantErr: true, errMsg: "devices is required",
 		},
-		// remove-baseline
+		// remove-loopback
 		{
-			name:    "remove-baseline valid",
-			step:    Step{Name: "s", Action: ActionRemoveBaseline, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			name:    "remove-loopback valid",
+			step:    Step{Name: "s", Action: ActionRemoveLoopback, Devices: deviceSelector{Devices: []string{"leaf1"}}},
 			wantErr: false,
 		},
 		{
-			name:    "remove-baseline missing devices",
-			step:    Step{Name: "s", Action: ActionRemoveBaseline},
+			name:    "remove-loopback missing devices",
+			step:    Step{Name: "s", Action: ActionRemoveLoopback},
 			wantErr: true, errMsg: "devices is required",
 		},
 	}
@@ -1433,7 +1433,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionProvision, ActionWait, ActionVerifyProvisioning,
 		ActionVerifyConfigDB, ActionVerifyStateDB, ActionVerifyBGP,
 		ActionVerifyHealth, ActionVerifyRoute, ActionVerifyPing,
-		ActionApplyService, ActionRemoveService, ActionApplyBaseline,
+		ActionApplyService, ActionRemoveService, ActionConfigureLoopback,
 		ActionSSHCommand, ActionRestartService, ActionConfigReload, ActionApplyFRRDefaults,
 		ActionSetInterface, ActionCreateVLAN, ActionDeleteVLAN,
 		ActionAddVLANMember, ActionCreateVRF, ActionDeleteVRF,
@@ -1450,7 +1450,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionCreateACLTable, ActionAddACLRule, ActionDeleteACLRule,
 		ActionDeleteACLTable, ActionBindACL, ActionUnbindACL,
 		ActionRemoveSVI, ActionRemoveIP, ActionTeardownEVPN,
-		ActionRemoveBGPGlobals, ActionRemoveBaseline,
+		ActionRemoveBGPGlobals, ActionRemoveLoopback,
 	}
 
 	if len(executors) != len(allActions) {

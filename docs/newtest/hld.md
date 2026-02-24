@@ -236,7 +236,7 @@ steps:
 | `verify-ping` | Data plane ping between devices (requires `dataplane: true`) | **newtest native** |
 | `apply-service` | Apply a named service to a device interface | newtron |
 | `remove-service` | Remove a service from a device interface | newtron |
-| `apply-baseline` | Apply a configlet baseline to a device | newtron |
+| `configure-loopback` | Configure loopback interface on a device | newtron |
 | `ssh-command` | Run arbitrary command via SSH, check output | newtest native |
 | `wait` | Wait for specified duration | newtest native |
 | `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron `Node.RestartService()` |
@@ -357,7 +357,7 @@ The `newtest/suites/2node-incremental/` suite contains 31 scenarios that increme
 | 11 | `bgp-loopback-neighbor` | provision | Add/remove loopback BGP peer |
 | 12 | `bgp-direct-neighbor` | provision | Add/remove direct eBGP peer on interface |
 | 13 | `state-db-port` | provision | STATE_DB port status verification |
-| 14 | `apply-baseline` | provision | Configlet baseline application |
+| 14 | `configure-loopback` | provision | Loopback interface configuration |
 | 15 | `device-health` | bgp-converge | Health checks after convergence |
 | 16 | `service-transit` | bgp-converge | Transit service with FRR defaults |
 | 17 | `ping-loopback` | route-propagation | Data plane ping between loopbacks |

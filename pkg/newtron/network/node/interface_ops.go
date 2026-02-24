@@ -56,7 +56,7 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	// SONiC requires both the base interface entry and the IP entry.
 	// The base entry enables routing on the interface; the IP entry assigns the address.
 	entries := append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
-	cs := configToChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
+	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
 	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
@@ -107,7 +107,7 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
 	}
 
-	cs := configToChangeSet(n.Name(), "interface.set-vrf", i.bindVrf(vrfName), ChangeModify)
+	cs := buildChangeSet(n.Name(), "interface.set-vrf", i.bindVrf(vrfName), ChangeModify)
 
 	n.trackOffline(cs)
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)

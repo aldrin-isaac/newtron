@@ -39,7 +39,7 @@ var executors = map[StepAction]stepExecutor{
 	ActionVerifyPing:         &verifyPingExecutor{},
 	ActionApplyService:       &applyServiceExecutor{},
 	ActionRemoveService:      &removeServiceExecutor{},
-	ActionApplyBaseline:      &applyBaselineExecutor{},
+	ActionConfigureLoopback:  &configureLoopbackExecutor{},
 	ActionSSHCommand:         &sshCommandExecutor{},
 	ActionRestartService:     &restartServiceExecutor{},
 	ActionConfigReload:       &configReloadExecutor{},
@@ -87,7 +87,7 @@ ActionSetInterface:       &setInterfaceExecutor{},
 	ActionTeardownEVPN:     &teardownEVPNExecutor{},
 	ActionConfigureBGP:     &configureBGPExecutor{},
 	ActionRemoveBGPGlobals: &removeBGPGlobalsExecutor{},
-	ActionRemoveBaseline:   &removeBaselineExecutor{},
+	ActionRemoveLoopback:   &removeLoopbackExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -950,24 +950,20 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 }
 
 // ============================================================================
-// applyBaselineExecutor
+// configureLoopbackExecutor
 // ============================================================================
 
-type applyBaselineExecutor struct{}
+type configureLoopbackExecutor struct{}
 
-func (e *applyBaselineExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	var vars []string
-	for k, v := range step.Vars {
-		vars = append(vars, fmt.Sprintf("%s=%s", k, v))
-	}
+func (e *configureLoopbackExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
-			return dev.ApplyBaseline(ctx, step.Configlet, vars)
+			return dev.ConfigureLoopback(ctx)
 		})
 		if err != nil {
-			return nil, "", fmt.Errorf("apply-baseline %s: %s", step.Configlet, err)
+			return nil, "", fmt.Errorf("configure-loopback: %s", err)
 		}
-		return cs, fmt.Sprintf("applied baseline %s (%d changes)", step.Configlet, len(cs.Changes)), nil
+		return cs, fmt.Sprintf("configured loopback (%d changes)", len(cs.Changes)), nil
 	})
 }
 
@@ -1915,20 +1911,20 @@ func (e *removeBGPGlobalsExecutor) Execute(ctx context.Context, r *Runner, step 
 }
 
 // ============================================================================
-// removeBaselineExecutor
+// removeLoopbackExecutor
 // ============================================================================
 
-type removeBaselineExecutor struct{}
+type removeLoopbackExecutor struct{}
 
-func (e *removeBaselineExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+func (e *removeLoopbackExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.executeForDevices(step, func(dev *node.Node, _ string) (*node.ChangeSet, string, error) {
 		cs, err := dev.ExecuteOp(func() (*node.ChangeSet, error) {
-			return dev.RemoveBaseline(ctx)
+			return dev.RemoveLoopback(ctx)
 		})
 		if err != nil {
-			return nil, "", fmt.Errorf("remove-baseline: %s", err)
+			return nil, "", fmt.Errorf("remove-loopback: %s", err)
 		}
-		return cs, fmt.Sprintf("removed baseline (%d changes)", len(cs.Changes)), nil
+		return cs, fmt.Sprintf("removed loopback (%d changes)", len(cs.Changes)), nil
 	})
 }
 

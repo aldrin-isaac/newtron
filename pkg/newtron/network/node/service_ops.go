@@ -275,7 +275,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// QoS device-wide tables (not in shared generator, which only emits per-interface entries)
 	var qosPolicyName string
-	if pn, policy := ResolveServiceQoSPolicy(i.Node(), svc); policy != nil {
+	if pn, policy := GetServiceQoSPolicy(i.Node(), svc); policy != nil {
 		qosPolicyName = pn
 		for _, entry := range GenerateDeviceQoSConfig(pn, policy) {
 			cs.Add(entry.Table, entry.Key, entry.Fields)

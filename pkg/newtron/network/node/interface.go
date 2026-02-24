@@ -348,9 +348,9 @@ func (i *Interface) IsVLAN() bool {
 // Helpers
 // ============================================================================
 
-// extractServiceFromACL extracts service name from ACL naming convention.
+// parseServiceFromACL extracts service name from ACL naming convention.
 // ACL name format: {service}-{direction} (per-service ACLs, shared across interfaces)
-func extractServiceFromACL(aclName string) string {
+func parseServiceFromACL(aclName string) string {
 	if strings.HasSuffix(aclName, "-in") {
 		return strings.TrimSuffix(aclName, "-in")
 	}

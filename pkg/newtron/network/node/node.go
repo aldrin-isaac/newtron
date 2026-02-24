@@ -363,7 +363,7 @@ func (n *Node) Lock() error {
 		return nil
 	}
 
-	holder := lockHolder()
+	holder := buildLockHolder()
 	if err := n.conn.Lock(holder, defaultLockTTL); err != nil {
 		return err
 	}
@@ -386,8 +386,8 @@ func (n *Node) Lock() error {
 	return nil
 }
 
-// lockHolder constructs a holder identity string: "user@hostname".
-func lockHolder() string {
+// buildLockHolder constructs a holder identity string: "user@hostname".
+func buildLockHolder() string {
 	username := "unknown"
 	if u, err := user.Current(); err == nil {
 		username = u.Username
@@ -429,7 +429,7 @@ func (n *Node) IsLocked() bool {
 // (execute mode) and the test runner, ensuring identical behavior.
 //
 // The operation function should build a ChangeSet without side effects
-// (e.g., iface.ApplyService, iface.RemoveService, dev.ApplyBaseline).
+// (e.g., iface.ApplyService, iface.RemoveService, dev.ConfigureLoopback).
 // ExecuteOp handles the lock/apply/unlock lifecycle.
 //
 // Write episode lifecycle: Lock() refreshes the CONFIG_DB cache (start of
@@ -529,8 +529,8 @@ func (n *Node) loadInterfaces() {
 	}
 }
 
-// splitConfigDBKey splits a config_db key on "|"
-func splitConfigDBKey(key string) []string {
+// splitKey splits a config_db key on "|"
+func splitKey(key string) []string {
 	for i := range key {
 		if key[i] == '|' {
 			return []string{key[:i], key[i+1:]}

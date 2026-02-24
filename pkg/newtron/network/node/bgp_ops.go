@@ -324,7 +324,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 		MultihopTTL:  "255",
 		ActivateEVPN: evpn,
 	})
-	cs := configToChangeSet(n.name, "bgp.add-loopback-neighbor", config, ChangeAdd)
+	cs := buildChangeSet(n.name, "bgp.add-loopback-neighbor", config, ChangeAdd)
 	n.trackOffline(cs)
 
 	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",

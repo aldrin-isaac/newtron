@@ -46,10 +46,6 @@ type Step struct {
 	Service   string         `yaml:"service,omitempty"`
 	Params    map[string]any `yaml:"params,omitempty"`
 
-	// apply-baseline
-	Configlet string            `yaml:"configlet,omitempty"`
-	Vars      map[string]string `yaml:"vars,omitempty"`
-
 	// ssh-command
 	Command string `yaml:"command,omitempty"`
 
@@ -80,7 +76,7 @@ const (
 	ActionVerifyPing         StepAction = "verify-ping"
 	ActionApplyService       StepAction = "apply-service"
 	ActionRemoveService      StepAction = "remove-service"
-	ActionApplyBaseline      StepAction = "apply-baseline"
+	ActionConfigureLoopback  StepAction = "configure-loopback"
 	ActionSSHCommand         StepAction = "ssh-command"
 	ActionRestartService     StepAction = "restart-service"
 	ActionConfigReload       StepAction = "config-reload"
@@ -139,8 +135,8 @@ ActionSetInterface       StepAction = "set-interface"
 	// BGP globals removal
 	ActionRemoveBGPGlobals StepAction = "remove-bgp-globals"
 
-	// Baseline removal
-	ActionRemoveBaseline StepAction = "remove-baseline"
+	// Loopback removal
+	ActionRemoveLoopback StepAction = "remove-loopback"
 )
 
 // validActions is the set of all recognized step actions, derived from the

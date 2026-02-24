@@ -19,8 +19,8 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// filterTypeToSONiC translates spec filter types to SONiC ACL_TABLE type values.
-func filterTypeToSONiC(specType string) string {
+// mapFilterType translates spec filter types to SONiC ACL_TABLE type values.
+func mapFilterType(specType string) string {
 	switch specType {
 	case "ipv6":
 		return "L3V6"
@@ -186,7 +186,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 	}
 
 	// QoS configuration: new-style policy takes precedence over legacy profile
-	if policyName, policy := ResolveServiceQoSPolicy(sp, svc); policy != nil {
+	if policyName, policy := GetServiceQoSPolicy(sp, svc); policy != nil {
 		entries = append(entries, i.bindQos(policyName, policy)...)
 	} else if svc.QoSProfile != "" {
 		qosProfile, err := sp.GetQoSProfile(svc.QoSProfile)
@@ -283,7 +283,7 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfNa
 
 // generateAclBinding generates ACL table and rule entries for a service filter on this interface.
 // Delegates to acl_ops.go config functions: aclTable for the ACL_TABLE entry,
-// aclRuleFields for the full ACL_RULE field set (including CoS→TC mapping).
+// buildAclRuleFields for the full ACL_RULE field set (including CoS→TC mapping).
 func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([]sonic.Entry, error) {
 	filterSpec, err := i.node.GetFilter(filterName)
 	if err != nil {
@@ -297,7 +297,7 @@ func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([
 	aclName := util.DeriveACLName(serviceName, direction)
 	desc := fmt.Sprintf("%s filter for %s", util.CapitalizeFirst(stage), serviceName)
 
-	entries := createAclTableConfig(aclName, filterTypeToSONiC(filterSpec.Type), stage, i.name, desc)
+	entries := createAclTableConfig(aclName, mapFilterType(filterSpec.Type), stage, i.name, desc)
 
 	for _, rule := range filterSpec.Rules {
 		entries = append(entries, createAclRuleFromFilterConfig(aclName, rule, rule.SrcIP, rule.DstIP, ""))

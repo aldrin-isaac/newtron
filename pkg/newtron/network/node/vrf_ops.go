@@ -344,7 +344,7 @@ func (n *Node) GetVRF(name string) (*VRFInfo, error) {
 	seen := make(map[string]bool)
 	for key, intf := range n.configDB.Interface {
 		// Key could be "Ethernet0" or "Ethernet0|10.1.1.1/24"
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		intfName := parts[0]
 		if intf.VRFName == name && !seen[intfName] {
 			seen[intfName] = true
@@ -354,7 +354,7 @@ func (n *Node) GetVRF(name string) (*VRFInfo, error) {
 
 	// Also check VLAN_INTERFACE for SVIs in this VRF
 	for key := range n.configDB.VLANInterface {
-		parts := splitConfigDBKey(key)
+		parts := splitKey(key)
 		vlanName := parts[0]
 		// VLANInterface value contains vrf_name
 		if vals, ok := n.configDB.VLANInterface[vlanName]; ok {

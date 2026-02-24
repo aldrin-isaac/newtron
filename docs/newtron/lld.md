@@ -51,7 +51,7 @@ newtron/
 │       │       ├── changeset.go         # ChangeSet for tracking config changes
 │       │       ├── composite.go         # CompositeBuilder, CompositeConfig, CompositeMode types
 │       │       ├── acl_ops.go           # ACL operations (CreateACL, AddACLRule, BindACL)
-│       │       ├── baseline_ops.go      # Baseline operations (ApplyBaseline, RemoveBaseline)
+│       │       ├── baseline_ops.go      # Loopback operations (ConfigureLoopback, RemoveLoopback)
 │       │       ├── evpn_ops.go          # EVPN operations (SetupEVPN, BindIPVPN, BindMACVPN)
 │       │       ├── health_ops.go        # Health check operations (RunHealthChecks)
 │       │       ├── interface_bgp_ops.go # Interface BGP operations (AddBGPNeighbor)
@@ -2307,9 +2307,8 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 // checkType is a filter: "bgp", "interfaces", "evpn", "lag", "vxlan", or "all".
 func (n *Node) RunHealthChecks(ctx context.Context, checkType string) ([]HealthCheckResult, error)
 
-// ApplyBaseline applies a baseline configlet to the device.
-// vars is a list of "key=value" strings for template substitution.
-func (n *Node) ApplyBaseline(ctx context.Context, configletName string, vars []string) (*ChangeSet, error)
+// ConfigureLoopback configures the loopback interface on the device.
+func (n *Node) ConfigureLoopback(ctx context.Context) (*ChangeSet, error)
 
 // Cleanup identifies and removes orphaned configurations.
 // cleanupType can be: "acl", "vrf", "vni", or "" for all.

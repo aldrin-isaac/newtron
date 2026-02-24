@@ -89,8 +89,6 @@ type Step struct {
     Interface string         `yaml:"interface,omitempty"`      // apply-service, remove-service, etc.
     Service   string         `yaml:"service,omitempty"`        // apply-service, restart-service
     Params    map[string]any `yaml:"params,omitempty"`         // action-specific parameters
-    Configlet string         `yaml:"configlet,omitempty"`      // apply-baseline
-    Vars      map[string]string `yaml:"vars,omitempty"`        // apply-baseline
     Command   string         `yaml:"command,omitempty"`        // ssh-command
     Target    string         `yaml:"target,omitempty"`         // verify-ping
     Count     int            `yaml:"count,omitempty"`          // verify-ping
@@ -119,7 +117,7 @@ const (
     ActionVerifyPing         StepAction = "verify-ping"
     ActionApplyService       StepAction = "apply-service"
     ActionRemoveService      StepAction = "remove-service"
-    ActionApplyBaseline      StepAction = "apply-baseline"
+    ActionConfigureLoopback  StepAction = "configure-loopback"
     ActionSSHCommand         StepAction = "ssh-command"
     ActionRestartService     StepAction = "restart-service"
     ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
@@ -248,7 +246,7 @@ execution rather than upfront.
 | `verify-ping` | `devices` (single), `target` |
 | `apply-service` | `devices`, `interface`, `service` |
 | `remove-service` | `devices`, `interface` |
-| `apply-baseline` | `devices`, `configlet` |
+| `configure-loopback` | `devices` |
 | `ssh-command` | `devices`, `command` |
 | `restart-service` | `devices`, `service` |
 | `apply-frr-defaults` | `devices` |
@@ -665,7 +663,7 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 | 9 | `verifyPingExecutor` | `verify-ping` | SSH ping (newtest native) |
 | 10 | `applyServiceExecutor` | `apply-service` | `Interface.ApplyService()` |
 | 11 | `removeServiceExecutor` | `remove-service` | `Interface.RemoveService()` |
-| 12 | `applyBaselineExecutor` | `apply-baseline` | `Node.ApplyBaseline()` |
+| 12 | `configureLoopbackExecutor` | `configure-loopback` | `Node.ConfigureLoopback()` |
 | 13 | `sshCommandExecutor` | `ssh-command` | SSH exec (newtest native) |
 | 14 | `restartServiceExecutor` | `restart-service` | `Node.RestartService()` |
 | 15 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Node.ApplyFRRDefaults()` |

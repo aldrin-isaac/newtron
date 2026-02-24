@@ -45,7 +45,7 @@ func NewChangeSet(device, operation string) *ChangeSet {
 	}
 }
 
-// add appends a change of any type (internal use by configToChangeSet, op).
+// add appends a change of any type (internal use by buildChangeSet, op).
 func (cs *ChangeSet) add(table, key string, changeType sonic.ChangeType, fields map[string]string) {
 	cs.Changes = append(cs.Changes, Change{
 		Table:  table,
@@ -101,10 +101,10 @@ func (cs *ChangeSet) IsEmpty() bool {
 	return len(cs.Changes) == 0
 }
 
-// configToChangeSet wraps config function output into a ChangeSet.
+// buildChangeSet wraps config function output into a ChangeSet.
 // Bridges pure config functions (return []sonic.Entry) with the ChangeSet
 // world used by primitives and composites.
-func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet {
+func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet {
 	cs := NewChangeSet(deviceName, operation)
 	for _, e := range config {
 		cs.add(e.Table, e.Key, changeType, e.Fields)
@@ -131,7 +131,7 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 	}
 
 	entries := gen()
-	cs := configToChangeSet(n.name, "device."+name, entries, changeType)
+	cs := buildChangeSet(n.name, "device."+name, entries, changeType)
 
 	// Shadow update + accumulation (offline mode)
 	if n.offline {

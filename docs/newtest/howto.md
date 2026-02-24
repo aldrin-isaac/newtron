@@ -358,17 +358,12 @@ newtest determines the expected values from the topology spec — newtron's
     exists: false
 ```
 
-### 8. Apply Baselines
+### 8. Configure Loopback
 
 ```yaml
-- name: apply-evpn-baseline
-  action: apply-baseline
+- name: configure-loopback
+  action: configure-loopback
   devices: [leaf1]
-  configlet: sonic-evpn-leaf
-  vars:
-    hostname: leaf1
-    loopback_ip: "10.0.0.11"
-    router_id: "10.0.0.11"
 ```
 
 ### 9. Use SSH Commands for Custom Checks

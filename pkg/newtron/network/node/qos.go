@@ -189,9 +189,9 @@ func (n *Node) isQoSPolicyReferenced(policyName, excludeInterface string) bool {
 	return false
 }
 
-// extractPolicyName extracts the policy name from a PORT_QOS_MAP bracket-ref
+// parsePolicyName extracts the policy name from a PORT_QOS_MAP bracket-ref
 // like "[DSCP_TO_TC_MAP|myPolicy]" → "myPolicy". Returns "" if not a bracket-ref.
-func extractPolicyName(bracketRef string) string {
+func parsePolicyName(bracketRef string) string {
 	const prefix = "[DSCP_TO_TC_MAP|"
 	if !strings.HasPrefix(bracketRef, prefix) || !strings.HasSuffix(bracketRef, "]") {
 		return ""
@@ -199,10 +199,10 @@ func extractPolicyName(bracketRef string) string {
 	return bracketRef[len(prefix) : len(bracketRef)-1]
 }
 
-// resolveServiceQoSPolicy returns the QoS policy name and definition for a service.
+// GetServiceQoSPolicy returns the QoS policy name and definition for a service.
 // It checks QoSPolicy (new-style) first, then falls back to legacy QoSProfile.
 // Returns ("", nil) if neither is set.
-func ResolveServiceQoSPolicy(sp SpecProvider, svc *spec.ServiceSpec) (string, *spec.QoSPolicy) {
+func GetServiceQoSPolicy(sp SpecProvider, svc *spec.ServiceSpec) (string, *spec.QoSPolicy) {
 	if svc.QoSPolicy != "" {
 		if policy, err := sp.GetQoSPolicy(svc.QoSPolicy); err == nil {
 			return svc.QoSPolicy, policy
