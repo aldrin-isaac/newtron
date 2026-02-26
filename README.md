@@ -16,7 +16,7 @@ The result: a single tool that provisions SONiC devices from declarative specs, 
 
 Three architectural choices define newtron:
 
-**Redis-first.** SONiC's entire state lives in Redis databases. CONFIG_DB holds desired state, APP_DB holds computed routes, ASIC_DB holds forwarding state, STATE_DB holds operational telemetry. newtron reads and writes these databases directly using a native Go Redis client — not by running `config` commands over SSH and parsing the output. This makes reads precise (typed table entries, not regex-parsed text), writes atomic (Redis pipelines), and verification exact (re-read what you wrote). CLI commands are used only for operations Redis cannot express (like `config save`), and each one is tagged for future elimination.
+**Redis-first.** SONiC's entire state lives in Redis databases. CONFIG_DB holds desired state, APP_DB holds computed routes, ASIC_DB holds forwarding state, STATE_DB holds operational telemetry. newtron reads and writes these databases directly using a native Go Redis client — not by running `config` commands over SSH and parsing the output. This makes reads precise (typed table entries, not regex-parsed text), writes ordered and verifiable (single HSET per key; composites delivered atomically via Redis pipeline), and verification exact (Apply → Verify → Save by re-reading what was written). CLI commands are used only for operations Redis cannot express (like `config save`), and each one is tagged for future elimination.
 
 **A domain model, not a connection wrapper.** `Network > Node > Interface` is a typed object hierarchy where each level holds the context for its operations. A Network holds specs (services, VPNs, filters). A Node holds its device profile, resolved config, and Redis connections. An Interface holds its service bindings. `Interface.ApplyService()` reaches up through the parent chain to resolve everything it needs — the device's AS number, the network's service spec, the interface's IP — and produces a ChangeSet. No external function orchestrates this. The object has the full context.
 
@@ -35,7 +35,7 @@ Key operations:
 - **EVPN/VXLAN** — VTEP creation, L2/L3 VNI mapping, SVI configuration, EVPN neighbor activation. Replaces traditional MPLS L3VPN.
 - **Composite provisioning** — Full-device configuration generated offline by running the same operations (`ConfigureBGP`, `SetupEVPN`, `iface.ApplyService`) against a shadow ConfigDB. No template engine — the code that configures a live device also generates offline composites. `BuildComposite()` exports accumulated entries for atomic delivery via Redis pipeline. Delivery merges composite entries on top of existing CONFIG_DB, preserving factory defaults while removing stale keys.
 
-Every mutating operation produces a **ChangeSet** — an ordered list of CONFIG_DB mutations with table, key, operation type, and old/new values. The ChangeSet serves as dry-run preview, execution receipt, and verification contract. `VerifyChangeSet` re-reads CONFIG_DB through a fresh connection and diffs against the ChangeSet. One verification method works for every operation.
+Every mutating operation produces a **ChangeSet** — an ordered list of CONFIG_DB mutations with table, key, operation type, and field values. The ChangeSet serves as dry-run preview, execution receipt, and verification contract. `ChangeSet.Verify()` re-reads CONFIG_DB through a fresh connection and diffs against the ChangeSet. One verification method works for every operation.
 
 All commands default to **dry-run**. Add `-x` to execute. This is an architectural constraint — because every operation must compute its ChangeSet without applying it, translation logic is always separate from execution logic.
 
@@ -65,13 +65,13 @@ After deployment, newtlab patches device profiles with SSH ports, console ports,
 
 newtest tests **composed network outcomes**, not individual features. The question is not "does VLAN creation work?" — it's "does the L3VPN service produce reachability across the overlay?" A feature test can pass while the composite multi-feature configuration fails due to ordering issues, missing glue config, or daemon interaction bugs. newtest tests the thing that actually matters: the assembled result.
 
-newtest deploys a topology (via newtlab), provisions devices (via newtron), then runs scenarios that assert correctness — both on individual devices and across the fabric. It observes devices exclusively through newtron's primitives (`GetRoute`, `GetRouteASIC`, `VerifyChangeSet`) — it never accesses Redis directly.
+newtest deploys a topology (via newtlab), provisions devices (via newtron), then runs scenarios that assert correctness — both on individual devices and across the fabric. It observes devices through newtron's primitives (health, BGP/EVPN/VLAN/VRF status, ChangeSet verification) — it never accesses Redis directly.
 
 Key capabilities:
 
-- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. 54 step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, ACL management, health checks, data plane verification, service churn.
-- **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run 31 scenarios.
-- **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. It can verify that a route configured on spine1 actually arrives in leaf1's APP_DB, that BGP sessions reach Established state on both ends, that data plane forwarding works end-to-end.
+- **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. Step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, ACL management, health checks, data plane verification, service churn.
+- **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run a suite of scenarios.
+- **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. Scenarios can assert cross-device outcomes (e.g., that a route configured on spine1 shows up in leaf1's APP_DB, that BGP sessions reach Established on both ends, that data plane forwarding works end-to-end).
 - **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Report generation** — console output with ANSI formatting, markdown reports, and JUnit XML for CI integration.
 
@@ -160,12 +160,11 @@ At deploy time, newtlab creates copy-on-write overlay disks — base images are 
 ### Provision a device
 
 ```bash
-newtron -n specs/ -d spine1 provision                   # Preview full provisioning
-newtron -n specs/ -d spine1 provision -x                # Execute it
-newtron -n specs/ -d spine1 verify                      # Verify CONFIG_DB matches
-newtron -n specs/ -d leaf1 -i Ethernet0 apply-service   # Single interface
-newtron -n specs/ -d spine1 get-route 10.0.0.1/32       # Query APP_DB
-newtron -n specs/ -d spine1 health                      # Health checks
+newtron -S specs/ spine1 provision                                      # Preview full provisioning
+newtron -S specs/ spine1 provision -x                                   # Execute (Apply → Verify → Save)
+newtron -S specs/ spine1 show                                           # Show derived config + counts
+newtron -S specs/ spine1 health check                                   # Health checks
+newtron -S specs/ leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 ```
 
 ### Deploy a test topology
