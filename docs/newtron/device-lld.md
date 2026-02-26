@@ -361,6 +361,8 @@ The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holde
 
 `Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
 
+Note: `ExecuteOp` does not call `Verify()` — it is a low-level building block. The CLI's `executeAndSave` wrapper adds Verify between Apply and Save. The newtest framework has its own explicit `verify-provisioning` step that calls `cs.Verify()` separately.
+
 **RunHealthChecks read-only episode:**
 
 `RunHealthChecks()` calls `Refresh()` at entry to start a fresh read-only episode before reading from the cache for `checkBGP`, `checkInterfaces`, etc.

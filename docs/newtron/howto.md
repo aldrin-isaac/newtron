@@ -221,7 +221,9 @@ sudo vim /etc/newtron/network.json
   },
   "zones": {
     "datacenter-east": {
-      "as_number": 65001
+      "prefix_lists": {
+        "dc-east-aggregates": ["10.100.0.0/16"]
+      }
     }
   },
   "prefix_lists": {
@@ -434,7 +436,7 @@ sudo vim /etc/newtron/profiles/leaf1-dc1.json
 | `platform` | Platform name (maps to platforms.json for HWSKU) |
 | `ssh_user` | SSH username for Redis tunnel access |
 | `ssh_pass` | SSH password for Redis tunnel access |
-| `as_number` | Override zone AS number for this device |
+| `underlay_asn` | eBGP underlay AS number (unique per device) |
 | `evpn` | EVPN overlay peering configuration (see below) |
 | `vlan_port_mapping` | Device-specific VLAN-to-port mappings |
 | `prefix_lists` | Device-specific prefix lists (merged with zone/global) |
@@ -480,10 +482,9 @@ Device Profile  >  Zone defaults  >  Global defaults
 
 The `ResolvedProfile` includes:
 
-- **From profile:** device name, mgmt_ip, loopback_ip, zone, platform, SSH credentials, EVPN peering config
-- **From inheritance:** AS number, affinity, router/bridge flags
-- **Derived at runtime:** router-id (= loopback_ip), VTEP source IP (= loopback_ip), BGP EVPN neighbors (from profile EVPN peers or route reflector config)
-- **Merged maps:** prefix_lists are merged (profile > zone > global)
+- **From profile:** device name, mgmt_ip, loopback_ip, zone, platform, SSH credentials, underlay_asn, EVPN peering config
+- **Derived at runtime:** router-id (= loopback_ip), VTEP source IP (= loopback_ip), BGP EVPN neighbors (from profile EVPN peers), BGP neighbor ASNs
+- **Merged maps:** prefix_lists, filters, QoS policies are merged (profile > zone > global)
 
 ### 3.6 Topology Specification (Optional)
 
@@ -564,7 +565,7 @@ Case-insensitive: `eth0`, `Eth0`, `ETH0` all work.
 | `-n, --network` | Network configuration name |
 | `-S, --specs` | Specification directory (default: `/etc/newtron`) |
 | `-x, --execute` | Execute changes (default: dry-run) |
-| `-s, --save` | Save config after changes (requires `-x`; use `-xs` together) |
+| `--no-save` | Skip config save after execute (save is default with `-x`) |
 | `-v, --verbose` | Verbose output |
 | `--json` | JSON output format |
 
@@ -573,11 +574,14 @@ Case-insensitive: `eth0`, `Eth0`, `ETH0` all work.
 Store default values to avoid repeating flags:
 
 ```bash
-# Set default device
-newtron settings set device leaf1-dc1
-
 # Set default network
 newtron settings set network production
+
+# Set spec directory
+newtron settings set specs /etc/newtron
+
+# Set default test suite
+newtron settings set suite newtest/suites/2node-incremental
 
 # View current settings
 newtron settings show
@@ -621,10 +625,11 @@ newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 # Changes applied successfully.
 ```
 
-To execute and save in one step:
+Execute mode (`-x`) saves automatically by default. Use `--no-save` to skip:
 
 ```bash
-newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -xs
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x             # execute + save
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x --no-save   # execute without saving
 ```
 
 ### 4.5 View Device Status
@@ -639,7 +644,7 @@ newtron leaf1 show
 # Platform: accton-as7726-32x (Accton-AS7726-32X)
 #
 # Derived Values (from spec -> device config):
-#   BGP Local AS: 65001 (from zone: datacenter-east)
+#   BGP Local AS: 65001 (from profile: underlay_asn)
 #   BGP Router ID: 10.0.0.10
 #   BGP EVPN Neighbors: [10.0.0.1, 10.0.0.2]
 #   VTEP Source: 10.0.0.10 via Loopback0
@@ -1206,6 +1211,7 @@ The MAC-VPN definition in network.json specifies the L2VNI and ARP suppression:
   "macvpns": {
     "servers-vlan100": {
       "description": "Server VLAN 100",
+      "vlan_id": 100,
       "vni": 10100,
       "arp_suppression": true
     }
@@ -2099,10 +2105,10 @@ ssh admin@192.168.1.10
 sudo config save -y
 ```
 
-Or use the `-s` flag with newtron to save automatically after executing:
+Newtron saves automatically after executing (`-x`). To skip the save step:
 
 ```bash
-newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -xs
+newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x --no-save
 ```
 
 Or as a one-liner via SSH:
@@ -2221,7 +2227,7 @@ newtron leaf1 show
 ssh admin@192.168.1.10 'sudo config save -y'
 ```
 
-Or use `-xs` to execute and save in one step.
+Note: `-x` saves by default. Use `--no-save` to skip persistence.
 
 See [Section 18: Config Persistence](#18-config-persistence) for details.
 
@@ -2515,9 +2521,10 @@ for _, name := range net.ListIPVPNs() {
 prefixes, _ := net.GetPrefixList("rfc1918")
 fmt.Printf("RFC1918 prefixes: %v\n", prefixes)
 
-// Get zone
-zone, _ := net.GetZone("amer")
-fmt.Printf("Zone AS: %d\n", zone.ASNumber)
+// List zones (from network spec)
+for name := range net.Spec().Zones {
+    fmt.Printf("Zone: %s\n", name)
+}
 ```
 
 ### 21.7 Performing Operations
@@ -2528,7 +2535,7 @@ Operations are methods on the objects they operate on:
 // Interface operations
 intf, _ := dev.GetInterface("Ethernet0")
 
-changeSet, err := intf.ApplyService(ctx, "customer-l3", network.ApplyServiceOpts{IPAddr: "10.1.1.1/30"})
+changeSet, err := intf.ApplyService(ctx, "customer-l3", node.ApplyServiceOpts{IPAddress: "10.1.1.1/30"})
 if err != nil {
     log.Fatal(err) // includes ErrDeviceLocked if another process has the lock
 }
@@ -2764,7 +2771,7 @@ Resource Commands
 │   ├── list
 │   ├── show <service-name>
 │   ├── create <service-name> --type <routed|bridged|irb|evpn-routed|evpn-bridged|evpn-irb> [--ipvpn] [--macvpn] [--vrf-type]
-│   │   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
+│   │   [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
 │   ├── delete <service-name>
 │   ├── apply <interface> <service> [--ip] [--peer-as]
 │   ├── remove <interface>
@@ -2773,7 +2780,7 @@ Resource Commands
 
 Device Operations
 ├── show
-├── provision [-d <device>] [-x] [-s]
+├── provision [-d <device>] [-x] [--no-save]
 ├── health check [--check <name>]
 ├── shell (alias: sh)
 └── device
@@ -2797,7 +2804,7 @@ Configuration & Meta
 | `--network` | `-n` | Network configuration name |
 | `--specs` | `-S` | Specification directory |
 | `--execute` | `-x` | Execute changes (default: dry-run) |
-| `--save` | `-s` | Save config after execute (requires `-x`) |
+| `--no-save` | | Skip config save after execute (save is default with `-x`) |
 | `--verbose` | `-v` | Verbose output |
 | `--json` | | JSON output format |
 
@@ -2807,7 +2814,7 @@ Configuration & Meta
 2. Provision from topology: `newtron provision -d leaf1 -x`
 3. Or apply services individually: `newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x`
 4. Verify: `newtron leaf1 health check`
-5. Persist: `ssh admin@<ip> 'sudo config save -y'` (or use `-xs`)
+5. Persist: automatic with `-x` (or `ssh admin@<ip> 'sudo config save -y'` if `--no-save` was used)
 
 ### 22.5 Lab Quick Start
 
@@ -2889,8 +2896,8 @@ newtron provision -d leaf1
 # Execute all devices
 newtron provision -x
 
-# Execute + save for one device
-newtron provision -d leaf1 -xs
+# Execute + save for one device (save is default)
+newtron provision -d leaf1 -x
 ```
 
 ### 23.3 Full Device Provisioning (Go API)
@@ -3056,7 +3063,7 @@ newtron leaf1 bgp status
 newtron leaf1 health check
 
 # 5. Persist
-newtron leaf1 evpn setup -xs    # -xs = execute + save
+newtron leaf1 evpn setup -x     # execute + save (save is default)
 ```
 
 ### 25.2 Add L3 Customer Interface
@@ -3210,7 +3217,6 @@ Add specs directly under a zone in `network.json` to make them available only to
 {
   "zones": {
     "amer": {
-      "as_number": 64512,
       "services": {
         "amer-transit": {
           "description": "AMER-specific transit service",

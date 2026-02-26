@@ -19,3 +19,6 @@ newtest/**/audit.log
 # OS
 .DS_Store
 Thumbs.db
+
+# Analysis artifacts (generated LLD, scratch notes)
+/analysis/

@@ -263,6 +263,8 @@ func (s *Shell) cmdApplyService(args []string) {
 	}
 	fmt.Println(green("Applied successfully."))
 	s.dirty = true
+
+	s.verifyChangeSet(changeSet)
 }
 
 // cmdRemoveService removes the service from the current interface.
@@ -299,6 +301,36 @@ func (s *Shell) cmdRemoveService() {
 	}
 	fmt.Println(green("Applied successfully."))
 	s.dirty = true
+
+	s.verifyChangeSet(changeSet)
+}
+
+// verifyChangeSet re-reads CONFIG_DB via a fresh connection and reports
+// any entries that didn't persist. Called after Apply in interactive mode.
+func (s *Shell) verifyChangeSet(cs *node.ChangeSet) {
+	fmt.Print("Verifying... ")
+	if err := cs.Verify(s.dev); err != nil {
+		fmt.Printf("%s: %v\n", yellow("WARN"), err)
+		fmt.Println(yellow("Could not verify changes. Check state before saving."))
+		return
+	}
+	v := cs.Verification
+	total := v.Passed + v.Failed
+	if v.Failed > 0 {
+		fmt.Printf("%s (%d/%d entries verified, %d failed)\n", red("FAILED"), v.Passed, total, v.Failed)
+		for _, e := range v.Errors {
+			if e.Actual == "" {
+				fmt.Printf("  [MISSING] %s|%s  (field: %s, expected: %q)\n",
+					e.Table, e.Key, e.Field, e.Expected)
+			} else {
+				fmt.Printf("  [MISMATCH] %s|%s  (field: %s, expected: %q, actual: %q)\n",
+					e.Table, e.Key, e.Field, e.Expected, e.Actual)
+			}
+		}
+		fmt.Println(yellow("Do NOT save until the issue is resolved."))
+		return
+	}
+	fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
 }
 
 // cmdSave saves the config to disk.

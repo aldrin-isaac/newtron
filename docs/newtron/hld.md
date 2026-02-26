@@ -238,7 +238,7 @@ The translation layer interprets specs in context to generate config:
 
 The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it**. If an operation needs the interface name, the device profile, and the network specs, it lives on Interface (which can reach all three through its parent chain). If it only needs the Redis connection, it lives on Node.
 
-A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and site topology — so it lives on `Node.AddLoopbackBGPNeighbor()` and `Node.SetupEVPN()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
+A related principle: **whatever configuration can be right-shifted to the interface level, should be**. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering (iBGP toward spines) is device-specific — it derives from the device's role and zone topology — so it lives on `Node.AddLoopbackBGPNeighbor()` and `Node.SetupEVPN()`. Interface-level configuration is more composable, more independently testable, and easier to reason about.
 
 ```
 +------------------------------------------------------------------+
@@ -302,15 +302,14 @@ The first argument is the device name unless it matches a known command. This le
 **Context Flags:**
 | Flag | Description |
 |------|-------------|
-| `-n, --network` | Network specs name |
 | `-d, --device` | Target device name (alternative to positional first arg) |
-| `-S, --specs` | Specification directory |
+| `-S, --specs` | Network root directory (contains `specs/`) |
 
 **Write Flags:**
 | Flag | Description |
 |------|-------------|
-| `-x, --execute` | Execute changes (default is dry-run preview) |
-| `-s, --save` | Save config after changes (requires `-x`; runs `config save -y`) |
+| `-x, --execute` | Execute changes (default is dry-run preview). Save runs automatically after apply. |
+| `--no-save` | Skip `config save -y` after execute (requires `-x`) |
 
 **Output Flags:**
 | Flag | Description |
@@ -339,7 +338,7 @@ func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeS
     // 2. dev.Lock() — acquire distributed STATE_DB lock
     // 3. fn(ctx, dev) — execute the operation, returns ChangeSet
     // 4. Print ChangeSet preview
-    // 5. If -x: Apply ChangeSet, optionally save config
+    // 5. If -x: Apply ChangeSet → Verify → optionally save config
     //    If not -x: Print dry-run notice
     // 6. defer dev.Unlock() + dev.Disconnect()
 }
@@ -430,7 +429,7 @@ Resource Commands
 |   +-- list
 |   +-- show <service-name>
 |   +-- create <service-name> --type <routed|bridged|irb|evpn-routed|evpn-bridged|evpn-irb> [--ipvpn] [--macvpn] [--vrf-type]
-|   |   [--vlan] [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
+|   |   [--qos-policy] [--ingress-filter] [--egress-filter] [--description]
 |   +-- delete <service-name>
 |   +-- apply <interface> <service> [--ip] [--peer-as]
 |   +-- remove <interface>
@@ -441,7 +440,7 @@ Resource Commands
 
 Device Operations
 +-- show
-+-- provision [-d <device>] [-x] [-s]
++-- provision [-d <device>] [-x] [--no-save]
 +-- health check [--check <name>]
 +-- device
     +-- cleanup [--type]
@@ -482,7 +481,7 @@ Loads and resolves specifications from JSON files.
 | `NetworkSpecFile` | Services, filters, VPNs, zones, permissions |
 | `PlatformSpecFile` | Hardware platform definitions (HWSKU, ports) |
 | `TopologySpecFile` | (optional) Topology: devices, interfaces, service bindings, links |
-| `DeviceProfile` | Per-device settings (mgmt_ip, loopback_ip, site, ssh_user, ssh_pass) |
+| `DeviceProfile` | Per-device settings (mgmt_ip, loopback_ip, zone, underlay_asn, ssh_user, ssh_pass) |
 | `ResolvedProfile` | Profile after inheritance resolution |
 
 **Key Distinction**: The spec layer handles **declarative intent**. It never contains concrete device configuration - only policy definitions and references.
@@ -548,7 +547,7 @@ newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 newtron leaf1 service remove Ethernet0 -x
 ```
 
-**RefreshService** — `RefreshService(ctx)` re-reads the service spec, diffs the expected config against the current CONFIG_DB, and applies only the delta. This is used when a service spec is updated and the device needs to converge to the new definition without a full remove/apply cycle.
+**RefreshService** — `RefreshService(ctx)` performs a full remove+reapply cycle: it calls `RemoveService` to tear down the current binding, then `ApplyService` with the same service name and IP address to rebuild from the current spec. The two ChangeSets are merged into one atomic result. This is used when a service spec is updated and the device needs to converge to the new definition.
 
 ```
 newtron leaf1 service refresh Ethernet0 -x
@@ -568,12 +567,12 @@ The `status` view combines:
 - **Local BGP identity** — AS number, router ID, loopback IP (from device profile)
 - **Configured neighbors** — from CONFIG_DB `BGP_NEIGHBOR` table, classified as direct (interface-level, different local_addr) or indirect (loopback-based)
 - **Operational state** — from STATE_DB `BGP_NEIGHBOR_TABLE`, showing session state (Established/Idle), prefix counts, and uptime
-- **Expected EVPN neighbors** — from site config (route reflector loopbacks)
+- **Expected EVPN neighbors** — from device profile EVPN config (route reflector loopbacks)
 
 All BGP peer management is handled through other nouns:
 - **`vrf add-neighbor`** — creates eBGP or iBGP neighbors with per-interface context (local_addr from interface IP, auto-derived neighbor IP for /30 and /31 subnets)
 - **`vrf remove-neighbor`** — removes a BGP neighbor from a VRF
-- **`evpn setup`** — creates overlay iBGP EVPN sessions with route reflectors from site config
+- **`evpn setup`** — creates overlay iBGP EVPN sessions with route reflectors from device profile EVPN config
 
 This separation reflects SONiC's data model: BGP neighbors belong to routing contexts (VRFs), and the VRF is the natural owner of neighbor lifecycle. The BGP noun provides read-only visibility across all VRFs.
 
@@ -755,7 +754,7 @@ The operation performs three steps, skipping any that are already configured:
 
 1. **VXLAN Tunnel Endpoint (VTEP)** — creates `VXLAN_TUNNEL` entry with source IP (defaults to device loopback IP)
 2. **EVPN NVO** — creates `VXLAN_EVPN_NVO` entry referencing the VTEP
-3. **BGP EVPN sessions** — creates `BGP_NEIGHBOR` entries for route reflectors from site config, with `l2vpn_evpn` address family activated
+3. **BGP EVPN sessions** — creates `BGP_NEIGHBOR` entries for EVPN peers from device profile, with `l2vpn_evpn` address family activated
 
 Idempotency means `evpn setup` can be run multiple times safely — it checks for existing entries before creating new ones.
 
@@ -783,7 +782,7 @@ newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --arp-suppre
 newtron evpn macvpn delete servers-vlan100 -x
 ```
 
-**IP-VPN** (L3 VPN) contains: L3VNI, import/export route targets, description.
+**IP-VPN** (L3 VPN) contains: VRF name, L3VNI, L3VNI VLAN (transit VLAN for decap), route targets, description.
 **MAC-VPN** (L2 VPN) contains: VNI, VLAN ID, anycast IP, anycast MAC, route targets, ARP suppression flag, description.
 
 The MAC-VPN definition contains a `vlan_id` field — the local bridge domain ID. This allows the same MAC-VPN definition to carry the VLAN binding, with the anycast IP/MAC enabling distributed anycast gateway functionality. VLANs bind to MAC-VPNs via `vlan bind-macvpn`, which brings the VNI and anycast gateway from the definition.
@@ -795,7 +794,7 @@ The MAC-VPN definition contains a `vlan_id` field — the local bridge domain ID
 | `VXLAN_TUNNEL` | Tunnel name (e.g., `vtep1`) | VTEP source IP |
 | `VXLAN_EVPN_NVO` | NVO name (e.g., `nvo1`) | References source VTEP |
 | `VXLAN_TUNNEL_MAP` | `tunnel\|map_name` | VNI → VLAN (L2) or VNI → VRF (L3) mapping |
-| `BGP_NEIGHBOR` | Neighbor IP | EVPN peers (RRs from site config) |
+| `BGP_NEIGHBOR` | Neighbor IP | EVPN peers (from device profile `evpn.peers`) |
 | `BGP_NEIGHBOR_AF` | `ip\|l2vpn_evpn` | EVPN AF activation and attributes |
 
 ### 4.6c Spec Authoring
@@ -964,7 +963,7 @@ This mode is used for incremental changes to a running device — adding a servi
   "description": "DC1 lab topology",
   "devices": {
     "leaf1-dc1": {
-      "device_config": { "route_reflector": false },
+      "device_config": { },
       "interfaces": {
         "Ethernet0": {
           "link": "spine1-dc1:Ethernet0",
@@ -986,7 +985,7 @@ This mode is used for incremental changes to a running device — adding a servi
 ```
 
 - `devices` keys are device names (must match profiles in `profiles/`)
-- `device_config` is optional (e.g., `route_reflector: true` for spines)
+- `device_config` is optional (overrides for topology-level settings)
 - `interfaces` keys are full SONiC interface names
 - `service` references a service from network.json
 - `ip` is the IP address to assign (equivalent to `--ip` at CLI)
@@ -1307,22 +1306,22 @@ SONiC uses a dual-state configuration model:
 
 Newtron writes exclusively to Redis CONFIG_DB. These changes take effect immediately because SONiC daemons process them in real time. However, these changes are **ephemeral** - they are lost if the switch reboots.
 
-To persist changes across reboots, the operator must run `config save -y` on the SONiC device, which writes the current Redis state to `/etc/sonic/config_db.json`. Persistence is the operator's responsibility; Newtron does not invoke `config save`.
+To persist changes across reboots, `config save -y` must be run on the SONiC device, which writes the current Redis state to `/etc/sonic/config_db.json`. Newtron's `executeAndSave` helper does this automatically after every successful `-x` execution: Apply writes entries sequentially to CONFIG_DB, then Verify re-reads every entry via a fresh Redis connection to confirm persistence. If verification fails, config is **not** saved — the operator can `config reload` to restore the last known-good state. The `--no-save` flag skips the persistence step for cases where the operator wants runtime-only changes.
 
 ### 7.3 Implications
 
 | Scenario | Behavior |
 |----------|----------|
 | Newtron writes to Redis | Change takes effect immediately (SONiC daemons react) |
-| Switch reboots without `config save` | Changes are lost; device returns to last saved config |
-| `config save -y` after Newtron changes | Changes are persisted to config_db.json |
+| Newtron runs `config save -y` (default) | Changes are persisted to config_db.json |
+| `--no-save` used | Changes are runtime-only; lost on reboot |
 | SONiC boots | Loads config_db.json into Redis; starts daemons |
 
 ### 7.4 Composite Mode and Config Persistence
 
-Composite mode writes to the same runtime Redis CONFIG_DB. The persistence model is identical: composite-delivered changes take effect immediately but are lost on reboot unless `config save -y` is run.
+Composite mode writes to the same runtime Redis CONFIG_DB. The persistence model is identical: composite-delivered changes take effect immediately and are persisted via the automatic `config save -y` that follows execution (unless `--no-save` is used).
 
-For **overwrite** mode (initial provisioning), the expectation is that the operator runs `config save -y` after delivery to establish the baseline persistent config. For **merge** mode (incremental service deployment), the same `config save` responsibility applies.
+For **overwrite** mode (initial provisioning), `config save` establishes the baseline persistent config. For **merge** mode (incremental service deployment), the same persistence applies.
 
 ## 8. Service Model
 
@@ -1338,7 +1337,6 @@ Services are the primary abstraction - they bundle intent into reusable template
       "service_type": "routed",
       "ipvpn": "customer-vpn",
       "vrf_type": "interface",
-      "vlan": 0,
       "qos_policy": "8q-datacenter",
       "ingress_filter": "customer-edge-in",
       "egress_filter": "customer-edge-out",
@@ -1407,7 +1405,6 @@ The `create` command accepts all ServiceSpec fields as flags:
 | `--ipvpn` | IP-VPN reference name |
 | `--macvpn` | MAC-VPN reference name |
 | `--vrf-type` | VRF instantiation: `interface` or `shared` |
-| `--vlan` | VLAN ID for L2/IRB services |
 | `--qos-policy` | QoS policy name |
 | `--ingress-filter` | Ingress filter spec name |
 | `--egress-filter` | Egress filter spec name |
@@ -1502,7 +1499,7 @@ The `routing` section declares routing intent:
 | `loopback_ip` | Device profile | BGP router-id, VTEP source |
 | `mgmt_ip` | Device profile | Redis connection (or SSH tunnel target) |
 | `underlay_asn` | Device profile | BGP local AS |
-| `route_reflectors` | Device profile EVPN config | BGP neighbor derivation |
+| `peers` | Device profile EVPN config | BGP neighbor derivation |
 | `ssh_user` / `ssh_pass` | Device profile | SSH tunnel for Redis access |
 
 ### 9.3 PlatformSpec Auto-Generation
@@ -1702,25 +1699,27 @@ In integration test environments, a standalone Redis container is used without S
 |------------|-------------|
 | `service.apply` | Apply services to interfaces |
 | `service.remove` | Remove services from interfaces |
-| `interface.configure` | Configure interface properties |
+| `interface.modify` | Configure interface properties |
 | `lag.create` | Create LAGs |
-| `vlan.create` | Create/delete VLANs |
-| `vlan.modify` | Modify VLAN membership |
+| `lag.modify` | Modify LAG membership |
+| `lag.delete` | Delete LAGs |
+| `vlan.create` | Create VLANs |
+| `vlan.modify` | Modify VLAN membership and SVI |
+| `vlan.delete` | Delete VLANs |
 | `acl.modify` | Modify ACLs (create/delete/bind/unbind rules) |
-| `bgp.modify` | Modify BGP configuration |
 | `evpn.modify` | EVPN setup and VNI operations |
 | `vrf.create` | Create VRFs |
 | `vrf.modify` | Modify VRF bindings (interfaces, neighbors, routes) |
 | `vrf.delete` | Delete VRFs |
-| `vrf.view` | View VRF details |
+| `device.cleanup` | Run orphan cleanup on device |
 | `spec.author` | Create/delete definitions in network.json (IP-VPN, MAC-VPN, QoS, filter, service) |
 | `filter.create` | Create filter specs |
-| `filter.modify` | Add/remove filter rules |
 | `filter.delete` | Delete filter specs |
-| `filter.view` | View filter details |
 | `qos.create` | Create QoS policies |
+| `qos.modify` | Modify QoS policies |
 | `qos.delete` | Delete QoS policies |
-| `all` | Superuser |
+
+Read/view operations have no permission requirement — only write operations (those requiring `-x`) are checked.
 
 ### 11.3 Audit Logging
 
@@ -1772,26 +1771,16 @@ All operations logged with:
 | ProvisionDevice | No (build) + Yes (deliver) | Yes (for delivery) | Yes (pipeline) |
 | ProvisionInterface | Yes | Yes (reads + writes) | Per-entry |
 
-### 12.5 Verify (`--verify` flag)
-The `--verify` flag can be appended to any execute-mode operation. After writing changes, newtron reconnects (fresh CONFIG_DB read) and runs `VerifyChangeSet` against the ChangeSet that was just applied:
+### 12.5 Verification via ChangeSet
 
-```
-newtron leaf1 service apply Ethernet2 customer-l3 --ip 10.1.1.1/30 -x --verify
-newtron provision -S specs/ -d leaf1 -x --verify
-```
+`ChangeSet.Verify(n)` is available programmatically: it re-reads CONFIG_DB through a fresh client and confirms every entry was applied. The standard CLI flow does **not** call Verify automatically — it relies on `Apply` success. Verification is primarily used by newtest for automated testing.
 
-Standalone verification against an already-provisioned device:
-
-```
-newtron verify -S specs/ -d leaf1
+```go
+cs.Apply(n)   // writes to CONFIG_DB
+cs.Verify(n)  // re-reads and confirms (used by newtest, not CLI)
 ```
 
-The standalone `verify` command loads the topology spec, rebuilds the expected CompositeConfig for the device, connects, and diffs against the live CONFIG_DB.
-
-| Mode | Online? | Device Required? | What It Checks |
-|------|---------|-----------------|----------------|
-| `--verify` (with `-x`) | Yes | Yes (re-reads CONFIG_DB) | ChangeSet entries landed |
-| `verify` (standalone) | Yes | Yes (reads CONFIG_DB) | Full device state matches topology spec |
+For topology-level verification (cross-device correctness), use newtest suites which assert on both CONFIG_DB entries and APP_DB/ASIC_DB convergence across multiple devices.
 
 ## 13. Verification Strategy
 
@@ -1907,7 +1896,7 @@ The system maintains this separation to enable:
 | Term | Definition |
 |------|------------|
 | **Network** | Top-level object representing the entire network. Owns all specs and provides access to devices. |
-| **Device** | A specific switch instance with its own IP, site membership, and profile. Represents a physical or virtual SONiC switch. |
+| **Device** | A specific switch instance with its own IP, zone membership, and profile. Represents a physical or virtual SONiC switch. |
 | **Platform** | Hardware type definition (HWSKU, port count, speeds). Describes what kind of switch hardware is supported. |
 | **Interface** | A logical network endpoint on a device (physical Ethernet, LAG, VLAN, loopback). Services are applied to interfaces. |
 
@@ -1918,7 +1907,7 @@ The system maintains this separation to enable:
 | `NetworkSpecFile` | `network.json` | Global network settings: services, filters, VPNs, zones, prefix lists |
 | `PlatformSpecFile` | `platforms.json` | Hardware definitions: HWSKU, port counts, breakout modes |
 | `TopologySpecFile` | `topology.json` | (optional) Devices, interfaces, service bindings, links |
-| `DeviceProfile` | `profiles/{name}.json` | Per-device settings: IPs, site membership, SSH credentials, overrides |
+| `DeviceProfile` | `profiles/{name}.json` | Per-device settings: IPs, zone membership, SSH credentials, overrides |
 | `ResolvedProfile` | (runtime) | Fully resolved device values after inheritance |
 
 ### Service Types
@@ -1979,7 +1968,7 @@ The system maintains this separation to enable:
 |------|------------|
 | **Noun-Group CLI** | CLI pattern `newtron <device> <noun> <action> [args] [-x]`. All commands are organized by resource noun (vlan, vrf, bgp, etc.). |
 | **Implicit Device** | The first argument is treated as a device name if it does not match a known command. Equivalent to `-d <device>`. |
-| **withDeviceWrite** | CLI helper that encapsulates connect → lock → execute → print changeset → apply/dry-run → unlock → disconnect for all device-level write commands. |
+| **withDeviceWrite** | CLI helper that encapsulates connect → lock → execute → print changeset → apply/verify/save or dry-run → unlock → disconnect for all device-level write commands. |
 | **Spec Authoring** | CLI-authored definitions (IP-VPN, MAC-VPN, QoS, filter, service) that persist to network.json via atomic write (temp file + rename). No device connection required. |
 | **Per-Noun Status** | Each resource noun owns its `status` subcommand combining CONFIG_DB config with operational state from STATE_DB. Replaces the old `state` command. |
 | **Filter vs ACL** | A filter is a spec-level template in network.json (reusable across devices); an ACL is a device-level CONFIG_DB instance. `service apply` instantiates filters as ACLs. |
@@ -1990,7 +1979,7 @@ The system maintains this separation to enable:
 |------|------------|
 | **Dry-Run** | Preview mode (default). Shows what would change without applying. |
 | **Execute (`-x`)** | Apply mode. Actually writes changes to device config_db. |
-| **Save (`-s`)** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json` after execute. Requires `-x`. |
+| **Save (default)** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json` after execute. Use `--no-save` to skip. |
 | **ChangeSet** | Collection of pending changes to be previewed or applied. Also serves as the verification contract — `cs.Verify(n)` diffs the ChangeSet against live CONFIG_DB. |
 | **ChangeSet.Verify(n \*Node)** | Re-reads CONFIG_DB through a fresh connection and confirms every entry in the ChangeSet was applied correctly. The only assertion newtron makes. |
 | **GetRoute** | Reads a route from APP_DB (DB 0) and returns structured data (prefix, protocol, next-hops). Observation primitive — returns data, not a verdict. |

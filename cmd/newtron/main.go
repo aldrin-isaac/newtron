@@ -298,13 +298,41 @@ func printDryRunNotice() {
 	}
 }
 
-// executeAndSave applies a changeset and optionally saves the config.
-// This is the standard post-apply flow for all CLI write commands.
+// executeAndSave applies a changeset, verifies writes landed, and optionally
+// saves the config. If verification fails, config is NOT saved so that
+// 'config reload' can restore the last known-good state.
 func executeAndSave(ctx context.Context, cs *node.ChangeSet, dev *node.Node) error {
 	if err := cs.Apply(dev); err != nil {
 		return fmt.Errorf("execution failed: %w", err)
 	}
 	fmt.Println("\n" + green("Changes applied successfully."))
+
+	fmt.Print("Verifying... ")
+	if err := cs.Verify(dev); err != nil {
+		fmt.Printf("%s: %v\n", yellow("WARN"), err)
+		fmt.Println(yellow("Could not verify changes. Config NOT saved as a precaution."))
+		fmt.Println("Run 'config reload' to restore last saved state, or retry the operation.")
+		return fmt.Errorf("verification failed: %w", err)
+	}
+
+	v := cs.Verification
+	total := v.Passed + v.Failed
+	if v.Failed > 0 {
+		fmt.Printf("%s (%d/%d entries verified, %d failed)\n", red("FAILED"), v.Passed, total, v.Failed)
+		for _, e := range v.Errors {
+			if e.Actual == "" {
+				fmt.Printf("  [MISSING] %s|%s  (field: %s, expected: %q)\n",
+					e.Table, e.Key, e.Field, e.Expected)
+			} else {
+				fmt.Printf("  [MISMATCH] %s|%s  (field: %s, expected: %q, actual: %q)\n",
+					e.Table, e.Key, e.Field, e.Expected, e.Actual)
+			}
+		}
+		fmt.Println(yellow("\nConfig NOT saved. Run 'config reload' to restore last saved state, or retry."))
+		return fmt.Errorf("verification failed: %d/%d entries did not persist", v.Failed, total)
+	}
+
+	fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
 
 	if !app.noSave {
 		fmt.Print("Saving configuration... ")

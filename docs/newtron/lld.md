@@ -52,11 +52,13 @@ newtron/
 │       │       ├── composite.go         # CompositeBuilder, CompositeConfig, CompositeMode types
 │       │       ├── acl_ops.go           # ACL operations (CreateACL, AddACLRule, BindACL)
 │       │       ├── baseline_ops.go      # Loopback operations (ConfigureLoopback, RemoveLoopback)
+│       │       ├── bgp_ops.go           # BGP operations (ConfigureBGP, BGP globals/AF)
+│       │       ├── cleanup_ops.go       # Orphan cleanup (ACLs, VRFs, VNIs)
 │       │       ├── evpn_ops.go          # EVPN operations (SetupEVPN, BindIPVPN, BindMACVPN)
 │       │       ├── health_ops.go        # Health check operations (RunHealthChecks)
 │       │       ├── interface_bgp_ops.go # Interface BGP operations (AddBGPNeighbor)
-│       │       ├── interface_member_ops.go # Interface membership operations (AddToLAG, AddToVLAN)
 │       │       ├── interface_ops.go     # Interface operations (SetAdminStatus, SetIP)
+│       │       ├── macvpn_ops.go        # MAC-VPN operations (BindMACVPN, UnbindMACVPN)
 │       │       ├── portchannel_ops.go   # PortChannel operations (CreateLAG, DeleteLAG)
 │       │       ├── qos.go               # QoS CONFIG_DB entry generation
 │       │       ├── qos_ops.go           # QoS operations (ApplyQoS, RemoveQoS)
@@ -72,12 +74,12 @@ newtron/
 │       │       ├── types.go             # Entry, SSHTunnel, ConfigChange, RouteEntry, VerificationResult, etc.
 │       │       ├── device.go            # Device struct, Connect, Disconnect, Lock
 │       │       ├── configdb.go          # CONFIG_DB (DB 4) mapping + client
+│       │       ├── configdb_parsers.go  # Table-driven parsers for CONFIG_DB entries
 │       │       ├── statedb.go           # STATE_DB (DB 6) mapping + client
+│       │       ├── statedb_parsers.go   # Table-driven parsers for STATE_DB entries
 │       │       ├── appldb.go            # APP_DB (DB 0) mapping + client
 │       │       ├── asicdb.go            # ASIC_DB (DB 1) mapping + client
-│       │       ├── state.go             # State loading from config_db
-│       │       ├── pipeline.go          # Redis MULTI/EXEC pipeline client
-│       │       └── platform.go          # SonicPlatformConfig, port validation
+│       │       └── pipeline.go          # Redis MULTI/EXEC pipeline client
 │   ├── audit/                       # Audit logging
 │   │   ├── event.go                 # Event types (uses node.Change, alias for sonic.ConfigChange)
 │   │   └── logger.go                # Logger implementation
@@ -85,7 +87,7 @@ newtron/
 │   │   ├── permission.go            # Permission definitions
 │   │   └── checker.go               # Permission checking
 │   ├── settings/                    # CLI user settings persistence
-│   │   └── settings.go              # DefaultNetwork, DefaultDevice, SpecDir
+│   │   └── settings.go              # DefaultNetwork, SpecDir, audit config
 │   └── util/                        # Utilities
 │       ├── derive.go                # Value derivation
 │       ├── errors.go                # Custom error types
@@ -98,25 +100,15 @@ newtron/
 └── docs/                            # Documentation
 ```
 
-**Additional files:**
+**Additional files not shown in the tree:**
 
 | File | Purpose |
 |------|---------|
-| `pkg/newtron/device/sonic/statedb.go` | STATE_DB (Redis DB 6) operational state access |
-
-**Platform and pipeline files:**
-
-| File | Purpose |
-|------|---------|
-| `pkg/newtron/device/sonic/platform.go` | SonicPlatformConfig struct, platform.json parsing via SSH, port validation |
-| `pkg/newtron/device/sonic/pipeline.go` | Redis MULTI/EXEC pipeline client for atomic batch writes (PipelineSet, ReplaceAll) |
+| `pkg/newtron/network/node/bgp_ops.go` | BGP global configuration (ConfigureBGP, BGP globals/AF) |
+| `pkg/newtron/network/node/cleanup_ops.go` | Orphan cleanup (ACLs, VRFs, VNIs) |
+| `pkg/newtron/network/node/macvpn_ops.go` | MAC-VPN operations (BindMACVPN, UnbindMACVPN) |
 | `pkg/newtron/network/node/composite.go` | CompositeBuilder, CompositeConfig, CompositeMode types; offline composite CONFIG_DB generation and delivery |
-
-**Topology files:**
-
-| File | Purpose |
-|------|---------|
-| `pkg/newtron/network/topology.go` | TopologyProvisioner, ProvisionDevice, ProvisionInterface, generateServiceEntries |
+| `pkg/newtron/network/topology.go` | TopologyProvisioner, ProvisionDevice, ProvisionInterface |
 | `pkg/newtron/network/node/qos.go` | generateQoSDeviceEntries, generateQoSInterfaceEntries, resolveServiceQoSPolicy |
 
 ## 3. Core Data Structures
@@ -151,30 +143,30 @@ type NetworkSpecFile struct {
 
 // IPVPNSpec defines IP-VPN parameters for L3 routing (Type-5 routes).
 // Referenced by services via the "ipvpn" field.
-//
-// For vrf_type "shared": VRF name = {serviceName}
-// For vrf_type "interface": VRF name = {serviceName}-{shortenedIntf}
 type IPVPNSpec struct {
-    Description string   `json:"description,omitempty"`
-    L3VNI       int      `json:"l3_vni"`
-    ImportRT    []string `json:"import_rt"`
-    ExportRT    []string `json:"export_rt"`
+    Description  string   `json:"description,omitempty"`
+    VRF          string   `json:"vrf"`
+    L3VNI        int      `json:"l3vni"`
+    L3VNIVlan    int      `json:"l3vni_vlan,omitempty"` // Dedicated transit VLAN for L3VNI decap
+    RouteTargets []string `json:"route_targets"`
 }
 
-// MACVPNSpec defines MAC-VPN parameters for L2 bridging (Type-2 routes).
+// MACVPNSpec defines MAC-VPN parameters for L2 bridging (EVPN Type-2 routes).
 // Referenced by services via the "macvpn" field.
-// Note: VLAN ID moved to ServiceSpec in V2 (MAC-VPN is a VPN definition,
-// not a bridge domain; the local VLAN is a per-service property).
+// VlanID is the local bridge domain ID, identical on all devices.
 type MACVPNSpec struct {
-    Description    string `json:"description,omitempty"`
-    L2VNI          int    `json:"l2_vni"`
-    ARPSuppression bool   `json:"arp_suppression,omitempty"`
+    Description    string   `json:"description,omitempty"`
+    VlanID         int      `json:"vlan_id"`
+    VNI            int      `json:"vni"`
+    AnycastIP      string   `json:"anycast_ip,omitempty"`
+    AnycastMAC     string   `json:"anycast_mac,omitempty"`
+    RouteTargets   []string `json:"route_targets,omitempty"`
+    ARPSuppression bool     `json:"arp_suppression,omitempty"`
 }
 
-// ZoneSpec - Zone network settings
+// ZoneSpec - Zone network settings (embeds OverridableSpecs for zone-level overrides)
 type ZoneSpec struct {
-    ASNumber     int                 `json:"as_number"`
-    PrefixLists  map[string][]string `json:"prefix_lists,omitempty"`
+    OverridableSpecs // Embedded — zone-level overrides
 }
 
 // ServiceSpec defines an interface service type.
@@ -193,22 +185,15 @@ type ZoneSpec struct {
 //   - (omitted):   No VRF, uses global routing table (for l3 without EVPN)
 type ServiceSpec struct {
     Description string `json:"description"`
-    ServiceType string `json:"service_type"` // l2, l3, irb
+    ServiceType string `json:"service_type"` // evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed
 
     // VPN references (names from ipvpn/macvpn sections)
     IPVPN   string `json:"ipvpn,omitempty"`
     MACVPN  string `json:"macvpn,omitempty"`
     VRFType string `json:"vrf_type,omitempty"` // "interface" or "shared"
 
-    // VLAN ID for L2/IRB services (local bridge domain)
-    VLAN int `json:"vlan,omitempty"`
-
     // Routing protocol specification
     Routing *RoutingSpec `json:"routing,omitempty"`
-
-    // Anycast gateway (for IRB services)
-    AnycastGateway string `json:"anycast_gateway,omitempty"` // e.g., "10.1.100.1/24"
-    AnycastMAC     string `json:"anycast_mac,omitempty"`     // e.g., "00:00:00:01:02:03"
 
     // Filters (references to filters)
     IngressFilter string `json:"ingress_filter,omitempty"`
@@ -216,7 +201,7 @@ type ServiceSpec struct {
 
     // QoS
     QoSPolicy  string `json:"qos_policy,omitempty"`
-    QoSProfile string `json:"qos_profile,omitempty"` // Legacy
+    QoSProfile string `json:"qos_profile,omitempty"` // Legacy — kept for backward compat
 
     // Permissions (override global permissions for this service)
     Permissions map[string][]string `json:"permissions,omitempty"`
@@ -225,7 +210,7 @@ type ServiceSpec struct {
 // RoutingSpec defines routing protocol specification for a service.
 //
 // For BGP services:
-//   - Local AS is always from device profile (ResolvedProfile.ASNumber)
+//   - Local AS is always from device profile (ResolvedProfile.UnderlayASN)
 //   - Peer AS can be fixed (number), or "request" (provided at apply time)
 //   - Peer IP is derived from interface IP for point-to-point links
 type RoutingSpec struct {
@@ -361,22 +346,28 @@ type ResolvedProfile struct {
     Platform   string
 
     // Resolved from inheritance
-    ASNumber         int
     IsRouteReflector bool
-    ClusterID        string // BGP RR cluster-id (from profile.EVPN.ClusterID, defaults to loopback)
+    ClusterID        string // RR cluster ID; from profile EVPN config or defaults to loopback IP
 
     // Derived at runtime
-    RouterID     string   // = LoopbackIP
-    VTEPSourceIP string   // = LoopbackIP
-    BGPNeighbors []string // From profile EVPN peers -> lookup loopback IPs
+    RouterID        string            // = LoopbackIP
+    VTEPSourceIP    string            // = LoopbackIP
+    BGPNeighbors    []string          // From profile EVPN peers → lookup loopback IPs
+    BGPNeighborASNs map[string]int    // peer loopback IP → peer UnderlayASN (for eBGP overlay)
 
-    // Merged maps (profile > zone > global)
-    PrefixLists map[string][]string
+    // From profile (optional)
+    MAC string
 
-    // SSH access for Redis tunnel
+    // SSH access (for Redis tunnel)
     SSHUser string
     SSHPass string
-    SSHPort int // Custom SSH port (0 = default 22)
+    SSHPort int // 0 means default (22)
+
+    // newtlab runtime (written by newtlab, read by newtron)
+    ConsolePort int
+
+    // BGP AS number (required in all-eBGP design)
+    UnderlayASN int
 }
 
 ### OverridableSpecs
@@ -551,15 +542,17 @@ type Network struct {
 // GetIPVPN(), GetMACVPN(), etc.
 type Node struct {
     SpecProvider                     // Embedded interface — n.GetService() works directly
-    name       string
-    profile    *spec.DeviceProfile
-    resolved   *spec.ResolvedProfile  // Resolved from inheritance
-    interfaces map[string]*Interface  // Child objects
-    conn       *sonic.Device          // Low-level device connection
-    configDB   *sonic.ConfigDB        // Cached config_db snapshot
-    connected  bool
-    locked     bool
-    mu         sync.RWMutex
+    name        string
+    profile     *spec.DeviceProfile
+    resolved    *spec.ResolvedProfile  // Resolved from inheritance
+    interfaces  map[string]*Interface  // Child objects
+    conn        *sonic.Device          // Low-level device connection
+    configDB    *sonic.ConfigDB        // Cached config_db snapshot
+    connected   bool
+    locked      bool
+    offline     bool                   // Abstract mode (no device connection)
+    accumulated []sonic.Entry          // Entries accumulated in abstract mode
+    mu          sync.RWMutex
 }
 
 // SpecProvider is the interface Node uses to access Network-level specs.
@@ -596,8 +589,8 @@ func (n *Node) IsConnected() bool
 // Name returns the device name.
 func (n *Node) Name() string { return n.name }
 
-// ASNumber returns the device's AS number from the resolved profile.
-func (n *Node) ASNumber() int { return n.resolved.ASNumber }
+// ASNumber returns the device's underlay AS number from the resolved profile.
+func (n *Node) ASNumber() int { return n.resolved.UnderlayASN }
 
 // GetInterface returns an Interface by name from the node's interface map.
 // Returns error if the interface name is not in the topology or CONFIG_DB.
@@ -860,7 +853,7 @@ type Device struct {
 | `Disconnect()` | `mu.Lock()` | `connected`, `tunnel`, all client fields |
 | `Lock()` / `Unlock()` | `mu.Lock()` | `locked` |
 
-`Name`, `Profile` are set once at construction and never mutated — safe to read without lock. `ConfigDB` and `StateDB` snapshots are replaced (not mutated in place), so readers must hold `mu.RLock()` or coordinate with the caller. In practice, newtron operations are single-threaded per device (Lock→Apply→Verify→Unlock), so the mutex primarily guards against concurrent Connect/Disconnect.
+`Name`, `Profile` are set once at construction and never mutated — safe to read without lock. `ConfigDB` and `StateDB` snapshots are replaced (not mutated in place), so readers must hold `mu.RLock()` or coordinate with the caller. In practice, newtron operations are single-threaded per device (Lock→Apply→Unlock), so the mutex primarily guards against concurrent Connect/Disconnect.
 
 ```go
 // Lock acquires a distributed lock on this device by writing a NEWTRON_LOCK
@@ -1043,15 +1036,19 @@ type BGPNeighborAFEntry struct {
 // This provides explicit tracking of what service was applied, enabling
 // proper removal and refresh without relying on naming conventions.
 type ServiceBindingEntry struct {
-    ServiceName string `json:"service_name"`
-    IPAddress   string `json:"ip_address,omitempty"`
-    VRFName     string `json:"vrf_name,omitempty"`
-    IPVPN       string `json:"ipvpn,omitempty"`
-    MACVPN      string `json:"macvpn,omitempty"`
-    IngressACL  string `json:"ingress_acl,omitempty"`
-    EgressACL   string `json:"egress_acl,omitempty"`
-    AppliedAt   string `json:"applied_at,omitempty"`
-    AppliedBy   string `json:"applied_by,omitempty"`
+    ServiceName     string `json:"service_name"`
+    IPAddress       string `json:"ip_address,omitempty"`
+    VRFName         string `json:"vrf_name,omitempty"`
+    IPVPN           string `json:"ipvpn,omitempty"`
+    MACVPN          string `json:"macvpn,omitempty"`
+    IngressACL      string `json:"ingress_acl,omitempty"`
+    EgressACL       string `json:"egress_acl,omitempty"`
+    BGPNeighbor     string `json:"bgp_neighbor,omitempty"`      // BGP peer IP created by service
+    QoSPolicy       string `json:"qos_policy,omitempty"`        // QoS policy name (for device-wide cleanup)
+    VlanId          string `json:"vlan_id,omitempty"`           // VLAN ID used (for cleanup without macvpn)
+    RedistributeVRF string `json:"redistribute_vrf,omitempty"`  // VRF where redistribution was overridden
+    AppliedAt       string `json:"applied_at,omitempty"`
+    AppliedBy       string `json:"applied_by,omitempty"`
 }
 
 // SchedulerEntry represents a QoS scheduler
@@ -1351,13 +1348,12 @@ func (c *ConfigDBClient) Close() error
 // GetAll reads the entire CONFIG_DB into a typed ConfigDB struct.
 //
 // Algorithm:
-//   1. KEYS * in DB 4 (acceptable for lab tool; SCAN would be premature)
+//   1. Cursor-based SCAN * in DB 4 (non-blocking, unlike KEYS *)
 //   2. For each key, split on first "|" → table name + entry key
 //   3. HGETALL per key → field map
-//   4. Switch on table name to dispatch into the corresponding typed
-//      map in ConfigDB (e.g., "PORT" → configDB.Port[key] = PortEntry{...})
-//   5. Unknown tables are stored in configDB.Extra[table][key]
-//   6. Return the populated ConfigDB
+//   4. Dispatch into table-driven parsers (configdb_parsers.go) which populate
+//      the corresponding typed map in ConfigDB (e.g., "PORT" → configDB.Port[key] = PortEntry{...})
+//   5. Return the populated ConfigDB
 func (c *ConfigDBClient) GetAll() (*ConfigDB, error)
 func (c *ConfigDBClient) Get(table, key string) (map[string]string, error)
 func (c *ConfigDBClient) Exists(table, key string) (bool, error)
@@ -1393,31 +1389,26 @@ type Entry struct {
     Fields map[string]string
 }
 
-// TableKey identifies a table entry for deletion
-type TableKey struct {
-    Table string
-    Key   string
-}
+// PipelineSet writes multiple entries atomically via Redis MULTI/EXEC pipeline.
+// Each Entry with non-nil Fields is written as HSET; nil Fields means DEL.
+// Empty Fields (len 0) writes the NULL:NULL sentinel (SONiC convention).
+func (c *ConfigDBClient) PipelineSet(changes []Entry) error
 
-// PipelineSet writes and deletes multiple entries atomically via Redis MULTI/EXEC pipeline.
-// sets are applied as HSET commands; dels are applied as DEL commands.
-// Used by composite delivery and ChangeSet.Apply for atomic multi-entry writes.
-func (c *ConfigDBClient) PipelineSet(sets []Entry, dels []TableKey) error
-
-// ReplaceAll flushes CONFIG_DB and writes the entire config atomically.
-// Used by composite overwrite mode.
+// ReplaceAll merges composite entries on top of existing CONFIG_DB, removing
+// only stale keys not present in the composite. Factory defaults (mac, platform,
+// hwsku from init_cfg.json; FEATURE, CRM, FLEX_COUNTER_TABLE, etc.) are preserved
+// because we never delete keys that appear in our composite — HSet merges our
+// fields on top of any surviving factory fields.
+//
+// Platform-managed tables (PORT) are merge-only — their keys are never deleted
+// even if absent from the composite, since port config comes from port_config.ini.
 //
 // Algorithm:
-//   1. MULTI
-//   2. FLUSHDB — clear all existing CONFIG_DB entries
-//   3. Iterate ConfigDB struct fields via reflection on json tags:
-//      for each non-nil map field (e.g., Port, VLAN, VRF, BGPNeighbor...),
-//      for each entry in the map, HSET "TABLE|key" with field values
-//   4. EXEC — atomic commit of flush + all writes
-//
-// The entire operation is a single MULTI/EXEC transaction, so CONFIG_DB
-// is never in a partially-written state.
-func (c *ConfigDBClient) ReplaceAll(config *ConfigDB) error
+//   1. Collect tables being replaced (excluding platform-managed merge-only tables)
+//   2. For each affected table, KEYS <table>|* to find existing keys
+//   3. Delete only stale keys (present in DB but absent from composite) via pipeline
+//   4. Write all composite entries via PipelineSet (HSet merges fields)
+func (c *ConfigDBClient) ReplaceAll(changes []Entry) error
 ```
 
 ### 3.6 ChangeSet Types (`pkg/newtron/network/node/changeset.go`)
@@ -1449,36 +1440,40 @@ type ChangeSet struct {
 }
 
 func NewChangeSet(device, operation string) *ChangeSet
-func (cs *ChangeSet) Add(table, key string, changeType ChangeType, fields map[string]string)
+
+// Typed add methods — one per change type:
+func (cs *ChangeSet) Add(table, key string, fields map[string]string)     // ChangeAdd
+func (cs *ChangeSet) Update(table, key string, fields map[string]string)  // ChangeModify
+func (cs *ChangeSet) Delete(table, key string)                            // ChangeDelete
+
+// Batch bridges for config function output ([]sonic.Entry):
+func (cs *ChangeSet) Adds(entries []sonic.Entry)                          // batch ChangeAdd
+func (cs *ChangeSet) Updates(entries []sonic.Entry)                       // batch ChangeModify
+func (cs *ChangeSet) Deletes(entries []sonic.Entry)                       // batch ChangeDelete
+
+func (cs *ChangeSet) Merge(other *ChangeSet)                              // append other's changes
 func (cs *ChangeSet) IsEmpty() bool
-func (cs *ChangeSet) String() string // human-readable diff format: "+ TABLE|key field=value" / "- TABLE|key" / "~ TABLE|key field: old→new"
+func (cs *ChangeSet) Preview() string // human-readable diff format: "+ TABLE|key field=value" / "- TABLE|key" / "~ TABLE|key field: old→new"
 
 // Apply writes all changes in the ChangeSet to CONFIG_DB sequentially.
 // Each change is written individually via ConfigDBClient.Set/Delete.
 //
 // Partial failure: If a write fails at index N, Apply sets cs.AppliedCount = N
 // (changes 0..N-1 succeeded) and returns the error. Changes already written
-// are NOT rolled back — the caller can use cs.AppliedCount to determine which
-// changes succeeded and call cs.Rollback() if needed.
+// are NOT rolled back.
 //
 // On full success, cs.AppliedCount = len(cs.Changes).
 func (cs *ChangeSet) Apply(n *Node) error
 
-// Rollback applies the inverse of each applied change in reverse order
-// (changes 0..AppliedCount-1):
-//   - ChangeAdd → delete the table/key
-//   - ChangeModify → not invertible (no old state stored)
-//   - ChangeDelete → not invertible (no old state stored)
-//
-// Rollback is best-effort: it attempts ALL inverse operations, collecting
-// errors into a combined errors.Join() error. It does not stop on first
-// failure. The caller should verify device state after rollback.
-func (cs *ChangeSet) Rollback(n *Node) error
+// Verify re-reads CONFIG_DB through a fresh client and confirms every entry
+// in the ChangeSet was applied correctly. Not called by the standard CLI flow,
+// but available for programmatic verification (e.g., newtest).
+func (cs *ChangeSet) Verify(n *Node) error
 
-// configToChangeSet wraps config function output into a ChangeSet.
+// buildChangeSet wraps config function output into a ChangeSet.
 // Bridges pure config functions (return []sonic.Entry) with the ChangeSet
 // world used by primitives and composites.
-func configToChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet
+func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeType sonic.ChangeType) *ChangeSet
 
 // op is a generic helper for simple CRUD operations. It runs precondition
 // checks, calls the entry generator, and wraps the result in a ChangeSet.
@@ -1602,21 +1597,24 @@ type CompositeConfig struct {
     Metadata CompositeMetadata                       `json:"metadata"`
 }
 
-// CompositeMetadata holds provenance information for a composite config
+// CompositeMetadata contains provenance information for a composite config.
 type CompositeMetadata struct {
-    Timestamp string        `json:"timestamp"`
-    Network   string        `json:"network"`
-    Device    string        `json:"device"`
-    Mode      CompositeMode `json:"mode"`
-    Version   string        `json:"version"`
+    Timestamp   time.Time     `json:"timestamp"`
+    NetworkName string        `json:"network_name,omitempty"`
+    DeviceName  string        `json:"device_name,omitempty"`
+    Mode        CompositeMode `json:"mode"`
+    GeneratedBy string        `json:"generated_by,omitempty"`
+    Description string        `json:"description,omitempty"`
 }
 
-// CompositeBuilder constructs composite configs offline
+// CompositeBuilder constructs composite configs offline using a builder pattern.
+// All Add* methods accumulate entries without requiring a device connection.
 type CompositeBuilder struct {
-    config *CompositeConfig
+    tables   map[string]map[string]map[string]string
+    metadata CompositeMetadata
 }
 
-func NewCompositeBuilder(network, device string, mode CompositeMode) *CompositeBuilder
+func NewCompositeBuilder(deviceName string, mode CompositeMode) *CompositeBuilder
 
 // AddEntries accepts output from config functions ([]sonic.Entry) — the primary way
 // to add entries. Callers call config functions from owning *_ops.go files and pass
@@ -1624,20 +1622,19 @@ func NewCompositeBuilder(network, device string, mode CompositeMode) *CompositeB
 // functions are the API.
 func (cb *CompositeBuilder) AddEntries(entries []sonic.Entry) *CompositeBuilder
 func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string) *CompositeBuilder
+func (cb *CompositeBuilder) SetDescription(desc string) *CompositeBuilder
+func (cb *CompositeBuilder) SetGeneratedBy(by string) *CompositeBuilder
 func (cb *CompositeBuilder) Build() *CompositeConfig
 
-// CompositeDeliveryResult reports the outcome of composite delivery
+// CompositeDeliveryResult reports the outcome of delivering a composite config.
 type CompositeDeliveryResult struct {
-    Applied  int        `json:"applied"`           // entries successfully written
-    Skipped  int        `json:"skipped"`           // entries skipped (merge conflict)
-    Failed   int        `json:"failed"`            // entries that failed to write
-    Error    error      `json:"error,omitempty"`
-    ChangeSet *ChangeSet `json:"changeset,omitempty"` // generated ChangeSet for verification
+    Applied int           `json:"applied"` // entries successfully written
+    Skipped int           `json:"skipped"` // entries skipped (already exist in merge)
+    Failed  int           `json:"failed"`  // entries that failed to write
+    Error   error         `json:"error,omitempty"`
+    Mode    CompositeMode `json:"mode"`
 }
 
-// ApplyServiceOpts holds the parameters for applying a service within
-// a composite context. Used by CompositeBuilder.AddService().
-//
 // ApplyServiceOpts holds parameters for applying a service to an interface.
 // Used by both Interface.ApplyService() and CompositeBuilder.AddService().
 //
@@ -1645,8 +1642,10 @@ type CompositeDeliveryResult struct {
 // via cs.Apply(). CompositeBuilder operates offline, collecting entries into a
 // CompositeConfig without connecting to a device. Both use the same opts struct.
 type ApplyServiceOpts struct {
-    IPAddr string // IP address (CIDR) to assign, e.g. "10.1.1.1/30"
-    PeerAS int    // Peer AS number (for BGP services with peer_as="request")
+    IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30")
+    VLAN      int               // VLAN ID for local types (irb, bridged) — overlay types use macvpnDef.VlanID
+    PeerAS    int               // BGP peer AS number (for services with routing.peer_as="request")
+    Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 }
 ```
 
@@ -1673,16 +1672,18 @@ Operations are methods on the objects they operate on. This follows true OO desi
 
 ### Execution Model
 
-All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(n)` to execute. Lock acquisition, verification, and unlock are the caller's responsibility.
+All operations that return `*ChangeSet` compute the changes without writing. The caller previews the ChangeSet, then calls `cs.Apply(n)` to execute. Lock acquisition and unlock are the caller's responsibility.
 
-**Caller execution pattern:**
+**CLI execution pattern (via `withDeviceWrite` helper):**
 
 ```
-Lock → cs.Apply(n) → cs.Verify(n) → Unlock → return
+Lock (+ CONFIG_DB refresh) → fn() returns ChangeSet → preview → if -x: Apply → Verify → optional SaveConfig → Unlock
 ```
+
+The CLI calls `cs.Verify()` after every `Apply`. Verify opens a **fresh** Redis connection (independent of the write connection), re-reads every entry in the ChangeSet, and compares field-by-field. If verification fails (entries missing or mismatched), config is **not** saved — the operator is told to `config reload` to restore the last known-good state. This catches transient write failures (SSH tunnel instability, connection drops) that `Apply`'s per-entry error checking cannot detect.
 
 The lock is scoped to a single operation — not held across multiple operations or for the duration of a session. This ensures:
-1. Minimal lock hold time — only during the critical mutation + verification window
+1. Minimal lock hold time — only during the critical mutation window
 2. No stale locks from long-running sessions
 3. Clear failure semantics — if lock acquisition fails, the operation fails immediately
 
@@ -1695,13 +1696,15 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     return cs, nil
 }
 
-// Caller applies the ChangeSet:
+// CLI caller pattern (withDeviceWrite):
+//   dev.Lock()           // acquires distributed lock + refreshes CONFIG_DB
 //   cs, err := intf.ApplyService(ctx, "customer-l3", opts)
-//   // preview cs.String() ...
-//   n.Lock()
-//   cs.Apply(n)
-//   cs.Verify(n)
-//   n.Unlock()
+//   fmt.Print(cs.Preview())
+//   if executeMode {
+//       cs.Apply(dev)    // writes to CONFIG_DB
+//       dev.SaveConfig() // unless --no-save
+//   }
+//   dev.Unlock()
 ```
 
 **Disconnect safety net:** `Node.Disconnect()` releases the lock if still held (e.g., after a panic during operation execution). This is a safety measure — normal operation always releases the lock within the operation method.
@@ -1729,112 +1732,54 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error)
 ```
 
 **RemoveService pseudocode** — reverse of ApplyService, using DependencyChecker
-(§5.5) to avoid deleting shared resources still referenced by other interfaces:
+to avoid deleting shared resources still referenced by other interfaces:
 
 ```go
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
-    n := i.Node()
-    if !n.IsConnected() {
-        return nil, util.ErrNotConnected
-    }
+    n := i.node
+    // ... precondition checks ...
 
-    binding, ok := n.ConfigDB().NewtronServiceBinding[i.name]
-    if !ok {
-        return nil, fmt.Errorf("no service bound to %s", i.name)
-    }
-
-    svc, err := i.Node().GetService(binding.ServiceName)
-    if err != nil {
-        return nil, fmt.Errorf("service spec %q: %w", binding.ServiceName, err)
-    }
+    binding := i.binding() // reads NEWTRON_SERVICE_BINDING
+    svc, _ := n.GetService(binding.ServiceName)
 
     cs := NewChangeSet(n.Name(), "interface.remove-service")
     dc := NewDependencyChecker(n, i.name)
 
     // 1. Remove service binding (always safe — owned by this interface)
-    cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeDelete,
-        map[string]string{"service": binding.ServiceName}, nil)
+    cs.Delete("NEWTRON_SERVICE_BINDING", i.name)
 
     // 2. Remove IP binding entries (INTERFACE|<name>|<ip>)
     for key := range n.ConfigDB().Interface {
         if strings.HasPrefix(key, i.name+"|") {
-            cs.Add("INTERFACE", key, ChangeDelete, nil, nil)
+            cs.Delete("INTERFACE", key)
         }
     }
 
     // 3. Remove BGP neighbors for this interface
-    neighborIP, _ := util.DeriveNeighborIP(i.IPAddress())
-    if neighborIP != "" {
-        vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
-        bgpKey := fmt.Sprintf("%s|%s", vrfName, neighborIP)
-        // Delete BGP_NEIGHBOR_AF entries first (child before parent)
-        for afKey := range n.ConfigDB().BGPNeighborAF {
-            if strings.HasPrefix(afKey, bgpKey+"|") {
-                cs.Add("BGP_NEIGHBOR_AF", afKey, ChangeDelete, nil, nil)
-            }
-        }
-        if dc.CanDeleteBGPNeighbor(bgpKey) {
-            cs.Add("BGP_NEIGHBOR", bgpKey, ChangeDelete, nil, nil)
-        }
-    }
+    //    Delete BGP_NEIGHBOR_AF entries first (child before parent)
+    //    DependencyChecker guards shared neighbors
 
     // 4. Remove ACLs if no other interfaces reference them
-    aclInName := util.DeriveACLName(binding.ServiceName, "in")
-    aclOutName := util.DeriveACLName(binding.ServiceName, "out")
-    for _, aclName := range []string{aclInName, aclOutName} {
-        if dc.CanDeleteACL(aclName, i.name) {
-            // No other interfaces reference this ACL — delete rules then table
-            for ruleKey := range n.ConfigDB().ACLRule {
-                if strings.HasPrefix(ruleKey, aclName+"|") {
-                    cs.Add("ACL_RULE", ruleKey, ChangeDelete, nil, nil)
-                }
-            }
-            cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
-        } else {
-            // Other interfaces still reference this ACL — just remove this interface from binding list
-            existing := n.ConfigDB().ACLTable[aclName]
-            ports := strings.Split(existing.Ports, ",")
-            filtered := removeFromSlice(ports, i.name)
-            cs.Add("ACL_TABLE", aclName, ChangeModify,
-                map[string]string{"ports": existing.Ports},
-                map[string]string{"ports": strings.Join(filtered, ",")})
-        }
-    }
+    //    dc.CanDeleteACL() → full delete (rules + table) vs port-list unbinding
 
     // 5. Remove VRF binding from INTERFACE base entry
-    cs.Add("INTERFACE", i.name, ChangeDelete, nil, nil)
+    cs.Delete("INTERFACE", i.name)
 
     // 6. Remove VRF if no other interfaces use it
-    vrfName := util.DeriveVRFName(svc.VRFType, binding.ServiceName, i.name)
-    if dc.CanDeleteVRF(vrfName, i.name) {
-        cs.Add("VRF", vrfName, ChangeDelete, nil, nil)
-        // Also remove VXLAN_TUNNEL_MAP for L3VNI if present
-    }
+    //    dc.CanDeleteVRF() → cascade delete VRF + VXLAN_TUNNEL_MAP
 
     // 7. L2/IRB-specific: remove VLAN member, VLAN if empty
-    if svc.ServiceType == ServiceTypeL2 || svc.ServiceType == ServiceTypeIRB {
-        vlanName := util.DeriveVLANName(binding.ServiceName)
-        memberKey := fmt.Sprintf("%s|%s", vlanName, i.name)
-        cs.Add("VLAN_MEMBER", memberKey, ChangeDelete, nil, nil)
-        if dc.CanDeleteVLAN(vlanName, i.name) {
-            cs.Add("VLAN", vlanName, ChangeDelete, nil, nil)
-            // Remove VXLAN_TUNNEL_MAP for L2VNI
-        }
-    }
+    //    dc.CanDeleteVLAN() → cascade delete VLAN + SVI + VNI map + ARP suppression
 
-    // 8. Remove QoS/PORT_QOS_MAP entry for this interface
-    cs.Add("PORT_QOS_MAP", i.name, ChangeDelete, nil, nil)
+    // 8. Remove QoS bindings for this interface
 
-    // Deletion order within the ChangeSet is children-before-parents:
-    //   IP entries before INTERFACE, MEMBER before VLAN, AF before NEIGHBOR
+    // 9. Remove route-policy artifacts (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
 
     return cs, nil
 }
 ```
 
-// RefreshService reapplies the service to sync with current definition.
-// Compares current interface config with current service spec and
-// generates changes to synchronize (updated filters, QoS, etc.).
+// RefreshService removes and reapplies the service with current definition.
 // Returns the ChangeSet for preview; caller applies via cs.Apply().
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error)
 
@@ -2680,7 +2625,7 @@ func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionCh
 func (p *PreconditionChecker) RequireConnected() *PreconditionChecker
 func (p *PreconditionChecker) RequireLocked() *PreconditionChecker
 func (p *PreconditionChecker) RequireInterfaceExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequireInterfaceNotLAGMember(name string) *PreconditionChecker
+func (p *PreconditionChecker) RequireInterfaceNotPortChannelMember(name string) *PreconditionChecker
 func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker
 func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker
 func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker
@@ -2707,14 +2652,15 @@ func (p *PreconditionChecker) Result() error {
     return util.NewValidationError(msgs...)
 }
 
-func (d *sonic.Device) RequireLocked() error {
-    if !d.connected {
-        return util.NewPreconditionError("operation", d.Name, "device must be connected", "")
+// RequireLocked is part of PreconditionChecker, not sonic.Device.
+// The Node.precondition() method creates a PreconditionChecker which
+// calls RequireConnected and RequireLocked to verify device state.
+func (p *PreconditionChecker) RequireLocked() *PreconditionChecker {
+    if !p.node.locked {
+        p.errors = append(p.errors, util.NewPreconditionError(
+            p.operation, p.resource, "device must be locked", "use Lock() first"))
     }
-    if !d.locked {
-        return util.NewPreconditionError("operation", d.Name, "device must be locked for changes", "use Lock() first")
-    }
-    return nil
+    return p
 }
 ```
 
@@ -2852,12 +2798,8 @@ func ResolveProfile(
         SSHPass:    profile.SSHPass,
     }
 
-    // AS Number: profile > zone
-    if profile.ASNumber != nil {
-        r.ASNumber = *profile.ASNumber
-    } else if zone != nil {
-        r.ASNumber = zone.ASNumber
-    }
+    // Underlay ASN from profile
+    r.UnderlayASN = profile.UnderlayASN
 
     // Router ID and VTEP from loopback
     r.RouterID = profile.LoopbackIP
@@ -2942,127 +2884,104 @@ type FileAuditLogger struct {
 ```go
 type Permission string
 
+// Write permissions — enforced via checkExecutePermission() in CLI write commands.
+// Read/view operations are always allowed (no permission check in dry-run/preview mode).
 const (
     PermServiceApply  Permission = "service.apply"
     PermServiceRemove Permission = "service.remove"
-    PermServiceView   Permission = "service.view"
 
-    PermInterfaceConfig Permission = "interface.configure"
     PermInterfaceModify Permission = "interface.modify"
-    PermInterfaceView   Permission = "interface.view"
 
     PermLAGCreate Permission = "lag.create"
     PermLAGModify Permission = "lag.modify"
     PermLAGDelete Permission = "lag.delete"
-    PermLAGView   Permission = "lag.view"
 
     PermVLANCreate Permission = "vlan.create"
     PermVLANModify Permission = "vlan.modify"
     PermVLANDelete Permission = "vlan.delete"
-    PermVLANView   Permission = "vlan.view"
 
-    PermACLCreate Permission = "acl.create"
     PermACLModify Permission = "acl.modify"
-    PermACLDelete Permission = "acl.delete"
-    PermACLView   Permission = "acl.view"
 
     PermEVPNModify Permission = "evpn.modify"
-    PermEVPNView   Permission = "evpn.view"
 
-    PermBGPModify Permission = "bgp.modify"
-    PermBGPView   Permission = "bgp.view"
-
+    PermQoSCreate Permission = "qos.create"
     PermQoSModify Permission = "qos.modify"
-    PermQoSView   Permission = "qos.view"
-
-    PermBaselineApply Permission = "baseline.apply"
-    PermHealthCheck   Permission = "health.check"
-
-    PermDeviceConnect    Permission = "device.connect"
-    PermDeviceLock       Permission = "device.lock"
-    PermDeviceDisconnect Permission = "device.disconnect"
-
-    PermAuditView Permission = "audit.view"
-
-    PermPortCreate   Permission = "port.create"
-    PermPortDelete   Permission = "port.delete"
-    PermBGPConfigure Permission = "bgp.configure"
-
-    PermCompositeDeliver  Permission = "composite.deliver"
-    PermTopologyProvision Permission = "topology.provision"
+    PermQoSDelete Permission = "qos.delete"
 
     PermVRFCreate Permission = "vrf.create"
     PermVRFModify Permission = "vrf.modify"
     PermVRFDelete Permission = "vrf.delete"
-    PermVRFView   Permission = "vrf.view"
+
+    PermDeviceCleanup Permission = "device.cleanup"
 
     PermSpecAuthor Permission = "spec.author"
 
     PermFilterCreate Permission = "filter.create"
-    PermFilterModify Permission = "filter.modify"
     PermFilterDelete Permission = "filter.delete"
-    PermFilterView   Permission = "filter.view"
-
-    PermQoSCreate Permission = "qos.create"
-    PermQoSDelete Permission = "qos.delete"
-
-    PermAll Permission = "all" // Superuser — allows everything
 )
 ```
 
 ### 9.2 Permission Checker (`pkg/auth/checker.go`)
 
 ```go
-// PermContext provides context for permission checks — which service,
+// Context provides context for permission checks — which service,
 // device, and interface are being operated on.
-type PermContext struct {
-    Service   string // Service name being applied/removed (empty for non-service ops)
-    Device    string // Target device name
-    Interface string // Target interface name (empty for device-level ops)
+type Context struct {
+    Device    string
+    Service   string
+    Interface string
+    Resource  string
 }
 
-type PermissionChecker struct {
-    spec *spec.NetworkSpecFile
+// Checker validates user permissions.
+// Current user is inferred from the OS at construction time.
+type Checker struct {
+    network     *spec.NetworkSpecFile
+    currentUser string
 }
 
-func (pc *PermissionChecker) Check(user string, perm Permission, ctx PermContext) error {
+func NewChecker(network *spec.NetworkSpecFile) *Checker
+
+// Check verifies if the current user has a permission.
+// No user parameter — uses currentUser from construction.
+func (c *Checker) Check(permission Permission, ctx *Context) error {
     // 1. Superusers bypass all checks
-    if contains(pc.spec.SuperUsers, user) {
+    if c.isSuperUser(c.currentUser) {
         return nil
     }
 
-    // 2. Get user's groups
-    userGroups := pc.getUserGroups(user)
-
-    // 3. Check service-specific permissions first
-    if ctx.Service != "" {
-        if svc := pc.spec.Services[ctx.Service]; svc != nil {
-            if svc.Permissions != nil {
-                if allowed := svc.Permissions[string(perm)]; len(allowed) > 0 {
-                    if hasOverlap(userGroups, allowed) {
-                        return nil
-                    }
-                    return ErrPermissionDenied
-                }
+    // 2. Check service-specific permissions first (via checkPermissionMap)
+    if ctx != nil && ctx.Service != "" {
+        if svc, ok := c.network.Services[ctx.Service]; ok {
+            if allowed := c.checkServicePermission(c.currentUser, permission, svc); allowed {
+                return nil
             }
         }
     }
 
-    // 4. Check global permissions
-    if allowed := pc.spec.Permissions[string(perm)]; len(allowed) > 0 {
-        if hasOverlap(userGroups, allowed) {
-            return nil
-        }
+    // 3. Check global permissions (via checkPermissionMap)
+    if c.checkGlobalPermission(c.currentUser, permission) {
+        return nil
     }
 
-    // 5. Check for 'all' permission
-    if allowed := pc.spec.Permissions["all"]; len(allowed) > 0 {
-        if hasOverlap(userGroups, allowed) {
-            return nil
+    return &PermissionError{...}
+}
+
+// checkPermissionMap checks whether username has the given permission in permMap.
+// It first checks the "all" wildcard key, then the specific permission key.
+func (c *Checker) checkPermissionMap(username string, permission Permission, permMap map[string][]string) bool {
+    // Check for "all" permission first
+    if groups, ok := permMap["all"]; ok {
+        if c.userInGroups(username, groups) {
+            return true
         }
     }
-
-    return ErrPermissionDenied
+    // Check specific permission
+    groups, ok := permMap[string(permission)]
+    if !ok {
+        return false
+    }
+    return c.userInGroups(username, groups)
 }
 ```
 
@@ -3157,7 +3076,7 @@ var (
 
     specDir     string // -S, --specs
     executeMode bool   // -x, --execute
-    saveMode    bool   // -s, --save
+    noSave      bool   //     --no-save (requires -x)
     verbose     bool   // -v, --verbose
     jsonOutput  bool   //     --json
 )
@@ -3194,7 +3113,7 @@ func init() {
     rootCmd.PersistentFlags().StringVarP(&specDir, "specs", "S", "", "Specification directory")
     rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
-    // Write flags (-x/-s) registered per noun-group parent (PersistentFlags)
+    // Write flags (-x/--no-save) registered per noun-group parent (PersistentFlags)
     for _, cmd := range []*cobra.Command{
         interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
         vrfCmd, serviceCmd, baselineCmd, deviceCmd, qosCmd, filterCmd,
@@ -3226,18 +3145,21 @@ func init() {
     }
 
     // Configuration & Meta
-    for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, versionCmd} {
+    for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, versionCmd} {
         cmd.GroupID = "meta"
         rootCmd.AddCommand(cmd)
     }
+
+    // Premature commands (hidden)
+    rootCmd.AddCommand(shellCmd)
 }
 ```
 
 **Flag notes:**
-- `-s` is `--save` (short for save config after execution), not `--specs`
 - `-S` is `--specs` (uppercase S for specification directory)
-- No `-i` (interface) flag -- interface names are positional args within noun commands
-- `-x` / `--execute` and `-s` / `--save` are inherited via PersistentFlags on each noun-group parent
+- `--no-save` opts out of the default save-after-execute behavior (requires `-x`)
+- No `-i` (interface) flag — interface names are positional args within noun commands
+- `-x` / `--execute` and `--no-save` are inherited via PersistentFlags on each noun-group parent
 
 **Helper functions:**
 
@@ -3275,8 +3197,7 @@ func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeS
         return nil
     }
 
-    fmt.Println("Changes to be applied:")
-    fmt.Print(changeSet.String())
+    fmt.Print(changeSet.Preview())
 
     if executeMode {
         return executeAndSave(ctx, changeSet, dev)
@@ -3379,71 +3300,55 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 
 ### 11.6 Service Refresh
 
-When a service definition changes (e.g., filter-spec updated in `network.json`), interfaces using that service can be synchronized:
+When a service definition changes (e.g., filter-spec updated in `network.json`), interfaces using that service can be synchronized via remove+reapply:
 
 ```go
 func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
-    svc, err := i.Node().GetService(i.ServiceName())
-    if err != nil {
+    n := i.node
+
+    if err := n.precondition("refresh-service", i.name).Result(); err != nil {
         return nil, err
     }
-
-    cs := NewChangeSet(i.Node().Name(), "interface.refresh-service")
-
-    // --- Step 1: Rebuild expected config from current spec ---
-    // Generate the full set of CONFIG_DB entries that ApplyService would
-    // produce today (using current spec + current interface context).
-    expected := i.generateServiceConfig(svc)
-
-    // --- Step 2: Read current config from CONFIG_DB ---
-    // For each table/key that this service owns (tracked via
-    // NEWTRON_SERVICE_BINDING metadata), read the current fields.
-    current := i.readOwnedEntries()
-
-    // --- Step 3: Diff expected vs current, field by field ---
-    // Comparison is per-field within each table|key. Sequence numbers
-    // (ACL_RULE) are compared by value, not by position — rule identity
-    // is the sequence number itself (e.g., RULE_100).
-    for _, entry := range expected {
-        cur, exists := current[entry.TableKey()]
-        if !exists {
-            // Entry missing from device — add it
-            cs.Add(entry.Table, entry.Key, ChangeAdd, nil, entry.Fields)
-        } else {
-            // Entry exists — compare field by field
-            changed := map[string]string{}
-            for field, val := range entry.Fields {
-                if cur[field] != val {
-                    changed[field] = val
-                }
-            }
-            if len(changed) > 0 {
-                cs.Add(entry.Table, entry.Key, ChangeModify, cur, entry.Fields)
-            }
-        }
+    if !i.HasService() {
+        return nil, fmt.Errorf("interface %s has no service to refresh", i.name)
     }
 
-    // --- Step 4: Detect orphaned entries (in current but not expected) ---
-    // Entries that exist on the device but are no longer in the spec
-    // are deleted. This handles: removed ACL rules, removed route-maps,
-    // changed VRF type (old VRF no longer needed).
-    for tableKey, fields := range current {
-        if _, needed := expected.Lookup(tableKey); !needed {
-            table, key := splitTableKey(tableKey)
-            cs.Add(table, key, ChangeDelete, fields, nil)
-        }
+    // Capture binding values before RemoveService records the delete
+    b := i.binding()
+    serviceName := b.ServiceName
+    serviceIP := b.IPAddress
+
+    // Remove the current service
+    removeCS, err := i.RemoveService(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("removing old service: %w", err)
     }
+
+    // Clear the binding from the ConfigDB cache so ApplyService's
+    // HasService() check passes. The delete change is already recorded
+    // above; this cache mutation only affects reads within this episode.
+    configDB := n.ConfigDB()
+    delete(configDB.NewtronServiceBinding, i.name)
+
+    // Reapply the service with current definition
+    applyCS, err := i.ApplyService(ctx, serviceName, ApplyServiceOpts{IPAddress: serviceIP})
+    if err != nil {
+        return nil, fmt.Errorf("reapplying service: %w", err)
+    }
+
+    // Merge the change sets
+    cs := NewChangeSet(n.Name(), "interface.refresh-service")
+    cs.Merge(removeCS)
+    cs.Merge(applyCS)
 
     return cs, nil
 }
 ```
 
-**Diff algorithm invariants:**
-- **Identity**: Each CONFIG_DB entry is identified by `table|key`. Two entries are "the same" if they share the same table and key.
-- **Field comparison**: Fields are compared by string equality. A field present in expected but missing in current is an addition. A field present in current but missing in expected within the same key is left untouched (service may not own all fields in a shared key).
-- **ACL rules**: Rule identity is the sequence number (`RULE_100`). If the spec adds `RULE_150` and removes `RULE_200`, the diff produces one ChangeAdd and one ChangeDelete. Rules are never reordered — sequence numbers are stable identifiers.
-- **Shared resources**: If the VRF name changed (e.g., `vrf_type` changed in spec), the old VRF appears in the orphan detection step. DependencyChecker is consulted before deleting shared resources — if another interface still uses the VRF, it is not deleted.
-- **Ownership boundary**: Only entries tracked in `NEWTRON_SERVICE_BINDING` metadata for this interface are compared. Entries created by other services or by the platform are not touched.
+**Refresh semantics:**
+- **Remove+reapply**: RefreshService does not perform a field-by-field diff. It fully removes the existing service (via `RemoveService`) and reapplies it (via `ApplyService`), producing a merged ChangeSet.
+- **Cache manipulation**: The binding is deleted from the in-memory ConfigDB cache between remove and reapply so that `ApplyService`'s `HasService()` precondition check passes. The actual CONFIG_DB delete is already recorded in `removeCS`.
+- **PeerAS limitation**: PeerAS is set to 0 on refresh since the BGP neighbor was already configured by the original apply. For services with `peer_as: "request"`, this means the neighbor AS is not re-prompted.
 
 ### 11.7 Orphan Cleanup
 
@@ -3451,33 +3356,50 @@ The `cleanup` command removes orphaned configurations from the device. Philosoph
 
 ```go
 func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *CleanupSummary, error) {
-    cs := NewChangeSet(n.name, "node.cleanup")
+    cs := NewChangeSet(n.name, "device.cleanup")
+    summary := &CleanupSummary{}
+    configDB := n.ConfigDB()
 
-    if cleanupType == "" || cleanupType == "acls" {
-        orphanedACLs := n.findOrphanedACLs()
-        for _, aclName := range orphanedACLs {
-            for _, ruleName := range n.getACLRules(aclName) {
-                cs.Add("ACL_RULE", fmt.Sprintf("%s|%s", aclName, ruleName), ChangeDelete, nil, nil)
+    // Find orphaned ACLs (no interfaces bound)
+    if cleanupType == "" || cleanupType == "acl" {
+        for aclName, acl := range configDB.ACLTable {
+            if acl.Ports == "" {
+                summary.OrphanedACLs = append(summary.OrphanedACLs, aclName)
+                cs.Deletes(n.deleteAclTableConfig(aclName))
             }
-            cs.Add("ACL_TABLE", aclName, ChangeDelete, nil, nil)
         }
     }
 
-    if cleanupType == "" || cleanupType == "vrfs" {
-        orphanedVRFs := d.findOrphanedVRFs()
-        for _, vrfName := range orphanedVRFs {
-            if vni := d.getVRFL3VNI(vrfName); vni > 0 {
-                mapKey := fmt.Sprintf("vtep1|map_%d_%s", vni, vrfName)
-                cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+    // Find orphaned VRFs (no interfaces bound)
+    if cleanupType == "" || cleanupType == "vrf" {
+        for vrfName := range configDB.VRF {
+            if vrfName == "default" { continue }
+            hasUsers := false
+            for intfName, intf := range configDB.Interface {
+                if strings.Contains(intfName, "|") { continue }
+                if intf.VRFName == vrfName { hasUsers = true; break }
             }
-            cs.Add("VRF", vrfName, ChangeDelete, nil, nil)
+            if !hasUsers {
+                summary.OrphanedVRFs = append(summary.OrphanedVRFs, vrfName)
+                cs.Deletes(createVrfConfig(vrfName))
+            }
         }
     }
 
-    if cleanupType == "" || cleanupType == "vnis" {
-        orphanedVNIs := d.findOrphanedVNIMappings()
-        for _, mapKey := range orphanedVNIs {
-            cs.Add("VXLAN_TUNNEL_MAP", mapKey, ChangeDelete, nil, nil)
+    // Find orphaned VNI mappings (VRF or VLAN doesn't exist)
+    if cleanupType == "" || cleanupType == "vni" {
+        for mapKey, mapping := range configDB.VXLANTunnelMap {
+            orphaned := false
+            if mapping.VRF != "" {
+                if _, ok := configDB.VRF[mapping.VRF]; !ok { orphaned = true }
+            }
+            if mapping.VLAN != "" {
+                if _, ok := configDB.VLAN[mapping.VLAN]; !ok { orphaned = true }
+            }
+            if orphaned {
+                summary.OrphanedVNIMappings = append(summary.OrphanedVNIMappings, mapKey)
+                cs.Deletes(deleteVniMapByKeyConfig(mapKey))
+            }
         }
     }
 
@@ -3489,9 +3411,9 @@ func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*ChangeSet, *Cl
 
 | Type | Description |
 |------|-------------|
-| `acls` | ACL tables not bound to any interface |
-| `vrfs` | VRFs with no interface bindings |
-| `vnis` | VNI mappings for deleted VLANs/VRFs |
+| `acl` | ACL tables not bound to any interface |
+| `vrf` | VRFs with no interface bindings |
+| `vni` | VNI mappings for deleted VLANs/VRFs |
 | (empty) | All of the above |
 
 ### 11.8 Settings Persistence
@@ -3500,11 +3422,13 @@ User settings are stored in `~/.newtron/settings.json`:
 
 ```go
 type Settings struct {
-    DefaultNetwork   string `json:"default_network,omitempty"`
-    DefaultDevice    string `json:"default_device,omitempty"`
-    SpecDir          string `json:"spec_dir,omitempty"`
-    LastDevice       string `json:"last_device,omitempty"`
-    ExecuteByDefault bool   `json:"execute_by_default,omitempty"`
+    DefaultNetwork  string `json:"default_network,omitempty"`
+    SpecDir         string `json:"spec_dir,omitempty"`
+    DefaultSuite    string `json:"default_suite,omitempty"`     // Default --dir for newtest run
+    TopologiesDir   string `json:"topologies_dir,omitempty"`    // Base directory for newtest topologies
+    AuditLogPath    string `json:"audit_log_path,omitempty"`    // Override default audit log path
+    AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"` // Max audit log size in MB (default: 10)
+    AuditMaxBackups int    `json:"audit_max_backups,omitempty"` // Max rotated log files (default: 10)
 }
 ```
 
@@ -3534,15 +3458,16 @@ These commands are read-only and do not require `-x`:
 |---------|-------------|
 | `shell` | Enter interactive shell with device connection reuse, tab completion, and command history |
 
-### 11.10 Config Persistence (`--save` / `-s`)
+### 11.10 Config Persistence (`--no-save`)
 
-The `--save` (`-s`) flag (in addition to `-x`) persists changes to disk after execution:
+By default, `executeAndSave` calls `ChangeSet.Verify()` after a successful `Apply()`, then `Device.SaveConfig()` to persist changes across reboots. If verification fails (entries missing or field mismatches), config is **not** saved — the partial state remains in runtime CONFIG_DB only, and `config reload` restores the last saved state. The `--no-save` flag (requires `-x`) skips the persistence step:
 
 ```
-newtron leaf1 interface set Ethernet0 mtu 9000 -xs
+newtron leaf1 interface set Ethernet0 mtu 9000 -x             # execute + save (default)
+newtron leaf1 interface set Ethernet0 mtu 9000 -x --no-save   # execute without saving
 ```
 
-This calls `Device.SaveConfig()` after a successful `ChangeSet.Apply()`, running `sudo config save -y` on the device. Without `--save`, changes are applied to the running CONFIG_DB but may be lost on reboot. The `-s` short flag can be combined with `-x` as `-xs` for brevity.
+Without `-x`, changes are previewed only (dry-run). `--no-save` without `-x` is an error.
 
 ## 12. Testing Strategy
 
