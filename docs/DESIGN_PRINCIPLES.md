@@ -1073,6 +1073,34 @@ creates.
 **If newtron creates it, newtron must be able to remove it. No orphans,
 no manual cleanup, no `redis-cli` required.**
 
+### Shared Resources and Safe Reversal
+
+CONFIG_DB resources are often shared. A VRF serves multiple services.
+A filter binds to multiple interfaces. A QoS policy applies to several
+ports. Forward operations handle sharing via idempotency — `ApplyService`
+checks whether the VRF already exists before creating it, so the second
+service that uses the same VRF simply reuses it.
+
+Reverse operations must be equally aware. `RemoveService` cannot blindly
+delete the VRF it finds in the service binding — another service may still
+depend on it. This is why every removal path uses `DependencyChecker` to
+scan CONFIG_DB for remaining consumers before deleting shared resources.
+
+This has a critical architectural implication: **mechanical ChangeSet
+reversal is unsafe.** A ChangeSet records low-level CONFIG_DB mutations
+(HSET, DEL) but not the sharing context in which they were made. Reversing
+those mutations would delete a VRF that two services share, remove a filter
+still bound to another interface, or tear down a VTEP that other overlays
+depend on. Only domain-level reverse operations (`RemoveService`,
+`UnbindACL`, `RemoveQoS`) have the context to safely determine whether a
+shared resource can be removed.
+
+Rollback is therefore an orchestrator concern, not a newtron concern. If
+an orchestrator provisions three interfaces and the second fails, it calls
+`RemoveService` on the first — not "reverse the first ChangeSet." newtron
+provides safe, reference-aware building blocks; the orchestrator decides
+when to invoke them.
+
 ---
 
 ## 24. Respect Abstraction Boundaries

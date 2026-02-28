@@ -234,6 +234,13 @@ When adding a new forward config generator, you MUST also add its reverse in the
 same commit. When reviewing code, verify that `RemoveService` and other teardown
 paths clean up every entry that the forward path creates.
 
+Reverse operations must be **reference-aware**: shared CONFIG_DB resources (VRFs,
+filters, QoS policies) may be referenced by multiple operations. Reverse operations
+must scan for remaining consumers before deleting shared resources. Mechanical
+ChangeSet reversal is unsafe — only domain-level reverse operations have the context
+to determine whether a shared resource can be safely removed. Rollback is an
+orchestrator concern that uses these domain-level operations, not a newtron concern.
+
 ## Redis-First Interaction Principle
 
 newtron is a Redis-centric system. All device interaction MUST go through SONiC Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB). See `docs/newtron/hld.md` for the full interaction model.
