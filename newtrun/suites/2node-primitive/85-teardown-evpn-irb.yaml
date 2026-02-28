@@ -1,0 +1,95 @@
+name: teardown-evpn-irb
+description: |
+  Reverse teardown of EVPN IRB (Phase 5b): remove SVI, unbind IP-VPN,
+  delete VRF on both switches. Reverse of 70-evpn-irb.
+topology: 2node
+requires: [evpn-irb]
+after: [health-check]
+
+steps:
+  # 1. Remove SVI from VLAN 300 on both switches
+  - name: remove-svi-sw1
+    action: remove-svi
+    devices: [switch1]
+    vlan_id: 300
+
+  - name: remove-svi-sw2
+    action: remove-svi
+    devices: [switch2]
+    vlan_id: 300
+
+  - name: verify-svi-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_INTERFACE
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-svi-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN_INTERFACE
+    key: Vlan300
+    expect:
+      exists: false
+
+  # 2. Unbind IP-VPN from Vrf_irb on both switches
+  - name: unbind-ipvpn-sw1
+    action: unbind-ipvpn
+    devices: [switch1]
+    params:
+      vrf: Vrf_irb
+
+  - name: unbind-ipvpn-sw2
+    action: unbind-ipvpn
+    devices: [switch2]
+    params:
+      vrf: Vrf_irb
+
+  - name: verify-vrf-vni-cleared-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_irb
+    expect:
+      fields:
+        vni: ""
+
+  # 3. Delete Vrf_irb on both switches
+  - name: delete-vrf-irb-sw1
+    action: delete-vrf
+    devices: [switch1]
+    params:
+      vrf: Vrf_irb
+
+  - name: delete-vrf-irb-sw2
+    action: delete-vrf
+    devices: [switch2]
+    params:
+      vrf: Vrf_irb
+
+  - name: verify-vrf-irb-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_irb
+    expect:
+      exists: false
+
+  - name: verify-vrf-irb-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: Vrf_irb
+    expect:
+      exists: false
+
+  # 4. Verify BGP_GLOBALS for Vrf_irb is gone
+  - name: verify-bgp-globals-vrf-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: Vrf_irb
+    expect:
+      exists: false

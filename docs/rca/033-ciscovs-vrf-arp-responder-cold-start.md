@@ -4,7 +4,7 @@
 
 **Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
 
-**Component**: CiscoVS NGDP (Silicon One network simulator), `newtest/suites/2node-primitive/35-vrf-routing.yaml`
+**Component**: CiscoVS NGDP (Silicon One network simulator), `newtrun/suites/2node-primitive/35-vrf-routing.yaml`
 **Affected**: Any test that configures a VRF interface IP and expects a host to reach it immediately
 **Discovered**: 2026-02-19
 

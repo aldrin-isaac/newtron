@@ -1,0 +1,12 @@
+{
+    "loopback_ip": "10.0.0.11",
+    "mgmt_ip": "127.0.0.1",
+    "zone": "amer",
+    "platform": "sonic-vpp",
+    "evpn": {
+        "peers": ["spine1", "spine2"]
+    },
+    "ssh_pass": "YourPaSsWoRd",
+    "ssh_user": "admin",
+    "underlay_asn": 65011
+}

@@ -4,7 +4,7 @@
 
 **Note (Feb 2026):** The `ApplyFRRDefaults` mechanism has been eliminated. FRR configuration is now managed by `frrcfgd` (unified mode) via a patched `frrcfgd.py.tmpl`. The timing and idempotency issues described here no longer apply. The `2node-incremental` suite has been replaced by `2node-primitive`.
 
-**Component**: bgpcfgd (FRR config daemon), `newtest/suites/2node-primitive/08-evpn-setup.yaml`
+**Component**: bgpcfgd (FRR config daemon), `newtrun/suites/2node-primitive/08-evpn-setup.yaml`
 **Affected**: CiscoVS 202505 builds; any topology that runs setup-evpn after provision
 **Discovered**: 2026-02-19
 

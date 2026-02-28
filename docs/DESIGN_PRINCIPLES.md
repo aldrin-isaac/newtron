@@ -1,7 +1,7 @@
 # Design Principles
 
 This document describes the architectural principles behind newtron,
-newtlab, and newtest — and the philosophy that keeps them coherent as a
+newtlab, and newtrun — and the philosophy that keeps them coherent as a
 system. It is intended to be read before the HLDs and LLDs, as a guide
 for understanding *why* things are the way they are.
 
@@ -84,7 +84,7 @@ to. **Patch what's broken; don't build parallel infrastructure around it.**
 ## 3. Two Tools and an Orchestrator
 
 The system is split into three programs — newtron (provision devices),
-newtlab (deploy VMs), newtest (E2E testing) — not because three is a
+newtlab (deploy VMs), newtrun (E2E testing) — not because three is a
 nice number, but because each program has a fundamentally different
 relationship with the world:
 
@@ -99,20 +99,20 @@ relationship with the world:
   freedom within those constraints for actual deployments. It operates
   on a single device at a time, translating specs into CONFIG_DB through
   an SSH tunnel. It never talks to two devices at once.
-- **newtest** is an orchestrator specifically for E2E testing. It tests
+- **newtrun** is an orchestrator specifically for E2E testing. It tests
   two things: that newtron's automation produces correct device state,
   and that SONiC software on each device behaves correctly in its role
   (spine, leaf, etc.). It deploys topologies (via newtlab), provisions
   devices (via newtron), then asserts correctness — both per-device
   and across the fabric.
 
-newtron and newtlab are general-purpose tools. newtest is not — it exists
+newtron and newtlab are general-purpose tools. newtrun is not — it exists
 to test newtron and the SONiC stack. Other orchestrators could be built on top of
 newtron and newtlab for different purposes (production deployment,
 CI/CD pipelines, compliance auditing), and the architecture is designed
 to support that. newtron's observation primitives (`GetRoute`,
 `RunHealthChecks`) return structured data precisely so that *any*
-orchestrator can consume them — not just newtest.
+orchestrator can consume them — not just newtrun.
 
 These boundaries follow from a single rule: **each program owns exactly
 one level of abstraction**. newtlab owns VM realization — turning a
@@ -120,7 +120,7 @@ topology spec into running, connected VMs. newtron owns single-device
 configuration — translating specs into CONFIG_DB entries. Orchestrators
 own the "what, where, and in what order" — which devices to provision,
 which services to apply to which interfaces, with what parameters, and
-in what sequence. newtest is the first orchestrator, focused on E2E
+in what sequence. newtrun is the first orchestrator, focused on E2E
 testing.
 
 If you're unsure where something belongs, ask: "does this decide what
@@ -257,7 +257,7 @@ checking its routing table. That's topology-wide context. That belongs
 in the orchestrator — whatever orchestrator that may be.
 
 The corollary is equally important: **orchestrators do not re-implement
-newtron's verification**. When newtest needs to check CONFIG_DB on a
+newtron's verification**. When newtrun needs to check CONFIG_DB on a
 device, it calls newtron's `VerifyChangeSet`. When it needs to read a
 route, it calls newtron's `GetRoute`. Orchestrators *compose* newtron's
 primitives across devices — they never duplicate them. A future
@@ -364,7 +364,7 @@ This separation enables two things that matter:
 
 The spec directory is also the only coupling surface between the three
 programs. newtlab reads topology and platform specs to deploy VMs. newtron
-reads all specs to provision devices. newtest reads scenario definitions
+reads all specs to provision devices. newtrun reads scenario definitions
 that reference topology specs. No program imports another's packages or
 calls another's API. They communicate through files.
 
@@ -470,11 +470,11 @@ necessary; resolve once at node creation.**
 DRY applies not just within a single codebase, but across the entire
 system. Every capability exists in exactly one place:
 
-**One spec directory.** newtlab, newtron, and newtest all read from the
-same `specs/` directory. `topology.json` belongs to newtlab and newtest —
+**One spec directory.** newtlab, newtron, and newtrun all read from the
+same `specs/` directory. `topology.json` belongs to newtlab and newtrun —
 it defines the physical topology for VM deployment and test orchestration.
 newtron does not require it. newtlab reads the `devices` and `links`
-sections to deploy VMs. newtest reads the topology to understand device
+sections to deploy VMs. newtrun reads the topology to understand device
 layout for test scenarios. Neither maintains its own copy.
 
 **One connection mechanism.** SSH-tunneled Redis access is implemented in
@@ -668,14 +668,14 @@ provisioning possible.
 ## 15. Programs Communicate Through Files, Not APIs
 
 newtlab does not expose an API that newtron calls. newtron does not expose
-a service that newtest connects to. The programs are not microservices.
+a service that newtrun connects to. The programs are not microservices.
 
 Instead, they communicate through the spec directory:
 
 - newtlab writes `ssh_port`, `console_port`, and `mgmt_ip` into profile
   files after deploying VMs.
 - newtron reads those profile files and uses the ports to connect.
-- Orchestrators (like newtest) invoke newtlab and newtron as CLI commands,
+- Orchestrators (like newtrun) invoke newtlab and newtron as CLI commands,
   passing the spec directory path.
 
 This means:
@@ -822,7 +822,7 @@ first verifying it via CLI on a real device.
    in the same order as the CLI path. Do not invent alternative layouts
    without explicit authorization.
 
-5. **Targeted test first.** Create a targeted newtest suite that tests
+5. **Targeted test first.** Create a targeted newtrun suite that tests
    only the specific feature. Debug and pass it before integrating into
    composite suites.
 

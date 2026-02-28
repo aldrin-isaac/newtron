@@ -5,7 +5,7 @@
 **Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
 
 **Component**: SONiC STATE_DB / CiscoVS platform
-**Affected**: Any newtest scenario using `verify-state-db` on PORT_TABLE
+**Affected**: Any newtrun scenario using `verify-state-db` on PORT_TABLE
 **Discovered**: 2026-02-19
 
 ---
@@ -52,7 +52,7 @@ Observed STATE_DB entry on CiscoVS:
 
 ## Impact
 
-Any newtest scenario that checks `oper_status: up/down` in STATE_DB PORT_TABLE will fail on
+Any newtrun scenario that checks `oper_status: up/down` in STATE_DB PORT_TABLE will fail on
 CiscoVS. Affected scenarios:
 
 - `04-interface-set.yaml`: `verify-oper-down`, `verify-oper-up`

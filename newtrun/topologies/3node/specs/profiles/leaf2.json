@@ -1,0 +1,14 @@
+{
+    "mgmt_ip": "127.0.0.1",
+    "loopback_ip": "10.0.0.12",
+    "zone": "amer",
+    "evpn": {
+        "peers": [
+            "leaf1"
+        ]
+    },
+    "platform": "ciscovs",
+    "ssh_user": "admin",
+    "ssh_pass": "YourPaSsWoRd",
+    "underlay_asn": 65012
+}

@@ -1,0 +1,9 @@
+name: cleanup
+description: Final cleanup pass - remove any remaining orphaned config
+topology: 3node
+requires: [teardown-verify]
+
+steps:
+  - name: cleanup-leafs
+    action: cleanup
+    devices: [leaf1, leaf2]

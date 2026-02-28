@@ -1,0 +1,140 @@
+name: acl-lifecycle
+description: |
+  Self-contained ACL lifecycle on sw1:Ethernet10 (config-only, no host wired).
+  Tests create-acl-table, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
+  and delete-acl-table primitives with full CONFIG_DB verification.
+topology: 2node
+requires: [boot-ssh]
+
+steps:
+  # 1. Create ACL table
+  - name: create-acl-table
+    action: create-acl-table
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+      type: L3
+      stage: ingress
+
+  - name: verify-acl-table-created
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_TABLE
+    key: TEST_ACL
+    expect:
+      exists: true
+
+  # 2. Add first ACL rule (FORWARD)
+  - name: add-acl-rule-10
+    action: add-acl-rule
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+      rule: RULE_10
+      action: FORWARD
+      priority: 10
+      src_ip: "10.0.0.0/8"
+
+  - name: verify-acl-rule-10
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_RULE
+    key: "TEST_ACL|RULE_10"
+    expect:
+      fields:
+        PACKET_ACTION: FORWARD
+        PRIORITY: "10"
+        SRC_IP: "10.0.0.0/8"
+
+  # 3. Add second ACL rule (DROP)
+  - name: add-acl-rule-20
+    action: add-acl-rule
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+      rule: RULE_20
+      action: DROP
+      priority: 20
+      dst_ip: "192.168.0.0/16"
+
+  - name: verify-acl-rule-20
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_RULE
+    key: "TEST_ACL|RULE_20"
+    expect:
+      fields:
+        PACKET_ACTION: DROP
+        PRIORITY: "20"
+
+  # 4. Bind ACL to Ethernet10
+  - name: bind-acl-ethernet10
+    action: bind-acl
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      name: TEST_ACL
+      direction: ingress
+
+  - name: verify-acl-bound
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_TABLE
+    key: TEST_ACL
+    expect:
+      fields:
+        ports: Ethernet10
+
+  # 5. Unbind ACL from Ethernet10
+  - name: unbind-acl-ethernet10
+    action: unbind-acl
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      name: TEST_ACL
+
+  # 6. Delete rules
+  - name: delete-acl-rule-20
+    action: delete-acl-rule
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+      rule: RULE_20
+
+  - name: verify-rule-20-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_RULE
+    key: "TEST_ACL|RULE_20"
+    expect:
+      exists: false
+
+  - name: delete-acl-rule-10
+    action: delete-acl-rule
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+      rule: RULE_10
+
+  - name: verify-rule-10-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_RULE
+    key: "TEST_ACL|RULE_10"
+    expect:
+      exists: false
+
+  # 7. Delete ACL table
+  - name: delete-acl-table
+    action: delete-acl-table
+    devices: [switch1]
+    params:
+      name: TEST_ACL
+
+  - name: verify-acl-table-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_TABLE
+    key: TEST_ACL
+    expect:
+      exists: false

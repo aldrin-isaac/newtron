@@ -2,7 +2,7 @@
 
 The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/sonic/` (SONiC-specific Redis implementation, including all shared types) — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md).
 
 ---
 
@@ -10,7 +10,7 @@ For the architectural principles behind newtron, newtlab, and newtest, see [Desi
 
 SONiC devices in the lab run inside QEMU VMs managed by newtlab. Redis listens on `127.0.0.1:6379` inside the VM, but QEMU SLiRP networking does not forward port 6379. The SSH tunnel solves this by forwarding a random local port through SSH to the in-VM Redis.
 
-**Consumer note:** newtest's `Runner.connectDevices()` calls `Node.Connect()` which delegates to `sonic.Device.Connect()` (§5.1), creating an SSH tunnel per device using the newtlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
+**Consumer note:** newtrun's `Runner.connectDevices()` calls `Node.Connect()` which delegates to `sonic.Device.Connect()` (§5.1), creating an SSH tunnel per device using the newtlab-allocated `SSHPort`. All Redis clients (CONFIG_DB, STATE_DB, APP_DB, ASIC_DB) then multiplex over this single tunnel.
 
 ### 1.1 When Tunnels Are Used
 
@@ -50,13 +50,13 @@ func (t *SSHTunnel) LocalAddr() string
 func (t *SSHTunnel) Close() error
 
 // SSHClient returns the underlying ssh.Client for opening command sessions.
-// Used by newtest's verifyPingExecutor and sshCommandExecutor to run commands
+// Used by newtrun's verifyPingExecutor and sshCommandExecutor to run commands
 // inside the device (e.g., "ping", "show interfaces status") via ssh.Session.
 func (t *SSHTunnel) SSHClient() *ssh.Client { return t.sshClient }
 
 // ExecCommand runs a command on the device via SSH session and returns the output.
 // Used internally by SaveConfig().
-// For arbitrary command execution, newtest uses SSHClient() directly.
+// For arbitrary command execution, newtrun uses SSHClient() directly.
 func (t *SSHTunnel) ExecCommand(cmd string) (string, error)
 ```
 
@@ -137,7 +137,7 @@ func (t *SSHTunnel) forward(local net.Conn) {
 
 STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. Where CONFIG_DB represents what you asked for, STATE_DB represents what the system is actually doing.
 
-**Consumer note:** newtest's `verifyStateDBExecutor` reads STATE_DB tables via `StateDBClient.Get*()` methods, polling with timeout until expected values appear. `verifyBGPExecutor` reads `BGPNeighborTable` from STATE_DB to check BGP session state.
+**Consumer note:** newtrun's `verifyStateDBExecutor` reads STATE_DB tables via `StateDBClient.Get*()` methods, polling with timeout until expected values appear. `verifyBGPExecutor` reads `BGPNeighborTable` from STATE_DB to check BGP session state.
 
 ### 2.1 StateDB Struct
 
@@ -302,7 +302,7 @@ func (c *StateDBClient) GetTransceiverStatus(port string) (*TransceiverStatusEnt
 
 // GetEntry reads a single STATE_DB entry as raw map[string]string.
 // Returns (nil, nil) if the entry does not exist.
-// Used by newtest's verifyStateDBExecutor for generic table/key/field assertions.
+// Used by newtrun's verifyStateDBExecutor for generic table/key/field assertions.
 func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error)
 
 // AcquireLock atomically sets NEWTRON_LOCK|<device> in STATE_DB.
@@ -361,7 +361,7 @@ The key has a Redis EXPIRE set to `ttl` seconds, so it auto-deletes if the holde
 
 `Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
 
-Note: `ExecuteOp` does not call `Verify()` — it is a low-level building block. The CLI's `executeAndSave` wrapper adds Verify between Apply and Save. The newtest framework has its own explicit `verify-provisioning` step that calls `cs.Verify()` separately.
+Note: `ExecuteOp` does not call `Verify()` — it is a low-level building block. The CLI's `executeAndSave` wrapper adds Verify between Apply and Save. The newtrun framework has its own explicit `verify-provisioning` step that calls `cs.Verify()` separately.
 
 **RunHealthChecks read-only episode:**
 
@@ -399,7 +399,7 @@ The serialization path is:
 
 APP_DB (Redis DB 0) contains application-level state written by SONiC daemons. For route verification, newtron reads `ROUTE_TABLE` entries written by `fpmsyncd` (the FPM-to-Redis daemon that syncs FRR's RIB into APP_DB).
 
-**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRoute()` (§5.8) to observe routes from APP_DB; it interprets the returned `RouteEntry` (newtron LLD §3.6A) to assert protocol, next-hop, and presence.
+**Consumer note:** newtrun's `verifyRouteExecutor` calls `Device.GetRoute()` (§5.8) to observe routes from APP_DB; it interprets the returned `RouteEntry` (newtron LLD §3.6A) to assert protocol, next-hop, and presence.
 
 ### 3.1 AppDB Struct
 
@@ -451,7 +451,7 @@ func (c *AppDBClient) GetRoute(vrf, prefix string) (*RouteEntry, error)
 
 ASIC_DB (Redis DB 1) contains SAI (Switch Abstraction Interface) objects that represent what is actually programmed in hardware. Reading routes from ASIC_DB confirms that the data plane is programmed, not just the control plane.
 
-**Consumer note:** newtest's `verifyRouteExecutor` calls `Device.GetRouteASIC()` (§5.8) when `expect.source == "asic_db"` to confirm data-plane programming. See newtest LLD §7.6.
+**Consumer note:** newtrun's `verifyRouteExecutor` calls `Device.GetRouteASIC()` (§5.8) when `expect.source == "asic_db"` to confirm data-plane programming. See newtrun LLD §7.6.
 
 ### 4.1 SAI Object Chain
 
@@ -538,7 +538,7 @@ Key scanning uses cursor-based `SCAN` (via `scanKeys()`) to avoid O(N) `KEYS` co
 
 The connection logic uses SSH tunnels when `SSHUser` and `SSHPass` are present in the resolved profile. When these are absent (e.g., integration tests with standalone Redis), a direct connection is made.
 
-**Consumer note:** newtlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (newtlab LLD §10). `sonic.Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct newtlab-allocated port. newtest calls `Node.Connect()` (which delegates to `sonic.Device.Connect()`) in `Runner.connectDevices()` after newtlab deploy — see newtest LLD §4.5.
+**Consumer note:** newtlab writes `ssh_port` and `mgmt_ip` into device profiles during deployment (newtlab LLD §10). `sonic.Device.Connect()` reads these fields from the resolved profile, so the SSH tunnel targets the correct newtlab-allocated port. newtrun calls `Node.Connect()` (which delegates to `sonic.Device.Connect()`) in `Runner.connectDevices()` after newtlab deploy — see newtrun LLD §4.5.
 
 ```go
 func (d *Device) Connect(ctx context.Context) error {
@@ -665,9 +665,9 @@ SONiC uses multiple Redis databases within a single Redis instance:
 
 ### 5.6 Verification Methods
 
-These methods expose DB 0 and DB 1 reads at the `Device` level. They are observation primitives — they return structured data, not pass/fail verdicts. Orchestrators (newtest) decide correctness.
+These methods expose DB 0 and DB 1 reads at the `Device` level. They are observation primitives — they return structured data, not pass/fail verdicts. Orchestrators (newtrun) decide correctness.
 
-**Single-shot reads:** Both `GetRoute` and `GetRouteASIC` perform a single Redis read and return immediately. They do not poll or retry. If the caller needs to wait for route convergence (e.g., waiting for BGP to install a route), the caller must implement its own polling loop with timeout. newtest's `verifyRouteExecutor` (newtest LLD §7.6) does exactly this.
+**Single-shot reads:** Both `GetRoute` and `GetRouteASIC` perform a single Redis read and return immediately. They do not poll or retry. If the caller needs to wait for route convergence (e.g., waiting for BGP to install a route), the caller must implement its own polling loop with timeout. newtrun's `verifyRouteExecutor` (newtrun LLD §7.6) does exactly this.
 
 ```go
 // GetRoute reads a route from APP_DB (Redis DB 0) via the AppDBClient.

@@ -4,7 +4,7 @@
 
 Newtron is an opinionated network automation tool for SONiC-based switches, built on the premise that SONiC is a Redis database with daemons that react to table changes — and should be treated as one. Where other SONiC tools SSH in and parse CLI output, newtron reads and writes CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB directly through an SSH-tunneled Redis client. It enforces a network design intent — expressed as declarative spec files — while allowing many degrees of freedom within those constraints for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
 
-For the architectural principles behind newtron, newtlab, and newtest — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ### Key Features
 
@@ -1003,7 +1003,7 @@ This is why newtron owns verification for everything it changes:
 - newtron configures BGP and redistribution → newtron can read the resulting routes from APP_DB (`GetRoute`) to confirm the intended local effect
 - newtron sets up EVPN/VXLAN → newtron can check ASIC_DB (`GetRouteASIC`) to confirm orchagent programmed the route
 
-Orchestrators like newtest then build on newtron's self-verification: they use newtron to confirm each device's local state, and add the cross-device layer that newtron cannot see (did the route propagate to the neighbor).
+Orchestrators like newtrun then build on newtron's self-verification: they use newtron to confirm each device's local state, and add the cross-device layer that newtron cannot see (did the route propagate to the neighbor).
 
 **For cross-device observations**: newtron returns structured data, not verdicts. If a check requires knowing what another device should have, it belongs in the orchestrator.
 
@@ -1077,7 +1077,7 @@ func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntr
 
 APP_DB tells you what FRR computed. ASIC_DB tells you what the hardware (or ASIC simulator) actually installed. The gap between them is `orchagent` processing.
 
-These primitives are building blocks for external orchestrators (newtest) that have topology-wide context. For example, newtest can connect to spine1 via newtron and call `GetRoute("default", "10.1.0.0/31")` to confirm that leaf1's connected subnet arrived via BGP with the expected next-hop. newtron provides the read; newtest knows what to expect.
+These primitives are building blocks for external orchestrators (newtrun) that have topology-wide context. For example, newtrun can connect to spine1 via newtron and call `GetRoute("default", "10.1.0.0/31")` to confirm that leaf1's connected subnet arrived via BGP with the expected next-hop. newtron provides the read; newtrun knows what to expect.
 
 #### 4.9.4 Health Checks
 
@@ -1090,7 +1090,7 @@ newtron operates on a single device. It cannot verify:
 - **Fabric convergence** — "do all devices agree on routing state?" (requires connecting to all devices)
 - **Data-plane forwarding** — "can traffic flow between VMs?" (requires multi-device packet injection)
 
-These require topology-wide context and belong in the orchestrator (newtest).
+These require topology-wide context and belong in the orchestrator (newtrun).
 
 #### 4.9.6 Verification Summary
 
@@ -1773,14 +1773,14 @@ All operations logged with:
 
 ### 12.5 Verification via ChangeSet
 
-`ChangeSet.Verify(n)` is available programmatically: it re-reads CONFIG_DB through a fresh client and confirms every entry was applied. The standard CLI flow does **not** call Verify automatically — it relies on `Apply` success. Verification is primarily used by newtest for automated testing.
+`ChangeSet.Verify(n)` is available programmatically: it re-reads CONFIG_DB through a fresh client and confirms every entry was applied. The standard CLI flow does **not** call Verify automatically — it relies on `Apply` success. Verification is primarily used by newtrun for automated testing.
 
 ```go
 cs.Apply(n)   // writes to CONFIG_DB
-cs.Verify(n)  // re-reads and confirms (used by newtest, not CLI)
+cs.Verify(n)  // re-reads and confirms (used by newtrun, not CLI)
 ```
 
-For topology-level verification (cross-device correctness), use newtest suites which assert on both CONFIG_DB entries and APP_DB/ASIC_DB convergence across multiple devices.
+For topology-level verification (cross-device correctness), use newtrun suites which assert on both CONFIG_DB entries and APP_DB/ASIC_DB convergence across multiple devices.
 
 ## 13. Verification Strategy
 
@@ -1788,7 +1788,7 @@ Newtron provides built-in verification primitives for single-device state. The a
 
 > **newtron exposes single-device state as structured data — not verdicts. The only assertion newtron makes is about its own writes.**
 >
-> When adding verification to newtron, return data, not judgments. If a check requires knowing what another device should have, it belongs in the orchestrator (newtest).
+> When adding verification to newtron, return data, not judgments. If a check requires knowing what another device should have, it belongs in the orchestrator (newtrun).
 
 Verification spans four tiers across two owners:
 
@@ -1810,7 +1810,7 @@ This works for every operation (disaggregated or composite) because they all pro
 
 **newtron primitives**: `Node.GetRoute(vrf, prefix)` and `Node.GetRouteASIC(vrf, prefix)` return structured `RouteEntry` data (prefix, protocol, next-hops) — or nil if the route is not present. These are observation methods, not assertions. newtron does not know whether a given route is "correct" — that depends on what other devices are advertising, which requires topology-wide context.
 
-**How orchestrators use it**: newtest connects to a remote device via newtron and calls `GetRoute` to check that an expected route arrived. For example, after provisioning leaf1, newtest connects to spine1 and verifies that leaf1's connected subnet appears in spine1's APP_DB with the expected next-hop. newtron provides the read; newtest knows what to expect.
+**How orchestrators use it**: newtrun connects to a remote device via newtron and calls `GetRoute` to check that an expected route arrived. For example, after provisioning leaf1, newtrun connects to spine1 and verifies that leaf1's connected subnet appears in spine1's APP_DB with the expected next-hop. newtron provides the read; newtrun knows what to expect.
 
 **ASIC_DB (Redis DB 1)**: `GetRouteASIC` resolves the SAI object chain (`SAI_ROUTE_ENTRY` → `SAI_NEXT_HOP_GROUP` → `SAI_NEXT_HOP`) to confirm the ASIC actually programmed the route. The gap between APP_DB and ASIC_DB is `orchagent` processing. On SONiC-VS with the NGDP simulator, complex routes (VXLAN, ECMP) may not make it to ASIC_DB.
 
@@ -1822,13 +1822,13 @@ This works for every operation (disaggregated or composite) because they all pro
 
 **SONiC-VS behavior**: BGP sessions establish reliably. Interface oper-status works for simple topologies. EVPN/VXLAN health depends on `orchagent` convergence.
 
-### 13.4 Tier 4: Cross-Device and Data-Plane Verification — newtest
+### 13.4 Tier 4: Cross-Device and Data-Plane Verification — newtrun
 
 **What it checks**: Route propagation across devices, fabric-wide convergence, actual packet forwarding.
 
-**Why it belongs in newtest, not newtron**: These checks require connecting to multiple devices and correlating their state. newtron operates on a single device and has no concept of "the fabric." newtest owns the topology and can connect to any device.
+**Why it belongs in newtrun, not newtron**: These checks require connecting to multiple devices and correlating their state. newtron operates on a single device and has no concept of "the fabric." newtrun owns the topology and can connect to any device.
 
-**Cross-device route verification**: newtest uses newtron's `GetRoute` primitive on multiple devices. For example: connect to spine1, call `GetRoute("default", "10.1.0.0/31")`, assert the next-hop matches leaf1's interface IP from the topology spec.
+**Cross-device route verification**: newtrun uses newtron's `GetRoute` primitive on multiple devices. For example: connect to spine1, call `GetRoute("default", "10.1.0.0/31")`, assert the next-hop matches leaf1's interface IP from the topology spec.
 
 **Data-plane verification**: Ping between VMs through the SONiC fabric. The NGDP ASIC emulator in SONiC-VS does not forward packets through VXLAN tunnels, so data-plane tests soft-fail on VS. On real hardware or VPP images, this tier would be a hard fail.
 
@@ -1839,7 +1839,7 @@ This works for every operation (disaggregated or composite) because they all pro
 | CONFIG_DB | Redis entries match ChangeSet | **newtron** | `cs.Verify(n)` | Hard fail (assertion) |
 | APP_DB / ASIC_DB | Routes installed by FRR / ASIC | **newtron** | `GetRoute()`, `GetRouteASIC()` | Observation (data, not verdict) |
 | Operational state | BGP sessions, interface health | **newtron** | `VerifyDeviceHealth()` | Observation (health report) |
-| Cross-device / data plane | Route propagation, ping | **newtest** | Composes newtron primitives | Topology-dependent |
+| Cross-device / data plane | Route propagation, ping | **newtrun** | Composes newtron primitives | Topology-dependent |
 
 ## 14. Lab Architecture
 
@@ -1852,16 +1852,16 @@ Lab environments use **newtlab** for VM orchestration (see `docs/newtlab/`).
 | Tier | How | Purpose |
 |------|-----|---------|
 | Unit | `go test ./...` | Pure logic: IP derivation, spec parsing, ACL expansion |
-| E2E | newtest framework | Full stack: newtlab VMs, SSH tunnel, real SONiC |
+| E2E | newtrun framework | Full stack: newtlab VMs, SSH tunnel, real SONiC |
 
 ### 15.2 Unit Tests
 
 Run with `go test ./...` (no build tags). Test pure functions and struct logic without any external dependencies. Examples: IP address derivation, prefix list expansion, spec inheritance resolution, ACL rule generation.
 
-### 15.3 E2E Tests (newtest)
+### 15.3 E2E Tests (newtrun)
 
-E2E testing uses the newtest framework (see `docs/newtest/`). Patterns and SONiC-specific
-learnings from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.md`.
+E2E testing uses the newtrun framework (see `docs/newtrun/`). Patterns and SONiC-specific
+learnings from the legacy Go-based e2e tests are captured in `docs/newtrun/e2e-learnings.md`.
 
 ## 16. Summary: Spec vs Config
 

@@ -1,6 +1,6 @@
 # newtlab — High-Level Design
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ## 1. Purpose
 
@@ -35,7 +35,7 @@ profiles with SSH and console ports so newtron can connect.
 └─────────────────────┘            └─────────────────────┘
          ▲                                    ▲
          │            ┌──────────┐            │
-         └────────────│ newtest  │────────────┘
+         └────────────│ newtrun  │────────────┘
                       │ (E2E)   │
                       └──────────┘
 ```

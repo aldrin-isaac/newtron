@@ -63,13 +63,13 @@ var settingsSetCmd = &cobra.Command{
 Available settings:
   network        - Default network name (-n flag default)
   specs          - Specification directory (-S flag default for newtron and newtlab)
-  suite          - Default newtest suite directory (--dir flag default)
-  topologies_dir - Base directory for newtest topologies
+  suite          - Default newtrun suite directory (--dir flag default)
+  topologies_dir - Base directory for newtrun topologies
 
 Examples:
   newtron settings set network production
   newtron settings set specs /etc/newtron
-  newtron settings set suite newtest/suites/2node-incremental`,
+  newtron settings set suite newtrun/suites/2node-incremental`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		setting := args[0]

@@ -10,9 +10,9 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Device LLD | `docs/newtron/device-lld.md` | CONFIG_DB/APP_DB/ASIC_DB/STATE_DB layer, SSH tunneling, ChangeSets |
 | newtron HOWTO | `docs/newtron/howto.md` | Operational patterns, provisioning flow |
-| newtest HLD | `docs/newtest/hld.md` | E2E test framework design |
-| newtest LLD | `docs/newtest/lld.md` | Step actions, suite mode, dependency ordering |
-| newtest HOWTO | `docs/newtest/howto.md` | Writing scenarios, running suites |
+| newtrun HLD | `docs/newtrun/hld.md` | E2E test framework design |
+| newtrun LLD | `docs/newtrun/lld.md` | Step actions, suite mode, dependency ordering |
+| newtrun HOWTO | `docs/newtrun/howto.md` | Writing scenarios, running suites |
 | newtlab HLD | `docs/newtlab/hld.md` | VM orchestration, QEMU, bridge networking |
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
@@ -278,7 +278,7 @@ These are routine project commands that do not require confirmation:
 - `git mv`, `git rm`, `git format-patch`, `git reset`, `git am`
 
 ### Project Binaries
-- `bin/newtlab`, `bin/newtron`, `bin/newtest`, `bin/newtlink` (all subcommands)
+- `bin/newtlab`, `bin/newtron`, `bin/newtrun`, `bin/newtlink` (all subcommands)
 
 ### Make
 - `make build`, `make test`, `make lint`
@@ -352,7 +352,7 @@ Before writing any CONFIG_DB entries to implement a SONiC feature:
    order as the CLI path. Do not invent alternative CONFIG_DB layouts without explicit
    user authorization.
 
-5. **Targeted test first**: Create a targeted newtest suite (like `2node-service`) that
+5. **Targeted test first**: Create a targeted newtrun suite (like `2node-service`) that
    tests only the specific feature. Debug and pass it before integrating into composite
    suites (like `2node-primitive`).
 

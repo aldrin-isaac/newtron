@@ -26,7 +26,7 @@ Three architectural choices define newtron:
 
 newtron manages SONiC devices through CONFIG_DB. A device's full configuration — interfaces, VLANs, VRFs, BGP neighbors, EVPN overlays, ACLs, QoS — is expressed as spec files and translated into CONFIG_DB entries using each device's profile, platform, and site context. Each CONFIG_DB table has a single owning file — one source of truth for how entries are constructed, no duplication across composites or service types.
 
-newtron reads `network.json` (services, VPNs, filters, routing policy, zones), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, zone, EVPN peering, credentials). It does not need `topology.json` — that file belongs to newtlab and newtest.
+newtron reads `network.json` (services, VPNs, filters, routing policy, zones), `platforms.json` (platform capabilities), and per-device `profiles/` (loopback IP, zone, EVPN peering, credentials). It does not need `topology.json` — that file belongs to newtlab and newtrun.
 
 Key operations:
 
@@ -61,17 +61,17 @@ Key capabilities:
 
 After deployment, newtlab patches device profiles with SSH ports, console ports, and deterministic system MACs so newtron can connect and provision correctly. On destroy, it restores original profiles. The spec directory is the only coordination surface between the tools.
 
-### newtest — E2E Test Orchestrator
+### newtrun — E2E Test Orchestrator
 
-newtest tests **composed network outcomes**, not individual features. The question is not "does VLAN creation work?" — it's "does the L3VPN service produce reachability across the overlay?" A feature test can pass while the composite multi-feature configuration fails due to ordering issues, missing glue config, or daemon interaction bugs. newtest tests the thing that actually matters: the assembled result.
+newtrun tests **composed network outcomes**, not individual features. The question is not "does VLAN creation work?" — it's "does the L3VPN service produce reachability across the overlay?" A feature test can pass while the composite multi-feature configuration fails due to ordering issues, missing glue config, or daemon interaction bugs. newtrun tests the thing that actually matters: the assembled result.
 
-newtest deploys a topology (via newtlab), provisions devices (via newtron), then runs scenarios that assert correctness — both on individual devices and across the fabric. It observes devices through newtron's primitives (health, BGP/EVPN/VLAN/VRF status, ChangeSet verification) — it never accesses Redis directly.
+newtrun deploys a topology (via newtlab), provisions devices (via newtron), then runs scenarios that assert correctness — both on individual devices and across the fabric. It observes devices through newtron's primitives (health, BGP/EVPN/VLAN/VRF status, ChangeSet verification) — it never accesses Redis directly.
 
 Key capabilities:
 
 - **YAML scenario format** — each test is a sequence of steps with an action, target devices, parameters, and optional assertions. Step actions cover the full range: provisioning, BGP, EVPN, VLAN/VRF/VTEP lifecycle, interface configuration, ACL management, health checks, data plane verification, service churn.
 - **Incremental suites** — scenarios declare dependencies (`requires: [provision, bgp-converge]`) and execute in topological order. If a dependency fails, all dependents are skipped. A shared deployment is reused across the suite — deploy once, run a suite of scenarios.
-- **Cross-device assertions** — newtest is the only program that connects to multiple devices simultaneously. Scenarios can assert cross-device outcomes (e.g., that a route configured on spine1 shows up in leaf1's APP_DB, that BGP sessions reach Established on both ends, that data plane forwarding works end-to-end).
+- **Cross-device assertions** — newtrun is the only program that connects to multiple devices simultaneously. Scenarios can assert cross-device outcomes (e.g., that a route configured on spine1 shows up in leaf1's APP_DB, that BGP sessions reach Established on both ends, that data plane forwarding works end-to-end).
 - **Repeat/stress mode** — `repeat: N` on a scenario runs it N times with per-iteration fail-fast and concise console output for identifying intermittent failures.
 - **Report generation** — console output with ANSI formatting, markdown reports, and JUnit XML for CI integration.
 
@@ -114,9 +114,9 @@ specs/
     ├── spine1.json
     └── leaf1.json
 
-# Test topologies (newtest/topologies/*/) include additional specs:
+# Test topologies (newtrun/topologies/*/) include additional specs:
 # ├── platforms.json   # Platform capabilities, VM defaults          ← newtron + newtlab
-# └── topology.json    # Devices, interfaces, links                  ← newtlab + newtest
+# └── topology.json    # Devices, interfaces, links                  ← newtlab + newtrun
 ```
 
 ## Quick Start
@@ -124,7 +124,7 @@ specs/
 Requires Go 1.24+. newtlab requires KVM for VM acceleration (`/dev/kvm`).
 
 ```bash
-make build                # → bin/newtron, bin/newtlab, bin/newtest, bin/newtlink
+make build                # → bin/newtron, bin/newtlab, bin/newtrun, bin/newtlink
 ```
 
 ### VM images
@@ -199,10 +199,10 @@ newtlab ssh leaf1                           # SSH to any node regardless of host
 ### Run E2E tests
 
 ```bash
-newtest start --dir newtest/suites/2node-incremental    # 31-scenario incremental suite
-newtest start --scenario health.yaml                    # Single scenario
-newtest list                                            # Discover available suites
-newtest topologies                                      # List topologies with device/link counts
+newtrun start --dir newtrun/suites/2node-incremental    # 31-scenario incremental suite
+newtrun start --scenario health.yaml                    # Single scenario
+newtrun list                                            # Discover available suites
+newtrun topologies                                      # List topologies with device/link counts
 ```
 
 ## Repository Layout
@@ -211,12 +211,12 @@ newtest topologies                                      # List topologies with d
 cmd/
   newtron/       Device provisioning and verification CLI
   newtlab/       VM orchestration CLI
-  newtest/       E2E test runner CLI
+  newtrun/       E2E test runner CLI
   newtlink/      Bridge traffic agent (standalone, deployed by newtlab to remote hosts)
 
 pkg/
   cli/           Shared CLI formatting
-  newtest/       Scenario parser, dependency ordering, 39 step executors,
+  newtrun/       Scenario parser, dependency ordering, 39 step executors,
                  progress reporting, JUnit/markdown output
   newtlab/       QEMU, multi-host placement, socket bridges, port probing,
                  boot patch framework
@@ -233,7 +233,7 @@ pkg/
   version/       Build version info
 
 specs/           Network and topology specifications
-newtest/
+newtrun/
   topologies/    Test topologies (2node, 2node-service, 3node, 4node)
   suites/        Test suites (5 suites, 46 scenarios)
 ```
@@ -246,7 +246,7 @@ newtest/
 |-|-----|-----|-------|
 | **newtron** | [Design](docs/newtron/hld.md) | [Types & Methods](docs/newtron/lld.md) | [Usage](docs/newtron/howto.md) |
 | **newtlab** | [Design](docs/newtlab/hld.md) | [Types & Methods](docs/newtlab/lld.md) | [Usage](docs/newtlab/howto.md) |
-| **newtest** | [Design](docs/newtest/hld.md) | [Types & Methods](docs/newtest/lld.md) | [Usage](docs/newtest/howto.md) |
+| **newtrun** | [Design](docs/newtrun/hld.md) | [Types & Methods](docs/newtrun/lld.md) | [Usage](docs/newtrun/howto.md) |
 
 [RCA Index](docs/rca/) — 40+ root-cause analyses documenting SONiC platform bugs, daemon interactions, and workarounds discovered during development. Covers frrcfgd, orchagent, vlanmgrd, SAI behavior, and CiscoVS/VPP platform-specific issues. This is institutional knowledge about SONiC internals that doesn't exist in upstream documentation.
 

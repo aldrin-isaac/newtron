@@ -19,10 +19,10 @@ type Settings struct {
 	// SpecDir overrides the default specification directory
 	SpecDir string `json:"spec_dir,omitempty"`
 
-	// DefaultSuite is the default --dir for newtest run
+	// DefaultSuite is the default --dir for newtrun run
 	DefaultSuite string `json:"default_suite,omitempty"`
 
-	// TopologiesDir is the base directory for newtest topologies
+	// TopologiesDir is the base directory for newtrun topologies
 	TopologiesDir string `json:"topologies_dir,omitempty"`
 
 	// AuditLogPath overrides the default audit log path

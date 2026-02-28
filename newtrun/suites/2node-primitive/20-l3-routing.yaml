@@ -1,0 +1,91 @@
+name: l3-routing
+description: |
+  L3 routing in a dedicated VRF on switch2: create Vrf_local, bind Ethernet1
+  (→host4), assign IP, and verify host4 can reach the gateway.
+  Demonstrates the full primitive build-up: VRF → interface binding → IP → ping.
+topology: 2node
+requires: [boot-ssh]
+
+steps:
+  - name: create-vrf-local
+    action: create-vrf
+    devices: [switch2]
+    params:
+      vrf: Vrf_local
+
+  - name: bind-ethernet1-to-vrf
+    action: set-interface
+    devices: [switch2]
+    interface: Ethernet1
+    params:
+      property: vrf
+      value: Vrf_local
+
+  - name: set-ip-ethernet1
+    action: set-interface
+    devices: [switch2]
+    interface: Ethernet1
+    params:
+      property: ip
+      value: "10.20.1.1/31"
+
+  # CONFIG_DB verification: VRF exists
+  - name: verify-vrf-exists
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: Vrf_local
+    expect:
+      exists: true
+
+  # CONFIG_DB verification: interface VRF binding
+  - name: verify-interface-vrf
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: Ethernet1
+    expect:
+      fields:
+        vrf_name: Vrf_local
+
+  # CONFIG_DB verification: IP assigned
+  - name: verify-ip-assigned
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet1|10.20.1.1/31"
+    expect:
+      exists: true
+
+  # Poll for intfmgrd to assign the IP in the kernel (can take 60-90s on CiscoVS).
+  - name: wait-ethernet1-ip
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show Ethernet1 | grep -q '10.20.1.1' && break; sleep 5; done; true"
+
+  # Prime NGDP ARP responder before host4 sends ARP (RCA-033, RCA-036).
+  - name: prime-ngdp-arp-ethernet1
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0 && break; sleep 2; done || true"
+
+  - name: wait-after-prime
+    action: wait
+    duration: 3s
+
+  - name: host4-configure-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr add 10.20.1.0/31 dev eth0 2>/dev/null || true"
+
+  - name: host4-add-default-route
+    action: host-exec
+    devices: [host4]
+    command: "ip route add default via 10.20.1.1 dev eth0 2>/dev/null || true"
+
+  - name: host4-ping-gateway
+    action: host-exec
+    devices: [host4]
+    command: "ping -c 3 -W 2 10.20.1.1"
+    expect:
+      success_rate: 0.8

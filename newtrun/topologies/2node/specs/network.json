@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "description": "2-node topology network specs — overlay VPN definitions for 2node-primitive suite",
+  "zones": {
+    "amer": {}
+  },
+  "macvpns": {
+    "vlan300": {
+      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
+      "vlan_id": 300,
+      "vni": 50300,
+      "route_targets": ["65000:50300"],
+      "arp_suppression": true
+    }
+  },
+  "ipvpns": {
+    "evpn-l3-vrf": {
+      "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
+      "vrf": "Vrf_l3evpn",
+      "l3vni": 50001,
+      "l3vni_vlan": 3999,
+      "route_targets": ["65000:50001"]
+    },
+    "evpn-irb-vrf": {
+      "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
+      "vrf": "Vrf_irb",
+      "l3vni": 50002,
+      "l3vni_vlan": 3998,
+      "route_targets": ["65000:50002"]
+    }
+  },
+  "qos_policies": {
+    "test-4q": {
+      "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
+      "queues": [
+        {"name": "best-effort", "type": "dwrr", "weight": 50, "dscp": [0, 1, 2, 3, 4, 5, 6, 7]},
+        {"name": "standard", "type": "dwrr", "weight": 30, "dscp": [8, 9, 10, 11, 12, 13, 14, 15]},
+        {"name": "priority", "type": "dwrr", "weight": 15, "dscp": [16, 17, 18, 19, 20, 21, 22, 23, 24, 25]},
+        {"name": "control", "type": "strict", "dscp": [46, 48]}
+      ]
+    }
+  }
+}

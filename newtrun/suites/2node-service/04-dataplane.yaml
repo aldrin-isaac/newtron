@@ -1,0 +1,174 @@
+name: dataplane
+description: |
+  Dataplane connectivity tests for service types provisioned by the topology.
+  Tests EVPN L2 cross-switch forwarding (VXLAN VNI 10300), EVPN IRB gateway
+  reachability (VRF-bound SVIs on VLAN 400/401), and local IRB gateway
+  reachability (SVI 10.100.1.1/24 on VLAN 100).
+  Note: EVPN IRB inter-subnet routing (L3VNI 50400) is blocked by CiscoVS
+  Silicon One SAI limitation — VNI_TO_VIRTUAL_ROUTER_ID DECAP fails (RCA-039).
+topology: 2node-service
+requires: [provision]
+after: [verify-health]
+
+steps:
+  # =========================================================================
+  # Test 1: EVPN L2 cross-switch (host3 ↔ host6, VLAN 300, VNI 10300)
+  # =========================================================================
+
+  # host3 (switch1:Ethernet3) and host6 (switch2:Ethernet3) are in VLAN 300
+  # with untagged membership. EVPN L2 overlay (VNI 10300) extends L2 domain
+  # across switches via VXLAN.
+
+  - name: configure-host3-ip
+    action: host-exec
+    devices: [host3]
+    command: "ip addr add 192.168.3.10/24 dev eth0"
+    expect:
+      contains: ""
+
+  - name: configure-host6-ip
+    action: host-exec
+    devices: [host6]
+    command: "ip addr add 192.168.3.20/24 dev eth0"
+    expect:
+      contains: ""
+
+  - name: wait-evpn-learning
+    action: wait
+    duration: 10s
+
+  - name: ping-host3-to-host6
+    action: host-exec
+    devices: [host3]
+    command: "ping -c 10 -W 2 192.168.3.20"
+    expect:
+      success_rate: 0.80
+
+  - name: ping-host6-to-host3
+    action: host-exec
+    devices: [host6]
+    command: "ping -c 10 -W 2 192.168.3.10"
+    expect:
+      success_rate: 0.80
+
+  # =========================================================================
+  # Test 2: EVPN IRB gateway reachability (host7, host8, Vrf_irb)
+  # =========================================================================
+
+  # host7 (switch1:Ethernet4) is in VLAN 400 (10.1.40.0/24, VNI 10400).
+  # host8 (switch2:Ethernet4) is in VLAN 401 (10.1.41.0/24, VNI 10401).
+  # Both VLANs are bound to Vrf_irb via the irb-vrf IPVPN (L3VNI 50400).
+  # Each switch has an anycast SVI for its local VLAN only.
+  #
+  # Gateway reachability validates that VRF-bound VLAN interfaces are
+  # properly configured: VLAN created, SVI bound to VRF, IP assigned,
+  # L3VNI transit VLAN infrastructure present. This verifies the
+  # config-reload fix (RCA-041) and L3VNI infrastructure generation.
+  #
+  # Inter-subnet routing (host7 ↔ host8 via L3VNI 50400) is blocked on
+  # CiscoVS — Silicon One SAI can't create VNI_TO_VIRTUAL_ROUTER_ID DECAP
+  # entries (RCA-039). FRR control plane is correct; ASIC drops L3 VXLAN.
+
+  - name: configure-host7-vlan
+    action: host-exec
+    devices: [host7]
+    command: "ip addr flush dev eth0; ip link add link eth0 name eth0.400 type vlan id 400; ip link set eth0.400 up; ip addr add 10.1.40.10/24 dev eth0.400"
+    expect:
+      contains: ""
+
+  - name: configure-host8-vlan
+    action: host-exec
+    devices: [host8]
+    command: "ip addr flush dev eth0; ip link add link eth0 name eth0.401 type vlan id 401; ip link set eth0.401 up; ip addr add 10.1.41.20/24 dev eth0.401"
+    expect:
+      contains: ""
+
+  - name: wait-evpn-irb-learning
+    action: wait
+    duration: 10s
+
+  # Verify anycast gateway is reachable from each host's local subnet.
+  # This proves VRF binding, SVI IP assignment, and L3VNI infrastructure
+  # are correct — the full config-reload → intfmgrd → kernel path works.
+  - name: ping-host7-to-gateway
+    action: host-exec
+    devices: [host7]
+    command: "ping -c 5 -W 2 10.1.40.1"
+    expect:
+      success_rate: 0.80
+
+  - name: ping-host8-to-gateway
+    action: host-exec
+    devices: [host8]
+    command: "ping -c 5 -W 2 10.1.41.1"
+    expect:
+      success_rate: 0.80
+
+  # =========================================================================
+  # Test 3: IRB gateway reachability (host1 → SVI on switch1)
+  # =========================================================================
+
+  # host1 (switch1:Ethernet1) is in VLAN 100 with tagged membership (IRB
+  # service type). Host needs a VLAN sub-interface to send tagged frames.
+  # SVI is 10.100.1.1/24.
+  #
+  # newtlab auto-derives a host IP onto eth0 from the switch-side topology IP.
+  # Since the switch port is a tagged VLAN member, untagged eth0 traffic won't
+  # reach the SVI. Flush eth0 addresses and use eth0.100 instead.
+
+  - name: configure-host1-vlan
+    action: host-exec
+    devices: [host1]
+    command: "ip addr flush dev eth0; ip link add link eth0 name eth0.100 type vlan id 100; ip link set eth0.100 up; ip addr add 10.100.1.10/24 dev eth0.100"
+    expect:
+      contains: ""
+
+  - name: wait-arp
+    action: wait
+    duration: 3s
+
+  - name: ping-host1-to-svi
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 5 -W 2 10.100.1.1"
+    expect:
+      success_rate: 0.80
+
+  # =========================================================================
+  # Cleanup: remove host IPs (deprovision handles switch-side cleanup)
+  # =========================================================================
+
+  - name: cleanup-host1
+    action: host-exec
+    devices: [host1]
+    command: "ip link del eth0.100 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host3
+    action: host-exec
+    devices: [host3]
+    command: "ip addr del 192.168.3.10/24 dev eth0 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host6
+    action: host-exec
+    devices: [host6]
+    command: "ip addr del 192.168.3.20/24 dev eth0 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host7
+    action: host-exec
+    devices: [host7]
+    command: "ip link del eth0.400 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host8
+    action: host-exec
+    devices: [host8]
+    command: "ip link del eth0.401 2>/dev/null || true"
+    expect:
+      contains: ""

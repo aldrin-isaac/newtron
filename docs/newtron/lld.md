@@ -1,6 +1,6 @@
 # Newtron Low-Level Design (LLD)
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md). For the network-level architecture, see [newtron HLD](hld.md). For the device connection layer (SSH tunnels, Redis clients), see [Device Layer LLD](device-lld.md).
 
 
 ---
@@ -482,7 +482,7 @@ type VMCredentials struct {
 
 The `pkg/newtron/spec/` types are a shared coupling surface — all three tools read from the same JSON files. This table shows which tool reads or writes each field group:
 
-| Type | Field Group | newtron | newtlab | newtest |
+| Type | Field Group | newtron | newtlab | newtrun |
 |------|-------------|---------|-------|---------|
 | `PlatformSpec` | Core (`hwsku`, `port_count`, `default_speed`) | Read | | |
 | `PlatformSpec` | VM (`vm_image`, `vm_memory`, `vm_cpus`, `vm_nic_driver`, ...) | | Read | |
@@ -942,7 +942,7 @@ type ConfigDB struct {
     NewtronServiceBinding map[string]ServiceBindingEntry `json:"NEWTRON_SERVICE_BINDING,omitempty"`
 }
 
-// --- ConfigDB generic accessors (for newtest verify-config-db) ---
+// --- ConfigDB generic accessors (for newtrun verify-config-db) ---
 
 // GetTableKeys returns all keys for a table name (e.g., "BGP_NEIGHBOR").
 // Uses reflect to find the struct field matching the JSON tag, then returns
@@ -1467,7 +1467,7 @@ func (cs *ChangeSet) Apply(n *Node) error
 
 // Verify re-reads CONFIG_DB through a fresh client and confirms every entry
 // in the ChangeSet was applied correctly. Not called by the standard CLI flow,
-// but available for programmatic verification (e.g., newtest).
+// but available for programmatic verification (e.g., newtrun).
 func (cs *ChangeSet) Verify(n *Node) error
 
 // buildChangeSet wraps config function output into a ChangeSet.
@@ -1496,9 +1496,9 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 
 These types live in `pkg/newtron/device/sonic/types.go`. `AppDBClient.GetRoute()` returns `*RouteEntry` — placing them in `pkg/newtron/network/node` would create an import cycle. The `pkg/newtron/network/node` layer re-exports these types for convenience.
 
-These types support the verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtest) assert cross-device correctness.
+These types support the verification architecture: newtron observes single-device state and returns structured data; orchestrators (newtrun) assert cross-device correctness.
 
-**Consumers:** newtest's step executors are the primary consumers — `verifyProvisioningExecutor` reads `VerificationResult`, `verifyRouteExecutor` reads `RouteEntry`. See newtest LLD §7.5, §7.6.
+**Consumers:** newtrun's step executors are the primary consumers — `verifyProvisioningExecutor` reads `VerificationResult`, `verifyRouteExecutor` reads `RouteEntry`. See newtrun LLD §7.5, §7.6.
 
 ```go
 // VerificationResult reports ChangeSet verification outcome.
@@ -3424,8 +3424,8 @@ User settings are stored in `~/.newtron/settings.json`:
 type Settings struct {
     DefaultNetwork  string `json:"default_network,omitempty"`
     SpecDir         string `json:"spec_dir,omitempty"`
-    DefaultSuite    string `json:"default_suite,omitempty"`     // Default --dir for newtest run
-    TopologiesDir   string `json:"topologies_dir,omitempty"`    // Base directory for newtest topologies
+    DefaultSuite    string `json:"default_suite,omitempty"`     // Default --dir for newtrun run
+    TopologiesDir   string `json:"topologies_dir,omitempty"`    // Base directory for newtrun topologies
     AuditLogPath    string `json:"audit_log_path,omitempty"`    // Override default audit log path
     AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"` // Max audit log size in MB (default: 10)
     AuditMaxBackups int    `json:"audit_max_backups,omitempty"` // Max rotated log files (default: 10)
@@ -3478,7 +3478,7 @@ Newtron uses three tiers of tests, each with different scope and infrastructure 
 | Tier | Infrastructure | Speed | What It Tests |
 |------|---------------|-------|---------------|
 | Unit | None | Fast (~1s) | Pure logic: IP math, name normalization, spec resolution |
-| E2E | newtlab + newtest | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
+| E2E | newtlab + newtrun | Slow (~5min) | Full stack: SSH tunnel, real SONiC, ASIC convergence |
 
 ### 12.2 Unit Tests
 
@@ -3509,9 +3509,9 @@ func TestComputeNeighborIP(t *testing.T) {
 }
 ```
 
-### 12.3 E2E Testing (newtest)
+### 12.3 E2E Testing (newtrun)
 
-E2E testing uses the newtest framework (see `docs/newtest/`). Patterns and learnings
-from the legacy Go-based e2e tests are captured in `docs/newtest/e2e-learnings.md`.
+E2E testing uses the newtrun framework (see `docs/newtrun/`). Patterns and learnings
+from the legacy Go-based e2e tests are captured in `docs/newtrun/e2e-learnings.md`.
 
 

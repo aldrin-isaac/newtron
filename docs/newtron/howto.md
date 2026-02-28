@@ -581,7 +581,7 @@ newtron settings set network production
 newtron settings set specs /etc/newtron
 
 # Set default test suite
-newtron settings set suite newtest/suites/2node-incremental
+newtron settings set suite newtrun/suites/2node-incremental
 
 # View current settings
 newtron settings show
@@ -2156,8 +2156,8 @@ This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any uns
 ## 19. Lab Environment
 
 Lab environments for newtron use **newtlab** (see `docs/newtlab/`). newtlab orchestrates
-SONiC-VS QEMU VMs without requiring root or Docker. E2E testing uses the **newtest**
-framework (see `docs/newtest/`).
+SONiC-VS QEMU VMs without requiring root or Docker. E2E testing uses the **newtrun**
+framework (see `docs/newtrun/`).
 
 ### 19.1 Running Tests
 
@@ -2658,7 +2658,7 @@ err := net.SaveMACVPN("my-l2vpn", spec.MACVPNSpec{
 dev.Disconnect()
 ```
 
-E2E testing uses the newtest framework. See `docs/newtest/e2e-learnings.md` for
+E2E testing uses the newtrun framework. See `docs/newtrun/e2e-learnings.md` for
 SONiC-specific patterns (convergence timing, cleanup ordering, vxlanmgrd pitfalls).
 
 ### 21.9 Design Benefits
@@ -3187,7 +3187,7 @@ Every self-contained unit of work that reads the cache must start with a fresh s
 
 - **Write operations** (via `ExecuteOp`): `Lock()` automatically refreshes the cache after acquiring the distributed lock. Precondition checks within the operation read from this fresh snapshot. No action needed by the caller.
 
-- **Read-only code** (health checks, CLI show commands): Call `Refresh()` before reading from the cache, or use `ConfigDBClient.Get()`/`Exists()` to read from Redis directly (as `verify-config-db` does in newtest).
+- **Read-only code** (health checks, CLI show commands): Call `Refresh()` before reading from the cache, or use `ConfigDBClient.Get()`/`Exists()` to read from Redis directly (as `verify-config-db` does in newtrun).
 
 - **Composite provisioning path**: Call `Refresh()` after `DeliverComposite()` to reload the cache with the newly written config.
 
@@ -3277,4 +3277,4 @@ The following documents provide additional detail on specific topics:
 | [lld.md](lld.md) | Low-Level Design -- package structure, data flow, object model details |
 | [device-lld.md](device-lld.md) | Device Layer LLD -- SSH tunnels, Redis clients, state access |
 | [DESIGN_PRINCIPLES.md](../DESIGN_PRINCIPLES.md) | Core design principles and philosophy |
-| [e2e-learnings.md](../newtest/e2e-learnings.md) | SONiC-VS reference and E2E testing patterns |
+| [e2e-learnings.md](../newtrun/e2e-learnings.md) | SONiC-VS reference and E2E testing patterns |

@@ -34,7 +34,7 @@ vtysh -c 'show running-config' | grep 'router bgp'        → "router bgp 65100"
 Restart the BGP Docker container **after** provisioning CONFIG_DB and **before** calling `ApplyFRRDefaults`. The restart kills `bgpd` + `bgpcfgd`, and on startup `bgpcfgd` regenerates `frr.conf` from the current CONFIG_DB state (which now has the correct ASN).
 
 ```yaml
-# Correct ordering in newtest scenarios:
+# Correct ordering in newtrun scenarios:
 - name: provision-leafs
   action: provision
   devices: [leaf1, leaf2]

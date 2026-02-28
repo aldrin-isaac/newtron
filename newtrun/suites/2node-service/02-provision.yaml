@@ -1,0 +1,38 @@
+name: provision
+description: |
+  Provision both switches via topology provisioner, then config reload to
+  ensure all SONiC daemons process the new config from a clean startup state.
+  config reload handles both the BGP ASN change (RCA-019) and the vrfmgrd
+  VRF_TABLE STATE_DB propagation that intfmgrd needs for VRF-bound interfaces.
+topology: 2node-service
+requires: [boot-ssh]
+
+steps:
+  - name: provision-switches
+    action: provision
+    devices: [switch1, switch2]
+
+  # config reload stops all daemons, re-reads config_db.json, restarts them.
+  # This ensures:
+  # 1. bgpcfgd picks up new ASN (RCA-019: can't change dynamically)
+  # 2. vrfmgrd writes VRF_TABLE to STATE_DB (intfmgrd depends on this to
+  #    bind VRF-bound VLAN interfaces like L3VNI transit VLANs and IRB SVIs)
+  - name: config-reload
+    action: config-reload
+    devices: [switch1, switch2]
+
+  # Wait for all services to fully restart after config reload.
+  # CiscoVS platform takes longer than VPP to stabilize.
+  - name: wait-reload
+    action: wait
+    duration: 45s
+
+  # BGP convergence gate — wait for all sessions to establish before
+  # proceeding to health check and dataplane tests.
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

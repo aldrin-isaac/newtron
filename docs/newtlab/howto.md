@@ -4,7 +4,7 @@ newtlab realizes network topologies as connected QEMU virtual machines. It
 reads newtron's spec files (`topology.json`, `platforms.json`, `profiles/`)
 and manages VM lifecycle without root privileges.
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md).
 
 ---
 
@@ -623,7 +623,7 @@ iperf3 -s
 iperf3 -c 10.1.1.1 -t 10
 ```
 
-Or via newtest scenarios (see `docs/newtest/howto.md` for step actions like `host-exec`).
+Or via newtrun scenarios (see `docs/newtrun/howto.md` for step actions like `host-exec`).
 
 ---
 

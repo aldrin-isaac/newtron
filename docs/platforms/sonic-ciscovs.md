@@ -44,7 +44,7 @@
 
 **Requirements:**
 - **Minimum:** 2 vCPU, 6GB RAM
-- **Allocated:** 6 vCPU, 8GB RAM (current newtest topology defaults)
+- **Allocated:** 6 vCPU, 8GB RAM (current newtrun topology defaults)
 
 **Impact:**
 - Cannot run many VMs simultaneously

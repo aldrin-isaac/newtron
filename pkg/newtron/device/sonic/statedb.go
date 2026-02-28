@@ -166,7 +166,7 @@ func (c *StateDBClient) Close() error {
 
 // GetEntry reads a single STATE_DB entry as raw map[string]string.
 // Returns (nil, nil) if the entry does not exist.
-// Used by newtest's verifyStateDBExecutor for generic table/key/field assertions.
+// Used by newtrun's verifyStateDBExecutor for generic table/key/field assertions.
 func (c *StateDBClient) GetEntry(table, key string) (map[string]string, error) {
 	redisKey := fmt.Sprintf("%s|%s", table, key)
 	vals, err := c.client.HGetAll(c.ctx, redisKey).Result()

@@ -1,0 +1,8 @@
+- are all the patches relevant or are some stale
+- remove dead code
+- update howto, hld, readme
+- update lld
+
+- newtest: show current "running" step in --detail
+- newtest: add streaming watch mode
+- newtest: add info about spec and suite directory

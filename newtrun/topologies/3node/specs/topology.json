@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "description": "3-node topology: 2 leaves (eBGP underlay) + 2 Alpine virtual hosts",
+  "devices": {
+    "leaf1": {
+      "interfaces": {
+        "Ethernet0": {
+          "link": "leaf2:Ethernet0",
+          "service": "transit",
+          "ip": "10.1.0.0/31"
+        },
+        "Ethernet1": {
+          "link": "host1:eth0",
+          "ip": "10.1.100.1/24"
+        }
+      }
+    },
+    "leaf2": {
+      "interfaces": {
+        "Ethernet0": {
+          "link": "leaf1:Ethernet0",
+          "service": "transit",
+          "ip": "10.1.0.1/31"
+        },
+        "Ethernet1": {
+          "link": "host2:eth0",
+          "ip": "10.1.200.1/24"
+        }
+      }
+    },
+    "host1": {
+      "interfaces": {
+        "eth0": {
+          "link": "leaf1:Ethernet1"
+        }
+      }
+    },
+    "host2": {
+      "interfaces": {
+        "eth0": {
+          "link": "leaf2:Ethernet1"
+        }
+      }
+    }
+  },
+  "links": [
+    {"a": "leaf1:Ethernet0", "z": "leaf2:Ethernet0"},
+    {"a": "leaf1:Ethernet1", "z": "host1:eth0"},
+    {"a": "leaf2:Ethernet1", "z": "host2:eth0"}
+  ],
+  "newtlab": {
+    "link_port_base": 10000,
+    "console_port_base": 12000,
+    "ssh_port_base": 13000
+  }
+}

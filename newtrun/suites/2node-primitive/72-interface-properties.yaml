@@ -1,0 +1,80 @@
+name: interface-properties
+description: |
+  Self-contained interface property lifecycle on sw1:Ethernet10 (CiscoVS has 32 ports,
+  Ethernet10 exists but has no host wired). Tests mtu, admin_status, and description
+  set/verify primitives.
+topology: 2node
+requires: [boot-ssh]
+
+steps:
+  # Set MTU to 9100
+  - name: set-mtu-9100
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      property: mtu
+      value: "9100"
+
+  - name: verify-mtu
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT
+    key: Ethernet10
+    expect:
+      fields:
+        mtu: "9100"
+
+  # Set admin_status down
+  - name: set-admin-down
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      property: admin_status
+      value: down
+
+  - name: verify-admin-down
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT
+    key: Ethernet10
+    expect:
+      fields:
+        admin_status: down
+
+  # Set admin_status back up
+  - name: set-admin-up
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      property: admin_status
+      value: up
+
+  - name: verify-admin-up
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT
+    key: Ethernet10
+    expect:
+      fields:
+        admin_status: up
+
+  # Set description
+  - name: set-description
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet10
+    params:
+      property: description
+      value: "test-interface-props"
+
+  - name: verify-description
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT
+    key: Ethernet10
+    expect:
+      fields:
+        description: test-interface-props

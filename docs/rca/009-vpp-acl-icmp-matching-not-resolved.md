@@ -42,4 +42,4 @@ SONiC-VPP's ACL implementation differs from SONiC-VS in non-obvious ways.
 The same ACL CONFIG_DB entries produce different behavior depending on the
 dataplane. When supporting multiple SONiC platforms, ACL rules must be
 validated per-platform — what works on VS may silently misbehave on VPP.
-Consider adding platform-specific ACL test cases to the newtest suite.
+Consider adding platform-specific ACL test cases to the newtrun suite.

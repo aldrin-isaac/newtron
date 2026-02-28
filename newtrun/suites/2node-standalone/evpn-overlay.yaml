@@ -1,0 +1,76 @@
+name: evpn-overlay
+description: "Full EVPN overlay: setup + VPN binding + teardown"
+topology: 2node
+
+steps:
+  - name: provision
+    action: provision
+    devices: all
+
+  - name: wait-convergence
+    action: wait
+    duration: 5s
+
+  - name: setup-evpn
+    action: setup-evpn
+    devices: [leaf1]
+    params:
+      source_ip: "10.0.0.11"
+
+  - name: create-vrf
+    action: create-vrf
+    devices: [leaf1]
+    params:
+      vrf: Vrf_overlay
+
+  - name: bind-ipvpn
+    action: bind-ipvpn
+    devices: [leaf1]
+    params:
+      vrf: Vrf_overlay
+      ipvpn: customer-vpn
+
+  - name: verify-l3vni
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_10001_Vrf_overlay"
+    expect:
+      exists: true
+
+  - name: create-vlan
+    action: create-vlan
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: bind-macvpn
+    action: bind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+    params:
+      macvpn: servers-vlan100
+
+  - name: verify-l2vni
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|map_10100_Vlan100"
+    expect:
+      exists: true
+
+  - name: unbind-macvpn
+    action: unbind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: unbind-ipvpn
+    action: unbind-ipvpn
+    devices: [leaf1]
+    params:
+      vrf: Vrf_overlay
+
+  - name: cleanup
+    action: cleanup
+    devices: [leaf1]
+    params:
+      type: all

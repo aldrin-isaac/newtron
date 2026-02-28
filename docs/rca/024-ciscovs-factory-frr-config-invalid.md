@@ -141,4 +141,4 @@ router bgp 65011
 
 Always validate factory configs in virtual platform images before using them as deployment baselines. The presence of `sonic-cfggen` headers doesn't guarantee the generated config is valid - template bugs or bad CONFIG_DB seed data can produce syntactically correct but semantically invalid FRR configs.
 
-For automation/testing frameworks (newtlab, newtest), add health checks that verify BGP container stability before proceeding with provisioning steps that depend on `vtysh` being available.
+For automation/testing frameworks (newtlab, newtrun), add health checks that verify BGP container stability before proceeding with provisioning steps that depend on `vtysh` being available.

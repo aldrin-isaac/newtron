@@ -1,0 +1,73 @@
+name: host-verification
+description: Deep host endpoint validation - interfaces, MTU, sustained bidirectional traffic
+topology: 3node
+requires: [l3-routing]
+
+steps:
+  # Verify host interfaces are up with correct IPs
+  - name: host1-interface
+    action: host-exec
+    devices: [host1]
+    command: "ip addr show dev eth0"
+    expect:
+      contains: "10.1.100.10"
+
+  - name: host2-interface
+    action: host-exec
+    devices: [host2]
+    command: "ip addr show dev eth0"
+    expect:
+      contains: "10.1.200.20"
+
+  # Verify interface link state
+  - name: host1-link-up
+    action: host-exec
+    devices: [host1]
+    command: "ip link show eth0 | grep -c 'state UP'"
+    expect:
+      contains: "1"
+
+  - name: host2-link-up
+    action: host-exec
+    devices: [host2]
+    command: "ip link show eth0 | grep -c 'state UP'"
+    expect:
+      contains: "1"
+
+  # MTU test: 1400-byte payload ping (fits default 1500 MTU)
+  - name: mtu-test-1400
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 -s 1400 -M do 10.1.200.20"
+    expect:
+      success_rate: 0.8
+
+  # Sustained bidirectional traffic: 20 pings each way
+  - name: sustained-host1-to-host2
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 20 -W 2 -i 0.2 10.1.200.20"
+    expect:
+      success_rate: 0.9
+
+  - name: sustained-host2-to-host1
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 20 -W 2 -i 0.2 10.1.100.10"
+    expect:
+      success_rate: 0.9
+
+  # Verify host routing tables
+  - name: host1-routes
+    action: host-exec
+    devices: [host1]
+    command: "ip route show"
+    expect:
+      contains: "default via 10.1.100.1"
+
+  - name: host2-routes
+    action: host-exec
+    devices: [host2]
+    command: "ip route show"
+    expect:
+      contains: "default via 10.1.200.1"

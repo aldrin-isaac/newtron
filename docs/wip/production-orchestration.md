@@ -1,22 +1,22 @@
 # Production Orchestration Requirements
 
-Status: WIP — capturing requirements for evolving newtest from lab orchestrator
+Status: WIP — capturing requirements for evolving newtrun from lab orchestrator
 to production-capable orchestrator.
 
 ## Context
 
 newtron is a per-device semantic change driver. It understands every allowable
 operation on a SONiC device, enforces preconditions, and provides reference-aware
-reverse operations. newtest is the orchestrator that composes newtron operations
+reverse operations. newtrun is the orchestrator that composes newtron operations
 across multiple devices.
 
-Today newtest is lab-grade: it deploys virtual topologies via newtlab, provisions
+Today newtrun is lab-grade: it deploys virtual topologies via newtlab, provisions
 devices, runs test scenarios, and tears down. These are the structural gaps that
 must be addressed for production use.
 
 ## Gap 1: Decoupled from Topology Lifecycle
 
-newtest assumes it owns the full lifecycle — deploy VMs, provision, test, destroy.
+newtrun assumes it owns the full lifecycle — deploy VMs, provision, test, destroy.
 Production devices already exist. The orchestrator must work with existing
 infrastructure without owning the device lifecycle.
 
@@ -30,7 +30,7 @@ infrastructure without owning the device lifecycle.
 
 ## Gap 2: Compensation on Failure (Rollback)
 
-If a suite provisions switch1 successfully then fails on switch2, newtest reports
+If a suite provisions switch1 successfully then fails on switch2, newtrun reports
 failure and stops. It never calls reverse operations on switch1 to restore it.
 A production orchestrator must compensate for partial failures.
 
@@ -46,7 +46,7 @@ A production orchestrator must compensate for partial failures.
 
 ## Gap 3: API Service
 
-newtest is CLI-only with local state.json on disk. A production orchestrator must
+newtrun is CLI-only with local state.json on disk. A production orchestrator must
 be a service.
 
 **Requirements:**
@@ -59,7 +59,7 @@ be a service.
 
 ## Gap 4: Concurrent Device Operations
 
-Within a step, newtest provisions devices sequentially. Production fabrics have
+Within a step, newtrun provisions devices sequentially. Production fabrics have
 hundreds of devices.
 
 **Requirements:**
@@ -71,7 +71,7 @@ hundreds of devices.
 
 ## Gap 5: Dry-Run Orchestration
 
-newtron supports per-device dry-run, but newtest has no way to preview an entire
+newtron supports per-device dry-run, but newtrun has no way to preview an entire
 suite's changes across all devices before committing.
 
 **Requirements:**
@@ -82,7 +82,7 @@ suite's changes across all devices before committing.
 
 ## Priority
 
-Gaps 1 and 2 are structural — they require architectural changes to newtest.
+Gaps 1 and 2 are structural — they require architectural changes to newtrun.
 Gaps 3-5 are features that can be added incrementally once the architecture
 supports them.
 

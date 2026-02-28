@@ -2,7 +2,7 @@
 
 newtlab realizes network topologies as connected QEMU virtual machines for SONiC lab environments. This document covers `pkg/newtlab/` — the VM lifecycle, networking, and port management layer.
 
-For the architectural principles behind newtron, newtlab, and newtest, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md). For the high-level architecture, see [newtlab HLD](hld.md). For the device connection layer used after VMs boot, see [Device Layer LLD](../newtron/device-lld.md).
 
 ---
 
@@ -1661,12 +1661,12 @@ return fmt.Errorf("newtlab: allocate links: port %d conflict: %w", port, err)
 | §1 SSH Tunnel | Tunnel reads `SSHPort` written by newtlab profile patching (§10) |
 | §5.1 `Device.Connect()` | Connection reads `SSHUser`/`SSHPass`/`SSHPort` from profiles that newtlab patches |
 
-### References to newtest LLD
+### References to newtrun LLD
 
-| newtest LLD Section | How newtlab Relates |
+| newtrun LLD Section | How newtlab Relates |
 |---------------------|-------------------|
-| §6.1 `DeployTopology` | newtest wraps `newtlab.NewLab()` + `newtlab.Lab.Deploy()` — see §4.1 |
-| §6.2 `DestroyTopology` | newtest wraps `newtlab.Lab.Destroy()` — see §4.1 |
-| §6.3 Platform Capability Check | newtest reads `PlatformSpec.Dataplane` (§1.1) to skip verify-ping |
-| §4.5 Device connection | newtest relies on newtlab profile patching (§10) before connecting devices |
+| §6.1 `DeployTopology` | newtrun wraps `newtlab.NewLab()` + `newtlab.Lab.Deploy()` — see §4.1 |
+| §6.2 `DestroyTopology` | newtrun wraps `newtlab.Lab.Destroy()` — see §4.1 |
+| §6.3 Platform Capability Check | newtrun reads `PlatformSpec.Dataplane` (§1.1) to skip verify-ping |
+| §4.5 Device connection | newtrun relies on newtlab profile patching (§10) before connecting devices |
 

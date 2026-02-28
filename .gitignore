@@ -4,9 +4,9 @@
 /newtlab
 /test_acl
 
-# newtest generated reports and runtime artifacts
-newtest/.generated/
-newtest/**/audit.log
+# newtrun generated reports and runtime artifacts
+newtrun/.generated/
+newtrun/**/audit.log
 /test_derive
 
 # Claude Code local settings

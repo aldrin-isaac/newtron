@@ -72,7 +72,7 @@ func TestTopoCounts(t *testing.T) {
 
 func TestResolveTopologyDir(t *testing.T) {
 	t.Run("simple name uses base dir", func(t *testing.T) {
-		t.Setenv("NEWTEST_TOPOLOGIES", "/tmp/topos")
+		t.Setenv("NEWTRUN_TOPOLOGIES", "/tmp/topos")
 		got := resolveTopologyDir("foo")
 		want := "/tmp/topos/foo/specs"
 		if got != want {

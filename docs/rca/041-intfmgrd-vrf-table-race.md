@@ -70,8 +70,8 @@ sequence. `config reload` restarts ALL SONiC daemons from scratch, ensuring:
 Changed files:
 - `cmd/newtron/cmd_provision.go` — `ConfigReload()` instead of `RestartService("bgp")`
 - `pkg/newtron/network/node/node.go` — new `ConfigReload()` method
-- `pkg/newtest/` — new `config-reload` action
-- `newtest/suites/2node-service/02-provision.yaml` — uses config-reload
+- `pkg/newtrun/` — new `config-reload` action
+- `newtrun/suites/2node-service/02-provision.yaml` — uses config-reload
 
 ## Related
 

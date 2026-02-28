@@ -49,7 +49,7 @@ var rootCmd = &cobra.Command{
 	CompletionOptions: cobra.CompletionOptions{HiddenDefaultCmd: true},
 	Long: `NewtLab deploys QEMU virtual machines from newtron topology specs.
 
-Topologies are resolved by name from newtest/topologies/.
+Topologies are resolved by name from newtrun/topologies/.
 
   newtlab list                       # show topologies
   newtlab deploy 2node               # deploy VMs from topology
@@ -91,15 +91,15 @@ func init() {
 // ============================================================================
 
 // topologiesBaseDir returns the base directory for topologies.
-// Resolution: NEWTEST_TOPOLOGIES env > settings > default.
+// Resolution: NEWTRUN_TOPOLOGIES env > settings > default.
 func topologiesBaseDir() string {
-	if v := os.Getenv("NEWTEST_TOPOLOGIES"); v != "" {
+	if v := os.Getenv("NEWTRUN_TOPOLOGIES"); v != "" {
 		return v
 	}
 	if s, err := settings.Load(); err == nil && s.TopologiesDir != "" {
 		return s.TopologiesDir
 	}
-	return "newtest/topologies"
+	return "newtrun/topologies"
 }
 
 // resolveTopologyDir resolves a topology name to its spec directory.

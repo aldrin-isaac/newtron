@@ -1,0 +1,25 @@
+name: baseline
+description: Verify basic provisioning and DEVICE_METADATA config
+topology: 2node
+
+steps:
+  - name: provision-all
+    action: provision
+    devices: all
+
+  - name: wait-config-apply
+    action: wait
+    duration: 30s
+
+  - name: verify-provisioning
+    action: verify-provisioning
+    devices: all
+
+  - name: verify-device-metadata
+    action: verify-config-db
+    devices: all
+    table: DEVICE_METADATA
+    key: localhost
+    expect:
+      fields:
+        platform: Force10-S6000

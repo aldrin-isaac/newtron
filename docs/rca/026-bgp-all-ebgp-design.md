@@ -204,7 +204,7 @@ For topologies with route reflectors:
 ### Test Results
 
 ```
-newtest: 5 scenarios: 5 passed (1m56s)
+newtrun: 5 scenarios: 5 passed (1m56s)
 
 [1/5] boot-provision ........ PASS (1m12s)
 [2/5] l3-routing ............ PASS (18s)

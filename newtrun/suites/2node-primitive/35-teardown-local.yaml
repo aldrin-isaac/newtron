@@ -1,0 +1,103 @@
+name: teardown-local
+description: |
+  Reverse teardown of local primitives (Phase 2) using newtron primitives.
+  Removes SVI, VLAN members, VLAN, interface IPs, VRF interface binding, and VRF
+  in reverse order of setup. Frees Ethernet1/Ethernet3 on sw1 and Ethernet1 on sw2
+  for reuse in cross-switch routing phase.
+topology: 2node
+requires: [irb, static-route]
+
+steps:
+  # 1. Remove SVI from VLAN 100 (reverse of irb scenario)
+  - name: remove-svi-vlan100
+    action: remove-svi
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: verify-svi-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_INTERFACE
+    key: "Vlan100"
+    expect:
+      exists: false
+
+  # 2. Remove VLAN members (reverse of l2-bridge scenario)
+  - name: remove-member-ethernet2
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 100
+
+  - name: remove-member-ethernet3
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet3
+    vlan_id: 100
+
+  - name: remove-member-ethernet1
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet1
+    vlan_id: 100
+
+  - name: verify-member-eth1-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet1"
+    expect:
+      exists: false
+
+  # 3. Delete VLAN 100
+  - name: delete-vlan100
+    action: delete-vlan
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: verify-vlan100-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  # 4. Remove IP from sw2:Ethernet1 (reverse of l3-routing)
+  - name: remove-ip-ethernet1
+    action: remove-ip
+    devices: [switch2]
+    interface: Ethernet1
+    params:
+      ip: "10.20.1.1/31"
+
+  - name: verify-ip-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet1|10.20.1.1/31"
+    expect:
+      exists: false
+
+  # 5. Unbind sw2:Ethernet1 from Vrf_local
+  - name: remove-vrf-interface
+    action: remove-vrf-interface
+    devices: [switch2]
+    interface: Ethernet1
+    params:
+      vrf: Vrf_local
+
+  # 6. Delete Vrf_local
+  - name: delete-vrf-local
+    action: delete-vrf
+    devices: [switch2]
+    params:
+      vrf: Vrf_local
+
+  - name: verify-vrf-removed
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: Vrf_local
+    expect:
+      exists: false

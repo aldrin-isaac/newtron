@@ -1,0 +1,124 @@
+name: teardown-bgp
+description: |
+  Reverse teardown of BGP + EVPN overlay + cross-switch routing (Phases 4-5).
+  Uses teardown-evpn primitive for EVPN overlay, bgp-remove-neighbor for underlay,
+  and remove-ip for interface cleanup.
+topology: 2node
+requires: [teardown-evpn-l2]
+
+steps:
+  # 1. Teardown EVPN overlay (VTEP, NVO, overlay BGP neighbors)
+  - name: teardown-evpn-sw1
+    action: teardown-evpn
+    devices: [switch1]
+
+  - name: teardown-evpn-sw2
+    action: teardown-evpn
+    devices: [switch2]
+
+  - name: verify-vxlan-tunnel-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  - name: verify-vxlan-nvo-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  - name: verify-bgp-l2vpn-af-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # 2. Remove underlay BGP neighbors
+  - name: bgp-remove-neighbor-sw1
+    action: bgp-remove-neighbor
+    devices: [switch1]
+    params:
+      neighbor_ip: "10.1.0.1"
+
+  - name: bgp-remove-neighbor-sw2
+    action: bgp-remove-neighbor
+    devices: [switch2]
+    params:
+      neighbor_ip: "10.1.0.0"
+
+  - name: verify-underlay-neighbor-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: false
+
+  - name: verify-underlay-neighbor-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.0"
+    expect:
+      exists: false
+
+  # 3. Remove cross-switch routing IPs from Ethernet1
+  - name: remove-ip-eth1-sw1
+    action: remove-ip
+    devices: [switch1]
+    interface: Ethernet1
+    params:
+      ip: "10.20.0.1/31"
+
+  - name: remove-ip-eth1-sw2
+    action: remove-ip
+    devices: [switch2]
+    interface: Ethernet1
+    params:
+      ip: "10.20.1.1/31"
+
+  - name: verify-eth1-ip-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet1|10.20.0.1/31"
+    expect:
+      exists: false
+
+  # 4. Remove underlay IPs from Ethernet0
+  - name: remove-ip-eth0-sw1
+    action: remove-ip
+    devices: [switch1]
+    interface: Ethernet0
+    params:
+      ip: "10.1.0.0/31"
+
+  - name: remove-ip-eth0-sw2
+    action: remove-ip
+    devices: [switch2]
+    interface: Ethernet0
+    params:
+      ip: "10.1.0.1/31"
+
+  - name: verify-eth0-ip-removed-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: false
+
+  - name: verify-eth0-ip-removed-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.1/31"
+    expect:
+      exists: false

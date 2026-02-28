@@ -1,0 +1,410 @@
+name: evpn-l2-irb
+description: EVPN L2/L3 VPN with IRB - tests both intra-subnet L2 and inter-subnet L3 via VXLAN
+topology: 3node
+requires_features: [evpn-vxlan, macvpn]
+requires:
+  - l3-routing
+
+steps:
+  # =========================================================================
+  # Pre-cleanup: Remove any leftover config from previous failed runs
+  # =========================================================================
+
+  # Delete VLANs from previous runs (ignore errors if they don't exist)
+  - name: pre-delete-vlan-100-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "redis-cli -n 4 del 'VLAN|Vlan100' 'VLAN_MEMBER|Vlan100|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
+  - name: pre-delete-vlan-100-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "redis-cli -n 4 del 'VLAN|Vlan100' 'VLAN_MEMBER|Vlan100|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
+  - name: pre-delete-vlan-200-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "redis-cli -n 4 del 'VLAN|Vlan200' 'VLAN_MEMBER|Vlan200|Ethernet1' 2>/dev/null || true"
+    expect:
+      exit_code: 0
+
+  - name: pre-cleanup-leafs
+    action: cleanup
+    devices: [leaf1, leaf2]
+
+  # Clean up EVPN-specific IPs from previous runs (keep L3 routing IPs)
+  - name: cleanup-host1-evpn-ips
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip addr del 192.168.100.10/24 dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  - name: cleanup-host2-evpn-ips
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip addr del 192.168.100.20/24 dev eth0 2>/dev/null || true
+      ip addr del 192.168.200.20/24 dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  - name: wait-cleanup
+    action: wait
+    duration: 3s
+
+  # =========================================================================
+  # EVPN Control Plane Setup
+  # =========================================================================
+
+  - name: setup-evpn-leaf1
+    action: setup-evpn
+    devices: [leaf1]
+
+  - name: setup-evpn-leaf2
+    action: setup-evpn
+    devices: [leaf2]
+
+  - name: wait-evpn-setup
+    action: wait
+    duration: 5s
+
+  - name: verify-evpn-bgp-leaf1
+    action: verify-bgp
+    devices: [leaf1]
+    expect:
+      state: Established
+      timeout: 30s
+
+  - name: verify-evpn-bgp-leaf2
+    action: verify-bgp
+    devices: [leaf2]
+    expect:
+      state: Established
+      timeout: 30s
+
+  # =========================================================================
+  # Test 1: INTRA-SUBNET L2 Connectivity (Same subnet across leaf switches)
+  # =========================================================================
+
+  # Create VLAN 100 for L2 overlay
+  - name: create-vlan-100-leaf1
+    action: create-vlan
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: create-vlan-100-leaf2
+    action: create-vlan
+    devices: [leaf2]
+    vlan_id: 100
+
+  # Add host-facing interfaces to VLAN 100 (untagged)
+  - name: add-vlan-member-leaf1
+    action: add-vlan-member
+    devices: [leaf1]
+    vlan_id: 100
+    interface: Ethernet1
+    tagging: untagged
+
+  - name: add-vlan-member-leaf2
+    action: add-vlan-member
+    devices: [leaf2]
+    vlan_id: 100
+    interface: Ethernet1
+    tagging: untagged
+
+  # Configure anycast gateway on VLAN 100
+  - name: configure-svi-100-leaf1
+    action: configure-svi
+    devices: [leaf1]
+    vlan_id: 100
+    params:
+      ip: 192.168.100.1/24
+      anycast: true
+
+  - name: configure-svi-100-leaf2
+    action: configure-svi
+    devices: [leaf2]
+    vlan_id: 100
+    params:
+      ip: 192.168.100.1/24
+      anycast: true
+
+  # Bind VLAN 100 to MAC-VPN (EVPN L2)
+  - name: bind-macvpn-100-leaf1
+    action: bind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+    params:
+      macvpn: servers-vlan100
+
+  - name: bind-macvpn-100-leaf2
+    action: bind-macvpn
+    devices: [leaf2]
+    vlan_id: 100
+    params:
+      macvpn: servers-vlan100
+
+  - name: wait-vxlan-convergence
+    action: wait
+    duration: 10s
+
+  # Verify VXLAN tunnel creation
+  - name: verify-vxlan-tunnel-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL
+    expect:
+      exists: true
+      min_entries: 1
+
+  - name: verify-vxlan-tunnel-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: VXLAN_TUNNEL
+    expect:
+      exists: true
+      min_entries: 1
+
+  # Configure hosts in SAME subnet (192.168.100.0/24)
+  - name: configure-host1-intra
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip addr add 192.168.100.10/24 dev eth0
+    expect:
+      contains: ""
+
+  - name: configure-host2-intra
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip addr add 192.168.100.20/24 dev eth0
+    expect:
+      contains: ""
+
+  - name: wait-arp-resolution
+    action: wait
+    duration: 3s
+
+  # Test INTRA-SUBNET L2 connectivity via VXLAN
+  - name: ping-intra-host1-to-host2
+    action: verify-ping
+    devices: [host1]
+    target: 192.168.100.20
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  - name: ping-intra-host2-to-host1
+    action: verify-ping
+    devices: [host2]
+    target: 192.168.100.10
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  # Test anycast gateway reachability (both hosts should reach same gateway)
+  - name: ping-gateway-from-host1
+    action: verify-ping
+    devices: [host1]
+    target: 192.168.100.1
+    count: 5
+    expect:
+      success_rate: 0.90
+
+  - name: ping-gateway-from-host2
+    action: verify-ping
+    devices: [host2]
+    target: 192.168.100.1
+    count: 5
+    expect:
+      success_rate: 0.90
+
+  # Cleanup intra-subnet IP on host2 only (host1 keeps 192.168.100.10/24)
+  - name: cleanup-host2-intra
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip addr del 192.168.100.20/24 dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  # Remove VLAN 100 membership to prepare for inter-subnet test
+  - name: remove-vlan-member-leaf2
+    action: remove-vlan-member
+    devices: [leaf2]
+    vlan_id: 100
+    interface: Ethernet1
+
+  # =========================================================================
+  # Test 2: INTER-SUBNET L3 Connectivity (Different subnets via IRB)
+  # =========================================================================
+
+  # Create VLAN 200 on leaf2 for second subnet
+  - name: create-vlan-200-leaf2
+    action: create-vlan
+    devices: [leaf2]
+    vlan_id: 200
+
+  # Add leaf2 host interface to VLAN 200
+  - name: add-vlan-200-member-leaf2
+    action: add-vlan-member
+    devices: [leaf2]
+    vlan_id: 200
+    interface: Ethernet1
+    tagging: untagged
+
+  # Configure anycast gateway on VLAN 200
+  - name: configure-svi-200-leaf2
+    action: configure-svi
+    devices: [leaf2]
+    vlan_id: 200
+    params:
+      ip: 192.168.200.1/24
+      anycast: true
+
+  # Bind VLAN 200 to MAC-VPN
+  - name: bind-macvpn-200-leaf2
+    action: bind-macvpn
+    devices: [leaf2]
+    vlan_id: 200
+    params:
+      macvpn: storage-vlan200
+
+  - name: wait-vlan200-convergence
+    action: wait
+    duration: 5s
+
+  # Configure host IPs first
+  - name: configure-host2-ip
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip addr add 192.168.200.20/24 dev eth0
+    expect:
+      contains: ""
+
+  # Wait for ARP/neighbor discovery
+  - name: wait-arp
+    action: wait
+    duration: 3s
+
+  # Verify gateways are reachable before adding routes
+  - name: verify-gw-host1
+    action: verify-ping
+    devices: [host1]
+    target: 192.168.100.1
+    count: 3
+    expect:
+      success_rate: 0.8
+
+  - name: verify-gw-host2
+    action: verify-ping
+    devices: [host2]
+    target: 192.168.200.1
+    count: 3
+    expect:
+      success_rate: 0.8
+
+  # Now add inter-subnet routes
+  - name: configure-host1-inter-route
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip route add 192.168.200.0/24 via 192.168.100.1
+    expect:
+      contains: ""
+
+  - name: configure-host2-inter-route
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip route add 192.168.100.0/24 via 192.168.200.1
+    expect:
+      contains: ""
+
+  - name: wait-routing-convergence
+    action: wait
+    duration: 3s
+
+  # Test INTER-SUBNET L3 routing via IRB
+  # Traffic flows: host1 -> leaf1 SVI (100.1) -> VXLAN -> leaf2 SVI (200.1) -> host2
+  - name: ping-inter-host1-to-host2
+    action: verify-ping
+    devices: [host1]
+    target: 192.168.200.20
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  - name: ping-inter-host2-to-host1
+    action: verify-ping
+    devices: [host2]
+    target: 192.168.100.10
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  # Final cleanup - remove all created config
+  - name: cleanup-host1-inter-route
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip route del 192.168.200.0/24 via 192.168.100.1 2>/dev/null || true
+    expect:
+      contains: ""
+
+  - name: cleanup-host1-ip
+    action: host-exec
+    devices: [host1]
+    command: |
+      ip addr del 192.168.100.10/24 dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  - name: cleanup-host2-inter
+    action: host-exec
+    devices: [host2]
+    command: |
+      ip route del 192.168.100.0/24 via 192.168.200.1 2>/dev/null || true
+      ip addr del 192.168.200.20/24 dev eth0 2>/dev/null || true
+    expect:
+      contains: ""
+
+  # Unbind MAC-VPNs before deleting VLANs
+  - name: unbind-macvpn-100-leaf1
+    action: unbind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: unbind-macvpn-100-leaf2
+    action: unbind-macvpn
+    devices: [leaf2]
+    vlan_id: 100
+
+  - name: unbind-macvpn-200-leaf2
+    action: unbind-macvpn
+    devices: [leaf2]
+    vlan_id: 200
+
+  # Delete VLANs (also removes SVIs and VLAN members)
+  - name: delete-vlan-100-leaf1
+    action: delete-vlan
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: delete-vlan-100-leaf2
+    action: delete-vlan
+    devices: [leaf2]
+    vlan_id: 100
+
+  - name: delete-vlan-200-leaf2
+    action: delete-vlan
+    devices: [leaf2]
+    vlan_id: 200

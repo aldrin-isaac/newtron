@@ -265,7 +265,7 @@ func (d *Device) ConnAddr() string {
 	return fmt.Sprintf("%s:6379", d.Profile.MgmtIP)
 }
 
-// Tunnel returns the SSH tunnel for direct access (e.g., newtest SSH commands).
+// Tunnel returns the SSH tunnel for direct access (e.g., newtrun SSH commands).
 // Returns nil if no SSH tunnel is configured (direct Redis connection).
 func (d *Device) Tunnel() *SSHTunnel {
 	d.mu.RLock()

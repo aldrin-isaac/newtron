@@ -1,0 +1,19 @@
+name: boot-ssh
+description: Verify SSH reachability on both switches (factory boot baseline)
+topology: 2node
+requires: []
+
+steps:
+  - name: ssh-echo-switch1
+    action: ssh-command
+    devices: [switch1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: ssh-echo-switch2
+    action: ssh-command
+    devices: [switch2]
+    command: "echo ok"
+    expect:
+      contains: "ok"
