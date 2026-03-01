@@ -39,7 +39,10 @@ func TestServiceConfig_EVPNBridged(t *testing.T) {
 	assertEntry(t, entries, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", "vni", "20100")
 	assertEntry(t, entries, "SUPPRESS_VLAN_NEIGH", "Vlan100", "suppress", "on")
 	assertEntry(t, entries, "VLAN_MEMBER", "Vlan100|Ethernet0", "tagging_mode", "untagged")
-	assertEntry(t, entries, "NEWTRON_SERVICE_BINDING", "Ethernet0", "service_name", "customer-l2")
+
+	// NEWTRON_SERVICE_BINDING is NOT emitted by generateServiceEntries — ApplyService
+	// constructs it with full self-sufficiency fields.
+	assertNoEntry(t, entries, "NEWTRON_SERVICE_BINDING", "Ethernet0")
 }
 
 func TestServiceConfig_Routed_NoVRF(t *testing.T) {
@@ -457,6 +460,17 @@ func TestServiceConfig_BGP_PeerASRequest(t *testing.T) {
 		}
 	}
 	t.Error("missing BGP_NEIGHBOR entry — peer_as:request with PeerAS should generate neighbor")
+}
+
+// assertNoEntry checks that no entry with the given table and key exists.
+func assertNoEntry(t *testing.T, entries []sonic.Entry, table, key string) {
+	t.Helper()
+	for _, e := range entries {
+		if e.Table == table && e.Key == key {
+			t.Errorf("unexpected entry %s|%s (should not be emitted)", table, key)
+			return
+		}
+	}
 }
 
 // assertEntry checks that an entry with the given table and key exists,
