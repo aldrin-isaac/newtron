@@ -12,7 +12,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var vlanCmd = &cobra.Command{
@@ -36,13 +36,13 @@ var vlanListCmd = &cobra.Command{
 	Short: "List all VLANs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		vlanIDs := dev.ListVLANs()
+		vlanIDs := n.ListVLANs()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(vlanIDs)
@@ -59,17 +59,17 @@ var vlanListCmd = &cobra.Command{
 
 		skipped := 0
 		for _, id := range vlanIDs {
-			vlan, err := dev.GetVLAN(id)
+			entry, err := n.ShowVLAN(id)
 			if err != nil {
 				skipped++
 				continue
 			}
 
-			vni := dashInt(vlan.L2VNI())
+			vni := dashInt(entry.L2VNI)
 
-			svi := dash(vlan.SVIStatus)
+			svi := dash(entry.SVI)
 
-			t.Row(fmt.Sprintf("%d", vlan.ID), vni, svi, strings.Join(vlan.Members, ","))
+			t.Row(fmt.Sprintf("%d", entry.ID), vni, svi, strings.Join(entry.MemberNames, ","))
 		}
 		t.Flush()
 
@@ -100,48 +100,48 @@ Examples:
 		}
 
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		vlan, err := dev.GetVLAN(vlanID)
+		entry, err := n.ShowVLAN(vlanID)
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(vlan)
+			return json.NewEncoder(os.Stdout).Encode(entry)
 		}
 
 		fmt.Printf("VLAN: %s\n", bold(fmt.Sprintf("Vlan%d", vlanID)))
-		if vlan.Name != "" {
-			fmt.Printf("Name: %s\n", vlan.Name)
+		if entry.Name != "" {
+			fmt.Printf("Name: %s\n", entry.Name)
 		}
 
-		if len(vlan.Members) > 0 {
-			fmt.Printf("Members: %s\n", strings.Join(vlan.Members, ", "))
+		if len(entry.MemberNames) > 0 {
+			fmt.Printf("Members: %s\n", strings.Join(entry.MemberNames, ", "))
 		} else {
 			fmt.Println("Members: (none)")
 		}
 
-		if vlan.SVIStatus != "" {
-			fmt.Printf("SVI: %s\n", green(vlan.SVIStatus))
+		if entry.SVI != "" {
+			fmt.Printf("SVI: %s\n", green(entry.SVI))
 		} else {
 			fmt.Println("SVI: (not configured)")
 		}
 
 		// MAC-VPN / L2VNI info
-		if vlan.MACVPNInfo != nil {
+		if entry.MACVPNInfo != nil {
 			fmt.Println("\nMAC-VPN Binding:")
-			if vlan.MACVPNInfo.Name != "" {
-				fmt.Printf("  MAC-VPN: %s\n", vlan.MACVPNInfo.Name)
+			if entry.MACVPNInfo.Name != "" {
+				fmt.Printf("  MAC-VPN: %s\n", entry.MACVPNInfo.Name)
 			}
-			if vlan.MACVPNInfo.L2VNI > 0 {
-				fmt.Printf("  L2VNI: %d\n", vlan.MACVPNInfo.L2VNI)
+			if entry.MACVPNInfo.L2VNI > 0 {
+				fmt.Printf("  L2VNI: %d\n", entry.MACVPNInfo.L2VNI)
 			}
-			fmt.Printf("  ARP Suppression: %v\n", vlan.MACVPNInfo.ARPSuppression)
+			fmt.Printf("  ARP Suppression: %v\n", entry.MACVPNInfo.ARPSuppression)
 		} else {
 			fmt.Println("\nMAC-VPN: (not bound)")
 		}
@@ -161,47 +161,20 @@ Examples:
   newtron -d leaf1-ny vlan status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		vlanIDs := dev.ListVLANs()
+		statuses, err := n.VLANStatus()
+		if err != nil {
+			return err
+		}
 
-		if len(vlanIDs) == 0 {
+		if len(statuses) == 0 {
 			fmt.Println("No VLANs configured")
 			return nil
-		}
-
-		sort.Ints(vlanIDs)
-
-		type vlanStatus struct {
-			ID      int    `json:"id"`
-			Name    string `json:"name,omitempty"`
-			L2VNI   int    `json:"l2_vni,omitempty"`
-			SVI     string `json:"svi,omitempty"`
-			Members int    `json:"members"`
-			MACVPN  string `json:"macvpn,omitempty"`
-		}
-
-		var statuses []vlanStatus
-		for _, id := range vlanIDs {
-			vlan, err := dev.GetVLAN(id)
-			if err != nil {
-				continue
-			}
-			s := vlanStatus{
-				ID:      vlan.ID,
-				Name:    vlan.Name,
-				L2VNI:   vlan.L2VNI(),
-				SVI:     vlan.SVIStatus,
-				Members: len(vlan.Members),
-			}
-			if vlan.MACVPNInfo != nil {
-				s.MACVPN = vlan.MACVPNInfo.Name
-			}
-			statuses = append(statuses, s)
 		}
 
 		if app.jsonOutput {
@@ -218,7 +191,7 @@ Examples:
 			}
 			name := dash(s.Name)
 			macvpn := dash(s.MACVPN)
-			t.Row(fmt.Sprintf("%d", s.ID), name, vni, svi, fmt.Sprintf("%d", s.Members), macvpn)
+			t.Row(fmt.Sprintf("%d", s.ID), name, vni, svi, fmt.Sprintf("%d", s.MemberCount), macvpn)
 		}
 		t.Flush()
 
@@ -245,18 +218,17 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANCreate, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.CreateVLAN(ctx, vlanID, node.VLANConfig{
+			if err := n.CreateVLAN(ctx, vlanID, newtron.VLANConfig{
 				Description: vlanDescription,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("creating VLAN: %w", err)
+			}); err != nil {
+				return fmt.Errorf("creating VLAN: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -280,16 +252,15 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.AddVLANMember(ctx, vlanID, interfaceName, vlanTagged)
-			if err != nil {
-				return nil, fmt.Errorf("adding interface: %w", err)
+			if err := n.AddVLANMember(ctx, vlanID, interfaceName, vlanTagged); err != nil {
+				return fmt.Errorf("adding interface: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -311,16 +282,15 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.RemoveVLANMember(ctx, vlanID, interfaceName)
-			if err != nil {
-				return nil, fmt.Errorf("removing interface: %w", err)
+			if err := n.RemoveVLANMember(ctx, vlanID, interfaceName); err != nil {
+				return fmt.Errorf("removing interface: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -340,16 +310,15 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermVLANDelete, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.DeleteVLAN(ctx, vlanID)
-			if err != nil {
-				return nil, fmt.Errorf("deleting VLAN: %w", err)
+			if err := n.DeleteVLAN(ctx, vlanID); err != nil {
+				return fmt.Errorf("deleting VLAN: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -384,20 +353,19 @@ Examples:
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.ConfigureSVI(ctx, vlanID, node.SVIConfig{
+			if err := n.ConfigureSVI(ctx, vlanID, newtron.SVIConfig{
 				VRF:        sviVRF,
 				IPAddress:  sviIP,
 				AnycastMAC: sviAnycastGW,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("configuring SVI: %w", err)
+			}); err != nil {
+				return fmt.Errorf("configuring SVI: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -420,21 +388,21 @@ Examples:
 		}
 		macvpnName := args[1]
 
-		macvpnDef, err := app.net.GetMACVPN(macvpnName)
+		macvpnDef, err := app.net.ShowMACVPN(macvpnName)
 		if err != nil {
 			return fmt.Errorf("macvpn '%s' not found in network.json", macvpnName)
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
 
 			vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-			intf, err := dev.GetInterface(vlanIntf)
+			iface, err := n.Interface(vlanIntf)
 			if err != nil {
-				return nil, fmt.Errorf("VLAN %d not found", vlanID)
+				return fmt.Errorf("VLAN %d not found", vlanID)
 			}
 
 			fmt.Printf("MAC-VPN: %s\n", macvpnName)
@@ -442,11 +410,10 @@ Examples:
 			fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
 			fmt.Println()
 
-			cs, err := intf.BindMACVPN(ctx, macvpnName, macvpnDef)
-			if err != nil {
-				return nil, fmt.Errorf("binding MAC-VPN: %w", err)
+			if err := iface.BindMACVPN(ctx, macvpnName); err != nil {
+				return fmt.Errorf("binding MAC-VPN: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -468,23 +435,22 @@ Examples:
 			return err
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
 
 			vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-			intf, err := dev.GetInterface(vlanIntf)
+			iface, err := n.Interface(vlanIntf)
 			if err != nil {
-				return nil, fmt.Errorf("VLAN %d not found", vlanID)
+				return fmt.Errorf("VLAN %d not found", vlanID)
 			}
 
-			cs, err := intf.UnbindMACVPN(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("unbinding MAC-VPN: %w", err)
+			if err := iface.UnbindMACVPN(ctx); err != nil {
+				return fmt.Errorf("unbinding MAC-VPN: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }

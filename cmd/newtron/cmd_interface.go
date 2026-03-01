@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var interfaceCmd = &cobra.Command{
@@ -32,13 +32,13 @@ var interfaceListCmd = &cobra.Command{
 	Short: "List all interfaces on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		interfaces := dev.ListInterfaces()
+		interfaces := n.ListInterfaces()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(interfaces)
@@ -53,7 +53,7 @@ var interfaceListCmd = &cobra.Command{
 
 		skipped := 0
 		for _, name := range interfaces {
-			intf, err := dev.GetInterface(name)
+			intf, err := n.Interface(name)
 			if err != nil {
 				skipped++
 				continue
@@ -104,13 +104,13 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		intf, err := dev.GetInterface(intfName)
+		intf, err := n.Interface(intfName)
 		if err != nil {
 			return err
 		}
@@ -207,13 +207,13 @@ Examples:
 		property := args[1]
 		ctx := context.Background()
 
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		intf, err := dev.GetInterface(intfName)
+		intf, err := n.Interface(intfName)
 		if err != nil {
 			return err
 		}
@@ -269,20 +269,19 @@ Examples:
 		intfName := args[0]
 		property := args[1]
 		value := strings.Join(args[2:], " ")
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
 			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			intf, err := dev.GetInterface(intfName)
+			intf, err := n.Interface(intfName)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := intf.Set(ctx, property, value)
-			if err != nil {
-				return nil, fmt.Errorf("setting %s: %w", property, err)
+			if err := intf.Set(ctx, property, value); err != nil {
+				return fmt.Errorf("setting %s: %w", property, err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -301,13 +300,13 @@ Examples:
 		intfName := args[0]
 		ctx := context.Background()
 
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		intf, err := dev.GetInterface(intfName)
+		intf, err := n.Interface(intfName)
 		if err != nil {
 			return err
 		}
@@ -352,13 +351,13 @@ Examples:
 		intfName := args[0]
 		ctx := context.Background()
 
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		intf, err := dev.GetInterface(intfName)
+		intf, err := n.Interface(intfName)
 		if err != nil {
 			return err
 		}

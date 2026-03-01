@@ -12,7 +12,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var lagCmd = &cobra.Command{
@@ -36,13 +36,13 @@ var lagListCmd = &cobra.Command{
 	Short: "List all LAGs on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		portChannels := dev.ListPortChannels()
+		portChannels := n.ListPortChannels()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(portChannels)
@@ -58,7 +58,7 @@ var lagListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "STATUS", "MEMBERS", "ACTIVE")
 
 		for _, pcName := range portChannels {
-			pc, err := dev.GetPortChannel(pcName)
+			pc, err := n.ShowLAGDetail(pcName)
 			if err != nil {
 				continue
 			}
@@ -94,13 +94,13 @@ Examples:
 		lagName := args[0]
 
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		pc, err := dev.GetPortChannel(lagName)
+		pc, err := n.ShowLAGDetail(lagName)
 		if err != nil {
 			return err
 		}
@@ -129,10 +129,8 @@ Examples:
 			fmt.Printf("Active Members: (none) (0/%d)\n", len(pc.Members))
 		}
 
-		// Show interface details for the LAG
-		intf, err := dev.GetInterface(pc.Name)
-		if err == nil {
-			fmt.Printf("MTU: %d\n", intf.MTU())
+		if pc.MTU > 0 {
+			fmt.Printf("MTU: %d\n", pc.MTU)
 		}
 
 		return nil
@@ -152,50 +150,20 @@ Examples:
   newtron -d leaf1-ny lag status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		portChannels := dev.ListPortChannels()
+		statuses, err := n.LAGStatus()
+		if err != nil {
+			return err
+		}
 
-		if len(portChannels) == 0 {
+		if len(statuses) == 0 {
 			fmt.Println("No LAGs configured")
 			return nil
-		}
-
-		sort.Strings(portChannels)
-
-		type lagStatus struct {
-			Name          string   `json:"name"`
-			AdminStatus   string   `json:"admin_status"`
-			OperStatus    string   `json:"oper_status,omitempty"`
-			Members       []string `json:"members"`
-			ActiveMembers []string `json:"active_members"`
-			MTU           int      `json:"mtu,omitempty"`
-		}
-
-		var statuses []lagStatus
-		for _, pcName := range portChannels {
-			pc, err := dev.GetPortChannel(pcName)
-			if err != nil {
-				continue
-			}
-			s := lagStatus{
-				Name:          pc.Name,
-				AdminStatus:   pc.AdminStatus,
-				Members:       pc.Members,
-				ActiveMembers: pc.ActiveMembers,
-			}
-
-			// Try to get operational info from interface
-			if intf, err := dev.GetInterface(pc.Name); err == nil {
-				s.OperStatus = intf.OperStatus()
-				s.MTU = intf.MTU()
-			}
-
-			statuses = append(statuses, s)
 		}
 
 		if app.jsonOutput {
@@ -260,21 +228,20 @@ Examples:
 			members[i] = strings.TrimSpace(members[i])
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.CreatePortChannel(ctx, lagName, node.PortChannelConfig{
+			if err := n.CreatePortChannel(ctx, lagName, newtron.PortChannelConfig{
 				Members:  members,
 				MinLinks: lagMinLinks,
 				FastRate: lagFastRate,
 				MTU:      lagMTU,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("creating LAG: %w", err)
+			}); err != nil {
+				return fmt.Errorf("creating LAG: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -292,16 +259,15 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.AddPortChannelMember(ctx, lagName, memberName)
-			if err != nil {
-				return nil, fmt.Errorf("adding interface: %w", err)
+			if err := n.AddPortChannelMember(ctx, lagName, memberName); err != nil {
+				return fmt.Errorf("adding interface: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -319,16 +285,15 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.RemovePortChannelMember(ctx, lagName, memberName)
-			if err != nil {
-				return nil, fmt.Errorf("removing interface: %w", err)
+			if err := n.RemovePortChannelMember(ctx, lagName, memberName); err != nil {
+				return fmt.Errorf("removing interface: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -345,16 +310,15 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
 			if err := checkExecutePermission(auth.PermLAGDelete, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.DeletePortChannel(ctx, lagName)
-			if err != nil {
-				return nil, fmt.Errorf("deleting LAG: %w", err)
+			if err := n.DeletePortChannel(ctx, lagName); err != nil {
+				return fmt.Errorf("deleting LAG: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }

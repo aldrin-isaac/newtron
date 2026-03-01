@@ -9,28 +9,29 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 // Shell provides an interactive REPL with persistent device connection.
 type Shell struct {
-	dev        *node.Node
+	node       *newtron.Node
 	deviceName string
-	currentIntf *node.Interface // nil = device scope
-	intfName    string          // "" = device scope
+	currentIF  *newtron.Interface // nil = device scope
+	intfName   string             // "" = device scope
 	reader     *bufio.Reader
 	dirty      bool // true if changes applied since last save
 	commands   map[string]func(args []string)
 
-	// Composite build mode
+	// Composite build mode (uses internal node API)
 	composite    *node.CompositeBuilder // non-nil when in composite mode
 	compositeFor string                 // "overwrite" or "merge"
 }
 
 // NewShell creates a new interactive shell for the given device.
-func NewShell(dev *node.Node, deviceName string) *Shell {
+func NewShell(n *newtron.Node, deviceName string) *Shell {
 	s := &Shell{
-		dev:        dev,
+		node:       n,
 		deviceName: deviceName,
 		reader:     bufio.NewReader(os.Stdin),
 	}
@@ -97,21 +98,21 @@ func (s *Shell) prompt() string {
 
 // cmdShow displays details for the current context.
 func (s *Shell) cmdShow() {
-	if s.currentIntf != nil {
+	if s.currentIF != nil {
 		s.showInterface()
 	} else {
-		s.showDevice()
+		s.showDeviceInfo()
 	}
 }
 
-func (s *Shell) showDevice() {
-	if err := showDevice(s.dev); err != nil {
+func (s *Shell) showDeviceInfo() {
+	if err := showDevice(s.node); err != nil {
 		fmt.Printf("Error: %v\n", err)
 	}
 }
 
 func (s *Shell) showInterface() {
-	intf := s.currentIntf
+	intf := s.currentIF
 	fmt.Printf("Interface: %s\n", bold(intf.Name()))
 	fmt.Printf("Admin Status: %s\n", intf.AdminStatus())
 	fmt.Printf("Oper Status: %s\n", intf.OperStatus())
@@ -131,7 +132,7 @@ func (s *Shell) showInterface() {
 
 // cmdList lists child objects.
 func (s *Shell) cmdList(args []string) {
-	if s.currentIntf != nil {
+	if s.currentIF != nil {
 		fmt.Println("list is only available at device scope (use 'exit' first)")
 		return
 	}
@@ -143,7 +144,7 @@ func (s *Shell) cmdList(args []string) {
 
 	switch args[0] {
 	case "interfaces":
-		interfaces := s.dev.ListInterfaces()
+		interfaces := s.node.ListInterfaces()
 		for _, name := range interfaces {
 			fmt.Printf("  %s\n", name)
 		}
@@ -151,7 +152,7 @@ func (s *Shell) cmdList(args []string) {
 			fmt.Println("  (none)")
 		}
 	case "vlans":
-		vlans := s.dev.ListVLANs()
+		vlans := s.node.ListVLANs()
 		for _, id := range vlans {
 			fmt.Printf("  Vlan%d\n", id)
 		}
@@ -159,7 +160,7 @@ func (s *Shell) cmdList(args []string) {
 			fmt.Println("  (none)")
 		}
 	case "lags", "portchannels":
-		pcs := s.dev.ListPortChannels()
+		pcs := s.node.ListPortChannels()
 		for _, name := range pcs {
 			fmt.Printf("  %s\n", name)
 		}
@@ -167,7 +168,7 @@ func (s *Shell) cmdList(args []string) {
 			fmt.Println("  (none)")
 		}
 	case "vrfs":
-		vrfs := s.dev.ListVRFs()
+		vrfs := s.node.ListVRFs()
 		for _, name := range vrfs {
 			fmt.Printf("  %s\n", name)
 		}
@@ -181,7 +182,7 @@ func (s *Shell) cmdList(args []string) {
 
 // cmdInterface enters interface context.
 func (s *Shell) cmdInterface(args []string) {
-	if s.currentIntf != nil {
+	if s.currentIF != nil {
 		fmt.Println("Already in interface context. Use 'exit' first.")
 		return
 	}
@@ -191,30 +192,30 @@ func (s *Shell) cmdInterface(args []string) {
 	}
 
 	name := args[0]
-	intf, err := s.dev.GetInterface(name)
+	intf, err := s.node.Interface(name)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	s.currentIntf = intf
+	s.currentIF = intf
 	s.intfName = intf.Name()
 	fmt.Printf("Entered interface context: %s\n", s.intfName)
 }
 
 // cmdExit returns to device context from interface context.
 func (s *Shell) cmdExit() {
-	if s.currentIntf == nil {
+	if s.currentIF == nil {
 		fmt.Println("Already at device scope. Use 'quit' to disconnect.")
 		return
 	}
-	s.currentIntf = nil
+	s.currentIF = nil
 	s.intfName = ""
 }
 
 // cmdApplyService applies a service to the current interface.
 func (s *Shell) cmdApplyService(args []string) {
-	if s.currentIntf == nil {
+	if s.currentIF == nil {
 		fmt.Println("apply-service requires interface context (use 'interface <name>' first)")
 		return
 	}
@@ -236,108 +237,86 @@ func (s *Shell) cmdApplyService(args []string) {
 
 	ctx := context.Background()
 
-	if err := s.dev.Lock(); err != nil {
+	if err := s.node.Lock(); err != nil {
 		fmt.Printf("Error locking device: %v\n", err)
 		return
 	}
-	defer s.dev.Unlock()
+	defer s.node.Unlock()
 
-	changeSet, err := s.currentIntf.ApplyService(ctx, serviceName, node.ApplyServiceOpts{
+	if err := s.currentIF.ApplyService(ctx, serviceName, newtron.ApplyServiceOpts{
 		IPAddress: ipAddress,
-	})
-	if err != nil {
+	}); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	fmt.Print(changeSet.Preview())
+	fmt.Print(s.node.PendingPreview())
 
 	if !s.confirmExecute() {
+		s.node.Rollback()
 		fmt.Println("Cancelled.")
 		return
 	}
 
-	if err := changeSet.Apply(s.dev); err != nil {
+	result, err := s.node.Commit(ctx)
+	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 	fmt.Println(green("Applied successfully."))
 	s.dirty = true
 
-	s.verifyChangeSet(changeSet)
+	if result != nil && result.Verification != nil {
+		printVerification(result.Verification)
+	}
 }
 
 // cmdRemoveService removes the service from the current interface.
 func (s *Shell) cmdRemoveService() {
-	if s.currentIntf == nil {
+	if s.currentIF == nil {
 		fmt.Println("remove-service requires interface context (use 'interface <name>' first)")
 		return
 	}
 
 	ctx := context.Background()
 
-	if err := s.dev.Lock(); err != nil {
+	if err := s.node.Lock(); err != nil {
 		fmt.Printf("Error locking device: %v\n", err)
 		return
 	}
-	defer s.dev.Unlock()
+	defer s.node.Unlock()
 
-	changeSet, err := s.currentIntf.RemoveService(ctx)
-	if err != nil {
+	if err := s.currentIF.RemoveService(ctx); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
-	fmt.Print(changeSet.Preview())
+	fmt.Print(s.node.PendingPreview())
 
 	if !s.confirmExecute() {
+		s.node.Rollback()
 		fmt.Println("Cancelled.")
 		return
 	}
 
-	if err := changeSet.Apply(s.dev); err != nil {
+	result, err := s.node.Commit(ctx)
+	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return
 	}
 	fmt.Println(green("Applied successfully."))
 	s.dirty = true
 
-	s.verifyChangeSet(changeSet)
-}
-
-// verifyChangeSet re-reads CONFIG_DB via a fresh connection and reports
-// any entries that didn't persist. Called after Apply in interactive mode.
-func (s *Shell) verifyChangeSet(cs *node.ChangeSet) {
-	fmt.Print("Verifying... ")
-	if err := cs.Verify(s.dev); err != nil {
-		fmt.Printf("%s: %v\n", yellow("WARN"), err)
-		fmt.Println(yellow("Could not verify changes. Check state before saving."))
-		return
+	if result != nil && result.Verification != nil {
+		printVerification(result.Verification)
 	}
-	v := cs.Verification
-	total := v.Passed + v.Failed
-	if v.Failed > 0 {
-		fmt.Printf("%s (%d/%d entries verified, %d failed)\n", red("FAILED"), v.Passed, total, v.Failed)
-		for _, e := range v.Errors {
-			if e.Actual == "" {
-				fmt.Printf("  [MISSING] %s|%s  (field: %s, expected: %q)\n",
-					e.Table, e.Key, e.Field, e.Expected)
-			} else {
-				fmt.Printf("  [MISMATCH] %s|%s  (field: %s, expected: %q, actual: %q)\n",
-					e.Table, e.Key, e.Field, e.Expected, e.Actual)
-			}
-		}
-		fmt.Println(yellow("Do NOT save until the issue is resolved."))
-		return
-	}
-	fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
 }
 
 // cmdSave saves the config to disk.
 func (s *Shell) cmdSave() {
 	ctx := context.Background()
 	fmt.Print("Saving configuration... ")
-	if err := s.dev.SaveConfig(ctx); err != nil {
+	if err := s.node.Save(ctx); err != nil {
 		fmt.Println(red("FAILED"))
 		fmt.Printf("Error: %v\n", err)
 		return
@@ -369,6 +348,7 @@ func (s *Shell) confirmExecute() bool {
 }
 
 // cmdComposite handles the composite build mode commands.
+// Uses the internal node API for CompositeBuilder access.
 func (s *Shell) cmdComposite(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: composite <begin|show|commit|discard>")
@@ -416,12 +396,13 @@ func (s *Shell) cmdComposite(args []string) {
 			fmt.Println("Cancelled.")
 			return
 		}
-		if err := s.dev.Lock(); err != nil {
+		internal := s.node.InternalNode()
+		if err := internal.Lock(); err != nil {
 			fmt.Printf("Error locking device: %v\n", err)
 			return
 		}
-		result, err := s.dev.DeliverComposite(config, node.CompositeMode(s.compositeFor))
-		s.dev.Unlock()
+		result, err := internal.DeliverComposite(config, node.CompositeMode(s.compositeFor))
+		internal.Unlock()
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			return
@@ -447,7 +428,7 @@ func (s *Shell) cmdComposite(args []string) {
 
 // cmdHelp displays available commands.
 func (s *Shell) cmdHelp() {
-	if s.currentIntf != nil {
+	if s.currentIF != nil {
 		fmt.Println("Interface commands:")
 		fmt.Println("  show               Show interface details")
 		fmt.Println("  apply-service <svc> [--ip <ip>]  Apply service to interface")
@@ -491,13 +472,13 @@ Examples:
 			return fmt.Errorf("device required: use -d <device> flag")
 		}
 		ctx := context.Background()
-		dev, err := app.net.ConnectNode(ctx, app.deviceName)
+		n, err := app.net.Connect(ctx, app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		sh := NewShell(dev, app.deviceName)
+		sh := NewShell(n, app.deviceName)
 		return sh.Run()
 	},
 }

@@ -9,10 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 var evpnCmd = &cobra.Command{
@@ -61,16 +60,15 @@ Examples:
   newtron leaf1 evpn setup -x
   newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("evpn")
 			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.SetupEVPN(ctx, evpnSetupSourceIP)
-			if err != nil {
-				return nil, fmt.Errorf("setting up EVPN: %w", err)
+			if err := n.SetupEVPN(ctx, evpnSetupSourceIP); err != nil {
+				return fmt.Errorf("setting up EVPN: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -84,13 +82,16 @@ var evpnStatusCmd = &cobra.Command{
 	Short: "Show EVPN config and operational state",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		configDB := dev.ConfigDB()
+		status, err := n.EVPNStatus()
+		if err != nil {
+			return fmt.Errorf("getting EVPN status: %w", err)
+		}
 
 		if app.jsonOutput {
 			type evpnStatusJSON struct {
@@ -98,112 +99,74 @@ var evpnStatusCmd = &cobra.Command{
 				NVOs     map[string]string `json:"nvos,omitempty"`
 				VNICount int               `json:"vni_count"`
 			}
-			status := evpnStatusJSON{
-				VTEPs: make(map[string]string),
-				NVOs:  make(map[string]string),
+			out := evpnStatusJSON{
+				VTEPs:    status.VTEPs,
+				NVOs:     status.NVOs,
+				VNICount: status.VNICount,
 			}
-			if configDB != nil {
-				for name, vtep := range configDB.VXLANTunnel {
-					status.VTEPs[name] = vtep.SrcIP
-				}
-				for name, nvo := range configDB.VXLANEVPNNVO {
-					status.NVOs[name] = nvo.SourceVTEP
-				}
-				status.VNICount = len(configDB.VXLANTunnelMap)
-			}
-			return json.NewEncoder(os.Stdout).Encode(status)
+			return json.NewEncoder(os.Stdout).Encode(out)
 		}
 
 		fmt.Printf("EVPN Status for %s\n\n", bold(app.deviceName))
 
 		// --- VTEP Configuration ---
 		fmt.Println("VTEP Configuration:")
-		if configDB == nil || len(configDB.VXLANTunnel) == 0 {
+		if len(status.VTEPs) == 0 {
 			fmt.Println("  (not configured)")
 		} else {
-			for name, vtep := range configDB.VXLANTunnel {
-				fmt.Printf("  %s: source_ip=%s\n", name, vtep.SrcIP)
+			for name, srcIP := range status.VTEPs {
+				fmt.Printf("  %s: source_ip=%s\n", name, srcIP)
 			}
 		}
 
 		// --- EVPN NVO ---
 		fmt.Println("\nEVPN NVO:")
-		if configDB == nil || len(configDB.VXLANEVPNNVO) == 0 {
+		if len(status.NVOs) == 0 {
 			fmt.Println("  (not configured)")
 		} else {
-			for name, nvo := range configDB.VXLANEVPNNVO {
-				fmt.Printf("  %s: source_vtep=%s\n", name, nvo.SourceVTEP)
+			for name, sourceVTEP := range status.NVOs {
+				fmt.Printf("  %s: source_vtep=%s\n", name, sourceVTEP)
 			}
 		}
 
 		// --- VNI Mappings ---
 		fmt.Println("\nVNI Mappings:")
-		if configDB == nil || len(configDB.VXLANTunnelMap) == 0 {
+		if len(status.VNIMappings) == 0 {
 			fmt.Println("  (none)")
 		} else {
 			t := cli.NewTable("VNI", "TYPE", "RESOURCE").WithPrefix("  ")
-			for _, mapping := range configDB.VXLANTunnelMap {
-				resType := "L2"
-				res := mapping.VLAN
-				if mapping.VRF != "" {
-					resType = "L3"
-					res = mapping.VRF
-				}
-				t.Row(mapping.VNI, resType, res)
+			for _, mapping := range status.VNIMappings {
+				t.Row(mapping.VNI, mapping.Type, mapping.Resource)
 			}
 			t.Flush()
 		}
 
 		// --- VRFs with L3VNI ---
 		fmt.Println("\nVRFs with L3VNI:")
-		hasVRFs := false
-		for _, vrfName := range dev.ListVRFs() {
-			vrf, _ := dev.GetVRF(vrfName)
-			if vrf != nil && vrf.L3VNI > 0 {
-				fmt.Printf("  %s: L3VNI=%d\n", vrfName, vrf.L3VNI)
-				hasVRFs = true
-			}
-		}
-		if !hasVRFs {
+		if len(status.L3VNIVRFs) == 0 {
 			fmt.Println("  (none)")
+		} else {
+			for _, entry := range status.L3VNIVRFs {
+				fmt.Printf("  %s: L3VNI=%d\n", entry.VRF, entry.L3VNI)
+			}
 		}
 
 		// --- Operational State ---
-		stateDB := dev.StateDB()
-		if stateDB != nil {
-			fmt.Println("\nOperational State:")
+		fmt.Println("\nOperational State:")
+		vtepState := "-"
+		if status.VTEPStatus != "" {
+			vtepState = formatOperStatus(status.VTEPStatus)
+		}
+		fmt.Printf("  VTEP Status: %s\n", vtepState)
+		fmt.Printf("  VNI Count: %d\n", status.VNICount)
 
-			vtepState := "-"
-			var remoteVTEPs []string
-			for name, tunnelState := range stateDB.VXLANTunnelTable {
-				// Check if this is the local VTEP (exists in configDB)
-				if configDB != nil {
-					if _, isLocal := configDB.VXLANTunnel[name]; isLocal {
-						vtepState = formatOperStatus(tunnelState.OperStatus)
-						if tunnelState.OperStatus == "" {
-							vtepState = "-"
-						}
-						continue
-					}
-				}
-				remoteVTEPs = append(remoteVTEPs, name)
+		if len(status.RemoteVTEPs) > 0 {
+			fmt.Printf("  Remote VTEPs (%d):\n", len(status.RemoteVTEPs))
+			for _, vtep := range status.RemoteVTEPs {
+				fmt.Printf("    %s\n", vtep)
 			}
-
-			fmt.Printf("  VTEP Status: %s\n", vtepState)
-			vniCount := 0
-			if configDB != nil {
-				vniCount = len(configDB.VXLANTunnelMap)
-			}
-			fmt.Printf("  VNI Count: %d\n", vniCount)
-
-			if len(remoteVTEPs) > 0 {
-				fmt.Printf("  Remote VTEPs (%d):\n", len(remoteVTEPs))
-				for _, vtep := range remoteVTEPs {
-					fmt.Printf("    %s\n", vtep)
-				}
-			} else {
-				fmt.Println("  Remote VTEPs: (none)")
-			}
+		} else {
+			fmt.Println("  Remote VTEPs: (none)")
 		}
 
 		return nil
@@ -233,7 +196,7 @@ var evpnIpvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all IP-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpns := app.net.Spec().IPVPNs
+		ipvpns := app.net.ListIPVPNs()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(ipvpns)
@@ -266,7 +229,7 @@ var evpnIpvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		ipvpn, err := app.net.GetIPVPN(name)
+		ipvpn, err := app.net.ShowIPVPN(name)
 		if err != nil {
 			return err
 		}
@@ -321,25 +284,26 @@ Examples:
 			return err
 		}
 
-		ipvpnSpec := &spec.IPVPNSpec{
-			Description: ipvpnDescription,
+		req := newtron.CreateIPVPNRequest{
+			Name:        name,
 			L3VNI:       ipvpnL3VNI,
 			VRF:         ipvpnVRF,
+			Description: ipvpnDescription,
 		}
 		if ipvpnRouteTargets != "" {
-			ipvpnSpec.RouteTargets = strings.Split(ipvpnRouteTargets, ",")
+			req.RouteTargets = strings.Split(ipvpnRouteTargets, ",")
 		}
 
 		fmt.Printf("IP-VPN: %s\n", name)
-		fmt.Printf("  L3VNI: %d\n", ipvpnSpec.L3VNI)
-		if ipvpnSpec.VRF != "" {
-			fmt.Printf("  VRF: %s\n", ipvpnSpec.VRF)
+		fmt.Printf("  L3VNI: %d\n", req.L3VNI)
+		if req.VRF != "" {
+			fmt.Printf("  VRF: %s\n", req.VRF)
 		}
-		if len(ipvpnSpec.RouteTargets) > 0 {
-			fmt.Printf("  Route Targets: %v\n", ipvpnSpec.RouteTargets)
+		if len(req.RouteTargets) > 0 {
+			fmt.Printf("  Route Targets: %v\n", req.RouteTargets)
 		}
-		if ipvpnSpec.Description != "" {
-			fmt.Printf("  Description: %s\n", ipvpnSpec.Description)
+		if req.Description != "" {
+			fmt.Printf("  Description: %s\n", req.Description)
 		}
 
 		if !app.executeMode {
@@ -347,7 +311,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.SaveIPVPN(name, ipvpnSpec); err != nil {
+		if err := app.net.CreateIPVPN(req, newtron.ExecOpts{Execute: true}); err != nil {
 			return fmt.Errorf("saving IP-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("IP-VPN definition saved to network.json."))
@@ -370,7 +334,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := app.net.GetIPVPN(name); err != nil {
+		if _, err := app.net.ShowIPVPN(name); err != nil {
 			return err
 		}
 
@@ -386,7 +350,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteIPVPN(name); err != nil {
+		if err := app.net.DeleteIPVPN(name, newtron.ExecOpts{Execute: true}); err != nil {
 			return fmt.Errorf("deleting IP-VPN: %w", err)
 		}
 		fmt.Println(green("IP-VPN definition deleted from network.json."))
@@ -419,7 +383,7 @@ var evpnMacvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all MAC-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		macvpns := app.net.Spec().MACVPNs
+		macvpns := app.net.ListMACVPNs()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(macvpns)
@@ -452,7 +416,7 @@ var evpnMacvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		macvpn, err := app.net.GetMACVPN(name)
+		macvpn, err := app.net.ShowMACVPN(name)
 		if err != nil {
 			return err
 		}
@@ -483,13 +447,13 @@ var evpnMacvpnShowCmd = &cobra.Command{
 }
 
 var (
-	macvpnVNI            int
-	macvpnVlanID         int
-	macvpnAnycastIP      string
-	macvpnAnycastMAC     string
-	macvpnRouteTargets   string
-	macvpnARPSuppress    bool
-	macvpnDescription    string
+	macvpnVNI          int
+	macvpnVlanID       int
+	macvpnAnycastIP    string
+	macvpnAnycastMAC   string
+	macvpnRouteTargets string
+	macvpnARPSuppress  bool
+	macvpnDescription  string
 )
 
 var evpnMacvpnCreateCmd = &cobra.Command{
@@ -515,35 +479,36 @@ Examples:
 			return err
 		}
 
-		macvpnSpec := &spec.MACVPNSpec{
-			Description:    macvpnDescription,
+		req := newtron.CreateMACVPNRequest{
+			Name:           name,
 			VNI:            macvpnVNI,
 			VlanID:         macvpnVlanID,
 			AnycastIP:      macvpnAnycastIP,
 			AnycastMAC:     macvpnAnycastMAC,
 			ARPSuppression: macvpnARPSuppress,
+			Description:    macvpnDescription,
 		}
 		if macvpnRouteTargets != "" {
-			macvpnSpec.RouteTargets = strings.Split(macvpnRouteTargets, ",")
+			req.RouteTargets = strings.Split(macvpnRouteTargets, ",")
 		}
 
 		fmt.Printf("MAC-VPN: %s\n", name)
-		fmt.Printf("  VNI: %d\n", macvpnSpec.VNI)
-		if macvpnSpec.VlanID > 0 {
-			fmt.Printf("  VLAN ID: %d\n", macvpnSpec.VlanID)
+		fmt.Printf("  VNI: %d\n", req.VNI)
+		if req.VlanID > 0 {
+			fmt.Printf("  VLAN ID: %d\n", req.VlanID)
 		}
-		if macvpnSpec.AnycastIP != "" {
-			fmt.Printf("  Anycast IP: %s\n", macvpnSpec.AnycastIP)
+		if req.AnycastIP != "" {
+			fmt.Printf("  Anycast IP: %s\n", req.AnycastIP)
 		}
-		if macvpnSpec.AnycastMAC != "" {
-			fmt.Printf("  Anycast MAC: %s\n", macvpnSpec.AnycastMAC)
+		if req.AnycastMAC != "" {
+			fmt.Printf("  Anycast MAC: %s\n", req.AnycastMAC)
 		}
-		if len(macvpnSpec.RouteTargets) > 0 {
-			fmt.Printf("  Route Targets: %v\n", macvpnSpec.RouteTargets)
+		if len(req.RouteTargets) > 0 {
+			fmt.Printf("  Route Targets: %v\n", req.RouteTargets)
 		}
-		fmt.Printf("  ARP Suppression: %v\n", macvpnSpec.ARPSuppression)
-		if macvpnSpec.Description != "" {
-			fmt.Printf("  Description: %s\n", macvpnSpec.Description)
+		fmt.Printf("  ARP Suppression: %v\n", req.ARPSuppression)
+		if req.Description != "" {
+			fmt.Printf("  Description: %s\n", req.Description)
 		}
 
 		if !app.executeMode {
@@ -551,7 +516,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.SaveMACVPN(name, macvpnSpec); err != nil {
+		if err := app.net.CreateMACVPN(req, newtron.ExecOpts{Execute: true}); err != nil {
 			return fmt.Errorf("saving MAC-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("MAC-VPN definition saved to network.json."))
@@ -574,7 +539,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := app.net.GetMACVPN(name); err != nil {
+		if _, err := app.net.ShowMACVPN(name); err != nil {
 			return err
 		}
 
@@ -590,7 +555,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteMACVPN(name); err != nil {
+		if err := app.net.DeleteMACVPN(name, newtron.ExecOpts{Execute: true}); err != nil {
 			return fmt.Errorf("deleting MAC-VPN: %w", err)
 		}
 		fmt.Println(green("MAC-VPN definition deleted from network.json."))

@@ -37,12 +37,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/audit"
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )
@@ -61,8 +58,8 @@ type App struct {
 	jsonOutput  bool
 
 	// Initialized state (set in PersistentPreRunE)
-	settings    *settings.Settings
-	net         *network.Network
+	settings    *newtron.UserSettings
+	net         *newtron.Network
 	permChecker *auth.Checker
 }
 
@@ -151,10 +148,10 @@ Examples:
 
 		// Load user settings
 		var err error
-		app.settings, err = settings.Load()
+		app.settings, err = newtron.LoadSettings()
 		if err != nil {
 			util.Logger.Warnf("Could not load settings: %v", err)
-			app.settings = &settings.Settings{}
+			app.settings = &newtron.UserSettings{}
 		}
 
 		// Apply defaults from settings
@@ -173,24 +170,19 @@ Examples:
 		}
 
 		// Create Network object (the top-level object in OO hierarchy)
-		app.net, err = network.NewNetwork(app.specDir)
+		app.net, err = newtron.LoadNetwork(app.specDir)
 		if err != nil {
 			return fmt.Errorf("initializing network: %w", err)
 		}
 
 		// Initialize permission checker from network spec
 		app.permChecker = auth.NewChecker(app.net.Spec())
+		app.net.SetAuth(app.permChecker)
 
 		// Initialize audit logger (path and rotation from settings)
 		auditPath := app.settings.GetAuditLogPath(app.specDir)
-		auditLogger, err := audit.NewFileLogger(auditPath, audit.RotationConfig{
-			MaxSize:    int64(app.settings.GetAuditMaxSizeMB()) * 1024 * 1024,
-			MaxBackups: app.settings.GetAuditMaxBackups(),
-		})
-		if err != nil {
+		if err := newtron.InitAuditLogger(auditPath, app.settings.GetAuditMaxSizeMB(), app.settings.GetAuditMaxBackups()); err != nil {
 			util.Logger.Warnf("Could not initialize audit logging: %v", err)
-		} else {
-			audit.SetDefaultLogger(auditLogger)
 		}
 
 		return nil
@@ -280,11 +272,11 @@ func printVersion(tool string) {
 // ============================================================================
 
 // requireDevice ensures a device is specified via -d flag
-func requireDevice(ctx context.Context) (*node.Node, error) {
+func requireDevice(ctx context.Context) (*newtron.Node, error) {
 	if app.deviceName == "" {
 		return nil, fmt.Errorf("device required: use -d <device> flag")
 	}
-	return app.net.ConnectNode(ctx, app.deviceName)
+	return app.net.Connect(ctx, app.deviceName)
 }
 
 // ============================================================================
@@ -298,25 +290,42 @@ func printDryRunNotice() {
 	}
 }
 
-// executeAndSave applies a changeset, verifies writes landed, and optionally
+// executeAndSave commits pending changes, verifies writes landed, and optionally
 // saves the config. If verification fails, config is NOT saved so that
 // 'config reload' can restore the last known-good state.
-func executeAndSave(ctx context.Context, cs *node.ChangeSet, dev *node.Node) error {
-	if err := cs.Apply(dev); err != nil {
-		return fmt.Errorf("execution failed: %w", err)
-	}
-	fmt.Println("\n" + green("Changes applied successfully."))
+func executeAndSave(ctx context.Context, n *newtron.Node) error {
+	result, err := n.Commit(ctx)
 
-	fmt.Print("Verifying... ")
-	if err := cs.Verify(dev); err != nil {
-		fmt.Printf("%s: %v\n", yellow("WARN"), err)
-		fmt.Println(yellow("Could not verify changes. Config NOT saved as a precaution."))
-		fmt.Println("Run 'config reload' to restore last saved state, or retry the operation.")
-		return fmt.Errorf("verification failed: %w", err)
+	if result != nil && result.Applied {
+		fmt.Println("\n" + green("Changes applied successfully."))
 	}
 
-	v := cs.Verification
+	if result != nil && result.Verification != nil {
+		printVerification(result.Verification)
+	}
+
+	if err != nil {
+		if _, ok := err.(*newtron.VerificationFailedError); ok {
+			fmt.Println(yellow("\nConfig NOT saved. Run 'config reload' to restore last saved state, or retry."))
+		}
+		return err
+	}
+
+	if !app.noSave {
+		fmt.Print("Saving configuration... ")
+		if err := n.Save(ctx); err != nil {
+			fmt.Println(red("FAILED"))
+			return fmt.Errorf("config save failed: %w", err)
+		}
+		fmt.Println(green("saved."))
+	}
+	return nil
+}
+
+// printVerification displays verification results to the user.
+func printVerification(v *newtron.VerificationResult) {
 	total := v.Passed + v.Failed
+	fmt.Print("Verifying... ")
 	if v.Failed > 0 {
 		fmt.Printf("%s (%d/%d entries verified, %d failed)\n", red("FAILED"), v.Passed, total, v.Failed)
 		for _, e := range v.Errors {
@@ -328,21 +337,9 @@ func executeAndSave(ctx context.Context, cs *node.ChangeSet, dev *node.Node) err
 					e.Table, e.Key, e.Field, e.Expected, e.Actual)
 			}
 		}
-		fmt.Println(yellow("\nConfig NOT saved. Run 'config reload' to restore last saved state, or retry."))
-		return fmt.Errorf("verification failed: %d/%d entries did not persist", v.Failed, total)
+	} else {
+		fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
 	}
-
-	fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
-
-	if !app.noSave {
-		fmt.Print("Saving configuration... ")
-		if err := dev.SaveConfig(ctx); err != nil {
-			fmt.Println(red("FAILED"))
-			return fmt.Errorf("config save failed: %w", err)
-		}
-		fmt.Println(green("saved."))
-	}
-	return nil
 }
 
 // Helper to check execute permission
@@ -355,34 +352,34 @@ func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
 }
 
 // withDeviceWrite handles boilerplate for device-level write commands.
-// The callback receives a connected, locked device and returns a changeset.
-// If changeset is nil, the helper returns nil (command handled its own output).
-// If changeset is non-nil, the helper prints it and handles execute/dry-run.
-func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
+// The callback receives a connected, locked Node and performs ops that
+// accumulate pending changes. After the callback, pending changes are
+// previewed and (if -x) committed, verified, and saved.
+func withDeviceWrite(fn func(ctx context.Context, n *newtron.Node) error) error {
 	ctx := context.Background()
-	dev, err := requireDevice(ctx)
+	n, err := requireDevice(ctx)
 	if err != nil {
 		return err
 	}
-	defer dev.Disconnect()
+	defer n.Close()
 
-	if err := dev.Lock(); err != nil {
+	if err := n.Lock(); err != nil {
 		return fmt.Errorf("locking device: %w", err)
 	}
-	defer dev.Unlock()
+	defer n.Unlock()
 
-	changeSet, err := fn(ctx, dev)
-	if err != nil {
+	if err := fn(ctx, n); err != nil {
 		return err
 	}
-	if changeSet == nil {
+
+	if n.PendingCount() == 0 {
 		return nil
 	}
 
-	fmt.Print(changeSet.Preview())
+	fmt.Print(n.PendingPreview())
 
 	if app.executeMode {
-		return executeAndSave(ctx, changeSet, dev)
+		return executeAndSave(ctx, n)
 	}
 	printDryRunNotice()
 	return nil

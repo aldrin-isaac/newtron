@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
 var healthCmd = &cobra.Command{
@@ -41,19 +40,13 @@ var healthCheckCmd = &cobra.Command{
 
 		ctx := context.Background()
 
-		provisioner, err := network.NewTopologyProvisioner(app.net)
-		if err != nil {
-			return fmt.Errorf("creating provisioner: %w", err)
-		}
-
-		// Connect the device (VerifyDeviceHealth needs it connected)
-		dev, err := app.net.ConnectNode(ctx, app.deviceName)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		report, err := provisioner.VerifyDeviceHealth(ctx, app.deviceName)
+		report, err := n.HealthCheck(ctx)
 		if err != nil {
 			return err
 		}

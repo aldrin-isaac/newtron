@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -44,14 +43,16 @@ Examples:
   newtron leaf1 bgp status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		resolved := dev.Resolved()
-		configDB := dev.ConfigDB()
+		status, err := n.BGPStatus()
+		if err != nil {
+			return fmt.Errorf("getting BGP status: %w", err)
+		}
 
 		if app.jsonOutput {
 			type bgpNeighborJSON struct {
@@ -62,172 +63,119 @@ Examples:
 				Admin     string `json:"admin_status"`
 			}
 			type bgpStatusJSON struct {
-				LocalAS    int                `json:"local_as"`
-				RouterID   string             `json:"router_id"`
-				LoopbackIP string             `json:"loopback_ip"`
-				Neighbors  []bgpNeighborJSON  `json:"neighbors,omitempty"`
+				LocalAS    int               `json:"local_as"`
+				RouterID   string            `json:"router_id"`
+				LoopbackIP string            `json:"loopback_ip"`
+				Neighbors  []bgpNeighborJSON `json:"neighbors,omitempty"`
 			}
-			status := bgpStatusJSON{
-				LocalAS:    resolved.UnderlayASN,
-				RouterID:   resolved.RouterID,
-				LoopbackIP: resolved.LoopbackIP,
+			out := bgpStatusJSON{
+				LocalAS:    status.LocalAS,
+				RouterID:   status.RouterID,
+				LoopbackIP: status.LoopbackIP,
 			}
-			if configDB != nil {
-				for addr, neighbor := range configDB.BGPNeighbor {
-					nType := bgpNeighborType(neighbor.LocalAddr, resolved.LoopbackIP)
-					localAddr := neighbor.LocalAddr
-					adminStatus := neighbor.AdminStatus
-					if adminStatus == "" {
-						adminStatus = "up"
-					}
-					status.Neighbors = append(status.Neighbors, bgpNeighborJSON{
-						Address:   addr,
-						RemoteAS:  neighbor.ASN,
-						Type:      nType,
-						LocalAddr: localAddr,
-						Admin:     adminStatus,
-					})
-				}
+			for _, nb := range status.Neighbors {
+				out.Neighbors = append(out.Neighbors, bgpNeighborJSON{
+					Address:   nb.Address,
+					RemoteAS:  nb.RemoteAS,
+					Type:      nb.Type,
+					LocalAddr: nb.LocalAddr,
+					Admin:     nb.Admin,
+				})
 			}
 			// operational state not yet serialized in JSON output
-			return json.NewEncoder(os.Stdout).Encode(status)
+			return json.NewEncoder(os.Stdout).Encode(out)
 		}
 
 		// --- Local BGP Identity ---
 		fmt.Printf("BGP Status for %s\n\n", bold(app.deviceName))
-		fmt.Printf("Local AS: %d\n", resolved.UnderlayASN)
-		fmt.Printf("Router ID: %s\n", resolved.RouterID)
-		fmt.Printf("Loopback IP: %s\n", resolved.LoopbackIP)
+		fmt.Printf("Local AS: %d\n", status.LocalAS)
+		fmt.Printf("Router ID: %s\n", status.RouterID)
+		fmt.Printf("Loopback IP: %s\n", status.LoopbackIP)
 
 		// --- Neighbor Summary ---
-		neighborCount := 0
+		neighborCount := len(status.Neighbors)
 		directCount := 0
 		indirectCount := 0
-		if configDB != nil {
-			for _, neighbor := range configDB.BGPNeighbor {
-				neighborCount++
-				if neighbor.LocalAddr != "" && neighbor.LocalAddr != resolved.LoopbackIP {
-					directCount++
-				} else {
-					indirectCount++
-				}
+		for _, nb := range status.Neighbors {
+			if nb.Type == "direct" {
+				directCount++
+			} else {
+				indirectCount++
 			}
 		}
 		fmt.Printf("\nNeighbors: %d total (%d direct, %d indirect)\n", neighborCount, directCount, indirectCount)
 
 		// --- Configured Neighbors Table ---
-		if configDB != nil && len(configDB.BGPNeighbor) > 0 {
+		if len(status.Neighbors) > 0 {
 			fmt.Println("\nConfigured Neighbors:")
 			t := cli.NewTable("NEIGHBOR", "TYPE", "REMOTE AS", "LOCAL ADDR", "DESCRIPTION", "ADMIN").WithPrefix("  ")
 
-			for addr, neighbor := range configDB.BGPNeighbor {
-				neighborType := bgpNeighborType(neighbor.LocalAddr, resolved.LoopbackIP)
-				localAddr := neighbor.LocalAddr
+			for _, nb := range status.Neighbors {
+				localAddr := nb.LocalAddr
 				if localAddr == "" {
-					localAddr = resolved.LoopbackIP
+					localAddr = status.LoopbackIP
 				}
-
-				adminStatus := neighbor.AdminStatus
-				if adminStatus == "" {
-					adminStatus = "up"
-				}
-				adminStatus = formatAdminStatus(adminStatus)
-
-				description := dash(neighbor.Name)
-
-				t.Row(addr, neighborType, neighbor.ASN, localAddr, description, adminStatus)
+				adminStatus := formatAdminStatus(nb.Admin)
+				description := dash(nb.Name)
+				t.Row(nb.Address, nb.Type, nb.RemoteAS, localAddr, description, adminStatus)
 			}
 			t.Flush()
 		}
 
 		// --- Operational State ---
-		stateClient := dev.StateDBClient()
-		if configDB != nil && stateClient != nil && len(configDB.BGPNeighbor) > 0 {
-			type neighborState struct {
-				address  string
-				remoteAS string
-				state    string
-				pfxRcvd  string
-				pfxSent  string
-				uptime   string
-			}
-
-			var neighbors []neighborState
-			establishedCount := 0
-			for key := range configDB.BGPNeighbor {
-				// Key format: "vrf|neighborIP"
-				parts := strings.SplitN(key, "|", 2)
-				if len(parts) != 2 {
-					continue
-				}
-				vrf, neighborIP := parts[0], parts[1]
-				entry, err := stateClient.GetBGPNeighborState(vrf, neighborIP)
-				if err != nil {
-					continue
-				}
-				ns := neighborState{
-					address:  neighborIP,
-					remoteAS: entry.RemoteAS,
-					state:    entry.State,
-					pfxRcvd:  entry.PfxRcvd,
-					pfxSent:  entry.PfxSent,
-					uptime:   entry.Uptime,
-				}
-				if entry.State == "Established" {
-					establishedCount++
-				}
-				neighbors = append(neighbors, ns)
-			}
-
-			fmt.Printf("\nOperational State:\n")
-			fmt.Printf("  Sessions: %d total, %d established\n", len(neighbors), establishedCount)
-
-			if len(neighbors) > 0 {
-				fmt.Println()
-				t := cli.NewTable("NEIGHBOR", "REMOTE AS", "STATE", "PFX RCVD", "PFX SENT", "UPTIME").WithPrefix("  ")
-
-				for _, ns := range neighbors {
-					state := ns.state
-					if state == "Established" {
-						state = green(state)
-					} else if state != "" {
-						state = red(state)
-					}
-
-					uptime := dash(ns.uptime)
-
-					t.Row(
-						ns.address,
-						ns.remoteAS,
-						state,
-						ns.pfxRcvd,
-						ns.pfxSent,
-						uptime,
-					)
-				}
-				t.Flush()
+		hasOpState := false
+		for _, nb := range status.Neighbors {
+			if nb.State != "" {
+				hasOpState = true
+				break
 			}
 		}
 
+		if hasOpState {
+			establishedCount := 0
+			for _, nb := range status.Neighbors {
+				if nb.State == "Established" {
+					establishedCount++
+				}
+			}
+
+			fmt.Printf("\nOperational State:\n")
+			fmt.Printf("  Sessions: %d total, %d established\n", neighborCount, establishedCount)
+			fmt.Println()
+
+			t := cli.NewTable("NEIGHBOR", "REMOTE AS", "STATE", "PFX RCVD", "PFX SENT", "UPTIME").WithPrefix("  ")
+			for _, nb := range status.Neighbors {
+				if nb.State == "" {
+					continue
+				}
+				state := nb.State
+				if state == "Established" {
+					state = green(state)
+				} else {
+					state = red(state)
+				}
+				t.Row(
+					nb.Address,
+					nb.RemoteAS,
+					state,
+					nb.PfxRcvd,
+					nb.PfxSent,
+					dash(nb.Uptime),
+				)
+			}
+			t.Flush()
+		}
+
 		// --- Expected EVPN Neighbors ---
-		if len(resolved.BGPNeighbors) > 0 {
+		if len(status.EVPNPeers) > 0 {
 			fmt.Printf("\nExpected EVPN neighbors (from EVPN peers):\n")
-			for _, neighbor := range resolved.BGPNeighbors {
+			for _, neighbor := range status.EVPNPeers {
 				fmt.Printf("  %s\n", neighbor)
 			}
 		}
 
 		return nil
 	},
-}
-
-// bgpNeighborType classifies a neighbor as "direct" (interface-level peering)
-// or "indirect" (loopback-sourced, typically iBGP overlay).
-func bgpNeighborType(localAddr, loopbackIP string) string {
-	if localAddr != "" && localAddr != loopbackIP {
-		return "direct"
-	}
-	return "indirect"
 }
 
 func init() {

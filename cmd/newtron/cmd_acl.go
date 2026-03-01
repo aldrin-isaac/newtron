@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var aclCmd = &cobra.Command{
@@ -38,56 +37,30 @@ var aclListCmd = &cobra.Command{
 	Short: "List all ACL tables",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		configDB := dev.ConfigDB()
-		if configDB == nil {
-			fmt.Println("Not connected to device config_db")
-			return nil
-		}
-
-		// Count rules per ACL table (single pass)
-		ruleCounts := make(map[string]int, len(configDB.ACLTable))
-		for ruleKey := range configDB.ACLRule {
-			if i := strings.IndexByte(ruleKey, '|'); i >= 0 {
-				ruleCounts[ruleKey[:i]]++
-			}
+		acls, err := n.ListACLs()
+		if err != nil {
+			return err
 		}
 
 		if app.jsonOutput {
-			type aclSummary struct {
-				Name       string `json:"name"`
-				Type       string `json:"type"`
-				Stage      string `json:"stage"`
-				Interfaces string `json:"interfaces"`
-				RuleCount  int    `json:"rule_count"`
-			}
-			var acls []aclSummary
-			for name, table := range configDB.ACLTable {
-				acls = append(acls, aclSummary{
-					Name:       name,
-					Type:       table.Type,
-					Stage:      table.Stage,
-					Interfaces: table.Ports,
-					RuleCount:  ruleCounts[name],
-				})
-			}
 			return json.NewEncoder(os.Stdout).Encode(acls)
 		}
 
-		if len(configDB.ACLTable) == 0 {
+		if len(acls) == 0 {
 			fmt.Println("No ACL tables configured")
 			return nil
 		}
 
 		t := cli.NewTable("NAME", "TYPE", "STAGE", "INTERFACES", "RULES")
 
-		for name, table := range configDB.ACLTable {
-			t.Row(name, table.Type, table.Stage, table.Ports, fmt.Sprintf("%d", ruleCounts[name]))
+		for _, acl := range acls {
+			t.Row(acl.Name, acl.Type, acl.Stage, acl.Interfaces, fmt.Sprintf("%d", acl.RuleCount))
 		}
 		t.Flush()
 
@@ -103,80 +76,37 @@ var aclShowCmd = &cobra.Command{
 		aclName := args[0]
 
 		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		n, err := requireDevice(ctx)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
+		defer n.Close()
 
-		configDB := dev.ConfigDB()
-		if configDB == nil {
-			return fmt.Errorf("not connected to device config_db")
-		}
-
-		table, ok := configDB.ACLTable[aclName]
-		if !ok {
-			return fmt.Errorf("ACL table '%s' not found", aclName)
+		detail, err := n.ShowACL(aclName)
+		if err != nil {
+			return err
 		}
 
 		if app.jsonOutput {
-			type ruleDetail struct {
-				Name       string `json:"name"`
-				Priority   string `json:"priority"`
-				Action     string `json:"action"`
-				SrcIP      string `json:"src_ip,omitempty"`
-				DstIP      string `json:"dst_ip,omitempty"`
-				Protocol   string `json:"protocol,omitempty"`
-				SrcPort    string `json:"src_port,omitempty"`
-				DstPort    string `json:"dst_port,omitempty"`
-			}
-			var rules []ruleDetail
-			for ruleKey, rule := range configDB.ACLRule {
-				if !strings.HasPrefix(ruleKey, aclName+"|") {
-					continue
-				}
-				rules = append(rules, ruleDetail{
-					Name:     strings.TrimPrefix(ruleKey, aclName+"|"),
-					Priority: rule.Priority,
-					Action:   rule.PacketAction,
-					SrcIP:    rule.SrcIP,
-					DstIP:    rule.DstIP,
-					Protocol: rule.IPProtocol,
-					SrcPort:  rule.L4SrcPort,
-					DstPort:  rule.L4DstPort,
-				})
-			}
-			data := map[string]any{
-				"name":        aclName,
-				"type":        table.Type,
-				"stage":       table.Stage,
-				"interfaces":  table.Ports,
-				"description": table.PolicyDesc,
-				"rules":       rules,
-			}
-			return json.NewEncoder(os.Stdout).Encode(data)
+			return json.NewEncoder(os.Stdout).Encode(detail)
 		}
 
 		fmt.Printf("ACL Table: %s\n", aclName)
-		fmt.Printf("  Type:  %s\n", table.Type)
-		fmt.Printf("  Stage: %s\n", table.Stage)
-		fmt.Printf("  Interfaces: %s\n", table.Ports)
-		fmt.Printf("  Description: %s\n", table.PolicyDesc)
+		fmt.Printf("  Type:  %s\n", detail.Type)
+		fmt.Printf("  Stage: %s\n", detail.Stage)
+		fmt.Printf("  Interfaces: %s\n", detail.Interfaces)
+		fmt.Printf("  Description: %s\n", detail.Description)
 
 		// Show rules
 		fmt.Println("\nRules:")
 		t := cli.NewTable("RULE", "PRIORITY", "ACTION", "SRC_IP", "DST_IP", "PROTOCOL", "DST_PORT").WithPrefix("  ")
 
-		for ruleKey, rule := range configDB.ACLRule {
-			if !strings.HasPrefix(ruleKey, aclName+"|") {
-				continue
-			}
-			ruleName := strings.TrimPrefix(ruleKey, aclName+"|")
-			t.Row(ruleName, rule.Priority, rule.PacketAction,
+		for _, rule := range detail.Rules {
+			t.Row(rule.Name, rule.Priority, rule.Action,
 				defaultStr(rule.SrcIP, "-"),
 				defaultStr(rule.DstIP, "-"),
-				defaultStr(rule.IPProtocol, "-"),
-				defaultStr(rule.L4DstPort, "-"))
+				defaultStr(rule.Protocol, "-"),
+				defaultStr(rule.DstPort, "-"))
 		}
 		t.Flush()
 
@@ -211,21 +141,20 @@ Examples:
 			return fmt.Errorf("--stage is required (ingress, egress)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			cs, err := dev.CreateACLTable(ctx, aclName, node.ACLTableConfig{
+			if err := n.CreateACLTable(ctx, aclName, newtron.ACLTableConfig{
 				Type:        aclType,
 				Stage:       aclStage,
 				Ports:       aclInterfaces,
 				Description: aclDescription,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("creating ACL table: %w", err)
+			}); err != nil {
+				return fmt.Errorf("creating ACL table: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -258,15 +187,15 @@ Examples:
 			return fmt.Errorf("--action is required (permit, deny)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			if !dev.ACLTableExists(aclName) {
-				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
+			if !n.ACLTableExists(aclName) {
+				return fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			cs, err := dev.AddACLRule(ctx, aclName, ruleName, node.ACLRuleConfig{
+			if err := n.AddACLRule(ctx, aclName, ruleName, newtron.ACLRuleConfig{
 				Priority: rulePriority,
 				SrcIP:    ruleSrcIP,
 				DstIP:    ruleDstIP,
@@ -274,11 +203,10 @@ Examples:
 				SrcPort:  ruleSrcPort,
 				DstPort:  ruleDstPort,
 				Action:   ruleAction,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("adding ACL rule: %w", err)
+			}); err != nil {
+				return fmt.Errorf("adding ACL rule: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -296,19 +224,18 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		ruleName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			if !dev.ACLTableExists(aclName) {
-				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
+			if !n.ACLTableExists(aclName) {
+				return fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			cs, err := dev.DeleteACLRule(ctx, aclName, ruleName)
-			if err != nil {
-				return nil, fmt.Errorf("deleting ACL rule: %w", err)
+			if err := n.RemoveACLRule(ctx, aclName, ruleName); err != nil {
+				return fmt.Errorf("deleting ACL rule: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -325,19 +252,18 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			if !dev.ACLTableExists(aclName) {
-				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
+			if !n.ACLTableExists(aclName) {
+				return fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			cs, err := dev.DeleteACLTable(ctx, aclName)
-			if err != nil {
-				return nil, fmt.Errorf("deleting ACL table: %w", err)
+			if err := n.DeleteACLTable(ctx, aclName); err != nil {
+				return fmt.Errorf("deleting ACL table: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -362,26 +288,25 @@ Examples:
 			aclBindDirection = "ingress"
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			if !dev.ACLTableExists(aclName) {
-				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
+			if !n.ACLTableExists(aclName) {
+				return fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			if !dev.InterfaceExists(interfaceName) {
-				return nil, fmt.Errorf("interface '%s' not found", interfaceName)
+			if !n.InterfaceExists(interfaceName) {
+				return fmt.Errorf("interface '%s' not found", interfaceName)
 			}
-			intf, err := dev.GetInterface(interfaceName)
+			iface, err := n.Interface(interfaceName)
 			if err != nil {
-				return nil, fmt.Errorf("getting interface: %w", err)
+				return fmt.Errorf("getting interface: %w", err)
 			}
-			cs, err := intf.BindACL(ctx, aclName, aclBindDirection)
-			if err != nil {
-				return nil, fmt.Errorf("binding ACL: %w", err)
+			if err := iface.BindACL(ctx, aclName, aclBindDirection); err != nil {
+				return fmt.Errorf("binding ACL: %w", err)
 			}
-			return cs, nil
+			return nil
 		})
 	},
 }
@@ -399,19 +324,22 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
 			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return nil, err
+				return err
 			}
-			if !dev.ACLTableExists(aclName) {
-				return nil, fmt.Errorf("ACL table '%s' not found", aclName)
+			if !n.ACLTableExists(aclName) {
+				return fmt.Errorf("ACL table '%s' not found", aclName)
 			}
-			cs, err := dev.UnbindACLFromInterface(ctx, aclName, interfaceName)
+			iface, err := n.Interface(interfaceName)
 			if err != nil {
-				return nil, fmt.Errorf("unbinding ACL: %w", err)
+				return fmt.Errorf("getting interface: %w", err)
 			}
-			return cs, nil
+			if err := iface.UnbindACL(ctx, aclName); err != nil {
+				return fmt.Errorf("unbinding ACL: %w", err)
+			}
+			return nil
 		})
 	},
 }

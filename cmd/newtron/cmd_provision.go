@@ -8,8 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -48,17 +47,12 @@ Examples:
 			return fmt.Errorf("no topology.json found in spec directory %s", app.rootDir)
 		}
 
-		tp, err := network.NewTopologyProvisioner(app.net)
-		if err != nil {
-			return err
-		}
-
 		// Get device list
 		var deviceNames []string
 		if app.deviceName != "" {
 			deviceNames = []string{app.deviceName}
 		} else {
-			deviceNames = app.net.GetTopology().DeviceNames()
+			deviceNames = app.net.TopologyDeviceNames()
 		}
 
 		if len(deviceNames) == 0 {
@@ -72,21 +66,21 @@ Examples:
 			fmt.Printf("=== %s ===\n", bold(name))
 
 			// Generate composite (always — for both dry-run and execute)
-			composite, err := tp.GenerateDeviceComposite(name)
+			composite, err := app.net.GenerateDeviceComposite(name)
 			if err != nil {
 				fmt.Printf("  %s: %v\n\n", red("ERROR"), err)
 				continue
 			}
 
 			// Show summary
-			fmt.Printf("  Entries: %d\n", composite.EntryCount())
+			fmt.Printf("  Entries: %d\n", composite.EntryCount)
 			tables := make([]string, 0, len(composite.Tables))
 			for table := range composite.Tables {
 				tables = append(tables, table)
 			}
 			sort.Strings(tables)
 			for _, table := range tables {
-				fmt.Printf("    %s: %d keys\n", table, len(composite.Tables[table]))
+				fmt.Printf("    %s: %d keys\n", table, composite.Tables[table])
 			}
 
 			if !app.executeMode {
@@ -98,8 +92,14 @@ Examples:
 			ctx := context.Background()
 			fmt.Print("  Delivering... ")
 
-			result, err := tp.ProvisionDevice(ctx, name)
+			n, err := app.net.Connect(ctx, name)
 			if err != nil {
+				fmt.Printf("%s: %v\n\n", red("FAILED"), err)
+				continue
+			}
+			result, err := n.DeliverComposite(ctx, composite, newtron.CompositeOverwrite)
+			if err != nil {
+				n.Close()
 				fmt.Printf("%s: %v\n\n", red("FAILED"), err)
 				continue
 			}
@@ -114,41 +114,36 @@ Examples:
 			//    only writes VRF_OBJECT_TABLE, not VRF_TABLE)
 			// 3. All daemons process config from a clean startup state
 			if !app.noSave {
-				dev, err := app.net.ConnectNode(ctx, name)
-				if err != nil {
-					fmt.Printf("  Save: %s (could not connect: %v)\n", red("FAILED"), err)
+				fmt.Print("  Saving config... ")
+				if err := n.Save(ctx); err != nil {
+					fmt.Printf("%s: %v\n", red("FAILED"), err)
 				} else {
-					fmt.Print("  Saving config... ")
-					if err := dev.SaveConfig(ctx); err != nil {
+					fmt.Println(green("saved"))
+				}
+
+				fmt.Print("  Reloading config... ")
+				if err := n.ConfigReload(ctx); err != nil {
+					fmt.Printf("%s: %v\n", red("FAILED"), err)
+				} else {
+					fmt.Println(green("reloaded"))
+
+					// Poll until FRR/vtysh is responsive, then apply
+					// defaults that frrcfgd doesn't support.
+					fmt.Print("  Waiting for FRR... ")
+					if err := waitForFRR(ctx, n); err != nil {
+						fmt.Printf("%s: %v\n", yellow("WARN"), err)
+					} else {
+						fmt.Println(green("ready"))
+					}
+					fmt.Print("  Applying FRR defaults... ")
+					if err := n.ApplyFRRDefaults(ctx); err != nil {
 						fmt.Printf("%s: %v\n", red("FAILED"), err)
 					} else {
-						fmt.Println(green("saved"))
+						fmt.Println(green("OK"))
 					}
-
-					fmt.Print("  Reloading config... ")
-					if err := dev.ConfigReload(ctx); err != nil {
-						fmt.Printf("%s: %v\n", red("FAILED"), err)
-					} else {
-						fmt.Println(green("reloaded"))
-
-						// Poll until FRR/vtysh is responsive, then apply
-						// defaults that frrcfgd doesn't support.
-						fmt.Print("  Waiting for FRR... ")
-						if err := waitForFRR(ctx, dev); err != nil {
-							fmt.Printf("%s: %v\n", yellow("WARN"), err)
-						} else {
-							fmt.Println(green("ready"))
-						}
-						fmt.Print("  Applying FRR defaults... ")
-						if err := dev.ApplyFRRDefaults(ctx); err != nil {
-							fmt.Printf("%s: %v\n", red("FAILED"), err)
-						} else {
-							fmt.Println(green("OK"))
-						}
-					}
-					dev.Disconnect()
 				}
 			}
+			n.Close()
 
 			fmt.Println()
 		}
@@ -162,7 +157,7 @@ Examples:
 }
 
 // waitForFRR polls vtysh until it responds or timeout expires.
-func waitForFRR(ctx context.Context, dev *node.Node) error {
+func waitForFRR(ctx context.Context, n *newtron.Node) error {
 	deadline := time.After(frrReadyTimeout)
 	ticker := time.NewTicker(frrReadyPollInterval)
 	defer ticker.Stop()
@@ -174,11 +169,7 @@ func waitForFRR(ctx context.Context, dev *node.Node) error {
 		case <-deadline:
 			return fmt.Errorf("FRR did not become responsive within %s", frrReadyTimeout)
 		case <-ticker.C:
-			tunnel := dev.Tunnel()
-			if tunnel == nil {
-				continue
-			}
-			_, err := tunnel.ExecCommand("vtysh -c 'show version'")
+			_, err := n.ExecCommand(ctx, "vtysh -c 'show version'")
 			if err == nil {
 				return nil
 			}

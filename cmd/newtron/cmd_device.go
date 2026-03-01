@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var deviceCmd = &cobra.Command{
@@ -41,20 +41,20 @@ Examples:
   newtron -d leaf1-ny device cleanup -x
   newtron -d leaf1-ny device cleanup --type acls -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
+		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
 			authCtx := auth.NewContext().WithDevice(app.deviceName)
 			if err := checkExecutePermission(auth.PermDeviceCleanup, authCtx); err != nil {
-				return nil, err
+				return err
 			}
 
-			cs, summary, err := dev.Cleanup(ctx, cleanupType)
+			summary, err := n.Cleanup(ctx, cleanupType)
 			if err != nil {
-				return nil, fmt.Errorf("analyzing orphaned configs: %w", err)
+				return fmt.Errorf("analyzing orphaned configs: %w", err)
 			}
 
-			if cs.IsEmpty() {
+			if n.PendingCount() == 0 {
 				fmt.Println("No orphaned configurations found. Device is clean.")
-				return nil, nil
+				return nil
 			}
 
 			// Display summary before changeset
@@ -83,7 +83,7 @@ Examples:
 			}
 			fmt.Println()
 
-			return cs, nil
+			return nil
 		})
 	},
 }

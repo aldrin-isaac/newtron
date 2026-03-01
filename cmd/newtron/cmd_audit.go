@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/audit"
 	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var auditCmd = &cobra.Command{
@@ -42,7 +42,7 @@ var auditListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List audit events",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filter := audit.Filter{
+		filter := newtron.AuditFilter{
 			Device:      auditDevice,
 			User:        auditUser,
 			Limit:       auditLimit,
@@ -58,7 +58,8 @@ var auditListCmd = &cobra.Command{
 			filter.StartTime = time.Now().Add(-duration)
 		}
 
-		events, err := audit.Query(filter)
+		auditPath := app.settings.GetAuditLogPath(app.specDir)
+		events, err := newtron.QueryAuditLog(auditPath, filter)
 		if err != nil {
 			return fmt.Errorf("querying audit log: %w", err)
 		}
@@ -84,7 +85,7 @@ var auditListCmd = &cobra.Command{
 			}
 
 			t.Row(
-				event.Timestamp.Format("2006-01-02 15:04:05"),
+				event.Timestamp,
 				event.User,
 				event.Device,
 				event.Operation,

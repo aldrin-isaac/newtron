@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var settingsCmd = &cobra.Command{
@@ -29,12 +29,12 @@ var settingsShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
 			return fmt.Errorf("loading settings: %w", err)
 		}
 
-		fmt.Printf("Settings file: %s\n\n", settings.DefaultSettingsPath())
+		fmt.Printf("Settings file: %s\n\n", newtron.SettingsPath())
 
 		t := cli.NewTable("SETTING", "VALUE")
 
@@ -75,9 +75,9 @@ Examples:
 		setting := args[0]
 		value := args[1]
 
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
-			s = &settings.Settings{}
+			s = &newtron.UserSettings{}
 		}
 
 		switch setting {
@@ -97,7 +97,7 @@ Examples:
 			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir)", setting)
 		}
 
-		if err := s.Save(); err != nil {
+		if err := newtron.SaveSettings(s); err != nil {
 			return fmt.Errorf("saving settings: %w", err)
 		}
 
@@ -112,7 +112,7 @@ var settingsGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		setting := args[0]
 
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
 			return fmt.Errorf("loading settings: %w", err)
 		}
@@ -144,8 +144,8 @@ var settingsClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Clear all settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := &settings.Settings{}
-		if err := s.Save(); err != nil {
+		s := &newtron.UserSettings{}
+		if err := newtron.SaveSettings(s); err != nil {
 			return fmt.Errorf("saving settings: %w", err)
 		}
 		fmt.Println("All settings cleared.")
@@ -157,7 +157,7 @@ var settingsPathCmd = &cobra.Command{
 	Use:   "path",
 	Short: "Show settings file path",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(settings.DefaultSettingsPath())
+		fmt.Println(newtron.SettingsPath())
 	},
 }
 
