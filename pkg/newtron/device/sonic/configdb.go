@@ -74,6 +74,15 @@ type ServiceBindingEntry struct {
 	QoSPolicy        string `json:"qos_policy,omitempty"`        // QoS policy name (for device-wide cleanup)
 	VlanID           string `json:"vlan_id,omitempty"`           // VLAN ID used (for cleanup without macvpn)
 	RedistributeVRF  string `json:"redistribute_vrf,omitempty"`  // VRF where redistribution was overridden
+	L3VNI            string `json:"l3vni,omitempty"`             // L3VNI from ipvpn (for VRF teardown without spec re-resolution)
+	L3VNIVlan        string `json:"l3vni_vlan,omitempty"`        // L3VNI transit VLAN (for VRF teardown without spec re-resolution)
+	ServiceType      string `json:"service_type,omitempty"`      // "evpn-irb", "routed", etc. (for teardown path decisions)
+	VRFType          string `json:"vrf_type,omitempty"`          // "interface", "shared" (for VRF cleanup path)
+	L2VNI            string `json:"l2vni,omitempty"`             // L2VNI from macvpn (for VXLAN_TUNNEL_MAP cleanup)
+	AnycastIP        string `json:"anycast_ip,omitempty"`        // Anycast gateway IP from macvpn (for SVI IP deletion)
+	AnycastMAC       string `json:"anycast_mac,omitempty"`       // Anycast gateway MAC from macvpn (for SAG_GLOBAL cleanup)
+	ARPSuppression   string `json:"arp_suppression,omitempty"`   // "true" from macvpn (for SUPPRESS_VLAN_NEIGH cleanup)
+	BGPPeerAS        string `json:"bgp_peer_as,omitempty"`       // Resolved BGP peer AS number (for RefreshService)
 	AppliedAt        string `json:"applied_at,omitempty"`        // Timestamp when applied
 	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
 }
@@ -489,6 +498,15 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			QoSPolicy:       fields["qos_policy"],
 			VlanID:          fields["vlan_id"],
 			RedistributeVRF: fields["redistribute_vrf"],
+			L3VNI:           fields["l3vni"],
+			L3VNIVlan:       fields["l3vni_vlan"],
+			ServiceType:     fields["service_type"],
+			VRFType:         fields["vrf_type"],
+			L2VNI:           fields["l2vni"],
+			AnycastIP:       fields["anycast_ip"],
+			AnycastMAC:      fields["anycast_mac"],
+			ARPSuppression:  fields["arp_suppression"],
+			BGPPeerAS:       fields["bgp_peer_as"],
 		}
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)

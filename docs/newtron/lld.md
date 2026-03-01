@@ -1045,8 +1045,17 @@ type ServiceBindingEntry struct {
     EgressACL       string `json:"egress_acl,omitempty"`
     BGPNeighbor     string `json:"bgp_neighbor,omitempty"`      // BGP peer IP created by service
     QoSPolicy       string `json:"qos_policy,omitempty"`        // QoS policy name (for device-wide cleanup)
-    VlanId          string `json:"vlan_id,omitempty"`           // VLAN ID used (for cleanup without macvpn)
+    VlanID          string `json:"vlan_id,omitempty"`            // VLAN ID used (for cleanup without macvpn)
     RedistributeVRF string `json:"redistribute_vrf,omitempty"`  // VRF where redistribution was overridden
+    L3VNI           string `json:"l3vni,omitempty"`             // L3VNI from ipvpn (for VRF teardown)
+    L3VNIVlan       string `json:"l3vni_vlan,omitempty"`        // L3VNI transit VLAN (for VRF teardown)
+    ServiceType     string `json:"service_type,omitempty"`      // "evpn-irb", "routed", etc. (teardown path decisions)
+    VRFType         string `json:"vrf_type,omitempty"`          // "interface", "shared" (VRF cleanup path)
+    L2VNI           string `json:"l2vni,omitempty"`             // L2VNI from macvpn (VXLAN_TUNNEL_MAP cleanup)
+    AnycastIP       string `json:"anycast_ip,omitempty"`        // Anycast gateway IP (SVI IP deletion)
+    AnycastMAC      string `json:"anycast_mac,omitempty"`       // Anycast gateway MAC (SAG_GLOBAL cleanup)
+    ARPSuppression  string `json:"arp_suppression,omitempty"`   // "true" (SUPPRESS_VLAN_NEIGH cleanup)
+    BGPPeerAS       string `json:"bgp_peer_as,omitempty"`       // Resolved peer AS (RefreshService preservation)
     AppliedAt       string `json:"applied_at,omitempty"`
     AppliedBy       string `json:"applied_by,omitempty"`
 }
@@ -2068,6 +2077,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
     if svc.MACVPN != "" {
         bindingFields["macvpn"] = svc.MACVPN
     }
+    if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
+        bindingFields["l3vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
+    }
+    if ipvpnDef != nil && ipvpnDef.L3VNIVlan > 0 {
+        bindingFields["l3vni_vlan"] = fmt.Sprintf("%d", ipvpnDef.L3VNIVlan)
+    }
     cs.Add("NEWTRON_SERVICE_BINDING", i.name, ChangeAdd, nil, bindingFields)
 
     return cs, nil
@@ -2207,7 +2222,13 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrfName, intfName string)
 func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPVPNSpec) (*ChangeSet, error)
 
 // UnbindIPVPN removes the L3VNI mapping from a VRF: clears the VNI from
-// the VRF entry and deletes the corresponding VXLAN_TUNNEL_MAP entry.
+// the VRF entry and deletes the corresponding VXLAN_TUNNEL_MAP entry and
+// transit VLAN infrastructure.
+//
+// Refuses if any NEWTRON_SERVICE_BINDING references this VRF (scans for
+// bindings where vrf_name == vrfName). Callers must remove services first.
+// RemoveService calls destroyVrfConfig directly (not UnbindIPVPN), so the
+// guard only protects standalone CLI/test usage.
 func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error)
 
 // AddStaticRoute creates a static route in the STATIC_ROUTE table for
@@ -2298,9 +2319,12 @@ func (n *Node) VTEPSourceIP() string
 // ============================================================================
 
 // Verify (ChangeSet method) re-reads CONFIG_DB through a fresh connection and
-// confirms every entry in the ChangeSet was applied. The actual verification is
-// performed by calling n.verifyConfigChanges() and storing the result
-// in cs.Verification.
+// confirms the final expected state was applied. When a key appears in multiple
+// changes (e.g., RefreshService merges delete+add for the same key), only the
+// last operation per key is verified — the final state, not intermediate state.
+// This is correct because Redis HSET is a merge (not replace); operations that
+// replace a key's content send DEL then HSET, and the verifier only needs to
+// confirm the end result.
 //
 // Pattern: cs.Verify(n) — method on ChangeSet, not Node.
 func (cs *ChangeSet) Verify(n *Node) error
@@ -3336,7 +3360,9 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
         return nil, fmt.Errorf("reapplying service: %w", err)
     }
 
-    // Merge the change sets
+    // Merge the change sets. The remove+apply creates overlapping
+    // delete/add operations on the same keys. verifyConfigChanges
+    // handles this correctly by computing final state per key.
     cs := NewChangeSet(n.Name(), "interface.refresh-service")
     cs.Merge(removeCS)
     cs.Merge(applyCS)
@@ -3347,6 +3373,8 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 
 **Refresh semantics:**
 - **Remove+reapply**: RefreshService does not perform a field-by-field diff. It fully removes the existing service (via `RemoveService`) and reapplies it (via `ApplyService`), producing a merged ChangeSet.
+- **DEL+HSET for clean replacement**: The merged ChangeSet preserves both delete and add operations for the same keys. Redis `HSET` merges fields — it does not remove old ones. Without the intermediate `DEL`, stale fields from the old service definition would persist. SONiC daemons also need to see the delete notification to tear down internal state before rebuilding from the add.
+- **Final-state verification**: `verifyConfigChanges` computes the last operation per key. A key that was deleted then re-added is verified as "should exist with new fields." Intermediate deletes are not verified — they are the apply sequence's concern.
 - **Cache manipulation**: The binding is deleted from the in-memory ConfigDB cache between remove and reapply so that `ApplyService`'s `HasService()` precondition check passes. The actual CONFIG_DB delete is already recorded in `removeCS`.
 - **PeerAS limitation**: PeerAS is set to 0 on refresh since the BGP neighbor was already configured by the original apply. For services with `peer_as: "request"`, this means the neighbor AS is not re-prompted.
 

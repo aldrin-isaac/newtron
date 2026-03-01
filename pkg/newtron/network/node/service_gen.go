@@ -204,23 +204,11 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		entries = append(entries, bgpEntries...)
 	}
 
-	// Service binding record
-	bindingFields := map[string]string{
-		"service_name": p.ServiceName,
-	}
-	if p.IPAddress != "" {
-		bindingFields["ip_address"] = p.IPAddress
-	}
-	if vrfName != "" {
-		bindingFields["vrf_name"] = vrfName
-	}
-	if svc.IPVPN != "" {
-		bindingFields["ipvpn"] = svc.IPVPN
-	}
-	if svc.MACVPN != "" {
-		bindingFields["macvpn"] = svc.MACVPN
-	}
-	entries = append(entries, createServiceBindingConfig(i.name, bindingFields))
+	// Note: NEWTRON_SERVICE_BINDING is NOT emitted here. ApplyService constructs
+	// the binding with full self-sufficiency fields (service_type, vrf_type, l2vni,
+	// anycast_ip, anycast_mac, arp_suppression, bgp_peer_as) that require context
+	// only available in the caller. The topology provisioner path skips the binding
+	// entry via the NEWTRON_SERVICE_BINDING continue guard in ApplyService.
 
 	return entries, nil
 }

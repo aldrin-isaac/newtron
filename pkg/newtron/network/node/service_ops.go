@@ -42,6 +42,12 @@ func createServiceBindingConfig(intfName string, fields map[string]string) sonic
 	return sonic.Entry{Table: "NEWTRON_SERVICE_BINDING", Key: intfName, Fields: fields}
 }
 
+// bindingInt parses a string field from a service binding record as int (0 if absent/invalid).
+func bindingInt(s string) int {
+	v, _ := strconv.Atoi(s)
+	return v
+}
+
 // ApplyService applies a service definition to this interface.
 // This is the main high-level operation that configures VPN, routing, filters, and QoS.
 func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts ApplyServiceOpts) (*ChangeSet, error) {
@@ -334,6 +340,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	if vlanID > 0 {
 		bindingFields["vlan_id"] = fmt.Sprintf("%d", vlanID)
 	}
+	if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
+		bindingFields["l3vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
+	}
+	if ipvpnDef != nil && ipvpnDef.L3VNIVlan > 0 {
+		bindingFields["l3vni_vlan"] = fmt.Sprintf("%d", ipvpnDef.L3VNIVlan)
+	}
 	if svc.Routing != nil && svc.Routing.Redistribute != nil {
 		redistVRF := "default"
 		if vrfName != "" {
@@ -341,6 +353,38 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 		bindingFields["redistribute_vrf"] = redistVRF
 	}
+
+	// Self-sufficiency fields: store everything the reverse path needs so
+	// RemoveService and RefreshService never re-resolve specs.
+	bindingFields["service_type"] = svc.ServiceType
+	if svc.VRFType != "" {
+		bindingFields["vrf_type"] = svc.VRFType
+	}
+	if macvpnDef != nil {
+		if macvpnDef.VNI > 0 {
+			bindingFields["l2vni"] = fmt.Sprintf("%d", macvpnDef.VNI)
+		}
+		if macvpnDef.AnycastIP != "" {
+			bindingFields["anycast_ip"] = macvpnDef.AnycastIP
+		}
+		if macvpnDef.AnycastMAC != "" {
+			bindingFields["anycast_mac"] = macvpnDef.AnycastMAC
+		}
+		if macvpnDef.ARPSuppression {
+			bindingFields["arp_suppression"] = "true"
+		}
+	}
+	// Extract resolved peer AS from the generated BGP_NEIGHBOR entry (DRY — the
+	// resolution logic stays in generateBGPPeeringConfig; we read the result).
+	for _, be := range baseEntries {
+		if be.Table == "BGP_NEIGHBOR" {
+			if asn := be.Fields["asn"]; asn != "" {
+				bindingFields["bgp_peer_as"] = asn
+				break
+			}
+		}
+	}
+
 	e := createServiceBindingConfig(i.name, bindingFields)
 	cs.Add(e.Table, e.Key, e.Fields)
 
@@ -720,23 +764,39 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Create dependency checker to determine what can be safely deleted
 	depCheck := NewDependencyChecker(n, i.name)
 
-	// Get service definition for cleanup logic
-	svc, _ := i.Node().GetService(serviceName)
-
-	// Resolve VPN definitions - prefer stored binding, fall back to service lookup
-	var ipvpnDef *spec.IPVPNSpec
-	var macvpnDef *spec.MACVPNSpec
-
-	if b.IPVPN != "" {
-		ipvpnDef, _ = i.Node().GetIPVPN(b.IPVPN)
-	} else if svc != nil && svc.IPVPN != "" {
-		ipvpnDef, _ = i.Node().GetIPVPN(svc.IPVPN)
+	// Decision fields — prefer binding (self-sufficient), fall back to spec (legacy bindings)
+	serviceType := b.ServiceType
+	vrfType := b.VRFType
+	if serviceType == "" {
+		if svc, _ := i.Node().GetService(serviceName); svc != nil {
+			serviceType = svc.ServiceType
+			vrfType = svc.VRFType
+		}
 	}
 
-	if b.MACVPN != "" {
-		macvpnDef, _ = i.Node().GetMACVPN(b.MACVPN)
-	} else if svc != nil && svc.MACVPN != "" {
-		macvpnDef, _ = i.Node().GetMACVPN(svc.MACVPN)
+	// Derived booleans from serviceType
+	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
+	canBridge := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeEVPNBridged ||
+		serviceType == spec.ServiceTypeIRB || serviceType == spec.ServiceTypeBridged
+	hasIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
+
+	// VLAN cleanup values — prefer binding (self-sufficient), fall back to macvpn spec (legacy)
+	l2vni := bindingInt(b.L2VNI)
+	anycastIP := b.AnycastIP
+	anycastMAC := b.AnycastMAC
+	arpSuppression := b.ARPSuppression == "true"
+
+	if l2vni == 0 && anycastIP == "" && b.L2VNI == "" {
+		// Legacy binding without self-sufficiency fields — fall back to macvpn spec
+		macvpnName := b.MACVPN
+		if macvpnName != "" {
+			if macvpnDef, err := i.Node().GetMACVPN(macvpnName); err == nil && macvpnDef != nil {
+				l2vni = macvpnDef.VNI
+				anycastIP = macvpnDef.AnycastIP
+				anycastMAC = macvpnDef.AnycastMAC
+				arpSuppression = macvpnDef.ARPSuppression
+			}
+		}
 	}
 
 	// Check if this is the last interface using this service (for shared resources)
@@ -763,7 +823,6 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Remove INTERFACE base entry for routed services (created by service).
 	// Must come after IP deletions since intfmgrd enforces parent-child ordering.
-	canRoute := svc != nil && (svc.ServiceType == spec.ServiceTypeRouted || svc.ServiceType == spec.ServiceTypeEVPNRouted)
 	if canRoute && (vrfName == "" || vrfName == "default") {
 		cs.Deletes(i.enableIpRouting())
 	}
@@ -801,7 +860,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	// =========================================================================
-	// Per-interface VRF (vrf_type: interface)
+	// Per-interface VRF (vrf_type: interface or shared)
 	// =========================================================================
 
 	if vrfName != "" && vrfName != "default" {
@@ -814,22 +873,19 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		}
 
 		// Per-interface VRF: delete VRF and related config
-		if svc != nil && svc.VRFType == spec.VRFTypeInterface {
-			derivedVRF := util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-			l3vni, l3vniVlan := 0, 0
-			if ipvpnDef != nil {
-				l3vni = ipvpnDef.L3VNI
-				l3vniVlan = ipvpnDef.L3VNIVlan
-			}
+		if vrfType == spec.VRFTypeInterface {
+			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
+			l3vni, l3vniVlan := bindingInt(b.L3VNI), bindingInt(b.L3VNIVlan)
 			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni, l3vniVlan))
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
 		// The shared VRF was auto-created by the first service apply and should
 		// be cleaned up when no service bindings reference the ipvpn anymore.
-		if svc != nil && svc.VRFType == spec.VRFTypeShared && svc.IPVPN != "" {
-			if depCheck.IsLastIPVPNUser(svc.IPVPN) && ipvpnDef != nil && ipvpnDef.VRF != "" {
-				cs.Deletes(n.destroyVrfConfig(ipvpnDef.VRF, ipvpnDef.L3VNI, ipvpnDef.L3VNIVlan))
+		if vrfType == spec.VRFTypeShared && b.IPVPN != "" {
+			if depCheck.IsLastIPVPNUser(b.IPVPN) {
+				l3vni, l3vniVlan := bindingInt(b.L3VNI), bindingInt(b.L3VNIVlan)
+				cs.Deletes(n.destroyVrfConfig(vrfName, l3vni, l3vniVlan))
 			}
 		}
 	}
@@ -838,57 +894,46 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-VLAN resources (delete only if last VLAN member)
 	// =========================================================================
 
-	// Resolve VLAN ID: prefer macvpn definition, fall back to binding record
-	vlanID := 0
-	if macvpnDef != nil && macvpnDef.VlanID > 0 {
-		vlanID = macvpnDef.VlanID
-	} else if b.VlanID != "" {
-		vlanID, _ = strconv.Atoi(b.VlanID)
-	}
+	vlanID := bindingInt(b.VlanID)
 
-	if svc != nil && vlanID > 0 {
-		canBridge := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeEVPNBridged ||
-			svc.ServiceType == spec.ServiceTypeIRB || svc.ServiceType == spec.ServiceTypeBridged
-		if canBridge {
-			vlanName := VLANName(vlanID)
+	if canBridge && vlanID > 0 {
+		vlanName := VLANName(vlanID)
 
-			// Always remove this interface's VLAN membership
-			cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+		// Always remove this interface's VLAN membership
+		cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
 
-			// Check if this is the last VLAN member
-			if depCheck.IsLastVLANMember(vlanID) {
-				// Last member - clean up all VLAN-related config
+		// Check if this is the last VLAN member
+		if depCheck.IsLastVLANMember(vlanID) {
+			// Last member - clean up all VLAN-related config
 
-				// SVI (for IRB types)
-				hasIRB := svc.ServiceType == spec.ServiceTypeEVPNIRB || svc.ServiceType == spec.ServiceTypeIRB
-				if hasIRB {
-					if macvpnDef != nil && macvpnDef.AnycastIP != "" {
-						cs.Deletes(deleteSviIPConfig(vlanID, macvpnDef.AnycastIP))
-					} else if b.IPAddress != "" {
-						// Local IRB: SVI IP comes from opts.IPAddress (stored in binding)
-						cs.Deletes(deleteSviIPConfig(vlanID, b.IPAddress))
-					}
-					cs.Deletes(deleteSviBaseConfig(vlanID))
-
-					// SAG_GLOBAL: clean up when last anycast MAC user is removed
-					if macvpnDef != nil && macvpnDef.AnycastMAC != "" && depCheck.IsLastAnycastMACUser() {
-						cs.Deletes(deleteSagGlobalConfig())
-					}
+			// SVI (for IRB types)
+			if hasIRB {
+				if anycastIP != "" {
+					cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
+				} else if b.IPAddress != "" {
+					// Local IRB: SVI IP comes from opts.IPAddress (stored in binding)
+					cs.Deletes(deleteSviIPConfig(vlanID, b.IPAddress))
 				}
+				cs.Deletes(deleteSviBaseConfig(vlanID))
 
-				// ARP suppression (only when macvpn defines it)
-				if macvpnDef != nil && macvpnDef.ARPSuppression {
-					cs.Deletes(disableArpSuppressionConfig(vlanName))
+				// SAG_GLOBAL: clean up when last anycast MAC user is removed
+				if anycastMAC != "" && depCheck.IsLastAnycastMACUser() {
+					cs.Deletes(deleteSagGlobalConfig())
 				}
-
-				// VNI mapping (only when macvpn defines it)
-				if macvpnDef != nil && macvpnDef.VNI > 0 {
-					cs.Deletes(deleteVniMapConfig(macvpnDef.VNI, vlanName))
-				}
-
-				// VLAN itself
-				cs.Deletes(deleteVlanConfig(vlanID))
 			}
+
+			// ARP suppression
+			if arpSuppression {
+				cs.Deletes(disableArpSuppressionConfig(vlanName))
+			}
+
+			// VNI mapping
+			if l2vni > 0 {
+				cs.Deletes(deleteVniMapConfig(l2vni, vlanName))
+			}
+
+			// VLAN itself
+			cs.Deletes(deleteVlanConfig(vlanID))
 		}
 	}
 
@@ -919,10 +964,13 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 		return nil, fmt.Errorf("interface %s has no service to refresh", i.name)
 	}
 
-	// Capture binding values before RemoveService records the delete
+	// Capture all binding values before RemoveService deletes the binding.
+	// These values are needed to reconstruct the same ApplyService call.
 	b := i.binding()
 	serviceName := b.ServiceName
 	serviceIP := b.IPAddress
+	peerAS := bindingInt(b.BGPPeerAS)
+	vlanID := bindingInt(b.VlanID)
 
 	// Remove the current service
 	removeCS, err := i.RemoveService(ctx)
@@ -936,15 +984,20 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	configDB := n.ConfigDB()
 	delete(configDB.NewtronServiceBinding, i.name)
 
-	// Reapply the service with current definition
-	// Note: PeerAS is 0 here since we're refreshing an existing service
-	// and the BGP neighbor would already be configured
-	applyCS, err := i.ApplyService(ctx, serviceName, ApplyServiceOpts{IPAddress: serviceIP})
+	// Reapply the service with preserved parameters. RemoveService deletes
+	// the BGP neighbor, so PeerAS must be passed to recreate it.
+	applyCS, err := i.ApplyService(ctx, serviceName, ApplyServiceOpts{
+		IPAddress: serviceIP,
+		PeerAS:    peerAS,
+		VLAN:      vlanID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("reapplying service: %w", err)
 	}
 
-	// Merge the change sets
+	// Merge the change sets. The remove+apply creates overlapping delete/add
+	// operations on the same keys. verifyConfigChanges handles this correctly
+	// by computing final state per key (last operation wins).
 	cs := NewChangeSet(n.Name(), "interface.refresh-service")
 	cs.Merge(removeCS)
 	cs.Merge(applyCS)
