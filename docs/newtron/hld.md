@@ -182,20 +182,31 @@ The translation layer interprets specs in context to generate config:
 ### 3.1 Layer Diagram
 
 ```
-+------------------+     +------------------+     +------------------+
-|                  |     |                  |     |                  |
-|   CLI Layer      |---->|  Network Layer   |---->|  SONiC Switch    |
-|   (cmd/newtron)  |     |(pkg/newtron/network)|  |  (Redis/config_db)|
-|                  |     |                  |     |                  |
-+------------------+     +------------------+     +------------------+
-           |                    |
-           v                    +-----------+-----------+
-   +---------------+            |           |
-   |CompositeBuilder|           v           v
-   | (offline      |     +----------+ +----------+
-   |  composite    |     | Spec     | | Device   |
-   |  config gen)  |     | Layer    | | Layer    |
-   +---------------+     +----------+ +----------+
++------------------+     +------------------+     +---------------------+     +------------------+
+|                  |     |                  |     |                     |     |                  |
+|   CLI Layer      |---->|  Public API      |---->|  Network Layer      |---->|  SONiC Switch    |
+|   (cmd/newtron)  |     | (pkg/newtron/)   |     |(pkg/newtron/network)|     |  (Redis/config_db)|
+|                  |     |                  |     |  (pkg/newtron/      |     |                  |
++------------------+     +------------------+     |   network/node/)    |     +------------------+
+         |                                        |                     |
+         |                                        +----------+----------+
+         |                                                   |
+         v                                        +----------+----------+
++------------------+                             |           |
+| newtrun          |                             v           v
+| (pkg/newtrun/)   |                       +----------+ +----------+
+| Also imports     |                       | Spec     | | Device   |
+| pkg/newtron/     |                       | Layer    | | Layer    |
+| Uses escape hatch|                       +----------+ +----------+
+| n.InternalNode() |
+| for advanced ops |
++------------------+
+   +---------------+
+   |CompositeBuilder|
+   | (offline      |
+   |  composite    |
+   |  config gen)  |
+   +---------------+
    +---------------+
    |Topology       |
    |Provisioner    |
@@ -233,6 +244,8 @@ The translation layer interprets specs in context to generate config:
              |  +---------------------------+           |
              +-----------------------------------------+
 ```
+
+External consumers (CLI, newtrun) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, and `newtron.Interface`. The public API wraps the internal `pkg/newtron/network/` and `pkg/newtron/network/node/` layers, eliminating ChangeSet exposure from callers — write operations on public types return only `error`. newtrun also has an escape hatch (`net.Internal()`, `n.InternalNode()`) for advanced use cases that require direct access to internal types.
 
 ### 3.2 Object Hierarchy (OO Design)
 
@@ -333,18 +346,18 @@ Device-required commands connect to the device via SSH tunnel, acquire a distrib
 All device-level write commands use the `withDeviceWrite` helper, which encapsulates the standard connect-lock-execute-print-unlock pattern:
 
 ```go
-func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
+func withDeviceWrite(fn func(ctx context.Context, n *newtron.Node) error) error {
     // 1. requireDevice(ctx) — connect to device via SSH tunnel
-    // 2. dev.Lock() — acquire distributed STATE_DB lock
-    // 3. fn(ctx, dev) — execute the operation, returns ChangeSet
-    // 4. Print ChangeSet preview
-    // 5. If -x: Apply ChangeSet → Verify → optionally save config
+    // 2. n.Lock() — acquire distributed STATE_DB lock
+    // 3. fn(ctx, n) — execute ops, changes tracked internally via appendPending
+    // 4. Print pending preview
+    // 5. If -x: Commit → Verify → Save
     //    If not -x: Print dry-run notice
-    // 6. defer dev.Unlock() + dev.Disconnect()
+    // 6. defer n.Unlock() + n.Disconnect()
 }
 ```
 
-This ensures every write command follows the same lifecycle: connect, lock, call the operation function, print the changeset, and handle execute/dry-run — with guaranteed cleanup.
+This ensures every write command follows the same lifecycle: connect, lock, call the operation function (which accumulates pending changes internally), print the pending preview, and handle execute/dry-run — with guaranteed cleanup. The callback performs operations on the `*newtron.Node` that accumulate pending changes via `appendPending`. After the callback returns, pending changes are previewed and (if `-x`) committed atomically via `n.Commit()`, verified, and saved. ChangeSet is never exposed to CLI callers.
 
 #### 4.1.4 Full Command Tree
 
@@ -460,16 +473,21 @@ Configuration & Meta
 | `Vl100` | `Vlan100` |
 | `Lo0` | `Loopback0` |
 
-### 4.2 Network Layer (`pkg/newtron/network`, `pkg/newtron/network/node`)
+### 4.2 Network Layer (public API: `pkg/newtron/`, internal: `pkg/newtron/network/`)
 
 The top-level object hierarchy that provides OO access to specs and devices.
 
+External consumers (CLI, newtrun) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, `newtron.Interface`. The internal packages (`pkg/newtron/network/`, `pkg/newtron/network/node/`) are implementation details. Write operations on public types return `error` — the ChangeSet is captured internally. `Node.Commit()` applies all pending changes atomically.
+
 **Key Types:**
-| Type | Description |
-|------|-------------|
-| `Network` | Top-level object; owns specs, creates Nodes |
-| `Node` | Node with parent reference to Network; creates Interfaces |
-| `Interface` | Interface with parent reference to Node |
+| Type | Package | Description |
+|------|---------|-------------|
+| `newtron.Network` | `pkg/newtron/` | Public API entry point; wraps `network.Network` |
+| `newtron.Node` | `pkg/newtron/` | Device handle with pending change management; wraps `node.Node` |
+| `newtron.Interface` | `pkg/newtron/` | Interface handle; wraps `node.Interface` |
+| `network.Network` | `pkg/newtron/network/` | Internal: spec loading, topology provisioning |
+| `node.Node` | `pkg/newtron/network/node/` | Internal: Redis connection, CONFIG_DB operations |
+| `node.Interface` | `pkg/newtron/network/node/` | Internal: interface-scoped operations |
 
 ### 4.3 Spec Layer (`pkg/newtron/spec`)
 
@@ -535,7 +553,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 }
 ```
 
-The CLI uses the `withDeviceWrite` helper (see section 4.1.3) to handle the connect-lock-execute-print lifecycle. The operation function returns a ChangeSet; `withDeviceWrite` prints it and applies it if `-x` is set.
+The public API (`pkg/newtron/`) wraps these internal operations. Write methods on `newtron.Node` and `newtron.Interface` call the internal method, capture the returned ChangeSet via `appendPending`, and return only `error`. The CLI uses the `withDeviceWrite` helper (see §4.1.3) which receives a `*newtron.Node`, calls operations that accumulate pending changes, then previews and (if `-x`) commits them. ChangeSet is never exposed to CLI callers.
 
 ```
 newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
@@ -656,7 +674,7 @@ Redistribution follows opinionated defaults:
 
 #### 4.6.8 BGP Network-Layer Operations
 
-These operations are methods on `node.Node` and `node.Interface`. They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
+These operations are methods on `newtron.Node` and `newtron.Interface` (which delegate to internal `node.Node` and `node.Interface`). They are called by the topology provisioner and by CLI commands (via `withDeviceWrite`), not exposed as standalone CLI verbs:
 
 **Node-level operations:**
 
@@ -1022,6 +1040,8 @@ func (cs *ChangeSet) Verify(n *Node) error
 
 This works for all operations — disaggregated (`CreateVLAN`) or composite (`DeliverComposite`) — because they all produce ChangeSets.
 
+The public API wraps this: `newtron.Node.Commit()` applies all pending ChangeSets, calls `cs.Verify(n)` on each, and returns a `*WriteResult` with aggregated verification status. CLI callers never call `cs.Verify` directly — they call `n.PendingPreview()` for dry-run display and `n.Commit()` for execution.
+
 ```go
 // VerificationResult reports ChangeSet verification outcome.
 type VerificationResult struct {
@@ -1103,7 +1123,7 @@ These require topology-wide context and belong in the orchestrator (newtrun).
 
 ### 4.10 CONFIG_DB Cache Architecture
 
-newtron maintains an in-memory snapshot of CONFIG_DB (`node.Node.configDB`) loaded at `Connect()` time. This section documents the cache lifecycle, the invariant that governs it, and its limitations.
+newtron maintains an in-memory snapshot of CONFIG_DB (`node.Node.configDB`) loaded at `Connect()` time. This section documents the cache lifecycle, the invariant that governs it, and its limitations. The public API's `newtron.Node` wraps this — callers interact through `newtron.Node` methods which delegate to the internal `node.Node` and its cached ConfigDB.
 
 #### 4.10.1 Shared-Device Reality
 

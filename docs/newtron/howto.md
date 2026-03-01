@@ -1994,7 +1994,7 @@ The JSON output uses `HealthCheckResult` objects with `check`, `status`, and `me
 
 ## 16. Baseline Configuration
 
-The loopback configuration functionality in newtron is implemented through the `ConfigureLoopback()` method on `node.Node`. This method applies loopback interface configuration directly from the device profile.
+The loopback configuration functionality in newtron is implemented through the `ConfigureLoopback()` method on `newtron.Node`. This method applies loopback interface configuration directly from the device profile.
 
 ### 16.1 How Baseline Works
 
@@ -2388,31 +2388,29 @@ import (
     "fmt"
     "log"
 
-    "github.com/newtron-network/newtron/pkg/newtron/network"
+    "github.com/newtron-network/newtron/pkg/newtron"
 )
 
 func main() {
     ctx := context.Background()
 
-    // Create Network -- loads all specifications (declarative intent)
-    net, err := network.NewNetwork("/etc/newtron")
+    // Load Network — loads all specifications (declarative intent)
+    net, err := newtron.LoadNetwork("/etc/newtron")
     if err != nil {
         log.Fatal(err)
     }
 
-    // Connect to a node (Node is created in Network's context)
-    // If the profile has ssh_user/ssh_pass, an SSH tunnel is established
-    // automatically for Redis access
-    dev, err := net.ConnectNode(ctx, "leaf1-dc1")
+    // Connect to a device (establishes SSH tunnel + Redis connections)
+    dev, err := net.Connect(ctx, "leaf1-dc1")
     if err != nil {
         log.Fatal(err)
     }
-    defer dev.Disconnect()
+    defer dev.Close()
 
-    // Node has access to Network configuration through parent reference
-    fmt.Printf("Device: %s\n", dev.Name())
-    fmt.Printf("AS Number: %d\n", dev.ASNumber())
-    fmt.Printf("BGP Neighbors: %v\n", dev.BGPNeighbors())
+    // Node provides typed read accessors
+    info, _ := dev.DeviceInfo()
+    fmt.Printf("Device: %s\n", info.Name)
+    fmt.Printf("AS Number: %d\n", info.BGPAS)
 }
 ```
 
@@ -2451,7 +2449,7 @@ The SSH tunnel is established automatically by `Node.Connect()` when the device 
 
 ```go
 // Get an interface (Interface is created in Device's context)
-intf, err := dev.GetInterface("Ethernet0")
+intf, err := dev.Interface("Ethernet0")
 if err != nil {
     log.Fatal(err)
 }
@@ -2479,7 +2477,7 @@ fmt.Printf("Filter rules: %d\n", len(filter.Rules))
 ```go
 // List all interfaces
 for _, name := range dev.ListInterfaces() {
-    intf, _ := dev.GetInterface(name)
+    intf, _ := dev.Interface(name)
     fmt.Printf("%s: %s\n", name, intf)
 }
 
@@ -2493,7 +2491,7 @@ if dev.VTEPExists() {
 }
 
 // Check interface state
-intf, _ := dev.GetInterface("Ethernet0")
+intf, _ := dev.Interface("Ethernet0")
 if intf.HasService() {
     fmt.Printf("Interface has service: %s\n", intf.ServiceName())
 }
@@ -2529,103 +2527,81 @@ for name := range net.Spec().Zones {
 
 ### 21.7 Performing Operations
 
-Operations are methods on the objects they operate on:
+Operations are methods on the objects they operate on. Write operations accumulate
+pending changes in the Node; call `dev.Commit(ctx)` to apply them all atomically.
 
 ```go
 // Interface operations
-intf, _ := dev.GetInterface("Ethernet0")
+intf, _ := dev.Interface("Ethernet0")
 
-changeSet, err := intf.ApplyService(ctx, "customer-l3", node.ApplyServiceOpts{IPAddress: "10.1.1.1/30"})
-if err != nil {
+if err := intf.ApplyService(ctx, "customer-l3", newtron.ApplyServiceOpts{IPAddress: "10.1.1.1/30"}); err != nil {
     log.Fatal(err) // includes ErrDeviceLocked if another process has the lock
 }
 
-// Preview changes (dry-run)
-fmt.Println("Changes to be applied:")
-fmt.Print(changeSet.String())
+// Preview pending changes (dry-run — nothing written yet)
+fmt.Print(dev.PendingPreview())
 
-// Apply changes
-if err := changeSet.Apply(dev); err != nil {
+// Apply all pending changes to CONFIG_DB
+result, err := dev.Commit(ctx)
+if err != nil {
     log.Fatal(err)
 }
+fmt.Printf("Applied: %v, Verified: %v, Changes: %d\n", result.Applied, result.Verified, result.ChangeCount)
 ```
 
 **Device operations:**
 
 ```go
-// Create a VLAN
-changeSet, err := dev.CreateVLAN(ctx, 100, network.VLANConfig{
-    Description: "Server VLAN",
-})
-if err != nil {
+// Operations accumulate as pending changes — each returns only error.
+// Call Commit once at the end to apply everything atomically.
+
+if err := dev.CreateVLAN(ctx, 100, newtron.VLANConfig{Description: "Server VLAN"}); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Create a PortChannel (LAG)
-changeSet, err := dev.CreatePortChannel(ctx, "PortChannel100", network.PortChannelConfig{
+if err := dev.CreatePortChannel(ctx, "PortChannel100", newtron.PortChannelConfig{
     Members:  []string{"Ethernet0", "Ethernet4"},
     MinLinks: 1,
     FastRate: true,
-})
-if err != nil {
+}); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Create VRF
-changeSet, err := dev.CreateVRF(ctx, "Vrf_CUST1")
-if err != nil {
+if err := dev.CreateVRF(ctx, "Vrf_CUST1"); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Add interface to VRF
-changeSet, err := dev.AddVRFInterface(ctx, "Vrf_CUST1", "Ethernet8")
-if err != nil {
+if err := dev.AddVRFInterface(ctx, "Vrf_CUST1", "Ethernet8"); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Bind IP-VPN to VRF
-changeSet, err := dev.BindIPVPN(ctx, "Vrf_CUST1", "customer-vpn")
-if err != nil {
+if err := dev.BindIPVPN(ctx, "Vrf_CUST1", "customer-vpn"); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Add static route to VRF
-changeSet, err := dev.AddStaticRoute(ctx, "Vrf_CUST1", "10.99.0.0/16", "10.1.1.2")
-if err != nil {
+if err := dev.AddStaticRoute(ctx, "Vrf_CUST1", "10.99.0.0/16", "10.1.1.2"); err != nil {
     log.Fatal(err)
 }
-changeSet.Apply(dev)
 
-// Set up EVPN overlay (idempotent composite)
-changeSet, err := dev.SetupEVPN(ctx, "") // empty = use loopback IP
-if err != nil {
+if err := dev.SetupEVPN(ctx, ""); err != nil { // empty = use loopback IP
     log.Fatal(err)
 }
-changeSet.Apply(dev)
+
+// Preview pending changes
+fmt.Print(dev.PendingPreview())
+
+// Apply all pending changes atomically
+if _, err := dev.Commit(ctx); err != nil {
+    log.Fatal(err)
+}
 
 // Run health checks
-report, err := provisioner.VerifyDeviceHealth(ctx, deviceName)
+report, err := dev.HealthCheck(ctx)
 if err != nil {
     log.Fatal(err)
 }
-for _, r := range report.Results {
+for _, r := range report.OperChecks {
     fmt.Printf("[%s] %s: %s\n", r.Status, r.Check, r.Message)
-}
-
-// Cleanup orphaned resources
-changeSet, summary, err := dev.Cleanup(ctx, "") // "" = all types
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("Orphaned ACLs: %v\n", summary.OrphanedACLs)
-fmt.Printf("Orphaned VRFs: %v\n", summary.OrphanedVRFs)
-if !changeSet.IsEmpty() {
-    changeSet.Apply(dev)
 }
 ```
 
@@ -2651,11 +2627,11 @@ err := net.SaveMACVPN("my-l2vpn", spec.MACVPNSpec{
 })
 ```
 
-### 21.8 Disconnect and Tunnel Cleanup
+### 21.8 Close and Tunnel Cleanup
 
 ```go
-// Disconnect closes Redis clients, releases lock, and closes SSH tunnel
-dev.Disconnect()
+// Close releases the Redis clients, lock, and SSH tunnel
+dev.Close()
 ```
 
 E2E testing uses the newtrun framework. See `docs/newtrun/e2e-learnings.md` for
@@ -2906,28 +2882,21 @@ Full device provisioning generates the complete CONFIG_DB offline and delivers i
 
 ```go
 // Load network with topology
-net, err := network.NewNetwork("/etc/newtron/specs")
+net, err := newtron.LoadNetwork("/etc/newtron/specs")
 if err != nil {
     log.Fatal(err)
 }
 
-// Create provisioner
-tp, err := network.NewTopologyProvisioner(net)
+// Provision devices (connects, delivers CompositeOverwrite, disconnects)
+result, err := net.ProvisionDevices(ctx, newtron.ProvisionRequest{
+    Devices: []string{"leaf1-dc1"},
+}, newtron.ExecOpts{Execute: true})
 if err != nil {
     log.Fatal(err)
 }
-
-// Validate before provisioning
-if err := tp.ValidateTopologyDevice("leaf1-dc1"); err != nil {
-    log.Fatal(err)
+for _, dr := range result.Results {
+    fmt.Printf("Device %s: applied %d entries\n", dr.Device, dr.Applied)
 }
-
-// Provision (connects, delivers CompositeOverwrite, disconnects)
-result, err := tp.ProvisionDevice(ctx, "leaf1-dc1")
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("Applied %d entries\n", result.Applied)
 ```
 
 This mode:
@@ -2942,19 +2911,27 @@ This mode:
 Per-interface provisioning connects to the device and applies a single service:
 
 ```go
-tp, _ := network.NewTopologyProvisioner(net)
-
-// Provision one interface (connects, interrogates, applies service)
-cs, err := tp.ProvisionInterface(ctx, "leaf1-dc1", "Ethernet0")
+// Connect to device
+dev, err := net.Connect(ctx, "leaf1-dc1")
 if err != nil {
     log.Fatal(err)
 }
-fmt.Println(cs.Preview())
+defer dev.Close()
 
-// Apply the changeset
-if err := cs.Apply(dev); err != nil {
+// Execute applies service, commits, and saves
+result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
+    iface, err := dev.Interface("Ethernet0")
+    if err != nil {
+        return err
+    }
+    return iface.ApplyService(ctx, "customer-l3", newtron.ApplyServiceOpts{
+        IPAddress: "10.1.1.1/30",
+    })
+})
+if err != nil {
     log.Fatal(err)
 }
+fmt.Printf("Applied %d changes\n", result.ChangeCount)
 ```
 
 This mode uses the standard `ApplyService()` path with full precondition checking.
@@ -2984,48 +2961,52 @@ fmt.Printf("Generated %d entries\n", composite.EntryCount())
 
 Composite mode generates a complete CONFIG_DB configuration offline (without a device connection), then delivers it atomically.
 
-### 24.1 Building a Composite Config (Go API)
+### 24.1 Generating a Composite Config (Go API)
+
+Composites are generated either from the topology (via `GenerateDeviceComposite`) or by
+operating on an abstract Node that accumulates entries offline (via `net.Abstract`):
 
 ```go
-cb := node.NewCompositeBuilder("leaf1-dc1", node.CompositeOverwrite).
-    SetGeneratedBy("my-tool").
-    SetDescription("Initial provisioning")
+// Option A: Generate from topology (requires topology.json in spec dir)
+composite, err := net.GenerateDeviceComposite("leaf1-dc1")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Composite has %d entries\n", composite.EntryCount)
 
-// Add device-level entries
-cb.AddBGPGlobals("default", map[string]string{
-    "local_asn": "64512",
-    "router_id": "10.0.0.11",
-})
+// Option B: Build manually using an abstract (offline) Node
+dev, err := net.Abstract("leaf1-dc1")
+if err != nil {
+    log.Fatal(err)
+}
 
-// Add port configuration
-cb.AddPortConfig("Ethernet0", map[string]string{
-    "admin_status": "up",
-    "mtu":          "9100",
-})
+// Call the same operation methods as a live device — no physical connection needed.
+if err := dev.ConfigureBGP(ctx); err != nil {
+    log.Fatal(err)
+}
+intf, _ := dev.Interface("Ethernet0")
+if err := intf.ApplyService(ctx, "customer-l3", newtron.ApplyServiceOpts{IPAddress: "10.1.1.1/30"}); err != nil {
+    log.Fatal(err)
+}
 
-// Add service binding
-cb.AddService("Ethernet0", "customer-l3", map[string]string{
-    "ip_address": "10.1.1.1/30",
-})
-
-// Build the composite
-composite := cb.Build()
-fmt.Printf("Composite has %d entries\n", composite.EntryCount())
+// Export all accumulated entries
+composite := dev.BuildComposite()
+fmt.Printf("Composite has %d entries\n", composite.EntryCount)
 ```
 
 ### 24.2 Delivering a Composite Config
 
 ```go
 // Connect to device
-dev, err := net.ConnectNode(ctx, "leaf1-dc1")
+dev, err := net.Connect(ctx, "leaf1-dc1")
 if err != nil {
     log.Fatal(err)
 }
-defer dev.Disconnect()
+defer dev.Close()
 
 // Lock is acquired/released automatically by DeliverComposite
 // Deliver with overwrite (merges on top of CONFIG_DB, removes stale keys)
-result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
+result, err := dev.DeliverComposite(ctx, composite, newtron.CompositeOverwrite)
 if err != nil {
     log.Fatal(err)
 }

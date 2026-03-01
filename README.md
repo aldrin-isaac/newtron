@@ -221,12 +221,13 @@ pkg/
   newtlab/       QEMU, multi-host placement, socket bridges, port probing,
                  boot patch framework
   newtron/
+    *.go         Public API: Network, Node, Interface, types, ephemeral ops
     audit/       Audit event logging
     auth/        Permission checking and user authorization
     device/
       sonic/     SONiC connection manager — SSH tunnels, Redis DB 0/1/4/6, locking
-    network/     Network type, topology graph, spec access
-      node/      Node and Interface types, all operations, composite provisioning
+    network/     Internal: Network type, topology graph, spec access
+      node/      Internal: Node and Interface types, all operations, composite provisioning
     settings/    Settings resolution (flag > env > file)
     spec/        Spec types and loader
   util/          Errors, logging, IP/string helpers

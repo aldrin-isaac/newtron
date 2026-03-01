@@ -9,6 +9,8 @@ For the architectural principles behind newtron, newtlab, and newtrun, see [Desi
 
 Newtron separates **specification** (declarative intent in `pkg/newtron/spec`) from **configuration** (imperative device state in `pkg/newtron/device/sonic`). The `pkg/newtron/network` layer translates specs into config. See HLD §2 for the full rationale.
 
+The `pkg/newtron` package provides the public API boundary. External consumers (CLI, newtrun) import `newtron.Network`, `newtron.Node`, `newtron.Interface` — these wrap the internal types and eliminate ChangeSet exposure from callers.
+
 | Layer | Package | Data | Edited by |
 |-------|---------|------|-----------|
 | Specification | `pkg/newtron/spec` | `specs/*.json` — policies, references | Network architects |
@@ -41,6 +43,16 @@ newtron/
 │   │   └── shell.go                 # Interactive shell with readline
 ├── pkg/
 │   └── newtron/
+│       ├── types.go                   # Public API types (WriteResult, ExecOpts, request/response structs)
+│       ├── network.go                 # Public Network type (wraps network.Network)
+│       ├── node.go                    # Public Node type (wraps node.Node, pending change mgmt)
+│       ├── interface.go               # Public Interface type (wraps node.Interface)
+│       ├── ephemeral_ops.go           # One-shot connect→lock→op→commit→save→close convenience methods
+│       ├── spec_ops.go                # Spec CRUD on Network (services, VPNs, filters, QoS, platforms)
+│       ├── platform_ops.go            # Platform queries
+│       ├── provision.go               # Composite generation and device provisioning
+│       ├── audit.go                   # Audit log wrapper
+│       ├── settings.go                # Settings wrapper
 │       ├── network/                     # Network struct, topology, spec->config translation
 │       │   ├── network.go               # Top-level Network object (owns specs + spec persistence)
 │       │   ├── topology.go              # TopologyProvisioner, ProvisionDevice, ProvisionInterface
@@ -568,7 +580,38 @@ type SpecProvider interface {
     GetRoutePolicy(name string) (*spec.RoutePolicy, error)
     FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec)
 }
+```
 
+#### Public API Wrapper (`pkg/newtron/`)
+
+The public API wraps the internal types with a boundary that eliminates ChangeSet exposure:
+
+```go
+// Public types (pkg/newtron/)
+type Network struct {
+    internal *network.Network
+    auth     *auth.Checker
+}
+
+type Node struct {
+    net      *Network
+    internal *node.Node
+    abstract bool
+    pending  []*node.ChangeSet  // accumulated by write ops
+    history  []*node.ChangeSet  // moved here after Commit
+}
+
+type Interface struct {
+    node     *Node
+    internal *node.Interface
+}
+```
+
+Write operations on internal types return `(*ChangeSet, error)`. Write operations on public types return `error` — the ChangeSet is captured internally in `Node.pending` via `appendPending`. `Node.Commit()` applies all pending atomically, verifies each, and returns `*WriteResult`.
+
+The `Node.Execute()` method provides a one-shot pattern: lock → fn → commit → save → unlock. The CLI's `withDeviceWrite` uses this pattern.
+
+```go
 // Lock acquires a distributed lock for this device via a Redis STATE_DB entry.
 // Constructs holder identity from current user and hostname, acquires lock with
 // default TTL (3600s), then refreshes CONFIG_DB cache to guarantee precondition
@@ -776,6 +819,24 @@ func (n *Network) GetPlatform(name string) (*spec.PlatformSpec, error)
 // establish SSH tunnels and load CONFIG_DB/STATE_DB.
 func NewNetwork(specDir string) (*Network, error)
 ```
+
+**Public API Constructor (`pkg/newtron/network.go`):**
+
+```go
+// LoadNetwork loads specs from the given directory and returns a public Network.
+// Wraps network.NewNetwork(specDir).
+func LoadNetwork(specDir string) (*Network, error)
+
+// Connect establishes a connection to the named device and returns a public Node.
+// Wraps net.internal.ConnectNode(ctx, device).
+func (net *Network) Connect(ctx context.Context, device string) (*Node, error)
+
+// Abstract returns an offline (abstract) Node for the named device.
+// Wraps net.internal.GetAbstractNode(device).
+func (net *Network) Abstract(device string) (*Node, error)
+```
+
+Note: `ConnectNode` is the internal method on `network.Network`; external callers use the public `Connect()` method on `newtron.Network`.
 
 **Loader (`pkg/newtron/spec/loader.go`):**
 
@@ -3164,43 +3225,43 @@ func init() {
 **Helper functions:**
 
 ```go
-// requireDevice ensures a device is specified via -d flag or implicit first arg.
-func requireDevice(ctx context.Context) (*node.Node, error) {
-    if deviceName == "" {
+// requireDevice ensures a device is specified via -d flag.
+func requireDevice(ctx context.Context) (*newtron.Node, error) {
+    if app.deviceName == "" {
         return nil, fmt.Errorf("device required: use -d <device> flag")
     }
-    return net.ConnectNode(ctx, deviceName)
+    return app.net.Connect(ctx, app.deviceName)
 }
 
 // withDeviceWrite handles boilerplate for device-level write commands.
-// The callback receives a connected, locked node and returns a changeset.
-// If changeset is nil, the helper returns nil (command handled its own output).
-// If changeset is non-nil, the helper prints it and handles execute/dry-run.
-func withDeviceWrite(fn func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error)) error {
+// The callback receives a connected, locked Node and performs ops that
+// accumulate pending changes. After the callback, pending changes are
+// previewed and (if -x) committed, verified, and saved.
+func withDeviceWrite(fn func(ctx context.Context, n *newtron.Node) error) error {
     ctx := context.Background()
-    dev, err := requireDevice(ctx)
+    n, err := requireDevice(ctx)
     if err != nil {
         return err
     }
-    defer dev.Disconnect()
+    defer n.Close()
 
-    if err := dev.Lock(); err != nil {
+    if err := n.Lock(); err != nil {
         return fmt.Errorf("locking device: %w", err)
     }
-    defer dev.Unlock()
+    defer n.Unlock()
 
-    changeSet, err := fn(ctx, dev)
-    if err != nil {
+    if err := fn(ctx, n); err != nil {
         return err
     }
-    if changeSet == nil {
+
+    if n.PendingCount() == 0 {
         return nil
     }
 
-    fmt.Print(changeSet.Preview())
+    fmt.Print(n.PendingPreview())
 
-    if executeMode {
-        return executeAndSave(ctx, changeSet, dev)
+    if app.executeMode {
+        return executeAndSave(ctx, n)
     }
     printDryRunNotice()
     return nil
