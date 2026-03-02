@@ -245,7 +245,7 @@ The translation layer interprets specs in context to generate config:
              +-----------------------------------------+
 ```
 
-External consumers (CLI, newtrun) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, and `newtron.Interface`. The public API wraps the internal `pkg/newtron/network/` and `pkg/newtron/network/node/` layers, eliminating ChangeSet exposure from callers — write operations on public types return only `error`. newtrun also has an escape hatch (`net.Internal()`, `n.InternalNode()`) for advanced use cases that require direct access to internal types.
+External consumers (CLI, newtrun, newtron-api HTTP server) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, and `newtron.Interface`. The public API wraps the internal `pkg/newtron/network/` and `pkg/newtron/network/node/` layers, eliminating ChangeSet exposure from callers — write operations on public types return only `error`. The HTTP server (`pkg/newtron/api/`) is a transparent transport layer that maps HTTP requests 1:1 to public API method calls via closure-based actor serialization (see DESIGN_PRINCIPLES.md Principle 29). newtrun also has an escape hatch (`net.Internal()`, `n.InternalNode()`) for advanced use cases that require direct access to internal types.
 
 ### 3.2 Object Hierarchy (OO Design)
 
@@ -565,7 +565,7 @@ newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
 newtron leaf1 service remove Ethernet0 -x
 ```
 
-**RefreshService** — `RefreshService(ctx)` performs a full remove+reapply cycle: it calls `RemoveService` to tear down the current binding, then `ApplyService` with the same service name and IP address to rebuild from the current spec. The two ChangeSets are merged into one atomic result. This is used when a service spec is updated and the device needs to converge to the new definition.
+**RefreshService** — `RefreshService(ctx)` performs a full remove+reapply cycle: it calls `RemoveService` to tear down the current binding, then `ApplyService` with the same service name and IP address to rebuild from the current spec. The two ChangeSets are merged into one atomic result, preserving both the deletes and the subsequent adds for the same keys. This is intentional: Redis `HSET` merges fields rather than replacing them, so a `DEL` is required first to remove stale fields from the old definition. The intermediate delete also lets SONiC daemons cleanly tear down internal state before the new config arrives. Verification checks only the final state per key — a key that was deleted then re-added is verified as "should exist with new fields."
 
 ```
 newtron leaf1 service refresh Ethernet0 -x
@@ -726,7 +726,7 @@ VRF exists
 | `add-interface` | VRF exists, interface exists, interface not already in another VRF |
 | `remove-interface` | Interface is bound to this VRF |
 | `bind-ipvpn` | VRF exists, IP-VPN definition exists in network.json, VTEP configured |
-| `unbind-ipvpn` | VRF has an IP-VPN binding |
+| `unbind-ipvpn` | VRF has an IP-VPN binding, no service bindings reference this VRF |
 | `add-neighbor` | VRF exists, interface bound to VRF, interface has IP address |
 | `remove-neighbor` | Neighbor exists in CONFIG_DB |
 | `add-route` | VRF exists |
@@ -1039,6 +1039,8 @@ func (cs *ChangeSet) Verify(n *Node) error
 ```
 
 This works for all operations — disaggregated (`CreateVLAN`) or composite (`DeliverComposite`) — because they all produce ChangeSets.
+
+When a ChangeSet contains multiple operations on the same key — as happens with `RefreshService`, which merges a remove ChangeSet and an apply ChangeSet — verification computes the *final* state per key. A key that was deleted then re-added is verified as "should exist with new fields," not as "should be deleted." The intermediate delete is an apply-sequence concern (ensuring clean Redis replacement via DEL+HSET); the verifier only cares about the end result.
 
 The public API wraps this: `newtron.Node.Commit()` applies all pending ChangeSets, calls `cs.Verify(n)` on each, and returns a `*WriteResult` with aggregated verification status. CLI callers never call `cs.Verify` directly — they call `n.PendingPreview()` for dry-run display and `n.Commit()` for execution.
 

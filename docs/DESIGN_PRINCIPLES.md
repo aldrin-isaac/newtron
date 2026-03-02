@@ -402,6 +402,17 @@ the device to know what to undo. It does not re-derive the removal from
 the spec because the spec may have changed, and what matters is what was
 actually applied.
 
+**Bindings must be self-sufficient for reverse operations.** The binding
+record must contain every value the reverse path needs to tear down what
+the forward path created. `RemoveService` must never re-resolve specs at
+removal time — the spec may have changed between apply and remove, and
+the binding records what was *actually applied*. For example, `l3vni`
+and `l3vni_vlan` are stored in the binding so `RemoveService` can tear
+down transit VLAN infrastructure without looking up the IP-VPN spec.
+When adding a new forward operation that creates infrastructure, the
+question to ask is: *can the reverse operation find everything it needs
+in the binding alone?* If not, the binding is incomplete.
+
 **Idempotency filtering** also operates on device reality, not spec
 intent. When applying a service, newtron checks whether VLANs and VRFs
 already exist on the device — because they may have been created by a
@@ -748,6 +759,33 @@ three interfaces in sequence) and the second fails, deciding whether to
 roll back the first is the orchestrator's responsibility. newtron provides
 the mechanism (each invocation's ChangeSet can be reversed); the
 orchestrator decides the policy.
+
+### Replace Semantics Require DEL+HSET
+
+Redis `HSET` merges fields into an existing hash — it does not remove
+old fields. Any operation that replaces a key's content
+(`RefreshService`, re-provisioning) must `DEL` the key first, then
+`HSET` the new fields. Without the `DEL`, stale fields from the
+previous state persist as ghost data. For example, if a service binding
+previously had `qos_policy=gold` and the new service definition drops
+QoS, an `HSET` leaves the old `qos_policy` field intact — only
+`DEL`+`HSET` gives a clean replacement.
+
+This has two consequences for ChangeSets:
+
+- **Apply must preserve delete+add sequences.** When a merged ChangeSet
+  contains both a delete and a subsequent add for the same key (e.g.,
+  `RefreshService` = remove + apply), both operations must be sent to
+  Redis in order. SONiC daemons see the delete notification, tear down
+  their internal state for that key, then see the add notification and
+  build new state from clean inputs. Stripping the intermediate delete
+  would leave stale fields and prevent daemons from cleaning up.
+
+- **Verification checks final state only.** When verifying a merged
+  ChangeSet, `verifyConfigChanges` computes the last operation per key.
+  A key that was deleted then re-added is verified as "should exist with
+  new fields" — not as "should be deleted." The apply sequence handles
+  intermediate state; the verifier only cares about the end result.
 
 ---
 
@@ -1358,7 +1396,177 @@ service in both modes.**
 
 ---
 
-## 28. Summary
+## 28. Public API Boundary — Types Express Intent, Not Implementation
+
+`pkg/newtron/` is the public API. `pkg/newtron/network/`,
+`pkg/newtron/network/node/`, and `pkg/newtron/device/sonic/` are internal
+implementation packages. All external consumers — CLI, newtrun, the newtron-api HTTP
+server — import only `pkg/newtron/`.
+
+This boundary is not just an import path convention. It is a type boundary
+that separates what callers need from what the implementation needs. Public
+types use domain vocabulary: `RouteNextHop.Address` (a network address),
+`CompositeInfo.Tables` (what was provisioned), `WriteResult.ChangeCount`
+(what happened). Internal types reflect implementation structure:
+`NextHop.IP` (a Redis field), `CompositeConfig.Entries` (a delivery
+format), `ChangeSet.Changes` (a list of Redis commands). The boundary
+conversion between public and internal types strips implementation details
+and maps to domain names.
+
+This distinction emerged from a concrete migration. newtrun — the E2E test
+orchestrator — originally imported three internal packages directly. It
+constructed `node.ChangeSet` objects, resolved specs via
+`network.GetIPVPN()`, accessed `sonic.RouteEntry` structs, and called
+`dev.ConfigDBClient().Get()` for verification. Every internal refactor
+(renamed fields, restructured types, changed method signatures) broke
+newtrun. The orchestrator was coupled to implementation, not intent.
+
+After migrating newtrun to use only the public API, five rules crystallized.
+These rules were subsequently validated by the newtron-api HTTP server,
+where every handler calls `pkg/newtron/` methods directly — the clean
+public API boundary is what makes the transport layer transparent
+(Principle 29):
+
+**Rule 1: Orchestrators are API consumers, not insiders.** If an
+orchestrator needs functionality the API doesn't expose, extend the API —
+don't bypass it with internal imports. `Internal()` escape hatches exist
+for the interactive CLI shell's exploratory commands, not for programmatic
+consumers that run in production.
+
+**Rule 2: Operations accept names; the API resolves specs.** Callers pass
+`ipvpnName`, `macvpnName`, `policyName` — string identifiers of intent.
+The API method resolves the spec from the Node's SpecProvider internally.
+Callers never pre-resolve specs and pass structs across the boundary. This
+means spec format changes are invisible to API consumers: `BindIPVPN(ctx,
+vrfName, ipvpnName)` works regardless of how `IPVPNSpec` is structured
+internally.
+
+**Rule 3: Verification tokens are opaque.** `CompositeInfo` flows from
+`GenerateDeviceComposite()` to `VerifyComposite()` as an opaque handle.
+Callers store it, pass it back, and read the result. They never inspect
+internal state — the verification mechanism (ChangeSet diffing against
+CONFIG_DB) is entirely hidden. This allows the verification implementation
+to change (different diff strategies, additional checks) without affecting
+any consumer. At a network boundary (HTTP), opaque handles that contain
+non-serializable state become server-side stores with client-facing UUID
+tokens — the opacity is preserved, the mechanism extends naturally.
+
+**Rule 4: Write results report outcomes, not internals.**
+`WriteResult.ChangeCount` and `DeliveryResult.Applied` tell callers what
+happened. Raw ChangeSets, Redis commands, and CONFIG_DB key formats never
+cross the boundary. An orchestrator that logs "created VLAN 100 (3
+changes)" does not need to know that those 3 changes were `HSET
+VLAN|Vlan100`, `HSET VLAN_MEMBER|Vlan100|Ethernet4`, and `HSET
+VLAN_INTERFACE|Vlan100`.
+
+**Rule 5: Public types are domain types, not wrappers.** A public type is
+not a thin wrapper around an internal type with the same fields. It is a
+domain-vocabulary type designed for what callers need to know. Internal
+`sonic.NextHop` has `IP` (a Redis field name); public `RouteNextHop` has
+`Address` (what a network engineer calls it). Internal `node.ChangeSet`
+exposes `Changes []ConfigChange` with Redis operations; public
+`WriteResult` exposes `ChangeCount int` because callers need the outcome,
+not the operations.
+
+When adding new public API surface:
+
+1. Define the public type in `types.go` using domain vocabulary
+2. Add the method to the appropriate wrapper (`Network`, `Node`,
+   `Interface`)
+3. Convert internal types at the boundary — never expose `*node.X` or
+   `*sonic.Y` directly
+4. Accept names/strings for spec references; resolve internally
+5. Return outcome structs, not implementation structs
+
+**Public types expose what callers need; internal types expose what the
+implementation needs. The boundary conversion strips and maps as needed.**
+
+---
+
+## 29. Transparent Transport — The Middle Layer Has No Logic
+
+The HTTP server layer (`pkg/newtron/api/`) is a mechanical translation
+between wire format and public API method calls. Every handler follows
+the same pattern:
+
+1. Decode JSON request body
+2. Construct a closure that calls a `pkg/newtron/` method
+3. Send the closure to an actor for serialized execution
+4. Encode the result as JSON
+
+There is no business logic in the transport layer. Domain validation,
+precondition checks, error classification, and state management all live
+inside `pkg/newtron/`. The handler is the glue — there is nothing else
+in the middle.
+
+### Why This Works
+
+newtron operations are gated by slow downstream I/O: SSH connections,
+Redis round-trips, and device response times measured in hundreds of
+milliseconds to seconds. The transport layer contributes nanoseconds.
+Optimizing it — typed dispatch infrastructure, binary protocols,
+zero-copy serialization — would be optimizing a layer that is invisible
+against the downstream cost.
+
+The alternative — typed message structs for each of 80+ operations,
+dispatch routing tables, intermediate representation layers — creates
+coordination points. Each new endpoint requires changes in three or more
+places (message type, routing entry, handler). When these drift, you get
+silent routing errors, type mismatches, or "added the handler but forgot
+to register the message type" bugs. The more boilerplate in the middle,
+the more places for drift, the more brittle the system.
+
+### Closures Over Typed Messages
+
+Generic closures (`func() (any, error)`) make the actor infrastructure
+O(1). Each closure captures decoded parameters by value — no shared
+mutable state between the HTTP goroutine and the actor goroutine. This
+achieves the same safety guarantees as typed messages with zero
+per-operation boilerplate.
+
+Adding a new API endpoint requires exactly one handler function. No new
+message types, no dispatch table entries, no middleware changes, no actor
+modifications.
+
+### Actor Serialization
+
+NetworkActors and NodeActors are goroutines that read closures from a
+channel and execute them sequentially. This serializes access to mutable
+resources (Network spec maps, Node device connections) without mutexes.
+
+Why actors over mutexes: spec writes do file I/O and modify in-memory
+maps; Node operations do SSH+Redis. These are long-held operations —
+holding a mutex across an SSH round-trip blocks all other goroutines
+waiting on that resource. An actor naturally queues concurrent requests
+and processes them one at a time, which is exactly the behavior needed
+when operations are slow and must not interleave.
+
+NodeActors provide serialization, not persistence. Each HTTP request
+connects to the device, executes, and disconnects. No session state
+carries between requests. This follows from the episodic caching
+principle (P18) — every unit of work begins with fresh state — and
+from the network-is-source-of-truth principle (P8) — always read
+current device reality, never cached assumptions.
+
+### The Tradeoff
+
+This architecture is correct for I/O-gated systems. For
+high-performance systems where transport latency matters (microsecond
+targets, millions of ops/sec), the tradeoff inverts: accept
+typed-message boilerplate to minimize allocation and dispatch overhead,
+and minimize API surface area because each endpoint has real cost. The
+decision criterion is simple: where is the bottleneck? If the
+downstream is 1000x slower than the transport, make the transport
+transparent. If the transport is the bottleneck, invest in its
+performance.
+
+**The transport layer is a mechanical shim. Domain logic lives in the
+public API. New endpoints are additive — one handler function, zero
+infrastructure changes.**
+
+---
+
+## 30. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1389,4 +1597,6 @@ service in both modes.**
 | Verb-first, domain-intent naming | Verbs come first (`createVlan` not `vlanCreate`); names describe domain intent, not CONFIG_DB mechanics |
 | Node as device isolation boundary | Every device-scoped operation is a Node method; cross-device coordination belongs in the orchestrator |
 | Abstract Node | Same code path, different initialization; the shadow enforces the same ordering constraints as a physical device |
+| Public API boundary | Public types expose caller intent; internal types expose implementation; orchestrators are consumers, not insiders |
+| Transparent transport | The transport layer is a mechanical shim; domain logic lives in the public API; new endpoints are additive with zero infrastructure changes |
 | Factory-default preservation | Provisioning merges on top of CONFIG_DB; stale keys are removed but factory defaults (MAC, platform, ports) survive |

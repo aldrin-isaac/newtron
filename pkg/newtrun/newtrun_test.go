@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 // ============================================================================
@@ -233,12 +232,12 @@ func TestApplyDefaults_PingSuccessRate(t *testing.T) {
 // ============================================================================
 
 func TestMatchRoute(t *testing.T) {
-	entry := &sonic.RouteEntry{
+	entry := &newtron.RouteEntry{
 		Prefix:   "10.0.0.0/24",
 		Protocol: "bgp",
-		NextHops: []sonic.NextHop{
-			{IP: "10.0.0.1", Interface: "Ethernet0"},
-			{IP: "10.0.0.2", Interface: "Ethernet4"},
+		NextHops: []newtron.RouteNextHop{
+			{Address: "10.0.0.1", Interface: "Ethernet0"},
+			{Address: "10.0.0.2", Interface: "Ethernet4"},
 		},
 	}
 
@@ -1471,7 +1470,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 
 func TestExecuteStep_UnknownAction(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
 	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
@@ -1494,7 +1493,7 @@ func TestExecuteStep_SetsNameAndAction(t *testing.T) {
 	// The wait executor is the simplest — it just sleeps.
 	// With 0 duration it returns immediately.
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	step := &Step{
 		Action:   ActionWait,
@@ -1768,7 +1767,7 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 					}
 				}()
 				r := &Runner{
-					ChangeSets: make(map[string]*node.ChangeSet),
+					Composites: make(map[string]*newtron.CompositeInfo),
 				}
 				executor.Execute(context.Background(), r, step)
 			}()
@@ -1796,7 +1795,7 @@ func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]*newtron.CompositeInfo),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -1822,7 +1821,7 @@ func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]*newtron.CompositeInfo),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -1847,7 +1846,7 @@ func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]*newtron.CompositeInfo),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -2053,7 +2052,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 
 func TestRunScenarioSteps_SingleStep(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2077,7 +2076,7 @@ func TestRunScenarioSteps_SingleStep(t *testing.T) {
 
 func TestRunScenarioSteps_FailFast(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2099,7 +2098,7 @@ func TestRunScenarioSteps_FailFast(t *testing.T) {
 
 func TestRunScenarioSteps_Repeat(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	scenario := &Scenario{
 		Name:   "test",
@@ -2129,7 +2128,7 @@ func TestRunScenarioSteps_Repeat(t *testing.T) {
 
 func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]*newtron.CompositeInfo),
 	}
 	scenario := &Scenario{
 		Name:   "test",
@@ -2152,8 +2151,8 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	}
 }
 
-func TestRunScenarioSteps_InitChangeSets(t *testing.T) {
-	r := &Runner{} // nil ChangeSets
+func TestRunScenarioSteps_InitComposites(t *testing.T) {
+	r := &Runner{} // nil Composites
 	scenario := &Scenario{
 		Name: "test",
 		Steps: []Step{
@@ -2163,8 +2162,8 @@ func TestRunScenarioSteps_InitChangeSets(t *testing.T) {
 	result := &ScenarioResult{Name: "test"}
 	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
 
-	if r.ChangeSets == nil {
-		t.Error("expected ChangeSets to be initialized, got nil")
+	if r.Composites == nil {
+		t.Error("expected Composites to be initialized, got nil")
 	}
 }
 

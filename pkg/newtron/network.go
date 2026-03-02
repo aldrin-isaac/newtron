@@ -69,6 +69,25 @@ func (net *Network) TopologyDeviceNames() []string {
 	return topo.DeviceNames()
 }
 
+// IsHostDevice returns true if the named device is a virtual host (not a SONiC switch).
+func (net *Network) IsHostDevice(name string) bool {
+	return net.internal.IsHostDevice(name)
+}
+
+// GetHostProfile returns connection parameters for a host device.
+func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
+	p, err := net.internal.GetHostProfile(name)
+	if err != nil {
+		return nil, err
+	}
+	return &HostProfile{
+		MgmtIP:  p.MgmtIP,
+		SSHUser: p.SSHUser,
+		SSHPass: p.SSHPass,
+		SSHPort: p.SSHPort,
+	}, nil
+}
+
 // Spec returns the raw network spec. Used by auth.NewChecker.
 func (net *Network) Spec() *spec.NetworkSpecFile {
 	return net.internal.Spec()

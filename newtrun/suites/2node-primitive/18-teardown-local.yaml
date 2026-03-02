@@ -8,7 +8,7 @@ topology: 2node
 requires: [irb, static-route]
 
 steps:
-  # 1. Remove SVI from VLAN 100 (reverse of irb scenario)
+  # 1. Remove SVI from VLAN 100
   - name: remove-svi-vlan100
     action: remove-svi
     devices: [switch1]
@@ -22,7 +22,7 @@ steps:
     expect:
       exists: false
 
-  # 2. Remove VLAN members (reverse of l2-bridge scenario)
+  # 2. Remove VLAN members
   - name: remove-member-ethernet2
     action: remove-vlan-member
     devices: [switch1]
@@ -63,7 +63,7 @@ steps:
     expect:
       exists: false
 
-  # 4. Remove IP from sw2:Ethernet1 (reverse of l3-routing)
+  # 4. Remove IP from sw2:Ethernet1
   - name: remove-ip-ethernet1
     action: remove-ip
     devices: [switch2]
@@ -79,13 +79,13 @@ steps:
     expect:
       exists: false
 
-  # 5. Unbind sw2:Ethernet1 from Vrf_local
+  # 5. Unbind sw2:Ethernet1 from Vrf_local (BUG FIX: params.interface)
   - name: remove-vrf-interface
     action: remove-vrf-interface
     devices: [switch2]
-    interface: Ethernet1
     params:
       vrf: Vrf_local
+      interface: Ethernet1
 
   # 6. Delete Vrf_local
   - name: delete-vrf-local

@@ -38,19 +38,19 @@ type ExecOpts struct {
 
 // WriteResult wraps the outcome of a configuration write operation.
 type WriteResult struct {
-	Preview       string              // Human-readable diff preview (populated in dry-run)
-	ChangeCount   int                 // Number of CONFIG_DB changes in this operation
-	Applied       bool                // True if changes were applied to the device
-	Verified      bool                // True if post-apply verification passed
-	Saved         bool                // True if config was saved after apply
-	Verification  *VerificationResult // Populated after apply; nil in dry-run
+	Preview      string              `json:"preview,omitempty"`
+	ChangeCount  int                 `json:"change_count"`
+	Applied      bool                `json:"applied"`
+	Verified     bool                `json:"verified"`
+	Saved        bool                `json:"saved"`
+	Verification *VerificationResult `json:"verification,omitempty"`
 }
 
 // VerificationResult reports ChangeSet verification outcome.
 type VerificationResult struct {
-	Passed int                 // entries that matched
-	Failed int                 // entries missing or mismatched
-	Errors []VerificationError // details of each failure
+	Passed int                 `json:"passed"`
+	Failed int                 `json:"failed"`
+	Errors []VerificationError `json:"errors,omitempty"`
 }
 
 // VerificationError describes a single verification failure.
@@ -127,11 +127,11 @@ type VRFConfig struct {
 
 // BGPNeighborConfig holds parameters for adding a BGP neighbor.
 type BGPNeighborConfig struct {
-	VRF         string
-	Interface   string
-	RemoteAS    int
-	NeighborIP  string
-	Description string
+	VRF         string `json:"vrf,omitempty"`
+	Interface   string `json:"interface,omitempty"`
+	RemoteAS    int    `json:"remote_as,omitempty"`
+	NeighborIP  string `json:"neighbor_ip,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // ACLTableConfig holds parameters for creating an ACL table.
@@ -175,354 +175,14 @@ type ApplyServiceOpts struct {
 }
 
 // ============================================================================
-// Service Operation Request Types
-// ============================================================================
-
-// ApplyServiceRequest is the request for applying a service to an interface.
-type ApplyServiceRequest struct {
-	Device    string
-	Interface string
-	Service   string
-	IPAddress string
-	PeerAS    int
-}
-
-// RemoveServiceRequest is the request for removing a service from an interface.
-type RemoveServiceRequest struct {
-	Device    string
-	Interface string
-}
-
-// RefreshServiceRequest is the request for refreshing a service on an interface.
-type RefreshServiceRequest struct {
-	Device    string
-	Interface string
-}
-
-// ============================================================================
-// VLAN Operation Request Types
-// ============================================================================
-
-// CreateVLANRequest is the request for creating a VLAN.
-type CreateVLANRequest struct {
-	Device      string
-	VlanID      int
-	Description string
-}
-
-// DeleteVLANRequest is the request for deleting a VLAN.
-type DeleteVLANRequest struct {
-	Device string
-	VlanID int
-}
-
-// AddVLANMemberRequest is the request for adding a member to a VLAN.
-type AddVLANMemberRequest struct {
-	Device    string
-	VlanID    int
-	Interface string
-	Tagged    bool
-}
-
-// RemoveVLANMemberRequest is the request for removing a member from a VLAN.
-type RemoveVLANMemberRequest struct {
-	Device    string
-	VlanID    int
-	Interface string
-}
-
-// ConfigureSVIRequest is the request for configuring an SVI.
-type ConfigureSVIRequest struct {
-	Device     string
-	VlanID     int
-	VRF        string
-	IPAddress  string
-	AnycastMAC string
-}
-
-// RemoveSVIRequest is the request for removing an SVI.
-type RemoveSVIRequest struct {
-	Device string
-	VlanID int
-}
-
-// BindMACVPNRequest is the request for binding a MACVPN to a VLAN.
-type BindMACVPNRequest struct {
-	Device    string
-	VlanID    int
-	MACVPName string
-}
-
-// UnbindMACVPNRequest is the request for unbinding a MACVPN from a VLAN.
-type UnbindMACVPNRequest struct {
-	Device string
-	VlanID int
-}
-
-// ============================================================================
-// VRF Operation Request Types
-// ============================================================================
-
-// CreateVRFRequest is the request for creating a VRF.
-type CreateVRFRequest struct {
-	Device string
-	Name   string
-}
-
-// DeleteVRFRequest is the request for deleting a VRF.
-type DeleteVRFRequest struct {
-	Device string
-	Name   string
-}
-
-// AddVRFInterfaceRequest is the request for adding an interface to a VRF.
-type AddVRFInterfaceRequest struct {
-	Device    string
-	VRF       string
-	Interface string
-}
-
-// RemoveVRFInterfaceRequest is the request for removing an interface from a VRF.
-type RemoveVRFInterfaceRequest struct {
-	Device    string
-	VRF       string
-	Interface string
-}
-
-// BindIPVPNRequest is the request for binding an IPVPN to a VRF.
-type BindIPVPNRequest struct {
-	Device string
-	VRF    string
-	IPVPN  string
-}
-
-// UnbindIPVPNRequest is the request for unbinding an IPVPN from a VRF.
-type UnbindIPVPNRequest struct {
-	Device string
-	VRF    string
-}
-
-// AddBGPNeighborRequest is the request for adding a BGP neighbor.
-type AddBGPNeighborRequest struct {
-	Device      string
-	VRF         string
-	Interface   string
-	RemoteAS    int
-	NeighborIP  string
-	Description string
-}
-
-// RemoveBGPNeighborRequest is the request for removing a BGP neighbor.
-type RemoveBGPNeighborRequest struct {
-	Device     string
-	VRF        string
-	Interface  string // explicit interface (newtrun)
-	NeighborIP string // explicit neighbor IP (newtrun)
-	Target     string // ambiguous interface-or-IP (CLI compat)
-}
-
-// AddStaticRouteRequest is the request for adding a static route.
-type AddStaticRouteRequest struct {
-	Device  string
-	VRF     string
-	Prefix  string
-	NextHop string
-	Metric  int
-}
-
-// RemoveStaticRouteRequest is the request for removing a static route.
-type RemoveStaticRouteRequest struct {
-	Device string
-	VRF    string
-	Prefix string
-}
-
-// ============================================================================
-// EVPN Operation Request Types
-// ============================================================================
-
-// SetupEVPNRequest is the request for setting up EVPN.
-type SetupEVPNRequest struct {
-	Device   string
-	SourceIP string
-}
-
-// TeardownEVPNRequest is the request for tearing down EVPN.
-type TeardownEVPNRequest struct {
-	Device string
-}
-
-// ============================================================================
-// ACL Operation Request Types
-// ============================================================================
-
-// CreateACLRequest is the request for creating an ACL table.
-type CreateACLRequest struct {
-	Device      string
-	Name        string
-	Type        string
-	Stage       string
-	Ports       string
-	Description string
-}
-
-// DeleteACLRequest is the request for deleting an ACL table.
-type DeleteACLRequest struct {
-	Device string
-	Name   string
-}
-
-// AddACLRuleRequest is the request for adding an ACL rule.
-type AddACLRuleRequest struct {
-	Device   string
-	ACLName  string
-	RuleName string
-	Priority int
-	Action   string
-	SrcIP    string
-	DstIP    string
-	Protocol string
-	SrcPort  string
-	DstPort  string
-}
-
-// RemoveACLRuleRequest is the request for removing an ACL rule.
-type RemoveACLRuleRequest struct {
-	Device   string
-	ACLName  string
-	RuleName string
-}
-
-// BindACLRequest is the request for binding an ACL to an interface.
-type BindACLRequest struct {
-	Device    string
-	ACLName   string
-	Interface string
-	Direction string
-}
-
-// UnbindACLRequest is the request for unbinding an ACL from an interface.
-type UnbindACLRequest struct {
-	Device    string
-	ACLName   string
-	Interface string
-}
-
-// ============================================================================
-// QoS Operation Request Types
-// ============================================================================
-
-// ApplyQoSRequest is the request for applying a QoS policy to an interface.
-type ApplyQoSRequest struct {
-	Device    string
-	Interface string
-	Policy    string
-}
-
-// RemoveQoSRequest is the request for removing a QoS policy from an interface.
-type RemoveQoSRequest struct {
-	Device    string
-	Interface string
-}
-
-// ============================================================================
-// Interface Operation Request Types
-// ============================================================================
-
-// SetInterfacePropertyRequest is the request for setting an interface property.
-type SetInterfacePropertyRequest struct {
-	Device    string
-	Interface string
-	Property  string
-	Value     string
-}
-
-// RemoveIPRequest is the request for removing an IP address from an interface.
-type RemoveIPRequest struct {
-	Device    string
-	Interface string
-	IP        string
-}
-
-// ============================================================================
-// LAG Operation Request Types
-// ============================================================================
-
-// CreateLAGRequest is the request for creating a LAG/PortChannel.
-type CreateLAGRequest struct {
-	Device   string
-	Name     string
-	Members  []string
-	MinLinks int
-	FastRate bool
-	Fallback bool
-	MTU      int
-}
-
-// DeleteLAGRequest is the request for deleting a LAG/PortChannel.
-type DeleteLAGRequest struct {
-	Device string
-	Name   string
-}
-
-// AddLAGMemberRequest is the request for adding a member to a LAG.
-type AddLAGMemberRequest struct {
-	Device string
-	LAG    string
-	Member string
-}
-
-// RemoveLAGMemberRequest is the request for removing a member from a LAG.
-type RemoveLAGMemberRequest struct {
-	Device string
-	LAG    string
-	Member string
-}
-
-// ============================================================================
 // Device Operation Request Types
 // ============================================================================
 
-// CleanupRequest is the request for cleaning up orphaned device resources.
-type CleanupRequest struct {
-	Device string
-	Type   string // "acls", "vrfs", "vnis", or empty for all
-}
-
 // CleanupSummary provides details about orphaned resources found and removed.
 type CleanupSummary struct {
-	OrphanedACLs        []string
-	OrphanedVRFs        []string
-	OrphanedVNIMappings []string
-}
-
-// ============================================================================
-// BGP Operation Request Types
-// ============================================================================
-
-// ConfigureBGPRequest is the request for configuring BGP globals on a device.
-type ConfigureBGPRequest struct {
-	Device string
-}
-
-// RemoveBGPGlobalsRequest is the request for removing BGP globals from a device.
-type RemoveBGPGlobalsRequest struct {
-	Device string
-}
-
-// ============================================================================
-// Loopback Operation Request Types
-// ============================================================================
-
-// ConfigureLoopbackRequest is the request for configuring a loopback interface.
-type ConfigureLoopbackRequest struct {
-	Device string
-	IP     string
-}
-
-// RemoveLoopbackRequest is the request for removing loopback configuration.
-type RemoveLoopbackRequest struct {
-	Device string
+	OrphanedACLs        []string `json:"orphaned_acls,omitempty"`
+	OrphanedVRFs        []string `json:"orphaned_vrfs,omitempty"`
+	OrphanedVNIMappings []string `json:"orphaned_vni_mappings,omitempty"`
 }
 
 // ============================================================================
@@ -531,7 +191,7 @@ type RemoveLoopbackRequest struct {
 
 // ProvisionRequest is the request for provisioning devices.
 type ProvisionRequest struct {
-	Devices []string // empty = all devices in topology
+	Devices []string `json:"devices,omitempty"` // empty = all devices in topology
 }
 
 // ProvisionDeviceResult holds the result of provisioning a single device.
@@ -695,6 +355,14 @@ type EVPNStatusResult struct {
 	VTEPStatus  string            `json:"vtep_status,omitempty"`
 	RemoteVTEPs []string          `json:"remote_vteps,omitempty"`
 	VNICount    int               `json:"vni_count"`
+}
+
+// NeighEntry represents a neighbor (ARP/NDP) entry read from STATE_DB.
+type NeighEntry struct {
+	IP        string `json:"ip"`
+	Interface string `json:"interface"`
+	MAC       string `json:"mac"`
+	Family    string `json:"family"` // "IPv4" or "IPv6"
 }
 
 // ServiceBindingDetail is the full service binding on an interface.
@@ -881,89 +549,77 @@ type PlatformDetail struct {
 
 // CreateServiceRequest is the request for creating a service definition.
 type CreateServiceRequest struct {
-	Name          string
-	Type          string
-	IPVPN         string
-	MACVPN        string
-	VRFType       string
-	QoSPolicy     string
-	IngressFilter string
-	EgressFilter  string
-	Description   string
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	IPVPN         string `json:"ipvpn,omitempty"`
+	MACVPN        string `json:"macvpn,omitempty"`
+	VRFType       string `json:"vrf_type,omitempty"`
+	QoSPolicy     string `json:"qos_policy,omitempty"`
+	IngressFilter string `json:"ingress_filter,omitempty"`
+	EgressFilter  string `json:"egress_filter,omitempty"`
+	Description   string `json:"description,omitempty"`
 }
 
 // CreateIPVPNRequest is the request for creating an IP-VPN definition.
 type CreateIPVPNRequest struct {
-	Name         string
-	L3VNI        int
-	VRF          string
-	RouteTargets []string
-	Description  string
+	Name         string   `json:"name"`
+	L3VNI        int      `json:"l3vni"`
+	VRF          string   `json:"vrf,omitempty"`
+	RouteTargets []string `json:"route_targets,omitempty"`
+	Description  string   `json:"description,omitempty"`
 }
 
 // CreateMACVPNRequest is the request for creating a MAC-VPN definition.
 type CreateMACVPNRequest struct {
-	Name           string
-	VNI            int
-	VlanID         int
-	AnycastIP      string
-	AnycastMAC     string
-	RouteTargets   []string
-	ARPSuppression bool
-	Description    string
+	Name           string   `json:"name"`
+	VNI            int      `json:"vni"`
+	VlanID         int      `json:"vlan_id,omitempty"`
+	AnycastIP      string   `json:"anycast_ip,omitempty"`
+	AnycastMAC     string   `json:"anycast_mac,omitempty"`
+	RouteTargets   []string `json:"route_targets,omitempty"`
+	ARPSuppression bool     `json:"arp_suppression,omitempty"`
+	Description    string   `json:"description,omitempty"`
 }
 
 // CreateQoSPolicyRequest is the request for creating a QoS policy.
 type CreateQoSPolicyRequest struct {
-	Name        string
-	Description string
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // AddQoSQueueRequest is the request for adding a queue to a QoS policy.
 type AddQoSQueueRequest struct {
-	Policy  string
-	QueueID int
-	Name    string
-	Type    string
-	Weight  int
-	DSCP    []int
-	ECN     bool
-}
-
-// RemoveQoSQueueRequest is the request for removing a queue from a QoS policy.
-type RemoveQoSQueueRequest struct {
-	Policy  string
-	QueueID int
+	Policy  string `json:"policy"`
+	QueueID int    `json:"queue_id"`
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Weight  int    `json:"weight,omitempty"`
+	DSCP    []int  `json:"dscp,omitempty"`
+	ECN     bool   `json:"ecn,omitempty"`
 }
 
 // CreateFilterRequest is the request for creating a filter definition.
 type CreateFilterRequest struct {
-	Name        string
-	Type        string
-	Description string
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
 }
 
 // AddFilterRuleRequest is the request for adding a rule to a filter.
 type AddFilterRuleRequest struct {
-	Filter        string
-	Sequence      int
-	Action        string
-	SrcIP         string
-	DstIP         string
-	SrcPrefixList string
-	DstPrefixList string
-	Protocol      string
-	SrcPort       string
-	DstPort       string
-	DSCP          string
-	CoS           string
-	Log           bool
-}
-
-// RemoveFilterRuleRequest is the request for removing a rule from a filter.
-type RemoveFilterRuleRequest struct {
-	Filter   string
-	Priority int
+	Filter        string `json:"filter"`
+	Sequence      int    `json:"seq"`
+	Action        string `json:"action"`
+	SrcIP         string `json:"src_ip,omitempty"`
+	DstIP         string `json:"dst_ip,omitempty"`
+	SrcPrefixList string `json:"src_prefix_list,omitempty"`
+	DstPrefixList string `json:"dst_prefix_list,omitempty"`
+	Protocol      string `json:"protocol,omitempty"`
+	SrcPort       string `json:"src_port,omitempty"`
+	DstPort       string `json:"dst_port,omitempty"`
+	DSCP          string `json:"dscp,omitempty"`
+	CoS           string `json:"cos,omitempty"`
+	Log           bool   `json:"log,omitempty"`
 }
 
 // ============================================================================
@@ -1069,6 +725,18 @@ func (us *UserSettings) GetAuditMaxBackups() int {
 		return us.AuditMaxBackups
 	}
 	return DefaultAuditMaxBackups
+}
+
+// ============================================================================
+// Host Types
+// ============================================================================
+
+// HostProfile contains SSH connection parameters for a virtual host device.
+type HostProfile struct {
+	MgmtIP  string `json:"mgmt_ip"`
+	SSHUser string `json:"ssh_user"`
+	SSHPass string `json:"ssh_pass"`
+	SSHPort int    `json:"ssh_port"`
 }
 
 // ============================================================================

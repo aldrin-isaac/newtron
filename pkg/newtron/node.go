@@ -82,6 +82,50 @@ func (n *Node) ListInterfaces() []string { return n.internal.ListInterfaces() }
 // InterfaceExists checks if an interface exists on the device.
 func (n *Node) InterfaceExists(name string) bool { return n.internal.InterfaceExists(name) }
 
+// LoopbackIP returns the device's loopback IP address.
+func (n *Node) LoopbackIP() string { return n.internal.LoopbackIP() }
+
+// HasConfigDB returns true if the CONFIG_DB has been loaded.
+func (n *Node) HasConfigDB() bool { return n.internal.ConfigDB() != nil }
+
+// QueryConfigDB reads a CONFIG_DB entry by table and key.
+// Returns an empty map (not error) if the entry does not exist.
+func (n *Node) QueryConfigDB(table, key string) (map[string]string, error) {
+	client := n.internal.ConfigDBClient()
+	if client == nil {
+		return nil, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+	}
+	return client.Get(table, key)
+}
+
+// ConfigDBTableKeys returns all keys in a CONFIG_DB table.
+func (n *Node) ConfigDBTableKeys(table string) ([]string, error) {
+	client := n.internal.ConfigDBClient()
+	if client == nil {
+		return nil, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+	}
+	return client.TableKeys(table)
+}
+
+// ConfigDBEntryExists returns true if a CONFIG_DB entry exists.
+func (n *Node) ConfigDBEntryExists(table, key string) (bool, error) {
+	client := n.internal.ConfigDBClient()
+	if client == nil {
+		return false, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+	}
+	return client.Exists(table, key)
+}
+
+// QueryStateDB reads a STATE_DB entry by table and key.
+// Returns nil (not error) if the entry does not exist.
+func (n *Node) QueryStateDB(table, key string) (map[string]string, error) {
+	client := n.internal.StateDBClient()
+	if client == nil {
+		return nil, fmt.Errorf("no STATE_DB client for device %s", n.internal.Name())
+	}
+	return client.GetEntry(table, key)
+}
+
 // ============================================================================
 // Pending change management
 // ============================================================================
@@ -657,6 +701,24 @@ func (n *Node) GetRouteASIC(ctx context.Context, vrf, prefix string) (*RouteEntr
 		return nil, err
 	}
 	return convertRouteEntry(re), nil
+}
+
+// GetNeighbor reads a neighbor (ARP/NDP) entry from STATE_DB.
+// Returns nil (not error) if the entry does not exist.
+func (n *Node) GetNeighbor(ctx context.Context, iface, ip string) (*NeighEntry, error) {
+	ne, err := n.internal.GetNeighbor(ctx, iface, ip)
+	if err != nil {
+		return nil, err
+	}
+	if ne == nil {
+		return nil, nil
+	}
+	return &NeighEntry{
+		IP:        ne.IP,
+		Interface: ne.Interface,
+		MAC:       ne.MAC,
+		Family:    ne.Family,
+	}, nil
 }
 
 // convertRouteEntry converts a *sonic.RouteEntry to a *RouteEntry.

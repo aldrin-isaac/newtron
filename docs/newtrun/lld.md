@@ -26,7 +26,7 @@ newtron/
 │       ├── scenario.go           # Scenario, Step, StepAction, ExpectBlock types
 │       ├── parser.go             # ParseScenario, ValidateScenario, TopologicalSort
 │       ├── runner.go             # Runner, RunOptions, Run, iterateScenarios
-│       ├── steps.go              # StepExecutor interface, 42 executor implementations
+│       ├── steps.go              # StepExecutor interface, 56 executor implementations
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
 │       ├── progress.go           # ProgressReporter, ConsoleProgress, StateReporter
@@ -288,9 +288,10 @@ execution rather than upfront.
 type Runner struct {
     ScenariosDir  string
     TopologiesDir string
-    Network       *network.Network
+    Network       *newtron.Network
     Lab           *newtlab.Lab
-    ChangeSets    map[string]*node.ChangeSet
+    Composites    map[string]*newtron.CompositeInfo
+    Nodes         map[string]*newtron.Node
     HostConns     map[string]*ssh.Client
     Progress      ProgressReporter
 
@@ -303,9 +304,10 @@ type Runner struct {
 |-------|-------------|
 | `ScenariosDir` | Path to suite directory (e.g., `newtrun/suites/2node-incremental`) |
 | `TopologiesDir` | Path to `newtrun/topologies/` |
-| `Network` | Top-level `network.Network` object (owns nodes, specs). Nodes accessed via `r.Network.GetNode(name)`, platforms via `r.Network.GetPlatform()`. |
+| `Network` | Top-level `newtron.Network` object (owns nodes, specs). Nodes accessed via `r.Network.GetNode(name)`, platforms via `r.Network.GetPlatform()`. |
 | `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
-| `ChangeSets` | Last ChangeSet per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce ChangeSets for the same device, only the latest is retained. Read by `verify-provisioning`. |
+| `Composites` | Last CompositeInfo per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce CompositeInfo for the same device, only the latest is retained. Read by `verify-provisioning`. |
+| `Nodes` | Connected `newtron.Node` instances keyed by device name. Populated during `connectDevices`. |
 | `HostConns` | SSH client connections keyed by host name. Used by `host-exec` executor to run commands inside host network namespaces. |
 | `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
 
@@ -402,8 +404,8 @@ in a loop for N iterations. Each iteration is fail-fast. The
 func (r *Runner) connectDevices(ctx context.Context, specDir string) error
 ```
 
-Builds the `network.Network` from the spec directory and connects all devices
-via SSH. Uses `network.NewNetwork(specDir)` to load specs, then `dev.Connect(ctx)`
+Builds the `newtron.Network` from the spec directory and connects all devices
+via SSH. Uses `newtron.NewNetwork(specDir)` to load specs, then `dev.Connect(ctx)`
 for each device. Connection failures are wrapped in `InfraError`.
 
 ### 4.9 Runner Helpers
@@ -602,18 +604,18 @@ type stepExecutor interface {
 
 type StepOutput struct {
     Result     *StepResult
-    ChangeSets map[string]*node.ChangeSet
+    Composites map[string]*newtron.CompositeInfo
 }
 ```
 
 All executors are stateless — mutable state lives in the Runner. Executors
-read from Runner (e.g., Network, ChangeSets) but return `StepOutput` rather
-than writing directly. The Runner merges ChangeSets after each step.
+read from Runner (e.g., Network, Composites) but return `StepOutput` rather
+than writing directly. The Runner merges Composites after each step.
 
 ### 7.2 Executor Dispatch
 
 ```go
-var executors = map[StepAction]stepExecutor{ ... } // 42 entries
+var executors = map[StepAction]stepExecutor{ ... } // 56 entries
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
@@ -625,14 +627,14 @@ when executors only set `Details`.
 ### 7.3 Multi-Device Helpers
 
 ```go
-func (r *Runner) executeForDevices(step *Step, fn func(dev *node.Node, name string) (*node.ChangeSet, string, error)) *StepOutput
-func (r *Runner) checkForDevices(step *Step, fn func(dev *node.Node, name string) (StepStatus, string)) *StepOutput
-func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *node.Node, name string) (done bool, msg string, err error)) *StepOutput
+func (r *Runner) executeForDevices(step *Step, fn func(dev *newtron.Node, name string) (string, error)) *StepOutput
+func (r *Runner) checkForDevices(step *Step, fn func(dev *newtron.Node, name string) (StepStatus, string)) *StepOutput
+func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *newtron.Node, name string) (done bool, msg string, err error)) *StepOutput
 ```
 
 Three patterns used by executors:
 
-- **executeForDevices**: for mutating actions (provision, apply-service, create-vlan, etc.). Collects ChangeSets per device.
+- **executeForDevices**: for mutating actions (provision, apply-service, create-vlan, etc.). Executors use `dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error { ... })` internally.
 - **checkForDevices**: for single-shot verification (verify-health, verify-config-db). Returns per-device status.
 - **pollForDevices**: for polling verification (verify-bgp, verify-state-db, verify-route). Polls until timeout.
 
@@ -666,46 +668,48 @@ read action-specific parameters from YAML. `intParam` handles int, float64
 | 12 | `configureLoopbackExecutor` | `configure-loopback` | `Node.ConfigureLoopback()` |
 | 13 | `sshCommandExecutor` | `ssh-command` | SSH exec (newtrun native) |
 | 14 | `restartServiceExecutor` | `restart-service` | `Node.RestartService()` |
-| 15 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Node.ApplyFRRDefaults()` |
-| 16 | `setInterfaceExecutor` | `set-interface` | `Interface.Set/SetIP/SetVRF()` |
-| 17 | `createVLANExecutor` | `create-vlan` | `Node.CreateVLAN()` |
-| 18 | `deleteVLANExecutor` | `delete-vlan` | `Node.DeleteVLAN()` |
-| 19 | `addVLANMemberExecutor` | `add-vlan-member` | `Node.AddVLANMember()` |
-| 20 | `createVRFExecutor` | `create-vrf` | `Node.CreateVRF()` |
-| 21 | `deleteVRFExecutor` | `delete-vrf` | `Node.DeleteVRF()` |
-| 22 | `setupEVPNExecutor` | `setup-evpn` | `Node.SetupEVPN()` |
-| 23 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `Node.AddVRFInterface()` |
-| 24 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `Node.RemoveVRFInterface()` |
-| 25 | `bindIPVPNExecutor` | `bind-ipvpn` | `Node.BindIPVPN()` |
-| 26 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `Node.UnbindIPVPN()` |
-| 27 | `bindMACVPNExecutor` | `bind-macvpn` | `Node.BindMACVPN()` |
-| 28 | `unbindMACVPNExecutor` | `unbind-macvpn` | `Node.UnbindMACVPN()` |
-| 29 | `addStaticRouteExecutor` | `add-static-route` | `Node.AddStaticRoute()` |
-| 30 | `removeStaticRouteExecutor` | `remove-static-route` | `Node.RemoveStaticRoute()` |
-| 31 | `removeVLANMemberExecutor` | `remove-vlan-member` | `Node.RemoveVLANMember()` |
-| 32 | `applyQoSExecutor` | `apply-qos` | `Node.ApplyQoS()` |
-| 33 | `removeQoSExecutor` | `remove-qos` | `Node.RemoveQoS()` |
-| 34 | `configureSVIExecutor` | `configure-svi` | `Node.ConfigureSVI()` |
-| 35 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `Interface.AddBGPNeighbor` / `Node.AddLoopbackBGPNeighbor` |
-| 36 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
-| 37 | `refreshServiceExecutor` | `refresh-service` | `Interface.RefreshService()` |
-| 38 | `cleanupExecutor` | `cleanup` | `Node.Cleanup()` |
-| 39 | `createPortChannelExecutor` | `create-portchannel` | `Node.CreatePortChannel()` |
-| 40 | `deletePortChannelExecutor` | `delete-portchannel` | `Node.DeletePortChannel()` |
-| 41 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Node.AddPortChannelMember()` |
-| 42 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Node.RemovePortChannelMember()` |
-| 43 | `hostExecExecutor` | `host-exec` | SSH exec in host namespace (newtrun native) |
-| 44 | `configureBGPExecutor` | `configure-bgp` | `Node.ConfigureBGP()` |
-| 45 | `createACLTableExecutor` | `create-acl-table` | `Node.CreateACLTable()` |
-| 46 | `addACLRuleExecutor` | `add-acl-rule` | `Node.AddACLRule()` |
-| 47 | `deleteACLRuleExecutor` | `delete-acl-rule` | `Node.DeleteACLRule()` |
-| 48 | `deleteACLTableExecutor` | `delete-acl-table` | `Node.DeleteACLTable()` |
-| 49 | `bindACLExecutor` | `bind-acl` | `Interface.BindACL()` |
-| 50 | `unbindACLExecutor` | `unbind-acl` | `Node.UnbindACLFromInterface()` |
-| 51 | `removeSVIExecutor` | `remove-svi` | `Node.RemoveSVI()` |
-| 52 | `removeIPExecutor` | `remove-ip` | `Interface.RemoveIP()` |
-| 53 | `teardownEVPNExecutor` | `teardown-evpn` | `Node.TeardownEVPN()` |
-| 54 | `removeBGPGlobalsExecutor` | `remove-bgp-globals` | `Node.RemoveBGPGlobals()` |
+| 15 | `configReloadExecutor` | `config-reload` | `Node.ConfigReload()` |
+| 16 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `Node.ApplyFRRDefaults()` |
+| 17 | `setInterfaceExecutor` | `set-interface` | `Interface.Set/SetIP/SetVRF()` |
+| 18 | `createVLANExecutor` | `create-vlan` | `Node.CreateVLAN()` |
+| 19 | `deleteVLANExecutor` | `delete-vlan` | `Node.DeleteVLAN()` |
+| 20 | `addVLANMemberExecutor` | `add-vlan-member` | `Node.AddVLANMember()` |
+| 21 | `createVRFExecutor` | `create-vrf` | `Node.CreateVRF()` |
+| 22 | `deleteVRFExecutor` | `delete-vrf` | `Node.DeleteVRF()` |
+| 23 | `setupEVPNExecutor` | `setup-evpn` | `Node.SetupEVPN()` |
+| 24 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `Node.AddVRFInterface()` |
+| 25 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `Node.RemoveVRFInterface()` |
+| 26 | `bindIPVPNExecutor` | `bind-ipvpn` | `Node.BindIPVPN()` |
+| 27 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `Node.UnbindIPVPN()` |
+| 28 | `bindMACVPNExecutor` | `bind-macvpn` | `Node.BindMACVPN()` |
+| 29 | `unbindMACVPNExecutor` | `unbind-macvpn` | `Node.UnbindMACVPN()` |
+| 30 | `addStaticRouteExecutor` | `add-static-route` | `Node.AddStaticRoute()` |
+| 31 | `removeStaticRouteExecutor` | `remove-static-route` | `Node.RemoveStaticRoute()` |
+| 32 | `removeVLANMemberExecutor` | `remove-vlan-member` | `Node.RemoveVLANMember()` |
+| 33 | `applyQoSExecutor` | `apply-qos` | `Node.ApplyQoS()` |
+| 34 | `removeQoSExecutor` | `remove-qos` | `Node.RemoveQoS()` |
+| 35 | `configureSVIExecutor` | `configure-svi` | `Node.ConfigureSVI()` |
+| 36 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `Interface.AddBGPNeighbor` / `Node.AddLoopbackBGPNeighbor` |
+| 37 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
+| 38 | `refreshServiceExecutor` | `refresh-service` | `Interface.RefreshService()` |
+| 39 | `cleanupExecutor` | `cleanup` | `Node.Cleanup()` |
+| 40 | `createPortChannelExecutor` | `create-portchannel` | `Node.CreatePortChannel()` |
+| 41 | `deletePortChannelExecutor` | `delete-portchannel` | `Node.DeletePortChannel()` |
+| 42 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `Node.AddPortChannelMember()` |
+| 43 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `Node.RemovePortChannelMember()` |
+| 44 | `hostExecExecutor` | `host-exec` | SSH exec in host namespace (newtrun native) |
+| 45 | `configureBGPExecutor` | `configure-bgp` | `Node.ConfigureBGP()` |
+| 46 | `createACLTableExecutor` | `create-acl-table` | `Node.CreateACLTable()` |
+| 47 | `addACLRuleExecutor` | `add-acl-rule` | `Node.AddACLRule()` |
+| 48 | `deleteACLRuleExecutor` | `delete-acl-rule` | `Node.DeleteACLRule()` |
+| 49 | `deleteACLTableExecutor` | `delete-acl-table` | `Node.DeleteACLTable()` |
+| 50 | `bindACLExecutor` | `bind-acl` | `Interface.BindACL()` |
+| 51 | `unbindACLExecutor` | `unbind-acl` | `Node.UnbindACLFromInterface()` |
+| 52 | `removeSVIExecutor` | `remove-svi` | `Node.RemoveSVI()` |
+| 53 | `removeIPExecutor` | `remove-ip` | `Interface.RemoveIP()` |
+| 54 | `teardownEVPNExecutor` | `teardown-evpn` | `Node.TeardownEVPN()` |
+| 55 | `removeBGPGlobalsExecutor` | `remove-bgp-globals` | `Node.RemoveBGPGlobals()` |
+| 56 | `removeLoopbackExecutor` | `remove-loopback` | `Node.RemoveLoopback()` |
 
 ### 7.6 Verification Executor Detail
 

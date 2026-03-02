@@ -41,18 +41,29 @@ newtron/
 │   │   ├── cmd_settings.go          # Settings management
 │   │   ├── cmd_provision.go         # Topology provisioning commands
 │   │   └── shell.go                 # Interactive shell with readline
+│   └── newtron-api/                  # HTTP API server
+│       └── main.go                   # Entry point, flags (-addr, -spec-dir, -net-id), signal handling
 ├── pkg/
 │   └── newtron/
 │       ├── types.go                   # Public API types (WriteResult, ExecOpts, request/response structs)
 │       ├── network.go                 # Public Network type (wraps network.Network)
 │       ├── node.go                    # Public Node type (wraps node.Node, pending change mgmt)
 │       ├── interface.go               # Public Interface type (wraps node.Interface)
-│       ├── ephemeral_ops.go           # One-shot connect→lock→op→commit→save→close convenience methods
 │       ├── spec_ops.go                # Spec CRUD on Network (services, VPNs, filters, QoS, platforms)
 │       ├── platform_ops.go            # Platform queries
 │       ├── provision.go               # Composite generation and device provisioning
 │       ├── audit.go                   # Audit log wrapper
 │       ├── settings.go                # Settings wrapper
+│       ├── api/                          # HTTP API server (transparent transport layer)
+│       │   ├── server.go                 # Server struct, network registration, Start/Stop
+│       │   ├── actors.go                 # NetworkActor, NodeActor (channel-based serialization)
+│       │   ├── handler.go                # Route registration (80+ routes), JSON helpers
+│       │   ├── handler_network.go        # Network-level handlers (spec CRUD, topology, provision)
+│       │   ├── handler_node.go           # Node handlers (reads, writes, execute)
+│       │   ├── handler_interface.go      # Interface operation handlers
+│       │   ├── handler_composite.go      # Composite generate/verify/deliver (UUID handles)
+│       │   ├── middleware.go             # Request ID, logging, timeout, recovery
+│       │   └── types.go                  # API request types, response envelope, error mapping
 │       ├── network/                     # Network struct, topology, spec->config translation
 │       │   ├── network.go               # Top-level Network object (owns specs + spec persistence)
 │       │   ├── topology.go              # TopologyProvisioner, ProvisionDevice, ProvisionInterface

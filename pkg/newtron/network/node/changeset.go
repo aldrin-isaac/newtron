@@ -225,6 +225,10 @@ func (cs *ChangeSet) Verify(n *Node) error {
 
 // verifyConfigChanges re-reads CONFIG_DB via a fresh connection and compares
 // against the given changes. Used by both ChangeSet.Verify and VerifyComposite.
+//
+// When a key appears in multiple changes (e.g., RefreshService does delete+add
+// on the same key), only the final operation per key is verified. This replaces
+// the former DeduplicateRefresh band-aid with correct final-state semantics.
 func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.VerificationResult, error) {
 	if n.conn == nil {
 		return nil, util.ErrNotConnected
@@ -238,9 +242,37 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 	}
 	defer freshClient.Close()
 
+	// Build final state per key: last operation wins. This correctly handles
+	// merged ChangeSets where a key is deleted then re-added (RefreshService).
+	type finalOp struct {
+		change sonic.ConfigChange
+		index  int // preserve order for deterministic iteration
+	}
+	final := make(map[string]*finalOp)
+	for idx, change := range changes {
+		key := change.Table + "|" + change.Key
+		final[key] = &finalOp{change: change, index: idx}
+	}
+
+	// Collect final ops sorted by original order
+	sorted := make([]sonic.ConfigChange, 0, len(final))
+	for _, op := range final {
+		sorted = append(sorted, op.change)
+	}
+	// Sort by index for deterministic verification order
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			ki := sorted[i].Table + "|" + sorted[i].Key
+			kj := sorted[j].Table + "|" + sorted[j].Key
+			if final[ki].index > final[kj].index {
+				sorted[i], sorted[j] = sorted[j], sorted[i]
+			}
+		}
+	}
+
 	result := &sonic.VerificationResult{}
 
-	for _, change := range changes {
+	for _, change := range sorted {
 		switch change.Type {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
 			actual, err := freshClient.Get(change.Table, change.Key)

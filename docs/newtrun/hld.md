@@ -42,7 +42,7 @@ correlating observations across devices.
 └─────────────────┘          └─────────────────┘
 ```
 
-The Runner holds a `*network.Network` object (not individual node references). Nodes are accessed via `r.Network.GetNode(name)`.
+The Runner holds a `*newtron.Network` object (not individual node references). Nodes are accessed via `r.Network.GetNode(name)`.
 
 ---
 

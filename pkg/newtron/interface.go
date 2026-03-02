@@ -266,3 +266,28 @@ func (i *Interface) Set(ctx context.Context, property, value string) error {
 	i.node.appendPending(cs)
 	return nil
 }
+
+// ApplyQoS applies a QoS policy to this interface.
+// Resolves the QoS policy spec by name from the node's SpecProvider.
+func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
+	policyDef, err := i.node.internal.GetQoSPolicy(policy)
+	if err != nil {
+		return err
+	}
+	cs, err := i.internal.ApplyQoS(ctx, policy, policyDef)
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
+// RemoveQoS removes QoS configuration from this interface.
+func (i *Interface) RemoveQoS(ctx context.Context) error {
+	cs, err := i.internal.RemoveQoS(ctx)
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}

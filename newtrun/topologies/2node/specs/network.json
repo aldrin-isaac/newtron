@@ -4,12 +4,39 @@
   "zones": {
     "amer": {}
   },
+  "services": {
+    "svc-bridged": {
+      "description": "Bridged service for composite testing",
+      "service_type": "bridged",
+      "macvpn": "svc-vlan200"
+    },
+    "svc-evpn-irb": {
+      "description": "EVPN IRB service for composite testing",
+      "service_type": "evpn-irb",
+      "vrf_type": "shared",
+      "ipvpn": "evpn-irb-vrf",
+      "macvpn": "svc-vlan400"
+    }
+  },
   "macvpns": {
     "vlan300": {
       "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
       "vlan_id": 300,
       "vni": 50300,
       "route_targets": ["65000:50300"],
+      "arp_suppression": true
+    },
+    "svc-vlan200": {
+      "description": "VLAN 200 for composite bridged testing",
+      "vlan_id": 200
+    },
+    "svc-vlan400": {
+      "description": "VLAN 400 for composite EVPN IRB testing",
+      "vlan_id": 400,
+      "vni": 50400,
+      "anycast_ip": "10.4.0.1/24",
+      "anycast_mac": "00:00:00:01:04:00",
+      "route_targets": ["65000:50400"],
       "arp_suppression": true
     }
   },

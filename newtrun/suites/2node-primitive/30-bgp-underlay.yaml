@@ -2,23 +2,17 @@ name: bgp-underlay
 description: |
   BGP underlay bringup: configure BGP globals, set Ethernet0 IPs, add eBGP
   neighbors across the inter-switch link, and verify Established.
-  Builds on loopback-setup (Loopback0 IPs already set).
-  Uses configure-bgp (new primitive) instead of provision.
+  Builds on loopback (Loopback0 IPs already set).
 
   Dependency ordering (critical):
     1. Write BGP_GLOBALS and DEVICE_METADATA.bgp_asn — but NOT BGP_NEIGHBOR yet.
     2. Set INTERFACE IPs on Ethernet0; poll for kernel IP (intfmgrd assignment).
     3. restart-bgp — bgpcfgd starts with NO BGP_NEIGHBOR in CONFIG_DB.
-       It programs the BGP instance cleanly without deferred-and-forgotten neighbors.
     4. poll-bgp-instance — wait for 'router bgp NNNNN' in show running-config.
-       This confirms bgpcfgd (BGPGlobalCfgMgr) has fully initialized.
     5. bgp-add-neighbor — write BGP_NEIGHBOR AFTER bgpcfgd is initialized.
-       bgpcfgd receives a fresh CONFIG_DB SET event with all deps met → programs neighbor.
-    6. wait-bgpcfgd-settle — 10s for bgpcfgd to regenerate frr.conf after neighbor add.
-    7. verify-bgp — poll until Established.
-
+    6. verify-bgp — poll until Established.
 topology: 2node
-requires: [loopback-setup]
+requires: [loopback]
 
 steps:
   # Step 1: Write BGP_GLOBALS + DEVICE_METADATA.bgp_asn.
@@ -30,7 +24,6 @@ steps:
     action: configure-bgp
     devices: [switch2]
 
-  # CONFIG_DB verification: BGP globals
   - name: verify-bgp-globals-sw1
     action: verify-config-db
     devices: [switch1]
@@ -66,7 +59,15 @@ steps:
       property: ip
       value: "10.1.0.1/31"
 
-  # Step 3: Poll for Ethernet0 IP in kernel on BOTH switches BEFORE restart.
+  - name: verify-ip-eth0-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: true
+
+  # Step 3: Poll for Ethernet0 IP in kernel on BOTH switches.
   - name: wait-eth0-ip-sw1
     action: ssh-command
     devices: [switch1]
@@ -87,12 +88,12 @@ steps:
   - name: wait-bgp-instance-sw1
     action: ssh-command
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 3; done; true"
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
 
   - name: wait-bgp-instance-sw2
     action: ssh-command
     devices: [switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 3; done; true"
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
 
   # Step 6: Write BGP_NEIGHBOR AFTER bgpcfgd is fully initialized.
   - name: bgp-add-neighbor-switch1
@@ -109,7 +110,6 @@ steps:
     params:
       remote_asn: 65001
 
-  # CONFIG_DB verification: BGP neighbor exists
   - name: verify-bgp-neighbor-sw1
     action: verify-config-db
     devices: [switch1]

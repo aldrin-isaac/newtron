@@ -32,7 +32,9 @@ newtron interacts with SONiC devices through Redis, not CLI commands. Every oper
 24. [Composite Configuration](#24-composite-configuration)
 25. [End-to-End Workflows](#25-end-to-end-workflows)
 26. [CONFIG_DB Cache Behavior](#26-config_db-cache-behavior)
-27. [Related Documentation](#27-related-documentation)
+27. [Zone-Level and Node-Level Spec Overrides](#27-zone-level-and-node-level-spec-overrides)
+28. [HTTP API Server](#28-http-api-server)
+29. [Related Documentation](#29-related-documentation)
 
 ---
 
@@ -3248,7 +3250,219 @@ All specs from all levels are visible. If the same name exists at multiple level
 
 ---
 
-## 28. Related Documentation
+## 28. HTTP API Server
+
+The `newtron-api` binary exposes every `pkg/newtron/` operation over HTTP. The
+transport layer is a mechanical shim — each endpoint maps 1:1 to a Go API
+method with zero business logic in between (see DESIGN_PRINCIPLES.md Principle 29).
+
+### 28.1 Building and Starting
+
+```bash
+go build -o bin/newtron-api ./cmd/newtron-api
+
+# Start with a spec directory auto-registered as the "default" network
+bin/newtron-api -spec-dir /path/to/specs -addr :8080
+
+# Start with a custom network ID
+bin/newtron-api -spec-dir /path/to/specs -net-id lab-east -addr :9090
+
+# Start empty (register networks via API)
+bin/newtron-api -addr :8080
+```
+
+### 28.2 Network Registration
+
+Networks can be registered at startup via `-spec-dir` or dynamically via the API:
+
+```bash
+# Register a network
+curl -X POST localhost:8080/network \
+  -d '{"id": "lab", "spec_dir": "/home/user/newtron/specs"}'
+
+# List registered networks
+curl localhost:8080/network
+
+# Unregister (fails if any NodeActors are active)
+curl -X DELETE localhost:8080/network/lab
+```
+
+### 28.3 Spec Operations
+
+All spec CRUD operations are available. Writes support `?dry_run=true`.
+
+```bash
+# List services
+curl localhost:8080/network/default/service
+
+# Show a specific service
+curl localhost:8080/network/default/service/customer-l3
+
+# Create a service
+curl -X POST localhost:8080/network/default/service \
+  -d '{"name": "new-svc", "type": "routed", "ingress_filter": "protect"}'
+
+# Delete a service
+curl -X DELETE localhost:8080/network/default/service/new-svc
+
+# List IP-VPNs, MAC-VPNs, QoS policies, filters, platforms
+curl localhost:8080/network/default/ipvpn
+curl localhost:8080/network/default/macvpn
+curl localhost:8080/network/default/qos-policy
+curl localhost:8080/network/default/filter
+curl localhost:8080/network/default/platform
+
+# Topology device names
+curl localhost:8080/network/default/topology/node
+
+# Feature dependencies
+curl localhost:8080/network/default/feature
+curl localhost:8080/network/default/feature/evpn/dependency
+```
+
+### 28.4 Node Operations
+
+Node operations connect to the device per-request (connect → execute → disconnect).
+Write operations support `?dry_run=true` and `?no_save=true` query parameters.
+
+```bash
+# Device info
+curl localhost:8080/network/default/node/leaf1/info
+
+# List interfaces
+curl localhost:8080/network/default/node/leaf1/interface
+
+# Show a specific interface (use %2F for slashes in interface names)
+curl localhost:8080/network/default/node/leaf1/interface/Ethernet0
+
+# Health check
+curl localhost:8080/network/default/node/leaf1/health
+
+# BGP / EVPN status
+curl localhost:8080/network/default/node/leaf1/bgp/status
+curl localhost:8080/network/default/node/leaf1/evpn/status
+
+# VLANs, VRFs, ACLs, LAGs
+curl localhost:8080/network/default/node/leaf1/vlan
+curl localhost:8080/network/default/node/leaf1/vrf
+curl localhost:8080/network/default/node/leaf1/acl
+curl localhost:8080/network/default/node/leaf1/lag
+
+# Route lookup (APP_DB and ASIC_DB)
+curl localhost:8080/network/default/node/leaf1/route/default/10.1.0.0%2F24
+curl localhost:8080/network/default/node/leaf1/route-asic/10.1.0.0%2F24
+
+# Create VLAN (dry run)
+curl -X POST 'localhost:8080/network/default/node/leaf1/vlan?dry_run=true' \
+  -d '{"vlan_id": 100, "description": "customer"}'
+
+# Create VLAN (execute)
+curl -X POST localhost:8080/network/default/node/leaf1/vlan \
+  -d '{"vlan_id": 100, "description": "customer"}'
+
+# Delete VLAN
+curl -X DELETE localhost:8080/network/default/node/leaf1/vlan/100
+
+# Create/delete VRF
+curl -X POST localhost:8080/network/default/node/leaf1/vrf \
+  -d '{"name": "Vrf_CUST1"}'
+curl -X DELETE localhost:8080/network/default/node/leaf1/vrf/Vrf_CUST1
+```
+
+### 28.5 Interface Operations
+
+```bash
+# Apply a service to an interface
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/apply-service \
+  -d '{"service": "customer-l3", "ip_address": "10.1.1.1/30"}'
+
+# Remove a service
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/remove-service
+
+# Set IP address
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/set-ip \
+  -d '{"ip_address": "10.1.1.1/30"}'
+
+# Bind/unbind VRF
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/set-vrf \
+  -d '{"vrf": "Vrf_CUST1"}'
+
+# Bind/unbind ACL
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/bind-acl \
+  -d '{"acl_name": "protect-in", "stage": "ingress"}'
+curl -X POST localhost:8080/network/default/node/leaf1/interface/Ethernet0/unbind-acl \
+  -d '{"acl_name": "protect-in", "stage": "ingress"}'
+```
+
+### 28.6 Composite Operations (Provisioning)
+
+Composites use UUID-based handles because the internal state cannot cross HTTP.
+The server stores the composite; the client passes back the UUID.
+
+```bash
+# Generate composite for a device (returns a handle UUID)
+curl -X POST localhost:8080/network/default/composite/leaf1
+# Response: {"data": {"handle": "a1b2c3...", "device_name": "leaf1", "entry_count": 312, ...}}
+
+# Verify composite against live device (using the handle)
+curl -X POST localhost:8080/network/default/node/leaf1/composite/verify \
+  -d '{"handle": "a1b2c3..."}'
+
+# Deliver composite (overwrite mode)
+curl -X POST localhost:8080/network/default/node/leaf1/composite/deliver \
+  -d '{"handle": "a1b2c3...", "mode": "overwrite"}'
+```
+
+Handles expire after 10 minutes.
+
+### 28.7 Batch Execute
+
+The `/execute` endpoint batches multiple operations in a single connect cycle:
+
+```bash
+curl -X POST localhost:8080/network/default/node/leaf1/execute \
+  -d '{
+    "operations": [
+      {"action": "create-vlan", "params": {"vlan_id": 100}},
+      {"action": "create-vrf", "params": {"name": "Vrf_CUST1"}},
+      {"action": "apply-service", "interface": "Ethernet0",
+       "params": {"service": "customer-l3", "ip_address": "10.1.1.1/30"}}
+    ]
+  }'
+```
+
+### 28.8 Response Format
+
+All responses use a consistent envelope:
+
+```json
+{"data": { ... }}          // Success
+{"error": "message"}       // Error
+```
+
+Error mapping:
+
+| Go error type | HTTP status |
+|---|---|
+| `NotFoundError` | 404 |
+| `ValidationError` | 400 |
+| `VerificationFailedError` | 409 |
+| `context.DeadlineExceeded` | 504 |
+| Other | 500 |
+
+### 28.9 Architecture Notes
+
+- **Stateless**: each request connects to the device, executes, disconnects.
+  No persistent sessions or cached device state between requests.
+- **Actor serialization**: NetworkActors serialize spec operations; NodeActors
+  serialize device operations. Concurrent requests to the same device are
+  queued, not rejected.
+- **Transparent transport**: every handler is decode JSON → closure →
+  actor → encode JSON. All domain logic lives in `pkg/newtron/`.
+
+---
+
+## 29. Related Documentation
 
 The following documents provide additional detail on specific topics:
 

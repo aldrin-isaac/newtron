@@ -124,7 +124,7 @@ specs/
 Requires Go 1.24+. newtlab requires KVM for VM acceleration (`/dev/kvm`).
 
 ```bash
-make build                # → bin/newtron, bin/newtlab, bin/newtrun, bin/newtlink
+make build                # → bin/newtron, bin/newtron-api, bin/newtlab, bin/newtrun, bin/newtlink
 ```
 
 ### VM images
@@ -205,23 +205,36 @@ newtrun list                                            # Discover available sui
 newtrun topologies                                      # List topologies with device/link counts
 ```
 
+### Start the HTTP API server
+
+```bash
+newtron-api -spec-dir specs/ -addr :8080                # Start server with spec directory
+curl localhost:8080/network                             # List registered networks
+curl localhost:8080/network/default/service             # List services
+curl -X POST localhost:8080/network/default/node/leaf1/health  # Health check
+```
+
+The HTTP server exposes every `pkg/newtron/` operation over HTTP. Each endpoint is a 1:1 mapping to a Go API method — no business logic in the transport layer. See [HOWTO §28](docs/newtron/howto.md#28-http-api-server) for full usage.
+
 ## Repository Layout
 
 ```
 cmd/
   newtron/       Device provisioning and verification CLI
+  newtron-api/   HTTP API server (transparent transport over pkg/newtron)
   newtlab/       VM orchestration CLI
   newtrun/       E2E test runner CLI
   newtlink/      Bridge traffic agent (standalone, deployed by newtlab to remote hosts)
 
 pkg/
   cli/           Shared CLI formatting
-  newtrun/       Scenario parser, dependency ordering, 39 step executors,
+  newtrun/       Scenario parser, dependency ordering, 56 step executors,
                  progress reporting, JUnit/markdown output
   newtlab/       QEMU, multi-host placement, socket bridges, port probing,
                  boot patch framework
   newtron/
-    *.go         Public API: Network, Node, Interface, types, ephemeral ops
+    *.go         Public API: Network, Node, Interface, types
+    api/         HTTP API server (actors, handlers, middleware)
     audit/       Audit event logging
     auth/        Permission checking and user authorization
     device/
