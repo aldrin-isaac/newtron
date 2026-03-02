@@ -252,7 +252,7 @@ orchestrator concern that uses these domain-level operations, not a newtron conc
 
 `pkg/newtron/` is the public API; `pkg/newtron/network/`, `pkg/newtron/network/node/`,
 and `pkg/newtron/device/sonic/` are internal. All external consumers (CLI, newtrun,
-newtron-api HTTP server) import only `pkg/newtron/`.
+newtron-server HTTP server) import only `pkg/newtron/`.
 
 Rules:
 

@@ -48,7 +48,7 @@ func NewServer(logger *log.Logger) *Server {
 // Start begins listening on the given address.
 func (s *Server) Start(addr string) error {
 	s.httpServer.Addr = addr
-	s.logger.Printf("newtron-api listening on %s", addr)
+	s.logger.Printf("newtron-server listening on %s", addr)
 	return s.httpServer.ListenAndServe()
 }
 

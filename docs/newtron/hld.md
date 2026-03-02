@@ -245,7 +245,7 @@ The translation layer interprets specs in context to generate config:
              +-----------------------------------------+
 ```
 
-External consumers (CLI, newtrun, newtron-api HTTP server) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, and `newtron.Interface`. The public API wraps the internal `pkg/newtron/network/` and `pkg/newtron/network/node/` layers, eliminating ChangeSet exposure from callers — write operations on public types return only `error`. The HTTP server (`pkg/newtron/api/`) is a transparent transport layer that maps HTTP requests 1:1 to public API method calls via closure-based actor serialization (see DESIGN_PRINCIPLES.md Principle 29). newtrun also has an escape hatch (`net.Internal()`, `n.InternalNode()`) for advanced use cases that require direct access to internal types.
+External consumers (CLI, newtrun, newtron-server HTTP server) import `pkg/newtron` and use `newtron.Network`, `newtron.Node`, and `newtron.Interface`. The public API wraps the internal `pkg/newtron/network/` and `pkg/newtron/network/node/` layers, eliminating ChangeSet exposure from callers — write operations on public types return only `error`. The HTTP server (`pkg/newtron/api/`) is a transparent transport layer that maps HTTP requests 1:1 to public API method calls via closure-based actor serialization (see DESIGN_PRINCIPLES.md Principle 29). newtrun also has an escape hatch (`net.Internal()`, `n.InternalNode()`) for advanced use cases that require direct access to internal types.
 
 ### 3.2 Object Hierarchy (OO Design)
 

@@ -46,7 +46,7 @@ A production orchestrator must compensate for partial failures.
 
 ## Gap 3: API Service (Partially Addressed)
 
-The HTTP API server exists (`cmd/newtron-api/`, `pkg/newtron/api/`) — it exposes
+The HTTP API server exists (`cmd/newtron-server/`, `pkg/newtron/api/`) — it exposes
 every `pkg/newtron/` operation over HTTP with actor-based serialization. See
 DESIGN_PRINCIPLES.md Principle 29 for the architecture.
 

@@ -124,7 +124,7 @@ specs/
 Requires Go 1.24+. newtlab requires KVM for VM acceleration (`/dev/kvm`).
 
 ```bash
-make build                # → bin/newtron, bin/newtron-api, bin/newtlab, bin/newtrun, bin/newtlink
+make build                # → bin/newtron, bin/newtron-server, bin/newtlab, bin/newtrun, bin/newtlink
 ```
 
 ### VM images
@@ -208,7 +208,7 @@ newtrun topologies                                      # List topologies with d
 ### Start the HTTP API server
 
 ```bash
-newtron-api -spec-dir specs/ -addr :8080                # Start server with spec directory
+newtron-server -spec-dir specs/ -addr :8080                # Start server with spec directory
 curl localhost:8080/network                             # List registered networks
 curl localhost:8080/network/default/service             # List services
 curl -X POST localhost:8080/network/default/node/leaf1/health  # Health check
@@ -221,7 +221,7 @@ The HTTP server exposes every `pkg/newtron/` operation over HTTP. Each endpoint 
 ```
 cmd/
   newtron/       Device provisioning and verification CLI
-  newtron-api/   HTTP API server (transparent transport over pkg/newtron)
+  newtron-server/   HTTP API server (transparent transport over pkg/newtron)
   newtlab/       VM orchestration CLI
   newtrun/       E2E test runner CLI
   newtlink/      Bridge traffic agent (standalone, deployed by newtlab to remote hosts)

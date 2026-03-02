@@ -3252,23 +3252,23 @@ All specs from all levels are visible. If the same name exists at multiple level
 
 ## 28. HTTP API Server
 
-The `newtron-api` binary exposes every `pkg/newtron/` operation over HTTP. The
+The `newtron-server` binary exposes every `pkg/newtron/` operation over HTTP. The
 transport layer is a mechanical shim — each endpoint maps 1:1 to a Go API
 method with zero business logic in between (see DESIGN_PRINCIPLES.md Principle 29).
 
 ### 28.1 Building and Starting
 
 ```bash
-go build -o bin/newtron-api ./cmd/newtron-api
+go build -o bin/newtron-server ./cmd/newtron-server
 
 # Start with a spec directory auto-registered as the "default" network
-bin/newtron-api -spec-dir /path/to/specs -addr :8080
+bin/newtron-server -spec-dir /path/to/specs -addr :8080
 
 # Start with a custom network ID
-bin/newtron-api -spec-dir /path/to/specs -net-id lab-east -addr :9090
+bin/newtron-server -spec-dir /path/to/specs -net-id lab-east -addr :9090
 
 # Start empty (register networks via API)
-bin/newtron-api -addr :8080
+bin/newtron-server -addr :8080
 ```
 
 ### 28.2 Network Registration

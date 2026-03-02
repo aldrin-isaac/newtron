@@ -1400,7 +1400,7 @@ service in both modes.**
 
 `pkg/newtron/` is the public API. `pkg/newtron/network/`,
 `pkg/newtron/network/node/`, and `pkg/newtron/device/sonic/` are internal
-implementation packages. All external consumers — CLI, newtrun, the newtron-api HTTP
+implementation packages. All external consumers — CLI, newtrun, the newtron-server HTTP
 server — import only `pkg/newtron/`.
 
 This boundary is not just an import path convention. It is a type boundary
@@ -1422,7 +1422,7 @@ constructed `node.ChangeSet` objects, resolved specs via
 newtrun. The orchestrator was coupled to implementation, not intent.
 
 After migrating newtrun to use only the public API, five rules crystallized.
-These rules were subsequently validated by the newtron-api HTTP server,
+These rules were subsequently validated by the newtron-server HTTP server,
 where every handler calls `pkg/newtron/` methods directly — the clean
 public API boundary is what makes the transport layer transparent
 (Principle 29):

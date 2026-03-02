@@ -18,7 +18,7 @@ func main() {
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
 	flag.Parse()
 
-	logger := log.New(os.Stderr, "newtron-api: ", log.LstdFlags|log.Lmsgprefix)
+	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
 
 	srv := api.NewServer(logger)
 

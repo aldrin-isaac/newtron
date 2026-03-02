@@ -41,7 +41,7 @@ newtron/
 │   │   ├── cmd_settings.go          # Settings management
 │   │   ├── cmd_provision.go         # Topology provisioning commands
 │   │   └── shell.go                 # Interactive shell with readline
-│   └── newtron-api/                  # HTTP API server
+│   └── newtron-server/                  # HTTP API server
 │       └── main.go                   # Entry point, flags (-addr, -spec-dir, -net-id), signal handling
 ├── pkg/
 │   └── newtron/
