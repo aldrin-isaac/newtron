@@ -22,14 +22,14 @@ steps:
   - name: configure-host3-ip
     action: host-exec
     devices: [host3]
-    command: "ip addr add 192.168.3.10/24 dev eth0"
+    command: "ip addr flush dev eth0; ip addr add 192.168.3.10/24 dev eth0"
     expect:
       contains: ""
 
   - name: configure-host6-ip
     action: host-exec
     devices: [host6]
-    command: "ip addr add 192.168.3.20/24 dev eth0"
+    command: "ip addr flush dev eth0; ip addr add 192.168.3.20/24 dev eth0"
     expect:
       contains: ""
 

@@ -8,9 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var filterCmd = &cobra.Command{
@@ -37,7 +36,10 @@ var filterListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all filter templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filterNames := app.net.ListFilters()
+		filterNames, err := app.client.ListFilters()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(filterNames)
@@ -53,7 +55,7 @@ var filterListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "TYPE", "RULES", "DESCRIPTION")
 
 		for _, name := range filterNames {
-			fs, err := app.net.GetFilter(name)
+			fs, err := app.client.ShowFilter(name)
 			if err != nil {
 				continue
 			}
@@ -72,7 +74,7 @@ var filterShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		fs, err := app.net.GetFilter(filterName)
+		fs, err := app.client.ShowFilter(filterName)
 		if err != nil {
 			return err
 		}
@@ -140,22 +142,6 @@ Examples:
 			return fmt.Errorf("--type must be 'ipv4' or 'ipv6'")
 		}
 
-		// Check if already exists
-		if _, err := app.net.GetFilter(filterName); err == nil {
-			return fmt.Errorf("filter '%s' already exists", filterName)
-		}
-
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermFilterCreate, authCtx); err != nil {
-			return err
-		}
-
-		fs := &spec.FilterSpec{
-			Description: filterCreateDescription,
-			Type:        filterCreateType,
-			Rules:       []*spec.FilterRule{},
-		}
-
 		fmt.Printf("Filter: %s (type: %s)\n", filterName, filterCreateType)
 
 		if !app.executeMode {
@@ -163,12 +149,11 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.SaveFilter(filterName, fs); err != nil {
-			return fmt.Errorf("saving filter: %w", err)
-		}
-
-		fmt.Printf("Created filter '%s' (type: %s)\n", filterName, filterCreateType)
-		return nil
+		return app.client.CreateFilter(newtron.CreateFilterRequest{
+			Name:        filterName,
+			Type:        filterCreateType,
+			Description: filterCreateDescription,
+		}, execOpts())
 	},
 }
 
@@ -185,16 +170,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		// Verify it exists
-		if _, err := app.net.GetFilter(filterName); err != nil {
-			return err
-		}
-
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermFilterDelete, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Deleting filter: %s\n", filterName)
 
 		if !app.executeMode {
@@ -202,12 +177,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteFilter(filterName); err != nil {
-			return err
-		}
-
-		fmt.Printf("Deleted filter '%s'\n", filterName)
-		return nil
+		return app.client.DeleteFilter(filterName, execOpts())
 	},
 }
 
@@ -250,24 +220,15 @@ Examples:
 			return fmt.Errorf("--action must be 'permit' or 'deny', got '%s'", filterRuleAction)
 		}
 
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
+		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
+
+		if !app.executeMode {
+			printDryRunNotice()
+			return nil
 		}
 
-		fs, err := app.net.GetFilter(filterName)
-		if err != nil {
-			return err
-		}
-
-		// Check for duplicate priority
-		for _, r := range fs.Rules {
-			if r.Sequence == filterRulePriority {
-				return fmt.Errorf("rule with priority %d already exists in filter '%s'", filterRulePriority, filterName)
-			}
-		}
-
-		rule := &spec.FilterRule{
+		return app.client.AddFilterRule(newtron.AddFilterRuleRequest{
+			Filter:        filterName,
 			Sequence:      filterRulePriority,
 			Action:        filterRuleAction,
 			SrcIP:         filterRuleSrcIP,
@@ -278,28 +239,7 @@ Examples:
 			DSCP:          filterRuleDSCP,
 			SrcPrefixList: filterRuleSrcPrefixList,
 			DstPrefixList: filterRuleDstPrefixList,
-		}
-
-		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
-
-		if !app.executeMode {
-			printDryRunNotice()
-			return nil
-		}
-
-		fs.Rules = append(fs.Rules, rule)
-
-		// Sort rules by sequence for consistent ordering
-		sort.Slice(fs.Rules, func(i, j int) bool {
-			return fs.Rules[i].Sequence < fs.Rules[j].Sequence
-		})
-
-		if err := app.net.SaveFilter(filterName, fs); err != nil {
-			return fmt.Errorf("saving filter: %w", err)
-		}
-
-		fmt.Printf("Added rule (priority %d, %s) to filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
-		return nil
+		}, execOpts())
 	},
 }
 
@@ -319,31 +259,6 @@ Examples:
 			return fmt.Errorf("invalid priority: %s", args[1])
 		}
 
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
-		fs, err := app.net.GetFilter(filterName)
-		if err != nil {
-			return err
-		}
-
-		// Find and remove the rule with matching sequence
-		found := false
-		newRules := make([]*spec.FilterRule, 0, len(fs.Rules))
-		for _, r := range fs.Rules {
-			if r.Sequence == priority {
-				found = true
-				continue
-			}
-			newRules = append(newRules, r)
-		}
-
-		if !found {
-			return fmt.Errorf("rule with priority %d not found in filter '%s'", priority, filterName)
-		}
-
 		fmt.Printf("Removing rule (priority %d) from filter '%s'\n", priority, filterName)
 
 		if !app.executeMode {
@@ -351,14 +266,7 @@ Examples:
 			return nil
 		}
 
-		fs.Rules = newRules
-
-		if err := app.net.SaveFilter(filterName, fs); err != nil {
-			return fmt.Errorf("saving filter: %w", err)
-		}
-
-		fmt.Printf("Removed rule (priority %d) from filter '%s'\n", priority, filterName)
-		return nil
+		return app.client.RemoveFilterRule(filterName, priority, execOpts())
 	},
 }
 

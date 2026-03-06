@@ -63,6 +63,7 @@ steps:
     action: verify-route
     devices: [leaf1]
     prefix: "10.1.200.0/24"
+    vrf: default
     expect:
       timeout: 30s
       poll_interval: 3s
@@ -71,6 +72,7 @@ steps:
     action: verify-route
     devices: [leaf2]
     prefix: "10.1.100.0/24"
+    vrf: default
     expect:
       timeout: 30s
       poll_interval: 3s

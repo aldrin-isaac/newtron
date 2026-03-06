@@ -7,7 +7,6 @@ topology: 2node
 requires: [boot-ssh]
 
 steps:
-  # 1. Create ACL table
   - name: create-acl-table
     action: create-acl-table
     devices: [switch1]
@@ -24,7 +23,6 @@ steps:
     expect:
       exists: true
 
-  # 2. Add first ACL rule (FORWARD)
   - name: add-acl-rule-10
     action: add-acl-rule
     devices: [switch1]
@@ -46,7 +44,6 @@ steps:
         PRIORITY: "10"
         SRC_IP: "10.0.0.0/8"
 
-  # 3. Add second ACL rule (DROP)
   - name: add-acl-rule-20
     action: add-acl-rule
     devices: [switch1]
@@ -67,7 +64,6 @@ steps:
         PACKET_ACTION: DROP
         PRIORITY: "20"
 
-  # 4. Bind ACL to Ethernet10
   - name: bind-acl-ethernet10
     action: bind-acl
     devices: [switch1]
@@ -85,7 +81,6 @@ steps:
       fields:
         ports: Ethernet10
 
-  # 5. Unbind ACL from Ethernet10
   - name: unbind-acl-ethernet10
     action: unbind-acl
     devices: [switch1]
@@ -93,7 +88,6 @@ steps:
     params:
       name: TEST_ACL
 
-  # 6. Delete rules
   - name: delete-acl-rule-20
     action: delete-acl-rule
     devices: [switch1]
@@ -124,7 +118,6 @@ steps:
     expect:
       exists: false
 
-  # 7. Delete ACL table
   - name: delete-acl-table
     action: delete-acl-table
     devices: [switch1]

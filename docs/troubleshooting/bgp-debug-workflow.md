@@ -9,7 +9,7 @@
 ### 1.1 Verify Link Status
 ```bash
 # SSH to device
-newtlab ssh leaf1
+newtlab ssh switch1
 
 # Check interface status
 show interface status Ethernet0
@@ -41,16 +41,16 @@ redis-cli -n 4 HGET 'DEVICE_METADATA|localhost' 'mac'
 
 ### 2.1 Assign Test IPs
 ```bash
-# On leaf1
+# On switch1
 sudo config interface ip add Ethernet0 10.1.0.0/31
 
-# On leaf2
+# On switch2
 sudo config interface ip add Ethernet0 10.1.0.1/31
 ```
 
 ### 2.2 Test Ping
 ```bash
-# From leaf1
+# From switch1
 ping -c 3 -I Ethernet0 10.1.0.1
 ```
 
@@ -84,7 +84,7 @@ redis-cli -n 4 HGETALL 'BGP_NEIGHBOR|default|<peer-ip>'
 docker exec bgp vtysh -c 'show running-config' | grep 'router bgp'
 
 # Should match DEVICE_METADATA bgp_asn
-# router bgp 65011
+# router bgp 65001
 ```
 
 **Critical Check**: Router's ASN must match what peer expects.
@@ -142,7 +142,7 @@ Connections established X; dropped Y
 ### 3.5 Verify Underlay Routing (for loopback peerings)
 ```bash
 # Check route to peer loopback
-docker exec bgp vtysh -c 'show ip route 10.0.0.12'
+docker exec bgp vtysh -c 'show ip route 10.0.0.2'
 
 # Expected: Route via underlay BGP or connected interface
 # If missing: underlay BGP not converged or route not redistributed
@@ -192,17 +192,17 @@ docker logs bgp | tail -50
 
 **Symptoms**:
 - Underlay BGP (10.1.0.0 ↔ 10.1.0.1): Established
-- Overlay BGP (10.0.0.11 ↔ 10.0.0.12): Idle
+- Overlay BGP (10.0.0.1 ↔ 10.0.0.2): Idle
 
 **Root Cause**: CONFIG_DB has wrong peer AS for overlay neighbor.
 
 **Fix**: Use peer's `underlay_asn` from its device profile. Both underlay and overlay use all-eBGP (see RCA-026).
 
-**Example**:
-- leaf1 runs AS 65011 (underlay_asn)
-- leaf2 runs AS 65012 (underlay_asn)
-- Underlay peering: 65011 ↔ 65012 (interface IPs)
-- Overlay peering: 65011 ↔ 65012 (loopback IPs, same ASNs)
+**Example** (2node topology):
+- switch1 runs AS 65001 (underlay_asn)
+- switch2 runs AS 65002 (underlay_asn)
+- Underlay peering: 65001 ↔ 65002 (interface IPs)
+- Overlay peering: 65001 ↔ 65002 (loopback IPs, same ASNs)
 
 ### Pattern 2: BGP Container Crash Loop
 
@@ -233,8 +233,8 @@ docker exec bgp cat /etc/frr/frr.conf
 **Debug**:
 ```bash
 # Check each device's MAC
-newtlab ssh leaf1 "redis-cli -n 4 HGET 'DEVICE_METADATA|localhost' 'mac'"
-newtlab ssh leaf2 "redis-cli -n 4 HGET 'DEVICE_METADATA|localhost' 'mac'"
+newtlab ssh switch1 "redis-cli -n 4 HGET 'DEVICE_METADATA|localhost' 'mac'"
+newtlab ssh switch2 "redis-cli -n 4 HGET 'DEVICE_METADATA|localhost' 'mac'"
 
 # Check QEMU MACs
 ps -ef | grep qemu | grep -o 'mac=[^ ]*'
@@ -244,25 +244,33 @@ ps -ef | grep qemu | grep -o 'mac=[^ ]*'
 
 ## Newtron Verification Methods
 
-newtron provides structured verification primitives for automated checks:
+newtron provides structured verification primitives via its public API
+(`pkg/newtron`). All methods are on the `newtron.Node` wrapper:
 
 ```go
 // Get route from APP_DB (FRR → SONiC)
-route, err := node.GetRoute(ctx, "default", "10.0.0.11/32")
+route, err := node.GetRoute(ctx, "default", "10.0.0.1/32")
 
 // Get route from ASIC_DB (SONiC → SAI)
-asicRoute, err := node.GetRouteASIC(ctx, "default", "10.0.0.11/32")
+asicRoute, err := node.GetRouteASIC(ctx, "default", "10.0.0.1/32")
 
-// Verify a ChangeSet was applied correctly
-err := cs.Verify(node)
-if cs.Verification.Failed > 0 {
+// Verify a composite was applied correctly (opaque token from DeliverComposite)
+result, err := node.VerifyComposite(ctx, compositeInfo)
+if result.Failed > 0 {
     // handle failed verification
 }
 
-// Check BGP neighbor existence
-if node.BGPNeighborExists("10.0.0.12") {
-    // neighbor is configured
+// Check BGP session health
+results, err := node.CheckBGPSessions(ctx)
+for _, r := range results {
+    fmt.Printf("%s: %s — %s\n", r.Check, r.Status, r.Message)
 }
+
+// Full BGP status (neighbors, ASN, router-id)
+status, err := node.BGPStatus()
+
+// Check if a CONFIG_DB entry exists
+exists, err := node.ConfigDBEntryExists("BGP_NEIGHBOR", "default|10.0.0.2")
 ```
 
 ## SONiC Redis Databases

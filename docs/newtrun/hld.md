@@ -1,8 +1,10 @@
 # newtrun — High-Level Design
 
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md).
+
 ## 1. Purpose
 
-newtrun is an E2E testing orchestrator that tests **composed network
+newtrun is an E2E testing framework that tests **composed network
 outcomes** — not individual features. The question is not "does VLAN
 creation work?" but "does the L3VPN service produce reachability across
 the EVPN overlay?" A feature test can pass while the composite
@@ -10,152 +12,232 @@ multi-feature configuration fails due to ordering issues, missing glue
 config, or daemon interaction bugs. newtrun tests the thing that actually
 matters: the assembled result.
 
-It uses newtlab to deploy VM topologies, runs newtron against them, and
-validates that newtron's automation produces correct device state and that
-SONiC software on each device behaves correctly in its role (spine, leaf,
-etc.).
+newtrun is a general-purpose test framework. Users write their own
+topologies and suites as YAML scenario files and spec directories — the
+built-in suites that ship with the project are examples, not the
+exhaustive set. Any topology that newtlab can deploy and any operation
+that newtron exposes can be exercised by a newtrun scenario.
 
 newtrun is one orchestrator built on top of newtron and newtlab — not the
 only one. Other orchestrators could be built for different purposes
 (production deployment, CI/CD pipelines, compliance auditing). newtrun
-observes devices exclusively through newtron's primitives (`GetRoute`,
-`GetRouteASIC`, `VerifyChangeSet`) — it never accesses Redis directly.
-newtron returns structured data; newtrun decides what "correct" means by
-correlating observations across devices.
+observes devices exclusively through newtron's HTTP API — it never
+accesses Redis directly. newtron returns structured data; newtrun decides
+what "correct" means by correlating observations across devices.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                            newtrun                              │
-│                                                                 │
-│  1. Deploy topology        newtlab deploy -S specs/             │
-│  2. Provision devices      newtron provision -S specs/ -d X -x  │
-│  3. Validate results       CONFIG_DB, STATE_DB, data plane      │
-│  4. Report pass/fail                                            │
-│  5. Tear down              newtlab destroy                      │
+│                            newtrun                               │
+│                                                                  │
+│  1. Deploy topology        newtlab API                           │
+│  2. Provision & operate    r.Client → HTTP → newtron-server      │
+│  3. Validate results       CONFIG_DB, STATE_DB, data plane       │
+│  4. Report pass/fail                                             │
+│  5. Tear down              newtlab API                           │
 └──────────────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-┌─────────────────┐          ┌─────────────────┐
-│     newtlab     │          │    newtron       │
-│ Deploy/manage   │          │ Provision        │
-│ QEMU VMs        │          │ CONFIG_DB        │
-└─────────────────┘          └─────────────────┘
+         │              │                         │
+         ▼              ▼                         ▼
+┌────────────┐   ┌─────────────────┐      ┌────────────┐
+│  newtlab   │   │ newtron-server  │      │ Host VMs   │
+│ Deploy VMs │   │ SONiC ops via   │      │ SSH direct │
+│ (QEMU)     │   │ HTTP REST API   │      │ (host-exec)│
+└────────────┘   └─────────────────┘      └────────────┘
 ```
-
-The Runner holds a `*network.Network` object (not individual node references). Nodes are accessed via `r.Network.GetNode(name)`.
 
 ---
 
 ## 2. Three Tools, Clear Boundaries
 
+newtrun sits between two tools that each do one thing well. Understanding the boundaries prevents the common mistake of putting cross-device logic in newtron or device-level logic in newtrun.
+
 | Tool | Responsibility | Knows About |
 |------|---------------|-------------|
 | **newtron** | Opinionated single-device automation: translate specs → CONFIG_DB; verify own writes; observe single-device routing state | Specs, device profiles, Redis (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) |
 | **newtlab** | Realize VM topologies: deploy QEMU VMs from newtron's topology.json, wire socket links across servers | topology.json, platforms.json, QEMU |
-| **newtrun** | E2E test orchestration: decide what gets provisioned where (devices, interfaces, services, parameters), sequence steps, assert cross-device correctness | Test scenarios, topology-wide expected results |
+| **newtrun** | E2E test orchestration: decide what gets provisioned where, sequence steps, assert cross-device correctness | Test scenarios, topology-wide expected results |
 
 **Verification principle**: If a tool changes the state of an entity, that same
 tool must be able to verify the change had the intended effect. newtron writes
 CONFIG_DB and configures routing — so newtron owns verification of those
-changes (`VerifyChangeSet`, `GetRoute`, `GetRouteASIC`). newtrun builds on
-newtron's self-verification by adding the cross-device layer: using newtron to
-observe each device, then correlating observations across devices using
-topology context. newtrun never accesses Redis directly — it observes devices
-exclusively through newtron's primitives.
+changes. newtrun builds on newtron's self-verification by adding the
+cross-device layer: using newtron (via HTTP) to observe each device, then
+correlating observations across devices using topology context. newtrun never
+accesses Redis directly — it observes devices exclusively through the
+newtron-server HTTP API.
 
 ---
 
-## 3. Directory Structure
+## 3. Architecture
+
+The Runner is a pure orchestrator. It holds references to three external
+systems but implements no device logic itself:
+
+```
+newtrun Runner
+├── r.Client     (*client.Client)  → HTTP → newtron-server → SONiC switches
+├── r.Lab        (*newtlab.Lab)    → newtlab → QEMU VMs (deploy/destroy/ensure)
+└── r.HostConns  (map[string]*ssh.Client)  → host VMs → network namespaces
+```
+
+**All SONiC operations go through HTTP.** The Runner creates an HTTP client
+(`pkg/newtron/client`), registers the network spec directory with the server,
+and every subsequent operation — provisioning, VLAN creation, health checks,
+route verification — is an HTTP request to newtron-server. The server manages
+SSH connections to SONiC devices; newtrun never connects to them directly.
+
+**Topology lifecycle goes through newtlab.** The Runner calls the newtlab Go
+API to deploy, ensure, or destroy QEMU VM topologies. When running in
+lifecycle mode (the `start` command), `EnsureTopology` reuses running VMs if
+all nodes are healthy, avoiding a full redeploy between iterations.
+
+**Host devices use direct SSH.** For data plane testing, the Runner
+SSH-connects to host VMs and stores the connections in `r.HostConns`. The
+`host-exec` action runs commands inside network namespaces on these hosts.
+Host SSH connections bypass newtron-server entirely — these are plain Linux
+VMs, not SONiC devices.
+
+**No internal imports.** newtrun imports `pkg/newtron/client/` (HTTP
+client), `pkg/newtlab/` (lab API), `pkg/newtron/` (public API types), and
+shared utilities (`pkg/util`, `pkg/cli`). It never imports
+`pkg/newtron/network/`, `pkg/newtron/network/node/`, or
+`pkg/newtron/device/sonic/` — the internal implementation packages.
+
+### 3.1 Server URL Resolution
+
+The Runner resolves the newtron-server URL through a four-tier cascade:
+
+1. `--server` CLI flag
+2. `NEWTRON_SERVER` environment variable
+3. `newtron.LoadSettings()` → `GetServerURL()`
+4. `newtron.DefaultServerURL` (built-in default)
+
+Network ID follows the same pattern (`--network-id`, `NEWTRON_NETWORK_ID`, settings, default).
+
+---
+
+## 4. Directory Structure
+
+newtrun's code lives in three places: CLI commands (`cmd/newtrun/`), core library (`pkg/newtrun/`), and test assets (`newtrun/` at the repo root).
 
 ```
 newtron/
-├── cmd/
-│   ├── newtron/            # Device provisioning CLI
-│   ├── newtlab/            # VM topology management CLI
-│   └── newtrun/            # E2E testing CLI
-│       ├── main.go         # Root command, sentinel errors, exit code mapping
-│       ├── helpers.go      # resolveDir, resolveSuite, suitesBaseDir
-│       ├── cmd_start.go    # start (and deprecated run) subcommand
-│       ├── cmd_pause.go    # pause subcommand
-│       ├── cmd_stop.go     # stop subcommand
-│       ├── cmd_status.go   # status subcommand
-│       ├── cmd_list.go     # list subcommand (suites and scenarios)
-│       ├── cmd_suites.go   # suites subcommand (hidden alias for list)
-│       └── cmd_topologies.go # topologies subcommand
-├── pkg/
-│   ├── newtron/
-│   │   ├── network/        # newtron core (Network, spec access, TopologyProvisioner)
-│   │   │   └── node/       # Node, Interface, ChangeSet, all operations
-│   │   ├── spec/           # Shared spec types
-│   │   ├── device/
-│   │   │   └── sonic/      # SONiC connection manager (SSH tunnel, Redis DB 0/1/4/6)
-│   │   └── audit/          # Audit logger (FileLogger, event filtering)
-│   ├── newtlab/            # newtlab core library
-│   └── newtrun/            # newtrun core library
-│       ├── scenario.go     # Scenario, Step, StepAction, ExpectBlock types
-│       ├── parser.go       # ParseScenario, validation, dependency graph
-│       ├── runner.go       # Runner, RunOptions, iterateScenarios
-│       ├── steps.go        # stepExecutor interface, 54 executor implementations
-│       ├── deploy.go       # DeployTopology, EnsureTopology, DestroyTopology
-│       ├── state.go        # RunState, ScenarioState, SuiteStatus, persistence
-│       ├── progress.go     # ProgressReporter, consoleProgress, StateReporter
-│       ├── errors.go       # InfraError, StepError, PauseError
-│       ├── report.go       # ScenarioResult, StepResult, StepStatus, ReportGenerator
-│       └── newtrun_test.go # Unit tests
-├── newtrun/                # E2E test assets
-│   ├── topologies/
-│   │   ├── 2node/
-│   │   │   └── specs/
-│   │   │       ├── topology.json
-│   │   │       ├── network.json
-│   │   │       ├── platforms.json
-│   │   │       └── profiles/
-│   │   │           ├── spine1.json
-│   │   │           └── leaf1.json
-│   │   └── 4node/
-│   │       └── specs/
-│   │           └── ...
-│   ├── suites/
-│   │   ├── 2node-standalone/
-│   │   │   └── *.yaml
-│   │   └── 2node-incremental/
-│   │       ├── 00-boot-ssh.yaml
-│   │       ├── 01-provision.yaml
-│   │       ├── ...
-│   │       └── 30-qos-apply-remove.yaml
-│   ├── images/             # VM images or symlinks
-│   └── .generated/         # Runtime output (gitignored)
+├── cmd/newtrun/              # CLI commands
+│   ├── main.go               # Root command, sentinel errors, exit code mapping
+│   ├── helpers.go             # resolveDir, resolveSuite, suitesBaseDir
+│   ├── cmd_start.go           # start command (+ deprecated run alias)
+│   ├── cmd_pause.go           # pause command
+│   ├── cmd_stop.go            # stop command
+│   ├── cmd_status.go          # status command
+│   ├── cmd_list.go            # list suites and scenarios
+│   ├── cmd_suites.go          # suites (hidden alias for list)
+│   ├── cmd_topologies.go      # topologies command
+│   └── cmd_actions.go         # actions command (list/show step actions)
+│
+├── pkg/newtrun/               # Core library
+│   ├── scenario.go            # Scenario, Step, StepAction (56 constants), ExpectBlock
+│   ├── parser.go              # ParseScenario, validation, dependency graph (Kahn's)
+│   ├── runner.go              # Runner, RunOptions, iterateScenarios, connectDevices
+│   ├── steps.go               # stepExecutor interface, 56 executor implementations
+│   ├── steps_host.go          # host-exec executor, shellQuote, runSSHCommand
+│   ├── deploy.go              # DeployTopology, EnsureTopology, DestroyTopology
+│   ├── state.go               # RunState, ScenarioState, SuiteStatus, persistence
+│   ├── progress.go            # ProgressReporter, consoleProgress, StateReporter
+│   ├── errors.go              # InfraError, StepError, PauseError
+│   ├── report.go              # ScenarioResult, StepResult, StepStatus, ReportGenerator
+│   ├── state_test.go          # State management tests
+│   └── newtrun_test.go        # Unit tests
+│
+├── newtrun/                   # Test assets
+│   ├── topologies/            # Topology spec directories
+│   │   ├── 2node/specs/       # 2 switches + 6 hosts
+│   │   ├── 2node-service/specs/  # 2 switches + 8 hosts (service-annotated)
+│   │   ├── 3node/specs/       # 2 leaves + 2 hosts
+│   │   └── 4node/specs/       # 2 spines + 2 leaves
+│   ├── suites/                # Test suite directories
+│   │   ├── 2node-primitive/   # 20 scenarios (disaggregated operations)
+│   │   ├── 2node-service/     # 6 scenarios (service lifecycle + dataplane)
+│   │   ├── 2node-standalone/  # 9 scenarios (independent, each deploys own topology)
+│   │   ├── 3node-dataplane/   # 6 scenarios (EVPN L2/L3 dataplane)
+│   │   └── simple-vrf-host/   # 5 scenarios (VRF + host reachability)
+│   └── .generated/            # Runtime output (gitignored)
 │       └── report.md
-└── docs/
-    ├── newtlab/
-    └── newtrun/
 ```
 
-### 3.1 Directory Layout
-
-Each topology is self-contained with its own spec directory:
-
-| Path | Purpose |
-|------|---------|
-| `topologies/*/specs/` | newtron spec dirs per topology |
-| `suites/2node-standalone/` | Standalone scenario YAML files |
-| `suites/2node-incremental/` | Incremental test suite with dependency ordering |
-| `.generated/` | Runtime output (reports, logs) |
+Each topology is self-contained with its own spec directory. Each suite is a
+directory of YAML scenario files. Users create new topologies and suites by
+adding directories — no code changes required.
 
 ---
 
-## 4. Test Topologies
+## 5. Test Topologies
 
-### 4.1 2-Node (1 spine + 1 leaf)
+Topologies are pre-defined spec directories checked into the repo. They
+contain the full set of newtron spec files: `topology.json` (devices, links),
+`network.json` (services, VPNs, filters), `platforms.json` (hardware
+definitions), and `profiles/*.json` (per-device settings). newtrun reads them
+directly — no generation step.
+
+### 5.1 Built-In Topologies
+
+| Topology | Devices | Purpose |
+|----------|---------|---------|
+| **2node** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
+| **2node-service** | switch1, switch2 + host1–host8 | Service lifecycle with dataplane verification |
+| **3node** | leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across two leaves |
+| **4node** | spine1, spine2, leaf1, leaf2 | Full fabric (route reflectors on spines) |
+
+#### 2node
+
+Two switches with three inter-switch links and three hosts per switch:
 
 ```
-spine1 ── Ethernet0 ─── Ethernet0 ── leaf1
+                switch1 ─── Eth0 ─── switch2
+                   │    ─── Eth4 ───    │
+                   │    ─── Eth5 ───    │
+                   │                    │
+            Eth1 Eth2 Eth3       Eth1 Eth2 Eth3
+             │    │    │          │    │    │
+           host1 host2 host3   host4 host5 host6
 ```
 
-Tests: basic BGP peering, interface configuration, service apply/remove,
-health checks, baseline application, CONFIG_DB writes.
+No pre-configured services — interfaces are clean slates for disaggregated
+operation testing.
 
-### 4.2 4-Node (2 spines + 2 leaves)
+#### 2node-service
+
+Same switch pair with service-annotated interfaces:
+
+```
+switch1:Eth0 ── transit ── switch2:Eth0
+switch1:Eth1 ── local-irb ── host1      switch2:Eth1 ── local-irb ── host4
+switch1:Eth2 ── local-bridge ── host2   switch2:Eth2 ── local-bridge ── host5
+switch1:Eth3 ── l2-extend ── host3      switch2:Eth3 ── l2-extend ── host6
+switch1:Eth4 ── overlay-irb-a ── host7  switch2:Eth4 ── overlay-irb-b ── host8
+switch1:Eth5 ──────────────────────── switch2:Eth5   (inter-switch, no service)
+```
+
+Each interface has a pre-assigned service in the topology spec. Provisioning
+applies all services atomically. The extra host pair (host7, host8) exercises
+EVPN IRB overlay scenarios.
+
+#### 3node
+
+Two leaves with a single transit link, one host per leaf:
+
+```
+leaf1 ── Eth0 (transit) ── leaf2
+  │                          │
+Eth1                       Eth1
+  │                          │
+host1                      host2
+```
+
+Exercises EVPN L2/L3 forwarding across a two-leaf fabric with real data
+plane verification between hosts.
+
+#### 4node
+
+Full-mesh Clos topology: two spines with `route_reflector: true`, two leaves:
 
 ```
 spine1 ─── leaf1
@@ -163,293 +245,339 @@ spine1 ─── leaf1
 spine2 ─── leaf2
 ```
 
-Tests: route reflection, ECMP, EVPN, eBGP overlay, shared VRF across
-leaves, multi-path, full fabric provisioning.
+### 5.2 Spec Files
 
-### 4.3 Spec Files Are Static
+Each topology directory contains:
 
-Test topologies are pre-defined spec directories checked into the repo. No
-generation step — newtrun reads them directly. This ensures tests are
-reproducible and version-controlled.
+| File | Read By | Contents |
+|------|---------|----------|
+| `topology.json` | newtlab + newtron | Devices, interfaces, links, newtlab settings |
+| `network.json` | newtron | Services, filters, VPNs, zones |
+| `platforms.json` | newtlab | Platform definitions with VM settings |
+| `profiles/*.json` | newtlab (writes ports) + newtron (reads) | Per-device settings, EVPN config |
 
-Each topology directory contains the full set of newtron specs:
-- `topology.json` — devices, interfaces, links (newtlab + newtron read)
-- `network.json` — services, filters, VPNs, zones (newtron reads)
-- `platforms.json` — platform definitions with VM settings (newtlab reads)
-- `profiles/*.json` — per-device settings (newtlab writes ports, newtron reads; EVPN config includes route reflectors and cluster ID)
+### 5.3 Custom Topologies
+
+The built-in topologies cover common patterns, but newtrun works with any
+topology that newtlab can deploy. To create a custom topology:
+
+1. Create a directory under `newtrun/topologies/<name>/specs/`
+2. Add the standard spec files (`topology.json`, `network.json`, `platforms.json`, `profiles/`)
+3. Reference it in scenario YAML: `topology: <name>`
 
 ---
 
-## 5. Test Scenarios
+## 6. Scenarios and Steps
 
-A scenario defines what to test against a deployed topology:
+A scenario is a YAML file that defines what to test against a deployed
+topology. Scenarios are the unit of authorship — users write scenarios to
+exercise specific network behaviors.
+
+### 6.1 Scenario Structure
 
 ```yaml
-# newtrun/suites/2node-standalone/bgp-underlay.yaml
-name: bgp-underlay
-description: Verify eBGP underlay sessions establish
-topology: 4node
-platform: sonic-vpp
+name: provision
+description: Provision switches and verify BGP convergence
+topology: 2node-service
+requires: [boot-ssh]
 
 steps:
-  - name: provision-all
+  - name: provision-switches
     action: provision
-    devices: all
+    devices: [switch1, switch2]
 
-  - name: wait-convergence
+  - name: config-reload
+    action: config-reload
+    devices: [switch1, switch2]
+
+  - name: wait-reload
     action: wait
-    duration: 30s
+    duration: 45s
 
-  - name: verify-provisioning
-    action: verify-provisioning
-    devices: all
-
-  - name: verify-underlay-route
-    action: verify-route
-    devices: [spine1]
-    prefix: "10.1.0.0/31"
-    vrf: default
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
     expect:
-      protocol: bgp
-      nexthop_ip: "10.1.0.1"
-      source: app_db
-      timeout: 60s
-
-  - name: verify-health
-    action: verify-health
-    devices: all
-    expect:
-      overall: ok
+      state: Established
+      timeout: 120s
+      poll_interval: 5s
 ```
 
-### 5.1 Step Actions
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique scenario identifier |
+| `description` | No | Human-readable purpose |
+| `topology` | Yes | Topology directory name |
+| `platform` | No | Override platform (default from topology) |
+| `requires` | No | Scenarios that must pass before this one runs |
+| `after` | No | Ordering constraint (run after, but no pass/fail gate) |
+| `requires_features` | No | Platform features required (skip if unsupported) |
+| `repeat` | No | Run all steps N times (fail-fast on first failure) |
+| `steps` | Yes | Ordered list of step actions |
 
-| Action | Description | Implemented By |
-|--------|-------------|----------------|
-| `provision` | Run `newtron provision -d <device> -x` | newtron |
-| `verify-provisioning` | Verify CONFIG_DB matches expected state from provisioning | newtron `VerifyChangeSet` |
-| `verify-config-db` | Assert specific CONFIG_DB table/key/field values (ad-hoc) | Direct CONFIG_DB read via newtron's `ConfigDBClient` |
-| `verify-state-db` | Assert STATE_DB entries match expected values (with polling) | newtron STATE_DB read |
-| `verify-bgp` | Check BGP neighbor state via STATE_DB | newtron `Node.CheckBGPSessions()` |
-| `verify-health` | Run health checks (CONFIG_DB intent + BGP sessions + interface oper-up) [^1] | newtron `TopologyProvisioner.VerifyDeviceHealth()` |
-| `verify-route` | Check a specific route exists on a device with expected next-hops | newtron `GetRoute` / `GetRouteASIC` |
-| `verify-ping` | Data plane ping between devices (requires `dataplane: true`) | **newtrun native** |
-| `apply-service` | Apply a named service to a device interface | newtron |
-| `remove-service` | Remove a service from a device interface | newtron |
-| `configure-loopback` | Configure loopback interface on a device | newtron |
-| `ssh-command` | Run arbitrary command via SSH, check output | newtrun native |
-| `wait` | Wait for specified duration | newtrun native |
-| `restart-service` | Restart a SONiC service (e.g., `bgp`, `swss`) | newtron `Node.RestartService()` |
-| `apply-frr-defaults` | Apply FRR runtime defaults (ebgp_requires_policy, clear bgp) | newtron `Node.ApplyFRRDefaults()` |
-| `set-interface` | Set interface property (mtu, description, admin-status, ip, vrf) | newtron `Interface.Set/SetIP/SetVRF` |
-| `create-vlan` | Create a VLAN | newtron `Node.CreateVLAN()` |
-| `delete-vlan` | Delete a VLAN | newtron `Node.DeleteVLAN()` |
-| `add-vlan-member` | Add an interface to a VLAN as tagged/untagged member | newtron `Node.AddVLANMember()` |
-| `create-vrf` | Create a VRF | newtron `Node.CreateVRF()` |
-| `delete-vrf` | Delete a VRF | newtron `Node.DeleteVRF()` |
-| `setup-evpn` | Set up EVPN overlay (VTEP + NVO + BGP EVPN) | newtron `Node.SetupEVPN()` |
-| `add-vrf-interface` | Bind an interface to a VRF | newtron `Node.AddVRFInterface()` |
-| `remove-vrf-interface` | Remove an interface from a VRF | newtron `Node.RemoveVRFInterface()` |
-| `bind-ipvpn` | Bind an IP-VPN to a VRF | newtron `Node.BindIPVPN()` |
-| `unbind-ipvpn` | Unbind an IP-VPN from a VRF | newtron `Node.UnbindIPVPN()` |
-| `bind-macvpn` | Bind a MAC-VPN to a VLAN | newtron `Node.BindMACVPN()` |
-| `unbind-macvpn` | Unbind a MAC-VPN from a VLAN | newtron `Node.UnbindMACVPN()` |
-| `add-static-route` | Add a static route to a VRF | newtron `Node.AddStaticRoute()` |
-| `remove-static-route` | Remove a static route from a VRF | newtron `Node.RemoveStaticRoute()` |
-| `remove-vlan-member` | Remove an interface from a VLAN | newtron `Node.RemoveVLANMember()` |
-| `apply-qos` | Apply a QoS policy to an interface | newtron `Node.ApplyQoS()` |
-| `remove-qos` | Remove QoS policy from an interface | newtron `Node.RemoveQoS()` |
-| `configure-svi` | Configure a Switched Virtual Interface (VLAN interface) | newtron `Node.ConfigureSVI()` |
-| `bgp-add-neighbor` | Add a BGP neighbor (direct or loopback-based) | newtron `Interface.AddBGPNeighbor` / `Node.AddLoopbackBGPNeighbor` |
-| `bgp-remove-neighbor` | Remove a BGP neighbor | newtron `Interface.RemoveBGPNeighbor` / `Node.RemoveBGPNeighbor` |
-| `refresh-service` | Refresh a service binding on an interface | newtron `Interface.RefreshService()` |
-| `cleanup` | Run device cleanup to remove orphaned resources | newtron `Node.Cleanup()` |
-| `configure-bgp` | Write BGP globals from device profile | newtron `Node.ConfigureBGP()` |
-| `remove-bgp-globals` | Remove BGP instance and global config | newtron `Node.RemoveBGPGlobals()` |
-| `create-acl-table` | Create an ACL table | newtron `Node.CreateACLTable()` |
-| `add-acl-rule` | Add a rule to an ACL table | newtron `Node.AddACLRule()` |
-| `delete-acl-rule` | Delete a rule from an ACL table | newtron `Node.DeleteACLRule()` |
-| `delete-acl-table` | Delete an ACL table and all its rules | newtron `Node.DeleteACLTable()` |
-| `bind-acl` | Bind ACL to an interface | newtron `Interface.BindACL()` |
-| `unbind-acl` | Remove interface from ACL binding | newtron `Node.UnbindACLFromInterface()` |
-| `remove-svi` | Remove Layer-3 SVI from a VLAN | newtron `Node.RemoveSVI()` |
-| `remove-ip` | Remove an IP address from an interface | newtron `Interface.RemoveIP()` |
-| `teardown-evpn` | Remove EVPN overlay and VTEP config | newtron `Node.TeardownEVPN()` |
-| `create-portchannel` | Create a port channel (LAG) | newtron `Node.CreatePortChannel()` |
-| `delete-portchannel` | Delete a port channel | newtron `Node.DeletePortChannel()` |
-| `add-portchannel-member` | Add interface to port channel | newtron `Node.AddPortChannelMember()` |
-| `remove-portchannel-member` | Remove interface from port channel | newtron `Node.RemovePortChannelMember()` |
+**Dependency modes:** `requires` means "skip this scenario if the named
+scenario did not pass." `after` means "run this scenario after the named one,
+regardless of its outcome." Both participate in topological sort for execution
+ordering.
+
+### 6.2 Step Actions
+
+Every step has an `action` that maps to a `stepExecutor` in the Runner. Most
+actions call `r.Client.X()` over HTTP to newtron-server. Host actions use
+direct SSH. There are 56 registered actions.
+
+**Pattern:** Each action is a struct implementing `Execute(ctx, r, step)
+*StepOutput`. Device-targeting actions use one of three multi-device helpers
+that iterate over `step.Devices`, executing the operation per-device and
+aggregating results. All three helpers automatically skip host devices (only
+SONiC switches receive newtron operations).
+
+#### Actions by Category
+
+**Provisioning** — Full device setup and configuration reload.
+
+| Action | Description |
+|--------|-------------|
+| `provision` | Generate and deliver device composite (6-step sequence) |
+| `configure-loopback` | Configure loopback interface |
+| `remove-loopback` | Remove loopback configuration |
+| `configure-bgp` | Write BGP globals from device profile |
+| `apply-frr-defaults` | Apply FRR runtime defaults |
+| `config-reload` | Reload SONiC configuration (restart bgp + apply pending) |
+
+**Verification** — Observe device state, with optional polling.
+
+| Action | Description |
+|--------|-------------|
+| `verify-provisioning` | Verify CONFIG_DB matches composite ChangeSet |
+| `verify-config-db` | Assert CONFIG_DB table/key/field values |
+| `verify-state-db` | Assert STATE_DB entries (polling) |
+| `verify-bgp` | Check BGP sessions reach expected state (polling) |
+| `verify-health` | Health check: CONFIG_DB intent + BGP + interfaces [^1] |
+| `verify-route` | Check route in APP_DB or ASIC_DB (polling) |
+| `verify-ping` | Data plane ping, resolved from device info |
+
+**Service lifecycle** — Apply, remove, and refresh interface services.
+
+| Action | Description |
+|--------|-------------|
+| `apply-service` | Apply named service to device interface |
+| `remove-service` | Remove service binding from interface |
+| `refresh-service` | Full remove + reapply cycle |
+
+**VLAN** — L2 domain management.
+
+| Action | Description |
+|--------|-------------|
+| `create-vlan` / `delete-vlan` | VLAN lifecycle |
+| `add-vlan-member` / `remove-vlan-member` | Interface membership |
+| `configure-svi` / `remove-svi` | Switched Virtual Interface (L3 on VLAN) |
+
+**VRF** — Virtual routing instances.
+
+| Action | Description |
+|--------|-------------|
+| `create-vrf` / `delete-vrf` | VRF lifecycle |
+| `add-vrf-interface` / `remove-vrf-interface` | Bind/unbind interface |
+
+**BGP** — Neighbor management.
+
+| Action | Description |
+|--------|-------------|
+| `bgp-add-neighbor` / `bgp-remove-neighbor` | Add/remove peer (interface or loopback) |
+| `remove-bgp-globals` | Remove BGP instance and globals |
+
+**EVPN** — Overlay setup and VPN bindings.
+
+| Action | Description |
+|--------|-------------|
+| `setup-evpn` / `teardown-evpn` | VTEP + NVO + BGP EVPN lifecycle |
+| `bind-ipvpn` / `unbind-ipvpn` | L3 VPN binding to VRF |
+| `bind-macvpn` / `unbind-macvpn` | L2 VPN binding to VLAN |
+
+**ACL** — Access control lists.
+
+| Action | Description |
+|--------|-------------|
+| `create-acl-table` / `delete-acl-table` | ACL table lifecycle |
+| `add-acl-rule` / `delete-acl-rule` | Rule management |
+| `bind-acl` / `unbind-acl` | Bind/unbind ACL to interface |
+
+**QoS** — Quality of service.
+
+| Action | Description |
+|--------|-------------|
+| `apply-qos` / `remove-qos` | Apply/remove QoS policy on interface |
+
+**Interface** — Property management.
+
+| Action | Description |
+|--------|-------------|
+| `set-interface` | Set properties (mtu, ip, vrf, admin-status) |
+| `remove-ip` | Remove IP address from interface |
+
+**PortChannel** — Link aggregation.
+
+| Action | Description |
+|--------|-------------|
+| `create-portchannel` / `delete-portchannel` | LAG lifecycle |
+| `add-portchannel-member` / `remove-portchannel-member` | Member management |
+
+**Static routing**
+
+| Action | Description |
+|--------|-------------|
+| `add-static-route` / `remove-static-route` | Static route in VRF |
+
+**Infrastructure** — Utility actions.
+
+| Action | Description |
+|--------|-------------|
+| `wait` | Wait for specified duration |
+| `ssh-command` | Run command via SSH, check output |
+| `host-exec` | Run command in host network namespace |
+| `restart-service` | Restart a SONiC service (bgp, swss) |
+| `cleanup` | Remove orphaned CONFIG_DB resources |
 
 [^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
 
-Steps implemented by newtron call newtron's built-in methods on the Node
-object. newtrun provides the orchestration (which device, what parameters,
-pass/fail reporting) but the observation/assertion logic is in newtron.
+### 6.3 Distinctive Actions
 
-Steps marked **newtrun native** require capabilities newtron doesn't have:
-cross-device data plane (ping), or arbitrary SSH commands with output matching.
+Most actions follow a uniform pattern: resolve devices, call `r.Client.X()`,
+check result. A few deserve additional explanation.
 
-### 5.2 Verification Tiers
+**`provision`** executes a 6-step sequence per device:
+
+1. `GenerateDeviceComposite` — build CONFIG_DB offline (HTTP POST)
+2. Store returned composite handle in `r.Composites[device]`
+3. `DeliverComposite` — atomic write to Redis (HTTP POST)
+4. `VerifyComposite` — re-read CONFIG_DB and diff (HTTP POST)
+5. Save configuration to disk
+6. Report change count
+
+**`verify-ping`** resolves the target IP from the device's profile information
+(loopback IP), then runs a ping from each specified device. On platforms
+without a dataplane (`dataplane: ""` in platform definition), the step
+automatically returns SKIP instead of FAIL.
+
+**`host-exec`** runs a command inside a network namespace on a host VM. The
+namespace name equals the device name (e.g., `host1`). The command is
+wrapped as `ip netns exec <device> sh -c '<command>'`, with single quotes
+escaped to handle compound commands with pipes and semicolons.
+
+**`set-interface`** dispatches three ways depending on parameters: `ip`
+parameter → set IP address, `vrf` parameter → bind to VRF, otherwise → set
+interface property (mtu, admin-status, description).
+
+### 6.4 Custom Suites
+
+The built-in suites demonstrate patterns for different testing strategies:
+
+- **Incremental suites** (2node-primitive, 2node-service, 3node-dataplane):
+  Ordered scenarios with `requires` chaining. A shared topology deployed once.
+  Scenarios build on each other (boot → configure → verify → teardown).
+
+- **Standalone suites** (2node-standalone): Independent scenarios, each with
+  its own deploy/destroy cycle. Good for testing one feature in isolation.
+
+Users write new suites by creating a directory of YAML files. Any combination
+of the 56 actions can appear in steps. Custom topologies work with custom
+suites — the only constraint is that the `topology:` field names a directory
+under `newtrun/topologies/`.
+
+---
+
+## 7. Verification Tiers
 
 Verification spans four tiers across two owners. newtron provides single-device
 primitives; newtrun orchestrates them across devices and adds data-plane testing.
 
-| Tier | What | Owner | newtron Method | Failure Mode |
-|------|------|-------|---------------|-------------|
-| **CONFIG_DB** | Redis entries match ChangeSet | **newtron** | `VerifyChangeSet(cs)` | Hard fail (assertion) |
-| **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | `GetRoute()`, `GetRouteASIC()` | Observation (data) |
-| **Operational state** | BGP sessions, interface health | **newtron** | `VerifyDeviceHealth()` | Observation (report) |
+| Tier | What | Owner | Method | Failure Mode |
+|------|------|-------|--------|-------------|
+| **CONFIG_DB** | Redis entries match ChangeSet | **newtron** | via HTTP: composite verify | Hard fail (assertion) |
+| **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | via HTTP: `VerifyRoute` | Observation (data) |
+| **Operational state** | BGP sessions, interface health | **newtron** | via HTTP: `VerifyHealth` | Observation (report) |
 | **Cross-device / data plane** | Route propagation, ping | **newtrun** | Composes newtron primitives | Topology-dependent |
 
-### 5.3 Platform-Aware Test Skipping
+The first three tiers execute on newtron-server — newtrun sends an HTTP
+request and receives structured results. The fourth tier is newtrun's own
+contribution: it correlates observations from multiple devices to determine
+cross-device correctness.
 
-Platforms declare their capabilities in `platforms.json`:
+### 7.1 Platform-Aware Test Skipping
 
-```json
-{
-  "platforms": {
-    "sonic-vs": {
-      "hwsku": "Force10-S6000",
-      "vm_image": "~/.newtlab/images/sonic-vs.qcow2",
-      "vm_nic_driver": "e1000",
-      "vm_interface_map": "stride-4",
-      "dataplane": ""
-    },
-    "sonic-vpp": {
-      "hwsku": "Force10-S6000",
-      "vm_image": "~/.newtlab/images/sonic-vpp.qcow2",
-      "vm_nic_driver": "virtio-net-pci",
-      "vm_interface_map": "sequential",
-      "dataplane": "vpp"
-    }
-  }
-}
-```
-
-When `dataplane` is empty, steps that require a data plane (`verify-ping`) are
-automatically skipped with a `SKIP` result instead of `FAIL`.
-
-### 5.4 Built-In Scenarios
-
-Scenarios are organized in two ways:
-
-**Standalone scenarios** (`newtrun/suites/2node-standalone/`) — independent tests, each with its own deploy/destroy cycle.
-
-**Incremental suites** (`newtrun/suites/2node-incremental/`) — ordered tests with dependency chaining (`requires` field). A suite shares a single topology deployment. Scenarios run in topological order; if a dependency fails, dependent scenarios are skipped.
-
-#### 2node-incremental Suite
-
-The `newtrun/suites/2node-incremental/` suite contains 31 scenarios that incrementally test all newtron operations on a 2-node (spine1 + leaf1) topology:
-
-| # | Scenario | Requires | What It Tests |
-|---|----------|----------|---------------|
-| 00 | `boot-ssh` | — | VM boot and SSH connectivity |
-| 01 | `provision` | boot-ssh | Full device provisioning |
-| 02 | `bgp-converge` | provision | eBGP underlay + eBGP overlay convergence |
-| 03 | `route-propagation` | bgp-converge | Loopback route visible on remote device |
-| 04 | `interface-set` | provision | Interface property changes (mtu, description, admin-status) |
-| 05 | `interface-ip-vrf` | provision | Interface IP and VRF assignment |
-| 06 | `vlan-lifecycle` | provision | VLAN create, add member, delete |
-| 07 | `vrf-lifecycle` | provision | VRF create, delete |
-| 08 | `evpn-setup` | provision | EVPN overlay setup (VTEP + NVO + BGP EVPN) |
-| 09 | `evpn-vpn-binding` | provision | IP-VPN + MAC-VPN bind/unbind |
-| 10 | `svi-configure` | provision | VLAN interface (SVI) creation |
-| 11 | `bgp-loopback-neighbor` | provision | Add/remove loopback BGP peer |
-| 12 | `bgp-direct-neighbor` | provision | Add/remove direct eBGP peer on interface |
-| 13 | `state-db-port` | provision | STATE_DB port status verification |
-| 14 | `configure-loopback` | provision | Loopback interface configuration |
-| 15 | `device-health` | bgp-converge | Health checks after convergence |
-| 16 | `service-transit` | bgp-converge | Transit service with FRR defaults |
-| 17 | `ping-loopback` | route-propagation | Data plane ping between loopbacks |
-| 18 | `service-l3` | vrf-lifecycle | L3 service apply/verify/remove |
-| 19 | `service-l2` | vlan-lifecycle | L2 service apply/verify/remove |
-| 20 | `service-remove` | service-l3, service-l2 | Service removal and cleanup verification |
-| 21 | `refresh-service` | service-remove | Service refresh preserves binding |
-| 22 | `verify-provisioning` | refresh-service | ChangeSet verification after apply |
-| 23 | `service-churn` | verify-provisioning | Stress test: 10x apply/remove cycle |
-| 24 | `cleanup` | service-churn | Cleanup and verify no orphaned resources |
-| 25 | `qos-l3-service` | vrf-lifecycle | 4q-customer QoS: DSCP map, schedulers, port binding, cleanup |
-| 26 | `qos-datacenter` | vlan-lifecycle | 8q-datacenter QoS with ECN/WRED profile verification |
-| 27 | `vrf-interface-binding` | vrf-lifecycle | VRF interface add/remove |
-| 28 | `static-route` | vrf-lifecycle | Static route add/remove in VRF |
-| 29 | `vlan-member-remove` | vlan-lifecycle | VLAN member removal |
-| 30 | `qos-apply-remove` | provision | QoS policy apply and remove on interface |
-
-**Standalone scenarios** (`newtrun/suites/2node-standalone/`) include `evpn-overlay` — an end-to-end overlay test that exercises EVPN setup, VPN binding, and traffic verification in a single scenario.
+Platforms declare capabilities in `platforms.json` (e.g., `dataplane: "vpp"`
+or `dataplane: ""`). Scenarios can declare `requires_features` — if the
+deployed platform lacks a required feature, the scenario is skipped with
+`SKIP` status rather than failing. Individual steps like `verify-ping` also
+check platform capabilities and auto-skip on control-plane-only platforms.
 
 ---
 
-## 6. Workflow
+## 8. Execution Model
 
-### 6.1 Single Scenario
+### 8.1 Dispatch Pipeline
 
-```bash
-newtrun start 2node-incremental --scenario boot-ssh
-```
+When the Runner receives a set of scenarios to execute:
 
-Internally:
-1. Resolve scenario from suite directory
-2. Deploy topology via `EnsureTopology` (reuses if already running)
-3. Connect to all devices via newtron
-4. Execute steps in order
-5. Report results
-6. Leave topology running (use `newtrun stop` to tear down)
+1. **Parse**: YAML files → `Scenario` structs. The parser validates that each
+   step uses only fields appropriate for its action type, checked against a
+   per-action validation table.
 
-### 6.2 Full Suite
+2. **Sort**: If any scenario declares `requires` or `after`, all scenarios are
+   topologically sorted using Kahn's algorithm. Cycles are rejected.
 
-```bash
-newtrun start 2node-incremental
-```
+3. **Mode selection**: If all scenarios share the same topology, the Runner
+   enters **shared mode** — deploy once, connect once, run all. If topologies
+   differ, **independent mode** — each scenario gets its own deploy/connect
+   cycle.
 
-Deploys the topology once, runs all scenarios in dependency order (topological
-sort), and skips scenarios whose dependencies failed. The topology stays running
-after completion.
+4. **Iterate**: For each scenario in order:
+   - **Resume check**: Skip already-passed scenarios when resuming a paused run
+   - **Pause check**: If another process set the suite to "pausing," stop here
+   - **Requires check**: Skip if a required scenario did not pass
+   - **Feature check**: Skip if platform lacks required features
+   - **Execute**: Run all steps sequentially
 
-### 6.3 Resume Paused Suite
+5. **Step dispatch**: Each step → `executors[action].Execute(ctx, r, step)`.
+   The executor returns a `StepOutput` containing per-device results.
 
-```bash
-# Resume a previously paused suite
-newtrun start 2node-incremental
-```
+### 8.2 Multi-Device Helpers
 
-When `start` detects a paused state for the suite, it automatically resumes.
-Already-passed scenarios are skipped; execution picks up at the first scenario
-that has not yet passed.
+Three helper functions handle the common pattern of running an operation
+across multiple devices:
 
-### 6.4 Keep Topology for Iteration
+| Helper | Pattern | Used By |
+|--------|---------|---------|
+| `executeForDevices` | Run once per device, collect results | All mutating operations |
+| `checkForDevices` | Single-shot observation per device | `verify-health` |
+| `pollForDevices` | Retry with timeout/interval per device | `verify-bgp`, `verify-route`, `verify-state-db` |
 
-```bash
-newtrun start 2node-incremental --scenario boot-ssh
-# topology stays up; modify scenario and re-run:
-newtrun start 2node-incremental --scenario boot-ssh
-# clean up when done:
-newtrun stop
-```
+All three automatically skip host devices — they check `r.HostConns[name]`
+and return SKIP for any device that is a host. Only SONiC switches receive
+newtron operations through these helpers.
 
-Since `start` always uses `EnsureTopology`, the topology is reused across
-successive invocations. This enables fast iteration without waiting for VM boot.
+### 8.3 Repeat Mode
 
-### 6.5 Existing Topology
+When a scenario sets `repeat: N`, the Runner executes all steps in a loop
+for N iterations. Execution stops on the first iteration that produces a
+failure. The report shows which iteration failed (e.g., "failed on iteration
+7/10").
 
-```bash
-# Deploy separately
-newtlab deploy -S newtrun/topologies/4node/specs/
+### 8.4 Signal Handling
 
-# Run tests without deploy/destroy (deprecated run command supports --no-deploy)
-newtrun run 2node-standalone --scenario bgp-underlay --no-deploy
-
-# Clean up when done
-newtlab destroy
-```
+The Runner installs a SIGINT handler at the start of each shared/independent
+run. On SIGINT, the current step completes (no mid-step interruption), then
+the context is cancelled and the scenario terminates gracefully.
 
 ---
 
-## 7. Suite Lifecycle
+## 9. Suite Lifecycle
 
 newtrun tracks suite state across process boundaries, enabling pause/resume
 and multi-command workflows.
 
-### 7.1 State Machine
+### 9.1 State Machine
 
 ```
             start
@@ -476,19 +604,15 @@ and multi-command workflows.
 | `failed` | Suite finished with failures or errors |
 | `aborted` | Runner process died unexpectedly |
 
-### 7.2 State Persistence
+### 9.2 State Persistence
 
 State is persisted at `~/.newtron/newtrun/<suite>/state.json`. The file
-contains:
-- Suite metadata (name, directory, topology, platform)
-- Runner PID (for liveness checks)
-- Suite status
-- Per-scenario status, current step, duration, skip reason
+contains suite metadata, runner PID, suite status, and per-scenario status
+with current step and duration. State is updated after every scenario start,
+scenario end, and step start — enabling real-time progress monitoring via
+`newtrun status`.
 
-State is updated after every scenario start, scenario end, and step start,
-enabling real-time progress monitoring via `newtrun status`.
-
-### 7.3 Lifecycle Commands
+### 9.3 Lifecycle Commands
 
 | Command | What It Does |
 |---------|-------------|
@@ -497,7 +621,7 @@ enabling real-time progress monitoring via `newtrun status`.
 | `stop` | Destroy topology, remove suite state |
 | `status` | Show suite progress, per-scenario status, current step |
 
-### 7.4 Concurrency Control
+### 9.4 Concurrency Control
 
 `AcquireLock` prevents concurrent runs of the same suite. It checks if an
 existing state file records a live PID (via `kill -0`). If the PID is alive,
@@ -506,108 +630,195 @@ considered stale and a new run proceeds.
 
 ---
 
-## 8. Output & Reporting
+## 10. Host Devices and Data Plane
 
-### 8.1 Console Output
+Data plane tests require endpoints that can generate and receive packets.
+newtrun uses **host devices** — Alpine Linux VMs defined alongside switches in
+`topology.json`.
+
+### 10.1 VM Coalescing
+
+Multiple host devices are coalesced into a single QEMU VM to reduce resource
+overhead. For example, host1 through host6 in the 2node topology share a
+single VM (`hostvm-0`). Inside the VM, each host gets its own **network
+namespace** matching its device name. newtlab creates the namespaces at deploy
+time — test scenarios do not manage namespace lifecycle.
+
+```
+┌──────────────────────────────────────────┐
+│  hostvm-0 (Alpine Linux VM)               │
+│  ┌──────────┬──────────┬──────────┐      │
+│  │ ns:host1 │ ns:host2 │ ns:host3 │ ...  │
+│  └────┬─────┴────┬─────┴────┬─────┘      │
+│       │          │          │             │
+│      eth1       eth2       eth3           │
+└───────┼──────────┼──────────┼─────────────┘
+        │          │          │
+   newtlink    newtlink   newtlink
+        │          │          │
+  switch1:Eth1  switch1:Eth2  switch1:Eth3
+```
+
+### 10.2 Host Actions
+
+The `host-exec` executor:
+1. Looks up the SSH connection from `r.HostConns[device]`
+2. Wraps the command: `ip netns exec <device> sh -c '<command>'`
+3. Executes via SSH, captures output
+4. Checks expectations: `success_rate` (ping parse), `contains` (string match), or bare exit code
+
+Example scenario step:
+```yaml
+- name: ping-host3-to-host6
+  action: host-exec
+  devices: [host3]
+  command: "ping -c 10 -W 2 192.168.3.20"
+  expect:
+    success_rate: 0.80
+```
+
+### 10.3 Automatic Host Skipping
+
+The three multi-device helpers (§8.2) automatically skip host devices. When a
+step targets `all` devices, SONiC operations run only on switches — hosts are
+silently skipped with a SKIP result. This means `devices: all` is safe for
+operations like `provision` or `verify-bgp` even when the topology includes
+hosts.
+
+---
+
+## 11. Output and Reporting
+
+newtrun produces three output formats: real-time console progress, a markdown summary report, and optional JUnit XML for CI integration.
+
+### 11.1 Console Output
 
 Non-verbose mode shows one line per scenario with dot-padded status:
 
 ```
-newtrun: 31 scenarios, topology: 2node, platform: sonic-vpp
+newtrun: 20 scenarios, topology: 2node, platform: sonic-cisco-8000
 
   #     SCENARIO                STEPS
   1     boot-ssh                2
-  2     provision               5
+  2     loopback                4
   ...
 
-  [1/31]  boot-ssh ............. PASS  (3s)
-  [2/31]  provision ............ PASS  (12s)
-  [3/31]  bgp-converge ........ PASS  (45s)
+  [1/20]  boot-ssh ............. PASS  (3s)
+  [2/20]  loopback ............. PASS  (8s)
+  [3/20]  bridged .............. PASS  (15s)
   ...
 
 ---
-newtrun: 31 scenarios: 28 passed, 2 failed, 1 skipped  (4m30s)
+newtrun: 20 scenarios: 20 passed  (6m30s)
 ```
 
 Verbose mode (`-v`) shows per-step detail within each scenario.
 
-### 8.2 Markdown Report
+### 11.2 Markdown Report
 
 Written to `newtrun/.generated/report.md` after each run:
 
 ```markdown
-# newtrun Report — 2026-02-14 10:30:00
+# newtrun Report — 2026-03-03 10:30:00
 
 | Scenario | Topology | Platform | Result | Duration | Note |
 |----------|----------|----------|--------|----------|------|
-| boot-ssh | 2node | sonic-vpp | PASS | 3s | |
-| provision | 2node | sonic-vpp | PASS | 12s | |
-| service-churn | 2node | sonic-vpp | PASS | 25s | 10 iterations |
+| boot-ssh | 2node | sonic-cisco-8000 | PASS | 3s | |
+| loopback | 2node | sonic-cisco-8000 | PASS | 8s | |
 
 ## Failures
 
-### full-fabric
-Step verify-ping (verify-ping): leaf1 → leaf2 ping failed
+(none)
 ```
 
-### 8.3 JUnit XML
+For repeated scenarios, the Note column shows iteration counts (e.g., "10
+iterations" or "failed on iteration 7/10").
+
+### 11.3 JUnit XML
 
 For CI systems that parse JUnit XML. Each `ScenarioResult` maps to a
 `<testsuite>`, each `StepResult` maps to a `<testcase>`.
 
 ```bash
-newtrun start 2node-incremental --junit results.xml
+newtrun start 2node-primitive --junit results.xml
 ```
 
 ---
 
-## 9. Data Plane Verification
+## 12. End-to-End Walkthrough
 
-### 9.1 Test Host Concept
-
-Data plane tests require endpoints that can generate and receive packets. newtrun uses **testhost** devices — Alpine Linux VMs with multiple NICs connected to leaf port channels via newtlink. These hosts run network namespaces for L2 isolation (one per NIC) and provide standard tools (ping, iperf3, tcpdump, hping3) for testing.
+A concrete trace of `newtrun start 2node-service` from command line to final
+report:
 
 ```
-┌────────────────────────────────────────┐
-│  testhost1 (Alpine Linux VM)          │
-│  ┌──────────────┬──────────────────┐   │
-│  │ ns-eth1      │ ns-eth2          │   │
-│  │ (192.168.1.2)│ (192.168.2.2)    │   │
-│  └──────┬───────┴──────┬───────────┘   │
-│         │              │               │
-│      eth1           eth2              │
-└─────────┼──────────────┼───────────────┘
-          │              │
-     newtlink        newtlink
-          │              │
-   ┌──────┴──────┐  ┌───┴──────┐
-   │ leaf1:Po1   │  │ leaf2:Po1│
-   └─────────────┘  └──────────┘
+CLI (cmd/newtrun/cmd_start.go)
+  │
+  │ 1. Resolve suite directory: newtrun/suites/2node-service/
+  │ 2. Check for paused state → LoadRunState("2node-service")
+  │ 3. AcquireLock → write PID to state.json
+  │ 4. Resolve server URL (--server > env > settings > default)
+  │ 5. Create Runner, assign ServerURL, NetworkID, Progress reporter
+  │
+  ▼
+Runner.Run(opts)
+  │
+  │ 6. ParseAllScenarios → 6 scenarios
+  │ 7. ValidateDependencyGraph → topological sort
+  │ 8. sharedTopology → "2node-service" (all scenarios agree)
+  │
+  ▼
+runShared(ctx, scenarios, "2node-service", opts)
+  │
+  │ 9. EnsureTopology("newtrun/topologies/2node-service/specs/")
+  │    newtlab checks if VMs running → deploys fresh if needed
+  │
+  │ 10. connectDevices:
+  │     a. client.New(serverURL, networkID)
+  │     b. client.RegisterNetwork(specDir) → HTTP POST → server loads specs
+  │     c. client.TopologyDeviceNames() → [host1..host8, switch1, switch2]
+  │     d. For each host device → SSH connect → r.HostConns["host1"] = conn
+  │     e. SONiC devices NOT pre-connected (server connects on demand)
+  │
+  ▼
+iterateScenarios → for each of the 6 scenarios in order:
+  │
+  │ 11. boot-ssh: ssh-command "echo ok" on switch1, switch2
+  │     → r.Client.SSHCommand("switch1", "echo ok") → HTTP → server → SSH → device
+  │
+  │ 12. provision: per device:
+  │     a. r.Client.GenerateDeviceComposite("switch1")
+  │        → HTTP POST → server builds composite offline → returns handle UUID
+  │     b. r.Composites["switch1"] = handle
+  │     c. r.Client.DeliverComposite("switch1", handle)
+  │        → HTTP POST → server writes to Redis atomically
+  │     d. r.Client.VerifyComposite("switch1", handle)
+  │        → HTTP POST → server re-reads CONFIG_DB, diffs against ChangeSet
+  │
+  │ 13. verify-health: r.Client.VerifyHealth("switch1")
+  │     → HTTP GET → server checks CONFIG_DB, BGP, interfaces → report
+  │
+  │ 14. dataplane: host-exec steps
+  │     → SSH to hostvm-0 → "ip netns exec host3 sh -c 'ping ...'"
+  │     → parse success rate from ping output
+  │
+  │ 15. deprovision: remove services, teardown BGP/EVPN
+  │ 16. verify-clean: verify CONFIG_DB returns to baseline
+  │
+  ▼
+Results
+  │
+  │ 17. Determine final status (complete or failed)
+  │ 18. SaveRunState → state.json
+  │ 19. WriteMarkdown → newtrun/.generated/report.md
+  │ 20. Exit code: 0 (all passed), 1 (failures), 2 (infra error)
 ```
-
-### 9.2 Step Actions for Host Testing
-
-| Action | Description |
-|--------|-------------|
-| `host-exec` | Execute a command in a namespace on a host device (namespace = device name) |
-
-**Note:** Namespaces are created by newtlab during topology deployment (infrastructure concern). Test scenarios do not manage namespace lifecycle — they only execute commands within pre-existing namespaces using `host-exec`.
-
-### 9.3 Host-Based Test Suites
-
-The **3node-dataplane** suite validates:
-- **L2 VXLAN connectivity** — ping across EVPN MAC-VPN overlay with untagged members
-- **L3 VRF routing** — ping across EVPN IP-VPN overlay with routed interfaces
-- **ACL filtering** — verify that deny/permit rules drop/pass traffic
-
-Host namespaces are provisioned by newtlab during topology deployment. Tests use `host-exec` to run commands (ping/iperf3/tcpdump) directly within these namespaces without setup or teardown steps.
 
 ---
 
-## 10. CLI Reference
+## 13. CLI Reference
 
 ```
-newtrun - E2E testing for newtron
+newtrun — E2E testing for newtron
 
 Commands:
   start [suite]        Start or resume a test suite
@@ -616,13 +827,14 @@ Commands:
   status               Show suite run status
   list [suite]         List suites or scenarios
   topologies           List available topologies
+  actions [action]     List step actions or show action detail
   version              Print version information
 
 Global Flags:
   -v, --verbose        Verbose output
 ```
 
-### 9.1 start
+### 13.1 start
 
 ```
 newtrun start [suite] [flags]
@@ -633,15 +845,17 @@ Flags:
   --topology <name>      Override topology
   --platform <name>      Override platform
   --junit <path>         JUnit XML output path
+  --server <url>         newtron-server URL (env: NEWTRON_SERVER)
+  --network-id <id>      Network identifier (env: NEWTRON_NETWORK_ID)
 ```
 
 The suite argument can be a name (resolved under `newtrun/suites/`) or a
 directory path. If a previous run was paused, `start` resumes automatically.
 
-In lifecycle mode (`start`), the topology is deployed via `EnsureTopology`
-(reuses if running) and kept running after completion. Use `stop` to tear down.
+In lifecycle mode, the topology is deployed via `EnsureTopology` (reuses if
+running) and kept running after completion. Use `stop` to tear down.
 
-### 9.2 pause
+### 13.2 pause
 
 ```
 newtrun pause [flags]
@@ -651,9 +865,9 @@ Flags:
 ```
 
 Signals the running suite to stop after the current scenario completes. The
-topology remains deployed. The suite can be resumed with `start`.
+topology remains deployed. Resume with `start`.
 
-### 9.3 stop
+### 13.3 stop
 
 ```
 newtrun stop [flags]
@@ -665,7 +879,7 @@ Flags:
 Destroys the deployed topology and removes suite state. Refuses to stop a suite
 with a running process — use `pause` first.
 
-### 9.4 status
+### 13.4 status
 
 ```
 newtrun status [flags]
@@ -676,10 +890,9 @@ Flags:
 ```
 
 Without `--dir`, shows all suites with state. With `--dir`, shows detailed
-status for a specific suite including per-scenario progress, current step,
-and topology liveness.
+status including per-scenario progress and current step.
 
-### 9.5 list
+### 13.5 list
 
 ```
 newtrun list [suite] [flags]
@@ -691,7 +904,16 @@ Flags:
 Without arguments, lists all available suites. With a suite name, lists the
 scenarios in that suite in dependency order.
 
-### 9.6 topologies
+### 13.6 actions
+
+```
+newtrun actions [action]
+```
+
+Without arguments, lists all 56 registered step actions. With an action name,
+shows the action's description and required parameters.
+
+### 13.7 topologies
 
 ```
 newtrun topologies
@@ -699,7 +921,7 @@ newtrun topologies
 
 Lists available topologies from `newtrun/topologies/`.
 
-### 9.7 version
+### 13.8 version
 
 ```
 newtrun version
@@ -707,7 +929,7 @@ newtrun version
 
 Prints version and git commit.
 
-### 9.8 Exit Codes
+### 13.9 Exit Codes
 
 | Code | Meaning |
 |------|---------|

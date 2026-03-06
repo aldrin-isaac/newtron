@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 var platformCmd = &cobra.Command{
@@ -27,11 +25,11 @@ var platformListCmd = &cobra.Command{
 
 Shows platform name, HWSKU, description, and count of unsupported features.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if app.net == nil {
-			return fmt.Errorf("network not initialized")
+		platforms, err := app.client.ListPlatforms()
+		if err != nil {
+			return err
 		}
 
-		platforms := app.net.Platforms()
 		if len(platforms) == 0 {
 			fmt.Println("No platforms defined")
 			return nil
@@ -88,14 +86,9 @@ Displays platform configuration, supported and unsupported features,
 and shows which features are unsupported via dependencies.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if app.net == nil {
-			return fmt.Errorf("network not initialized")
-		}
-
 		platformName := args[0]
-		platforms := app.net.Platforms()
-		p, ok := platforms[platformName]
-		if !ok {
+		pd, err := app.client.ShowPlatform(platformName)
+		if err != nil {
 			return fmt.Errorf("platform %q not found", platformName)
 		}
 
@@ -106,42 +99,49 @@ and shows which features are unsupported via dependencies.`,
 
 		// Platform details
 		fmt.Printf("Platform: %s\n", platformName)
-		if p.Description != "" {
-			fmt.Printf("Description: %s\n", p.Description)
+		if pd.Description != "" {
+			fmt.Printf("Description: %s\n", pd.Description)
 		}
-		if p.HWSKU != "" {
-			fmt.Printf("HWSKU: %s\n", p.HWSKU)
+		if pd.HWSKU != "" {
+			fmt.Printf("HWSKU: %s\n", pd.HWSKU)
 		}
-		if p.DeviceType != "" {
-			fmt.Printf("Device Type: %s\n", p.DeviceType)
+		if pd.DeviceType != "" {
+			fmt.Printf("Device Type: %s\n", pd.DeviceType)
 		}
-		if p.PortCount > 0 {
-			fmt.Printf("Port Count: %d\n", p.PortCount)
+		if pd.PortCount > 0 {
+			fmt.Printf("Port Count: %d\n", pd.PortCount)
 		}
-		if p.DefaultSpeed != "" {
-			fmt.Printf("Default Speed: %s\n", p.DefaultSpeed)
+		if pd.DefaultSpeed != "" {
+			fmt.Printf("Default Speed: %s\n", pd.DefaultSpeed)
 		}
-		if p.Dataplane != "" {
-			fmt.Printf("Dataplane: %s\n", p.Dataplane)
+		if pd.Dataplane != "" {
+			fmt.Printf("Dataplane: %s\n", pd.Dataplane)
 		}
 
 		// Feature support
 		fmt.Println("\nFeature Support:")
 
 		// Get all known features from dependency map
-		allFeatures := spec.GetAllFeatures()
+		allFeatures, err := app.client.GetAllFeatures()
+		if err != nil {
+			return fmt.Errorf("getting features: %w", err)
+		}
 
 		var supported []string
 		var unsupportedDirect []string
 		var unsupportedCascade []string
 
 		for _, feat := range allFeatures {
-			if p.SupportsFeature(feat) {
+			supports, err := app.client.PlatformSupportsFeature(platformName, feat)
+			if err != nil {
+				return fmt.Errorf("checking feature support: %w", err)
+			}
+			if supports {
 				supported = append(supported, feat)
 			} else {
 				// Check if it's directly unsupported or via dependency
 				isDirect := false
-				for _, u := range p.UnsupportedFeatures {
+				for _, u := range pd.UnsupportedFeatures {
 					if u == feat {
 						isDirect = true
 						break
@@ -151,9 +151,12 @@ and shows which features are unsupported via dependencies.`,
 					unsupportedDirect = append(unsupportedDirect, feat)
 				} else {
 					// Find which dependency is blocking it
-					deps := spec.GetFeatureDependencies(feat)
+					deps, err := app.client.GetFeatureDependencies(feat)
+					if err != nil {
+						return fmt.Errorf("getting feature dependencies: %w", err)
+					}
 					if len(deps) > 0 {
-						unsupportedCascade = append(unsupportedCascade, 
+						unsupportedCascade = append(unsupportedCascade,
 							fmt.Sprintf("%s (requires: %s)", feat, strings.Join(deps, ", ")))
 					} else {
 						unsupportedDirect = append(unsupportedDirect, feat)
@@ -176,10 +179,13 @@ and shows which features are unsupported via dependencies.`,
 		}
 
 		// Show what disabling each unsupported feature affects
-		if len(p.UnsupportedFeatures) > 0 {
+		if len(pd.UnsupportedFeatures) > 0 {
 			fmt.Println("\nDependency Impact:")
-			for _, feat := range p.UnsupportedFeatures {
-				affected := spec.GetUnsupportedDueTo(feat)
+			for _, feat := range pd.UnsupportedFeatures {
+				affected, err := app.client.GetUnsupportedDueTo(feat)
+				if err != nil {
+					return fmt.Errorf("getting unsupported-due-to: %w", err)
+				}
 				if len(affected) > 0 {
 					fmt.Printf("  %s also disables: %s\n", feat, strings.Join(affected, ", "))
 				}

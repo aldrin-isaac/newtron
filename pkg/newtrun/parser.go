@@ -31,6 +31,13 @@ func ParseScenario(path string) (*Scenario, error) {
 	}
 
 	applyDefaults(&s)
+
+	for i, step := range s.Steps {
+		if err := validateStepFields(s.Name, i, &step); err != nil {
+			return nil, fmt.Errorf("validating %s: %w", path, err)
+		}
+	}
+
 	return &s, nil
 }
 
@@ -127,19 +134,19 @@ ActionCleanup:           {needsDevices: true},
 	ActionDeleteVLAN:         {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionAddVLANMember:      {needsDevices: true, fields: []string{"vlan_id", "interface"}},
 	ActionRemoveVLANMember:   {needsDevices: true, fields: []string{"vlan_id", "interface"}},
-	ActionCreateVRF:          {needsDevices: true, params: []string{"vrf"}},
-	ActionDeleteVRF:          {needsDevices: true, params: []string{"vrf"}},
-	ActionSetupEVPN:          {needsDevices: true, params: []string{"source_ip"}},
-	ActionAddVRFInterface:    {needsDevices: true, params: []string{"vrf", "interface"}},
-	ActionRemoveVRFInterface: {needsDevices: true, params: []string{"vrf", "interface"}},
-	ActionBindIPVPN:          {needsDevices: true, params: []string{"vrf", "ipvpn"}},
-	ActionUnbindIPVPN:        {needsDevices: true, params: []string{"vrf"}},
+	ActionCreateVRF:          {needsDevices: true, fields: []string{"vrf"}},
+	ActionDeleteVRF:          {needsDevices: true, fields: []string{"vrf"}},
+	ActionSetupEVPN:          {needsDevices: true},
+	ActionAddVRFInterface:    {needsDevices: true, fields: []string{"vrf", "interface"}},
+	ActionRemoveVRFInterface: {needsDevices: true, fields: []string{"vrf", "interface"}},
+	ActionBindIPVPN:          {needsDevices: true, fields: []string{"vrf"}, params: []string{"ipvpn"}},
+	ActionUnbindIPVPN:        {needsDevices: true, fields: []string{"vrf"}},
 	ActionBindMACVPN:         {needsDevices: true, fields: []string{"vlan_id"}, params: []string{"macvpn"}},
 	ActionUnbindMACVPN:       {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionAddStaticRoute:     {needsDevices: true, params: []string{"vrf", "prefix", "next_hop"}},
-	ActionRemoveStaticRoute:  {needsDevices: true, params: []string{"vrf", "prefix"}},
-	ActionApplyQoS:           {needsDevices: true, params: []string{"interface", "qos_policy"}},
-	ActionRemoveQoS:          {needsDevices: true, params: []string{"interface"}},
+	ActionAddStaticRoute:     {needsDevices: true, fields: []string{"vrf", "prefix"}, params: []string{"next_hop"}},
+	ActionRemoveStaticRoute:  {needsDevices: true, fields: []string{"vrf", "prefix"}},
+	ActionApplyQoS:           {needsDevices: true, fields: []string{"interface"}, params: []string{"qos_policy"}},
+	ActionRemoveQoS:          {needsDevices: true, fields: []string{"interface"}},
 	ActionConfigureSVI:       {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionBGPAddNeighbor:     {needsDevices: true, params: []string{"remote_asn"}},
 	ActionBGPRemoveNeighbor:  {needsDevices: true, params: []string{"neighbor_ip"}},
@@ -154,6 +161,16 @@ ActionCleanup:           {needsDevices: true},
 	ActionDeleteACLTable: {needsDevices: true, params: []string{"name"}},
 	ActionBindACL:        {needsDevices: true, fields: []string{"interface"}, params: []string{"name", "direction"}},
 	ActionUnbindACL:      {needsDevices: true, fields: []string{"interface"}, params: []string{"name"}},
+
+	// BGP configuration
+	ActionConfigureBGP: {needsDevices: true},
+
+	// PortChannel management
+	ActionCreatePortChannel:       {needsDevices: true, params: []string{"name"}},
+	ActionDeletePortChannel:       {needsDevices: true, params: []string{"name"}},
+	ActionAddPortChannelMember:    {needsDevices: true, params: []string{"name", "member"}},
+	ActionRemovePortChannelMember: {needsDevices: true, params: []string{"name", "member"}},
+
 	ActionRemoveSVI:      {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
 	ActionTeardownEVPN:     {needsDevices: true},

@@ -22,11 +22,7 @@ steps:
   - name: verify-health-switch1
     action: verify-health
     devices: [switch1]
-    expect:
-      overall: pass
 
   - name: verify-health-switch2
     action: verify-health
     devices: [switch2]
-    expect:
-      overall: pass

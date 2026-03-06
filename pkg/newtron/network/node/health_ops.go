@@ -137,13 +137,33 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: fmt.Sprintf("vtysh parse: %s", err)}}
 	}
 
-	// Collect peer states from all address families
+	// Collect peer states from all address families.
+	//
+	// FRR's "show bgp summary json" returns two different formats:
+	//   AF-keyed:  {"ipv4Unicast": {"peers": {…}}, "l2VpnEvpn": {"peers": {…}}}
+	//   Flat:      {"routerId": "…", "as": 65001, "peers": {…}, …}
+	// The flat format appears intermittently (likely a FRR race condition during
+	// daemon initialization). Handle both by trying each top-level value as an
+	// AF object with nested peers, AND checking for a direct top-level "peers" key.
+	type peerInfo struct {
+		State string `json:"state"`
+	}
 	peerStates := make(map[string]string) // ip → state
+
+	// Try flat format: top-level "peers" key contains the peer map directly.
+	if peersRaw, ok := summary["peers"]; ok {
+		var peers map[string]peerInfo
+		if json.Unmarshal(peersRaw, &peers) == nil {
+			for ip, peer := range peers {
+				peerStates[ip] = peer.State
+			}
+		}
+	}
+
+	// Try AF-keyed format: each top-level key is an address family with nested "peers".
 	for _, afData := range summary {
 		var af struct {
-			Peers map[string]struct {
-				State string `json:"state"`
-			} `json:"peers"`
+			Peers map[string]peerInfo `json:"peers"`
 		}
 		if json.Unmarshal(afData, &af) == nil {
 			for ip, peer := range af.Peers {

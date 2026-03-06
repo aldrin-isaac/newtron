@@ -40,6 +40,13 @@ This has concrete design implications:
 - **Do NOT implement a desired-state reconciler** (Terraform/Kubernetes model). There is
   no canonical "desired state" for incremental operations — only device reality + the
   requested change.
+- **Bindings must be self-sufficient for reverse operations.** NEWTRON_SERVICE_BINDING
+  must contain every value needed for teardown — never re-resolve specs at removal time.
+  The spec may have changed between apply and remove; the binding records what was
+  actually applied. Example: `l3vni` and `l3vni_vlan` are stored in the binding so
+  `RemoveService` can tear down transit VLAN infrastructure without looking up the
+  IP-VPN spec. When adding a new forward operation that creates infrastructure, ask:
+  "can the reverse operation find everything it needs in the binding alone?"
 
 ## Platform Patching Principle
 
@@ -241,6 +248,43 @@ ChangeSet reversal is unsafe — only domain-level reverse operations have the c
 to determine whether a shared resource can be safely removed. Rollback is an
 orchestrator concern that uses these domain-level operations, not a newtron concern.
 
+## Public API Boundary Design
+
+`pkg/newtron/` is the public API; `pkg/newtron/network/`, `pkg/newtron/network/node/`,
+and `pkg/newtron/device/sonic/` are internal. All external consumers (CLI, newtrun,
+newtron-server HTTP server) import only `pkg/newtron/`.
+
+Rules:
+
+- **Public types expose caller intent; internal types expose implementation.**
+  Public types use domain vocabulary (`RouteNextHop.Address`, `CompositeInfo.Tables`).
+  Internal types reflect implementation (`NextHop.IP`, `CompositeConfig.Entries`).
+  Boundary conversions strip implementation details and map to domain names.
+
+- **Orchestrators are API consumers, not insiders.** If an orchestrator (newtrun,
+  a provisioner, the HTTP server) needs functionality the API doesn't expose,
+  extend the API — don't bypass it with internal imports.
+
+- **Operations accept names; the API resolves specs.** Callers pass `ipvpnName`,
+  `macvpnName`, `policyName` — string identifiers of intent. The API method resolves
+  the spec from the Node's SpecProvider internally. Callers never pre-resolve specs
+  and pass structs across the boundary.
+
+- **Verification tokens are opaque.** `CompositeInfo` flows from `GenerateDeviceComposite`
+  to `VerifyComposite` as an opaque handle. Callers store and return it; they never
+  inspect internal state. The verification mechanism (ChangeSet diffing) is entirely
+  hidden.
+
+- **Write results report outcomes, not internals.** `WriteResult.ChangeCount` and
+  `DeliveryResult.Applied` tell callers what happened. Raw ChangeSets, Redis
+  commands, and CONFIG_DB key formats never cross the boundary.
+
+When adding new public API surface:
+1. Define the public type in `types.go` using domain vocabulary
+2. Add the method to the appropriate wrapper (`Network`, `Node`, `Interface`)
+3. Convert internal types at the boundary — never expose `*node.X` or `*sonic.Y`
+4. Accept names/strings for spec references; resolve internally
+
 ## Redis-First Interaction Principle
 
 newtron is a Redis-centric system. All device interaction MUST go through SONiC Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB). See `docs/newtron/hld.md` for the full interaction model.
@@ -262,6 +306,28 @@ Before adding any `session.Run()`, `ExecCommand()`, or shell command constructio
 2. If it is, use the Redis path
 3. If it isn't, add the `CLI-WORKAROUND` tag with a resolution path
 4. Never normalize CLI calls — they are exceptions, not the standard interaction model
+
+## CONFIG_DB Replace Semantics (DEL+HSET)
+
+Redis `HSET` merges fields into an existing hash — it does NOT remove old fields.
+Any operation that replaces a key's content (RefreshService, re-provisioning) MUST
+`DEL` the key first, then `HSET` the new fields. Without the `DEL`, stale fields
+from the previous state persist as ghost data.
+
+This has two consequences:
+
+- **Apply must preserve delete+add sequences.** When a ChangeSet contains both a
+  delete and a subsequent add for the same key (e.g., RefreshService = remove + apply),
+  both operations must be sent to Redis in order. SONiC daemons see the delete
+  notification (tear down old state), then the add notification (create new state).
+  Stripping the intermediate delete — as the former `DeduplicateRefresh` did — leaves
+  stale fields and prevents daemons from cleaning up internal state.
+
+- **Verification checks final state only.** When verifying a merged ChangeSet,
+  `verifyConfigChanges` computes the last operation per key. A key that was deleted
+  then re-added is verified as "should exist with new fields" — not as "should be
+  deleted". The apply sequence handles intermediate state; the verifier only cares
+  about the end result.
 
 ## Allowed Commands
 

@@ -429,6 +429,29 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 	return dev, nil
 }
 
+// GetAbstractNode creates an offline abstract Node for the named device.
+// Same profile/spec resolution as GetNode, but the Node starts with an empty
+// shadow ConfigDB and no device connection. Used for composite generation.
+func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
+	// Host devices have no SONiC — cannot create a Node
+	if n.IsHostDevice(name) {
+		return nil, fmt.Errorf("device '%s' is a host (no SONiC); use GetHostProfile() instead", name)
+	}
+
+	profile, err := n.loadProfile(name)
+	if err != nil {
+		return nil, fmt.Errorf("loading profile for %s: %w", name, err)
+	}
+
+	resolved, err := n.resolveProfile(name, profile)
+	if err != nil {
+		return nil, fmt.Errorf("resolving profile for %s: %w", name, err)
+	}
+
+	resolvedSpecs := n.buildResolvedSpecs(profile)
+	return node.NewAbstract(resolvedSpecs, name, profile, resolved), nil
+}
+
 // ConnectDevice loads a device and establishes connection.
 func (n *Network) ConnectNode(ctx context.Context, name string) (*node.Node, error) {
 	dev, err := n.GetNode(name)

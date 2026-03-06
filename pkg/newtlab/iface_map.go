@@ -53,33 +53,6 @@ func ResolveNICIndex(interfaceMap, interfaceName string, customMap map[string]in
 	}
 }
 
-// ResolveInterfaceName returns the SONiC interface name for a QEMU NIC index.
-// Inverse of ResolveNICIndex. When interfaceMap is "custom", the customMap
-// parameter is used for reverse lookup; otherwise it is ignored.
-func ResolveInterfaceName(interfaceMap string, nicIndex int, customMap map[string]int) string {
-	switch interfaceMap {
-	case "sequential":
-		return fmt.Sprintf("Ethernet%d", nicIndex-1)
-
-	case "stride-4":
-		return fmt.Sprintf("Ethernet%d", (nicIndex-1)*4)
-
-	case "linux":
-		return fmt.Sprintf("eth%d", nicIndex)
-
-	case "custom":
-		for name, idx := range customMap {
-			if idx == nicIndex {
-				return name
-			}
-		}
-		return fmt.Sprintf("NIC%d", nicIndex)
-
-	default:
-		return fmt.Sprintf("NIC%d", nicIndex)
-	}
-}
-
 // parseEthernetIndex extracts the numeric index from "EthernetN".
 // Returns -1 if the name is not a valid Ethernet interface.
 func parseEthernetIndex(name string) int {

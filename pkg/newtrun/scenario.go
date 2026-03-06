@@ -199,9 +199,6 @@ type ExpectBlock struct {
 	// verify-bgp
 	State string `yaml:"state,omitempty"`
 
-	// verify-health
-	Overall string `yaml:"overall,omitempty"`
-
 	// verify-route
 	Protocol  string `yaml:"protocol,omitempty"`
 	NextHopIP string `yaml:"nexthop_ip,omitempty"`

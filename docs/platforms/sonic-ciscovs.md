@@ -203,29 +203,29 @@ mv sonic-ciscovs.qcow2 ~/.newtlab/images/
 - ✅ VRFs with services (2node-primitive, 2node-service)
 - ✅ Service apply/remove lifecycle (2node-service)
 - ✅ Port channels (2node-primitive)
+- ✅ ACL lifecycle — create/bind/unbind/delete (2node-primitive)
+- ✅ QoS lifecycle — apply/remove per-interface (2node-primitive)
 
 ### Known Limitations
 
 - ❌ EVPN L3 VNI routing — Silicon One SAI can't create `VNI_TO_VIRTUAL_ROUTER_ID` L3 DECAP entries (RCA-039)
-- ⚠️ ACL offloading — not yet tested
-- ⚠️ QoS policies — not yet tested
 
 ### Test Suite Compatibility
 
 | Suite | Status |
 |-------|--------|
-| 2node-primitive | ✅ 20/20 PASS |
-| 2node-service | ✅ 6/6 PASS |
-| 3node-dataplane | ✅ 6/6 PASS |
+| 2node-primitive | ✅ All scenarios pass |
+| 2node-service | ✅ All scenarios pass |
+| 3node-dataplane | ✅ All scenarios pass |
 
 ### Current Test Status
 
 **Last Validated:** Feb 2026
 
 **Results:**
-- 2node-primitive: ✅ 20/20 PASS
-- 2node-service: ✅ 6/6 PASS (provision, health, dataplane, deprovision, verify-clean)
-- 3node-dataplane: ✅ 6/6 PASS (L3 routing, EVPN L2 IRB)
+- 2node-primitive: ✅ All pass (L3 services, BGP, EVPN, ACL, QoS, port channels)
+- 2node-service: ✅ All pass (provision, health, dataplane, deprovision, verify-clean)
+- 3node-dataplane: ✅ All pass (L3 routing, EVPN L2 IRB)
 
 ## Performance Characteristics
 
@@ -311,14 +311,11 @@ show vxlan vni
 ## Related Documentation
 
 - [RCA-022: CiscoVS Build Issues](../rca/022-sonic-202505-ciscovs-build-issues.md)
-- [Platform Capabilities](../platform-capabilities.md)
-- [EVPN HOWTO](../newtron/evpn-howto.md)
+- [Platform Capabilities](platform-capabilities.md)
 - [Device LLD](../newtron/device-lld.md)
 
 ## Future Work
 
-- [ ] Test ACL offloading
-- [ ] Test QoS policies
 - [ ] Benchmark dataplane throughput
 - [ ] Test EVPN multihoming
 - [ ] Investigate L3 VNI on newer Silicon One SAI versions (RCA-039)

@@ -251,9 +251,45 @@ func (n *Node) unbindIpvpnConfig(vrfName string) []sonic.Entry {
 }
 
 // UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping and BGP EVPN config).
+// Also removes the L3VNI transit VLAN infrastructure (VLAN, SVI, VXLAN_TUNNEL_MAP) that
+// BindIPVPN created — operational symmetry requires the reverse to undo all forward effects.
+//
+// Refuses if any NEWTRON_SERVICE_BINDING references this VRF — callers must remove
+// services first. RemoveService calls destroyVrfConfig directly (not UnbindIPVPN),
+// so this guard only protects standalone CLI/test usage.
 func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
 	if err := n.precondition("unbind-ipvpn", vrfName).Result(); err != nil {
 		return nil, err
+	}
+
+	// Refuse if service bindings still reference this VRF
+	if n.configDB != nil {
+		var refs []string
+		for intfName, binding := range n.configDB.NewtronServiceBinding {
+			if binding.VRFName == vrfName {
+				refs = append(refs, intfName)
+			}
+		}
+		if len(refs) > 0 {
+			return nil, fmt.Errorf("cannot unbind IP-VPN from VRF %s — %d service binding(s) still reference it: %v",
+				vrfName, len(refs), refs)
+		}
+	}
+
+	// Read current L3VNI before clearing it, so we can find the transit VLAN.
+	var l3vni int
+	var l3vniVlan int
+	if vrfEntry, ok := n.configDB.VRF[vrfName]; ok && vrfEntry.VNI != "" {
+		fmt.Sscanf(vrfEntry.VNI, "%d", &l3vni)
+	}
+	if l3vni > 0 {
+		vniStr := fmt.Sprintf("%d", l3vni)
+		for _, mapping := range n.configDB.VXLANTunnelMap {
+			if mapping.VNI == vniStr {
+				fmt.Sscanf(mapping.VLAN, "Vlan%d", &l3vniVlan)
+				break
+			}
+		}
 	}
 
 	cs := NewChangeSet(n.name, "device.unbind-ipvpn")
@@ -263,8 +299,17 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 		"vni": "",
 	})
 
-	// Delete the remaining IP-VPN entries.
+	// Delete the remaining IP-VPN entries (BGP AFs, route redistribution, EVPN RTs).
 	cs.Deletes(n.unbindIpvpnConfig(vrfName))
+
+	// Delete L3VNI transit VLAN infrastructure (reverse of bindIpvpnConfig).
+	// BindIPVPN creates: transit VLAN, SVI binding VLAN→VRF, VXLAN_TUNNEL_MAP.
+	// UnbindIPVPN must remove all three to satisfy operational symmetry.
+	if l3vni > 0 && l3vniVlan > 0 {
+		cs.Deletes(deleteVniMapConfig(l3vni, VLANName(l3vniVlan)))
+		cs.Deletes(deleteSviBaseConfig(l3vniVlan))
+		cs.Deletes(deleteVlanConfig(l3vniVlan))
+	}
 
 	util.WithDevice(n.name).Infof("Unbound IP-VPN from VRF %s", vrfName)
 	return cs, nil

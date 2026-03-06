@@ -7,15 +7,13 @@ topology: 2node
 requires: [boot-ssh]
 
 steps:
-  # Apply QoS policy
   - name: apply-qos-ethernet11
     action: apply-qos
     devices: [switch1]
+    interface: Ethernet11
     params:
-      interface: Ethernet11
       qos_policy: test-4q
 
-  # Verify per-interface QoS mapping
   - name: verify-port-qos-map
     action: verify-config-db
     devices: [switch1]
@@ -24,7 +22,6 @@ steps:
     expect:
       exists: true
 
-  # Verify device-wide DSCP-to-TC map was created
   - name: verify-dscp-tc-map
     action: verify-config-db
     devices: [switch1]
@@ -33,14 +30,11 @@ steps:
     expect:
       exists: true
 
-  # Remove QoS from interface
   - name: remove-qos-ethernet11
     action: remove-qos
     devices: [switch1]
-    params:
-      interface: Ethernet11
+    interface: Ethernet11
 
-  # Verify per-interface mapping removed
   - name: verify-port-qos-map-removed
     action: verify-config-db
     devices: [switch1]

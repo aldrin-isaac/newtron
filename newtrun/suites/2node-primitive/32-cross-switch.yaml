@@ -1,4 +1,4 @@
-name: cross-switch-routing
+name: cross-switch
 description: |
   Cross-switch L3 routing: assign IPs on sw1:Ethernet1 and sw2:Ethernet1 in
   the default VRF, verify BGP distributes connected routes, and test host-to-host
@@ -24,7 +24,6 @@ steps:
       property: ip
       value: "10.20.1.1/31"
 
-  # CONFIG_DB verification
   - name: verify-ip-sw1-eth1
     action: verify-config-db
     devices: [switch1]
@@ -41,7 +40,7 @@ steps:
     expect:
       exists: true
 
-  # Poll for kernel IPs
+  # Poll for kernel IPs (90s)
   - name: wait-eth1-ip-sw1
     action: ssh-command
     devices: [switch1]
@@ -52,7 +51,7 @@ steps:
     devices: [switch2]
     command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show Ethernet1 | grep -q '10.20.1.1' && break; sleep 5; done; true"
 
-  # Verify BGP distributes connected routes (10.20.1.0/31 learned on sw1 via BGP)
+  # Verify BGP distributes connected routes (60s timeout)
   - name: verify-route-sw1
     action: verify-route
     devices: [switch1]
@@ -75,12 +74,12 @@ steps:
   - name: prime-arp-sw1-eth1
     action: ssh-command
     devices: [switch1]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I Ethernet1 10.20.0.0 && break; sleep 2; done || true"
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Ethernet1 10.20.0.0 && break; sleep 1; done || true"
 
   - name: prime-arp-sw2-eth1
     action: ssh-command
     devices: [switch2]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0 && break; sleep 2; done || true"
+    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Ethernet1 10.20.1.0 && break; sleep 1; done || true"
 
   - name: wait-after-prime
     action: wait
@@ -97,7 +96,7 @@ steps:
     devices: [host4]
     command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.20.1.0/31 dev eth0; ip route add default via 10.20.1.1 dev eth0 2>/dev/null || true"
 
-  # Host-to-host dataplane: routed path through two switches
+  # Host-to-host dataplane
   - name: host1-ping-host4
     action: host-exec
     devices: [host1]

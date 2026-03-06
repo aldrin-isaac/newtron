@@ -213,13 +213,13 @@ requires_features: [evpn-vxlan, macvpn]
 
 ```bash
 # Run test suite on VPP - EVPN test auto-skips
-$ bin/newtrun suite 3node-dataplane --platform sonic-vpp
+$ bin/newtrun start 3node-dataplane --platform sonic-vpp
 ✓ boot-provision (12.3s)
 ✓ l3-routing (8.1s)
 ⊘ evpn-l2-irb (skipped: platform 'sonic-vpp' does not support required features: [evpn-vxlan, macvpn])
 
 # Run same suite on CiscoVS - EVPN test runs
-$ bin/newtrun suite 3node-dataplane --platform ciscovs
+$ bin/newtrun start 3node-dataplane --platform ciscovs
 ✓ boot-provision (18.4s)
 ✓ l3-routing (10.2s)
 ✓ evpn-l2-irb (22.7s)

@@ -20,14 +20,13 @@ steps:
   - name: create-vrf
     action: create-vrf
     devices: [leaf1]
-    params:
-      vrf: Vrf_overlay
+    vrf: Vrf_overlay
 
   - name: bind-ipvpn
     action: bind-ipvpn
     devices: [leaf1]
+    vrf: Vrf_overlay
     params:
-      vrf: Vrf_overlay
       ipvpn: customer-vpn
 
   - name: verify-l3vni
@@ -66,8 +65,7 @@ steps:
   - name: unbind-ipvpn
     action: unbind-ipvpn
     devices: [leaf1]
-    params:
-      vrf: Vrf_overlay
+    vrf: Vrf_overlay
 
   - name: cleanup
     action: cleanup

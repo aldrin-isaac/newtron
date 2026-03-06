@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var settingsCmd = &cobra.Command{
@@ -29,12 +29,12 @@ var settingsShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show current settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
 			return fmt.Errorf("loading settings: %w", err)
 		}
 
-		fmt.Printf("Settings file: %s\n\n", settings.DefaultSettingsPath())
+		fmt.Printf("Settings file: %s\n\n", newtron.SettingsPath())
 
 		t := cli.NewTable("SETTING", "VALUE")
 
@@ -49,6 +49,8 @@ var settingsShowCmd = &cobra.Command{
 		printSetting("spec_dir", s.SpecDir)
 		printSetting("default_suite", s.DefaultSuite)
 		printSetting("topologies_dir", s.TopologiesDir)
+		printSetting("server", s.ServerURL)
+		printSetting("network_id", s.NetworkID)
 
 		t.Flush()
 		return nil
@@ -65,19 +67,22 @@ Available settings:
   specs          - Specification directory (-S flag default for newtron and newtlab)
   suite          - Default newtrun suite directory (--dir flag default)
   topologies_dir - Base directory for newtrun topologies
+  server         - newtron-server HTTP address (default: http://localhost:8080)
+  network_id     - Network identifier for server operations (default: "default")
 
 Examples:
   newtron settings set network production
   newtron settings set specs /etc/newtron
-  newtron settings set suite newtrun/suites/2node-incremental`,
+  newtron settings set server http://10.0.0.1:8080
+  newtron settings set network_id lab1`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		setting := args[0]
 		value := args[1]
 
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
-			s = &settings.Settings{}
+			s = &newtron.UserSettings{}
 		}
 
 		switch setting {
@@ -93,11 +98,17 @@ Examples:
 		case "topologies_dir":
 			s.TopologiesDir = value
 			fmt.Printf("Topologies directory set to: %s\n", value)
+		case "server", "server_url":
+			s.ServerURL = value
+			fmt.Printf("Server URL set to: %s\n", value)
+		case "network_id":
+			s.NetworkID = value
+			fmt.Printf("Network ID set to: %s\n", value)
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir, server, network_id)", setting)
 		}
 
-		if err := s.Save(); err != nil {
+		if err := newtron.SaveSettings(s); err != nil {
 			return fmt.Errorf("saving settings: %w", err)
 		}
 
@@ -112,7 +123,7 @@ var settingsGetCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		setting := args[0]
 
-		s, err := settings.Load()
+		s, err := newtron.LoadSettings()
 		if err != nil {
 			return fmt.Errorf("loading settings: %w", err)
 		}
@@ -127,8 +138,12 @@ var settingsGetCmd = &cobra.Command{
 			value = s.DefaultSuite
 		case "topologies_dir":
 			value = s.TopologiesDir
+		case "server", "server_url":
+			value = s.ServerURL
+		case "network_id":
+			value = s.NetworkID
 		default:
-			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir)", setting)
+			return fmt.Errorf("unknown setting: %s (valid: network, specs, suite, topologies_dir, server, network_id)", setting)
 		}
 
 		if value == "" {
@@ -144,8 +159,8 @@ var settingsClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Clear all settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s := &settings.Settings{}
-		if err := s.Save(); err != nil {
+		s := &newtron.UserSettings{}
+		if err := newtron.SaveSettings(s); err != nil {
 			return fmt.Errorf("saving settings: %w", err)
 		}
 		fmt.Println("All settings cleared.")
@@ -157,7 +172,7 @@ var settingsPathCmd = &cobra.Command{
 	Use:   "path",
 	Short: "Show settings file path",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(settings.DefaultSettingsPath())
+		fmt.Println(newtron.SettingsPath())
 	},
 }
 

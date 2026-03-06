@@ -11,18 +11,19 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/newtlab"
+	"github.com/newtron-network/newtron/pkg/newtron/client"
 )
 
 // Runner is the top-level newtrun orchestrator.
 type Runner struct {
 	ScenariosDir  string
 	TopologiesDir string
-	Network       *network.Network
+	ServerURL     string         // newtron-server HTTP address
+	NetworkID     string         // network identifier for server operations
+	Client        *client.Client // HTTP client for all SONiC operations
 	Lab           *newtlab.Lab
-	ChangeSets    map[string]*node.ChangeSet
+	Composites    map[string]string      // device → composite handle UUID
 	HostConns     map[string]*ssh.Client // host device name → SSH client
 	Progress      ProgressReporter
 
@@ -310,7 +311,7 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 		return results, nil
 	}
 
-	r.ChangeSets = make(map[string]*node.ChangeSet)
+	r.Composites = make(map[string]string)
 
 	// In shared mode, all capability checks use the deployed platform
 	return r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
@@ -407,8 +408,8 @@ func (r *Runner) runScenario(ctx context.Context, scenario *Scenario, opts RunOp
 // When scenario.Repeat > 1, all steps are executed in a loop for the specified
 // number of iterations. Execution stops on the first failed iteration.
 func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
-	if r.ChangeSets == nil {
-		r.ChangeSets = make(map[string]*node.ChangeSet)
+	if r.Composites == nil {
+		r.Composites = make(map[string]string)
 	}
 
 	repeat := scenario.Repeat
@@ -425,9 +426,9 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 
 			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
 
-			// Merge ChangeSets (last-write-wins)
-			for name, cs := range output.ChangeSets {
-				r.ChangeSets[name] = cs
+			// Merge Composites (provision step produces these)
+			for name, ci := range output.Composites {
+				r.Composites[name] = ci
 			}
 
 			sr := *output.Result
@@ -457,45 +458,44 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	result.Status = computeOverallStatus(result.Steps)
 }
 
-// connectDevices builds the Network OO hierarchy and connects all devices.
-// Host devices are connected via plain SSH (no Redis tunnel).
+// connectDevices registers the network with the server and connects host devices.
+// SONiC devices are not pre-connected; the server connects on demand per-request.
 func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
-	net, err := network.NewNetwork(specDir)
-	if err != nil {
-		return &InfraError{Op: "connect", Err: fmt.Errorf("loading specs: %w", err)}
+	r.Client = client.New(r.ServerURL, r.NetworkID)
+	// Unregister first to ensure fresh specs — different suites use different
+	// topology spec dirs with the same network ID.
+	_ = r.Client.UnregisterNetwork()
+	if err := r.Client.RegisterNetwork(specDir); err != nil {
+		return &InfraError{Op: "connect", Err: fmt.Errorf("registering network: %w", err)}
 	}
-	r.Network = net
 	r.HostConns = make(map[string]*ssh.Client)
 
-	topo := net.GetTopology()
-	if topo == nil {
+	deviceNames, err := r.Client.TopologyDeviceNames()
+	if err != nil || deviceNames == nil {
 		return &InfraError{Op: "connect", Err: fmt.Errorf("no topology.json found")}
 	}
 
-	for _, name := range topo.DeviceNames() {
-		if net.IsHostDevice(name) {
-			client, err := connectHostSSH(net, name)
-			if err != nil {
-				return &InfraError{Op: "connect", Device: name, Err: err}
-			}
-			r.HostConns[name] = client
-			continue
-		}
-		dev, err := net.GetNode(name)
+	for _, name := range deviceNames {
+		isHost, err := r.Client.IsHostDevice(name)
 		if err != nil {
 			return &InfraError{Op: "connect", Device: name, Err: err}
 		}
-		if err := dev.Connect(ctx); err != nil {
-			return &InfraError{Op: "connect", Device: name, Err: err}
+		if isHost {
+			sshClient, err := connectHostSSH(r.Client, name)
+			if err != nil {
+				return &InfraError{Op: "connect", Device: name, Err: err}
+			}
+			r.HostConns[name] = sshClient
 		}
+		// No pre-connection for SONiC devices — server connects on demand
 	}
 
 	return nil
 }
 
 // connectHostSSH establishes a plain SSH connection to a host device.
-func connectHostSSH(net *network.Network, name string) (*ssh.Client, error) {
-	profile, err := net.GetHostProfile(name)
+func connectHostSSH(c *client.Client, name string) (*ssh.Client, error) {
+	profile, err := c.GetHostProfile(name)
 	if err != nil {
 		return nil, fmt.Errorf("loading host profile: %w", err)
 	}
@@ -577,10 +577,8 @@ func (r *Runner) progress(fn func(ProgressReporter)) {
 
 // allDeviceNames returns sorted names of all topology devices (including hosts).
 func (r *Runner) allDeviceNames() []string {
-	if topo := r.Network.GetTopology(); topo != nil {
-		return topo.DeviceNames()
-	}
-	return r.Network.ListNodes()
+	names, _ := r.Client.TopologyDeviceNames()
+	return names
 }
 
 // resolveDevices resolves step.Devices to concrete device names.
@@ -594,7 +592,7 @@ func (r *Runner) hasDataplane() bool {
 	if r.opts.Platform != "" {
 		platformName = r.opts.Platform
 	}
-	p, err := r.Network.GetPlatform(platformName)
+	p, err := r.Client.ShowPlatform(platformName)
 	if err != nil {
 		return false
 	}
@@ -670,8 +668,8 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 		return "" // No feature requirements
 	}
 
-	if r.Network == nil {
-		return "" // Cannot check features without network (proceed and let operations fail)
+	if r.Client == nil {
+		return "" // Cannot check features without server connection (proceed and let operations fail)
 	}
 
 	// Use deployed platform (shared mode) if provided, otherwise use per-scenario platform
@@ -680,14 +678,10 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 		platformName = scenarioPlatform
 	}
 
-	platform, err := r.Network.GetPlatform(platformName)
-	if err != nil {
-		return "" // Cannot get platform spec (proceed and let operations fail)
-	}
-
 	var unsupported []string
 	for _, feature := range sc.RequiresFeatures {
-		if !platform.SupportsFeature(feature) {
+		supported, err := r.Client.PlatformSupportsFeature(platformName, feature)
+		if err != nil || !supported {
 			unsupported = append(unsupported, feature)
 		}
 	}

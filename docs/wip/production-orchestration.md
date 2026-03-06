@@ -44,13 +44,13 @@ A production orchestrator must compensate for partial failures.
 - Configurable compensation policy: auto-rollback, pause-and-ask, continue-on-error
 - Compensation log: record what was rolled back and what was left in place
 
-## Gap 3: API Service
+## Gap 3: API Service (Partially Addressed)
 
-newtrun is CLI-only with local state.json on disk. A production orchestrator must
-be a service.
+The HTTP API server exists (`cmd/newtron-server/`, `pkg/newtron/api/`) — it exposes
+every `pkg/newtron/` operation over HTTP with actor-based serialization. See
+DESIGN_PRINCIPLES.md Principle 29 for the architecture.
 
-**Requirements:**
-- REST or gRPC API for triggering operations and querying status
+**Remaining gaps for production:**
 - Authentication and authorization (API keys at minimum, OIDC/RBAC eventually)
 - Persistent state store (database, not local JSON files)
 - Webhook/event notifications for operation completion, failure, drift detection

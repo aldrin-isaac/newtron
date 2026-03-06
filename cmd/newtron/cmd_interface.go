@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,9 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 )
 
 var interfaceCmd = &cobra.Command{
@@ -19,26 +16,26 @@ var interfaceCmd = &cobra.Command{
 	Short: "Manage interfaces",
 	Long: `Manage device interfaces.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny interface list
-  newtron -d leaf1-ny interface show Ethernet0
-  newtron -d leaf1-ny interface set Ethernet0 mtu 9000 -x`,
+  newtron -D leaf1-ny interface list
+  newtron -D leaf1-ny interface show Ethernet0
+  newtron -D leaf1-ny interface set Ethernet0 mtu 9000 -x`,
 }
 
 var interfaceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all interfaces on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		interfaces, err := app.client.ListInterfaces(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
-
-		interfaces := dev.ListInterfaces()
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(interfaces)
@@ -51,40 +48,28 @@ var interfaceListCmd = &cobra.Command{
 
 		t := cli.NewTable("INTERFACE", "ADMIN", "OPER", "IP ADDRESS", "VRF", "SERVICE")
 
-		skipped := 0
-		for _, name := range interfaces {
-			intf, err := dev.GetInterface(name)
-			if err != nil {
-				skipped++
-				continue
-			}
-
-			adminStatus := formatAdminStatus(intf.AdminStatus())
+		for _, intf := range interfaces {
+			adminStatus := formatAdminStatus(intf.AdminStatus)
 			if adminStatus == "" {
 				adminStatus = "-"
 			}
 
-			operStatus := formatOperStatus(intf.OperStatus())
-			if intf.OperStatus() == "" {
+			operStatus := formatOperStatus(intf.OperStatus)
+			if intf.OperStatus == "" {
 				operStatus = "-"
 			}
 
 			ipAddr := "-"
-			if addrs := intf.IPAddresses(); len(addrs) > 0 {
-				ipAddr = strings.Join(addrs, ",")
+			if len(intf.IPAddresses) > 0 {
+				ipAddr = strings.Join(intf.IPAddresses, ",")
 			}
 
-			vrf := dash(intf.VRF())
+			vrf := dash(intf.VRF)
+			svc := dash(intf.Service)
 
-			svc := dash(intf.ServiceName())
-
-			t.Row(name, adminStatus, operStatus, ipAddr, vrf, svc)
+			t.Row(intf.Name, adminStatus, operStatus, ipAddr, vrf, svc)
 		}
 		t.Flush()
-
-		if skipped > 0 {
-			fmt.Fprintf(os.Stderr, "warning: %d interface(s) could not be read\n", skipped)
-		}
 
 		return nil
 	},
@@ -95,40 +80,37 @@ var interfaceShowCmd = &cobra.Command{
 	Short: "Show interface details",
 	Long: `Show detailed information about an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny interface show Ethernet0
-  newtron -d leaf1-ny interface show Vlan100`,
+  newtron -D leaf1-ny interface show Ethernet0
+  newtron -D leaf1-ny interface show Vlan100`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		intf, err := dev.GetInterface(intfName)
+		detail, err := app.client.ShowInterface(app.deviceName, intfName)
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
 			data := map[string]interface{}{
-				"name":         intfName,
-				"admin_status": intf.AdminStatus(),
-				"oper_status":  intf.OperStatus(),
-				"speed":        intf.Speed(),
-				"mtu":          intf.MTU(),
-				"ip_addresses": intf.IPAddresses(),
-				"vrf":          intf.VRF(),
-				"service":      intf.ServiceName(),
-				"pc_member":    intf.IsPortChannelMember(),
-				"pc_parent":    intf.PortChannelParent(),
-				"ingress_acl":  intf.IngressACL(),
-				"egress_acl":   intf.EgressACL(),
+				"name":         detail.Name,
+				"admin_status": detail.AdminStatus,
+				"oper_status":  detail.OperStatus,
+				"speed":        detail.Speed,
+				"mtu":          detail.MTU,
+				"ip_addresses": detail.IPAddresses,
+				"vrf":          detail.VRF,
+				"service":      detail.Service,
+				"pc_member":    detail.PCMember,
+				"pc_parent":    detail.PCParent,
+				"ingress_acl":  detail.IngressACL,
+				"egress_acl":   detail.EgressACL,
 			}
 			return json.NewEncoder(os.Stdout).Encode(data)
 		}
@@ -136,45 +118,45 @@ Examples:
 		fmt.Printf("Interface: %s\n", bold(intfName))
 
 		// Show status with color coding
-		adminFmt := formatAdminStatus(intf.AdminStatus())
+		adminFmt := formatAdminStatus(detail.AdminStatus)
 		if adminFmt == "" {
 			adminFmt = "-"
 		}
 		fmt.Printf("Admin Status: %s\n", adminFmt)
 
-		operFmt := formatOperStatus(intf.OperStatus())
-		if intf.OperStatus() == "" {
+		operFmt := formatOperStatus(detail.OperStatus)
+		if detail.OperStatus == "" {
 			operFmt = "-"
 		}
 		fmt.Printf("Oper Status: %s\n", operFmt)
 
-		fmt.Printf("Speed: %s\n", intf.Speed())
-		fmt.Printf("MTU: %d\n", intf.MTU())
+		fmt.Printf("Speed: %s\n", detail.Speed)
+		fmt.Printf("MTU: %d\n", detail.MTU)
 
-		if addrs := intf.IPAddresses(); len(addrs) > 0 {
+		if len(detail.IPAddresses) > 0 {
 			fmt.Println("\nIP Addresses:")
-			for _, ip := range addrs {
+			for _, ip := range detail.IPAddresses {
 				fmt.Printf("  %s\n", ip)
 			}
 		}
 
-		if vrf := intf.VRF(); vrf != "" {
-			fmt.Printf("\nVRF: %s\n", vrf)
+		if detail.VRF != "" {
+			fmt.Printf("\nVRF: %s\n", detail.VRF)
 		}
 
-		if svc := intf.ServiceName(); svc != "" {
-			fmt.Printf("\nService: %s\n", svc)
+		if detail.Service != "" {
+			fmt.Printf("\nService: %s\n", detail.Service)
 		}
 
-		if intf.IsPortChannelMember() {
-			fmt.Printf("\nPortChannel Member of: %s\n", intf.PortChannelParent())
+		if detail.PCMember {
+			fmt.Printf("\nPortChannel Member of: %s\n", detail.PCParent)
 		}
 
-		if acl := intf.IngressACL(); acl != "" {
-			fmt.Printf("\nIngress ACL: %s\n", acl)
+		if detail.IngressACL != "" {
+			fmt.Printf("\nIngress ACL: %s\n", detail.IngressACL)
 		}
-		if acl := intf.EgressACL(); acl != "" {
-			fmt.Printf("Egress ACL: %s\n", acl)
+		if detail.EgressACL != "" {
+			fmt.Printf("Egress ACL: %s\n", detail.EgressACL)
 		}
 
 		return nil
@@ -186,7 +168,7 @@ var interfaceGetCmd = &cobra.Command{
 	Short: "Get a specific property value",
 	Long: `Get a specific property value from an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Properties:
   mtu           - Interface MTU
@@ -198,22 +180,19 @@ Properties:
   ip            - IP addresses
 
 Examples:
-  newtron -d leaf1-ny interface get Ethernet0 mtu
-  newtron -d leaf1-ny interface get Ethernet0 admin-status
-  newtron -d leaf1-ny interface get Ethernet0 vrf`,
+  newtron -D leaf1-ny interface get Ethernet0 mtu
+  newtron -D leaf1-ny interface get Ethernet0 admin-status
+  newtron -D leaf1-ny interface get Ethernet0 vrf`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		property := args[1]
-		ctx := context.Background()
 
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		intf, err := dev.GetInterface(intfName)
+		detail, err := app.client.ShowInterface(app.deviceName, intfName)
 		if err != nil {
 			return err
 		}
@@ -221,19 +200,19 @@ Examples:
 		var value interface{}
 		switch property {
 		case "mtu":
-			value = intf.MTU()
+			value = detail.MTU
 		case "admin-status":
-			value = intf.AdminStatus()
+			value = detail.AdminStatus
 		case "oper-status":
-			value = intf.OperStatus()
+			value = detail.OperStatus
 		case "speed":
-			value = intf.Speed()
+			value = detail.Speed
 		case "description":
-			value = intf.Description()
+			value = "(not available)"
 		case "vrf":
-			value = intf.VRF()
+			value = detail.VRF
 		case "ip":
-			value = strings.Join(intf.IPAddresses(), ", ")
+			value = strings.Join(detail.IPAddresses, ", ")
 		default:
 			return fmt.Errorf("unknown property: %s", property)
 		}
@@ -251,7 +230,7 @@ var interfaceSetCmd = &cobra.Command{
 	Short: "Set a property on an interface",
 	Long: `Set a property on an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Properties:
   mtu <value>           - Interface MTU
@@ -261,29 +240,18 @@ Properties:
   ip <address/prefix>   - IP address
 
 Examples:
-  newtron -d leaf1-ny interface set Ethernet0 mtu 9000 -x
-  newtron -d leaf1-ny interface set Ethernet0 admin-status down -x
-  newtron -d leaf1-ny interface set Ethernet0 description "Uplink to spine" -x`,
+  newtron -D leaf1-ny interface set Ethernet0 mtu 9000 -x
+  newtron -D leaf1-ny interface set Ethernet0 admin-status down -x
+  newtron -D leaf1-ny interface set Ethernet0 description "Uplink to spine" -x`,
 	Args: cobra.MinimumNArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		property := args[1]
 		value := strings.Join(args[2:], " ")
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
-			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-				return nil, err
-			}
-			intf, err := dev.GetInterface(intfName)
-			if err != nil {
-				return nil, err
-			}
-			cs, err := intf.Set(ctx, property, value)
-			if err != nil {
-				return nil, fmt.Errorf("setting %s: %w", property, err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.InterfaceSet(app.deviceName, intfName, property, value, execOpts()))
 	},
 }
 
@@ -292,28 +260,24 @@ var interfaceListAclsCmd = &cobra.Command{
 	Short: "List ACLs bound to an interface",
 	Long: `List ACLs bound to an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny interface list-acls Ethernet0`,
+  newtron -D leaf1-ny interface list-acls Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		ctx := context.Background()
-
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		intf, err := dev.GetInterface(intfName)
+		detail, err := app.client.ShowInterface(app.deviceName, intfName)
 		if err != nil {
 			return err
 		}
 
-		ingressACL := intf.IngressACL()
-		egressACL := intf.EgressACL()
+		ingressACL := detail.IngressACL
+		egressACL := detail.EgressACL
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(map[string]string{
@@ -342,46 +306,42 @@ var interfaceListMembersCmd = &cobra.Command{
 	Short: "List members of a LAG or VLAN",
 	Long: `List members of a LAG (PortChannel) or VLAN.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny interface list-members PortChannel100
-  newtron -d leaf1-ny interface list-members Vlan100`,
+  newtron -D leaf1-ny interface list-members PortChannel100
+  newtron -D leaf1-ny interface list-members Vlan100`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		ctx := context.Background()
-
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		intf, err := dev.GetInterface(intfName)
+		detail, err := app.client.ShowInterface(app.deviceName, intfName)
 		if err != nil {
 			return err
 		}
 
 		// Check if it's a PortChannel
-		if members := intf.PortChannelMembers(); len(members) > 0 {
+		if len(detail.PCMembers) > 0 {
 			if app.jsonOutput {
-				return json.NewEncoder(os.Stdout).Encode(members)
+				return json.NewEncoder(os.Stdout).Encode(detail.PCMembers)
 			}
 			fmt.Println("LAG Members:")
-			for _, m := range members {
+			for _, m := range detail.PCMembers {
 				fmt.Printf("  %s\n", m)
 			}
 			return nil
 		}
 
 		// Check if it's a VLAN
-		if members := intf.VLANMembers(); len(members) > 0 {
+		if len(detail.VLANMembers) > 0 {
 			if app.jsonOutput {
-				return json.NewEncoder(os.Stdout).Encode(members)
+				return json.NewEncoder(os.Stdout).Encode(detail.VLANMembers)
 			}
 			fmt.Println("VLAN Members:")
-			for _, m := range members {
+			for _, m := range detail.VLANMembers {
 				fmt.Printf("  %s\n", m)
 			}
 			return nil

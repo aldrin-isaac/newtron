@@ -134,9 +134,15 @@ docker restart bgp
 
 ### Boot Patches
 
-Located in `patches/vpp/always/`:
-- Interface mapping fixes
-- VPP-specific configuration
+Located in `pkg/newtlab/patches/vpp/always/`:
+
+| Patch | Description |
+|-------|-------------|
+| `01-disable-factory-hook.json` | Disable factory default hooks that interfere with provisioning |
+| `02-port-config.json` | Generate `port_config.ini` matching QEMU NIC count (VPP ports = NICs) |
+
+Supporting templates: `port_config.ini.tmpl`, `port_entries.tmpl`,
+`sonic_vpp_ifmap.ini.tmpl`, `syncd_vpp_env.tmpl`.
 
 No release-specific patches needed for 202505.
 
@@ -160,11 +166,10 @@ No release-specific patches needed for 202505.
 
 | Suite | Compatible | Notes |
 |-------|------------|-------|
-| boot-provision | ✅ Yes | Full support |
-| l3-routing | ✅ Yes | Primary use case |
-| host-verification | ✅ Yes | Works well |
-| evpn-l2-irb | ❌ No | Requires VXLAN |
-| acl-* | ❌ No | ACLs not supported |
+| 2node-primitive | ⚠️ Partial | L3 services pass; EVPN/ACL/QoS scenarios require CiscoVS |
+| 2node-service | ❌ No | Requires EVPN VXLAN |
+| 3node-dataplane | ⚠️ Partial | L3 routing passes; evpn-l2-irb skipped (`requires_features: [evpn-vxlan]`) |
+| simple-vrf-host | ✅ Yes | VRF + host connectivity, no EVPN |
 
 ### Test Design Tips
 
@@ -240,5 +245,5 @@ If your test requires unsupported features:
 - [RCA-001: swss restart breaks VPP](../rca/001-sonic-vpp-swss-restart-fatal.md)
 - [RCA-019: BGP restart after provision](../rca/019-sonic-vpp-bgp-asn-change-requires-restart.md)
 - [RCA-020: Port count matches NIC count](../rca/020-sonic-vpp-port-count-matches-nic-count.md)
-- [Platform Capabilities](../platform-capabilities.md)
+- [Platform Capabilities](platform-capabilities.md)
 - [Device LLD](../newtron/device-lld.md)

@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 // ============================================================================
@@ -233,12 +232,12 @@ func TestApplyDefaults_PingSuccessRate(t *testing.T) {
 // ============================================================================
 
 func TestMatchRoute(t *testing.T) {
-	entry := &sonic.RouteEntry{
+	entry := &newtron.RouteEntry{
 		Prefix:   "10.0.0.0/24",
 		Protocol: "bgp",
-		NextHops: []sonic.NextHop{
-			{IP: "10.0.0.1", Interface: "Ethernet0"},
-			{IP: "10.0.0.2", Interface: "Ethernet4"},
+		NextHops: []newtron.RouteNextHop{
+			{Address: "10.0.0.1", Interface: "Ethernet0"},
+			{Address: "10.0.0.2", Interface: "Ethernet4"},
 		},
 	}
 
@@ -1074,24 +1073,24 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// create-vrf
 		{
 			name:    "create-vrf valid",
-			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
 			wantErr: false,
 		},
 		{
 			name:    "create-vrf missing vrf",
 			step:    Step{Name: "s", Action: ActionCreateVRF, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vrf is required",
+			wantErr: true, errMsg: "vrf is required",
 		},
-		// setup-evpn
+		// setup-evpn (source_ip is optional — falls back to profile loopback)
 		{
-			name:    "setup-evpn valid",
+			name:    "setup-evpn valid with source_ip",
 			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"source_ip": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
-			name:    "setup-evpn missing source_ip",
+			name:    "setup-evpn valid without source_ip",
 			step:    Step{Name: "s", Action: ActionSetupEVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.source_ip is required",
+			wantErr: false,
 		},
 		{
 			name:    "setup-evpn missing devices",
@@ -1101,61 +1100,61 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// add-vrf-interface
 		{
 			name:    "add-vrf-interface valid",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Interface: "Ethernet0"},
 			wantErr: false,
 		},
 		{
 			name:    "add-vrf-interface missing vrf",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
-			wantErr: true, errMsg: "params.vrf is required",
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: true, errMsg: "vrf is required",
 		},
 		{
 			name:    "add-vrf-interface missing interface",
-			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
-			wantErr: true, errMsg: "params.interface is required",
+			step:    Step{Name: "s", Action: ActionAddVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
+			wantErr: true, errMsg: "interface is required",
 		},
 		// remove-vrf-interface
 		{
 			name:    "remove-vrf-interface valid",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Interface: "Ethernet0"},
 			wantErr: false,
 		},
 		{
 			name:    "remove-vrf-interface missing vrf",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
-			wantErr: true, errMsg: "params.vrf is required",
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
+			wantErr: true, errMsg: "vrf is required",
 		},
 		{
 			name:    "remove-vrf-interface missing interface",
-			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
-			wantErr: true, errMsg: "params.interface is required",
+			step:    Step{Name: "s", Action: ActionRemoveVRFInterface, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
+			wantErr: true, errMsg: "interface is required",
 		},
 		// bind-ipvpn
 		{
 			name:    "bind-ipvpn valid",
-			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "ipvpn": "customer-a"}},
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Params: map[string]any{"ipvpn": "customer-a"}},
 			wantErr: false,
 		},
 		{
 			name:    "bind-ipvpn missing vrf",
 			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"ipvpn": "customer-a"}},
-			wantErr: true, errMsg: "params.vrf is required",
+			wantErr: true, errMsg: "vrf is required",
 		},
 		{
 			name:    "bind-ipvpn missing ipvpn",
-			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionBindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
 			wantErr: true, errMsg: "params.ipvpn is required",
 		},
 		// unbind-ipvpn
 		{
 			name:    "unbind-ipvpn valid",
-			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
+			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
 			wantErr: false,
 		},
 		{
 			name:    "unbind-ipvpn missing vrf",
 			step:    Step{Name: "s", Action: ActionUnbindIPVPN, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.vrf is required",
+			wantErr: true, errMsg: "vrf is required",
 		},
 		// bind-macvpn
 		{
@@ -1187,39 +1186,39 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// add-static-route
 		{
 			name:    "add-static-route valid",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Prefix: "10.0.0.0/24", Params: map[string]any{"next_hop": "10.0.0.1"}},
 			wantErr: false,
 		},
 		{
 			name:    "add-static-route missing vrf",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24", "next_hop": "10.0.0.1"}},
-			wantErr: true, errMsg: "params.vrf is required",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Prefix: "10.0.0.0/24", Params: map[string]any{"next_hop": "10.0.0.1"}},
+			wantErr: true, errMsg: "vrf is required",
 		},
 		{
 			name:    "add-static-route missing prefix",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "next_hop": "10.0.0.1"}},
-			wantErr: true, errMsg: "params.prefix is required",
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Params: map[string]any{"next_hop": "10.0.0.1"}},
+			wantErr: true, errMsg: "prefix is required",
 		},
 		{
 			name:    "add-static-route missing next_hop",
-			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			step:    Step{Name: "s", Action: ActionAddStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Prefix: "10.0.0.0/24"},
 			wantErr: true, errMsg: "params.next_hop is required",
 		},
 		// remove-static-route
 		{
 			name:    "remove-static-route valid",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test", "prefix": "10.0.0.0/24"}},
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test", Prefix: "10.0.0.0/24"},
 			wantErr: false,
 		},
 		{
 			name:    "remove-static-route missing vrf",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"prefix": "10.0.0.0/24"}},
-			wantErr: true, errMsg: "params.vrf is required",
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Prefix: "10.0.0.0/24"},
+			wantErr: true, errMsg: "vrf is required",
 		},
 		{
 			name:    "remove-static-route missing prefix",
-			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"vrf": "Vrf_test"}},
-			wantErr: true, errMsg: "params.prefix is required",
+			step:    Step{Name: "s", Action: ActionRemoveStaticRoute, Devices: deviceSelector{Devices: []string{"leaf1"}}, VRF: "Vrf_test"},
+			wantErr: true, errMsg: "prefix is required",
 		},
 		// remove-vlan-member
 		{
@@ -1240,29 +1239,29 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 		// apply-qos
 		{
 			name:    "apply-qos valid",
-			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0", "qos_policy": "8q-datacenter"}},
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0", Params: map[string]any{"qos_policy": "8q-datacenter"}},
 			wantErr: false,
 		},
 		{
 			name:    "apply-qos missing interface",
 			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"qos_policy": "8q-datacenter"}},
-			wantErr: true, errMsg: "params.interface is required",
+			wantErr: true, errMsg: "interface is required",
 		},
 		{
 			name:    "apply-qos missing qos_policy",
-			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionApplyQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
 			wantErr: true, errMsg: "params.qos_policy is required",
 		},
 		// remove-qos
 		{
 			name:    "remove-qos valid",
-			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"interface": "Ethernet0"}},
+			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}, Interface: "Ethernet0"},
 			wantErr: false,
 		},
 		{
 			name:    "remove-qos missing interface",
 			step:    Step{Name: "s", Action: ActionRemoveQoS, Devices: deviceSelector{Devices: []string{"leaf1"}}},
-			wantErr: true, errMsg: "params.interface is required",
+			wantErr: true, errMsg: "interface is required",
 		},
 		// configure-svi
 		{
@@ -1374,6 +1373,71 @@ func TestValidateStepFields_NewActions(t *testing.T) {
 			step:    Step{Name: "s", Action: ActionRemoveLoopback},
 			wantErr: true, errMsg: "devices is required",
 		},
+		// configure-bgp
+		{
+			name:    "configure-bgp valid",
+			step:    Step{Name: "s", Action: ActionConfigureBGP, Devices: deviceSelector{Devices: []string{"switch1"}}},
+			wantErr: false,
+		},
+		{
+			name:    "configure-bgp missing devices",
+			step:    Step{Name: "s", Action: ActionConfigureBGP},
+			wantErr: true, errMsg: "devices is required",
+		},
+		// create-portchannel
+		{
+			name:    "create-portchannel valid",
+			step:    Step{Name: "s", Action: ActionCreatePortChannel, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1"}},
+			wantErr: false,
+		},
+		{
+			name:    "create-portchannel missing name",
+			step:    Step{Name: "s", Action: ActionCreatePortChannel, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.name is required",
+		},
+		// delete-portchannel
+		{
+			name:    "delete-portchannel valid",
+			step:    Step{Name: "s", Action: ActionDeletePortChannel, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1"}},
+			wantErr: false,
+		},
+		{
+			name:    "delete-portchannel missing name",
+			step:    Step{Name: "s", Action: ActionDeletePortChannel, Devices: deviceSelector{Devices: []string{"leaf1"}}},
+			wantErr: true, errMsg: "params.name is required",
+		},
+		// add-portchannel-member
+		{
+			name:    "add-portchannel-member valid",
+			step:    Step{Name: "s", Action: ActionAddPortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1", "member": "Ethernet0"}},
+			wantErr: false,
+		},
+		{
+			name:    "add-portchannel-member missing name",
+			step:    Step{Name: "s", Action: ActionAddPortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"member": "Ethernet0"}},
+			wantErr: true, errMsg: "params.name is required",
+		},
+		{
+			name:    "add-portchannel-member missing member",
+			step:    Step{Name: "s", Action: ActionAddPortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1"}},
+			wantErr: true, errMsg: "params.member is required",
+		},
+		// remove-portchannel-member
+		{
+			name:    "remove-portchannel-member valid",
+			step:    Step{Name: "s", Action: ActionRemovePortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1", "member": "Ethernet0"}},
+			wantErr: false,
+		},
+		{
+			name:    "remove-portchannel-member missing name",
+			step:    Step{Name: "s", Action: ActionRemovePortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"member": "Ethernet0"}},
+			wantErr: true, errMsg: "params.name is required",
+		},
+		{
+			name:    "remove-portchannel-member missing member",
+			step:    Step{Name: "s", Action: ActionRemovePortChannelMember, Devices: deviceSelector{Devices: []string{"leaf1"}}, Params: map[string]any{"name": "PortChannel1"}},
+			wantErr: true, errMsg: "params.member is required",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1471,7 +1535,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 
 func TestExecuteStep_UnknownAction(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
 	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
@@ -1494,7 +1558,7 @@ func TestExecuteStep_SetsNameAndAction(t *testing.T) {
 	// The wait executor is the simplest — it just sleeps.
 	// With 0 duration it returns immediately.
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	step := &Step{
 		Action:   ActionWait,
@@ -1713,18 +1777,18 @@ func TestPollUntil_SuccessAfterRetries(t *testing.T) {
 // ============================================================================
 
 func TestExecutorsMissingParams_NoPanic(t *testing.T) {
-	// Executors that operate via executeForDevices need r.Network and
-	// resolveDevices, which requires a topology. With a nil Network, they
+	// Executors that operate via executeForDevices need r.Client and
+	// resolveDevices, which requires a topology. With a nil Client, they
 	// will either panic in resolveDevices or in the device lookup.
 	// We test that the executor.Execute call itself doesn't panic with
 	// nil Runner fields by wrapping in recover. Since these executors call
-	// r.resolveDevices → r.allDeviceNames → r.Network.GetTopology, which
-	// will panic on nil Network, we test the subset that doesn't call
+	// r.resolveDevices → r.allDeviceNames → r.Client.TopologyDeviceNames(),
+	// which will panic on nil Client, we test the subset that doesn't call
 	// resolveDevices first. For executors that do, we still verify no
 	// unexpected panics by catching and reporting them.
 
 	// Parameterized actions that extract params before doing device work.
-	// Even with nil Network, the param extraction itself shouldn't panic.
+	// Even with nil Client, the param extraction itself shouldn't panic.
 	paramActions := []StepAction{
 		ActionCreateVLAN, ActionDeleteVLAN, ActionAddVLANMember,
 		ActionCreateVRF, ActionDeleteVRF, ActionSetupEVPN,
@@ -1768,7 +1832,7 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 					}
 				}()
 				r := &Runner{
-					ChangeSets: make(map[string]*node.ChangeSet),
+					Composites: make(map[string]string),
 				}
 				executor.Execute(context.Background(), r, step)
 			}()
@@ -1776,9 +1840,9 @@ func TestExecutorsMissingParams_NoPanic(t *testing.T) {
 	}
 }
 
-func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
-	// bind-ipvpn extracts params and calls r.Network.GetIPVPN before
-	// resolveDevices, so it should produce a clean panic or error on nil Network.
+func TestExecutorsMissingParams_BindIPVPN_NoClient(t *testing.T) {
+	// bind-ipvpn extracts params and calls r.Client methods before
+	// resolveDevices, so it should produce a clean panic or error on nil Client.
 	executor := executors[ActionBindIPVPN]
 	step := &Step{
 		Action:  ActionBindIPVPN,
@@ -1796,15 +1860,15 @@ func TestExecutorsMissingParams_BindIPVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]string),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
 }
 
-func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
-	// bind-macvpn extracts params and calls r.Network.GetMACVPN before
-	// resolveDevices, so it should produce a clean panic on nil Network.
+func TestExecutorsMissingParams_BindMACVPN_NoClient(t *testing.T) {
+	// bind-macvpn extracts params and calls r.Client methods before
+	// resolveDevices, so it should produce a clean panic on nil Client.
 	executor := executors[ActionBindMACVPN]
 	step := &Step{
 		Action:  ActionBindMACVPN,
@@ -1822,14 +1886,14 @@ func TestExecutorsMissingParams_BindMACVPN_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]string),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
 }
 
-func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
-	// apply-qos calls r.Network.GetQoSPolicy before resolveDevices
+func TestExecutorsMissingParams_ApplyQoS_NoClient(t *testing.T) {
+	// apply-qos calls r.Client methods before resolveDevices
 	executor := executors[ActionApplyQoS]
 	step := &Step{
 		Action:  ActionApplyQoS,
@@ -1847,7 +1911,7 @@ func TestExecutorsMissingParams_ApplyQoS_NoNetwork(t *testing.T) {
 			}
 		}()
 		r := &Runner{
-			ChangeSets: make(map[string]*node.ChangeSet),
+			Composites: make(map[string]string),
 		}
 		executor.Execute(context.Background(), r, step)
 	}()
@@ -2053,7 +2117,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 
 func TestRunScenarioSteps_SingleStep(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2077,7 +2141,7 @@ func TestRunScenarioSteps_SingleStep(t *testing.T) {
 
 func TestRunScenarioSteps_FailFast(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	scenario := &Scenario{
 		Name: "test",
@@ -2099,7 +2163,7 @@ func TestRunScenarioSteps_FailFast(t *testing.T) {
 
 func TestRunScenarioSteps_Repeat(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	scenario := &Scenario{
 		Name:   "test",
@@ -2129,7 +2193,7 @@ func TestRunScenarioSteps_Repeat(t *testing.T) {
 
 func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	r := &Runner{
-		ChangeSets: make(map[string]*node.ChangeSet),
+		Composites: make(map[string]string),
 	}
 	scenario := &Scenario{
 		Name:   "test",
@@ -2152,8 +2216,8 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	}
 }
 
-func TestRunScenarioSteps_InitChangeSets(t *testing.T) {
-	r := &Runner{} // nil ChangeSets
+func TestRunScenarioSteps_InitComposites(t *testing.T) {
+	r := &Runner{} // nil Composites
 	scenario := &Scenario{
 		Name: "test",
 		Steps: []Step{
@@ -2163,8 +2227,8 @@ func TestRunScenarioSteps_InitChangeSets(t *testing.T) {
 	result := &ScenarioResult{Name: "test"}
 	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
 
-	if r.ChangeSets == nil {
-		t.Error("expected ChangeSets to be initialized, got nil")
+	if r.Composites == nil {
+		t.Error("expected Composites to be initialized, got nil")
 	}
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,9 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var vrfCmd = &cobra.Command{
@@ -23,7 +21,7 @@ var vrfCmd = &cobra.Command{
 VRF is a first-class routing context that owns interfaces, BGP neighbors,
 IP-VPN binding, and static routes.
 
-Requires -d (device) flag for all commands.
+Requires -D (device) flag for all commands.
 
 Examples:
   newtron leaf1 vrf list
@@ -39,64 +37,32 @@ var vrfListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all VRFs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		entries, err := app.client.ListVRFs(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
-
-		vrfNames := dev.ListVRFs()
 
 		if app.jsonOutput {
-			var vrfs []*node.VRFInfo
-			skipped := 0
-			for _, name := range vrfNames {
-				vrf, err := dev.GetVRF(name)
-				if err != nil {
-					skipped++
-					continue
-				}
-				vrfs = append(vrfs, vrf)
-			}
-			if err := json.NewEncoder(os.Stdout).Encode(vrfs); err != nil {
-				return err
-			}
-			if skipped > 0 {
-				fmt.Fprintf(os.Stderr, "warning: %d VRF(s) could not be read\n", skipped)
-			}
-			return nil
+			return json.NewEncoder(os.Stdout).Encode(entries)
 		}
 
-		if len(vrfNames) == 0 {
+		if len(entries) == 0 {
 			fmt.Println("No VRFs configured")
 			return nil
 		}
 
 		t := cli.NewTable("NAME", "L3VNI", "INTERFACES")
 
-		skipped := 0
-		for _, name := range vrfNames {
-			vrf, err := dev.GetVRF(name)
-			if err != nil {
-				skipped++
-				continue
-			}
-
-			l3vni := dashInt(vrf.L3VNI)
-
-			intfs := "-"
-			if len(vrf.Interfaces) > 0 {
-				intfs = strings.Join(vrf.Interfaces, ",")
-			}
-
-			t.Row(name, l3vni, intfs)
+		for _, entry := range entries {
+			l3vni := dashInt(entry.L3VNI)
+			intfs := fmt.Sprintf("%d", entry.Interfaces)
+			t.Row(entry.Name, l3vni, intfs)
 		}
 		t.Flush()
-
-		if skipped > 0 {
-			fmt.Fprintf(os.Stderr, "warning: %d VRF(s) could not be read\n", skipped)
-		}
 
 		return nil
 	},
@@ -109,14 +75,11 @@ var vrfShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		vrf, err := dev.GetVRF(vrfName)
+		vrf, err := app.client.ShowVRF(app.deviceName, vrfName)
 		if err != nil {
 			return err
 		}
@@ -143,26 +106,14 @@ var vrfShowCmd = &cobra.Command{
 		}
 
 		// Show BGP neighbors in this VRF
-		configDB := dev.ConfigDB()
-		if configDB != nil && len(configDB.BGPNeighbor) > 0 {
-			vrfPrefix := vrfName + "|"
-			hasNeighbors := false
-			for key, neighbor := range configDB.BGPNeighbor {
-				if strings.HasPrefix(key, vrfPrefix) {
-					if !hasNeighbors {
-						fmt.Println("\nBGP Neighbors:")
-						hasNeighbors = true
-					}
-					// Extract neighbor IP from key "Vrf_CUST1|10.1.1.2"
-					parts := strings.SplitN(key, "|", 2)
-					neighborIP := parts[1]
-					desc := dash(neighbor.Name)
-					fmt.Printf("  %s  AS %s  %s\n", neighborIP, neighbor.ASN, desc)
-				}
+		if len(vrf.BGPNeighbors) > 0 {
+			fmt.Println("\nBGP Neighbors:")
+			for _, neighbor := range vrf.BGPNeighbors {
+				desc := dash(neighbor.Description)
+				fmt.Printf("  %s  AS %s  %s\n", neighbor.Address, neighbor.ASN, desc)
 			}
-			if !hasNeighbors {
-				fmt.Println("\nBGP Neighbors: (none)")
-			}
+		} else {
+			fmt.Println("\nBGP Neighbors: (none)")
 		}
 
 		return nil
@@ -173,50 +124,21 @@ var vrfStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show VRF config and operational state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		dev, err := requireDevice(ctx)
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		statuses, err := app.client.ListVRFs(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer dev.Disconnect()
 
-		vrfNames := dev.ListVRFs()
-
-		if len(vrfNames) == 0 {
+		if len(statuses) == 0 {
 			if app.jsonOutput {
 				return json.NewEncoder(os.Stdout).Encode([]struct{}{})
 			}
 			fmt.Println("No VRFs configured")
 			return nil
-		}
-
-		type vrfStatusEntry struct {
-			Name       string `json:"name"`
-			L3VNI      int    `json:"l3_vni,omitempty"`
-			Interfaces int    `json:"interfaces"`
-			State      string `json:"state,omitempty"`
-			RouteCount int    `json:"route_count,omitempty"`
-		}
-
-		var statuses []vrfStatusEntry
-		for _, name := range vrfNames {
-			vrf, err := dev.GetVRF(name)
-			if err != nil {
-				continue
-			}
-			s := vrfStatusEntry{
-				Name:       name,
-				L3VNI:      vrf.L3VNI,
-				Interfaces: len(vrf.Interfaces),
-			}
-			stateClient := dev.StateDBClient()
-			if stateClient != nil {
-				entry, err := stateClient.GetEntry("VRF_TABLE", name)
-				if err == nil && entry != nil {
-					s.State = entry["state"]
-				}
-			}
-			statuses = append(statuses, s)
 		}
 
 		if app.jsonOutput {
@@ -225,7 +147,6 @@ var vrfStatusCmd = &cobra.Command{
 
 		fmt.Printf("VRF Status for %s\n\n", bold(app.deviceName))
 
-		// Config view
 		t := cli.NewTable("VRF", "L3VNI", "INTERFACES", "STATE", "ROUTES")
 
 		for _, s := range statuses {
@@ -237,9 +158,8 @@ var vrfStatusCmd = &cobra.Command{
 			if s.State != "" {
 				state = formatOperStatus(s.State)
 			}
-			routeCount := dashInt(s.RouteCount)
 
-			t.Row(s.Name, l3vni, intfCount, state, routeCount)
+			t.Row(s.Name, l3vni, intfCount, state, "-")
 		}
 		t.Flush()
 
@@ -255,24 +175,17 @@ var vrfCreateCmd = &cobra.Command{
 The VRF is created without an L3VNI. Use 'vrf bind-ipvpn' to associate
 it with an IP-VPN definition which provides L3VNI and route targets.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf create Vrf_CUST1 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFCreate, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.CreateVRF(ctx, vrfName, node.VRFConfig{})
-			if err != nil {
-				return nil, fmt.Errorf("creating VRF: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.CreateVRF(app.deviceName, vrfName, execOpts()))
 	},
 }
 
@@ -283,24 +196,17 @@ var vrfDeleteCmd = &cobra.Command{
 
 The VRF must have no interfaces bound before it can be deleted.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf delete Vrf_CUST1 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFDelete, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.DeleteVRF(ctx, vrfName)
-			if err != nil {
-				return nil, fmt.Errorf("deleting VRF: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.DeleteVRF(app.deviceName, vrfName, execOpts()))
 	},
 }
 
@@ -309,7 +215,7 @@ var vrfAddInterfaceCmd = &cobra.Command{
 	Short: "Add an interface to a VRF",
 	Long: `Bind an interface to a VRF.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet4 -x
@@ -318,17 +224,10 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		intfName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.AddVRFInterface(ctx, vrfName, intfName)
-			if err != nil {
-				return nil, fmt.Errorf("adding interface to VRF: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.AddVRFInterface(app.deviceName, vrfName, intfName, execOpts()))
 	},
 }
 
@@ -337,7 +236,7 @@ var vrfRemoveInterfaceCmd = &cobra.Command{
 	Short: "Remove an interface from a VRF",
 	Long: `Unbind an interface from a VRF.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet4 -x`,
@@ -345,17 +244,10 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
 		intfName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.RemoveVRFInterface(ctx, vrfName, intfName)
-			if err != nil {
-				return nil, fmt.Errorf("removing interface from VRF: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveVRFInterface(app.deviceName, vrfName, intfName, execOpts()))
 	},
 }
 
@@ -366,7 +258,7 @@ var vrfBindIPVPNCmd = &cobra.Command{
 
 The IP-VPN definition provides L3VNI and route targets for the VRF.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf bind-ipvpn Vrf_CUST1 customer-vpn -x`,
@@ -375,7 +267,7 @@ Examples:
 		vrfName := args[0]
 		ipvpnName := args[1]
 
-		ipvpnDef, err := app.net.GetIPVPN(ipvpnName)
+		ipvpnDef, err := app.client.ShowIPVPN(ipvpnName)
 		if err != nil {
 			return fmt.Errorf("ipvpn '%s' not found in network.json", ipvpnName)
 		}
@@ -390,17 +282,10 @@ Examples:
 		}
 		fmt.Println()
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.BindIPVPN(ctx, vrfName, ipvpnDef)
-			if err != nil {
-				return nil, fmt.Errorf("binding IP-VPN: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.BindIPVPN(app.deviceName, vrfName, ipvpnName, execOpts()))
 	},
 }
 
@@ -409,24 +294,17 @@ var vrfUnbindIPVPNCmd = &cobra.Command{
 	Short: "Unbind the IP-VPN from a VRF",
 	Long: `Unbind the IP-VPN from a VRF, removing L3VNI and route targets.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf unbind-ipvpn Vrf_CUST1 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vrfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.UnbindIPVPN(ctx, vrfName)
-			if err != nil {
-				return nil, fmt.Errorf("unbinding IP-VPN: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UnbindIPVPN(app.deviceName, vrfName, execOpts()))
 	},
 }
 
@@ -442,7 +320,7 @@ var vrfAddNeighborCmd = &cobra.Command{
 
 The neighbor IP is auto-derived for /30 and /31 subnets unless --neighbor is specified.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf add-neighbor Vrf_CUST1 Ethernet4 65200 -x
@@ -456,31 +334,16 @@ Examples:
 			return fmt.Errorf("invalid ASN: %s", args[2])
 		}
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			intf, err := dev.GetInterface(intfName)
-			if err != nil {
-				return nil, err
-			}
-
-			// Verify the interface belongs to the specified VRF
-			if intf.VRF() != vrfName {
-				return nil, fmt.Errorf("interface %s is not in VRF %s (current VRF: %q)", intfName, vrfName, intf.VRF())
-			}
-
-			cs, err := intf.AddBGPNeighbor(ctx, node.DirectBGPNeighborConfig{
-				NeighborIP:  vrfNeighborIP,
-				RemoteAS:    asn,
-				Description: vrfNeighborDescription,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("adding BGP neighbor: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.InterfaceAddBGPNeighbor(app.deviceName, intfName, newtron.BGPNeighborConfig{
+			VRF:         vrfName,
+			Interface:   intfName,
+			NeighborIP:  vrfNeighborIP,
+			RemoteAS:    asn,
+			Description: vrfNeighborDescription,
+		}, execOpts()))
 	},
 }
 
@@ -492,40 +355,30 @@ var vrfRemoveNeighborCmd = &cobra.Command{
 The second argument can be an interface name (removes the auto-derived neighbor)
 or a neighbor IP address (removes that specific neighbor).
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf remove-neighbor Vrf_CUST1 Ethernet4 -x
   newtron leaf1 vrf remove-neighbor Vrf_CUST1 10.1.1.2 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
 		target := args[1]
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-			// Try as interface first
-			intf, intfErr := dev.GetInterface(target)
-			if intfErr == nil {
-				// It's an interface — remove its BGP neighbor
-				cs, err := intf.RemoveBGPNeighbor(ctx, "")
-				if err != nil {
-					return nil, fmt.Errorf("removing BGP neighbor from interface: %w", err)
-				}
-				return cs, nil
-			}
+		// Determine whether target is an interface or a neighbor IP by checking
+		// if it looks like an interface name (contains letters + digits prefix pattern)
+		// vs an IP address (contains dots). Use a simple heuristic: if it contains
+		// a dot it's an IP; otherwise treat as interface name.
+		if strings.Contains(target, ".") {
+			// Treat as neighbor IP — use node-level remove
+			return displayWriteResult(app.client.RemoveBGPNeighbor(app.deviceName, target, execOpts()))
+		}
 
-			// Not an interface — treat as neighbor IP
-			cs, err := dev.RemoveBGPNeighbor(ctx, target)
-			if err != nil {
-				return nil, fmt.Errorf("removing BGP neighbor: %w", err)
-			}
-			return cs, nil
-		})
+		// Treat as interface name — use interface-level remove
+		return displayWriteResult(app.client.InterfaceRemoveBGPNeighbor(app.deviceName, target, "", execOpts()))
 	},
 }
 
@@ -536,7 +389,7 @@ var vrfAddRouteCmd = &cobra.Command{
 	Short: "Add a static route to a VRF",
 	Long: `Add a static route to a VRF routing table.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf add-route Vrf_CUST1 10.0.0.0/8 10.1.1.1 -x
@@ -547,17 +400,10 @@ Examples:
 		prefix := args[1]
 		nextHop := args[2]
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.AddStaticRoute(ctx, vrfName, prefix, nextHop, vrfRouteMetric)
-			if err != nil {
-				return nil, fmt.Errorf("adding static route: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.AddStaticRoute(app.deviceName, vrfName, prefix, nextHop, vrfRouteMetric, execOpts()))
 	},
 }
 
@@ -566,7 +412,7 @@ var vrfRemoveRouteCmd = &cobra.Command{
 	Short: "Remove a static route from a VRF",
 	Long: `Remove a static route from a VRF routing table.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf remove-route Vrf_CUST1 10.0.0.0/8 -x`,
@@ -575,17 +421,10 @@ Examples:
 		vrfName := args[0]
 		prefix := args[1]
 
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(vrfName)
-			if err := checkExecutePermission(auth.PermVRFModify, authCtx); err != nil {
-				return nil, err
-			}
-			cs, err := dev.RemoveStaticRoute(ctx, vrfName, prefix)
-			if err != nil {
-				return nil, fmt.Errorf("removing static route: %w", err)
-			}
-			return cs, nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveStaticRoute(app.deviceName, vrfName, prefix, execOpts()))
 	},
 }
 

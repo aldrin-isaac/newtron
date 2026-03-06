@@ -1,0 +1,285 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/newtron-network/newtron/pkg/newtron"
+)
+
+// APIResponse is the standard envelope for all API responses.
+type APIResponse struct {
+	Data  any    `json:"data,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// ============================================================================
+// HTTP Request Types — Network
+// ============================================================================
+
+// RegisterNetworkRequest is the body for POST /network.
+type RegisterNetworkRequest struct {
+	ID      string `json:"id"`
+	SpecDir string `json:"spec_dir"`
+}
+
+// NetworkInfo is returned when listing or showing a registered network.
+type NetworkInfo struct {
+	ID          string   `json:"id"`
+	SpecDir     string   `json:"spec_dir"`
+	HasTopology bool     `json:"has_topology"`
+	Nodes       []string `json:"nodes"`
+}
+
+// ============================================================================
+// HTTP Request Types — Node Operations
+// ============================================================================
+
+// ExecuteRequest batches multiple operations in a single connect cycle.
+type ExecuteRequest struct {
+	Operations []Operation `json:"operations"`
+	Execute    bool        `json:"execute"`
+	NoSave     bool        `json:"no_save"`
+}
+
+// Operation is a single action within an ExecuteRequest.
+type Operation struct {
+	Action    string         `json:"action"`
+	Interface string         `json:"interface,omitempty"`
+	Params    map[string]any `json:"params,omitempty"`
+}
+
+// SSHCommandRequest is the body for POST .../ssh-command.
+type SSHCommandRequest struct {
+	Command string `json:"command"`
+}
+
+// SSHCommandResponse wraps the output of an SSH command.
+type SSHCommandResponse struct {
+	Output string `json:"output"`
+}
+
+// SetupEVPNRequest is the body for POST .../setup-evpn.
+type SetupEVPNRequest struct {
+	SourceIP string `json:"source_ip"`
+}
+
+// CompositeHandleRequest references a stored composite by UUID.
+type CompositeHandleRequest struct {
+	Handle string `json:"handle"`
+	Mode   string `json:"mode,omitempty"` // "overwrite" or "merge"
+}
+
+// CompositeHandleResponse is returned by GenerateComposite.
+type CompositeHandleResponse struct {
+	Handle     string         `json:"handle"`
+	DeviceName string         `json:"device_name"`
+	EntryCount int            `json:"entry_count"`
+	Tables     map[string]int `json:"tables"`
+}
+
+// CleanupRequest is the body for POST .../cleanup.
+type CleanupRequest struct {
+	Type string `json:"type,omitempty"` // "acls", "vrfs", "vnis", or "" for all
+}
+
+// ============================================================================
+// HTTP Request Types — Interface Operations
+// ============================================================================
+
+// ApplyServiceRequest is the body for POST .../apply-service.
+type ApplyServiceRequest struct {
+	Service   string            `json:"service"`
+	IPAddress string            `json:"ip_address,omitempty"`
+	VLAN      int               `json:"vlan,omitempty"`
+	PeerAS    int               `json:"peer_as,omitempty"`
+	Params    map[string]string `json:"params,omitempty"`
+}
+
+// SetIPRequest is the body for POST .../set-ip.
+type SetIPRequest struct {
+	IP string `json:"ip"`
+}
+
+// RemoveIPRequest is the body for POST .../remove-ip.
+type RemoveIPRequest struct {
+	IP string `json:"ip"`
+}
+
+// SetVRFRequest is the body for POST .../set-vrf.
+type SetVRFRequest struct {
+	VRF string `json:"vrf"`
+}
+
+// BindACLRequest is the body for POST .../bind-acl.
+type BindACLRequest struct {
+	ACL       string `json:"acl"`
+	Direction string `json:"direction"`
+}
+
+// UnbindACLRequest is the body for POST .../unbind-acl.
+type UnbindACLRequest struct {
+	ACL string `json:"acl"`
+}
+
+// BindMACVPNRequest is the body for POST .../bind-macvpn.
+type BindMACVPNRequest struct {
+	MACVPN string `json:"macvpn"`
+}
+
+// InterfaceSetRequest is the body for POST .../set.
+type InterfaceSetRequest struct {
+	Property string `json:"property"`
+	Value    string `json:"value"`
+}
+
+// ApplyQoSRequest is the body for POST .../apply-qos.
+type ApplyQoSRequest struct {
+	Policy string `json:"policy"`
+}
+
+// ============================================================================
+// HTTP Request Types — Node write operations that need JSON bodies
+// ============================================================================
+
+// VLANCreateRequest is the body for POST .../vlan.
+type VLANCreateRequest struct {
+	ID          int    `json:"id"`
+	Description string `json:"description,omitempty"`
+}
+
+// SVIConfigureRequest is the body for POST .../svi.
+type SVIConfigureRequest = newtron.SVIConfigureRequest
+
+// VRFCreateRequest is the body for POST .../vrf.
+type VRFCreateRequest struct {
+	Name string `json:"name"`
+}
+
+// ACLCreateRequest is the body for POST .../acl.
+type ACLCreateRequest = newtron.ACLCreateRequest
+
+// ACLRuleAddRequest is the body for POST .../acl/{name}/rule.
+type ACLRuleAddRequest = newtron.ACLRuleAddRequest
+
+// PortChannelCreateRequest is the body for POST .../portchannel.
+type PortChannelCreateRequest = newtron.PortChannelCreateRequest
+
+// PortChannelMemberRequest is the body for POST .../portchannel/{name}/member.
+type PortChannelMemberRequest struct {
+	Interface string `json:"interface"`
+}
+
+// ============================================================================
+// HTTP Request Types — Missing Node Operations
+// ============================================================================
+
+// VLANMemberRequest is the body for POST .../vlan/{id}/member.
+type VLANMemberRequest struct {
+	Interface string `json:"interface"`
+	Tagged    bool   `json:"tagged"`
+}
+
+// RemoveSVIRequest is the body for POST .../remove-svi.
+type RemoveSVIRequest struct {
+	VlanID int `json:"vlan_id"`
+}
+
+// VRFInterfaceRequest is the body for POST .../vrf/{name}/interface.
+type VRFInterfaceRequest struct {
+	Interface string `json:"interface"`
+}
+
+// BindIPVPNRequest is the body for POST .../vrf/{name}/bind-ipvpn.
+type BindIPVPNRequest struct {
+	IPVPN string `json:"ipvpn"`
+}
+
+// StaticRouteRequest is the body for POST .../vrf/{name}/route.
+type StaticRouteRequest struct {
+	Prefix  string `json:"prefix"`
+	NextHop string `json:"nexthop"`
+	Metric  int    `json:"metric,omitempty"`
+}
+
+// RestartServiceRequest is the body for POST .../restart-service.
+type RestartServiceRequest struct {
+	Service string `json:"service"`
+}
+
+// SetDeviceMetadataRequest is the body for POST .../set-metadata.
+type SetDeviceMetadataRequest struct {
+	Fields map[string]string `json:"fields"`
+}
+
+// NodeApplyQoSRequest is the body for POST .../apply-qos (node-level).
+type NodeApplyQoSRequest struct {
+	Interface string `json:"interface"`
+	Policy    string `json:"policy"`
+}
+
+// NodeRemoveQoSRequest is the body for POST .../remove-qos (node-level).
+type NodeRemoveQoSRequest struct {
+	Interface string `json:"interface"`
+}
+
+// ============================================================================
+// Error mapping
+// ============================================================================
+
+// notRegisteredError is returned when a network ID is not registered.
+type notRegisteredError struct {
+	id string
+}
+
+func (e *notRegisteredError) Error() string {
+	return "network '" + e.id + "' not registered"
+}
+
+// alreadyRegisteredError is returned when a network ID is already registered.
+type alreadyRegisteredError struct {
+	id string
+}
+
+func (e *alreadyRegisteredError) Error() string {
+	return "network '" + e.id + "' already registered"
+}
+
+// httpStatusFromError maps Go error types to HTTP status codes.
+func httpStatusFromError(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+
+	var notReg *notRegisteredError
+	if errors.As(err, &notReg) {
+		return http.StatusNotFound
+	}
+
+	var alreadyReg *alreadyRegisteredError
+	if errors.As(err, &alreadyReg) {
+		return http.StatusConflict
+	}
+
+	var notFound *newtron.NotFoundError
+	if errors.As(err, &notFound) {
+		return http.StatusNotFound
+	}
+
+	var validation *newtron.ValidationError
+	if errors.As(err, &validation) {
+		return http.StatusBadRequest
+	}
+
+	var verificationFailed *newtron.VerificationFailedError
+	if errors.As(err, &verificationFailed) {
+		return http.StatusConflict
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return http.StatusGatewayTimeout
+	}
+
+	return http.StatusInternalServerError
+}

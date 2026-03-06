@@ -1,8 +1,5 @@
-name: loopback-setup
-description: |
-  Configure Loopback0 IP on both switches.
-  Uses primitive configure-loopback (not provision), so only touches
-  LOOPBACK_INTERFACE — no wipe of CONFIG_DB, no MAC loss.
+name: loopback
+description: Configure Loopback0 IP on both switches using configure-loopback primitive.
 topology: 2node
 requires: [boot-ssh]
 

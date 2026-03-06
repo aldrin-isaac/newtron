@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,10 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -40,15 +37,18 @@ Services define a complete interface configuration including:
 Examples:
   newtron service list                                        # List all services
   newtron service show customer-l3                            # Show service details
-  newtron -d leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
-  newtron -d leaf1-ny service remove Ethernet0`,
+  newtron -D leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
+  newtron -D leaf1-ny service remove Ethernet0`,
 }
 
 var serviceListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available services",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		services := app.net.ListServices()
+		services, err := app.client.ListServices()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(services)
@@ -62,7 +62,7 @@ var serviceListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "TYPE", "DESCRIPTION")
 
 		for _, name := range services {
-			svc, _ := app.net.GetService(name)
+			svc, _ := app.client.ShowService(name)
 			if svc != nil {
 				t.Row(name, svc.ServiceType, svc.Description)
 			}
@@ -80,7 +80,7 @@ var serviceShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serviceName := args[0]
 
-		svc, err := app.net.GetService(serviceName)
+		svc, err := app.client.ShowService(serviceName)
 		if err != nil {
 			return err
 		}
@@ -95,17 +95,17 @@ var serviceShowCmd = &cobra.Command{
 		fmt.Println()
 
 		// Look up VPN definitions
-		var ipvpnDef *spec.IPVPNSpec
-		var macvpnDef *spec.MACVPNSpec
+		var ipvpnDef *newtron.IPVPNDetail
+		var macvpnDef *newtron.MACVPNDetail
 		if svc.IPVPN != "" {
-			ipvpnDef, _ = app.net.GetIPVPN(svc.IPVPN)
+			ipvpnDef, _ = app.client.ShowIPVPN(svc.IPVPN)
 		}
 		if svc.MACVPN != "" {
-			macvpnDef, _ = app.net.GetMACVPN(svc.MACVPN)
+			macvpnDef, _ = app.client.ShowMACVPN(svc.MACVPN)
 		}
 
 		switch svc.ServiceType {
-		case spec.ServiceTypeEVPNIRB:
+		case newtron.ServiceTypeEVPNIRB:
 			fmt.Println("EVPN IRB Configuration:")
 			if svc.MACVPN != "" {
 				fmt.Printf("  MAC-VPN: %s\n", svc.MACVPN)
@@ -145,7 +145,7 @@ var serviceShowCmd = &cobra.Command{
 				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
 
-		case spec.ServiceTypeEVPNBridged:
+		case newtron.ServiceTypeEVPNBridged:
 			fmt.Println("EVPN Bridged Configuration:")
 			if svc.MACVPN != "" {
 				fmt.Printf("  MAC-VPN: %s\n", svc.MACVPN)
@@ -162,7 +162,7 @@ var serviceShowCmd = &cobra.Command{
 				}
 			}
 
-		case spec.ServiceTypeEVPNRouted:
+		case newtron.ServiceTypeEVPNRouted:
 			fmt.Println("EVPN Routed Configuration:")
 			if svc.IPVPN != "" {
 				fmt.Printf("  IP-VPN: %s\n", svc.IPVPN)
@@ -182,16 +182,16 @@ var serviceShowCmd = &cobra.Command{
 				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
 
-		case spec.ServiceTypeIRB:
+		case newtron.ServiceTypeIRB:
 			fmt.Println("Local IRB Configuration:")
 			if svc.VRFType != "" {
 				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
 			}
 
-		case spec.ServiceTypeBridged:
+		case newtron.ServiceTypeBridged:
 			fmt.Println("Local L2 Configuration:")
 
-		case spec.ServiceTypeRouted:
+		case newtron.ServiceTypeRouted:
 			fmt.Println("Local L3 Configuration:")
 			if svc.VRFType != "" {
 				fmt.Printf("  VRF Type: %s\n", svc.VRFType)
@@ -211,9 +211,6 @@ var serviceShowCmd = &cobra.Command{
 		if svc.QoSPolicy != "" {
 			fmt.Println("\nQoS:")
 			fmt.Printf("  Policy: %s\n", svc.QoSPolicy)
-		} else if svc.QoSProfile != "" {
-			fmt.Println("\nQoS:")
-			fmt.Printf("  Profile: %s (legacy)\n", svc.QoSProfile)
 		}
 
 		return nil
@@ -221,8 +218,8 @@ var serviceShowCmd = &cobra.Command{
 }
 
 var (
-	applyIP  string
-	peerAS   int
+	applyIP string
+	peerAS  int
 )
 
 var serviceApplyCmd = &cobra.Command{
@@ -238,57 +235,45 @@ This operation configures:
 By default, this shows what would change (dry-run).
 Use -x to actually apply the changes.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
-  newtron -d leaf1-ny service apply PortChannel100 transit --ip 192.168.1.1/31 -x`,
+  newtron -D leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
+  newtron -D leaf1-ny service apply PortChannel100 transit --ip 192.168.1.1/31 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		serviceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithService(serviceName).WithInterface(intfName)
-			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
-				return nil, err
-			}
 
-			intf, err := dev.GetInterface(intfName)
-			if err != nil {
-				return nil, fmt.Errorf("interface not found: %w", err)
-			}
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-			// Show derived values
-			svc, _ := app.net.GetService(serviceName)
-			derived, _ := util.DeriveFromInterface(intfName, applyIP, serviceName)
+		svc, _ := app.client.ShowService(serviceName)
+		derived, _ := util.DeriveFromInterface(intfName, applyIP, serviceName)
 
-			fmt.Printf("\nApplying service '%s' to interface %s...\n", serviceName, intfName)
-			fmt.Println("\nDerived configuration:")
-			if applyIP != "" && derived != nil {
-				if derived.NeighborIP != "" {
-					fmt.Printf("  Neighbor IP: %s\n", derived.NeighborIP)
-				}
-				fmt.Printf("  VRF Name: %s\n", derived.VRFName)
+		fmt.Printf("\nApplying service '%s' to interface %s...\n", serviceName, intfName)
+		fmt.Println("\nDerived configuration:")
+		if applyIP != "" && derived != nil {
+			if derived.NeighborIP != "" {
+				fmt.Printf("  Neighbor IP: %s\n", derived.NeighborIP)
 			}
-			if svc != nil {
-				if svc.IngressFilter != "" {
-					fmt.Printf("  Ingress ACL: %s-in\n", derived.ACLPrefix)
-				}
-				if svc.EgressFilter != "" {
-					fmt.Printf("  Egress ACL: %s-out\n", derived.ACLPrefix)
-				}
+			fmt.Printf("  VRF Name: %s\n", derived.VRFName)
+		}
+		if svc != nil {
+			if svc.IngressFilter != "" {
+				fmt.Printf("  Ingress ACL: %s-in\n", derived.ACLPrefix)
 			}
-			fmt.Println()
+			if svc.EgressFilter != "" {
+				fmt.Printf("  Egress ACL: %s-out\n", derived.ACLPrefix)
+			}
+		}
+		fmt.Println()
 
-			cs, err := intf.ApplyService(ctx, serviceName, node.ApplyServiceOpts{
-				IPAddress: applyIP,
-				PeerAS:    peerAS,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("applying service: %w", err)
-			}
-			return cs, nil
-		})
+		return displayWriteResult(app.client.ApplyService(app.deviceName, intfName, serviceName, newtron.ApplyServiceOpts{
+			IPAddress: applyIP,
+			PeerAS:    peerAS,
+		}, execOpts()))
 	},
 }
 
@@ -297,28 +282,19 @@ var serviceRemoveCmd = &cobra.Command{
 	Short: "Remove a service from an interface",
 	Long: `Remove a service from an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny service remove Ethernet0`,
+  newtron -D leaf1-ny service remove Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithInterface(intfName)
-			if err := checkExecutePermission(auth.PermServiceRemove, authCtx); err != nil {
-				return nil, err
-			}
-			intf, err := dev.GetInterface(intfName)
-			if err != nil {
-				return nil, fmt.Errorf("interface not found: %w", err)
-			}
-			cs, err := intf.RemoveService(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("removing service: %w", err)
-			}
-			return cs, nil
-		})
+
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		return displayWriteResult(app.client.RemoveService(app.deviceName, intfName, execOpts()))
 	},
 }
 
@@ -327,27 +303,24 @@ var serviceGetCmd = &cobra.Command{
 	Short: "Get the service bound to an interface",
 	Long: `Get the service bound to an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny service get Ethernet0`,
+  newtron -D leaf1-ny service get Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		ctx := context.Background()
 
-		dev, err := requireDevice(ctx)
-		if err != nil {
-			return err
-		}
-		defer dev.Disconnect()
-
-		intf, err := dev.GetInterface(intfName)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
 
-		svc := intf.ServiceName()
+		detail, err := app.client.ShowInterface(app.deviceName, intfName)
+		if err != nil {
+			return err
+		}
+
+		svc := detail.Service
 		if svc == "" {
 			fmt.Println("(no service bound)")
 			return nil
@@ -356,17 +329,17 @@ Examples:
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(map[string]string{
 				"service": svc,
-				"ip":      strings.Join(intf.IPAddresses(), ", "),
-				"vrf":     intf.VRF(),
+				"ip":      strings.Join(detail.IPAddresses, ", "),
+				"vrf":     detail.VRF,
 			})
 		}
 
 		fmt.Printf("Service: %s\n", svc)
-		if addrs := intf.IPAddresses(); len(addrs) > 0 {
-			fmt.Printf("IP: %s\n", strings.Join(addrs, ", "))
+		if len(detail.IPAddresses) > 0 {
+			fmt.Printf("IP: %s\n", strings.Join(detail.IPAddresses, ", "))
 		}
-		if vrf := intf.VRF(); vrf != "" {
-			fmt.Printf("VRF: %s\n", vrf)
+		if detail.VRF != "" {
+			fmt.Printf("VRF: %s\n", detail.VRF)
 		}
 		return nil
 	},
@@ -380,50 +353,29 @@ var serviceRefreshCmd = &cobra.Command{
 Use this when the service definition (filters, QoS, etc.) has changed in network.json
 and you want to sync the interface configuration to match.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny service refresh Ethernet0 -x`,
+  newtron -D leaf1-ny service refresh Ethernet0 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
-		return withDeviceWrite(func(ctx context.Context, dev *node.Node) (*node.ChangeSet, error) {
-			intf, err := dev.GetInterface(intfName)
-			if err != nil {
-				return nil, fmt.Errorf("interface not found: %w", err)
-			}
-			if !intf.HasService() {
-				return nil, fmt.Errorf("no service bound to interface %s", intfName)
-			}
 
-			serviceName := intf.ServiceName()
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName).WithService(serviceName)
-			if err := checkExecutePermission(auth.PermServiceApply, authCtx); err != nil {
-				return nil, err
-			}
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-			cs, err := intf.RefreshService(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("refreshing service: %w", err)
-			}
+		result, err := app.client.RefreshService(app.deviceName, intfName, execOpts())
+		if err != nil {
+			return err
+		}
 
-			if cs.IsEmpty() {
-				fmt.Println("Service is already in sync with definition. No changes needed.")
-				return nil, nil
-			}
+		if result != nil && result.ChangeCount == 0 {
+			fmt.Println("already in sync")
+			return nil
+		}
 
-			// Show orphaned ACLs that will be cleaned up
-			orphans := dev.GetOrphanedACLs()
-			if len(orphans) > 0 {
-				fmt.Println("Orphaned ACLs to be removed:")
-				for _, acl := range orphans {
-					fmt.Printf("  - %s\n", acl)
-				}
-				fmt.Println()
-			}
-
-			return cs, nil
-		})
+		return displayWriteResult(result, nil)
 	},
 }
 
@@ -458,47 +410,36 @@ Examples:
 		}
 
 		validTypes := map[string]bool{
-			spec.ServiceTypeEVPNIRB:     true,
-			spec.ServiceTypeEVPNBridged: true,
-			spec.ServiceTypeEVPNRouted:  true,
-			spec.ServiceTypeIRB:         true,
-			spec.ServiceTypeBridged:     true,
-			spec.ServiceTypeRouted:      true,
+			newtron.ServiceTypeEVPNIRB:     true,
+			newtron.ServiceTypeEVPNBridged: true,
+			newtron.ServiceTypeEVPNRouted:  true,
+			newtron.ServiceTypeIRB:         true,
+			newtron.ServiceTypeBridged:     true,
+			newtron.ServiceTypeRouted:      true,
 		}
 		if !validTypes[svcCreateType] {
 			return fmt.Errorf("--type must be one of: evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed; got '%s'", svcCreateType)
 		}
 
-		// Check if already exists
-		if _, err := app.net.GetService(serviceName); err == nil {
-			return fmt.Errorf("service '%s' already exists", serviceName)
-		}
+		fmt.Printf("Service: %s (type: %s)\n", serviceName, svcCreateType)
 
-		authCtx := auth.NewContext().WithResource(serviceName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
-		svc := &spec.ServiceSpec{
-			Description:   svcCreateDescription,
-			ServiceType:   svcCreateType,
+		if err := app.client.CreateService(newtron.CreateServiceRequest{
+			Name:          serviceName,
+			Type:          svcCreateType,
 			IPVPN:         svcCreateIPVPN,
 			MACVPN:        svcCreateMACVPN,
 			VRFType:       svcCreateVRFType,
 			QoSPolicy:     svcCreateQoSPolicy,
 			IngressFilter: svcCreateIngressFilter,
 			EgressFilter:  svcCreateEgressFilter,
+			Description:   svcCreateDescription,
+		}, execOpts()); err != nil {
+			return fmt.Errorf("saving service: %w", err)
 		}
-
-		fmt.Printf("Service: %s (type: %s)\n", serviceName, svcCreateType)
 
 		if !app.executeMode {
 			printDryRunNotice()
 			return nil
-		}
-
-		if err := app.net.SaveService(serviceName, svc); err != nil {
-			return fmt.Errorf("saving service: %w", err)
 		}
 
 		fmt.Printf("Created service '%s' (type: %s)\n", serviceName, svcCreateType)
@@ -522,25 +463,15 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		serviceName := args[0]
 
-		// Verify it exists
-		if _, err := app.net.GetService(serviceName); err != nil {
-			return err
-		}
-
-		authCtx := auth.NewContext().WithResource(serviceName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Deleting service: %s\n", serviceName)
+
+		if err := app.client.DeleteService(serviceName, execOpts()); err != nil {
+			return err
+		}
 
 		if !app.executeMode {
 			printDryRunNotice()
 			return nil
-		}
-
-		if err := app.net.DeleteService(serviceName); err != nil {
-			return err
 		}
 
 		fmt.Printf("Deleted service '%s'\n", serviceName)

@@ -1,4 +1,4 @@
-name: interface-properties
+name: interface-props
 description: |
   Self-contained interface property lifecycle on sw1:Ethernet10 (CiscoVS has 32 ports,
   Ethernet10 exists but has no host wired). Tests mtu, admin_status, and description
@@ -7,7 +7,6 @@ topology: 2node
 requires: [boot-ssh]
 
 steps:
-  # Set MTU to 9100
   - name: set-mtu-9100
     action: set-interface
     devices: [switch1]
@@ -25,7 +24,6 @@ steps:
       fields:
         mtu: "9100"
 
-  # Set admin_status down
   - name: set-admin-down
     action: set-interface
     devices: [switch1]
@@ -43,7 +41,6 @@ steps:
       fields:
         admin_status: down
 
-  # Set admin_status back up
   - name: set-admin-up
     action: set-interface
     devices: [switch1]
@@ -61,7 +58,6 @@ steps:
       fields:
         admin_status: up
 
-  # Set description
   - name: set-description
     action: set-interface
     devices: [switch1]

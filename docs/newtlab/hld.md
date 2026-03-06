@@ -1,108 +1,167 @@
 # newtlab — High-Level Design
 
-For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see
+[Design Principles](../DESIGN_PRINCIPLES.md).
 
-## 1. Purpose
+---
+
+## 1. Purpose and Boundaries
 
 newtlab realizes network topologies as connected QEMU virtual machines,
 wired together through **userspace socket bridges** — not kernel networking.
 It reads newtron's spec files (`topology.json`, `platforms.json`,
-`profiles/*.json`) and brings the topology to life — deploying VMs
-(primarily SONiC) and wiring them across one or more servers. No root,
-no Linux bridges, no veth pairs, no network namespaces, no Docker.
+`profiles/*.json`) and brings the topology to life: deploying VMs (primarily
+SONiC), wiring them across one or more servers, and patching device profiles
+so newtron can connect. No root, no Linux bridges, no veth pairs, no Docker.
 
-newtlab doesn't define the topology or touch device configuration — it
-makes the topology physically exist. After deployment, it patches device
-profiles with SSH and console ports so newtron can connect.
+newtlab occupies a specific position in the three-tool model:
+
+- **newtlab** makes the topology physically exist — VMs, networking, boot
+  patches, profile patching. It does not define the topology (that's the spec
+  files) or touch device configuration (that's newtron).
+- **newtron** configures devices — CONFIG_DB writes, BGP, EVPN, services,
+  ACLs. It reads profiles that newtlab has patched with SSH ports but knows
+  nothing about QEMU or bridges.
+- **newtrun** orchestrates end-to-end test scenarios. It calls newtlab for
+  deployment and newtron for device operations, but implements neither.
+
+The boundary between newtlab and newtron is **profile patching**. newtlab
+writes `ssh_port`, `console_port`, and `mgmt_ip` into device profiles;
+newtron reads those profiles to connect. The two programs communicate through
+files — no shared libraries, no IPC, no API calls between them.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        Shared Spec Directory                         │
-│  specs/                                                              │
-│  ├── topology.json    ← newtlab reads: devices, links, newtlab settings │
-│  ├── platforms.json   ← newtlab reads: VM defaults (image, memory)    │
-│  ├── profiles/*.json  ← newtlab reads/writes: VM overrides, ports     │
-│  └── network.json     ← newtron reads: services, VPNs, filters      │
+│                        Shared Spec Directory                       │
+│  specs/                                                            │
+│  ├── topology.json    ← newtlab reads: devices, links, settings   │
+│  ├── platforms.json   ← newtlab reads: VM defaults (image, memory) │
+│  ├── profiles/*.json  ← newtlab reads+writes: VM overrides, ports │
+│  └── network.json     ← newtron reads: services, VPNs, filters   │
 └─────────────────────────────────────────────────────────────────────┘
-         │                                    │
+         │ reads/writes                       │ reads
          ▼                                    ▼
 ┌─────────────────────┐            ┌─────────────────────┐
-│       newtlab         │            │      newtron        │
-│                     │            │                     │
-│ • Deploy QEMU VMs   │            │ • Provision devices │
-│ • Socket networking │            │ • Write CONFIG_DB   │
+│       newtlab       │            │      newtron        │
+│                     │  profiles  │                     │
+│ • Deploy QEMU VMs   │───────────→│ • Provision devices │
+│ • Socket networking │  (files)   │ • Write CONFIG_DB   │
 │ • Patch profiles    │            │ • BGP, EVPN, ACLs   │
 └─────────────────────┘            └─────────────────────┘
          ▲                                    ▲
          │            ┌──────────┐            │
          └────────────│ newtrun  │────────────┘
-                      │ (E2E)   │
+                      │ (E2E)    │
                       └──────────┘
 ```
 
-This is a deliberate alternative to kernel-level wiring (veth pairs, Linux
-bridges, tc rules). A userspace bridge knows exactly how many bytes crossed
-each link, because it handles every frame. Rate monitoring, tap-to-wireshark,
-fault injection — all are straightforward extensions of the bridge loop.
-Kernel networking is powerful but opaque; when a link breaks, you debug
-iptables rules and bridge state. When a newtlink bridge has a problem, you
-look at one process.
+**Benefits of the newtlab approach:**
 
-Benefits:
-- **Observable** — per-link byte counters, session state, and bridge stats aggregated across hosts
-- **Debuggable** — one userspace process per host, not kernel bridge/iptables state
-- **Multi-host native** — cross-host links work identically to local links via TCP
-- **Unprivileged** — no root, no kernel modules, no Docker
-- **No startup ordering** — both VMs connect outbound to newtlink
-- **Multi-platform** — VS, VPP, Cisco 8000, vendor images with per-platform boot patches
-
----
-
-## 2. Workflow
-
-### 2.1 Deploy
-
-```bash
-newtlab deploy -S specs/
-```
-
-### 2.2 Interact
-
-```bash
-newtlab status
-newtlab ssh leaf1
-newtlab console spine1
-```
-
-### 2.3 Tear Down
-
-```bash
-newtlab destroy
-```
+- **Observable** — per-link byte counters, session state, and bridge stats
+  aggregated across hosts. Every frame passes through userspace; nothing is
+  invisible.
+- **Debuggable** — one userspace process per host, not kernel bridge/iptables
+  state. When a link breaks, you look at one process.
+- **Multi-host native** — cross-host links work identically to local links
+  via TCP sockets.
+- **Unprivileged** — no root, no kernel modules, no Docker.
+- **No startup ordering** — both VMs connect outbound to the bridge; neither
+  needs to start first.
+- **Multi-platform** — VS, VPP, Cisco 8000, vendor images, each with
+  platform-specific boot patches applied at deploy time.
 
 ---
 
-## 3. Spec Files (Shared with newtron)
+## 2. Architecture
 
-newtlab reads from the same spec directory as newtron. No new files required.
+A deployed newtlab topology consists of three layers: the spec directory
+(input), the newtlab runtime (QEMU processes and bridge workers), and the
+patched profiles (output that enables newtron).
 
-### 3.1 topology.json
+```
+Deployed Topology: 2 switches, 1 link
 
-newtlab reads `devices` and `links` (same as newtron), plus an optional `newtlab`
-section for orchestration settings:
+                    newtlink Bridge Process
+                    ┌─────────────────────────────────┐
+                    │  worker: spine1↔leaf1            │
+                    │  :20000 (A-side)  :20001 (Z-side)│
+                    │     ▲                  ▲         │
+                    │     │ TCP connect      │         │
+                    └─────┼──────────────────┼─────────┘
+                          │                  │
+              ┌───────────┴──┐         ┌─────┴────────────┐
+              │  spine1 QEMU │         │  leaf1 QEMU      │
+              │              │         │                   │
+              │  mgmt: :40000│         │  mgmt: :40001    │
+              │  cons: :30000│         │  cons: :30001    │
+              │  overlay disk│         │  overlay disk    │
+              └──────────────┘         └──────────────────┘
+                          │                  │
+                          ▼                  ▼
+              ┌──────────────────────────────────────────┐
+              │  State: ~/.newtlab/labs/<name>/           │
+              │  state.json, qemu/*.pid, disks/, logs/   │
+              └──────────────────────────────────────────┘
+
+Spec Directory (input)          Patched Profiles (output)
+┌──────────────────────┐        ┌──────────────────────┐
+│ topology.json        │ deploy │ profiles/spine1.json  │
+│ platforms.json       │───────→│   + ssh_port: 40000   │→ newtron reads
+│ profiles/*.json      │  patch │   + console_port: ... │   to connect
+│ network.json         │        │   + mgmt_ip: 127...   │   via SSH tunnel
+└──────────────────────┘        └──────────────────────┘
+```
+
+The diagram shows the key runtime relationships: both VMs connect *outbound*
+to the bridge worker (not to each other), the bridge owns the link, and each
+VM exposes management (SSH forwarding) and console (serial TCP) ports. The
+state directory tracks everything needed for destroy, stop/start, and status.
+
+**Component relationships:**
+
+- **newtlab** reads spec files, creates QEMU processes and bridge workers,
+  writes patched profiles, and maintains state.
+- **newtlink** is the bridge agent — a set of goroutines within the newtlab
+  bridge process. Each link gets one worker that bridges Ethernet frames
+  between two TCP listeners. The bridge process starts before VMs (workers
+  must be listening when QEMU tries to connect at boot).
+- **newtron** is invoked as a sibling binary (`newtron provision`) during
+  the optional provisioning step. newtlab finds it adjacent to its own
+  binary or on PATH.
+- **State directory** (`~/.newtlab/labs/<name>/`) holds everything needed to
+  manage the lab after deployment: PIDs, overlay disks, logs, bridge config,
+  and `state.json`.
+
+---
+
+## 3. Spec File Contract
+
+newtlab shares a spec directory with newtron. Each tool reads the files it
+needs; newtlab also writes to profiles after deployment. No new files are
+required — the same directory structure serves both tools.
+
+**What newtlab reads:**
+
+| File | What newtlab uses |
+|------|-------------------|
+| `topology.json` | `devices` (names, interfaces), `links` (endpoint pairs), `newtlab` section (port bases, servers) |
+| `platforms.json` | VM defaults per platform: image path, memory, CPUs, NIC driver, interface map, credentials, boot timeout, dataplane type, image release |
+| `profiles/<device>.json` | Per-device overrides: platform selection, SSH credentials, VM resource overrides, host pinning (`vm_host`) |
+
+newtlab reads `devices` and `links` from the same `topology.json` that
+newtron reads, plus an optional `newtlab` section for orchestration settings:
 
 ```json
 {
-  "version": "1.0",
   "devices": {
     "spine1": {
       "interfaces": {
-        "Ethernet0": { "link": "leaf1:Ethernet0", "service": "fabric-underlay", "ip": "10.1.0.0/31" }
+        "Ethernet0": { "link": "leaf1:Ethernet0", "ip": "10.1.0.0/31" }
       }
     },
     "leaf1": {
       "interfaces": {
-        "Ethernet0": { "link": "spine1:Ethernet0", "service": "fabric-underlay", "ip": "10.1.0.1/31" }
+        "Ethernet0": { "link": "spine1:Ethernet0", "ip": "10.1.0.1/31" }
       }
     }
   },
@@ -114,240 +173,177 @@ section for orchestration settings:
     "console_port_base": 30000,
     "ssh_port_base": 40000,
     "servers": [
-      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 },
-      { "name": "server-b", "address": "192.168.1.11", "max_nodes": 4 }
+      { "name": "server-a", "address": "192.168.1.10", "max_nodes": 4 }
     ]
   }
 }
 ```
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `link_port_base` | 20000 | Base port for socket links |
-| `console_port_base` | 30000 | Base port for serial consoles |
-| `ssh_port_base` | 40000 | Base port for SSH forwarding |
-| `servers` | (none) | Server pool for auto-placement (see §5.7) |
-| `hosts` | (none) | Legacy host name → IP mapping (use `servers` instead) |
+The `newtlab` section is the only part of `topology.json` that newtron
+ignores. Everything else — devices, links, interface definitions — is shared.
 
-### 3.2 platforms.json
+**What newtlab writes** (after deployment):
 
-newtlab reads VM defaults from platform definitions. Multiple platforms can be
-defined to support different SONiC images:
+| Profile field | Value | Purpose |
+|---------------|-------|---------|
+| `mgmt_ip` | `127.0.0.1` (local) or host IP (remote) | Where newtron connects |
+| `ssh_port` | Allocated from `ssh_port_base` | SSH forwarded port for this VM |
+| `console_port` | Allocated from `console_port_base` | Serial console TCP port |
+| `MAC` | Deterministic from device name | Management NIC MAC address |
 
-```json
-{
-  "platforms": {
-    "sonic-vs": {
-      "hwsku": "Force10-S6000",
-      "description": "SONiC Virtual Switch (control plane only)",
-      "port_count": 32,
-      "default_speed": "40000",
-      "vm_image": "~/.newtlab/images/sonic-vs.qcow2",
-      "vm_memory": 4096,
-      "vm_cpus": 2,
-      "vm_nic_driver": "e1000",
-      "vm_interface_map": "stride-4",
-      "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
-      "vm_boot_timeout": 180
-    },
-    "sonic-vpp": {
-      "hwsku": "Force10-S6000",
-      "description": "SONiC with VPP dataplane (full forwarding)",
-      "port_count": 32,
-      "default_speed": "40000",
-      "vm_image": "~/.newtlab/images/sonic-vpp.qcow2",
-      "vm_memory": 4096,
-      "vm_cpus": 4,
-      "vm_nic_driver": "virtio-net-pci",
-      "vm_interface_map": "sequential",
-      "vm_cpu_features": "+sse4.2",
-      "vm_credentials": { "user": "admin", "pass": "YourPaSsWoRd" },
-      "vm_boot_timeout": 180,
-      "dataplane": "vpp",
-      "vm_image_release": "202405"
-    },
-    "sonic-cisco-8000": {
-      "hwsku": "cisco-8101-p4-32x100-vs",
-      "description": "Cisco 8000 SONiC NGDP image",
-      "port_count": 32,
-      "default_speed": "100000",
-      "vm_image": "~/.newtlab/images/sonic-cisco.qcow2",
-      "vm_memory": 8192,
-      "vm_cpus": 4,
-      "vm_nic_driver": "e1000",
-      "vm_interface_map": "stride-4",
-      "vm_credentials": { "user": "cisco", "pass": "cisco123" },
-      "vm_boot_timeout": 300
-    }
-  }
-}
-```
+MAC addresses are derived from a SHA256 hash of the device name, using the
+QEMU OUI prefix `52:54:00`. The same device name always produces the same
+MAC, so ARP caches and DHCP leases survive stop/start and redeployment.
+For switch devices, all data NICs share the management MAC — SONiC requires
+a uniform system MAC across all interfaces.
 
-#### VM-Specific Platform Fields
+On destroy, newtlab restores the original `mgmt_ip` and removes the runtime
+fields — profiles return to their pre-deploy state.
 
-| Field | Description |
-|-------|-------------|
-| `vm_image` | Path to QCOW2 disk image |
-| `vm_memory` | Memory in MB (default: 4096) |
-| `vm_cpus` | Number of vCPUs (default: 2) |
-| `vm_nic_driver` | QEMU NIC driver: `e1000`, `virtio-net-pci` |
-| `vm_interface_map` | How NIC index maps to SONiC interface names |
-| `vm_cpu_features` | QEMU CPU feature flags (e.g., `+sse4.2` for VPP) |
-| `vm_credentials` | Default login credentials |
-| `vm_boot_timeout` | Seconds to wait for SSH readiness |
-| `dataplane` | Dataplane type: `"vpp"`, `"barefoot"`, `""` (none/vs) |
-| `vm_image_release` | Image release identifier — selects release-specific boot patches |
+**Interface maps.** Different SONiC platforms map QEMU NIC indices to
+interface names differently. The platform's `vm_interface_map` field
+controls this mapping:
 
-#### Interface Maps
+| Map | NIC 1 | NIC 2 | NIC 3 | NIC 4 | Used by |
+|-----|-------|-------|-------|-------|---------|
+| `stride-4` | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | VS (built-in default) |
+| `sequential` | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | VPP, CiscoVS |
+| `linux` | eth1 | eth2 | eth3 | eth4 | Alpine hosts |
 
-Different SONiC images map QEMU NIC index to SONiC interface names differently:
+NIC 0 is always the management interface (`eth0`). newtlab uses the
+interface map to determine which QEMU NIC index carries each topology link.
 
-| Map Type | NIC 1 | NIC 2 | NIC 3 | NIC 4 | Notes |
-|----------|-------|-------|-------|-------|-------|
-| `sequential` | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | VPP |
-| `stride-4` | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | VS, Cisco |
-| `custom` | (explicit) | | | | Vendor-specific |
+**Resolution order** for VM configuration (first non-empty wins):
 
-NIC 0 is always management.
+1. Profile override (`profiles/<device>.json`)
+2. Platform default (`platforms.json`)
+3. Built-in default (4096 MB, 2 CPUs, `e1000`, `stride-4`)
 
-### 3.3 profiles/*.json
+Credentials resolve: profile `ssh_user`/`ssh_pass` → platform
+`vm_credentials`. The LLD documents the complete resolution table with every
+field.
 
-newtlab reads per-device overrides and writes runtime ports after deployment:
-
-```json
-{
-  "mgmt_ip": "127.0.0.1",
-  "loopback_ip": "10.0.0.1",
-  "zone": "amer",
-  "platform": "sonic-vpp",
-  "ssh_user": "admin",
-  "ssh_pass": "YourPaSsWoRd",
-  "evpn": {
-    "peers": ["10.0.0.2", "10.0.0.3"],
-    "route_reflector": true
-  },
-  "vm_memory": 8192,
-  "vm_host": "server-a",
-  "ssh_port": 40000,
-  "console_port": 30000
-}
-```
-
-| Field | Read/Write | Description |
-|-------|------------|-------------|
-| `platform` | Read | Platform name (for VM defaults) |
-| `ssh_user`, `ssh_pass` | Read | SSH credentials (overrides platform) |
-| `vm_image` | Read | Override platform's vm_image |
-| `vm_memory` | Read | Override platform's vm_memory |
-| `vm_cpus` | Read | Override platform's vm_cpus |
-| `vm_host` | Read | Host to run this VM (multi-host) |
-| `mgmt_ip` | Write | Set to 127.0.0.1 (or host IP) |
-| `ssh_port` | Write | Assigned SSH forwarded port |
-| `console_port` | Write | Assigned console port |
+**Relationship to newtron:** newtron reads profiles and `network.json` but
+never reads `topology.json` or `platforms.json`. newtlab reads topology and
+platforms but never reads `network.json`. newtlab imports newtron's spec
+types for reading shared files, but has no dependency on newtron's device
+operations or network model — the spec directory and the patched profiles
+are the only coupling points.
 
 ---
 
-## 4. Resolution Order
+## 4. Userspace Socket Networking
 
-VM configuration resolves (first non-empty wins):
+The link networking model is the single most important architectural decision
+in newtlab. Every other choice — multi-host distribution, observability,
+unprivileged operation — flows from it.
 
-1. **Profile override** (`profiles/<device>.json`)
-2. **Platform default** (`platforms.json`)
-3. **Built-in default** (4096 MB, 2 CPUs, `e1000`, `stride-4`, error if no image)
+### Why Not Kernel Networking
 
-Credentials resolve:
-1. Profile `ssh_user`/`ssh_pass`
-2. Platform `vm_credentials`
+The standard approach for lab networking is kernel-level: Linux bridges, veth
+pairs, tc rules, iptables. This works, but it has properties that make it a
+poor fit for a lab orchestrator:
 
----
+- **Requires root.** Creating bridges, veth pairs, and network namespaces is a
+  privileged operation. Running a SONiC lab shouldn't require root on the host.
+- **Opaque.** When a link breaks, you debug bridge state, iptables rules, and
+  tc configurations across multiple kernel subsystems. The data path is
+  invisible — the kernel forwards frames without any userspace insight into
+  what's happening.
+- **Multi-host divergence.** Local links use bridges; cross-host links need
+  tunnels (VXLAN, GRE, or userspace proxies). The two paths have different
+  failure modes, different debugging, and different setup.
 
-## 5. Link Networking — newtlink Bridge Agent
+Userspace socket bridges avoid all three: no root (TCP sockets are
+unprivileged), full visibility (every frame passes through a goroutine with
+counters), and uniform local/remote behavior (TCP sockets work the same way
+regardless of whether the peer is on the same host or across a network).
 
-### 5.1 How It Works
+### The newtlink Bridge Model
 
-Each link in `topology.json` is realized by a **newtlink bridge worker** — a
-goroutine that listens on two TCP ports (one per endpoint) and bridges
-Ethernet frames between them. Both QEMU VMs connect *outbound* to newtlink;
-newtlink never connects to QEMU.
+Each link in `topology.json` becomes a **newtlink bridge worker** — a
+goroutine that listens on two TCP ports (one per endpoint) and copies
+Ethernet frames between them. Both QEMU VMs connect *outbound* to the
+bridge; the bridge never connects to QEMU.
 
 ```
-Link: { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0" }
+Link: spine1:Ethernet0 ↔ leaf1:Ethernet0
 
-newtlink worker (per link):
-  Listen on :20000  (A-side port)
-  Listen on :20001  (Z-side port)
-  Accept one connection on each
-  Bridge frames: A↔Z
-
-spine1 QEMU:
-  -netdev socket,id=eth1,connect=127.0.0.1:20000
-  -device <nic_driver>,netdev=eth1
-
-leaf1 QEMU:
-  -netdev socket,id=eth1,connect=127.0.0.1:20001
-  -device <nic_driver>,netdev=eth1
+newtlink bridge worker:
+  Listen :20000  (A-side)        Listen :20001  (Z-side)
+       ▲                              ▲
+       │ connect                      │ connect
+       │                              │
+  spine1 QEMU                    leaf1 QEMU
+  -netdev socket,               -netdev socket,
+   connect=127.0.0.1:20000       connect=127.0.0.1:20001
 ```
 
-newtlab uses the platform's `vm_interface_map` to determine which QEMU NIC index
-corresponds to each SONiC interface name.
+The worker accepts one connection on each side, then enters a bidirectional
+copy loop. If either VM disconnects (reboot, stop/start), the worker loops
+back to re-accept — surviving VM restarts without newtlab intervention.
 
-#### Why newtlink instead of direct QEMU sockets?
+### Why newtlink Instead of Direct QEMU Sockets
 
 QEMU's built-in `-netdev socket` supports a listen/connect model where one VM
 listens and the other connects. This has three problems:
 
 1. **Startup ordering** — the listen-side VM must start before the connect-side
-   VM, creating a dependency graph that complicates deployment.
+   VM, creating a dependency graph that complicates parallel deployment.
 2. **Asymmetry** — each side of a link uses different QEMU arguments (listen vs
    connect), so link wiring must track which side is which.
 3. **Cross-host divergence** — local links use `127.0.0.1` while cross-host
-   links need the remote host's IP, requiring different implementations.
+   links need the remote host's IP, requiring different code paths.
 
-newtlink eliminates all three: both VMs always `connect` to a known local port,
-newtlink handles the bridging, and the same model works identically for local
-and cross-host links (newtlink just listens on `0.0.0.0` instead of `127.0.0.1`
-for cross-host endpoints).
+newtlink eliminates all three: both VMs always `connect` to a known port,
+newtlink handles the bridging, and the same model works for local and
+cross-host links. For cross-host endpoints, newtlink just listens on
+`0.0.0.0` instead of `127.0.0.1`.
 
-### 5.2 Port Allocation
+### Cross-Host Links
 
-Each link consumes **two** ports (one per endpoint):
-
-```
-Link ports:      link_port_base + (link_index * 2)         A-side
-                 link_port_base + (link_index * 2) + 1     Z-side
-Console ports:   console_port_base + node_index            (30000, 30001, ...)
-SSH ports:       ssh_port_base + node_index                (40000, 40001, ...)
-```
-
-Example for two links:
-```
-Link 0: A-side :20000, Z-side :20001
-Link 1: A-side :20002, Z-side :20003
-```
-
-### 5.3 Cross-Host Links
-
-For cross-host links, the newtlink worker runs on one of the two hosts (the
-A-side host by convention). The A-side port listens on `127.0.0.1` (local VM
-connects to it), while the Z-side port listens on `0.0.0.0` (remote VM connects
-across the network).
+For cross-host links, the bridge worker runs on one of the two endpoint hosts
+(assigned by the worker placement algorithm — see §5). The local-side port
+listens on `127.0.0.1`; the remote-side port listens on `0.0.0.0` so the
+remote VM can connect across the network.
 
 ```
-Link: spine1 (server-a) ↔ leaf1 (server-b)
+spine1 (server-a) ↔ leaf1 (server-b)
 
 newtlink on server-a:
-  Listen 127.0.0.1:20000  (spine1 connects locally)
-  Listen 0.0.0.0:20001    (leaf1 connects from server-b)
+  127.0.0.1:20000  ← spine1 connects locally
+  0.0.0.0:20001    ← leaf1 connects from server-b
 
-spine1 QEMU (server-a):
-  -netdev socket,id=eth1,connect=127.0.0.1:20000
-
-leaf1 QEMU (server-b):
-  -netdev socket,id=eth1,connect=192.168.1.10:20001
+leaf1 QEMU on server-b:
+  -netdev socket,connect=192.168.1.10:20001
 ```
 
-The `servers` list in `topology.json` provides IP addresses (the legacy
-`hosts` map is also supported):
+A cross-host link always costs exactly one network hop regardless of which
+endpoint host runs the worker — one side is local, the other crosses the
+network. Worker placement is about load balancing, not latency.
+
+### Observability
+
+Every bridge worker maintains per-link counters: bytes A→Z, bytes Z→A,
+session count, and connection state — because every Ethernet frame passes
+through the worker's copy loop.
+
+Each bridge process exposes a stats endpoint. The local bridge listens on
+both a Unix socket (fast path for `newtlab status` on the same host) and a
+TCP port; remote bridges listen on TCP only. `newtlab status` queries all
+bridge processes across all hosts and merges their counters into a single
+table — giving a topology-wide view of traffic flow and link health without
+any central collector.
+
+---
+
+## 5. Multi-Host Deployment
+
+Topologies larger than a single server can support are distributed across a
+**server pool** — a list of servers defined in `topology.json` with
+addresses and optional capacity limits.
+
+### Server Pool Configuration
 
 ```json
 {
@@ -360,181 +356,23 @@ The `servers` list in `topology.json` provides IP addresses (the legacy
 }
 ```
 
-Profile can optionally pin a VM to a specific host:
-```json
-{ "vm_host": "server-a" }
-```
+Each server has a name (for identification and host pinning), an IP address
+(for cross-host connections), and an optional `max_nodes` capacity limit.
 
-Unpinned VMs are auto-placed across the server pool (see §5.7).
+### Node Placement
 
-For same-host links, both ports listen on `127.0.0.1`.
+Nodes are assigned to servers using a **spread algorithm** that minimizes
+the maximum load:
 
-### 5.4 Worker Placement (Multi-Host)
-
-Each newtlink worker must run on one of its link's two endpoint hosts — never
-a third host, which would add an unnecessary network hop. A cross-host link
-always costs exactly one network hop regardless of which endpoint host runs the
-worker (one side is local, the other crosses the network). So placement is
-about **load balancing**, not latency.
-
-In multi-host mode, each host runs `newtlab deploy --host X` independently.
-All instances read the same `topology.json`, so the placement algorithm must
-be **deterministic from the topology alone** — no coordination needed.
-
-**Placement rules:**
-
-1. **Local link** (both VMs on same host): worker runs on that host.
-2. **Cross-host link**: assigned to the endpoint host with fewer cross-host
-   workers so far (greedy, iterating links in sorted order). Ties broken by
-   host name sort order.
-
-Since every host computes the same sorted link order and the same greedy
-assignment, each host's newtlab instance knows exactly which cross-host
-link workers it owns — and starts only those.
-
-**Example:** 2 spines on host-A, 4 leaves on host-B, full-mesh links:
-
-```
-Link 0: spine1↔leaf1  → host-A has 0, host-B has 0 → assign host-A (tie, A < B)
-Link 1: spine1↔leaf2  → host-A has 1, host-B has 0 → assign host-B
-Link 2: spine1↔leaf3  → host-A has 1, host-B has 1 → assign host-A
-Link 3: spine1↔leaf4  → host-A has 2, host-B has 1 → assign host-B
-Link 4: spine2↔leaf1  → host-A has 2, host-B has 2 → assign host-A
-Link 5: spine2↔leaf2  → host-A has 3, host-B has 2 → assign host-B
-Link 6: spine2↔leaf3  → host-A has 3, host-B has 3 → assign host-A
-Link 7: spine2↔leaf4  → host-A has 4, host-B has 3 → assign host-B
-Result: 4 workers on host-A, 4 on host-B (perfectly balanced)
-```
-
-For pairwise balancing with 3+ hosts, the same greedy rule applies
-independently to each host pair. Each cross-host link only considers the two
-endpoint hosts — the global count doesn't matter since traffic is pairwise.
-
-### 5.5 Multi-Host Bridge Distribution
-
-In single-host mode, all bridge workers run in one process. In multi-host
-mode, each host runs its own bridge process for the links assigned to it
-by the worker placement algorithm (§5.4).
-
-```
-2-host topology:
-
-server-a                         server-b
-┌────────────────────┐           ┌────────────────────┐
-│ Bridge process     │           │ Bridge process     │
-│  • spine1↔leaf1    │           │  • spine1↔leaf2    │
-│  • spine2↔leaf1    │           │  • spine2↔leaf2    │
-│                    │           │                    │
-│ Stats TCP :19999   │           │ Stats TCP :19998   │
-│ Stats Unix sock    │           │                    │
-└────────────────────┘           └────────────────────┘
-```
-
-**Bridge process lifecycle:**
-- **Local host:** spawned as a child process via `newtlab bridge <lab>`
-- **Remote host:** started via SSH: `nohup newtlab bridge <lab> &`
-- **Bridge config:** each host's bridge process reads `bridge.json` from
-  `~/.newtlab/labs/<name>/bridge.json`, containing only its assigned links
-
-**Stats port allocation:** Each bridge process exposes a TCP stats endpoint
-for remote queries, allocated from the link port space counting downward:
-
-```
-Stats ports:     link_port_base - 1 - host_index
-                 (where host_index = 0 for local, 1 for first remote, etc.)
-
-Example with link_port_base=20000 and 2 hosts:
-  Local bridge:   127.0.0.1:19999   (also has Unix socket for local queries)
-  Remote bridge:  0.0.0.0:19998     (TCP only)
-```
-
-The local bridge also listens on a Unix socket (`bridge.sock`) for backward
-compatibility with single-host deployments.
-
-**Stats aggregation:** `newtlab status <topology>` queries all bridge processes
-and merges their counters into a single table. Local bridges are queried
-via Unix socket; remote bridges via TCP.
-
-### 5.6 Platform Boot Patches
-
-Different SONiC images have platform-specific initialization quirks that must
-be patched after boot but before provisioning. Rather than hardcoding per-platform
-Go code, newtlab uses a **declarative boot patch framework**: JSON descriptors
-paired with Go templates.
-
-**Patch directory structure:**
-
-```
-patches/
-└── vpp/
-    ├── always/                      # Applied to every VPP image
-    │   ├── 01-disable-factory-hook.json
-    │   └── 02-port-config.json
-    └── 202405/                      # Applied only when vm_image_release = "202405"
-        └── 01-specific-fix.json
-```
-
-**Resolution order:**
-1. `patches/<dataplane>/always/*.json` — always applied for this dataplane
-2. `patches/<dataplane>/<release>/*.json` — applied only when `vm_image_release` matches
-
-Within each directory, patches are applied in filename sort order (hence the numeric prefix convention).
-
-**Template variables** are computed from what newtlab already knows — QEMU NIC
-count, deterministic PCI addresses, platform HWSKU, port speed. No SSH-based
-discovery inside the VM is needed.
-
-**Each patch descriptor** specifies:
-- `pre_commands` — shell commands to run before applying files (e.g., wait for a process to exit)
-- `disable_files` — paths to rename to `.disabled` (e.g., broken init hooks)
-- `files` — Go templates rendered with patch variables and uploaded to the VM
-- `redis` — Go templates rendered into redis-cli commands for CONFIG_DB writes
-- `post_commands` — shell commands to run after (e.g., restart services)
-
-**Adding support for a new platform** requires no Go code changes — create a
-directory under `patches/` with descriptors and templates. When an upstream
-image fixes a bug, delete the release-specific patch directory.
-
-### 5.7 Server Pool Auto-Placement
-
-Deploying large topologies (20+ nodes) across multiple servers requires
-assigning each node to a host. Manually setting `vm_host` in every profile is
-tedious and error-prone. The **server pool** automates this.
-
-**Configuration:** Define a `servers` list in the `newtlab` section of
-`topology.json`:
-
-```json
-{
-  "newtlab": {
-    "servers": [
-      { "name": "server-a", "address": "10.0.0.1", "max_nodes": 4 },
-      { "name": "server-b", "address": "10.0.0.2", "max_nodes": 4 }
-    ]
-  }
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Server name (used for `vm_host` pinning and state) |
-| `address` | Yes | IP address (replaces `hosts` map) |
-| `max_nodes` | No | Max VMs on this server (0 = unlimited) |
-
-**Placement algorithm — spread (minimize maximum load):**
-
-1. **Phase 1 (pinned nodes):** Nodes with `vm_host` set in their profile are
-   validated against the server list and count toward capacity. Error if pinned
-   to an unknown server or the server is over capacity.
-
-2. **Phase 2 (unpinned nodes):** Remaining nodes are placed one at a time onto
-   the server with the fewest nodes so far. Ties broken by server name sort
-   order. Error if no server has capacity.
+1. **Pinned nodes first.** Nodes with `vm_host` in their profile are placed
+   on the named server and count toward its capacity.
+2. **Unpinned nodes second.** Each remaining node goes to the server with
+   the fewest nodes so far. Ties broken by server name.
 
 Iteration is deterministic (sorted by device name) — given the same
 `topology.json`, every host computes the same placement independently. This
-is required for `--host X` deploys where each server runs `newtlab deploy`
-without coordination.
+is essential because each server runs `newtlab deploy --host X` without
+coordination.
 
 **Example:** 6 nodes, 2 servers (max 4 each), `leaf1` pinned to `server-a`:
 
@@ -548,99 +386,322 @@ Unpinned:  leaf2 → server-b (a=1, b=0 → pick b)
 Result:    server-a: 3, server-b: 3
 ```
 
-**Backward compatibility:** If no `servers` field is present, behavior is
-identical to before — `hosts` map is used directly, and `vm_host` must be
-set manually in each profile.
+If no `servers` field is present, newtlab falls back to the legacy `hosts`
+map, and `vm_host` must be set manually in each profile.
 
-### 5.8 Virtual Hosts with VM Coalescing
+### The --host Model
 
-Topologies can include first-class virtual hosts (e.g., `host1`, `host2`) defined as devices with platform `alpine-host` (which has `device_type: "host"`). Unlike switches, which each get their own QEMU instance, **multiple host devices are coalesced into a shared VM** to reduce resource overhead.
+In multi-host mode, each server runs `newtlab deploy --host <name>`
+independently. The key insight: every instance reads the same spec files and
+computes the *full* topology — placement, bridge assignments, port
+allocation — then acts only on its own portion. Because the algorithms are
+deterministic (sorted inputs, greedy with alphabetical tie-breaking), every
+host arrives at the same answer independently. No coordination protocol, no
+leader election, no shared state. The topology spec file *is* the
+coordination mechanism.
 
-**VM coalescing model:**
-- All host devices in the topology are grouped by platform
-- Each group shares a single QEMU VM (e.g., `hostvm-0`)
-- Inside the VM, each host gets its own **network namespace** created at deploy time
-- Namespaces are pre-configured with veth pairs for connectivity
-- Host IPs are auto-derived from switch-side interface IPs (or manually specified via `host_ip`/`host_gateway` in the device profile)
+### Bridge Worker Placement
 
-**Namespace provisioning** (`provisionHostNamespaces()`):
-- For each host device (e.g., `host1`, `host2`):
-  - Create namespace: `ip netns add host1`
-  - Create veth pair: `veth-host1` (parent) ↔ `eth1` (inside namespace)
-  - Assign IP address from topology or profile
-  - Set default route via `host_gateway` (if specified)
-- All network namespaces share the parent VM's management interface (eth0)
+Each bridge worker must run on one of its link's two endpoint hosts — never
+a third host. For cross-host links, the worker is assigned to the endpoint
+host with fewer cross-host workers so far (greedy, iterating links in sorted
+order, ties broken alphabetically). Since every host computes the same
+sorted order and the same greedy assignment, each instance knows exactly
+which workers it owns.
 
-**SSH transparency:**
-- `newtlab ssh host1` automatically enters the correct namespace
-- Implementation: SSH to parent VM (`hostvm-0`), then `ip netns exec host1 sh`
-- From the user's perspective, each host appears as a separate SSH target
+**Example:** 2 spines on host-A, 4 leaves on host-B, full-mesh links:
 
-**Status display:**
-- `newtlab status` shows a TYPE column: `switch`, `host-vm`, `vhost:hostvm-0/host1`
-- Virtual hosts (vhosts) display their parent VM and namespace
-- The parent VM (`hostvm-0`) appears once as type `host-vm`
+```
+Link 0: spine1↔leaf1  → A has 0, B has 0 → assign A (tie, A < B)
+Link 1: spine1↔leaf2  → A has 1, B has 0 → assign B
+Link 2: spine1↔leaf3  → A has 1, B has 1 → assign A
+Link 3: spine1↔leaf4  → A has 2, B has 1 → assign B
+Link 4: spine2↔leaf1  → A has 2, B has 2 → assign A
+Link 5: spine2↔leaf2  → A has 3, B has 2 → assign B
+Link 6: spine2↔leaf3  → A has 3, B has 3 → assign A
+Link 7: spine2↔leaf4  → A has 4, B has 3 → assign B
+Result: 4 workers on host-A, 4 on host-B (perfectly balanced)
+```
 
-**Simplified boot sequence** (BootstrapHostNetwork):
-- Waits for login prompt (no DHCP setup, no user creation)
-- Assumes pre-configured credentials (Alpine cloud-init or preseed)
-- No FRR, no SONiC-specific init
+Each host runs one bridge process containing all its assigned workers. The
+bridge process is started before any QEMU processes (workers must be
+listening before VMs try to connect).
 
-**Skipped operations:**
-- `Provision()` — hosts are not provisioned via newtron
-- `refreshBGP()` — no BGP on hosts
+---
 
-**Interface map:** Host platforms use the `"linux"` interface map, where QEMU NIC index N maps to `ethN` (NIC 0 = eth0 management, NIC 1+ = data interfaces).
+## 6. Virtual Host Coalescing
 
-Example platform definition:
+Topologies often include virtual hosts for data-plane testing — Linux VMs
+that act as traffic endpoints connected to leaf switches. Running each host
+as a separate QEMU instance wastes resources: a topology with 8 hosts would
+need 8 VMs, each consuming memory and CPU for what is essentially a network
+namespace with an IP address.
+
+### The Coalescing Model
+
+newtlab **coalesces** host devices into shared QEMU VMs:
+
+- All devices with `device_type: "host"` (from their platform) are grouped.
+- Each group shares a single QEMU VM (named `hostvm-0`, `hostvm-1`, etc.).
+- Inside the VM, each logical host gets its own **network namespace** with
+  a dedicated data interface, IP address, and default route.
+- Network namespaces are created at deploy time, not test time.
+
+The result: 8 logical hosts consume 1 VM instead of 8. Each host has full
+network isolation (separate routing table, separate interface) but shares
+the kernel and management interface with its siblings.
+
+### IP Auto-Derivation
+
+Host IPs are derived from the switch-side topology interface that the host
+connects to, eliminating manual IP assignment for most topologies:
+
+- For `/31` links: the host gets the other address in the pair.
+- For `/30` links: the host gets the switch IP + 1.
+- For `/24` and wider: the host gets an offset based on host index.
+
+Manual override is available via `host_ip` and `host_gateway` in the device
+profile.
+
+### What's Different About Hosts
+
+Host devices follow a simpler lifecycle than switches:
+
+- **Simplified boot.** Host VMs (Alpine Linux) auto-start DHCP and SSH —
+  newtlab just waits for the login prompt, with no serial console login, no
+  manual DHCP, no user creation.
+- **No provisioning.** Hosts have no CONFIG_DB; `newtlab provision` and
+  `newtron` skip them entirely.
+- **No BGP refresh.** Hosts don't run FRR; the post-provision soft-clear
+  skips them.
+- **Linux interface map.** Host platforms use `"linux"` mapping where QEMU
+  NIC index N maps directly to `ethN` (NIC 0 = eth0 management, NIC 1+ =
+  data interfaces), unlike switches which use `stride-4` or `sequential`.
+
+Host devices connect to leaf switches via newtlink the same way switches
+connect to each other — the networking model is identical. The differences
+are all behavioral.
+
+### SSH Transparency
+
+From the operator's perspective, each virtual host appears as a separate SSH
+target:
+
+```bash
+newtlab ssh host1    # → SSH to hostvm-0, then: ip netns exec host1 bash
+```
+
+The `newtlab ssh` command detects virtual hosts and automatically enters the
+correct namespace. `newtlab status` shows virtual hosts with their parent VM:
+
+```
+NODE      TYPE                   STATUS   IMAGE        SSH     CONSOLE  PID
+switch1   switch                 running  sonic-cisco  :40000  :30000   12345
+switch2   switch                 running  sonic-cisco  :40001  :30001   12346
+hostvm-0  host-vm                running  alpine-host  :40002  :30002   12347
+host1     vhost:hostvm-0/host1   running  -            -       -        -
+host2     vhost:hostvm-0/host2   running  -            -       -        -
+```
+
+---
+
+## 7. Platform Boot Patches
+
+Different SONiC images have platform-specific initialization quirks — config
+mode flags that need setting, factory hooks that need disabling, port
+configurations that differ from what the image ships with. These need fixing
+after boot but before provisioning.
+
+### Why Patch at Deploy Time
+
+The alternative is to bake fixes into the base image — maintain a custom
+build per platform with all patches applied. This has two problems:
+
+- **Build coupling.** Every upstream image update requires rebuilding with
+  patches reapplied. Patches accumulate; tracking which patches are still
+  needed is error-prone.
+- **Release skew.** A patch that fixes a bug in release X may break release Y.
+  The fix must be conditional on the release, which is a deployment concern,
+  not a build concern.
+
+Deploy-time patching keeps base images stock. When an upstream release fixes
+a bug, you delete the patch descriptor — no rebuild required.
+
+### Mechanism
+
+The boot patch framework is declarative: JSON descriptors paired with Go
+templates, organized by dataplane and optionally by release. Descriptors and
+templates are embedded in the newtlab binary at build time — newtlab is a
+single binary with no external files to manage or lose. Patches travel with
+the binary; deploying a new newtlab version automatically deploys its
+patches.
+
+```
+patches/
+├── ciscovs/
+│   └── always/
+│       ├── 00-frrcfgd-mode.json        descriptor
+│       ├── 00-frrcfgd-mode.tmpl        template (if needed)
+│       └── ...
+└── vpp/
+    ├── always/
+    │   ├── 01-disable-factory-hook.json
+    │   └── 02-port-config.json
+    └── 202405/                          release-specific
+        └── 01-specific-fix.json
+```
+
+**Resolution order:**
+1. `patches/<dataplane>/always/*.json` — applied to every image of this
+   dataplane type, sorted by filename.
+2. `patches/<dataplane>/<release>/*.json` — applied only when the platform's
+   `vm_image_release` matches, sorted by filename, after always patches.
+
+Numeric prefixes (`00-`, `01-`, `02-`) control ordering within each
+directory.
+
+**Each descriptor** can specify any combination of:
+- `pre_commands` — shell commands run before applying changes
+- `disable_files` — paths renamed to `.disabled`
+- `files` — Go templates rendered with platform variables and uploaded to the VM
+- `redis` — Go templates rendered into `redis-cli` commands for CONFIG_DB writes
+- `post_commands` — shell commands run after all changes
+
+**Template variables** are computed from what newtlab already knows: QEMU NIC
+count, deterministic PCI addresses, platform HWSKU, port speed. No
+SSH-based discovery inside the VM is needed.
+
+### Adding a New Platform
+
+Adding support for a new platform or fixing a new platform bug requires no
+Go code changes. Create a directory under `patches/` with descriptors and
+templates. When an upstream image fixes the bug, delete the patch directory.
+The LLD documents the full descriptor schema and template variable reference.
+
+---
+
+## 8. Deploy Lifecycle
+
+Deployment is an ordered sequence of phases, each building on the previous.
+The design prioritizes two properties: **continue on error** (a single VM
+failure should not prevent the rest of the topology from deploying) and
+**always save state** (state is persisted immediately after creation so
+`destroy` can clean up even after a partial deploy).
+
+### Phase Overview
+
+| Phase | What happens | Why |
+|-------|-------------|-----|
+| **Preflight** | Probe all allocated ports for conflicts | Catch issues before any process starts |
+| **State** | Create state directory, generate Ed25519 SSH keypair, save initial state | State must exist before any process starts so destroy can clean up; the SSH key eliminates password prompts for subsequent operations (provisioning, newtrun test steps) |
+| **Disks** | Create COW overlay disks from base images | Overlay disks let multiple labs share a base image; destroy just deletes overlays |
+| **Bridges** | Start bridge processes, wait for listeners | Bridge workers must be listening before VMs connect |
+| **Start** | Launch QEMU processes (parallel) | Each VM connects to its bridge ports on start |
+| **Bootstrap** | Serial console login, DHCP, SSH readiness wait, key injection | The chicken-and-egg of VM bootstrap: SSH requires networking, but bringing up networking requires running commands on the VM. The serial console is the only way in before SSH exists. newtlab logs in via serial, runs `dhclient eth0` to get mgmt networking, then switches to SSH for everything else. |
+| **Patch** | Apply platform boot patches, write patched profiles | Fix platform quirks, then enable newtron to connect |
+| **Hosts** | Create network namespaces in coalesced VMs | Only runs when the topology includes virtual hosts |
+
+If `--provision` is passed, an additional provisioning phase shells out to
+the `newtron` binary for each switch device (parallel, with configurable
+concurrency), followed by a BGP soft-clear (see §10).
+
+### Overlay Disks
+
+Each VM gets a COW (copy-on-write) overlay disk backed by the platform's
+base image. This means:
+
+- Multiple labs can share one base image without conflict.
+- Destroying a lab just deletes the overlay — the base image is untouched.
+- `stop` + `start` preserves the VM's disk state (the overlay persists).
+
+### Error Strategy
+
+Most deploy phases use **continue-on-error**: if one VM fails to boot or
+patch, the rest of the topology still deploys. State tracks per-node status
+(`running`, `error`) so the operator can see what succeeded and what didn't.
+Port conflict detection is the exception — conflicts are reported as a single
+multi-error listing every conflict, and deployment does not proceed.
+
+---
+
+## 9. State and Recovery
+
+newtlab persists all runtime state to a lab directory. This is the single
+source of truth for what's running — newtlab never discovers QEMU processes
+by scanning the system.
+
+### State Directory
+
+```
+~/.newtlab/labs/<name>/
+├── state.json           # Lab state: nodes, links, bridges, ports
+├── lab.key              # Ed25519 SSH key (generated per lab)
+├── bridge.json          # Bridge worker configuration
+├── qemu/
+│   ├── spine1.pid       # QEMU PID file
+│   └── spine1.mon       # QEMU monitor socket
+├── disks/
+│   └── spine1.qcow2    # COW overlay disk
+└── logs/
+    └── spine1.log       # QEMU stdout/stderr
+```
+
+### state.json
+
+Tracks the complete runtime state of the lab:
 
 ```json
 {
-  "alpine-host": {
-    "description": "Alpine Linux virtual host (coalesced into shared VM)",
-    "device_type": "host",
-    "vm_image": "~/.newtlab/images/alpine-host.qcow2",
-    "vm_memory": 512,
-    "vm_cpus": 2,
-    "vm_nic_driver": "virtio-net-pci",
-    "vm_interface_map": "linux",
-    "vm_credentials": { "user": "root", "pass": "newtron" },
-    "vm_boot_timeout": 30
+  "name": "2node",
+  "spec_dir": "/home/user/newtrun/topologies/2node/specs",
+  "nodes": {
+    "switch1": {
+      "pid": 12345, "status": "running",
+      "ssh_port": 40000, "console_port": 30000,
+      "original_mgmt_ip": "PLACEHOLDER",
+      "host": "", "host_ip": ""
+    }
+  },
+  "links": [
+    { "a": "switch1:Ethernet0", "z": "switch2:Ethernet0",
+      "a_port": 20000, "z_port": 20001, "worker_host": "" }
+  ],
+  "bridges": {
+    "": { "pid": 54321, "stats_addr": "127.0.0.1:19999" }
   }
 }
 ```
 
-**NodeState tracking** (for virtual hosts):
-- `VMName` field: parent VM name (e.g., `"hostvm-0"`)
-- `Namespace` field: namespace name (e.g., `"host1"`)
-- Switch devices leave these fields empty
+The `bridges` map is keyed by host name (`""` for local). Each node records
+its `original_mgmt_ip` so destroy can restore the profile. The LLD documents
+the complete field set.
 
-Host devices are connected to leaf switches via newtlink the same way switches connect to each other. The difference is behavioral — hosts share a VM with namespaces for isolation, skip provisioning, and are accessed via `newtlab ssh <host>` for data plane testing.
+### Lifecycle Operations
 
-### 5.9 Port Conflict Detection
-
-Before starting any QEMU or bridge process, newtlab probes **all** allocated
-ports to detect conflicts early. This catches issues that would otherwise
-cause cryptic failures mid-deploy.
-
-**Ports probed:**
-- SSH ports (one per node, on the node's host)
-- Console ports (one per node, on the node's host)
-- Link ports (two per link — A-side and Z-side, on the bridge worker's host)
-- Bridge stats ports (one per bridge worker host)
-
-**Local ports** are tested with `net.Listen` — if the port can be bound, it's
-free. **Remote ports** are tested via a single SSH connection per host running
-`ss -tlnH` to check for listening sockets.
-
-All conflicts are reported in a single multi-error message listing every
-conflict with its purpose (e.g., "spine1 SSH: port 40000 in use").
+- **Deploy** creates the state directory and populates it incrementally.
+  State is saved after each phase so partial deploys are always destroyable.
+- **Destroy** kills QEMU processes, stops bridges, removes overlay disks,
+  restores profiles, and deletes the state directory. Virtual host entries
+  are skipped — they are killed with their parent VM.
+- **Stop** / **Start** kill and relaunch individual QEMU processes. The
+  overlay disk persists across stop/start, preserving the VM's state.
+- **List** scans `~/.newtlab/labs/` for deployed topologies and shows their
+  status.
 
 ---
 
-## 6. Profile Patching
+## 10. newtron Integration
 
-After deploying VMs, newtlab updates profiles so newtron can connect:
+newtlab and newtron are separate binaries that communicate through files.
+This loose coupling is deliberate — newtlab imports newtron's spec types
+for reading shared files, but has no dependency on newtron's device
+operations, CONFIG_DB logic, or network model. The two tools can be built
+and updated independently.
+
+### Profile Patching Is the Interface
+
+The entire integration surface is a handful of profile fields. newtlab
+writes them after deployment; newtron reads them when connecting to devices:
 
 ```json
 // Before newtlab deploy
@@ -660,169 +721,161 @@ After deploying VMs, newtlab updates profiles so newtron can connect:
 }
 ```
 
-On destroy, newtlab restores the original `mgmt_ip` from state.json (`original_mgmt_ip`), removing `ssh_port` and `console_port`.
+Profiles without `ssh_port` default to port 22 — backward compatible with
+profiles that were never deployed by newtlab. On destroy, newtlab restores
+the original `mgmt_ip` and removes the runtime fields.
+
+### Provisioning Shells Out
+
+When `--provision` is passed, newtlab invokes `newtron provision -S <specs>
+-D <device> -x` as a subprocess for each switch device. This is intentional:
+
+- **No library coupling.** newtlab depends on spec types for reading
+  topology files, but has no dependency on newtron's device operations,
+  CONFIG_DB logic, or network model.
+- **Independent versioning.** newtlab and newtron can be built and updated
+  independently. A newtron change never requires rebuilding newtlab.
+- **Binary resolution.** newtlab looks for the `newtron` binary adjacent to
+  its own binary first, then falls back to PATH.
+
+### Post-Provision BGP Refresh
+
+After parallel provisioning completes, newtlab waits briefly then issues
+`vtysh -c 'clear bgp * soft'` on every device. This handles a race
+condition: when devices are provisioned in parallel, some peers may not have
+finished configuring BGP when others try to establish sessions. The soft
+clear causes all devices to re-attempt peering after everyone is configured.
 
 ---
 
-## 7. newtron Integration
+## 11. CLI
 
-### 7.1 SSH Port Support
+newtlab's CLI provides topology lifecycle management and device access.
 
-newtron needs one small change: support custom SSH port from profiles.
+| Command | Description |
+|---------|-------------|
+| `newtlab deploy [topology]` | Deploy VMs from spec files |
+| `newtlab destroy [topology]` | Stop all VMs, remove state |
+| `newtlab status [topology]` | Show node and link status with live bridge stats |
+| `newtlab ssh <node>` | SSH to a VM (namespace-aware for virtual hosts) |
+| `newtlab console <node>` | Attach to serial console via socat/telnet |
+| `newtlab stop <node>` | Stop a VM (preserves overlay disk) |
+| `newtlab start <node>` | Start a stopped VM |
+| `newtlab provision [topology]` | Provision devices via newtron |
+| `newtlab list` | List all deployed labs |
 
-**pkg/newtron/spec/types.go**:
-```go
-type DeviceProfile struct {
-    // ... existing fields ...
-    SSHPort int `json:"ssh_port,omitempty"`
-}
-```
+**Key flags:** `-S <dir>` (spec directory), `--provision` (deploy +
+provision), `--host <name>` (multi-host mode), `--force` (redeploy over
+existing), `--parallel <n>` (provisioning concurrency), `-v` (verbose
+output).
 
-**pkg/newtron/device/sonic/types.go**:
-```go
-func NewSSHTunnel(host, user, pass string, port int) (*SSHTunnel, error) {
-    if port == 0 {
-        port = 22
-    }
-    addr := fmt.Sprintf("%s:%d", host, port)
-    // ...
-}
-```
+**Topology resolution** (when no `-S` flag):
+1. Positional argument matching a deployed lab by name
+2. Positional argument resolved under the topologies directory
+3. Auto-detect: exactly one deployed lab
 
-Backward compatible — profiles without `ssh_port` use port 22.
-
----
-
-## 8. State Management
-
-### 8.1 Lab State Directory
-
-```
-~/.newtlab/labs/<topology-name>/
-├── state.json           # Running state
-├── qemu/
-│   ├── spine1.pid
-│   └── spine1.mon       # QEMU monitor socket
-├── disks/
-│   └── spine1.qcow2     # COW overlay
-└── logs/
-    └── spine1.log
-```
-
-### 8.2 state.json
-
-```json
-{
-  "name": "spine-leaf",
-  "created": "2026-02-05T10:30:00Z",
-  "spec_dir": "/home/user/specs",
-  "nodes": {
-    "spine1": {
-      "pid": 12345,
-      "status": "running",
-      "ssh_port": 40000,
-      "console_port": 30000,
-      "original_mgmt_ip": "PLACEHOLDER",
-      "host": "server-a",
-      "host_ip": "192.168.1.10"
-    }
-  },
-  "links": [
-    { "a": "spine1:Ethernet0", "z": "leaf1:Ethernet0", "a_port": 20000, "z_port": 20001, "worker_host": "server-a" }
-  ],
-  "bridges": {
-    "": { "pid": 54321, "stats_addr": "127.0.0.1:19999" },
-    "server-b": { "pid": 54322, "host_ip": "192.168.1.11", "stats_addr": "192.168.1.11:19998" }
-  }
-}
-```
-
-The `bridges` map tracks per-host bridge processes (see §5.5). The key is
-the host name (`""` for local). `bridge_pid` is retained for backward
-compatibility with older state files but is superseded by `bridges`.
+The LLD documents the complete flag set and topology resolution logic.
 
 ---
 
-## 9. CLI
+## 12. End-to-End Walkthrough
 
-```
-newtlab - VM orchestration for network topologies
+This traces `newtlab deploy 2node --provision` through the architecture,
+focusing on the moments where layers interact in non-obvious ways.
 
-Commands:
-  newtlab deploy -S <specs>        Deploy VMs from topology.json (--force to redeploy)
-  newtlab destroy                  Stop and remove all VMs
-  newtlab status                   Show VM status
-  newtlab ssh <node>               SSH to a VM
-  newtlab console <node>           Attach to serial console
-  newtlab stop <node>              Stop a VM (preserves disk)
-  newtlab start <node>             Start a stopped VM
-  newtlab provision -S <specs>     Provision devices via newtron
-  newtlab list                     List all deployed labs
+### Spec Resolution and Port Planning
 
-Options:
-  -S, --specs <dir>     Spec directory (required for deploy/provision)
-  --provision           Provision devices after deploy
-  --parallel <n>        Parallel provisioning threads
-  --host <name>         Multi-host: only deploy nodes for this host
-  --force               Force destroy even if inconsistent
-  -v, --verbose         Verbose output
-```
+newtlab resolves `2node` to `newtrun/topologies/2node/specs/`. It loads
+`topology.json` (two switches, links between them), `platforms.json`
+(CiscoVS platform: `sequential` interface map, `e1000` NIC driver, 8 GB
+memory), and both device profiles. Configuration resolution merges profile
+overrides with platform defaults; port allocation assigns SSH, console, and
+link ports by sorted device index.
+
+**Non-obvious detail:** link allocation must resolve the interface map
+*before* building QEMU commands. The topology says `spine1:Ethernet0 ↔
+leaf1:Ethernet0`. With `sequential`, Ethernet0 is NIC index 1 (not 0 — NIC 0
+is management). The interface map determines which QEMU `-netdev socket`
+argument carries this link. A wrong mapping means traffic goes to the wrong
+port — the VMs boot fine but can't reach each other.
+
+### Bridge Before VMs
+
+The bridge process starts first — its workers begin listening on link ports
+(`:20000`, `:20001`). This ordering is mandatory: QEMU's `-netdev
+socket,connect=127.0.0.1:20000` tries to connect immediately at VM boot. If
+the bridge isn't listening yet, QEMU retries internally, but some platforms
+treat connection failure as a fatal NIC error. Starting bridges first
+eliminates the race entirely.
+
+### The Serial Console Chicken-and-Egg
+
+QEMU processes launch for both switches. Each VM boots from its COW overlay
+disk. But at this point the VMs have no management networking — they're
+isolated QEMU instances with forwarded SSH ports that nothing is listening
+on yet.
+
+This is the bootstrap chicken-and-egg: newtlab needs SSH to configure the
+VM, but SSH requires networking, and bringing up networking requires running
+commands *on the VM*. The serial console — a raw TCP connection to QEMU's
+emulated serial port — is the only way in. newtlab connects to the serial
+console, logs in with the platform's console credentials, runs
+`ip link set eth0 up` and `dhclient eth0` to get DHCP on the management
+NIC, and creates the SSH user if needed. Only then does SSH become reachable.
+
+Bootstrap runs in parallel across all VMs. After SSH is up, newtlab injects
+the lab's Ed25519 key — subsequent operations (boot patches, provisioning,
+newtrun test steps) use key-based auth with no password prompts.
+
+### Boot Patches and the Handoff to newtron
+
+Platform boot patches are applied via SSH — for CiscoVS, this means
+switching to unified FRR config mode (required for frrcfgd to manage all
+protocols), installing the VNI bootstrap helper, and waiting for the swss
+container to be ready. These run AFTER SSH is up but BEFORE profile patching
+— patches may change the SSH credentials or service state that subsequent
+steps depend on.
+
+After patches complete, newtlab writes runtime values into the device
+profiles: `mgmt_ip`, `ssh_port`, `console_port`. This is the handoff point:
+from here on, newtron can connect to the devices using the standard profile
+path. newtlab's job (physical infrastructure) is done; newtron's job (device
+configuration) begins.
+
+### Provisioning and the Parallel Race
+
+Because `--provision` was passed, newtlab invokes `newtron provision` for
+each switch as a subprocess. newtron reads the patched profiles, connects
+via SSH tunnel, and writes CONFIG_DB entries for BGP, EVPN, loopback, and
+topology interfaces. Both switches provision in parallel.
+
+**Non-obvious problem:** switch1 finishes provisioning and its BGP daemon
+tries to peer with switch2. But switch2 is still being provisioned — its
+BGP configuration doesn't exist yet. The session attempt fails and enters a
+backoff timer. By the time switch2 finishes, switch1's BGP daemon is
+waiting on a retry timer that could be tens of seconds.
+
+The post-provision BGP soft-clear (§10) solves this: after all devices
+finish, newtlab tells every BGP daemon to re-attempt all sessions
+immediately. Sessions establish within seconds instead of waiting for
+backoff expiry.
+
+### Result
+
+Two SONiC VMs are running, connected through a newtlink bridge, with BGP
+sessions established and EVPN overlay configured. `newtlab status` shows
+both nodes as `running` with live bridge stats showing bytes flowing across
+the link. newtron can connect to either device using the patched profile
+ports. newtrun can orchestrate test scenarios against the topology.
 
 ---
 
-## 10. Comparison with Containerlab
+## 13. Cross-References
 
-| Aspect | newtlab | containerlab |
-|--------|-------|--------------|
-| Root required | No | Yes |
-| Host networking | None | Bridges, veth, tc |
-| Multi-host | Native (TCP) | Complex (tunnels) |
-| Topology source | topology.json | clab.yml |
-| Image flexibility | Platform-based | Per-node kind |
-| Profile patching | Automatic | Manual/setup.sh |
-
----
-
-## 11. Implementation Phases
-
-### Phase 1: Core (done)
-- Read topology.json, platforms.json, profiles/*.json
-- Single-host QEMU deployment with platform-based image selection
-- Interface map support (sequential, stride-4)
-- Direct socket links from topology.json links (listen/connect model)
-- Profile patching (mgmt_ip, ssh_port, console_port)
-- CLI: deploy, destroy, status, ssh, console
-
-### Phase 2: Polish (done)
-- Boot timeout and health check
-- NIC driver and CPU feature support
-- Improved error messages
-
-### Phase 3: Multi-Host (done)
-- vm_host in profiles
-- hosts map in topology.json newtlab section
-- Cross-host socket links (direct listen/connect model)
-- Per-host deployment (`--host`)
-- Remote QEMU launch via SSH (`StartNodeRemote`/`StopNodeRemote`)
-
-### Phase 4: newtlink Bridge Agent (done)
-- Replace direct listen/connect sockets with newtlink bridge workers
-- Each link gets a goroutine that listens on two ports and bridges frames
-- Both QEMU VMs use `-netdev socket,connect=...` (no listen mode)
-- Eliminates startup ordering dependency
-- Unifies local and cross-host link handling
-- newtlink process lifecycle tied to Lab (start before VMs, stop after)
-- Per-link byte counters and session tracking
-- Multi-host bridge distribution: one bridge process per WorkerHost
-- TCP stats transport for remote bridge queries
-- `status` aggregates counters from all hosts (bridge stats shown by default)
-- Legacy `bridge_pid` preserved for backward compatibility
-
-### Phase 5: Operations (done)
-- Server pool auto-placement — spread algorithm with capacity constraints (§5.7)
-- Comprehensive port conflict detection — all ports (SSH, console, link, stats), local and remote (§5.8)
-- Platform boot patches — declarative patch framework (§5.6)
-
-### Phase 6: Advanced (planned)
-- Snapshot/restore (not yet implemented)
-- Image management (not yet implemented)
+| Document | What it covers |
+|----------|---------------|
+| [newtlab LLD](lld.md) | Types, functions, deploy phases in detail, port formulas, interface map resolution, complete CLI flags |
+| [newtron HLD](../newtron/hld.md) | Device configuration architecture, CONFIG_DB interaction, verification model |
+| [newtrun HLD](../newtrun/hld.md) | End-to-end test framework, step actions, suite mode |
+| [Design Principles](../DESIGN_PRINCIPLES.md) | Architectural philosophy behind all three tools |
+| [newtlab HOWTO](howto.md) | Deploying topologies, troubleshooting, multi-host setup |
