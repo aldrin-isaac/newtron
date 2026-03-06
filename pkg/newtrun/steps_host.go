@@ -26,7 +26,7 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 	client, ok := r.HostConns[deviceName]
 	if !ok {
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusError, Device: deviceName,
+			Status: StepStatusError,
 			Message: fmt.Sprintf("no SSH connection for host device %q", deviceName),
 		}}
 	}
@@ -43,12 +43,12 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 		expected := *step.Expect.SuccessRate
 		if rate >= expected {
 			return &StepOutput{Result: &StepResult{
-				Status: StepStatusPassed, Device: deviceName,
+				Status: StepStatusPassed,
 				Message: fmt.Sprintf("%.0f%% success (≥ %.0f%%)", rate*100, expected*100),
 			}}
 		}
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusFailed, Device: deviceName,
+			Status: StepStatusFailed,
 			Message: fmt.Sprintf("%.0f%% success (expected ≥ %.0f%%)\n%s", rate*100, expected*100, output),
 		}}
 	}
@@ -56,12 +56,12 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 	if step.Expect != nil && step.Expect.Contains != "" {
 		if strings.Contains(output, step.Expect.Contains) {
 			return &StepOutput{Result: &StepResult{
-				Status: StepStatusPassed, Device: deviceName,
+				Status: StepStatusPassed,
 				Message: fmt.Sprintf("output contains %q", step.Expect.Contains),
 			}}
 		}
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusFailed, Device: deviceName,
+			Status: StepStatusFailed,
 			Message: fmt.Sprintf("output does not contain %q\n%s", step.Expect.Contains, output),
 		}}
 	}
@@ -69,13 +69,12 @@ func (e *hostExecExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 	// Bare exit code check
 	if err != nil {
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusFailed, Device: deviceName,
+			Status: StepStatusFailed,
 			Message: fmt.Sprintf("command failed: %s\n%s", err, output),
 		}}
 	}
 	return &StepOutput{Result: &StepResult{
 		Status:  StepStatusPassed,
-		Device:  deviceName,
 		Message: "command succeeded",
 	}}
 }

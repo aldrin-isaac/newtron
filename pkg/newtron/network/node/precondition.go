@@ -140,7 +140,7 @@ func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
 	if !p.node.VTEPExists() {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VTEP must be configured",
-			fmt.Sprintf("no VTEP found on %s — run 'newtron -d %s evpn setup' first", p.node.Name(), p.node.Name())))
+			fmt.Sprintf("no VTEP found on %s — run 'newtron -D %s evpn setup' first", p.node.Name(), p.node.Name())))
 	}
 	return p
 }

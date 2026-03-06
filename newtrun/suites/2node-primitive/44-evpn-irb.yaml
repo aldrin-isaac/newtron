@@ -11,28 +11,26 @@ steps:
   - name: create-vrf-irb-sw1
     action: create-vrf
     devices: [switch1]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   - name: create-vrf-irb-sw2
     action: create-vrf
     devices: [switch2]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   # Bind IP-VPN
   - name: bind-ipvpn-irb-sw1
     action: bind-ipvpn
     devices: [switch1]
+    vrf: Vrf_irb
     params:
-      vrf: Vrf_irb
       ipvpn: evpn-irb-vrf
 
   - name: bind-ipvpn-irb-sw2
     action: bind-ipvpn
     devices: [switch2]
+    vrf: Vrf_irb
     params:
-      vrf: Vrf_irb
       ipvpn: evpn-irb-vrf
 
   # CONFIG_DB verification: VRF with VNI
@@ -166,9 +164,8 @@ steps:
   - name: add-vrf-interface-eth3
     action: add-vrf-interface
     devices: [switch1]
-    params:
-      vrf: Vrf_irb
-      interface: Ethernet3
+    vrf: Vrf_irb
+    interface: Ethernet3
 
   - name: verify-eth3-in-vrf
     action: verify-config-db
@@ -182,9 +179,8 @@ steps:
   - name: remove-vrf-interface-eth3
     action: remove-vrf-interface
     devices: [switch1]
-    params:
-      vrf: Vrf_irb
-      interface: Ethernet3
+    vrf: Vrf_irb
+    interface: Ethernet3
 
   - name: verify-eth3-vrf-removed
     action: verify-config-db

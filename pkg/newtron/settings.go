@@ -18,6 +18,8 @@ func LoadSettings() (*UserSettings, error) {
 		AuditLogPath:    s.AuditLogPath,
 		AuditMaxSizeMB:  s.AuditMaxSizeMB,
 		AuditMaxBackups: s.AuditMaxBackups,
+		ServerURL:       s.ServerURL,
+		NetworkID:       s.NetworkID,
 	}, nil
 }
 
@@ -31,6 +33,8 @@ func SaveSettings(us *UserSettings) error {
 		AuditLogPath:    us.AuditLogPath,
 		AuditMaxSizeMB:  us.AuditMaxSizeMB,
 		AuditMaxBackups: us.AuditMaxBackups,
+		ServerURL:       us.ServerURL,
+		NetworkID:       us.NetworkID,
 	}
 	return s.Save()
 }

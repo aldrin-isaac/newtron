@@ -9,9 +9,9 @@ steps:
   - name: add-static-route
     action: add-static-route
     devices: [switch2]
+    vrf: Vrf_local
+    prefix: "10.99.0.0/24"
     params:
-      vrf: Vrf_local
-      prefix: "10.99.0.0/24"
       next_hop: "10.20.1.0"
 
   - name: verify-static-route-added
@@ -26,9 +26,8 @@ steps:
   - name: remove-static-route
     action: remove-static-route
     devices: [switch2]
-    params:
-      vrf: Vrf_local
-      prefix: "10.99.0.0/24"
+    vrf: Vrf_local
+    prefix: "10.99.0.0/24"
 
   - name: verify-static-route-removed
     action: verify-config-db

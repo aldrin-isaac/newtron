@@ -143,11 +143,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
 	if isOverlay {
 		if !n.VTEPExists() {
-			return nil, fmt.Errorf("service '%s' (%s) requires EVPN overlay, but no VTEP is configured on %s — run 'newtron -d %s evpn setup' first",
+			return nil, fmt.Errorf("service '%s' (%s) requires EVPN overlay, but no VTEP is configured on %s — run 'newtron -D %s evpn setup' first",
 				serviceName, svc.ServiceType, n.Name(), n.Name())
 		}
 		if !n.BGPConfigured() {
-			return nil, fmt.Errorf("service '%s' (%s) requires BGP, but no BGP_GLOBALS found on %s — run 'newtron -d %s evpn setup' or provision the device first",
+			return nil, fmt.Errorf("service '%s' (%s) requires BGP, but no BGP_GLOBALS found on %s — run 'newtron -D %s evpn setup' or provision the device first",
 				serviceName, svc.ServiceType, n.Name(), n.Name())
 		}
 	}

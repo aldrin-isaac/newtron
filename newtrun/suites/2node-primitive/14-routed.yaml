@@ -10,8 +10,7 @@ steps:
   - name: create-vrf-local
     action: create-vrf
     devices: [switch2]
-    params:
-      vrf: Vrf_local
+    vrf: Vrf_local
 
   - name: bind-ethernet1-to-vrf
     action: set-interface

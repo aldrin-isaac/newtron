@@ -6,7 +6,6 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // Network is the top-level API entry point.
@@ -36,17 +35,6 @@ func (net *Network) Connect(ctx context.Context, device string) (*Node, error) {
 		return nil, fmt.Errorf("connecting to %s: %w", device, err)
 	}
 	return &Node{net: net, internal: dev}, nil
-}
-
-// Abstract creates an offline abstract Node for the named device.
-// The Node starts with an empty shadow ConfigDB — operations accumulate entries
-// for composite export without requiring a physical device connection.
-func (net *Network) Abstract(device string) (*Node, error) {
-	dev, err := net.internal.GetAbstractNode(device)
-	if err != nil {
-		return nil, err
-	}
-	return &Node{net: net, internal: dev, abstract: true}, nil
 }
 
 // ListNodes returns the names of all devices that have been loaded into this Network.
@@ -86,16 +74,6 @@ func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
 		SSHPass: p.SSHPass,
 		SSHPort: p.SSHPort,
 	}, nil
-}
-
-// Spec returns the raw network spec. Used by auth.NewChecker.
-func (net *Network) Spec() *spec.NetworkSpecFile {
-	return net.internal.Spec()
-}
-
-// Internal returns the underlying network.Network for newtrun escape hatch.
-func (net *Network) Internal() *network.Network {
-	return net.internal
 }
 
 func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {

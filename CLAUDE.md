@@ -263,8 +263,7 @@ Rules:
 
 - **Orchestrators are API consumers, not insiders.** If an orchestrator (newtrun,
   a provisioner, the HTTP server) needs functionality the API doesn't expose,
-  extend the API — don't bypass it with internal imports. `InternalNode()` escape
-  hatches exist only for the interactive CLI shell, not for programmatic consumers.
+  extend the API — don't bypass it with internal imports.
 
 - **Operations accept names; the API resolves specs.** Callers pass `ipvpnName`,
   `macvpnName`, `policyName` — string identifiers of intent. The API method resolves

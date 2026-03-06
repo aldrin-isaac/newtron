@@ -38,14 +38,12 @@ steps:
   - name: unbind-ipvpn-sw1
     action: unbind-ipvpn
     devices: [switch1]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   - name: unbind-ipvpn-sw2
     action: unbind-ipvpn
     devices: [switch2]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   - name: verify-vrf-vni-cleared-sw1
     action: verify-config-db
@@ -60,14 +58,12 @@ steps:
   - name: delete-vrf-irb-sw1
     action: delete-vrf
     devices: [switch1]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   - name: delete-vrf-irb-sw2
     action: delete-vrf
     devices: [switch2]
-    params:
-      vrf: Vrf_irb
+    vrf: Vrf_irb
 
   - name: verify-vrf-irb-removed-sw1
     action: verify-config-db

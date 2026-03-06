@@ -13,8 +13,7 @@ steps:
   - name: create-customer-vrf
     action: create-vrf
     devices: [switch2]
-    params:
-      vrf: CUSTOMER
+    vrf: CUSTOMER
 
   # Verify VRF|CUSTOMER is in CONFIG_DB.
   - name: verify-vrf-config-db

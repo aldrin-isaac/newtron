@@ -10,8 +10,8 @@ steps:
   - name: apply-qos-ethernet11
     action: apply-qos
     devices: [switch1]
+    interface: Ethernet11
     params:
-      interface: Ethernet11
       qos_policy: test-4q
 
   - name: verify-port-qos-map
@@ -33,8 +33,7 @@ steps:
   - name: remove-qos-ethernet11
     action: remove-qos
     devices: [switch1]
-    params:
-      interface: Ethernet11
+    interface: Ethernet11
 
   - name: verify-port-qos-map-removed
     action: verify-config-db

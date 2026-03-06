@@ -94,7 +94,7 @@ func (s *Server) handleCompositeDeliver(w http.ResponseWriter, r *http.Request) 
 		mode = newtron.CompositeMerge
 	}
 
-	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
 		ci, err := nodeActor.getComposite(req.Handle)
 		if err != nil {
 			return nil, err

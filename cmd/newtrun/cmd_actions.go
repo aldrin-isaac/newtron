@@ -34,7 +34,7 @@ Examples:
 
 func listActions() error {
 	actions := getActionMetadata()
-	
+
 	// Sort by name
 	var names []string
 	for name := range actions {
@@ -114,20 +114,40 @@ func showActionDetails(actionName string) error {
 		}
 	}
 
+	if len(meta.RequiredFields) > 0 {
+		// Required fields header in bold red
+		fmt.Println("\n\033[1;31mRequired Fields (top-level YAML):\033[0m")
+		for _, p := range meta.RequiredFields {
+			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
+		}
+	}
+
 	if len(meta.RequiredParams) > 0 {
 		// Required params header in bold red
-		fmt.Println("\n\033[1;31mRequired Parameters:\033[0m")
+		fmt.Println("\n\033[1;31mRequired Params (under params:):\033[0m")
 		for _, p := range meta.RequiredParams {
 			// Param name in bold
 			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
 		}
 	}
 
+	if len(meta.OptionalFields) > 0 {
+		fmt.Println("\n\033[1;34mOptional Fields (top-level YAML):\033[0m")
+		for _, p := range meta.OptionalFields {
+			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
+		}
+	}
+
 	if len(meta.OptionalParams) > 0 {
-		// Optional params header in bold blue
-		fmt.Println("\n\033[1;34mOptional Parameters:\033[0m")
+		fmt.Println("\n\033[1;34mOptional Params (under params:):\033[0m")
 		for _, p := range meta.OptionalParams {
-			// Param name in bold
+			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
+		}
+	}
+
+	if len(meta.ExpectParams) > 0 {
+		fmt.Println("\n\033[1;34mExpect Fields (under expect:):\033[0m")
+		for _, p := range meta.ExpectParams {
 			fmt.Printf("  \033[1m%-20s\033[0m %s\n", p.Name, p.Desc)
 		}
 	}
@@ -149,8 +169,11 @@ type ActionMetadata struct {
 	ShortDesc      string
 	LongDesc       string
 	Prerequisites  []string
-	RequiredParams []ParamInfo
-	OptionalParams []ParamInfo
+	RequiredFields []ParamInfo // Step-level YAML fields (top-level in step definition)
+	OptionalFields []ParamInfo // Optional step-level YAML fields (top-level in step definition)
+	RequiredParams []ParamInfo // Params map keys (under params: in step definition)
+	OptionalParams []ParamInfo // Optional params map keys (under params: in step definition)
+	ExpectParams   []ParamInfo // Fields under expect: block
 	Devices        string
 	Example        string
 }
@@ -168,8 +191,10 @@ type ParamInfo struct {
 //   1. Add action to stepValidations in parser.go
 //   2. Add metadata entry here with category, description, parameters, example
 //
-// Future enhancement: Consider auto-generating this from stepValidations map
-// using struct tags or reflection to eliminate duplication.
+// RequiredFields / OptionalFields = step-level YAML fields (top-level in step definition).
+// RequiredParams / OptionalParams = params map keys (under params: in step definition).
+// ExpectParams = fields under the expect: block.
+// See stepValidations in parser.go: "fields" → RequiredFields, "params" → RequiredParams.
 func getActionMetadata() map[string]ActionMetadata {
 	return map[string]ActionMetadata{
 		// Provisioning
@@ -194,6 +219,15 @@ func getActionMetadata() map[string]ActionMetadata {
 			Example: `- name: configure-loopback
   action: configure-loopback
   devices: all`,
+		},
+		"config-reload": {
+			Category:  "Provisioning",
+			ShortDesc: "Reload device configuration",
+			LongDesc:  "Restarts the BGP container and applies VRF table entries. Replaces separate restart-service bgp for CiscoVS.",
+			Devices:   "required",
+			Example: `- name: config-reload
+  action: config-reload
+  devices: [switch1, switch2]`,
 		},
 		"verify-provisioning": {
 			Category:  "Verification",
@@ -220,12 +254,15 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Verify ICMP connectivity",
 			LongDesc:  "Tests ICMP connectivity from device to target IP",
 			Devices:   "required (single device)",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"target", "Target IP address to ping"},
 			},
-			OptionalParams: []ParamInfo{
+			OptionalFields: []ParamInfo{
 				{"count", "Number of ping packets (default: 5)"},
-				{"success_rate", "Required success rate (default: 0.8)"},
+			},
+			ExpectParams: []ParamInfo{
+				{"timeout", "Timeout for ping (default: 30s)"},
+				{"success_rate", "Required success rate (default: 1.0)"},
 			},
 			Example: `- name: ping-test
   action: verify-ping
@@ -240,9 +277,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Verify BGP session state",
 			LongDesc:  "Checks BGP session state on device",
 			Devices:   "required",
-			OptionalParams: []ParamInfo{
-				{"state", "Expected BGP state (e.g., Established)"},
-				{"timeout", "Timeout for state check"},
+			ExpectParams: []ParamInfo{
+				{"state", "Expected BGP state (default: Established)"},
+				{"timeout", "Timeout for state check (default: 120s)"},
+				{"poll_interval", "Polling interval (default: 5s)"},
 			},
 			Example: `- name: verify-bgp-up
   action: verify-bgp
@@ -265,13 +303,16 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Verify route in routing table",
 			LongDesc:  "Checks that a specific route prefix exists in APP_DB routing table",
 			Devices:   "required (single device)",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"prefix", "Route prefix to verify"},
 				{"vrf", "VRF name (or 'default')"},
 			},
-			OptionalParams: []ParamInfo{
-				{"timeout", "Timeout for route appearance"},
-				{"poll_interval", "Polling interval"},
+			ExpectParams: []ParamInfo{
+				{"timeout", "Timeout for route appearance (default: 60s)"},
+				{"poll_interval", "Polling interval (default: 5s)"},
+				{"source", "Route source: app_db (default) or asic_db"},
+				{"protocol", "Expected route protocol (e.g., bgp, connected)"},
+				{"nexthop_ip", "Expected next-hop IP address"},
 			},
 			Example: `- name: verify-route
   action: verify-route
@@ -287,14 +328,18 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Verify CONFIG_DB entry",
 			LongDesc:  "Checks that a specific entry exists in SONiC CONFIG_DB",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"table", "CONFIG_DB table name"},
 			},
-			OptionalParams: []ParamInfo{
-				{"key", "Table key to check"},
+			OptionalFields: []ParamInfo{
+				{"key", "Table key to check (omit to check all entries)"},
+			},
+			ExpectParams: []ParamInfo{
 				{"exists", "Whether entry should exist (true/false)"},
 				{"min_entries", "Minimum number of entries"},
-				{"fields", "Expected field values"},
+				{"fields", "Expected field values (map)"},
+				{"timeout", "Timeout for polling (default: none)"},
+				{"poll_interval", "Polling interval (default: 5s)"},
 			},
 			Example: `- name: verify-vxlan-tunnel
   action: verify-config-db
@@ -309,12 +354,14 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Verify STATE_DB entry fields",
 			LongDesc:  "Checks specific field values in SONiC STATE_DB",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"table", "STATE_DB table name"},
 				{"key", "Table key"},
 			},
-			OptionalParams: []ParamInfo{
-				{"fields", "Expected field values"},
+			ExpectParams: []ParamInfo{
+				{"fields", "Expected field values (map, required)"},
+				{"timeout", "Timeout for polling (default: 120s)"},
+				{"poll_interval", "Polling interval (default: 5s)"},
 			},
 			Example: `- name: verify-port-state
   action: verify-state-db
@@ -332,7 +379,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Create a VLAN",
 			LongDesc:  "Creates a VLAN on the device",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID (1-4094)"},
 			},
 			Example: `- name: create-vlan-100
@@ -345,7 +392,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Delete a VLAN",
 			LongDesc:  "Deletes a VLAN from the device",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID to delete"},
 			},
 			Example: `- name: delete-vlan-100
@@ -358,11 +405,11 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Add interface to VLAN",
 			LongDesc:  "Adds an interface as a member of a VLAN",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID"},
 				{"interface", "Interface name"},
 			},
-			OptionalParams: []ParamInfo{
+			OptionalFields: []ParamInfo{
 				{"tagging", "Tagged or untagged (default: untagged)"},
 			},
 			Example: `- name: add-member
@@ -377,7 +424,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove interface from VLAN",
 			LongDesc:  "Removes an interface from VLAN membership",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID"},
 				{"interface", "Interface name"},
 			},
@@ -392,12 +439,13 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Configure VLAN SVI (IRB)",
 			LongDesc:  "Configures a VLAN interface with IP address and optional anycast gateway",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID"},
 			},
 			OptionalParams: []ParamInfo{
 				{"ip", "IP address with prefix (e.g., 192.168.1.1/24)"},
-				{"anycast", "Enable anycast gateway (true/false)"},
+				{"vrf", "VRF to bind the SVI to"},
+				{"anycast_mac", "Anycast gateway MAC address"},
 			},
 			Example: `- name: configure-svi-100
   action: configure-svi
@@ -405,7 +453,8 @@ func getActionMetadata() map[string]ActionMetadata {
   vlan_id: 100
   params:
     ip: 192.168.100.1/24
-    anycast: true`,
+    vrf: Vrf_CUST1
+    anycast_mac: "00:00:00:01:02:03"`,
 		},
 
 		// VRF
@@ -414,7 +463,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Create a VRF",
 			LongDesc:  "Creates a VRF instance on the device",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 			},
 			Example: `- name: create-vrf-cust1
@@ -427,7 +476,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Delete a VRF",
 			LongDesc:  "Deletes a VRF instance from the device",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 			},
 			Example: `- name: delete-vrf-cust1
@@ -440,7 +489,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Add interface to VRF",
 			LongDesc:  "Binds an interface to a VRF",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 				{"interface", "Interface name"},
 			},
@@ -455,7 +504,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove interface from VRF",
 			LongDesc:  "Unbinds an interface from a VRF",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 				{"interface", "Interface name"},
 			},
@@ -476,13 +525,14 @@ func getActionMetadata() map[string]ActionMetadata {
 				"Underlay BGP sessions already established (use 'provision' first)",
 			},
 			Devices: "required",
-			RequiredParams: []ParamInfo{
-				{"source_ip", "VTEP source IP (loopback address)"},
+			OptionalParams: []ParamInfo{
+				{"source_ip", "VTEP source IP (optional — falls back to profile loopback)"},
 			},
 			Example: `- name: setup-evpn-leaf1
   action: setup-evpn
   devices: [leaf1]
-  source_ip: 10.0.0.11`,
+  params:
+    source_ip: "10.0.0.11"`,
 		},
 		"bind-ipvpn": {
 			Category:  "EVPN",
@@ -494,22 +544,25 @@ func getActionMetadata() map[string]ActionMetadata {
 				"EVPN control plane configured (use 'setup-evpn' first)",
 			},
 			Devices: "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"ipvpn", "IP-VPN spec name"},
 			},
 			Example: `- name: bind-vrf-ipvpn
   action: bind-ipvpn
   devices: [leaf1]
   vrf: Vrf_CUST1
-  ipvpn: customer-l3`,
+  params:
+    ipvpn: customer-l3`,
 		},
 		"unbind-ipvpn": {
 			Category:  "EVPN",
 			ShortDesc: "Unbind VRF from IP-VPN",
 			LongDesc:  "Removes IP-VPN binding from a VRF",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 			},
 			Example: `- name: unbind-vrf-ipvpn
@@ -527,8 +580,10 @@ func getActionMetadata() map[string]ActionMetadata {
 				"EVPN control plane configured (use 'setup-evpn' first)",
 			},
 			Devices: "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID to bind"},
+			},
+			RequiredParams: []ParamInfo{
 				{"macvpn", "MAC-VPN spec name"},
 			},
 			Example: `- name: bind-vlan100
@@ -543,7 +598,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Unbind VLAN from MAC-VPN",
 			LongDesc:  "Removes MAC-VPN binding from a VLAN",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID to unbind"},
 			},
 			Example: `- name: unbind-vlan100
@@ -563,7 +618,7 @@ func getActionMetadata() map[string]ActionMetadata {
 				"Referenced Filter/QoS specs exist (if service references them)",
 			},
 			Devices: "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 				{"service", "Service spec name"},
 			},
@@ -584,7 +639,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove service from interface",
 			LongDesc:  "Removes service configuration from an interface",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 			},
 			Example: `- name: remove-service
@@ -597,7 +652,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Refresh service configuration",
 			LongDesc:  "Re-applies service configuration to interface (idempotent update)",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 			},
 			Example: `- name: refresh
@@ -615,22 +670,25 @@ func getActionMetadata() map[string]ActionMetadata {
 				"QoS policy spec defined in network.json, zone spec, or device profile (under 'qos_policies' section)",
 			},
 			Devices: "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"qos_policy", "QoS policy name"},
 			},
 			Example: `- name: apply-qos
   action: apply-qos
   devices: [leaf1]
   interface: Ethernet10
-  qos_policy: datacenter`,
+  params:
+    qos_policy: datacenter`,
 		},
 		"remove-qos": {
 			Category:  "QoS",
 			ShortDesc: "Remove QoS policy from interface",
 			LongDesc:  "Removes QoS policy from an interface",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 			},
 			Example: `- name: remove-qos
@@ -643,36 +701,40 @@ func getActionMetadata() map[string]ActionMetadata {
 		"bgp-add-neighbor": {
 			Category:  "BGP",
 			ShortDesc: "Add BGP neighbor to interface",
-			LongDesc:  "Configures BGP neighbor on an interface",
+			LongDesc:  "Configures BGP neighbor on an interface. If interface is set, uses interface-level BGP; otherwise global BGP.",
 			Devices:   "required",
+			OptionalFields: []ParamInfo{
+				{"interface", "Interface name (for interface-level BGP peering)"},
+			},
 			RequiredParams: []ParamInfo{
 				{"remote_asn", "Remote AS number"},
 			},
 			OptionalParams: []ParamInfo{
-				{"interface", "Interface name (for interface BGP)"},
-				{"vrf", "VRF name (default: global)"},
+				{"neighbor_ip", "Neighbor IP address"},
 			},
 			Example: `- name: add-bgp-neighbor
   action: bgp-add-neighbor
   devices: [leaf1]
   interface: Ethernet10
-  remote_asn: 65100`,
+  params:
+    remote_asn: 65100`,
 		},
 		"bgp-remove-neighbor": {
 			Category:  "BGP",
 			ShortDesc: "Remove BGP neighbor",
-			LongDesc:  "Removes BGP neighbor configuration",
+			LongDesc:  "Removes BGP neighbor configuration. If interface is set, removes interface-level peer.",
 			Devices:   "required",
+			OptionalFields: []ParamInfo{
+				{"interface", "Interface name (for interface-level BGP peering)"},
+			},
 			RequiredParams: []ParamInfo{
 				{"neighbor_ip", "Neighbor IP address"},
-			},
-			OptionalParams: []ParamInfo{
-				{"interface", "Interface name (for interface BGP)"},
 			},
 			Example: `- name: remove-bgp-neighbor
   action: bgp-remove-neighbor
   devices: [leaf1]
-  neighbor_ip: 10.1.1.2`,
+  params:
+    neighbor_ip: 10.1.1.2`,
 		},
 
 		// PortChannel (LAG)
@@ -694,9 +756,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			Example: `- name: create-lag
   action: create-portchannel
   devices: [leaf1]
-  name: PortChannel1
-  members: [Ethernet0, Ethernet1]
-  min_links: 1`,
+  params:
+    name: PortChannel1
+    members: [Ethernet0, Ethernet1]
+    min_links: 1`,
 		},
 		"delete-portchannel": {
 			Category:  "PortChannel",
@@ -709,7 +772,8 @@ func getActionMetadata() map[string]ActionMetadata {
 			Example: `- name: delete-lag
   action: delete-portchannel
   devices: [leaf1]
-  name: PortChannel1`,
+  params:
+    name: PortChannel1`,
 		},
 		"add-portchannel-member": {
 			Category:  "PortChannel",
@@ -723,8 +787,9 @@ func getActionMetadata() map[string]ActionMetadata {
 			Example: `- name: add-lag-member
   action: add-portchannel-member
   devices: [leaf1]
-  name: PortChannel1
-  member: Ethernet2`,
+  params:
+    name: PortChannel1
+    member: Ethernet2`,
 		},
 		"remove-portchannel-member": {
 			Category:  "PortChannel",
@@ -738,8 +803,9 @@ func getActionMetadata() map[string]ActionMetadata {
 			Example: `- name: remove-lag-member
   action: remove-portchannel-member
   devices: [leaf1]
-  name: PortChannel1
-  member: Ethernet2`,
+  params:
+    name: PortChannel1
+    member: Ethernet2`,
 		},
 
 		// Interface
@@ -748,8 +814,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Set interface property",
 			LongDesc:  "Sets a property on an interface (mtu, admin_status, description, speed)",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"property", "Property name (mtu, admin_status, description, speed)"},
 			},
 			OptionalParams: []ParamInfo{
@@ -770,24 +838,30 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Add static route",
 			LongDesc:  "Adds a static route to a VRF",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 				{"prefix", "Destination prefix"},
+			},
+			RequiredParams: []ParamInfo{
 				{"next_hop", "Next hop IP address"},
+			},
+			OptionalParams: []ParamInfo{
+				{"metric", "Route metric (default: 0)"},
 			},
 			Example: `- name: add-route
   action: add-static-route
   devices: [leaf1]
   vrf: Vrf_CUST1
   prefix: 10.99.0.0/16
-  next_hop: 10.1.1.2`,
+  params:
+    next_hop: 10.1.1.2`,
 		},
 		"remove-static-route": {
 			Category:  "Routing",
 			ShortDesc: "Remove static route",
 			LongDesc:  "Removes a static route from a VRF",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vrf", "VRF name"},
 				{"prefix", "Destination prefix"},
 			},
@@ -804,20 +878,19 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Execute command on host",
 			LongDesc:  "Executes a shell command on a virtual host device",
 			Devices:   "required (single host device)",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"command", "Shell command to execute"},
 			},
-			OptionalParams: []ParamInfo{
+			ExpectParams: []ParamInfo{
+				{"success_rate", "For ping commands, required success rate (0.0-1.0)"},
 				{"contains", "Expected output substring (for validation)"},
-				{"success_rate", "For ping commands, required success rate"},
 			},
-			Example: `- name: configure-host-ip
+			Example: `- name: ping-remote-host
   action: host-exec
   devices: [host1]
-  command: |
-    ip addr add 192.168.1.10/24 dev eth0
+  command: "ping -c 5 -W 2 10.1.200.20"
   expect:
-    contains: ""`,
+    success_rate: 0.8`,
 		},
 
 		// Utility
@@ -825,7 +898,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			Category:  "Utility",
 			ShortDesc: "Wait for specified duration",
 			LongDesc:  "Pauses test execution for a specified duration",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"duration", "Duration to wait (e.g., 5s, 1m)"},
 			},
 			Example: `- name: wait-convergence
@@ -849,8 +922,11 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Execute raw SSH command",
 			LongDesc:  "Executes a raw shell command on device via SSH (use sparingly)",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"command", "Shell command to execute"},
+			},
+			ExpectParams: []ParamInfo{
+				{"contains", "Expected output substring (for validation)"},
 			},
 			Example: `- name: check-frr
   action: ssh-command
@@ -864,7 +940,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Restart SONiC service",
 			LongDesc:  "Restarts a SONiC systemd service (bgp, swss, etc.)",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"service", "Service name (e.g., bgp, swss, syncd)"},
 			},
 			Example: `- name: restart-bgp
@@ -989,8 +1065,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Bind ACL to an interface",
 			LongDesc:  "Adds the interface to the ACL table's port binding list",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"name", "ACL table name"},
 				{"direction", "ingress or egress"},
 			},
@@ -1007,8 +1085,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove interface from ACL binding",
 			LongDesc:  "Removes the interface from the ACL table's port binding list",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"name", "ACL table name"},
 			},
 			Example: `- name: unbind-acl
@@ -1036,7 +1116,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove SVI from a VLAN",
 			LongDesc:  "Deletes all VLAN_INTERFACE entries for the VLAN (reverse of configure-svi)",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID whose SVI to remove"},
 			},
 			Example: `- name: remove-svi
@@ -1051,8 +1131,10 @@ func getActionMetadata() map[string]ActionMetadata {
 			ShortDesc: "Remove IP address from interface",
 			LongDesc:  "Deletes an IP address entry from an interface; removes the base entry if last IP",
 			Devices:   "required",
-			RequiredParams: []ParamInfo{
+			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
+			},
+			RequiredParams: []ParamInfo{
 				{"ip", "IP address with prefix length (e.g., 10.1.0.0/31)"},
 			},
 			Example: `- name: remove-ip

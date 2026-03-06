@@ -145,17 +145,17 @@ steps:
   - name: add-static-route-sw1
     action: add-static-route
     devices: [switch1]
+    vrf: default
+    prefix: "10.20.1.0/31"
     params:
-      vrf: default
-      prefix: "10.20.1.0/31"
       next_hop: "10.30.0.1"
 
   - name: add-static-route-sw2
     action: add-static-route
     devices: [switch2]
+    vrf: default
+    prefix: "10.20.0.0/31"
     params:
-      vrf: default
-      prefix: "10.20.0.0/31"
       next_hop: "10.30.0.0"
 
   - name: wait-routes-install
@@ -181,16 +181,14 @@ steps:
   - name: remove-static-route-sw1
     action: remove-static-route
     devices: [switch1]
-    params:
-      vrf: default
-      prefix: "10.20.1.0/31"
+    vrf: default
+    prefix: "10.20.1.0/31"
 
   - name: remove-static-route-sw2
     action: remove-static-route
     devices: [switch2]
-    params:
-      vrf: default
-      prefix: "10.20.0.0/31"
+    vrf: default
+    prefix: "10.20.0.0/31"
 
   - name: remove-ip-portchannel1-sw1
     action: remove-ip

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,7 +18,7 @@ var bgpCmd = &cobra.Command{
 BGP is visibility-only in this noun group. Peer management lives in
 'vrf add-neighbor' (direct, interface-level) and 'evpn setup' (overlay).
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 bgp status`,
@@ -37,19 +36,16 @@ var bgpStatusCmd = &cobra.Command{
   - Configured neighbors (from CONFIG_DB) with type classification
   - Operational neighbor state (from STATE_DB) with session info
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 bgp status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		status, err := n.BGPStatus()
+		status, err := app.client.BGPStatus(app.deviceName)
 		if err != nil {
 			return fmt.Errorf("getting BGP status: %w", err)
 		}

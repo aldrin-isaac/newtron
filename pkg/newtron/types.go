@@ -681,6 +681,8 @@ type UserSettings struct {
 	AuditLogPath    string `json:"audit_log_path,omitempty"`
 	AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
 	AuditMaxBackups int    `json:"audit_max_backups,omitempty"`
+	ServerURL       string `json:"server_url,omitempty"`
+	NetworkID       string `json:"network_id,omitempty"`
 }
 
 // DefaultSpecDir is the default specification directory.
@@ -727,6 +729,28 @@ func (us *UserSettings) GetAuditMaxBackups() int {
 	return DefaultAuditMaxBackups
 }
 
+// DefaultServerURL is the default newtron-server address.
+const DefaultServerURL = "http://localhost:8080"
+
+// DefaultNetworkID is the default network identifier.
+const DefaultNetworkID = "default"
+
+// GetServerURL returns the server URL with a fallback default.
+func (us *UserSettings) GetServerURL() string {
+	if us.ServerURL != "" {
+		return us.ServerURL
+	}
+	return DefaultServerURL
+}
+
+// GetNetworkID returns the network ID with a fallback default.
+func (us *UserSettings) GetNetworkID() string {
+	if us.NetworkID != "" {
+		return us.NetworkID
+	}
+	return DefaultNetworkID
+}
+
 // ============================================================================
 // Host Types
 // ============================================================================
@@ -756,4 +780,49 @@ type RouteEntry struct {
 type RouteNextHop struct {
 	Address   string `json:"address"`
 	Interface string `json:"interface"`
+}
+
+// ============================================================================
+// Request types used by the HTTP client and server.
+// These live in the public API package so that consumers (CLI, newtrun) do not
+// need to import the internal server package (pkg/newtron/api).
+// ============================================================================
+
+// SVIConfigureRequest is the request body for configuring an SVI.
+type SVIConfigureRequest struct {
+	VlanID     int    `json:"vlan_id"`
+	VRF        string `json:"vrf,omitempty"`
+	IPAddress  string `json:"ip_address,omitempty"`
+	AnycastMAC string `json:"anycast_mac,omitempty"`
+}
+
+// ACLCreateRequest is the request body for creating an ACL table.
+type ACLCreateRequest struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Stage       string `json:"stage"`
+	Ports       string `json:"ports,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ACLRuleAddRequest is the request body for adding a rule to an ACL table.
+type ACLRuleAddRequest struct {
+	RuleName string `json:"rule_name"`
+	Priority int    `json:"priority"`
+	Action   string `json:"action"`
+	SrcIP    string `json:"src_ip,omitempty"`
+	DstIP    string `json:"dst_ip,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	SrcPort  string `json:"src_port,omitempty"`
+	DstPort  string `json:"dst_port,omitempty"`
+}
+
+// PortChannelCreateRequest is the request body for creating a port channel.
+type PortChannelCreateRequest struct {
+	Name     string   `json:"name"`
+	Members  []string `json:"members,omitempty"`
+	MinLinks int      `json:"min_links,omitempty"`
+	FastRate bool     `json:"fast_rate,omitempty"`
+	Fallback bool     `json:"fallback,omitempty"`
+	MTU      int      `json:"mtu,omitempty"`
 }

@@ -40,7 +40,6 @@ type StepResult struct {
 	Status    StepStatus
 	Duration  time.Duration
 	Message   string
-	Device    string
 	Details   []DeviceResult
 	Iteration int // 1-based iteration number (0 = no repeat)
 }

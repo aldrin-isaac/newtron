@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtrun"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -20,6 +21,8 @@ func newStartCmd() *cobra.Command {
 		topology  string
 		platform  string
 		junitPath string
+		serverURL string
+		networkID string
 	)
 
 	cmd := &cobra.Command{
@@ -113,6 +116,34 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			runner := newtrun.NewRunner(absDir, topologiesDir)
 			runner.Progress = reporter
 
+			// Resolve server URL: flag > env > settings > default
+			if serverURL == "" {
+				serverURL = os.Getenv("NEWTRON_SERVER")
+			}
+			if serverURL == "" {
+				if s, err := newtron.LoadSettings(); err == nil {
+					serverURL = s.GetServerURL()
+				}
+			}
+			if serverURL == "" {
+				serverURL = newtron.DefaultServerURL
+			}
+			runner.ServerURL = serverURL
+
+			// Resolve network ID: flag > env > settings > default
+			if networkID == "" {
+				networkID = os.Getenv("NEWTRON_NETWORK_ID")
+			}
+			if networkID == "" {
+				if s, err := newtron.LoadSettings(); err == nil {
+					networkID = s.GetNetworkID()
+				}
+			}
+			if networkID == "" {
+				networkID = newtron.DefaultNetworkID
+			}
+			runner.NetworkID = networkID
+
 			results, runErr := runner.Run(opts)
 
 			// Handle pause
@@ -184,6 +215,8 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
+	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (env: NEWTRON_SERVER)")
+	cmd.Flags().StringVar(&networkID, "network-id", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 
 	return cmd
 }

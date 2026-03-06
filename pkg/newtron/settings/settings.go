@@ -33,6 +33,12 @@ type Settings struct {
 
 	// AuditMaxBackups is the max number of rotated audit log files (default: 10)
 	AuditMaxBackups int `json:"audit_max_backups,omitempty"`
+
+	// ServerURL is the newtron-server HTTP address
+	ServerURL string `json:"server_url,omitempty"`
+
+	// NetworkID identifies which registered network to operate on
+	NetworkID string `json:"network_id,omitempty"`
 }
 
 const (

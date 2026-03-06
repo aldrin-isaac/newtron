@@ -858,13 +858,6 @@ func (n *Node) VerifyComposite(ctx context.Context, ci *CompositeInfo) (*Verific
 }
 
 // ============================================================================
-// Escape hatch
-// ============================================================================
-
-// InternalNode returns the underlying *node.Node for advanced callers.
-func (n *Node) InternalNode() *node.Node { return n.internal }
-
-// ============================================================================
 // HealthCheck
 // ============================================================================
 

@@ -1,14 +1,12 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
 )
@@ -18,32 +16,29 @@ var aclCmd = &cobra.Command{
 	Short: "Manage Access Control Lists",
 	Long: `Manage ACLs on SONiC devices.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Note: ACLs are typically managed through services. Use these commands
 for manual ACL configuration outside the service model.
 
 Examples:
-  newtron -d leaf1-ny acl list
-  newtron -d leaf1-ny acl show CUSTOM-ACL
-  newtron -d leaf1-ny acl create CUSTOM-ACL --type L3 --stage ingress --interfaces Ethernet0
-  newtron -d leaf1-ny acl add-rule CUSTOM-ACL RULE_10 --priority 9999 --src-ip 10.0.0.0/8 --action permit
-  newtron -d leaf1-ny acl delete CUSTOM-ACL
-  newtron -d leaf1-ny acl bind CUSTOM-ACL Ethernet0 --direction ingress`,
+  newtron -D leaf1-ny acl list
+  newtron -D leaf1-ny acl show CUSTOM-ACL
+  newtron -D leaf1-ny acl create CUSTOM-ACL --type L3 --stage ingress --interfaces Ethernet0
+  newtron -D leaf1-ny acl add-rule CUSTOM-ACL RULE_10 --priority 9999 --src-ip 10.0.0.0/8 --action permit
+  newtron -D leaf1-ny acl delete CUSTOM-ACL
+  newtron -D leaf1-ny acl bind CUSTOM-ACL Ethernet0 --direction ingress`,
 }
 
 var aclListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all ACL tables",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		acls, err := n.ListACLs()
+		acls, err := app.client.ListACLs(app.deviceName)
 		if err != nil {
 			return err
 		}
@@ -75,14 +70,11 @@ var aclShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		detail, err := n.ShowACL(aclName)
+		detail, err := app.client.ShowACL(app.deviceName, aclName)
 		if err != nil {
 			return err
 		}
@@ -126,10 +118,10 @@ var aclCreateCmd = &cobra.Command{
 	Short: "Create a new ACL table",
 	Long: `Create a new ACL table.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl create CUSTOM-ACL --type L3 --stage ingress --interfaces Ethernet0`,
+  newtron -D leaf1-ny acl create CUSTOM-ACL --type L3 --stage ingress --interfaces Ethernet0`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
@@ -141,21 +133,16 @@ Examples:
 			return fmt.Errorf("--stage is required (ingress, egress)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.CreateACLTable(ctx, aclName, newtron.ACLTableConfig{
-				Type:        aclType,
-				Stage:       aclStage,
-				Ports:       aclInterfaces,
-				Description: aclDescription,
-			}); err != nil {
-				return fmt.Errorf("creating ACL table: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.CreateACLTable(app.deviceName, newtron.ACLCreateRequest{
+			Name:        aclName,
+			Type:        aclType,
+			Stage:       aclStage,
+			Ports:       aclInterfaces,
+			Description: aclDescription,
+		}, execOpts()))
 	},
 }
 
@@ -174,10 +161,10 @@ var aclAddRuleCmd = &cobra.Command{
 	Short: "Add a rule to an ACL table",
 	Long: `Add a rule to an ACL table.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl add-rule CUSTOM-ACL RULE_10 --priority 9999 --src-ip 10.0.0.0/8 --action permit`,
+  newtron -D leaf1-ny acl add-rule CUSTOM-ACL RULE_10 --priority 9999 --src-ip 10.0.0.0/8 --action permit`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
@@ -187,27 +174,19 @@ Examples:
 			return fmt.Errorf("--action is required (permit, deny)")
 		}
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if !n.ACLTableExists(aclName) {
-				return fmt.Errorf("ACL table '%s' not found", aclName)
-			}
-			if err := n.AddACLRule(ctx, aclName, ruleName, newtron.ACLRuleConfig{
-				Priority: rulePriority,
-				SrcIP:    ruleSrcIP,
-				DstIP:    ruleDstIP,
-				Protocol: ruleProtocol,
-				SrcPort:  ruleSrcPort,
-				DstPort:  ruleDstPort,
-				Action:   ruleAction,
-			}); err != nil {
-				return fmt.Errorf("adding ACL rule: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.AddACLRule(app.deviceName, aclName, newtron.ACLRuleAddRequest{
+			RuleName: ruleName,
+			Priority: rulePriority,
+			SrcIP:    ruleSrcIP,
+			DstIP:    ruleDstIP,
+			Protocol: ruleProtocol,
+			SrcPort:  ruleSrcPort,
+			DstPort:  ruleDstPort,
+			Action:   ruleAction,
+		}, execOpts()))
 	},
 }
 
@@ -216,27 +195,18 @@ var aclDeleteRuleCmd = &cobra.Command{
 	Short: "Delete a rule from an ACL table",
 	Long: `Delete a rule from an ACL table.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl delete-rule CUSTOM-ACL RULE_10 -x`,
+  newtron -D leaf1-ny acl delete-rule CUSTOM-ACL RULE_10 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		ruleName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if !n.ACLTableExists(aclName) {
-				return fmt.Errorf("ACL table '%s' not found", aclName)
-			}
-			if err := n.RemoveACLRule(ctx, aclName, ruleName); err != nil {
-				return fmt.Errorf("deleting ACL rule: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveACLRule(app.deviceName, aclName, ruleName, execOpts()))
 	},
 }
 
@@ -245,26 +215,17 @@ var aclDeleteCmd = &cobra.Command{
 	Short: "Delete an ACL table and its rules",
 	Long: `Delete an ACL table and its rules.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl delete CUSTOM-ACL`,
+  newtron -D leaf1-ny acl delete CUSTOM-ACL`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if !n.ACLTableExists(aclName) {
-				return fmt.Errorf("ACL table '%s' not found", aclName)
-			}
-			if err := n.DeleteACLTable(ctx, aclName); err != nil {
-				return fmt.Errorf("deleting ACL table: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.DeleteACLTable(app.deviceName, aclName, execOpts()))
 	},
 }
 
@@ -275,10 +236,10 @@ var aclBindCmd = &cobra.Command{
 	Short: "Bind an ACL to an interface",
 	Long: `Bind an ACL to an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl bind CUSTOM-ACL Ethernet0 --direction ingress`,
+  newtron -D leaf1-ny acl bind CUSTOM-ACL Ethernet0 --direction ingress`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
@@ -288,26 +249,10 @@ Examples:
 			aclBindDirection = "ingress"
 		}
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if !n.ACLTableExists(aclName) {
-				return fmt.Errorf("ACL table '%s' not found", aclName)
-			}
-			if !n.InterfaceExists(interfaceName) {
-				return fmt.Errorf("interface '%s' not found", interfaceName)
-			}
-			iface, err := n.Interface(interfaceName)
-			if err != nil {
-				return fmt.Errorf("getting interface: %w", err)
-			}
-			if err := iface.BindACL(ctx, aclName, aclBindDirection); err != nil {
-				return fmt.Errorf("binding ACL: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.BindACL(app.deviceName, interfaceName, aclName, aclBindDirection, execOpts()))
 	},
 }
 
@@ -316,31 +261,18 @@ var aclUnbindCmd = &cobra.Command{
 	Short: "Unbind an ACL from an interface",
 	Long: `Unbind an ACL from an interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny acl unbind CUSTOM-ACL Ethernet0`,
+  newtron -D leaf1-ny acl unbind CUSTOM-ACL Ethernet0`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aclName := args[0]
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(aclName)
-			if err := checkExecutePermission(auth.PermACLModify, authCtx); err != nil {
-				return err
-			}
-			if !n.ACLTableExists(aclName) {
-				return fmt.Errorf("ACL table '%s' not found", aclName)
-			}
-			iface, err := n.Interface(interfaceName)
-			if err != nil {
-				return fmt.Errorf("getting interface: %w", err)
-			}
-			if err := iface.UnbindACL(ctx, aclName); err != nil {
-				return fmt.Errorf("unbinding ACL: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UnbindACL(app.deviceName, interfaceName, aclName, execOpts()))
 	},
 }
 

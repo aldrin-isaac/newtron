@@ -40,6 +40,15 @@ func (s *Server) handleUnregisterNetwork(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unregistered"})
 }
 
+func (s *Server) handleReloadNetwork(w http.ResponseWriter, r *http.Request) {
+	netID := r.PathValue("netID")
+	if err := s.ReloadNetwork(netID); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
+}
+
 // ============================================================================
 // Network spec reads
 // ============================================================================
@@ -281,6 +290,12 @@ func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.PathValue("name")
+	// Only return profiles for actual host devices, not switches.
+	// The client uses 200 vs 404 from this endpoint to classify devices.
+	if !na.net.IsHostDevice(name) {
+		writeError(w, &newtron.NotFoundError{Resource: "host device", Name: name})
+		return
+	}
 	val, err := na.do(r.Context(), func() (any, error) {
 		return na.net.GetHostProfile(name)
 	})
@@ -604,6 +619,43 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ============================================================================
+// Platform feature support
+// ============================================================================
+
+func (s *Server) handlePlatformSupportsFeature(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	platform := r.PathValue("name")
+	feature := r.PathValue("feature")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return map[string]bool{"supported": na.net.PlatformSupportsFeature(platform, feature)}, nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	feature := r.PathValue("name")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.GetUnsupportedDueTo(feature), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
 }
 
 // ============================================================================

@@ -488,6 +488,15 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 			var cmds []string
 			cmds = append(cmds, fmt.Sprintf("ip netns add %s", hostName))
 
+			// Write a per-namespace profile so interactive shells show the
+			// logical host name in the prompt (e.g. "host1:/root# ").
+			// ip netns exec bind-mounts /etc/netns/<name>/* onto /etc/*,
+			// so "profile" maps to /etc/profile which Alpine sources.
+			cmds = append(cmds,
+				fmt.Sprintf("mkdir -p /etc/netns/%s", hostName),
+				fmt.Sprintf("echo 'export PS1=\"%s:\\w# \"' > /etc/netns/%s/profile", hostName, hostName),
+			)
+
 			// Move each data NIC into the namespace
 			// For a host with one link (eth0), NIC = nicBase + 0
 			// The VM sees this as eth<nicBase>
@@ -1072,7 +1081,7 @@ func (l *Lab) Provision(ctx context.Context, parallel int) error {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-d", name, "-x")
+			cmd := exec.CommandContext(ctx, findSiblingBinary("newtron"), "provision", "-S", l.SpecDir, "-D", name, "-x")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				mu.Lock()

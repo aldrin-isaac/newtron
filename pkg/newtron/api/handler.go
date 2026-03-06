@@ -20,6 +20,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network", s.handleRegisterNetwork)
 	mux.HandleFunc("GET /network", s.handleListNetworks)
 	mux.HandleFunc("DELETE /network/{netID}", s.handleUnregisterNetwork)
+	mux.HandleFunc("POST /network/{netID}/reload", s.handleReloadNetwork)
 
 	// ====================================================================
 	// Network spec reads
@@ -42,6 +43,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/host/{name}", s.handleGetHostProfile)
 	mux.HandleFunc("GET /network/{netID}/feature", s.handleGetAllFeatures)
 	mux.HandleFunc("GET /network/{netID}/feature/{name}/dependency", s.handleGetFeatureDependencies)
+	mux.HandleFunc("GET /network/{netID}/feature/{name}/unsupported-due-to", s.handleGetUnsupportedDueTo)
+	mux.HandleFunc("GET /network/{netID}/platform/{name}/supports/{feature}", s.handlePlatformSupportsFeature)
 
 	// ====================================================================
 	// Network spec writes
@@ -103,9 +106,18 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/ssh-command", s.handleSSHCommand)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/vlan", s.handleCreateVLAN)
 	mux.HandleFunc("DELETE /network/{netID}/node/{device}/vlan/{id}", s.handleDeleteVLAN)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/vlan/{id}/member", s.handleAddVLANMember)
+	mux.HandleFunc("DELETE /network/{netID}/node/{device}/vlan/{id}/member/{iface}", s.handleRemoveVLANMember)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/svi", s.handleConfigureSVI)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-svi", s.handleRemoveSVI)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/vrf", s.handleCreateVRF)
 	mux.HandleFunc("DELETE /network/{netID}/node/{device}/vrf/{name}", s.handleDeleteVRF)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/vrf/{name}/interface", s.handleAddVRFInterface)
+	mux.HandleFunc("DELETE /network/{netID}/node/{device}/vrf/{name}/interface/{iface}", s.handleRemoveVRFInterface)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/vrf/{name}/bind-ipvpn", s.handleBindIPVPN)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/vrf/{name}/unbind-ipvpn", s.handleUnbindIPVPN)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/vrf/{name}/route", s.handleAddStaticRoute)
+	mux.HandleFunc("DELETE /network/{netID}/node/{device}/vrf/{name}/route/{prefix...}", s.handleRemoveStaticRoute)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/acl", s.handleCreateACL)
 	mux.HandleFunc("DELETE /network/{netID}/node/{device}/acl/{name}", s.handleDeleteACL)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/acl/{name}/rule", s.handleAddACLRule)
@@ -114,6 +126,22 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("DELETE /network/{netID}/node/{device}/portchannel/{name}", s.handleDeletePortChannel)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/portchannel/{name}/member", s.handleAddPortChannelMember)
 	mux.HandleFunc("DELETE /network/{netID}/node/{device}/portchannel/{name}/member/{iface}", s.handleRemovePortChannelMember)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/add-bgp-neighbor", s.handleAddBGPNeighborNode)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-bgp-neighbor", s.handleRemoveBGPNeighborNode)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-bgp-globals", s.handleRemoveBGPGlobals)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/apply-frr-defaults", s.handleApplyFRRDefaults)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/restart-service", s.handleRestartService)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/set-metadata", s.handleSetDeviceMetadata)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/refresh", s.handleRefresh)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/apply-qos", s.handleNodeApplyQoS)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-qos", s.handleNodeRemoveQoS)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/verify-committed", s.handleVerifyCommitted)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}", s.handleConfigDBTableKeys)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}", s.handleQueryConfigDB)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}/exists", s.handleConfigDBEntryExists)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/statedb/{table}/{key}", s.handleQueryStateDB)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/check", s.handleCheckBGPSessions)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/lag/{name}", s.handleShowLAGDetail)
 
 	// ====================================================================
 	// Node composite operations

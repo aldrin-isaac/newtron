@@ -84,12 +84,6 @@ type CleanupRequest struct {
 	Type string `json:"type,omitempty"` // "acls", "vrfs", "vnis", or "" for all
 }
 
-// ConfigReloadRequest is the body for POST .../config-reload (currently empty).
-type ConfigReloadRequest struct{}
-
-// SaveConfigRequest is the body for POST .../save-config (currently empty).
-type SaveConfigRequest struct{}
-
 // ============================================================================
 // HTTP Request Types — Interface Operations
 // ============================================================================
@@ -145,12 +139,6 @@ type ApplyQoSRequest struct {
 	Policy string `json:"policy"`
 }
 
-// RouteRequest identifies a route lookup.
-type RouteRequest struct {
-	VRF    string `json:"vrf"`
-	Prefix string `json:"prefix"`
-}
-
 // ============================================================================
 // HTTP Request Types — Node write operations that need JSON bodies
 // ============================================================================
@@ -162,12 +150,7 @@ type VLANCreateRequest struct {
 }
 
 // SVIConfigureRequest is the body for POST .../svi.
-type SVIConfigureRequest struct {
-	VlanID     int    `json:"vlan_id"`
-	VRF        string `json:"vrf,omitempty"`
-	IPAddress  string `json:"ip_address,omitempty"`
-	AnycastMAC string `json:"anycast_mac,omitempty"`
-}
+type SVIConfigureRequest = newtron.SVIConfigureRequest
 
 // VRFCreateRequest is the body for POST .../vrf.
 type VRFCreateRequest struct {
@@ -175,38 +158,69 @@ type VRFCreateRequest struct {
 }
 
 // ACLCreateRequest is the body for POST .../acl.
-type ACLCreateRequest struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Stage       string `json:"stage"`
-	Ports       string `json:"ports,omitempty"`
-	Description string `json:"description,omitempty"`
-}
+type ACLCreateRequest = newtron.ACLCreateRequest
 
 // ACLRuleAddRequest is the body for POST .../acl/{name}/rule.
-type ACLRuleAddRequest struct {
-	RuleName string `json:"rule_name"`
-	Priority int    `json:"priority"`
-	Action   string `json:"action"`
-	SrcIP    string `json:"src_ip,omitempty"`
-	DstIP    string `json:"dst_ip,omitempty"`
-	Protocol string `json:"protocol,omitempty"`
-	SrcPort  string `json:"src_port,omitempty"`
-	DstPort  string `json:"dst_port,omitempty"`
-}
+type ACLRuleAddRequest = newtron.ACLRuleAddRequest
 
 // PortChannelCreateRequest is the body for POST .../portchannel.
-type PortChannelCreateRequest struct {
-	Name     string   `json:"name"`
-	Members  []string `json:"members,omitempty"`
-	MinLinks int      `json:"min_links,omitempty"`
-	FastRate bool     `json:"fast_rate,omitempty"`
-	Fallback bool     `json:"fallback,omitempty"`
-	MTU      int      `json:"mtu,omitempty"`
-}
+type PortChannelCreateRequest = newtron.PortChannelCreateRequest
 
 // PortChannelMemberRequest is the body for POST .../portchannel/{name}/member.
 type PortChannelMemberRequest struct {
+	Interface string `json:"interface"`
+}
+
+// ============================================================================
+// HTTP Request Types — Missing Node Operations
+// ============================================================================
+
+// VLANMemberRequest is the body for POST .../vlan/{id}/member.
+type VLANMemberRequest struct {
+	Interface string `json:"interface"`
+	Tagged    bool   `json:"tagged"`
+}
+
+// RemoveSVIRequest is the body for POST .../remove-svi.
+type RemoveSVIRequest struct {
+	VlanID int `json:"vlan_id"`
+}
+
+// VRFInterfaceRequest is the body for POST .../vrf/{name}/interface.
+type VRFInterfaceRequest struct {
+	Interface string `json:"interface"`
+}
+
+// BindIPVPNRequest is the body for POST .../vrf/{name}/bind-ipvpn.
+type BindIPVPNRequest struct {
+	IPVPN string `json:"ipvpn"`
+}
+
+// StaticRouteRequest is the body for POST .../vrf/{name}/route.
+type StaticRouteRequest struct {
+	Prefix  string `json:"prefix"`
+	NextHop string `json:"nexthop"`
+	Metric  int    `json:"metric,omitempty"`
+}
+
+// RestartServiceRequest is the body for POST .../restart-service.
+type RestartServiceRequest struct {
+	Service string `json:"service"`
+}
+
+// SetDeviceMetadataRequest is the body for POST .../set-metadata.
+type SetDeviceMetadataRequest struct {
+	Fields map[string]string `json:"fields"`
+}
+
+// NodeApplyQoSRequest is the body for POST .../apply-qos (node-level).
+type NodeApplyQoSRequest struct {
+	Interface string `json:"interface"`
+	Policy    string `json:"policy"`
+}
+
+// NodeRemoveQoSRequest is the body for POST .../remove-qos (node-level).
+type NodeRemoveQoSRequest struct {
 	Interface string `json:"interface"`
 }
 
@@ -223,6 +237,15 @@ func (e *notRegisteredError) Error() string {
 	return "network '" + e.id + "' not registered"
 }
 
+// alreadyRegisteredError is returned when a network ID is already registered.
+type alreadyRegisteredError struct {
+	id string
+}
+
+func (e *alreadyRegisteredError) Error() string {
+	return "network '" + e.id + "' already registered"
+}
+
 // httpStatusFromError maps Go error types to HTTP status codes.
 func httpStatusFromError(err error) int {
 	if err == nil {
@@ -232,6 +255,11 @@ func httpStatusFromError(err error) int {
 	var notReg *notRegisteredError
 	if errors.As(err, &notReg) {
 		return http.StatusNotFound
+	}
+
+	var alreadyReg *alreadyRegisteredError
+	if errors.As(err, &alreadyReg) {
+		return http.StatusConflict
 	}
 
 	var notFound *newtron.NotFoundError

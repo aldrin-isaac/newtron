@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,9 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 var evpnCmd = &cobra.Command{
@@ -54,22 +52,16 @@ var evpnSetupCmd = &cobra.Command{
 If --source-ip is not specified, uses the device's loopback IP.
 Skips any components that are already configured.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
   newtron leaf1 evpn setup -x
   newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource("evpn")
-			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.SetupEVPN(ctx, evpnSetupSourceIP); err != nil {
-				return fmt.Errorf("setting up EVPN: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.SetupEVPN(app.deviceName, evpnSetupSourceIP, execOpts()))
 	},
 }
 
@@ -81,14 +73,11 @@ var evpnStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show EVPN config and operational state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		status, err := n.EVPNStatus()
+		status, err := app.client.EVPNStatus(app.deviceName)
 		if err != nil {
 			return fmt.Errorf("getting EVPN status: %w", err)
 		}
@@ -196,7 +185,10 @@ var evpnIpvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all IP-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ipvpns := app.net.ListIPVPNs()
+		ipvpns, err := app.client.ListIPVPNs()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(ipvpns)
@@ -229,7 +221,7 @@ var evpnIpvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		ipvpn, err := app.net.ShowIPVPN(name)
+		ipvpn, err := app.client.ShowIPVPN(name)
 		if err != nil {
 			return err
 		}
@@ -279,11 +271,6 @@ Examples:
 			return fmt.Errorf("--l3vni is required")
 		}
 
-		authCtx := auth.NewContext().WithResource(name)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		req := newtron.CreateIPVPNRequest{
 			Name:        name,
 			L3VNI:       ipvpnL3VNI,
@@ -311,7 +298,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.CreateIPVPN(req, newtron.ExecOpts{Execute: true}); err != nil {
+		if err := app.client.CreateIPVPN(req, execOpts()); err != nil {
 			return fmt.Errorf("saving IP-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("IP-VPN definition saved to network.json."))
@@ -334,12 +321,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := app.net.ShowIPVPN(name); err != nil {
-			return err
-		}
-
-		authCtx := auth.NewContext().WithResource(name)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
+		if _, err := app.client.ShowIPVPN(name); err != nil {
 			return err
 		}
 
@@ -350,7 +332,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteIPVPN(name, newtron.ExecOpts{Execute: true}); err != nil {
+		if err := app.client.DeleteIPVPN(name, execOpts()); err != nil {
 			return fmt.Errorf("deleting IP-VPN: %w", err)
 		}
 		fmt.Println(green("IP-VPN definition deleted from network.json."))
@@ -383,7 +365,10 @@ var evpnMacvpnListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all MAC-VPN definitions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		macvpns := app.net.ListMACVPNs()
+		macvpns, err := app.client.ListMACVPNs()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(macvpns)
@@ -416,7 +401,7 @@ var evpnMacvpnShowCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		macvpn, err := app.net.ShowMACVPN(name)
+		macvpn, err := app.client.ShowMACVPN(name)
 		if err != nil {
 			return err
 		}
@@ -474,11 +459,6 @@ Examples:
 			return fmt.Errorf("--vni is required")
 		}
 
-		authCtx := auth.NewContext().WithResource(name)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		req := newtron.CreateMACVPNRequest{
 			Name:           name,
 			VNI:            macvpnVNI,
@@ -516,7 +496,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.CreateMACVPN(req, newtron.ExecOpts{Execute: true}); err != nil {
+		if err := app.client.CreateMACVPN(req, execOpts()); err != nil {
 			return fmt.Errorf("saving MAC-VPN: %w", err)
 		}
 		fmt.Println("\n" + green("MAC-VPN definition saved to network.json."))
@@ -539,12 +519,7 @@ Examples:
 		name := args[0]
 
 		// Verify it exists
-		if _, err := app.net.ShowMACVPN(name); err != nil {
-			return err
-		}
-
-		authCtx := auth.NewContext().WithResource(name)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
+		if _, err := app.client.ShowMACVPN(name); err != nil {
 			return err
 		}
 
@@ -555,7 +530,7 @@ Examples:
 			return nil
 		}
 
-		if err := app.net.DeleteMACVPN(name, newtron.ExecOpts{Execute: true}); err != nil {
+		if err := app.client.DeleteMACVPN(name, execOpts()); err != nil {
 			return fmt.Errorf("deleting MAC-VPN: %w", err)
 		}
 		fmt.Println(green("MAC-VPN definition deleted from network.json."))

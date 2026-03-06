@@ -16,8 +16,9 @@ type Server struct {
 	mu       sync.RWMutex
 	networks map[string]*networkEntry
 
-	httpServer *http.Server
-	logger     *log.Logger
+	idleTimeout time.Duration
+	httpServer  *http.Server
+	logger      *log.Logger
 }
 
 // networkEntry pairs a NetworkActor with its registration metadata.
@@ -26,14 +27,20 @@ type networkEntry struct {
 	specDir string
 }
 
-// NewServer creates a new API server.
-func NewServer(logger *log.Logger) *Server {
+// NewServer creates a new API server. idleTimeout controls how long SSH
+// connections to devices are cached between requests. Use 0 for the default
+// (5 minutes). Use a negative value to disable caching (connect per request).
+func NewServer(logger *log.Logger, idleTimeout time.Duration) *Server {
 	if logger == nil {
 		logger = log.Default()
 	}
+	if idleTimeout == 0 {
+		idleTimeout = DefaultIdleTimeout
+	}
 	s := &Server{
-		networks: make(map[string]*networkEntry),
-		logger:   logger,
+		networks:    make(map[string]*networkEntry),
+		idleTimeout: idleTimeout,
+		logger:      logger,
 	}
 	mux := s.buildMux()
 	s.httpServer = &http.Server{
@@ -70,7 +77,7 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	defer s.mu.Unlock()
 
 	if _, exists := s.networks[id]; exists {
-		return fmt.Errorf("network '%s' already registered", id)
+		return &alreadyRegisteredError{id: id}
 	}
 
 	net, err := newtron.LoadNetwork(specDir)
@@ -79,15 +86,15 @@ func (s *Server) RegisterNetwork(id, specDir string) error {
 	}
 
 	s.networks[id] = &networkEntry{
-		actor:   newNetworkActor(net, specDir),
+		actor:   newNetworkActor(net, s.idleTimeout),
 		specDir: specDir,
 	}
 	s.logger.Printf("registered network '%s' from %s", id, specDir)
 	return nil
 }
 
-// UnregisterNetwork removes a registered network.
-// Fails if any NodeActors are active.
+// UnregisterNetwork removes a registered network. Stops all NodeActors
+// (draining in-flight requests and closing SSH connections) before removing.
 func (s *Server) UnregisterNetwork(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,13 +104,38 @@ func (s *Server) UnregisterNetwork(id string) error {
 		return fmt.Errorf("network '%s' not registered", id)
 	}
 
-	if count := entry.actor.activeNodeCount(); count > 0 {
-		return fmt.Errorf("network '%s' has %d active node(s) — stop them first", id, count)
-	}
-
 	entry.actor.stop()
 	delete(s.networks, id)
 	s.logger.Printf("unregistered network '%s'", id)
+	return nil
+}
+
+// ReloadNetwork stops the existing NetworkActor, reloads specs from disk,
+// and creates a fresh NetworkActor. SSH connections reconnect lazily on next request.
+func (s *Server) ReloadNetwork(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.networks[id]
+	if !exists {
+		return &notRegisteredError{id}
+	}
+
+	// Stop old actor (drains all NodeActors and SSH connections)
+	entry.actor.stop()
+
+	// Reload specs from disk
+	net, err := newtron.LoadNetwork(entry.specDir)
+	if err != nil {
+		return fmt.Errorf("reloading specs from %s: %w", entry.specDir, err)
+	}
+
+	// Replace with new actor
+	s.networks[id] = &networkEntry{
+		actor:   newNetworkActor(net, s.idleTimeout),
+		specDir: entry.specDir,
+	}
+	s.logger.Printf("reloaded network '%s' from %s", id, entry.specDir)
 	return nil
 }
 

@@ -1,14 +1,7 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"strings"
-
 	"github.com/spf13/cobra"
-
-	"github.com/newtron-network/newtron/pkg/newtron"
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 )
 
 var deviceCmd = &cobra.Command{
@@ -17,8 +10,8 @@ var deviceCmd = &cobra.Command{
 	Long: `Device-scope operations that don't fit a specific resource group.
 
 Examples:
-  newtron -d leaf1-ny device cleanup -x
-  newtron -d leaf1-ny device cleanup --type acls -x`,
+  newtron -D leaf1-ny device cleanup -x
+  newtron -D leaf1-ny device cleanup --type acls -x`,
 }
 
 var cleanupType string
@@ -34,57 +27,18 @@ This command identifies and removes configurations that are no longer in use:
   - VNI mappings for deleted VLANs/VRFs
   - Unused EVPN route targets
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny device cleanup
-  newtron -d leaf1-ny device cleanup -x
-  newtron -d leaf1-ny device cleanup --type acls -x`,
+  newtron -D leaf1-ny device cleanup
+  newtron -D leaf1-ny device cleanup -x
+  newtron -D leaf1-ny device cleanup --type acls -x`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName)
-			if err := checkExecutePermission(auth.PermDeviceCleanup, authCtx); err != nil {
-				return err
-			}
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-			summary, err := n.Cleanup(ctx, cleanupType)
-			if err != nil {
-				return fmt.Errorf("analyzing orphaned configs: %w", err)
-			}
-
-			if n.PendingCount() == 0 {
-				fmt.Println("No orphaned configurations found. Device is clean.")
-				return nil
-			}
-
-			// Display summary before changeset
-			fmt.Printf("Orphaned Configurations on %s\n", bold(app.deviceName))
-			fmt.Println(strings.Repeat("=", 50))
-
-			if len(summary.OrphanedACLs) > 0 {
-				fmt.Printf("\nOrphaned ACLs (%d):\n", len(summary.OrphanedACLs))
-				for _, acl := range summary.OrphanedACLs {
-					fmt.Printf("  - %s\n", acl)
-				}
-			}
-
-			if len(summary.OrphanedVRFs) > 0 {
-				fmt.Printf("\nOrphaned VRFs (%d):\n", len(summary.OrphanedVRFs))
-				for _, vrf := range summary.OrphanedVRFs {
-					fmt.Printf("  - %s\n", vrf)
-				}
-			}
-
-			if len(summary.OrphanedVNIMappings) > 0 {
-				fmt.Printf("\nOrphaned VNI Mappings (%d):\n", len(summary.OrphanedVNIMappings))
-				for _, vni := range summary.OrphanedVNIMappings {
-					fmt.Printf("  - %s\n", vni)
-				}
-			}
-			fmt.Println()
-
-			return nil
-		})
+		return displayWriteResult(app.client.Cleanup(app.deviceName, cleanupType, execOpts()))
 	},
 }
 

@@ -16,11 +16,12 @@ func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	specDir := flag.String("spec-dir", "", "spec directory to auto-register as 'default' network")
 	netID := flag.String("net-id", "default", "network ID for auto-registered spec directory")
+	idleTimeout := flag.Duration("idle-timeout", 0, "SSH connection idle timeout (default 5m, negative to disable caching)")
 	flag.Parse()
 
 	logger := log.New(os.Stderr, "newtron-server: ", log.LstdFlags|log.Lmsgprefix)
 
-	srv := api.NewServer(logger)
+	srv := api.NewServer(logger, *idleTimeout)
 
 	if *specDir != "" {
 		if err := srv.RegisterNetwork(*netID, *specDir); err != nil {

@@ -99,36 +99,6 @@ func TestResolveNICIndex_Custom(t *testing.T) {
 	}
 }
 
-func TestResolveInterfaceName(t *testing.T) {
-	tests := []struct {
-		mapType string
-		nic     int
-		want    string
-	}{
-		{"stride-4", 1, "Ethernet0"},
-		{"stride-4", 2, "Ethernet4"},
-		{"stride-4", 3, "Ethernet8"},
-		{"sequential", 1, "Ethernet0"},
-		{"sequential", 2, "Ethernet1"},
-		{"sequential", 3, "Ethernet2"},
-	}
-
-	for _, tt := range tests {
-		got := ResolveInterfaceName(tt.mapType, tt.nic, nil)
-		if got != tt.want {
-			t.Errorf("ResolveInterfaceName(%s, %d) = %q, want %q", tt.mapType, tt.nic, got, tt.want)
-		}
-	}
-}
-
-func TestResolveInterfaceName_Custom(t *testing.T) {
-	customMap := map[string]int{"Ethernet0": 3, "Ethernet4": 1}
-	got := ResolveInterfaceName("custom", 3, customMap)
-	if got != "Ethernet0" {
-		t.Errorf("ResolveInterfaceName(custom, 3) = %q, want Ethernet0", got)
-	}
-}
-
 func TestParseEthernetIndex(t *testing.T) {
 	tests := []struct {
 		name string

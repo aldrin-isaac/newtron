@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
 )
@@ -37,7 +36,10 @@ var filterListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all filter templates",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filterNames := app.net.ListFilters()
+		filterNames, err := app.client.ListFilters()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(filterNames)
@@ -53,7 +55,7 @@ var filterListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "TYPE", "RULES", "DESCRIPTION")
 
 		for _, name := range filterNames {
-			fs, err := app.net.ShowFilter(name)
+			fs, err := app.client.ShowFilter(name)
 			if err != nil {
 				continue
 			}
@@ -72,7 +74,7 @@ var filterShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		fs, err := app.net.ShowFilter(filterName)
+		fs, err := app.client.ShowFilter(filterName)
 		if err != nil {
 			return err
 		}
@@ -147,11 +149,11 @@ Examples:
 			return nil
 		}
 
-		return app.net.CreateFilter(newtron.CreateFilterRequest{
+		return app.client.CreateFilter(newtron.CreateFilterRequest{
 			Name:        filterName,
 			Type:        filterCreateType,
 			Description: filterCreateDescription,
-		}, newtron.ExecOpts{Execute: true})
+		}, execOpts())
 	},
 }
 
@@ -168,11 +170,6 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterName := args[0]
 
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermFilterDelete, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Deleting filter: %s\n", filterName)
 
 		if !app.executeMode {
@@ -180,7 +177,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.DeleteFilter(filterName, newtron.ExecOpts{Execute: true})
+		return app.client.DeleteFilter(filterName, execOpts())
 	},
 }
 
@@ -223,11 +220,6 @@ Examples:
 			return fmt.Errorf("--action must be 'permit' or 'deny', got '%s'", filterRuleAction)
 		}
 
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Rule: priority %d, action %s, filter '%s'\n", filterRulePriority, filterRuleAction, filterName)
 
 		if !app.executeMode {
@@ -235,7 +227,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.AddFilterRule(newtron.AddFilterRuleRequest{
+		return app.client.AddFilterRule(newtron.AddFilterRuleRequest{
 			Filter:        filterName,
 			Sequence:      filterRulePriority,
 			Action:        filterRuleAction,
@@ -247,7 +239,7 @@ Examples:
 			DSCP:          filterRuleDSCP,
 			SrcPrefixList: filterRuleSrcPrefixList,
 			DstPrefixList: filterRuleDstPrefixList,
-		}, newtron.ExecOpts{Execute: true})
+		}, execOpts())
 	},
 }
 
@@ -267,11 +259,6 @@ Examples:
 			return fmt.Errorf("invalid priority: %s", args[1])
 		}
 
-		authCtx := auth.NewContext().WithResource(filterName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Removing rule (priority %d) from filter '%s'\n", priority, filterName)
 
 		if !app.executeMode {
@@ -279,7 +266,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.RemoveFilterRule(filterName, priority, newtron.ExecOpts{Execute: true})
+		return app.client.RemoveFilterRule(filterName, priority, execOpts())
 	},
 }
 

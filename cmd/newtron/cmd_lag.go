@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
 )
@@ -20,51 +18,52 @@ var lagCmd = &cobra.Command{
 	Short: "Manage link aggregation groups (LAG/PortChannel)",
 	Long: `Manage link aggregation groups.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag list
-  newtron -d leaf1-ny lag show PortChannel100
-  newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
-  newtron -d leaf1-ny lag add-interface PortChannel100 Ethernet8
-  newtron -d leaf1-ny lag remove-interface PortChannel100 Ethernet8
-  newtron -d leaf1-ny lag status`,
+  newtron -D leaf1-ny lag list
+  newtron -D leaf1-ny lag show PortChannel100
+  newtron -D leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
+  newtron -D leaf1-ny lag add-interface PortChannel100 Ethernet8
+  newtron -D leaf1-ny lag remove-interface PortChannel100 Ethernet8
+  newtron -D leaf1-ny lag status`,
 }
 
 var lagListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all LAGs on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		entries, err := app.client.ListLAGs(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer n.Close()
-
-		portChannels := n.ListPortChannels()
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(portChannels)
+			// Extract names for the list view
+			var names []string
+			for _, e := range entries {
+				names = append(names, e.Name)
+			}
+			return json.NewEncoder(os.Stdout).Encode(names)
 		}
 
-		if len(portChannels) == 0 {
+		if len(entries) == 0 {
 			fmt.Println("No LAGs configured")
 			return nil
 		}
 
-		sort.Strings(portChannels)
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].Name < entries[j].Name
+		})
 
 		t := cli.NewTable("NAME", "STATUS", "MEMBERS", "ACTIVE")
 
-		for _, pcName := range portChannels {
-			pc, err := n.ShowLAGDetail(pcName)
-			if err != nil {
-				continue
-			}
-
+		for _, pc := range entries {
 			status := formatAdminStatus(pc.AdminStatus)
-
 			t.Row(
 				pc.Name,
 				status,
@@ -85,22 +84,19 @@ var lagShowCmd = &cobra.Command{
 
 Includes name, status, members, active members, MTU, and min-links.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag show PortChannel100`,
+  newtron -D leaf1-ny lag show PortChannel100`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		pc, err := n.ShowLAGDetail(lagName)
+		pc, err := app.client.ShowLAGDetail(app.deviceName, lagName)
 		if err != nil {
 			return err
 		}
@@ -144,19 +140,16 @@ var lagStatusCmd = &cobra.Command{
 
 Combines config and STATE_DB information.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag status`,
+  newtron -D leaf1-ny lag status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		statuses, err := n.LAGStatus()
+		statuses, err := app.client.ListLAGs(app.deviceName)
 		if err != nil {
 			return err
 		}
@@ -211,11 +204,11 @@ var lagCreateCmd = &cobra.Command{
 
 The LAG name should be in the format PortChannelN (e.g., PortChannel100).
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
-  newtron -d leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4 --fast-rate -x`,
+  newtron -D leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4
+  newtron -D leaf1-ny lag create PortChannel100 --members Ethernet0,Ethernet4 --fast-rate -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
@@ -228,21 +221,16 @@ Examples:
 			members[i] = strings.TrimSpace(members[i])
 		}
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
-			if err := checkExecutePermission(auth.PermLAGCreate, authCtx); err != nil {
-				return err
-			}
-			if err := n.CreatePortChannel(ctx, lagName, newtron.PortChannelConfig{
-				Members:  members,
-				MinLinks: lagMinLinks,
-				FastRate: lagFastRate,
-				MTU:      lagMTU,
-			}); err != nil {
-				return fmt.Errorf("creating LAG: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.CreatePortChannel(app.deviceName, newtron.PortChannelCreateRequest{
+			Name:     lagName,
+			Members:  members,
+			MinLinks: lagMinLinks,
+			FastRate: lagFastRate,
+			MTU:      lagMTU,
+		}, execOpts()))
 	},
 }
 
@@ -251,24 +239,18 @@ var lagAddInterfaceCmd = &cobra.Command{
 	Short: "Add an interface to a LAG",
 	Long: `Add a member interface to a LAG.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag add-interface PortChannel100 Ethernet8`,
+  newtron -D leaf1-ny lag add-interface PortChannel100 Ethernet8`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
-			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.AddPortChannelMember(ctx, lagName, memberName); err != nil {
-				return fmt.Errorf("adding interface: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.AddPortChannelMember(app.deviceName, lagName, memberName, execOpts()))
 	},
 }
 
@@ -277,24 +259,18 @@ var lagRemoveInterfaceCmd = &cobra.Command{
 	Short: "Remove an interface from a LAG",
 	Long: `Remove a member interface from a LAG.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag remove-interface PortChannel100 Ethernet8`,
+  newtron -D leaf1-ny lag remove-interface PortChannel100 Ethernet8`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
 		memberName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
-			if err := checkExecutePermission(auth.PermLAGModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.RemovePortChannelMember(ctx, lagName, memberName); err != nil {
-				return fmt.Errorf("removing interface: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemovePortChannelMember(app.deviceName, lagName, memberName, execOpts()))
 	},
 }
 
@@ -303,23 +279,17 @@ var lagDeleteCmd = &cobra.Command{
 	Short: "Delete a LAG",
 	Long: `Delete a link aggregation group.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny lag delete PortChannel100 -x`,
+  newtron -D leaf1-ny lag delete PortChannel100 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		lagName := args[0]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(lagName)
-			if err := checkExecutePermission(auth.PermLAGDelete, authCtx); err != nil {
-				return err
-			}
-			if err := n.DeletePortChannel(ctx, lagName); err != nil {
-				return fmt.Errorf("deleting LAG: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.DeletePortChannel(app.deviceName, lagName, execOpts()))
 	},
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
 )
@@ -20,62 +18,51 @@ var vlanCmd = &cobra.Command{
 	Short: "Manage VLANs",
 	Long: `Manage VLANs on SONiC devices.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan list
-  newtron -d leaf1-ny vlan show 100
-  newtron -d leaf1-ny vlan create 100
-  newtron -d leaf1-ny vlan add-interface 100 Ethernet0 --tagged
-  newtron -d leaf1-ny vlan remove-interface 100 Ethernet0
-  newtron -d leaf1-ny vlan status`,
+  newtron -D leaf1-ny vlan list
+  newtron -D leaf1-ny vlan show 100
+  newtron -D leaf1-ny vlan create 100
+  newtron -D leaf1-ny vlan add-interface 100 Ethernet0 --tagged
+  newtron -D leaf1-ny vlan remove-interface 100 Ethernet0
+  newtron -D leaf1-ny vlan status`,
 }
 
 var vlanListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all VLANs",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		entries, err := app.client.ListVLANs(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer n.Close()
-
-		vlanIDs := n.ListVLANs()
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(vlanIDs)
+			return json.NewEncoder(os.Stdout).Encode(entries)
 		}
 
-		if len(vlanIDs) == 0 {
+		if len(entries) == 0 {
 			fmt.Println("No VLANs configured")
 			return nil
 		}
 
-		sort.Ints(vlanIDs)
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ID < entries[j].ID
+		})
 
 		t := cli.NewTable("VLAN ID", "L2VNI", "SVI", "MEMBERS")
 
-		skipped := 0
-		for _, id := range vlanIDs {
-			entry, err := n.ShowVLAN(id)
-			if err != nil {
-				skipped++
-				continue
-			}
-
+		for _, entry := range entries {
 			vni := dashInt(entry.L2VNI)
-
 			svi := dash(entry.SVI)
-
 			t.Row(fmt.Sprintf("%d", entry.ID), vni, svi, strings.Join(entry.MemberNames, ","))
 		}
 		t.Flush()
-
-		if skipped > 0 {
-			fmt.Fprintf(os.Stderr, "warning: %d VLAN(s) could not be read\n", skipped)
-		}
 
 		return nil
 	},
@@ -88,10 +75,10 @@ var vlanShowCmd = &cobra.Command{
 
 Includes VLAN ID, name, members, SVI status, MAC-VPN binding, and L2VNI.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan show 100`,
+  newtron -D leaf1-ny vlan show 100`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
@@ -99,14 +86,11 @@ Examples:
 			return err
 		}
 
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		entry, err := n.ShowVLAN(vlanID)
+		entry, err := app.client.ShowVLAN(app.deviceName, vlanID)
 		if err != nil {
 			return err
 		}
@@ -155,19 +139,16 @@ var vlanStatusCmd = &cobra.Command{
 	Short: "Show all VLANs with operational state",
 	Long: `Show all VLANs with their operational state from STATE_DB.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan status`,
+  newtron -D leaf1-ny vlan status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
-		n, err := requireDevice(ctx)
-		if err != nil {
+		if err := requireDevice(); err != nil {
 			return err
 		}
-		defer n.Close()
 
-		statuses, err := n.VLANStatus()
+		statuses, err := app.client.ListVLANs(app.deviceName)
 		if err != nil {
 			return err
 		}
@@ -208,28 +189,20 @@ var vlanCreateCmd = &cobra.Command{
 	Short: "Create a new VLAN",
 	Long: `Create a new VLAN on the device.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan create 100 --description "Frontend VLAN"`,
+  newtron -D leaf1-ny vlan create 100 --description "Frontend VLAN"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermVLANCreate, authCtx); err != nil {
-				return err
-			}
-			if err := n.CreateVLAN(ctx, vlanID, newtron.VLANConfig{
-				Description: vlanDescription,
-			}); err != nil {
-				return fmt.Errorf("creating VLAN: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.CreateVLAN(app.deviceName, vlanID, vlanDescription, execOpts()))
 	},
 }
 
@@ -240,11 +213,11 @@ var vlanAddInterfaceCmd = &cobra.Command{
 	Short: "Add an interface to a VLAN",
 	Long: `Add an interface to a VLAN as a tagged or untagged member.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan add-interface 100 Ethernet0 --tagged
-  newtron -d leaf1-ny vlan add-interface 100 PortChannel100`,
+  newtron -D leaf1-ny vlan add-interface 100 Ethernet0 --tagged
+  newtron -D leaf1-ny vlan add-interface 100 PortChannel100`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
@@ -252,16 +225,10 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.AddVLANMember(ctx, vlanID, interfaceName, vlanTagged); err != nil {
-				return fmt.Errorf("adding interface: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.AddVLANMember(app.deviceName, vlanID, interfaceName, vlanTagged, execOpts()))
 	},
 }
 
@@ -270,11 +237,11 @@ var vlanRemoveInterfaceCmd = &cobra.Command{
 	Short: "Remove an interface from a VLAN",
 	Long: `Remove an interface from a VLAN.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan remove-interface 100 Ethernet0 -x
-  newtron -d leaf1-ny vlan remove-interface 100 PortChannel100 -x`,
+  newtron -D leaf1-ny vlan remove-interface 100 Ethernet0 -x
+  newtron -D leaf1-ny vlan remove-interface 100 PortChannel100 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
@@ -282,16 +249,10 @@ Examples:
 			return err
 		}
 		interfaceName := args[1]
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermVLANModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.RemoveVLANMember(ctx, vlanID, interfaceName); err != nil {
-				return fmt.Errorf("removing interface: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveVLANMember(app.deviceName, vlanID, interfaceName, execOpts()))
 	},
 }
 
@@ -300,26 +261,20 @@ var vlanDeleteCmd = &cobra.Command{
 	Short: "Delete a VLAN",
 	Long: `Delete a VLAN from the device.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan delete 100 -x`,
+  newtron -D leaf1-ny vlan delete 100 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermVLANDelete, authCtx); err != nil {
-				return err
-			}
-			if err := n.DeleteVLAN(ctx, vlanID); err != nil {
-				return fmt.Errorf("deleting VLAN: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.DeleteVLAN(app.deviceName, vlanID, execOpts()))
 	},
 }
 
@@ -337,7 +292,7 @@ var vlanConfigureSVICmd = &cobra.Command{
 Creates VLAN_INTERFACE entries for VRF binding and IP address assignment,
 and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Options:
   --vrf <name>         VRF to bind the SVI to
@@ -345,28 +300,23 @@ Options:
   --anycast-gw <mac>   Anycast gateway MAC address (SAG)
 
 Examples:
-  newtron -d leaf1-ny vlan configure-svi 100 --vrf Vrf_CUST1 --ip 10.1.100.1/24 -x
-  newtron -d leaf1-ny vlan configure-svi 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:01:01 -x`,
+  newtron -D leaf1-ny vlan configure-svi 100 --vrf Vrf_CUST1 --ip 10.1.100.1/24 -x
+  newtron -D leaf1-ny vlan configure-svi 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:01:01 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
 		if err != nil {
 			return err
 		}
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermInterfaceModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.ConfigureSVI(ctx, vlanID, newtron.SVIConfig{
-				VRF:        sviVRF,
-				IPAddress:  sviIP,
-				AnycastMAC: sviAnycastGW,
-			}); err != nil {
-				return fmt.Errorf("configuring SVI: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.ConfigureSVI(app.deviceName, newtron.SVIConfigureRequest{
+			VlanID:     vlanID,
+			VRF:        sviVRF,
+			IPAddress:  sviIP,
+			AnycastMAC: sviAnycastGW,
+		}, execOpts()))
 	},
 }
 
@@ -376,10 +326,10 @@ var vlanBindMacvpnCmd = &cobra.Command{
 	Long: `Bind a VLAN to a MAC-VPN definition from network.json.
 
 The MAC-VPN definition specifies L2VNI and ARP suppression settings.
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan bind-macvpn 100 servers-vlan100 -x`,
+  newtron -D leaf1-ny vlan bind-macvpn 100 servers-vlan100 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
@@ -388,33 +338,23 @@ Examples:
 		}
 		macvpnName := args[1]
 
-		macvpnDef, err := app.net.ShowMACVPN(macvpnName)
+		macvpnDef, err := app.client.ShowMACVPN(macvpnName)
 		if err != nil {
 			return fmt.Errorf("macvpn '%s' not found in network.json", macvpnName)
 		}
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return err
-			}
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-			vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-			iface, err := n.Interface(vlanIntf)
-			if err != nil {
-				return fmt.Errorf("VLAN %d not found", vlanID)
-			}
+		vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
 
-			fmt.Printf("MAC-VPN: %s\n", macvpnName)
-			fmt.Printf("  VNI: %d\n", macvpnDef.VNI)
-			fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
-			fmt.Println()
+		fmt.Printf("MAC-VPN: %s\n", macvpnName)
+		fmt.Printf("  VNI: %d\n", macvpnDef.VNI)
+		fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
+		fmt.Println()
 
-			if err := iface.BindMACVPN(ctx, macvpnName); err != nil {
-				return fmt.Errorf("binding MAC-VPN: %w", err)
-			}
-			return nil
-		})
+		return displayWriteResult(app.client.BindMACVPN(app.deviceName, vlanIntf, macvpnName, execOpts()))
 	},
 }
 
@@ -424,34 +364,21 @@ var vlanUnbindMacvpnCmd = &cobra.Command{
 	Long: `Unbind the MAC-VPN from a VLAN.
 
 Removes the L2VNI mapping and ARP suppression settings.
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny vlan unbind-macvpn 100 -x`,
+  newtron -D leaf1-ny vlan unbind-macvpn 100 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
 		if err != nil {
 			return err
 		}
-
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(fmt.Sprintf("Vlan%d", vlanID))
-			if err := checkExecutePermission(auth.PermEVPNModify, authCtx); err != nil {
-				return err
-			}
-
-			vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-			iface, err := n.Interface(vlanIntf)
-			if err != nil {
-				return fmt.Errorf("VLAN %d not found", vlanID)
-			}
-
-			if err := iface.UnbindMACVPN(ctx); err != nil {
-				return fmt.Errorf("unbinding MAC-VPN: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
+		return displayWriteResult(app.client.UnbindMACVPN(app.deviceName, vlanIntf, execOpts()))
 	},
 }
 

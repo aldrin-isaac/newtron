@@ -205,7 +205,7 @@ This means:
 - **GetService lives on Network**, not on Node, because services are
   network-wide definitions that exist independent of any device.
 
-The CLI mirrors this: `newtron -n network -d device -i interface verb`.
+The CLI mirrors this: `newtron -N network -D device -i interface verb`.
 You select an object, then invoke a method on it. The flags are not
 configuration — they are object selection.
 
@@ -1429,9 +1429,9 @@ public API boundary is what makes the transport layer transparent
 
 **Rule 1: Orchestrators are API consumers, not insiders.** If an
 orchestrator needs functionality the API doesn't expose, extend the API —
-don't bypass it with internal imports. `Internal()` escape hatches exist
-for the interactive CLI shell's exploratory commands, not for programmatic
-consumers that run in production.
+don't bypass it with internal imports. The CLI, newtrun, and
+newtron-server all consume `pkg/newtron/` without reaching into internal
+packages.
 
 **Rule 2: Operations accept names; the API resolves specs.** Callers pass
 `ipvpnName`, `macvpnName`, `policyName` — string identifiers of intent.
@@ -1541,12 +1541,13 @@ waiting on that resource. An actor naturally queues concurrent requests
 and processes them one at a time, which is exactly the behavior needed
 when operations are slow and must not interleave.
 
-NodeActors provide serialization, not persistence. Each HTTP request
-connects to the device, executes, and disconnects. No session state
-carries between requests. This follows from the episodic caching
-principle (P18) — every unit of work begins with fresh state — and
-from the network-is-source-of-truth principle (P8) — always read
-current device reality, never cached assumptions.
+NodeActors provide serialization and connection caching. SSH connections
+are reused across requests within a configurable idle timeout (default
+5 minutes), eliminating the ~200ms connection overhead per request. But
+the episodic caching principle (P18) still holds: every request refreshes
+CONFIG_DB from Redis (`Lock()` for writes, `Refresh()` for reads) so
+operations always see current device reality. The SSH tunnel is reused;
+the device state is never assumed from a prior request.
 
 ### The Tradeoff
 
@@ -1587,7 +1588,7 @@ infrastructure changes.**
 | Files, not APIs | Programs communicate through the spec directory, not through shared libraries or services |
 | Observation vs assertion | Assert your own work; observe everything else as structured data |
 | The ChangeSet is universal | One contract for all mutations; one verification method for all operations |
-| Episodic caching | Refresh once at episode start; read many times within; never carry cache across episode boundaries |
+| Episodic caching | Refresh once at episode start; read many times within; never carry cache across episode boundaries. SSH connections are reused; CONFIG_DB snapshots are not |
 | CLI-first research | Never assume a CONFIG_DB path works without first verifying it via CLI on a real device |
 | Documentation freshness | Grep finds what you already know is wrong; audits find what you don't know is wrong |
 | Pure config functions | Generate entries in pure functions; orchestrate them in operations |

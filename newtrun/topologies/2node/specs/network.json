@@ -1,8 +1,119 @@
 {
   "version": "1.0",
-  "description": "2-node topology network specs — overlay VPN definitions for 2node-primitive suite",
+  "super_users": null,
+  "user_groups": null,
+  "permissions": null,
   "zones": {
     "amer": {}
+  },
+  "qos_policies": {
+    "test-4q": {
+      "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
+      "queues": [
+        {
+          "name": "best-effort",
+          "type": "dwrr",
+          "weight": 50,
+          "dscp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "name": "standard",
+          "type": "dwrr",
+          "weight": 30,
+          "dscp": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        },
+        {
+          "name": "priority",
+          "type": "dwrr",
+          "weight": 15,
+          "dscp": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25
+          ]
+        },
+        {
+          "name": "control",
+          "type": "strict",
+          "dscp": [
+            46,
+            48
+          ]
+        }
+      ]
+    }
+  },
+  "ipvpns": {
+    "evpn-irb-vrf": {
+      "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
+      "vrf": "Vrf_irb",
+      "l3vni": 50002,
+      "l3vni_vlan": 3998,
+      "route_targets": [
+        "65000:50002"
+      ]
+    },
+    "evpn-l3-vrf": {
+      "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
+      "vrf": "Vrf_l3evpn",
+      "l3vni": 50001,
+      "l3vni_vlan": 3999,
+      "route_targets": [
+        "65000:50001"
+      ]
+    }
+  },
+  "macvpns": {
+    "svc-vlan200": {
+      "description": "VLAN 200 for composite bridged testing",
+      "vlan_id": 200,
+      "vni": 0
+    },
+    "svc-vlan400": {
+      "description": "VLAN 400 for composite EVPN IRB testing",
+      "vlan_id": 400,
+      "vni": 50400,
+      "anycast_ip": "10.4.0.1/24",
+      "anycast_mac": "00:00:00:01:04:00",
+      "route_targets": [
+        "65000:50400"
+      ],
+      "arp_suppression": true
+    },
+    "vlan300": {
+      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
+      "vlan_id": 300,
+      "vni": 50300,
+      "route_targets": [
+        "65000:50300"
+      ],
+      "arp_suppression": true
+    }
   },
   "services": {
     "svc-bridged": {
@@ -13,58 +124,9 @@
     "svc-evpn-irb": {
       "description": "EVPN IRB service for composite testing",
       "service_type": "evpn-irb",
-      "vrf_type": "shared",
       "ipvpn": "evpn-irb-vrf",
-      "macvpn": "svc-vlan400"
-    }
-  },
-  "macvpns": {
-    "vlan300": {
-      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
-      "vlan_id": 300,
-      "vni": 50300,
-      "route_targets": ["65000:50300"],
-      "arp_suppression": true
-    },
-    "svc-vlan200": {
-      "description": "VLAN 200 for composite bridged testing",
-      "vlan_id": 200
-    },
-    "svc-vlan400": {
-      "description": "VLAN 400 for composite EVPN IRB testing",
-      "vlan_id": 400,
-      "vni": 50400,
-      "anycast_ip": "10.4.0.1/24",
-      "anycast_mac": "00:00:00:01:04:00",
-      "route_targets": ["65000:50400"],
-      "arp_suppression": true
-    }
-  },
-  "ipvpns": {
-    "evpn-l3-vrf": {
-      "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
-      "vrf": "Vrf_l3evpn",
-      "l3vni": 50001,
-      "l3vni_vlan": 3999,
-      "route_targets": ["65000:50001"]
-    },
-    "evpn-irb-vrf": {
-      "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
-      "vrf": "Vrf_irb",
-      "l3vni": 50002,
-      "l3vni_vlan": 3998,
-      "route_targets": ["65000:50002"]
-    }
-  },
-  "qos_policies": {
-    "test-4q": {
-      "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
-      "queues": [
-        {"name": "best-effort", "type": "dwrr", "weight": 50, "dscp": [0, 1, 2, 3, 4, 5, 6, 7]},
-        {"name": "standard", "type": "dwrr", "weight": 30, "dscp": [8, 9, 10, 11, 12, 13, 14, 15]},
-        {"name": "priority", "type": "dwrr", "weight": 15, "dscp": [16, 17, 18, 19, 20, 21, 22, 23, 24, 25]},
-        {"name": "control", "type": "strict", "dscp": [46, 48]}
-      ]
+      "macvpn": "svc-vlan400",
+      "vrf_type": "shared"
     }
   }
 }

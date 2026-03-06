@@ -21,8 +21,11 @@ type stepExecutor interface {
 // StepOutput is the return value from every executor.
 type StepOutput struct {
 	Result     *StepResult
-	Composites map[string]*newtron.CompositeInfo
+	Composites map[string]string
 }
+
+// execOptsRun is a shorthand for ExecOpts with Execute: true.
+var execOptsRun = newtron.ExecOpts{Execute: true}
 
 // executors maps each StepAction to its executor implementation.
 var executors = map[StepAction]stepExecutor{
@@ -158,9 +161,8 @@ func strSliceParam(params map[string]any, key string) []string {
 }
 
 // executeForDevices runs an operation on each target device and collects results.
-// The callback fn receives the device and its name, returning a human-readable
-// message and an error.
-func (r *Runner) executeForDevices(step *Step, fn func(dev *newtron.Node, name string) (string, error)) *StepOutput {
+// The callback fn receives the device name, returning a human-readable message and an error.
+func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, error)) *StepOutput {
 	names := r.resolveDevices(step)
 	if len(names) == 0 {
 		return &StepOutput{Result: &StepResult{
@@ -174,18 +176,11 @@ func (r *Runner) executeForDevices(step *Step, fn func(dev *newtron.Node, name s
 	for _, name := range names {
 		// Skip host devices for SONiC-specific operations (provision, restart-service, apply-frr-defaults, etc.)
 		// Host actions use the 'command' executor which doesn't call this helper.
-		if r.Network.IsHostDevice(name) {
+		if _, isHost := r.HostConns[name]; isHost {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC operation not applicable)"})
 			continue
 		}
-
-		dev, ok := r.Nodes[name]
-		if !ok {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: fmt.Sprintf("device %s not connected", name)})
-			allPassed = false
-			continue
-		}
-		msg, err := fn(dev, name)
+		msg, err := fn(name)
 		if err != nil {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
 			allPassed = false
@@ -225,7 +220,7 @@ pollLoop:
 
 // checkForDevices resolves devices, calls fn for each, and collects results.
 // Use for non-polling verification executors. The callback returns status and message.
-func (r *Runner) checkForDevices(step *Step, fn func(dev *newtron.Node, name string) (StepStatus, string)) *StepOutput {
+func (r *Runner) checkForDevices(step *Step, fn func(name string) (StepStatus, string)) *StepOutput {
 	names := r.resolveDevices(step)
 	if len(names) == 0 {
 		return &StepOutput{Result: &StepResult{
@@ -239,18 +234,11 @@ func (r *Runner) checkForDevices(step *Step, fn func(dev *newtron.Node, name str
 	for _, name := range names {
 		// Skip host devices for SONiC-specific verification (verify-health, verify-config-db, etc.)
 		// Host actions use the 'host-exec' executor which doesn't call this helper.
-		if r.Network.IsHostDevice(name) {
+		if _, isHost := r.HostConns[name]; isHost {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
 			continue
 		}
-
-		dev, ok := r.Nodes[name]
-		if !ok {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: fmt.Sprintf("device %s not connected", name)})
-			allPassed = false
-			continue
-		}
-		status, msg := fn(dev, name)
+		status, msg := fn(name)
 		details = append(details, DeviceResult{Device: name, Status: status, Message: msg})
 		if status != StepStatusPassed {
 			allPassed = false
@@ -267,7 +255,7 @@ func (r *Runner) checkForDevices(step *Step, fn func(dev *newtron.Node, name str
 // pollForDevices resolves devices, polls fn for each with timeout, and collects results.
 // The callback returns (done, message, error). On done=true, message is the success message.
 // On timeout, the last message is used as the failure detail.
-func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *newtron.Node, name string) (done bool, msg string, err error)) *StepOutput {
+func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name string) (done bool, msg string, err error)) *StepOutput {
 	names := r.resolveDevices(step)
 	if len(names) == 0 {
 		return &StepOutput{Result: &StepResult{
@@ -284,15 +272,8 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *ne
 	for _, name := range names {
 		// Skip host devices for SONiC-specific verification (verify-bgp, verify-health, etc.)
 		// Host actions use the 'host-exec' executor which doesn't call this helper.
-		if r.Network.IsHostDevice(name) {
+		if _, isHost := r.HostConns[name]; isHost {
 			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
-			continue
-		}
-
-		dev, ok := r.Nodes[name]
-		if !ok {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: fmt.Sprintf("device %s not connected", name)})
-			allPassed = false
 			continue
 		}
 
@@ -301,7 +282,7 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(dev *ne
 		var pollErr error
 
 		pollErr = pollUntil(ctx, timeout, interval, func() (bool, error) {
-			done, msg, err := fn(dev, name)
+			done, msg, err := fn(name)
 			lastMsg = msg
 			if err != nil {
 				return false, err
@@ -344,12 +325,12 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	devices := r.resolveDevices(step)
 
 	var details []DeviceResult
-	composites := make(map[string]*newtron.CompositeInfo)
+	composites := make(map[string]string)
 	allPassed := true
 
 	for _, name := range devices {
 		// Skip host devices — they don't have SONiC CONFIG_DB to provision
-		if r.Network.IsHostDevice(name) {
+		if _, isHost := r.HostConns[name]; isHost {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusSkipped,
 				Message: "host device (no SONiC provisioning)",
@@ -357,11 +338,7 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			continue
 		}
 
-		// Generate composite config offline, then deliver using the shared
-		// connection (without disconnecting). ProvisionDevice() can't be used
-		// here because it calls defer dev.Disconnect() which kills the shared
-		// test runner connection.
-		composite, err := r.Network.GenerateDeviceComposite(name)
+		handle, err := r.Client.GenerateComposite(name)
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
@@ -371,24 +348,14 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			continue
 		}
 
-		dev, ok := r.Nodes[name]
-		if !ok {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("device %s not connected", name),
-			})
-			allPassed = false
-			continue
-		}
-
 		// Best-effort config reload to restore CONFIG_DB to saved defaults.
 		// On fresh boot: services may still be starting (SwSS not ready),
 		// and CONFIG_DB is already in factory state — failure is safe.
 		// On re-provision: reload succeeds, giving a clean baseline.
-		if err := dev.ConfigReload(ctx); err != nil {
+		if err := r.Client.ConfigReload(name); err != nil {
 			util.Logger.Warnf("[%s] config reload before provision skipped: %v", name, err)
 		} else {
-			if err := dev.RefreshWithRetry(ctx, 60*time.Second); err != nil {
+			if err := r.Client.RefreshWithRetry(name, 60*time.Second); err != nil {
 				details = append(details, DeviceResult{
 					Device: name, Status: StepStatusFailed,
 					Message: fmt.Sprintf("refresh after config reload: %s", err),
@@ -398,19 +365,8 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			}
 		}
 
-		if err := dev.Lock(); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("lock: %s", err),
-			})
-			allPassed = false
-			continue
-		}
-
-		// Deliver composite — ReplaceAll merges our fields on top of the
-		// freshly-reloaded CONFIG_DB. Factory fields survive; stale keys removed.
-		result, err := dev.DeliverComposite(ctx, composite, newtron.CompositeOverwrite)
-		dev.Unlock()
+		// Deliver composite — server handles lock→deliver→unlock internally
+		result, err := r.Client.DeliverComposite(name, handle.Handle, "overwrite")
 		if err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
@@ -422,7 +378,7 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 
 		// Refresh the device's cached CONFIG_DB and interface list so
 		// subsequent steps see the newly provisioned PORT entries.
-		if err := dev.Refresh(ctx); err != nil {
+		if err := r.Client.Refresh(name); err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
 				Message: fmt.Sprintf("refresh after provision: %s", err),
@@ -433,7 +389,7 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 
 		// Persist to config_db.json so subsequent config-reload steps
 		// re-read the provisioned config (not factory defaults).
-		if err := dev.Save(ctx); err != nil {
+		if err := r.Client.SaveConfig(name); err != nil {
 			details = append(details, DeviceResult{
 				Device: name, Status: StepStatusFailed,
 				Message: fmt.Sprintf("config save after provision: %s", err),
@@ -442,7 +398,7 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			continue
 		}
 
-		composites[name] = composite
+		composites[name] = handle.Handle
 		details = append(details, DeviceResult{
 			Device: name, Status: StepStatusPassed,
 			Message: fmt.Sprintf("provisioned (%d entries applied)", result.Applied),
@@ -486,12 +442,12 @@ func (e *waitExecutor) Execute(ctx context.Context, r *Runner, step *Step) *Step
 type verifyProvisioningExecutor struct{}
 
 func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.checkForDevices(step, func(dev *newtron.Node, name string) (StepStatus, string) {
-		ci, ok := r.Composites[name]
+	return r.checkForDevices(step, func(name string) (StepStatus, string) {
+		handle, ok := r.Composites[name]
 		if !ok {
 			return StepStatusError, "no composite accumulated (was provision run first?)"
 		}
-		vr, err := dev.VerifyComposite(ctx, ci)
+		vr, err := r.Client.VerifyComposite(name, handle)
 		if err != nil {
 			return StepStatusError, fmt.Sprintf("verification error: %s", err)
 		}
@@ -510,11 +466,8 @@ func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, ste
 type verifyConfigDBExecutor struct{}
 
 func (e *verifyConfigDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.checkForDevices(step, func(dev *newtron.Node, name string) (StepStatus, string) {
-		if !dev.HasConfigDB() {
-			return StepStatusError, "CONFIG_DB not loaded"
-		}
-		result := e.checkDevice(dev, step)
+	return r.checkForDevices(step, func(name string) (StepStatus, string) {
+		result := e.checkDevice(r, name, step)
 		return result.status, result.message
 	})
 }
@@ -524,20 +477,20 @@ type checkResult struct {
 	message string
 }
 
-func (e *verifyConfigDBExecutor) checkDevice(dev *newtron.Node, step *Step) checkResult {
+func (e *verifyConfigDBExecutor) checkDevice(r *Runner, device string, step *Step) checkResult {
 	// Mode 1: min_entries
 	if step.Expect.MinEntries != nil {
 		var count int
 		if step.Key == "" {
 			// No key: count all entries in the table
-			keys, err := dev.ConfigDBTableKeys(step.Table)
+			keys, err := r.Client.ConfigDBTableKeys(device, step.Table)
 			if err != nil {
 				return checkResult{StepStatusError, fmt.Sprintf("scanning %s: %s", step.Table, err)}
 			}
 			count = len(keys)
 		} else {
 			// Specific key: count fields in that entry
-			vals, err := dev.QueryConfigDB(step.Table, step.Key)
+			vals, err := r.Client.QueryConfigDB(device, step.Table, step.Key)
 			if err != nil {
 				return checkResult{StepStatusError, fmt.Sprintf("reading %s|%s: %s", step.Table, step.Key, err)}
 			}
@@ -551,7 +504,7 @@ func (e *verifyConfigDBExecutor) checkDevice(dev *newtron.Node, step *Step) chec
 
 	// Mode 2: exists
 	if step.Expect.Exists != nil {
-		exists, err := dev.ConfigDBEntryExists(step.Table, step.Key)
+		exists, err := r.Client.ConfigDBEntryExists(device, step.Table, step.Key)
 		if err != nil {
 			return checkResult{StepStatusError, fmt.Sprintf("checking %s|%s: %s", step.Table, step.Key, err)}
 		}
@@ -563,7 +516,7 @@ func (e *verifyConfigDBExecutor) checkDevice(dev *newtron.Node, step *Step) chec
 
 	// Mode 3: fields
 	if len(step.Expect.Fields) > 0 {
-		vals, err := dev.QueryConfigDB(step.Table, step.Key)
+		vals, err := r.Client.QueryConfigDB(device, step.Table, step.Key)
 		if err != nil {
 			return checkResult{StepStatusError, fmt.Sprintf("reading %s|%s: %s", step.Table, step.Key, err)}
 		}
@@ -592,8 +545,8 @@ func (e *verifyConfigDBExecutor) checkDevice(dev *newtron.Node, step *Step) chec
 type verifyStateDBExecutor struct{}
 
 func (e *verifyStateDBExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.pollForDevices(ctx, step, func(dev *newtron.Node, name string) (bool, string, error) {
-		vals, err := dev.QueryStateDB(step.Table, step.Key)
+	return r.pollForDevices(ctx, step, func(name string) (bool, string, error) {
+		vals, err := r.Client.QueryStateDB(name, step.Table, step.Key)
 		if err != nil {
 			return false, "", fmt.Errorf("reading STATE_DB: %s", err)
 		}
@@ -622,8 +575,8 @@ type verifyBGPExecutor struct{}
 func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	expectedState := step.Expect.State
 
-	return r.pollForDevices(ctx, step, func(dev *newtron.Node, name string) (bool, string, error) {
-		results, err := dev.CheckBGPSessions(ctx)
+	return r.pollForDevices(ctx, step, func(name string) (bool, string, error) {
+		results, err := r.Client.CheckBGPSessions(name)
 		if err != nil {
 			return false, "transient BGP check error", nil
 		}
@@ -658,8 +611,8 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type verifyHealthExecutor struct{}
 
 func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.checkForDevices(step, func(dev *newtron.Node, name string) (StepStatus, string) {
-		report, err := dev.HealthCheck(ctx)
+	return r.checkForDevices(step, func(name string) (StepStatus, string) {
+		report, err := r.Client.HealthCheck(name)
 		if err != nil {
 			return StepStatusError, fmt.Sprintf("health check error: %s", err)
 		}
@@ -733,14 +686,14 @@ func (e *verifyHealthExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type verifyRouteExecutor struct{}
 
 func (e *verifyRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.pollForDevices(ctx, step, func(dev *newtron.Node, name string) (bool, string, error) {
+	return r.pollForDevices(ctx, step, func(name string) (bool, string, error) {
 		var entry *newtron.RouteEntry
 		var err error
 
 		if step.Expect.Source == "asic_db" {
-			entry, err = dev.GetRouteASIC(ctx, step.VRF, step.Prefix)
+			entry, err = r.Client.GetRouteASIC(name, step.Prefix)
 		} else {
-			entry, err = dev.GetRoute(ctx, step.VRF, step.Prefix)
+			entry, err = r.Client.GetRoute(name, step.VRF, step.Prefix)
 		}
 		if err != nil {
 			return false, "", err
@@ -798,25 +751,19 @@ func (e *verifyPingExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 	}
 
 	deviceName := r.resolveDevices(step)[0]
-	dev, ok := r.Nodes[deviceName]
-	if !ok {
-		return &StepOutput{Result: &StepResult{
-			Status: StepStatusError, Device: deviceName, Message: fmt.Sprintf("device %s not connected", deviceName),
-		}}
-	}
 
 	// Resolve target IP
 	targetIP := step.Target
 	if net.ParseIP(targetIP) == nil {
 		// Treat as device name, resolve to loopback IP
-		targetDev, ok := r.Nodes[step.Target]
-		if !ok {
+		info, err := r.Client.DeviceInfo(step.Target)
+		if err != nil {
 			return &StepOutput{Result: &StepResult{
-				Status: StepStatusError, Device: deviceName,
-				Message: fmt.Sprintf("target device %q not connected", step.Target),
+				Status: StepStatusError,
+				Message: fmt.Sprintf("target device %q: %s", step.Target, err),
 			}}
 		}
-		targetIP = targetDev.LoopbackIP()
+		targetIP = info.LoopbackIP
 	}
 
 	count := step.Count
@@ -824,10 +771,21 @@ func (e *verifyPingExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 		count = 5
 	}
 
-	output, err := dev.ExecCommand(ctx, fmt.Sprintf("ping -c %d -W 5 %s", count, targetIP))
+	pingCmd := fmt.Sprintf("ping -c %d -W 5 %s", count, targetIP)
+
+	var output string
+	var err error
+	if hostConn, ok := r.HostConns[deviceName]; ok {
+		// Host device: run ping inside the network namespace via direct SSH
+		cmd := fmt.Sprintf("ip netns exec %s %s", deviceName, pingCmd)
+		output, err = runSSHCommand(hostConn, cmd)
+	} else {
+		// Switch device: run via newtron-server API
+		output, err = r.Client.SSHCommand(deviceName, pingCmd)
+	}
 	if err != nil && output == "" {
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusError, Device: deviceName,
+			Status: StepStatusError,
 			Message: fmt.Sprintf("ping command failed: %s", err),
 		}}
 	}
@@ -841,12 +799,12 @@ func (e *verifyPingExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 
 	if successRate >= expectedRate {
 		return &StepOutput{Result: &StepResult{
-			Status: StepStatusPassed, Device: deviceName,
+			Status: StepStatusPassed,
 			Message: fmt.Sprintf("ping %s: %.0f%% success", targetIP, successRate*100),
 		}}
 	}
 	return &StepOutput{Result: &StepResult{
-		Status: StepStatusFailed, Device: deviceName,
+		Status: StepStatusFailed,
 		Message: fmt.Sprintf("ping %s: %.0f%% success (expected ≥ %.0f%%)", targetIP, successRate*100, expectedRate*100),
 	}}
 }
@@ -877,15 +835,10 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 		if ip, ok := step.Params["ip"]; ok {
 			opts.IPAddress = fmt.Sprintf("%v", ip)
 		}
+		opts.VLAN = intParam(step.Params, "vlan")
 	}
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			iface, err := dev.Interface(step.Interface)
-			if err != nil {
-				return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-			}
-			return iface.ApplyService(ctx, step.Service, opts)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.ApplyService(name, step.Interface, step.Service, opts, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("apply-service %s: %s", step.Service, err)
 		}
@@ -900,14 +853,8 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type removeServiceExecutor struct{}
 
 func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			iface, err := dev.Interface(step.Interface)
-			if err != nil {
-				return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-			}
-			return iface.RemoveService(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveService(name, step.Interface, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-service: %s", err)
 		}
@@ -922,10 +869,8 @@ func (e *removeServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 type configureLoopbackExecutor struct{}
 
 func (e *configureLoopbackExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.ConfigureLoopback(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.ConfigureLoopback(name, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("configure-loopback: %s", err)
 		}
@@ -940,8 +885,24 @@ func (e *configureLoopbackExecutor) Execute(ctx context.Context, r *Runner, step
 type sshCommandExecutor struct{}
 
 func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.checkForDevices(step, func(dev *newtron.Node, name string) (StepStatus, string) {
-		output, err := dev.ExecCommand(ctx, step.Command)
+	// When timeout is set, poll until the command succeeds (useful for boot-ssh).
+	if step.Expect != nil && step.Expect.Timeout > 0 {
+		return r.pollForDevices(ctx, step, func(name string) (bool, string, error) {
+			output, err := r.Client.SSHCommand(name, step.Command)
+			if err != nil {
+				return false, fmt.Sprintf("command failed: %s", err), nil
+			}
+			if step.Expect != nil && step.Expect.Contains != "" {
+				if strings.Contains(output, step.Expect.Contains) {
+					return true, fmt.Sprintf("output contains %q", step.Expect.Contains), nil
+				}
+				return false, fmt.Sprintf("output does not contain %q", step.Expect.Contains), nil
+			}
+			return true, "command succeeded", nil
+		})
+	}
+	return r.checkForDevices(step, func(name string) (StepStatus, string) {
+		output, err := r.Client.SSHCommand(name, step.Command)
 		if step.Expect != nil && step.Expect.Contains != "" {
 			if strings.Contains(output, step.Expect.Contains) {
 				return StepStatusPassed, fmt.Sprintf("output contains %q", step.Expect.Contains)
@@ -962,8 +923,8 @@ func (e *sshCommandExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 type restartServiceExecutor struct{}
 
 func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		if err := dev.RestartService(ctx, step.Service); err != nil {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		if err := r.Client.RestartService(name, step.Service); err != nil {
 			return "", fmt.Errorf("restart %s: %s", step.Service, err)
 		}
 		return fmt.Sprintf("restarted %s", step.Service), nil
@@ -977,8 +938,8 @@ func (e *restartServiceExecutor) Execute(ctx context.Context, r *Runner, step *S
 type configReloadExecutor struct{}
 
 func (e *configReloadExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		if err := dev.ConfigReload(ctx); err != nil {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		if err := r.Client.ConfigReload(name); err != nil {
 			return "", fmt.Errorf("config reload: %s", err)
 		}
 		return "config reloaded", nil
@@ -992,8 +953,8 @@ func (e *configReloadExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type applyFRRDefaultsExecutor struct{}
 
 func (e *applyFRRDefaultsExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		if err := dev.ApplyFRRDefaults(ctx); err != nil {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		if err := r.Client.ApplyFRRDefaults(name); err != nil {
 			return "", fmt.Errorf("apply FRR defaults: %s", err)
 		}
 		return "applied FRR defaults", nil
@@ -1010,21 +971,17 @@ func (e *setInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 	property := strParam(step.Params, "property")
 	value := strParam(step.Params, "value")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			iface, err := dev.Interface(step.Interface)
-			if err != nil {
-				return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-			}
-			switch property {
-			case "ip":
-				return iface.SetIP(ctx, value)
-			case "vrf":
-				return iface.SetVRF(ctx, value)
-			default:
-				return iface.Set(ctx, property, value)
-			}
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		var result *newtron.WriteResult
+		var err error
+		switch property {
+		case "ip":
+			result, err = r.Client.SetIP(name, step.Interface, value, execOptsRun)
+		case "vrf":
+			result, err = r.Client.SetVRF(name, step.Interface, value, execOptsRun)
+		default:
+			result, err = r.Client.InterfaceSet(name, step.Interface, property, value, execOptsRun)
+		}
 		if err != nil {
 			return "", fmt.Errorf("set-interface %s %s=%s: %s", step.Interface, property, value, err)
 		}
@@ -1040,10 +997,8 @@ type createVLANExecutor struct{}
 
 func (e *createVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.CreateVLAN(ctx, vlanID, newtron.VLANConfig{})
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.CreateVLAN(name, vlanID, "", execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("create-vlan %d: %s", vlanID, err)
 		}
@@ -1059,10 +1014,8 @@ type deleteVLANExecutor struct{}
 
 func (e *deleteVLANExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.DeleteVLAN(ctx, vlanID)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.DeleteVLAN(name, vlanID, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("delete-vlan %d: %s", vlanID, err)
 		}
@@ -1081,10 +1034,8 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 	interfaceName := step.Interface
 	tagged := step.Tagging == "tagged"
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.AddVLANMember(ctx, vlanID, interfaceName, tagged)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.AddVLANMember(name, vlanID, interfaceName, tagged, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("add-vlan-member %d %s: %s", vlanID, interfaceName, err)
 		}
@@ -1099,11 +1050,9 @@ func (e *addVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step *St
 type createVRFExecutor struct{}
 
 func (e *createVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.CreateVRF(ctx, vrfName, newtron.VRFConfig{})
-		})
+	vrfName := step.VRF
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.CreateVRF(name, vrfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("create-vrf %s: %s", vrfName, err)
 		}
@@ -1118,11 +1067,9 @@ func (e *createVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type deleteVRFExecutor struct{}
 
 func (e *deleteVRFExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.DeleteVRF(ctx, vrfName)
-		})
+	vrfName := step.VRF
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.DeleteVRF(name, vrfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("delete-vrf %s: %s", vrfName, err)
 		}
@@ -1138,10 +1085,8 @@ type setupEVPNExecutor struct{}
 
 func (e *setupEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	sourceIP := strParam(step.Params, "source_ip")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.SetupEVPN(ctx, sourceIP)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.SetupEVPN(name, sourceIP, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("setup-evpn (source=%s): %s", sourceIP, err)
 		}
@@ -1156,12 +1101,10 @@ func (e *setupEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type addVRFInterfaceExecutor struct{}
 
 func (e *addVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	intfName := strParam(step.Params, "interface")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.AddVRFInterface(ctx, vrfName, intfName)
-		})
+	vrfName := step.VRF
+	intfName := step.Interface
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.AddVRFInterface(name, vrfName, intfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("add-vrf-interface %s %s: %s", vrfName, intfName, err)
 		}
@@ -1176,12 +1119,10 @@ func (e *addVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *
 type removeVRFInterfaceExecutor struct{}
 
 func (e *removeVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	intfName := strParam(step.Params, "interface")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveVRFInterface(ctx, vrfName, intfName)
-		})
+	vrfName := step.VRF
+	intfName := step.Interface
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveVRFInterface(name, vrfName, intfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-vrf-interface %s %s: %s", vrfName, intfName, err)
 		}
@@ -1196,13 +1137,11 @@ func (e *removeVRFInterfaceExecutor) Execute(ctx context.Context, r *Runner, ste
 type bindIPVPNExecutor struct{}
 
 func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
+	vrfName := step.VRF
 	ipvpnName := strParam(step.Params, "ipvpn")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.BindIPVPN(ctx, vrfName, ipvpnName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.BindIPVPN(name, vrfName, ipvpnName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("bind-ipvpn %s %s: %s", vrfName, ipvpnName, err)
 		}
@@ -1217,11 +1156,9 @@ func (e *bindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type unbindIPVPNExecutor struct{}
 
 func (e *unbindIPVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.UnbindIPVPN(ctx, vrfName)
-		})
+	vrfName := step.VRF
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.UnbindIPVPN(name, vrfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("unbind-ipvpn %s: %s", vrfName, err)
 		}
@@ -1239,15 +1176,9 @@ func (e *bindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 	vlanID := step.VLANID
 	macvpnName := strParam(step.Params, "macvpn")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
+	return r.executeForDevices(step, func(name string) (string, error) {
 		vlanName := fmt.Sprintf("Vlan%d", vlanID)
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			intf, err := dev.Interface(vlanName)
-			if err != nil {
-				return fmt.Errorf("bind-macvpn: %s", err)
-			}
-			return intf.BindMACVPN(ctx, macvpnName)
-		})
+		result, err := r.Client.BindMACVPN(name, vlanName, macvpnName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("bind-macvpn vlan=%d %s: %s", vlanID, macvpnName, err)
 		}
@@ -1263,15 +1194,9 @@ type unbindMACVPNExecutor struct{}
 
 func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
+	return r.executeForDevices(step, func(name string) (string, error) {
 		vlanName := fmt.Sprintf("Vlan%d", vlanID)
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			intf, err := dev.Interface(vlanName)
-			if err != nil {
-				return fmt.Errorf("unbind-macvpn: %s", err)
-			}
-			return intf.UnbindMACVPN(ctx)
-		})
+		result, err := r.Client.UnbindMACVPN(name, vlanName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("unbind-macvpn vlan=%d: %s", vlanID, err)
 		}
@@ -1286,15 +1211,13 @@ func (e *unbindMACVPNExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type addStaticRouteExecutor struct{}
 
 func (e *addStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	prefix := strParam(step.Params, "prefix")
+	vrfName := step.VRF
+	prefix := step.Prefix
 	nextHop := strParam(step.Params, "next_hop")
 	metric := intParam(step.Params, "metric")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.AddStaticRoute(name, vrfName, prefix, nextHop, metric, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("add-static-route %s %s via %s: %s", vrfName, prefix, nextHop, err)
 		}
@@ -1309,13 +1232,11 @@ func (e *addStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *S
 type removeStaticRouteExecutor struct{}
 
 func (e *removeStaticRouteExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	vrfName := strParam(step.Params, "vrf")
-	prefix := strParam(step.Params, "prefix")
+	vrfName := step.VRF
+	prefix := step.Prefix
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveStaticRoute(ctx, vrfName, prefix)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveStaticRoute(name, vrfName, prefix, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-static-route %s %s: %s", vrfName, prefix, err)
 		}
@@ -1333,10 +1254,8 @@ func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step 
 	vlanID := step.VLANID
 	interfaceName := step.Interface
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveVLANMember(ctx, vlanID, interfaceName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveVLANMember(name, vlanID, interfaceName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-vlan-member %d %s: %s", vlanID, interfaceName, err)
 		}
@@ -1351,13 +1270,11 @@ func (e *removeVLANMemberExecutor) Execute(ctx context.Context, r *Runner, step 
 type applyQoSExecutor struct{}
 
 func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	intfName := strParam(step.Params, "interface")
+	intfName := step.Interface
 	policyName := strParam(step.Params, "qos_policy")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.ApplyQoS(ctx, intfName, policyName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.ApplyQoS(name, intfName, policyName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("apply-qos %s %s: %s", intfName, policyName, err)
 		}
@@ -1372,11 +1289,9 @@ func (e *applyQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 type removeQoSExecutor struct{}
 
 func (e *removeQoSExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	intfName := strParam(step.Params, "interface")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveQoS(ctx, intfName)
-		})
+	intfName := step.Interface
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveQoS(name, intfName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-qos %s: %s", intfName, err)
 		}
@@ -1392,14 +1307,13 @@ type configureSVIExecutor struct{}
 
 func (e *configureSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
-	opts := newtron.SVIConfig{
-		VRF:       strParam(step.Params, "vrf"),
-		IPAddress: strParam(step.Params, "ip"),
-	}
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.ConfigureSVI(ctx, vlanID, opts)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.ConfigureSVI(name, newtron.SVIConfigureRequest{
+			VlanID:     vlanID,
+			VRF:        strParam(step.Params, "vrf"),
+			IPAddress:  strParam(step.Params, "ip"),
+			AnycastMAC: strParam(step.Params, "anycast_mac"),
+		}, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("configure-svi vlan=%d: %s", vlanID, err)
 		}
@@ -1417,23 +1331,18 @@ func (e *bgpAddNeighborExecutor) Execute(ctx context.Context, r *Runner, step *S
 	remoteASN := intParam(step.Params, "remote_asn")
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			if step.Interface != "" {
-				iface, err := dev.Interface(step.Interface)
-				if err != nil {
-					return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-				}
-				return iface.AddBGPNeighbor(ctx, newtron.BGPNeighborConfig{
-					NeighborIP: neighborIP,
-					RemoteAS:   remoteASN,
-				})
-			}
-			return dev.AddBGPNeighbor(ctx, newtron.BGPNeighborConfig{
-				NeighborIP: neighborIP,
-				RemoteAS:   remoteASN,
-			})
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		config := newtron.BGPNeighborConfig{
+			NeighborIP: neighborIP,
+			RemoteAS:   remoteASN,
+		}
+		var result *newtron.WriteResult
+		var err error
+		if step.Interface != "" {
+			result, err = r.Client.InterfaceAddBGPNeighbor(name, step.Interface, config, execOptsRun)
+		} else {
+			result, err = r.Client.AddBGPNeighbor(name, config, execOptsRun)
+		}
 		if err != nil {
 			return "", fmt.Errorf("bgp-add-neighbor %s: %s", neighborIP, err)
 		}
@@ -1450,17 +1359,14 @@ type bgpRemoveNeighborExecutor struct{}
 func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	neighborIP := strParam(step.Params, "neighbor_ip")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			if step.Interface != "" {
-				iface, err := dev.Interface(step.Interface)
-				if err != nil {
-					return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-				}
-				return iface.RemoveBGPNeighbor(ctx, neighborIP)
-			}
-			return dev.RemoveBGPNeighbor(ctx, neighborIP)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		var result *newtron.WriteResult
+		var err error
+		if step.Interface != "" {
+			result, err = r.Client.InterfaceRemoveBGPNeighbor(name, step.Interface, neighborIP, execOptsRun)
+		} else {
+			result, err = r.Client.RemoveBGPNeighbor(name, neighborIP, execOptsRun)
+		}
 		if err != nil {
 			return "", fmt.Errorf("bgp-remove-neighbor %s: %s", neighborIP, err)
 		}
@@ -1475,14 +1381,8 @@ func (e *bgpRemoveNeighborExecutor) Execute(ctx context.Context, r *Runner, step
 type refreshServiceExecutor struct{}
 
 func (e *refreshServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			iface, err := dev.Interface(step.Interface)
-			if err != nil {
-				return fmt.Errorf("getting interface %s: %s", step.Interface, err)
-			}
-			return iface.RefreshService(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RefreshService(name, step.Interface, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("refresh-service %s: %s", step.Interface, err)
 		}
@@ -1498,22 +1398,12 @@ type cleanupExecutor struct{}
 
 func (e *cleanupExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	cleanupType := strParam(step.Params, "type")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		var summary *newtron.CleanupSummary
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			s, err := dev.Cleanup(ctx, cleanupType)
-			summary = s
-			return err
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.Cleanup(name, cleanupType, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("cleanup: %s", err)
 		}
-		msg := fmt.Sprintf("cleanup (%d changes)", result.ChangeCount)
-		if summary != nil {
-			orphans := len(summary.OrphanedACLs) + len(summary.OrphanedVRFs) + len(summary.OrphanedVNIMappings)
-			msg = fmt.Sprintf("cleanup: %d orphans removed (%d changes)", orphans, result.ChangeCount)
-		}
-		return msg, nil
+		return fmt.Sprintf("cleanup (%d changes)", result.ChangeCount), nil
 	})
 }
 
@@ -1531,16 +1421,15 @@ func (e *createPortChannelExecutor) Execute(ctx context.Context, r *Runner, step
 	fallback := boolParam(step.Params, "fallback")
 	fastRate := boolParam(step.Params, "fast_rate")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.CreatePortChannel(ctx, pcName, newtron.PortChannelConfig{
-				Members:  members,
-				MTU:      mtu,
-				MinLinks: minLinks,
-				Fallback: fallback,
-				FastRate: fastRate,
-			})
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.CreatePortChannel(name, newtron.PortChannelCreateRequest{
+			Name:     pcName,
+			Members:  members,
+			MTU:      mtu,
+			MinLinks: minLinks,
+			Fallback: fallback,
+			FastRate: fastRate,
+		}, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("create-portchannel %s: %s", pcName, err)
 		}
@@ -1556,10 +1445,8 @@ type deletePortChannelExecutor struct{}
 
 func (e *deletePortChannelExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	pcName := strParam(step.Params, "name")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.DeletePortChannel(ctx, pcName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.DeletePortChannel(name, pcName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("delete-portchannel %s: %s", pcName, err)
 		}
@@ -1576,10 +1463,8 @@ type addPortChannelMemberExecutor struct{}
 func (e *addPortChannelMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	pcName := strParam(step.Params, "name")
 	member := strParam(step.Params, "member")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.AddPortChannelMember(ctx, pcName, member)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.AddPortChannelMember(name, pcName, member, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("add-portchannel-member %s %s: %s", pcName, member, err)
 		}
@@ -1596,10 +1481,8 @@ type removePortChannelMemberExecutor struct{}
 func (e *removePortChannelMemberExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	pcName := strParam(step.Params, "name")
 	member := strParam(step.Params, "member")
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemovePortChannelMember(ctx, pcName, member)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemovePortChannelMember(name, pcName, member, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-portchannel-member %s %s: %s", pcName, member, err)
 		}
@@ -1614,23 +1497,22 @@ func (e *removePortChannelMemberExecutor) Execute(ctx context.Context, r *Runner
 type createACLTableExecutor struct{}
 
 func (e *createACLTableExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	name := strParam(step.Params, "name")
+	aclName := strParam(step.Params, "name")
 	aclType := strParam(step.Params, "type")
 	stage := strParam(step.Params, "stage")
 	description := strParam(step.Params, "description")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.CreateACLTable(ctx, name, newtron.ACLTableConfig{
-				Type:        aclType,
-				Stage:       stage,
-				Description: description,
-			})
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.CreateACLTable(name, newtron.ACLCreateRequest{
+			Name:        aclName,
+			Type:        aclType,
+			Stage:       stage,
+			Description: description,
+		}, execOptsRun)
 		if err != nil {
-			return "", fmt.Errorf("create-acl-table %s: %s", name, err)
+			return "", fmt.Errorf("create-acl-table %s: %s", aclName, err)
 		}
-		return fmt.Sprintf("created ACL table %s (%d changes)", name, result.ChangeCount), nil
+		return fmt.Sprintf("created ACL table %s (%d changes)", aclName, result.ChangeCount), nil
 	})
 }
 
@@ -1651,18 +1533,17 @@ func (e *addACLRuleExecutor) Execute(ctx context.Context, r *Runner, step *Step)
 	srcPort := strParam(step.Params, "src_port")
 	dstPort := strParam(step.Params, "dst_port")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.AddACLRule(ctx, tableName, ruleName, newtron.ACLRuleConfig{
-				Priority: priority,
-				Action:   action,
-				SrcIP:    srcIP,
-				DstIP:    dstIP,
-				Protocol: protocol,
-				SrcPort:  srcPort,
-				DstPort:  dstPort,
-			})
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.AddACLRule(name, tableName, newtron.ACLRuleAddRequest{
+			RuleName: ruleName,
+			Priority: priority,
+			Action:   action,
+			SrcIP:    srcIP,
+			DstIP:    dstIP,
+			Protocol: protocol,
+			SrcPort:  srcPort,
+			DstPort:  dstPort,
+		}, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("add-acl-rule %s|%s: %s", tableName, ruleName, err)
 		}
@@ -1680,10 +1561,8 @@ func (e *deleteACLRuleExecutor) Execute(ctx context.Context, r *Runner, step *St
 	tableName := strParam(step.Params, "name")
 	ruleName := strParam(step.Params, "rule")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveACLRule(ctx, tableName, ruleName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveACLRule(name, tableName, ruleName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("delete-acl-rule %s|%s: %s", tableName, ruleName, err)
 		}
@@ -1698,16 +1577,14 @@ func (e *deleteACLRuleExecutor) Execute(ctx context.Context, r *Runner, step *St
 type deleteACLTableExecutor struct{}
 
 func (e *deleteACLTableExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	name := strParam(step.Params, "name")
+	aclName := strParam(step.Params, "name")
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.DeleteACLTable(ctx, name)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.DeleteACLTable(name, aclName, execOptsRun)
 		if err != nil {
-			return "", fmt.Errorf("delete-acl-table %s: %s", name, err)
+			return "", fmt.Errorf("delete-acl-table %s: %s", aclName, err)
 		}
-		return fmt.Sprintf("deleted ACL table %s (%d changes)", name, result.ChangeCount), nil
+		return fmt.Sprintf("deleted ACL table %s (%d changes)", aclName, result.ChangeCount), nil
 	})
 }
 
@@ -1722,14 +1599,8 @@ func (e *bindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) *S
 	direction := strParam(step.Params, "direction")
 	ifaceName := step.Interface
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			intf, err := dev.Interface(ifaceName)
-			if err != nil {
-				return fmt.Errorf("bind-acl: %s", err)
-			}
-			return intf.BindACL(ctx, aclName, direction)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.BindACL(name, ifaceName, aclName, direction, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("bind-acl %s to %s (%s): %s", aclName, ifaceName, direction, err)
 		}
@@ -1747,14 +1618,8 @@ func (e *unbindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	aclName := strParam(step.Params, "name")
 	ifaceName := step.Interface
 
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			intf, err := dev.Interface(ifaceName)
-			if err != nil {
-				return fmt.Errorf("unbind-acl: %s", err)
-			}
-			return intf.UnbindACL(ctx, aclName)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.UnbindACL(name, ifaceName, aclName, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("unbind-acl %s from %s: %s", aclName, ifaceName, err)
 		}
@@ -1769,10 +1634,8 @@ func (e *unbindACLExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 type configureBGPExecutor struct{}
 
 func (e *configureBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.ConfigureBGP(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.ConfigureBGP(name, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("configure-bgp: %s", err)
 		}
@@ -1788,10 +1651,8 @@ type removeSVIExecutor struct{}
 
 func (e *removeSVIExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	vlanID := step.VLANID
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveSVI(ctx, vlanID)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveSVI(name, vlanID, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-svi vlan=%d: %s", vlanID, err)
 		}
@@ -1807,14 +1668,8 @@ type removeIPExecutor struct{}
 
 func (e *removeIPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	ip := strParam(step.Params, "ip")
-	return r.executeForDevices(step, func(dev *newtron.Node, devName string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			intf, err := dev.Interface(step.Interface)
-			if err != nil {
-				return fmt.Errorf("remove-ip: %s", err)
-			}
-			return intf.RemoveIP(ctx, ip)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveIP(name, step.Interface, ip, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-ip %s %s: %s", step.Interface, ip, err)
 		}
@@ -1829,10 +1684,8 @@ func (e *removeIPExecutor) Execute(ctx context.Context, r *Runner, step *Step) *
 type teardownEVPNExecutor struct{}
 
 func (e *teardownEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.TeardownEVPN(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.TeardownEVPN(name, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("teardown-evpn: %s", err)
 		}
@@ -1847,10 +1700,8 @@ func (e *teardownEVPNExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 type removeBGPGlobalsExecutor struct{}
 
 func (e *removeBGPGlobalsExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveBGPGlobals(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveBGPGlobals(name, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-bgp-globals: %s", err)
 		}
@@ -1865,14 +1716,11 @@ func (e *removeBGPGlobalsExecutor) Execute(ctx context.Context, r *Runner, step 
 type removeLoopbackExecutor struct{}
 
 func (e *removeLoopbackExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	return r.executeForDevices(step, func(dev *newtron.Node, _ string) (string, error) {
-		result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-			return dev.RemoveLoopback(ctx)
-		})
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RemoveLoopback(name, execOptsRun)
 		if err != nil {
 			return "", fmt.Errorf("remove-loopback: %s", err)
 		}
 		return fmt.Sprintf("removed loopback (%d changes)", result.ChangeCount), nil
 	})
 }
-

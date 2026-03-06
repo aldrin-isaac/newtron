@@ -70,7 +70,7 @@ the search to a specific lab.
 					"-t",
 					"-p", strconv.Itoa(node.SSHPort),
 					user+"@"+host,
-					fmt.Sprintf("ip netns exec %s bash", node.Namespace),
+					fmt.Sprintf("ip netns exec %s bash -l", node.Namespace),
 				)
 				return syscallExec(sshBin, sshArgs, os.Environ())
 			}

@@ -336,7 +336,14 @@ func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return iface.Set(ctx, req.Property, req.Value)
+		switch req.Property {
+		case "ip":
+			return iface.SetIP(ctx, req.Value)
+		case "vrf":
+			return iface.SetVRF(ctx, req.Value)
+		default:
+			return iface.Set(ctx, req.Property, req.Value)
+		}
 	})
 	if err != nil {
 		writeError(w, err)

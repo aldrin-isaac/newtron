@@ -28,7 +28,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,9 +36,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/newtron-network/newtron/pkg/newtron/client"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
 )
@@ -52,15 +51,16 @@ type App struct {
 	// Option flags
 	rootDir     string // -S flag: network root dir (contains specs/)
 	specDir     string // resolved: rootDir/specs or rootDir (flat layout)
+	serverURL   string // --server flag
+	networkID   string // --network-id flag
 	executeMode bool
 	noSave      bool
 	verbose     bool
 	jsonOutput  bool
 
 	// Initialized state (set in PersistentPreRunE)
-	settings    *newtron.UserSettings
-	net         *newtron.Network
-	permChecker *auth.Checker
+	settings *newtron.UserSettings
+	client *client.Client // HTTP client for all commands
 }
 
 var app = &App{}
@@ -70,9 +70,9 @@ func main() {
 	// treat it as a device name. This lets users write:
 	//   newtron leaf1 vlan list
 	// instead of:
-	//   newtron -d leaf1 vlan list
+	//   newtron -D leaf1 vlan list
 	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") && !isKnownCommand(os.Args[1]) {
-		os.Args = append([]string{os.Args[0], "-d", os.Args[1]}, os.Args[2:]...)
+		os.Args = append([]string{os.Args[0], "-D", os.Args[1]}, os.Args[2:]...)
 	}
 
 	if err := rootCmd.Execute(); err != nil {
@@ -119,10 +119,10 @@ Write commands preview changes by default — use -x to execute.
 
   newtron <device> <resource> <action> [args] [-x]
 
-The first argument is treated as a device name (equivalent to -d <device>)
+The first argument is treated as a device name (equivalent to -D <device>)
 unless it matches a known command. This lets you write:
 
-  newtron leaf1 vlan list          instead of    newtron -d leaf1 vlan list
+  newtron leaf1 vlan list          instead of    newtron -D leaf1 vlan list
 
 Commands that don't need a device work without one:
 
@@ -169,15 +169,27 @@ Examples:
 			util.SetLogLevel("warn")
 		}
 
-		// Create Network object (the top-level object in OO hierarchy)
-		app.net, err = newtron.LoadNetwork(app.specDir)
-		if err != nil {
-			return fmt.Errorf("initializing network: %w", err)
+		// Resolve server URL: flag > env > settings > default
+		if app.serverURL == "" {
+			app.serverURL = os.Getenv("NEWTRON_SERVER")
+		}
+		if app.serverURL == "" {
+			app.serverURL = app.settings.GetServerURL()
 		}
 
-		// Initialize permission checker from network spec
-		app.permChecker = auth.NewChecker(app.net.Spec())
-		app.net.SetAuth(app.permChecker)
+		// Resolve network ID: flag > env > settings > default
+		if app.networkID == "" {
+			app.networkID = os.Getenv("NEWTRON_NETWORK_ID")
+		}
+		if app.networkID == "" {
+			app.networkID = app.settings.GetNetworkID()
+		}
+
+		// Create HTTP client and register network
+		app.client = client.New(app.serverURL, app.networkID)
+		if err := app.client.RegisterNetwork(app.specDir); err != nil {
+			return fmt.Errorf("registering network with server: %w", err)
+		}
 
 		// Initialize audit logger (path and rotation from settings)
 		auditPath := app.settings.GetAuditLogPath(app.specDir)
@@ -191,10 +203,12 @@ Examples:
 
 func init() {
 	// Context flags (object selectors)
-	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "d", "", "Device name")
+	rootCmd.PersistentFlags().StringVarP(&app.deviceName, "device", "D", "", "Device name")
 
 	// Option flags (global)
 	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/)")
+	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (env: NEWTRON_SERVER)")
+	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
@@ -246,9 +260,6 @@ func init() {
 		cmd.GroupID = "meta"
 		rootCmd.AddCommand(cmd)
 	}
-
-	// Premature commands (hidden)
-	rootCmd.AddCommand(shellCmd)
 }
 
 var versionCmd = &cobra.Command{
@@ -271,12 +282,17 @@ func printVersion(tool string) {
 // Context Helpers - Get device/interface from flags or prompt
 // ============================================================================
 
-// requireDevice ensures a device is specified via -d flag
-func requireDevice(ctx context.Context) (*newtron.Node, error) {
+// requireDevice ensures a device is specified via -D flag.
+func requireDevice() error {
 	if app.deviceName == "" {
-		return nil, fmt.Errorf("device required: use -d <device> flag")
+		return fmt.Errorf("device required: use -D <device> flag")
 	}
-	return app.net.Connect(ctx, app.deviceName)
+	return nil
+}
+
+// execOpts returns ExecOpts from the current app flags.
+func execOpts() newtron.ExecOpts {
+	return newtron.ExecOpts{Execute: app.executeMode, NoSave: app.noSave}
 }
 
 // ============================================================================
@@ -290,34 +306,26 @@ func printDryRunNotice() {
 	}
 }
 
-// executeAndSave commits pending changes, verifies writes landed, and optionally
-// saves the config. If verification fails, config is NOT saved so that
-// 'config reload' can restore the last known-good state.
-func executeAndSave(ctx context.Context, n *newtron.Node) error {
-	result, err := n.Commit(ctx)
-
-	if result != nil && result.Applied {
-		fmt.Println("\n" + green("Changes applied successfully."))
-	}
-
-	if result != nil && result.Verification != nil {
-		printVerification(result.Verification)
-	}
-
+// displayWriteResult shows the result of a write operation.
+// It handles preview, applied status, verification, and dry-run notices.
+func displayWriteResult(result *newtron.WriteResult, err error) error {
 	if err != nil {
-		if _, ok := err.(*newtron.VerificationFailedError); ok {
-			fmt.Println(yellow("\nConfig NOT saved. Run 'config reload' to restore last saved state, or retry."))
-		}
 		return err
 	}
-
-	if !app.noSave {
-		fmt.Print("Saving configuration... ")
-		if err := n.Save(ctx); err != nil {
-			fmt.Println(red("FAILED"))
-			return fmt.Errorf("config save failed: %w", err)
-		}
-		fmt.Println(green("saved."))
+	if result == nil {
+		return nil
+	}
+	if result.Preview != "" {
+		fmt.Print(result.Preview)
+	}
+	if result.Applied {
+		fmt.Println(green("Changes applied successfully."))
+	}
+	if result.Verification != nil {
+		printVerification(result.Verification)
+	}
+	if !app.executeMode {
+		printDryRunNotice()
 	}
 	return nil
 }
@@ -340,49 +348,6 @@ func printVerification(v *newtron.VerificationResult) {
 	} else {
 		fmt.Printf("%s (%d/%d entries verified)\n", green("OK"), v.Passed, total)
 	}
-}
-
-// Helper to check execute permission
-func checkExecutePermission(perm auth.Permission, ctx *auth.Context) error {
-	if app.executeMode {
-		return app.permChecker.Check(perm, ctx)
-	}
-	// Preview/dry-run only needs view permission
-	return nil
-}
-
-// withDeviceWrite handles boilerplate for device-level write commands.
-// The callback receives a connected, locked Node and performs ops that
-// accumulate pending changes. After the callback, pending changes are
-// previewed and (if -x) committed, verified, and saved.
-func withDeviceWrite(fn func(ctx context.Context, n *newtron.Node) error) error {
-	ctx := context.Background()
-	n, err := requireDevice(ctx)
-	if err != nil {
-		return err
-	}
-	defer n.Close()
-
-	if err := n.Lock(); err != nil {
-		return fmt.Errorf("locking device: %w", err)
-	}
-	defer n.Unlock()
-
-	if err := fn(ctx, n); err != nil {
-		return err
-	}
-
-	if n.PendingCount() == 0 {
-		return nil
-	}
-
-	fmt.Print(n.PendingPreview())
-
-	if app.executeMode {
-		return executeAndSave(ctx, n)
-	}
-	printDryRunNotice()
-	return nil
 }
 
 // isSettingsOrHelp checks whether cmd (or any ancestor) is a settings, help, or version command.

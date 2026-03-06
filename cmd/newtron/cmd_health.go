@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,33 +19,30 @@ Requires a loaded topology. Compares live CONFIG_DB against the topology-derived
 expected config (same entries the provisioner would write), then checks BGP
 session state and interface oper-up status.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d switch1 health check
-  newtron -d switch1 health check --json`,
+  newtron -D switch1 health check
+  newtron -D switch1 health check --json`,
 }
 
 var healthCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Run intent-based health checks on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if app.deviceName == "" {
-			return fmt.Errorf("device required: use -d <device> flag")
-		}
-		if !app.net.HasTopology() {
-			return fmt.Errorf("no topology loaded — health checks require a topology to define expected state")
+		if err := requireDevice(); err != nil {
+			return err
 		}
 
-		ctx := context.Background()
-
-		n, err := requireDevice(ctx)
+		hasTopology, err := app.client.HasTopology()
 		if err != nil {
 			return err
 		}
-		defer n.Close()
+		if !hasTopology {
+			return fmt.Errorf("no topology loaded — health checks require a topology to define expected state")
+		}
 
-		report, err := n.HealthCheck(ctx)
+		report, err := app.client.HealthCheck(app.deviceName)
 		if err != nil {
 			return err
 		}

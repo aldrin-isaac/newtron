@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,35 +11,31 @@ import (
 )
 
 // showCmd displays device details.
-// Top-level because "newtron -d leaf1 show" is the most natural entry point.
+// Top-level because "newtron -D leaf1 show" is the most natural entry point.
 var showCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show device details",
 	Long: `Show details of the selected device.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny show`,
+  newtron -D leaf1-ny show`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := context.Background()
+		if err := requireDevice(); err != nil {
+			return err
+		}
 
-		n, err := requireDevice(ctx)
+		info, err := app.client.DeviceInfo(app.deviceName)
 		if err != nil {
 			return err
 		}
-		defer n.Close()
 
-		return showDevice(n)
+		return showDevice(info)
 	},
 }
 
-func showDevice(n *newtron.Node) error {
-	info, err := n.DeviceInfo()
-	if err != nil {
-		return fmt.Errorf("getting device info: %w", err)
-	}
-
+func showDevice(info *newtron.DeviceInfo) error {
 	if app.jsonOutput {
 		return json.NewEncoder(os.Stdout).Encode(info)
 	}

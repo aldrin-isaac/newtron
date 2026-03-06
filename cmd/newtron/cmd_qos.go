@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
 )
@@ -23,7 +21,7 @@ var qosCmd = &cobra.Command{
 Spec-level commands (no device needed):
   list, show, create, delete, add-queue, remove-queue
 
-Device-level commands (requires -d flag):
+Device-level commands (requires -D flag):
   apply, remove
 
 Examples:
@@ -34,15 +32,18 @@ Examples:
   newtron qos add-queue my-policy 1 --type strict --dscp 46,48 --name realtime
   newtron qos remove-queue my-policy 1
   newtron qos delete my-policy
-  newtron -d leaf1-ny qos apply Ethernet0 8q-datacenter -x
-  newtron -d leaf1-ny qos remove Ethernet0 -x`,
+  newtron -D leaf1-ny qos apply Ethernet0 8q-datacenter -x
+  newtron -D leaf1-ny qos remove Ethernet0 -x`,
 }
 
 var qosListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all QoS policies",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		policies := app.net.ListQoSPolicies()
+		policies, err := app.client.ListQoSPolicies()
+		if err != nil {
+			return err
+		}
 
 		if app.jsonOutput {
 			return json.NewEncoder(os.Stdout).Encode(policies)
@@ -58,7 +59,7 @@ var qosListCmd = &cobra.Command{
 		t := cli.NewTable("NAME", "QUEUES", "DESCRIPTION")
 
 		for _, name := range policies {
-			policy, err := app.net.ShowQoSPolicy(name)
+			policy, err := app.client.ShowQoSPolicy(name)
 			if err != nil {
 				continue
 			}
@@ -77,7 +78,7 @@ var qosShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		policyName := args[0]
 
-		policy, err := app.net.ShowQoSPolicy(policyName)
+		policy, err := app.client.ShowQoSPolicy(policyName)
 		if err != nil {
 			return err
 		}
@@ -145,10 +146,10 @@ Examples:
 			return nil
 		}
 
-		return app.net.CreateQoSPolicy(newtron.CreateQoSPolicyRequest{
+		return app.client.CreateQoSPolicy(newtron.CreateQoSPolicyRequest{
 			Name:        policyName,
 			Description: qosCreateDescription,
-		}, newtron.ExecOpts{Execute: true})
+		}, execOpts())
 	},
 }
 
@@ -172,7 +173,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.DeleteQoSPolicy(policyName, newtron.ExecOpts{Execute: true})
+		return app.client.DeleteQoSPolicy(policyName, execOpts())
 	},
 }
 
@@ -216,11 +217,6 @@ Examples:
 			return fmt.Errorf("--weight is required for dwrr queues")
 		}
 
-		authCtx := auth.NewContext().WithResource(policyName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		// Parse DSCP values
 		var dscpValues []int
 		if addQueueDSCP != "" {
@@ -244,7 +240,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.AddQoSQueue(newtron.AddQoSQueueRequest{
+		return app.client.AddQoSQueue(newtron.AddQoSQueueRequest{
 			Policy:  policyName,
 			QueueID: queueID,
 			Name:    addQueueName,
@@ -252,7 +248,7 @@ Examples:
 			Weight:  addQueueWeight,
 			DSCP:    dscpValues,
 			ECN:     addQueueECN,
-		}, newtron.ExecOpts{Execute: true})
+		}, execOpts())
 	},
 }
 
@@ -272,11 +268,6 @@ Examples:
 			return fmt.Errorf("invalid queue-id: %s", args[1])
 		}
 
-		authCtx := auth.NewContext().WithResource(policyName)
-		if err := checkExecutePermission(auth.PermSpecAuthor, authCtx); err != nil {
-			return err
-		}
-
 		fmt.Printf("Removing queue %d from policy '%s'\n", queueID, policyName)
 
 		if !app.executeMode {
@@ -284,7 +275,7 @@ Examples:
 			return nil
 		}
 
-		return app.net.RemoveQoSQueue(policyName, queueID, newtron.ExecOpts{Execute: true})
+		return app.client.RemoveQoSQueue(policyName, queueID, execOpts())
 	},
 }
 
@@ -295,25 +286,20 @@ var qosApplyCmd = &cobra.Command{
 
 This writes QoS entries to CONFIG_DB for the specified interface.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny qos apply Ethernet0 8q-datacenter -x`,
+  newtron -D leaf1-ny qos apply Ethernet0 8q-datacenter -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 		policyName := args[1]
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
-			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.ApplyQoS(ctx, intfName, policyName); err != nil {
-				return fmt.Errorf("applying QoS: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		return displayWriteResult(app.client.ApplyQoS(app.deviceName, intfName, policyName, execOpts()))
 	},
 }
 
@@ -322,24 +308,19 @@ var qosRemoveCmd = &cobra.Command{
 	Short: "Remove QoS configuration from an interface",
 	Long: `Remove QoS configuration from an interface on the device.
 
-Requires -d (device) flag.
+Requires -D (device) flag.
 
 Examples:
-  newtron -d leaf1-ny qos remove Ethernet0 -x`,
+  newtron -D leaf1-ny qos remove Ethernet0 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
 
-		return withDeviceWrite(func(ctx context.Context, n *newtron.Node) error {
-			authCtx := auth.NewContext().WithDevice(app.deviceName).WithResource(intfName)
-			if err := checkExecutePermission(auth.PermQoSModify, authCtx); err != nil {
-				return err
-			}
-			if err := n.RemoveQoS(ctx, intfName); err != nil {
-				return fmt.Errorf("removing QoS: %w", err)
-			}
-			return nil
-		})
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		return displayWriteResult(app.client.RemoveQoS(app.deviceName, intfName, execOpts()))
 	},
 }
 

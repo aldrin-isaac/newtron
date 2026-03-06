@@ -26,7 +26,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 		return nil, fmt.Errorf("bind-macvpn only valid for VLAN interfaces")
 	}
 	if !n.VTEPExists() {
-		return nil, fmt.Errorf("bind-macvpn '%s' on %s requires VTEP — run 'newtron -d %s evpn setup' first",
+		return nil, fmt.Errorf("bind-macvpn '%s' on %s requires VTEP — run 'newtron -D %s evpn setup' first",
 			macvpnName, n.Name(), n.Name())
 	}
 
