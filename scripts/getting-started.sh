@@ -12,7 +12,6 @@ IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node/specs"
 SERVER_PID=""
-NEWTRUN_PID=""
 
 # Colors (if terminal supports them)
 if [ -t 1 ]; then
@@ -27,13 +26,10 @@ else
 fi
 
 cleanup() {
-    for pid_var in NEWTRUN_PID SERVER_PID; do
-        eval "pid=\$$pid_var"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            kill "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
-        fi
-    done
+    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+        kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 
@@ -231,18 +227,10 @@ header "Step 7: Run the test suite"
 echo " newtrun runs YAML test scenarios against the server. The 1node-basic"
 echo " suite tests service apply/remove, VLAN/VRF lifecycle, and cleanup"
 echo " verification — all against the switch you just deployed."
-echo " The monitor auto-refreshes per-scenario progress until the suite finishes."
+echo " The --monitor flag shows a live status dashboard during the run."
 echo ""
 
-echo -e " ${CYAN}Running:${RESET} bin/newtrun start 1node-basic --server http://localhost:8080 (background)"
-echo -e " ${CYAN}Running:${RESET} bin/newtrun status --monitor"
-echo ""
-bin/newtrun start 1node-basic --server http://localhost:8080 > /tmp/newtrun.log 2>&1 &
-NEWTRUN_PID=$!
-sleep 2
-bin/newtrun status --monitor
-wait "$NEWTRUN_PID" || true
-NEWTRUN_PID=""
+run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
 
 pause
 

@@ -23,6 +23,7 @@ func newStartCmd() *cobra.Command {
 		junitPath string
 		serverURL string
 		networkID string
+		monitor   bool
 	)
 
 	cmd := &cobra.Command{
@@ -33,8 +34,9 @@ func newStartCmd() *cobra.Command {
 The suite can be a name (resolved under newtrun/suites/) or a path.
 All scenarios run by default. Use --scenario to run a single one.
 
-  newtrun start 2node-incremental                    # run all scenarios
+  newtrun start 2node-incremental                     # run all scenarios
   newtrun start 2node-incremental --scenario boot-ssh
+  newtrun start 2node-incremental --monitor           # live status dashboard
 
 If a previous run was paused, start resumes from where it left off.
 Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
@@ -106,10 +108,15 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			}
 			defer func() { _ = newtrun.ReleaseLock(state) }()
 
-			// Set up progress reporter with state tracking
-			console := newtrun.NewConsoleProgress(verboseFlag)
+			// Set up progress reporter with state tracking.
+			// In monitor mode, suppress console output (Inner=nil) — the
+			// monitor dashboard reads from the persisted state file instead.
+			var inner newtrun.ProgressReporter
+			if !monitor {
+				inner = newtrun.NewConsoleProgress(verboseFlag)
+			}
 			reporter := &newtrun.StateReporter{
-				Inner: console,
+				Inner: inner,
 				State: state,
 			}
 
@@ -144,7 +151,31 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			}
 			runner.NetworkID = networkID
 
-			results, runErr := runner.Run(opts)
+			// In monitor mode, run the suite in a goroutine and show the
+			// live status dashboard (equivalent to newtrun status --detail --monitor).
+			type runResult struct {
+				results []*newtrun.ScenarioResult
+				err     error
+			}
+			var resultCh chan runResult
+			if monitor {
+				resultCh = make(chan runResult, 1)
+				go func() {
+					r, e := runner.Run(opts)
+					resultCh <- runResult{r, e}
+				}()
+				time.Sleep(2 * time.Second)
+				_ = monitorSuite(suite, true)
+			}
+
+			var results []*newtrun.ScenarioResult
+			var runErr error
+			if monitor {
+				res := <-resultCh
+				results, runErr = res.results, res.err
+			} else {
+				results, runErr = runner.Run(opts)
+			}
 
 			// Handle pause
 			var pauseErr *newtrun.PauseError
@@ -217,6 +248,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
 	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (env: NEWTRON_SERVER)")
 	cmd.Flags().StringVar(&networkID, "network-id", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
+	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 
 	return cmd
 }

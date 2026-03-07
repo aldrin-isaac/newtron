@@ -285,7 +285,9 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	r.Inner.SuiteStart(scenarios)
+	if r.Inner != nil {
+		r.Inner.SuiteStart(scenarios)
+	}
 }
 
 func (r *StateReporter) ScenarioStart(name string, index, total int) {
@@ -296,7 +298,9 @@ func (r *StateReporter) ScenarioStart(name string, index, total int) {
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	r.Inner.ScenarioStart(name, index, total)
+	if r.Inner != nil {
+		r.Inner.ScenarioStart(name, index, total)
+	}
 }
 
 func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
@@ -311,7 +315,9 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	r.Inner.ScenarioEnd(result, index, total)
+	if r.Inner != nil {
+		r.Inner.ScenarioEnd(result, index, total)
+	}
 }
 
 func (r *StateReporter) StepStart(scenario string, step *Step, index, total int) {
@@ -323,7 +329,9 @@ func (r *StateReporter) StepStart(scenario string, step *Step, index, total int)
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	r.Inner.StepStart(scenario, step, index, total)
+	if r.Inner != nil {
+		r.Inner.StepStart(scenario, step, index, total)
+	}
 }
 
 func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, total int) {
@@ -344,12 +352,16 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 			util.Logger.Warnf("save run state: %v", err)
 		}
 	}
-	r.Inner.StepEnd(scenario, result, index, total)
+	if r.Inner != nil {
+		r.Inner.StepEnd(scenario, result, index, total)
+	}
 }
 
 func (r *StateReporter) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
 	if err := SaveRunState(r.State); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	r.Inner.SuiteEnd(results, duration)
+	if r.Inner != nil {
+		r.Inner.SuiteEnd(results, duration)
+	}
 }
