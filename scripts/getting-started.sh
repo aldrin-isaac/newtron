@@ -153,7 +153,7 @@ echo " Boot takes 2–5 minutes depending on your machine."
 echo " The --monitor flag shows live status during deployment."
 echo ""
 
-run_cmd bin/newtlab deploy 1node --monitor
+run_cmd bin/newtlab deploy 1node --monitor --force
 
 pause
 
@@ -166,6 +166,14 @@ echo " all operations as HTTP endpoints on port 8080."
 echo ""
 echo " newtron (the CLI) sends HTTP requests to this server."
 echo ""
+
+# Kill any leftover newtron-server from a previous run
+existing_pid=$(pgrep -f "newtron-server.*--spec-dir" || true)
+if [ -n "$existing_pid" ]; then
+    echo -e " ${DIM}Stopping leftover newtron-server (PID $existing_pid)...${RESET}"
+    kill "$existing_pid" 2>/dev/null || true
+    sleep 1
+fi
 
 echo -e " ${CYAN}Running:${RESET} bin/newtron-server --spec-dir $SPEC_DIR &"
 echo ""
