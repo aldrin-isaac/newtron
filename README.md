@@ -29,10 +29,11 @@ Define a service in `network.json`:
 }
 ```
 
-Apply it to an interface. By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
+Start the server with your specs, then apply the service to an interface. By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
 
 ```
-$ newtron -S . spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
+$ newtron-server -spec-dir . &
+$ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 
 Operation: interface.applyService
 Device: spine1
@@ -55,7 +56,7 @@ There is no template engine — newtron computed these entries by running the sa
 Add `-x` to execute. newtron writes atomically, re-reads to verify, then persists:
 
 ```
-$ newtron -S . spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
+$ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 
 Changes applied successfully.
 Verifying... OK (7/7 entries verified)
