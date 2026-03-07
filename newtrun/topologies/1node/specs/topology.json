@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "description": "Single SONiC switch for getting started",
+  "devices": {
+    "switch1": {
+      "interfaces": {}
+    }
+  },
+  "newtlab": {
+    "link_port_base": 10000,
+    "console_port_base": 12000,
+    "ssh_port_base": 13000
+  }
+}

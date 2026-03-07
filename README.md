@@ -16,27 +16,39 @@ The result is a typed object hierarchy (`Network > Node > Interface`) that provi
 
 ## See It Work
 
-Define a service in `network.json`:
+Requires Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
 
-```json
-{
-  "services": {
-    "transit": {
-      "service_type": "routed",
-      "routing": { "protocol": "bgp", "peer_as": "request" }
-    }
-  }
-}
+```bash
+scripts/getting-started.sh
 ```
 
-Start the server with your specs, then apply the service to an interface. By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
+The script walks you through downloading the SONiC community VM image, building newtron, deploying a single-switch lab, and applying your first service — step by step, with explanations at each stage.
+
+Or run the steps yourself:
+
+```bash
+# 1. Get the SONiC community image
+mkdir -p ~/.newtlab/images
+curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+  | gunzip > ~/.newtlab/images/sonic-vs.qcow2
+
+# 2. Build
+make build
+
+# 3. Deploy a single-switch lab
+bin/newtlab deploy 1node
+bin/newtlab status 1node          # wait for "running"
+
+# 4. Start the server and apply a service
+bin/newtron-server --spec-dir newtrun/topologies/1node/specs &
+bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
+```
+
+By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
 
 ```
-$ newtron-server --spec-dir . &
-$ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
-
 Operation: interface.applyService
-Device: spine1
+Device: switch1
 Changes:
   [ADD] INTERFACE|Ethernet0                              → map[NULL:NULL]
   [ADD] INTERFACE|Ethernet0|10.1.0.0/31                  → map[NULL:NULL]
@@ -54,29 +66,18 @@ There is no template engine — newtron computed these entries by running the sa
 Add `-x` to execute. newtron writes atomically, re-reads to verify, then persists:
 
 ```
-$ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
+$ bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 
 Changes applied successfully.
 Verifying... OK (5/5 entries verified)
 Config saved.
 ```
 
-Check device health — composite verification plus operational checks:
+Tear down when done:
 
+```bash
+bin/newtlab destroy 1node
 ```
-$ newtron spine1 health check
-
-Health Report for spine1
-Config Intent: PASS (47/47 entries match)
-
-CHECK               STATUS  MESSAGE
-interface-oper      PASS    4/4 interfaces up
-bgp                 PASS    2/2 sessions established
-
-Overall: PASS
-```
-
-`Config Intent` re-reads CONFIG_DB and diffs it against the device's full composite ChangeSet. The operational checks read STATE_DB for link status, BGP session state, VTEP health. Everything comes from Redis — no CLI parsing, no screen scraping.
 
 ## System Overview
 
@@ -154,7 +155,7 @@ cp alpine-testhost.qcow2 ~/.newtlab/images/    # lightweight test host (optional
 Deploy VMs and wire the topology:
 
 ```bash
-bin/newtlab deploy -S newtrun/topologies/2node/specs
+bin/newtlab deploy 2node
 bin/newtlab status                              # Check VM and link state
 bin/newtlab ssh switch1                         # SSH into a switch
 ```
@@ -395,7 +396,7 @@ pkg/
   util/             Errors, logging, IP/string helpers
 
 newtrun/
-  topologies/       Test topologies (2node, 2node-service, 3node, 4node)
+  topologies/       Test topologies (1node, 2node, 2node-service, 3node, 4node)
   suites/           Test suites and scenarios (YAML)
 
 docs/

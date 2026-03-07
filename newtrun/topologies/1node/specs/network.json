@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "zones": {
+    "amer": {}
+  },
+  "services": {
+    "transit": {
+      "description": "Transit peering interface",
+      "service_type": "routed",
+      "routing": { "protocol": "bgp", "peer_as": "request" }
+    }
+  }
+}
