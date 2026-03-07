@@ -1,0 +1,12 @@
+graph { flow: south; }
+
+[ \n  test suite  \n\n ] { rank: 0; }
+[ \n  newtron  \n  (client)  \n\n ] { rank: 0; }
+
+[ \n  test suite  \n\n ] --> [ \n  newtrun  \n\n ]
+[ \n  newtrun  \n\n ] --> { label: HTTP; } [ \n  newtron-server  \n\n ]
+[ \n  newtron  \n  (client)  \n\n ] --> { label: HTTP; } [ \n  newtron-server  \n\n ]
+[ \n  specs  \n\n ] --> [ \n  newtron-server  \n\n ]
+[ \n  specs  \n\n ] --> [ \n  newtlab  \n\n ]
+[ \n  newtron-server  \n\n ] --> { label: SSH+Redis; } [ \n  SONiC VM  \n\n ]
+[ \n  newtlab  \n\n ] --> { label: deploy, wire; } [ \n  SONiC VM  \n\n ]
