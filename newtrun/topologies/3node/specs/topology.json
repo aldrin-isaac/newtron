@@ -1,13 +1,27 @@
 {
   "version": "1.0",
-  "description": "3-node topology: 2 leaves (eBGP underlay) + 2 Alpine virtual hosts",
+  "description": "3-node topology: 1 spine + 2 leaves (eBGP fabric) + 2 Alpine virtual hosts",
   "devices": {
+    "spine": {
+      "interfaces": {
+        "Ethernet0": {
+          "link": "leaf1:Ethernet0",
+          "service": "transit",
+          "ip": "10.1.0.0/31"
+        },
+        "Ethernet1": {
+          "link": "leaf2:Ethernet0",
+          "service": "transit",
+          "ip": "10.1.0.2/31"
+        }
+      }
+    },
     "leaf1": {
       "interfaces": {
         "Ethernet0": {
-          "link": "leaf2:Ethernet0",
+          "link": "spine:Ethernet0",
           "service": "transit",
-          "ip": "10.1.0.0/31"
+          "ip": "10.1.0.1/31"
         },
         "Ethernet1": {
           "link": "host1:eth0",
@@ -18,9 +32,9 @@
     "leaf2": {
       "interfaces": {
         "Ethernet0": {
-          "link": "leaf1:Ethernet0",
+          "link": "spine:Ethernet1",
           "service": "transit",
-          "ip": "10.1.0.1/31"
+          "ip": "10.1.0.3/31"
         },
         "Ethernet1": {
           "link": "host2:eth0",
@@ -44,7 +58,8 @@
     }
   },
   "links": [
-    {"a": "leaf1:Ethernet0", "z": "leaf2:Ethernet0"},
+    {"a": "spine:Ethernet0", "z": "leaf1:Ethernet0"},
+    {"a": "spine:Ethernet1", "z": "leaf2:Ethernet0"},
     {"a": "leaf1:Ethernet1", "z": "host1:eth0"},
     {"a": "leaf2:Ethernet1", "z": "host2:eth0"}
   ],

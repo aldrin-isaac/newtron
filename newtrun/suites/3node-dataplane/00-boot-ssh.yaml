@@ -1,0 +1,45 @@
+name: boot-ssh
+description: SSH connectivity check for all devices (spine, leaf switches, virtual hosts)
+topology: 3node
+
+steps:
+  - name: ssh-echo-spine
+    action: ssh-command
+    devices: [spine]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+      timeout: 120s
+      poll_interval: 5s
+
+  - name: ssh-echo-leaf1
+    action: ssh-command
+    devices: [leaf1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+      timeout: 120s
+      poll_interval: 5s
+
+  - name: ssh-echo-leaf2
+    action: ssh-command
+    devices: [leaf2]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+      timeout: 120s
+      poll_interval: 5s
+
+  - name: host1-echo
+    action: host-exec
+    devices: [host1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+
+  - name: host2-echo
+    action: host-exec
+    devices: [host2]
+    command: "echo ok"
+    expect:
+      contains: "ok"
