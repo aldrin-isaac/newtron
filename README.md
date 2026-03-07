@@ -92,44 +92,42 @@ Five programs, two subsystems:
 | **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
 
 ```
-  Control Plane                                   Lab
-
-┌────────────────────┐          ┌─────────────┐          ┌─────────────┐
-│                    │          │             │          │             │
-│                    │          │             │          │             │
-│                    │          │             │          │             │
-│      newtron       │     HTTP─┤   newtrun   │          │   newtlab   │
-│                    │     │    │             │          │             │
-│                    │     │    │             │          │             │
-│                    │     │    │             │          │             │
-└──────────┬─────────┘     │    └─────────────┘          └──────┬──────┘
-           │               │                                    │
-         HTTP──────────────┘                                    │
-           ▼                                                  QEMU
-┌────────────────────┐          ┌─────────────┐                 │
-│                    │          │             │                 │
-│                    │          │             │                 │
-│                    │          │             │                 │
-│   newtron-server   │          │     VMs     │◄────────────────┘
-│                    │          │             │
-│                    │          │             │
-│                    │          │             │
-└──────────┬─────────┘          └──────┬──────┘
-           │                           │
-       SSH+Redis                       │
-           ▼                       Ethernet
-┌────────────────────┐                 │
-│                    │                 │
-│                    │                 │
-│                    │                 │
-│      devices       │◄────────────────┘
+┌────────────────────┐          ┌─────────────┐          ┌───────────────┐
+│                    │          │             │          │               │
+│                    │          │             │          │               │
+│                    │          │             │          │               │
+│      newtron       │          │   newtrun   │          │    newtlab    │
+│                    │          │             │          │               │
+│                    │          │             │          │               │
+│                    │          │             │          │               │
+└──────────┬─────────┘          └──────┬──────┘          └───────┬───────┘
+           │                           │                         │
+         HTTP                          │                         │
+           ▼                           │                         │
+┌────────────────────┐               HTTP                        │
+│                    │                 │                         │
+│                    │                 │                         │
+│                    │                 │                         │
+│   newtron-server   │◄────────────────┘                         │
+│                    │                                           │
+│                    │                                     QEMU+newtlink
+│                    │                                           │
+└──────────┬─────────┘                                           │
+           │                                                     │
+       SSH+Redis                                                 │
+           ▼                                                     │
+┌────────────────────┐                                           │
+│                    │                                           │
+│                    │                                           │
+│                    │                                           │
+│       SONiC        │◄──────────────────────────────────────────┘
 │                    │
 │                    │
 │                    │
 └────────────────────┘
 ```
 
-The control plane (left) and lab infrastructure (right) are independent. newtlab creates the VMs; newtron-server talks to them. You can point newtron-server at any SONiC device — newtlab VMs, hardware switches, or third-party labs.
+Both paths converge on the same SONiC devices. newtlab creates QEMU VMs running SONiC and wires them with newtlink; newtron-server connects to those same VMs via SSH-tunneled Redis. You can also point newtron-server at hardware switches or third-party labs — newtlab is only needed for local virtual topologies.
 
 ## Quick Start
 

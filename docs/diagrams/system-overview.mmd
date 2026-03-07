@@ -1,6 +1,5 @@
 graph TD
     newtron -->|HTTP| newtron-server
     newtrun -->|HTTP| newtron-server
-    newtron-server -->|SSH+Redis| devices
-    newtlab -->|QEMU| VMs
-    VMs -->|Ethernet| devices
+    newtron-server -->|SSH+Redis| SONiC
+    newtlab -->|QEMU+newtlink| SONiC
