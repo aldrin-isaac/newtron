@@ -14,7 +14,46 @@ newtron connects to CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB through a native Go
 
 The result is a typed object hierarchy (`Network > Node > Interface`) that provisions SONiC devices from declarative specs, prevents invalid configurations structurally, and exposes every Redis database as structured data for any orchestrator to consume.
 
-## See It Work
+## System Overview
+
+Five programs, two subsystems:
+
+| Program | What it does |
+|---------|-------------|
+| **newtron-server** | HTTP API server. Loads specs, connects to SONiC devices via SSH/Redis, exposes all operations as REST endpoints. The brain. |
+| **newtron** | CLI client. Human interface to newtron-server — every command is an HTTP call. |
+| **newtlab** | VM orchestrator. Deploys QEMU virtual machines and wires them into topologies. |
+| **newtlink** | Userspace bridge agent. Bridges Ethernet frames between VMs over TCP sockets. Deployed by newtlab. |
+| **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
+
+```
+                            ┌────────────────┐         ┌────────────┐
+                            │                │         │            │
+                            │    newtron     │         │ test suite │
+                            │    (client)    │         │            │
+                            │                │         │            │
+                            └────────────────┘         └────────────┘
+                              │                          │
+                              │ HTTP                     │
+                              ∨                          ∨
+┌─────────┐                 ┌────────────────┐         ┌────────────┐
+│         │                 │                │         │            │
+│  specs  │                 │ newtron-server │  HTTP   │  newtrun   │
+│         │ ──────────────> │                │ <────── │            │
+└─────────┘                 └────────────────┘         └────────────┘
+  │                           │
+  │                           │ SSH+Redis
+  ∨                           ∨
+┌─────────┐                 ┌────────────────┐
+│         │                 │                │
+│ newtlab │  deploy, wire   │    SONiC VM    │
+│         │ ──────────────> │                │
+└─────────┘                 └────────────────┘
+```
+
+Both paths converge on the same SONiC devices. newtlab creates QEMU VMs running SONiC and wires them with newtlink; newtron-server connects to those same VMs via SSH-tunneled Redis. You can also point newtron-server at hardware switches or third-party labs — newtlab is only needed for local virtual topologies.
+
+## Have 5 Minutes? See It Work
 
 Requires Linux x86_64, Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
 
@@ -78,45 +117,6 @@ Tear down when done:
 ```bash
 bin/newtlab destroy 1node
 ```
-
-## System Overview
-
-Five programs, two subsystems:
-
-| Program | What it does |
-|---------|-------------|
-| **newtron-server** | HTTP API server. Loads specs, connects to SONiC devices via SSH/Redis, exposes all operations as REST endpoints. The brain. |
-| **newtron** | CLI client. Human interface to newtron-server — every command is an HTTP call. |
-| **newtlab** | VM orchestrator. Deploys QEMU virtual machines and wires them into topologies. |
-| **newtlink** | Userspace bridge agent. Bridges Ethernet frames between VMs over TCP sockets. Deployed by newtlab. |
-| **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
-
-```
-                            ┌────────────────┐         ┌────────────┐
-                            │                │         │            │
-                            │    newtron     │         │ test suite │
-                            │    (client)    │         │            │
-                            │                │         │            │
-                            └────────────────┘         └────────────┘
-                              │                          │
-                              │ HTTP                     │
-                              ∨                          ∨
-┌─────────┐                 ┌────────────────┐         ┌────────────┐
-│         │                 │                │         │            │
-│  specs  │                 │ newtron-server │  HTTP   │  newtrun   │
-│         │ ──────────────> │                │ <────── │            │
-└─────────┘                 └────────────────┘         └────────────┘
-  │                           │
-  │                           │ SSH+Redis
-  ∨                           ∨
-┌─────────┐                 ┌────────────────┐
-│         │                 │                │
-│ newtlab │  deploy, wire   │    SONiC VM    │
-│         │ ──────────────> │                │
-└─────────┘                 └────────────────┘
-```
-
-Both paths converge on the same SONiC devices. newtlab creates QEMU VMs running SONiC and wires them with newtlink; newtron-server connects to those same VMs via SSH-tunneled Redis. You can also point newtron-server at hardware switches or third-party labs — newtlab is only needed for local virtual topologies.
 
 ## Quick Start
 
