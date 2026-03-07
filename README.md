@@ -16,7 +16,7 @@ The result is a typed object hierarchy (`Network > Node > Interface`) that provi
 
 ## See It Work
 
-Requires Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
+Requires Linux x86_64, Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
 
 ```bash
 scripts/getting-started.sh

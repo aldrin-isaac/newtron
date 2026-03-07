@@ -55,6 +55,12 @@ pause() {
     read -r
 }
 
+# Ensure we're on Linux x86_64 (SONiC VM images are Intel-only)
+if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
+    echo "Error: SONiC VM images require Linux x86_64 with KVM." >&2
+    exit 1
+fi
+
 # Ensure we're in the project root
 if [ ! -f "Makefile" ] || [ ! -d "cmd/newtron" ]; then
     echo "Error: run this script from the newtron project root." >&2
