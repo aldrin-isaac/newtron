@@ -95,8 +95,8 @@ Five programs, two subsystems:
 ┌──────────────┐          ┌────────────────────┐          ┌─────────────┐
 │              │          │                    │          │             │
 │              │          │                    │          │             │
-│              │          │                    │          │             │
-│    specs     ├─────┐    │      newtron       │          │   newtrun   │
+│              │          │      newtron       │          │             │
+│    specs     ├─────┐    │      (client)      │          │   newtrun   │
 │              │     │    │                    │          │             │
 │              │     │    │                    │          │             │
 │              │     │    │                    │          │             │
