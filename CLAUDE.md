@@ -359,6 +359,19 @@ These are routine project commands that do not require confirmation:
 - `WebSearch` (always allowed)
 - `WebFetch` for: `github.com`, `raw.githubusercontent.com`, `containerlab.dev`, `hackmd.io`, `sonic.software`, `deepwiki.com`, `r12f.com`
 
+## Diagrams
+
+ASCII diagrams in markdown files are generated with `mermaid-ascii`, never hand-drawn.
+
+- Source files: `docs/diagrams/*.mmd` (Mermaid syntax)
+- Render command: `mermaid-ascii -f <file>.mmd -x 10 -y 3 -p 3`
+- **Padding rule**: all text — both node labels and edge labels — must have at least
+  3 characters of clearance from the nearest box edge (above, below, left, right).
+  `-p 3` enforces box padding; `-x 10 -y 3` ensures edge labels aren't crowded.
+- Paste the rendered output into the markdown code block; commit both `.mmd` source
+  and the rendered output.
+- Never hand-draw ASCII art — the tool handles all alignment.
+
 ## Build Convention
 
 Always `go build -o bin/<tool> ./cmd/<tool>` before testing — `go run` compiles to a temp dir and breaks sibling binary resolution.
