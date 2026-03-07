@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -15,6 +16,7 @@ func newDeployCmd() *cobra.Command {
 	var force bool
 	var provision bool
 	var parallel int
+	var monitor bool
 
 	cmd := &cobra.Command{
 		Use:   "deploy [topology]",
@@ -23,6 +25,7 @@ func newDeployCmd() *cobra.Command {
 (resolved under newtrun/topologies/) or specified via -S.
 
   newtlab deploy 2node
+  newtlab deploy 2node --monitor
   newtlab deploy 2node --provision`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,12 +39,17 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 			lab.Force = force
-			lab.OnProgress = func(phase, detail string) {
-				fmt.Printf("  [%s] %s\n", phase, detail)
-			}
 
 			if host != "" {
 				lab.FilterHost(host)
+			}
+
+			if monitor {
+				return deployWithMonitor(cmd, lab, provision, parallel)
+			}
+
+			lab.OnProgress = func(phase, detail string) {
+				fmt.Printf("  [%s] %s\n", phase, detail)
 			}
 
 			fmt.Println("Deploying VMs...")
@@ -49,20 +57,7 @@ func newDeployCmd() *cobra.Command {
 				return err
 			}
 
-			// Print summary
-			state := lab.State
-			fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.Name, len(state.Nodes))
-			t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE").WithPrefix("  ")
-			nodeNames := make([]string, 0, len(state.Nodes))
-			for name := range state.Nodes {
-				nodeNames = append(nodeNames, name)
-			}
-			sort.Strings(nodeNames)
-			for _, name := range nodeNames {
-				node := state.Nodes[name]
-				t.Row(name, node.Status, fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort))
-			}
-			t.Flush()
+			printDeploySummary(lab)
 
 			if provision {
 				fmt.Println("\nProvisioning devices...")
@@ -80,5 +75,53 @@ func newDeployCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "force deploy (destroy existing first)")
 	cmd.Flags().BoolVar(&provision, "provision", false, "provision devices after deploy")
 	cmd.Flags().IntVar(&parallel, "parallel", 1, "parallel provisioning threads")
+	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status during deploy")
 	return cmd
+}
+
+// deployWithMonitor runs deploy in a goroutine and shows the status monitor.
+func deployWithMonitor(cmd *cobra.Command, lab *newtlab.Lab, provision bool, parallel int) error {
+	deployErr := make(chan error, 1)
+	go func() {
+		deployErr <- lab.Deploy(cmd.Context())
+	}()
+
+	// Wait for state file to be created by the deploy goroutine.
+	time.Sleep(2 * time.Second)
+
+	// Monitor until deploy phases clear.
+	_ = monitorLab(lab.Name)
+
+	// Wait for deploy goroutine to finish.
+	if err := <-deployErr; err != nil {
+		return err
+	}
+
+	fmt.Printf("\n%s Deploy complete\n", green("✓"))
+
+	if provision {
+		fmt.Println("\nProvisioning devices...")
+		if err := lab.Provision(cmd.Context(), parallel); err != nil {
+			return err
+		}
+		fmt.Printf("%s Provisioning complete\n", green("✓"))
+	}
+
+	return nil
+}
+
+func printDeploySummary(lab *newtlab.Lab) {
+	state := lab.State
+	fmt.Printf("\n%s Deployed %s (%d nodes)\n\n", green("✓"), lab.Name, len(state.Nodes))
+	t := cli.NewTable("NODE", "STATUS", "SSH PORT", "CONSOLE").WithPrefix("  ")
+	nodeNames := make([]string, 0, len(state.Nodes))
+	for name := range state.Nodes {
+		nodeNames = append(nodeNames, name)
+	}
+	sort.Strings(nodeNames)
+	for _, name := range nodeNames {
+		node := state.Nodes[name]
+		t.Row(name, node.Status, fmt.Sprintf("%d", node.SSHPort), fmt.Sprintf("%d", node.ConsolePort))
+	}
+	t.Flush()
 }

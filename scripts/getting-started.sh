@@ -12,7 +12,6 @@ IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node/specs"
 SERVER_PID=""
-DEPLOY_PID=""
 NEWTRUN_PID=""
 
 # Colors (if terminal supports them)
@@ -28,7 +27,7 @@ else
 fi
 
 cleanup() {
-    for pid_var in NEWTRUN_PID DEPLOY_PID SERVER_PID; do
+    for pid_var in NEWTRUN_PID SERVER_PID; do
         eval "pid=\$$pid_var"
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
@@ -155,27 +154,10 @@ echo " it according to the topology in $SPEC_DIR/."
 echo ""
 echo " This starts one VM (switch1) with 2 vCPUs, 4 GB RAM."
 echo " Boot takes 2–5 minutes depending on your machine."
-echo " The monitor auto-refreshes status until deployment finishes."
+echo " The --monitor flag shows live status during deployment."
 echo ""
 
-echo -e " ${CYAN}Running:${RESET} bin/newtlab deploy 1node (background)"
-echo -e " ${CYAN}Running:${RESET} bin/newtlab status 1node --monitor"
-echo ""
-bin/newtlab deploy 1node > /tmp/newtlab-deploy.log 2>&1 &
-DEPLOY_PID=$!
-sleep 2
-bin/newtlab status 1node --monitor 2> >(grep -v "Could not initialize audit" >&2)
-wait "$DEPLOY_PID" || {
-    echo -e " ${YELLOW}Deploy log:${RESET}"
-    tail -20 /tmp/newtlab-deploy.log
-    echo ""
-    echo " Error: deployment failed." >&2
-    exit 1
-}
-DEPLOY_PID=""
-
-echo ""
-echo -e " ${GREEN}Lab deployed.${RESET}"
+run_cmd bin/newtlab deploy 1node --monitor
 
 pause
 

@@ -75,8 +75,7 @@ curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=
 make build
 
 # 3. Deploy a single-switch lab
-bin/newtlab deploy 1node
-bin/newtlab status 1node --monitor # watch deploy progress, exits when ready
+bin/newtlab deploy 1node --monitor  # live status during deploy
 
 # 4. Start the server and apply a service
 bin/newtron-server --spec-dir newtrun/topologies/1node/specs &
