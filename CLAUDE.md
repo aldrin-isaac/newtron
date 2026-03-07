@@ -347,7 +347,7 @@ These are routine project commands that do not require confirmation:
 - `bin/newtlab`, `bin/newtron`, `bin/newtrun`, `bin/newtlink` (all subcommands)
 
 ### Make
-- `make build`, `make test`, `make lint`
+- `make build`, `make test`, `make lint`, `make tools`
 
 ### Misc
 - `ls`, `stat`, `file`, `wc`, `chmod`, `ln`
@@ -361,14 +361,14 @@ These are routine project commands that do not require confirmation:
 
 ## Diagrams
 
-ASCII diagrams in markdown files are generated with `mermaid-ascii`, never hand-drawn.
+ASCII diagrams in markdown files are generated with `graph-easy`, never hand-drawn.
 
-- Source files: `docs/diagrams/*.mmd` (Mermaid syntax)
-- Render command: `mermaid-ascii -f <file>.mmd -x 10 -y 3 -p 3`
-- **Padding rule**: all text — both node labels and edge labels — must have at least
-  3 characters of clearance from the nearest box edge (above, below, left, right).
-  `-p 3` enforces box padding; `-x 10 -y 3` ensures edge labels aren't crowded.
-- Paste the rendered output into the markdown code block; commit both `.mmd` source
+- Source files: `docs/diagrams/*.dot` (Graphviz DOT syntax)
+- Render command: `graph-easy --from=dot --boxart < file.dot`
+- Install: `make tools` (installs graph-easy to `~/perl5/`; works on Linux and macOS)
+- Graph::Easy supports layout hints: `rank=same` for same-row placement,
+  edge port control via Graph::Easy attributes when DOT is insufficient.
+- Paste the rendered output into the markdown code block; commit both `.dot` source
   and the rendered output.
 - Never hand-draw ASCII art — the tool handles all alignment.
 

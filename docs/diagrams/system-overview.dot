@@ -1,0 +1,9 @@
+digraph {
+    rankdir=TB;
+    "newtron\n(client)" -> "newtron-server" [label="HTTP"];
+    "newtrun" -> "newtron-server" [label="HTTP"];
+    "specs" -> "newtron-server";
+    "specs" -> "newtlab";
+    "newtron-server" -> "SONiC" [label="SSH+Redis"];
+    "newtlab" -> "SONiC" [label="deploy, wire"];
+}
