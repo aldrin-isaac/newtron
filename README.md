@@ -32,7 +32,7 @@ Define a service in `network.json`:
 Start the server with your specs, then apply the service to an interface. By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
 
 ```
-$ newtron-server -spec-dir . &
+$ newtron-server --spec-dir . &
 $ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 
 Operation: interface.applyService
@@ -99,7 +99,7 @@ make build              # → bin/newtron, bin/newtron-server, bin/newtlab, bin/
 Point it at a shipped topology's spec files:
 
 ```bash
-bin/newtron-server -spec-dir newtrun/topologies/2node/specs &
+bin/newtron-server --spec-dir newtrun/topologies/2node/specs &
 ```
 
 The server auto-registers these specs as the `default` network and starts
