@@ -363,14 +363,48 @@ These are routine project commands that do not require confirmation:
 
 ASCII diagrams in markdown files are generated with `graph-easy`, never hand-drawn.
 
-- Source files: `docs/diagrams/*.dot` (Graphviz DOT syntax)
-- Render command: `graph-easy --from=dot --boxart < file.dot`
+### Setup
+
 - Install: `make tools` (installs graph-easy to `~/perl5/`; works on Linux and macOS)
-- Graph::Easy supports layout hints: `rank=same` for same-row placement,
-  edge port control via Graph::Easy attributes when DOT is insufficient.
-- Paste the rendered output into the markdown code block; commit both `.dot` source
-  and the rendered output.
+- Source files: `docs/diagrams/*.dot` (Graphviz DOT syntax)
+- Render: `graph-easy --from=dot --boxart < file.dot`
+
+### Workflow
+
+1. Edit the `.dot` source file in `docs/diagrams/`
+2. Render with `graph-easy --from=dot --boxart < file.dot`
+3. Paste the rendered output into the markdown code block
+4. Commit both the `.dot` source and the rendered output
+
+### Box Padding
+
+Graph::Easy has no padding attribute. Control box size with whitespace in node names:
+
+- **Vertical padding**: `\n` adds blank lines above/below the label.
+  Use `\n` before the text for top padding, `\n\n` after for bottom padding.
+- **Horizontal padding**: spaces inside the label widen the box.
+- **Standard pattern**: `"\n  Label  \n\n"` gives 1 blank line top, 1 blank line
+  bottom, 2 spaces on each side.
+- **Multiline labels**: `"\n  Line 1  \n  Line 2  \n\n"` (e.g., newtron + (client)).
+- All boxes in a diagram should use the same padding pattern for consistency.
+
+### Layout Control
+
+Graph::Easy supports layout hints that DOT alone cannot express. When the DOT
+`rankdir` and edge ordering aren't sufficient, use Graph::Easy's native syntax
+(`.ge` files) with these attributes:
+
+- **Same-row placement**: `[ A ] { rank: same; } [ B ] { rank: same; }`
+- **Edge port control**: `[ A ] --> { start: east; end: west; } [ B ]` forces
+  a horizontal connection (right side of A to left side of B).
+  Compass directions: `north`, `south`, `east`, `west`.
+
+### Rules
+
 - Never hand-draw ASCII art — the tool handles all alignment.
+- Every diagram in a markdown file must have a corresponding source file in
+  `docs/diagrams/`. The source file is the record of intent; the rendered
+  ASCII in the markdown is the output.
 
 ## Build Convention
 

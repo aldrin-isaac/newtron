@@ -96,20 +96,23 @@ Five programs, two subsystems:
                             │                │
                             │    newtron     │
                             │    (client)    │
+                            │                │
                             └────────────────┘
                               │
                               │ HTTP
                               ▼
 ┌─────────┐                 ┌────────────────┐         ┌─────────┐
-│         │                 │                │  HTTP   │         │
-│  specs  │ ──────────────▶ │ newtron-server │ ◀────── │ newtrun │
+│         │                 │                │         │         │
+│  specs  │                 │ newtron-server │  HTTP   │ newtrun │
+│         │ ──────────────▶ │                │ ◀────── │         │
 └─────────┘                 └────────────────┘         └─────────┘
   │                           │
   │                           │ SSH+Redis
   ▼                           ▼
 ┌─────────┐                 ┌────────────────┐
-│         │  deploy, wire   │                │
-│ newtlab │ ──────────────▶ │    SONiC VM    │
+│         │                 │                │
+│ newtlab │  deploy, wire   │    SONiC VM    │
+│         │ ──────────────▶ │                │
 └─────────┘                 └────────────────┘
 ```
 
