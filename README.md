@@ -38,18 +38,16 @@ $ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 6500
 Operation: interface.applyService
 Device: spine1
 Changes:
-  [ADD] VRF|Vrf_transit                         → map[NULL:NULL]
-  [ADD] INTERFACE|Ethernet0                     → map[vrf_name:Vrf_transit]
-  [ADD] INTERFACE|Ethernet0|10.1.0.0/31         → map[NULL:NULL]
-  [ADD] BGP_GLOBALS|Vrf_transit                  → map[local_asn:65001 router_id:10.0.0.1]
-  [ADD] BGP_NEIGHBOR|Vrf_transit|10.1.0.1        → map[asn:65002 local_addr:10.1.0.0 admin_status:true]
-  [ADD] BGP_NEIGHBOR_AF|10.1.0.1|ipv4_unicast    → map[activate:true]
-  [ADD] NEWTRON_SERVICE_BINDING|Ethernet0        → map[service_name:transit vrf_name:Vrf_transit ...]
+  [ADD] INTERFACE|Ethernet0                              → map[NULL:NULL]
+  [ADD] INTERFACE|Ethernet0|10.1.0.0/31                  → map[NULL:NULL]
+  [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up]
+  [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast    → map[admin_status:true]
+  [ADD] NEWTRON_SERVICE_BINDING|Ethernet0                → map[service_name:transit ...]
 
 DRY-RUN: No changes applied. Use -x to execute.
 ```
 
-Every entry names a real CONFIG_DB table and key. `VRF|Vrf_transit` becomes `HSET VRF|Vrf_transit ...` in Redis. `BGP_NEIGHBOR|Vrf_transit|10.1.0.1` is exactly what `frrcfgd` subscribes to. (`NULL:NULL` is SONiC's sentinel for entries with no fields, like IP bindings and empty VRFs.)
+Every entry names a real CONFIG_DB table and key. `INTERFACE|Ethernet0` enables IP routing on the port. `BGP_NEIGHBOR|default|10.1.0.1` is exactly what `frrcfgd` subscribes to — it will configure FRR with a BGP peer at 10.1.0.1 in the default VRF. (`NULL:NULL` is SONiC's sentinel for entries with no fields, like IP bindings.)
 
 There is no template engine — newtron computed these entries by running the same code path it uses online, using the device's AS number (65001), the interface's IP (10.1.0.0, so peer is 10.1.0.1), and the service spec.
 
@@ -59,7 +57,7 @@ Add `-x` to execute. newtron writes atomically, re-reads to verify, then persist
 $ newtron spine1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 
 Changes applied successfully.
-Verifying... OK (7/7 entries verified)
+Verifying... OK (5/5 entries verified)
 Config saved.
 ```
 
@@ -80,11 +78,40 @@ Overall: PASS
 
 `Config Intent` re-reads CONFIG_DB and diffs it against the device's full composite ChangeSet. The operational checks read STATE_DB for link status, BGP session state, VTEP health. Everything comes from Redis — no CLI parsing, no screen scraping.
 
-## Quick Start
+## System Overview
 
-Everything in newtron goes through an HTTP server. The CLI, the test runner,
-and your own scripts are all HTTP clients of `newtron-server`. Start the server
-first — everything else follows.
+Five programs, two subsystems:
+
+| Program | What it does |
+|---------|-------------|
+| **newtron-server** | HTTP API server. Loads specs, connects to SONiC devices via SSH/Redis, exposes all operations as REST endpoints. The brain. |
+| **newtron** | CLI client. Human interface to newtron-server — every command is an HTTP call. |
+| **newtlab** | VM orchestrator. Deploys QEMU virtual machines and wires them into topologies. |
+| **newtlink** | Userspace bridge agent. Bridges Ethernet frames between VMs over TCP sockets. Deployed by newtlab. |
+| **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
+
+```
+         Control Plane                          Lab Infrastructure
+
+  ┌─────────┐ ┌─────────┐ ┌───────┐
+  │ newtron  │ │ newtrun  │ │ curl  │
+  │  (CLI)   │ │ (tests)  │ │       │
+  └────┬─────┘ └────┬─────┘ └───┬───┘
+       └─────────────┼───────────┘
+                     │ HTTP :8080
+              ┌──────▼───────┐               ┌──────────┐
+              │newtron-server │               │ newtlab   │
+              └──────┬───────┘               └─────┬────┘
+                     │ SSH → Redis                 │ QEMU
+              ┌──────▼───────┐               ┌─────▼─────┐
+              │ SONiC devices │◄──────────────│  VMs +     │
+              └──────────────┘  Ethernet     │  newtlink  │
+                                 frames      └───────────┘
+```
+
+The control plane (left) and lab infrastructure (right) are independent. newtlab creates the VMs; newtron-server talks to them. You can point newtron-server at any SONiC device — newtlab VMs, hardware switches, or third-party labs.
+
+## Quick Start
 
 ### 1. Build
 
@@ -94,34 +121,17 @@ Requires Go 1.24+.
 make build              # → bin/newtron, bin/newtron-server, bin/newtlab, bin/newtrun, bin/newtlink
 ```
 
-### 2. Start the server
+### 2. Explore without VMs
 
-Point it at a shipped topology's spec files:
+Start the server with a shipped topology's specs and explore — no SONiC devices needed:
 
 ```bash
 bin/newtron-server --spec-dir newtrun/topologies/2node/specs &
+
+bin/newtron service list                    # List defined services
+bin/newtron show switch1                    # Show device profile
+bin/newtron switch1 provision               # Preview full composite (dry-run)
 ```
-
-The server auto-registers these specs as the `default` network and starts
-listening on `:8080`. You should see:
-
-```
-newtron-server: newtron-server listening on :8080
-```
-
-### 3. Explore via CLI
-
-With the server running, the CLI works immediately — the server already
-has the specs loaded, so the CLI doesn't need to know where they are.
-Spec reads don't need deployed devices either:
-
-```bash
-newtron service list                            # List defined services
-newtron show switch1                            # Show device profile
-newtron switch1 provision                       # Preview full composite (dry-run)
-```
-
-### 4. Explore via HTTP
 
 The same operations are available as HTTP endpoints:
 
@@ -131,32 +141,33 @@ curl localhost:8080/network/default/platform                 # List platforms
 curl localhost:8080/network/default/topology/node            # List devices in topology
 ```
 
-The server exposes every `pkg/newtron/` operation over HTTP — each endpoint is
-a 1:1 mapping to a Go API method. See the [API Reference](docs/newtron/api.md)
-for all endpoints.
+### 3. Deploy a lab (requires KVM + SONiC image)
 
-### 5. Deploy a lab and talk to real devices (optional)
-
-This requires KVM (`/dev/kvm`) and SONiC VM images in `~/.newtlab/images/`.
+Build a [SONiC VPP image](https://github.com/sonic-net/sonic-buildimage) and place it in `~/.newtlab/images/`:
 
 ```bash
 mkdir -p ~/.newtlab/images
-cp sonic-ciscovs.qcow2 ~/.newtlab/images/           # Cisco Silicon One VS
-cp alpine-testhost.qcow2 ~/.newtlab/images/          # Lightweight test host
-
-newtlab deploy -S newtrun/topologies/2node/specs     # Deploy QEMU VMs, wire links
-newtlab status                                        # Check VM and link state
-newtlab ssh switch1                                   # SSH into a switch
+cp sonic-vpp.qcow2 ~/.newtlab/images/
+cp alpine-testhost.qcow2 ~/.newtlab/images/    # lightweight test host (optional)
 ```
 
-Now device operations work against real SONiC (the server already has the
-specs, so no `-S` needed):
+Deploy VMs and wire the topology:
 
 ```bash
-newtron switch1 provision -x                          # Apply full composite config
-newtron switch1 health check                          # Operational health check
-newtron switch1 bgp status                            # BGP neighbor table
-newtron switch1 service apply Ethernet4 transit --ip 10.1.0.0/31 --peer-as 65002 -x
+bin/newtlab deploy -S newtrun/topologies/2node/specs
+bin/newtlab status                              # Check VM and link state
+bin/newtlab ssh switch1                         # SSH into a switch
+```
+
+### 4. Provision and operate
+
+With the server still running and VMs deployed:
+
+```bash
+bin/newtron switch1 provision -x                # Apply full composite config
+bin/newtron switch1 health check                # Operational health check
+bin/newtron switch1 bgp status                  # BGP neighbor table
+bin/newtron switch1 service apply Ethernet4 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 ```
 
 Or via HTTP:
@@ -166,17 +177,19 @@ curl localhost:8080/network/default/node/switch1/health       # Health check
 curl localhost:8080/network/default/node/switch1/interface     # List interfaces
 ```
 
-When done:
+### 5. Run the E2E test suite
 
 ```bash
-newtlab destroy                                       # Tear down VMs
+bin/newtrun start --dir newtrun/suites/2node-primitive    # Full primitive test suite
 ```
 
-### 6. Run the E2E test suite (optional)
+### 6. Tear down
 
 ```bash
-newtrun start --dir newtrun/suites/2node-service      # Full lifecycle test
+bin/newtlab destroy                             # Stop VMs, clean up
 ```
+
+See the [newtlab HOWTO](docs/newtlab/howto.md) and [newtrun HOWTO](docs/newtrun/howto.md) for detailed guides.
 
 ## Architecture
 
@@ -196,9 +209,9 @@ A device's full configuration — interfaces, VLANs, VRFs, BGP, EVPN overlays, A
 
 | Type | What it creates | VPN reference |
 |------|----------------|---------------|
-| `routed` | VRF + BGP neighbor + IP + ACLs | — |
+| `routed` | BGP neighbor + IP (optionally in a per-interface VRF) | — |
 | `bridged` | VLAN + VLAN member | MAC-VPN (local) |
-| `irb` | VLAN + SVI + VRF + IP + BGP | MAC-VPN (local) |
+| `irb` | VLAN + SVI + IP (optionally in a VRF) | MAC-VPN (local) |
 | `evpn-bridged` | VLAN + VNI mapping + ARP suppression | MAC-VPN (EVPN) |
 | `evpn-irb` | VLAN + VNI + SVI + anycast GW + L3VNI + VRF | IP-VPN + MAC-VPN |
 | `evpn-routed` | VRF + L3VNI + BGP neighbor | IP-VPN |
@@ -335,12 +348,12 @@ All shipped test suites pass on Cisco Silicon One (CiscoVS Palladium2):
 |-------|---------------|
 | 2node-primitive | Disaggregated operations: VLAN/VRF/VTEP lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
 | 2node-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
-| 3node-dataplane | L3 routing, EVPN L2 bridging over VXLAN tunnels |
+| 3node-dataplane | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
 
-EVPN VXLAN L2 bridging verified end-to-end between virtual switches running
-Cisco Silicon One SAI.
+EVPN VXLAN verified end-to-end: L2 bridging across switches and inter-subnet
+routing via asymmetric IRB, both running on Cisco Silicon One SAI.
 
-Every platform bug encountered along the way is documented in [`docs/rca/`](docs/rca/) — 40+ root-cause analyses covering frrcfgd, orchagent, SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the answer is probably already there.
+Every platform bug encountered along the way is documented in [`docs/rca/`](docs/rca/) — 39 root-cause analyses covering frrcfgd, orchagent, SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the answer is probably already there.
 
 ## Specs
 
@@ -389,7 +402,7 @@ docs/
   newtron/          HLD, LLD, device LLD, API reference, HOWTO
   newtlab/          HLD, LLD, HOWTO
   newtrun/          HLD, LLD, HOWTO
-  rca/              40+ root-cause analyses of SONiC platform bugs and workarounds
+  rca/              39 root-cause analyses of SONiC platform bugs and workarounds
 ```
 
 ## Documentation
@@ -402,7 +415,7 @@ docs/
 | **newtlab** | [Architecture](docs/newtlab/hld.md) | [Types & Methods](docs/newtlab/lld.md) | [Usage](docs/newtlab/howto.md) |
 | **newtrun** | [Architecture](docs/newtrun/hld.md) | [Types & Methods](docs/newtrun/lld.md) | [Usage](docs/newtrun/howto.md) |
 
-Additional references: [Device Layer LLD](docs/newtron/device-lld.md) (SSH tunnels, Redis clients, CONFIG_DB types) · [API Reference](docs/newtron/api.md) (122 HTTP endpoints) · [RCA Index](docs/rca/) (40+ SONiC platform analyses — frrcfgd, orchagent, SAI, CiscoVS/VPP)
+Additional references: [Device Layer LLD](docs/newtron/device-lld.md) (SSH tunnels, Redis clients, CONFIG_DB types) · [API Reference](docs/newtron/api.md) (123 HTTP endpoints) · [RCA Index](docs/rca/) (39 SONiC platform analyses — frrcfgd, orchagent, SAI, CiscoVS/VPP)
 
 ## Building
 
