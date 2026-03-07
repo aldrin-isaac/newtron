@@ -162,6 +162,9 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				resultCh = make(chan runResult, 1)
 				go func() {
 					r, e := runner.Run(opts)
+					// Update state status BEFORE sending result so the
+					// monitor sees the terminal status and exits.
+					finalizeRunState(state, r, e)
 					resultCh <- runResult{r, e}
 				}()
 				time.Sleep(2 * time.Second)
@@ -180,9 +183,11 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			// Handle pause
 			var pauseErr *newtrun.PauseError
 			if errors.As(runErr, &pauseErr) {
-				state.Status = newtrun.SuiteStatusPaused
-				if err := newtrun.SaveRunState(state); err != nil {
-					util.Logger.Warnf("failed to save run state: %v", err)
+				if !monitor {
+					state.Status = newtrun.SuiteStatusPaused
+					if err := newtrun.SaveRunState(state); err != nil {
+						util.Logger.Warnf("failed to save run state: %v", err)
+					}
 				}
 				suiteName := filepath.Base(dir)
 				fmt.Fprintf(os.Stderr, "\n%s; resume with: newtrun start %s\n", pauseErr, suiteName)
@@ -190,15 +195,21 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			}
 
 			if runErr != nil {
-				state.Status = newtrun.SuiteStatusFailed
-				state.Finished = time.Now()
-				if err := newtrun.SaveRunState(state); err != nil {
-					util.Logger.Warnf("failed to save run state: %v", err)
+				if !monitor {
+					state.Status = newtrun.SuiteStatusFailed
+					state.Finished = time.Now()
+					if err := newtrun.SaveRunState(state); err != nil {
+						util.Logger.Warnf("failed to save run state: %v", err)
+					}
 				}
 				return runErr
 			}
 
-			// Determine final status
+			// Finalize state (already done in monitor mode goroutine).
+			if !monitor {
+				finalizeRunState(state, results, runErr)
+			}
+
 			hasFailure, hasError := false, false
 			for _, r := range results {
 				if r.Status == newtrun.StepStatusFailed {
@@ -207,16 +218,6 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				if r.Status == newtrun.StepStatusError || r.DeployError != nil {
 					hasError = true
 				}
-			}
-
-			if hasFailure || hasError {
-				state.Status = newtrun.SuiteStatusFailed
-			} else {
-				state.Status = newtrun.SuiteStatusComplete
-			}
-			state.Finished = time.Now()
-			if err := newtrun.SaveRunState(state); err != nil {
-				util.Logger.Warnf("failed to save run state: %v", err)
 			}
 
 			// Write reports
@@ -251,4 +252,38 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 
 	return cmd
+}
+
+// finalizeRunState sets the terminal status on the run state and persists it.
+// Called from the runner goroutine in monitor mode (so the monitor sees the
+// status change and exits), or from the main goroutine in normal mode.
+func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
+	if runErr != nil {
+		state.Status = newtrun.SuiteStatusFailed
+		state.Finished = time.Now()
+		if err := newtrun.SaveRunState(state); err != nil {
+			util.Logger.Warnf("failed to save run state: %v", err)
+		}
+		return
+	}
+
+	hasFailure, hasError := false, false
+	for _, r := range results {
+		if r.Status == newtrun.StepStatusFailed {
+			hasFailure = true
+		}
+		if r.Status == newtrun.StepStatusError || r.DeployError != nil {
+			hasError = true
+		}
+	}
+
+	if hasFailure || hasError {
+		state.Status = newtrun.SuiteStatusFailed
+	} else {
+		state.Status = newtrun.SuiteStatusComplete
+	}
+	state.Finished = time.Now()
+	if err := newtrun.SaveRunState(state); err != nil {
+		util.Logger.Warnf("failed to save run state: %v", err)
+	}
 }
