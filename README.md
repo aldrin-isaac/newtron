@@ -76,7 +76,7 @@ make build
 
 # 3. Deploy a single-switch lab
 bin/newtlab deploy 1node
-bin/newtlab status 1node          # wait for "running"
+bin/newtlab status 1node --monitor # watch deploy progress, exits when ready
 
 # 4. Start the server and apply a service
 bin/newtron-server --spec-dir newtrun/topologies/1node/specs &
