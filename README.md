@@ -92,27 +92,27 @@ Five programs, two subsystems:
 | **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
 
 ```
-  Control Plane                       Lab
+  Control Plane                                Lab
 
-┌────────────────┐      ┌──────────┐     ┌─────────┐
-│                │      │          │     │         │
-│    newtron     │  HTTP┤ newtrun  │     │ newtlab │
-│                │   │  │          │     │         │
-└────────┬───────┘   │  └──────────┘     └────┬────┘
-         │           │                        │
-       HTTP──────────┘                        │
-         ▼                                  QEMU
-┌────────────────┐      ┌──────────┐          │
-│                │      │          │          │
-│ newtron-server │      │   VMs    │◄─────────┘
-│                │      │          │
-└────────┬───────┘      └─────┬────┘
-         │                    │
-     SSH+Redis                │
-         ▼                Ethernet
-┌────────────────┐            │
-│                │            │
-│    devices     │◄───────────┘
+┌────────────────┐          ┌──────────┐          ┌─────────┐
+│                │          │          │          │         │
+│    newtron     │     HTTP─┤ newtrun  │          │ newtlab │
+│                │     │    │          │          │         │
+└────────┬───────┘     │    └──────────┘          └────┬────┘
+         │             │                               │
+       HTTP────────────┘                               │
+         ▼                                           QEMU
+┌────────────────┐          ┌──────────┐               │
+│                │          │          │               │
+│ newtron-server │          │   VMs    │◄──────────────┘
+│                │          │          │
+└────────┬───────┘          └─────┬────┘
+         │                        │
+     SSH+Redis                    │
+         ▼                    Ethernet
+┌────────────────┐                │
+│                │                │
+│    devices     │◄───────────────┘
 │                │
 └────────────────┘
 ```
