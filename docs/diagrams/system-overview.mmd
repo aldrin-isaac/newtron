@@ -1,10 +1,6 @@
 graph TD
-    subgraph Control Plane
-        newtron -->|HTTP| server
-        newtrun -->|HTTP| server
-        server -->|SSH+Redis| devices
-    end
-    subgraph Lab
-        newtlab -->|QEMU| VMs
-    end
+    newtron -->|HTTP| server
+    newtrun -->|HTTP| server
+    server -->|SSH+Redis| devices
+    newtlab -->|QEMU| VMs
     VMs -->|Ethernet| devices

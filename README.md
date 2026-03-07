@@ -92,37 +92,29 @@ Five programs, two subsystems:
 | **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
 
 ```
-┌─────────────────────────────────┐ ┌─────────────┐
-│          Control Plane          │ │     Lab     │
-│                                 │ │             │
-│                                 │ │             │
-│ ┌───────────┐      ┌──────────┐ │ │ ┌─────────┐ │
-│ │           │      │          │ │ │ │         │ │
-│ │  newtron  │  HTTP┤ newtrun  │ │ │ │ newtlab │ │
-│ │           │   │  │          │ │ │ │         │ │
-│ └─────┬─────┘   │  └──────────┘ │ │ └────┬────┘ │
-│       │         │               │ │      │      │
-│     HTTP────────┘               │ │      │      │
-│       ▼                         │ │    QEMU     │
-│ ┌───────────┐      ┌──────────┐ │ │      │      │
-│ │           │      │          │ │ │      │      │
-│ │   server  │      │   VMs    │◄┼─┼──────┘      │
-│ │           │      │          │ │ │             │
-│ └─────┬─────┘      └─────┬────┘ │ │             │
-│       │                  │      │ │             │
-│       │                  │      │ └─────────────┘
-│       │                  │      │
-│   SSH+Redis              │      │
-│       │              Ethernet   │
-│       │                  │      │
-│       ▼                  │      │
-│ ┌───────────┐            │      │
-│ │           │            │      │
-│ │  devices  │◄───────────┘      │
-│ │           │                   │
-│ └───────────┘                   │
-│                                 │
-└─────────────────────────────────┘
+  Control Plane                    Lab
+
+┌───────────┐      ┌──────────┐     ┌─────────┐
+│           │      │          │     │         │
+│  newtron  │  HTTP┤ newtrun  │     │ newtlab │
+│           │   │  │          │     │         │
+└─────┬─────┘   │  └──────────┘     └────┬────┘
+      │         │                        │
+    HTTP────────┘                        │
+      ▼                                QEMU
+┌───────────┐      ┌──────────┐          │
+│           │      │          │          │
+│   server  │      │   VMs    │◄─────────┘
+│           │      │          │
+└─────┬─────┘      └─────┬────┘
+      │                  │
+  SSH+Redis              │
+      ▼              Ethernet
+┌───────────┐            │
+│           │            │
+│  devices  │◄───────────┘
+│           │
+└───────────┘
 ```
 
 The control plane (left) and lab infrastructure (right) are independent. newtlab creates the VMs; newtron-server talks to them. You can point newtron-server at any SONiC device — newtlab VMs, hardware switches, or third-party labs.
