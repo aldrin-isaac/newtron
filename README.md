@@ -3,9 +3,9 @@
 > **Note:** newtron is a SONiC automation demonstrator — a research and learning project exploring Redis-first device management, declarative provisioning, and E2E verification against virtual SONiC topologies. It is not intended for production use.
 
 <p align="center">
-  <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
+  <sub>Ron, the Newt</sub>
   <br/>
-  <sub>↑ Ron, the Newt</sub>
+  <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
 </p>
 
 SONiC's defining characteristic is that it stores everything in Redis. CONFIG_DB holds desired configuration. APP_DB holds computed routes. ASIC_DB holds what's programmed in hardware. STATE_DB holds operational telemetry. Daemons subscribe to table changes and react. The entire system is a set of Redis databases with subscriber processes — and newtron treats it as one.
