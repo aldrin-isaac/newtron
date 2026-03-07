@@ -151,7 +151,8 @@ echo ""
 echo " This starts one VM (switch1) with 2 vCPUs, 4 GB RAM."
 echo " Boot takes 2–5 minutes depending on your machine."
 echo " The --monitor flag shows live status during deployment."
-echo ""
+
+pause
 
 run_cmd bin/newtlab deploy 1node --monitor --force
 
@@ -269,7 +270,8 @@ echo " newtrun runs YAML test scenarios against the server. The 1node-basic"
 echo " suite tests service apply/remove, VLAN/VRF lifecycle, and cleanup"
 echo " verification — all against the switch you just deployed."
 echo " The --monitor flag shows a live status dashboard during the run."
-echo ""
+
+pause
 
 run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
 
