@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,6 +19,8 @@ import (
 var jsonOutput bool
 
 func newStatusCmd() *cobra.Command {
+	var monitor bool
+
 	cmd := &cobra.Command{
 		Use:   "status [topology]",
 		Short: "Show VM status",
@@ -27,11 +31,15 @@ With a topology name, shows detailed status for that lab.
 
   newtlab status                      # all labs
   newtlab status 2node                # detailed view
+  newtlab status 2node --monitor      # auto-refresh every 2s
   newtlab status --json               # machine-readable output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// No args and no -S: show all deployed labs
 			if len(args) == 0 && specDir == "" {
+				if monitor {
+					return monitorAllLabs()
+				}
 				return showAllLabs()
 			}
 
@@ -40,11 +48,15 @@ With a topology name, shows detailed status for that lab.
 			if err != nil {
 				return err
 			}
+			if monitor {
+				return monitorLab(labName)
+			}
 			return showLabDetail(labName)
 		},
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "JSON output")
+	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "auto-refresh every 2s (Ctrl+C to stop)")
 	return cmd
 }
 
@@ -244,4 +256,80 @@ func showLinkTableWithStats(labName string, state *newtlab.LabState) {
 		}
 	}
 	lt.Flush()
+}
+
+// monitorLab auto-refreshes a single lab's status every 2 seconds.
+// Exits when deployment is complete (all nodes running with no phase) or on Ctrl+C.
+func monitorLab(labName string) error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	for {
+		fmt.Print("\033[2J\033[H") // clear screen, cursor to top
+		if err := showLabDetail(labName); err != nil {
+			fmt.Printf("  error: %v\n", err)
+		}
+
+		if labDeployFinished(labName) {
+			return nil
+		}
+
+		select {
+		case <-sigCh:
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// monitorAllLabs auto-refreshes all labs' status every 2 seconds.
+// Exits when all labs finish deploying or on Ctrl+C.
+func monitorAllLabs() error {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	defer signal.Stop(sigCh)
+
+	for {
+		fmt.Print("\033[2J\033[H") // clear screen, cursor to top
+		if err := showAllLabs(); err != nil {
+			fmt.Printf("  error: %v\n", err)
+		}
+
+		// Check all deployed labs
+		labs, _ := newtlab.ListLabs()
+		allDone := len(labs) > 0
+		for _, name := range labs {
+			if !labDeployFinished(name) {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			return nil
+		}
+
+		select {
+		case <-sigCh:
+			return nil
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// labDeployFinished returns true when a lab is no longer deploying:
+// all nodes are running with no phase, or all have reached a terminal state
+// (stopped/error).
+func labDeployFinished(labName string) bool {
+	lab := &newtlab.Lab{Name: labName}
+	state, err := lab.Status()
+	if err != nil || len(state.Nodes) == 0 {
+		return false
+	}
+	for _, node := range state.Nodes {
+		if node.Phase != "" {
+			return false // still in a deploy phase
+		}
+	}
+	return true
 }

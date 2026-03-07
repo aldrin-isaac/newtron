@@ -1,0 +1,94 @@
+name: vlan-vrf
+description: |
+  VLAN and VRF lifecycle: create VLAN 100 with a tagged member, create VRF,
+  then tear down and verify all entries removed. Tests disaggregated primitives
+  on a single switch.
+topology: 1node
+requires: [boot-ssh]
+
+steps:
+  # Create VLAN 100
+  - name: create-vlan100
+    action: create-vlan
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: verify-vlan100
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: true
+
+  # Add Ethernet0 as tagged member
+  - name: add-member-eth0-tagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet0
+    vlan_id: 100
+    tagging: tagged
+
+  - name: verify-vlan-member
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet0"
+    expect:
+      fields:
+        tagging_mode: tagged
+
+  # Create VRF
+  - name: create-vrf-test
+    action: create-vrf
+    devices: [switch1]
+    vrf: Vrf_test
+
+  - name: verify-vrf
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_test
+    expect:
+      exists: true
+
+  # Tear down: remove VLAN member, delete VLAN, delete VRF
+  - name: remove-member-eth0
+    action: remove-vlan-member
+    devices: [switch1]
+    interface: Ethernet0
+    vlan_id: 100
+
+  - name: verify-member-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet0"
+    expect:
+      exists: false
+
+  - name: delete-vlan100
+    action: delete-vlan
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: verify-vlan100-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: delete-vrf-test
+    action: delete-vrf
+    devices: [switch1]
+    vrf: Vrf_test
+
+  - name: verify-vrf-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_test
+    expect:
+      exists: false

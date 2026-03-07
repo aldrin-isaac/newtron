@@ -12,6 +12,8 @@ IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node/specs"
 SERVER_PID=""
+DEPLOY_PID=""
+NEWTRUN_PID=""
 
 # Colors (if terminal supports them)
 if [ -t 1 ]; then
@@ -26,12 +28,13 @@ else
 fi
 
 cleanup() {
-    if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo ""
-        echo -e "${DIM}Stopping newtron-server (PID $SERVER_PID)...${RESET}"
-        kill "$SERVER_PID" 2>/dev/null || true
-        wait "$SERVER_PID" 2>/dev/null || true
-    fi
+    for pid_var in NEWTRUN_PID DEPLOY_PID SERVER_PID; do
+        eval "pid=\$$pid_var"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
 }
 trap cleanup EXIT
 
@@ -152,26 +155,33 @@ echo " it according to the topology in $SPEC_DIR/."
 echo ""
 echo " This starts one VM (switch1) with 2 vCPUs, 4 GB RAM."
 echo " Boot takes 2–5 minutes depending on your machine."
+echo " The monitor auto-refreshes status until deployment finishes."
 echo ""
 
-run_cmd bin/newtlab deploy 1node
+echo -e " ${CYAN}Running:${RESET} bin/newtlab deploy 1node (background)"
+echo -e " ${CYAN}Running:${RESET} bin/newtlab status 1node --monitor"
+echo ""
+bin/newtlab deploy 1node > /tmp/newtlab-deploy.log 2>&1 &
+DEPLOY_PID=$!
+sleep 2
+bin/newtlab status 1node --monitor 2> >(grep -v "Could not initialize audit" >&2)
+wait "$DEPLOY_PID" || {
+    echo -e " ${YELLOW}Deploy log:${RESET}"
+    tail -20 /tmp/newtlab-deploy.log
+    echo ""
+    echo " Error: deployment failed." >&2
+    exit 1
+}
+DEPLOY_PID=""
+
+echo ""
+echo -e " ${GREEN}Lab deployed.${RESET}"
 
 pause
 
-# ─── Step 4: Check status ─────────────────────────────────────────────────────
+# ─── Step 4: Start newtron-server ─────────────────────────────────────────────
 
-header "Step 4: Check status"
-
-echo " Verify the VM is running and SSH is reachable."
-echo ""
-
-run_cmd bin/newtlab status 1node
-
-pause
-
-# ─── Step 5: Start newtron-server ─────────────────────────────────────────────
-
-header "Step 5: Start newtron-server"
+header "Step 4: Start newtron-server"
 
 echo " The server loads specs from the topology directory and exposes"
 echo " all operations as HTTP endpoints on port 8080."
@@ -195,9 +205,9 @@ echo -e " ${GREEN}Server started${RESET} (PID $SERVER_PID)"
 
 pause
 
-# ─── Step 6: Dry-run a service operation ──────────────────────────────────────
+# ─── Step 5: Dry-run a service operation ──────────────────────────────────────
 
-header "Step 6: Dry-run a service operation"
+header "Step 5: Dry-run a service operation"
 
 echo " Apply a transit service to Ethernet0. By default, newtron shows"
 echo " what it would write to CONFIG_DB — every table, key, and field."
@@ -219,9 +229,9 @@ echo " the device's AS (65001), the interface IP, and the service spec."
 
 pause
 
-# ─── Step 7: Execute ──────────────────────────────────────────────────────────
+# ─── Step 6: Execute ──────────────────────────────────────────────────────────
 
-header "Step 7: Execute"
+header "Step 6: Execute"
 
 echo " Add -x to execute. newtron writes to CONFIG_DB via Redis pipeline,"
 echo " re-reads every entry to verify, then saves the config."
@@ -229,6 +239,28 @@ echo ""
 
 run_cmd bin/newtron switch1 service apply Ethernet0 transit \
     --ip 10.1.0.0/31 --peer-as 65002 -x
+
+pause
+
+# ─── Step 7: Run the test suite ───────────────────────────────────────────────
+
+header "Step 7: Run the test suite"
+
+echo " newtrun runs YAML test scenarios against the server. The 1node-basic"
+echo " suite tests service apply/remove, VLAN/VRF lifecycle, and cleanup"
+echo " verification — all against the switch you just deployed."
+echo " The monitor auto-refreshes per-scenario progress until the suite finishes."
+echo ""
+
+echo -e " ${CYAN}Running:${RESET} bin/newtrun start 1node-basic --server http://localhost:8080 (background)"
+echo -e " ${CYAN}Running:${RESET} bin/newtrun status --monitor"
+echo ""
+bin/newtrun start 1node-basic --server http://localhost:8080 > /tmp/newtrun.log 2>&1 &
+NEWTRUN_PID=$!
+sleep 2
+bin/newtrun status --monitor
+wait "$NEWTRUN_PID" || true
+NEWTRUN_PID=""
 
 pause
 
@@ -254,7 +286,8 @@ echo -e "${BOLD}═════════════════════�
 echo -e "${BOLD} Done!${RESET}"
 echo -e "${BOLD}═══════════════════════════════════════════════════════════════${RESET}"
 echo ""
-echo " You've deployed a SONiC switch, applied a service, and torn it down."
+echo " You've deployed a SONiC switch, applied a service, run the E2E test
+ suite, and torn it down."
 echo ""
 echo " Next steps:"
 echo "   - Deploy the 2node topology for multi-switch testing"
