@@ -1,0 +1,5 @@
+digraph {
+    rankdir=LR;
+    "\n  ConfigDBClient  \n  127.0.0.1:<random>  \n\n" -> "\n  SSH Tunnel  \n\n" [label="local"];
+    "\n  SSH Tunnel  \n\n" -> "\n  sshd (:22)  \n  127.0.0.1:6379  \n  (Redis)  \n\n" [label="forward"];
+}

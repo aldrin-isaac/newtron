@@ -1,0 +1,9 @@
+digraph {
+    rankdir=TB;
+    "\n  hostvm-0 (Alpine Linux VM)  \n  ns:host1 | ns:host2 | ns:host3  \n  eth1       eth2       eth3  \n\n" -> "\n  newtlink  \n  (to switch1:Eth1)  \n\n" [label="eth1"];
+    "\n  hostvm-0 (Alpine Linux VM)  \n  ns:host1 | ns:host2 | ns:host3  \n  eth1       eth2       eth3  \n\n" -> "\n  newtlink  \n  (to switch1:Eth2)  \n\n" [label="eth2"];
+    "\n  hostvm-0 (Alpine Linux VM)  \n  ns:host1 | ns:host2 | ns:host3  \n  eth1       eth2       eth3  \n\n" -> "\n  newtlink  \n  (to switch1:Eth3)  \n\n" [label="eth3"];
+    "\n  newtlink  \n  (to switch1:Eth1)  \n\n" -> "\n  switch1:Eth1  \n\n";
+    "\n  newtlink  \n  (to switch1:Eth2)  \n\n" -> "\n  switch1:Eth2  \n\n";
+    "\n  newtlink  \n  (to switch1:Eth3)  \n\n" -> "\n  switch1:Eth3  \n\n";
+}

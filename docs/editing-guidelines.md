@@ -420,3 +420,36 @@ When Quick Start appears after multiple conceptual sections (Architecture, Verif
 **Dependency ordering applies within steps too.** If the system has a server that must be running before clients work, "start the server" is step 1 (after build), not a footnote under "HTTP API." If VM images must be installed before deploying a lab, that goes before the deploy command, not in a separate "VM images" subsection below it.
 
 **Concrete test:** Read the Quick Start top to bottom and execute each command in order. If any command fails because a prerequisite was described later in the document, the ordering is wrong.
+
+## 32. Diagrams Are Rendered from Source, Never Hand-Drawn — ALL
+
+ASCII diagrams in documentation must be generated from a source file using Graph::Easy, not drawn by hand. Hand-drawn diagrams have misaligned lines, inconsistent box sizes, and break silently when edited.
+
+**Workflow:**
+
+1. Create a DOT source file in `docs/diagrams/` (e.g., `system-overview.dot`)
+2. Render with Graph::Easy:
+   ```
+   PERL5LIB=~/perl5/lib/perl5 ~/perl5/bin/graph-easy --from=dot --boxart < docs/diagrams/system-overview.dot
+   ```
+3. Paste the rendered output into the markdown document
+4. Commit both the `.dot` source and the updated markdown
+
+Install Graph::Easy with `make tools` (works on Linux and macOS — requires Perl, which ships with both).
+
+**Box padding convention:** Control box size with whitespace in DOT node names. `\n` adds vertical padding, spaces add horizontal padding. Use `\n\n` at the end for symmetric bottom padding:
+
+```dot
+"\n  Label  \n\n"     // 2-space horizontal padding, 1-line top + bottom padding
+"\n  Long Name  \n\n" // same pattern, wider box
+```
+
+**Layout control:** Graph::Easy supports DOT attributes for layout:
+- `rankdir=TB` (top-to-bottom) or `rankdir=LR` (left-to-right) for overall direction
+- `{ rank=same; "A"; "B" }` to force nodes onto the same row
+- Edge port hints via Graph::Easy attributes (`start:`, `end:`) when default routing is unclear
+
+**Rules:**
+- Every diagram in markdown must have a corresponding `.dot` source in `docs/diagrams/`
+- Never hand-edit rendered output — if the layout is wrong, fix the `.dot` source and re-render
+- Words in boxes and on edge labels must have at least 3 characters of clearance from the nearest box edge

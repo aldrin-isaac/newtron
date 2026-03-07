@@ -1,0 +1,5 @@
+digraph {
+    rankdir=LR;
+    "\n  Spec Directory (input)  \n  topology.json  \n  platforms.json  \n  profiles/*.json  \n  network.json  \n\n" -> "\n  Patched Profiles (output)  \n  profiles/spine1.json  \n  + ssh_port, console_port  \n  + mgmt_ip  \n\n" [label="deploy\npatch"];
+    "\n  Patched Profiles (output)  \n  profiles/spine1.json  \n  + ssh_port, console_port  \n  + mgmt_ip  \n\n" -> "\n  newtron reads  \n  (to connect  \n  via SSH tunnel)  \n\n";
+}

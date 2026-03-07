@@ -199,15 +199,51 @@ things that converge independently of the ASIC (BGP sessions, interface existenc
 ## 17. Packet Wiring (Container → ASIC)
 
 ```
-Container ethN
-  ↓ (tc mirred redirect)
-tapN (QEMU TAP)
-  ↓ (QEMU virtio NIC)
-EthernetN inside SONiC VM
-  ↓ (tc mirred redirect)
-swvethN / vethN (veth pair)
-  ↓
-ngdpd (ASIC simulator) → STOP (no forwarding)
+┌──────────────────────┐
+│                      │
+│    Container ethN    │
+│                      │
+└──────────────────────┘
+  │
+  │ tc mirred
+  │ redirect
+  ▼
+┌──────────────────────┐
+│                      │
+│         tapN         │
+│      (QEMU TAP)      │
+│                      │
+└──────────────────────┘
+  │
+  │ QEMU
+  │ virtio NIC
+  ▼
+┌──────────────────────┐
+│                      │
+│      EthernetN       │
+│  (inside SONiC VM)   │
+│                      │
+└──────────────────────┘
+  │
+  │ tc mirred
+  │ redirect
+  ▼
+┌──────────────────────┐
+│                      │
+│   swvethN / vethN    │
+│     (veth pair)      │
+│                      │
+└──────────────────────┘
+  │
+  │
+  ▼
+┌──────────────────────┐
+│                      │
+│        ngdpd         │
+│   (ASIC simulator)   │
+│ STOP (no forwarding) │
+│                      │
+└──────────────────────┘
 ```
 
 Management interface uses QEMU SLiRP with explicit TCP port forwarding.

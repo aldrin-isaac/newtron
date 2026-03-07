@@ -1,0 +1,5 @@
+digraph {
+    rankdir=TB;
+    "\n  Network  \n  owns: specs  \n  GetService(), GetFilter(), GetZone()  \n\n" -> "\n  Node  \n  owns: profile, resolved config, Redis, ConfigDB  \n  ConfigureBGP(), SetupEVPN(), CreateVLAN()  \n\n" [label="parent ref\n(SpecProvider)"];
+    "\n  Node  \n  owns: profile, resolved config, Redis, ConfigDB  \n  ConfigureBGP(), SetupEVPN(), CreateVLAN()  \n\n" -> "\n  Interface  \n  owns: interface identity (name + parent node)  \n  ApplyService(), RemoveService(), ApplyQoS()  \n  SetIP(), SetVRF(), BindACL(), UnbindACL()  \n\n" [label="parent ref"];
+}

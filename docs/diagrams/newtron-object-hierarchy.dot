@@ -1,0 +1,5 @@
+digraph {
+    rankdir=TB;
+    "\n  Network  \n  (owns all specs)  \n\n" -> "\n  Node  \n  (device handle)  \n\n" [label="creates\n(parent ref)"];
+    "\n  Node  \n  (device handle)  \n\n" -> "\n  Interface  \n  (interface handle)  \n\n" [label="creates\n(parent ref)"];
+}

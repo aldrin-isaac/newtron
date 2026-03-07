@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  newtrun  \n  1. Deploy topology  \n  2. Provision & operate  \n  3. Validate results  \n  4. Report pass/fail  \n  5. Tear down  \n\n" -> "\n  newtlab  \n  Deploy VMs  \n  (QEMU)  \n\n" [label="newtlab API"];
+    "\n  newtrun  \n  1. Deploy topology  \n  2. Provision & operate  \n  3. Validate results  \n  4. Report pass/fail  \n  5. Tear down  \n\n" -> "\n  newtron-server  \n  SONiC ops via  \n  HTTP REST API  \n\n" [label="HTTP"];
+    "\n  newtrun  \n  1. Deploy topology  \n  2. Provision & operate  \n  3. Validate results  \n  4. Report pass/fail  \n  5. Tear down  \n\n" -> "\n  Host VMs  \n  SSH direct  \n  (host-exec)  \n\n" [label="SSH"];
+}

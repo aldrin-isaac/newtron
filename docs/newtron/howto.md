@@ -5,9 +5,20 @@ Newtron is a network automation tool for SONiC switches. It reads and writes SON
 All interaction goes through an HTTP API server (`newtron-server`). The CLI and newtrun are HTTP clients — they never connect to devices directly. This means you can run the server close to your devices and operate from anywhere.
 
 ```
-newtron CLI  ─┐
-              ├──→ newtron-server (HTTP) ──→ SSH tunnel ──→ SONiC Redis
-newtrun      ─┘        :8080                                  DB 4 (CONFIG_DB)
+┌─────────────┐     ┌────────────────┐     ┌────────────┐     ┌──────────────────┐
+│             │     │                │     │            │     │                  │
+│ newtron CLI │     │ newtron-server │     │ SSH tunnel │     │   SONiC Redis    │
+│             │     │  (HTTP :8080)  │     │            │     │ DB 4 (CONFIG_DB) │
+│             │ ──▶ │                │ ──▶ │            │ ──▶ │                  │
+└─────────────┘     └────────────────┘     └────────────┘     └──────────────────┘
+                      ▲
+                      │
+                      │
+                    ┌────────────────┐
+                    │                │
+                    │    newtrun     │
+                    │                │
+                    └────────────────┘
 ```
 
 All write commands default to **dry-run** (preview only). Add `-x` to execute. This applies to both device operations and spec edits.
@@ -1753,8 +1764,13 @@ newtron audit list --limit 50 --json
 Newtron writes to Redis CONFIG_DB — changes take effect immediately but are **ephemeral** until saved to disk.
 
 ```
-newtron -x  ──→  Redis CONFIG_DB (runtime, immediate)  ──→  config save (persistent)
-                  SONiC daemons process changes              /etc/sonic/config_db.json
+┌────────────┐     ┌──────────────────────┐     ┌───────────────────────────┐
+│            │     │                      │     │                           │
+│            │     │   Redis CONFIG_DB    │     │        config save        │
+│ newtron -x │     │ (runtime, immediate) │     │ /etc/sonic/config_db.json │
+│            │     │                      │     │       (persistent)        │
+│            │ ──▶ │                      │ ──▶ │                           │
+└────────────┘     └──────────────────────┘     └───────────────────────────┘
 ```
 
 With `-x`, newtron saves automatically. With `-x --no-save`, it doesn't.

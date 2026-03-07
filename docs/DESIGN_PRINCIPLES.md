@@ -162,22 +162,35 @@ identity to produce CONFIG_DB entries. No external function orchestrates
 this — the object has everything it needs through its parent chain.
 
 ```
-Network
-  ├── owns: specs (services, filters, VPNs, sites, platforms)
-  ├── methods: GetService(), GetFilter(), GetZone()
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│                     Network                     │
+│                   owns: specs                   │
+│      GetService(), GetFilter(), GetZone()       │
+│                                                 │
+└─────────────────────────────────────────────────┘
   │
-  └── Node (parent: Network via SpecProvider)
-        ├── owns: profile, resolved config, Redis connections, ConfigDB
-        ├── methods: ConfigureBGP(), SetupEVPN(), CreateVLAN(), VerifyChangeSet()
-        │
-        └── Interface (parent: Node)
-              ├── owns: interface identity (name + parent node)
-              └── methods: ApplyService(), RemoveService(), ApplyQoS(),
-                           RemoveQoS(), SetIP(), SetVRF(),
-                           BindACL(), UnbindACL()
-                  config:  generateServiceEntries(), bindVrf(),
-                           enableIpRouting(), assignIpAddress(),
-                           bindQos(), unbindQos(), generateAclBinding()
+  │ parent ref
+  │ (SpecProvider)
+  ▼
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│                      Node                       │
+│ owns: profile, resolved config, Redis, ConfigDB │
+│    ConfigureBGP(), SetupEVPN(), CreateVLAN()    │
+│                                                 │
+└─────────────────────────────────────────────────┘
+  │
+  │ parent ref
+  ▼
+┌─────────────────────────────────────────────────┐
+│                                                 │
+│                    Interface                    │
+│  owns: interface identity (name + parent node)  │
+│   ApplyService(), RemoveService(), ApplyQoS()   │
+│    SetIP(), SetVRF(), BindACL(), UnbindACL()    │
+│                                                 │
+└─────────────────────────────────────────────────┘
 ```
 
 Interface delegates to Node for infrastructure (Redis connections,

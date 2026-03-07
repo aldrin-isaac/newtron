@@ -1,0 +1,6 @@
+digraph {
+    rankdir=LR;
+    "\n  NodeActor.do(fn)  \n\n" -> "\n  request channel  \n\n" [label="sends fn"];
+    "\n  request channel  \n\n" -> "\n  actor goroutine  \n  (executes fn)  \n\n" [label="one at a time"];
+    "\n  actor goroutine  \n  (executes fn)  \n\n" -> "\n  response channel  \n\n" [label="result"];
+}

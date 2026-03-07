@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  Global  \n  (network.json)  \n\n" -> "\n  Zone  \n  (zones.{name})  \n\n" [label="overrides"];
+    "\n  Zone  \n  (zones.{name})  \n\n" -> "\n  Device Profile  \n  (profiles/{device}.json)  \n\n" [label="overrides"];
+    "\n  Device Profile  \n  (profiles/{device}.json)  \n\n" -> "\n  ResolvedProfile  \n  (runtime)  \n\n" [label="resolves to"];
+}

@@ -1,0 +1,9 @@
+digraph {
+    rankdir=LR;
+    "\n  newtrun  \n\n" -> "\n  newtron-server  \n  (HTTP :8080)  \n\n" [label="HTTP"];
+    "\n  newtron-server  \n  (HTTP :8080)  \n\n" -> "\n  SSH tunnel  \n\n";
+    "\n  SSH tunnel  \n\n" -> "\n  SONiC Redis  \n  CONFIG_DB  \n\n";
+    "\n  newtrun  \n\n" -> "\n  host VMs  \n  (direct SSH)  \n\n";
+    "\n  host VMs  \n  (direct SSH)  \n\n" -> "\n  network  \n  namespace  \n\n";
+    "\n  network  \n  namespace  \n\n" -> "\n  data plane  \n\n";
+}

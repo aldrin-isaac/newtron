@@ -1,0 +1,8 @@
+digraph {
+    rankdir=LR;
+    "\n  HTTP request  \n\n" -> "\n  middleware  \n  recovery / logger  \n  requestID / timeout  \n\n";
+    "\n  middleware  \n  recovery / logger  \n  requestID / timeout  \n\n" -> "\n  handler  \n  params, body,  \n  ExecOpts  \n\n";
+    "\n  handler  \n  params, body,  \n  ExecOpts  \n\n" -> "\n  NodeActor  \n  .connectAndExecute  \n\n" [label="serialize"];
+    "\n  NodeActor  \n  .connectAndExecute  \n\n" -> "\n  Node.Execute  \n  Lock > fn() > Commit  \n  > Save > Unlock  \n\n";
+    "\n  Node.Execute  \n  Lock > fn() > Commit  \n  > Save > Unlock  \n\n" -> "\n  fn()  \n  op() > config fn  \n  > ChangeSet  \n  > CONFIG_DB entries  \n\n";
+}

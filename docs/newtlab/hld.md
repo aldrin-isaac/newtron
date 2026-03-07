@@ -31,28 +31,36 @@ newtron reads those profiles to connect. The two programs communicate through
 files — no shared libraries, no IPC, no API calls between them.
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        Shared Spec Directory                       │
-│  specs/                                                            │
-│  ├── topology.json    ← newtlab reads: devices, links, settings   │
-│  ├── platforms.json   ← newtlab reads: VM defaults (image, memory) │
-│  ├── profiles/*.json  ← newtlab reads+writes: VM overrides, ports │
-│  └── network.json     ← newtron reads: services, VPNs, filters   │
-└─────────────────────────────────────────────────────────────────────┘
-         │ reads/writes                       │ reads
-         ▼                                    ▼
-┌─────────────────────┐            ┌─────────────────────┐
-│       newtlab       │            │      newtron        │
-│                     │  profiles  │                     │
-│ • Deploy QEMU VMs   │───────────→│ • Provision devices │
-│ • Socket networking │  (files)   │ • Write CONFIG_DB   │
-│ • Patch profiles    │            │ • BGP, EVPN, ACLs   │
-└─────────────────────┘            └─────────────────────┘
-         ▲                                    ▲
-         │            ┌──────────┐            │
-         └────────────│ newtrun  │────────────┘
-                      │ (E2E)    │
-                      └──────────┘
+              ┌────────────────────────────────┐
+              │                                │
+              │     Shared Spec Directory      │
+              │ topology.json, platforms.json, │
+              │ profiles/*.json, network.json  │
+              │                                │ ─┐
+              └────────────────────────────────┘  │
+                │                                 │
+                │ reads/writes                    │
+                ▼                                 │
+┌─────────┐     ┌────────────────────────────────┐  │
+│         │     │                                │  │
+│         │     │            newtlab             │  │
+│ newtrun │     │        Deploy QEMU VMs         │  │
+│  (E2E)  │     │       Socket networking        │  │ reads
+│         │     │         Patch profiles         │  │
+│         │ ──▶ │                                │  │
+└─────────┘     └────────────────────────────────┘  │
+  │               │                                 │
+  │               │ profiles                        │
+  │               │ (files)                         │
+  │               ▼                                 │
+  │             ┌────────────────────────────────┐  │
+  │             │                                │  │
+  │             │            newtron             │  │
+  │             │       Provision devices        │  │
+  │             │        Write CONFIG_DB         │  │
+  │             │        BGP, EVPN, ACLs         │  │
+  └───────────▶ │                                │ ◀┘
+                └────────────────────────────────┘
 ```
 
 **Benefits of the newtlab approach:**
@@ -79,37 +87,39 @@ A deployed newtlab topology consists of three layers: the spec directory
 patched profiles (output that enables newtron).
 
 ```
-Deployed Topology: 2 switches, 1 link
+┌────────────────────────────┐                ┌───────────────────────────────────────┐
+│        spine1 QEMU         │                │        newtlink Bridge Process        │
+│ mgmt: :40000, cons: :30000 │  TCP connect   │        worker: spine1 <> leaf1        │
+│        overlay disk        │ <───────────── │    :20000 (A-side) :20001 (Z-side)    │
+└────────────────────────────┘                └───────────────────────────────────────┘
+  │                                             │
+  │                                             │ TCP connect
+  │                                             ∨
+  │                                           ┌───────────────────────────────────────┐
+  │                                           │              leaf1 QEMU               │
+  │                                           │      mgmt: :40001, cons: :30001       │
+  │                                           │             overlay disk              │
+  │                                           └───────────────────────────────────────┘
+  │                                             │
+  │                                             │
+  │                                             ∨
+  │                                           ┌───────────────────────────────────────┐
+  │                                           │                 State                 │
+  │                                           │        ~/.newtlab/labs/<name>/        │
+  └─────────────────────────────────────────> │ state.json, qemu/*.pid, disks/, logs/ │
+                                              └───────────────────────────────────────┘
+```
 
-                    newtlink Bridge Process
-                    ┌─────────────────────────────────┐
-                    │  worker: spine1↔leaf1            │
-                    │  :20000 (A-side)  :20001 (Z-side)│
-                    │     ▲                  ▲         │
-                    │     │ TCP connect      │         │
-                    └─────┼──────────────────┼─────────┘
-                          │                  │
-              ┌───────────┴──┐         ┌─────┴────────────┐
-              │  spine1 QEMU │         │  leaf1 QEMU      │
-              │              │         │                   │
-              │  mgmt: :40000│         │  mgmt: :40001    │
-              │  cons: :30000│         │  cons: :30001    │
-              │  overlay disk│         │  overlay disk    │
-              └──────────────┘         └──────────────────┘
-                          │                  │
-                          ▼                  ▼
-              ┌──────────────────────────────────────────┐
-              │  State: ~/.newtlab/labs/<name>/           │
-              │  state.json, qemu/*.pid, disks/, logs/   │
-              └──────────────────────────────────────────┘
-
-Spec Directory (input)          Patched Profiles (output)
-┌──────────────────────┐        ┌──────────────────────┐
-│ topology.json        │ deploy │ profiles/spine1.json  │
-│ platforms.json       │───────→│   + ssh_port: 40000   │→ newtron reads
-│ profiles/*.json      │  patch │   + console_port: ... │   to connect
-│ network.json         │        │   + mgmt_ip: 127...   │   via SSH tunnel
-└──────────────────────┘        └──────────────────────┘
+```
+┌────────────────────────┐           ┌───────────────────────────┐     ┌─────────────────┐
+│                        │           │                           │     │                 │
+│ Spec Directory (input) │           │ Patched Profiles (output) │     │                 │
+│     topology.json      │           │   profiles/spine1.json    │     │  newtron reads  │
+│     platforms.json     │           │ + ssh_port, console_port  │     │   (to connect   │
+│    profiles/*.json     │  deploy   │         + mgmt_ip         │     │ via SSH tunnel) │
+│      network.json      │  patch    │                           │     │                 │
+│                        │ ────────▶ │                           │ ──▶ │                 │
+└────────────────────────┘           └───────────────────────────┘     └─────────────────┘
 ```
 
 The diagram shows the key runtime relationships: both VMs connect *outbound*
@@ -267,16 +277,48 @@ Ethernet frames between them. Both QEMU VMs connect *outbound* to the
 bridge; the bridge never connects to QEMU.
 
 ```
-Link: spine1:Ethernet0 ↔ leaf1:Ethernet0
-
-newtlink bridge worker:
-  Listen :20000  (A-side)        Listen :20001  (Z-side)
-       ▲                              ▲
-       │ connect                      │ connect
-       │                              │
-  spine1 QEMU                    leaf1 QEMU
-  -netdev socket,               -netdev socket,
-   connect=127.0.0.1:20000       connect=127.0.0.1:20001
+┌─────────────────────────────────────┐
+│                                     │
+│             leaf1 QEMU              │
+│       connect=127.0.0.1:20001       │
+│                                     │
+└─────────────────────────────────────┘
+  │
+  │ connect
+  ▼
+┌─────────────────────────────────────┐
+│                                     │
+│            Listen :20001            │
+│              (Z-side)               │
+│                                     │
+└─────────────────────────────────────┘
+  ▲
+  │
+  │
+┌─────────────────────────────────────┐
+│                                     │
+│       newtlink bridge worker        │
+│ spine1:Ethernet0 <> leaf1:Ethernet0 │
+│                                     │
+└─────────────────────────────────────┘
+  │
+  └──────────────────────────────────────┐
+                                         │
+┌─────────────────────────────────────┐  │
+│                                     │  │
+│             spine1 QEMU             │  │
+│       connect=127.0.0.1:20000       │  │
+│                                     │  │
+└─────────────────────────────────────┘  │
+  │                                      │
+  │ connect                              │
+  ▼                                      │
+┌─────────────────────────────────────┐  │
+│                                     │  │
+│            Listen :20000            │  │
+│              (A-side)               │  │
+│                                     │ ◀┘
+└─────────────────────────────────────┘
 ```
 
 The worker accepts one connection on each side, then enters a bidirectional
@@ -308,14 +350,48 @@ listens on `127.0.0.1`; the remote-side port listens on `0.0.0.0` so the
 remote VM can connect across the network.
 
 ```
-spine1 (server-a) ↔ leaf1 (server-b)
-
-newtlink on server-a:
-  127.0.0.1:20000  ← spine1 connects locally
-  0.0.0.0:20001    ← leaf1 connects from server-b
-
-leaf1 QEMU on server-b:
-  -netdev socket,connect=192.168.1.10:20001
+┌──────────────────────┐
+│                      │
+│      leaf1 QEMU      │
+│      (server-b)      │
+│                      │
+└──────────────────────┘
+  │
+  │ connect=
+  │ 192.168.1.10:20001
+  ▼
+┌──────────────────────┐
+│                      │
+│    0.0.0.0:20001     │
+│       (remote)       │
+│                      │
+└──────────────────────┘
+  ▲
+  │
+  │
+┌──────────────────────┐
+│                      │
+│ newtlink on server-a │
+│                      │
+└──────────────────────┘
+  │
+  └───────────────────────┐
+                          │
+┌──────────────────────┐  │
+│                      │  │
+│     spine1 QEMU      │  │
+│      (server-a)      │  │
+│                      │  │
+└──────────────────────┘  │
+  │                       │
+  │ local                 │
+  ▼                       │
+┌──────────────────────┐  │
+│                      │  │
+│   127.0.0.1:20000    │  │
+│       (local)        │  │
+│                      │ ◀┘
+└──────────────────────┘
 ```
 
 A cross-host link always costs exactly one network hop regardless of which

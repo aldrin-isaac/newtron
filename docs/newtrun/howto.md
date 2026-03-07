@@ -10,9 +10,21 @@ SSH tunnels and Redis connections to the SONiC switches. Host operations
 (ping, iperf) use direct SSH to the host VMs.
 
 ```
-newtrun ──→ newtron-server (HTTP :8080) ──→ SSH tunnel ──→ SONiC Redis
-  │                                                          CONFIG_DB
-  └──→ host VMs (direct SSH) ──→ network namespace ──→ data plane
+┌────────────────┐     ┌──────────────┐     ┌─────────────┐     ┌────────────┐
+│                │     │              │     │             │     │            │
+│    newtrun     │     │   host VMs   │     │   network   │     │ data plane │
+│                │     │ (direct SSH) │     │  namespace  │     │            │
+│                │ ──▶ │              │ ──▶ │             │ ──▶ │            │
+└────────────────┘     └──────────────┘     └─────────────┘     └────────────┘
+  │
+  │ HTTP
+  ▼
+┌────────────────┐     ┌──────────────┐     ┌─────────────┐
+│                │     │              │     │             │
+│ newtron-server │     │  SSH tunnel  │     │ SONiC Redis │
+│  (HTTP :8080)  │     │              │     │  CONFIG_DB  │
+│                │ ──▶ │              │ ──▶ │             │
+└────────────────┘     └──────────────┘     └─────────────┘
 ```
 
 For architecture and design, see the [HLD](hld.md). For type definitions

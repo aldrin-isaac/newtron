@@ -1,0 +1,8 @@
+digraph {
+    rankdir=TB;
+    "\n  start  \n\n" -> "\n  running  \n\n";
+    "\n  running  \n\n" -> "\n  pausing  \n\n" [label="pause"];
+    "\n  running  \n\n" -> "\n  complete / failed  \n\n" [label="scenario ends"];
+    "\n  pausing  \n\n" -> "\n  paused  \n\n" [label="current scenario\nends"];
+    "\n  paused  \n\n" -> "\n  running  \n\n" [label="start"];
+}

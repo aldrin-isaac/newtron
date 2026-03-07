@@ -1,0 +1,5 @@
+digraph {
+    rankdir=LR;
+    "\n  newtron -x  \n\n" -> "\n  Redis CONFIG_DB  \n  (runtime, immediate)  \n\n";
+    "\n  Redis CONFIG_DB  \n  (runtime, immediate)  \n\n" -> "\n  config save  \n  /etc/sonic/config_db.json  \n  (persistent)  \n\n";
+}

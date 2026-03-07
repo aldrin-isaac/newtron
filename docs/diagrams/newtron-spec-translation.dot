@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  Spec (declarative)  \n  evpn-routed, ipvpn=customer-vpn,  \n  peer_as=request, filter=customer-edge-in  \n\n" -> "\n  Translation  \n\n";
+    "\n  Context  \n  Interface: Ethernet0, IP: 10.1.1.1/30  \n  Device AS: 64512, Peer AS: 65100  \n  IP-VPN customer-vpn: L3VNI 10001  \n\n" -> "\n  Translation  \n\n";
+    "\n  Translation  \n\n" -> "\n  Config (imperative)  \n  VRF, VXLAN_TUNNEL_MAP,  \n  BGP_NEIGHBOR, ACL_TABLE  \n\n";
+}

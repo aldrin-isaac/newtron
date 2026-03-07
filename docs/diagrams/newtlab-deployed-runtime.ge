@@ -1,0 +1,13 @@
+graph { flow: south; }
+
+[ newtlink Bridge Process\nworker: spine1 <> leaf1\n:20000 (A-side)  :20001 (Z-side) ]
+  --> { label: TCP connect; } [ spine1 QEMU\nmgmt: :40000, cons: :30000\noverlay disk ]
+
+[ newtlink Bridge Process\nworker: spine1 <> leaf1\n:20000 (A-side)  :20001 (Z-side) ]
+  --> { label: TCP connect; } [ leaf1 QEMU\nmgmt: :40001, cons: :30001\noverlay disk ]
+
+[ spine1 QEMU\nmgmt: :40000, cons: :30000\noverlay disk ]
+  --> [ State\n~/.newtlab/labs/<name>/\nstate.json, qemu/*.pid, disks/, logs/ ]
+
+[ leaf1 QEMU\nmgmt: :40001, cons: :30001\noverlay disk ]
+  --> [ State\n~/.newtlab/labs/<name>/\nstate.json, qemu/*.pid, disks/, logs/ ]

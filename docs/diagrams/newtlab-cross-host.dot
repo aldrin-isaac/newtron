@@ -1,0 +1,8 @@
+digraph {
+    rankdir=TB;
+    "\n  newtlink on server-a  \n\n";
+    "\n  127.0.0.1:20000  \n  (local)  \n\n" -> "\n  newtlink on server-a  \n\n" [dir=back];
+    "\n  0.0.0.0:20001  \n  (remote)  \n\n" -> "\n  newtlink on server-a  \n\n" [dir=back];
+    "\n  spine1 QEMU  \n  (server-a)  \n\n" -> "\n  127.0.0.1:20000  \n  (local)  \n\n" [label="local"];
+    "\n  leaf1 QEMU  \n  (server-b)  \n\n" -> "\n  0.0.0.0:20001  \n  (remote)  \n\n" [label="connect=\n192.168.1.10:20001"];
+}

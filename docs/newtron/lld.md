@@ -1021,11 +1021,14 @@ The binding is self-sufficient for reverse operations — every value needed for
 Every write operation follows this path through the system:
 
 ```
-HTTP request → middleware (recovery / logger / requestID / timeout)
-  → handler (extract path params, decode JSON body, read ExecOpts from query)
-  → NodeActor.connectAndExecute (serialize into single actor goroutine)
-  → Node.Execute: Lock → fn() → Commit (Apply + Verify) → Save → Unlock
-  → fn(): Node method → op() → config function → ChangeSet → CONFIG_DB entries
+┌──────────────┐     ┌─────────────────────┐     ┌───────────────┐              ┌────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
+│              │     │                     │     │               │              │                    │     │                      │     │                     │
+│              │     │     middleware      │     │    handler    │              │                    │     │     Node.Execute     │     │        fn()         │
+│ HTTP request │     │  recovery / logger  │     │ params, body, │              │     NodeActor      │     │ Lock > fn() > Commit │     │  op() > config fn   │
+│              │     │ requestID / timeout │     │   ExecOpts    │              │ .connectAndExecute │     │   > Save > Unlock    │     │     > ChangeSet     │
+│              │     │                     │     │               │  serialize   │                    │     │                      │     │ > CONFIG_DB entries │
+│              │ ──▶ │                     │ ──▶ │               │ ───────────▶ │                    │ ──▶ │                      │ ──▶ │                     │
+└──────────────┘     └─────────────────────┘     └───────────────┘              └────────────────────┘     └──────────────────────┘     └─────────────────────┘
 ```
 
 Read operations follow the same path but use `connectAndRead`, which calls `Refresh()` (reload CONFIG_DB from Redis) instead of Lock/Execute. §6.3 includes a worked example tracing `CreateVLAN` through every layer.
@@ -1293,10 +1296,12 @@ Handlers extract path params via `r.PathValue("device")`, decode JSON bodies via
 Each device gets a `NodeActor` — a single goroutine that serializes all operations to that device. The cached `*Node` (SSH connection) is only accessed from this goroutine, eliminating mutex contention:
 
 ```
-NodeActor.do(fn)
-  → sends fn to actor's request channel
-  → actor goroutine executes fn (only one fn runs at a time)
-  → result returned via response channel
+┌──────────────────┐             ┌─────────────────┐                  ┌─────────────────┐           ┌──────────────────┐
+│                  │             │                 │                  │                 │           │                  │
+│ NodeActor.do(fn) │             │ request channel │                  │ actor goroutine │           │ response channel │
+│                  │  sends fn   │                 │  one at a time   │  (executes fn)  │  result   │                  │
+│                  │ ──────────▶ │                 │ ───────────────▶ │                 │ ────────▶ │                  │
+└──────────────────┘             └─────────────────┘                  └─────────────────┘           └──────────────────┘
 ```
 
 **Connection caching:** `getNode()` returns the cached `*Node` or creates a new SSH tunnel. After each operation completes, a 5-minute idle timer (`DefaultIdleTimeout`) resets. On timeout, the connection closes. On SSH failure mid-operation, the connection is dropped and the next request reconnects.

@@ -1,0 +1,8 @@
+digraph {
+    rankdir=TB;
+    "\n  Shared Spec Directory  \n  topology.json, platforms.json,  \n  profiles/*.json, network.json  \n\n" -> "\n  newtlab  \n  Deploy QEMU VMs  \n  Socket networking  \n  Patch profiles  \n\n" [label="reads/writes"];
+    "\n  Shared Spec Directory  \n  topology.json, platforms.json,  \n  profiles/*.json, network.json  \n\n" -> "\n  newtron  \n  Provision devices  \n  Write CONFIG_DB  \n  BGP, EVPN, ACLs  \n\n" [label="reads"];
+    "\n  newtlab  \n  Deploy QEMU VMs  \n  Socket networking  \n  Patch profiles  \n\n" -> "\n  newtron  \n  Provision devices  \n  Write CONFIG_DB  \n  BGP, EVPN, ACLs  \n\n" [label="profiles\n(files)"];
+    "\n  newtrun  \n  (E2E)  \n\n" -> "\n  newtlab  \n  Deploy QEMU VMs  \n  Socket networking  \n  Patch profiles  \n\n";
+    "\n  newtrun  \n  (E2E)  \n\n" -> "\n  newtron  \n  Provision devices  \n  Write CONFIG_DB  \n  BGP, EVPN, ACLs  \n\n";
+}

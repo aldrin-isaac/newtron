@@ -1,0 +1,8 @@
+digraph {
+    rankdir=TB;
+    "\n  newtlink bridge worker  \n  spine1:Ethernet0 <> leaf1:Ethernet0  \n\n";
+    "\n  Listen :20000  \n  (A-side)  \n\n" -> "\n  newtlink bridge worker  \n  spine1:Ethernet0 <> leaf1:Ethernet0  \n\n" [dir=back];
+    "\n  Listen :20001  \n  (Z-side)  \n\n" -> "\n  newtlink bridge worker  \n  spine1:Ethernet0 <> leaf1:Ethernet0  \n\n" [dir=back];
+    "\n  spine1 QEMU  \n  connect=127.0.0.1:20000  \n\n" -> "\n  Listen :20000  \n  (A-side)  \n\n" [label="connect"];
+    "\n  leaf1 QEMU  \n  connect=127.0.0.1:20001  \n\n" -> "\n  Listen :20001  \n  (Z-side)  \n\n" [label="connect"];
+}

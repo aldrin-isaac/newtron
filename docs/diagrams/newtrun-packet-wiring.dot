@@ -1,0 +1,7 @@
+digraph {
+    rankdir=TB;
+    "\n  Container ethN  \n\n" -> "\n  tapN  \n  (QEMU TAP)  \n\n" [label="tc mirred\nredirect"];
+    "\n  tapN  \n  (QEMU TAP)  \n\n" -> "\n  EthernetN  \n  (inside SONiC VM)  \n\n" [label="QEMU\nvirtio NIC"];
+    "\n  EthernetN  \n  (inside SONiC VM)  \n\n" -> "\n  swvethN / vethN  \n  (veth pair)  \n\n" [label="tc mirred\nredirect"];
+    "\n  swvethN / vethN  \n  (veth pair)  \n\n" -> "\n  ngdpd  \n  (ASIC simulator)  \n  STOP (no forwarding)  \n\n";
+}

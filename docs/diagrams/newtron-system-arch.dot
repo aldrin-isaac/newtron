@@ -1,0 +1,13 @@
+digraph {
+    rankdir=TB;
+    "\n  CLI  \n  (cmd/newtron)  \n  HTTP client  \n\n" -> "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" [label="HTTP\n(REST API)"];
+    "\n  newtrun  \n  (pkg/newtrun/)  \n  HTTP client  \n\n" -> "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" [label="HTTP\n(REST API)"];
+    "\n  newtron-server  \n  (pkg/newtron/api/)  \n\n" -> "\n  NetworkActor  \n  (1 per network)  \n  owns *Network  \n\n";
+    "\n  NetworkActor  \n  (1 per network)  \n  owns *Network  \n\n" -> "\n  NodeActor  \n  (1 per device)  \n  caches *Node (SSH conn)  \n\n" [label="manages"];
+    "\n  NetworkActor  \n  (1 per network)  \n  owns *Network  \n\n" -> "\n  Network Layer  \n  (pkg/newtron/network/)  \n  Spec resolution,  \n  topology provisioning  \n\n";
+    "\n  NodeActor  \n  (1 per device)  \n  caches *Node (SSH conn)  \n\n" -> "\n  Node Layer  \n  (pkg/newtron/network/node/)  \n  Node, Interface,  \n  ChangeSet, *_ops.go  \n\n" [label="Connect()"];
+    "\n  Network Layer  \n  (pkg/newtron/network/)  \n  Spec resolution,  \n  topology provisioning  \n\n" -> "\n  Spec Layer  \n  (pkg/newtron/spec/)  \n\n";
+    "\n  Network Layer  \n  (pkg/newtron/network/)  \n  Spec resolution,  \n  topology provisioning  \n\n" -> "\n  Node Layer  \n  (pkg/newtron/network/node/)  \n  Node, Interface,  \n  ChangeSet, *_ops.go  \n\n";
+    "\n  Node Layer  \n  (pkg/newtron/network/node/)  \n  Node, Interface,  \n  ChangeSet, *_ops.go  \n\n" -> "\n  Device Layer  \n  (pkg/newtron/device/sonic/)  \n  SSH Tunnel > ConfigDB(4)  \n  StateDB(6), AppDB(0), AsicDB(1)  \n\n";
+    "\n  Device Layer  \n  (pkg/newtron/device/sonic/)  \n  SSH Tunnel > ConfigDB(4)  \n  StateDB(6), AppDB(0), AsicDB(1)  \n\n" -> "\n  SONiC Switch  \n  (Redis)  \n\n";
+}

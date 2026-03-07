@@ -13,64 +13,76 @@ For the architectural principles behind newtron, newtlab, and newtrun — includ
 ### 2.1 System Architecture
 
 ```
-  +-----------------+     +-----------------+
-  |  CLI            |     |  newtrun        |
-  |  (cmd/newtron)  |     |  (pkg/newtrun/) |
-  |  HTTP client    |     |  HTTP client    |
-  +--------+--------+     +--------+--------+
-           |                       |
-           |    HTTP (REST API)    |
-           +-----------+-----------+
-                       |
-                       v
-  +------------------------------------------------------+
-  |              newtron-server (pkg/newtron/api/)        |
-  |                                                      |
-  |  +------------------------------------------------+  |
-  |  | NetworkActor (1 per network)                    |  |
-  |  |                                                 |  |
-  |  |  owns *Network    manages NodeActors            |  |
-  |  |       |           +------------------------+    |  |
-  |  |       |           | NodeActor (1 per device)|   |  |
-  |  |       |           | holds *Network ref      |   |  |
-  |  |       |           | caches *Node (SSH conn) |   |  |
-  |  |       |           +------------+------------+   |  |
-  |  +-------|------------------------|-----------+----+  |
-  +----------|------------------------|-----------+-------+
-             |                        |
-             v                        |
-  +-----------------------+           |
-  | Network Layer         |           |
-  | (pkg/newtron/network/)|           |
-  |                       | Connect() |
-  | Spec resolution,      |-----+     |
-  | topology provisioning |     |     |
-  +---+-------------------+     |     |
-      |                         v     v
-      v                  +----------------------+
-  +---------------+      | Node Layer           |
-  | Spec Layer    |      | (pkg/newtron/network/|
-  | (pkg/newtron/ |      |  node/)              |
-  |  spec/)       |      | Node, Interface,     |
-  +---------------+      | ChangeSet, *_ops.go  |
-                         +----------+-----------+
-                                    |
-                                    v
-                         +-------------------------+
-                         | Device Layer             |
-                         | (pkg/newtron/device/     |
-                         |  sonic/)                 |
-                         |                          |
-                         | SSH Tunnel → ConfigDB(4) |
-                         |           → StateDB (6)  |
-                         |           → AppDB   (0)  |
-                         |           → AsicDB  (1)  |
-                         +-------------+------------+
-                                       |
-                                       v
-                         +-------------------------+
-                         | SONiC Switch (Redis)     |
-                         +-------------------------+
+                                          ┌─────────────────────────────────┐
+                                          │                                 │
+                                          │               CLI               │
+                                          │          (cmd/newtron)          │
+                                          │           HTTP client           │
+                                          │                                 │
+                                          └─────────────────────────────────┘
+                                            │
+                                            │ HTTP
+                                            │ (REST API)
+                                            ▼
+┌─────────────────────────┐               ┌─────────────────────────────────┐
+│                         │               │                                 │
+│         newtrun         │               │         newtron-server          │
+│     (pkg/newtrun/)      │  HTTP         │       (pkg/newtron/api/)        │
+│       HTTP client       │  (REST API)   │                                 │
+│                         │ ────────────▶ │                                 │
+└─────────────────────────┘               └─────────────────────────────────┘
+                                            │
+                                            │
+                                            ▼
+┌─────────────────────────┐               ┌─────────────────────────────────┐
+│                         │               │                                 │
+│        NodeActor        │               │          NetworkActor           │
+│     (1 per device)      │               │         (1 per network)         │
+│ caches *Node (SSH conn) │  manages      │          owns *Network          │
+│                         │ ◀──────────── │                                 │
+└─────────────────────────┘               └─────────────────────────────────┘
+  │                                         │
+  │                                         │
+  │                                         ▼
+  │                                       ┌─────────────────────────────────┐     ┌─────────────────────┐
+  │                                       │                                 │     │                     │
+  │                                       │          Network Layer          │     │                     │
+  │                                       │     (pkg/newtron/network/)      │     │     Spec Layer      │
+  │                                       │        Spec resolution,         │     │ (pkg/newtron/spec/) │
+  │                                       │      topology provisioning      │     │                     │
+  │                                       │                                 │ ──▶ │                     │
+  │                                       └─────────────────────────────────┘     └─────────────────────┘
+  │                                         │
+  │                                         │
+  │                                         ▼
+  │                                       ┌─────────────────────────────────┐
+  │                                       │                                 │
+  │                                       │           Node Layer            │
+  │                                       │   (pkg/newtron/network/node/)   │
+  │                                       │        Node, Interface,         │
+  │                         Connect()     │       ChangeSet, *_ops.go       │
+  └─────────────────────────────────────▶ │                                 │
+                                          └─────────────────────────────────┘
+                                            │
+                                            │
+                                            ▼
+                                          ┌─────────────────────────────────┐
+                                          │                                 │
+                                          │          Device Layer           │
+                                          │   (pkg/newtron/device/sonic/)   │
+                                          │    SSH Tunnel > ConfigDB(4)     │
+                                          │ StateDB(6), AppDB(0), AsicDB(1) │
+                                          │                                 │
+                                          └─────────────────────────────────┘
+                                            │
+                                            │
+                                            ▼
+                                          ┌─────────────────────────────────┐
+                                          │                                 │
+                                          │          SONiC Switch           │
+                                          │             (Redis)             │
+                                          │                                 │
+                                          └─────────────────────────────────┘
 ```
 
 ### 2.2 How the Pieces Fit Together
@@ -100,15 +112,32 @@ HTTP handlers follow a two-step resolution: server → NetworkActor (by network 
 The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it.**
 
 ```
-Network (owns all specs)
+┌────────────────────┐
+│                    │
+│      Network       │
+│  (owns all specs)  │
+│                    │
+└────────────────────┘
   │
-  │ creates (with parent reference)
+  │ creates
+  │ (parent ref)
   ▼
-Node (device handle: parent *Network, ConfigDB, profile)
+┌────────────────────┐
+│                    │
+│        Node        │
+│  (device handle)   │
+│                    │
+└────────────────────┘
   │
-  │ creates (with parent reference)
+  │ creates
+  │ (parent ref)
   ▼
-Interface (interface handle: parent *Node, interface name)
+┌────────────────────┐
+│                    │
+│     Interface      │
+│ (interface handle) │
+│                    │
+└────────────────────┘
 ```
 
 Whatever configuration can be right-shifted to the interface level, should be. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering is device-specific — it derives from the device's role and zone topology — so it lives on `Node.SetupEVPN()`.
@@ -215,19 +244,34 @@ The VNI (`10001`) comes from the IP-VPN definition `customer-vpn`, not from the 
 The translation layer interprets specs in context to generate config:
 
 ```
-Spec (declarative)                       Context
-  "evpn-routed,                    +  Interface: Ethernet0
-   ipvpn=customer-vpn,                IP: 10.1.1.1/30
-   peer_as=request,                   Device AS: 64512
-   filter=customer-edge-in"           User peer AS: 65100
-                                      IP-VPN "customer-vpn": L3VNI 10001
-         │
-         ▼
-Config (imperative)
-  VRF|customer-l3-Ethernet0 → {vni:10001}
-  VXLAN_TUNNEL_MAP|vtep1|map_10001 → {vni:10001, vrf:customer-l3-Ethernet0}
-  BGP_NEIGHBOR|10.1.1.2 → {asn:65100, local_addr:10.1.1.1}
-  ACL_TABLE|customer-l3-Ethernet0-in → {type:L3, stage:ingress}
+                                                 ┌───────────────────────────────────────┐
+                                                 │                                       │
+                                                 │                Context                │
+                                                 │ Interface: Ethernet0, IP: 10.1.1.1/30 │
+                                                 │   Device AS: 64512, Peer AS: 65100    │
+                                                 │   IP-VPN customer-vpn: L3VNI 10001    │
+                                                 │                                       │
+                                                 └───────────────────────────────────────┘
+                                                   │
+                                                   │
+                                                   ▼
+┌──────────────────────────────────────────┐     ┌───────────────────────────────────────┐
+│                                          │     │                                       │
+│            Spec (declarative)            │     │                                       │
+│     evpn-routed, ipvpn=customer-vpn,     │     │              Translation              │
+│ peer_as=request, filter=customer-edge-in │     │                                       │
+│                                          │ ──▶ │                                       │
+└──────────────────────────────────────────┘     └───────────────────────────────────────┘
+                                                   │
+                                                   │
+                                                   ▼
+                                                 ┌───────────────────────────────────────┐
+                                                 │                                       │
+                                                 │          Config (imperative)          │
+                                                 │        VRF, VXLAN_TUNNEL_MAP,         │
+                                                 │        BGP_NEIGHBOR, ACL_TABLE        │
+                                                 │                                       │
+                                                 └───────────────────────────────────────┘
 ```
 
 Translation follows a three-layer pattern in the Node Layer:
@@ -254,13 +298,39 @@ Specs participate in a three-level hierarchy: **network → zone → node**. Eac
 Resolution is **union with lower-level-wins**: if the same spec name exists at multiple levels, the most specific level wins (node > zone > network). Specs at different levels with different names are all visible.
 
 ```
-Global (network.json)
-    │ overrides
-Zone (network.json → zones.{name})
-    │ overrides
-Device Profile (profiles/{device}.json)
-    │ resolves to
-ResolvedProfile (runtime)
+┌──────────────────────────┐
+│                          │
+│          Global          │
+│      (network.json)      │
+│                          │
+└──────────────────────────┘
+  │
+  │ overrides
+  ▼
+┌──────────────────────────┐
+│                          │
+│           Zone           │
+│      (zones.{name})      │
+│                          │
+└──────────────────────────┘
+  │
+  │ overrides
+  ▼
+┌──────────────────────────┐
+│                          │
+│      Device Profile      │
+│ (profiles/{device}.json) │
+│                          │
+└──────────────────────────┘
+  │
+  │ resolves to
+  ▼
+┌──────────────────────────┐
+│                          │
+│     ResolvedProfile      │
+│        (runtime)         │
+│                          │
+└──────────────────────────┘
 ```
 
 ### 3.6 Spec File Structure
@@ -568,9 +638,13 @@ This eliminates topology.go constructing CONFIG_DB entries inline — it calls t
 When SSH credentials (`ssh_user`, `ssh_pass`) are present in the device profile, an SSH tunnel forwards a local random port to `127.0.0.1:6379` inside the device. Redis on SONiC listens only on localhost — SSH is the only path in.
 
 ```
-Newtron Process                         SONiC Device
-  ConfigDBClient                   SSH    sshd (:22)
-    → 127.0.0.1:<random>   ──────────→     → 127.0.0.1:6379 (Redis)
+┌────────────────────┐          ┌────────────┐            ┌────────────────┐
+│                    │          │            │            │                │
+│   ConfigDBClient   │          │            │            │   sshd (:22)   │
+│ 127.0.0.1:<random> │          │ SSH Tunnel │            │ 127.0.0.1:6379 │
+│                    │  local   │            │  forward   │    (Redis)     │
+│                    │ ───────▶ │            │ ─────────▶ │                │
+└────────────────────┘          └────────────┘            └────────────────┘
 ```
 
 Four Redis clients are established: ConfigDB (DB 4), StateDB (DB 6), AppDB (DB 0), AsicDB (DB 1). StateDB/AppDB/AsicDB failures are non-fatal — the system can still read/write CONFIG_DB.
