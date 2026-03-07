@@ -53,7 +53,7 @@ Five programs, two subsystems:
 
 Both paths converge on the same SONiC devices. newtlab creates QEMU VMs running SONiC and wires them with newtlink; newtron-server connects to those same VMs via SSH-tunneled Redis. You can also point newtron-server at hardware switches or third-party labs — newtlab is only needed for local virtual topologies.
 
-## Have 5 Minutes? See It Work
+## Have 3 Minutes? See It Work
 
 Requires Linux x86_64, Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
 

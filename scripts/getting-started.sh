@@ -46,7 +46,7 @@ header() {
 run_cmd() {
     echo -e " ${CYAN}Running:${RESET} $*"
     echo ""
-    "$@"
+    "$@" 2> >(grep -v "Could not initialize audit" >&2)
 }
 
 pause() {
@@ -181,7 +181,7 @@ echo ""
 
 echo -e " ${CYAN}Running:${RESET} bin/newtron-server --spec-dir $SPEC_DIR &"
 echo ""
-bin/newtron-server --spec-dir "$SPEC_DIR" &
+bin/newtron-server --spec-dir "$SPEC_DIR" > /tmp/newtron-server.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 
