@@ -87,7 +87,7 @@ By default, newtron shows what it _would_ write to CONFIG_DB — every table, ke
 ```
 Operation: interface.applyService
 Device: switch1
-Changes:
+Changes to CONFIG_DB:
   [ADD] INTERFACE|Ethernet0                              → map[NULL:NULL]
   [ADD] INTERFACE|Ethernet0|10.1.0.0/31                  → map[NULL:NULL]
   [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up]

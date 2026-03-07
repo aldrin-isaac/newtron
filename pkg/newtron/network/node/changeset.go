@@ -175,7 +175,7 @@ func (cs *ChangeSet) Preview() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Operation: %s\n", cs.Operation))
 	sb.WriteString(fmt.Sprintf("Device: %s\n", cs.Device))
-	sb.WriteString(fmt.Sprintf("Changes:\n%s", cs.String()))
+	sb.WriteString(fmt.Sprintf("Changes to CONFIG_DB:\n%s", cs.String()))
 	return sb.String()
 }
 
