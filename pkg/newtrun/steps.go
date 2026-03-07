@@ -836,6 +836,7 @@ func (e *applyServiceExecutor) Execute(ctx context.Context, r *Runner, step *Ste
 			opts.IPAddress = fmt.Sprintf("%v", ip)
 		}
 		opts.VLAN = intParam(step.Params, "vlan")
+		opts.PeerAS = intParam(step.Params, "peer_as")
 	}
 	return r.executeForDevices(step, func(name string) (string, error) {
 		result, err := r.Client.ApplyService(name, step.Interface, step.Service, opts, execOptsRun)

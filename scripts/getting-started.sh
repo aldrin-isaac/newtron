@@ -253,6 +253,12 @@ echo ""
 run_cmd bin/newtron switch1 service apply Ethernet0 transit \
     --ip 10.1.0.0/31 --peer-as 65002 -x
 
+echo ""
+echo " Now remove the service so the device is clean for the test suite."
+echo ""
+
+run_cmd bin/newtron switch1 service remove Ethernet0 -x
+
 pause
 
 # ─── Step 8: Run the test suite ───────────────────────────────────────────────
