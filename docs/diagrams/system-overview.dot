@@ -1,9 +1,9 @@
 digraph {
     rankdir=TB;
-    "newtron\n(client)" -> "newtron-server" [label="HTTP"];
-    "newtrun" -> "newtron-server" [label="HTTP"];
-    "specs" -> "newtron-server";
-    "specs" -> "newtlab";
-    "newtron-server" -> "SONiC" [label="SSH+Redis"];
-    "newtlab" -> "SONiC" [label="deploy, wire"];
+    "\n  newtron  \n  (client)  \n" -> "\n  newtron-server  \n" [label="HTTP"];
+    "\n  newtrun  \n" -> "\n  newtron-server  \n" [label="HTTP"];
+    "\n  specs  \n" -> "\n  newtron-server  \n";
+    "\n  specs  \n" -> "\n  newtlab  \n";
+    "\n  newtron-server  \n" -> "\n  SONiC VM  \n" [label="SSH+Redis"];
+    "\n  newtlab  \n" -> "\n  SONiC VM  \n" [label="deploy, wire"];
 }
