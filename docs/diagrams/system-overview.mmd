@@ -1,6 +1,6 @@
 graph TD
-    specs --> newtron-server
     specs --> newtlab
+    specs --> newtron-server
     newtron -->|HTTP| newtron-server
     newtrun -->|HTTP| newtron-server
     newtron-server -->|SSH+Redis| SONiC

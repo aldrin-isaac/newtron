@@ -92,39 +92,39 @@ Five programs, two subsystems:
 | **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
 
 ```
-┌────────────────────┐          ┌──────────────┐          ┌─────────────┐
-│                    │          │              │          │             │
-│                    │          │              │          │             │
-│                    │          │              │          │             │
-│       specs        ├─────HTTP─┤   newtron    │     HTTP─┤   newtrun   │
-│                    │     │    │              │     │    │             │
-│                    │     │    │              │     │    │             │
-│                    │     │    │              │     │    │             │
-└──────────┬─────────┘     │    └──────────────┘     │    └─────────────┘
-           │               │                         │
-           ├───────────────┴────────────┬────────────┘
-           ▼                            ▼
-┌────────────────────┐          ┌──────────────┐
-│                    │          │              │
-│                    │          │              │
-│                    │          │              │
-│   newtron-server   │          │   newtlab    │
-│                    │          │              │
-│                    │          │              │
-│                    │          │              │
-└──────────┬─────────┘          └───────┬──────┘
-           │                            │
-       SSH+Redis                        │
-           ▼                      deploy, wire
-┌────────────────────┐                  │
-│                    │                  │
-│                    │                  │
-│                    │                  │
-│       SONiC        │◄─────────────────┘
-│                    │
-│                    │
-│                    │
-└────────────────────┘
+┌──────────────┐          ┌────────────────────┐          ┌─────────────┐
+│              │          │                    │          │             │
+│              │          │                    │          │             │
+│              │          │                    │          │             │
+│    specs     ├─────┐    │      newtron       │          │   newtrun   │
+│              │     │    │                    │          │             │
+│              │     │    │                    │          │             │
+│              │     │    │                    │          │             │
+└───────┬──────┘     │    └──────────┬─────────┘          └──────┬──────┘
+        │            │               │                           │
+        │            └─────────────HTTP                          │
+        ▼                            ▼                           │
+┌──────────────┐          ┌────────────────────┐               HTTP
+│              │          │                    │                 │
+│              │          │                    │                 │
+│              │          │                    │                 │
+│   newtlab    │          │   newtron-server   │◄────────────────┘
+│              │          │                    │
+│              │          │                    │
+│              │          │                    │
+└───────┬──────┘          └──────────┬─────────┘
+        │                            │
+  deploy, wire                       │
+        ▼                        SSH+Redis
+┌──────────────┐                     │
+│              │                     │
+│              │                     │
+│              │                     │
+│    SONiC     │◄────────────────────┘
+│              │
+│              │
+│              │
+└──────────────┘
 ```
 
 Both paths converge on the same SONiC devices. newtlab creates QEMU VMs running SONiC and wires them with newtlink; newtron-server connects to those same VMs via SSH-tunneled Redis. You can also point newtron-server at hardware switches or third-party labs — newtlab is only needed for local virtual topologies.
