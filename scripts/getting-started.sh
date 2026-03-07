@@ -191,9 +191,36 @@ echo -e " ${GREEN}Server started${RESET} (PID $SERVER_PID)"
 
 pause
 
-# ─── Step 5: Dry-run a service operation ──────────────────────────────────────
+# ─── Step 5: Look at the specs ────────────────────────────────────────────────
 
-header "Step 5: Dry-run a service operation"
+header "Step 5: Look at the specs"
+
+echo " newtron reads two kinds of spec files:"
+echo ""
+echo -e " ${BOLD}network.json${RESET} — defines services, VPNs, filters, and routing policy."
+echo " This one defines a single service called 'transit':"
+echo ""
+echo -e " ${DIM}$SPEC_DIR/network.json${RESET}"
+cat "$SPEC_DIR/network.json" | sed 's/^/   /'
+echo ""
+echo " The service type is 'routed' (L3 BGP peering). 'peer_as: request'"
+echo " means the caller provides the peer AS number at apply time."
+echo ""
+echo -e " ${BOLD}profiles/switch1.json${RESET} — per-device identity: ASN, loopback IP,"
+echo " platform, and SSH credentials."
+echo ""
+echo -e " ${DIM}$SPEC_DIR/profiles/switch1.json${RESET}"
+cat "$SPEC_DIR/profiles/switch1.json" | sed 's/^/   /'
+echo ""
+echo " When you apply the transit service, newtron combines these:"
+echo " the service spec says 'BGP peer', the profile says 'AS 65001',"
+echo " and the CLI provides the interface IP and peer AS."
+
+pause
+
+# ─── Step 6: Dry-run a service operation ──────────────────────────────────────
+
+header "Step 6: Dry-run a service operation"
 
 echo " Apply a transit service to Ethernet0. By default, newtron shows"
 echo " what it would write to CONFIG_DB — every table, key, and field."
@@ -215,9 +242,9 @@ echo " the device's AS (65001), the interface IP, and the service spec."
 
 pause
 
-# ─── Step 6: Execute ──────────────────────────────────────────────────────────
+# ─── Step 7: Execute ──────────────────────────────────────────────────────────
 
-header "Step 6: Execute"
+header "Step 7: Execute"
 
 echo " Add -x to execute. newtron writes to CONFIG_DB via Redis pipeline,"
 echo " re-reads every entry to verify, then saves the config."
@@ -228,9 +255,9 @@ run_cmd bin/newtron switch1 service apply Ethernet0 transit \
 
 pause
 
-# ─── Step 7: Run the test suite ───────────────────────────────────────────────
+# ─── Step 8: Run the test suite ───────────────────────────────────────────────
 
-header "Step 7: Run the test suite"
+header "Step 8: Run the test suite"
 
 echo " newtrun runs YAML test scenarios against the server. The 1node-basic"
 echo " suite tests service apply/remove, VLAN/VRF lifecycle, and cleanup"
@@ -242,9 +269,9 @@ run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
 
 pause
 
-# ─── Step 8: Tear down ────────────────────────────────────────────────────────
+# ─── Step 9: Tear down ────────────────────────────────────────────────────────
 
-header "Step 8: Tear down"
+header "Step 9: Tear down"
 
 echo " Stop the VM and clean up."
 echo ""
