@@ -355,6 +355,42 @@ steps:
       exists: false
 
   # =========================================================================
+  # BGP_GLOBALS — VRF-level BGP globals from bind-ipvpn
+  # Forward: bindIpvpn → CreateBGPGlobals for VRF
+  # Reverse: RemoveService → unbindIpvpn → deleteBGPGlobals for VRF
+  # =========================================================================
+
+  - name: no-bgp-globals-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS
+    key: Vrf_irb
+    expect:
+      exists: false
+
+  # =========================================================================
+  # BGP_GLOBALS_AF — VRF-level address-family from bind-ipvpn
+  # Forward: bindIpvpn → CreateBGPGlobalsAF for VRF (ipv4_unicast + l2vpn_evpn)
+  # Reverse: RemoveService → unbindIpvpn → delete AF entries
+  # =========================================================================
+
+  - name: no-bgp-af-vrf-irb-ipv4
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_irb|ipv4_unicast"
+    expect:
+      exists: false
+
+  - name: no-bgp-af-vrf-irb-l2vpn
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_irb|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # =========================================================================
   # BGP_GLOBALS_EVPN_RT — VRF route targets for EVPN
   # Forward: bindIpvpn → createBgpEvpnRT
   # Reverse: RemoveService → unbindIpvpn → deleteBgpEvpnRT
@@ -442,7 +478,16 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: ROUTE_REDISTRIBUTE
-    key: "default|connected|ipv4"
+    key: "default|connected|bgp|ipv4"
+    expect:
+      exists: false
+
+  # VRF-level redistribute from bind-ipvpn (overlay-irb services)
+  - name: no-route-redistribute-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: ROUTE_REDISTRIBUTE
+    key: "Vrf_irb|connected|bgp|ipv4"
     expect:
       exists: false
 

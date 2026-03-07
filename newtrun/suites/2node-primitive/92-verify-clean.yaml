@@ -57,17 +57,17 @@ steps:
       exists: false
 
   # BGP_GLOBALS_AF
-  - name: verify-no-bgp-af-ipv4-sw1
+  - name: verify-no-bgp-af-ipv4
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
     key: "default|ipv4_unicast"
     expect:
       exists: false
 
-  - name: verify-no-bgp-af-l2vpn-sw1
+  - name: verify-no-bgp-af-l2vpn
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
     key: "default|l2vpn_evpn"
     expect:
@@ -107,9 +107,9 @@ steps:
       exists: false
 
   # ROUTE_REDISTRIBUTE
-  - name: verify-no-redistribute-sw1
+  - name: verify-no-redistribute
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: ROUTE_REDISTRIBUTE
     key: "default|connected|bgp|ipv4"
     expect:
@@ -149,7 +149,23 @@ steps:
     expect:
       exists: false
 
-  # INTERFACE (Ethernet0, Ethernet1 base + IP sub-entries)
+  # INTERFACE (base entries + IP sub-entries)
+  - name: verify-no-eth0-base
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: INTERFACE
+    key: Ethernet0
+    expect:
+      exists: false
+
+  - name: verify-no-eth1-base
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: INTERFACE
+    key: Ethernet1
+    expect:
+      exists: false
+
   - name: verify-no-eth0-ip-sw1
     action: verify-config-db
     devices: [switch1]
@@ -281,17 +297,17 @@ steps:
     expect:
       exists: false
 
-  - name: verify-no-vlan300-intf-sw1
+  - name: verify-no-vlan300-intf
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: VLAN_INTERFACE
     key: Vlan300
     expect:
       exists: false
 
-  - name: verify-no-vlan400-intf-sw1
+  - name: verify-no-vlan400-intf
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: VLAN_INTERFACE
     key: Vlan400
     expect:
@@ -348,17 +364,17 @@ steps:
       exists: false
 
   # VXLAN_TUNNEL_MAP
-  - name: verify-no-tunnel-map-300-sw1
+  - name: verify-no-tunnel-map-300
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_50300_Vlan300"
     expect:
       exists: false
 
-  - name: verify-no-tunnel-map-400-sw1
+  - name: verify-no-tunnel-map-400
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: VXLAN_TUNNEL_MAP
     key: "vtep1|map_50400_Vlan400"
     expect:
@@ -367,7 +383,7 @@ steps:
   # SUPPRESS_VLAN_NEIGH
   - name: verify-no-suppress-300
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: SUPPRESS_VLAN_NEIGH
     key: Vlan300
     expect:
@@ -375,7 +391,7 @@ steps:
 
   - name: verify-no-suppress-400
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: SUPPRESS_VLAN_NEIGH
     key: Vlan400
     expect:
@@ -384,16 +400,68 @@ steps:
   # BGP_GLOBALS_EVPN_RT
   - name: verify-no-evpn-rt-irb
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: BGP_GLOBALS_EVPN_RT
     key: "Vrf_irb|L2VPN_EVPN|65000:50002"
+    expect:
+      exists: false
+
+  # BGP_EVPN_VNI (from bind-macvpn and service-lifecycle)
+  - name: verify-no-bgp-evpn-vni-50300
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_EVPN_VNI
+    key: "default|50300"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-evpn-vni-50400
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_EVPN_VNI
+    key: "default|50400"
+    expect:
+      exists: false
+
+  # BGP_GLOBALS (VRF-level from bind-ipvpn)
+  - name: verify-no-bgp-globals-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS
+    key: Vrf_irb
+    expect:
+      exists: false
+
+  # BGP_GLOBALS_AF (VRF-level from bind-ipvpn)
+  - name: verify-no-bgp-af-vrf-irb-ipv4
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_irb|ipv4_unicast"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-af-vrf-irb-l2vpn
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_irb|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # ROUTE_REDISTRIBUTE (VRF-level from bind-ipvpn)
+  - name: verify-no-redistribute-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: ROUTE_REDISTRIBUTE
+    key: "Vrf_irb|connected|bgp|ipv4"
     expect:
       exists: false
 
   # SAG_GLOBAL
   - name: verify-no-sag-global
     action: verify-config-db
-    devices: [switch1]
+    devices: [switch1, switch2]
     table: SAG_GLOBAL
     key: IPv4
     expect:
