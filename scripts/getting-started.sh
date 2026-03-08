@@ -42,9 +42,20 @@ header() {
 }
 
 run_cmd() {
-    echo -e " ${CYAN}Running:${RESET} $*"
+    echo -e " ${CYAN}\$${RESET} $*"
     echo ""
     "$@" 2> >(grep -v "Could not initialize audit" >&2)
+}
+
+# run_ssh executes a command on switch1 via SSH and displays it
+run_ssh() {
+    local desc="$1"
+    shift
+    echo -e " ${DIM}# $desc${RESET}"
+    echo -e " ${CYAN}\$${RESET} ssh switch1 \"$*\""
+    sshpass -p YourPaSsWoRd ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR -p 13000 admin@127.0.0.1 "$@" 2>/dev/null | sed 's/^/   /' || true
+    echo ""
 }
 
 pause() {
@@ -68,17 +79,37 @@ fi
 echo ""
 echo -e "${BOLD}newtron — Getting Started${RESET}"
 echo ""
-echo " This script walks you through deploying a single SONiC virtual switch"
-echo " and using newtron to configure it. Each step explains what it does,"
-echo " then runs the command."
+echo " newtron is a programmatic configuration system for SONiC switches."
+echo ""
+echo " On a traditional SONiC switch, you configure things with CLI commands"
+echo " (config vlan add, config interface ip add, vtysh) or by editing"
+echo " CONFIG_DB directly. That works for one switch. For a fleet of switches"
+echo " with consistent services, you need something that can:"
+echo ""
+echo "   1. Express network intent as specs (\"transit peering on this port\")"
+echo "   2. Translate intent to device config (CONFIG_DB entries)"
+echo "   3. Validate before writing (catch bad values before they hit Redis)"
+echo "   4. Verify after writing (re-read every entry to confirm)"
+echo "   5. Clean up completely when removing (no orphaned config)"
+echo ""
+echo " That's what newtron does. This walkthrough shows the full cycle on"
+echo " a single virtual SONiC switch."
+echo ""
+echo -e " ${DIM}Prerequisites: Linux x86_64 with KVM, Go, make, QEMU, sshpass${RESET}"
+echo -e " ${DIM}Total time: ~10 minutes (mostly waiting for the VM to boot)${RESET}"
+
+pause
 
 # ─── Step 1: Download SONiC image ─────────────────────────────────────────────
 
 header "Step 1: Download SONiC image"
 
-echo " newtron uses QEMU virtual machines running real SONiC software."
-echo " The community sonic-vs image is a free download (~1.2 GB compressed)"
-echo " from the SONiC project's Azure Pipelines build."
+echo " The VM runs real SONiC — the same software stack as production:"
+echo " Redis, FRR, orchagent, syncd, and all the *mgrd daemons."
+echo ""
+echo " The community sonic-vs image uses a virtual switch ASIC (no real"
+echo " hardware), but CONFIG_DB operations and FRR behavior are identical"
+echo " to a physical switch."
 echo ""
 echo -e " Destination: ${BOLD}$IMAGE_PATH${RESET}"
 echo ""
@@ -117,12 +148,10 @@ fi
 
 echo ""
 echo -e " ${YELLOW}Note:${RESET} The community sonic-vs image supports L2/L3 switching, BGP, and"
-echo " CONFIG_DB operations — enough for this walkthrough and the 1node topology."
+echo " CONFIG_DB operations — enough for this walkthrough."
 echo ""
-echo " For EVPN VXLAN overlay (multi-switch fabrics with VXLAN tunneling), you"
-echo " need a dataplane-capable image:"
-echo "   - Cisco NGDP (Silicon One virtual PFE) — available via Cisco engagement"
-echo "   - SONiC VPP — community project, VXLAN support in progress"
+echo " For EVPN VXLAN overlay (multi-switch fabrics with VXLAN tunneling),"
+echo " you need a dataplane-capable image like Cisco Silicon One (NGDP)."
 
 pause
 
@@ -130,14 +159,20 @@ pause
 
 header "Step 2: Build"
 
-echo " Compile the five newtron binaries into bin/."
+echo " newtron has five binaries, each with a distinct role:"
+echo ""
+echo -e "   ${BOLD}newtron${RESET}        CLI — the command you type to configure switches"
+echo -e "   ${BOLD}newtron-server${RESET} API server — manages SSH connections to switches,"
+echo "                    loads specs, validates and applies config"
+echo -e "   ${BOLD}newtlab${RESET}        Lab manager — creates/destroys QEMU VMs, wires"
+echo "                    virtual links between them"
+echo -e "   ${BOLD}newtrun${RESET}        Test runner — executes YAML test scenarios"
+echo "                    against a deployed topology"
+echo -e "   ${BOLD}newtlink${RESET}       Link agent — runs on each host to manage virtual"
+echo "                    Ethernet bridges between VMs"
 echo ""
 
 run_cmd make build
-
-echo ""
-echo " Binaries:"
-ls -1 bin/ | sed 's/^/   /'
 
 pause
 
@@ -145,12 +180,19 @@ pause
 
 header "Step 3: Deploy the lab"
 
-echo " newtlab creates a QEMU virtual machine running SONiC and wires"
-echo " it according to the topology in $SPEC_DIR/."
+echo " newtlab boots a QEMU VM running SONiC and wires it to the host."
 echo ""
-echo " This starts one VM (switch1) with 2 vCPUs, 4 GB RAM."
-echo " Boot takes 2–5 minutes depending on your machine."
+echo " Inside the VM, the full SONiC stack starts up:"
+echo "   - Redis (database container) — CONFIG_DB, APP_DB, ASIC_DB, STATE_DB"
+echo "   - FRR via frrcfgd (bgp container) — watches CONFIG_DB for BGP config"
+echo "   - intfmgrd, vrfmgrd (swss container) — configure kernel interfaces"
+echo "   - orchagent (swss container) — programs the virtual ASIC"
+echo ""
+echo " This is identical to what runs on a physical switch. The only"
+echo " difference is the ASIC is simulated."
+echo ""
 echo " The --monitor flag shows live status during deployment."
+echo -e " ${DIM}Boot takes 2-5 minutes depending on your machine.${RESET}"
 
 pause
 
@@ -162,21 +204,32 @@ pause
 
 header "Step 4: Start newtron-server"
 
-echo " The server loads specs from the topology directory and exposes"
-echo " all operations as HTTP endpoints on port 8080."
+echo " The architecture is:"
 echo ""
-echo " newtron (the CLI) sends HTTP requests to this server."
+echo "   You type:  bin/newtron switch1 service apply ..."
+echo "        |"
+echo "        v"
+echo "   newtron CLI  --(HTTP)--> newtron-server  --(SSH tunnel)--> Redis"
+echo "                               |                                |"
+echo "                          loads specs,                    CONFIG_DB on"
+echo "                          validates,                      the switch"
+echo "                          computes entries"
 echo ""
+echo " The server manages SSH connections (tunneled to Redis on port 6379)"
+echo " and holds the spec files that define your network's services."
+echo " The CLI is stateless — it sends requests and displays results."
 
 # Kill any leftover newtron-server from a previous run
 existing_pid=$(pgrep -f "newtron-server.*--spec-dir" || true)
 if [ -n "$existing_pid" ]; then
+    echo ""
     echo -e " ${DIM}Stopping leftover newtron-server (PID $existing_pid)...${RESET}"
     kill "$existing_pid" 2>/dev/null || true
     sleep 1
 fi
 
-echo -e " ${CYAN}Running:${RESET} bin/newtron-server --spec-dir $SPEC_DIR &"
+echo ""
+echo -e " ${CYAN}\$${RESET} bin/newtron-server --spec-dir $SPEC_DIR &"
 echo ""
 bin/newtron-server --spec-dir "$SPEC_DIR" > /tmp/newtron-server.log 2>&1 &
 SERVER_PID=$!
@@ -194,61 +247,73 @@ pause
 
 # ─── Step 5: Look at the specs ────────────────────────────────────────────────
 
-header "Step 5: Look at the specs"
+header "Step 5: Understand the spec files"
 
-echo " newtron reads two kinds of spec files:"
+echo " newtron separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
 echo ""
-echo -e " ${BOLD}network.json${RESET} — defines services, VPNs, filters, and routing policy."
-echo " This one defines a single service called 'transit':"
+echo -e " ${BOLD}network.json${RESET} defines services — abstract descriptions of what"
+echo " a port should do. This one defines a transit peering service:"
 echo ""
 echo -e " ${DIM}$SPEC_DIR/network.json${RESET}"
 cat "$SPEC_DIR/network.json" | sed 's/^/   /'
 echo ""
-echo " The service type is 'routed' (L3 BGP peering). 'peer_as: request'"
-echo " means the caller provides the peer AS number at apply time."
+echo " 'routed' means L3 — an IP address on the interface with a BGP peer."
+echo " 'peer_as: request' means the operator provides the peer AS at apply"
+echo " time (it varies per customer/upstream)."
 echo ""
-echo -e " ${BOLD}profiles/switch1.json${RESET} — per-device identity: ASN, loopback IP,"
-echo " platform, and SSH credentials."
+echo " Other service types: 'bridged' (L2 VLAN access), 'irb' (L2+L3 with"
+echo " SVI), 'evpn-bridged' (VXLAN L2), 'evpn-irb' (VXLAN L2+L3)."
+echo ""
+echo -e " ${BOLD}profiles/switch1.json${RESET} identifies the device — its ASN, loopback,"
+echo " management IP, and credentials:"
 echo ""
 echo -e " ${DIM}$SPEC_DIR/profiles/switch1.json${RESET}"
 cat "$SPEC_DIR/profiles/switch1.json" | sed 's/^/   /'
 echo ""
-echo " When you apply the transit service, newtron combines these:"
-echo " the service spec says 'BGP peer', the profile says 'AS 65001',"
-echo " and the CLI provides the interface IP and peer AS."
+echo " When you say 'apply transit to Ethernet0 with IP 10.1.0.0/31 and"
+echo " peer AS 65002', newtron combines the service spec + device profile"
+echo " + your parameters to compute the exact CONFIG_DB entries needed."
 
 pause
 
 # ─── Step 6: Dry-run a service operation ──────────────────────────────────────
 
-header "Step 6: Dry-run a service operation"
+header "Step 6: Preview — see what newtron would write"
 
-echo " Apply a transit service to Ethernet0. By default, newtron shows"
-echo " what it would write to CONFIG_DB — every table, key, and field."
-echo ""
-echo " No changes are made to the device in dry-run mode."
+echo " Let's apply a transit service to Ethernet0. Without -x, newtron"
+echo " computes the CONFIG_DB entries but doesn't write them — a dry run."
 echo ""
 
 run_cmd bin/newtron switch1 service apply Ethernet0 transit \
     --ip 10.1.0.0/31 --peer-as 65002
 
 echo ""
-echo " Each entry names a real CONFIG_DB table and key:"
-echo "   INTERFACE|Ethernet0           → enables IP routing on the port"
-echo "   BGP_NEIGHBOR|default|10.1.0.1 → frrcfgd subscribes to this and"
-echo "                                   configures FRR with a BGP peer"
+echo " Read the output top to bottom — newtron is telling you exactly what"
+echo " it will write to CONFIG_DB:"
 echo ""
-echo " There is no template engine — newtron computed these entries using"
-echo " the device's AS (65001), the interface IP, and the service spec."
+echo "   INTERFACE|Ethernet0              Enable IP routing on this port"
+echo "   INTERFACE|Ethernet0|10.1.0.0/31  Assign the /31 address"
+echo "   BGP_NEIGHBOR|default|10.1.0.1    Create a BGP peer at 10.1.0.1"
+echo "                                    (the other end of the /31)"
+echo "   BGP_NEIGHBOR_AF|...|ipv4_unicast Enable IPv4 unicast for the peer"
+echo "   NEWTRON_SERVICE_BINDING|Ethernet0  Record what was applied (so"
+echo "                                    'remove' knows what to clean up)"
+echo ""
+echo " These are the same entries you'd create manually with 'config interface'"
+echo " and 'vtysh' commands — but computed from the spec, validated against"
+echo " SONiC's YANG schema, and applied atomically."
 
 pause
 
 # ─── Step 7: Execute ──────────────────────────────────────────────────────────
 
-header "Step 7: Execute"
+header "Step 7: Apply — write to the switch"
 
-echo " Add -x to execute. newtron writes to CONFIG_DB via Redis pipeline,"
-echo " re-reads every entry to verify, then saves the config."
+echo " Add -x to execute. newtron will:"
+echo "   1. Validate all entries against SONiC YANG constraints"
+echo "   2. Write to CONFIG_DB via Redis pipeline (atomic batch)"
+echo "   3. Re-read every entry to verify it was written correctly"
+echo "   4. Save the running config to disk (config save)"
 echo ""
 
 run_cmd bin/newtron switch1 service apply Ethernet0 transit \
@@ -256,21 +321,79 @@ run_cmd bin/newtron switch1 service apply Ethernet0 transit \
 
 pause
 
-echo " Now remove the service so the device is clean for the test suite."
+echo " The config is now live on the switch. SONiC daemons have already"
+echo " reacted to the CONFIG_DB changes:"
+echo ""
+echo "   - frrcfgd saw BGP_NEIGHBOR → configured FRR with the BGP peer"
+echo "   - intfmgrd saw INTERFACE → configured the kernel interface + IP"
+echo ""
+echo " Let's look at the actual device state:"
+echo ""
+
+run_ssh "CONFIG_DB entry for the BGP peer (what newtron wrote to Redis)" \
+    "redis-cli -n 4 hgetall 'BGP_NEIGHBOR|default|10.1.0.1'"
+
+run_ssh "Interface IP (intfmgrd processed the CONFIG_DB entry)" \
+    "ip addr show Ethernet0 | grep 'inet ' || echo 'IP not yet assigned (intfmgrd still processing)'"
+
+run_ssh "BGP neighbor state (frrcfgd configured FRR from CONFIG_DB)" \
+    "vtysh -c 'show bgp neighbors 10.1.0.1' 2>/dev/null | head -3 || echo 'FRR still initializing'"
+
+echo " The BGP peer shows 'Connect' or 'Active' — it's trying to reach"
+echo " 10.1.0.1 (which doesn't exist in this single-switch lab). On a real"
+echo " network with a peer at that address, the session would come up."
+
+pause
+
+# ─── Step 8: Remove — clean teardown ─────────────────────────────────────────
+
+header "Step 8: Remove — operational symmetry"
+
+echo " Every apply has an equal and opposite remove. This is critical for"
+echo " network operations — orphaned config (stale BGP peers, leftover IPs,"
+echo " ghost VLAN members) is a constant source of outages."
+echo ""
+echo " newtron reads the NEWTRON_SERVICE_BINDING to know exactly what was"
+echo " applied, then removes every entry in reverse dependency order:"
+echo " BGP neighbor AF first, then BGP neighbor, then interface IP, then"
+echo " the interface routing config, then the binding record itself."
 echo ""
 
 run_cmd bin/newtron switch1 service remove Ethernet0 -x
 
 pause
 
-# ─── Step 8: Run the test suite ───────────────────────────────────────────────
+echo " Verify the switch is clean:"
+echo ""
 
-header "Step 8: Run the test suite"
+run_ssh "BGP neighbor entry — should be empty (deleted)" \
+    "redis-cli -n 4 exists 'BGP_NEIGHBOR|default|10.1.0.1' | sed 's/0/(gone)/'"
 
-echo " newtrun runs YAML test scenarios against the server. The 1node-basic"
-echo " suite tests service apply/remove, VLAN/VRF lifecycle, and cleanup"
-echo " verification — all against the switch you just deployed."
-echo " The --monitor flag shows a live status dashboard during the run."
+run_ssh "Interface IP — should be empty (removed)" \
+    "ip addr show Ethernet0 | grep 'inet ' || echo '(no IPv4 address — clean)'"
+
+echo " Every entry that 'apply' created has been removed. The switch is"
+echo " back to its pre-service state."
+
+pause
+
+# ─── Step 9: Run the test suite ───────────────────────────────────────────────
+
+header "Step 9: Automated testing with newtrun"
+
+echo " newtrun executes YAML test scenarios that exercise the full stack."
+echo " The 1node-basic suite runs 4 scenarios with 25 steps:"
+echo ""
+echo "   1. boot-ssh         Verify the switch is reachable"
+echo "   2. service-lifecycle Apply transit → verify CONFIG_DB → remove → verify clean"
+echo "   3. vlan-vrf          Create VLAN 100, add member, create VRF, tear down"
+echo "   4. verify-clean      Assert zero leftover entries from any test"
+echo ""
+echo " Each step calls newtron-server via HTTP (same API the CLI uses)."
+echo " The verify steps read CONFIG_DB entries and assert expected values."
+echo " The final scenario confirms no test left orphaned config behind."
+echo ""
+echo " The --monitor flag shows a live dashboard as steps execute."
 
 pause
 
@@ -278,11 +401,11 @@ run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
 
 pause
 
-# ─── Step 9: Tear down ────────────────────────────────────────────────────────
+# ─── Step 10: Tear down ──────────────────────────────────────────────────────
 
-header "Step 9: Tear down"
+header "Step 10: Tear down"
 
-echo " Stop the VM and clean up."
+echo " Stop the server and destroy the VM."
 echo ""
 
 # Stop server first
@@ -300,11 +423,31 @@ echo -e "${BOLD}═════════════════════�
 echo -e "${BOLD} Done!${RESET}"
 echo -e "${BOLD}═══════════════════════════════════════════════════════════════${RESET}"
 echo ""
-echo " You've deployed a SONiC switch, applied a service, run the E2E test
- suite, and torn it down."
+echo " What you just did:"
+echo ""
+echo "   1. Booted a real SONiC switch (Redis, FRR, orchagent — all of it)"
+echo "   2. Defined a transit peering service as a spec"
+echo "   3. Applied it to Ethernet0 — newtron computed the CONFIG_DB entries,"
+echo "      validated them against YANG constraints, and wrote them atomically"
+echo "   4. Saw the SONiC daemons react in real time (FRR configured the peer,"
+echo "      intfmgrd set up the interface)"
+echo "   5. Removed the service — every entry cleaned up, zero orphans"
+echo "   6. Ran automated tests that verify the whole lifecycle"
 echo ""
 echo " Next steps:"
-echo "   - Deploy the 2node topology for multi-switch testing"
-echo "   - Run the E2E test suite: bin/newtrun start --dir newtrun/suites/2node-primitive"
-echo "   - Read the docs: docs/newtron/howto.md, docs/newtlab/howto.md"
+echo ""
+echo "   Multi-switch fabric:"
+echo "     bin/newtlab deploy 2node"
+echo "     bin/newtrun start 2node-primitive --server http://localhost:8080"
+echo "     (20 scenarios: BGP, EVPN, VLANs, VRFs, ACLs, QoS, PortChannels)"
+echo ""
+echo "   EVPN dataplane (requires Cisco Silicon One image):"
+echo "     bin/newtlab deploy 3node"
+echo "     bin/newtrun start 3node-dataplane --server http://localhost:8080"
+echo "     (L3 routing + EVPN L2 bridged + IRB with host-to-host ping)"
+echo ""
+echo "   Documentation:"
+echo "     docs/newtron/howto.md    Operational patterns and provisioning flow"
+echo "     docs/newtlab/howto.md    Deploying topologies, troubleshooting"
+echo "     docs/newtrun/howto.md    Writing test scenarios"
 echo ""
