@@ -1580,7 +1580,197 @@ infrastructure changes.**
 
 ---
 
-## 30. Summary
+## 30. YANG-Derived Schema Validation — Trust the Spec, Not the Developer
+
+CONFIG_DB accepts anything. Write `VLAN|Vlan99999` with `vlanid: -7` and
+Redis stores it without complaint. SONiC daemons downstream — orchagent,
+vlanmgrd, bgpcfgd — respond to these entries with silent failures,
+crashes, or undefined behavior. The problem is not malice; it's typos,
+off-by-one ranges, and developers writing field names from memory instead
+of checking the YANG model.
+
+newtron solves this with a static schema table in
+`pkg/newtron/device/sonic/schema.go` that encodes per-table, per-field
+constraints derived from the SONiC YANG models. Every ChangeSet passes
+through `Validate()` before any Redis write:
+
+```go
+func (cs *ChangeSet) Apply(n *Node) error {
+    // ... precondition checks (business logic: does the resource exist?) ...
+    if err := cs.Validate(); err != nil {
+        return err  // schema violations → no writes at all
+    }
+    // ... Redis writes ...
+}
+```
+
+This is a different layer from preconditions. Preconditions enforce
+business logic ("does this VRF exist?", "is this interface already
+bound?"). Schema validation enforces data format ("is this ASN in the
+range 1–4294967295?", "is this a valid MAC address?", "does this table
+even exist?").
+
+The schema is **fail-closed**:
+
+- **Unknown table → error.** Every table newtron writes must have a
+  schema entry. A developer who adds a new `configDB.Set("NEW_TABLE", ...)`
+  in `*_ops.go` will see validation failures until they add `NEW_TABLE`
+  to `schema.go`.
+
+- **Unknown field → error.** Every field newtron writes must be declared.
+  This catches misspelled field names at the point of write, not when
+  a daemon silently ignores the entry 30 seconds later.
+
+- **Deletes validate key format only.** A delete doesn't need field
+  validation — it's removing data, not writing it. But the key must
+  still match the expected pattern.
+
+The constraints come from SONiC YANG models, stored as a reference in
+`pkg/newtron/device/sonic/yang/constraints.md`. Each constraint in
+`schema.go` carries a `// YANG:` comment citing its source. When newtron
+diverges from YANG (e.g., writing `nexthop_unchanged` instead of YANG's
+`unchanged_nexthop`), the deviation is documented.
+
+The maintenance contract:
+
+1. **Upgrading SONiC buildimage** → re-fetch YANG files, diff against
+   `constraints.md`, update `schema.go` for any changed ranges, enums,
+   or field names.
+2. **Adding a new CONFIG_DB table** → fetch its YANG model, extract
+   constraints, add to both `constraints.md` and `schema.go`.
+3. **A daemon rejects a CONFIG_DB entry that passed validation** → the
+   constraint table is missing or wrong; fix it.
+
+**YANG is the authority. The developer's intuition about what values are
+valid is not. When schema.go and the YANG model disagree, the YANG model
+wins — unless there is a documented, justified deviation.**
+
+---
+
+## 31. Write Ordering and Daemon Settling — Respect the Dependency Chain
+
+CONFIG_DB is a flat key-value store with no referential integrity. Redis
+accepts entries in any order. But the daemons that consume CONFIG_DB
+entries — orchagent, vlanmgrd, vrfmgrd, intfmgrd, bgpcfgd, frrcfgd —
+have implicit ordering requirements derived from the YANG leafref chain.
+Writing entries out of order doesn't cause a Redis error; it causes a
+daemon to silently ignore an entry, crash, or enter an unrecoverable
+state.
+
+### The Dependency Chain
+
+YANG `leafref` declarations define a directed dependency graph. A table
+with a leafref to another table cannot be meaningfully processed until
+the referenced entry exists. The critical chains for newtron:
+
+```
+VLAN  ──→  VLAN_MEMBER  ──→  (interface must exist)
+VLAN  ──→  VLAN_INTERFACE  ──→  VRF (via vrf_name leafref)
+VRF   ──→  BGP_GLOBALS  ──→  BGP_NEIGHBOR  ──→  BGP_NEIGHBOR_AF
+VRF   ──→  INTERFACE (via vrf_name)
+VRF   ──→  BGP_GLOBALS_AF  ──→  ROUTE_REDISTRIBUTE
+VXLAN_TUNNEL  ──→  VXLAN_EVPN_NVO  ──→  VXLAN_TUNNEL_MAP
+ACL_TABLE  ──→  ACL_RULE
+SCHEDULER  ──→  QUEUE (via bracket-ref)
+DSCP_TO_TC_MAP  ──→  PORT_QOS_MAP (via bracket-ref)
+```
+
+Every config function in newtron returns entries in dependency order.
+`service_gen.go` documents this explicitly: "returned slice is ordered
+by table dependency (VLANs before members, VRFs before interfaces,
+etc.)." Forward operations append parents before children; reverse
+operations delete children before parents.
+
+### Structural Ordering, Not Timing Hacks
+
+Write ordering is enforced structurally — by the order entries appear in
+the slice returned by config functions — not by inserting `time.Sleep`
+between writes. This is deliberate:
+
+- Config functions return `[]sonic.Entry` in dependency order. Callers
+  `append()` these slices in the correct sequence.
+- `PipelineSet` sends entries to Redis in slice order via MULTI/EXEC.
+- The ChangeSet `Apply()` loop iterates changes sequentially.
+
+There are no `time.Sleep` calls in the write path. If a developer feels
+the need to add a sleep between CONFIG_DB writes, it means the ordering
+is wrong or the daemon has a bug — both of which deserve investigation,
+not a timing band-aid.
+
+### Daemon Settling Time
+
+Redis accepts entries instantly, but daemons need time to process them.
+When a MULTI/EXEC transaction commits hundreds of entries atomically,
+every subscribed daemon receives a burst of keyspace notifications
+simultaneously. Processing delays vary by daemon and platform:
+
+| Daemon | Operation | Typical Latency | Platform Notes |
+|--------|-----------|-----------------|----------------|
+| vrfmgrd | VRF → kernel netdev | <1s (VPP), 1–5s (CiscoVS) | Writes STATE_DB only on startup path (RCA-041) |
+| intfmgrd | Interface VRF binding | 1–30s (CiscoVS) | Must wait for vrfmgrd to create kernel device (RCA-037) |
+| orchagent | VLAN/VRF/EVPN → SAI | 60–90s (CiscoVS) | Silicon One simulator latency; VPP is faster |
+| bgpcfgd | BGP config → FRR | <1s | Except ASN changes: requires daemon restart (RCA-019) |
+| frrcfgd | VRF VNI → FRR | 1–2s polling | vrf_handler pub/sub broken on CiscoVS; polling fallback |
+
+These latencies matter in two contexts:
+
+1. **Post-provisioning convergence.** After `DeliverComposite` writes
+   the full device config, daemons need time to process everything
+   before the device is operational. newtrun test suites handle this
+   with polling-based health checks (`pollUntil` with configurable
+   timeout and interval), not hardcoded sleeps.
+
+2. **Inter-daemon races.** When two daemons process related entries
+   from the same atomic commit, one may finish before the other has
+   created a prerequisite. RCA-037 documents this: intfmgrd tries to
+   bind an interface to a VRF before vrfmgrd has created the kernel
+   VRF device. The fix is a post-provisioning polling step that
+   verifies kernel state, not a sleep between CONFIG_DB writes.
+
+### Known Race Conditions
+
+Three documented races establish the patterns:
+
+**RCA-037 (VRF binding race):** VLAN + VRF provisioned together →
+intfmgrd processes the INTERFACE entry before vrfmgrd creates the
+kernel VRF device. Race window: 1–30 seconds on CiscoVS. Fix:
+post-provisioning polling step that checks `ip link show type vrf`
+and forces the binding if needed.
+
+**RCA-041 (VRF_TABLE asymmetry):** vrfmgrd writes `VRF_OBJECT_TABLE`
+on runtime notification but only writes `VRF_TABLE` during its startup
+code path. intfmgrd checks `VRF_TABLE` → not found → retries forever.
+Fix: use `config reload` (which restarts all daemons, triggering the
+startup path) instead of selective daemon restarts after provisioning.
+
+**RCA-016 (BGP route staleness):** After parallel device provisioning,
+BGP sessions establish but routes aren't exchanged. Fix: two-stage BGP
+clear — per-device soft clear (both directions) immediately after
+provision, then a global refresh 5 seconds after all devices are
+provisioned.
+
+### The Principle
+
+Write ordering is a compile-time property: config functions encode it
+in the slice they return. Daemon settling is a runtime property: test
+suites verify it with polling, not sleeps.
+
+**When adding a new CONFIG_DB table:**
+
+1. Identify its YANG leafref dependencies — what must exist before it.
+2. Place its entries after the dependency in the config function's
+   return slice.
+3. Place its deletion before the dependency in the reverse function.
+4. If tests reveal a daemon race, document it as an RCA with root
+   cause and workaround. Do not add `time.Sleep` to the write path.
+
+**When a daemon ignores an entry:** The entry was probably written
+before its dependency was processed. Check the ordering chain, not the
+timing.
+
+---
+
+## 32. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1614,3 +1804,5 @@ infrastructure changes.**
 | Public API boundary | Public types expose caller intent; internal types expose implementation; orchestrators are consumers, not insiders |
 | Transparent transport | The transport layer is a mechanical shim; domain logic lives in the public API; new endpoints are additive with zero infrastructure changes |
 | Factory-default preservation | Provisioning merges on top of CONFIG_DB; stale keys are removed but factory defaults (MAC, platform, ports) survive |
+| YANG-derived schema validation | YANG is the authority for value constraints; fail closed on unknown tables and fields; validate every ChangeSet before any Redis write |
+| Write ordering and daemon settling | Config functions encode dependency order in their return slice; daemon settling is verified by polling, never by sleeping in the write path |

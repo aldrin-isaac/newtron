@@ -179,9 +179,20 @@ func (cs *ChangeSet) Preview() string {
 	return sb.String()
 }
 
+// Validate checks all entries in the ChangeSet against the CONFIG_DB schema.
+// Returns an error listing all violations. Called by Apply() before any writes.
+// Can also be called independently for dry-run / preview validation.
+func (cs *ChangeSet) Validate() error {
+	return sonic.ValidateChanges(cs.Changes)
+}
+
 // Apply writes the changes to the device's config_db via Redis.
 func (cs *ChangeSet) Apply(n *Node) error {
 	if err := n.precondition("apply-changeset", cs.Operation).Result(); err != nil {
+		return err
+	}
+
+	if err := cs.Validate(); err != nil {
 		return err
 	}
 

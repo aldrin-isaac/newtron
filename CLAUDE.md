@@ -329,6 +329,65 @@ This has two consequences:
   deleted". The apply sequence handles intermediate state; the verifier only cares
   about the end result.
 
+## CONFIG_DB Schema Validation (YANG-Derived)
+
+Every CONFIG_DB write goes through `ChangeSet.Validate()` before reaching Redis.
+The schema is defined in `pkg/newtron/device/sonic/schema.go`, with constraints
+derived from SONiC YANG models (`sonic-buildimage/src/sonic-yang-models/yang-models/`).
+The YANG reference is stored in `pkg/newtron/device/sonic/yang/constraints.md`.
+
+Rules:
+
+- **Fail closed.** Unknown tables and unknown fields are validation errors. When
+  adding a new CONFIG_DB write in `*_ops.go`, you MUST also add the table/field
+  to `schema.go` — tests will fail until you do.
+- **YANG is the authority for value constraints.** Ranges, enums, and patterns in
+  `schema.go` must match the SONiC YANG model. When they diverge (e.g., newtron
+  writes `"nexthop_unchanged"` but YANG defines `unchanged_nexthop`), document
+  the deviation with a comment explaining why.
+- **Cross-check on upgrade.** When upgrading the SONiC buildimage, re-fetch the
+  YANG files, diff against `yang/constraints.md`, and update `schema.go` for
+  any changes to ranges, enums, or field names.
+- **Validate values AND dependencies.** Field-level validation (type, range, enum)
+  is implemented. Dependency validation (e.g., YANG `must` statements like
+  "max_threshold >= min_threshold") should be added to `schema.go` as the
+  relevant tables are exercised in production.
+- **Tables without YANG models** (NEWTRON_SERVICE_BINDING, SAG_GLOBAL,
+  SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI) derive constraints from newtron usage
+  patterns. Document this in the schema entry comment.
+
+When adding a new CONFIG_DB table or field:
+1. Fetch the YANG model: find the `.yang` file in `sonic-yang-models/yang-models/`
+2. Extract the constraint (type, range, enum, pattern, mandatory flag)
+3. Add to `schema.go` with a `// YANG:` comment citing the source
+4. Update `yang/constraints.md` with the new table/field
+5. Add test cases in `schema_test.go`
+
+## CONFIG_DB Write Ordering and Daemon Settling
+
+YANG `leafref` declarations define a dependency graph between CONFIG_DB tables.
+Config functions must return entries in dependency order (parents before children).
+Reverse operations must delete in the opposite order (children before parents).
+
+Key dependency chains:
+- VLAN → VLAN_MEMBER, VLAN_INTERFACE
+- VRF → INTERFACE (vrf_name), BGP_GLOBALS → BGP_NEIGHBOR → BGP_NEIGHBOR_AF
+- VXLAN_TUNNEL → VXLAN_EVPN_NVO → VXLAN_TUNNEL_MAP
+- ACL_TABLE → ACL_RULE
+- DSCP_TO_TC_MAP, SCHEDULER → PORT_QOS_MAP, QUEUE (via bracket-ref)
+
+Rules:
+- **Ordering is structural.** Encode dependency order in the config function's
+  return slice. Never use `time.Sleep` between CONFIG_DB writes.
+- **Daemon settling is verified by polling.** After provisioning, daemons need
+  time to process entries. Use `pollUntil` with configurable timeout/interval
+  in test suites, not hardcoded sleeps.
+- **Document daemon races as RCAs.** When a daemon ignores an entry because a
+  prerequisite wasn't ready, the root cause is a daemon race — document it in
+  `docs/rca/` with workaround and resolution path. See RCA-037, RCA-041, RCA-016.
+- **When adding a new table:** identify its leafref parents, place entries after
+  them in config functions, place deletions before them in reverse functions.
+
 ## Allowed Commands
 
 These are routine project commands that do not require confirmation:

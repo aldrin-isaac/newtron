@@ -1,9 +1,9 @@
 {
-  "mgmt_ip": "127.0.0.1",
-  "loopback_ip": "10.0.0.1",
-  "zone": "amer",
-  "platform": "sonic-vs",
-  "ssh_user": "admin",
-  "ssh_pass": "YourPaSsWoRd",
-  "underlay_asn": 65001
+    "mgmt_ip": "127.0.0.1",
+    "loopback_ip": "10.0.0.1",
+    "zone": "amer",
+    "platform": "sonic-vs",
+    "ssh_user": "admin",
+    "ssh_pass": "YourPaSsWoRd",
+    "underlay_asn": 65001
 }

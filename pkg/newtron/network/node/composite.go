@@ -160,6 +160,13 @@ func (n *Node) DeliverComposite(composite *CompositeConfig, mode CompositeMode) 
 		return nil, err
 	}
 
+	// Schema validation: check all entries against YANG-derived constraints
+	// before any Redis writes. Same principle as ChangeSet.Apply() calling
+	// Validate(), but for the composite delivery path.
+	if err := sonic.ValidateChanges(composite.ToConfigChanges()); err != nil {
+		return nil, fmt.Errorf("composite schema validation failed: %w", err)
+	}
+
 	result := &CompositeDeliveryResult{Mode: mode}
 	changes := composite.ToEntries()
 

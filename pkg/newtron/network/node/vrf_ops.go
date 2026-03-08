@@ -295,6 +295,9 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs := NewChangeSet(n.name, "device.unbind-ipvpn")
 
 	// Clear VRF|vni (standard SONiC: clear L3VNI binding) — this is a modify, not delete.
+	// Write "" (SONiC convention for field clear). vrfmgrd's stoul("") throws an
+	// exception and skips the entry, which is correct when the VRF is about to be
+	// deleted — avoids a race between explicit L3VNI unbind and VRF deletion.
 	cs.Update("VRF", vrfName, map[string]string{
 		"vni": "",
 	})
