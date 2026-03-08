@@ -249,7 +249,7 @@ pause
 
 header "Step 5: Understand the spec files"
 
-echo " newtron separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
+echo -e " newtron separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
 echo ""
 echo -e " ${BOLD}network.json${RESET} defines services — abstract descriptions of what"
 echo " a port should do. This one defines a transit peering service:"
