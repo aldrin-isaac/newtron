@@ -35,8 +35,11 @@ newtron uses — the YANG models define additional fields not shown here.
 ## VRF (sonic-vrf.yang)
 
 **VRF_LIST**
-- Key: `name` — pattern `Vrf[a-zA-Z0-9_-]+` (note: starts with "Vrf")
-- `vni`: uint32, range 0..16777215, default 0
+- Key: `name` — YANG pattern `Vrf[a-zA-Z0-9_-]+`, but SONiC CLI and vrfmgrd
+  accept arbitrary names (e.g., `CUSTOMER`, `Vrf_irb`). newtron schema uses
+  `^[a-zA-Z][a-zA-Z0-9_-]*$`.
+- `vni`: uint32, range 0..16777215, default 0. AllowEmpty: `""` clears L3VNI
+  (vrfmgrd's `stoul("")` throws exception and skips the entry).
 - `fallback`: boolean, default false
 
 ## BGP_GLOBALS (sonic-bgp-global.yang)
@@ -102,7 +105,7 @@ standard YANG model. Constraints are derived from newtron usage patterns.
 
 **DEVICE_METADATA_LIST**
 - Key: `localhost` (singleton)
-- `bgp_asn`: inet:as-number (uint32)
+- `bgp_asn`: inet:as-number (uint32). AllowEmpty: `""` clears ASN.
 - `type`: string, length 1..255, pattern matching ~24 device types
 - `docker_routing_config_mode`: string pattern {separated|unified|split|split-unified}, default "unified"
 - `frr_mgmt_framework_config`: boolean, default false
@@ -193,20 +196,42 @@ standard YANG model. Constraints are derived from newtron usage patterns.
 Not defined in `sonic-vxlan.yang`. This table is a SONiC-specific extension.
 Constraints derived from newtron usage: key is VLAN name, field `suppress` is "on"|"off".
 
-## ACL (no dedicated YANG file found in sonic-yang-models)
+## ACL (sonic-acl.yang)
 
-ACL_TABLE and ACL_RULE schemas are derived from newtron usage and SONiC
-documentation rather than YANG models. The `sonic-acl.yang` file was not
-found in the standard YANG models directory.
+ACL schemas derived from newtron usage and SONiC documentation.
 
-- ACL_TABLE: type={L3,L3V6,MIRROR,MIRRORV6}, stage={ingress,egress}
-- ACL_RULE: PRIORITY=uint16 0..65535, PACKET_ACTION={FORWARD,DROP,REDIRECT}
+**ACL_TABLE**
+- Key: `name`
+- `type`: enum {L3, L3V6, MIRROR, MIRRORV6}
+- `stage`: enum {ingress, egress}
+- `ports`: string (comma-separated port list)
+- `policy_desc`: string
+
+**ACL_RULE**
+- Key: `name|rule_name`
+- `PRIORITY`: uint16, range 0..65535
+- `PACKET_ACTION`: enum {FORWARD, DROP, REDIRECT}
+- `SRC_IP`: CIDR
+- `DST_IP`: CIDR
+- `IP_PROTOCOL`: uint8, range 0..255
+- `L4_SRC_PORT`: string, pattern `^\d+(-\d+)?$` (single port or range, e.g., "179" or "3784-3785")
+- `L4_DST_PORT`: string, pattern `^\d+(-\d+)?$` (single port or range)
+- `L4_SRC_PORT_RANGE`: string, pattern `^\d+-\d+$` (explicit range field)
+- `L4_DST_PORT_RANGE`: string, pattern `^\d+-\d+$`
+- `TCP_FLAGS`: string, pattern `^0x[0-9a-fA-F]+/0x[0-9a-fA-F]+$` (value/mask)
+- `ICMP_TYPE`: uint8, range 0..255
+- `ICMP_CODE`: uint8, range 0..255
+- `ETHER_TYPE`: string, pattern `^(0x[0-9a-fA-F]+|\d+)$`
+- `DSCP`: uint8, range 0..63
+- `TC`: uint8, range 0..7
+- `IN_PORTS`: string
+- `REDIRECT_PORT`: string
 
 ## STATIC_ROUTE (sonic-static-route.yang)
 
 **STATIC_ROUTE_LIST**
 - Key: `vrf_name|prefix`
-- `vrf_name`: union {"default"|"mgmt"|Vrf pattern}
+- `vrf_name`: union {"default"|"mgmt"|VRF name}
 - `prefix`: inet:ip-prefix
 - `nexthop`: string (comma-separated for ECMP)
 - `distance`: string (comma-separated), values 0..255
@@ -297,8 +322,8 @@ Similar pattern to DSCP_TO_TC_MAP. TC values 0..7, queue values 0..7.
 
 ### PORT_QOS_MAP
 
-Not found in a dedicated YANG file. The `sonic-port-qos-map.yang` file
-exists but was not fetched. newtron uses `dscp_to_tc_map` field.
+Not found in a dedicated YANG file. newtron uses `dscp_to_tc_map` and
+`tc_to_queue_map` fields (bracket-ref strings like `[DSCP_TO_TC_MAP|mapName]`).
 
 ## ROUTE_REDISTRIBUTE
 

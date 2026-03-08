@@ -160,9 +160,9 @@ newtron/
 │   ├── suites/                # Test suite directories
 │   │   ├── 2node-primitive/   # 20 scenarios (disaggregated operations)
 │   │   ├── 2node-service/     # 6 scenarios (service lifecycle + dataplane)
-│   │   ├── 2node-standalone/  # 9 scenarios (independent, each deploys own topology)
-│   │   ├── 3node-dataplane/   # 6 scenarios (EVPN L2/L3 dataplane)
-│   │   └── simple-vrf-host/   # 5 scenarios (VRF + host reachability)
+│   │   ├── 3node-dataplane/   # 8 scenarios (EVPN L2/L3 dataplane)
+│   │   ├── simple-vrf-host/   # 5 scenarios (VRF + host reachability)
+│   │   └── 1node-basic/       # 4 scenarios (service lifecycle + VLAN/VRF)
 │   └── .generated/            # Runtime output (gitignored)
 │       └── report.md
 ```
@@ -480,9 +480,6 @@ The built-in suites demonstrate patterns for different testing strategies:
 - **Incremental suites** (2node-primitive, 2node-service, 3node-dataplane):
   Ordered scenarios with `requires` chaining. A shared topology deployed once.
   Scenarios build on each other (boot → configure → verify → teardown).
-
-- **Standalone suites** (2node-standalone): Independent scenarios, each with
-  its own deploy/destroy cycle. Good for testing one feature in isolation.
 
 Users write new suites by creating a directory of YAML files. Any combination
 of the 56 actions can appear in steps. Custom topologies work with custom

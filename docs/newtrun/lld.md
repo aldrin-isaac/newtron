@@ -45,10 +45,10 @@ newtron/
     │   ├── 3node/specs/          # 3-switch + 6-host topology (EVPN dataplane)
     │   └── 4node/specs/          # 4-node topology
     ├── suites/
+    │   ├── 1node-basic/           # Single-switch basics (4 scenarios)
     │   ├── 2node-primitive/      # Disaggregated operation tests (20 scenarios)
     │   ├── 2node-service/        # Service lifecycle tests (6 scenarios)
-    │   ├── 2node-standalone/     # Standalone scenario files
-    │   ├── 3node-dataplane/      # EVPN L2/L3 dataplane tests (6 scenarios)
+    │   ├── 3node-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
     │   └── simple-vrf-host/      # Simple VRF with host verification
     └── .generated/               # Runtime output (gitignored)
 ```

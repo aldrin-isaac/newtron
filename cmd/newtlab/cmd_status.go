@@ -49,7 +49,7 @@ With a topology name, shows detailed status for that lab.
 				return err
 			}
 			if monitor {
-				return monitorLab(labName)
+				return monitorLab(labName, nil)
 			}
 			return showLabDetail(labName)
 		},
@@ -260,7 +260,7 @@ func showLinkTableWithStats(labName string, state *newtlab.LabState) {
 
 // monitorLab auto-refreshes a single lab's status every 2 seconds.
 // Exits when deployment is complete (all nodes running with no phase) or on Ctrl+C.
-func monitorLab(labName string) error {
+func monitorLab(labName string, done <-chan struct{}) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt)
 	defer signal.Stop(sigCh)
@@ -268,7 +268,7 @@ func monitorLab(labName string) error {
 	for {
 		fmt.Print("\033[2J\033[H") // clear screen, cursor to top
 		if err := showLabDetail(labName); err != nil {
-			fmt.Printf("  error: %v\n", err)
+			fmt.Printf("  Waiting for %s to start...\n", labName)
 		}
 
 		if labDeployFinished(labName) {
@@ -277,6 +277,12 @@ func monitorLab(labName string) error {
 
 		select {
 		case <-sigCh:
+			return nil
+		case <-done:
+			// Deploy goroutine finished (success or error) — stop monitoring.
+			// Show final state before returning.
+			fmt.Print("\033[2J\033[H")
+			_ = showLabDetail(labName)
 			return nil
 		case <-time.After(2 * time.Second):
 		}

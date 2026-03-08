@@ -126,16 +126,15 @@ in `profiles/`.
 
 | Suite | Topology | Scenarios | Description |
 |-------|----------|-----------|-------------|
+| `1node-basic` | 1node | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
 | `2node-primitive` | 2node | 20 | Incremental: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
 | `2node-service` | 2node-service | 6 | Service lifecycle: provision → health → data plane → deprovision → verify clean. |
-| `2node-standalone` | varies | 9 | Independent scenarios (no ordering): baseline, BGP, EVPN, services. Good for testing individual features. |
-| `3node-dataplane` | 3node | 6 | Data plane: L3 routing + EVPN L2 IRB across a 2-leaf fabric with host verification. |
+| `3node-dataplane` | 3node | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
 | `simple-vrf-host` | 2node | 5 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
 
-Suites in the `2node-primitive` and `2node-service` directories use
-dependency ordering (`requires`/`after`) — scenarios run in the declared
-order and skip if prerequisites failed. Standalone suites have independent
-scenarios that can run individually with `--scenario`.
+Suites in the `2node-primitive`, `2node-service`, and `3node-dataplane`
+directories use dependency ordering (`requires`/`after`) — scenarios run in
+the declared order and skip if prerequisites failed.
 
 ---
 

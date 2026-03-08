@@ -81,20 +81,23 @@ func newDeployCmd() *cobra.Command {
 
 // deployWithMonitor runs deploy in a goroutine and shows the status monitor.
 func deployWithMonitor(cmd *cobra.Command, lab *newtlab.Lab, provision bool, parallel int) error {
-	deployErr := make(chan error, 1)
+	var deployErr error
+	deployDone := make(chan struct{})
 	go func() {
-		deployErr <- lab.Deploy(cmd.Context())
+		deployErr = lab.Deploy(cmd.Context())
+		close(deployDone)
 	}()
 
 	// Wait for state file to be created by the deploy goroutine.
 	time.Sleep(2 * time.Second)
 
-	// Monitor until deploy phases clear.
-	_ = monitorLab(lab.Name)
+	// Monitor until deploy phases clear or deploy goroutine finishes.
+	_ = monitorLab(lab.Name, deployDone)
 
-	// Wait for deploy goroutine to finish.
-	if err := <-deployErr; err != nil {
-		return err
+	// Wait for deploy goroutine to finish (may already be done).
+	<-deployDone
+	if deployErr != nil {
+		return deployErr
 	}
 
 	fmt.Printf("\n%s Deploy complete\n", green("✓"))
