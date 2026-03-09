@@ -67,7 +67,7 @@ func TestParseEntry_RoundTrip(t *testing.T) {
 				"holdtime":      "180",
 				"keepalive":     "60",
 				"admin_status":  "up",
-				"peer_group":    "SPINE_PEERS",
+				"peer_group_name": "SPINE_PEERS",
 				"ebgp_multihop": "2",
 				"password":      "secret",
 			},

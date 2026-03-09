@@ -223,11 +223,12 @@ var Schema = map[string]TableSchema{
 		// YANG: key vrf_name|neighbor
 		KeyPattern: `^[^|]+\|.+$`,
 		Fields: map[string]FieldConstraint{
-			"asn":            {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32, refined >=1 in cmn-neigh
-			"admin_status":   {Type: FieldEnum, Enum: []string{"up", "down"}},
-			"local_addr":     {Type: FieldIP},                                  // YANG: union (IP, port, LAG, loopback, Vlan)
-			"name":           {Type: FieldString},
-			"ebgp_multihop":  {Type: FieldString},                              // YANG: boolean; newtron writes "true"/TTL
+			"asn":              {Type: FieldInt, Range: intRange(1, 4294967295)}, // YANG: uint32, refined >=1 in cmn-neigh
+			"admin_status":     {Type: FieldEnum, Enum: []string{"up", "down"}},
+			"local_addr":       {Type: FieldIP},                                  // YANG: union (IP, port, LAG, loopback, Vlan)
+			"name":             {Type: FieldString},
+			"ebgp_multihop":    {Type: FieldString},                              // YANG: boolean; newtron writes "true"/TTL
+			"peer_group_name":  {Type: FieldString},                              // YANG: leafref → BGP_PEER_GROUP
 		},
 	},
 
@@ -241,6 +242,24 @@ var Schema = map[string]TableSchema{
 			"nexthop_unchanged":  {Type: FieldBool},      // YANG: unchanged_nexthop (boolean); newtron uses nexthop_unchanged
 			"route_map_in":       {Type: FieldString},    // YANG: leafref list, max 1
 			"route_map_out":      {Type: FieldString},    // YANG: leafref list, max 1
+		},
+	},
+
+	"BGP_PEER_GROUP": {
+		// YANG: sonic-bgp-peergroup, key vrf_name|peer_group_name
+		KeyPattern: `^[^|]+\|[A-Z0-9_]+$`,
+		Fields: map[string]FieldConstraint{
+			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},
+		},
+	},
+
+	"BGP_PEER_GROUP_AF": {
+		// YANG: sonic-bgp-peergroup, key vrf_name|peer_group_name|afi_safi
+		KeyPattern: `^[^|]+\|[^|]+\|(ipv4_unicast|ipv6_unicast|l2vpn_evpn)$`,
+		Fields: map[string]FieldConstraint{
+			"admin_status":  {Type: FieldBool},
+			"route_map_in":  {Type: FieldString},
+			"route_map_out": {Type: FieldString},
 		},
 	},
 
@@ -502,6 +521,7 @@ var Schema = map[string]TableSchema{
 			"anycast_mac":     {Type: FieldMAC},
 			"arp_suppression": {Type: FieldBool},
 			"redistribute_vrf": {Type: FieldString},
+			"peer_group":       {Type: FieldString},
 		},
 	},
 

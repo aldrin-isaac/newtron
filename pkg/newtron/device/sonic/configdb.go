@@ -83,6 +83,7 @@ type ServiceBindingEntry struct {
 	AnycastMAC       string `json:"anycast_mac,omitempty"`       // Anycast gateway MAC from macvpn (for SAG_GLOBAL cleanup)
 	ARPSuppression   string `json:"arp_suppression,omitempty"`   // "true" from macvpn (for SUPPRESS_VLAN_NEIGH cleanup)
 	BGPPeerAS        string `json:"bgp_peer_as,omitempty"`       // Resolved BGP peer AS number (for RefreshService)
+	PeerGroup        string `json:"peer_group,omitempty"`        // BGP peer group name (for peer group cleanup)
 	AppliedAt        string `json:"applied_at,omitempty"`        // Timestamp when applied
 	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
 }
@@ -217,7 +218,7 @@ type BGPNeighborEntry struct {
 	AdminStatus   string `json:"admin_status,omitempty"`
 
 	// v3: frrcfgd extended fields
-	PeerGroup    string `json:"peer_group,omitempty"`
+	PeerGroup    string `json:"peer_group_name,omitempty"`
 	EBGPMultihop string `json:"ebgp_multihop,omitempty"`
 	Password     string `json:"password,omitempty"`
 }
@@ -507,6 +508,7 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			AnycastMAC:      fields["anycast_mac"],
 			ARPSuppression:  fields["arp_suppression"],
 			BGPPeerAS:       fields["bgp_peer_as"],
+			PeerGroup:       fields["peer_group"],
 		}
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)

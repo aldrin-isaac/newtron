@@ -27,6 +27,7 @@ type BGPNeighborOpts struct {
 	RRClientIPv6     bool   // rrclient on ipv6_unicast AF
 	NextHopSelfIPv6  bool   // nhself on ipv6_unicast AF
 	RRClientEVPN     bool   // rrclient on l2vpn_evpn AF
+	PeerGroup        string // peer group name (for service-level BGP neighbors, per Principle 36)
 }
 
 // CreateBGPNeighborConfig returns sonic.Entry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
@@ -52,6 +53,9 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 		} else {
 			fields["ebgp_multihop"] = "true"
 		}
+	}
+	if opts.PeerGroup != "" {
+		fields["peer_group_name"] = opts.PeerGroup
 	}
 
 	entries = append(entries, sonic.Entry{
@@ -216,6 +220,58 @@ func updateDeviceMetadataConfig(fields map[string]string) sonic.Entry {
 // createBgpNeighborAFConfig returns a BGP_NEIGHBOR_AF entry for a specific address family.
 func createBgpNeighborAFConfig(vrf, neighborIP, af string, fields map[string]string) sonic.Entry {
 	return sonic.Entry{Table: "BGP_NEIGHBOR_AF", Key: BGPNeighborAFKey(vrf, neighborIP, af), Fields: fields}
+}
+
+// ============================================================================
+// BGP Peer Group Config Functions (pure, no Node state)
+// ============================================================================
+
+// BGPPeerGroupKey returns the CONFIG_DB key for a BGP_PEER_GROUP entry.
+// Format: vrf|peer_group_name (e.g., "default|TRANSIT")
+func BGPPeerGroupKey(vrf, name string) string {
+	if vrf == "" {
+		vrf = "default"
+	}
+	return fmt.Sprintf("%s|%s", vrf, name)
+}
+
+// BGPPeerGroupAFKey returns the CONFIG_DB key for a BGP_PEER_GROUP_AF entry.
+// Format: vrf|peer_group_name|af (e.g., "default|TRANSIT|ipv4_unicast")
+func BGPPeerGroupAFKey(vrf, name, af string) string {
+	if vrf == "" {
+		vrf = "default"
+	}
+	return fmt.Sprintf("%s|%s|%s", vrf, name, af)
+}
+
+// CreateBGPPeerGroupConfig returns entries for a BGP_PEER_GROUP + BGP_PEER_GROUP_AF.
+// Peer groups are service-named templates: shared attributes live here, not on neighbors.
+// Per DESIGN_PRINCIPLES.md principle 36.
+func CreateBGPPeerGroupConfig(vrf, name string, afFields map[string]string) []sonic.Entry {
+	if vrf == "" {
+		vrf = "default"
+	}
+	entries := []sonic.Entry{
+		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, name), Fields: map[string]string{
+			"admin_status": "up",
+		}},
+		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, name, "ipv4_unicast"), Fields: util.MergeMaps(
+			map[string]string{"admin_status": "true"},
+			afFields,
+		)},
+	}
+	return entries
+}
+
+// DeleteBGPPeerGroupConfig returns delete entries for a peer group and its AF entry.
+func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
+	if vrf == "" {
+		vrf = "default"
+	}
+	return []sonic.Entry{
+		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, name, "ipv4_unicast")},
+		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, name)},
+	}
 }
 
 // BGPConfigured checks if BGP is configured.

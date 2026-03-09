@@ -90,7 +90,7 @@ func init() {
 				HoldTime:      vals["holdtime"],
 				KeepaliveTime: vals["keepalive"],
 				AdminStatus:   vals["admin_status"],
-				PeerGroup:     vals["peer_group"],
+				PeerGroup:     vals["peer_group_name"],
 				EBGPMultihop:  vals["ebgp_multihop"],
 				Password:      vals["password"],
 			}

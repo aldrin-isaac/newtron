@@ -40,6 +40,7 @@ type ServiceEntryParams struct {
 	UnderlayASN  int               // device AS number (required in all-eBGP design)
 	RouterID     string            // device router ID (required for per-VRF BGP_GLOBALS)
 	PlatformName string            // for feature gating (ACL skip)
+	PeerGroup    string            // BGP peer group name (for service-level BGP, per Principle 36)
 }
 
 // generateServiceEntries produces the CONFIG_DB entries for applying a service
@@ -266,6 +267,7 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfNa
 		ActivateIPv4: true,
 		RRClient:     p.Params["route_reflector_client"] == "true",
 		NextHopSelf:  p.Params["next_hop_self"] == "true",
+		PeerGroup:    p.PeerGroup,
 	}), nil
 }
 
