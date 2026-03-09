@@ -493,3 +493,284 @@ func assertEntry(t *testing.T, entries []sonic.Entry, table, key, field, value s
 	}
 	t.Errorf("missing entry %s|%s", table, key)
 }
+
+// ============================================================================
+// Route Policy Content-Hashed Naming Tests (Principle 35)
+// ============================================================================
+
+func TestCreateRoutePolicy_ContentHashedNames(t *testing.T) {
+	sp := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"ALLOW_CUST": {
+				Rules: []*spec.RoutePolicyRule{
+					{Sequence: 10, Action: "permit", PrefixList: "RFC1918"},
+					{Sequence: 20, Action: "deny"},
+				},
+			},
+		},
+		prefixLists: map[string][]string{
+			"RFC1918": {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		},
+	}
+	iface := newTestInterface(sp, "Ethernet0")
+
+	entries, rmName := iface.createRoutePolicy("TRANSIT", "import", "ALLOW_CUST", "", "")
+
+	// Route-map name must contain content hash
+	if rmName == "TRANSIT_IMPORT" {
+		t.Fatal("route-map name should include content hash, got bare name without hash")
+	}
+	if len(rmName) <= len("TRANSIT_IMPORT_") {
+		t.Fatalf("route-map name too short (no hash?): %s", rmName)
+	}
+
+	// Verify entries exist
+	var foundPrefixSet, foundRouteMap bool
+	for _, e := range entries {
+		if e.Table == "PREFIX_SET" {
+			foundPrefixSet = true
+			// PREFIX_SET key should contain a hash
+			if len(e.Key) <= len("TRANSIT_IMPORT_PL_10|10") {
+				t.Errorf("PREFIX_SET key too short (no hash?): %s", e.Key)
+			}
+		}
+		if e.Table == "ROUTE_MAP" {
+			foundRouteMap = true
+			// Route-map key should use the hashed name
+			if e.Key[:len(rmName)] != rmName {
+				t.Errorf("ROUTE_MAP key %q doesn't start with rmName %q", e.Key, rmName)
+			}
+		}
+	}
+	if !foundPrefixSet {
+		t.Error("no PREFIX_SET entries generated")
+	}
+	if !foundRouteMap {
+		t.Error("no ROUTE_MAP entries generated")
+	}
+}
+
+func TestCreateRoutePolicy_DifferentContentDifferentHash(t *testing.T) {
+	sp1 := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{{Sequence: 10, Action: "permit"}}},
+		},
+		prefixLists: map[string][]string{},
+	}
+	sp2 := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{{Sequence: 10, Action: "deny"}}},
+		},
+		prefixLists: map[string][]string{},
+	}
+
+	iface1 := newTestInterface(sp1, "Ethernet0")
+	iface2 := newTestInterface(sp2, "Ethernet0")
+
+	_, name1 := iface1.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, name2 := iface2.createRoutePolicy("SVC", "import", "POL", "", "")
+
+	if name1 == name2 {
+		t.Errorf("different policy content should produce different hashes, both got %s", name1)
+	}
+}
+
+func TestCreateRoutePolicy_SameContentSameHash(t *testing.T) {
+	sp := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{{Sequence: 10, Action: "permit"}}},
+		},
+		prefixLists: map[string][]string{},
+	}
+
+	iface := newTestInterface(sp, "Ethernet0")
+
+	_, name1 := iface.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, name2 := iface.createRoutePolicy("SVC", "import", "POL", "", "")
+
+	if name1 != name2 {
+		t.Errorf("same content should produce same hash: %s != %s", name1, name2)
+	}
+}
+
+func TestCreateRoutePolicy_MerkleHashCascade(t *testing.T) {
+	// Changing the prefix list content should change the PREFIX_SET hash,
+	// which changes the ROUTE_MAP match_prefix_set field, which changes
+	// the ROUTE_MAP hash — bottom-up Merkle cascade.
+	sp1 := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{{Sequence: 10, Action: "permit", PrefixList: "PL1"}}},
+		},
+		prefixLists: map[string][]string{
+			"PL1": {"10.0.0.0/8"},
+		},
+	}
+	sp2 := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{{Sequence: 10, Action: "permit", PrefixList: "PL1"}}},
+		},
+		prefixLists: map[string][]string{
+			"PL1": {"10.0.0.0/8", "172.16.0.0/12"},
+		},
+	}
+
+	iface1 := newTestInterface(sp1, "Ethernet0")
+	iface2 := newTestInterface(sp2, "Ethernet0")
+
+	_, rmName1 := iface1.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, rmName2 := iface2.createRoutePolicy("SVC", "import", "POL", "", "")
+
+	if rmName1 == rmName2 {
+		t.Errorf("changing prefix list content should cascade to different route-map hash, both got %s", rmName1)
+	}
+}
+
+func TestCreateRoutePolicy_WithCommunity(t *testing.T) {
+	sp := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{
+				{Sequence: 10, Action: "permit", Community: "65000:100"},
+			}},
+		},
+		prefixLists: map[string][]string{},
+	}
+	iface := newTestInterface(sp, "Ethernet0")
+
+	entries, rmName := iface.createRoutePolicy("SVC", "import", "POL", "", "")
+
+	if rmName == "" {
+		t.Fatal("expected non-empty route-map name")
+	}
+
+	var foundCS bool
+	for _, e := range entries {
+		if e.Table == "COMMUNITY_SET" {
+			foundCS = true
+			// COMMUNITY_SET key should contain a hash
+			if e.Fields["community_member"] != "65000:100" {
+				t.Errorf("unexpected community_member: %s", e.Fields["community_member"])
+			}
+		}
+	}
+	if !foundCS {
+		t.Error("no COMMUNITY_SET entry generated")
+	}
+}
+
+func TestCreateInlineRoutePolicy_ContentHashedNames(t *testing.T) {
+	sp := &testSpecProvider{
+		prefixLists: map[string][]string{
+			"ALLOWED": {"10.1.0.0/16", "10.2.0.0/16"},
+		},
+	}
+	iface := newTestInterface(sp, "Ethernet0")
+
+	entries, rmName := iface.createInlineRoutePolicy("SVC", "import", "", "ALLOWED")
+
+	if rmName == "SVC_IMPORT" {
+		t.Fatal("inline route-map name should include content hash")
+	}
+
+	var foundPL, foundRM bool
+	for _, e := range entries {
+		if e.Table == "PREFIX_SET" {
+			foundPL = true
+		}
+		if e.Table == "ROUTE_MAP" {
+			foundRM = true
+		}
+	}
+	if !foundPL {
+		t.Error("no PREFIX_SET entries generated")
+	}
+	if !foundRM {
+		t.Error("no ROUTE_MAP entries generated")
+	}
+}
+
+func TestCreateHashedPrefixSet_ContentHash(t *testing.T) {
+	sp := &testSpecProvider{
+		prefixLists: map[string][]string{
+			"PL1": {"10.0.0.0/8", "172.16.0.0/12"},
+		},
+	}
+	iface := newTestInterface(sp, "Ethernet0")
+
+	entries, name := iface.createHashedPrefixSet("TEST_PL", "PL1")
+
+	if name == "TEST_PL" {
+		t.Fatal("prefix set name should include content hash")
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 PREFIX_SET entries, got %d", len(entries))
+	}
+
+	// Verify determinism
+	_, name2 := iface.createHashedPrefixSet("TEST_PL", "PL1")
+	if name != name2 {
+		t.Errorf("same content should produce same hash: %s != %s", name, name2)
+	}
+}
+
+func TestCreateRoutePolicy_ExtraCommunityAndPrefixList(t *testing.T) {
+	sp := &testSpecProvider{
+		routePolicies: map[string]*spec.RoutePolicy{
+			"POL": {Rules: []*spec.RoutePolicyRule{
+				{Sequence: 10, Action: "permit"},
+			}},
+		},
+		prefixLists: map[string][]string{
+			"EXTRA_PL": {"192.168.0.0/16"},
+		},
+	}
+	iface := newTestInterface(sp, "Ethernet0")
+
+	entries, rmName := iface.createRoutePolicy("SVC", "export", "POL", "65000:200", "EXTRA_PL")
+
+	if rmName == "" {
+		t.Fatal("expected non-empty route-map name")
+	}
+
+	// Should have: PREFIX_SET (extra), COMMUNITY_SET (extra), ROUTE_MAP entries
+	tables := map[string]int{}
+	for _, e := range entries {
+		tables[e.Table]++
+	}
+	if tables["COMMUNITY_SET"] == 0 {
+		t.Error("expected COMMUNITY_SET entry for extra community")
+	}
+	if tables["PREFIX_SET"] == 0 {
+		t.Error("expected PREFIX_SET entry for extra prefix list")
+	}
+	// ROUTE_MAP: rule 10 + extra community (9000) + extra prefix (9100) = 3
+	if tables["ROUTE_MAP"] != 3 {
+		t.Errorf("expected 3 ROUTE_MAP entries, got %d", tables["ROUTE_MAP"])
+	}
+}
+
+func TestDeleteRoutePoliciesConfig_FindsHashedNames(t *testing.T) {
+	// Verify that deleteRoutePoliciesConfig scans by prefix and finds
+	// content-hashed route map, prefix set, and community set entries.
+	n := testDevice()
+	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
+	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|20"] = sonic.RouteMapEntry{}
+	n.configDB.PrefixSet["SVC_IMPORT_PL_10_F1E2D3C4|10"] = sonic.PrefixSetEntry{}
+	n.configDB.PrefixSet["SVC_IMPORT_PL_10_F1E2D3C4|20"] = sonic.PrefixSetEntry{}
+	n.configDB.CommunitySet["SVC_IMPORT_CS_10_B7A4E9F1"] = sonic.CommunitySetEntry{}
+
+	entries := n.deleteRoutePoliciesConfig("SVC")
+
+	tables := map[string]int{}
+	for _, e := range entries {
+		tables[e.Table]++
+	}
+	if tables["ROUTE_MAP"] != 2 {
+		t.Errorf("expected 2 ROUTE_MAP deletes, got %d", tables["ROUTE_MAP"])
+	}
+	if tables["PREFIX_SET"] != 2 {
+		t.Errorf("expected 2 PREFIX_SET deletes, got %d", tables["PREFIX_SET"])
+	}
+	if tables["COMMUNITY_SET"] != 1 {
+		t.Errorf("expected 1 COMMUNITY_SET delete, got %d", tables["COMMUNITY_SET"])
+	}
+}

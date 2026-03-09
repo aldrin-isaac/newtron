@@ -108,10 +108,15 @@ func (sp *testSpecProvider) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) 
 func testDevice() *Node {
 	return &Node{
 		SpecProvider: &testSpecProvider{
-			services:    map[string]*spec.ServiceSpec{},
-			filterSpecs: map[string]*spec.FilterSpec{},
-			ipvpn:       map[string]*spec.IPVPNSpec{},
-			macvpn:      map[string]*spec.MACVPNSpec{},
+			services:      map[string]*spec.ServiceSpec{},
+			filterSpecs:   map[string]*spec.FilterSpec{},
+			ipvpn:         map[string]*spec.IPVPNSpec{},
+			macvpn:        map[string]*spec.MACVPNSpec{},
+			qosPolicies:   map[string]*spec.QoSPolicy{},
+			qosProfiles:   map[string]*spec.QoSProfile{},
+			platforms:     map[string]*spec.PlatformSpec{},
+			prefixLists:   map[string][]string{},
+			routePolicies: map[string]*spec.RoutePolicy{},
 		},
 		name:      "test-dev",
 		connected: true,
@@ -151,6 +156,12 @@ func testDevice() *Node {
 			ACLTableType:          map[string]sonic.ACLTableTypeEntry{},
 			RouteRedistribute:     map[string]sonic.RouteRedistributeEntry{},
 			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
+			BGPGlobalsEVPNRT:      map[string]sonic.BGPGlobalsEVPNRTEntry{},
+			BGPPeerGroup:          map[string]sonic.BGPPeerGroupEntry{},
+			BGPPeerGroupAF:        map[string]sonic.BGPPeerGroupAFEntry{},
+			RouteMap:              map[string]sonic.RouteMapEntry{},
+			PrefixSet:             map[string]sonic.PrefixSetEntry{},
+			CommunitySet:          map[string]sonic.CommunitySetEntry{},
 		},
 	}
 }

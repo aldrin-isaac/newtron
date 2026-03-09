@@ -515,8 +515,18 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	return peerIP, nil
 }
 
+// routeMapRule holds a single route-map rule's sequence and fields,
+// used during bottom-up Merkle hash computation (Principle 35).
+type routeMapRule struct {
+	seq    int
+	fields map[string]string
+}
+
 // createRoutePolicy translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
-// PREFIX_SET, and COMMUNITY_SET entries. Returns entries and the route-map name.
+// PREFIX_SET, and COMMUNITY_SET entries with content-hashed names (Principle 35).
+// Bottom-up Merkle: PREFIX_SET/COMMUNITY_SET hashes computed first (leaves),
+// then ROUTE_MAP hash includes those hashed names. Returns entries and the
+// route-map name.
 func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraCommunity, extraPrefixList string) ([]sonic.Entry, string) {
 	policy, err := i.Node().GetRoutePolicy(policyName)
 	if err != nil {
@@ -525,29 +535,38 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 	}
 
 	// serviceName is already normalized (uppercase, underscores) by the spec loader.
-	rmName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
-	var entries []sonic.Entry
+	baseRMName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
+
+	// Phase 1: Build leaf objects (PREFIX_SET, COMMUNITY_SET) with content hashes.
+	// Collect route-map rule fields that reference the hashed leaf names.
+	var leafEntries []sonic.Entry
+	var rules []routeMapRule
 
 	for _, rule := range policy.Rules {
-		ruleKey := fmt.Sprintf("%s|%d", rmName, rule.Sequence)
 		fields := map[string]string{
 			"route_operation": rule.Action,
 		}
 
 		if rule.PrefixList != "" {
-			prefixSetName := fmt.Sprintf("%s_PL_%d", rmName, rule.Sequence)
-			entries = append(entries, i.createPrefixSet(prefixSetName, rule.PrefixList)...)
-			fields["match_prefix_set"] = prefixSetName
+			plBase := fmt.Sprintf("%s_PL_%d", baseRMName, rule.Sequence)
+			plEntries, plName := i.createHashedPrefixSet(plBase, rule.PrefixList)
+			leafEntries = append(leafEntries, plEntries...)
+			if plName != "" {
+				fields["match_prefix_set"] = plName
+			}
 		}
 
 		if rule.Community != "" {
-			csName := fmt.Sprintf("%s_CS_%d", rmName, rule.Sequence)
-			entries = append(entries, sonic.Entry{
-				Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
-					"set_type":         "standard",
-					"match_action":     "any",
-					"community_member": rule.Community,
-				},
+			csBase := fmt.Sprintf("%s_CS_%d", baseRMName, rule.Sequence)
+			csFields := map[string]string{
+				"set_type":         "standard",
+				"match_action":     "any",
+				"community_member": rule.Community,
+			}
+			csHash := util.ContentHash([]map[string]string{csFields})
+			csName := fmt.Sprintf("%s_%s", csBase, csHash)
+			leafEntries = append(leafEntries, sonic.Entry{
+				Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
 			})
 			fields["match_community"] = csName
 		}
@@ -564,18 +583,21 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 			}
 		}
 
-		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: ruleKey, Fields: fields})
+		rules = append(rules, routeMapRule{seq: rule.Sequence, fields: fields})
 	}
 
 	// Extra community AND condition from service routing spec
 	if extraCommunity != "" {
-		csName := fmt.Sprintf("%s_EXTRA_CS", rmName)
-		entries = append(entries, sonic.Entry{
-			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
-				"set_type":         "standard",
-				"match_action":     "any",
-				"community_member": extraCommunity,
-			},
+		csBase := fmt.Sprintf("%s_EXTRA_CS", baseRMName)
+		csFields := map[string]string{
+			"set_type":         "standard",
+			"match_action":     "any",
+			"community_member": extraCommunity,
+		}
+		csHash := util.ContentHash([]map[string]string{csFields})
+		csName := fmt.Sprintf("%s_%s", csBase, csHash)
+		leafEntries = append(leafEntries, sonic.Entry{
+			Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
 		})
 		extraFields := map[string]string{
 			"route_operation": "permit",
@@ -584,40 +606,63 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 		if direction == "export" {
 			extraFields["set_community"] = extraCommunity
 		}
-		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|9000", rmName), Fields: extraFields})
+		rules = append(rules, routeMapRule{seq: 9000, fields: extraFields})
 	}
 
 	// Extra prefix list AND condition
 	if extraPrefixList != "" {
-		plName := fmt.Sprintf("%s_EXTRA_PL", rmName)
-		entries = append(entries, i.createPrefixSet(plName, extraPrefixList)...)
-		entries = append(entries, sonic.Entry{
-			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|9100", rmName), Fields: map[string]string{
+		plBase := fmt.Sprintf("%s_EXTRA_PL", baseRMName)
+		plEntries, plName := i.createHashedPrefixSet(plBase, extraPrefixList)
+		leafEntries = append(leafEntries, plEntries...)
+		if plName != "" {
+			rules = append(rules, routeMapRule{seq: 9100, fields: map[string]string{
 				"route_operation":  "permit",
 				"match_prefix_set": plName,
-			},
+			}})
+		}
+	}
+
+	// Phase 2: Compute route-map hash from all rule fields (Merkle: includes hashed leaf names).
+	var rmFieldMaps []map[string]string
+	for _, r := range rules {
+		rmFieldMaps = append(rmFieldMaps, r.fields)
+	}
+	rmHash := util.ContentHash(rmFieldMaps)
+	rmName := fmt.Sprintf("%s_%s", baseRMName, rmHash)
+
+	// Phase 3: Build final entries — leaves first, then route-map rules.
+	entries := make([]sonic.Entry, 0, len(leafEntries)+len(rules))
+	entries = append(entries, leafEntries...)
+	for _, r := range rules {
+		entries = append(entries, sonic.Entry{
+			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, r.seq), Fields: r.fields,
 		})
 	}
 
 	return entries, rmName
 }
 
-// createInlineRoutePolicy creates a route-map from standalone community/prefix filters.
-// Returns entries and the route-map name.
+// createInlineRoutePolicy creates a route-map from standalone community/prefix
+// filters with content-hashed names (Principle 35). Returns entries and the
+// route-map name.
 func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, prefixList string) ([]sonic.Entry, string) {
 	// serviceName is already normalized (uppercase, underscores) by the spec loader.
-	rmName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
-	var entries []sonic.Entry
+	baseRMName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
+	var leafEntries []sonic.Entry
+	var rules []routeMapRule
 	seq := 10
 
 	if community != "" {
-		csName := fmt.Sprintf("%s_CS", rmName)
-		entries = append(entries, sonic.Entry{
-			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
-				"set_type":         "standard",
-				"match_action":     "any",
-				"community_member": community,
-			},
+		csBase := fmt.Sprintf("%s_CS", baseRMName)
+		csFields := map[string]string{
+			"set_type":         "standard",
+			"match_action":     "any",
+			"community_member": community,
+		}
+		csHash := util.ContentHash([]map[string]string{csFields})
+		csName := fmt.Sprintf("%s_%s", csBase, csHash)
+		leafEntries = append(leafEntries, sonic.Entry{
+			Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
 		})
 		fields := map[string]string{
 			"route_operation": "permit",
@@ -626,42 +671,72 @@ func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, p
 		if direction == "export" {
 			fields["set_community"] = community
 		}
-		entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, seq), Fields: fields})
+		rules = append(rules, routeMapRule{seq: seq, fields: fields})
 		seq += 10
 	}
 
 	if prefixList != "" {
-		plName := fmt.Sprintf("%s_PL", rmName)
-		entries = append(entries, i.createPrefixSet(plName, prefixList)...)
-		entries = append(entries, sonic.Entry{
-			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, seq), Fields: map[string]string{
+		plBase := fmt.Sprintf("%s_PL", baseRMName)
+		plEntries, plName := i.createHashedPrefixSet(plBase, prefixList)
+		leafEntries = append(leafEntries, plEntries...)
+		if plName != "" {
+			rules = append(rules, routeMapRule{seq: seq, fields: map[string]string{
 				"route_operation":  "permit",
 				"match_prefix_set": plName,
-			},
+			}})
+		}
+	}
+
+	// Compute route-map hash from all rule fields (Merkle: includes hashed leaf names).
+	var rmFieldMaps []map[string]string
+	for _, r := range rules {
+		rmFieldMaps = append(rmFieldMaps, r.fields)
+	}
+	rmHash := util.ContentHash(rmFieldMaps)
+	rmName := fmt.Sprintf("%s_%s", baseRMName, rmHash)
+
+	entries := make([]sonic.Entry, 0, len(leafEntries)+len(rules))
+	entries = append(entries, leafEntries...)
+	for _, r := range rules {
+		entries = append(entries, sonic.Entry{
+			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, r.seq), Fields: r.fields,
 		})
 	}
 
 	return entries, rmName
 }
 
-// createPrefixSet resolves a prefix list and returns PREFIX_SET entries.
-func (i *Interface) createPrefixSet(prefixSetName, prefixListName string) []sonic.Entry {
+// createHashedPrefixSet resolves a prefix list and returns PREFIX_SET entries
+// with a content-hashed name (Principle 35). Returns entries and the hashed name.
+func (i *Interface) createHashedPrefixSet(baseName, prefixListName string) ([]sonic.Entry, string) {
 	prefixes, err := i.Node().GetPrefixList(prefixListName)
 	if err != nil || len(prefixes) == 0 {
 		util.WithDevice(i.node.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
-		return nil
+		return nil, ""
 	}
+
+	// Compute content hash from the fields that will be written.
+	var fieldMaps []map[string]string
+	for _, prefix := range prefixes {
+		fieldMaps = append(fieldMaps, map[string]string{
+			"ip_prefix": prefix,
+			"action":    "permit",
+		})
+	}
+	hash := util.ContentHash(fieldMaps)
+	name := fmt.Sprintf("%s_%s", baseName, hash)
+
 	var entries []sonic.Entry
 	for seq, prefix := range prefixes {
-		entryKey := fmt.Sprintf("%s|%d", prefixSetName, (seq+1)*10)
 		entries = append(entries, sonic.Entry{
-			Table: "PREFIX_SET", Key: entryKey, Fields: map[string]string{
+			Table: "PREFIX_SET", Key: fmt.Sprintf("%s|%d", name, (seq+1)*10),
+			Fields: map[string]string{
 				"ip_prefix": prefix,
 				"action":    "permit",
 			},
 		})
 	}
-	return entries
+	return entries, name
 }
 
 // deleteRoutePoliciesConfig returns delete entries for all ROUTE_MAP, PREFIX_SET, and
