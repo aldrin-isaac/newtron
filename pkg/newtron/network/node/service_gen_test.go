@@ -17,26 +17,26 @@ func newTestInterface(sp SpecProvider, name string) *Interface {
 func TestServiceConfig_EVPNBridged(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"customer-l2": {
+			"CUSTOMER_L2": {
 				ServiceType: spec.ServiceTypeEVPNBridged,
-				MACVPN:      "cust-mac",
+				MACVPN:      "CUST_MAC",
 			},
 		},
 		macvpn: map[string]*spec.MACVPNSpec{
-			"cust-mac": {VlanID: 100, VNI: 20100, ARPSuppression: true},
+			"CUST_MAC": {VlanID: 100, VNI: 20100, ARPSuppression: true},
 		},
 	}
 
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "customer-l2",
+		ServiceName: "CUSTOMER_L2",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	assertEntry(t, entries, "VLAN", "Vlan100", "vlanid", "100")
-	assertEntry(t, entries, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", "vni", "20100")
+	assertEntry(t, entries, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", "vni", "20100")
 	assertEntry(t, entries, "SUPPRESS_VLAN_NEIGH", "Vlan100", "suppress", "on")
 	assertEntry(t, entries, "VLAN_MEMBER", "Vlan100|Ethernet0", "tagging_mode", "untagged")
 
@@ -48,7 +48,7 @@ func TestServiceConfig_EVPNBridged(t *testing.T) {
 func TestServiceConfig_Routed_NoVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"fabric-underlay": {
+			"FABRIC_UNDERLAY": {
 				ServiceType: spec.ServiceTypeRouted,
 			},
 		},
@@ -56,7 +56,7 @@ func TestServiceConfig_Routed_NoVRF(t *testing.T) {
 
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "fabric-underlay",
+		ServiceName: "FABRIC_UNDERLAY",
 		IPAddress:   "10.1.0.0/31",
 	})
 	if err != nil {
@@ -90,29 +90,29 @@ func TestServiceConfig_Routed_NoVRF(t *testing.T) {
 func TestServiceConfig_EVPNRouted_WithVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"customer-l3": {
+			"CUSTOMER_L3": {
 				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeInterface,
-				IPVPN:       "customer-vpn",
+				IPVPN:       "CUSTOMER_VPN",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
-			"customer-vpn": {L3VNI: 10001},
+			"CUSTOMER_VPN": {L3VNI: 10001},
 		},
 	}
 
 	iface := newTestInterface(sp, "Ethernet4")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "customer-l3",
+		ServiceName: "CUSTOMER_L3",
 		IPAddress:   "10.2.0.1/30",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// VRF creation — DeriveVRFName shortens Ethernet4 → Eth4.
+	// VRF creation — DeriveVRFName shortens Ethernet4 → ETH4.
 	// VRF entry carries vni field for L3VNI.
-	assertEntry(t, entries, "VRF", "customer-l3-Eth4", "vni", "10001")
+	assertEntry(t, entries, "VRF", "CUSTOMER_L3_ETH4", "vni", "10001")
 
 	// Base INTERFACE entry should have vrf_name
 	var baseFound, ipFound bool
@@ -142,24 +142,24 @@ func TestServiceConfig_EVPNRouted_WithVRF(t *testing.T) {
 func TestServiceConfig_EVPNIRB(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"customer-irb": {
+			"CUSTOMER_IRB": {
 				ServiceType: spec.ServiceTypeEVPNIRB,
 				VRFType:     spec.VRFTypeInterface,
-				IPVPN:       "cust-vpn",
-				MACVPN:      "cust-mac",
+				IPVPN:       "CUST_VPN",
+				MACVPN:      "CUST_MAC",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
-			"cust-vpn": {L3VNI: 10001},
+			"CUST_VPN": {L3VNI: 10001},
 		},
 		macvpn: map[string]*spec.MACVPNSpec{
-			"cust-mac": {VlanID: 100, VNI: 20100, AnycastIP: "10.1.100.1/24", AnycastMAC: "00:00:00:01:02:03"},
+			"CUST_MAC": {VlanID: 100, VNI: 20100, AnycastIP: "10.1.100.1/24", AnycastMAC: "00:00:00:01:02:03"},
 		},
 	}
 
 	iface := newTestInterface(sp, "Ethernet8")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "customer-irb",
+		ServiceName: "CUSTOMER_IRB",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -185,13 +185,13 @@ func TestServiceConfig_EVPNIRB(t *testing.T) {
 func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"svc-with-acl": {
+			"SVC_WITH_ACL": {
 				ServiceType:   spec.ServiceTypeRouted,
-				IngressFilter: "test-filter",
+				IngressFilter: "TEST_FILTER",
 			},
 		},
 		filterSpecs: map[string]*spec.FilterSpec{
-			"test-filter": {
+			"TEST_FILTER": {
 				Rules: []*spec.FilterRule{
 					{
 						Sequence: 10,
@@ -212,7 +212,7 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "svc-with-acl",
+		ServiceName: "SVC_WITH_ACL",
 		IPAddress:   "10.1.0.0/31",
 	})
 	if err != nil {
@@ -220,11 +220,11 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 	}
 
 	// Verify ACL table exists
-	assertEntry(t, entries, "ACL_TABLE", "svc-with-acl-in", "stage", "ingress")
+	assertEntry(t, entries, "ACL_TABLE", "SVC_WITH_ACL_IN", "stage", "ingress")
 
 	// Verify CoS→TC mapping present (fix #4)
 	for _, e := range entries {
-		if e.Table == "ACL_RULE" && e.Key == "svc-with-acl-in|RULE_10" {
+		if e.Table == "ACL_RULE" && e.Key == "SVC_WITH_ACL_IN|RULE_10" {
 			if e.Fields["TC"] != "5" {
 				t.Errorf("ACL rule with CoS=ef should have TC=5, got %q", e.Fields["TC"])
 			}
@@ -237,13 +237,13 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 			return
 		}
 	}
-	t.Error("missing ACL_RULE|svc-with-acl-in|RULE_10 entry")
+	t.Error("missing ACL_RULE|SVC_WITH_ACL_IN|RULE_10 entry")
 }
 
 func TestServiceConfig_BGP_UnderlayASN(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"transit": {
+			"TRANSIT": {
 				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
@@ -256,7 +256,7 @@ func TestServiceConfig_BGP_UnderlayASN(t *testing.T) {
 	// Bug fix #2: UnderlayASN should be used when set
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "transit",
+		ServiceName: "TRANSIT",
 		IPAddress:   "10.1.0.0/31",
 		UnderlayASN: 65100,
 	})
@@ -281,7 +281,7 @@ func TestServiceConfig_BGP_UnderlayASN(t *testing.T) {
 func TestServiceConfig_BGP_FallbackToLocalAS(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"transit": {
+			"TRANSIT": {
 				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
@@ -294,7 +294,7 @@ func TestServiceConfig_BGP_FallbackToLocalAS(t *testing.T) {
 	// When UnderlayASN is 0, should fall back to LocalAS
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "transit",
+		ServiceName: "TRANSIT",
 		IPAddress:   "10.1.0.0/31",
 		UnderlayASN: 64512,
 	})
@@ -316,7 +316,7 @@ func TestServiceConfig_BGP_FallbackToLocalAS(t *testing.T) {
 func TestServiceConfig_BGP_AdminStatus(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"transit": {
+			"TRANSIT": {
 				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
@@ -328,7 +328,7 @@ func TestServiceConfig_BGP_AdminStatus(t *testing.T) {
 
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "transit",
+		ServiceName: "TRANSIT",
 		IPAddress:   "10.1.0.0/31",
 		UnderlayASN: 64512,
 	})
@@ -354,14 +354,14 @@ func TestServiceConfig_BGP_AdminStatus(t *testing.T) {
 func TestServiceConfig_RouteTargets(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"customer-l3": {
+			"CUSTOMER_L3": {
 				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeInterface,
-				IPVPN:       "customer-vpn",
+				IPVPN:       "CUSTOMER_VPN",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
-			"customer-vpn": {
+			"CUSTOMER_VPN": {
 				L3VNI:        10001,
 				RouteTargets: []string{"64512:10001"},
 			},
@@ -370,7 +370,7 @@ func TestServiceConfig_RouteTargets(t *testing.T) {
 
 	iface := newTestInterface(sp, "Ethernet4")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "customer-l3",
+		ServiceName: "CUSTOMER_L3",
 		IPAddress:   "10.2.0.1/30",
 	})
 	if err != nil {
@@ -378,29 +378,29 @@ func TestServiceConfig_RouteTargets(t *testing.T) {
 	}
 
 	// BGP_GLOBALS_AF l2vpn_evpn for the VRF — produced by ipvpn
-	assertEntry(t, entries, "BGP_GLOBALS_AF", "customer-l3-Eth4|l2vpn_evpn", "advertise-ipv4-unicast", "true")
+	assertEntry(t, entries, "BGP_GLOBALS_AF", "CUSTOMER_L3_ETH4|l2vpn_evpn", "advertise-ipv4-unicast", "true")
 
 	// Route targets are written to BGP_GLOBALS_EVPN_RT (frrcfgd watches this table)
-	assertEntry(t, entries, "BGP_GLOBALS_EVPN_RT", "customer-l3-Eth4|L2VPN_EVPN|64512:10001", "route-target-type", "both")
+	assertEntry(t, entries, "BGP_GLOBALS_EVPN_RT", "CUSTOMER_L3_ETH4|L2VPN_EVPN|64512:10001", "route-target-type", "both")
 }
 
 func TestServiceConfig_SharedVRF(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"shared-l3": {
+			"SHARED_L3": {
 				ServiceType: spec.ServiceTypeEVPNRouted,
 				VRFType:     spec.VRFTypeShared,
-				IPVPN:       "shared-vpn",
+				IPVPN:       "SHARED_VPN",
 			},
 		},
 		ipvpn: map[string]*spec.IPVPNSpec{
-			"shared-vpn": {L3VNI: 20001, VRF: "shared-vpn"},
+			"SHARED_VPN": {L3VNI: 20001, VRF: "SHARED_VPN"},
 		},
 	}
 
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "shared-l3",
+		ServiceName: "SHARED_L3",
 		IPAddress:   "10.3.0.0/31",
 	})
 	if err != nil {
@@ -408,13 +408,13 @@ func TestServiceConfig_SharedVRF(t *testing.T) {
 	}
 
 	// VRF name should be the ipvpn name; vni field carries the L3VNI.
-	assertEntry(t, entries, "VRF", "shared-vpn", "vni", "20001")
+	assertEntry(t, entries, "VRF", "SHARED_VPN", "vni", "20001")
 
-	// INTERFACE should have vrf_name = shared-vpn
+	// INTERFACE should have vrf_name = SHARED_VPN
 	for _, e := range entries {
 		if e.Table == "INTERFACE" && e.Key == "Ethernet0" {
-			if e.Fields["vrf_name"] != "shared-vpn" {
-				t.Errorf("INTERFACE vrf_name = %q, want shared-vpn", e.Fields["vrf_name"])
+			if e.Fields["vrf_name"] != "SHARED_VPN" {
+				t.Errorf("INTERFACE vrf_name = %q, want SHARED_VPN", e.Fields["vrf_name"])
 			}
 			return
 		}
@@ -425,7 +425,7 @@ func TestServiceConfig_SharedVRF(t *testing.T) {
 func TestServiceConfig_BGP_PeerASRequest(t *testing.T) {
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
-			"transit": {
+			"TRANSIT": {
 				ServiceType: spec.ServiceTypeRouted,
 				Routing: &spec.RoutingSpec{
 					Protocol: spec.RoutingProtocolBGP,
@@ -438,7 +438,7 @@ func TestServiceConfig_BGP_PeerASRequest(t *testing.T) {
 	// PeerAS field should be used when service spec says peer_as:"request"
 	iface := newTestInterface(sp, "Ethernet0")
 	entries, err := iface.generateServiceEntries(ServiceEntryParams{
-		ServiceName: "transit",
+		ServiceName: "TRANSIT",
 		IPAddress:   "10.1.0.0/31",
 		PeerAS:      65002,
 		UnderlayASN: 65001,

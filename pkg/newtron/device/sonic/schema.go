@@ -306,7 +306,7 @@ var Schema = map[string]TableSchema{
 
 	"VXLAN_TUNNEL_MAP": {
 		// YANG: key name|mapname; vlan and vni are mandatory
-		KeyPattern: `^vtep\d+\|map_.+$`,
+		KeyPattern: `^vtep\d+\|VNI\d+_.+$`,
 		Fields: map[string]FieldConstraint{
 			"vlan": {Type: FieldString, Pattern: `^Vlan\d+$`}, // YANG: Vlan pattern, mandatory
 			"vrf":  {Type: FieldString},

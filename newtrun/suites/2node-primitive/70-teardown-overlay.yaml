@@ -104,7 +104,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_50300_Vlan300"
+    key: "vtep1|VNI50300_Vlan300"
     expect:
       exists: false
 
@@ -112,7 +112,7 @@ steps:
     action: verify-config-db
     devices: [switch2]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_50300_Vlan300"
+    key: "vtep1|VNI50300_Vlan300"
     expect:
       exists: false
 

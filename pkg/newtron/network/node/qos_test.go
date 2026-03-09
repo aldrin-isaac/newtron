@@ -16,7 +16,7 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 		},
 	}
 
-	entries := GenerateDeviceQoSConfig("test-2q", policy)
+	entries := GenerateDeviceQoSConfig("TEST_2Q", policy)
 
 	// Expect: 1 DSCP_TO_TC_MAP + 1 TC_TO_QUEUE_MAP + 2 SCHEDULER = 4 entries
 	if len(entries) != 4 {
@@ -25,8 +25,8 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 
 	// DSCP_TO_TC_MAP
 	dscpMap := entries[0]
-	if dscpMap.Table != "DSCP_TO_TC_MAP" || dscpMap.Key != "test-2q" {
-		t.Errorf("entry[0]: got %s|%s, want DSCP_TO_TC_MAP|test-2q", dscpMap.Table, dscpMap.Key)
+	if dscpMap.Table != "DSCP_TO_TC_MAP" || dscpMap.Key != "TEST_2Q" {
+		t.Errorf("entry[0]: got %s|%s, want DSCP_TO_TC_MAP|TEST_2Q", dscpMap.Table, dscpMap.Key)
 	}
 	if len(dscpMap.Fields) != 64 {
 		t.Errorf("DSCP map should have 64 entries, got %d", len(dscpMap.Fields))
@@ -44,8 +44,8 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 
 	// TC_TO_QUEUE_MAP
 	tcMap := entries[1]
-	if tcMap.Table != "TC_TO_QUEUE_MAP" || tcMap.Key != "test-2q" {
-		t.Errorf("entry[1]: got %s|%s, want TC_TO_QUEUE_MAP|test-2q", tcMap.Table, tcMap.Key)
+	if tcMap.Table != "TC_TO_QUEUE_MAP" || tcMap.Key != "TEST_2Q" {
+		t.Errorf("entry[1]: got %s|%s, want TC_TO_QUEUE_MAP|TEST_2Q", tcMap.Table, tcMap.Key)
 	}
 	if len(tcMap.Fields) != 2 {
 		t.Errorf("TC map should have 2 entries, got %d", len(tcMap.Fields))
@@ -56,8 +56,8 @@ func TestGenerateDeviceQoSConfig_TwoQueue(t *testing.T) {
 
 	// SCHEDULER entries
 	sched0 := entries[2]
-	if sched0.Table != "SCHEDULER" || sched0.Key != "test-2q.0" {
-		t.Errorf("entry[2]: got %s|%s, want SCHEDULER|test-2q.0", sched0.Table, sched0.Key)
+	if sched0.Table != "SCHEDULER" || sched0.Key != "TEST_2Q_Q0" {
+		t.Errorf("entry[2]: got %s|%s, want SCHEDULER|TEST_2Q_Q0", sched0.Table, sched0.Key)
 	}
 	if sched0.Fields["type"] != "DWRR" {
 		t.Errorf("scheduler 0 type: got %q, want DWRR", sched0.Fields["type"])
@@ -89,7 +89,7 @@ func TestGenerateDeviceQoSConfig_EightQueueWithECN(t *testing.T) {
 		},
 	}
 
-	entries := GenerateDeviceQoSConfig("8q-dc", policy)
+	entries := GenerateDeviceQoSConfig("8Q_DC", policy)
 
 	// 1 DSCP + 1 TC + 8 SCHEDULER + 1 WRED = 11
 	if len(entries) != 11 {
@@ -98,8 +98,8 @@ func TestGenerateDeviceQoSConfig_EightQueueWithECN(t *testing.T) {
 
 	// Last entry should be WRED_PROFILE
 	wred := entries[10]
-	if wred.Table != "WRED_PROFILE" || wred.Key != "8q-dc.ecn" {
-		t.Errorf("last entry: got %s|%s, want WRED_PROFILE|8q-dc.ecn", wred.Table, wred.Key)
+	if wred.Table != "WRED_PROFILE" || wred.Key != "8Q_DC_ECN" {
+		t.Errorf("last entry: got %s|%s, want WRED_PROFILE|8Q_DC_ECN", wred.Table, wred.Key)
 	}
 	if wred.Fields["ecn"] != "ecn_all" {
 		t.Errorf("WRED ecn: got %q, want ecn_all", wred.Fields["ecn"])
@@ -114,7 +114,7 @@ func TestGenerateDeviceQoSConfig_NoECN(t *testing.T) {
 		},
 	}
 
-	entries := GenerateDeviceQoSConfig("no-ecn", policy)
+	entries := GenerateDeviceQoSConfig("NO_ECN", policy)
 
 	// 1 DSCP + 1 TC + 2 SCHEDULER = 4 (no WRED)
 	if len(entries) != 4 {
@@ -137,7 +137,7 @@ func TestQoSBinding(t *testing.T) {
 	}
 
 	iface := &Interface{node: &Node{configDB: sonic.NewEmptyConfigDB(), offline: true}, name: "Ethernet0"}
-	entries := iface.bindQos("test-3q", policy)
+	entries := iface.bindQos("TEST_3Q", policy)
 
 	// 1 PORT_QOS_MAP + 3 QUEUE = 4
 	if len(entries) != 4 {
@@ -149,10 +149,10 @@ func TestQoSBinding(t *testing.T) {
 	if portMap.Table != "PORT_QOS_MAP" || portMap.Key != "Ethernet0" {
 		t.Errorf("entry[0]: got %s|%s, want PORT_QOS_MAP|Ethernet0", portMap.Table, portMap.Key)
 	}
-	if portMap.Fields["dscp_to_tc_map"] != "[DSCP_TO_TC_MAP|test-3q]" {
+	if portMap.Fields["dscp_to_tc_map"] != "[DSCP_TO_TC_MAP|TEST_3Q]" {
 		t.Errorf("dscp_to_tc_map bracket-ref: got %q", portMap.Fields["dscp_to_tc_map"])
 	}
-	if portMap.Fields["tc_to_queue_map"] != "[TC_TO_QUEUE_MAP|test-3q]" {
+	if portMap.Fields["tc_to_queue_map"] != "[TC_TO_QUEUE_MAP|TEST_3Q]" {
 		t.Errorf("tc_to_queue_map bracket-ref: got %q", portMap.Fields["tc_to_queue_map"])
 	}
 
@@ -161,7 +161,7 @@ func TestQoSBinding(t *testing.T) {
 	if q0.Table != "QUEUE" || q0.Key != "Ethernet0|0" {
 		t.Errorf("entry[1]: got %s|%s, want QUEUE|Ethernet0|0", q0.Table, q0.Key)
 	}
-	if q0.Fields["scheduler"] != "[SCHEDULER|test-3q.0]" {
+	if q0.Fields["scheduler"] != "[SCHEDULER|TEST_3Q_Q0]" {
 		t.Errorf("queue 0 scheduler ref: got %q", q0.Fields["scheduler"])
 	}
 	if _, hasWred := q0.Fields["wred_profile"]; hasWred {
@@ -173,7 +173,7 @@ func TestQoSBinding(t *testing.T) {
 	if q2.Key != "Ethernet0|2" {
 		t.Errorf("entry[3] key: got %q, want Ethernet0|2", q2.Key)
 	}
-	if q2.Fields["wred_profile"] != "[WRED_PROFILE|test-3q.ecn]" {
+	if q2.Fields["wred_profile"] != "[WRED_PROFILE|TEST_3Q_ECN]" {
 		t.Errorf("queue 2 wred_profile ref: got %q", q2.Fields["wred_profile"])
 	}
 }
@@ -186,7 +186,7 @@ func TestDSCPDefaultMapping(t *testing.T) {
 		},
 	}
 
-	entries := GenerateDeviceQoSConfig("dscp-test", policy)
+	entries := GenerateDeviceQoSConfig("DSCP_TEST", policy)
 	dscpMap := entries[0]
 
 	// Explicitly mapped

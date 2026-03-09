@@ -212,7 +212,7 @@ func TestCreateVLAN_Basic(t *testing.T) {
 	assertField(t, c, "description", "test-vlan")
 
 	// No VXLAN_TUNNEL_MAP when L2VNI is 0
-	assertNoChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_0_Vlan100")
+	assertNoChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI0_Vlan100")
 }
 
 func TestCreateVLAN_WithL2VNI(t *testing.T) {
@@ -225,7 +225,7 @@ func TestCreateVLAN_WithL2VNI(t *testing.T) {
 	}
 
 	assertChange(t, cs, "VLAN", "Vlan200", ChangeAdd)
-	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20200_Vlan200", ChangeAdd)
+	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20200_Vlan200", ChangeAdd)
 	assertField(t, c, "vlan", "Vlan200")
 	assertField(t, c, "vni", "20200")
 }
@@ -249,7 +249,7 @@ func TestDeleteVLAN_WithMembers(t *testing.T) {
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	d.configDB.VLANMember["Vlan100|Ethernet0"] = sonic.VLANMemberEntry{TaggingMode: "untagged"}
 	d.configDB.VLANMember["Vlan100|Ethernet4"] = sonic.VLANMemberEntry{TaggingMode: "tagged"}
-	d.configDB.VXLANTunnelMap["vtep1|map_20100_Vlan100"] = sonic.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
+	d.configDB.VXLANTunnelMap["vtep1|VNI20100_Vlan100"] = sonic.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVLAN(ctx, 100)
@@ -261,7 +261,7 @@ func TestDeleteVLAN_WithMembers(t *testing.T) {
 	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
 	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet4", ChangeDelete)
 	// VNI mapping deleted
-	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeDelete)
+	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", ChangeDelete)
 	// VLAN itself deleted
 	assertChange(t, cs, "VLAN", "Vlan100", ChangeDelete)
 }
@@ -474,7 +474,7 @@ func TestMapL2VNI(t *testing.T) {
 		t.Fatalf("MapL2VNI: %v", err)
 	}
 
-	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|map_20100_Vlan100", ChangeAdd)
+	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", ChangeAdd)
 	assertField(t, c, "vlan", "Vlan100")
 	assertField(t, c, "vni", "20100")
 }

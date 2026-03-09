@@ -388,6 +388,72 @@ Rules:
 - **When adding a new table:** identify its leafref parents, place entries after
   them in config functions, place deletions before them in reverse functions.
 
+## Unified Naming Convention for CONFIG_DB Keys
+
+Every CONFIG_DB key name that newtron derives follows a single convention:
+
+- **ALL UPPERCASE**, single underscore (`_`) as the only separator.
+- **Hyphens converted**: user-provided spec names have hyphens replaced with
+  underscores and uppercased. `protect-re` → `PROTECT_RE`.
+- **Allowed characters**: `[A-Z0-9_]` only.
+- **No redundant kind in key**: the table name carries the object kind.
+  `ACL_TABLE|PROTECT_RE_IN_1ED5F2C7` — not `ACL_TABLE|ACL_PROTECT_RE_IN_1ED5F2C7`.
+- **Numeric IDs concatenated with type prefix**: `VNI1001`, `VLAN100`, `ETH0`, `Q0`
+  (matching SONiC convention: `Vlan100`, `Loopback0`).
+
+See `docs/DESIGN_PRINCIPLES.md` §32 for rationale.
+
+## Normalize at the Boundary
+
+Names are normalized **once, at spec load time** — not at each point of use.
+The spec loader converts all map keys and name-reference fields to canonical
+form (uppercase, hyphens → underscores) before returning specs to callers.
+
+After loading, every map key (`Services["TRANSIT"]`), every cross-reference
+(`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows into
+CONFIG_DB key construction is already canonical. Operations code never calls
+`NormalizeName()`.
+
+See `docs/DESIGN_PRINCIPLES.md` §33 for rationale.
+
+## Policy vs Infrastructure — Shared Object Lifecycles
+
+CONFIG_DB entries fall into three categories:
+
+| Category | Identity | Lifecycle |
+|----------|----------|-----------|
+| **Infrastructure** | Per-interface | Created/destroyed with service apply/remove |
+| **Policy** | User-named + content hash | Shared across services, independent lifecycle |
+| **Binding** | Per-interface | Created/destroyed with service apply/remove |
+
+Policy objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) are created on
+first reference and deleted when the last reference is removed. They persist
+across individual service removals as long as at least one consumer remains.
+
+Content-hashed naming: shared policy objects include an 8-character SHA256 hash
+of their generated CONFIG_DB fields in the key name. Spec unchanged → hash
+unchanged → `RefreshService` is a no-op for that object. Spec changed → new hash
+→ blue-green migration (new object alongside old, interfaces migrate one by one,
+old object deleted when last consumer migrates).
+
+Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes computed first,
+then ROUTE_MAP entries reference real PREFIX_SET names (including hashes), so a
+content change cascades through the hash chain automatically.
+
+See `docs/DESIGN_PRINCIPLES.md` §34–35 for rationale.
+
+## BGP Peer Groups — Native Sharing Mechanism
+
+When multiple interfaces use the same service with BGP routing, newtron creates a
+`BGP_PEER_GROUP` named after the service. Neighbors reference the peer group;
+shared attributes (route maps, admin status) live on `BGP_PEER_GROUP_AF`.
+
+Peer groups are created on first `ApplyService` for a service with BGP routing,
+and deleted when the last interface using that service is removed. Topology-level
+underlay peers do NOT use peer groups — each has unique attributes.
+
+See `docs/DESIGN_PRINCIPLES.md` §36 for rationale.
+
 ## Allowed Commands
 
 These are routine project commands that do not require confirmation:

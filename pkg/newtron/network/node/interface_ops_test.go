@@ -32,20 +32,20 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	// Register service in network spec
-	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["CUSTOMER_L3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 		VRFType:     spec.VRFTypeInterface,
 	}
 
 	// ConfigDB state: service binding + VRF + IP + INTERFACE base
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
+		ServiceName: "CUSTOMER_L3",
 		IPAddress:   "10.1.0.0/31",
-		VRFName:     "Vrf_CUST1",
+		VRFName:     "CUSTOMER_L3_ETH0",
 	}
-	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "CUSTOMER_L3_ETH0"}
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
-	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
+	d.configDB.VRF["CUSTOMER_L3_ETH0"] = sonic.VRFEntry{}
 
 	cs, err := intf.RemoveService(ctx)
 	if err != nil {
@@ -56,8 +56,8 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeDelete)
 	// INTERFACE base entry deleted (routed service — full cleanup)
 	assertChange(t, cs, "INTERFACE", "Ethernet0", ChangeDelete)
-	// Per-interface VRF deleted (derived name: service-interface)
-	assertChange(t, cs, "VRF", "customer-l3-Eth0", ChangeDelete)
+	// Per-interface VRF deleted (derived name: SERVICE_INTF)
+	assertChange(t, cs, "VRF", "CUSTOMER_L3_ETH0", ChangeDelete)
 	// Service binding removed
 	assertChange(t, cs, "NEWTRON_SERVICE_BINDING", "Ethernet0", ChangeDelete)
 }
@@ -66,19 +66,19 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	d, intf := testInterface()
 	ctx := context.Background()
 
-	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["CUSTOMER_L3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 
 	// ACL only bound to this interface → last user
-	d.configDB.ACLTable["ACL_CUST_IN"] = sonic.ACLTableEntry{
+	d.configDB.ACLTable["CUSTOMER_L3_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0",
 	}
-	d.configDB.ACLRule["ACL_CUST_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
+	d.configDB.ACLRule["CUSTOMER_L3_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
-		IngressACL:  "ACL_CUST_IN",
+		ServiceName: "CUSTOMER_L3",
+		IngressACL:  "CUSTOMER_L3_IN",
 	}
 
 	cs, err := intf.RemoveService(ctx)
@@ -87,26 +87,26 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	}
 
 	// Last user → rules + table deleted
-	assertChange(t, cs, "ACL_RULE", "ACL_CUST_IN|RULE_10", ChangeDelete)
-	assertChange(t, cs, "ACL_TABLE", "ACL_CUST_IN", ChangeDelete)
+	assertChange(t, cs, "ACL_RULE", "CUSTOMER_L3_IN|RULE_10", ChangeDelete)
+	assertChange(t, cs, "ACL_TABLE", "CUSTOMER_L3_IN", ChangeDelete)
 }
 
 func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	d, intf := testInterface()
 	ctx := context.Background()
 
-	d.SpecProvider.(*testSpecProvider).services["customer-l3"] = &spec.ServiceSpec{
+	d.SpecProvider.(*testSpecProvider).services["CUSTOMER_L3"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 
 	// ACL bound to both Ethernet0 and Ethernet4 → not last user
-	d.configDB.ACLTable["ACL_CUST_IN"] = sonic.ACLTableEntry{
+	d.configDB.ACLTable["CUSTOMER_L3_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
-		IngressACL:  "ACL_CUST_IN",
+		ServiceName: "CUSTOMER_L3",
+		IngressACL:  "CUSTOMER_L3_IN",
 	}
 
 	cs, err := intf.RemoveService(ctx)
@@ -115,9 +115,9 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	}
 
 	// Not last user → ACL_TABLE modified (interface removed), NOT deleted
-	c := assertChange(t, cs, "ACL_TABLE", "ACL_CUST_IN", ChangeModify)
+	c := assertChange(t, cs, "ACL_TABLE", "CUSTOMER_L3_IN", ChangeModify)
 	assertField(t, c, "ports", "Ethernet4")
-	assertNoChange(t, cs, "ACL_RULE", "ACL_CUST_IN|RULE_10")
+	assertNoChange(t, cs, "ACL_RULE", "CUSTOMER_L3_IN|RULE_10")
 }
 
 // ============================================================================
@@ -319,17 +319,17 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 
 func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "existing-service"}
-	d.SpecProvider.(*testSpecProvider).services["new-service"] = &spec.ServiceSpec{
+	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "EXISTING_SERVICE"}
+	d.SpecProvider.(*testSpecProvider).services["NEW_SERVICE"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}
 	ctx := context.Background()
 
-	_, err := intf.ApplyService(ctx, "new-service", ApplyServiceOpts{IPAddress: "10.0.0.1/30"})
+	_, err := intf.ApplyService(ctx, "NEW_SERVICE", ApplyServiceOpts{IPAddress: "10.0.0.1/30"})
 	if err == nil {
 		t.Fatal("expected error when interface already has service")
 	}
-	if got := err.Error(); got != "interface Ethernet0 already has service 'existing-service' - remove it first" {
+	if got := err.Error(); got != "interface Ethernet0 already has service 'EXISTING_SERVICE' - remove it first" {
 		t.Errorf("error = %q", got)
 	}
 }

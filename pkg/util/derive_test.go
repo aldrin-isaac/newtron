@@ -10,7 +10,7 @@ func TestDeriveFromInterface(t *testing.T) {
 		name        string
 		intf        string
 		ipWithMask  string
-		serviceName string
+		serviceName string // expected to be pre-normalized (uppercase, underscores)
 		wantErr     bool
 		checkVRF    string
 		checkACL    string
@@ -19,33 +19,33 @@ func TestDeriveFromInterface(t *testing.T) {
 			name:        "basic interface",
 			intf:        "Ethernet0",
 			ipWithMask:  "10.1.1.1/30",
-			serviceName: "customer",
+			serviceName: "CUSTOMER",
 			wantErr:     false,
-			checkVRF:    "customer-Eth0",
-			checkACL:    "customer-Eth0",
+			checkVRF:    "CUSTOMER_ETH0",
+			checkACL:    "CUSTOMER_ETH0",
 		},
 		{
 			name:        "port channel",
 			intf:        "PortChannel100",
 			ipWithMask:  "10.1.1.1/30",
-			serviceName: "transit",
+			serviceName: "TRANSIT",
 			wantErr:     false,
-			checkVRF:    "transit-Po100",
-			checkACL:    "transit-Po100",
+			checkVRF:    "TRANSIT_PO100",
+			checkACL:    "TRANSIT_PO100",
 		},
 		{
 			name:        "no IP",
 			intf:        "Ethernet0",
 			ipWithMask:  "",
-			serviceName: "l2-only",
+			serviceName: "L2_ONLY",
 			wantErr:     false,
-			checkVRF:    "l2-only-Eth0",
+			checkVRF:    "L2_ONLY_ETH0",
 		},
 		{
 			name:        "invalid IP",
 			intf:        "Ethernet0",
 			ipWithMask:  "invalid",
-			serviceName: "test",
+			serviceName: "TEST",
 			wantErr:     true,
 		},
 	}
@@ -95,14 +95,14 @@ func TestSanitizeForName(t *testing.T) {
 func TestDeriveVRFName(t *testing.T) {
 	tests := []struct {
 		vrfType       string
-		serviceName   string
+		serviceName   string // pre-normalized
 		interfaceName string
 		want          string
 	}{
-		{"interface", "customer", "Ethernet0", "customer-Eth0"},
-		{"shared", "customer", "Ethernet0", "customer"},
-		{"", "customer", "Ethernet0", "customer-Eth0"}, // default to interface
-		{"interface", "transit", "PortChannel100", "transit-Po100"},
+		{"interface", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"},
+		{"shared", "CUSTOMER", "Ethernet0", "CUSTOMER"},
+		{"", "CUSTOMER", "Ethernet0", "CUSTOMER_ETH0"}, // default to interface
+		{"interface", "TRANSIT", "PortChannel100", "TRANSIT_PO100"},
 	}
 
 	for _, tt := range tests {
@@ -118,13 +118,13 @@ func TestDeriveVRFName(t *testing.T) {
 
 func TestDeriveACLName(t *testing.T) {
 	tests := []struct {
-		serviceName string
+		serviceName string // pre-normalized
 		direction   string
 		want        string
 	}{
-		{"customer-edge", "in", "customer-edge-in"},
-		{"customer-edge", "out", "customer-edge-out"},
-		{"transit", "in", "transit-in"},
+		{"CUSTOMER_EDGE", "in", "CUSTOMER_EDGE_IN"},
+		{"CUSTOMER_EDGE", "out", "CUSTOMER_EDGE_OUT"},
+		{"TRANSIT", "in", "TRANSIT_IN"},
 	}
 
 	for _, tt := range tests {
@@ -132,6 +132,30 @@ func TestDeriveACLName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("DeriveACLName(%q, %q) = %q, want %q", tt.serviceName, tt.direction, got, tt.want)
 		}
+	}
+}
+
+func TestNormalizeName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"transit", "TRANSIT"},
+		{"customer-edge", "CUSTOMER_EDGE"},
+		{"PROTECT-RE", "PROTECT_RE"},
+		{"l2-only", "L2_ONLY"},
+		{"already_UPPER", "ALREADY_UPPER"},
+		{"mixed-Case_Name", "MIXED_CASE_NAME"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeName(tt.input)
+			if got != tt.want {
+				t.Errorf("NormalizeName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

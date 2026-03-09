@@ -58,7 +58,7 @@ steps:
     action: verify-config-db
     devices: [leaf1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10100_Vlan100"
+    key: "vtep1|VNI10100_Vlan100"
     expect:
       fields:
         vlan: Vlan100
@@ -68,7 +68,7 @@ steps:
     action: verify-config-db
     devices: [leaf2]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_10100_Vlan100"
+    key: "vtep1|VNI10100_Vlan100"
     expect:
       fields:
         vlan: Vlan100

@@ -940,7 +940,7 @@ Every table newtron reads or writes, with key format and fields.
 | Table | Key Format | Purpose | Fields |
 |-------|-----------|---------|--------|
 | `VXLAN_TUNNEL` | `vtep1` | VTEP source | `src_ip` |
-| `VXLAN_TUNNEL_MAP` | `vtep1\|map_{vni}_{target}` | VNI mapping | `vni`, `vlan` (L2VNI) or `vrf` (L3VNI) |
+| `VXLAN_TUNNEL_MAP` | `vtep1\|VNI{vni}_{target}` | VNI mapping | `vni`, `vlan` (L2VNI) or `vrf` (L3VNI) |
 | `VXLAN_EVPN_NVO` | `nvo1` | EVPN NVO | `source_vtep` |
 | `SUPPRESS_VLAN_NEIGH` | `Vlan100` | ARP suppression | `suppress` (`on`) |
 

@@ -346,7 +346,7 @@ func TestConfigDB_ComplexJSON(t *testing.T) {
 			}
 		},
 		"VXLAN_TUNNEL_MAP": {
-			"vtep1|map_100_Vlan100": {
+			"vtep1|VNI100_Vlan100": {
 				"vlan": "Vlan100",
 				"vni": "10100"
 			}
@@ -400,7 +400,7 @@ func TestConfigDB_ComplexJSON(t *testing.T) {
 	}
 
 	// Verify VXLAN_TUNNEL_MAP
-	if mapping, ok := cfg.VXLANTunnelMap["vtep1|map_100_Vlan100"]; !ok {
+	if mapping, ok := cfg.VXLANTunnelMap["vtep1|VNI100_Vlan100"]; !ok {
 		t.Error("VXLAN mapping not found")
 	} else {
 		if mapping.VNI != "10100" {

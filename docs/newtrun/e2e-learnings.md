@@ -73,7 +73,7 @@ VLAN_INTERFACE|Vlan100|10.1.100.1/24      → IP binding (empty hash)
 INTERFACE|Ethernet2                       → vrf_name (base entry)
 INTERFACE|Ethernet2|10.99.2.1/30          → IP binding (empty hash)
 VRF|customer-l3-Eth0                      → vni (empty if no L3VNI)
-VXLAN_TUNNEL_MAP|vtep1|map_10700_Vlan700  → vlan: Vlan700, vni: 10700
+VXLAN_TUNNEL_MAP|vtep1|VNI10700_Vlan700   → vlan: Vlan700, vni: 10700
 SUPPRESS_VLAN_NEIGH|Vlan700               → suppress: on
 NEWTRON_SERVICE_BINDING|Ethernet2         → service_name: l2-extend
 SAG_GLOBAL|IPv4                           → gwmac: 00:00:00:01:02:03
@@ -102,8 +102,8 @@ Entries like VRF, VLAN (no fields), IP bindings, and PORTCHANNEL_MEMBER use this
 
 ## 8. VXLAN Tunnel Naming
 
-- **Leaf L2VNI**: `VXLAN_TUNNEL_MAP|vtep1|map_<VNI>_Vlan<ID>`
-- **Leaf L3VNI** (VRF): `VXLAN_TUNNEL_MAP|vtep1|map_<L3VNI>_<VRF>`
+- **Leaf L2VNI**: `VXLAN_TUNNEL_MAP|vtep1|VNI<VNI>_Vlan<ID>`
+- **Leaf L3VNI** (VRF): `VXLAN_TUNNEL_MAP|vtep1|VNI<L3VNI>_<VRF>`
 - **NVO**: Always `VXLAN_EVPN_NVO|nvo1` with `source_vtep=vtep1`
 - SONiC-VS supports only one VXLAN_TUNNEL per device
 

@@ -497,7 +497,8 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 		return nil, ""
 	}
 
-	rmName := fmt.Sprintf("svc-%s-%s", util.SanitizeName(serviceName), direction)
+	// serviceName is already normalized (uppercase, underscores) by the spec loader.
+	rmName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
 	var entries []sonic.Entry
 
 	for _, rule := range policy.Rules {
@@ -507,13 +508,13 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 		}
 
 		if rule.PrefixList != "" {
-			prefixSetName := fmt.Sprintf("%s-pl-%d", rmName, rule.Sequence)
+			prefixSetName := fmt.Sprintf("%s_PL_%d", rmName, rule.Sequence)
 			entries = append(entries, i.createPrefixSet(prefixSetName, rule.PrefixList)...)
 			fields["match_prefix_set"] = prefixSetName
 		}
 
 		if rule.Community != "" {
-			csName := fmt.Sprintf("%s-cs-%d", rmName, rule.Sequence)
+			csName := fmt.Sprintf("%s_CS_%d", rmName, rule.Sequence)
 			entries = append(entries, sonic.Entry{
 				Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
 					"set_type":         "standard",
@@ -541,7 +542,7 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 
 	// Extra community AND condition from service routing spec
 	if extraCommunity != "" {
-		csName := fmt.Sprintf("%s-extra-cs", rmName)
+		csName := fmt.Sprintf("%s_EXTRA_CS", rmName)
 		entries = append(entries, sonic.Entry{
 			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
 				"set_type":         "standard",
@@ -561,7 +562,7 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 
 	// Extra prefix list AND condition
 	if extraPrefixList != "" {
-		plName := fmt.Sprintf("%s-extra-pl", rmName)
+		plName := fmt.Sprintf("%s_EXTRA_PL", rmName)
 		entries = append(entries, i.createPrefixSet(plName, extraPrefixList)...)
 		entries = append(entries, sonic.Entry{
 			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|9100", rmName), Fields: map[string]string{
@@ -577,12 +578,13 @@ func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraC
 // createInlineRoutePolicy creates a route-map from standalone community/prefix filters.
 // Returns entries and the route-map name.
 func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, prefixList string) ([]sonic.Entry, string) {
-	rmName := fmt.Sprintf("svc-%s-%s", util.SanitizeName(serviceName), direction)
+	// serviceName is already normalized (uppercase, underscores) by the spec loader.
+	rmName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
 	var entries []sonic.Entry
 	seq := 10
 
 	if community != "" {
-		csName := fmt.Sprintf("%s-cs", rmName)
+		csName := fmt.Sprintf("%s_CS", rmName)
 		entries = append(entries, sonic.Entry{
 			Table: "COMMUNITY_SET", Key: csName, Fields: map[string]string{
 				"set_type":         "standard",
@@ -602,7 +604,7 @@ func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, p
 	}
 
 	if prefixList != "" {
-		plName := fmt.Sprintf("%s-pl", rmName)
+		plName := fmt.Sprintf("%s_PL", rmName)
 		entries = append(entries, i.createPrefixSet(plName, prefixList)...)
 		entries = append(entries, sonic.Entry{
 			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, seq), Fields: map[string]string{
@@ -637,13 +639,14 @@ func (i *Interface) createPrefixSet(prefixSetName, prefixListName string) []soni
 
 // deleteRoutePoliciesConfig returns delete entries for all ROUTE_MAP, PREFIX_SET, and
 // COMMUNITY_SET entries created by a service (keyed by the deterministic prefix
-// "svc-{util.SanitizeName(serviceName)}-").
+// "{serviceName}_" where serviceName is already normalized by the spec loader).
 func (n *Node) deleteRoutePoliciesConfig(serviceName string) []sonic.Entry {
 	var entries []sonic.Entry
 	if n.configDB == nil {
 		return entries
 	}
-	prefix := "svc-" + util.SanitizeName(serviceName) + "-"
+	// serviceName is already normalized (uppercase, underscores) by the spec loader.
+	prefix := serviceName + "_"
 
 	for key := range n.configDB.RouteMap {
 		// RouteMap keys are "rmName|seq" — check if rmName starts with prefix

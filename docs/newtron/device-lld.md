@@ -478,7 +478,7 @@ type VXLANTunnelEntry struct {        // Key: "vtep1"
     SrcIP string `json:"src_ip"`
 }
 
-type VXLANMapEntry struct {           // Key: "vtep1|map_100_Vlan100"
+type VXLANMapEntry struct {           // Key: "vtep1|VNI100_Vlan100"
     VLAN string `json:"vlan,omitempty"`
     VRF  string `json:"vrf,omitempty"`
     VNI  string `json:"vni"`

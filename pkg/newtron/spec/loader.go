@@ -88,6 +88,9 @@ func (l *Loader) LoadProfile(deviceName string) (*DeviceProfile, error) {
 		return nil, fmt.Errorf("parsing profile %s: %w", deviceName, err)
 	}
 
+	// Normalize name keys and name-reference fields at load time.
+	normalizeOverridableSpecs(&profile.OverridableSpecs)
+
 	// Validate profile
 	if err := l.validateProfile(&profile); err != nil {
 		return nil, fmt.Errorf("validating profile %s: %w", deviceName, err)
@@ -107,6 +110,12 @@ func (l *Loader) loadNetworkSpec() (*NetworkSpecFile, error) {
 	var spec NetworkSpecFile
 	if err := json.Unmarshal(data, &spec); err != nil {
 		return nil, err
+	}
+
+	// Normalize all name keys and name-reference fields at load time.
+	normalizeOverridableSpecs(&spec.OverridableSpecs)
+	for _, zone := range spec.Zones {
+		normalizeOverridableSpecs(&zone.OverridableSpecs)
 	}
 
 	return &spec, nil
@@ -543,4 +552,102 @@ func (l *Loader) validateLinkEndpoint(v *util.ValidationBuilder, linkIdx int, si
 // splitEndpoint splits a "device:interface" string into its components.
 func splitEndpoint(endpoint string) []string {
 	return strings.SplitN(endpoint, ":", 2)
+}
+
+// normalizeOverridableSpecs normalizes all map keys and name-reference fields
+// in an OverridableSpecs to canonical form (uppercase, hyphens → underscores).
+// Called once at spec load time so operations code sees only canonical names.
+func normalizeOverridableSpecs(s *OverridableSpecs) {
+	s.Services = normalizeMap(s.Services)
+	s.Filters = normalizeMap(s.Filters)
+	s.IPVPNs = normalizeMap(s.IPVPNs)
+	s.MACVPNs = normalizeMap(s.MACVPNs)
+	s.QoSPolicies = normalizeMap(s.QoSPolicies)
+	s.QoSProfiles = normalizeMap(s.QoSProfiles)
+	s.RoutePolicies = normalizeMap(s.RoutePolicies)
+	s.PrefixLists = normalizeMap(s.PrefixLists)
+
+	// Normalize name-reference fields inside specs
+	for _, svc := range s.Services {
+		normalizeServiceRefs(svc)
+	}
+	for _, filter := range s.Filters {
+		normalizeFilterRefs(filter)
+	}
+	for _, rp := range s.RoutePolicies {
+		normalizeRoutePolicyRefs(rp)
+	}
+	for _, ipvpn := range s.IPVPNs {
+		normalizeIPVPNRefs(ipvpn)
+	}
+}
+
+// normalizeMap re-keys a map using NormalizeName on each key.
+func normalizeMap[V any](m map[string]V) map[string]V {
+	if m == nil {
+		return nil
+	}
+	result := make(map[string]V, len(m))
+	for k, v := range m {
+		result[util.NormalizeName(k)] = v
+	}
+	return result
+}
+
+// normalizeServiceRefs normalizes name-reference fields in a ServiceSpec.
+func normalizeServiceRefs(svc *ServiceSpec) {
+	if svc == nil {
+		return
+	}
+	svc.IngressFilter = normalizeRef(svc.IngressFilter)
+	svc.EgressFilter = normalizeRef(svc.EgressFilter)
+	svc.IPVPN = normalizeRef(svc.IPVPN)
+	svc.MACVPN = normalizeRef(svc.MACVPN)
+	svc.QoSPolicy = normalizeRef(svc.QoSPolicy)
+	svc.QoSProfile = normalizeRef(svc.QoSProfile)
+	if svc.Routing != nil {
+		svc.Routing.ImportPolicy = normalizeRef(svc.Routing.ImportPolicy)
+		svc.Routing.ExportPolicy = normalizeRef(svc.Routing.ExportPolicy)
+		svc.Routing.ImportPrefixList = normalizeRef(svc.Routing.ImportPrefixList)
+		svc.Routing.ExportPrefixList = normalizeRef(svc.Routing.ExportPrefixList)
+		// ImportCommunity/ExportCommunity are values (e.g., "65001:100"), not spec names
+	}
+}
+
+// normalizeFilterRefs normalizes prefix list references in filter rules.
+func normalizeFilterRefs(filter *FilterSpec) {
+	if filter == nil {
+		return
+	}
+	for _, rule := range filter.Rules {
+		rule.SrcPrefixList = normalizeRef(rule.SrcPrefixList)
+		rule.DstPrefixList = normalizeRef(rule.DstPrefixList)
+	}
+}
+
+// normalizeRoutePolicyRefs normalizes prefix list references in route policy rules.
+func normalizeRoutePolicyRefs(rp *RoutePolicy) {
+	if rp == nil {
+		return
+	}
+	for _, rule := range rp.Rules {
+		rule.PrefixList = normalizeRef(rule.PrefixList)
+		// rule.Community is a match value (e.g., "65001:100"), not a spec name
+	}
+}
+
+// normalizeIPVPNRefs normalizes the VRF name reference in IPVPNSpec.
+func normalizeIPVPNRefs(ipvpn *IPVPNSpec) {
+	if ipvpn == nil {
+		return
+	}
+	ipvpn.VRF = normalizeRef(ipvpn.VRF)
+}
+
+// normalizeRef normalizes a single name reference (returns "" for empty strings).
+func normalizeRef(ref string) string {
+	if ref == "" {
+		return ""
+	}
+	return util.NormalizeName(ref)
 }

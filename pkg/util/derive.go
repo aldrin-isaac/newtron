@@ -11,6 +11,14 @@ var (
 	parseInterfaceRegexp = regexp.MustCompile(`^([a-zA-Z]+)(\d+(?:/\d+)*)$`)
 )
 
+// NormalizeName converts a user-provided spec name to canonical form for
+// CONFIG_DB key construction. Hyphens → underscores, then uppercased.
+// Called by the spec loader on all name keys and name-reference fields at
+// load time. Operations code should never need to call this directly.
+func NormalizeName(name string) string {
+	return strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+}
+
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
 	NeighborIP  string // Computed from local IP for point-to-point
@@ -19,7 +27,8 @@ type DerivedValues struct {
 	ACLPrefix   string // Prefix for per-interface ACL names (append "-in"/"-out")
 }
 
-// DeriveFromInterface derives values from interface name, IP, and service name
+// DeriveFromInterface derives values from interface name, IP, and service name.
+// Service names are expected to already be normalized (uppercase, underscores).
 func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, error) {
 	d := &DerivedValues{}
 
@@ -32,12 +41,12 @@ func DeriveFromInterface(intf, ipWithMask, serviceName string) (*DerivedValues, 
 		d.NeighborIP = ComputeNeighborIP(ip.String(), mask)
 	}
 
-	// Generate VRF name from service and interface (using short names)
-	shortIntf := SanitizeForName(ShortenInterfaceName(intf))
-	d.VRFName = serviceName + "-" + shortIntf
+	// Generate VRF name from service and interface (using short names, uppercase)
+	shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(intf)))
+	d.VRFName = serviceName + "_" + shortIntf
 
-	// Generate ACL base name (using short names)
-	d.ACLPrefix = serviceName + "-" + shortIntf
+	// Generate ACL base name (using short names, uppercase)
+	d.ACLPrefix = serviceName + "_" + shortIntf
 
 	return d, nil
 }
@@ -52,24 +61,28 @@ func SanitizeForName(name string) string {
 	return sanitizeRegexp.ReplaceAllString(name, "")
 }
 
-// DeriveVRFName generates a VRF name based on type
-// Uses short interface names: customer-edge-Eth0 instead of customer-edge-Ethernet0
+// DeriveVRFName generates a VRF name based on type.
+// Service names are expected to already be normalized (uppercase, underscores).
+// Uses short interface names: TRANSIT_ETH0 instead of TRANSIT_ETHERNET0
 func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 	switch vrfType {
 	case "interface":
-		return serviceName + "-" + SanitizeForName(ShortenInterfaceName(interfaceName))
+		shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
+		return serviceName + "_" + shortIntf
 	case "shared":
 		return serviceName
 	default:
-		return serviceName + "-" + SanitizeForName(ShortenInterfaceName(interfaceName))
+		shortIntf := strings.ToUpper(SanitizeForName(ShortenInterfaceName(interfaceName)))
+		return serviceName + "_" + shortIntf
 	}
 }
 
 // DeriveACLName generates an ACL name for a service and direction.
-// ACLs are per-service, not per-interface: customer-edge-in, customer-edge-out
+// Service names are expected to already be normalized (uppercase, underscores).
+// ACLs are per-service, not per-interface: CUSTOMER_EDGE_IN, CUSTOMER_EDGE_OUT
 // Multiple interfaces using the same service share the same ACL.
 func DeriveACLName(serviceName, direction string) string {
-	return serviceName + "-" + direction
+	return serviceName + "_" + strings.ToUpper(direction)
 }
 
 // ParseInterfaceName extracts interface type and number

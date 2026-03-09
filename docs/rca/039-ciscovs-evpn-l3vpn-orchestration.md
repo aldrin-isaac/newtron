@@ -43,7 +43,7 @@ tunnel map entries impossible on this platform.
 ## Why EVPN IRB (Type-2) Works
 
 EVPN IRB uses `VNI_TO_VLAN_ID` (L2 DECAP) tunnel map entries created by
-`VxlanTunnelMapOrch` when `VXLAN_TUNNEL_MAP|vtep1|map_{vni}_Vlan{id}` is written.
+`VxlanTunnelMapOrch` when `VXLAN_TUNNEL_MAP|vtep1|VNI{vni}_Vlan{id}` is written.
 Silicon One SAI handles L2 DECAP correctly — decap routes through the VLAN bridge
 domain, and the SVI bound to the VRF provides L3 routing.  This is the standard
 EVPN IRB path and works end-to-end:

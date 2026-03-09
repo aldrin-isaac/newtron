@@ -68,7 +68,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|map_50400_Vlan400"
+    key: "vtep1|VNI50400_Vlan400"
     expect:
       fields:
         vlan: Vlan400

@@ -57,8 +57,9 @@ func GenerateDeviceQoSConfig(policyName string, policy *spec.QoSPolicy) []sonic.
 	})
 
 	// SCHEDULER: one per queue.
+	// Policy names are already normalized (uppercase, underscores) by the spec loader.
 	for i, q := range policy.Queues {
-		schedKey := fmt.Sprintf("%s.%d", policyName, i)
+		schedKey := fmt.Sprintf("%s_Q%d", policyName, i)
 		schedFields := map[string]string{
 			"type": strings.ToUpper(q.Type),
 		}
@@ -83,7 +84,7 @@ func GenerateDeviceQoSConfig(policyName string, policy *spec.QoSPolicy) []sonic.
 	if hasECN {
 		entries = append(entries, sonic.Entry{
 			Table: "WRED_PROFILE",
-			Key:   policyName + ".ecn",
+			Key:   policyName + "_ECN",
 			Fields: map[string]string{
 				"ecn":                   "ecn_all",
 				"green_min_threshold":   defaultWREDMinThreshold,
@@ -113,11 +114,11 @@ func (i *Interface) bindQos(policyName string, policy *spec.QoSPolicy) []sonic.E
 	})
 
 	// QUEUE: one per queue, binding scheduler (and optionally WRED).
-	wredKey := policyName + ".ecn"
+	wredKey := policyName + "_ECN"
 	for idx, q := range policy.Queues {
 		queueKey := fmt.Sprintf("%s|%d", i.name, idx)
 		queueFields := map[string]string{
-			"scheduler": fmt.Sprintf("[SCHEDULER|%s.%d]", policyName, idx),
+			"scheduler": fmt.Sprintf("[SCHEDULER|%s_Q%d]", policyName, idx),
 		}
 		if q.ECN {
 			queueFields["wred_profile"] = fmt.Sprintf("[WRED_PROFILE|%s]", wredKey)
@@ -157,9 +158,9 @@ func (n *Node) deleteDeviceQoSConfig(policyName string) []sonic.Entry {
 	// DSCP_TO_TC_MAP and TC_TO_QUEUE_MAP: exact key match
 	entries = append(entries, sonic.Entry{Table: "DSCP_TO_TC_MAP", Key: policyName})
 	entries = append(entries, sonic.Entry{Table: "TC_TO_QUEUE_MAP", Key: policyName})
-	// SCHEDULER and WRED_PROFILE: scan for policyName.* prefix
+	// SCHEDULER and WRED_PROFILE: scan for policyName_* prefix
 	if n.configDB != nil {
-		prefix := policyName + "."
+		prefix := policyName + "_"
 		for key := range n.configDB.Scheduler {
 			if strings.HasPrefix(key, prefix) {
 				entries = append(entries, sonic.Entry{Table: "SCHEDULER", Key: key})

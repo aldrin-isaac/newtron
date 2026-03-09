@@ -15,7 +15,7 @@ import (
 // VNIMapKey returns the CONFIG_DB key for a VXLAN_TUNNEL_MAP entry.
 // Target is a VLAN name (e.g., "Vlan100") or VRF name.
 func VNIMapKey(vni int, target string) string {
-	return fmt.Sprintf("vtep1|map_%d_%s", vni, target)
+	return fmt.Sprintf("vtep1|VNI%d_%s", vni, target)
 }
 
 // BGPEVPNVNIKey returns the CONFIG_DB key for a BGP_EVPN_VNI entry.

@@ -213,7 +213,7 @@ func TestLoader_GetService(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	svc, err := loader.GetService("customer-l3")
+	svc, err := loader.GetService("CUSTOMER_L3")
 	if err != nil {
 		t.Fatalf("GetService() failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestLoader_GetFilter(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	filter, err := loader.GetFilter("test-filter")
+	filter, err := loader.GetFilter("TEST_FILTER")
 	if err != nil {
 		t.Fatalf("GetFilter() failed: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestLoader_GetPrefixList(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	list, err := loader.GetPrefixList("rfc1918")
+	list, err := loader.GetPrefixList("RFC1918")
 	if err != nil {
 		t.Fatalf("GetPrefixList() failed: %v", err)
 	}

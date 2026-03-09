@@ -129,19 +129,19 @@ func TestChangeSet_AddMultiple(t *testing.T) {
 	cs := NewChangeSet("leaf1-ny", "service.apply")
 
 	// Add typical service apply changes
-	cs.Add("VRF", "customer-l3-Ethernet0", map[string]string{
+	cs.Add("VRF", "CUSTOMER_L3_ETH0", map[string]string{
 		"vni": "10001",
 	})
 	cs.Update("INTERFACE", "Ethernet0", map[string]string{
-		"vrf_name": "customer-l3-Ethernet0",
+		"vrf_name": "CUSTOMER_L3_ETH0",
 	})
 	cs.Add("INTERFACE", "Ethernet0|10.1.1.1/30", nil)
-	cs.Add("ACL_TABLE", "customer-l3-in", map[string]string{
+	cs.Add("ACL_TABLE", "CUSTOMER_L3_IN", map[string]string{
 		"type":  "L3",
 		"stage": "ingress",
 		"ports": "Ethernet0",
 	})
-	cs.Add("ACL_RULE", "customer-l3-in|RULE_100", map[string]string{
+	cs.Add("ACL_RULE", "CUSTOMER_L3_IN|RULE_100", map[string]string{
 		"packet_action": "FORWARD",
 	})
 
@@ -328,13 +328,13 @@ func TestVLANInfo_L2VNI(t *testing.T) {
 
 func TestMACVPNInfo_Structure(t *testing.T) {
 	info := MACVPNInfo{
-		Name:           "server-vlan-evpn",
+		Name:           "SERVER_VLAN_EVPN",
 		L2VNI:          10100,
 		ARPSuppression: true,
 	}
 
-	if info.Name != "server-vlan-evpn" {
-		t.Errorf("Name = %q, want %q", info.Name, "server-vlan-evpn")
+	if info.Name != "SERVER_VLAN_EVPN" {
+		t.Errorf("Name = %q, want %q", info.Name, "SERVER_VLAN_EVPN")
 	}
 	if info.L2VNI != 10100 {
 		t.Errorf("L2VNI = %d, want %d", info.L2VNI, 10100)
@@ -492,14 +492,14 @@ func TestInterface_HasService(t *testing.T) {
 		NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
-		configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
+		configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "CUSTOMER_L3"}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 		intf := &Interface{node: d, name: "Ethernet0"}
 		if !intf.HasService() {
 			t.Error("HasService() should be true")
 		}
-		if intf.ServiceName() != "customer-l3" {
-			t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "customer-l3")
+		if intf.ServiceName() != "CUSTOMER_L3" {
+			t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "CUSTOMER_L3")
 		}
 	})
 
@@ -533,25 +533,25 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
 	configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
+		ServiceName: "CUSTOMER_L3",
 		IPAddress:   "10.1.1.1/30",
-		VRFName:     "customer-l3-Ethernet0",
-		IPVPN:       "mgmt-spoke-global",
-		MACVPN:      "server-vlan",
-		IngressACL:  "customer-edge-in",
-		EgressACL:   "customer-edge-out",
+		VRFName:     "CUSTOMER_L3_ETH0",
+		IPVPN:       "MGMT_SPOKE_GLOBAL",
+		MACVPN:      "SERVER_VLAN",
+		IngressACL:  "CUSTOMER_EDGE_IN",
+		EgressACL:   "CUSTOMER_EDGE_OUT",
 	}
 	d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 	intf := &Interface{node: d, name: "Ethernet0"}
 
-	if intf.ServiceName() != "customer-l3" {
-		t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "customer-l3")
+	if intf.ServiceName() != "CUSTOMER_L3" {
+		t.Errorf("ServiceName() = %q, want %q", intf.ServiceName(), "CUSTOMER_L3")
 	}
-	if intf.IngressACL() != "customer-edge-in" {
-		t.Errorf("IngressACL() = %q, want %q", intf.IngressACL(), "customer-edge-in")
+	if intf.IngressACL() != "CUSTOMER_EDGE_IN" {
+		t.Errorf("IngressACL() = %q, want %q", intf.IngressACL(), "CUSTOMER_EDGE_IN")
 	}
-	if intf.EgressACL() != "customer-edge-out" {
-		t.Errorf("EgressACL() = %q, want %q", intf.EgressACL(), "customer-edge-out")
+	if intf.EgressACL() != "CUSTOMER_EDGE_OUT" {
+		t.Errorf("EgressACL() = %q, want %q", intf.EgressACL(), "CUSTOMER_EDGE_OUT")
 	}
 }
 
@@ -600,11 +600,11 @@ func TestExtractServiceFromACL(t *testing.T) {
 		aclName  string
 		expected string
 	}{
-		{"customer-edge-in", "customer-edge"},
-		{"customer-edge-out", "customer-edge"},
-		{"transit-protect-in", "transit-protect"},
-		{"simple-out", "simple"},
-		{"no-suffix", ""},
+		{"CUSTOMER_EDGE_IN", "CUSTOMER_EDGE"},
+		{"CUSTOMER_EDGE_OUT", "CUSTOMER_EDGE"},
+		{"TRANSIT_PROTECT_IN", "TRANSIT_PROTECT"},
+		{"SIMPLE_OUT", "SIMPLE"},
+		{"NO_SUFFIX", ""},
 		{"", ""},
 	}
 
@@ -667,7 +667,7 @@ func TestInterface_String(t *testing.T) {
 			Interface:         map[string]sonic.InterfaceEntry{},
 			PortChannelMember: map[string]map[string]string{},
 			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{
-				"Ethernet0": {ServiceName: "customer-l3"},
+				"Ethernet0": {ServiceName: "CUSTOMER_L3"},
 			},
 		}
 		intf := stringTestIntf(
@@ -676,7 +676,7 @@ func TestInterface_String(t *testing.T) {
 			configDB,
 		)
 		str := intf.String()
-		if !strings.Contains(str, "[service: customer-l3]") {
+		if !strings.Contains(str, "[service: CUSTOMER_L3]") {
 			t.Error("String should contain service info")
 		}
 	})

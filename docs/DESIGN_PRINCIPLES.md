@@ -1770,7 +1770,136 @@ timing.
 
 ---
 
-## 32. Summary
+## 32. Unified Naming Convention — Consistent CONFIG_DB Key Names
+
+Every CONFIG_DB key name that newtron derives follows a single convention:
+
+- **ALL UPPERCASE**, single underscore (`_`) as the only separator.
+- **Hyphens converted**: user-provided spec names have hyphens replaced with
+  underscores and letters uppercased. `protect-re` → `PROTECT_RE`.
+- **Allowed characters**: `[A-Z0-9_]` only.
+- **No redundant kind in key**: the table name carries the object kind. The key
+  never repeats it. `ACL_TABLE|PROTECT_RE_IN_1ED5F2C7` — not
+  `ACL_TABLE|ACL_PROTECT_RE_IN_1ED5F2C7`. Just as SONiC uses `Vlan100` (not
+  `VlanVlan100`), newtron keys don't echo their table.
+- **Numeric IDs concatenated with type prefix**: matching SONiC convention
+  (`Vlan100`, `Loopback0`), newtron uses `VNI1001`, `VLAN100`, `ETH0`, `Q0`.
+
+This is not cosmetic. A single convention means any CONFIG_DB key can be
+parsed programmatically — and any operator scanning `redis-cli` output can
+read newtron-managed entries by eye.
+
+---
+
+## 33. Normalize at the Boundary — Spec Loader Owns Name Canonicalization
+
+Names are normalized **once, at spec load time** — not at each point of use.
+When the spec loader reads JSON files, it converts all name keys and
+name-reference fields to canonical form (uppercase, hyphens → underscores)
+before returning specs to callers.
+
+After loading, every map key (`Services["TRANSIT"]`), every cross-reference
+(`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows into
+CONFIG_DB key construction is already canonical. Operations code never calls
+`NormalizeName()` — the loader already did it.
+
+This eliminates an entire class of bugs: comparing a raw spec name against a
+normalized CONFIG_DB key. It also means JSON spec files on disk are
+untouched — operators write whatever case they prefer (`"protect-re"`,
+`"PROTECT-RE"`, `"Protect-RE"`); the loader normalizes on read.
+
+The pattern: validate and normalize at system boundaries (spec loading, CLI
+parsing); trust canonical form inside the boundary.
+
+---
+
+## 34. Policy vs Infrastructure — Shared Objects Have Independent Lifecycles
+
+CONFIG_DB entries fall into three categories:
+
+| Category | Identity | Lifecycle | Examples |
+|----------|----------|-----------|----------|
+| **Infrastructure** | Per-interface | Created/destroyed with service apply/remove | INTERFACE IP, BGP_NEIGHBOR, VRF binding |
+| **Policy** | User-named + content hash | Shared across services, independent lifecycle | ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET |
+| **Binding** | Per-interface | Created/destroyed with service apply/remove | ACL ports field, BGP_PEER_GROUP_AF route_map_in |
+
+Infrastructure is 1:1 with an interface's service binding. Policy objects are
+N:1 — many interfaces can reference the same ACL or route map. Bindings
+connect the two.
+
+This distinction drives the lifecycle model: infrastructure entries are
+created on `ApplyService` and deleted on `RemoveService`. Policy objects are
+created on first reference and deleted when the last reference is removed.
+They persist across individual service removals as long as at least one
+consumer remains.
+
+The separation also enables content-hashed naming — policy objects carry a
+hash of their CONFIG_DB content in their name, allowing automatic change
+detection and blue-green updates without touching every consumer
+simultaneously.
+
+---
+
+## 35. Content-Hashed Naming — Version Shared Objects by What They Write
+
+Shared policy objects (ACLs, route maps, prefix sets, community sets) include
+an 8-character content hash in their CONFIG_DB key name:
+
+```
+ACL_TABLE|PROTECT_RE_IN_1ED5F2C7
+ROUTE_MAP|ALLOW_CUST_IMPORT_A1B2C3D4|10
+PREFIX_SET|RFC1918_5F2A8B3E|10
+```
+
+The hash is computed from the **generated CONFIG_DB entry fields** — the actual
+`map[string]string` that would be written to Redis — not the spec struct. Sorted
+keys, sorted entries, SHA256, first 4 bytes as uppercase hex. This means:
+
+- Future newtron versions that add new CONFIG_DB fields automatically produce
+  different hashes (correct — new fields = new content).
+- No separate "canonical form" to maintain, no version field to forget to bump.
+- The hash is literally "what would this policy write to Redis?"
+
+Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes are computed
+first (leaves), then ROUTE_MAP entries reference the real PREFIX_SET names
+(including their hashes), so a prefix list content change cascades through the
+hash chain automatically. The cascade terminates at BGP_PEER_GROUP_AF — a
+field update, not a name change.
+
+Spec unchanged → hash unchanged → `RefreshService` is a no-op for that object.
+Spec changed → new hash → new object created alongside old → interfaces migrate
+one by one → old object deleted when last consumer migrates. Blue-green at the
+object level, with zero disruption.
+
+---
+
+## 36. BGP Peer Groups — The Protocol's Native Sharing Mechanism
+
+When multiple interfaces use the same service with BGP routing, their neighbors
+share route maps, admin status, and other service-level attributes. Rather than
+duplicating these on every `BGP_NEIGHBOR_AF` entry, newtron creates a
+**BGP_PEER_GROUP** named after the service. Neighbors reference the peer group;
+shared attributes live on `BGP_PEER_GROUP_AF`.
+
+```
+BGP_PEER_GROUP|TRANSIT                  → { admin_status: up }
+BGP_PEER_GROUP_AF|TRANSIT|ipv4_unicast  → { route_map_in: ..., route_map_out: ... }
+BGP_NEIGHBOR|default|10.1.0.1           → { peer_group: TRANSIT, asn: 65002 }
+```
+
+This is BGP's own mechanism for template inheritance — not an invention. When a
+route map hash changes, one update to the peer group AF propagates to all
+neighbors. Without peer groups, every neighbor AF entry would need individual
+updates.
+
+Peer groups are created on first `ApplyService` for a service with BGP routing,
+and deleted when the last interface using that service is removed. Topology-level
+underlay peers (spine-leaf links) do NOT use peer groups — each has unique
+attributes.
+
+---
+
+## 37. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1806,3 +1935,8 @@ timing.
 | Factory-default preservation | Provisioning merges on top of CONFIG_DB; stale keys are removed but factory defaults (MAC, platform, ports) survive |
 | YANG-derived schema validation | YANG is the authority for value constraints; fail closed on unknown tables and fields; validate every ChangeSet before any Redis write |
 | Write ordering and daemon settling | Config functions encode dependency order in their return slice; daemon settling is verified by polling, never by sleeping in the write path |
+| Unified naming convention | ALL UPPERCASE, single underscore, no redundant kind in key; `[A-Z0-9_]` only; any CONFIG_DB key can be parsed programmatically |
+| Normalize at the boundary | Spec loader normalizes all name keys and references at load time; operations code never calls `NormalizeName()` |
+| Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are N:1, shared, created on first reference, deleted on last |
+| Content-hashed naming | Shared policy objects carry an 8-char hash of their CONFIG_DB content; spec unchanged → hash unchanged → no-op |
+| BGP peer groups | Service-named peer groups are the protocol's native sharing mechanism; shared attributes live on `BGP_PEER_GROUP_AF`, not duplicated per neighbor |
