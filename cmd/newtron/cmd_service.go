@@ -258,7 +258,9 @@ Examples:
 			if derived.NeighborIP != "" {
 				fmt.Printf("  Neighbor IP: %s\n", derived.NeighborIP)
 			}
-			fmt.Printf("  VRF Name: %s\n", derived.VRFName)
+			if svc != nil && svc.VRFType != "" {
+				fmt.Printf("  VRF Name: %s\n", derived.VRFName)
+			}
 		}
 		if svc != nil {
 			if svc.IngressFilter != "" {

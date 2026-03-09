@@ -216,9 +216,8 @@ type RoutePolicyRule struct {
 	Action   string `json:"action"` // permit, deny
 
 	// Match conditions (all conditions must match)
-	PrefixList   string `json:"prefix_list,omitempty"`    // Reference to prefix_lists
-	ASPathLength string `json:"as_path_length,omitempty"` // e.g., "> 10", "< 5"
-	Community    string `json:"community,omitempty"`      // Match community
+	PrefixList string `json:"prefix_list,omitempty"` // Reference to prefix_lists
+	Community  string `json:"community,omitempty"`   // Match community
 
 	// Set actions (for permit rules)
 	Set *RoutePolicySet `json:"set,omitempty"`

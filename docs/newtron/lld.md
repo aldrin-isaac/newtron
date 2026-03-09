@@ -277,12 +277,11 @@ type RoutePolicy struct {
 }
 
 type RoutePolicyRule struct {
-    Sequence     int             `json:"seq"`
-    Action       string          `json:"action"`  // "permit" or "deny"
-    PrefixList   string          `json:"prefix_list,omitempty"`
-    ASPathLength string          `json:"as_path_length,omitempty"`
-    Community    string          `json:"community,omitempty"`
-    Set          *RoutePolicySet `json:"set,omitempty"`
+    Sequence   int             `json:"seq"`
+    Action     string          `json:"action"`  // "permit" or "deny"
+    PrefixList string          `json:"prefix_list,omitempty"`
+    Community  string          `json:"community,omitempty"`
+    Set        *RoutePolicySet `json:"set,omitempty"`
 }
 
 type RoutePolicySet struct {
