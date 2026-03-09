@@ -219,12 +219,16 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
+	// ACL name is content-hashed from filter name + direction + hash (Principle 35)
+	// TEST_FILTER rules produce hash DB985A64
+	expectedACL := "TEST_FILTER_IN_DB985A64"
+
 	// Verify ACL table exists
-	assertEntry(t, entries, "ACL_TABLE", "SVC_WITH_ACL_IN", "stage", "ingress")
+	assertEntry(t, entries, "ACL_TABLE", expectedACL, "stage", "ingress")
 
 	// Verify CoS→TC mapping present (fix #4)
 	for _, e := range entries {
-		if e.Table == "ACL_RULE" && e.Key == "SVC_WITH_ACL_IN|RULE_10" {
+		if e.Table == "ACL_RULE" && e.Key == expectedACL+"|RULE_10" {
 			if e.Fields["TC"] != "5" {
 				t.Errorf("ACL rule with CoS=ef should have TC=5, got %q", e.Fields["TC"])
 			}
@@ -237,7 +241,7 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 			return
 		}
 	}
-	t.Error("missing ACL_RULE|SVC_WITH_ACL_IN|RULE_10 entry")
+	t.Errorf("missing ACL_RULE|%s|RULE_10 entry", expectedACL)
 }
 
 func TestServiceConfig_BGP_UnderlayASN(t *testing.T) {

@@ -282,7 +282,8 @@ func (i *Interface) generateAclBinding(serviceName, filterName, stage string) ([
 	if stage == "egress" {
 		direction = "out"
 	}
-	aclName := util.DeriveACLName(serviceName, direction)
+	hash := computeFilterHash(filterSpec)
+	aclName := util.DeriveACLName(filterName, direction, hash)
 	desc := fmt.Sprintf("%s filter for %s", util.CapitalizeFirst(stage), serviceName)
 
 	entries := createAclTableConfig(aclName, mapFilterType(filterSpec.Type), stage, i.name, desc)

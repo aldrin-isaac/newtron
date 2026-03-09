@@ -116,21 +116,63 @@ func TestDeriveVRFName(t *testing.T) {
 	}
 }
 
+func TestContentHash(t *testing.T) {
+	// Deterministic: same fields → same hash
+	entries := []map[string]string{
+		{"PRIORITY": "9990", "PACKET_ACTION": "FORWARD", "SRC_IP": "10.0.0.0/8"},
+	}
+	h1 := ContentHash(entries)
+	h2 := ContentHash(entries)
+	if h1 != h2 {
+		t.Errorf("ContentHash not deterministic: %q != %q", h1, h2)
+	}
+
+	// 8 hex characters
+	if len(h1) != 8 {
+		t.Errorf("ContentHash length = %d, want 8", len(h1))
+	}
+
+	// Different content → different hash
+	entries2 := []map[string]string{
+		{"PRIORITY": "9990", "PACKET_ACTION": "DROP", "SRC_IP": "10.0.0.0/8"},
+	}
+	h3 := ContentHash(entries2)
+	if h1 == h3 {
+		t.Errorf("different content should produce different hash")
+	}
+
+	// Field order doesn't matter (sorted keys)
+	entries3 := []map[string]string{
+		{"SRC_IP": "10.0.0.0/8", "PACKET_ACTION": "FORWARD", "PRIORITY": "9990"},
+	}
+	h4 := ContentHash(entries3)
+	if h1 != h4 {
+		t.Errorf("ContentHash should be order-independent: %q != %q", h1, h4)
+	}
+
+	// Empty entries
+	h5 := ContentHash(nil)
+	if len(h5) != 8 {
+		t.Errorf("ContentHash(nil) length = %d, want 8", len(h5))
+	}
+}
+
 func TestDeriveACLName(t *testing.T) {
 	tests := []struct {
-		serviceName string // pre-normalized
+		filterName  string // pre-normalized
 		direction   string
+		contentHash string
 		want        string
 	}{
-		{"CUSTOMER_EDGE", "in", "CUSTOMER_EDGE_IN"},
-		{"CUSTOMER_EDGE", "out", "CUSTOMER_EDGE_OUT"},
-		{"TRANSIT", "in", "TRANSIT_IN"},
+		{"PROTECT_RE", "in", "1ED5F2C7", "PROTECT_RE_IN_1ED5F2C7"},
+		{"PROTECT_RE", "out", "A1B2C3D4", "PROTECT_RE_OUT_A1B2C3D4"},
+		{"EDGE_FILTER", "in", "5F2A8B3E", "EDGE_FILTER_IN_5F2A8B3E"},
 	}
 
 	for _, tt := range tests {
-		got := DeriveACLName(tt.serviceName, tt.direction)
+		got := DeriveACLName(tt.filterName, tt.direction, tt.contentHash)
 		if got != tt.want {
-			t.Errorf("DeriveACLName(%q, %q) = %q, want %q", tt.serviceName, tt.direction, got, tt.want)
+			t.Errorf("DeriveACLName(%q, %q, %q) = %q, want %q", tt.filterName, tt.direction, tt.contentHash, got, tt.want)
 		}
 	}
 }

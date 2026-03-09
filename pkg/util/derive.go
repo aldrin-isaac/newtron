@@ -1,6 +1,8 @@
 package util
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -91,12 +93,40 @@ func DeriveVRFName(vrfType, serviceName, interfaceName string) string {
 	}
 }
 
-// DeriveACLName generates an ACL name for a service and direction.
-// Service names are expected to already be normalized (uppercase, underscores).
-// ACLs are per-service, not per-interface: CUSTOMER_EDGE_IN, CUSTOMER_EDGE_OUT
-// Multiple interfaces using the same service share the same ACL.
-func DeriveACLName(serviceName, direction string) string {
-	return serviceName + "_" + strings.ToUpper(direction)
+// DeriveACLName generates a content-hashed ACL name from filter name, direction,
+// and content hash. The hash ensures that different filter contents produce different
+// ACL names, enabling sharing: two services using the same filter share one ACL.
+//
+// Format: FILTERNAME_DIRECTION_HASH (e.g., PROTECT_RE_IN_A1B2C3D4)
+// All inputs are expected to be pre-normalized (uppercase, underscores).
+func DeriveACLName(filterName, direction, contentHash string) string {
+	return filterName + "_" + strings.ToUpper(direction) + "_" + contentHash
+}
+
+// ContentHash computes an 8-character uppercase hex hash from CONFIG_DB entry
+// field maps. Used for content-addressed naming of shared policy objects (ACLs,
+// route maps, prefix sets). Entries are sorted by key for determinism.
+//
+// Per DESIGN_PRINCIPLES.md principle 35: the hash is computed from the actual
+// CONFIG_DB fields that would be written, not the spec struct.
+func ContentHash(entries []map[string]string) string {
+	h := sha256.New()
+	for _, fields := range entries {
+		// Sort field keys for deterministic ordering
+		keys := make([]string, 0, len(fields))
+		for k := range fields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			h.Write([]byte(k))
+			h.Write([]byte("="))
+			h.Write([]byte(fields[k]))
+			h.Write([]byte("\n"))
+		}
+		h.Write([]byte("---\n"))
+	}
+	return fmt.Sprintf("%X", h.Sum(nil)[:4])
 }
 
 // ParseInterfaceName extracts interface type and number

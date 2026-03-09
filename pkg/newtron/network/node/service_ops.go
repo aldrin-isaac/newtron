@@ -210,13 +210,18 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	cs := NewChangeSet(n.Name(), "interface.apply-service")
 	configDB := n.ConfigDB()
 
-	// Track ACL names from generated entries for interface-merging
+	// Track ACL names from generated entries for interface-merging.
+	// ACL names are content-hashed from the filter spec (Principle 35).
 	var ingressACLName, egressACLName string
 	if svc.IngressFilter != "" {
-		ingressACLName = util.DeriveACLName(serviceName, "in")
+		if filterSpec, err := n.GetFilter(svc.IngressFilter); err == nil {
+			ingressACLName = util.DeriveACLName(svc.IngressFilter, "in", computeFilterHash(filterSpec))
+		}
 	}
 	if svc.EgressFilter != "" {
-		egressACLName = util.DeriveACLName(serviceName, "out")
+		if filterSpec, err := n.GetFilter(svc.EgressFilter); err == nil {
+			egressACLName = util.DeriveACLName(svc.EgressFilter, "out", computeFilterHash(filterSpec))
+		}
 	}
 
 	for _, e := range baseEntries {
