@@ -1871,6 +1871,40 @@ Spec changed → new hash → new object created alongside old → interfaces mi
 one by one → old object deleted when last consumer migrates. Blue-green at the
 object level, with zero disruption.
 
+### Hash Placement: Always Suffix, Never Prefix
+
+The content hash is always a **suffix** on the object name:
+`{SERVICE}_{DIRECTION}_{HASH}`, not `{HASH}_{SERVICE}_{DIRECTION}`. This is a
+deliberate coupling constraint between two independent code paths.
+
+The forward path (`createRoutePolicy`) generates entries with hashed names. The
+reverse path (`deleteRoutePoliciesConfig`) scans CONFIG_DB for entries whose key
+starts with `{serviceName}_` — a prefix scan. These two code paths never call
+each other; they agree on names only by naming convention.
+
+If the hash is a suffix, the prefix scan still works:
+
+```
+ROUTE_MAP|TRANSIT_IMPORT_A1B2C3D4|10     ← starts with "TRANSIT_" ✓
+PREFIX_SET|TRANSIT_IMPORT_PL_10_F3E2|10   ← starts with "TRANSIT_" ✓
+```
+
+If the hash were a prefix, the prefix scan would silently match nothing:
+
+```
+ROUTE_MAP|A1B2C3D4_TRANSIT_IMPORT|10     ← does NOT start with "TRANSIT_" ✗
+```
+
+The failure mode is particularly dangerous: the forward path (create) works
+fine; only the reverse path (delete) breaks — silently leaking CONFIG_DB
+entries that accumulate over time and can never be cleaned up. This breakage
+would only manifest when a service is removed, which might not happen in
+testing for weeks.
+
+**Rule: content hashes are always the last component of a generated name.**
+The service name prefix is the anchor that connects the forward and reverse
+paths.
+
 ---
 
 ## 36. BGP Peer Groups — The Protocol's Native Sharing Mechanism
@@ -1899,7 +1933,143 @@ attributes.
 
 ---
 
-## 37. Summary
+## 37. Verification Must Not Pass Vacuously
+
+A verification check that finds zero items to verify must **fail**, not pass.
+An empty result set means the precondition isn't met — the daemon hasn't
+processed entries yet, the table hasn't been populated, or the query returned
+no data. It does not mean "all checks passed."
+
+### The Vacuous Truth Trap
+
+```go
+// WRONG — passes when results is empty
+for _, hc := range results {
+    if hc.Status != "pass" {
+        return false  // keep polling
+    }
+}
+return true  // "all pass" — but zero items were checked
+
+// CORRECT — empty results means precondition not met
+if len(results) == 0 {
+    return false  // keep polling
+}
+for _, hc := range results {
+    if hc.Status != "pass" {
+        return false
+    }
+}
+return true
+```
+
+This class of bug is insidious because:
+
+- **It passes in testing.** The poll returns "success" instantly because the
+  precondition (e.g., frrcfgd creating BGP sessions) hasn't happened yet.
+  Subsequent checks may or may not catch the missing state, depending on
+  timing.
+- **It masks real failures.** If a daemon silently drops entries, the
+  verification sees zero results and reports success.
+- **It creates timing-dependent flakiness.** Sometimes the daemon processes
+  entries before the first poll (real pass); sometimes it doesn't (vacuous
+  pass followed by a point-in-time check that fails).
+
+### Observation Lag
+
+Even when a polling check correctly detects state, a subsequent point-in-time
+observation may contradict it. This happens because the observation tool (e.g.,
+`vtysh -c 'show bgp summary json'`) has its own internal latency — FRR's
+routing daemon knows about the peer, but the JSON serializer hasn't caught up.
+
+The pattern: a polling check confirms BGP sessions are Established, then a
+health check run 1 second later reports "BGP neighbor not found in FRR." The
+sessions didn't disappear — the observation tool lagged behind the daemon's
+internal state.
+
+**Rule: when a polling check passes but a subsequent point-in-time observation
+contradicts it, the observation is stale — not the poll.** Add a brief settle
+delay between the poll and the observation to let the observation tool catch
+up. This is not a `time.Sleep` in the write path (prohibited by §31); it is a
+read-side settling delay in the test suite.
+
+### Application
+
+Every polling-based verification function must:
+
+1. **Check for empty results** and return false (keep polling).
+2. **Document the minimum expected count** if known — e.g., "at least N BGP
+   neighbors should exist based on CONFIG_DB."
+3. **Distinguish between "precondition not met" and "check failed"** in log
+   messages, so flaky tests can be diagnosed from output alone.
+
+---
+
+## 38. Convergence Budget — Every Entry Costs Time
+
+Each CONFIG_DB entry newtron writes extends the post-provisioning convergence
+window. SONiC daemons process entries sequentially from keyspace notifications;
+adding N entries to a composite adds O(N) processing time to the convergence
+window. This is not a bug — it is the fundamental cost model of SONiC's
+event-driven architecture.
+
+### The Cost Model
+
+After `DeliverComposite` writes a full device config via `config reload`,
+every subscribed daemon receives a burst of notifications and processes them
+one by one. The total convergence time is approximately:
+
+```
+T_converge ≈ Σ (entries_per_daemon × processing_time_per_entry)
+```
+
+Processing time varies by daemon and platform (see §31's latency table), but
+the key insight is that it's **linear in entry count**. When a design change
+adds entries — even small, seemingly harmless ones — the convergence window
+grows.
+
+### Real Example
+
+Adding BGP_PEER_GROUP support (§36) added 2 entries per service
+(BGP_PEER_GROUP + BGP_PEER_GROUP_AF). In the 2node-service topology with one
+service on each switch, this added 4 entries total. frrcfgd now processes
+these entries before creating BGP neighbors in FRR — adding approximately
+1-2 seconds to the BGP convergence window.
+
+The verify-health test had a timing margin of ~1 second. The 2 extra entries
+consumed that margin. The test went from "usually passes" to "usually fails"
+— not because anything was broken, but because the convergence budget was
+exceeded.
+
+### Implications for Design
+
+1. **Shared objects amortize their cost.** A BGP_PEER_GROUP shared across 10
+   neighbors costs 2 entries (the group + AF). Without sharing, those 10
+   neighbors would each carry route-map fields on their BGP_NEIGHBOR_AF — the
+   same entry count but worse update semantics. Sharing reduces update cost
+   (one AF update vs. ten), even if it adds initial creation cost.
+
+2. **Test timeouts must be proportional to entry count.** A topology with 50
+   CONFIG_DB entries converges faster than one with 200. Fixed timeouts
+   (e.g., "wait 30 seconds after provision") will be either too short for
+   large configs or wastefully long for small ones. Use polling with generous
+   upper bounds instead.
+
+3. **Count entries when adding features.** Before adding a new table or entry
+   type, estimate how many entries it adds per service × per interface × per
+   device. Multiply by the daemon's per-entry latency from §31's table. If the
+   total exceeds the test suite's timing margin, increase the margin
+   preemptively — don't discover it from flaky tests.
+
+4. **Prefer field updates over new entries.** Updating a field on an existing
+   entry (e.g., adding `route_map_in` to BGP_PEER_GROUP_AF) generates one
+   notification. Creating a new entry generates one notification plus any
+   daemon-internal initialization. When the choice exists, field updates are
+   cheaper.
+
+---
+
+## 39. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -1938,5 +2108,7 @@ attributes.
 | Unified naming convention | ALL UPPERCASE, single underscore, no redundant kind in key; `[A-Z0-9_]` only; any CONFIG_DB key can be parsed programmatically |
 | Normalize at the boundary | Spec loader normalizes all name keys and references at load time; operations code never calls `NormalizeName()` |
 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are N:1, shared, created on first reference, deleted on last |
-| Content-hashed naming | Shared policy objects carry an 8-char hash of their CONFIG_DB content; spec unchanged → hash unchanged → no-op |
+| Content-hashed naming | Shared policy objects carry an 8-char hash of their CONFIG_DB content; hash is always a suffix (never prefix) to preserve prefix-scan deletion; spec unchanged → hash unchanged → no-op |
 | BGP peer groups | Service-named peer groups are the protocol's native sharing mechanism; shared attributes live on `BGP_PEER_GROUP_AF`, not duplicated per neighbor |
+| Verification must not pass vacuously | Zero items to verify = precondition not met = keep polling; observation tools lag behind daemon state; settle before point-in-time checks |
+| Convergence budget | Every CONFIG_DB entry costs convergence time; count entries when adding features; test timeouts must be proportional to entry count |

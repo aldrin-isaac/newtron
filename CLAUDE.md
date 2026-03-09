@@ -606,6 +606,12 @@ Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and de
 - **Always start tests on a freshly deployed topology.** Destroy and redeploy before running
   any test suite. Never attempt to reuse a topology that has run previous tests or has
   manually applied state. This ensures a clean, reproducible baseline.
+- **Polling checks must not pass vacuously.** If a poll finds zero items to verify,
+  return false (keep polling) — not true. Zero results means the daemon hasn't
+  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES.md` §37.
+- **Test timeouts must account for CONFIG_DB entry count.** Each new entry type extends
+  the convergence window. When adding entries, verify that existing test timeouts still
+  have margin. See `docs/DESIGN_PRINCIPLES.md` §38.
 
 ## Documentation Freshness Protocol
 
