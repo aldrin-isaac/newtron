@@ -159,6 +159,29 @@ func TestNormalizeName(t *testing.T) {
 	}
 }
 
+func TestNormalizeVRFName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Vrf_irb", "Vrf_IRB"},
+		{"Vrf_l3evpn", "Vrf_L3EVPN"},
+		{"Vrf_CUST1", "Vrf_CUST1"},
+		{"Vrf_customer-edge", "Vrf_CUSTOMER_EDGE"},
+		{"myVrf", "Vrf_MYVRF"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeVRFName(tt.input)
+			if got != tt.want {
+				t.Errorf("NormalizeVRFName(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseInterfaceName(t *testing.T) {
 	tests := []struct {
 		name       string

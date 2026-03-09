@@ -79,12 +79,12 @@ func getSpec[V any](mu *sync.RWMutex, m map[string]V, kind, name string) (V, err
 
 // GetService returns a service definition by name.
 func (n *Network) GetService(name string) (*spec.ServiceSpec, error) {
-	return getSpec(&n.mu, n.spec.Services, "service", name)
+	return getSpec(&n.mu, n.spec.Services, "service", util.NormalizeName(name))
 }
 
 // GetFilter returns a filter specification by name.
 func (n *Network) GetFilter(name string) (*spec.FilterSpec, error) {
-	return getSpec(&n.mu, n.spec.Filters, "filter", name)
+	return getSpec(&n.mu, n.spec.Filters, "filter", util.NormalizeName(name))
 }
 
 // GetPlatform returns a platform definition by name.
@@ -101,32 +101,32 @@ func (n *Network) Platforms() map[string]*spec.PlatformSpec {
 
 // GetPrefixList returns a prefix list by name.
 func (n *Network) GetPrefixList(name string) ([]string, error) {
-	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", name)
+	return getSpec(&n.mu, n.spec.PrefixLists, "prefix list", util.NormalizeName(name))
 }
 
 // GetQoSPolicy returns a QoS policy by name.
 func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
-	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", name)
+	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
 }
 
 // GetQoSProfile returns a QoS profile by name (legacy).
 func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error) {
-	return getSpec(&n.mu, n.spec.QoSProfiles, "QoS profile", name)
+	return getSpec(&n.mu, n.spec.QoSProfiles, "QoS profile", util.NormalizeName(name))
 }
 
 // GetIPVPN returns an IP-VPN definition by name.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", name)
+	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
 }
 
 // GetMACVPN returns a MAC-VPN definition by name.
 func (n *Network) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
-	return getSpec(&n.mu, n.spec.MACVPNs, "macvpn", name)
+	return getSpec(&n.mu, n.spec.MACVPNs, "macvpn", util.NormalizeName(name))
 }
 
 // GetRoutePolicy returns a route policy by name.
 func (n *Network) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
-	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", name)
+	return getSpec(&n.mu, n.spec.RoutePolicies, "route policy", util.NormalizeName(name))
 }
 
 // FindMACVPNByVNI returns the MACVPN name and spec for a given VNI.
@@ -184,6 +184,9 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	name = util.NormalizeName(name)
+	spec.NormalizeIPVPNRefs(def)
+
 	if n.spec.IPVPNs == nil {
 		n.spec.IPVPNs = make(map[string]*spec.IPVPNSpec)
 	}
@@ -196,6 +199,8 @@ func (n *Network) SaveIPVPN(name string, def *spec.IPVPNSpec) error {
 func (n *Network) DeleteIPVPN(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
@@ -213,6 +218,9 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	name = util.NormalizeName(name)
+	// MACVPNSpec has no name-reference fields to normalize.
+
 	if n.spec.MACVPNs == nil {
 		n.spec.MACVPNs = make(map[string]*spec.MACVPNSpec)
 	}
@@ -225,6 +233,8 @@ func (n *Network) SaveMACVPN(name string, def *spec.MACVPNSpec) error {
 func (n *Network) DeleteMACVPN(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
@@ -242,6 +252,9 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	name = util.NormalizeName(name)
+	// QoSPolicy has no name-reference fields to normalize.
+
 	if n.spec.QoSPolicies == nil {
 		n.spec.QoSPolicies = make(map[string]*spec.QoSPolicy)
 	}
@@ -254,6 +267,8 @@ func (n *Network) SaveQoSPolicy(name string, def *spec.QoSPolicy) error {
 func (n *Network) DeleteQoSPolicy(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
@@ -271,6 +286,9 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	name = util.NormalizeName(name)
+	spec.NormalizeFilterRefs(def)
+
 	if n.spec.Filters == nil {
 		n.spec.Filters = make(map[string]*spec.FilterSpec)
 	}
@@ -283,6 +301,8 @@ func (n *Network) SaveFilter(name string, def *spec.FilterSpec) error {
 func (n *Network) DeleteFilter(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
 
 	// Check for dependent services
 	for svcName, svc := range n.spec.Services {
@@ -300,6 +320,9 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	name = util.NormalizeName(name)
+	spec.NormalizeServiceRefs(def)
+
 	if n.spec.Services == nil {
 		n.spec.Services = make(map[string]*spec.ServiceSpec)
 	}
@@ -312,6 +335,8 @@ func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 func (n *Network) DeleteService(name string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
 
 	delete(n.spec.Services, name)
 	return n.persistSpec()

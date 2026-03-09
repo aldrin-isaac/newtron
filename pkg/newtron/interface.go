@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // Interface is a scoped interface context within a Node.
@@ -125,6 +126,7 @@ func (i *Interface) String() string {
 
 // ApplyService applies a service definition to this interface.
 func (i *Interface) ApplyService(ctx context.Context, service string, opts ApplyServiceOpts) error {
+	service = util.NormalizeName(service)
 	cs, err := i.internal.ApplyService(ctx, service, node.ApplyServiceOpts{
 		IPAddress: opts.IPAddress,
 		PeerAS:    opts.PeerAS,
@@ -210,6 +212,7 @@ func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
 
 // BindMACVPN binds this VLAN interface to a MAC-VPN definition.
 func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string) error {
+	macvpnName = util.NormalizeName(macvpnName)
 	macvpnDef, err := i.node.internal.GetMACVPN(macvpnName)
 	if err != nil {
 		return err
@@ -270,6 +273,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) error {
 // ApplyQoS applies a QoS policy to this interface.
 // Resolves the QoS policy spec by name from the node's SpecProvider.
 func (i *Interface) ApplyQoS(ctx context.Context, policy string) error {
+	policy = util.NormalizeName(policy)
 	policyDef, err := i.node.internal.GetQoSPolicy(policy)
 	if err != nil {
 		return err

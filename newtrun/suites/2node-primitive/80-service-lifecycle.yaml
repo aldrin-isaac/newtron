@@ -82,7 +82,7 @@ steps:
     key: Vlan400
     expect:
       fields:
-        vrf_name: Vrf_irb
+        vrf_name: Vrf_IRB
 
   # Configure host sub-interfaces while waiting (overlap with EVPN convergence)
   - name: host3-configure-subintf

@@ -36,7 +36,7 @@ newtron uses — the YANG models define additional fields not shown here.
 
 **VRF_LIST**
 - Key: `name` — YANG pattern `Vrf[a-zA-Z0-9_-]+`, but SONiC CLI and vrfmgrd
-  accept arbitrary names (e.g., `CUSTOMER`, `Vrf_irb`). newtron schema uses
+  accept arbitrary names (e.g., `CUSTOMER`, `Vrf_IRB`). newtron schema uses
   `^[a-zA-Z][a-zA-Z0-9_-]*$`.
 - `vni`: uint32, range 0..16777215, default 0. AllowEmpty: `""` clears L3VNI
   (vrfmgrd's `stoul("")` throws exception and skips the entry).

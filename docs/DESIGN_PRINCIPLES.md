@@ -1809,7 +1809,7 @@ untouched — operators write whatever case they prefer (`"protect-re"`,
 `"PROTECT-RE"`, `"Protect-RE"`); the loader normalizes on read.
 
 The pattern: validate and normalize at system boundaries (spec loading, CLI
-parsing); trust canonical form inside the boundary.
+parsing, API Save methods); trust canonical form inside the boundary.
 
 ---
 

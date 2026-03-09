@@ -11,7 +11,7 @@
     "overlay-irb-b": { "description": "EVPN IRB subnet B (10.1.41.0/24)", "service_type": "evpn-irb", "vrf_type": "shared", "ipvpn": "irb-vrf", "macvpn": "irb-vlan401" }
   },
   "ipvpns": {
-    "irb-vrf": { "description": "L3 VRF for EVPN IRB routing", "vrf": "Vrf_irb", "l3vni": 50400, "l3vni_vlan": 3998, "route_targets": ["65000:50400"] }
+    "irb-vrf": { "description": "L3 VRF for EVPN IRB routing", "vrf": "Vrf_IRB", "l3vni": 50400, "l3vni_vlan": 3998, "route_targets": ["65000:50400"] }
   },
   "macvpns": {
     "irb-vlan100":    { "description": "VLAN 100 for local IRB", "vlan_id": 100 },

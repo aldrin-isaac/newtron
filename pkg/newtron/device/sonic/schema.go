@@ -184,7 +184,7 @@ var Schema = map[string]TableSchema{
 
 	"VRF": {
 		// YANG: pattern Vrf[a-zA-Z0-9_-]+, but SONiC CLI and vrfmgrd accept
-		// arbitrary names (e.g., CUSTOMER, Vrf_irb). Allow any non-empty
+		// arbitrary names (e.g., CUSTOMER, Vrf_IRB). Allow any non-empty
 		// alphanumeric/underscore/hyphen string, plus "default".
 		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*$`,
 		Fields: map[string]FieldConstraint{

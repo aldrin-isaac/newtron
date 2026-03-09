@@ -34,42 +34,42 @@ steps:
     expect:
       exists: false
 
-  # 2. Unbind IP-VPN from Vrf_irb
+  # 2. Unbind IP-VPN from Vrf_IRB
   - name: unbind-ipvpn-sw1
     action: unbind-ipvpn
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   - name: unbind-ipvpn-sw2
     action: unbind-ipvpn
     devices: [switch2]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   - name: verify-vrf-vni-cleared-sw1
     action: verify-config-db
     devices: [switch1]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       fields:
         vni: ""
 
-  # 3. Delete Vrf_irb
+  # 3. Delete Vrf_IRB
   - name: delete-vrf-irb-sw1
     action: delete-vrf
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   - name: delete-vrf-irb-sw2
     action: delete-vrf
     devices: [switch2]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   - name: verify-vrf-irb-removed-sw1
     action: verify-config-db
     devices: [switch1]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -77,7 +77,7 @@ steps:
     action: verify-config-db
     devices: [switch2]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -85,7 +85,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: BGP_GLOBALS
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 

@@ -71,7 +71,7 @@
   "ipvpns": {
     "evpn-irb-vrf": {
       "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
-      "vrf": "Vrf_irb",
+      "vrf": "Vrf_IRB",
       "l3vni": 50002,
       "l3vni_vlan": 3998,
       "route_targets": [
@@ -80,7 +80,7 @@
     },
     "evpn-l3-vrf": {
       "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
-      "vrf": "Vrf_l3evpn",
+      "vrf": "Vrf_L3EVPN",
       "l3vni": 50001,
       "l3vni_vlan": 3999,
       "route_targets": [

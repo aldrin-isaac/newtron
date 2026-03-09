@@ -9,6 +9,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // Node wraps a *node.Node with pending change management.
@@ -396,6 +397,7 @@ func (n *Node) RemoveVRFInterface(ctx context.Context, vrf, iface string) error 
 // BindIPVPN binds a VRF to an IP-VPN definition.
 // Resolves the IPVPN spec by name from the node's SpecProvider.
 func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
+	ipvpnName = util.NormalizeName(ipvpnName)
 	ipvpnDef, err := n.internal.GetIPVPN(ipvpnName)
 	if err != nil {
 		return fmt.Errorf("ipvpn '%s' not found: %w", ipvpnName, err)
@@ -532,6 +534,7 @@ func (n *Node) RemoveACLRule(ctx context.Context, acl, ruleName string) error {
 // ApplyQoS applies a QoS policy to an interface.
 // Resolves the QoS policy spec by name from the node's SpecProvider.
 func (n *Node) ApplyQoS(ctx context.Context, iface, policy string) error {
+	policy = util.NormalizeName(policy)
 	policyDef, err := n.internal.GetQoSPolicy(policy)
 	if err != nil {
 		return fmt.Errorf("qos policy '%s' not found: %w", policy, err)

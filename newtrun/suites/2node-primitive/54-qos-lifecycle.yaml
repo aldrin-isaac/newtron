@@ -26,7 +26,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: DSCP_TO_TC_MAP
-    key: test-4q
+    key: TEST_4Q
     expect:
       exists: true
 

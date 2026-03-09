@@ -227,7 +227,7 @@ VPN specs define the overlay parameters:
 ```json
 {
   "ipvpns": {
-    "irb-vrf": { "vrf": "Vrf_irb", "l3vni": 50400, "l3vni_vlan": 3998,
+    "irb-vrf": { "vrf": "Vrf_IRB", "l3vni": 50400, "l3vni_vlan": 3998,
                  "route_targets": ["65000:50400"] }
   },
   "macvpns": {

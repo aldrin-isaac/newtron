@@ -19,6 +19,20 @@ func NormalizeName(name string) string {
 	return strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 }
 
+// NormalizeVRFName normalizes a CONFIG_DB VRF name. Preserves the "Vrf_" prefix
+// (required by SONiC CONFIG_DB convention) and normalizes the suffix to uppercase
+// with underscores. Examples: "Vrf_irb" → "Vrf_IRB", "Vrf_l3evpn" → "Vrf_L3EVPN".
+func NormalizeVRFName(name string) string {
+	if name == "" {
+		return ""
+	}
+	if strings.HasPrefix(name, "Vrf_") {
+		return "Vrf_" + NormalizeName(name[4:])
+	}
+	// If no Vrf_ prefix, add it and normalize the whole thing
+	return "Vrf_" + NormalizeName(name)
+}
+
 // DerivedValues contains auto-computed values from user input
 type DerivedValues struct {
 	NeighborIP  string // Computed from local IP for point-to-point

@@ -11,13 +11,13 @@ in their `VLAN_INTERFACE` entry are NOT bound to the VRF in the kernel:
 
 ```
 $ ip link show Vlan400
-Vlan400@Bridge: <UP> ... mode DEFAULT  (NO "master Vrf_irb")
+Vlan400@Bridge: <UP> ... mode DEFAULT  (NO "master Vrf_IRB")
 $ ip addr show Vlan400
 inet6 fe80::... (NO IPv4 address)
 ```
 
 CONFIG_DB and APP_DB both have the correct entries. Gateway ping to non-VRF SVIs works.
-The VRF kernel device exists (`ip link show type vrf` shows Vrf_irb).
+The VRF kernel device exists (`ip link show type vrf` shows Vrf_IRB).
 
 ## Root Cause — VRF_TABLE vs VRF_OBJECT_TABLE Asymmetry
 
@@ -33,8 +33,8 @@ if (!vrf_name.empty() && !isIntfStateOk(vrf_name)) {
 1-second SELECT_TIMEOUT loop.
 
 vrfmgrd writes to two STATE_DB tables:
-- **`VRF_OBJECT_TABLE|Vrf_irb`** — written on BOTH startup and runtime notification
-- **`VRF_TABLE|Vrf_irb`** — written ONLY during startup (fresh daemon initialization)
+- **`VRF_OBJECT_TABLE|Vrf_IRB`** — written on BOTH startup and runtime notification
+- **`VRF_TABLE|Vrf_IRB`** — written ONLY during startup (fresh daemon initialization)
 
 During HMSET provisioning (daemons already running), vrfmgrd receives a CONFIG_DB
 notification, creates the VRF kernel device, writes `VRF_OBJECT_TABLE`, but does NOT
@@ -48,14 +48,14 @@ exists and VRF binding succeeds.
 
 After HMSET provisioning:
 ```
-STATE_DB keys: VRF_OBJECT_TABLE|Vrf_irb   (state: ok)
-               # VRF_TABLE|Vrf_irb — MISSING
+STATE_DB keys: VRF_OBJECT_TABLE|Vrf_IRB   (state: ok)
+               # VRF_TABLE|Vrf_IRB — MISSING
 ```
 
 After config reload:
 ```
-STATE_DB keys: VRF_OBJECT_TABLE|Vrf_irb   (state: ok)
-               VRF_TABLE|Vrf_irb           (state: ok)    ← NOW PRESENT
+STATE_DB keys: VRF_OBJECT_TABLE|Vrf_IRB   (state: ok)
+               VRF_TABLE|Vrf_IRB           (state: ok)    ← NOW PRESENT
 ```
 
 ## Fix

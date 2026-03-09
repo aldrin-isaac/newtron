@@ -193,7 +193,7 @@ type BGPGlobalsAFEntry struct {
 }
 
 // BGPGlobalsEVPNRTEntry represents a per-VRF EVPN route-target entry (frrcfgd managed).
-// Key format: "vrf_name|L2VPN_EVPN|rt" (e.g., "Vrf_l3evpn|L2VPN_EVPN|65001:50001")
+// Key format: "vrf_name|L2VPN_EVPN|rt" (e.g., "Vrf_L3EVPN|L2VPN_EVPN|65001:50001")
 type BGPGlobalsEVPNRTEntry struct {
 	RouteTargetType string `json:"route-target-type,omitempty"` // "both", "import", "export"
 }

@@ -131,7 +131,7 @@ steps:
     expect:
       exists: false
 
-  # L3VNI VLAN for Vrf_irb (evpn-irb shared VRF)
+  # L3VNI VLAN for Vrf_IRB (evpn-irb shared VRF)
   - name: no-vlan3998
     action: verify-config-db
     devices: [switch1, switch2]
@@ -248,7 +248,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -285,12 +285,12 @@ steps:
     expect:
       exists: false
 
-  # L3VNI: VNI 50400 → Vrf_irb
+  # L3VNI: VNI 50400 → Vrf_IRB
   - name: no-vni-map-50400
     action: verify-config-db
     devices: [switch1, switch2]
     table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI50400_Vrf_irb"
+    key: "vtep1|VNI50400_Vrf_IRB"
     expect:
       exists: false
 
@@ -364,7 +364,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -378,7 +378,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
-    key: "Vrf_irb|ipv4_unicast"
+    key: "Vrf_IRB|ipv4_unicast"
     expect:
       exists: false
 
@@ -386,7 +386,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
-    key: "Vrf_irb|l2vpn_evpn"
+    key: "Vrf_IRB|l2vpn_evpn"
     expect:
       exists: false
 
@@ -400,7 +400,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_EVPN_RT
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -487,7 +487,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: ROUTE_REDISTRIBUTE
-    key: "Vrf_irb|connected|bgp|ipv4"
+    key: "Vrf_IRB|connected|bgp|ipv4"
     expect:
       exists: false
 

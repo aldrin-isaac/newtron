@@ -11,7 +11,7 @@ EVPN L3VPN scenarios (`evpn-l3-routing`, `evpn-irb`) fail. Cross-VRF host pings 
 FRR shows no L3VNI configured in the VRF:
 
 ```
-switch1# show bgp vrf Vrf_l3evpn l2vpn evpn
+switch1# show bgp vrf Vrf_L3EVPN l2vpn evpn
 No BGP prefixes displayed, [0] exist
 (no vni block in router bgp output)
 ```
@@ -19,8 +19,8 @@ No BGP prefixes displayed, [0] exist
 Syslog shows vxlanmgrd crash during BindIPVPN:
 
 ```
-May 19 05:55:25.863783 switch1 ERR syncd#SDK: VNI mapping 'vtep1:evpn_map_50001_Vrf_l3evpn'
-  update vrf Vrf_l3evpn, vni 50001: SAI_STATUS_ITEM_ALREADY_EXISTS
+May 19 05:55:25.863783 switch1 ERR syncd#SDK: VNI mapping 'vtep1:evpn_map_50001_Vrf_L3EVPN'
+  update vrf Vrf_L3EVPN, vni 50001: SAI_STATUS_ITEM_ALREADY_EXISTS
 May 19 05:55:25.863783 switch1 ERR supervisord: ... Process 'vxlanmgrd' exited unexpectedly.
   Terminating supervisor 'swss'.
 ```
@@ -44,7 +44,7 @@ container (containing frrcfgd).
 frrcfgd restarts ~84 seconds later, **after** all BindIPVPN CONFIG_DB writes are already
 complete. frrcfgd init replays BGP_GLOBALS and BGP_NEIGHBOR entries but does NOT replay
 VRF|vni via vtysh (it only processes new events after subscribe). As a result, zebra never
-gets `vrf Vrf_l3evpn; vni 50001` and the L3VNI mapping is never established.
+gets `vrf Vrf_L3EVPN; vni 50001` and the L3VNI mapping is never established.
 
 ## Secondary Bugs (Fixed Simultaneously)
 
@@ -90,7 +90,7 @@ After fix:
 - vxlanmgrd no longer crashes during BindIPVPN
 - FRR shows correct L3VNI in VRF:
   ```
-  router bgp 65001 vrf Vrf_l3evpn
+  router bgp 65001 vrf Vrf_L3EVPN
     address-family l2vpn evpn
       advertise ipv4 unicast
       route-target both 65001:50001

@@ -802,7 +802,7 @@ omitted, it reads the loopback IP from the device profile.
 - name: bind-ipvpn
   action: bind-ipvpn
   devices: [switch1]
-  vrf: Vrf_irb
+  vrf: Vrf_IRB
   params:
     ipvpn: evpn-irb-vrf
 

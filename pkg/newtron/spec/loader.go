@@ -475,6 +475,10 @@ func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 		return nil, err
 	}
 
+	// Normalize at the boundary: service name references in topology
+	// interfaces must match the normalized keys in the network spec.
+	normalizeTopologyRefs(&spec)
+
 	return &spec, nil
 }
 
@@ -569,16 +573,16 @@ func normalizeOverridableSpecs(s *OverridableSpecs) {
 
 	// Normalize name-reference fields inside specs
 	for _, svc := range s.Services {
-		normalizeServiceRefs(svc)
+		NormalizeServiceRefs(svc)
 	}
 	for _, filter := range s.Filters {
-		normalizeFilterRefs(filter)
+		NormalizeFilterRefs(filter)
 	}
 	for _, rp := range s.RoutePolicies {
-		normalizeRoutePolicyRefs(rp)
+		NormalizeRoutePolicyRefs(rp)
 	}
 	for _, ipvpn := range s.IPVPNs {
-		normalizeIPVPNRefs(ipvpn)
+		NormalizeIPVPNRefs(ipvpn)
 	}
 }
 
@@ -595,7 +599,7 @@ func normalizeMap[V any](m map[string]V) map[string]V {
 }
 
 // normalizeServiceRefs normalizes name-reference fields in a ServiceSpec.
-func normalizeServiceRefs(svc *ServiceSpec) {
+func NormalizeServiceRefs(svc *ServiceSpec) {
 	if svc == nil {
 		return
 	}
@@ -615,7 +619,7 @@ func normalizeServiceRefs(svc *ServiceSpec) {
 }
 
 // normalizeFilterRefs normalizes prefix list references in filter rules.
-func normalizeFilterRefs(filter *FilterSpec) {
+func NormalizeFilterRefs(filter *FilterSpec) {
 	if filter == nil {
 		return
 	}
@@ -626,7 +630,7 @@ func normalizeFilterRefs(filter *FilterSpec) {
 }
 
 // normalizeRoutePolicyRefs normalizes prefix list references in route policy rules.
-func normalizeRoutePolicyRefs(rp *RoutePolicy) {
+func NormalizeRoutePolicyRefs(rp *RoutePolicy) {
 	if rp == nil {
 		return
 	}
@@ -636,12 +640,27 @@ func normalizeRoutePolicyRefs(rp *RoutePolicy) {
 	}
 }
 
-// normalizeIPVPNRefs normalizes the VRF name reference in IPVPNSpec.
-func normalizeIPVPNRefs(ipvpn *IPVPNSpec) {
+// NormalizeIPVPNRefs normalizes the VRF name in IPVPNSpec.
+// VRF is a CONFIG_DB key name with "Vrf_" prefix — normalize the suffix only.
+func NormalizeIPVPNRefs(ipvpn *IPVPNSpec) {
 	if ipvpn == nil {
 		return
 	}
-	ipvpn.VRF = normalizeRef(ipvpn.VRF)
+	if ipvpn.VRF != "" {
+		ipvpn.VRF = util.NormalizeVRFName(ipvpn.VRF)
+	}
+}
+
+// normalizeTopologyRefs normalizes service name references in topology interfaces.
+func normalizeTopologyRefs(t *TopologySpecFile) {
+	if t == nil {
+		return
+	}
+	for _, device := range t.Devices {
+		for _, intf := range device.Interfaces {
+			intf.Service = normalizeRef(intf.Service)
+		}
+	}
 }
 
 // normalizeRef normalizes a single name reference (returns "" for empty strings).

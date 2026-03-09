@@ -19,7 +19,7 @@ tunnel map entry (`VIRTUAL_ROUTER_ID_TO_VNI`) but **no DECAP entry**
 
 When `VRF|vni` is written to CONFIG_DB, the orchestration chain is:
 
-1. **vrfmgrd** writes `VXLAN_VRF_TABLE|Vrf_l3evpn` to APP_DB
+1. **vrfmgrd** writes `VXLAN_VRF_TABLE|Vrf_L3EVPN` to APP_DB
 2. **VxlanVrfMapOrch** processes this entry and calls `sai_tunnel_api->create_tunnel_map_entry()`:
    - ENCAP (`VIRTUAL_ROUTER_ID_TO_VNI`) — **succeeds**
    - DECAP (`VNI_TO_VIRTUAL_ROUTER_ID`) — **fails** with:

@@ -326,7 +326,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -334,7 +334,7 @@ steps:
     action: verify-config-db
     devices: [switch2]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -402,7 +402,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_EVPN_RT
-    key: "Vrf_irb|L2VPN_EVPN|65000:50002"
+    key: "Vrf_IRB|L2VPN_EVPN|65000:50002"
     expect:
       exists: false
 
@@ -428,7 +428,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       exists: false
 
@@ -437,7 +437,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
-    key: "Vrf_irb|ipv4_unicast"
+    key: "Vrf_IRB|ipv4_unicast"
     expect:
       exists: false
 
@@ -445,7 +445,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: BGP_GLOBALS_AF
-    key: "Vrf_irb|l2vpn_evpn"
+    key: "Vrf_IRB|l2vpn_evpn"
     expect:
       exists: false
 
@@ -454,7 +454,7 @@ steps:
     action: verify-config-db
     devices: [switch1, switch2]
     table: ROUTE_REDISTRIBUTE
-    key: "Vrf_irb|connected|bgp|ipv4"
+    key: "Vrf_IRB|connected|bgp|ipv4"
     expect:
       exists: false
 

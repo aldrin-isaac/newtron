@@ -1,6 +1,6 @@
 name: evpn-irb
 description: |
-  EVPN IRB: create Vrf_irb with L3VNI, configure SVI for VLAN 300 as
+  EVPN IRB: create Vrf_IRB with L3VNI, configure SVI for VLAN 300 as
   distributed anycast gateway. Verify IRB gateway reachability and L2
   bridging still works. Includes add/remove-vrf-interface sub-lifecycle.
 topology: 2node
@@ -11,25 +11,25 @@ steps:
   - name: create-vrf-irb-sw1
     action: create-vrf
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   - name: create-vrf-irb-sw2
     action: create-vrf
     devices: [switch2]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
 
   # Bind IP-VPN
   - name: bind-ipvpn-irb-sw1
     action: bind-ipvpn
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
     params:
       ipvpn: evpn-irb-vrf
 
   - name: bind-ipvpn-irb-sw2
     action: bind-ipvpn
     devices: [switch2]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
     params:
       ipvpn: evpn-irb-vrf
 
@@ -38,7 +38,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: VRF
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       fields:
         vni: "50002"
@@ -47,7 +47,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: BGP_GLOBALS
-    key: Vrf_irb
+    key: Vrf_IRB
     expect:
       fields:
         local_asn: "65001"
@@ -56,7 +56,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: BGP_GLOBALS_AF
-    key: "Vrf_irb|l2vpn_evpn"
+    key: "Vrf_IRB|l2vpn_evpn"
     expect:
       fields:
         advertise-ipv4-unicast: "true"
@@ -65,7 +65,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: BGP_GLOBALS_EVPN_RT
-    key: "Vrf_irb|L2VPN_EVPN|65000:50002"
+    key: "Vrf_IRB|L2VPN_EVPN|65000:50002"
     expect:
       exists: true
 
@@ -73,7 +73,7 @@ steps:
     action: verify-config-db
     devices: [switch1]
     table: ROUTE_REDISTRIBUTE
-    key: "Vrf_irb|connected|bgp|ipv4"
+    key: "Vrf_IRB|connected|bgp|ipv4"
     expect:
       exists: true
 
@@ -84,7 +84,7 @@ steps:
     vlan_id: 300
     params:
       ip: "10.3.0.1/24"
-      vrf: Vrf_irb
+      vrf: Vrf_IRB
 
   - name: configure-svi-sw2
     action: configure-svi
@@ -92,7 +92,7 @@ steps:
     vlan_id: 300
     params:
       ip: "10.3.0.1/24"
-      vrf: Vrf_irb
+      vrf: Vrf_IRB
 
   - name: verify-svi-vrf-sw1
     action: verify-config-db
@@ -101,7 +101,7 @@ steps:
     key: Vlan300
     expect:
       fields:
-        vrf_name: Vrf_irb
+        vrf_name: Vrf_IRB
 
   - name: verify-svi-ip-sw1
     action: verify-config-db
@@ -160,11 +160,11 @@ steps:
     expect:
       success_rate: 0.8
 
-  # Sub-lifecycle: add-vrf-interface Eth3→Vrf_irb on sw1
+  # Sub-lifecycle: add-vrf-interface Eth3→Vrf_IRB on sw1
   - name: add-vrf-interface-eth3
     action: add-vrf-interface
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
     interface: Ethernet3
 
   - name: verify-eth3-in-vrf
@@ -174,12 +174,12 @@ steps:
     key: Ethernet3
     expect:
       fields:
-        vrf_name: Vrf_irb
+        vrf_name: Vrf_IRB
 
   - name: remove-vrf-interface-eth3
     action: remove-vrf-interface
     devices: [switch1]
-    vrf: Vrf_irb
+    vrf: Vrf_IRB
     interface: Ethernet3
 
   - name: verify-eth3-vrf-removed
