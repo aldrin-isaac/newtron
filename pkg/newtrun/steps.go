@@ -581,6 +581,12 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			return false, "transient BGP check error", nil
 		}
 
+		// No BGP sessions found yet — frrcfgd may not have processed
+		// BGP_NEIGHBOR entries. Keep polling instead of passing vacuously.
+		if len(results) == 0 {
+			return false, "no BGP sessions found (waiting for frrcfgd)", nil
+		}
+
 		for _, hc := range results {
 			if hc.Status != "pass" {
 				var states []string
@@ -600,7 +606,7 @@ func (e *verifyBGPExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			}
 		}
 
-		return true, fmt.Sprintf("BGP %s", expectedState), nil
+		return true, fmt.Sprintf("BGP %s (%d sessions)", expectedState, len(results)), nil
 	})
 }
 

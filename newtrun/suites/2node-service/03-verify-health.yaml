@@ -19,6 +19,13 @@ steps:
       timeout: 120s
       poll_interval: 5s
 
+  # Brief pause after BGP poll passes — vtysh JSON output can lag behind
+  # FRR's internal state, causing point-in-time health checks to miss peers
+  # that the poll just confirmed as Established.
+  - name: settle-after-bgp
+    action: wait
+    duration: 5s
+
   - name: verify-health-switch1
     action: verify-health
     devices: [switch1]
