@@ -522,6 +522,8 @@ var Schema = map[string]TableSchema{
 			"arp_suppression": {Type: FieldBool},
 			"redistribute_vrf": {Type: FieldString},
 			"peer_group":       {Type: FieldString},
+			"route_map_in":     {Type: FieldString},
+			"route_map_out":    {Type: FieldString},
 		},
 	},
 

@@ -84,6 +84,8 @@ type ServiceBindingEntry struct {
 	ARPSuppression   string `json:"arp_suppression,omitempty"`   // "true" from macvpn (for SUPPRESS_VLAN_NEIGH cleanup)
 	BGPPeerAS        string `json:"bgp_peer_as,omitempty"`       // Resolved BGP peer AS number (for RefreshService)
 	PeerGroup        string `json:"peer_group,omitempty"`        // BGP peer group name (for peer group cleanup)
+	RouteMapIn       string `json:"route_map_in,omitempty"`      // Content-hashed import route map name (for stale cleanup)
+	RouteMapOut      string `json:"route_map_out,omitempty"`     // Content-hashed export route map name (for stale cleanup)
 	AppliedAt        string `json:"applied_at,omitempty"`        // Timestamp when applied
 	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
 }
@@ -509,6 +511,8 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			ARPSuppression:  fields["arp_suppression"],
 			BGPPeerAS:       fields["bgp_peer_as"],
 			PeerGroup:       fields["peer_group"],
+			RouteMapIn:      fields["route_map_in"],
+			RouteMapOut:     fields["route_map_out"],
 		}
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)
@@ -524,6 +528,33 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 		db.RouteRedistribute[key] = RouteRedistributeEntry{RouteMap: fields["route_map"]}
 	case "SAG_GLOBAL":
 		db.SAGGlobal[key] = copyFields(fields)
+	case "ROUTE_MAP":
+		db.RouteMap[key] = RouteMapEntry{
+			Action: fields["route_operation"],
+			MatchPrefixSet: fields["match_prefix_set"],
+			MatchCommunity: fields["match_community"],
+			SetLocalPref:   fields["set_local_pref"],
+			SetCommunity:   fields["set_community"],
+			SetMED:         fields["set_med"],
+		}
+	case "PREFIX_SET":
+		db.PrefixSet[key] = PrefixSetEntry{
+			IPPrefix: fields["ip_prefix"],
+			Action:   fields["action"],
+		}
+	case "COMMUNITY_SET":
+		db.CommunitySet[key] = CommunitySetEntry{
+			SetType:         fields["set_type"],
+			MatchAction:     fields["match_action"],
+			CommunityMember: fields["community_member"],
+		}
+	case "BGP_PEER_GROUP":
+		db.BGPPeerGroup[key] = BGPPeerGroupEntry{}
+	case "BGP_PEER_GROUP_AF":
+		db.BGPPeerGroupAF[key] = BGPPeerGroupAFEntry{
+			RouteMapIn:  fields["route_map_in"],
+			RouteMapOut: fields["route_map_out"],
+		}
 	// Tables not needed for preconditions: silently skip
 	}
 }

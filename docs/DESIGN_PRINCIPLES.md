@@ -1905,6 +1905,26 @@ testing for weeks.
 The service name prefix is the anchor that connects the forward and reverse
 paths.
 
+### Stale Hash Cleanup During RefreshService
+
+When a spec changes and `RefreshService` runs, old-hash policy objects become
+orphaned. `RemoveService` (called internally) skips shared policy deletion if
+other interfaces still use the service. `ApplyService` creates new-hash objects.
+The old objects are never cleaned up by normal lifecycle — `deleteRoutePoliciesConfig`
+only runs when the last service user is entirely removed.
+
+`RefreshService` solves this with a post-merge scan: after the remove+apply
+cycle, it reads existing route policy objects from CONFIG_DB (Redis in online
+mode, shadow in offline mode), compares against the set of objects just created
+by the apply phase, and deletes the difference. This is safe because:
+
+- All interfaces sharing a service use the same spec → the same hashes
+- The shared peer group AF was already updated to reference new route map names
+- Old objects are genuinely unreferenced after the peer group AF update
+
+The binding stores `route_map_in` and `route_map_out` for self-sufficiency —
+enabling future optimizations (e.g., skip the Redis scan when hashes match).
+
 ---
 
 ## 36. BGP Peer Groups — The Protocol's Native Sharing Mechanism
@@ -2108,7 +2128,7 @@ exceeded.
 | Unified naming convention | ALL UPPERCASE, single underscore, no redundant kind in key; `[A-Z0-9_]` only; any CONFIG_DB key can be parsed programmatically |
 | Normalize at the boundary | Spec loader normalizes all name keys and references at load time; operations code never calls `NormalizeName()` |
 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are N:1, shared, created on first reference, deleted on last |
-| Content-hashed naming | Shared policy objects carry an 8-char hash of their CONFIG_DB content; hash is always a suffix (never prefix) to preserve prefix-scan deletion; spec unchanged → hash unchanged → no-op |
+| Content-hashed naming | Shared policy objects carry an 8-char hash of their CONFIG_DB content; hash is always a suffix (never prefix) to preserve prefix-scan deletion; spec unchanged → hash unchanged → no-op; RefreshService scans for stale hashes and cleans up orphaned objects |
 | BGP peer groups | Service-named peer groups are the protocol's native sharing mechanism; shared attributes live on `BGP_PEER_GROUP_AF`, not duplicated per neighbor |
 | Verification must not pass vacuously | Zero items to verify = precondition not met = keep polling; observation tools lag behind daemon state; settle before point-in-time checks |
 | Convergence budget | Every CONFIG_DB entry costs convergence time; count entries when adding features; test timeouts must be proportional to entry count |

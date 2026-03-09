@@ -1,6 +1,7 @@
 package node
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
@@ -745,6 +746,233 @@ func TestCreateRoutePolicy_ExtraCommunityAndPrefixList(t *testing.T) {
 	// ROUTE_MAP: rule 10 + extra community (9000) + extra prefix (9100) = 3
 	if tables["ROUTE_MAP"] != 3 {
 		t.Errorf("expected 3 ROUTE_MAP entries, got %d", tables["ROUTE_MAP"])
+	}
+}
+
+func TestScanExistingRoutePolicies_OfflineMode(t *testing.T) {
+	// Verify that scanExistingRoutePolicies in offline mode correctly
+	// delegates to deleteRoutePoliciesConfig (reads shadow configDB).
+	n := testDevice()
+	n.offline = true
+	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
+	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|20"] = sonic.RouteMapEntry{}
+	n.configDB.PrefixSet["SVC_IMPORT_PL_10_FFFF|10"] = sonic.PrefixSetEntry{}
+	n.configDB.CommunitySet["SVC_IMPORT_CS_10_EEEE"] = sonic.CommunitySetEntry{}
+	// Unrelated entries for other services should NOT be returned
+	n.configDB.RouteMap["OTHER_IMPORT_DEADBEEF|10"] = sonic.RouteMapEntry{}
+
+	entries, err := n.scanExistingRoutePolicies("SVC")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tables := map[string]int{}
+	for _, e := range entries {
+		tables[e.Table]++
+	}
+	if tables["ROUTE_MAP"] != 2 {
+		t.Errorf("expected 2 ROUTE_MAP entries, got %d", tables["ROUTE_MAP"])
+	}
+	if tables["PREFIX_SET"] != 1 {
+		t.Errorf("expected 1 PREFIX_SET entry, got %d", tables["PREFIX_SET"])
+	}
+	if tables["COMMUNITY_SET"] != 1 {
+		t.Errorf("expected 1 COMMUNITY_SET entry, got %d", tables["COMMUNITY_SET"])
+	}
+	// Total should be 4 (not 5 — OTHER_IMPORT should be excluded)
+	if len(entries) != 4 {
+		t.Errorf("expected 4 total entries, got %d", len(entries))
+	}
+}
+
+func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
+	// Simulate: interface has service with old-hash route policies, spec changes,
+	// RefreshService should create new-hash objects and delete old ones.
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"TRANSIT": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol:     spec.RoutingProtocolBGP,
+					PeerAS:       "65002",
+					ImportPolicy: "ALLOW_ALL",
+				},
+			},
+		},
+		routePolicies: map[string]*spec.RoutePolicy{
+			"ALLOW_ALL": {
+				Rules: []*spec.RoutePolicyRule{
+					{Sequence: 10, Action: "permit"},
+				},
+			},
+		},
+		prefixLists: map[string][]string{},
+	}
+
+	n := &Node{
+		SpecProvider: sp,
+		name:         "test-dev",
+		offline:      true,
+		resolved: &spec.ResolvedProfile{
+			UnderlayASN: 64512,
+			RouterID:    "10.255.0.1",
+			LoopbackIP:  "10.255.0.1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB:   sonic.NewEmptyConfigDB(),
+	}
+
+	// Register a port and set up the interface
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	iface, _ := n.GetInterface("Ethernet0")
+
+	// Step 1: Apply the service — creates route policies with hash v1
+	ctx := t.Context()
+	applyCS, err := iface.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{
+		IPAddress: "10.1.0.0/31",
+	})
+	if err != nil {
+		t.Fatalf("ApplyService failed: %v", err)
+	}
+
+	// Verify route map was created
+	var originalRMName string
+	for _, c := range applyCS.Changes {
+		if c.Table == "ROUTE_MAP" {
+			originalRMName = strings.SplitN(c.Key, "|", 2)[0]
+			break
+		}
+	}
+	if originalRMName == "" {
+		t.Fatal("ApplyService did not create any ROUTE_MAP entries")
+	}
+
+	// Verify route_map_in is stored in binding
+	binding := n.configDB.NewtronServiceBinding["Ethernet0"]
+	if binding.RouteMapIn == "" {
+		t.Fatal("binding.RouteMapIn is empty — route map name not stored in binding")
+	}
+
+	// Step 2: Change the route policy spec (different content → different hash)
+	sp.routePolicies["ALLOW_ALL"] = &spec.RoutePolicy{
+		Rules: []*spec.RoutePolicyRule{
+			{Sequence: 10, Action: "permit", Set: &spec.RoutePolicySet{LocalPref: 200}},
+		},
+	}
+
+	// Step 3: RefreshService — should create new-hash objects and clean up old ones
+	refreshCS, err := iface.RefreshService(ctx)
+	if err != nil {
+		t.Fatalf("RefreshService failed: %v", err)
+	}
+
+	// Find new route map name (from add operations)
+	var newRMName string
+	for _, c := range refreshCS.Changes {
+		if c.Table == "ROUTE_MAP" && c.Type == sonic.ChangeTypeAdd {
+			newRMName = strings.SplitN(c.Key, "|", 2)[0]
+			break
+		}
+	}
+	if newRMName == "" {
+		t.Fatal("RefreshService did not create any new ROUTE_MAP entries")
+	}
+	if newRMName == originalRMName {
+		t.Fatal("route map name did not change after spec change — hash should differ")
+	}
+
+	// Verify old route map is being deleted
+	var oldRMDeleted bool
+	for _, c := range refreshCS.Changes {
+		if c.Table == "ROUTE_MAP" && c.Type == sonic.ChangeTypeDelete {
+			if strings.HasPrefix(c.Key, originalRMName) {
+				oldRMDeleted = true
+				break
+			}
+		}
+	}
+	if !oldRMDeleted {
+		t.Errorf("stale route map %s was not deleted by RefreshService", originalRMName)
+	}
+}
+
+func TestRefreshService_NoStaleCleanupWhenHashUnchanged(t *testing.T) {
+	// When the spec hasn't changed, RefreshService should NOT produce
+	// any stale cleanup deletes for route policies.
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"TRANSIT": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol:     spec.RoutingProtocolBGP,
+					PeerAS:       "65002",
+					ImportPolicy: "ALLOW_ALL",
+				},
+			},
+		},
+		routePolicies: map[string]*spec.RoutePolicy{
+			"ALLOW_ALL": {
+				Rules: []*spec.RoutePolicyRule{
+					{Sequence: 10, Action: "permit"},
+				},
+			},
+		},
+		prefixLists: map[string][]string{},
+	}
+
+	n := &Node{
+		SpecProvider: sp,
+		name:         "test-dev",
+		offline:      true,
+		resolved: &spec.ResolvedProfile{
+			UnderlayASN: 64512,
+			RouterID:    "10.255.0.1",
+			LoopbackIP:  "10.255.0.1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB:   sonic.NewEmptyConfigDB(),
+	}
+
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	iface, _ := n.GetInterface("Ethernet0")
+
+	// Apply the service
+	ctx := t.Context()
+	_, err := iface.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{
+		IPAddress: "10.1.0.0/31",
+	})
+	if err != nil {
+		t.Fatalf("ApplyService failed: %v", err)
+	}
+
+	// Refresh WITHOUT changing spec — same hash, no stale cleanup needed
+	refreshCS, err := iface.RefreshService(ctx)
+	if err != nil {
+		t.Fatalf("RefreshService failed: %v", err)
+	}
+
+	// Count route policy deletes that aren't matched by a subsequent add
+	// (i.e., truly stale deletes, not the remove+add cycle)
+	adds := make(map[string]bool)
+	deletes := make(map[string]bool)
+	for _, c := range refreshCS.Changes {
+		switch c.Table {
+		case "ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET":
+			key := c.Table + "|" + c.Key
+			if c.Type == sonic.ChangeTypeAdd {
+				adds[key] = true
+			} else if c.Type == sonic.ChangeTypeDelete {
+				deletes[key] = true
+			}
+		}
+	}
+
+	// Every delete should have a matching add (remove+apply cycle).
+	// No orphaned deletes = no stale cleanup.
+	for key := range deletes {
+		if !adds[key] {
+			t.Errorf("stale delete without matching add: %s — spec didn't change, no cleanup should occur", key)
+		}
 	}
 }
 

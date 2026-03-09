@@ -304,9 +304,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// Add route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) — these are only
 	// needed in the incremental path, not in topology provisioner.
-	var bgpNeighborIP string
+	var bgpResult bgpRoutePolicyResult
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpNeighborIP, err = i.addBGPRoutePolicies(cs, serviceName, svc, opts)
+		bgpResult, err = i.addBGPRoutePolicies(cs, serviceName, svc, opts)
 		if err != nil {
 			return nil, fmt.Errorf("BGP route policies for %s: %w", i.name, err)
 		}
@@ -345,8 +345,14 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	if egressACLName != "" {
 		bindingFields["egress_acl"] = egressACLName
 	}
-	if bgpNeighborIP != "" {
-		bindingFields["bgp_neighbor"] = bgpNeighborIP
+	if bgpResult.neighborIP != "" {
+		bindingFields["bgp_neighbor"] = bgpResult.neighborIP
+	}
+	if bgpResult.routeMapIn != "" {
+		bindingFields["route_map_in"] = bgpResult.routeMapIn
+	}
+	if bgpResult.routeMapOut != "" {
+		bindingFields["route_map_out"] = bgpResult.routeMapOut
 	}
 	if qosPolicyName != "" {
 		bindingFields["qos_policy"] = qosPolicyName
@@ -410,14 +416,21 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	return cs, nil
 }
 
+// bgpRoutePolicyResult holds the outputs of addBGPRoutePolicies needed by the caller.
+type bgpRoutePolicyResult struct {
+	neighborIP  string // BGP peer IP for binding record
+	routeMapIn  string // content-hashed import route map name (for binding self-sufficiency)
+	routeMapOut string // content-hashed export route map name (for binding self-sufficiency)
+}
+
 // addBGPRoutePolicies creates the BGP peer group (if first use), adds route policy
 // entries (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET), and attaches route maps to the
 // peer group AF (Principle 36). Also handles redistribution config.
 //
-// Returns the neighbor IP (for the service binding record).
-func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec, opts ApplyServiceOpts) (string, error) {
+// Returns the neighbor IP and route map names (for the service binding record).
+func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec, opts ApplyServiceOpts) (bgpRoutePolicyResult, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
-		return "", nil
+		return bgpRoutePolicyResult{}, nil
 	}
 
 	routing := svc.Routing
@@ -428,7 +441,7 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 		var err error
 		peerIP, err = util.DeriveNeighborIP(opts.IPAddress)
 		if err != nil {
-			return "", fmt.Errorf("could not derive BGP peer IP: %w", err)
+			return bgpRoutePolicyResult{}, fmt.Errorf("could not derive BGP peer IP: %w", err)
 		}
 	}
 
@@ -448,19 +461,23 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 
 	// Build route-map references. These go on the peer group AF (shared),
 	// not on individual neighbor AF entries (Principle 36).
+	// Also track route map names for binding self-sufficiency (stale cleanup).
 	afFields := map[string]string{}
+	var routeMapIn, routeMapOut string
 
 	if routing.ImportPolicy != "" {
 		entries, rmName := i.createRoutePolicy(serviceName, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_in"] = rmName
+			routeMapIn = rmName
 		}
 	} else if routing.ImportCommunity != "" || routing.ImportPrefixList != "" {
 		entries, rmName := i.createInlineRoutePolicy(serviceName, "import", routing.ImportCommunity, routing.ImportPrefixList)
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_in"] = rmName
+			routeMapIn = rmName
 		}
 	}
 
@@ -469,12 +486,14 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_out"] = rmName
+			routeMapOut = rmName
 		}
 	} else if routing.ExportCommunity != "" || routing.ExportPrefixList != "" {
 		entries, rmName := i.createInlineRoutePolicy(serviceName, "export", routing.ExportCommunity, routing.ExportPrefixList)
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_out"] = rmName
+			routeMapOut = rmName
 		}
 	}
 
@@ -512,7 +531,11 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 		cs.Updates(CreateBGPGlobalsAFConfig(vrfKey, "ipv4_unicast", fields))
 	}
 
-	return peerIP, nil
+	return bgpRoutePolicyResult{
+		neighborIP:  peerIP,
+		routeMapIn:  routeMapIn,
+		routeMapOut: routeMapOut,
+	}, nil
 }
 
 // routeMapRule holds a single route-map rule's sequence and fields,
@@ -737,6 +760,44 @@ func (i *Interface) createHashedPrefixSet(baseName, prefixListName string) ([]so
 		})
 	}
 	return entries, name
+}
+
+// scanExistingRoutePolicies returns all ROUTE_MAP, PREFIX_SET, and COMMUNITY_SET
+// entries matching the service prefix. In online mode, reads live Redis (ground
+// truth, not stale cache). In offline mode, scans the shadow configDB.
+// Used by RefreshService to identify stale content-hashed objects (Principle 35).
+func (n *Node) scanExistingRoutePolicies(serviceName string) ([]sonic.Entry, error) {
+	if n.offline {
+		// Offline mode: shadow configDB has all entries (applyShadow only adds)
+		return n.deleteRoutePoliciesConfig(serviceName), nil
+	}
+
+	// Online mode: read from Redis (cache may be stale if services were applied
+	// after the initial ConnectNode loaded the cache)
+	client := n.ConfigDBClient()
+	if client == nil {
+		return nil, nil
+	}
+
+	prefix := serviceName + "_"
+	var entries []sonic.Entry
+
+	for _, table := range []string{"ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET"} {
+		keys, err := client.TableKeys(table)
+		if err != nil {
+			return nil, fmt.Errorf("scanning %s for stale policies: %w", table, err)
+		}
+		for _, redisKey := range keys {
+			// redisKey is "TABLE|key_part" — strip table prefix
+			key := strings.TrimPrefix(redisKey, table+"|")
+			// Check if the base name (before first |) starts with service prefix
+			baseName := strings.SplitN(key, "|", 2)[0]
+			if strings.HasPrefix(baseName, prefix) {
+				entries = append(entries, sonic.Entry{Table: table, Key: key})
+			}
+		}
+	}
+	return entries, nil
 }
 
 // deleteRoutePoliciesConfig returns delete entries for all ROUTE_MAP, PREFIX_SET, and
@@ -1116,6 +1177,35 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	cs := NewChangeSet(n.Name(), "interface.refresh-service")
 	cs.Merge(removeCS)
 	cs.Merge(applyCS)
+
+	// Clean up stale content-hashed route policy objects (Principle 35, Phase 4).
+	//
+	// When specs change, RefreshService creates new-hash objects but RemoveService
+	// (called above) skips shared policy deletion if other users exist. The peer
+	// group AF was updated to reference new route maps, leaving old objects orphaned.
+	//
+	// Scan for existing route policy objects in CONFIG_DB, compare against what
+	// the apply phase just created, and delete the difference.
+	existing, err := n.scanExistingRoutePolicies(serviceName)
+	if err != nil {
+		// Non-fatal: stale policies might persist but don't break functionality
+		util.WithDevice(n.Name()).Warnf("Could not scan for stale route policies: %v", err)
+	} else if len(existing) > 0 {
+		activeKeys := make(map[string]bool)
+		for _, c := range applyCS.Changes {
+			if c.Type == sonic.ChangeTypeAdd {
+				switch c.Table {
+				case "ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET":
+					activeKeys[c.Table+"|"+c.Key] = true
+				}
+			}
+		}
+		for _, e := range existing {
+			if !activeKeys[e.Table+"|"+e.Key] {
+				cs.Delete(e.Table, e.Key)
+			}
+		}
+	}
 
 	util.WithDevice(n.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)
 	return cs, nil
