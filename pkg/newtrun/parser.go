@@ -109,8 +109,8 @@ ActionCleanup:           {needsDevices: true},
 		if step.Expect == nil {
 			return fmt.Errorf("%s: expect is required", prefix)
 		}
-		if step.Expect.MinEntries == nil && step.Expect.Exists == nil && len(step.Expect.Fields) == 0 {
-			return fmt.Errorf("%s: expect must have min_entries, exists, or fields", prefix)
+		if step.Expect.MinEntries == nil && step.Expect.MaxEntries == nil && step.Expect.Exists == nil && len(step.Expect.Fields) == 0 {
+			return fmt.Errorf("%s: expect must have min_entries, max_entries, exists, or fields", prefix)
 		}
 		return nil
 	}},

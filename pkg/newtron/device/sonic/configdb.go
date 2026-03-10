@@ -54,6 +54,8 @@ type ConfigDB struct {
 	CommunitySet       map[string]CommunitySetEntry       `json:"COMMUNITY_SET,omitempty"`
 	ASPathSet          map[string]ASPathSetEntry           `json:"AS_PATH_SET,omitempty"`
 
+	StaticRoute map[string]map[string]string `json:"STATIC_ROUTE,omitempty"`
+
 	// Newtron-specific tables (custom, not standard SONiC)
 	NewtronServiceBinding map[string]ServiceBindingEntry `json:"NEWTRON_SERVICE_BINDING,omitempty"`
 }
@@ -84,9 +86,11 @@ type ServiceBindingEntry struct {
 	ARPSuppression   string `json:"arp_suppression,omitempty"`   // "true" from macvpn (for SUPPRESS_VLAN_NEIGH cleanup)
 	BGPPeerAS        string `json:"bgp_peer_as,omitempty"`       // Resolved BGP peer AS number (for RefreshService)
 	PeerGroup        string `json:"peer_group,omitempty"`        // BGP peer group name (for peer group cleanup)
-	RouteMapIn       string `json:"route_map_in,omitempty"`      // Content-hashed import route map name (for stale cleanup)
-	RouteMapOut      string `json:"route_map_out,omitempty"`     // Content-hashed export route map name (for stale cleanup)
-	AppliedAt        string `json:"applied_at,omitempty"`        // Timestamp when applied
+	RouteMapIn            string `json:"route_map_in,omitempty"`            // Content-hashed import route map name (for stale cleanup)
+	RouteMapOut           string `json:"route_map_out,omitempty"`           // Content-hashed export route map name (for stale cleanup)
+	RouteReflectorClient  string `json:"route_reflector_client,omitempty"`  // "true" if topology params set rrclient (for RefreshService)
+	NextHopSelf           string `json:"next_hop_self,omitempty"`           // "true" if topology params set nhself (for RefreshService)
+	AppliedAt             string `json:"applied_at,omitempty"`              // Timestamp when applied
 	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
 }
 
@@ -511,8 +515,10 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			ARPSuppression:  fields["arp_suppression"],
 			BGPPeerAS:       fields["bgp_peer_as"],
 			PeerGroup:       fields["peer_group"],
-			RouteMapIn:      fields["route_map_in"],
-			RouteMapOut:     fields["route_map_out"],
+			RouteMapIn:           fields["route_map_in"],
+			RouteMapOut:          fields["route_map_out"],
+			RouteReflectorClient: fields["route_reflector_client"],
+			NextHopSelf:          fields["next_hop_self"],
 		}
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)
@@ -555,7 +561,142 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			RouteMapIn:  fields["route_map_in"],
 			RouteMapOut: fields["route_map_out"],
 		}
+	case "ACL_RULE":
+		db.ACLRule[key] = ACLRuleEntry{
+			Priority:     fields["PRIORITY"],
+			PacketAction: fields["PACKET_ACTION"],
+			SrcIP:        fields["SRC_IP"],
+			DstIP:        fields["DST_IP"],
+			IPProtocol:   fields["IP_PROTOCOL"],
+			L4SrcPort:    fields["L4_SRC_PORT"],
+			L4DstPort:    fields["L4_DST_PORT"],
+		}
+	case "BGP_EVPN_VNI":
+		db.BGPEVPNVNI[key] = BGPEVPNVNIEntry{
+			RD:                 fields["rd"],
+			RTImport:           fields["route_target_import"],
+			RTExport:           fields["route_target_export"],
+			AdvertiseDefaultGW: fields["advertise_default_gw"],
+		}
+	case "BGP_GLOBALS_EVPN_RT":
+		db.BGPGlobalsEVPNRT[key] = BGPGlobalsEVPNRTEntry{
+			RouteTargetType: fields["route-target-type"],
+		}
+	case "STATIC_ROUTE":
+		db.StaticRoute[key] = copyFields(fields)
+	case "PORT_QOS_MAP":
+		db.PortQoSMap[key] = PortQoSMapEntry{
+			DSCPToTCMap:  fields["dscp_to_tc_map"],
+			TCToQueueMap: fields["tc_to_queue_map"],
+		}
+	case "QUEUE":
+		db.Queue[key] = QueueEntry{
+			Scheduler:   fields["scheduler"],
+			WREDProfile: fields["wred_profile"],
+		}
+	case "DSCP_TO_TC_MAP":
+		db.DSCPToTCMap[key] = copyFields(fields)
+	case "TC_TO_QUEUE_MAP":
+		db.TCToQueueMap[key] = copyFields(fields)
+	case "SCHEDULER":
+		db.Scheduler[key] = SchedulerEntry{
+			Type:   fields["type"],
+			Weight: fields["weight"],
+		}
+	case "WRED_PROFILE":
+		db.WREDProfile[key] = WREDProfileEntry{
+			GreenMinThreshold:     fields["green_min_threshold"],
+			GreenMaxThreshold:     fields["green_max_threshold"],
+			GreenDropProbability:  fields["green_drop_probability"],
+			YellowMinThreshold:    fields["yellow_min_threshold"],
+			YellowMaxThreshold:    fields["yellow_max_threshold"],
+			YellowDropProbability: fields["yellow_drop_probability"],
+			RedMinThreshold:       fields["red_min_threshold"],
+			RedMaxThreshold:       fields["red_max_threshold"],
+			RedDropProbability:    fields["red_drop_probability"],
+		}
 	// Tables not needed for preconditions: silently skip
+	}
+}
+
+// DeleteEntry removes an entry from the ConfigDB by table and key.
+// Used by applyShadow to keep the shadow consistent when processing deletes.
+func (db *ConfigDB) DeleteEntry(table, key string) {
+	switch table {
+	case "PORT":
+		delete(db.Port, key)
+	case "PORTCHANNEL":
+		delete(db.PortChannel, key)
+	case "PORTCHANNEL_MEMBER":
+		delete(db.PortChannelMember, key)
+	case "VLAN":
+		delete(db.VLAN, key)
+	case "VLAN_MEMBER":
+		delete(db.VLANMember, key)
+	case "VRF":
+		delete(db.VRF, key)
+	case "INTERFACE":
+		delete(db.Interface, key)
+	case "VLAN_INTERFACE":
+		delete(db.VLANInterface, key)
+	case "VXLAN_TUNNEL":
+		delete(db.VXLANTunnel, key)
+	case "VXLAN_TUNNEL_MAP":
+		delete(db.VXLANTunnelMap, key)
+	case "VXLAN_EVPN_NVO":
+		delete(db.VXLANEVPNNVO, key)
+	case "BGP_GLOBALS":
+		delete(db.BGPGlobals, key)
+	case "BGP_NEIGHBOR":
+		delete(db.BGPNeighbor, key)
+	case "BGP_NEIGHBOR_AF":
+		delete(db.BGPNeighborAF, key)
+	case "BGP_GLOBALS_AF":
+		delete(db.BGPGlobalsAF, key)
+	case "DEVICE_METADATA":
+		delete(db.DeviceMetadata, key)
+	case "NEWTRON_SERVICE_BINDING":
+		delete(db.NewtronServiceBinding, key)
+	case "SUPPRESS_VLAN_NEIGH":
+		delete(db.SuppressVLANNeigh, key)
+	case "ACL_TABLE":
+		delete(db.ACLTable, key)
+	case "ACL_RULE":
+		delete(db.ACLRule, key)
+	case "LOOPBACK_INTERFACE":
+		delete(db.LoopbackInterface, key)
+	case "ROUTE_REDISTRIBUTE":
+		delete(db.RouteRedistribute, key)
+	case "SAG_GLOBAL":
+		delete(db.SAGGlobal, key)
+	case "ROUTE_MAP":
+		delete(db.RouteMap, key)
+	case "PREFIX_SET":
+		delete(db.PrefixSet, key)
+	case "COMMUNITY_SET":
+		delete(db.CommunitySet, key)
+	case "BGP_PEER_GROUP":
+		delete(db.BGPPeerGroup, key)
+	case "BGP_PEER_GROUP_AF":
+		delete(db.BGPPeerGroupAF, key)
+	case "BGP_EVPN_VNI":
+		delete(db.BGPEVPNVNI, key)
+	case "BGP_GLOBALS_EVPN_RT":
+		delete(db.BGPGlobalsEVPNRT, key)
+	case "STATIC_ROUTE":
+		delete(db.StaticRoute, key)
+	case "PORT_QOS_MAP":
+		delete(db.PortQoSMap, key)
+	case "QUEUE":
+		delete(db.Queue, key)
+	case "DSCP_TO_TC_MAP":
+		delete(db.DSCPToTCMap, key)
+	case "TC_TO_QUEUE_MAP":
+		delete(db.TCToQueueMap, key)
+	case "SCHEDULER":
+		delete(db.Scheduler, key)
+	case "WRED_PROFILE":
+		delete(db.WREDProfile, key)
 	}
 }
 

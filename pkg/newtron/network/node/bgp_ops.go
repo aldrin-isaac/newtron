@@ -263,6 +263,16 @@ func CreateBGPPeerGroupConfig(vrf, name string, afFields map[string]string) []so
 	return entries
 }
 
+// UpdateBGPPeerGroupAF returns an update entry for a peer group's address-family fields.
+// Used when the peer group already exists but AF attributes (e.g., route maps) need updating.
+func UpdateBGPPeerGroupAF(vrf, name string, afFields map[string]string) sonic.Entry {
+	return sonic.Entry{
+		Table:  "BGP_PEER_GROUP_AF",
+		Key:    BGPPeerGroupAFKey(vrf, name, "ipv4_unicast"),
+		Fields: afFields,
+	}
+}
+
 // DeleteBGPPeerGroupConfig returns delete entries for a peer group and its AF entry.
 func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
 	if vrf == "" {

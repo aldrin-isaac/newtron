@@ -622,6 +622,206 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 }
 
 // ============================================================================
+// Prefix Lists
+// ============================================================================
+
+func (s *Server) handleShowPrefixList(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ShowPrefixList(name)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleCreatePrefixList(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.CreatePrefixListRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.CreatePrefixList(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeletePrefixList(name, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.AddPrefixListEntryRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	req.PrefixList = r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.AddPrefixListEntry(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"prefix": req.Prefix})
+}
+
+func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	prefixList := r.PathValue("name")
+	prefix := r.PathValue("prefix")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.RemovePrefixListEntry(prefixList, prefix, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ============================================================================
+// Route Policies
+// ============================================================================
+
+func (s *Server) handleShowRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ShowRoutePolicy(name)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleCreateRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.CreateRoutePolicyRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.CreateRoutePolicy(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeleteRoutePolicy(name, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.AddRoutePolicyRuleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	req.Policy = r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.AddRoutePolicyRule(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]int{"seq": req.Sequence})
+}
+
+func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	seq, err := pathInt(r, "seq")
+	if err != nil {
+		writeError(w, &newtron.ValidationError{Field: "seq", Message: "invalid sequence number"})
+		return
+	}
+	opts := execOpts(r)
+	_, err = na.do(r.Context(), func() (any, error) {
+		return nil, na.net.RemoveRoutePolicyRule(name, seq, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ============================================================================
 // Platform feature support
 // ============================================================================
 

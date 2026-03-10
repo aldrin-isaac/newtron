@@ -252,10 +252,22 @@ func init() {
 				AnycastIP:       vals["anycast_ip"],
 				AnycastMAC:      vals["anycast_mac"],
 				ARPSuppression:  vals["arp_suppression"],
-				BGPPeerAS:       vals["bgp_peer_as"],
-				AppliedAt:       vals["applied_at"],
-				AppliedBy:       vals["applied_by"],
+				BGPPeerAS:            vals["bgp_peer_as"],
+				PeerGroup:            vals["peer_group"],
+				RouteMapIn:           vals["route_map_in"],
+				RouteMapOut:          vals["route_map_out"],
+				RouteReflectorClient: vals["route_reflector_client"],
+				NextHopSelf:          vals["next_hop_self"],
+				AppliedAt:            vals["applied_at"],
+				AppliedBy:            vals["applied_by"],
 			}
+		},
+		"STATIC_ROUTE": func(db *ConfigDB, entry string, vals map[string]string) {
+			cp := make(map[string]string, len(vals))
+			for k, v := range vals {
+				cp[k] = v
+			}
+			db.StaticRoute[entry] = cp
 		},
 		"ROUTE_REDISTRIBUTE": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.RouteRedistribute[entry] = RouteRedistributeEntry{

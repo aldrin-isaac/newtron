@@ -660,6 +660,9 @@ func normalizeTopologyRefs(t *TopologySpecFile) {
 		for _, intf := range device.Interfaces {
 			intf.Service = normalizeRef(intf.Service)
 		}
+		for _, pc := range device.PortChannels {
+			pc.Service = normalizeRef(pc.Service)
+		}
 	}
 }
 

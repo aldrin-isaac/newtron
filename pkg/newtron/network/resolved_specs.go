@@ -6,7 +6,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
@@ -36,81 +35,75 @@ func newResolvedSpecs(merged spec.OverridableSpecs, network *Network) *ResolvedS
 func (r *ResolvedSpecs) GetService(name string) (*spec.ServiceSpec, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.Services[name]
-	if !ok {
-		return nil, fmt.Errorf("service '%s' not found", name)
+	if v, ok := r.merged.Services[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	// Fall through to network-level specs for dynamically added entries
+	// (SaveService writes to n.spec.Services after merge was built).
+	return r.network.GetService(name)
 }
 
 func (r *ResolvedSpecs) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.IPVPNs[name]
-	if !ok {
-		return nil, fmt.Errorf("ipvpn '%s' not found", name)
+	if v, ok := r.merged.IPVPNs[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetIPVPN(name)
 }
 
 func (r *ResolvedSpecs) GetMACVPN(name string) (*spec.MACVPNSpec, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.MACVPNs[name]
-	if !ok {
-		return nil, fmt.Errorf("macvpn '%s' not found", name)
+	if v, ok := r.merged.MACVPNs[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetMACVPN(name)
 }
 
 func (r *ResolvedSpecs) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.QoSPolicies[name]
-	if !ok {
-		return nil, fmt.Errorf("QoS policy '%s' not found", name)
+	if v, ok := r.merged.QoSPolicies[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetQoSPolicy(name)
 }
 
 func (r *ResolvedSpecs) GetQoSProfile(name string) (*spec.QoSProfile, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.QoSProfiles[name]
-	if !ok {
-		return nil, fmt.Errorf("QoS profile '%s' not found", name)
+	if v, ok := r.merged.QoSProfiles[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetQoSProfile(name)
 }
 
 func (r *ResolvedSpecs) GetFilter(name string) (*spec.FilterSpec, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.Filters[name]
-	if !ok {
-		return nil, fmt.Errorf("filter '%s' not found", name)
+	if v, ok := r.merged.Filters[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetFilter(name)
 }
 
 func (r *ResolvedSpecs) GetRoutePolicy(name string) (*spec.RoutePolicy, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.RoutePolicies[name]
-	if !ok {
-		return nil, fmt.Errorf("route policy '%s' not found", name)
+	if v, ok := r.merged.RoutePolicies[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetRoutePolicy(name)
 }
 
 func (r *ResolvedSpecs) GetPrefixList(name string) ([]string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	v, ok := r.merged.PrefixLists[name]
-	if !ok {
-		return nil, fmt.Errorf("prefix list '%s' not found", name)
+	if v, ok := r.merged.PrefixLists[name]; ok {
+		return v, nil
 	}
-	return v, nil
+	return r.network.GetPrefixList(name)
 }
 
 func (r *ResolvedSpecs) GetPlatform(name string) (*spec.PlatformSpec, error) {
@@ -125,5 +118,7 @@ func (r *ResolvedSpecs) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) {
 			return name, def
 		}
 	}
-	return "", nil
+	// Fall through to network-level specs for dynamically added entries
+	// (SaveMACVPN writes to n.spec.MACVPNs after merge was built).
+	return r.network.FindMACVPNByVNI(vni)
 }

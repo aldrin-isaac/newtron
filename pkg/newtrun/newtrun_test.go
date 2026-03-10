@@ -1515,6 +1515,11 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionDeleteACLTable, ActionBindACL, ActionUnbindACL,
 		ActionRemoveSVI, ActionRemoveIP, ActionTeardownEVPN,
 		ActionRemoveBGPGlobals, ActionRemoveLoopback,
+		ActionCreatePrefixList, ActionDeletePrefixList,
+		ActionAddPrefixEntry, ActionRemovePrefixEntry,
+		ActionCreateRoutePolicy, ActionDeleteRoutePolicy,
+		ActionAddRoutePolicyRule, ActionRemoveRoutePolicyRule,
+		ActionCreateService, ActionDeleteService,
 	}
 
 	if len(executors) != len(allActions) {

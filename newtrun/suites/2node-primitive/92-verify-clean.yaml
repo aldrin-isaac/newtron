@@ -106,6 +106,23 @@ steps:
     expect:
       exists: false
 
+  # BGP_NEIGHBOR_AF (overlay peers)
+  - name: verify-no-bgp-neighbor-af-overlay-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR_AF
+    key: "default|10.0.0.2|l2vpn_evpn"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-neighbor-af-overlay-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR_AF
+    key: "default|10.0.0.1|l2vpn_evpn"
+    expect:
+      exists: false
+
   # ROUTE_REDISTRIBUTE
   - name: verify-no-redistribute
     action: verify-config-db
@@ -493,6 +510,23 @@ steps:
     expect:
       exists: false
 
+  # PORTCHANNEL_MEMBER
+  - name: verify-no-portchannel-member-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet4"
+    expect:
+      exists: false
+
+  - name: verify-no-portchannel-member-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet4"
+    expect:
+      exists: false
+
   # ACL_TABLE
   - name: verify-no-acl-table
     action: verify-config-db
@@ -501,6 +535,47 @@ steps:
     key: TEST_ACL
     expect:
       exists: false
+
+  # NEWTRON_SERVICE_BINDING (spec-authoring scenario)
+  - name: verify-no-binding-eth10-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet10
+    expect:
+      exists: false
+
+  # ROUTE_MAP (from spec-authoring scenario)
+  - name: verify-no-route-map
+    action: verify-config-db
+    devices: [switch1]
+    table: ROUTE_MAP
+    expect:
+      max_entries: 0
+
+  # PREFIX_SET (from spec-authoring scenario)
+  - name: verify-no-prefix-set
+    action: verify-config-db
+    devices: [switch1]
+    table: PREFIX_SET
+    expect:
+      max_entries: 0
+
+  # BGP_PEER_GROUP (from service apply/remove lifecycle)
+  - name: verify-no-bgp-peer-group
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_PEER_GROUP
+    expect:
+      max_entries: 0
+
+  # BGP_PEER_GROUP_AF (from service apply/remove lifecycle)
+  - name: verify-no-bgp-peer-group-af
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_PEER_GROUP_AF
+    expect:
+      max_entries: 0
 
   # PORT_QOS_MAP
   - name: verify-no-qos-map

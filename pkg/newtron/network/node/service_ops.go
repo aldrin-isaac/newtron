@@ -257,7 +257,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			existingACL, aclExists := configDB.ACLTable[aclName]
 			if aclExists {
 				// ACL exists — merge this interface into the binding list
-				merged := unbindAclConfig(aclName, util.AddToCSV(existingACL.Ports, i.name))
+				merged := updateAclPorts(aclName, util.AddToCSV(existingACL.Ports, i.name))
 				cs.Update(merged.Table, merged.Key, merged.Fields)
 			} else {
 				// ACL doesn't exist - create table entry from generated fields
@@ -281,13 +281,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		case e.Table == "NEWTRON_SERVICE_BINDING":
 			// Handled separately below to add extra binding fields
 			continue
-		}
-
-		// QoS device-wide tables need idempotent upsert in incremental mode
-		if e.Table == "DSCP_TO_TC_MAP" || e.Table == "TC_TO_QUEUE_MAP" ||
-			e.Table == "SCHEDULER" || e.Table == "WRED_PROFILE" {
-			// For QoS device-wide entries, the shared generator doesn't emit these
-			// (only per-interface entries). Generate them here for incremental mode.
 		}
 
 		cs.Add(e.Table, e.Key, e.Fields)
@@ -396,6 +389,14 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 	if peerGroup != "" {
 		bindingFields["peer_group"] = peerGroup
+	}
+	// Topology params for RefreshService self-sufficiency (Principle 8):
+	// these BGP neighbor attributes must survive remove+reapply cycles.
+	if opts.Params["route_reflector_client"] == "true" {
+		bindingFields["route_reflector_client"] = "true"
+	}
+	if opts.Params["next_hop_self"] == "true" {
+		bindingFields["next_hop_self"] = "true"
 	}
 	// Extract resolved peer AS from the generated BGP_NEIGHBOR entry (DRY — the
 	// resolution logic stays in generateBGPPeeringConfig; we read the result).
@@ -506,11 +507,7 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 		cs.Adds(CreateBGPPeerGroupConfig(vrfKey, serviceName, afFields))
 	} else if len(afFields) > 0 {
 		// Peer group exists — update AF with route map references if needed
-		e := sonic.Entry{
-			Table:  "BGP_PEER_GROUP_AF",
-			Key:    BGPPeerGroupAFKey(vrfKey, serviceName, "ipv4_unicast"),
-			Fields: afFields,
-		}
+		e := UpdateBGPPeerGroupAF(vrfKey, serviceName, afFields)
 		cs.Update(e.Table, e.Key, e.Fields)
 	}
 
@@ -898,7 +895,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 		cs.Deletes(i.node.deleteAclTableConfig(aclName))
 	} else {
 		// Other users exist — just remove this interface from the binding list
-		e := unbindAclConfig(aclName, depCheck.GetACLRemainingInterfaces(aclName))
+		e := updateAclPorts(aclName, depCheck.GetACLRemainingInterfaces(aclName))
 		cs.Update(e.Table, e.Key, e.Fields)
 	}
 }
@@ -1041,11 +1038,10 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	if vrfName != "" && vrfName != "default" {
 		// For routed services, delete the INTERFACE base entry entirely.
-		// For non-routed services (IRB, bridged), just clear the VRF binding.
+		// For IRB/bridged types, the VRF binding is on the SVI (VLAN_INTERFACE),
+		// not the physical INTERFACE — SVI cleanup happens in the VLAN section below.
 		if canRoute {
 			cs.Deletes(i.enableIpRouting())
-		} else {
-			cs.Updates(i.bindVrf(""))
 		}
 
 		// Per-interface VRF: delete VRF and related config
@@ -1119,6 +1115,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	cs.Delete("NEWTRON_SERVICE_BINDING", i.name)
 
+	n.applyShadow(cs)
+
 	// Log if this was the last user of the service
 	if isLastServiceUser {
 		util.WithDevice(n.Name()).Infof("Last interface removed from service '%s' - all service resources cleaned up", serviceName)
@@ -1160,12 +1158,27 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	configDB := n.ConfigDB()
 	delete(configDB.NewtronServiceBinding, i.name)
 
+	// Restore topology params from the binding (Principle 8: binding self-sufficiency).
+	// route_reflector_client and next_hop_self are topology attributes that must
+	// survive the remove+reapply cycle.
+	var params map[string]string
+	if b.RouteReflectorClient == "true" || b.NextHopSelf == "true" {
+		params = make(map[string]string)
+		if b.RouteReflectorClient == "true" {
+			params["route_reflector_client"] = "true"
+		}
+		if b.NextHopSelf == "true" {
+			params["next_hop_self"] = "true"
+		}
+	}
+
 	// Reapply the service with preserved parameters. RemoveService deletes
 	// the BGP neighbor, so PeerAS must be passed to recreate it.
 	applyCS, err := i.ApplyService(ctx, serviceName, ApplyServiceOpts{
 		IPAddress: serviceIP,
 		PeerAS:    peerAS,
 		VLAN:      vlanID,
+		Params:    params,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("reapplying service: %w", err)
@@ -1200,11 +1213,14 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 				}
 			}
 		}
+		staleCS := NewChangeSet(n.Name(), "stale-policy-cleanup")
 		for _, e := range existing {
 			if !activeKeys[e.Table+"|"+e.Key] {
-				cs.Delete(e.Table, e.Key)
+				staleCS.Delete(e.Table, e.Key)
 			}
 		}
+		n.applyShadow(staleCS)
+		cs.Merge(staleCS)
 	}
 
 	util.WithDevice(n.Name()).Infof("Refreshed service '%s' on interface %s", serviceName, i.name)

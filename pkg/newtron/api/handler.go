@@ -38,7 +38,9 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/platform", s.handleListPlatforms)
 	mux.HandleFunc("GET /network/{netID}/platform/{name}", s.handleShowPlatform)
 	mux.HandleFunc("GET /network/{netID}/route-policy", s.handleListRoutePolicies)
+	mux.HandleFunc("GET /network/{netID}/route-policy/{name}", s.handleShowRoutePolicy)
 	mux.HandleFunc("GET /network/{netID}/prefix-list", s.handleListPrefixLists)
+	mux.HandleFunc("GET /network/{netID}/prefix-list/{name}", s.handleShowPrefixList)
 	mux.HandleFunc("GET /network/{netID}/topology/node", s.handleTopologyDeviceNames)
 	mux.HandleFunc("GET /network/{netID}/host/{name}", s.handleGetHostProfile)
 	mux.HandleFunc("GET /network/{netID}/feature", s.handleGetAllFeatures)
@@ -63,6 +65,14 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("DELETE /network/{netID}/filter/{name}", s.handleDeleteFilter)
 	mux.HandleFunc("POST /network/{netID}/filter/{name}/rule", s.handleAddFilterRule)
 	mux.HandleFunc("DELETE /network/{netID}/filter/{name}/rule/{seq}", s.handleRemoveFilterRule)
+	mux.HandleFunc("POST /network/{netID}/prefix-list", s.handleCreatePrefixList)
+	mux.HandleFunc("DELETE /network/{netID}/prefix-list/{name}", s.handleDeletePrefixList)
+	mux.HandleFunc("POST /network/{netID}/prefix-list/{name}/entry", s.handleAddPrefixListEntry)
+	mux.HandleFunc("DELETE /network/{netID}/prefix-list/{name}/entry/{prefix...}", s.handleRemovePrefixListEntry)
+	mux.HandleFunc("POST /network/{netID}/route-policy", s.handleCreateRoutePolicy)
+	mux.HandleFunc("DELETE /network/{netID}/route-policy/{name}", s.handleDeleteRoutePolicy)
+	mux.HandleFunc("POST /network/{netID}/route-policy/{name}/rule", s.handleAddRoutePolicyRule)
+	mux.HandleFunc("DELETE /network/{netID}/route-policy/{name}/rule/{seq}", s.handleRemoveRoutePolicyRule)
 
 	// ====================================================================
 	// Network provision

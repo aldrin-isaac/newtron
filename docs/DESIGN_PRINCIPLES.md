@@ -549,7 +549,8 @@ The ownership map:
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
 vrf_ops.go         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
 bgp_ops.go         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
-                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA
+                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
+                      BGP_PEER_GROUP, BGP_PEER_GROUP_AF
 evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
                       SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
 acl_ops.go         → ACL_TABLE, ACL_RULE
@@ -2089,7 +2090,71 @@ exceeded.
 
 ---
 
-## 39. Summary
+## 39. Definition Is Network-Scoped; Execution Is Device-Scoped
+
+The network is the unit of definition — specs, services, policies, prefix
+lists exist at the network level and have their own lifecycle (create,
+modify, delete) independent of any device. The device is the unit of
+execution — apply, remove, verify, observe operate on a specific device's
+CONFIG_DB reality.
+
+These two lifecycles must not be coupled. A service can be defined before
+any device is connected. A device can consume a service defined after it
+connected. Neither layer should require the other to be in a particular
+state for its own operations to succeed.
+
+### Why this matters
+
+§9 (Hierarchical Spec Resolution) describes how specs are merged at node
+creation time: network → zone → profile, lower level wins. This merge
+produces a `ResolvedSpecs` snapshot — a per-device flattened view for fast
+lookup. The snapshot is correct at creation time, but it becomes a closed
+world: specs added to the network after the snapshot was built are invisible.
+
+This is not hypothetical. The spec authoring API (`SaveService`,
+`SavePrefixList`, `SaveRoutePolicy`) adds entries to the network-level maps
+at runtime. If `ResolvedSpecs` only reads its snapshot, a newly created
+service is invisible to every connected device until the server restarts.
+
+### The fix: snapshot with live fallback
+
+`ResolvedSpecs.Get*` methods check the merged snapshot first (preserving
+override semantics — profile wins over zone wins over network). On miss,
+they fall through to the network-level maps via `network.Get*`. This keeps
+the hierarchy intact for overrides while making the network level open for
+additions:
+
+```
+ResolvedSpecs.GetService("TRANSIT")
+  1. Check merged snapshot → found (profile override) → return it
+  2. Miss → fall through to network.GetService("TRANSIT") → found → return it
+  3. Miss at both levels → "service not found" error
+```
+
+The alternative — rebuilding all snapshots on every write — is correct but
+expensive and couples the write path to the set of connected nodes. The
+fallback-on-miss approach is O(1) per lookup and requires no coordination.
+
+### Implications
+
+1. **Per-device resolution snapshots must fall through to live network maps
+   on miss.** Any new `Get*` method on `ResolvedSpecs` must include the
+   network fallback. A merged-map-only lookup is a bug.
+
+2. **Orchestrators model the two scopes as distinct step types.** In newtrun,
+   network-level steps (create-prefix-list, create-route-policy, create-service)
+   call `r.Client.*` directly with no `devices:` field. Device-level steps
+   (apply-service, remove-service) use `executeForDevices`. When adding new
+   newtrun actions, pick the pattern based on whether the operation targets
+   the spec layer or a device.
+
+3. **The spec authoring API never touches a device. The device operation API
+   never creates specs.** The boundary is the `Get*` interface on
+   `SpecProvider` — devices read definitions, they don't own them.
+
+---
+
+## 40. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -2122,7 +2187,6 @@ exceeded.
 | Abstract Node | Same code path, different initialization; the shadow enforces the same ordering constraints as a physical device |
 | Public API boundary | Public types expose caller intent; internal types expose implementation; orchestrators are consumers, not insiders |
 | Transparent transport | The transport layer is a mechanical shim; domain logic lives in the public API; new endpoints are additive with zero infrastructure changes |
-| Factory-default preservation | Provisioning merges on top of CONFIG_DB; stale keys are removed but factory defaults (MAC, platform, ports) survive |
 | YANG-derived schema validation | YANG is the authority for value constraints; fail closed on unknown tables and fields; validate every ChangeSet before any Redis write |
 | Write ordering and daemon settling | Config functions encode dependency order in their return slice; daemon settling is verified by polling, never by sleeping in the write path |
 | Unified naming convention | ALL UPPERCASE, single underscore, no redundant kind in key; `[A-Z0-9_]` only; any CONFIG_DB key can be parsed programmatically |
@@ -2132,3 +2196,4 @@ exceeded.
 | BGP peer groups | Service-named peer groups are the protocol's native sharing mechanism; shared attributes live on `BGP_PEER_GROUP_AF`, not duplicated per neighbor |
 | Verification must not pass vacuously | Zero items to verify = precondition not met = keep polling; observation tools lag behind daemon state; settle before point-in-time checks |
 | Convergence budget | Every CONFIG_DB entry costs convergence time; count entries when adding features; test timeouts must be proportional to entry count |
+| Definition is network-scoped; execution is device-scoped | Specs live at the network level with their own lifecycle; devices consume them via `Get*` with live fallback; the two lifecycles must not be coupled |

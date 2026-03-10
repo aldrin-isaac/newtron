@@ -168,14 +168,13 @@ func (n *Node) applyShadow(cs *ChangeSet) {
 		return
 	}
 	for _, c := range cs.Changes {
-		if c.Type != sonic.ChangeTypeDelete {
-			entry := sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields}
-			n.configDB.ApplyEntries([]sonic.Entry{entry})
-			n.accumulated = append(n.accumulated, entry)
+		entry := sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields}
+		if c.Type == sonic.ChangeTypeDelete {
+			n.configDB.DeleteEntry(c.Table, c.Key)
 		} else {
-			// For deletes in offline mode, just accumulate (shadow doesn't need to remove)
-			n.accumulated = append(n.accumulated, sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields})
+			n.configDB.ApplyEntries([]sonic.Entry{entry})
 		}
+		n.accumulated = append(n.accumulated, entry)
 	}
 }
 

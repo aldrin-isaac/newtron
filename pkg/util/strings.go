@@ -27,20 +27,6 @@ func CapitalizeFirst(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// SanitizeName replaces non-alphanumeric chars with hyphens for config key names.
-func SanitizeName(name string) string {
-	result := make([]byte, 0, len(name))
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' {
-			result = append(result, c)
-		} else {
-			result = append(result, '-')
-		}
-	}
-	return string(result)
-}
-
 // AddToCSV adds a value to a comma-separated list if not already present.
 // Returns the value itself if the list is empty.
 func AddToCSV(list, value string) string {

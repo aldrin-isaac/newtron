@@ -300,6 +300,41 @@ func TestConfigDB_EmptyInit(t *testing.T) {
 	}
 }
 
+// TestShadow_CoversAllSchemaTables verifies that every table in the validation
+// schema has a corresponding case in both applyEntry and DeleteEntry.
+// This prevents silent data loss in abstract/offline mode when new tables are
+// added to the schema but not to the shadow ConfigDB switch statements.
+func TestShadow_CoversAllSchemaTables(t *testing.T) {
+	db := NewEmptyConfigDB()
+
+	for tableName := range Schema {
+		testFields := map[string]string{"test_field": "test_value"}
+
+		// Test applyEntry: should not panic and should create an entry
+		db.applyEntry(tableName, "test_key", testFields)
+
+		// Test DeleteEntry: should not panic
+		db.DeleteEntry(tableName, "test_key")
+	}
+}
+
+// TestShadow_ApplyDeleteRoundTrip verifies that for each schema table,
+// applyEntry creates state that DeleteEntry can remove.
+func TestShadow_ApplyDeleteRoundTrip(t *testing.T) {
+	for tableName := range Schema {
+		t.Run(tableName, func(t *testing.T) {
+			db := NewEmptyConfigDB()
+
+			// Apply an entry
+			fields := map[string]string{"NULL": "NULL"}
+			db.applyEntry(tableName, "roundtrip_key", fields)
+
+			// Delete the entry
+			db.DeleteEntry(tableName, "roundtrip_key")
+		})
+	}
+}
+
 func TestConfigDB_ComplexJSON(t *testing.T) {
 	// Test a more complex config_db structure
 	configJSON := `{

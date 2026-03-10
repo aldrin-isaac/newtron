@@ -52,6 +52,19 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 		IngressFilter: req.IngressFilter,
 		EgressFilter:  req.EgressFilter,
 	}
+	if req.Routing != nil {
+		svc.Routing = &spec.RoutingSpec{
+			Protocol:         req.Routing.Protocol,
+			PeerAS:           req.Routing.PeerAS,
+			ImportPolicy:     req.Routing.ImportPolicy,
+			ExportPolicy:     req.Routing.ExportPolicy,
+			ImportCommunity:  req.Routing.ImportCommunity,
+			ExportCommunity:  req.Routing.ExportCommunity,
+			ImportPrefixList: req.Routing.ImportPrefixList,
+			ExportPrefixList: req.Routing.ExportPrefixList,
+			Redistribute:     req.Routing.Redistribute,
+		}
+	}
 	return net.internal.SaveService(req.Name, svc)
 }
 
@@ -460,6 +473,217 @@ func (net *Network) ListPrefixLists() []string {
 	return names
 }
 
+// ShowPrefixList returns the prefix list for a given name.
+func (net *Network) ShowPrefixList(name string) (*PrefixListDetail, error) {
+	prefixes, err := net.internal.GetPrefixList(name)
+	if err != nil {
+		return nil, err
+	}
+	return &PrefixListDetail{Name: name, Prefixes: prefixes}, nil
+}
+
+// CreatePrefixList creates a new prefix list.
+func (net *Network) CreatePrefixList(req CreatePrefixListRequest, opts ExecOpts) error {
+	if _, err := net.internal.GetPrefixList(req.Name); err == nil {
+		return fmt.Errorf("prefix list '%s' already exists", req.Name)
+	}
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	prefixes := req.Prefixes
+	if prefixes == nil {
+		prefixes = []string{}
+	}
+	return net.internal.SavePrefixList(req.Name, prefixes)
+}
+
+// DeletePrefixList removes a prefix list.
+func (net *Network) DeletePrefixList(name string, opts ExecOpts) error {
+	if _, err := net.internal.GetPrefixList(name); err != nil {
+		return err
+	}
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	return net.internal.DeletePrefixList(name)
+}
+
+// AddPrefixListEntry adds a prefix to a prefix list.
+func (net *Network) AddPrefixListEntry(req AddPrefixListEntryRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.PrefixList)); err != nil {
+			return err
+		}
+	}
+	prefixes, err := net.internal.GetPrefixList(req.PrefixList)
+	if err != nil {
+		return err
+	}
+	for _, p := range prefixes {
+		if p == req.Prefix {
+			return fmt.Errorf("prefix '%s' already exists in prefix list '%s'", req.Prefix, req.PrefixList)
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	prefixes = append(prefixes, req.Prefix)
+	return net.internal.SavePrefixList(req.PrefixList, prefixes)
+}
+
+// RemovePrefixListEntry removes a prefix from a prefix list.
+func (net *Network) RemovePrefixListEntry(prefixList, prefix string, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(prefixList)); err != nil {
+			return err
+		}
+	}
+	prefixes, err := net.internal.GetPrefixList(prefixList)
+	if err != nil {
+		return err
+	}
+	found := false
+	newPrefixes := make([]string, 0, len(prefixes))
+	for _, p := range prefixes {
+		if p == prefix {
+			found = true
+			continue
+		}
+		newPrefixes = append(newPrefixes, p)
+	}
+	if !found {
+		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
+	}
+	if !opts.Execute {
+		return nil
+	}
+	return net.internal.SavePrefixList(prefixList, newPrefixes)
+}
+
+// ShowRoutePolicy returns the route policy for a given name.
+func (net *Network) ShowRoutePolicy(name string) (*RoutePolicyDetail, error) {
+	rp, err := net.internal.GetRoutePolicy(name)
+	if err != nil {
+		return nil, err
+	}
+	return convertRoutePolicyDetail(name, rp), nil
+}
+
+// CreateRoutePolicy creates a new route policy.
+func (net *Network) CreateRoutePolicy(req CreateRoutePolicyRequest, opts ExecOpts) error {
+	if _, err := net.internal.GetRoutePolicy(req.Name); err == nil {
+		return fmt.Errorf("route policy '%s' already exists", req.Name)
+	}
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	rp := &spec.RoutePolicy{
+		Description: req.Description,
+		Rules:       []*spec.RoutePolicyRule{},
+	}
+	return net.internal.SaveRoutePolicy(req.Name, rp)
+}
+
+// DeleteRoutePolicy removes a route policy.
+func (net *Network) DeleteRoutePolicy(name string, opts ExecOpts) error {
+	if _, err := net.internal.GetRoutePolicy(name); err != nil {
+		return err
+	}
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
+			return err
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	return net.internal.DeleteRoutePolicy(name)
+}
+
+// AddRoutePolicyRule adds a rule to a route policy.
+func (net *Network) AddRoutePolicyRule(req AddRoutePolicyRuleRequest, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(req.Policy)); err != nil {
+			return err
+		}
+	}
+	rp, err := net.internal.GetRoutePolicy(req.Policy)
+	if err != nil {
+		return err
+	}
+	for _, r := range rp.Rules {
+		if r.Sequence == req.Sequence {
+			return fmt.Errorf("rule with sequence %d already exists in route policy '%s'", req.Sequence, req.Policy)
+		}
+	}
+	if !opts.Execute {
+		return nil
+	}
+	rule := &spec.RoutePolicyRule{
+		Sequence:   req.Sequence,
+		Action:     req.Action,
+		PrefixList: req.PrefixList,
+		Community:  req.Community,
+	}
+	if req.Set != nil {
+		rule.Set = &spec.RoutePolicySet{
+			LocalPref: req.Set.LocalPref,
+			Community: req.Set.Community,
+			MED:       req.Set.MED,
+		}
+	}
+	rp.Rules = append(rp.Rules, rule)
+	sort.Slice(rp.Rules, func(i, j int) bool {
+		return rp.Rules[i].Sequence < rp.Rules[j].Sequence
+	})
+	return net.internal.SaveRoutePolicy(req.Policy, rp)
+}
+
+// RemoveRoutePolicyRule removes a rule from a route policy by sequence number.
+func (net *Network) RemoveRoutePolicyRule(policy string, seq int, opts ExecOpts) error {
+	if opts.Execute {
+		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(policy)); err != nil {
+			return err
+		}
+	}
+	rp, err := net.internal.GetRoutePolicy(policy)
+	if err != nil {
+		return err
+	}
+	found := false
+	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
+	for _, r := range rp.Rules {
+		if r.Sequence == seq {
+			found = true
+			continue
+		}
+		newRules = append(newRules, r)
+	}
+	if !found {
+		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", seq, policy)
+	}
+	if !opts.Execute {
+		return nil
+	}
+	rp.Rules = newRules
+	return net.internal.SaveRoutePolicy(policy, rp)
+}
+
 // ============================================================================
 // Conversion helpers
 // ============================================================================
@@ -536,6 +760,27 @@ func convertFilterDetail(name string, f *spec.FilterSpec) *FilterDetail {
 			CoS:           r.CoS,
 			Log:           r.Log,
 		})
+	}
+	return detail
+}
+
+func convertRoutePolicyDetail(name string, rp *spec.RoutePolicy) *RoutePolicyDetail {
+	detail := &RoutePolicyDetail{Name: name, Description: rp.Description}
+	for _, r := range rp.Rules {
+		entry := RoutePolicyRuleEntry{
+			Sequence:   r.Sequence,
+			Action:     r.Action,
+			PrefixList: r.PrefixList,
+			Community:  r.Community,
+		}
+		if r.Set != nil {
+			entry.Set = &RoutePolicySetSpec{
+				LocalPref: r.Set.LocalPref,
+				Community: r.Set.Community,
+				MED:       r.Set.MED,
+			}
+		}
+		detail.Rules = append(detail.Rules, entry)
 	}
 	return detail
 }

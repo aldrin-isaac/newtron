@@ -220,9 +220,10 @@ func TestServiceConfig_ACL_WithCoS(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// ACL name is content-hashed from filter name + direction + hash (Principle 35)
-	// TEST_FILTER rules produce hash DB985A64
-	expectedACL := "TEST_FILTER_IN_DB985A64"
+	// ACL name is content-hashed from filter spec (Principle 35).
+	// Compute dynamically to avoid fragile hardcoded hash values.
+	hash := computeFilterHash(sp.filterSpecs["TEST_FILTER"])
+	expectedACL := "TEST_FILTER_IN_" + hash
 
 	// Verify ACL table exists
 	assertEntry(t, entries, "ACL_TABLE", expectedACL, "stage", "ingress")
@@ -973,6 +974,363 @@ func TestRefreshService_NoStaleCleanupWhenHashUnchanged(t *testing.T) {
 		if !adds[key] {
 			t.Errorf("stale delete without matching add: %s — spec didn't change, no cleanup should occur", key)
 		}
+	}
+}
+
+func TestRefreshService_PreservesTopologyParams(t *testing.T) {
+	// Verify that route_reflector_client and next_hop_self from topology params
+	// survive the remove+reapply cycle in RefreshService (Principle 8: binding self-sufficiency).
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"OVERLAY": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   "65002",
+				},
+			},
+		},
+		routePolicies: map[string]*spec.RoutePolicy{},
+		prefixLists:   map[string][]string{},
+	}
+
+	n := &Node{
+		SpecProvider: sp,
+		name:         "test-dev",
+		offline:      true,
+		resolved: &spec.ResolvedProfile{
+			UnderlayASN: 64512,
+			RouterID:    "10.255.0.1",
+			LoopbackIP:  "10.255.0.1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB:   sonic.NewEmptyConfigDB(),
+	}
+
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	iface, _ := n.GetInterface("Ethernet0")
+
+	// Apply with topology params
+	ctx := t.Context()
+	_, err := iface.ApplyService(ctx, "OVERLAY", ApplyServiceOpts{
+		IPAddress: "10.1.0.0/31",
+		PeerAS:    65002,
+		Params: map[string]string{
+			"route_reflector_client": "true",
+			"next_hop_self":          "true",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyService failed: %v", err)
+	}
+
+	// Verify binding has topology params stored
+	b := iface.binding()
+	if b.RouteReflectorClient != "true" {
+		t.Errorf("binding route_reflector_client = %q, want %q", b.RouteReflectorClient, "true")
+	}
+	if b.NextHopSelf != "true" {
+		t.Errorf("binding next_hop_self = %q, want %q", b.NextHopSelf, "true")
+	}
+
+	// RefreshService should preserve these params
+	refreshCS, err := iface.RefreshService(ctx)
+	if err != nil {
+		t.Fatalf("RefreshService failed: %v", err)
+	}
+
+	// Check the reapply phase wrote BGP_NEIGHBOR_AF with rrclient and nhself
+	var foundRRC, foundNHS bool
+	for _, c := range refreshCS.Changes {
+		if c.Table == "BGP_NEIGHBOR_AF" && c.Type == sonic.ChangeTypeAdd {
+			if c.Fields["rrclient"] == "true" {
+				foundRRC = true
+			}
+			if c.Fields["nhself"] == "true" {
+				foundNHS = true
+			}
+		}
+	}
+	if !foundRRC {
+		t.Error("RefreshService lost route_reflector_client — BGP_NEIGHBOR_AF should have rrclient=true")
+	}
+	if !foundNHS {
+		t.Error("RefreshService lost next_hop_self — BGP_NEIGHBOR_AF should have nhself=true")
+	}
+
+	// Verify new binding still has params
+	b = iface.binding()
+	if b.RouteReflectorClient != "true" {
+		t.Errorf("post-refresh binding route_reflector_client = %q, want %q", b.RouteReflectorClient, "true")
+	}
+	if b.NextHopSelf != "true" {
+		t.Errorf("post-refresh binding next_hop_self = %q, want %q", b.NextHopSelf, "true")
+	}
+}
+
+func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
+	// Blue-green migration: two interfaces share a service with route policies.
+	// Spec changes. Refresh interface 1 → old-hash objects deleted, new-hash created,
+	// peer group AF updated. Refresh interface 2 → no stale cleanup needed (already done).
+	// This tests the multi-interface coexistence path from DESIGN_PRINCIPLES §35.
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"TRANSIT": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol:     spec.RoutingProtocolBGP,
+					PeerAS:       "65002",
+					ImportPolicy: "ALLOW_ALL",
+				},
+			},
+		},
+		routePolicies: map[string]*spec.RoutePolicy{
+			"ALLOW_ALL": {
+				Rules: []*spec.RoutePolicyRule{
+					{Sequence: 10, Action: "permit"},
+				},
+			},
+		},
+		prefixLists: map[string][]string{},
+	}
+
+	n := &Node{
+		SpecProvider: sp,
+		name:         "test-dev",
+		offline:      true,
+		resolved: &spec.ResolvedProfile{
+			UnderlayASN: 64512,
+			RouterID:    "10.255.0.1",
+			LoopbackIP:  "10.255.0.1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB:   sonic.NewEmptyConfigDB(),
+	}
+
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up"})
+
+	ctx := t.Context()
+
+	// Step 1: Apply service on both interfaces
+	iface0, _ := n.GetInterface("Ethernet0")
+	_, err := iface0.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.1.0.0/31"})
+	if err != nil {
+		t.Fatalf("ApplyService on Ethernet0 failed: %v", err)
+	}
+
+	iface4, _ := n.GetInterface("Ethernet4")
+	_, err = iface4.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.1.0.2/31"})
+	if err != nil {
+		t.Fatalf("ApplyService on Ethernet4 failed: %v", err)
+	}
+
+	// Capture the original route map name from the binding
+	b0 := n.configDB.NewtronServiceBinding["Ethernet0"]
+	originalRM := b0.RouteMapIn
+	if originalRM == "" {
+		t.Fatal("Ethernet0 binding has no route_map_in after apply")
+	}
+
+	// Verify both interfaces share the same route map via peer group
+	b4 := n.configDB.NewtronServiceBinding["Ethernet4"]
+	if b4.RouteMapIn != originalRM {
+		t.Fatalf("expected both interfaces to share route map %s, but Ethernet4 has %s", originalRM, b4.RouteMapIn)
+	}
+
+	// Step 2: Change the route policy spec (different content → different hash)
+	sp.routePolicies["ALLOW_ALL"] = &spec.RoutePolicy{
+		Rules: []*spec.RoutePolicyRule{
+			{Sequence: 10, Action: "permit", Set: &spec.RoutePolicySet{LocalPref: 200}},
+		},
+	}
+
+	// Step 3: Refresh Ethernet0 — should migrate to new-hash and clean up old
+	refreshCS0, err := iface0.RefreshService(ctx)
+	if err != nil {
+		t.Fatalf("RefreshService on Ethernet0 failed: %v", err)
+	}
+
+	// Find the new route map name
+	var newRM string
+	for _, c := range refreshCS0.Changes {
+		if c.Table == "ROUTE_MAP" && c.Type == sonic.ChangeTypeAdd {
+			newRM = strings.SplitN(c.Key, "|", 2)[0]
+			break
+		}
+	}
+	if newRM == "" {
+		t.Fatal("RefreshService did not create new ROUTE_MAP entries")
+	}
+	if newRM == originalRM {
+		t.Fatal("route map hash should change after spec change")
+	}
+
+	// Verify old route map was deleted in the changeset
+	var oldRMDeleted bool
+	for _, c := range refreshCS0.Changes {
+		if c.Table == "ROUTE_MAP" && c.Type == sonic.ChangeTypeDelete {
+			if strings.HasPrefix(c.Key, originalRM) {
+				oldRMDeleted = true
+				break
+			}
+		}
+	}
+	if !oldRMDeleted {
+		t.Errorf("stale route map %s was not cleaned up after first interface refresh", originalRM)
+	}
+
+	// Verify shadow ConfigDB no longer has old route map entries
+	for key := range n.configDB.RouteMap {
+		if strings.HasPrefix(key, originalRM) {
+			t.Errorf("shadow ConfigDB still contains old route map entry: %s", key)
+		}
+	}
+
+	// Step 4: Refresh Ethernet4 — should produce no stale cleanup (already done by Ethernet0)
+	refreshCS4, err := iface4.RefreshService(ctx)
+	if err != nil {
+		t.Fatalf("RefreshService on Ethernet4 failed: %v", err)
+	}
+
+	// Count policy deletes that are NOT part of the remove+add cycle
+	adds := make(map[string]bool)
+	deletes := make(map[string]bool)
+	for _, c := range refreshCS4.Changes {
+		switch c.Table {
+		case "ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET":
+			key := c.Table + "|" + c.Key
+			if c.Type == sonic.ChangeTypeAdd {
+				adds[key] = true
+			} else if c.Type == sonic.ChangeTypeDelete {
+				deletes[key] = true
+			}
+		}
+	}
+
+	for key := range deletes {
+		if !adds[key] {
+			t.Errorf("Ethernet4 refresh produced orphan delete %s — stale cleanup should already be done", key)
+		}
+	}
+
+	// Verify both interfaces now reference the new route map
+	b0After := n.configDB.NewtronServiceBinding["Ethernet0"]
+	b4After := n.configDB.NewtronServiceBinding["Ethernet4"]
+	if b0After.RouteMapIn != newRM {
+		t.Errorf("Ethernet0 binding should reference new route map %s, got %s", newRM, b0After.RouteMapIn)
+	}
+	if b4After.RouteMapIn != newRM {
+		t.Errorf("Ethernet4 binding should reference new route map %s, got %s", newRM, b4After.RouteMapIn)
+	}
+}
+
+func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
+	// Principle §36: Peer groups are created on first ApplyService for a service
+	// with BGP routing, and deleted when the last interface removes that service.
+	sp := &testSpecProvider{
+		services: map[string]*spec.ServiceSpec{
+			"TRANSIT": {
+				ServiceType: spec.ServiceTypeRouted,
+				Routing: &spec.RoutingSpec{
+					Protocol: spec.RoutingProtocolBGP,
+					PeerAS:   "65002",
+				},
+			},
+		},
+		prefixLists:   map[string][]string{},
+		routePolicies: map[string]*spec.RoutePolicy{},
+	}
+
+	n := &Node{
+		SpecProvider: sp,
+		name:         "test-dev",
+		offline:      true,
+		resolved: &spec.ResolvedProfile{
+			UnderlayASN: 64512,
+			RouterID:    "10.255.0.1",
+			LoopbackIP:  "10.255.0.1",
+		},
+		interfaces: make(map[string]*Interface),
+		configDB:   sonic.NewEmptyConfigDB(),
+	}
+
+	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up"})
+
+	ctx := t.Context()
+
+	// Step 1: Apply service on first interface → peer group created
+	iface0, _ := n.GetInterface("Ethernet0")
+	cs0, err := iface0.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.1.0.0/31"})
+	if err != nil {
+		t.Fatalf("ApplyService on Ethernet0 failed: %v", err)
+	}
+
+	pgKey := BGPPeerGroupKey("default", "TRANSIT")
+	hasPGAdd := false
+	for _, c := range cs0.Changes {
+		if c.Table == "BGP_PEER_GROUP" && c.Key == pgKey && c.Type != sonic.ChangeTypeDelete {
+			hasPGAdd = true
+		}
+	}
+	if !hasPGAdd {
+		t.Error("First ApplyService should create BGP_PEER_GROUP")
+	}
+	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
+		t.Error("BGP_PEER_GROUP should exist in shadow ConfigDB after first apply")
+	}
+
+	// Step 2: Apply service on second interface → peer group reused (not recreated)
+	iface4, _ := n.GetInterface("Ethernet4")
+	cs4, err := iface4.ApplyService(ctx, "TRANSIT", ApplyServiceOpts{IPAddress: "10.1.0.2/31"})
+	if err != nil {
+		t.Fatalf("ApplyService on Ethernet4 failed: %v", err)
+	}
+
+	pgAdds := 0
+	for _, c := range cs4.Changes {
+		if c.Table == "BGP_PEER_GROUP" && c.Key == pgKey && c.Type != sonic.ChangeTypeDelete {
+			pgAdds++
+		}
+	}
+	if pgAdds != 0 {
+		t.Errorf("Second ApplyService should NOT recreate BGP_PEER_GROUP, got %d adds", pgAdds)
+	}
+
+	// Step 3: Remove service from first interface → peer group persists
+	cs0r, err := iface0.RemoveService(ctx)
+	if err != nil {
+		t.Fatalf("RemoveService on Ethernet0 failed: %v", err)
+	}
+
+	pgDeletes := 0
+	for _, c := range cs0r.Changes {
+		if c.Table == "BGP_PEER_GROUP" && c.Key == pgKey && c.Type == sonic.ChangeTypeDelete {
+			pgDeletes++
+		}
+	}
+	if pgDeletes != 0 {
+		t.Error("RemoveService on first interface should NOT delete peer group (second still uses it)")
+	}
+	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
+		t.Error("BGP_PEER_GROUP should still exist after first remove")
+	}
+
+	// Step 4: Remove service from last interface → peer group deleted
+	cs4r, err := iface4.RemoveService(ctx)
+	if err != nil {
+		t.Fatalf("RemoveService on Ethernet4 failed: %v", err)
+	}
+
+	hasPGDelete := false
+	for _, c := range cs4r.Changes {
+		if c.Table == "BGP_PEER_GROUP" && c.Key == pgKey && c.Type == sonic.ChangeTypeDelete {
+			hasPGDelete = true
+		}
+	}
+	if !hasPGDelete {
+		t.Error("RemoveService on last interface should delete BGP_PEER_GROUP")
 	}
 }
 

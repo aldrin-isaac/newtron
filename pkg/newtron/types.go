@@ -549,15 +549,29 @@ type PlatformDetail struct {
 
 // CreateServiceRequest is the request for creating a service definition.
 type CreateServiceRequest struct {
-	Name          string `json:"name"`
-	Type          string `json:"type"`
-	IPVPN         string `json:"ipvpn,omitempty"`
-	MACVPN        string `json:"macvpn,omitempty"`
-	VRFType       string `json:"vrf_type,omitempty"`
-	QoSPolicy     string `json:"qos_policy,omitempty"`
-	IngressFilter string `json:"ingress_filter,omitempty"`
-	EgressFilter  string `json:"egress_filter,omitempty"`
-	Description   string `json:"description,omitempty"`
+	Name          string                `json:"name"`
+	Type          string                `json:"type"`
+	IPVPN         string                `json:"ipvpn,omitempty"`
+	MACVPN        string                `json:"macvpn,omitempty"`
+	VRFType       string                `json:"vrf_type,omitempty"`
+	QoSPolicy     string                `json:"qos_policy,omitempty"`
+	IngressFilter string                `json:"ingress_filter,omitempty"`
+	EgressFilter  string                `json:"egress_filter,omitempty"`
+	Description   string                `json:"description,omitempty"`
+	Routing       *CreateServiceRouting `json:"routing,omitempty"`
+}
+
+// CreateServiceRouting defines routing parameters for service creation.
+type CreateServiceRouting struct {
+	Protocol         string `json:"protocol"`
+	PeerAS           string `json:"peer_as,omitempty"`
+	ImportPolicy     string `json:"import_policy,omitempty"`
+	ExportPolicy     string `json:"export_policy,omitempty"`
+	ImportCommunity  string `json:"import_community,omitempty"`
+	ExportCommunity  string `json:"export_community,omitempty"`
+	ImportPrefixList string `json:"import_prefix_list,omitempty"`
+	ExportPrefixList string `json:"export_prefix_list,omitempty"`
+	Redistribute     *bool  `json:"redistribute,omitempty"`
 }
 
 // CreateIPVPNRequest is the request for creating an IP-VPN definition.
@@ -620,6 +634,63 @@ type AddFilterRuleRequest struct {
 	DSCP          string `json:"dscp,omitempty"`
 	CoS           string `json:"cos,omitempty"`
 	Log           bool   `json:"log,omitempty"`
+}
+
+// CreatePrefixListRequest is the request for creating a prefix list.
+type CreatePrefixListRequest struct {
+	Name     string   `json:"name"`
+	Prefixes []string `json:"prefixes,omitempty"`
+}
+
+// AddPrefixListEntryRequest is the request for adding an entry to a prefix list.
+type AddPrefixListEntryRequest struct {
+	PrefixList string `json:"prefix_list"`
+	Prefix     string `json:"prefix"`
+}
+
+// PrefixListDetail is the detail response for a prefix list.
+type PrefixListDetail struct {
+	Name     string   `json:"name"`
+	Prefixes []string `json:"prefixes"`
+}
+
+// CreateRoutePolicyRequest is the request for creating a route policy.
+type CreateRoutePolicyRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// AddRoutePolicyRuleRequest is the request for adding a rule to a route policy.
+type AddRoutePolicyRuleRequest struct {
+	Policy     string              `json:"policy"`
+	Sequence   int                 `json:"seq"`
+	Action     string              `json:"action"`
+	PrefixList string              `json:"prefix_list,omitempty"`
+	Community  string              `json:"community,omitempty"`
+	Set        *RoutePolicySetSpec `json:"set,omitempty"`
+}
+
+// RoutePolicySetSpec defines set-actions in a route policy rule (API-level type).
+type RoutePolicySetSpec struct {
+	LocalPref int    `json:"local_pref,omitempty"`
+	Community string `json:"community,omitempty"`
+	MED       int    `json:"med,omitempty"`
+}
+
+// RoutePolicyDetail is the detail response for a route policy.
+type RoutePolicyDetail struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Rules       []RoutePolicyRuleEntry `json:"rules"`
+}
+
+// RoutePolicyRuleEntry is a single rule in a RoutePolicyDetail.
+type RoutePolicyRuleEntry struct {
+	Sequence   int                 `json:"seq"`
+	Action     string              `json:"action"`
+	PrefixList string              `json:"prefix_list,omitempty"`
+	Community  string              `json:"community,omitempty"`
+	Set        *RoutePolicySetSpec `json:"set,omitempty"`
 }
 
 // ============================================================================

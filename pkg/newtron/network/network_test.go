@@ -218,6 +218,150 @@ func TestResolvedSpecs_FindMACVPNByVNI(t *testing.T) {
 	}
 }
 
+func TestResolvedSpecs_FindMACVPNByVNI_DynamicFallback(t *testing.T) {
+	// §39: MACVPNs added after ResolvedSpecs snapshot must be visible
+	// through the live fallback in FindMACVPNByVNI.
+	n := &Network{
+		spec: &spec.NetworkSpecFile{
+			Zones: map[string]*spec.ZoneSpec{
+				"amer": {},
+			},
+			OverridableSpecs: spec.OverridableSpecs{
+				MACVPNs: map[string]*spec.MACVPNSpec{
+					"EXISTING": {VNI: 1000, VlanID: 100},
+				},
+			},
+		},
+		platforms: &spec.PlatformSpecFile{
+			Platforms: map[string]*spec.PlatformSpec{},
+		},
+	}
+
+	profile := &spec.DeviceProfile{Zone: "amer"}
+	rs := n.buildResolvedSpecs(profile)
+
+	// Pre-existing MACVPN should be found
+	name, def := rs.FindMACVPNByVNI(1000)
+	if name != "EXISTING" || def == nil {
+		t.Fatalf("FindMACVPNByVNI(1000) = %q, want EXISTING", name)
+	}
+
+	// Dynamically add a MACVPN after snapshot build
+	n.spec.MACVPNs["DYNAMIC"] = &spec.MACVPNSpec{VNI: 2000, VlanID: 200}
+
+	// Dynamic MACVPN should be visible via live fallback
+	name, def = rs.FindMACVPNByVNI(2000)
+	if name != "DYNAMIC" || def == nil {
+		t.Errorf("FindMACVPNByVNI(2000) should find DYNAMIC via fallback, got %q", name)
+	}
+
+	// Non-existent VNI should still return empty
+	name, def = rs.FindMACVPNByVNI(9999)
+	if name != "" || def != nil {
+		t.Errorf("FindMACVPNByVNI(9999) should return empty, got %q", name)
+	}
+}
+
+func TestResolvedSpecs_LiveFallback_DynamicService(t *testing.T) {
+	// §39: Specs added via SaveService after ResolvedSpecs was built
+	// must be visible through the live fallback to network.Get*.
+	n := &Network{
+		spec: &spec.NetworkSpecFile{
+			Zones: map[string]*spec.ZoneSpec{
+				"amer": {},
+			},
+			OverridableSpecs: spec.OverridableSpecs{
+				Services: map[string]*spec.ServiceSpec{
+					"EXISTING": {Description: "pre-existing service"},
+				},
+			},
+		},
+		platforms: &spec.PlatformSpecFile{
+			Platforms: map[string]*spec.PlatformSpec{},
+		},
+	}
+
+	profile := &spec.DeviceProfile{Zone: "amer"}
+	rs := n.buildResolvedSpecs(profile)
+
+	// Pre-existing service should be in the merged snapshot
+	if _, err := rs.GetService("EXISTING"); err != nil {
+		t.Fatalf("pre-existing service should be visible: %v", err)
+	}
+
+	// Dynamically add a service (simulates SaveService writing to n.spec.Services)
+	n.spec.Services["NEW_DYNAMIC"] = &spec.ServiceSpec{
+		Description: "created after snapshot",
+		ServiceType: "routed",
+	}
+
+	// The dynamically added service should be visible via live fallback
+	svc, err := rs.GetService("NEW_DYNAMIC")
+	if err != nil {
+		t.Fatalf("dynamically added service should be visible via fallback: %v", err)
+	}
+	if svc.Description != "created after snapshot" {
+		t.Errorf("got description %q, want %q", svc.Description, "created after snapshot")
+	}
+
+	// Non-existent service should still fail
+	if _, err := rs.GetService("NONEXISTENT"); err == nil {
+		t.Error("non-existent service should return error")
+	}
+}
+
+func TestResolvedSpecs_LiveFallback_ProfileOverrideStillWins(t *testing.T) {
+	// §39: Profile-level override must still win over network-level,
+	// even when the network level has been modified after snapshot build.
+	n := &Network{
+		spec: &spec.NetworkSpecFile{
+			Zones: map[string]*spec.ZoneSpec{
+				"amer": {},
+			},
+			OverridableSpecs: spec.OverridableSpecs{
+				Services: map[string]*spec.ServiceSpec{
+					"SVC": {Description: "network-level"},
+				},
+			},
+		},
+		platforms: &spec.PlatformSpecFile{
+			Platforms: map[string]*spec.PlatformSpec{},
+		},
+	}
+
+	profile := &spec.DeviceProfile{
+		Zone: "amer",
+		OverridableSpecs: spec.OverridableSpecs{
+			Services: map[string]*spec.ServiceSpec{
+				"SVC": {Description: "profile-level"},
+			},
+		},
+	}
+
+	rs := n.buildResolvedSpecs(profile)
+
+	// Profile override should win
+	svc, err := rs.GetService("SVC")
+	if err != nil {
+		t.Fatalf("GetService failed: %v", err)
+	}
+	if svc.Description != "profile-level" {
+		t.Errorf("profile should win, got %q", svc.Description)
+	}
+
+	// Now modify the network-level spec
+	n.spec.Services["SVC"] = &spec.ServiceSpec{Description: "network-modified"}
+
+	// Profile override should STILL win (snapshot has it)
+	svc, err = rs.GetService("SVC")
+	if err != nil {
+		t.Fatalf("GetService after network modify failed: %v", err)
+	}
+	if svc.Description != "profile-level" {
+		t.Errorf("profile should still win after network modify, got %q", svc.Description)
+	}
+}
+
 func TestResolvedSpecs_GetPlatformDelegatesToNetwork(t *testing.T) {
 	n := &Network{
 		spec: &spec.NetworkSpecFile{

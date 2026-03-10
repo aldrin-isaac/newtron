@@ -315,6 +315,107 @@ func (n *Network) DeleteFilter(name string) error {
 	return n.persistSpec()
 }
 
+// SavePrefixList saves a prefix list to the network spec.
+func (n *Network) SavePrefixList(name string, prefixes []string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
+
+	if n.spec.PrefixLists == nil {
+		n.spec.PrefixLists = make(map[string][]string)
+	}
+	n.spec.PrefixLists[name] = prefixes
+	return n.persistSpec()
+}
+
+// DeletePrefixList deletes a prefix list from the network spec.
+func (n *Network) DeletePrefixList(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
+
+	// Check for dependent filters
+	for filterName, f := range n.spec.Filters {
+		for _, r := range f.Rules {
+			if r.SrcPrefixList == name || r.DstPrefixList == name {
+				return fmt.Errorf("cannot delete prefix list '%s': referenced by filter '%s'", name, filterName)
+			}
+		}
+	}
+	// Check for dependent route policies
+	for policyName, rp := range n.spec.RoutePolicies {
+		for _, r := range rp.Rules {
+			if r.PrefixList == name {
+				return fmt.Errorf("cannot delete prefix list '%s': referenced by route policy '%s'", name, policyName)
+			}
+		}
+	}
+
+	delete(n.spec.PrefixLists, name)
+	return n.persistSpec()
+}
+
+// SaveRoutePolicy saves a route policy to the network spec.
+func (n *Network) SaveRoutePolicy(name string, def *spec.RoutePolicy) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
+
+	if n.spec.RoutePolicies == nil {
+		n.spec.RoutePolicies = make(map[string]*spec.RoutePolicy)
+	}
+	spec.NormalizeRoutePolicyRefs(def)
+	n.spec.RoutePolicies[name] = def
+	return n.persistSpec()
+}
+
+// DeleteRoutePolicy deletes a route policy from the network spec.
+func (n *Network) DeleteRoutePolicy(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	name = util.NormalizeName(name)
+
+	// Check for dependent services
+	for svcName, svc := range n.spec.Services {
+		if svc.Routing != nil {
+			if svc.Routing.ImportPolicy == name || svc.Routing.ExportPolicy == name {
+				return fmt.Errorf("cannot delete route policy '%s': referenced by service '%s'", name, svcName)
+			}
+		}
+	}
+
+	delete(n.spec.RoutePolicies, name)
+	return n.persistSpec()
+}
+
+// ListPrefixLists returns all prefix list names.
+func (n *Network) ListPrefixLists() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	names := make([]string, 0, len(n.spec.PrefixLists))
+	for name := range n.spec.PrefixLists {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ListRoutePolicies returns all route policy names.
+func (n *Network) ListRoutePolicies() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	names := make([]string, 0, len(n.spec.RoutePolicies))
+	for name := range n.spec.RoutePolicies {
+		names = append(names, name)
+	}
+	return names
+}
+
 // SaveService creates or updates a service definition in network.json.
 func (n *Network) SaveService(name string, def *spec.ServiceSpec) error {
 	n.mu.Lock()

@@ -163,8 +163,9 @@ func bindAclConfig(aclName, ports, stage string) sonic.Entry {
 	}}
 }
 
-// unbindAclConfig returns the ACL_TABLE entry for updating the ports binding list.
-func unbindAclConfig(aclName, ports string) sonic.Entry {
+// updateAclPorts returns the ACL_TABLE entry for updating the ports binding list.
+// Used in both bind (adding interface) and unbind (removing interface) paths.
+func updateAclPorts(aclName, ports string) sonic.Entry {
 	return sonic.Entry{Table: "ACL_TABLE", Key: aclName, Fields: map[string]string{
 		"ports": ports,
 	}}

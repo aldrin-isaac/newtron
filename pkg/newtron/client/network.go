@@ -196,6 +196,65 @@ func (c *Client) ListPrefixLists() ([]string, error) {
 	return result, nil
 }
 
+// ShowPrefixList returns the detail for a prefix list.
+func (c *Client) ShowPrefixList(name string) (*newtron.PrefixListDetail, error) {
+	var result newtron.PrefixListDetail
+	if err := c.doGet(c.networkPath()+"/prefix-list/"+url.PathEscape(name), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CreatePrefixList creates a new prefix list.
+func (c *Client) CreatePrefixList(req newtron.CreatePrefixListRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/prefix-list"+execQuery(opts), req, nil)
+}
+
+// DeletePrefixList deletes a prefix list.
+func (c *Client) DeletePrefixList(name string, opts newtron.ExecOpts) error {
+	return c.doDelete(c.networkPath()+"/prefix-list/"+url.PathEscape(name)+execQuery(opts), nil)
+}
+
+// AddPrefixListEntry adds an entry to a prefix list.
+func (c *Client) AddPrefixListEntry(req newtron.AddPrefixListEntryRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/prefix-list/"+url.PathEscape(req.PrefixList)+"/entry"+execQuery(opts), req, nil)
+}
+
+// RemovePrefixListEntry removes an entry from a prefix list.
+func (c *Client) RemovePrefixListEntry(prefixList, prefix string, opts newtron.ExecOpts) error {
+	return c.doDelete(c.networkPath()+"/prefix-list/"+url.PathEscape(prefixList)+"/entry/"+prefix+execQuery(opts), nil)
+}
+
+// ShowRoutePolicy returns the detail for a route policy.
+func (c *Client) ShowRoutePolicy(name string) (*newtron.RoutePolicyDetail, error) {
+	var result newtron.RoutePolicyDetail
+	if err := c.doGet(c.networkPath()+"/route-policy/"+url.PathEscape(name), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CreateRoutePolicy creates a new route policy.
+func (c *Client) CreateRoutePolicy(req newtron.CreateRoutePolicyRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/route-policy"+execQuery(opts), req, nil)
+}
+
+// DeleteRoutePolicy deletes a route policy.
+func (c *Client) DeleteRoutePolicy(name string, opts newtron.ExecOpts) error {
+	return c.doDelete(c.networkPath()+"/route-policy/"+url.PathEscape(name)+execQuery(opts), nil)
+}
+
+// AddRoutePolicyRule adds a rule to a route policy.
+func (c *Client) AddRoutePolicyRule(req newtron.AddRoutePolicyRuleRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/route-policy/"+url.PathEscape(req.Policy)+"/rule"+execQuery(opts), req, nil)
+}
+
+// RemoveRoutePolicyRule removes a rule from a route policy.
+func (c *Client) RemoveRoutePolicyRule(policy string, seq int, opts newtron.ExecOpts) error {
+	return c.doDelete(fmt.Sprintf("%s/route-policy/%s/rule/%d%s",
+		c.networkPath(), url.PathEscape(policy), seq, execQuery(opts)), nil)
+}
+
 // GetAllFeatures returns all feature names.
 func (c *Client) GetAllFeatures() ([]string, error) {
 	var result []string

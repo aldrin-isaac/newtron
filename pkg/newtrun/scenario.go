@@ -137,6 +137,18 @@ ActionSetInterface       StepAction = "set-interface"
 
 	// Loopback removal
 	ActionRemoveLoopback StepAction = "remove-loopback"
+
+	// Network-level spec authoring actions
+	ActionCreatePrefixList    StepAction = "create-prefix-list"
+	ActionDeletePrefixList    StepAction = "delete-prefix-list"
+	ActionAddPrefixEntry      StepAction = "add-prefix-entry"
+	ActionRemovePrefixEntry   StepAction = "remove-prefix-entry"
+	ActionCreateRoutePolicy   StepAction = "create-route-policy"
+	ActionDeleteRoutePolicy   StepAction = "delete-route-policy"
+	ActionAddRoutePolicyRule  StepAction = "add-route-policy-rule"
+	ActionRemoveRoutePolicyRule StepAction = "remove-route-policy-rule"
+	ActionCreateService       StepAction = "create-service"
+	ActionDeleteService       StepAction = "delete-service"
 )
 
 // validActions is the set of all recognized step actions, derived from the
@@ -189,6 +201,7 @@ func (ds *deviceSelector) Resolve(allDevices []string) []string {
 type ExpectBlock struct {
 	// verify-config-db
 	MinEntries *int              `yaml:"min_entries,omitempty"`
+	MaxEntries *int              `yaml:"max_entries,omitempty"`
 	Exists     *bool             `yaml:"exists,omitempty"`
 	Fields     map[string]string `yaml:"fields,omitempty"`
 

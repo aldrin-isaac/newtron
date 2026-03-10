@@ -1,0 +1,196 @@
+name: spec-authoring
+description: |
+  Tests network-level spec authoring API: prefix list CRUD, route policy CRUD,
+  service creation with routing referencing those objects, apply/remove on device,
+  and full teardown in reverse dependency order.
+topology: 2node
+requires: [boot-ssh]
+
+steps:
+  # --- Prefix list lifecycle ---
+  - name: create-prefix-list
+    action: create-prefix-list
+    params:
+      name: test-prefixes
+      prefixes:
+        - "10.100.0.0/16"
+
+  - name: add-prefix-entry
+    action: add-prefix-entry
+    params:
+      prefix_list: test-prefixes
+      prefix: "10.200.0.0/16"
+
+  # --- Route policy lifecycle ---
+  - name: create-route-policy
+    action: create-route-policy
+    params:
+      name: test-import-policy
+      description: "Import policy for spec-authoring test"
+
+  - name: add-policy-rule-10
+    action: add-route-policy-rule
+    params:
+      policy: test-import-policy
+      seq: 10
+      action: permit
+      prefix_list: test-prefixes
+      set:
+        local_pref: 200
+
+  - name: add-policy-rule-20
+    action: add-route-policy-rule
+    params:
+      policy: test-import-policy
+      seq: 20
+      action: deny
+
+  # --- Create service referencing the route policy ---
+  - name: create-test-service
+    action: create-service
+    params:
+      name: test-routed-svc
+      type: routed
+      description: "Routed service with import policy"
+      routing:
+        protocol: bgp
+        peer_as: "65099"
+        import_policy: test-import-policy
+
+  # --- Apply service on switch1:Ethernet10 (unwired, config-only) ---
+  - name: apply-service
+    action: apply-service
+    devices: [switch1]
+    interface: Ethernet10
+    service: test-routed-svc
+    params:
+      ip: "10.99.0.0/31"
+      peer_ip: "10.99.0.1"
+      peer_as: "65099"
+
+  - name: wait-for-apply
+    action: wait
+    duration: 3s
+
+  - name: verify-interface-configured
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet10|10.99.0.0/31"
+    expect:
+      exists: true
+      timeout: 10s
+
+  - name: verify-bgp-neighbor
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.99.0.1"
+    expect:
+      exists: true
+      fields:
+        asn: "65099"
+      timeout: 10s
+
+  - name: verify-route-map-created
+    action: verify-config-db
+    devices: [switch1]
+    table: ROUTE_MAP
+    expect:
+      min_entries: 1
+      timeout: 10s
+
+  - name: verify-prefix-set-created
+    action: verify-config-db
+    devices: [switch1]
+    table: PREFIX_SET
+    expect:
+      min_entries: 1
+      timeout: 10s
+
+  # --- Teardown: remove service, delete service, delete policy, delete prefix list ---
+  - name: remove-service
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet10
+    service: test-routed-svc
+
+  - name: wait-for-remove
+    action: wait
+    duration: 3s
+
+  - name: verify-interface-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet10|10.99.0.0/31"
+    expect:
+      exists: false
+      timeout: 10s
+
+  - name: verify-bgp-neighbor-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.99.0.1"
+    expect:
+      exists: false
+      timeout: 10s
+
+  - name: verify-route-map-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: ROUTE_MAP
+    expect:
+      max_entries: 0
+      timeout: 10s
+
+  - name: verify-prefix-set-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: PREFIX_SET
+    expect:
+      max_entries: 0
+      timeout: 10s
+
+  - name: verify-peer-group-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_PEER_GROUP
+    expect:
+      max_entries: 0
+      timeout: 10s
+
+  # --- Teardown specs in reverse dependency order ---
+  - name: delete-test-service
+    action: delete-service
+    params:
+      name: test-routed-svc
+
+  - name: remove-policy-rule-20
+    action: remove-route-policy-rule
+    params:
+      policy: test-import-policy
+      seq: 20
+
+  - name: remove-policy-rule-10
+    action: remove-route-policy-rule
+    params:
+      policy: test-import-policy
+      seq: 10
+
+  - name: delete-route-policy
+    action: delete-route-policy
+    params:
+      name: test-import-policy
+
+  - name: remove-prefix-entry
+    action: remove-prefix-entry
+    params:
+      prefix_list: test-prefixes
+      prefix: "10.200.0.0/16"
+
+  - name: delete-prefix-list
+    action: delete-prefix-list
+    params:
+      name: test-prefixes

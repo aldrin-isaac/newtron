@@ -522,8 +522,10 @@ var Schema = map[string]TableSchema{
 			"arp_suppression": {Type: FieldBool},
 			"redistribute_vrf": {Type: FieldString},
 			"peer_group":       {Type: FieldString},
-			"route_map_in":     {Type: FieldString},
-			"route_map_out":    {Type: FieldString},
+			"route_map_in":              {Type: FieldString},
+			"route_map_out":             {Type: FieldString},
+			"route_reflector_client":    {Type: FieldBool},
+			"next_hop_self":             {Type: FieldBool},
 		},
 	},
 
@@ -553,6 +555,7 @@ var Schema = map[string]TableSchema{
 	"COMMUNITY_SET": {
 		// YANG: sonic-routing-policy-sets.yang — set_type is STANDARD/EXPANDED (uppercase)
 		// newtron writes lowercase (standard/extended) — this matches SONiC CLI behavior
+		KeyPattern: `^[A-Z0-9_]+$`, // newtron normalized name
 		Fields: map[string]FieldConstraint{
 			"set_type":         {Type: FieldEnum, Enum: []string{"standard", "extended"}},
 			"match_action":     {Type: FieldEnum, Enum: []string{"any", "all"}},

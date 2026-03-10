@@ -75,7 +75,8 @@ Target ownership map:
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
 vrf_ops.go         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
 bgp_ops.go         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
-                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA
+                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
+                      BGP_PEER_GROUP, BGP_PEER_GROUP_AF
 evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
                       SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
 acl_ops.go         → ACL_TABLE, ACL_RULE
@@ -140,12 +141,12 @@ not how it is implemented. CONFIG_DB concepts like "Entry", "Sub", "Config", "Ba
 are implementation details — they belong in comments, not in names.
 
 Examples:
-- `vrfBinding` not `interfaceBaseConfig` — binding an interface to a VRF
-- `ipAddress` not `interfaceIPSubEntry` — assigning an IP address
-- `serviceConfig` not `GenerateServiceEntries` — the service configuration for this interface
-- `qosBinding` / `qosUnbinding` not `generateQoSInterfaceEntries` / `qosDeleteConfig`
-- `aclBinding` not `generateServiceACLEntries`
-- `ipRoutingEnable` not `interfaceBaseConfig(intfName, nil)` — enabling IP routing on an interface
+- `bindVrf` not `interfaceBaseConfig` — binding an interface to a VRF
+- `assignIpAddress` not `interfaceIPSubEntry` — assigning an IP address
+- `generateServiceEntries` not `ServiceConfig` — generating service CONFIG_DB entries
+- `bindQos` / `unbindQos` not `generateQoSInterfaceEntries` / `qosDeleteConfig`
+- `updateAclPorts` not `generateServiceACLEntries`
+- `enableIpRouting` not `interfaceBaseConfig(intfName, nil)` — enabling IP routing on an interface
 
 This applies at all levels: method names, function names, type names, field names.
 When reading code, the name should tell you the domain purpose without needing to
@@ -415,6 +416,25 @@ CONFIG_DB key construction is already canonical. Operations code never calls
 `NormalizeName()`.
 
 See `docs/DESIGN_PRINCIPLES.md` §33 for rationale.
+
+## Definition Is Network-Scoped; Execution Is Device-Scoped
+
+Specs (services, policies, prefix lists) exist at the network level with their
+own lifecycle, independent of any device. Device operations (apply, remove,
+verify) consume specs but don't create them. The two lifecycles must not be
+coupled — a service can be defined before any device connects, and a device can
+consume a service defined after it connected.
+
+`ResolvedSpecs` is a per-node snapshot built at connection time. Specs added via
+the API after snapshot time are invisible in the snapshot. All `Get*` methods on
+`ResolvedSpecs` must fall through to `network.Get*` on miss — a merged-map-only
+lookup is a bug.
+
+In newtrun, network-level steps (create-prefix-list, create-route-policy,
+create-service) call `r.Client.*` directly with no `devices:` field. Device-level
+steps use `executeForDevices`.
+
+See `docs/DESIGN_PRINCIPLES.md` §39 for rationale.
 
 ## Policy vs Infrastructure — Shared Object Lifecycles
 

@@ -163,7 +163,7 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 	configDB := n.ConfigDB()
 	if configDB != nil {
 		if table, ok := configDB.ACLTable[aclName]; ok {
-			e := unbindAclConfig(aclName, util.RemoveFromCSV(table.Ports, i.name))
+			e := updateAclPorts(aclName, util.RemoveFromCSV(table.Ports, i.name))
 			cs.Update(e.Table, e.Key, e.Fields)
 		}
 	}

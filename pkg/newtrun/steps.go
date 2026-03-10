@@ -89,6 +89,18 @@ ActionSetInterface:       &setInterfaceExecutor{},
 	ActionConfigureBGP:     &configureBGPExecutor{},
 	ActionRemoveBGPGlobals: &removeBGPGlobalsExecutor{},
 	ActionRemoveLoopback:   &removeLoopbackExecutor{},
+
+	// Network-level spec authoring executors
+	ActionCreatePrefixList:      &createPrefixListExecutor{},
+	ActionDeletePrefixList:      &deletePrefixListExecutor{},
+	ActionAddPrefixEntry:        &addPrefixEntryExecutor{},
+	ActionRemovePrefixEntry:     &removePrefixEntryExecutor{},
+	ActionCreateRoutePolicy:     &createRoutePolicyExecutor{},
+	ActionDeleteRoutePolicy:     &deleteRoutePolicyExecutor{},
+	ActionAddRoutePolicyRule:    &addRoutePolicyRuleExecutor{},
+	ActionRemoveRoutePolicyRule: &removeRoutePolicyRuleExecutor{},
+	ActionCreateService:         &createServiceExecutor{},
+	ActionDeleteService:         &deleteServiceExecutor{},
 }
 
 // strParam extracts a string parameter from the step's Params map.
@@ -500,6 +512,28 @@ func (e *verifyConfigDBExecutor) checkDevice(r *Runner, device string, step *Ste
 			return checkResult{StepStatusPassed, fmt.Sprintf("%s: %d entries (≥ %d)", step.Table, count, *step.Expect.MinEntries)}
 		}
 		return checkResult{StepStatusFailed, fmt.Sprintf("%s: %d entries (expected ≥ %d)", step.Table, count, *step.Expect.MinEntries)}
+	}
+
+	// Mode 1b: max_entries (verify table has at most N entries)
+	if step.Expect.MaxEntries != nil {
+		var count int
+		if step.Key == "" {
+			keys, err := r.Client.ConfigDBTableKeys(device, step.Table)
+			if err != nil {
+				return checkResult{StepStatusError, fmt.Sprintf("scanning %s: %s", step.Table, err)}
+			}
+			count = len(keys)
+		} else {
+			vals, err := r.Client.QueryConfigDB(device, step.Table, step.Key)
+			if err != nil {
+				return checkResult{StepStatusError, fmt.Sprintf("reading %s|%s: %s", step.Table, step.Key, err)}
+			}
+			count = len(vals)
+		}
+		if count <= *step.Expect.MaxEntries {
+			return checkResult{StepStatusPassed, fmt.Sprintf("%s: %d entries (≤ %d)", step.Table, count, *step.Expect.MaxEntries)}
+		}
+		return checkResult{StepStatusFailed, fmt.Sprintf("%s: %d entries (expected ≤ %d)", step.Table, count, *step.Expect.MaxEntries)}
 	}
 
 	// Mode 2: exists
@@ -1730,4 +1764,165 @@ func (e *removeLoopbackExecutor) Execute(ctx context.Context, r *Runner, step *S
 		}
 		return fmt.Sprintf("removed loopback (%d changes)", result.ChangeCount), nil
 	})
+}
+
+// ============================================================================
+// Network-level spec authoring executors
+// ============================================================================
+
+type createPrefixListExecutor struct{}
+
+func (e *createPrefixListExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	prefixes := strSliceParam(step.Params, "prefixes")
+	err := r.Client.CreatePrefixList(newtron.CreatePrefixListRequest{
+		Name:     name,
+		Prefixes: prefixes,
+	}, execOptsRun)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("created prefix list '%s'", name)}}
+}
+
+type deletePrefixListExecutor struct{}
+
+func (e *deletePrefixListExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	if err := r.Client.DeletePrefixList(name, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("deleted prefix list '%s'", name)}}
+}
+
+type addPrefixEntryExecutor struct{}
+
+func (e *addPrefixEntryExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	prefixList := strParam(step.Params, "prefix_list")
+	prefix := strParam(step.Params, "prefix")
+	err := r.Client.AddPrefixListEntry(newtron.AddPrefixListEntryRequest{
+		PrefixList: prefixList,
+		Prefix:     prefix,
+	}, execOptsRun)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("added '%s' to prefix list '%s'", prefix, prefixList)}}
+}
+
+type removePrefixEntryExecutor struct{}
+
+func (e *removePrefixEntryExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	prefixList := strParam(step.Params, "prefix_list")
+	prefix := strParam(step.Params, "prefix")
+	if err := r.Client.RemovePrefixListEntry(prefixList, prefix, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("removed '%s' from prefix list '%s'", prefix, prefixList)}}
+}
+
+type createRoutePolicyExecutor struct{}
+
+func (e *createRoutePolicyExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	err := r.Client.CreateRoutePolicy(newtron.CreateRoutePolicyRequest{
+		Name:        name,
+		Description: strParam(step.Params, "description"),
+	}, execOptsRun)
+	if err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("created route policy '%s'", name)}}
+}
+
+type deleteRoutePolicyExecutor struct{}
+
+func (e *deleteRoutePolicyExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	if err := r.Client.DeleteRoutePolicy(name, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("deleted route policy '%s'", name)}}
+}
+
+type addRoutePolicyRuleExecutor struct{}
+
+func (e *addRoutePolicyRuleExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	policy := strParam(step.Params, "policy")
+	req := newtron.AddRoutePolicyRuleRequest{
+		Policy:     policy,
+		Sequence:   intParam(step.Params, "seq"),
+		Action:     strParam(step.Params, "action"),
+		PrefixList: strParam(step.Params, "prefix_list"),
+		Community:  strParam(step.Params, "community"),
+	}
+	if setRaw, ok := step.Params["set"]; ok {
+		if setMap, ok := setRaw.(map[string]any); ok {
+			req.Set = &newtron.RoutePolicySetSpec{
+				LocalPref: intParam(setMap, "local_pref"),
+				Community: strParam(setMap, "community"),
+				MED:       intParam(setMap, "med"),
+			}
+		}
+	}
+	if err := r.Client.AddRoutePolicyRule(req, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("added rule %d to route policy '%s'", req.Sequence, policy)}}
+}
+
+type removeRoutePolicyRuleExecutor struct{}
+
+func (e *removeRoutePolicyRuleExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	policy := strParam(step.Params, "policy")
+	seq := intParam(step.Params, "seq")
+	if err := r.Client.RemoveRoutePolicyRule(policy, seq, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("removed rule %d from route policy '%s'", seq, policy)}}
+}
+
+type createServiceExecutor struct{}
+
+func (e *createServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	req := newtron.CreateServiceRequest{
+		Name:          name,
+		Type:          strParam(step.Params, "type"),
+		Description:   strParam(step.Params, "description"),
+		IPVPN:         strParam(step.Params, "ipvpn"),
+		MACVPN:        strParam(step.Params, "macvpn"),
+		VRFType:       strParam(step.Params, "vrf_type"),
+		QoSPolicy:     strParam(step.Params, "qos_policy"),
+		IngressFilter: strParam(step.Params, "ingress_filter"),
+		EgressFilter:  strParam(step.Params, "egress_filter"),
+	}
+	if routingRaw, ok := step.Params["routing"]; ok {
+		if rm, ok := routingRaw.(map[string]any); ok {
+			req.Routing = &newtron.CreateServiceRouting{
+				Protocol:         strParam(rm, "protocol"),
+				PeerAS:           strParam(rm, "peer_as"),
+				ImportPolicy:     strParam(rm, "import_policy"),
+				ExportPolicy:     strParam(rm, "export_policy"),
+				ImportCommunity:  strParam(rm, "import_community"),
+				ExportCommunity:  strParam(rm, "export_community"),
+				ImportPrefixList: strParam(rm, "import_prefix_list"),
+				ExportPrefixList: strParam(rm, "export_prefix_list"),
+			}
+		}
+	}
+	if err := r.Client.CreateService(req, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("created service '%s'", name)}}
+}
+
+type deleteServiceExecutor struct{}
+
+func (e *deleteServiceExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	name := strParam(step.Params, "name")
+	if err := r.Client.DeleteService(name, execOptsRun); err != nil {
+		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
+	}
+	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("deleted service '%s'", name)}}
 }
