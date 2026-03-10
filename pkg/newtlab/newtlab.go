@@ -658,7 +658,6 @@ func (l *Lab) setupBridges(ctx context.Context) error {
 			}
 			reachAddr := fmt.Sprintf("127.0.0.1:%d", statsPort)
 			l.State.Bridges[""] = &BridgeState{PID: pid, StatsAddr: reachAddr}
-			l.State.BridgePID = pid // back-compat
 		} else {
 			cfg := buildBridgeConfig(links, statsBindAddr)
 			configJSON, err := json.MarshalIndent(cfg, "", "    ")
@@ -1185,11 +1184,6 @@ func stopAllBridges(state *LabState) []error {
 					errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", bs.PID, err))
 				}
 			}
-		}
-	} else if state.BridgePID > 0 && isRunningLocal(state.BridgePID) {
-		// Legacy fallback
-		if err := stopNodeLocal(state.BridgePID); err != nil {
-			errs = append(errs, fmt.Errorf("stop bridge (pid %d): %w", state.BridgePID, err))
 		}
 	}
 	return errs

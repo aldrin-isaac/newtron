@@ -16,8 +16,7 @@ type LabState struct {
 	SSHKeyPath string                  `json:"ssh_key_path,omitempty"` // path to lab Ed25519 private key
 	Nodes      map[string]*NodeState   `json:"nodes"`
 	Links      []*LinkState            `json:"links"`
-	BridgePID  int                     `json:"bridge_pid,omitempty"` // deprecated: use Bridges
-	Bridges    map[string]*BridgeState `json:"bridges,omitempty"`    // host ("" = local) → bridge info
+	Bridges    map[string]*BridgeState `json:"bridges,omitempty"` // host ("" = local) → bridge info
 }
 
 // NodeState tracks per-node runtime state.

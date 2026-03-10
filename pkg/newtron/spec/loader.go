@@ -163,7 +163,6 @@ func mergeOverridableSpecs(parent, child *OverridableSpecs) *OverridableSpecs {
 		IPVPNs:        util.MergeMaps(parent.IPVPNs, child.IPVPNs),
 		MACVPNs:       util.MergeMaps(parent.MACVPNs, child.MACVPNs),
 		QoSPolicies:   util.MergeMaps(parent.QoSPolicies, child.QoSPolicies),
-		QoSProfiles:   util.MergeMaps(parent.QoSProfiles, child.QoSProfiles),
 		RoutePolicies: util.MergeMaps(parent.RoutePolicies, child.RoutePolicies),
 	}
 }
@@ -187,11 +186,6 @@ func (l *Loader) validateSpecRefs(v *util.ValidationBuilder, prefix string, own,
 		if svc.QoSPolicy != "" {
 			if _, ok := resolved.QoSPolicies[svc.QoSPolicy]; !ok {
 				v.AddErrorf("%sservice '%s' references unknown QoS policy '%s'", prefix, svcName, svc.QoSPolicy)
-			}
-		}
-		if svc.QoSProfile != "" {
-			if _, ok := resolved.QoSProfiles[svc.QoSProfile]; !ok {
-				v.AddErrorf("%sservice '%s' references unknown QoS profile '%s'", prefix, svcName, svc.QoSProfile)
 			}
 		}
 		if svc.IPVPN != "" {
@@ -355,13 +349,6 @@ func (l *Loader) validateProfile(profile *DeviceProfile) error {
 	if profile.Zone != "" {
 		if _, ok := l.network.Zones[profile.Zone]; !ok {
 			v.AddErrorf("unknown zone: %s", profile.Zone)
-		}
-	}
-
-	// Validate AS number if specified
-	if profile.ASNumber != nil {
-		if err := util.ValidateASN(*profile.ASNumber); err != nil {
-			v.AddError(err.Error())
 		}
 	}
 
@@ -567,7 +554,6 @@ func normalizeOverridableSpecs(s *OverridableSpecs) {
 	s.IPVPNs = normalizeMap(s.IPVPNs)
 	s.MACVPNs = normalizeMap(s.MACVPNs)
 	s.QoSPolicies = normalizeMap(s.QoSPolicies)
-	s.QoSProfiles = normalizeMap(s.QoSProfiles)
 	s.RoutePolicies = normalizeMap(s.RoutePolicies)
 	s.PrefixLists = normalizeMap(s.PrefixLists)
 
@@ -608,7 +594,6 @@ func NormalizeServiceRefs(svc *ServiceSpec) {
 	svc.IPVPN = normalizeRef(svc.IPVPN)
 	svc.MACVPN = normalizeRef(svc.MACVPN)
 	svc.QoSPolicy = normalizeRef(svc.QoSPolicy)
-	svc.QoSProfile = normalizeRef(svc.QoSProfile)
 	if svc.Routing != nil {
 		svc.Routing.ImportPolicy = normalizeRef(svc.Routing.ImportPolicy)
 		svc.Routing.ExportPolicy = normalizeRef(svc.Routing.ExportPolicy)

@@ -234,9 +234,7 @@ func QueryAllBridgeStats(labName string) (*BridgeStats, error) {
 		return merged, nil
 	}
 
-	// Legacy fallback: single bridge via Unix socket
-	sockPath := filepath.Join(LabDir(labName), "bridge.sock")
-	return QueryBridgeStats(sockPath)
+	return nil, fmt.Errorf("no bridge state found for lab %s", labName)
 }
 
 // startBridgeProcess spawns a newtlink bridge process locally.

@@ -143,7 +143,6 @@ type OverridableSpecs struct {
     PrefixLists   map[string][]string      `json:"prefix_lists,omitempty"`
     Filters       map[string]*FilterSpec   `json:"filters,omitempty"`
     QoSPolicies   map[string]*QoSPolicy    `json:"qos_policies,omitempty"`
-    QoSProfiles   map[string]*QoSProfile   `json:"qos_profiles,omitempty"`
     RoutePolicies map[string]*RoutePolicy  `json:"route_policies,omitempty"`
     IPVPNs        map[string]*IPVPNSpec    `json:"ipvpns,omitempty"`
     MACVPNs       map[string]*MACVPNSpec   `json:"macvpns,omitempty"`
@@ -166,7 +165,6 @@ type ServiceSpec struct {
     IngressFilter  string              `json:"ingress_filter,omitempty"`
     EgressFilter   string              `json:"egress_filter,omitempty"`
     QoSPolicy      string              `json:"qos_policy,omitempty"`
-    QoSProfile     string              `json:"qos_profile,omitempty"`
     Permissions    map[string][]string `json:"permissions,omitempty"`
 }
 ```

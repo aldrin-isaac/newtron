@@ -293,7 +293,7 @@ Translation follows a three-layer pattern in the Node Layer:
 
 ### 3.5 Hierarchical Spec Resolution
 
-Specs participate in a three-level hierarchy: **network → zone → node**. Each level can define or override any of the 8 overridable spec types (services, filters, IP-VPNs, MAC-VPNs, QoS policies, QoS profiles, route policies, prefix lists).
+Specs participate in a three-level hierarchy: **network → zone → node**. Each level can define or override any of the 7 overridable spec types (services, filters, IP-VPNs, MAC-VPNs, QoS policies, route policies, prefix lists).
 
 Resolution is **union with lower-level-wins**: if the same spec name exists at multiple levels, the most specific level wins (node > zone > network). Specs at different levels with different names are all visible.
 

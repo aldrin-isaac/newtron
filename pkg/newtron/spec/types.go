@@ -26,15 +26,6 @@ type QoSQueue struct {
 	ECN    bool   `json:"ecn,omitempty"`    // Enable ECN/WRED
 }
 
-// QoSProfile maps interface types to scheduler configurations (legacy).
-type QoSProfile struct {
-	Name         string `json:"name"`
-	Description  string `json:"description,omitempty"`
-	SchedulerMap string `json:"scheduler_map"` // e.g., "8q" or "4q"
-	DSCPToTCMap  string `json:"dscp_to_tc_map,omitempty"`
-	TCToQueueMap string `json:"tc_to_queue_map,omitempty"`
-}
-
 // OverridableSpecs holds spec maps that participate in hierarchical resolution
 // (network → zone → node). Embedded by NetworkSpecFile, ZoneSpec, and DeviceProfile.
 // Resolution is a union with lower-level-wins: node > zone > network.
@@ -42,7 +33,6 @@ type OverridableSpecs struct {
 	PrefixLists   map[string][]string      `json:"prefix_lists,omitempty"`
 	Filters       map[string]*FilterSpec   `json:"filters,omitempty"`
 	QoSPolicies   map[string]*QoSPolicy    `json:"qos_policies,omitempty"`
-	QoSProfiles   map[string]*QoSProfile   `json:"qos_profiles,omitempty"`
 	RoutePolicies map[string]*RoutePolicy  `json:"route_policies,omitempty"`
 	IPVPNs        map[string]*IPVPNSpec    `json:"ipvpns,omitempty"`
 	MACVPNs       map[string]*MACVPNSpec   `json:"macvpns,omitempty"`
@@ -57,7 +47,7 @@ type NetworkSpecFile struct {
 	Permissions map[string][]string `json:"permissions"`  // Action → allowed groups
 	Zones       map[string]*ZoneSpec `json:"zones"`
 
-	OverridableSpecs // Embedded — all 8 overridable spec maps
+	OverridableSpecs // Embedded — all 7 overridable spec maps
 }
 
 // ZoneSpec defines zone settings (AS number, defaults).
@@ -141,8 +131,7 @@ type ServiceSpec struct {
 	EgressFilter  string `json:"egress_filter,omitempty"`
 
 	// QoS
-	QoSPolicy  string `json:"qos_policy,omitempty"`
-	QoSProfile string `json:"qos_profile,omitempty"` // Legacy — kept for backward compat
+	QoSPolicy string `json:"qos_policy,omitempty"`
 
 	// Permissions (override global permissions for this service)
 	Permissions map[string][]string `json:"permissions,omitempty"`
@@ -195,7 +184,6 @@ type FilterRule struct {
 	DSCP          string `json:"dscp,omitempty"`
 	Action        string `json:"action"` // permit, deny
 	CoS           string `json:"cos,omitempty"`
-	Log           bool   `json:"log,omitempty"` // TODO(v4): not consumed — implement ACL_RULE log action (requires SONiC logging infrastructure)
 }
 
 // ============================================================================
@@ -378,13 +366,9 @@ type DeviceProfile struct {
 	// OPTIONAL - EVPN overlay peering
 	EVPN *EVPNConfig `json:"evpn,omitempty"`
 
-	// OPTIONAL OVERRIDES - if set, override region/global values
-	ASNumber *int `json:"as_number,omitempty"`
-
 	// OPTIONAL - device-specific
-	MAC             string           `json:"mac,omitempty"`
-	Platform        string           `json:"platform,omitempty"`
-	VLANPortMapping map[int][]string `json:"vlan_port_mapping,omitempty"` // TODO(v4): not consumed — implement VLAN-to-port mapping for pre-provisioned access ports
+	MAC      string `json:"mac,omitempty"`
+	Platform string `json:"platform,omitempty"`
 
 	OverridableSpecs // Embedded — node-level overrides
 

@@ -32,7 +32,7 @@ var serviceCmd = &cobra.Command{
 Services define a complete interface configuration including:
   - VRF/EVPN settings
   - ACL/filter rules
-  - QoS profiles
+  - QoS policies
 
 Examples:
   newtron service list                                        # List all services

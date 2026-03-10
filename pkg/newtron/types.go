@@ -527,7 +527,6 @@ type FilterRuleEntry struct {
 	DstPort       string `json:"dst_port,omitempty"`
 	DSCP          string `json:"dscp,omitempty"`
 	CoS           string `json:"cos,omitempty"`
-	Log           bool   `json:"log,omitempty"`
 }
 
 // PlatformDetail is the API view of a platform definition.
@@ -633,7 +632,6 @@ type AddFilterRuleRequest struct {
 	DstPort       string `json:"dst_port,omitempty"`
 	DSCP          string `json:"dscp,omitempty"`
 	CoS           string `json:"cos,omitempty"`
-	Log           bool   `json:"log,omitempty"`
 }
 
 // CreatePrefixListRequest is the request for creating a prefix list.

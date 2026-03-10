@@ -186,14 +186,9 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		}
 	}
 
-	// QoS configuration: new-style policy takes precedence over legacy profile
+	// QoS configuration
 	if policyName, policy := GetServiceQoSPolicy(sp, svc); policy != nil {
 		entries = append(entries, i.bindQos(policyName, policy)...)
-	} else if svc.QoSProfile != "" {
-		qosProfile, err := sp.GetQoSProfile(svc.QoSProfile)
-		if err == nil && qosProfile != nil {
-			entries = append(entries, i.bindQosProfile(qosProfile)...)
-		}
 	}
 
 	// BGP routing configuration

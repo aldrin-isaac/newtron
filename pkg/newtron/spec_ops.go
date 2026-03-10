@@ -410,7 +410,6 @@ func (net *Network) AddFilterRule(req AddFilterRuleRequest, opts ExecOpts) error
 		DstPort:       req.DstPort,
 		DSCP:          req.DSCP,
 		CoS:           req.CoS,
-		Log:           req.Log,
 	}
 	fs.Rules = append(fs.Rules, rule)
 	sort.Slice(fs.Rules, func(i, j int) bool {
@@ -758,7 +757,6 @@ func convertFilterDetail(name string, f *spec.FilterSpec) *FilterDetail {
 			DstPort:       r.DstPort,
 			DSCP:          r.DSCP,
 			CoS:           r.CoS,
-			Log:           r.Log,
 		})
 	}
 	return detail

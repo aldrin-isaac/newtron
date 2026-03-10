@@ -40,6 +40,8 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	// ConfigDB state: service binding + VRF + IP + INTERFACE base
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "CUSTOMER_L3",
+		ServiceType: spec.ServiceTypeEVPNRouted,
+		VRFType:     spec.VRFTypeInterface,
 		IPAddress:   "10.1.0.0/31",
 		VRFName:     "CUSTOMER_L3_ETH0",
 	}
@@ -78,6 +80,7 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 	d.configDB.ACLRule["CUSTOMER_L3_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "CUSTOMER_L3",
+		ServiceType: spec.ServiceTypeEVPNRouted,
 		IngressACL:  "CUSTOMER_L3_IN",
 	}
 
@@ -106,6 +109,7 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 	}
 	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
 		ServiceName: "CUSTOMER_L3",
+		ServiceType: spec.ServiceTypeEVPNRouted,
 		IngressACL:  "CUSTOMER_L3_IN",
 	}
 

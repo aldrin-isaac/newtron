@@ -231,8 +231,8 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 }
 
 // deployTopology deploys the lab topology using lifecycle mode (EnsureTopology)
-// or legacy mode (DeployTopology). It returns a cleanup function that should be
-// deferred by the caller; the cleanup is nil when no teardown is needed.
+// or standalone mode (DeployTopology). It returns a cleanup function that should
+// be deferred by the caller; the cleanup is nil when no teardown is needed.
 func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error) {
 	if opts.Suite != "" {
 		lab, err := EnsureTopology(ctx, specDir)

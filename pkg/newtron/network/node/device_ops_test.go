@@ -19,7 +19,6 @@ type testSpecProvider struct {
 	ipvpn         map[string]*spec.IPVPNSpec
 	macvpn        map[string]*spec.MACVPNSpec
 	qosPolicies   map[string]*spec.QoSPolicy
-	qosProfiles   map[string]*spec.QoSProfile
 	platforms     map[string]*spec.PlatformSpec
 	prefixLists   map[string][]string
 	routePolicies map[string]*spec.RoutePolicy
@@ -51,13 +50,6 @@ func (sp *testSpecProvider) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 		return s, nil
 	}
 	return nil, fmt.Errorf("qos policy %q not found", name)
-}
-
-func (sp *testSpecProvider) GetQoSProfile(name string) (*spec.QoSProfile, error) {
-	if s, ok := sp.qosProfiles[name]; ok {
-		return s, nil
-	}
-	return nil, fmt.Errorf("qos profile %q not found", name)
 }
 
 func (sp *testSpecProvider) GetFilter(name string) (*spec.FilterSpec, error) {
@@ -113,7 +105,6 @@ func testDevice() *Node {
 			ipvpn:         map[string]*spec.IPVPNSpec{},
 			macvpn:        map[string]*spec.MACVPNSpec{},
 			qosPolicies:   map[string]*spec.QoSPolicy{},
-			qosProfiles:   map[string]*spec.QoSProfile{},
 			platforms:     map[string]*spec.PlatformSpec{},
 			prefixLists:   map[string][]string{},
 			routePolicies: map[string]*spec.RoutePolicy{},

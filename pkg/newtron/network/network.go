@@ -109,11 +109,6 @@ func (n *Network) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 	return getSpec(&n.mu, n.spec.QoSPolicies, "QoS policy", util.NormalizeName(name))
 }
 
-// GetQoSProfile returns a QoS profile by name (legacy).
-func (n *Network) GetQoSProfile(name string) (*spec.QoSProfile, error) {
-	return getSpec(&n.mu, n.spec.QoSProfiles, "QoS profile", util.NormalizeName(name))
-}
-
 // GetIPVPN returns an IP-VPN definition by name.
 func (n *Network) GetIPVPN(name string) (*spec.IPVPNSpec, error) {
 	return getSpec(&n.mu, n.spec.IPVPNs, "ipvpn", util.NormalizeName(name))
@@ -666,7 +661,7 @@ func (n *Network) resolveProfile(name string, profile *spec.DeviceProfile) (*spe
 	return resolved, nil
 }
 
-// buildResolvedSpecs merges all 8 overridable spec maps with hierarchical
+// buildResolvedSpecs merges all 7 overridable spec maps with hierarchical
 // resolution: network → zone → profile (lower-level wins).
 func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs {
 	zone := n.spec.Zones[profile.Zone] // already validated in resolveProfile
@@ -678,7 +673,6 @@ func (n *Network) buildResolvedSpecs(profile *spec.DeviceProfile) *ResolvedSpecs
 		IPVPNs:        util.MergeMaps(n.spec.IPVPNs, zone.IPVPNs, profile.IPVPNs),
 		MACVPNs:       util.MergeMaps(n.spec.MACVPNs, zone.MACVPNs, profile.MACVPNs),
 		QoSPolicies:   util.MergeMaps(n.spec.QoSPolicies, zone.QoSPolicies, profile.QoSPolicies),
-		QoSProfiles:   util.MergeMaps(n.spec.QoSProfiles, zone.QoSProfiles, profile.QoSProfiles),
 		RoutePolicies: util.MergeMaps(n.spec.RoutePolicies, zone.RoutePolicies, profile.RoutePolicies),
 	}
 

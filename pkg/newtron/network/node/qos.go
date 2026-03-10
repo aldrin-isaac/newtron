@@ -133,23 +133,6 @@ func (i *Interface) bindQos(policyName string, policy *spec.QoSPolicy) []sonic.E
 	return entries
 }
 
-// bindQosProfile returns a PORT_QOS_MAP entry for a QoS profile.
-// Profiles reference pre-existing maps by name (not bracket-ref like policies).
-// Returns nil if the profile has no map fields set.
-func (i *Interface) bindQosProfile(profile *spec.QoSProfile) []sonic.Entry {
-	fields := map[string]string{}
-	if profile.DSCPToTCMap != "" {
-		fields["dscp_to_tc_map"] = profile.DSCPToTCMap
-	}
-	if profile.TCToQueueMap != "" {
-		fields["tc_to_queue_map"] = profile.TCToQueueMap
-	}
-	if len(fields) == 0 {
-		return nil
-	}
-	return []sonic.Entry{{Table: "PORT_QOS_MAP", Key: i.name, Fields: fields}}
-}
-
 // deleteDeviceQoSConfig returns delete entries for the device-wide QoS tables
 // created by GenerateDeviceQoSConfig: DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 // SCHEDULER (prefix scan), and WRED_PROFILE (prefix scan).
@@ -201,8 +184,7 @@ func parsePolicyName(bracketRef string) string {
 }
 
 // GetServiceQoSPolicy returns the QoS policy name and definition for a service.
-// It checks QoSPolicy (new-style) first, then falls back to legacy QoSProfile.
-// Returns ("", nil) if neither is set.
+// Returns ("", nil) if no QoS policy is set.
 func GetServiceQoSPolicy(sp SpecProvider, svc *spec.ServiceSpec) (string, *spec.QoSPolicy) {
 	if svc.QoSPolicy != "" {
 		if policy, err := sp.GetQoSPolicy(svc.QoSPolicy); err == nil {

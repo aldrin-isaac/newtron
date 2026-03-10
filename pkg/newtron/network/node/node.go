@@ -25,7 +25,6 @@ type SpecProvider interface {
 	GetIPVPN(name string) (*spec.IPVPNSpec, error)
 	GetMACVPN(name string) (*spec.MACVPNSpec, error)
 	GetQoSPolicy(name string) (*spec.QoSPolicy, error)
-	GetQoSProfile(name string) (*spec.QoSProfile, error)
 	GetFilter(name string) (*spec.FilterSpec, error)
 	GetPlatform(name string) (*spec.PlatformSpec, error)
 	GetPrefixList(name string) ([]string, error)

@@ -390,7 +390,7 @@ Specs resolve through a three-level chain where lower levels win:
 Device Profile  >  Zone defaults  >  Global (network.json)
 ```
 
-Eight maps participate in merge: services, filters, ipvpns, macvpns, qos_policies, qos_profiles, route_policies, prefix_lists. A device-level prefix list overrides a zone-level one of the same name, which overrides a global one.
+Seven maps participate in merge: services, filters, ipvpns, macvpns, qos_policies, route_policies, prefix_lists. A device-level prefix list overrides a zone-level one of the same name, which overrides a global one.
 
 **Zone-level overrides** — add specs under a zone in `network.json` to scope them to devices in that zone:
 

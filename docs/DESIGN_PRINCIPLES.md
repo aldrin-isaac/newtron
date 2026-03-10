@@ -451,8 +451,8 @@ truth using intent.**
 ## 9. Hierarchical Spec Resolution — Network, Zone, Node
 
 Specs are organized in a three-level hierarchy: network → zone → node
-(device profile). Each level can define the same eight overridable spec
-maps: Services, Filters, IPVPNs, MACVPNs, QoSPolicies, QoSProfiles,
+(device profile). Each level can define the same seven overridable spec
+maps: Services, Filters, IPVPNs, MACVPNs, QoSPolicies,
 RoutePolicies, and PrefixLists. **Lower level wins.** A service defined
 at the node level overrides the same-named service at the zone level,
 which overrides the network level.

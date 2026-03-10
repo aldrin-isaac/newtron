@@ -469,21 +469,6 @@ func TestLoader_ValidateAllServiceErrors(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			name: "invalid qos profile",
-			networkJSON: `{
-				"version": "1.0",
-				"zones": {},
-				"services": {
-					"bad-service": {
-						"service_type": "routed",
-						"qos_profile": "nonexistent-qos"
-					}
-				},
-				"qos_profiles": {}
-			}`,
-			expectErr: true,
-		},
-		{
 			name: "invalid ipvpn reference",
 			networkJSON: `{
 				"version": "1.0",
@@ -716,11 +701,6 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 		{
 			name:        "unknown zone",
 			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "unknown-zone"}`,
-			expectErr:   true,
-		},
-		{
-			name:        "invalid as_number",
-			profileJSON: `{"mgmt_ip": "192.168.1.1", "loopback_ip": "10.0.0.1", "zone": "amer", "as_number": -1}`,
 			expectErr:   true,
 		},
 	}

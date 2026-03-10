@@ -172,11 +172,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			return nil, fmt.Errorf("service '%s' references QoS policy '%s' which was not found — define it in network.json qos_policies section",
 				serviceName, svc.QoSPolicy)
 		}
-	} else if svc.QoSProfile != "" {
-		if _, err := i.Node().GetQoSProfile(svc.QoSProfile); err != nil {
-			return nil, fmt.Errorf("service '%s' references QoS profile '%s' which was not found — define it in network.json qos_profiles section",
-				serviceName, svc.QoSProfile)
-		}
 	}
 
 	// Generate base CONFIG_DB entries via shared generator (service_gen.go).
@@ -927,15 +922,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Create dependency checker to determine what can be safely deleted
 	depCheck := NewDependencyChecker(n, i.name)
 
-	// Decision fields — prefer binding (self-sufficient), fall back to spec (legacy bindings)
 	serviceType := b.ServiceType
 	vrfType := b.VRFType
-	if serviceType == "" {
-		if svc, _ := i.Node().GetService(serviceName); svc != nil {
-			serviceType = svc.ServiceType
-			vrfType = svc.VRFType
-		}
-	}
 
 	// Derived booleans from serviceType
 	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
@@ -943,24 +931,10 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		serviceType == spec.ServiceTypeIRB || serviceType == spec.ServiceTypeBridged
 	hasIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
 
-	// VLAN cleanup values — prefer binding (self-sufficient), fall back to macvpn spec (legacy)
 	l2vni := bindingInt(b.L2VNI)
 	anycastIP := b.AnycastIP
 	anycastMAC := b.AnycastMAC
 	arpSuppression := b.ARPSuppression == "true"
-
-	if l2vni == 0 && anycastIP == "" && b.L2VNI == "" {
-		// Legacy binding without self-sufficiency fields — fall back to macvpn spec
-		macvpnName := b.MACVPN
-		if macvpnName != "" {
-			if macvpnDef, err := i.Node().GetMACVPN(macvpnName); err == nil && macvpnDef != nil {
-				l2vni = macvpnDef.VNI
-				anycastIP = macvpnDef.AnycastIP
-				anycastMAC = macvpnDef.AnycastMAC
-				arpSuppression = macvpnDef.ARPSuppression
-			}
-		}
-	}
 
 	// Check if this is the last interface using this service (for shared resources)
 	isLastServiceUser := depCheck.IsLastServiceUser(serviceName)

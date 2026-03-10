@@ -19,7 +19,7 @@ type Settings struct {
 	// SpecDir overrides the default specification directory
 	SpecDir string `json:"spec_dir,omitempty"`
 
-	// DefaultSuite is the default --dir for newtrun run
+	// DefaultSuite is the default --dir for newtrun start
 	DefaultSuite string `json:"default_suite,omitempty"`
 
 	// TopologiesDir is the base directory for newtrun topologies

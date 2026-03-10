@@ -49,18 +49,11 @@ Discovery:
 
 	startCmd := newStartCmd()
 
-	// Register "run" as a hidden alias for "start" (backward compatibility)
-	runCmd := *startCmd
-	runCmd.Use = "run [suite]"
-	runCmd.Hidden = true
-	runCmd.Deprecated = "use 'start' instead"
-
 	rootCmd.AddCommand(
 		startCmd,
 		newPauseCmd(),
 		newStopCmd(),
 		newStatusCmd(),
-		&runCmd,
 		newListCmd(),
 		newSuitesCmd(),
 		newTopologiesCmd(),

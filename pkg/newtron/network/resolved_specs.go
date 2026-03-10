@@ -1,7 +1,7 @@
 // resolved_specs.go provides a per-device SpecProvider that holds the merged
 // result of hierarchical spec resolution (network → zone → node).
 //
-// Built at Node creation time in resolveProfile(). All 8 overridable spec
+// Built at Node creation time in resolveProfile(). All 7 overridable spec
 // maps are merged with lower-level-wins semantics: node > zone > network.
 package network
 
@@ -68,15 +68,6 @@ func (r *ResolvedSpecs) GetQoSPolicy(name string) (*spec.QoSPolicy, error) {
 		return v, nil
 	}
 	return r.network.GetQoSPolicy(name)
-}
-
-func (r *ResolvedSpecs) GetQoSProfile(name string) (*spec.QoSProfile, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if v, ok := r.merged.QoSProfiles[name]; ok {
-		return v, nil
-	}
-	return r.network.GetQoSProfile(name)
 }
 
 func (r *ResolvedSpecs) GetFilter(name string) (*spec.FilterSpec, error) {

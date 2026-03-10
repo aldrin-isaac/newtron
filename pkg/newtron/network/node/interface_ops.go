@@ -366,8 +366,6 @@ func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
 
 // IsLastAnycastMACUser returns true if no other service binding references a
 // macvpn with AnycastMAC set. Used to gate SAG_GLOBAL cleanup.
-// Reads anycast_mac from the binding directly (self-sufficient), with legacy
-// fallback to macvpn spec resolution for bindings created before this field existed.
 func (dc *DependencyChecker) IsLastAnycastMACUser() bool {
 	configDB := dc.node.ConfigDB()
 	if configDB == nil {
@@ -377,15 +375,7 @@ func (dc *DependencyChecker) IsLastAnycastMACUser() bool {
 		if intfName == dc.excludeInterface {
 			continue
 		}
-		// Prefer binding field (self-sufficient)
-		anycastMAC := binding.AnycastMAC
-		if anycastMAC == "" && binding.MACVPN != "" {
-			// Legacy fallback: binding lacks anycast_mac field
-			if macvpn, err := dc.node.GetMACVPN(binding.MACVPN); err == nil {
-				anycastMAC = macvpn.AnycastMAC
-			}
-		}
-		if anycastMAC != "" {
+		if binding.AnycastMAC != "" {
 			return false
 		}
 	}
