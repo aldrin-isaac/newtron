@@ -191,7 +191,6 @@ func TestAPICompleteness(t *testing.T) {
 			"ListVRFs":          "covered by VRFStatus",
 			"ListPortChannels":  "covered by LAGStatus",
 			"ACLTableExists":    "covered by ShowACL",
-			"GetOrphanedACLs":   "covered by Cleanup",
 			"VTEPExists":        "covered by EVPNStatus",
 			"GetServiceBinding": "covered by GetServiceBindingDetail",
 			"GetInterfaceProperty": "covered by ShowInterfaceDetail",

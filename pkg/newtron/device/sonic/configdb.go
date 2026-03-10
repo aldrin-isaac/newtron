@@ -35,7 +35,6 @@ type ConfigDB struct {
 	RouteTable        map[string]StaticRouteEntry   `json:"ROUTE_TABLE,omitempty"`
 	ACLTable          map[string]ACLTableEntry      `json:"ACL_TABLE,omitempty"`
 	ACLRule           map[string]ACLRuleEntry       `json:"ACL_RULE,omitempty"`
-	ACLTableType      map[string]ACLTableTypeEntry  `json:"ACL_TABLE_TYPE,omitempty"`
 	Scheduler         map[string]SchedulerEntry     `json:"SCHEDULER,omitempty"`
 	Queue             map[string]QueueEntry         `json:"QUEUE,omitempty"`
 	WREDProfile       map[string]WREDProfileEntry   `json:"WRED_PROFILE,omitempty"`
@@ -47,12 +46,9 @@ type ConfigDB struct {
 	RouteMap           map[string]RouteMapEntry           `json:"ROUTE_MAP,omitempty"`
 	BGPPeerGroup       map[string]BGPPeerGroupEntry       `json:"BGP_PEER_GROUP,omitempty"`
 	BGPPeerGroupAF     map[string]BGPPeerGroupAFEntry     `json:"BGP_PEER_GROUP_AF,omitempty"`
-	BGPGlobalsAFNet    map[string]BGPGlobalsAFNetEntry    `json:"BGP_GLOBALS_AF_NETWORK,omitempty"`
-	BGPGlobalsAFAgg    map[string]BGPGlobalsAFAggEntry    `json:"BGP_GLOBALS_AF_AGGREGATE_ADDR,omitempty"`
 	BGPGlobalsEVPNRT   map[string]BGPGlobalsEVPNRTEntry   `json:"BGP_GLOBALS_EVPN_RT,omitempty"`
 	PrefixSet          map[string]PrefixSetEntry          `json:"PREFIX_SET,omitempty"`
 	CommunitySet       map[string]CommunitySetEntry       `json:"COMMUNITY_SET,omitempty"`
-	ASPathSet          map[string]ASPathSetEntry           `json:"AS_PATH_SET,omitempty"`
 
 	StaticRoute map[string]map[string]string `json:"STATIC_ROUTE,omitempty"`
 
@@ -285,13 +281,6 @@ type ACLRuleEntry struct {
 	RedirectPort   string `json:"REDIRECT_PORT,omitempty"`
 }
 
-// ACLTableTypeEntry represents a custom ACL table type
-type ACLTableTypeEntry struct {
-	MatchFields   string `json:"matches,omitempty"`
-	Actions       string `json:"actions,omitempty"`
-	BindPointType string `json:"bind_point_type,omitempty"`
-}
-
 // SchedulerEntry represents a QoS scheduler
 type SchedulerEntry struct {
 	Type   string `json:"type"`             // DWRR, STRICT
@@ -372,19 +361,6 @@ type BGPPeerGroupAFEntry struct {
 	SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
 }
 
-// BGPGlobalsAFNetEntry represents a BGP network statement.
-// Key format: "vrf|address_family|prefix" (e.g., "default|ipv4_unicast|10.0.0.0/24")
-type BGPGlobalsAFNetEntry struct {
-	Policy string `json:"policy,omitempty"` // Optional route-map
-}
-
-// BGPGlobalsAFAggEntry represents a BGP aggregate-address.
-// Key format: "vrf|address_family|prefix" (e.g., "default|ipv4_unicast|10.0.0.0/8")
-type BGPGlobalsAFAggEntry struct {
-	AsSet       string `json:"as_set,omitempty"`
-	SummaryOnly string `json:"summary_only,omitempty"`
-}
-
 // PrefixSetEntry represents an IP prefix list entry for route-map matching.
 // Key format: "set_name|seq" (e.g., "PL_ALLOW|10")
 type PrefixSetEntry struct {
@@ -399,12 +375,6 @@ type CommunitySetEntry struct {
 	SetType     string `json:"set_type,omitempty"` // standard, expanded
 	MatchAction string `json:"match_action,omitempty"`
 	CommunityMember string `json:"community_member,omitempty"` // Comma-separated communities
-}
-
-// ASPathSetEntry represents an AS-path regex filter.
-// Key format: set_name (e.g., "ASPATH_FILTER")
-type ASPathSetEntry struct {
-	ASPathMember string `json:"as_path_member,omitempty"` // Regex pattern
 }
 
 // ============================================================================

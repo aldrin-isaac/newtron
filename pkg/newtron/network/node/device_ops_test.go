@@ -144,7 +144,6 @@ func testDevice() *Node {
 			RouteTable:            map[string]sonic.StaticRouteEntry{},
 			ACLTable:              map[string]sonic.ACLTableEntry{},
 			ACLRule:               map[string]sonic.ACLRuleEntry{},
-			ACLTableType:          map[string]sonic.ACLTableTypeEntry{},
 			RouteRedistribute:     map[string]sonic.RouteRedistributeEntry{},
 			NewtronServiceBinding: map[string]sonic.ServiceBindingEntry{},
 			BGPGlobalsEVPNRT:      map[string]sonic.BGPGlobalsEVPNRTEntry{},

@@ -192,13 +192,6 @@ func init() {
 				RedirectPort:   vals["REDIRECT_PORT"],
 			}
 		},
-		"ACL_TABLE_TYPE": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.ACLTableType[entry] = ACLTableTypeEntry{
-				MatchFields:   vals["matches"],
-				Actions:       vals["actions"],
-				BindPointType: vals["bind_point_type"],
-			}
-		},
 		"SCHEDULER": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.Scheduler[entry] = SchedulerEntry{
 				Type:   vals["type"],
@@ -308,17 +301,6 @@ func init() {
 				SoftReconfiguration:  vals["soft_reconfiguration"],
 			}
 		},
-		"BGP_GLOBALS_AF_NETWORK": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.BGPGlobalsAFNet[entry] = BGPGlobalsAFNetEntry{
-				Policy: vals["policy"],
-			}
-		},
-		"BGP_GLOBALS_AF_AGGREGATE_ADDR": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.BGPGlobalsAFAgg[entry] = BGPGlobalsAFAggEntry{
-				AsSet:       vals["as_set"],
-				SummaryOnly: vals["summary_only"],
-			}
-		},
 		"PREFIX_SET": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.PrefixSet[entry] = PrefixSetEntry{
 				IPPrefix:     vals["ip_prefix"],
@@ -331,11 +313,6 @@ func init() {
 				SetType:         vals["set_type"],
 				MatchAction:     vals["match_action"],
 				CommunityMember: vals["community_member"],
-			}
-		},
-		"AS_PATH_SET": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.ASPathSet[entry] = ASPathSetEntry{
-				ASPathMember: vals["as_path_member"],
 			}
 		},
 		// ---- Hash-merge parsers (9 tables) ----

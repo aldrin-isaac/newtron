@@ -204,90 +204,6 @@ func TestLoader_LoadProfile_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoader_GetService(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	svc, err := loader.GetService("CUSTOMER_L3")
-	if err != nil {
-		t.Fatalf("GetService() failed: %v", err)
-	}
-	if svc.ServiceType != "evpn-routed" {
-		t.Errorf("ServiceType = %q, want %q", svc.ServiceType, "evpn-routed")
-	}
-}
-
-func TestLoader_GetService_NotFound(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	_, err := loader.GetService("nonexistent")
-	if err == nil {
-		t.Error("GetService() should fail for nonexistent service")
-	}
-}
-
-func TestLoader_GetFilter(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	filter, err := loader.GetFilter("TEST_FILTER")
-	if err != nil {
-		t.Fatalf("GetFilter() failed: %v", err)
-	}
-	if filter.Type != "ipv4" {
-		t.Errorf("Filter type = %q, want %q", filter.Type, "ipv4")
-	}
-}
-
-func TestLoader_GetPrefixList(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	list, err := loader.GetPrefixList("RFC1918")
-	if err != nil {
-		t.Fatalf("GetPrefixList() failed: %v", err)
-	}
-	if len(list) != 3 {
-		t.Errorf("Expected 3 prefixes, got %d", len(list))
-	}
-}
-
-func TestLoader_ListServices(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	services := loader.ListServices()
-	if len(services) != 1 {
-		t.Errorf("Expected 1 service, got %d", len(services))
-	}
-}
-
 func TestLoader_DefaultSpecDir(t *testing.T) {
 	// Test that empty string uses default
 	loader := NewLoader("")
@@ -723,36 +639,6 @@ func TestLoader_ValidateProfile_InvalidIPs(t *testing.T) {
 				t.Errorf("LoadProfile() unexpected error: %v", err)
 			}
 		})
-	}
-}
-
-func TestLoader_GetFilter_NotFound(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	_, err := loader.GetFilter("nonexistent")
-	if err == nil {
-		t.Error("GetFilter() should fail for nonexistent filter")
-	}
-}
-
-func TestLoader_GetPrefixList_NotFound(t *testing.T) {
-	tmpDir := createTestSpecDir(t)
-	defer os.RemoveAll(tmpDir)
-
-	loader := NewLoader(tmpDir)
-	if err := loader.Load(); err != nil {
-		t.Fatalf("Load() failed: %v", err)
-	}
-
-	_, err := loader.GetPrefixList("nonexistent")
-	if err == nil {
-		t.Error("GetPrefixList() should fail for nonexistent prefix list")
 	}
 }
 

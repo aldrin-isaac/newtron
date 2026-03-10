@@ -68,12 +68,6 @@ func NewCompositeBuilder(deviceName string, mode CompositeMode) *CompositeBuilde
 	}
 }
 
-// SetDescription sets the description in metadata.
-func (cb *CompositeBuilder) SetDescription(desc string) *CompositeBuilder {
-	cb.metadata.Description = desc
-	return cb
-}
-
 // SetGeneratedBy sets the generator identifier in metadata.
 func (cb *CompositeBuilder) SetGeneratedBy(by string) *CompositeBuilder {
 	cb.metadata.GeneratedBy = by
@@ -108,15 +102,6 @@ func (cb *CompositeBuilder) Build() *CompositeConfig {
 		Tables:   cb.tables,
 		Metadata: cb.metadata,
 	}
-}
-
-// EntryCount returns the total number of entries in the composite config.
-func (cc *CompositeConfig) EntryCount() int {
-	count := 0
-	for _, keys := range cc.Tables {
-		count += len(keys)
-	}
-	return count
 }
 
 // ToConfigChanges converts the composite config to a slice of device.ConfigChange

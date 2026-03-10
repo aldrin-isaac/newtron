@@ -669,8 +669,7 @@ func (n *Node) ListPortChannels() []string { return n.internal.ListPortChannels(
 // ACLTableExists checks if an ACL table exists on the device.
 func (n *Node) ACLTableExists(name string) bool { return n.internal.ACLTableExists(name) }
 
-// GetOrphanedACLs returns ACL table names that are not bound to any interface.
-func (n *Node) GetOrphanedACLs() []string { return n.internal.GetOrphanedACLs() }
+
 
 // VTEPExists checks if a VTEP is configured on the device.
 func (n *Node) VTEPExists() bool { return n.internal.VTEPExists() }

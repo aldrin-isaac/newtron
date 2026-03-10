@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/newtron-network/newtron/pkg/util"
@@ -363,43 +362,6 @@ func (l *Loader) GetNetwork() *NetworkSpecFile {
 // GetPlatforms returns the platform spec
 func (l *Loader) GetPlatforms() *PlatformSpecFile {
 	return l.platforms
-}
-
-// GetService returns a service definition by name
-func (l *Loader) GetService(name string) (*ServiceSpec, error) {
-	svc, ok := l.network.Services[name]
-	if !ok {
-		return nil, fmt.Errorf("service '%s' not found", name)
-	}
-	return svc, nil
-}
-
-// GetFilter returns a filter spec by name
-func (l *Loader) GetFilter(name string) (*FilterSpec, error) {
-	spec, ok := l.network.Filters[name]
-	if !ok {
-		return nil, fmt.Errorf("filter spec '%s' not found", name)
-	}
-	return spec, nil
-}
-
-// GetPrefixList returns a prefix list by name
-func (l *Loader) GetPrefixList(name string) ([]string, error) {
-	list, ok := l.network.PrefixLists[name]
-	if !ok {
-		return nil, fmt.Errorf("prefix list '%s' not found", name)
-	}
-	return list, nil
-}
-
-// ListServices returns all service names, sorted for deterministic output.
-func (l *Loader) ListServices() []string {
-	names := make([]string, 0, len(l.network.Services))
-	for name := range l.network.Services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }
 
 // GetTopology returns the topology spec, or nil if no topology.json was found.
