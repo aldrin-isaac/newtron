@@ -395,7 +395,7 @@ action-specific extras.
 | Field | Used by | Description |
 |-------|---------|-------------|
 | `name` | all | Step identifier for output |
-| `action` | all | Which executor to run (56 available) |
+| `action` | all | Which executor to run (see `newtrun actions`) |
 | `devices` | most | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
 | `duration` | wait | How long to wait |
 | `table` | verify-config-db, verify-state-db | CONFIG_DB/STATE_DB table name |
@@ -443,6 +443,7 @@ actions. Available fields:
 | `exists` | bool | verify-config-db | Assert key exists (`true`) or does not exist (`false`) |
 | `fields` | map | verify-config-db, verify-state-db | Assert field values match (e.g., `hostname: switch1`) |
 | `min_entries` | int | verify-config-db | Assert table has at least N entries |
+| `max_entries` | int | verify-config-db | Assert table has at most N entries |
 | `timeout` | duration | verify-state-db, verify-bgp, verify-route, verify-ping, host-exec | Poll until condition met or timeout (default: 120s for BGP/state, 60s for routes, 30s for ping) |
 | `poll_interval` | duration | verify-state-db, verify-bgp, verify-route | Time between polls (default: 5s) |
 | `state` | string | verify-bgp | Expected BGP peer state (default: `Established`) |
@@ -1454,7 +1455,7 @@ List all step actions organized by category. With an action name, shows
 detailed parameter info and example YAML.
 
 ```
-newtrun actions                    # list all 56 actions by category
+newtrun actions                    # list all actions by category
 newtrun actions provision          # show detail for one action
 ```
 

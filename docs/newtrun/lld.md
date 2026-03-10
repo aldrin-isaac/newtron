@@ -26,10 +26,10 @@ newtron/
 │       └── cmd_actions.go        # actions subcommand (action metadata + detail view)
 ├── pkg/
 │   └── newtrun/
-│       ├── scenario.go           # Scenario, Step, StepAction (56 constants), ExpectBlock
+│       ├── scenario.go           # Scenario, Step, StepAction constants, ExpectBlock
 │       ├── parser.go             # ParseScenario, stepValidations table, ValidateDependencyGraph
 │       ├── runner.go             # Runner (with Client, ServerURL, NetworkID), RunOptions, Run
-│       ├── steps.go              # stepExecutor interface, StepOutput, 56 executor implementations
+│       ├── steps.go              # stepExecutor interface, StepOutput, all executor implementations
 │       ├── steps_host.go         # hostExecExecutor, shellQuote, runSSHCommand
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
@@ -732,7 +732,7 @@ each step.
 ### 7.2 Executor Dispatch
 
 ```go
-var executors = map[StepAction]stepExecutor{ ... } // 56 entries
+var executors = map[StepAction]stepExecutor{ ... } // see scenario.go for full list
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
@@ -835,6 +835,21 @@ All SONiC operations go through `r.Client.*()` HTTP client methods. The "Client 
 | 54 | `refreshServiceExecutor` | `refresh-service` | `RefreshService` |
 | 55 | `cleanupExecutor` | `cleanup` | `Cleanup` |
 | 56 | `hostExecExecutor` | `host-exec` | — (direct SSH via `r.HostConns`) |
+| 57 | `createPrefixListExecutor` | `create-prefix-list` | `CreatePrefixList` |
+| 58 | `deletePrefixListExecutor` | `delete-prefix-list` | `DeletePrefixList` |
+| 59 | `addPrefixEntryExecutor` | `add-prefix-entry` | `AddPrefixEntry` |
+| 60 | `removePrefixEntryExecutor` | `remove-prefix-entry` | `RemovePrefixEntry` |
+| 61 | `createRoutePolicyExecutor` | `create-route-policy` | `CreateRoutePolicy` |
+| 62 | `deleteRoutePolicyExecutor` | `delete-route-policy` | `DeleteRoutePolicy` |
+| 63 | `addRoutePolicyRuleExecutor` | `add-route-policy-rule` | `AddRoutePolicyRule` |
+| 64 | `removeRoutePolicyRuleExecutor` | `remove-route-policy-rule` | `RemoveRoutePolicyRule` |
+| 65 | `createServiceExecutor` | `create-service` | `CreateService` |
+| 66 | `deleteServiceExecutor` | `delete-service` | `DeleteService` |
+
+Executors 57–66 are **network-level spec authoring** actions. They operate at
+network scope (no `devices:` field) and call `r.Client.*` directly. These
+actions create or modify specs that services reference — they never touch
+device CONFIG_DB.
 
 ### 7.6 Verification Executor Detail
 
@@ -1479,7 +1494,7 @@ Lists directories under `newtrun/topologies/`.
 newtrun actions [action]
 ```
 
-- No args: lists all 56 actions grouped by category (Provisioning, Verification, VLAN, VRF, EVPN, Service, QoS, BGP, ACL, PortChannel, Interface, Routing, Host, Utility)
+- No args: lists all actions grouped by category (Provisioning, Verification, VLAN, VRF, EVPN, Service, QoS, BGP, ACL, PortChannel, Interface, Routing, Host, Spec Authoring, Utility)
 - With action name: shows detailed information including category, description, prerequisites, required/optional parameters, devices requirement, and YAML example
 
 The `ActionMetadata` struct and `getActionMetadata()` function provide structured

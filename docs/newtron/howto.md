@@ -43,7 +43,7 @@ For the architectural principles behind this design, see the [HLD](hld.md). For 
 12. [ACL Management](#12-acl-management)
 13. [BGP Visibility](#13-bgp-visibility)
 14. [QoS Management](#14-qos-management)
-15. [Filter Management](#15-filter-management)
+15. [Filter and Policy Management](#15-filter-and-policy-management)
 16. [Device Operations](#16-device-operations)
 17. [Topology Provisioning](#17-topology-provisioning)
 18. [Troubleshooting](#18-troubleshooting)
@@ -442,6 +442,8 @@ Zone-level specs can reference network-level specs (e.g., the `amer-transit` ser
 
 All specs from all levels are visible. If the same name exists at multiple levels, the most specific level wins.
 
+**Common pitfall:** a device profile overrides a network-level service with the same name but different fields. The override replaces the entire spec — fields not repeated in the override are lost, not merged. If you want to change one field of a network-level service for a specific device, you must repeat all fields.
+
 ### 3.5 Platform Specification (`platforms.json`)
 
 ```json
@@ -739,12 +741,12 @@ newtron leaf1 service remove Ethernet0 -x
 
 1. Removes QoS mapping from interface
 2. Removes IP addresses from interface
-3. Handles shared ACLs: removes interface from ACL binding list, or deletes ACL entirely if this was the last user
+3. Handles shared policy objects (ACLs, route maps, prefix sets, BGP peer groups): removes interface from binding list, or deletes the object entirely if this was the last user (see [§15.5](#155-shared-policy-objects))
 4. Unbinds interface from VRF; for per-interface VRFs (`vrf_type: interface`), deletes the VRF and all associated EVPN config (BGP_EVPN_VNI, BGP_GLOBALS_AF, VXLAN_TUNNEL_MAP)
 5. For L2/IRB services: removes VLAN membership; if last member, removes all VLAN-related config (SVI, ARP suppression, L2VNI mapping, VLAN itself)
 6. Deletes `NEWTRON_SERVICE_BINDING` entry
 
-**Dependency-aware cleanup:** Shared resources (ACLs, VLANs, VRFs) are only deleted when the interface being cleaned up is the last user. This is determined by scanning CONFIG_DB for remaining consumers while excluding the current interface.
+**Dependency-aware cleanup:** Shared resources (ACLs, route maps, prefix sets, peer groups, VLANs, VRFs) are only deleted when the interface being cleaned up is the last user. This is determined by scanning CONFIG_DB for remaining consumers while excluding the current interface.
 
 ### 5.4 Refresh a Service
 
@@ -774,7 +776,7 @@ newtron leaf1 service refresh Ethernet0 -x
 
 **How RefreshService works internally:**
 
-RefreshService performs a full remove-then-reapply cycle:
+RefreshService performs a full remove-then-reapply cycle. Why not a targeted diff? Because services touch many CONFIG_DB tables with cross-dependencies (ACLs, VRFs, route maps, peer groups). A targeted diff would need table-specific merge logic for every combination. The remove+reapply approach guarantees that the final state matches the current spec, regardless of what changed:
 
 1. Saves the current service name, IP address, and peer AS from the interface binding
 2. Calls `RemoveService()` to generate a changeset that tears down the current config
@@ -1502,11 +1504,14 @@ If the ACL is bound to only one interface, unbinding it will automatically delet
 
 When a service with an `ingress_filter` is applied, newtron:
 
-1. Derives the ACL name from the service name (e.g., `customer-l3-in`)
+1. Derives a content-hashed ACL name from the filter spec and direction
+   (e.g., `PROTECT_RE_IN_1ED5F2C7` — see [§15.5 Shared Policy Objects](#155-shared-policy-objects))
 2. If the ACL exists: adds the interface to its binding list
 3. If not: creates the ACL table and expands all rules from the filter spec
 
-Rule expansion handles `src_prefix_list`/`dst_prefix_list` references — each prefix becomes a separate ACL rule. Priority is computed as `10000 - sequence_number`.
+Rule expansion handles `src_prefix_list`/`dst_prefix_list` references — each
+prefix becomes a separate ACL rule. Priority is computed as
+`10000 - sequence_number`.
 
 ---
 
@@ -1639,9 +1644,18 @@ newtron leaf1 service refresh Ethernet0 -x               # restore service-manag
 
 ---
 
-## 15. Filter Management
+## 15. Filter and Policy Management
 
-Why both filters and ACLs? A **filter** is a reusable template in `network.json`. An **ACL** is a device-level CONFIG_DB object. Services bridge the two — applying a service with a filter creates the corresponding ACL. Filter management is spec-level; ACL management is device-level.
+Three spec-level policy objects control traffic handling: **filters** (ACL
+templates), **route policies** (BGP import/export rules), and **prefix lists**
+(reusable IP prefix sets referenced by filters and route policies). All three
+live in `network.json` and are instantiated as CONFIG_DB objects when services
+reference them.
+
+Why both filters and ACLs? A **filter** is a reusable template in `network.json`.
+An **ACL** is a device-level CONFIG_DB object. Services bridge the two — applying
+a service with a filter creates the corresponding ACL. Filter management is
+spec-level; ACL management is device-level.
 
 ### 15.1 Spec-Level Operations
 
@@ -1704,6 +1718,134 @@ newtron filter add-rule my-filter --priority 150 --action deny --src-ip 172.16.0
 # 5. Refresh to pick up filter changes
 newtron leaf1 service refresh Ethernet0 -x
 ```
+
+### 15.3 Route Policy Management
+
+Route policies define match-action rules for BGP route filtering. A service's
+`routing.import_policy` or `routing.export_policy` references a route policy by
+name. When the service is applied, newtron translates the route policy into
+`ROUTE_MAP` and (if rules reference prefix lists) `PREFIX_SET` entries in
+CONFIG_DB.
+
+Route policies are managed via the HTTP API. No CLI noun exists yet — use the
+Go client or newtrun step actions (`create-route-policy`, `delete-route-policy`,
+`add-route-policy-rule`, `remove-route-policy-rule`).
+
+**Spec structure** in `network.json`:
+
+```json
+{
+  "route_policies": {
+    "customer-import": {
+      "description": "Accept customer routes with local-pref 200",
+      "rules": [
+        {
+          "sequence": 10,
+          "action": "permit",
+          "prefix_list": "rfc1918",
+          "set": { "local_pref": 200 }
+        },
+        {
+          "sequence": 20,
+          "action": "deny"
+        }
+      ]
+    }
+  }
+}
+```
+
+**Rule fields:** `sequence` (ordering), `action` (permit/deny), `prefix_list`
+(optional — matches routes against this prefix list), `community` (optional —
+match on community), `set` (optional — modify attributes: `local_pref`,
+`community`, `med`).
+
+**Go client usage:**
+
+```go
+client.CreateRoutePolicy(ctx, newtron.CreateRoutePolicyRequest{
+    Name:        "customer-import",
+    Description: "Accept customer routes with local-pref 200",
+})
+client.AddRoutePolicyRule(ctx, newtron.AddRoutePolicyRuleRequest{
+    Policy:     "customer-import",
+    Sequence:   10,
+    Action:     "permit",
+    PrefixList: "rfc1918",
+    Set:        &newtron.RoutePolicySetSpec{LocalPref: 200},
+})
+```
+
+Delete fails if any service references the route policy.
+
+### 15.4 Prefix List Management
+
+Prefix lists are named collections of IP prefixes. They are referenced in two
+places: filter rules (`src_prefix_list` / `dst_prefix_list` — each prefix
+expands to a separate ACL rule) and route policy rules (`prefix_list` — becomes
+a `PREFIX_SET` match condition in `ROUTE_MAP`).
+
+Prefix lists are managed via the HTTP API. No CLI noun exists yet — use the
+Go client or newtrun step actions (`create-prefix-list`, `delete-prefix-list`,
+`add-prefix-entry`, `remove-prefix-entry`).
+
+**Spec structure** in `network.json`:
+
+```json
+{
+  "prefix_lists": {
+    "rfc1918": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+    "bogons": ["0.0.0.0/8", "127.0.0.0/8", "224.0.0.0/4"]
+  }
+}
+```
+
+**Go client usage:**
+
+```go
+client.CreatePrefixList(ctx, newtron.CreatePrefixListRequest{
+    Name:     "rfc1918",
+    Prefixes: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+})
+client.AddPrefixListEntry(ctx, newtron.AddPrefixListEntryRequest{
+    PrefixList: "rfc1918",
+    Prefix:     "100.64.0.0/10",
+})
+client.RemovePrefixListEntry(ctx, "rfc1918", "100.64.0.0/10")
+```
+
+Delete fails if any filter rule or route policy rule references the prefix list.
+
+### 15.5 Shared Policy Objects
+
+When services reference filters, route policies, or prefix lists, newtron
+creates CONFIG_DB objects that may be **shared** across multiple interfaces.
+Three mechanisms manage this sharing:
+
+**Content-hashed naming.** ACL_TABLE, ROUTE_MAP, PREFIX_SET, and COMMUNITY_SET
+entries include an 8-character SHA256 hash of their generated CONFIG_DB fields
+in the key name (e.g., `PROTECT_RE_IN_1ED5F2C7`). The hash ensures that
+identical specs produce identical names, and changed specs produce different
+names.
+
+**Blue-green migration.** When a spec changes (filter rule added, route policy
+modified), the content hash changes. On `service refresh`, newtron creates the
+new object alongside the old one, migrates the interface to the new object, and
+deletes the old object only if no other interface still references it. This
+avoids a window where the device has no policy applied.
+
+**Reference-aware cleanup.** Shared policy objects are created on first reference
+and deleted when the last consumer is removed. `RemoveService` scans CONFIG_DB
+for remaining consumers of each shared object before deciding whether to delete
+it. This prevents one interface's removal from breaking another interface's
+policy.
+
+**BGP peer groups.** When multiple interfaces use the same service with BGP
+routing, newtron creates a `BGP_PEER_GROUP` named after the service. Neighbors
+reference the peer group; shared attributes (route maps, admin status) live on
+`BGP_PEER_GROUP_AF`. Peer groups are created on first `ApplyService` for a
+service with BGP routing and deleted when the last interface using that service
+is removed.
 
 ---
 
@@ -1824,7 +1966,7 @@ newtron provision -x
 
 **Provisioning flow (per device):**
 
-1. `GenerateComposite` — builds complete CONFIG_DB offline using an abstract Node (no SSH connection). Calls the same methods as manual operations (`SetupEVPN`, `ApplyService`, `ConfigureBGP`, etc.) but against a shadow CONFIG_DB.
+1. `GenerateComposite` — builds complete CONFIG_DB offline using an abstract Node. The abstract Node has no SSH connection; instead of writing to Redis, operations accumulate entries in a shadow CONFIG_DB. This uses the same code path as manual operations (`SetupEVPN`, `ApplyService`, `ConfigureBGP`, etc.) — the abstract node eliminates the need for a parallel "config generation" implementation.
 2. `DeliverComposite` — delivers the composite to the device via overwrite mode (`DEL` all relevant tables, then `HSET` new entries).
 3. `SaveConfig` — persists to `/etc/sonic/config_db.json`.
 4. `ConfigReload` — restarts all SONiC daemons to pick up the new config.

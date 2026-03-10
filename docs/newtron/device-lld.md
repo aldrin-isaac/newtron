@@ -411,6 +411,37 @@ Used by composite delivery (`DeliverComposite` at the node layer) to replace the
 - **Performance**: Single round-trip vs one per entry. A composite with 200 entries takes 1 round-trip.
 - **Notification batching**: SONiC daemons see the complete change set at once via keyspace notifications.
 
+### 3.8 Schema Validation (`pkg/newtron/device/sonic/schema.go`)
+
+Every CONFIG_DB write passes through `ChangeSet.Validate()` before reaching
+Redis. The schema is a static Go data structure encoding per-table, per-field
+constraints derived from SONiC YANG models:
+
+```go
+type FieldConstraint struct {
+    Type       FieldType         // String, Int, Enum, IP, CIDR, MAC, Bool
+    Required   bool
+    Range      *[2]int           // min, max (for Int fields)
+    Pattern    string            // regex (for string validation)
+    Enum       []string          // allowed values (for Enum fields)
+}
+
+type TableSchema struct {
+    KeyPattern string                       // regex for key format
+    Fields     map[string]FieldConstraint   // field name → constraint
+}
+```
+
+**Fail-closed design:** Unknown tables and unknown fields are validation errors.
+When adding a new CONFIG_DB write in `*_ops.go`, the corresponding table and
+field must also be added to `schema.go` — tests fail until they are.
+
+**YANG reference:** Constraints are derived from
+`sonic-buildimage/src/sonic-yang-models/yang-models/*.yang`. The mapping is
+documented in `pkg/newtron/device/sonic/yang/constraints.md`. Tables without
+YANG models (NEWTRON_SERVICE_BINDING, SAG_GLOBAL, SUPPRESS_VLAN_NEIGH,
+BGP_EVPN_VNI) derive constraints from newtron usage patterns.
+
 ---
 
 ## 4. CONFIG_DB Entry Types
@@ -730,9 +761,14 @@ type ServiceBindingEntry struct {
     AnycastIP        string `json:"anycast_ip,omitempty"`
     AnycastMAC       string `json:"anycast_mac,omitempty"`
     ARPSuppression   string `json:"arp_suppression,omitempty"`
-    BGPPeerAS        string `json:"bgp_peer_as,omitempty"`
-    AppliedAt        string `json:"applied_at,omitempty"`
-    AppliedBy        string `json:"applied_by,omitempty"`
+    BGPPeerAS             string `json:"bgp_peer_as,omitempty"`
+    PeerGroup             string `json:"peer_group,omitempty"`        // BGP peer group name (for cleanup)
+    RouteMapIn            string `json:"route_map_in,omitempty"`      // Content-hashed import route map (stale cleanup)
+    RouteMapOut           string `json:"route_map_out,omitempty"`     // Content-hashed export route map (stale cleanup)
+    RouteReflectorClient  string `json:"route_reflector_client,omitempty"` // "true" if rrclient
+    NextHopSelf           string `json:"next_hop_self,omitempty"`     // "true" if nhself
+    AppliedAt             string `json:"applied_at,omitempty"`
+    AppliedBy             string `json:"applied_by,omitempty"`
 }
 ```
 

@@ -178,7 +178,7 @@ type ServiceSpec struct {
 | `ServiceTypeRouted` | `"routed"` | IP address at apply time |
 | `ServiceTypeBridged` | `"bridged"` | VLAN at apply time |
 | `ServiceTypeIRB` | `"irb"` | VLAN + IP at apply time |
-| `ServiceTypeEVPNRouted` | `"evpn-routed"` | `ipvpn` reference |
+| `ServiceTypeEVPNRouted` | `"evpn-routed"` | `ipvpn` reference — **abandoned on CiscoVS/Silicon One** (RCA-039: L3VNI DECAP blocked by SAI) |
 | `ServiceTypeEVPNBridged` | `"evpn-bridged"` | `macvpn` reference |
 | `ServiceTypeEVPNIRB` | `"evpn-irb"` | Both `ipvpn` and `macvpn` references |
 
@@ -377,6 +377,13 @@ type TopologyInterface struct {
     Service string            `json:"service"`
     IP      string            `json:"ip,omitempty"`
     VRF     string            `json:"vrf,omitempty"`
+    Params  map[string]string `json:"params,omitempty"`
+}
+
+type TopologyPortChannel struct {
+    Members []string          `json:"members"`          // Physical interface names
+    Service string            `json:"service,omitempty"`
+    IP      string            `json:"ip,omitempty"`
     Params  map[string]string `json:"params,omitempty"`
 }
 
@@ -1314,6 +1321,41 @@ Each device gets a `NodeActor` — a single goroutine that serializes all operat
 | `connectAndLocked` | Composite deliver | `getNode → Lock → fn(node) → Unlock` — direct Redis writes outside ChangeSet model |
 
 `connectAndRead` calls `Refresh()` to reload CONFIG_DB from Redis before reading, ensuring reads always reflect the latest device state. `connectAndExecute` delegates the full Lock/Commit/Save/Unlock lifecycle to `Node.Execute()` (§6.6). `connectAndLocked` is used for operations like `DeliverComposite` that write directly to Redis via pipeline without the ChangeSet model.
+
+### 6.12 Shared Policy Objects
+
+When services reference filters, route policies, or prefix lists, newtron
+creates CONFIG_DB objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
+that may be shared across multiple interfaces using the same service.
+
+**Content-hashed naming.** Shared policy object keys include an 8-character
+SHA256 hash of their generated CONFIG_DB fields:
+
+```
+ACL_TABLE|PROTECT_RE_IN_1ED5F2C7
+ROUTE_MAP|CUSTOMER_IMPORT_A3B7C1D4|10
+PREFIX_SET|RFC1918_E9F2A1B3
+```
+
+The hash is computed by `util.ContentHash()` from the entry's field values.
+Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes are computed
+first, then ROUTE_MAP entries reference real PREFIX_SET names (including hashes),
+so a content change cascades through the hash chain.
+
+**Lifecycle:** Created on first reference (first `ApplyService` using the
+spec), deleted when the last consumer is removed (`RemoveService` scans
+CONFIG_DB for remaining consumers). On spec change → hash change → blue-green
+migration: new object created alongside old, interface migrated, old object
+deleted if no remaining consumers.
+
+**BGP peer groups.** Services with BGP routing create a `BGP_PEER_GROUP` named
+after the service (not content-hashed — the group identity is the service name,
+not its content). Peer group created on first apply, deleted when last consumer
+removed.
+
+**Ownership:** `service_ops.go` owns ROUTE_MAP, PREFIX_SET, COMMUNITY_SET.
+`acl_ops.go` owns ACL_TABLE, ACL_RULE. `bgp_ops.go` owns BGP_PEER_GROUP,
+BGP_PEER_GROUP_AF.
 
 ## 7. Permission System
 

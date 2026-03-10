@@ -138,10 +138,10 @@ newtron/
 │   └── cmd_actions.go         # actions command (list/show step actions)
 │
 ├── pkg/newtrun/               # Core library
-│   ├── scenario.go            # Scenario, Step, StepAction (56 constants), ExpectBlock
+│   ├── scenario.go            # Scenario, Step, StepAction constants, ExpectBlock
 │   ├── parser.go              # ParseScenario, validation, dependency graph (Kahn's)
 │   ├── runner.go              # Runner, RunOptions, iterateScenarios, connectDevices
-│   ├── steps.go               # stepExecutor interface, 56 executor implementations
+│   ├── steps.go               # stepExecutor interface, all executor implementations
 │   ├── steps_host.go          # host-exec executor, shellQuote, runSSHCommand
 │   ├── deploy.go              # DeployTopology, EnsureTopology, DestroyTopology
 │   ├── state.go               # RunState, ScenarioState, SuiteStatus, persistence
@@ -328,7 +328,7 @@ ordering.
 
 Every step has an `action` that maps to a `stepExecutor` in the Runner. Most
 actions call `r.Client.X()` over HTTP to newtron-server. Host actions use
-direct SSH. There are 56 registered actions.
+direct SSH (run `newtrun actions` for the full list).
 
 **Pattern:** Each action is a struct implementing `Execute(ctx, r, step)
 *StepOutput`. Device-targeting actions use one of three multi-device helpers
@@ -433,6 +433,18 @@ SONiC switches receive newtron operations).
 |--------|-------------|
 | `add-static-route` / `remove-static-route` | Static route in VRF |
 
+**Network-level spec authoring** — Create and modify specs without touching devices.
+These actions operate at network scope (no `devices:` field). They call
+`r.Client.*` directly — the spec exists in the network, not on any device.
+
+| Action | Description |
+|--------|-------------|
+| `create-service` / `delete-service` | Service spec lifecycle |
+| `create-prefix-list` / `delete-prefix-list` | Prefix list spec lifecycle |
+| `add-prefix-entry` / `remove-prefix-entry` | Add/remove prefix in list |
+| `create-route-policy` / `delete-route-policy` | Route policy spec lifecycle |
+| `add-route-policy-rule` / `remove-route-policy-rule` | Add/remove rule in policy |
+
 **Infrastructure** — Utility actions.
 
 | Action | Description |
@@ -482,7 +494,7 @@ The built-in suites demonstrate patterns for different testing strategies:
   Scenarios build on each other (boot → configure → verify → teardown).
 
 Users write new suites by creating a directory of YAML files. Any combination
-of the 56 actions can appear in steps. Custom topologies work with custom
+of the registered actions can appear in steps. Custom topologies work with custom
 suites — the only constraint is that the `topology:` field names a directory
 under `newtrun/topologies/`.
 
@@ -940,7 +952,7 @@ scenarios in that suite in dependency order.
 newtrun actions [action]
 ```
 
-Without arguments, lists all 56 registered step actions. With an action name,
+Without arguments, lists all registered step actions. With an action name,
 shows the action's description and required parameters.
 
 ### 13.7 topologies

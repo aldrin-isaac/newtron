@@ -300,7 +300,7 @@ Resolution is **union with lower-level-wins**: if the same spec name exists at m
 ```
 ┌──────────────────────────┐
 │                          │
-│          Global          │
+│         Network          │
 │      (network.json)      │
 │                          │
 └──────────────────────────┘
@@ -318,7 +318,7 @@ Resolution is **union with lower-level-wins**: if the same spec name exists at m
   ▼
 ┌──────────────────────────┐
 │                          │
-│      Device Profile      │
+│          Node            │
 │ (profiles/{device}.json) │
 │                          │
 └──────────────────────────┘
@@ -327,11 +327,13 @@ Resolution is **union with lower-level-wins**: if the same spec name exists at m
   ▼
 ┌──────────────────────────┐
 │                          │
-│     ResolvedProfile      │
+│     ResolvedSpecs        │
 │        (runtime)         │
 │                          │
 └──────────────────────────┘
 ```
+
+At runtime, `buildResolvedSpecs()` merges all three levels into a `ResolvedSpecs` snapshot per node. This snapshot implements the `SpecProvider` interface used by all node operations — lookups fall through from node to zone to network until a match is found.
 
 ### 3.6 Spec File Structure
 
