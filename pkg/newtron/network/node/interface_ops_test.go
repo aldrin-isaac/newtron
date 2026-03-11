@@ -144,6 +144,26 @@ func TestSetIP(t *testing.T) {
 	}
 }
 
+func TestSetIP_VRFBound(t *testing.T) {
+	d, intf := testInterface()
+	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
+	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	ctx := context.Background()
+
+	cs, err := intf.SetIP(ctx, "10.1.0.0/31")
+	if err != nil {
+		t.Fatalf("SetIP: %v", err)
+	}
+
+	// When VRF-bound, only the IP subentry is written (no enableIpRouting base entry).
+	// The base INTERFACE entry already exists with vrf_name; re-writing it with NULL
+	// disrupts intfmgrd on CiscoVS (RCA-037).
+	assertChange(t, cs, "INTERFACE", "Ethernet0|10.1.0.0/31", ChangeAdd)
+	if len(cs.Changes) != 1 {
+		t.Errorf("expected 1 change (IP only, no base entry), got %d", len(cs.Changes))
+	}
+}
+
 func TestSetIP_Invalid(t *testing.T) {
 	_, intf := testInterface()
 	ctx := context.Background()

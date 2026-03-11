@@ -7,7 +7,7 @@
     "amer": {}
   },
   "qos_policies": {
-    "test-4q": {
+    "TEST_4Q": {
       "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
       "queues": [
         {
@@ -69,7 +69,7 @@
     }
   },
   "ipvpns": {
-    "evpn-irb-vrf": {
+    "EVPN_IRB_VRF": {
       "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
       "vrf": "Vrf_IRB",
       "l3vni": 50002,
@@ -78,7 +78,7 @@
         "65000:50002"
       ]
     },
-    "evpn-l3-vrf": {
+    "EVPN_L3_VRF": {
       "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
       "vrf": "Vrf_L3EVPN",
       "l3vni": 50001,
@@ -89,12 +89,12 @@
     }
   },
   "macvpns": {
-    "svc-vlan200": {
+    "SVC_VLAN200": {
       "description": "VLAN 200 for composite bridged testing",
       "vlan_id": 200,
       "vni": 0
     },
-    "svc-vlan400": {
+    "SVC_VLAN400": {
       "description": "VLAN 400 for composite EVPN IRB testing",
       "vlan_id": 400,
       "vni": 50400,
@@ -105,7 +105,7 @@
       ],
       "arp_suppression": true
     },
-    "vlan300": {
+    "VLAN300": {
       "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
       "vlan_id": 300,
       "vni": 50300,
@@ -116,16 +116,16 @@
     }
   },
   "services": {
-    "svc-bridged": {
+    "SVC_BRIDGED": {
       "description": "Bridged service for composite testing",
       "service_type": "bridged",
-      "macvpn": "svc-vlan200"
+      "macvpn": "SVC_VLAN200"
     },
-    "svc-evpn-irb": {
+    "SVC_EVPN_IRB": {
       "description": "EVPN IRB service for composite testing",
       "service_type": "evpn-irb",
-      "ipvpn": "evpn-irb-vrf",
-      "macvpn": "svc-vlan400",
+      "ipvpn": "EVPN_IRB_VRF",
+      "macvpn": "SVC_VLAN400",
       "vrf_type": "shared"
     }
   }

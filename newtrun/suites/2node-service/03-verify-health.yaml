@@ -24,7 +24,7 @@ steps:
   # that the poll just confirmed as Established.
   - name: settle-after-bgp
     action: wait
-    duration: 5s
+    duration: 15s
 
   - name: verify-health-switch1
     action: verify-health

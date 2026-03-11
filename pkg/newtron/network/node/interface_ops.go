@@ -55,7 +55,15 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 
 	// SONiC requires both the base interface entry and the IP entry.
 	// The base entry enables routing on the interface; the IP entry assigns the address.
-	entries := append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
+	// However, if the interface already has a VRF binding (INTERFACE|name with
+	// vrf_name set), the base entry already exists — re-writing it with NULL:NULL
+	// disrupts intfmgrd on CiscoVS (see RCA-037). Skip enableIpRouting in that case.
+	var entries []sonic.Entry
+	if i.VRF() == "" {
+		entries = append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
+	} else {
+		entries = i.assignIpAddress(ipAddr)
+	}
 	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
 	n.applyShadow(cs)
