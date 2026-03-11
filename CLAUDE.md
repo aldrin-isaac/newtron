@@ -572,6 +572,23 @@ Dispatch subagents with `model: "sonnet"` for:
 - Grep/read research tasks with clear search criteria
 - Doc updates where the changes are already specified
 
+## Greenfield — No Backwards Compatibility
+
+newtron is a greenfield system with no installed base. Backwards compatibility is
+a non-goal. See `docs/DESIGN_PRINCIPLES.md` §40 for the full principle.
+
+Rules:
+- **No compatibility shims.** When a format or API changes, change it everywhere in
+  one commit. No dual-format detection, no deprecated aliases, no `_old` renames.
+- **No legacy format handling at runtime.** Factory/community artifacts are cleaned
+  up by `newtron init`. Operations assume a clean, initialized device.
+- **No API versioning.** One version: current. All consumers updated in the same commit.
+- **Delete, don't deprecate.** If something is unused, remove it completely.
+- **Exception: SONiC releases.** newtron must support multiple SONiC releases (202411,
+  202505, etc.) because operators run different versions. This is multi-platform
+  support, not backwards compatibility. Version-aware code paths belong in the device
+  layer, gated on detected SONiC version.
+
 ## Regression Prevention
 
 **Never break a feature that was previously working.**

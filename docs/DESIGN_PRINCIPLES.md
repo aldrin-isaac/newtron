@@ -2154,7 +2154,163 @@ fallback-on-miss approach is O(1) per lookup and requires no coordination.
 
 ---
 
-## 40. Summary
+## 40. Greenfield — Backwards Compatibility Is a Non-Goal
+
+newtron is a greenfield system. It does not inherit users, deployments, or API
+contracts from a predecessor. There is no installed base to protect, no migration
+path to maintain, no deprecated interface to keep working.
+
+This has concrete consequences for how code is written:
+
+### No compatibility shims
+
+When a data format, key schema, or API shape changes, change it everywhere in
+one commit. Do not:
+
+- Rename unused variables to `_oldName` to preserve symbols
+- Re-export moved types from their old location
+- Add `// removed: X` comments as tombstones
+- Accept both old and new formats with a detection heuristic
+- Add feature flags or version checks to route between old and new paths
+
+If something is unused, delete it. If something moved, update all references.
+If a format changed, change all producers and consumers. One commit, fully clean.
+
+### No legacy format handling in the runtime path
+
+Factory images, community defaults, and third-party tools may leave artifacts
+in CONFIG_DB (legacy bgpcfgd entries, stale DEVICE_METADATA fields, default
+config_db.json entries). These are **not newtron's problem at runtime**.
+
+The correct approach:
+
+1. **Initialization cleans up** — `newtron init` is the one-time boundary where
+   factory state is scrubbed and the device is prepared for newtron management.
+   Cleanup code belongs here, not scattered through operations.
+2. **Operations assume a clean device** — after init, every operation assumes the
+   device has only newtron-managed and community-standard entries. Operations do
+   not check for or work around legacy formats.
+3. **Detection functions check newtron's own schema** — `BGPConfigured()` checks
+   `BGP_GLOBALS["default"]` (the frrcfgd entry newtron creates), not legacy
+   indicators like `DEVICE_METADATA.bgp_asn` or bare-IP `BGP_NEIGHBOR` keys.
+
+### No API versioning
+
+The public API (`pkg/newtron/`) has exactly one version: current. When a type,
+method signature, or behavior changes, all consumers (CLI, newtrun, HTTP server)
+are updated in the same commit. There is no `v1`/`v2` namespace, no deprecation
+period, no `Option` structs with backwards-compatible zero values.
+
+### Why this matters
+
+Compatibility code is the primary source of accidental complexity in mature
+systems. Every `if oldFormat { ... } else { ... }` branch doubles the test
+surface, doubles the bug surface, and confuses readers who must understand both
+paths to reason about behavior. In a greenfield system, this complexity is
+entirely self-inflicted — there is no external force requiring it.
+
+The rule is simple: **write code for the system as it is today, not as it was
+yesterday.**
+
+### Exception: SONiC release differences
+
+This principle applies to newtron's own code — its types, APIs, key schemas, and
+internal formats. It does **not** apply to the SONiC platform underneath.
+
+SONiC releases change CONFIG_DB schemas, daemon behavior, YANG models, and
+default configurations between releases (e.g., 202411 → 202505). newtron must
+support multiple SONiC releases because operators run different versions across
+their fleet. This is not backwards compatibility — it is multi-platform support,
+analogous to a compiler targeting multiple CPU architectures.
+
+When SONiC releases diverge, the correct approach is platform-aware code paths
+gated on the detected SONiC version, not version-unaware code that tries to
+work everywhere by accident. The version detection and branching should be
+explicit and centralized (in the device layer), not scattered across operations.
+
+---
+
+## 41. Multi-Version Readiness — Protect the Seams
+
+newtron will eventually manage devices running different SONiC releases
+simultaneously (202411, 202505, future). The architecture must support this
+without scattering version checks across the codebase. This is not a feature
+to build now — it is a set of **architectural boundaries to preserve** so that
+multi-version support can be added later by layering data-driven overrides onto
+the existing structure.
+
+### The three boundaries that make multi-version possible
+
+**1. All CONFIG_DB interaction is funneled through Device.**
+
+The `device/sonic/` package is the sole point of contact with Redis. No
+operation in `node/` or above constructs raw Redis commands or knows Redis
+database numbers. This means version-aware schema resolution, key format
+differences, and parser variations can be introduced in one package without
+touching operations code.
+
+Preserving principles: §1 (SONiC is a database), §11 (single-owner tables),
+§13 (import direction).
+
+**2. All device-scoped operations flow through Node.**
+
+Every operation goes `CLI → API → Node → Device → Redis`. Node holds the
+Device, which will hold the detected version. Any operation that needs
+version-aware behavior has access to the version through this chain without
+new plumbing. There is no alternative path that bypasses Node.
+
+Preserving principles: §26 (Node as device isolation boundary), §24 (respect
+abstraction boundaries).
+
+**3. Config functions are pure — parameters in, entries out.**
+
+The `*_ops.go` config generators take domain parameters and return
+`[]sonic.Entry`. They do not reach into Redis, Device, or global state.
+Adding a version parameter (or a version-aware schema lookup) to their
+inputs lets them produce different entries for different releases without
+changing their structure.
+
+Preserving principles: §21 (pure config functions), §12 (file-level cohesion).
+
+### What this means for day-to-day development
+
+These boundaries exist today for other good reasons. This principle says:
+**do not erode them**, because they are load-bearing for multi-version support.
+
+Concretely, do not:
+
+- Add direct Redis calls outside `device/sonic/` — even "just one quick read"
+- Add CONFIG_DB key construction outside the owning `*_ops.go` file
+- Bypass Node to call Device methods from operations code
+- Hardcode SONiC-version-specific behavior in operations without a version
+  parameter (use platform feature checks or defer to the device layer)
+- Put schema knowledge (field names, value constraints, key formats) in the
+  transport or API layer
+
+### When multi-version is implemented
+
+The expected shape — not a design, just the architectural direction:
+
+- **Version detection**: `Device.Connect()` reads the SONiC version, stores it
+  on Device. Available to all downstream code through the existing call chain.
+- **Schema overrides**: base schema (current `schema.go`) + version-specific
+  deltas. Validation resolves the effective schema for the device's version.
+  Data-driven, not code-branched.
+- **Feature/behavior overrides**: extend `PlatformSpec` with version constraints
+  alongside feature flags. Operations consult capabilities, not version numbers.
+- **Config function overrides**: where a table's key format or field set changes
+  between releases, the config function receives the version context and
+  produces the correct entries. The override is in the config function (which
+  owns the table), not in the caller.
+
+The guiding rule: **version differences are data (schema deltas, capability
+tables), not code (if/else branches scattered across operations)**. This is
+the same principle as §40's greenfield rule applied to the platform layer —
+avoid compatibility code, use declarative overrides.
+
+---
+
+## 42. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
@@ -2197,3 +2353,5 @@ fallback-on-miss approach is O(1) per lookup and requires no coordination.
 | Verification must not pass vacuously | Zero items to verify = precondition not met = keep polling; observation tools lag behind daemon state; settle before point-in-time checks |
 | Convergence budget | Every CONFIG_DB entry costs convergence time; count entries when adding features; test timeouts must be proportional to entry count |
 | Definition is network-scoped; execution is device-scoped | Specs live at the network level with their own lifecycle; devices consume them via `Get*` with live fallback; the two lifecycles must not be coupled |
+| Greenfield | No backwards compatibility; no legacy format handling in runtime; no API versioning; write code for the system as it is today, not as it was yesterday |
+| Multi-version readiness | All Redis through Device, all operations through Node, all entry generation in pure config functions — preserve these seams so version overrides are data-driven additions, not scattered code branches |
