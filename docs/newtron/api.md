@@ -50,12 +50,20 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | GET | `/network/{n}/service` | List services (also: `/ipvpn`, `/macvpn`, `/qos-policy`, `/filter`, `/platform`) |
 | GET | `/network/{n}/service/{name}` | Show service (also: ipvpn, macvpn, qos-policy, filter, platform) |
 | GET | `/network/{n}/route-policy` | List route policy names (also: `/prefix-list`) |
+| GET | `/network/{n}/profile` | List device profile names |
+| GET | `/network/{n}/profile/{name}` | Show device profile |
+| GET | `/network/{n}/zone` | List zone names |
+| GET | `/network/{n}/zone/{name}` | Show zone |
 | GET | `/network/{n}/topology/node` | List topology device names |
 | GET | `/network/{n}/host/{name}` | Get host profile |
 | GET | `/network/{n}/feature` | List features (also: `/{name}/dependency`, `/{name}/unsupported-due-to`) |
 | GET | `/network/{n}/platform/{name}/supports/{feature}` | Check platform feature support |
 | POST | `/network/{n}/service` | Create service (also: ipvpn, macvpn, qos-policy, filter) |
 | DELETE | `/network/{n}/service/{name}` | Delete service (also: ipvpn, macvpn, qos-policy, filter) |
+| POST | `/network/{n}/profile` | Create device profile |
+| DELETE | `/network/{n}/profile/{name}` | Delete device profile |
+| POST | `/network/{n}/zone` | Create zone |
+| DELETE | `/network/{n}/zone/{name}` | Delete zone |
 | POST | `/network/{n}/qos-policy/{name}/queue` | Add queue to QoS policy |
 | POST | `/network/{n}/filter/{name}/rule` | Add rule to filter |
 
@@ -508,15 +516,16 @@ POST /network/default/reload
 ## 4. Network Spec Reads
 
 These endpoints read from the in-memory network spec — service definitions, VPN
-specs, QoS policies, filters, platforms, and topology metadata. They do not connect
-to any device; they read what was loaded from the spec directory at registration time.
+specs, QoS policies, filters, platforms, device profiles, zones, and topology
+metadata. They do not connect to any device; they read what was loaded from the
+spec directory at registration time.
 
 All spec read endpoints require a registered network (`{netID}`) and are serialized
 through the NetworkActor to prevent concurrent modification during spec writes.
 
 ### Spec Resource Endpoints (List / Show)
 
-Six resource types follow an identical pattern — list all returns an array, show
+Eight resource types follow an identical pattern — list all returns an array, show
 one by name returns a single object (or 404 if not found):
 
 | Resource | List endpoint | Show endpoint | Response type |
@@ -527,6 +536,8 @@ one by name returns a single object (or 404 if not found):
 | QoS Policies | `GET /network/{netID}/qos-policy` | `GET .../qos-policy/{name}` | [`QoSPolicyDetail`](#qospolicydetail) |
 | Filters | `GET /network/{netID}/filter` | `GET .../filter/{name}` | [`FilterDetail`](#filterdetail) |
 | Platforms | `GET /network/{netID}/platform` | `GET .../platform/{name}` | [`PlatformDetail`](#platformdetail) |
+| Profiles | `GET /network/{netID}/profile` | `GET .../profile/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
+| Zones | `GET /network/{netID}/zone` | `GET .../zone/{name}` | [`ZoneDetail`](#zonedetail) |
 
 All response types are defined in [§14 Types Reference](#14-types-reference).
 
@@ -613,8 +624,9 @@ Check whether a platform supports a specific feature.
 ## 5. Network Spec Writes
 
 These endpoints create and delete spec definitions (services, VPNs, QoS policies,
-filters). They modify the in-memory spec and persist changes to the spec directory
-on disk. Like spec reads, they are serialized through the NetworkActor.
+filters, device profiles, zones). They modify the in-memory spec and persist
+changes to the spec directory on disk. Like spec reads, they are serialized
+through the NetworkActor.
 
 All spec write endpoints accept the `dry_run` query parameter. When `dry_run=true`,
 the spec is validated but not persisted.
@@ -902,6 +914,98 @@ Remove a rule from a filter.
 ```
 
 **Status codes:** 200 success, 400 invalid sequence number
+
+### Device Profiles
+
+Profiles are stored as individual JSON files under `profiles/{name}.json` in the
+spec directory. They define per-device settings (management IP, loopback, zone,
+platform, EVPN peering).
+
+#### POST /network/{netID}/profile
+
+Create a new device profile.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Profile name (becomes `profiles/{name}.json`) |
+| `mgmt_ip` | string | yes | Management IP address |
+| `loopback_ip` | string | no | Loopback IP address |
+| `zone` | string | yes | Zone name (must exist in network.json) |
+| `platform` | string | no | Platform name (from platforms.json) |
+| `underlay_asn` | integer | no | BGP underlay AS number |
+| `ssh_user` | string | no | SSH username |
+| `ssh_pass` | string | no | SSH password |
+| `ssh_port` | integer | no | SSH port (default 22) |
+| `evpn` | object | no | EVPN config: `peers` (array), `route_reflector` (bool), `cluster_id` (string) |
+
+**Response (201):**
+
+```json
+{"data": {"name": "switch3"}}
+```
+
+**Status codes:** 201 created, 400 validation error, 409 already exists
+
+#### DELETE /network/{netID}/profile/{name}
+
+Delete a device profile.
+
+**Query parameters:** `dry_run`
+
+**Path parameters:** `name` — profile name
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+**Status codes:** 200 success, 404 not found
+
+### Zones
+
+Zones group devices by location or function and can carry zone-level spec
+overrides. They are stored in the `zones` map within `network.json`.
+
+#### POST /network/{netID}/zone
+
+Create a new zone.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Zone name |
+
+**Response (201):**
+
+```json
+{"data": {"name": "dc2"}}
+```
+
+**Status codes:** 201 created, 400 validation error, 409 already exists
+
+#### DELETE /network/{netID}/zone/{name}
+
+Delete a zone. Returns error if any device profile references this zone.
+
+**Query parameters:** `dry_run`
+
+**Path parameters:** `name` — zone name
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+**Status codes:** 200 success, 404 not found, 409 zone still referenced by profiles
 
 ---
 
@@ -2826,6 +2930,31 @@ Returned by `GET .../platform` (array) and `GET .../platform/{name}` (single).
 | `port_count` | integer | Number of ports |
 | `breakouts` | string[] | Supported breakout modes |
 | `unsupported_features` | string[] | Features not supported on this platform |
+
+#### DeviceProfileDetail
+
+Returned by `GET .../profile` (array of names) and `GET .../profile/{name}` (single).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Profile name |
+| `mgmt_ip` | string | Management IP address |
+| `loopback_ip` | string | Loopback IP address |
+| `zone` | string | Zone name |
+| `platform` | string | Platform name |
+| `mac` | string | MAC address |
+| `underlay_asn` | integer | BGP underlay AS number |
+| `ssh_user` | string | SSH username |
+| `ssh_port` | integer | SSH port |
+| `evpn` | object | EVPN config: `peers` (string[]), `route_reflector` (bool), `cluster_id` (string) |
+
+#### ZoneDetail
+
+Returned by `GET .../zone` (array of names) and `GET .../zone/{name}` (single).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Zone name |
 
 ### Composite Types
 

@@ -368,6 +368,25 @@ Each device needs a profile JSON file in `profiles/`. The profile is the single 
 
 **Required fields:** `mgmt_ip`, `loopback_ip`, `zone`
 
+Profiles can also be managed via CLI or API (instead of editing JSON files directly):
+
+```bash
+# Create a profile
+newtron profile create switch3 \
+  --mgmt-ip 172.20.20.4 --loopback-ip 10.0.0.3 \
+  --zone datacenter-east --platform accton-as7726-32x \
+  --underlay-asn 65003 -x
+
+# List all profiles
+newtron profile list
+
+# Show a profile
+newtron profile show switch3
+
+# Delete a profile
+newtron profile delete switch3 -x
+```
+
 **Optional fields:**
 
 | Field | Description |
@@ -391,6 +410,19 @@ Device Profile  >  Zone defaults  >  Global (network.json)
 ```
 
 Seven maps participate in merge: services, filters, ipvpns, macvpns, qos_policies, route_policies, prefix_lists. A device-level prefix list overrides a zone-level one of the same name, which overrides a global one.
+
+Zones can be managed via CLI or API:
+
+```bash
+# List zones
+newtron zone list
+
+# Create a zone
+newtron zone create datacenter-west -x
+
+# Delete a zone (fails if profiles reference it)
+newtron zone delete datacenter-west -x
+```
 
 **Zone-level overrides** — add specs under a zone in `network.json` to scope them to devices in that zone:
 

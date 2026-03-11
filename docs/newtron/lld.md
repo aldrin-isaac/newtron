@@ -677,6 +677,23 @@ type AddFilterRuleRequest struct {
     Protocol, SrcPort, DstPort, DSCP, CoS string
     Log bool
 }
+
+type CreateDeviceProfileRequest struct {
+    Name, MgmtIP, LoopbackIP, Zone string
+    Platform, MAC, SSHUser, SSHPass string
+    UnderlayASN, SSHPort int
+    EVPN *CreateEVPNConfigRequest
+}
+
+type CreateEVPNConfigRequest struct {
+    Peers          []string
+    RouteReflector bool
+    ClusterID      string
+}
+
+type CreateZoneRequest struct {
+    Name string
+}
 ```
 
 ### 3.8 Settings
@@ -779,6 +796,10 @@ Write operations accept `?dry_run=true` and `?no_save=true` query parameters.
 | `GET` | `/network/{netID}/platform/{name}` | `PlatformDetail` |
 | `GET` | `/network/{netID}/route-policy` | route policies |
 | `GET` | `/network/{netID}/prefix-list` | prefix lists |
+| `GET` | `/network/{netID}/profile` | `[]string` (profile names) |
+| `GET` | `/network/{netID}/profile/{name}` | `DeviceProfileDetail` |
+| `GET` | `/network/{netID}/zone` | `[]string` (zone names) |
+| `GET` | `/network/{netID}/zone/{name}` | `ZoneDetail` |
 | `GET` | `/network/{netID}/topology/node` | `[]string` (device names) |
 | `GET` | `/network/{netID}/host/{name}` | `HostProfile` |
 | `GET` | `/network/{netID}/feature` | all features |
@@ -804,6 +825,10 @@ Write operations accept `?dry_run=true` and `?no_save=true` query parameters.
 | `DELETE` | `/network/{netID}/filter/{name}` | — | — |
 | `POST` | `/network/{netID}/filter/{name}/rule` | `AddFilterRuleRequest` | `FilterDetail` |
 | `DELETE` | `/network/{netID}/filter/{name}/rule/{seq}` | — | — |
+| `POST` | `/network/{netID}/profile` | `CreateDeviceProfileRequest` | `DeviceProfileDetail` |
+| `DELETE` | `/network/{netID}/profile/{name}` | — | — |
+| `POST` | `/network/{netID}/zone` | `CreateZoneRequest` | `ZoneDetail` |
+| `DELETE` | `/network/{netID}/zone/{name}` | — | — |
 
 ### 4.4 Provisioning
 

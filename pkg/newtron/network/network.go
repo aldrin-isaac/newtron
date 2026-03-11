@@ -507,6 +507,85 @@ func (n *Network) GetHostProfile(name string) (*spec.DeviceProfile, error) {
 	return n.loadProfile(name)
 }
 
+// GetProfile returns the device profile for a named device.
+func (n *Network) GetProfile(name string) (*spec.DeviceProfile, error) {
+	return n.loadProfile(name)
+}
+
+// ListProfiles returns the names of all profile files in the profiles directory.
+func (n *Network) ListProfiles() []string {
+	return n.loader.ListProfiles()
+}
+
+// SaveProfile creates or updates a device profile.
+func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
+	return n.loader.SaveProfile(name, profile)
+}
+
+// DeleteProfile removes a device profile.
+func (n *Network) DeleteProfile(name string) error {
+	// Remove from loader cache and delete the file
+	return n.loader.DeleteProfile(name)
+}
+
+// ListZones returns all zone names from the network spec.
+func (n *Network) ListZones() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	names := make([]string, 0, len(n.spec.Zones))
+	for name := range n.spec.Zones {
+		names = append(names, name)
+	}
+	return names
+}
+
+// GetZone returns a zone spec by name.
+func (n *Network) GetZone(name string) (*spec.ZoneSpec, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	z, ok := n.spec.Zones[name]
+	if !ok {
+		return nil, fmt.Errorf("zone '%s' not found", name)
+	}
+	return z, nil
+}
+
+// SaveZone creates or updates a zone in network.json.
+func (n *Network) SaveZone(name string, zone *spec.ZoneSpec) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.spec.Zones == nil {
+		n.spec.Zones = make(map[string]*spec.ZoneSpec)
+	}
+	n.spec.Zones[name] = zone
+	return n.persistSpec()
+}
+
+// DeleteZone removes a zone from network.json.
+// Returns error if any profile references it.
+func (n *Network) DeleteZone(name string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Check for profiles in this zone
+	profiles := n.loader.ListProfiles()
+	for _, pName := range profiles {
+		p, err := n.loader.LoadProfile(pName)
+		if err != nil {
+			continue
+		}
+		if p.Zone == name {
+			return fmt.Errorf("cannot delete zone '%s': referenced by profile '%s'", name, pName)
+		}
+	}
+
+	delete(n.spec.Zones, name)
+	return n.persistSpec()
+}
+
 // ============================================================================
 // Device (Node) Management
 // ============================================================================

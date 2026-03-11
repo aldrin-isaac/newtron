@@ -543,6 +543,63 @@ type PlatformDetail struct {
 }
 
 // ============================================================================
+// Profile and Zone Detail Types
+// ============================================================================
+
+// DeviceProfileDetail is the API view of a device profile.
+type DeviceProfileDetail struct {
+	Name        string      `json:"name"`
+	MgmtIP      string      `json:"mgmt_ip"`
+	LoopbackIP  string      `json:"loopback_ip"`
+	Zone        string      `json:"zone"`
+	Platform    string      `json:"platform,omitempty"`
+	MAC         string      `json:"mac,omitempty"`
+	UnderlayASN int         `json:"underlay_asn,omitempty"`
+	SSHUser     string      `json:"ssh_user,omitempty"`
+	SSHPort     int         `json:"ssh_port,omitempty"`
+	EVPN        *EVPNDetail `json:"evpn,omitempty"`
+}
+
+// EVPNDetail is the API view of EVPN peering config within a profile.
+type EVPNDetail struct {
+	Peers          []string `json:"peers,omitempty"`
+	RouteReflector bool     `json:"route_reflector,omitempty"`
+	ClusterID      string   `json:"cluster_id,omitempty"`
+}
+
+// ZoneDetail is the API view of a zone definition.
+type ZoneDetail struct {
+	Name string `json:"name"`
+}
+
+// CreateDeviceProfileRequest is the request for creating a device profile.
+type CreateDeviceProfileRequest struct {
+	Name        string                  `json:"name"`
+	MgmtIP      string                  `json:"mgmt_ip"`
+	LoopbackIP  string                  `json:"loopback_ip"`
+	Zone        string                  `json:"zone"`
+	Platform    string                  `json:"platform,omitempty"`
+	MAC         string                  `json:"mac,omitempty"`
+	UnderlayASN int                     `json:"underlay_asn,omitempty"`
+	SSHUser     string                  `json:"ssh_user,omitempty"`
+	SSHPass     string                  `json:"ssh_pass,omitempty"`
+	SSHPort     int                     `json:"ssh_port,omitempty"`
+	EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
+}
+
+// CreateEVPNConfigRequest defines EVPN peering for profile creation.
+type CreateEVPNConfigRequest struct {
+	Peers          []string `json:"peers,omitempty"`
+	RouteReflector bool     `json:"route_reflector,omitempty"`
+	ClusterID      string   `json:"cluster_id,omitempty"`
+}
+
+// CreateZoneRequest is the request for creating a zone.
+type CreateZoneRequest struct {
+	Name string `json:"name"`
+}
+
+// ============================================================================
 // Spec Authoring Request Types
 // ============================================================================
 

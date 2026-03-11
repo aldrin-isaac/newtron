@@ -76,6 +76,10 @@ if [ ! -f "Makefile" ] || [ ! -d "cmd/newtron" ]; then
     exit 1
 fi
 
+# Clean up any leftover state from a previous run
+bin/newtrun stop --dir newtrun/suites/1node-basic 2>/dev/null || true
+bin/newtlab destroy 1node 2>/dev/null || true
+
 echo ""
 echo -e "${BOLD}newtron — Getting Started${RESET}"
 echo ""
@@ -88,7 +92,7 @@ echo " with consistent services, you need something that can:"
 echo ""
 echo "   1. Express network intent as specs (\"transit peering on this port\")"
 echo "   2. Translate intent to device config (CONFIG_DB entries)"
-echo "   3. Validate before writing (catch bad values before they hit Redis)"
+echo "   3. Validate before writing (catch bad values before they hit CONFIG_DB)"
 echo "   4. Verify after writing (re-read every entry to confirm)"
 echo "   5. Clean up completely when removing (no orphaned config)"
 echo ""
@@ -198,6 +202,11 @@ pause
 
 run_cmd bin/newtlab deploy 1node --monitor --force
 
+echo ""
+echo " Lab status:"
+echo ""
+run_cmd bin/newtlab status 1node
+
 pause
 
 # ─── Step 4: Start newtron-server ─────────────────────────────────────────────
@@ -220,7 +229,7 @@ echo " and holds the spec files that define your network's services."
 echo " The CLI is stateless — it sends requests and displays results."
 
 # Kill any leftover newtron-server from a previous run
-existing_pid=$(pgrep -f "newtron-server.*--spec-dir" || true)
+existing_pid=$(pgrep -f "newtron-server.*-spec-dir" || true)
 if [ -n "$existing_pid" ]; then
     echo ""
     echo -e " ${DIM}Stopping leftover newtron-server (PID $existing_pid)...${RESET}"
@@ -293,6 +302,7 @@ echo " it will write to CONFIG_DB:"
 echo ""
 echo "   INTERFACE|Ethernet0              Enable IP routing on this port"
 echo "   INTERFACE|Ethernet0|10.1.0.0/31  Assign the /31 address"
+echo "   BGP_PEER_GROUP|default|TRANSIT   Create a peer group for the service"
 echo "   BGP_NEIGHBOR|default|10.1.0.1    Create a BGP peer at 10.1.0.1"
 echo "                                    (the other end of the /31)"
 echo "   BGP_NEIGHBOR_AF|...|ipv4_unicast Enable IPv4 unicast for the peer"
@@ -329,6 +339,9 @@ echo "   - intfmgrd saw INTERFACE → configured the kernel interface + IP"
 echo ""
 echo " Let's look at the actual device state:"
 echo ""
+
+# Give SONiC daemons a moment to process CONFIG_DB changes
+sleep 3
 
 run_ssh "CONFIG_DB entry for the BGP peer (what newtron wrote to Redis)" \
     "redis-cli -n 4 hgetall 'BGP_NEIGHBOR|default|10.1.0.1'"
@@ -399,6 +412,11 @@ pause
 
 run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
 
+echo ""
+echo " Suite results:"
+echo ""
+run_cmd bin/newtrun status --suite 1node-basic
+
 pause
 
 # ─── Step 10: Tear down ──────────────────────────────────────────────────────
@@ -416,7 +434,17 @@ if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     SERVER_PID=""
 fi
 
-run_cmd bin/newtlab destroy 1node
+# newtrun stop destroys the topology and removes suite state,
+# so newtrun status / newtlab status show nothing afterward.
+echo -e " ${CYAN}\$${RESET} bin/newtrun stop --dir newtrun/suites/1node-basic"
+echo ""
+bin/newtrun stop --dir newtrun/suites/1node-basic 2>/dev/null
+
+echo ""
+echo " Verify everything is cleaned up:"
+echo ""
+run_cmd bin/newtrun status --suite 1node-basic || true
+run_cmd bin/newtlab status 1node || true
 
 echo ""
 echo -e "${BOLD}═══════════════════════════════════════════════════════════════${RESET}"

@@ -67,6 +67,70 @@ func (c *Client) GetHostProfile(name string) (*newtron.HostProfile, error) {
 }
 
 // ============================================================================
+// Profiles
+// ============================================================================
+
+// ListProfiles returns all device profile names.
+func (c *Client) ListProfiles() ([]string, error) {
+	var result []string
+	if err := c.doGet(c.networkPath()+"/profile", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ShowProfile returns details of a named device profile.
+func (c *Client) ShowProfile(name string) (*newtron.DeviceProfileDetail, error) {
+	var result newtron.DeviceProfileDetail
+	if err := c.doGet(c.networkPath()+"/profile/"+url.PathEscape(name), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CreateProfile creates a new device profile.
+func (c *Client) CreateProfile(req newtron.CreateDeviceProfileRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/profile"+execQuery(opts), req, nil)
+}
+
+// DeleteProfile deletes a device profile.
+func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts) error {
+	return c.doDelete(c.networkPath()+"/profile/"+url.PathEscape(name)+execQuery(opts), nil)
+}
+
+// ============================================================================
+// Zones
+// ============================================================================
+
+// ListZones returns all zone names.
+func (c *Client) ListZones() ([]string, error) {
+	var result []string
+	if err := c.doGet(c.networkPath()+"/zone", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ShowZone returns details of a named zone.
+func (c *Client) ShowZone(name string) (*newtron.ZoneDetail, error) {
+	var result newtron.ZoneDetail
+	if err := c.doGet(c.networkPath()+"/zone/"+url.PathEscape(name), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CreateZone creates a new zone.
+func (c *Client) CreateZone(req newtron.CreateZoneRequest, opts newtron.ExecOpts) error {
+	return c.doPost(c.networkPath()+"/zone"+execQuery(opts), req, nil)
+}
+
+// DeleteZone deletes a zone.
+func (c *Client) DeleteZone(name string, opts newtron.ExecOpts) error {
+	return c.doDelete(c.networkPath()+"/zone/"+url.PathEscape(name)+execQuery(opts), nil)
+}
+
+// ============================================================================
 // Spec reads
 // ============================================================================
 

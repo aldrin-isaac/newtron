@@ -369,6 +369,78 @@ func (l *Loader) GetTopology() *TopologySpecFile {
 	return l.topology
 }
 
+// ListProfiles returns the names of all profile files in the profiles directory.
+func (l *Loader) ListProfiles() []string {
+	profileDir := filepath.Join(l.specDir, "profiles")
+	entries, err := os.ReadDir(profileDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".json") {
+			names = append(names, strings.TrimSuffix(name, ".json"))
+		}
+	}
+	return names
+}
+
+// SaveProfile writes a device profile to disk atomically (temp file + rename).
+func (l *Loader) SaveProfile(name string, profile *DeviceProfile) error {
+	profileDir := filepath.Join(l.specDir, "profiles")
+	if err := os.MkdirAll(profileDir, 0755); err != nil {
+		return fmt.Errorf("creating profiles directory: %w", err)
+	}
+
+	path := filepath.Join(profileDir, name+".json")
+
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling profile %s: %w", name, err)
+	}
+	data = append(data, '\n')
+
+	tmp, err := os.CreateTemp(profileDir, "profile-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("renaming temp file: %w", err)
+	}
+
+	// Update the in-memory cache
+	l.profiles[name] = profile
+
+	return nil
+}
+
+// DeleteProfile removes a device profile file and its cache entry.
+func (l *Loader) DeleteProfile(name string) error {
+	path := filepath.Join(l.specDir, "profiles", name+".json")
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("deleting profile %s: %w", name, err)
+	}
+	delete(l.profiles, name)
+	return nil
+}
+
 // SaveNetwork writes the network spec to disk atomically (temp file + rename).
 func (l *Loader) SaveNetwork(spec *NetworkSpecFile) error {
 	path := filepath.Join(l.specDir, "network.json")

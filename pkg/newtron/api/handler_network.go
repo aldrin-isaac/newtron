@@ -822,6 +822,152 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 }
 
 // ============================================================================
+// Profiles
+// ============================================================================
+
+func (s *Server) handleListProfiles(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ListProfiles(), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleShowProfile(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ShowProfile(name)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.CreateDeviceProfileRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.CreateProfile(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeleteProfile(name, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ============================================================================
+// Zones
+// ============================================================================
+
+func (s *Server) handleListZones(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ListZones(), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleShowZone(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.ShowZone(name)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleCreateZone(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req newtron.CreateZoneRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.CreateZone(req, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
+}
+
+func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	opts := execOpts(r)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeleteZone(name, opts)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ============================================================================
 // Platform feature support
 // ============================================================================
 

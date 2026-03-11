@@ -59,6 +59,15 @@ func TestAPICompleteness(t *testing.T) {
 			"DeleteRoutePolicy":    true,
 			"AddRoutePolicyRule":   true,
 			"RemoveRoutePolicyRule": true,
+			// Profiles and Zones
+			"ListProfiles":  true,
+			"ShowProfile":   true,
+			"CreateProfile": true,
+			"DeleteProfile": true,
+			"ListZones":     true,
+			"ShowZone":      true,
+			"CreateZone":    true,
+			"DeleteZone":    true,
 			// Topology / Provision
 			"HasTopology":            true,
 			"TopologyDeviceNames":    true,

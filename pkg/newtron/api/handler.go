@@ -47,6 +47,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/feature/{name}/dependency", s.handleGetFeatureDependencies)
 	mux.HandleFunc("GET /network/{netID}/feature/{name}/unsupported-due-to", s.handleGetUnsupportedDueTo)
 	mux.HandleFunc("GET /network/{netID}/platform/{name}/supports/{feature}", s.handlePlatformSupportsFeature)
+	mux.HandleFunc("GET /network/{netID}/profile", s.handleListProfiles)
+	mux.HandleFunc("GET /network/{netID}/profile/{name}", s.handleShowProfile)
+	mux.HandleFunc("GET /network/{netID}/zone", s.handleListZones)
+	mux.HandleFunc("GET /network/{netID}/zone/{name}", s.handleShowZone)
 
 	// ====================================================================
 	// Network spec writes
@@ -73,6 +77,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("DELETE /network/{netID}/route-policy/{name}", s.handleDeleteRoutePolicy)
 	mux.HandleFunc("POST /network/{netID}/route-policy/{name}/rule", s.handleAddRoutePolicyRule)
 	mux.HandleFunc("DELETE /network/{netID}/route-policy/{name}/rule/{seq}", s.handleRemoveRoutePolicyRule)
+	mux.HandleFunc("POST /network/{netID}/profile", s.handleCreateProfile)
+	mux.HandleFunc("DELETE /network/{netID}/profile/{name}", s.handleDeleteProfile)
+	mux.HandleFunc("POST /network/{netID}/zone", s.handleCreateZone)
+	mux.HandleFunc("DELETE /network/{netID}/zone/{name}", s.handleDeleteZone)
 
 	// ====================================================================
 	// Network provision
