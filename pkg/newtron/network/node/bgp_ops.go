@@ -285,9 +285,7 @@ func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
 	}
 }
 
-// BGPConfigured checks if BGP is configured.
-// Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
-// DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
+// BGPConfigured reports whether BGP_GLOBALS|default exists (a working frrcfgd instance).
 func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
 
 // RemoveLegacyBGPEntries deletes bgpcfgd-format BGP_NEIGHBOR entries from
