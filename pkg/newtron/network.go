@@ -8,6 +8,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // Network is the top-level API entry point.
@@ -78,8 +79,27 @@ func (net *Network) InitDevice(ctx context.Context, device string, force bool) e
 	}
 	defer dev.Disconnect()
 
+	// Remove legacy bgpcfgd-format BGP_NEIGHBOR entries (no VRF prefix).
+	// Community sonic-vs ships with 32 such entries in its factory config.
+	// These are ignored by frrcfgd but fool BGPConfigured() into thinking
+	// BGP is already set up, causing the auto-ensure to skip BGP_GLOBALS.
+	// Runs unconditionally — even if frrcfgd is already enabled, the legacy
+	// entries may still be present from the factory config.
+	removed, err := dev.RemoveLegacyBGPEntries(ctx)
+	if err != nil {
+		return fmt.Errorf("removing legacy BGP entries: %w", err)
+	}
+	if removed > 0 {
+		util.WithDevice(device).Infof("Removed %d legacy bgpcfgd BGP_NEIGHBOR entries", removed)
+	}
+
 	// Check if already initialized via Node method (respects API boundary)
 	if dev.IsUnifiedConfigMode() {
+		if removed > 0 {
+			if err := dev.SaveConfig(ctx); err != nil {
+				return fmt.Errorf("saving config: %w", err)
+			}
+		}
 		return ErrAlreadyInitialized
 	}
 

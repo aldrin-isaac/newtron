@@ -872,21 +872,20 @@ func (db *ConfigDB) HasInterface(name string) bool {
 	return false
 }
 
-// BGPConfigured reports whether BGP is configured, checking both the
-// BGP_NEIGHBOR table and DEVICE_METADATA bgp_asn.
+// BGPConfigured reports whether BGP_GLOBALS|default exists — the frrcfgd-managed
+// BGP instance that frrcfgd uses to create the `router bgp` process. Without this
+// entry, frrcfgd silently ignores BGP_NEIGHBOR entries.
+//
+// This intentionally does NOT check DEVICE_METADATA.bgp_asn or BGP_NEIGHBOR count.
+// Factory SONiC images may have bgp_asn set (bgpcfgd era) and/or legacy BGP_NEIGHBOR
+// entries without a BGP_GLOBALS entry — those do not constitute a working frrcfgd
+// BGP instance.
 func (db *ConfigDB) BGPConfigured() bool {
 	if db == nil {
 		return false
 	}
-	if len(db.BGPNeighbor) > 0 {
-		return true
-	}
-	if meta, ok := db.DeviceMetadata["localhost"]; ok {
-		if asn, ok := meta["bgp_asn"]; ok && asn != "" {
-			return true
-		}
-	}
-	return false
+	_, ok := db.BGPGlobals["default"]
+	return ok
 }
 
 // scanKeys iterates Redis keys matching the given pattern using cursor-based

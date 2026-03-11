@@ -307,25 +307,27 @@ func TestConfigDB_Has_NilReceiver(t *testing.T) {
 }
 
 func TestConfigDB_BGPConfigured(t *testing.T) {
-	// Path 1: BGPNeighbor non-empty
+	// BGP_GLOBALS|default present → configured
 	db := newEmptyConfigDB()
-	db.BGPNeighbor["default|10.0.0.2"] = BGPNeighborEntry{ASN: "65001"}
+	db.BGPGlobals["default"] = BGPGlobalsEntry{LocalASN: "65001", RouterID: "10.0.0.1"}
 	if !db.BGPConfigured() {
-		t.Error("BGPConfigured should be true with BGP neighbor")
+		t.Error("BGPConfigured should be true with BGP_GLOBALS|default")
 	}
 
-	// Path 2: DeviceMetadata bgp_asn
+	// BGP_NEIGHBOR without BGP_GLOBALS → not configured
+	// (legacy bgpcfgd entries don't constitute a working frrcfgd instance)
 	db2 := newEmptyConfigDB()
-	db2.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65000"}
-	if !db2.BGPConfigured() {
-		t.Error("BGPConfigured should be true with device metadata ASN")
+	db2.BGPNeighbor["10.0.0.2"] = BGPNeighborEntry{ASN: "65001"}
+	if db2.BGPConfigured() {
+		t.Error("BGPConfigured should be false with only BGP_NEIGHBOR (no BGP_GLOBALS)")
 	}
 
-	// Path 3: DeviceMetadata with empty bgp_asn
+	// DEVICE_METADATA bgp_asn without BGP_GLOBALS → not configured
+	// (factory bgp_asn is a bgpcfgd-era field, not a frrcfgd BGP instance)
 	db3 := newEmptyConfigDB()
-	db3.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": ""}
+	db3.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65100"}
 	if db3.BGPConfigured() {
-		t.Error("BGPConfigured should be false with empty ASN")
+		t.Error("BGPConfigured should be false with only DEVICE_METADATA bgp_asn")
 	}
 }
 

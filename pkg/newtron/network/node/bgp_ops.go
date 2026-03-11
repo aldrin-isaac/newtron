@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -288,6 +289,35 @@ func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
 // Checks both CONFIG_DB BGP_NEIGHBOR table (CONFIG_DB-managed BGP) and
 // DEVICE_METADATA bgp_asn (FRR-managed BGP with frr_split_config_enabled).
 func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
+
+// RemoveLegacyBGPEntries deletes bgpcfgd-format BGP_NEIGHBOR entries from
+// CONFIG_DB. These use the key format "BGP_NEIGHBOR|<ip>" (no VRF prefix),
+// which frrcfgd ignores. Community sonic-vs ships with 32 such entries in
+// its factory config_db.json. Called by newtron init when switching to frrcfgd.
+func (n *Node) RemoveLegacyBGPEntries(ctx context.Context) (int, error) {
+	client := n.ConfigDBClient()
+	if client == nil {
+		return 0, fmt.Errorf("not connected")
+	}
+
+	count := 0
+	for key := range n.configDB.BGPNeighbor {
+		// frrcfgd keys have VRF prefix: "default|10.0.0.1"
+		// bgpcfgd keys are bare IPs: "10.0.0.1"
+		if !strings.Contains(key, "|") {
+			if err := client.Delete("BGP_NEIGHBOR", key); err != nil {
+				return count, fmt.Errorf("deleting BGP_NEIGHBOR|%s: %w", key, err)
+			}
+			delete(n.configDB.BGPNeighbor, key)
+			count++
+		}
+	}
+
+	if count > 0 {
+		util.WithDevice(n.name).Infof("Removed %d legacy bgpcfgd BGP_NEIGHBOR entries", count)
+	}
+	return count, nil
+}
 
 // BGPNeighborExists checks if a BGP neighbor exists.
 // Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
