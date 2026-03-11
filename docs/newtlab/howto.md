@@ -329,7 +329,7 @@ NIC 0 is always reserved for management.
 | `sequential` | Ethernet0 | Ethernet1 | Ethernet2 | Ethernet3 | CiscoVS, VPP |
 | `stride-4` | Ethernet0 | Ethernet4 | Ethernet8 | Ethernet12 | Legacy VS |
 | `linux` | eth1 | eth2 | eth3 | eth4 | Alpine host VMs |
-| `custom` | *(explicit mapping via `vm_interface_map_custom`)* | | | | Vendor-specific |
+| `custom` | *(caller-provided map, not yet configurable via platform spec)* | | | | Vendor-specific |
 
 ### Profile VM Overrides
 

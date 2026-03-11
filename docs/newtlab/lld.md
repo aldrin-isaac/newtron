@@ -60,7 +60,6 @@ type PlatformSpec struct {
     VMCPUs               int            `json:"vm_cpus,omitempty"`
     VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
     VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
-    VMInterfaceMapCustom map[string]int `json:"vm_interface_map_custom,omitempty"`
     VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
     VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
@@ -76,7 +75,6 @@ type PlatformSpec struct {
 | `vm_cpus` | int | 2 | vCPU count |
 | `vm_nic_driver` | string | `"e1000"` | QEMU NIC model (`e1000`, `virtio-net-pci`) |
 | `vm_interface_map` | string | `"stride-4"` | NIC-to-interface mapping scheme (§5.3) |
-| `vm_interface_map_custom` | map[string]int | nil | Custom SONiC name → NIC index (for `"custom"` scheme) |
 | `vm_cpu_features` | string | `""` | QEMU `-cpu host,<features>` suffix |
 | `vm_credentials` | *VMCredentials | nil | Image-baked login credentials |
 | `vm_boot_timeout` | int | 180 | Seconds to wait for boot |
@@ -560,7 +558,7 @@ QEMU NIC index. Data NICs start at index 1 (NIC 0 is management — see §3.4).
 | `sequential` | `EthernetN` → `N + 1` | Ethernet0 → 1, Ethernet1 → 2, Ethernet2 → 3 |
 | `stride-4` | `EthernetN` → `N/4 + 1` (N must be divisible by 4) | Ethernet0 → 1, Ethernet4 → 2, Ethernet8 → 3 |
 | `linux` | `ethN` → `N` | eth1 → 1, eth2 → 2 |
-| `custom` | Direct lookup in `VMInterfaceMapCustom` | (arbitrary mapping) |
+| `custom` | Direct lookup in caller-provided map | (arbitrary mapping, not yet wired to platform spec) |
 
 `sequential` is used by platforms where data ports are Ethernet0, 1, 2, ...
 (e.g., CiscoVS, VPP). `stride-4` is the built-in default where ports are

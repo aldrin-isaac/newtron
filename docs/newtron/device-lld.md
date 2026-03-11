@@ -241,16 +241,12 @@ type ConfigDB struct {
     // BGP peer groups and policy
     BGPPeerGroup      map[string]BGPPeerGroupEntry   // BGP_PEER_GROUP
     BGPPeerGroupAF    map[string]BGPPeerGroupAFEntry // BGP_PEER_GROUP_AF
-    BGPGlobalsAFNet   map[string]BGPGlobalsAFNetEntry    // BGP_GLOBALS_AF_NETWORK
-    BGPGlobalsAFAgg   map[string]BGPGlobalsAFAggEntry    // BGP_GLOBALS_AF_AGGREGATE_ADDR
     PrefixSet         map[string]PrefixSetEntry      // PREFIX_SET
     CommunitySet      map[string]CommunitySetEntry   // COMMUNITY_SET
-    ASPathSet         map[string]ASPathSetEntry       // AS_PATH_SET
 
     // ACL
     ACLTable          map[string]ACLTableEntry       // ACL_TABLE
     ACLRule           map[string]ACLRuleEntry         // ACL_RULE
-    ACLTableType      map[string]ACLTableTypeEntry   // ACL_TABLE_TYPE
 
     // QoS
     Scheduler         map[string]SchedulerEntry      // SCHEDULER
@@ -364,8 +360,8 @@ const (
 
 CONFIG_DB entries are parsed from Redis hashes into typed Go structs via a registry in `configdb_parsers.go`. This avoids a giant switch statement and makes adding new tables mechanical.
 
-**42 registered parsers:**
-- **33 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, ACL_TABLE_TYPE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, NEWTRON_SERVICE_BINDING, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, BGP_GLOBALS_AF_NETWORK, BGP_GLOBALS_AF_AGGREGATE_ADDR, PREFIX_SET, COMMUNITY_SET, AS_PATH_SET
+**39 registered parsers:**
+- **30 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, NEWTRON_SERVICE_BINDING, STATIC_ROUTE, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
 - **9 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP
 
 Hash-merge parsers (`mergeParser`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
@@ -652,14 +648,6 @@ type StaticRouteEntry struct {        // Key: "vrf|prefix" (e.g., "Vrf_CUST1|192
     Blackhole  string `json:"blackhole,omitempty"`
 }
 
-type BGPGlobalsAFNetEntry struct {    // Key: "vrf|address_family|prefix"
-    Policy string `json:"policy,omitempty"`
-}
-
-type BGPGlobalsAFAggEntry struct {    // Key: "vrf|address_family|prefix"
-    AsSet       string `json:"as_set,omitempty"`
-    SummaryOnly string `json:"summary_only,omitempty"`
-}
 ```
 
 ### 4.6 ACL Types
@@ -692,11 +680,6 @@ type ACLRuleEntry struct {            // Key: "table_name|rule_name"
     RedirectPort   string `json:"REDIRECT_PORT,omitempty"`
 }
 
-type ACLTableTypeEntry struct {       // Key: type_name
-    MatchFields   string `json:"matches,omitempty"`
-    Actions       string `json:"actions,omitempty"`
-    BindPointType string `json:"bind_point_type,omitempty"`
-}
 ```
 
 ### 4.7 QoS Types

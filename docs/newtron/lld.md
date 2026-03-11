@@ -344,7 +344,6 @@ type PlatformSpec struct {
     VMCPUs               int            `json:"vm_cpus,omitempty"`
     VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
     VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
-    VMInterfaceMapCustom map[string]int `json:"vm_interface_map_custom,omitempty"`
     VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
     VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
     VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
