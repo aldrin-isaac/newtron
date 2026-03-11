@@ -394,11 +394,9 @@ run_cmd bin/newtron switch1 service apply Ethernet0 transit \
 
 pause
 
-echo "  The config is now live on the switch. SONiC daemons have already"
-echo "  reacted to the CONFIG_DB changes:"
-echo ""
-echo -e "    ${GRAY}${H}${RESET} frrcfgd saw BGP_NEIGHBOR --> configured FRR with the BGP peer"
-echo -e "    ${GRAY}${H}${RESET} intfmgrd saw INTERFACE --> configured the kernel interface + IP"
+echo "  The config is now live on the switch. SONiC daemons react to"
+echo "  CONFIG_DB changes in real time -- intfmgrd programs the kernel"
+echo "  interface, frrcfgd configures FRR with the BGP peer."
 echo ""
 echo "  Let's look at the actual device state:"
 echo ""
@@ -406,18 +404,18 @@ echo ""
 # Give SONiC daemons a moment to process CONFIG_DB changes
 sleep 3
 
-run_ssh "CONFIG_DB entry for the BGP peer (what newtron wrote)" \
+run_ssh "CONFIG_DB: BGP peer entry (what newtron wrote)" \
     "redis-cli -n 4 hgetall 'BGP_NEIGHBOR|default|10.1.0.1'"
 
-run_ssh "Interface IP (intfmgrd processed the CONFIG_DB entry)" \
-    "ip addr show Ethernet0 | grep 'inet ' || echo 'IP not yet assigned (intfmgrd still processing)'"
+run_ssh "Kernel: interface IP (intfmgrd processed the CONFIG_DB entry)" \
+    "ip addr show Ethernet0 | grep 'inet ' | grep -v inet6 || echo '(intfmgrd still processing -- takes a few seconds)'"
 
-run_ssh "BGP neighbor state (frrcfgd configured FRR from CONFIG_DB)" \
-    "vtysh -c 'show bgp neighbors 10.1.0.1' 2>/dev/null | head -3 || echo 'FRR still initializing'"
+run_ssh "CONFIG_DB: service binding (newtron's record of what was applied)" \
+    "redis-cli -n 4 hgetall 'NEWTRON_SERVICE_BINDING|Ethernet0'"
 
-echo "  The BGP peer shows 'Connect' or 'Active' -- it's trying to reach"
-echo "  10.1.0.1 (which doesn't exist in this single-switch lab). On a real"
-echo "  network with a peer at that address, the session would come up."
+echo "  The service binding is the key to clean teardown -- it records"
+echo "  exactly what was applied so 'remove' knows what to clean up,"
+echo "  even if the service spec changes between apply and remove."
 
 pause
 
