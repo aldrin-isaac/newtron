@@ -1933,7 +1933,87 @@ newtron audit list --limit 50 --json
 
 **Flags:** `--device`, `--user`, `--last` (duration: `24h`, `7d`), `--limit` (default 100), `--failures`
 
-### 16.4 Config Persistence
+### 16.4 Device Initialization
+
+Before newtron can manage a device, it must be initialized. Initialization enables **unified config mode** (frrcfgd) so that all CONFIG_DB writes — BGP neighbors, VRFs, EVPN tunnels — are processed by FRR. Without it, SONiC's default bgpcfgd silently ignores dynamic CONFIG_DB entries.
+
+**Preconditions:**
+
+| Requirement | Why |
+|-------------|-----|
+| Device profile exists | `newtron` must resolve SSH credentials and management IP |
+| Device is reachable via SSH | Init writes DEVICE_METADATA and restarts the bgp container |
+| bgp container is running | The restart command targets the bgp systemd service |
+
+**Initialize a fresh device:**
+
+```bash
+newtron switch1 init
+```
+
+```
+Initializing switch1 for newtron management...
+Initialized.
+  DEVICE_METADATA: docker_routing_config_mode=unified
+  bgp container restarted, frrcfgd running
+  Config saved to persist across reboots
+```
+
+**Already initialized (idempotent):**
+
+```bash
+newtron switch1 init
+```
+
+```
+Initializing switch1 for newtron management...
+switch1 is already initialized (frrcfgd enabled).
+```
+
+**Device with active BGP sessions (safety check):**
+
+If the device has existing BGP neighbors in CONFIG_DB, init refuses to proceed. Switching to unified mode restarts the bgp container (dropping all BGP sessions) and replaces `frr.conf` with frrcfgd-generated config from CONFIG_DB. Any FRR routing configuration done via vtysh that was never written to CONFIG_DB is permanently lost:
+
+```bash
+newtron leaf1 init
+```
+
+```
+Error: leaf1 has 4 active BGP neighbor(s) — device has active BGP
+configuration; use --force to proceed (this will restart bgp, drop all
+sessions, and replace frr.conf — any vtysh-only config not in CONFIG_DB
+will be lost)
+```
+
+Use `--force` only if you understand the impact (session drops + vtysh config loss):
+
+```bash
+newtron leaf1 init --force
+```
+
+**When to run:**
+
+- Before using `newtron` on a new device for the first time (standalone, no topology)
+- Not needed after `newtron provision` — provisioning includes init automatically
+- Not needed in newtlab — boot patches handle it during `newtlab deploy`
+
+**What it does:**
+
+1. Writes `docker_routing_config_mode=unified` and `frr_mgmt_framework_config=true` to DEVICE_METADATA
+2. Restarts the bgp container so frrcfgd takes over from bgpcfgd
+3. Polls until frrcfgd is confirmed running (up to 120 seconds)
+4. Saves config to persist the change across reboots
+
+**What can go wrong:**
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `frrcfgd not enabled` on `Connect()` | Device was never initialized | Run `newtron <device> init` |
+| `device has active BGP configuration` | Device has BGP neighbors; init drops sessions and replaces frr.conf | Back up `frr.conf` first, then use `--force` if config loss is acceptable |
+| Init times out waiting for frrcfgd | bgp container failed to start | SSH to device, check `docker ps`, `journalctl -u bgp` |
+| `ensuring unified config mode requires SSH connection` | Profile missing `ssh_user`/`ssh_pass` | Add SSH credentials to device profile |
+
+### 16.5 Config Persistence
 
 Newtron writes to Redis CONFIG_DB — changes take effect immediately but are **ephemeral** until saved to disk.
 
@@ -1999,11 +2079,9 @@ newtron provision -x
 **Provisioning flow (per device):**
 
 1. `GenerateComposite` — builds complete CONFIG_DB offline using an abstract Node. The abstract Node has no SSH connection; instead of writing to Redis, operations accumulate entries in a shadow CONFIG_DB. This uses the same code path as manual operations (`SetupEVPN`, `ApplyService`, `ConfigureBGP`, etc.) — the abstract node eliminates the need for a parallel "config generation" implementation.
-2. `DeliverComposite` — delivers the composite to the device via overwrite mode (`DEL` all relevant tables, then `HSET` new entries).
-3. `SaveConfig` — persists to `/etc/sonic/config_db.json`.
-4. `ConfigReload` — restarts all SONiC daemons to pick up the new config.
-5. Wait for FRR — polls until the FRR routing stack is responsive.
-6. `ApplyFRRDefaults` — applies FRR settings that frrcfgd doesn't handle from CONFIG_DB.
+2. `ConfigReload` — best-effort reload to restore CONFIG_DB to saved defaults (factory fields like `mac`, `platform`, `hwsku` intact). Safe to fail on fresh boot.
+3. `DeliverComposite` — delivers the composite to the device via overwrite mode (merges on top of the reloaded baseline; stale keys removed).
+4. `EnsureUnifiedConfigMode` — if the device was using bgpcfgd, restarts the bgp container so frrcfgd takes over. No-op if already running.
 
 Without `-x`, provisioning shows a summary of what would be generated (entry count, table breakdown).
 

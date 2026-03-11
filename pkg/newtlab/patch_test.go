@@ -63,6 +63,27 @@ func TestResolveBootPatches_VPP(t *testing.T) {
 	}
 }
 
+func TestResolveBootPatches_SonicVS(t *testing.T) {
+	patches, err := ResolveBootPatches("sonic-vs", "")
+	if err != nil {
+		t.Fatalf("ResolveBootPatches(sonic-vs, '') error: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("ResolveBootPatches(sonic-vs, '') returned %d patches, want 1", len(patches))
+	}
+
+	// Verify it's the frrcfgd mode patch
+	if !strings.Contains(patches[0].Description, "frrcfgd") {
+		t.Errorf("patch[0] description = %q, want to contain 'frrcfgd'", patches[0].Description)
+	}
+	if len(patches[0].Redis) != 1 {
+		t.Errorf("patch[0] redis = %d, want 1", len(patches[0].Redis))
+	}
+	if len(patches[0].PostCommands) != 3 {
+		t.Errorf("patch[0] post_commands = %d, want 3", len(patches[0].PostCommands))
+	}
+}
+
 func TestResolveBootPatches_NoDataplane(t *testing.T) {
 	// Empty dataplane returns nil
 	patches, err := ResolveBootPatches("", "")

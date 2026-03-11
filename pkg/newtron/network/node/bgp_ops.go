@@ -321,30 +321,19 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)
 	cs := NewChangeSet(n.name, "device.configure-bgp")
 
-	// bgpcfgd.BGPPeerMgrBase requires DEVICE_METADATA["localhost"]["bgp_asn"] and
-	// DEVICE_METADATA["localhost"]["type"] as explicit dependencies (checked via
-	// directory.available_deps). Without "type", the dependency check fails and
-	// bgpcfgd silently defers all BGP_NEIGHBOR entries permanently.
+	// bgpcfgd requires DEVICE_METADATA["localhost"]["bgp_asn"] and
+	// DEVICE_METADATA["localhost"]["type"] as explicit dependencies.
+	// Without "type", bgpcfgd silently defers all BGP_NEIGHBOR entries.
 	//
-	// docker_routing_config_mode and frr_mgmt_framework_config MUST be in
-	// DEVICE_METADATA (not BGP_GLOBALS). bgpcfgd reads them from DEVICE_METADATA
-	// to decide which FRR template to use. Writing them to BGP_GLOBALS has no
-	// effect — bgpcfgd ignores unknown BGP_GLOBALS fields.
-	//
-	// With docker_routing_config_mode=unified + frr_mgmt_framework_config=true,
-	// bgpcfgd uses the frrcfgd Jinja2 db template (bgpd.conf.db.j2) which:
-	//   - Generates "service integrated-vtysh-config"
-	//   - Handles local_addr → "update-source <IP>" for loopback-sourced peers
-	//   - Handles ebgp_multihop → "ebgp-multihop"
-	//   - Generates proper address-family l2vpn evpn sections
-	// Without these flags, bgpcfgd uses the legacy "general" template which
-	// adds PEER_V4/PEER_V6 peer-groups but does NOT handle local_addr or
-	// ebgp_multihop, causing EVPN loopback sessions to stay "Active".
+	// frrcfgd flags (docker_routing_config_mode, frr_mgmt_framework_config)
+	// are NOT written here — they are infrastructure init set by:
+	//   - newtron init (manual)
+	//   - topology provisioner (GenerateDeviceComposite)
+	//   - newtlab boot patch (lab VMs)
+	// Connect() enforces frrcfgd as a precondition before any operation.
 	e := updateDeviceMetadataConfig(map[string]string{
-		"bgp_asn":                    asnStr,
-		"type":                       "LeafRouter",
-		"docker_routing_config_mode": "unified",
-		"frr_mgmt_framework_config":  "true",
+		"bgp_asn": asnStr,
+		"type":    "LeafRouter",
 	})
 	cs.Update(e.Table, e.Key, e.Fields)
 

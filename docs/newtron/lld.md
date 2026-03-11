@@ -836,6 +836,7 @@ Write operations accept `?dry_run=true` and `?no_save=true` query parameters.
 |--------|------|------|----------|
 | `POST` | `/network/{netID}/provision` | `ProvisionRequest` | `ProvisionResult` |
 | `POST` | `/network/{netID}/composite/{device}` | — | `CompositeHandleResponse` |
+| `POST` | `/network/{netID}/init/{device}?force=true` | — | `{"status": "initialized"}` or `{"status": "already_initialized"}` |
 
 ### 4.5 Node Reads
 
@@ -952,7 +953,7 @@ Every table newtron reads or writes, with key format and fields.
 
 | Table | Key Format | Purpose | Fields |
 |-------|-----------|---------|--------|
-| `DEVICE_METADATA` | `localhost` | Hostname, platform, ASN | `hostname`, `platform`, `hwsku`, `bgp_asn`, `docker_routing_config_mode`, `frr_mgmt_framework_config` |
+| `DEVICE_METADATA` | `localhost` | Hostname, platform, ASN, unified config mode | `hostname`, `platform`, `hwsku`, `bgp_asn`, `docker_routing_config_mode`, `frr_mgmt_framework_config` |
 | `PORT` | `Ethernet0` | Physical port | `admin_status`, `mtu`, `speed`, `lanes`, `alias`, `description`, `index`, `fec`, `autoneg` |
 | `PORTCHANNEL` | `PortChannel100` | LAG | `admin_status`, `mtu`, `min_links`, `fallback`, `fast_rate`, `lacp_key`, `description` |
 | `PORTCHANNEL_MEMBER` | `PortChannel100\|Ethernet0` | LAG membership | NULL:NULL sentinel |
@@ -1492,6 +1493,7 @@ The CLI is an HTTP client using `pkg/newtron/client/`. All operations route thro
 | Command | Description |
 |---------|-------------|
 | `show` | Device summary (info, interfaces, VLANs, VRFs) |
+| `init [--force]` | Enable unified config mode (frrcfgd) for newtron management |
 | `provision` | Generate + deliver composite from topology |
 | `health` | Device health report |
 | `device config-reload` | Reload CONFIG_DB from disk |

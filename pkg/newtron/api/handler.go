@@ -87,6 +87,7 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	mux.HandleFunc("POST /network/{netID}/provision", s.handleProvisionDevices)
 	mux.HandleFunc("POST /network/{netID}/composite/{device}", s.handleGenerateDeviceComposite)
+	mux.HandleFunc("POST /network/{netID}/init/{device}", s.handleInitDevice)
 
 	// ====================================================================
 	// Node read operations

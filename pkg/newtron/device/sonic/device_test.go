@@ -2,8 +2,8 @@ package sonic
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
-
 )
 
 func TestConfigDB_JSONSerialization(t *testing.T) {
@@ -280,6 +280,91 @@ func TestServiceBindingEntry_Structure(t *testing.T) {
 	}
 	if binding.IngressACL != "customer-l3-Ethernet0-in" {
 		t.Errorf("IngressACL = %q", binding.IngressACL)
+	}
+}
+
+func TestRequireFrrcfgd_Unified(t *testing.T) {
+	d := &Device{
+		Name: "switch1",
+		ConfigDB: &ConfigDB{
+			DeviceMetadata: map[string]map[string]string{
+				"localhost": {"docker_routing_config_mode": "unified"},
+			},
+		},
+	}
+	if err := d.requireFrrcfgd(); err != nil {
+		t.Errorf("unified mode should pass: %v", err)
+	}
+}
+
+func TestRequireFrrcfgd_NotSet(t *testing.T) {
+	d := &Device{
+		Name: "switch1",
+		ConfigDB: &ConfigDB{
+			DeviceMetadata: map[string]map[string]string{
+				"localhost": {"hostname": "switch1"},
+			},
+		},
+	}
+	err := d.requireFrrcfgd()
+	if err == nil {
+		t.Fatal("expected error when docker_routing_config_mode is not set")
+	}
+	if !strings.Contains(err.Error(), "frrcfgd not enabled") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRequireFrrcfgd_Split(t *testing.T) {
+	d := &Device{
+		Name: "switch1",
+		ConfigDB: &ConfigDB{
+			DeviceMetadata: map[string]map[string]string{
+				"localhost": {"docker_routing_config_mode": "split"},
+			},
+		},
+	}
+	err := d.requireFrrcfgd()
+	if err == nil {
+		t.Fatal("expected error when mode is split")
+	}
+	if !strings.Contains(err.Error(), "frrcfgd not enabled") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestFrrcfgdMetadataFields(t *testing.T) {
+	fields := FrrcfgdMetadataFields()
+	if fields["docker_routing_config_mode"] != "unified" {
+		t.Errorf("docker_routing_config_mode = %q, want \"unified\"", fields["docker_routing_config_mode"])
+	}
+	if fields["frr_mgmt_framework_config"] != "true" {
+		t.Errorf("frr_mgmt_framework_config = %q, want \"true\"", fields["frr_mgmt_framework_config"])
+	}
+	if len(fields) != 2 {
+		t.Errorf("expected 2 fields, got %d: %v", len(fields), fields)
+	}
+}
+
+func TestIsUnifiedConfigMode(t *testing.T) {
+	tests := []struct {
+		name   string
+		device *Device
+		want   bool
+	}{
+		{"unified", &Device{ConfigDB: &ConfigDB{DeviceMetadata: map[string]map[string]string{"localhost": {"docker_routing_config_mode": "unified"}}}}, true},
+		{"split", &Device{ConfigDB: &ConfigDB{DeviceMetadata: map[string]map[string]string{"localhost": {"docker_routing_config_mode": "split"}}}}, false},
+		{"empty", &Device{ConfigDB: &ConfigDB{DeviceMetadata: map[string]map[string]string{"localhost": {}}}}, false},
+		{"no localhost", &Device{ConfigDB: &ConfigDB{DeviceMetadata: map[string]map[string]string{}}}, false},
+		{"nil metadata", &Device{ConfigDB: &ConfigDB{}}, false},
+		{"nil configdb", &Device{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.device.IsUnifiedConfigMode(); got != tt.want {
+				t.Errorf("IsUnifiedConfigMode() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -152,6 +152,28 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 
+	// Resolve profile early — needed for BGP prerequisite and entry generation.
+	resolved := n.Resolved()
+
+	// BGP prerequisite: check if BGP_GLOBALS is needed for the default VRF.
+	// Without BGP_GLOBALS, frrcfgd has no `router bgp` process and silently
+	// ignores BGP_NEIGHBOR entries. Entries are added to the service ChangeSet
+	// (not a separate operation) so they appear in dry-run preview and apply
+	// atomically with the service entries.
+	//
+	// For non-default VRFs, generateServiceEntries handles BGP_GLOBALS_AF via
+	// the VRF creation path. This only covers the default VRF case.
+	hasBGPRouting := svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP
+	needsBGPEnsure := hasBGPRouting && !isOverlay && !n.BGPConfigured()
+	if needsBGPEnsure {
+		if resolved.UnderlayASN == 0 {
+			return nil, fmt.Errorf("service '%s' requires BGP but underlay_asn is not set in device profile", serviceName)
+		}
+		if resolved.RouterID == "" {
+			return nil, fmt.Errorf("service '%s' requires BGP but router_id (loopback_ip) is not set in device profile", serviceName)
+		}
+	}
+
 	// Filter preconditions
 	if svc.IngressFilter != "" {
 		if _, err := i.Node().GetFilter(svc.IngressFilter); err != nil {
@@ -176,7 +198,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// Generate base CONFIG_DB entries via shared generator (service_gen.go).
 	// This is the single source of truth for service → CONFIG_DB translation.
-	resolved := n.Resolved()
 
 	// Service-level BGP neighbors reference a peer group named after the service
 	// (Principle 36). Topology-level underlay peers do NOT use peer groups.
@@ -213,6 +234,26 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// overwrite mode).  Here we skip entries that already exist on the device.
 	cs := NewChangeSet(n.Name(), "interface.apply-service")
 	configDB := n.ConfigDB()
+
+	// Auto-ensure BGP_GLOBALS for the default VRF if needed. Added first so
+	// BGP_GLOBALS entries precede BGP_NEIGHBOR entries (dependency order).
+	// Same entries as ConfigureBGP — DEVICE_METADATA, BGP_GLOBALS, BGP_GLOBALS_AF,
+	// ROUTE_REDISTRIBUTE — using the profile's ASN and router ID.
+	if needsBGPEnsure {
+		asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)
+		e := updateDeviceMetadataConfig(map[string]string{
+			"bgp_asn": asnStr,
+			"type":    "LeafRouter",
+		})
+		cs.Update(e.Table, e.Key, e.Fields)
+		cs.Adds(CreateBGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+			"ebgp_requires_policy": "false",
+			"suppress_fib_pending": "false",
+			"log_neighbor_changes": "true",
+		}))
+		cs.Adds(CreateBGPGlobalsAFConfig("default", "ipv4_unicast", nil))
+		cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
+	}
 
 	// Track ACL names from generated entries for interface-merging.
 	// ACL names are content-hashed from the filter spec (Principle 35).

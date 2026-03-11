@@ -467,6 +467,21 @@ func (c *Client) DeliverComposite(device, handle, mode string) (*newtron.Deliver
 	return &result, nil
 }
 
+// InitDevice prepares a device for newtron management by enabling frrcfgd.
+// Returns the status: "initialized" or "already_initialized".
+// If force is true, proceeds even if the device has active BGP configuration.
+func (c *Client) InitDevice(device string, force bool) (string, error) {
+	path := c.networkPath() + "/init/" + url.PathEscape(device)
+	if force {
+		path += "?force=true"
+	}
+	var result map[string]string
+	if err := c.doPost(path, nil, &result); err != nil {
+		return "", err
+	}
+	return result["status"], nil
+}
+
 // ProvisionDevices provisions devices from the topology.
 func (c *Client) ProvisionDevices(req newtron.ProvisionRequest, opts newtron.ExecOpts) (*newtron.ProvisionResult, error) {
 	var result newtron.ProvisionResult

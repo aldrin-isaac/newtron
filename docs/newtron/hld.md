@@ -669,7 +669,25 @@ newtron maintains an in-memory snapshot of CONFIG_DB loaded at connection time. 
 
 **Limitation:** Between refresh and code that reads the cache, an external actor can modify CONFIG_DB. Precondition checks are advisory safety nets, not transactional guarantees. Acceptable because newtron is typically the sole CONFIG_DB writer in lab/production environments.
 
-### 9.3 Config Persistence
+### 9.3 Device Initialization (Unified Config Mode)
+
+SONiC ships with **bgpcfgd** by default — a daemon that processes only a subset of CONFIG_DB tables. Dynamic entries like BGP_NEIGHBOR, BGP_GLOBALS, and VRF are silently ignored. newtron requires **frrcfgd** (unified config mode), which translates all CONFIG_DB tables to FRR commands.
+
+**Three-layer enforcement** ensures frrcfgd is always active:
+
+| Layer | When | How | Scope |
+|-------|------|-----|-------|
+| **Boot patch** | VM deploy (newtlab) | Redis HSET + bgp restart | Lab convenience — applied during `newtlab deploy` |
+| **`newtron init`** | Before first use | `SetDeviceMetadata` + bgp restart + config save | Any device — standalone or topology-managed |
+| **Connect-time check** | Every `Connect()` | Reads `DEVICE_METADATA\|localhost` `docker_routing_config_mode` | Safety net — blocks operations on misconfigured devices |
+
+The init command is idempotent and intentionally one-way. There is no reverse operation — reverting to bgpcfgd would silently break all CONFIG_DB-driven configuration that newtron manages.
+
+**Safety guard for production devices.** Initialization restarts the bgp container, which drops all active BGP sessions and replaces `frr.conf` with frrcfgd-generated configuration from CONFIG_DB. Any FRR configuration applied via vtysh (not stored in CONFIG_DB) is permanently lost. If the device has active BGP neighbors, `newtron init` refuses and requires `--force` to proceed.
+
+**Provisioning** (`newtron provision`) includes the frrcfgd fields in the composite and runs `EnsureUnifiedConfigMode` after delivery, so separately running `newtron init` is unnecessary for topology-provisioned devices.
+
+### 9.4 Config Persistence
 
 SONiC uses a dual-state model: Redis CONFIG_DB (runtime, immediate) and `/etc/sonic/config_db.json` (persistent, loaded at boot). Newtron writes to Redis; `config save -y` persists to disk. This runs automatically after every `-x` execution unless `--no-save` is used.
 

@@ -13,7 +13,7 @@
       "vm_interface_map": "sequential",
       "vm_credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 300,
-      "dataplane": "",
+      "dataplane": "sonic-vs",
       "unsupported_features": ["evpn-vxlan"]
     }
   }

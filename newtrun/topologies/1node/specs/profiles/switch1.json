@@ -1,5 +1,6 @@
 {
     "mgmt_ip": "127.0.0.1",
+    "ssh_port": 13000,
     "loopback_ip": "10.0.0.1",
     "zone": "amer",
     "platform": "sonic-vs",

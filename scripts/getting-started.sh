@@ -12,7 +12,7 @@ IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node/specs"
 SERVER_PID=""
-TOTAL_STEPS=10
+TOTAL_STEPS=11
 
 # ── Colors and formatting ────────────────────────────────────────────────────
 
@@ -267,9 +267,6 @@ pause
 
 run_cmd bin/newtlab deploy 1node --monitor --force
 
-echo ""
-run_cmd bin/newtlab status 1node
-
 pause
 
 # ─── Step 4: Start newtron-server ─────────────────────────────────────────────
@@ -317,9 +314,34 @@ echo -e "  ${GREEN}Server started${RESET} (PID $SERVER_PID)"
 
 pause
 
-# ─── Step 5: Look at the specs ────────────────────────────────────────────────
+# ─── Step 5: Initialize the device ────────────────────────────────────────────
 
-header 5 "Understand the spec files"
+header 5 "Initialize the device"
+
+echo "  SONiC ships with bgpcfgd, which silently ignores dynamic CONFIG_DB"
+echo "  entries (BGP_NEIGHBOR, VRF, etc.). newtron requires frrcfgd (unified"
+echo "  config mode) so all CONFIG_DB writes are processed by FRR."
+echo ""
+echo -e "  ${BOLD}newtron init${RESET} enables frrcfgd, restarts the bgp container, and"
+echo "  saves the config. It's idempotent -- safe to run multiple times."
+echo ""
+echo "  In this walkthrough, newtlab's boot patch already enabled frrcfgd"
+echo "  during deploy. On a production device without newtlab, this is the"
+echo "  required first step before any newtron operations."
+echo ""
+
+run_cmd bin/newtron switch1 init
+
+echo ""
+note "On a production device with active BGP sessions, init requires"
+echo "    --force because it restarts the bgp container (dropping all sessions)"
+echo "    and replaces frr.conf (losing any vtysh-only configuration)."
+
+pause
+
+# ─── Step 6: Look at the specs ────────────────────────────────────────────────
+
+header 6 "Understand the spec files"
 
 echo -e "  newtron separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
 echo ""
@@ -348,9 +370,9 @@ echo "  + your parameters to compute the exact CONFIG_DB entries needed."
 
 pause
 
-# ─── Step 6: Dry-run a service operation ──────────────────────────────────────
+# ─── Step 7: Dry-run a service operation ──────────────────────────────────────
 
-header 6 "Preview -- see what newtron would write"
+header 7 "Preview -- see what newtron would write"
 
 echo "  Let's apply a transit service to Ethernet0. Without -x, newtron"
 echo "  computes the CONFIG_DB entries but doesn't write them -- a dry run."
@@ -363,14 +385,22 @@ echo ""
 echo "  Read the output top to bottom -- newtron is telling you exactly what"
 echo "  it will write to CONFIG_DB:"
 echo ""
-echo -e "    ${GRAY}INTERFACE|Ethernet0${RESET}              Enable IP routing on this port"
-echo -e "    ${GRAY}INTERFACE|Ethernet0|10.1.0.0/31${RESET}  Assign the /31 address"
-echo -e "    ${GRAY}BGP_PEER_GROUP|default|TRANSIT${RESET}   Create a peer group for the service"
-echo -e "    ${GRAY}BGP_NEIGHBOR|default|10.1.0.1${RESET}    Create a BGP peer at 10.1.0.1"
-echo "                                     (the other end of the /31)"
-echo -e "    ${GRAY}BGP_NEIGHBOR_AF|...|ipv4_unicast${RESET} Enable IPv4 unicast for the peer"
-echo -e "    ${GRAY}NEWTRON_SERVICE_BINDING|Ethernet0${RESET}  Record what was applied (so"
-echo "                                     'remove' knows what to clean up)"
+echo -e "    ${GRAY}DEVICE_METADATA|localhost${RESET}         Set BGP ASN and device type"
+echo -e "    ${GRAY}BGP_GLOBALS|default${RESET}               Create the BGP instance (AS 65001)"
+echo -e "    ${GRAY}BGP_GLOBALS_AF|...|ipv4_unicast${RESET}   Enable IPv4 address family"
+echo -e "    ${GRAY}ROUTE_REDISTRIBUTE|...${RESET}            Redistribute connected routes"
+echo -e "    ${GRAY}INTERFACE|Ethernet0${RESET}               Enable IP routing on this port"
+echo -e "    ${GRAY}INTERFACE|Ethernet0|10.1.0.0/31${RESET}   Assign the /31 address"
+echo -e "    ${GRAY}BGP_PEER_GROUP|default|TRANSIT${RESET}    Create a peer group for the service"
+echo -e "    ${GRAY}BGP_NEIGHBOR|default|10.1.0.1${RESET}     Create a BGP peer at 10.1.0.1"
+echo "                                      (the other end of the /31)"
+echo -e "    ${GRAY}BGP_NEIGHBOR_AF|...|ipv4_unicast${RESET}  Enable IPv4 unicast for the peer"
+echo -e "    ${GRAY}NEWTRON_SERVICE_BINDING|Ethernet0${RESET}   Record what was applied (so"
+echo "                                      'remove' knows what to clean up)"
+echo ""
+echo "  The first four entries appear because the device has no BGP instance"
+echo "  yet -- newtron auto-creates one from the profile's ASN and loopback."
+echo "  On a provisioned device, only the service entries would appear."
 echo ""
 echo "  These are the same entries you'd create manually with 'config interface'"
 echo "  and 'vtysh' commands -- but computed from the spec, validated against"
@@ -378,9 +408,9 @@ echo "  SONiC's YANG schema, and applied atomically."
 
 pause
 
-# ─── Step 7: Execute ──────────────────────────────────────────────────────────
+# ─── Step 8: Execute ──────────────────────────────────────────────────────────
 
-header 7 "Apply -- write to the switch"
+header 8 "Apply -- write to the switch"
 
 echo -e "  Add ${BOLD}-x${RESET} to execute. newtron will:"
 echo -e "    ${WHITE}1.${RESET} Validate all entries against SONiC YANG constraints"
@@ -410,18 +440,22 @@ run_ssh "CONFIG_DB: BGP peer entry (what newtron wrote)" \
 run_ssh "Kernel: interface IP (intfmgrd processed the CONFIG_DB entry)" \
     "ip addr show Ethernet0 | grep 'inet ' | grep -v inet6 || echo '(intfmgrd still processing -- takes a few seconds)'"
 
+run_ssh "FRR: BGP neighbor (frrcfgd read CONFIG_DB and configured FRR)" \
+    "docker exec bgp vtysh -c 'show bgp neighbors 10.1.0.1' 2>/dev/null | head -5 || echo '(frrcfgd still processing)'"
+
 run_ssh "CONFIG_DB: service binding (newtron's record of what was applied)" \
     "redis-cli -n 4 hgetall 'NEWTRON_SERVICE_BINDING|Ethernet0'"
 
-echo "  The service binding is the key to clean teardown -- it records"
-echo "  exactly what was applied so 'remove' knows what to clean up,"
-echo "  even if the service spec changes between apply and remove."
+echo "  The chain: newtron writes CONFIG_DB --> frrcfgd reads it -->"
+echo "  FRR configures the BGP peer. The service binding records what"
+echo "  was applied so 'remove' knows what to clean up, even if the"
+echo "  service spec changes between apply and remove."
 
 pause
 
-# ─── Step 8: Remove — clean teardown ─────────────────────────────────────────
+# ─── Step 9: Remove — clean teardown ─────────────────────────────────────────
 
-header 8 "Remove -- operational symmetry"
+header 9 "Remove -- operational symmetry"
 
 echo "  Every apply has an equal and opposite remove. This is critical for"
 echo "  network operations -- orphaned config (stale BGP peers, leftover IPs,"
@@ -451,9 +485,9 @@ echo "  back to its pre-service state."
 
 pause
 
-# ─── Step 9: Run the test suite ───────────────────────────────────────────────
+# ─── Step 10: Run the test suite ──────────────────────────────────────────────
 
-header 9 "Automated testing with newtrun"
+header 10 "Automated testing with newtrun"
 
 echo "  newtrun executes YAML test scenarios that exercise the full stack."
 echo "  The 1node-basic suite runs 4 scenarios with 25 steps:"
@@ -478,9 +512,9 @@ run_cmd bin/newtrun status --suite 1node-basic
 
 pause
 
-# ─── Step 10: Tear down ──────────────────────────────────────────────────────
+# ─── Step 11: Tear down ──────────────────────────────────────────────────────
 
-header 10 "Tear down"
+header 11 "Tear down"
 
 echo "  Stop the server and destroy the VM."
 echo ""

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/newtron-network/newtron/pkg/newtron"
@@ -1037,6 +1038,30 @@ func (s *Server) handleGenerateDeviceComposite(w http.ResponseWriter, r *http.Re
 	device := r.PathValue("device")
 	val, err := na.do(r.Context(), func() (any, error) {
 		return na.net.GenerateDeviceComposite(device)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	device := r.PathValue("device")
+	force := r.URL.Query().Get("force") == "true"
+	val, err := na.do(r.Context(), func() (any, error) {
+		err := na.net.InitDevice(r.Context(), device, force)
+		if errors.Is(err, newtron.ErrAlreadyInitialized) {
+			return map[string]string{"status": "already_initialized"}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"status": "initialized"}, nil
 	})
 	if err != nil {
 		writeError(w, err)

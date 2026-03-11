@@ -77,27 +77,34 @@ make build
 # 3. Deploy a single-switch lab
 bin/newtlab deploy 1node --monitor  # live status during deploy
 
-# 4. Start the server and apply a service
+# 4. Start the server, initialize the device, and apply a service
 bin/newtron-server --spec-dir newtrun/topologies/1node/specs &
+bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
 
 By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
 
 ```
-Operation: interface.applyService
+Operation: interface.apply-service
 Device: switch1
 Changes to CONFIG_DB:
+  [UPD] DEVICE_METADATA|localhost                        → map[bgp_asn:65001 type:LeafRouter]
+  [ADD] BGP_GLOBALS|default                              → map[local_asn:65001 router_id:10.0.0.1 ...]
+  [ADD] BGP_GLOBALS_AF|default|ipv4_unicast              → map[]
+  [ADD] ROUTE_REDISTRIBUTE|default|connected|bgp|ipv4    → map[]
   [ADD] INTERFACE|Ethernet0                              → map[NULL:NULL]
   [ADD] INTERFACE|Ethernet0|10.1.0.0/31                  → map[NULL:NULL]
-  [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up]
+  [ADD] BGP_PEER_GROUP|default|TRANSIT                   → map[admin_status:true]
+  [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast   → map[]
+  [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up peer_group_name:TRANSIT]
   [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast    → map[admin_status:true]
   [ADD] NEWTRON_SERVICE_BINDING|Ethernet0                → map[service_name:transit ...]
 
 DRY-RUN: No changes applied. Use -x to execute.
 ```
 
-Every entry names a real CONFIG_DB table and key. `INTERFACE|Ethernet0` enables IP routing on the port. `BGP_NEIGHBOR|default|10.1.0.1` is exactly what `frrcfgd` subscribes to — it will configure FRR with a BGP peer at 10.1.0.1 in the default VRF. (`NULL:NULL` is SONiC's sentinel for entries with no fields, like IP bindings.)
+Every entry names a real CONFIG_DB table and key. The first four entries auto-configure a BGP instance (newtron detects no existing BGP_GLOBALS and creates one using the profile's ASN). `INTERFACE|Ethernet0` enables IP routing on the port. `BGP_PEER_GROUP|default|TRANSIT` creates a shared peer group for the service; `BGP_NEIGHBOR|default|10.1.0.1` adds the peer referencing it. These are exactly what `frrcfgd` subscribes to — it will configure FRR with a BGP peer at 10.1.0.1 in the default VRF. (`NULL:NULL` is SONiC's sentinel for entries with no fields, like IP bindings.)
 
 There is no template engine — newtron computed these entries by running the same code path it uses online, using the device's AS number (65001), the interface's IP (10.1.0.0, so peer is 10.1.0.1), and the service spec.
 
@@ -107,7 +114,7 @@ Add `-x` to execute. newtron writes atomically, re-reads to verify, then persist
 $ bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
 
 Changes applied successfully.
-Verifying... OK (5/5 entries verified)
+Verifying... OK (11/11 entries verified)
 Config saved.
 ```
 
@@ -149,12 +156,12 @@ curl localhost:8080/network/default/topology/node            # List devices in t
 
 ### 3. Deploy a lab (requires KVM + SONiC image)
 
-Build a [SONiC VPP image](https://github.com/sonic-net/sonic-buildimage) and place it in `~/.newtlab/images/`:
+Place a SONiC image in `~/.newtlab/images/`. The getting-started script downloads the community sonic-vs image automatically; for multi-switch topologies, build a [SONiC image](https://github.com/sonic-net/sonic-buildimage) with a dataplane-capable platform (e.g., Cisco Silicon One):
 
 ```bash
 mkdir -p ~/.newtlab/images
-cp sonic-vpp.qcow2 ~/.newtlab/images/
-cp alpine-testhost.qcow2 ~/.newtlab/images/    # lightweight test host (optional)
+cp sonic-vs.qcow2 ~/.newtlab/images/            # community image (L2/L3, no EVPN dataplane)
+cp alpine-testhost.qcow2 ~/.newtlab/images/      # lightweight test host (optional)
 ```
 
 Deploy VMs and wire the topology:
@@ -359,7 +366,7 @@ All shipped test suites pass on Cisco Silicon One (CiscoVS Palladium2):
 EVPN VXLAN verified end-to-end: L2 bridging across switches and inter-subnet
 routing via asymmetric IRB, both running on Cisco Silicon One SAI.
 
-Every platform bug encountered along the way is documented in [`docs/rca/`](docs/rca/) — 39 root-cause analyses covering frrcfgd, orchagent, SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the answer is probably already there.
+Every platform bug encountered along the way is documented in [`docs/rca/`](docs/rca/) — root-cause analyses covering frrcfgd, orchagent, SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the answer is probably already there.
 
 ## Specs
 
@@ -408,7 +415,7 @@ docs/
   newtron/          HLD, LLD, device LLD, API reference, HOWTO
   newtlab/          HLD, LLD, HOWTO
   newtrun/          HLD, LLD, HOWTO
-  rca/              39 root-cause analyses of SONiC platform bugs and workarounds
+  rca/              Root-cause analyses of SONiC platform bugs and workarounds
 ```
 
 ## Documentation
@@ -421,7 +428,7 @@ docs/
 | **newtlab** | [Architecture](docs/newtlab/hld.md) | [Types & Methods](docs/newtlab/lld.md) | [Usage](docs/newtlab/howto.md) |
 | **newtrun** | [Architecture](docs/newtrun/hld.md) | [Types & Methods](docs/newtrun/lld.md) | [Usage](docs/newtrun/howto.md) |
 
-Additional references: [Device Layer LLD](docs/newtron/device-lld.md) (SSH tunnels, Redis clients, CONFIG_DB types) · [API Reference](docs/newtron/api.md) (123 HTTP endpoints) · [RCA Index](docs/rca/) (39 SONiC platform analyses — frrcfgd, orchagent, SAI, CiscoVS/VPP)
+Additional references: [Device Layer LLD](docs/newtron/device-lld.md) (SSH tunnels, Redis clients, CONFIG_DB types) · [API Reference](docs/newtron/api.md) · [RCA Index](docs/rca/) (SONiC platform analyses — frrcfgd, orchagent, SAI, CiscoVS/VPP)
 
 ## Building
 

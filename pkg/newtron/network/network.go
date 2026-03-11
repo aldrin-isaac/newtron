@@ -666,6 +666,22 @@ func (n *Network) ConnectNode(ctx context.Context, name string) (*node.Node, err
 	return dev, nil
 }
 
+// ConnectNodeForSetup connects without requiring frrcfgd. Used by
+// provisioning and InitDevice — both write unified config mode and
+// restart bgp afterward, so the check is skipped.
+func (n *Network) ConnectNodeForSetup(ctx context.Context, name string) (*node.Node, error) {
+	dev, err := n.GetNode(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := dev.ConnectForSetup(ctx); err != nil {
+		return nil, err
+	}
+
+	return dev, nil
+}
+
 // ListDevices returns names of all loaded devices.
 func (n *Network) ListNodes() []string {
 	n.mu.RLock()

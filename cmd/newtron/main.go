@@ -249,7 +249,7 @@ func init() {
 
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
-		showCmd, provisionCmd, healthCmd, deviceCmd,
+		showCmd, provisionCmd, healthCmd, deviceCmd, initCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)

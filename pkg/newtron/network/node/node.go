@@ -231,6 +231,26 @@ func (n *Node) ConfigDB() *sonic.ConfigDB {
 	return n.configDB
 }
 
+// IsUnifiedConfigMode returns true if the device has frrcfgd (unified config
+// mode) enabled in DEVICE_METADATA. Delegates to sonic.Device for connected
+// nodes; checks shadow ConfigDB for abstract/offline nodes.
+func (n *Node) IsUnifiedConfigMode() bool {
+	if n.conn != nil {
+		return n.conn.IsUnifiedConfigMode()
+	}
+	// Offline/abstract mode — no sonic.Device, check shadow directly.
+	// This is the only place that duplicates the check logic; physical
+	// nodes always delegate to sonic.Device.IsUnifiedConfigMode().
+	if n.configDB == nil || n.configDB.DeviceMetadata == nil {
+		return false
+	}
+	localhost, ok := n.configDB.DeviceMetadata["localhost"]
+	if !ok {
+		return false
+	}
+	return localhost["docker_routing_config_mode"] == "unified"
+}
+
 // Tunnel returns the SSH tunnel for direct command execution.
 // Returns nil if no SSH tunnel is configured.
 func (n *Node) Tunnel() *sonic.SSHTunnel {
@@ -270,6 +290,17 @@ func (n *Node) StateDB() *sonic.StateDB {
 
 // Connect establishes connection to the device via Redis/config_db.
 func (n *Node) Connect(ctx context.Context) error {
+	return n.connectWithOpts(ctx, false)
+}
+
+// ConnectForSetup connects to the device without requiring frrcfgd.
+// Used by provisioning and InitDevice — both write unified config mode
+// to DEVICE_METADATA and restart bgp afterward, so the check is skipped.
+func (n *Node) ConnectForSetup(ctx context.Context) error {
+	return n.connectWithOpts(ctx, true)
+}
+
+func (n *Node) connectWithOpts(ctx context.Context, skipFrrcfgdCheck bool) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -279,6 +310,7 @@ func (n *Node) Connect(ctx context.Context) error {
 
 	// Create connection using sonic package
 	n.conn = sonic.NewDevice(n.name, n.resolved)
+	n.conn.SkipFrrcfgdCheck = skipFrrcfgdCheck
 	if err := n.conn.Connect(ctx); err != nil {
 		return err
 	}
@@ -579,6 +611,54 @@ func (n *Node) SaveConfig(ctx context.Context) error {
 		return fmt.Errorf("config save failed: %w (output: %s)", err, output)
 	}
 	return nil
+}
+
+// EnsureUnifiedConfigMode checks whether frrcfgd (unified config mode) is
+// running. If not, restarts the bgp container so it picks up the
+// docker_routing_config_mode=unified that was written to DEVICE_METADATA.
+// Returns nil if frrcfgd is already running.
+func (n *Node) EnsureUnifiedConfigMode(ctx context.Context) error {
+	tunnel := n.Tunnel()
+	if tunnel == nil {
+		return fmt.Errorf("ensuring unified config mode requires SSH connection")
+	}
+
+	// CLI-WORKAROUND(frrcfgd-status): Check frrcfgd daemon status via supervisorctl.
+	// Gap: No STATE_DB or CONFIG_DB key reflects whether frrcfgd is the active routing config daemon.
+	// Resolution: SONiC could expose active routing config daemon in STATE_DB.
+	output, err := tunnel.ExecCommand("docker exec bgp supervisorctl status frrcfgd 2>&1")
+	if err == nil && strings.Contains(output, "RUNNING") {
+		return nil // already running
+	}
+
+	util.WithDevice(n.name).Info("frrcfgd not running — restarting bgp container to enable unified config mode")
+
+	// CLI-WORKAROUND(frrcfgd-restart): Restart bgp container to switch from bgpcfgd to frrcfgd.
+	// Gap: No CONFIG_DB-driven way to switch the active routing config daemon at runtime.
+	// Resolution: SONiC could support runtime daemon switching via CONFIG_DB or gNMI.
+	if _, err := tunnel.ExecCommand("sudo systemctl restart bgp"); err != nil {
+		return fmt.Errorf("restarting bgp container: %w", err)
+	}
+
+	// Wait for bgp container + frrcfgd to come up
+	deadline := time.After(120 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled waiting for frrcfgd: %w", ctx.Err())
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for frrcfgd to start after bgp restart")
+		case <-ticker.C:
+			output, err := tunnel.ExecCommand("docker exec bgp supervisorctl status frrcfgd 2>&1")
+			if err == nil && strings.Contains(output, "RUNNING") {
+				util.WithDevice(n.name).Info("frrcfgd is running")
+				return nil
+			}
+		}
+	}
 }
 
 // ConfigReload runs 'config reload -y' which stops all SONiC services,

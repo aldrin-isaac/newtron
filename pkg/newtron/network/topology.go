@@ -114,11 +114,13 @@ func (tp *TopologyProvisioner) GenerateDeviceComposite(deviceName string) (*node
 	// Step 4: Full device metadata (bgp_asn, hwsku, type, frrcfgd flags)
 	// =========================================================================
 	metaFields := map[string]string{
-		"hostname":                   deviceName,
-		"bgp_asn":                    fmt.Sprintf("%d", resolved.UnderlayASN),
-		"docker_routing_config_mode": "unified",
-		"frr_mgmt_framework_config":  "true",
-		"type":                       "LeafRouter",
+		"hostname": deviceName,
+		"bgp_asn":  fmt.Sprintf("%d", resolved.UnderlayASN),
+		"type":     "LeafRouter",
+	}
+	// Merge canonical frrcfgd fields from single source of truth
+	for k, v := range sonic.FrrcfgdMetadataFields() {
+		metaFields[k] = v
 	}
 	// Platform is a factory value (baked into the SONiC image) — do NOT
 	// write it to DEVICE_METADATA. SONiC components may read it to find
@@ -302,8 +304,9 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 		return nil, fmt.Errorf("generating composite: %w", err)
 	}
 
-	// Connect to device for delivery
-	dev, err := tp.network.ConnectNode(ctx, deviceName)
+	// Connect without frrcfgd check — the composite includes unified config
+	// mode fields, and we restart bgp after delivery.
+	dev, err := tp.network.ConnectNodeForSetup(ctx, deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to device: %w", err)
 	}
@@ -335,6 +338,13 @@ func (tp *TopologyProvisioner) ProvisionDevice(ctx context.Context, deviceName s
 	result, err := dev.DeliverComposite(composite, node.CompositeOverwrite)
 	if err != nil {
 		return nil, fmt.Errorf("delivering composite: %w", err)
+	}
+
+	// Ensure unified config mode is active. The composite wrote the frrcfgd
+	// fields to DEVICE_METADATA. If the device was using bgpcfgd (community
+	// sonic-vs default), restart bgp so frrcfgd takes over. No-op if already running.
+	if err := dev.EnsureUnifiedConfigMode(ctx); err != nil {
+		return nil, fmt.Errorf("enabling unified config mode: %w", err)
 	}
 
 	util.WithDevice(deviceName).Infof("Provisioned device from topology: %d entries applied", result.Applied)

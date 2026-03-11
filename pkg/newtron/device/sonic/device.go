@@ -16,6 +16,11 @@ type Device struct {
 	ConfigDB *ConfigDB
 	StateDB  *StateDB
 
+	// SkipFrrcfgdCheck bypasses the frrcfgd precondition at connect time.
+	// Set to true for provisioning, which writes docker_routing_config_mode=unified
+	// as part of the composite and restarts bgp afterward.
+	SkipFrrcfgdCheck bool
+
 	// Redis connections
 	client      *ConfigDBClient
 	stateClient *StateDBClient
@@ -71,6 +76,17 @@ func (d *Device) Connect(ctx context.Context) error {
 	if err != nil {
 		d.client.Close()
 		return fmt.Errorf("loading config_db from %s: %w", d.Name, err)
+	}
+
+	// Verify frrcfgd (unified config mode) is enabled. Without it, dynamic
+	// CONFIG_DB entries (BGP_NEIGHBOR, BGP_GLOBALS, etc.) are silently ignored
+	// by bgpcfgd, and FRR never programs the peers newtron configures.
+	// Skipped for provisioning, which writes unified mode + restarts bgp.
+	if !d.SkipFrrcfgdCheck {
+		if err := d.requireFrrcfgd(); err != nil {
+			d.client.Close()
+			return err
+		}
 	}
 
 	// Connect to STATE_DB (DB 6)
@@ -271,4 +287,52 @@ func (d *Device) Tunnel() *SSHTunnel {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.tunnel
+}
+
+// FrrcfgdMetadataFields returns the DEVICE_METADATA fields that enable frrcfgd
+// (unified config mode). This is the single source of truth for these fields —
+// used by InitDevice, the topology provisioner, and newtlab boot patches.
+func FrrcfgdMetadataFields() map[string]string {
+	return map[string]string{
+		"docker_routing_config_mode": "unified",
+		"frr_mgmt_framework_config":  "true",
+	}
+}
+
+// IsUnifiedConfigMode returns true if the device has frrcfgd (unified config
+// mode) enabled in DEVICE_METADATA.
+func (d *Device) IsUnifiedConfigMode() bool {
+	if d.ConfigDB == nil || d.ConfigDB.DeviceMetadata == nil {
+		return false
+	}
+	localhost, ok := d.ConfigDB.DeviceMetadata["localhost"]
+	if !ok {
+		return false
+	}
+	return localhost["docker_routing_config_mode"] == "unified"
+}
+
+// requireFrrcfgd checks that the device uses frrcfgd (unified config mode).
+// bgpcfgd (the default on community sonic-vs) silently ignores dynamic
+// CONFIG_DB entries like BGP_NEIGHBOR, making newtron's BGP configuration
+// invisible to FRR. frrcfgd processes all CONFIG_DB tables correctly.
+func (d *Device) requireFrrcfgd() error {
+	if d.ConfigDB == nil || d.ConfigDB.DeviceMetadata == nil {
+		return fmt.Errorf("%s: cannot read DEVICE_METADATA — CONFIG_DB may be empty", d.Name)
+	}
+	localhost, ok := d.ConfigDB.DeviceMetadata["localhost"]
+	if !ok {
+		return fmt.Errorf("%s: DEVICE_METADATA|localhost not found in CONFIG_DB", d.Name)
+	}
+	mode := localhost["docker_routing_config_mode"]
+	if mode != "unified" {
+		return fmt.Errorf(
+			"%s: frrcfgd not enabled (docker_routing_config_mode=%q, need \"unified\")\n"+
+				"  newtron requires frrcfgd (unified config mode) to operate.\n"+
+				"  Without it, BGP_NEIGHBOR and other CONFIG_DB entries are silently ignored.\n\n"+
+				"  To fix, run:  newtron %s init",
+			d.Name, mode, d.Name,
+		)
+	}
+	return nil
 }

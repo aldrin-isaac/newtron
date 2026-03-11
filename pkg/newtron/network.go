@@ -2,9 +2,11 @@ package newtron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
 )
 
@@ -35,6 +37,85 @@ func (net *Network) Connect(ctx context.Context, device string) (*Node, error) {
 		return nil, fmt.Errorf("connecting to %s: %w", device, err)
 	}
 	return &Node{net: net, internal: dev}, nil
+}
+
+// InitDevice prepares a device for newtron management. This is a one-time
+// operation that enables unified config mode (frrcfgd) so CONFIG_DB writes
+// for BGP, VRF, and other tables are processed by FRR. Without this, SONiC's
+// default bgpcfgd silently ignores dynamic CONFIG_DB entries.
+//
+// The operation:
+//  1. Connects to the device (skipping frrcfgd check)
+//  2. Writes unified config mode fields to DEVICE_METADATA
+//  3. Restarts bgp container so frrcfgd takes over from bgpcfgd
+//  4. Saves config to persist across reboots
+//
+// Safe to run multiple times — no-op if already initialized.
+//
+// Intentionally one-way: there is no reverse operation. Reverting to bgpcfgd
+// would break all newtron CONFIG_DB operations. This is infrastructure init,
+// not a reversible configuration change.
+//
+// ErrAlreadyInitialized is returned by InitDevice when the device already
+// has unified config mode enabled. This is not an error condition — the caller
+// can display a message and proceed.
+var ErrAlreadyInitialized = errors.New("device already initialized")
+
+// ErrActiveConfiguration is returned by InitDevice when the device has active
+// BGP configuration and --force was not specified. Initialization switches
+// from split/separated mode to unified mode, which:
+//   - Restarts the bgp container, dropping all active BGP sessions
+//   - Replaces frr.conf with frrcfgd-generated config from CONFIG_DB
+//   - Any FRR configuration done via vtysh (not in CONFIG_DB) is permanently lost
+//
+// The caller should warn the user and retry with Force=true.
+var ErrActiveConfiguration = errors.New("device has active BGP configuration; use --force to proceed (this will restart bgp, drop all sessions, and replace frr.conf — any vtysh-only config not in CONFIG_DB will be lost)")
+
+func (net *Network) InitDevice(ctx context.Context, device string, force bool) error {
+	dev, err := net.internal.ConnectNodeForSetup(ctx, device)
+	if err != nil {
+		return fmt.Errorf("connecting to %s: %w", device, err)
+	}
+	defer dev.Disconnect()
+
+	// Check if already initialized via Node method (respects API boundary)
+	if dev.IsUnifiedConfigMode() {
+		return ErrAlreadyInitialized
+	}
+
+	// Safety check: if the device has active BGP neighbors, initialization
+	// will restart the bgp container and drop all sessions. This is
+	// dangerous on a production device — require --force.
+	if !force {
+		configDB := dev.ConfigDB()
+		if configDB != nil && len(configDB.BGPNeighbor) > 0 {
+			return fmt.Errorf("%s has %d active BGP neighbor(s) — %w",
+				device, len(configDB.BGPNeighbor), ErrActiveConfiguration)
+		}
+	}
+
+	node := &Node{net: net, internal: dev}
+
+	// Write unified config mode fields to DEVICE_METADATA and commit.
+	// Fields from sonic.FrrcfgdMetadataFields() — single source of truth.
+	_, err = node.Execute(ctx, ExecOpts{Execute: true, NoSave: true}, func(ctx context.Context) error {
+		return node.SetDeviceMetadata(ctx, sonic.FrrcfgdMetadataFields())
+	})
+	if err != nil {
+		return fmt.Errorf("writing DEVICE_METADATA: %w", err)
+	}
+
+	// Restart bgp so frrcfgd takes over from bgpcfgd
+	if err := dev.EnsureUnifiedConfigMode(ctx); err != nil {
+		return fmt.Errorf("enabling unified config mode: %w", err)
+	}
+
+	// Save config so unified mode persists across reboots
+	if err := dev.SaveConfig(ctx); err != nil {
+		return fmt.Errorf("saving config: %w", err)
+	}
+
+	return nil
 }
 
 // ListNodes returns the names of all devices that have been loaded into this Network.

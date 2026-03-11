@@ -75,6 +75,7 @@ func TestAPICompleteness(t *testing.T) {
 			"GetHostProfile":         true,
 			"GenerateDeviceComposite": true,
 			"ProvisionDevices":        true,
+			"InitDevice":             true,
 			// Connection
 			"Connect":   true,
 			"ListNodes": true,
