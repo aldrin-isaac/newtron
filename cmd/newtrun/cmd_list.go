@@ -45,7 +45,7 @@ func newListCmd() *cobra.Command {
 With a suite name, lists the scenarios in that suite.
 
   newtrun list                     # show all suites
-  newtrun list 2node-incremental   # show scenarios in suite`,
+  newtrun list 2node-ngdp-incremental   # show scenarios in suite`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// If no positional arg and no --dir, show all suites

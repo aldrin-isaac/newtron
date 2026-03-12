@@ -601,9 +601,9 @@ Before making any change to `service_gen.go`, `*_ops.go`, or any shared code pat
    working features are at risk and how they are protected
 
 Tracking what was working (update this as test suites are validated):
-- `evpn-bridged`: WORKS — 2node-primitive, 3node-dataplane (evpn-l2-irb L2 path)
-- `routed`, `irb`, `bridged`: WORKS — 2node-primitive
-- `evpn-irb`: WORKS — 3node-dataplane evpn-l2-irb (L2 + L3 inter-subnet via asymmetric IRB)
+- `evpn-bridged`: WORKS — 2node-ngdp-primitive, 3node-ngdp-dataplane (evpn-l2-irb L2 path)
+- `routed`, `irb`, `bridged`: WORKS — 2node-ngdp-primitive
+- `evpn-irb`: WORKS — 3node-ngdp-dataplane evpn-l2-irb (L2 + L3 inter-subnet via asymmetric IRB)
 - `evpn-routed`: ABANDONED on CiscoVS/Silicon One (RCA-039, L3VNI DECAP blocked)
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
@@ -627,9 +627,9 @@ Before writing any CONFIG_DB entries to implement a SONiC feature:
    order as the CLI path. Do not invent alternative CONFIG_DB layouts without explicit
    user authorization.
 
-5. **Targeted test first**: Create a targeted newtrun suite (like `2node-service`) that
+5. **Targeted test first**: Create a targeted newtrun suite (like `2node-ngdp-service`) that
    tests only the specific feature. Debug and pass it before integrating into composite
-   suites (like `2node-primitive`).
+   suites (like `2node-ngdp-primitive`).
 
 **Never assume a CONFIG_DB path works without first verifying it via CLI on a real device.**
 

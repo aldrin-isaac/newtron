@@ -1,0 +1,13 @@
+{
+    "description": "Patch frrcfgd template to handle ebgp_requires_policy CONFIG_DB field (missing in sonic-vs frrcfgd)",
+    "pre_commands": [
+        "for i in $(seq 1 60); do docker ps 2>/dev/null | grep -q ' bgp$' && break; sleep 5; done"
+    ],
+    "files": [
+        { "template": "patch_ebgp_policy.py", "dest": "/tmp/patch_ebgp_policy.py" }
+    ],
+    "post_commands": [
+        "sudo docker cp /tmp/patch_ebgp_policy.py bgp:/root/patch_ebgp_policy.py",
+        "sudo docker exec bgp python3 /root/patch_ebgp_policy.py"
+    ]
+}

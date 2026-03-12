@@ -43,25 +43,14 @@ increase TTL is rejected because FRR thinks it's iBGP.
 - Single-hop overlay sessions (leaf ↔ spine) unaffected (TTL=1 is enough)
 - Only manifests in topologies with >1 hop between overlay peers
 
-## Fix
+## Fix (Historical)
 
-Changed `ApplyFRRDefaults` in `pkg/newtron/network/node/node.go` to use `ttl-security`
-instead of `ebgp-multihop`. Unlike `ebgp-multihop`, `ttl-security` is
-accepted regardless of eBGP/iBGP classification:
-
-```go
-// Before (silently ignored by FRR):
-cmds += fmt.Sprintf(" -c 'neighbor %s ebgp-multihop 255'", ip)
-
-// After (works regardless of FRR's internal classification):
-cmds += fmt.Sprintf(
-    " -c 'neighbor %s ttl-security hops 10'"+
-        " -c 'neighbor %s disable-connected-check'",
-    ip, ip)
-```
-
-`ttl-security hops 10` sets outgoing TTL=255 and requires incoming TTL≥245.
-`disable-connected-check` allows non-directly-connected eBGP peers.
+At the time, the workaround was to change `ApplyFRRDefaults` to use `ttl-security`
+instead of `ebgp-multihop`, since `ttl-security` is accepted regardless of
+eBGP/iBGP classification. This entire approach was later superseded by the
+all-eBGP design (RCA-026), which eliminated the `local-as` mechanism and
+`ApplyFRRDefaults` entirely. The all-eBGP design uses each device's `underlay_asn`
+directly, so the local-as/remote-as ambiguity described here cannot occur.
 
 ## Lesson
 

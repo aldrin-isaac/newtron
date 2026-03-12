@@ -55,10 +55,10 @@ Deploy a topology, SSH in, and tear down — the minimal path:
 go build -o bin/newtlab ./cmd/newtlab
 
 # 2. Deploy VMs from a spec directory
-bin/newtlab deploy -S newtrun/topologies/2node/specs
+bin/newtlab deploy -S newtrun/topologies/2node-ngdp/specs
 
 # 3. Provision CONFIG_DB on all switches
-bin/newtlab provision -S newtrun/topologies/2node/specs
+bin/newtlab provision -S newtrun/topologies/2node-ngdp/specs
 
 # 4. SSH to a device
 bin/newtlab ssh switch1
@@ -70,7 +70,7 @@ bin/newtlab destroy
 Steps 2 and 3 can be combined:
 
 ```bash
-bin/newtlab deploy -S newtrun/topologies/2node/specs --provision
+bin/newtlab deploy -S newtrun/topologies/2node-ngdp/specs --provision
 ```
 
 The rest of this guide covers each step in detail with all flags, example
@@ -80,14 +80,14 @@ output, and troubleshooting.
 
 ## End-to-End Workflow
 
-This walkthrough deploys the `2node-service` topology — two CiscoVS switches
+This walkthrough deploys the `2node-ngdp-service` topology — two CiscoVS switches
 with eight virtual hosts — and exercises the full lifecycle: deploy, provision,
 status, data plane test, and teardown.
 
 **Deploy with provisioning:**
 
 ```bash
-newtlab deploy -S newtrun/topologies/2node-service/specs --provision
+newtlab deploy -S newtrun/topologies/2node-ngdp-service/specs --provision
 ```
 
 ```
@@ -102,7 +102,7 @@ Deploying VMs...
   [hosts] provisioning host namespaces
   [ready] all nodes ready
 
-✓ Deployed 2node-service (11 nodes)
+✓ Deployed 2node-ngdp-service (11 nodes)
 
   NODE      STATUS   SSH PORT  CONSOLE
   host1     running  13000     12000
@@ -128,12 +128,12 @@ the sorted device list, so `ssh_port_base + 8` and `ssh_port_base + 9`).
 **Check status:**
 
 ```bash
-newtlab status 2node-service
+newtlab status 2node-ngdp-service
 ```
 
 ```
-Lab: 2node-service (deployed 2026-03-05 10:30:00)
-Spec dir: /home/user/newtrun/topologies/2node-service/specs
+Lab: 2node-ngdp-service (deployed 2026-03-05 10:30:00)
+Spec dir: /home/user/newtrun/topologies/2node-ngdp-service/specs
 
   NODE      TYPE                   STATUS   IMAGE              SSH    CONSOLE  PID
   host1     vhost:hostvm-0/host1   running  alpine-testhost    13000  12000    54320
@@ -203,17 +203,17 @@ full data plane across both switches and the newtlink bridge network.
 **Tear down:**
 
 ```bash
-newtlab destroy 2node-service
+newtlab destroy 2node-ngdp-service
 ```
 
 ```
-Destroying lab 2node-service...
+Destroying lab 2node-ngdp-service...
   [stop] stopping hostvm-0
   [stop] stopping switch1
   [stop] stopping switch2
   [bridges] stopping bridge workers
 
-✓ Lab 2node-service destroyed
+✓ Lab 2node-ngdp-service destroyed
 ```
 
 Destroy kills the 3 QEMU processes (virtual hosts are killed implicitly when
@@ -404,7 +404,7 @@ Deploying VMs...
   [hosts] provisioning host namespaces
   [ready] all nodes ready
 
-✓ Deployed 2node (9 nodes)
+✓ Deployed 2node-ngdp (9 nodes)
 
   NODE      STATUS   SSH PORT  CONSOLE
   host1     running  13000     12000
@@ -548,8 +548,8 @@ newtlab status -S <specs>
 **Node table:**
 
 ```
-Lab: 2node (deployed 2026-03-01 14:30:00)
-Spec dir: /home/user/newtrun/topologies/2node/specs
+Lab: 2node-ngdp (deployed 2026-03-01 14:30:00)
+Spec dir: /home/user/newtrun/topologies/2node-ngdp/specs
 
   NODE      TYPE                   STATUS   IMAGE              SSH    CONSOLE  PID
   host1     vhost:hostvm-0/host1   running  alpine-testhost    13000  12000    54320
@@ -603,9 +603,9 @@ newtlab list
 
 ```
   TOPOLOGY        DEVICES  LINKS  STATUS    NODES
-  2node           2        1      deployed  2/2 running
-  2node-service   10       8      deployed  3/3 running
-  3node           3        4      —
+  2node-ngdp      2        1      deployed  2/2 running
+  2node-ngdp-service   10       8      deployed  3/3 running
+  3node-ngdp      3        4      —
 ```
 
 STATUS values: `deployed` (green), `degraded` (yellow — some nodes stopped),
@@ -764,13 +764,13 @@ newtlab destroy              # auto-selects if only one lab deployed
 ```
 
 ```
-Destroying lab 2node...
+Destroying lab 2node-ngdp...
   [stop] stopping hostvm-0
   [stop] stopping switch1
   [stop] stopping switch2
   [bridges] stopping bridge workers
 
-✓ Lab 2node destroyed
+✓ Lab 2node-ngdp destroyed
 ```
 
 **What destroy cleans up:**

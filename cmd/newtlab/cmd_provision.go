@@ -21,9 +21,9 @@ This invokes 'newtron provision -x' on each device in the topology,
 delivering the CONFIG_DB derived from spec files. Equivalent to the
 --provision flag on 'newtlab deploy'.
 
-  newtlab provision 2node
-  newtlab provision 2node --device leaf1    # single device
-  newtlab provision 2node --parallel 4      # parallel provisioning`,
+  newtlab provision 2node-ngdp
+  newtlab provision 2node-ngdp --device leaf1    # single device
+  newtlab provision 2node-ngdp --parallel 4      # parallel provisioning`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := resolveSpecDir(args)

@@ -111,7 +111,7 @@ Test scenarios declare `requires_features` in YAML:
 ```yaml
 name: evpn-l2-irb
 description: EVPN L2VNI with IRB testing
-topology: 3node
+topology: 3node-ngdp
 platform: ciscovs
 requires: [boot-provision]
 requires_features: [evpn-vxlan, macvpn]
@@ -213,13 +213,13 @@ requires_features: [evpn-vxlan, macvpn]
 
 ```bash
 # Run test suite on VPP - EVPN test auto-skips
-$ bin/newtrun start 3node-dataplane --platform sonic-vpp
+$ bin/newtrun start 3node-ngdp-dataplane --platform sonic-vpp
 ✓ boot-provision (12.3s)
 ✓ l3-routing (8.1s)
 ⊘ evpn-l2-irb (skipped: platform 'sonic-vpp' does not support required features: [evpn-vxlan, macvpn])
 
 # Run same suite on CiscoVS - EVPN test runs
-$ bin/newtrun start 3node-dataplane --platform ciscovs
+$ bin/newtrun start 3node-ngdp-dataplane --platform ciscovs
 ✓ boot-provision (18.4s)
 ✓ l3-routing (10.2s)
 ✓ evpn-l2-irb (22.7s)

@@ -13,7 +13,7 @@ import (
 )
 
 // resolveDir resolves the suite directory from: positional arg > flag > env > settings > default.
-// A bare name like "2node-incremental" is resolved under the suites base directory.
+// A bare name like "2node-ngdp-incremental" is resolved under the suites base directory.
 func resolveDir(cmd *cobra.Command, flagVal string, args ...string) string {
 	// Positional arg takes priority
 	if len(args) > 0 && args[0] != "" {
@@ -28,7 +28,7 @@ func resolveDir(cmd *cobra.Command, flagVal string, args ...string) string {
 	if s, err := settings.Load(); err == nil && s.DefaultSuite != "" {
 		return s.DefaultSuite
 	}
-	return "newtrun/suites/2node-standalone"
+	return "newtrun/suites/2node-ngdp-standalone"
 }
 
 // resolveSuiteName resolves a suite name to a directory path.

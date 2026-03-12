@@ -372,7 +372,7 @@ The insight survives the architecture change. The best phrasing often does too.
 
 Guideline #23 says CLI output mockups must match the actual format (columns, status strings). That's necessary but not sufficient. The **values** in mockups — port numbers, PIDs, node counts, table rows — must also be consistent across the entire document.
 
-During the newtlab HOWTO rewrite, the first pass had switch1 at SSH port 13000 in the status mockup but at 13006 in the deploy mockup. Both were individually plausible, but they contradicted each other because they implied different topologies. Port 13000 would be correct if switch1 were the first device alphabetically (no hosts); port 13006 is correct for the 2node topology where 6 host devices sort before the switches.
+During the newtlab HOWTO rewrite, the first pass had switch1 at SSH port 13000 in the status mockup but at 13006 in the deploy mockup. Both were individually plausible, but they contradicted each other because they implied different topologies. Port 13000 would be correct if switch1 were the first device alphabetically (no hosts); port 13006 is correct for the 2node-ngdp topology where 6 host devices sort before the switches.
 
 **Rule:** Pick one real topology from the codebase and derive ALL mockups from it. Run the allocation algorithm mentally (or trace the code) to get correct port numbers, node counts, PID relationships, and table row sets. Then verify that every mockup in the document is consistent with the same topology.
 
@@ -400,7 +400,7 @@ The Quick Start says "here's the minimum." The End-to-End Workflow says "here's 
 
 ## 30. Name the Topology Your Mockups Are Based On — HOWTO
 
-When CLI output mockups derive from a real topology (per #28), name it. A mockup that says `✓ Deployed 2node (9 nodes)` with no context forces the reader to wonder "why 9?" and "where did these port numbers come from?"
+When CLI output mockups derive from a real topology (per #28), name it. A mockup that says `✓ Deployed 2node-ngdp (9 nodes)` with no context forces the reader to wonder "why 9?" and "where did these port numbers come from?"
 
 **Rule:** State which topology the example uses and, when relevant, explain why the numbers are what they are. Example: "The 8 virtual hosts share a single QEMU VM (hostvm-0) and thus share its SSH and console ports. Switches get their own ports (indices 6 and 7 in the sorted device list, so `ssh_port_base + 6` and `ssh_port_base + 7`)."
 

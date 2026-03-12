@@ -1,10 +1,10 @@
 # RCA-019: BGP ASN Mismatch After Provisioning
 
-**Note (Feb 2026):** The `ApplyFRRDefaults` mechanism and `docker restart bgp` references are outdated. FRR configuration is now managed by `frrcfgd` (unified mode). The ASN change still requires `systemctl restart bgp` (on CiscoVS) or `docker restart bgp` (on VPP) after provisioning — this is handled by the `restart-bgp` step in test suites.
+**Note (Mar 2026):** The `ApplyFRRDefaults` mechanism referenced below was eliminated when frrcfgd unified mode was adopted. The core issue remains valid: changing the ASN in CONFIG_DB still requires a BGP service restart so frrcfgd regenerates the full FRR config with the new ASN. This is handled by the `restart-bgp` newtrun step (`systemctl restart bgp` on CiscoVS, `docker restart bgp` on VPP).
 
 ## Symptom
 
-`ApplyFRRDefaults` fails with:
+Originally surfaced as an `ApplyFRRDefaults` failure (now eliminated):
 
 ```
 BGP instance name and AS number mismatch. BGP instance is already running; AS is 65100
@@ -31,10 +31,13 @@ vtysh -c 'show running-config' | grep 'router bgp'        → "router bgp 65100"
 
 ## Fix
 
-Restart the BGP Docker container **after** provisioning CONFIG_DB and **before** calling `ApplyFRRDefaults`. The restart kills `bgpd` + `bgpcfgd`, and on startup `bgpcfgd` regenerates `frr.conf` from the current CONFIG_DB state (which now has the correct ASN).
+Restart the BGP service **after** provisioning CONFIG_DB. The restart kills
+`bgpd` + `frrcfgd` (or `bgpcfgd` in split mode), and on startup frrcfgd
+regenerates the full FRR configuration from the current CONFIG_DB state
+(which now has the correct ASN).
 
 ```yaml
-# Correct ordering in newtrun scenarios:
+# Current ordering in newtrun scenarios:
 - name: provision-leafs
   action: provision
   devices: [leaf1, leaf2]
@@ -47,17 +50,18 @@ Restart the BGP Docker container **after** provisioning CONFIG_DB and **before**
 - name: wait-bgp-restart
   action: wait
   duration: 15s
-
-- name: apply-frr-defaults
-  action: apply-frr-defaults
-  devices: [leaf1, leaf2]
 ```
+
+The `apply-frr-defaults` step that previously followed the restart was
+eliminated when frrcfgd unified mode was adopted -- frrcfgd now generates the
+complete FRR config (including `no bgp ebgp-requires-policy` and
+`no bgp suppress-fib-pending`) from CONFIG_DB on startup.
 
 The `config reload` alternative is **not safe** on SONiC VPP — it breaks VPP syncd (see RCA-001).
 
 ## Affected Topologies
 
-Any topology where the device profile's `underlay_asn` differs from the SONiC VPP image's factory-default ASN (65100). This includes the 2node and 3node topologies which use ASN 65011/65012.
+Any topology where the device profile's `underlay_asn` differs from the SONiC VPP image's factory-default ASN (65100). This includes the 2node-ngdp and 3node-ngdp topologies which use ASN 65011/65012.
 
 ## Related
 

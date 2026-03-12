@@ -1,0 +1,320 @@
+name: verify-clean
+description: |
+  Verify that CONFIG_DB is clean after full teardown. For every forward action
+  there must be a reverse action — this suite verifies that every CONFIG_DB
+  entry written during provisioning or test scenarios has been removed.
+  Organized by table to trace operational symmetry.
+topology: 3node-ngdp
+requires: [teardown]
+
+steps:
+  # =========================================================================
+  # LOOPBACK_INTERFACE — loopback from provisioning
+  # Forward: ConfigureLoopback
+  # Reverse: RemoveLoopback
+  # =========================================================================
+
+  - name: no-loopback
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: LOOPBACK_INTERFACE
+    key: Loopback0
+    expect:
+      exists: false
+
+  - name: no-loopback-ip-spine
+    action: verify-config-db
+    devices: [spine]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.10/32"
+    expect:
+      exists: false
+
+  - name: no-loopback-ip-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.11/32"
+    expect:
+      exists: false
+
+  - name: no-loopback-ip-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.12/32"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # BGP_GLOBALS — global BGP configuration
+  # Forward: ConfigureBGP
+  # Reverse: RemoveBGPGlobals
+  # =========================================================================
+
+  - name: no-bgp-globals
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      exists: false
+
+  # =========================================================================
+  # BGP_GLOBALS_AF — address-family configs
+  # Forward: ConfigureBGP (ipv4) + SetupEVPN (l2vpn_evpn)
+  # Reverse: RemoveBGPGlobals + TeardownEVPN
+  # =========================================================================
+
+  - name: no-bgp-af-ipv4
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: BGP_GLOBALS_AF
+    key: "default|ipv4_unicast"
+    expect:
+      exists: false
+
+  - name: no-bgp-af-l2vpn
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # BGP_NEIGHBOR — underlay + overlay peers
+  # =========================================================================
+
+  # Spine underlay: peers with leaf1 (10.1.0.1) and leaf2 (10.1.0.3)
+  - name: no-bgp-neighbor-spine-leaf1
+    action: verify-config-db
+    devices: [spine]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: false
+
+  - name: no-bgp-neighbor-spine-leaf2
+    action: verify-config-db
+    devices: [spine]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.3"
+    expect:
+      exists: false
+
+  # Leaf underlay: leaf1 peers with spine (10.1.0.0), leaf2 peers with spine (10.1.0.2)
+  - name: no-bgp-neighbor-underlay-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.0"
+    expect:
+      exists: false
+
+  - name: no-bgp-neighbor-underlay-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.2"
+    expect:
+      exists: false
+
+  # Overlay: leaf1 peers with 10.0.0.12, leaf2 peers with 10.0.0.11
+  - name: no-bgp-neighbor-overlay-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: BGP_NEIGHBOR
+    key: "default|10.0.0.12"
+    expect:
+      exists: false
+
+  - name: no-bgp-neighbor-overlay-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: BGP_NEIGHBOR
+    key: "default|10.0.0.11"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # ROUTE_REDISTRIBUTE — connected redistribution
+  # Forward: ConfigureBGP
+  # Reverse: RemoveBGPGlobals
+  # =========================================================================
+
+  - name: no-route-redistribute
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: ROUTE_REDISTRIBUTE
+    key: "default|connected|bgp|ipv4"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # INTERFACE — L3 interface config (cleaned up by l3-routing + teardown)
+  # =========================================================================
+
+  - name: no-interface-eth0
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: INTERFACE
+    key: Ethernet0
+    expect:
+      exists: false
+
+  - name: no-interface-eth1-leafs
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: INTERFACE
+    key: Ethernet1
+    expect:
+      exists: false
+
+  - name: no-interface-eth1-spine
+    action: verify-config-db
+    devices: [spine]
+    table: INTERFACE
+    key: Ethernet1
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VXLAN_TUNNEL — VTEP infrastructure (leafs only)
+  # Forward: SetupEVPN
+  # Reverse: TeardownEVPN
+  # =========================================================================
+
+  - name: no-vtep
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VXLAN_EVPN_NVO — NVO infrastructure (leafs only)
+  # Forward: SetupEVPN
+  # Reverse: TeardownEVPN
+  # =========================================================================
+
+  - name: no-nvo
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VXLAN_TUNNEL_MAP — VNI-to-VLAN mappings (cleaned up by per-scenario cleanup)
+  # =========================================================================
+
+  - name: no-vni-map-10100
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI10100_Vlan100"
+    expect:
+      exists: false
+
+  - name: no-vni-map-10200
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI10200_Vlan200"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # SUPPRESS_VLAN_NEIGH — ARP suppression (cleaned up by per-scenario cleanup)
+  # =========================================================================
+
+  - name: no-arp-suppress-vlan100
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: no-arp-suppress-vlan200
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan200
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VLAN_INTERFACE — SVIs from IRB (cleaned up by per-scenario cleanup)
+  # =========================================================================
+
+  - name: no-svi-vlan100
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VLAN_INTERFACE
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: no-svi-vlan200
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VLAN_INTERFACE
+    key: Vlan200
+    expect:
+      exists: false
+
+  # =========================================================================
+  # SAG_GLOBAL — anycast gateway MAC (cleaned up by per-scenario cleanup)
+  # =========================================================================
+
+  - name: no-sag-global
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: SAG_GLOBAL
+    key: IPv4
+    expect:
+      exists: false
+
+  # =========================================================================
+  # VLAN — per-scenario VLANs (cleaned up by per-scenario cleanup)
+  # =========================================================================
+
+  - name: no-vlan100
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: no-vlan200
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VLAN
+    key: Vlan200
+    expect:
+      exists: false
+
+  # =========================================================================
+  # NEWTRON_SERVICE_BINDING — no service bindings should remain
+  # =========================================================================
+
+  - name: no-binding-eth0
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet0
+    expect:
+      exists: false
+
+  - name: no-binding-eth1
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet1
+    expect:
+      exists: false

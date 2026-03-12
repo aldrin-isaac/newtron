@@ -1,0 +1,103 @@
+name: teardown
+description: |
+  Structured reverse of infrastructure provisioning:
+    ApplyService   → RemoveService    (transit interfaces — all switches)
+    SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers — leafs only)
+    ConfigureBGP   → RemoveBGPGlobals (BGP globals, AF, redistribution — all switches)
+    ConfigureLoopback → RemoveLoopback (loopback interface — all switches)
+  Uses newtron actions exclusively (no raw redis-cli).
+topology: 3node-ngdp
+requires: [evpn-irb]
+
+steps:
+  # =========================================================================
+  # Reverse of ApplyService — transit interfaces (creates BGP underlay peers)
+  # =========================================================================
+
+  - name: remove-transit-spine-eth0
+    action: remove-service
+    devices: [spine]
+    interface: Ethernet0
+
+  - name: remove-transit-spine-eth1
+    action: remove-service
+    devices: [spine]
+    interface: Ethernet1
+
+  - name: remove-transit-leaf1
+    action: remove-service
+    devices: [leaf1]
+    interface: Ethernet0
+
+  - name: remove-transit-leaf2
+    action: remove-service
+    devices: [leaf2]
+    interface: Ethernet0
+
+  # =========================================================================
+  # Reverse of SetupEVPN (leafs only — spine has no EVPN)
+  # =========================================================================
+
+  - name: teardown-evpn-leaf1
+    action: teardown-evpn
+    devices: [leaf1]
+
+  - name: teardown-evpn-leaf2
+    action: teardown-evpn
+    devices: [leaf2]
+
+  - name: verify-vtep-removed
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  - name: verify-nvo-removed
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  - name: verify-l2vpn-af-removed
+    action: verify-config-db
+    devices: [leaf1, leaf2]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # =========================================================================
+  # Reverse of ConfigureBGP (all switches)
+  # =========================================================================
+
+  - name: remove-bgp-globals
+    action: remove-bgp-globals
+    devices: [spine, leaf1, leaf2]
+
+  - name: verify-bgp-globals-removed
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      exists: false
+
+  # =========================================================================
+  # Reverse of ConfigureLoopback (all switches)
+  # =========================================================================
+
+  - name: remove-loopback
+    action: remove-loopback
+    devices: [spine, leaf1, leaf2]
+
+  - name: verify-loopback-removed
+    action: verify-config-db
+    devices: [spine, leaf1, leaf2]
+    table: LOOPBACK_INTERFACE
+    key: Loopback0
+    expect:
+      exists: false

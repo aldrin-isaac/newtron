@@ -1,0 +1,150 @@
+name: bgp-underlay
+description: |
+  BGP underlay bringup: configure BGP globals, set Ethernet0 IPs, add eBGP
+  neighbors across the inter-switch link, and verify Established.
+  Builds on loopback (Loopback0 IPs already set).
+
+  Dependency ordering (sonic-vs frrcfgd workaround):
+    1. Write BGP_GLOBALS and DEVICE_METADATA.bgp_asn.
+    2. Set INTERFACE IPs on Ethernet0; poll for kernel IP (intfmgrd assignment).
+    3. Write BGP_NEIGHBOR — BEFORE restart, so frrcfgd startup replay processes it.
+    4. restart-bgp — frrcfgd replays all CONFIG_DB entries (BGP_GLOBALS + BGP_NEIGHBOR).
+    5. poll-bgp-instance — wait for 'router bgp NNNNN' in show running-config.
+    6. verify-bgp — poll until Established.
+
+  Note: sonic-vs frrcfgd (unified mode) does not process runtime CONFIG_DB
+  notifications — only startup replay works. All BGP entries must be in
+  CONFIG_DB before the BGP restart. CiscoVS bgpcfgd (split mode) handles
+  runtime notifications, so the CiscoVS suite can write BGP_NEIGHBOR after
+  restart. See RCA-044 for details.
+topology: 2node-vs
+requires: [loopback]
+
+steps:
+  # Step 1: Write BGP_GLOBALS + DEVICE_METADATA.bgp_asn.
+  - name: configure-bgp-switch1
+    action: configure-bgp
+    devices: [switch1]
+
+  - name: configure-bgp-switch2
+    action: configure-bgp
+    devices: [switch2]
+
+  - name: verify-bgp-globals-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "65001"
+
+  - name: verify-bgp-globals-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "65002"
+
+  # Step 2: Set inter-switch link IPs on Ethernet0.
+  - name: set-ip-eth0-switch1
+    action: set-interface
+    devices: [switch1]
+    interface: Ethernet0
+    params:
+      property: ip
+      value: "10.1.0.0/31"
+
+  - name: set-ip-eth0-switch2
+    action: set-interface
+    devices: [switch2]
+    interface: Ethernet0
+    params:
+      property: ip
+      value: "10.1.0.1/31"
+
+  - name: verify-ip-eth0-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: true
+
+  # Step 3: Poll for Ethernet0 IP in kernel on BOTH switches.
+  - name: wait-eth0-ip-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do ip addr show Ethernet0 | grep -q '10.1.0.0' && break; sleep 5; done; true"
+
+  - name: wait-eth0-ip-sw2
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do ip addr show Ethernet0 | grep -q '10.1.0.1' && break; sleep 5; done; true"
+
+  # Step 4: Write BGP_NEIGHBOR BEFORE restart (frrcfgd startup replay workaround).
+  - name: bgp-add-neighbor-switch1
+    action: bgp-add-neighbor
+    devices: [switch1]
+    interface: Ethernet0
+    params:
+      remote_asn: 65002
+
+  - name: bgp-add-neighbor-switch2
+    action: bgp-add-neighbor
+    devices: [switch2]
+    interface: Ethernet0
+    params:
+      remote_asn: 65001
+
+  - name: verify-bgp-neighbor-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: true
+
+  - name: verify-bgp-neighbor-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.0"
+    expect:
+      exists: true
+
+  # Step 5: Restart BGP — frrcfgd replays BGP_GLOBALS + BGP_NEIGHBOR from CONFIG_DB.
+  - name: restart-bgp
+    action: restart-service
+    devices: [switch1, switch2]
+    service: bgp
+
+  # Step 6: Poll for 'router bgp' in FRR running-config.
+  - name: wait-bgp-instance-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+
+  - name: wait-bgp-instance-sw2
+    action: ssh-command
+    devices: [switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+
+  # Step 7: Verify underlay BGP sessions reach Established.
+  - name: verify-bgp-underlay-switch1
+    action: verify-bgp
+    devices: [switch1]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s
+
+  - name: verify-bgp-underlay-switch2
+    action: verify-bgp
+    devices: [switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

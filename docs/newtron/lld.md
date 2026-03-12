@@ -1554,6 +1554,6 @@ E2E testing is covered by newtrun test suites (see [newtrun HLD](../newtrun/hld.
 
 | Suite | Topology | Steps | Covers |
 |-------|----------|-------|--------|
-| `2node-primitive` | 2node | 20 | All service types, VLANs, VRFs, BGP, ACLs, health checks |
-| `2node-service` | 2node-service | 6 | Provision → health → dataplane → deprovision → verify-clean |
-| `3node-dataplane` | 3node | 6 | L3 routing, EVPN L2 IRB, cross-device traffic verification |
+| `2node-ngdp-primitive` | 2node-ngdp | 20 | All service types, VLANs, VRFs, BGP, ACLs, health checks |
+| `2node-ngdp-service` | 2node-ngdp-service | 6 | Provision → health → dataplane → deprovision → verify-clean |
+| `3node-ngdp-dataplane` | 3node-ngdp | 6 | L3 routing, EVPN L2 IRB, cross-device traffic verification |

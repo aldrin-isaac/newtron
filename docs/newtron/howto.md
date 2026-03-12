@@ -2516,20 +2516,20 @@ newtron leaf1 device cleanup -x
 make build
 
 # Deploy topology (uses newtlab)
-bin/newtlab deploy newtrun/topologies/2node
+bin/newtlab deploy newtrun/topologies/2node-ngdp
 
 # Start server pointing at lab specs
-bin/newtron-server -spec-dir newtrun/topologies/2node/specs &
+bin/newtron-server -spec-dir newtrun/topologies/2node-ngdp/specs &
 
 # Provision switches from topology
-bin/newtron -S newtrun/topologies/2node/specs provision -x
+bin/newtron -S newtrun/topologies/2node-ngdp/specs provision -x
 
 # Verify health
-bin/newtron -S newtrun/topologies/2node/specs -D switch1 health check
-bin/newtron -S newtrun/topologies/2node/specs -D switch2 health check
+bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 health check
+bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch2 health check
 
 # Run E2E test suite (uses newtrun)
-bin/newtrun start newtrun/suites/2node-primitive
+bin/newtrun start newtrun/suites/2node-ngdp-primitive
 ```
 
 ---

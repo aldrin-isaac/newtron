@@ -2052,7 +2052,7 @@ grows.
 ### Real Example
 
 Adding BGP_PEER_GROUP support (§36) added 2 entries per service
-(BGP_PEER_GROUP + BGP_PEER_GROUP_AF). In the 2node-service topology with one
+(BGP_PEER_GROUP + BGP_PEER_GROUP_AF). In the 2node-ngdp-service topology with one
 service on each switch, this added 4 entries total. frrcfgd now processes
 these entries before creating BGP neighbors in FRR — adding approximately
 1-2 seconds to the BGP convergence window.

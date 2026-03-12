@@ -40,15 +40,15 @@ newtron/
 │       └── newtrun_test.go       # Unit tests
 └── newtrun/                      # E2E test assets
     ├── topologies/
-    │   ├── 2node/specs/          # 2-switch + 6-host topology
-    │   ├── 2node-service/specs/  # 2-switch + 8-host topology (service testing)
-    │   ├── 3node/specs/          # 3-switch + 6-host topology (EVPN dataplane)
-    │   └── 4node/specs/          # 4-node topology
+    │   ├── 2node-ngdp/specs/          # 2-switch + 6-host topology
+    │   ├── 2node-ngdp-service/specs/  # 2-switch + 8-host topology (service testing)
+    │   ├── 3node-ngdp/specs/          # 3-switch + 6-host topology (EVPN dataplane)
+    │   └── 4node-ngdp/specs/          # 4-node topology
     ├── suites/
-    │   ├── 1node-basic/           # Single-switch basics (4 scenarios)
-    │   ├── 2node-primitive/      # Disaggregated operation tests (20 scenarios)
-    │   ├── 2node-service/        # Service lifecycle tests (6 scenarios)
-    │   ├── 3node-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
+    │   ├── 1node-vs-basic/           # Single-switch basics (4 scenarios)
+    │   ├── 2node-ngdp-primitive/      # Disaggregated operation tests (20 scenarios)
+    │   ├── 2node-ngdp-service/        # Service lifecycle tests (6 scenarios)
+    │   ├── 3node-ngdp-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
     │   └── simple-vrf-host/      # Simple VRF with host verification
     └── .generated/               # Runtime output (gitignored)
 ```
@@ -400,7 +400,7 @@ type Runner struct {
 
 | Field | Description |
 |-------|-------------|
-| `ScenariosDir` | Path to suite directory (e.g., `newtrun/suites/2node-primitive`) |
+| `ScenariosDir` | Path to suite directory (e.g., `newtrun/suites/2node-ngdp-primitive`) |
 | `TopologiesDir` | Path to `newtrun/topologies/` |
 | `ServerURL` | newtron-server HTTP address (e.g., `http://localhost:8080`). Resolved from: `--server` flag → `NEWTRON_SERVER` env → settings → `newtron.DefaultServerURL`. |
 | `NetworkID` | Network identifier passed to all server requests. Resolved from: `--network-id` flag → `NEWTRON_NETWORK_ID` env → settings → `newtron.DefaultNetworkID`. |
@@ -1516,7 +1516,7 @@ func resolveSuite(cmd *cobra.Command, dir string, filter func(SuiteStatus) bool)
 func resolveTopologyFromState(state *RunState) string
 ```
 
-**Suite directory resolution** (`resolveDir`): positional arg → `--dir` flag → `NEWTRUN_SUITE` env → `settings.DefaultSuite` → `"newtrun/suites/2node-standalone"`. Bare names (no `/`) are resolved under `suitesBaseDir()`.
+**Suite directory resolution** (`resolveDir`): positional arg → `--dir` flag → `NEWTRUN_SUITE` env → `settings.DefaultSuite` → `"newtrun/suites/2node-ngdp-standalone"`. Bare names (no `/`) are resolved under `suitesBaseDir()`.
 
 **Suites base directory** (`suitesBaseDir`): `NEWTRUN_SUITES_BASE` env → `"newtrun/suites"`.
 

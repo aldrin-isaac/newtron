@@ -166,9 +166,9 @@ No release-specific patches needed for 202505.
 
 | Suite | Compatible | Notes |
 |-------|------------|-------|
-| 2node-primitive | ⚠️ Partial | L3 services pass; EVPN/ACL/QoS scenarios require CiscoVS |
-| 2node-service | ❌ No | Requires EVPN VXLAN |
-| 3node-dataplane | ⚠️ Partial | L3 routing passes; evpn-l2-irb skipped (`requires_features: [evpn-vxlan]`) |
+| 2node-ngdp-primitive | ⚠️ Partial | L3 services pass; EVPN/ACL/QoS scenarios require CiscoVS |
+| 2node-ngdp-service | ❌ No | Requires EVPN VXLAN |
+| 3node-ngdp-dataplane | ⚠️ Partial | L3 routing passes; evpn-l2-irb skipped (`requires_features: [evpn-vxlan]`) |
 | simple-vrf-host | ✅ Yes | VRF + host connectivity, no EVPN |
 
 ### Test Design Tips

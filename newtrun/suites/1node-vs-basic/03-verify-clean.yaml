@@ -1,0 +1,51 @@
+name: verify-clean
+description: |
+  Verify no leftover CONFIG_DB entries from the test suite. Confirms that
+  service-lifecycle and vlan-vrf scenarios cleaned up after themselves.
+topology: 1node-vs
+requires: [service-lifecycle, vlan-vrf]
+
+steps:
+  # No service binding leftovers
+  - name: verify-no-binding-eth0
+    action: verify-config-db
+    devices: [switch1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet0
+    expect:
+      exists: false
+
+  # No VLAN leftovers
+  - name: verify-no-vlan100
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  # No VRF leftovers
+  - name: verify-no-vrf-test
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_test
+    expect:
+      exists: false
+
+  # No BGP neighbor leftovers
+  - name: verify-no-bgp-neighbor
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: false
+
+  # Confirm no test VLANs in kernel
+  - name: verify-no-kernel-vlans
+    action: ssh-command
+    devices: [switch1]
+    command: "ip link show | grep -c 'Vlan100' || echo 0"
+    expect:
+      contains: "0"

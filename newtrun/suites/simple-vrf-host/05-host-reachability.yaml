@@ -2,7 +2,7 @@ name: host-reachability
 description: >
   Verify host5→switch2:Ethernet2 (CUSTOMER VRF) reachability.
   Primes NGDP ARP responder from switch side (RCA-033), then verifies host can ping.
-topology: 2node
+topology: 2node-ngdp
 requires: [bind-interface]
 
 steps:

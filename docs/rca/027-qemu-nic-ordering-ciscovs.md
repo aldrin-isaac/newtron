@@ -1,5 +1,7 @@
 # RCA-027: QEMU NIC ordering mismatch breaks CiscoVS data plane for >2 data ports
 
+**Platform**: Affects all newtlab-deployed topologies. Discovered on CiscoVS but the root cause is in newtlab's QEMU command generation, not in any platform-specific code.
+
 ## Summary
 
 When a SONiC device has 3 or more data interfaces, newtlab's QEMU command appended data
@@ -18,14 +20,14 @@ the NIC connected to switch port Ethernet0, all data-plane traffic was silently 
   processes via syncd — tcpdump on TAP doesn't see traffic the same way as hardware NICs).
 - Interface TX byte counters on `EthernetN` do increment (syncd queues the packets to the
   TAP fd), but they never reach the peer.
-- 3node topology (2 data ports per switch) was unaffected: with only 2 data NICs added in
+- 3node-ngdp topology (2 data ports per switch) was unaffected: with only 2 data NICs added in
   the order NIC1, NIC2, the kernel naming happened to match by coincidence.
 
 ## Root Cause
 
 `link.go:AllocateLinks` appends `NICConfig` entries to `node.NICs` in topology link
 processing order, which depends on Go map iteration (non-deterministic) and link ordering
-in the topology file. With 4 data interfaces on switch1 in the 2node topology, the order
+in the topology file. With 4 data interfaces on switch1 in the 2node-ngdp topology, the order
 was: NIC4 (Ethernet3), NIC3 (Ethernet2), NIC1 (Ethernet0), NIC2 (Ethernet1).
 
 `qemu.go:Build` iterated over `node.NICs` in slice order without sorting, producing a
@@ -65,9 +67,9 @@ for _, nic := range sortedNICs {
 
 ## Why 3-node was unaffected
 
-3node leaf switches have only Ethernet0 and Ethernet1 (2 data ports). The link-processing
+3node-ngdp leaf switches have only Ethernet0 and Ethernet1 (2 data ports). The link-processing
 order happened to produce NIC1 (Ethernet0) before NIC2 (Ethernet1), matching the correct
-kernel naming. The 2node topology's 4-port switches exposed the bug because the random
+kernel naming. The 2node-ngdp topology's 4-port switches exposed the bug because the random
 map iteration order placed NIC4 first.
 
 ## Detection

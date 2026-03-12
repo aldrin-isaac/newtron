@@ -1,0 +1,13 @@
+name: boot-ssh
+description: Verify SSH reachability on switch1
+topology: 1node-vs
+
+steps:
+  - name: ssh-echo-switch1
+    action: ssh-command
+    devices: [switch1]
+    command: "echo ok"
+    expect:
+      contains: "ok"
+      timeout: 120s
+      poll_interval: 5s

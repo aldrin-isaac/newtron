@@ -1,5 +1,7 @@
 # RCA-014: Stale factory PORT entries survive boot patches
 
+**Platform**: sonic-vpp only.
+
 ## Symptom
 
 After boot patches wrote correct PORT entries (e.g., `PORT|Ethernet0`,

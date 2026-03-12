@@ -81,13 +81,13 @@ This is the minimum path from zero to a passing test suite.
 
 ```bash
 # 1. Start newtron-server (must be running before newtrun)
-bin/newtron-server --specs newtrun/topologies/2node/specs &
+bin/newtron-server --specs newtrun/topologies/2node-ngdp/specs &
 
 # 2. List available suites
 bin/newtrun list
 
-# 3. Run the 2node-primitive suite (deploys topology automatically)
-bin/newtrun start 2node-primitive
+# 3. Run the 2node-ngdp-primitive suite (deploys topology automatically)
+bin/newtrun start 2node-ngdp-primitive
 
 # 4. Check progress from another terminal
 bin/newtrun status
@@ -113,10 +113,10 @@ test suites in `newtrun/suites/`. Use `newtrun topologies` and
 
 | Topology | Devices | Description |
 |----------|---------|-------------|
-| `2node` | 2 switches + 6 hosts | General-purpose: BGP, VLANs, VRFs, services, ACLs, QoS, PortChannels. The workhorse topology. |
-| `2node-service` | 2 switches + 8 hosts | Service-focused: end-to-end service provisioning with data plane verification across more host endpoints. |
-| `3node` | 2 leaves + 2 hosts | EVPN/VXLAN and multi-hop: L2 bridging across a fabric, L3 inter-subnet routing via asymmetric IRB. |
-| `4node` | 2 spines + 2 leaves | Full fabric: ECMP, eBGP overlay, route reflection, shared VRFs. |
+| `2node-ngdp` | 2 switches + 6 hosts | General-purpose: BGP, VLANs, VRFs, services, ACLs, QoS, PortChannels. The workhorse topology. |
+| `2node-ngdp-service` | 2 switches + 8 hosts | Service-focused: end-to-end service provisioning with data plane verification across more host endpoints. |
+| `3node-ngdp` | 2 leaves + 2 hosts | EVPN/VXLAN and multi-hop: L2 bridging across a fabric, L3 inter-subnet routing via asymmetric IRB. |
+| `4node-ngdp` | 2 spines + 2 leaves | Full fabric: ECMP, eBGP overlay, route reflection, shared VRFs. |
 
 Each topology lives at `newtrun/topologies/<name>/specs/` containing
 `topology.json`, `network.json`, `platforms.json`, and per-device profiles
@@ -126,13 +126,13 @@ in `profiles/`.
 
 | Suite | Topology | Scenarios | Description |
 |-------|----------|-----------|-------------|
-| `1node-basic` | 1node | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
-| `2node-primitive` | 2node | 20 | Incremental: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
-| `2node-service` | 2node-service | 6 | Service lifecycle: provision → health → data plane → deprovision → verify clean. |
-| `3node-dataplane` | 3node | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
-| `simple-vrf-host` | 2node | 5 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
+| `1node-vs-basic` | 1node-vs | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
+| `2node-ngdp-primitive` | 2node-ngdp | 20 | Incremental: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
+| `2node-ngdp-service` | 2node-ngdp-service | 6 | Service lifecycle: provision → health → data plane → deprovision → verify clean. |
+| `3node-ngdp-dataplane` | 3node-ngdp | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
+| `simple-vrf-host` | 2node-ngdp | 5 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
 
-Suites in the `2node-primitive`, `2node-service`, and `3node-dataplane`
+Suites in the `2node-ngdp-primitive`, `2node-ngdp-service`, and `3node-ngdp-dataplane`
 directories use dependency ordering (`requires`/`after`) — scenarios run in
 the declared order and skip if prerequisites failed.
 
@@ -147,34 +147,34 @@ via newtlab, then runs scenarios in dependency order against newtron-server.
 ### Run All Scenarios in a Suite
 
 ```bash
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 ```
 
 This deploys the topology (or reuses an existing one), runs all scenarios
 in dependency order, and leaves the topology running. The suite name
-resolves to `newtrun/suites/2node-primitive/`. You can also pass a full
+resolves to `newtrun/suites/2node-ngdp-primitive/`. You can also pass a full
 path with `--dir`:
 
 ```bash
-newtrun start --dir newtrun/suites/2node-primitive
+newtrun start --dir newtrun/suites/2node-ngdp-primitive
 ```
 
 ### Run a Single Scenario
 
 ```bash
-newtrun start 2node-primitive --scenario boot-ssh
+newtrun start 2node-ngdp-primitive --scenario boot-ssh
 ```
 
 ### Override Platform
 
 ```bash
-newtrun start 2node-primitive --platform sonic-ciscovs
+newtrun start 2node-ngdp-primitive --platform sonic-ciscovs
 ```
 
 ### Override Topology
 
 ```bash
-newtrun start 2node-service --topology 2node
+newtrun start 2node-ngdp-service --topology 2node-ngdp
 ```
 
 ### Server URL
@@ -185,11 +185,11 @@ newtrun resolves the server URL in this order: `--server` flag >
 
 ```bash
 # Explicit server
-newtrun start 2node-primitive --server http://10.1.0.5:8080
+newtrun start 2node-ngdp-primitive --server http://10.1.0.5:8080
 
 # Or via environment
 export NEWTRON_SERVER=http://10.1.0.5:8080
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 ```
 
 ### Network ID
@@ -199,13 +199,13 @@ Resolution order: `--network-id` flag > `NEWTRON_NETWORK_ID` environment
 variable > settings file > default.
 
 ```bash
-newtrun start 2node-primitive --network-id lab1
+newtrun start 2node-ngdp-primitive --network-id lab1
 ```
 
 ### Verbose Output
 
 ```bash
-newtrun start 2node-primitive -v
+newtrun start 2node-ngdp-primitive -v
 ```
 
 Shows per-step results with timing, failure details, and device-level
@@ -214,7 +214,7 @@ messages.
 ### JUnit Output
 
 ```bash
-newtrun start 2node-primitive --junit results.xml
+newtrun start 2node-ngdp-primitive --junit results.xml
 ```
 
 ---
@@ -228,7 +228,7 @@ monitor across terminal sessions.
 ### Start a Suite
 
 ```bash
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 ```
 
 This:
@@ -249,8 +249,8 @@ newtrun status
 Output:
 
 ```
-newtrun: 2node-primitive
-  topology:  2node (deployed, 2 nodes running)
+newtrun: 2node-ngdp-primitive
+  topology:  2node-ngdp (deployed, 2 nodes running)
   platform:  sonic-ciscovs
   status:    running (pid 12345)
   started:   2026-02-14 10:30:00 (5m ago)
@@ -281,7 +281,7 @@ newtrun status --monitor
 Filter by suite name with `--suite`:
 
 ```bash
-newtrun status --suite 2node
+newtrun status --suite 2node-ngdp
 ```
 
 ### Pause a Running Suite
@@ -296,7 +296,7 @@ deployed. State is saved as `paused`.
 ### Resume a Paused Suite
 
 ```bash
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 ```
 
 newtrun detects the paused state and resumes from where it left off.
@@ -315,7 +315,7 @@ paused or completed first — `stop` refuses to kill a running process.
 
 ```bash
 # Terminal 1: start the suite
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 
 # Terminal 2: check progress
 newtrun status --monitor
@@ -324,10 +324,10 @@ newtrun status --monitor
 newtrun pause
 
 # Terminal 1: runner finishes current scenario and exits
-# "paused after 3 scenarios; resume with: newtrun start 2node-primitive"
+# "paused after 3 scenarios; resume with: newtrun start 2node-ngdp-primitive"
 
 # Later: resume
-newtrun start 2node-primitive
+newtrun start 2node-ngdp-primitive
 
 # When done: tear down
 newtrun stop
@@ -344,13 +344,13 @@ shipped suites are examples of this framework, not the framework itself.
 ### 6.1 Scenario Format
 
 A scenario is a YAML file containing metadata and an ordered list of
-steps. Here is a real scenario from the 2node-primitive suite:
+steps. Here is a real scenario from the 2node-ngdp-primitive suite:
 
 ```yaml
-# newtrun/suites/2node-primitive/00-boot-ssh.yaml
+# newtrun/suites/2node-ngdp-primitive/00-boot-ssh.yaml
 name: boot-ssh
 description: Verify SSH reachability on both switches (factory boot baseline)
-topology: 2node
+topology: 2node-ngdp
 requires: []
 
 steps:
@@ -480,7 +480,7 @@ exercise apply/remove cycles to detect resource leaks or state corruption:
 ```yaml
 name: service-churn
 description: Stress test service apply/remove cycles
-topology: 2node
+topology: 2node-ngdp
 requires: [provision]
 repeat: 10
 
@@ -1044,8 +1044,8 @@ host runs in its own network namespace on a shared QEMU VM (VM
 coalescing). newtlab creates the namespaces at deploy time — test
 scenarios don't need to manage namespace lifecycle.
 
-Multiple hosts may share a single QEMU VM. For example, the 2node
-topology coalesces host1-host6 across two host VMs (the 2node-service
+Multiple hosts may share a single QEMU VM. For example, the 2node-ngdp
+topology coalesces host1-host6 across two host VMs (the 2node-ngdp-service
 topology has host1-host8). Each host's network namespace provides
 isolation.
 
@@ -1110,7 +1110,7 @@ with and without data plane support.
 
 ### Example: L2 Bridging Test
 
-From the 2node-primitive suite — creates a VLAN, adds untagged members
+From the 2node-ngdp-primitive suite — creates a VLAN, adds untagged members
 on a single switch, and verifies L2 connectivity between two hosts:
 
 ```yaml
@@ -1160,7 +1160,7 @@ on a single switch, and verifies L2 connectivity between two hosts:
 Normal mode shows scenario-level results:
 
 ```
-newtrun: 20 scenarios, topology: 2node, platform: sonic-ciscovs
+newtrun: 20 scenarios, topology: 2node-ngdp, platform: sonic-ciscovs
 
   [1/20]  boot-ssh .................. PASS  (3s)
   [2/20]  loopback .................. PASS  (5s)
@@ -1192,7 +1192,7 @@ details.
 ### JUnit XML
 
 ```bash
-newtrun start 2node-primitive --junit results.xml
+newtrun start 2node-ngdp-primitive --junit results.xml
 ```
 
 ### GitHub Actions Example
@@ -1200,7 +1200,7 @@ newtrun start 2node-primitive --junit results.xml
 ```yaml
 - name: Run newtrun
   run: |
-    bin/newtrun start 2node-primitive --junit results.xml
+    bin/newtrun start 2node-ngdp-primitive --junit results.xml
   timeout-minutes: 30
 
 - name: Upload JUnit results
@@ -1251,10 +1251,10 @@ pgrep -f newtron-server
 curl http://localhost:8080/health
 
 # Start it manually
-bin/newtron-server --specs newtrun/topologies/2node/specs &
+bin/newtron-server --specs newtrun/topologies/2node-ngdp/specs &
 
 # Override the URL
-newtrun start 2node-primitive --server http://localhost:8080
+newtrun start 2node-ngdp-primitive --server http://localhost:8080
 ```
 
 ### Provisioning Fails
@@ -1298,7 +1298,7 @@ VXLAN). If one fails:
 
 ```bash
 # Run verbose to see which check failed
-newtrun start 2node-primitive --scenario boot-ssh -v
+newtrun start 2node-ngdp-primitive --scenario boot-ssh -v
 
 # SSH in and inspect
 newtlab ssh switch1
@@ -1313,7 +1313,7 @@ packet forwarding. Check:
 
 ```bash
 # Verify the platform has dataplane support
-cat newtrun/topologies/2node/specs/platforms.json | grep dataplane
+cat newtrun/topologies/2node-ngdp/specs/platforms.json | grep dataplane
 ```
 
 Host-related actions auto-skip on platforms without data plane support,
@@ -1357,8 +1357,8 @@ newtrun start <suite>
 Deploy topology (if needed), run scenarios, leave topology running.
 
 ```
-newtrun start 2node-primitive                        # all scenarios
-newtrun start 2node-primitive --scenario boot-ssh    # single scenario
+newtrun start 2node-ngdp-primitive                        # all scenarios
+newtrun start 2node-ngdp-primitive --scenario boot-ssh    # single scenario
 newtrun start --dir path/to/suite                    # explicit path
 ```
 
@@ -1410,7 +1410,7 @@ Show suite run status. Without flags, shows all suites with state.
 ```
 newtrun status                    # all suites
 newtrun status --dir <path>       # specific suite
-newtrun status --suite 2node      # filter by name
+newtrun status --suite 2node-ngdp  # filter by name
 newtrun status --detail           # per-step status
 newtrun status --monitor          # auto-refresh (every 2s, implies --detail)
 newtrun status --json             # machine-readable output
@@ -1431,7 +1431,7 @@ lists the scenarios in that suite with dependency order.
 
 ```
 newtrun list                       # show all suites
-newtrun list 2node-primitive       # show scenarios in suite
+newtrun list 2node-ngdp-primitive       # show scenarios in suite
 newtrun list --dir path/to/suite   # explicit path
 ```
 

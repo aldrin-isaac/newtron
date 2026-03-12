@@ -1,6 +1,6 @@
 name: boot-ssh
 description: Verify SSH connectivity to switch2
-topology: 2node
+topology: 2node-ngdp
 
 steps:
   - name: ssh-echo-switch2

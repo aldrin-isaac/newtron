@@ -2,7 +2,7 @@
 
 **Status**: Fixed (initial fix was incomplete — see RCA-032 for the corrected approach)
 **Component**: `pkg/newtlab/link.go`
-**Affected**: 2node topology (any topology with >1 data NIC per host VM)
+**Affected**: 2node-ngdp topology (any topology with >1 data NIC per host VM)
 **Discovered**: 2026-02-19
 
 ---
@@ -45,25 +45,25 @@ MAC: GenerateMAC(nodeZ.Name, 0),
 call, all data NICs on a node got identical MACs. The management NIC also used index 0 and was
 assigned the same MAC via a separate path.
 
-For the 2node topology, `hostvm-0` hosts 6 data NICs (one per host namespace) plus 1 management
+For the 2node-ngdp topology, `hostvm-0` hosts 6 data NICs (one per host namespace) plus 1 management
 NIC — all with MAC `52:54:00:4a:09:12`. Switch sees:
 
 - ARP broadcast from host2 via Ethernet2 → learns MAC→Ethernet2
 - host3 sends ARP reply via Ethernet3 → MAC→Ethernet3 (overwrites)
 - Switch forwards the reply back to Ethernet3, not Ethernet2 → host2 never sees it
 
-The 3node topology was unaffected because each host was a separate QEMU VM (no coalescing),
+The 3node-ngdp topology was unaffected because each host was a separate QEMU VM (no coalescing),
 so each host had only one data NIC and the duplicate MAC was never triggered.
 
 ---
 
-## Why 3node Was Unaffected
+## Why 3node-ngdp Was Unaffected
 
-In 3node, hosts are **not** coalesced: host1, host2 each get their own QEMU VM. A VM with
+In 3node-ngdp, hosts are **not** coalesced: host1, host2 each get their own QEMU VM. A VM with
 only one data NIC only ever assigns NIC index 0 — so all NICs got the "same" MAC, but each
 was on a separate switch port from a different physical VM. No FDB flapping occurred.
 
-In 2node, all 6 hosts are coalesced into `hostvm-0` (one QEMU VM). Multiple NICs share a
+In 2node-ngdp, all 6 hosts are coalesced into `hostvm-0` (one QEMU VM). Multiple NICs share a
 single VM, so the kernel assigns them to separate veth pairs. When all get the same MAC,
 any L2 switch with multiple host-facing ports sees source-MAC collisions.
 

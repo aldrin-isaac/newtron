@@ -24,9 +24,9 @@ func newDeployCmd() *cobra.Command {
 		Long: `Deploy VMs from a topology spec. The topology can be a name
 (resolved under newtrun/topologies/) or specified via -S.
 
-  newtlab deploy 2node
-  newtlab deploy 2node --monitor
-  newtlab deploy 2node --provision`,
+  newtlab deploy 2node-ngdp
+  newtlab deploy 2node-ngdp --monitor
+  newtlab deploy 2node-ngdp --provision`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := resolveSpecDir(args)

@@ -1,0 +1,175 @@
+name: evpn-l2-bridged
+description: |
+  EVPN L2 intra-subnet bridging: VLAN 100 with VNI 10100 across leaf1 and leaf2.
+  Ethernet1 on both switches (→host1 and →host2) are access members.
+  Hosts communicate via L2 bridged over VXLAN — verifies the complete EVPN L2
+  control and data plane path. Self-cleaning: removes all config at end.
+topology: 3node-ngdp
+requires: [evpn-setup]
+
+steps:
+  # =========================================================================
+  # Create L2 overlay
+  # =========================================================================
+
+  - name: create-vlan-100-leaf1
+    action: create-vlan
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: create-vlan-100-leaf2
+    action: create-vlan
+    devices: [leaf2]
+    vlan_id: 100
+
+  - name: add-vlan-member-leaf1
+    action: add-vlan-member
+    devices: [leaf1]
+    vlan_id: 100
+    interface: Ethernet1
+    tagging: untagged
+
+  - name: add-vlan-member-leaf2
+    action: add-vlan-member
+    devices: [leaf2]
+    vlan_id: 100
+    interface: Ethernet1
+    tagging: untagged
+
+  - name: bind-macvpn-100-leaf1
+    action: bind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+    params:
+      macvpn: servers-vlan100
+
+  - name: bind-macvpn-100-leaf2
+    action: bind-macvpn
+    devices: [leaf2]
+    vlan_id: 100
+    params:
+      macvpn: servers-vlan100
+
+  # =========================================================================
+  # Verify CONFIG_DB
+  # =========================================================================
+
+  - name: verify-tunnel-map-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI10100_Vlan100"
+    expect:
+      fields:
+        vlan: Vlan100
+        vni: "10100"
+
+  - name: verify-tunnel-map-leaf2
+    action: verify-config-db
+    devices: [leaf2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI10100_Vlan100"
+    expect:
+      fields:
+        vlan: Vlan100
+        vni: "10100"
+
+  - name: verify-arp-suppress-leaf1
+    action: verify-config-db
+    devices: [leaf1]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan100
+    expect:
+      exists: true
+
+  - name: wait-vxlan-convergence
+    action: wait
+    duration: 15s
+
+  # =========================================================================
+  # Configure hosts and test dataplane
+  # =========================================================================
+
+  - name: configure-host1-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 192.168.100.10/24 dev eth0"
+
+  - name: configure-host2-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 192.168.100.20/24 dev eth0"
+
+  - name: wait-arp
+    action: wait
+    duration: 3s
+
+  - name: ping-host1-to-host2
+    action: verify-ping
+    devices: [host1]
+    target: 192.168.100.20
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  - name: ping-host2-to-host1
+    action: verify-ping
+    devices: [host2]
+    target: 192.168.100.10
+    count: 10
+    expect:
+      success_rate: 0.90
+
+  # =========================================================================
+  # Cleanup: hosts
+  # =========================================================================
+
+  - name: cleanup-host1-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr del 192.168.100.10/24 dev eth0 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  - name: cleanup-host2-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr del 192.168.100.20/24 dev eth0 2>/dev/null || true"
+    expect:
+      contains: ""
+
+  # =========================================================================
+  # Cleanup: switch config (reverse order)
+  # =========================================================================
+
+  - name: unbind-macvpn-100-leaf1
+    action: unbind-macvpn
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: unbind-macvpn-100-leaf2
+    action: unbind-macvpn
+    devices: [leaf2]
+    vlan_id: 100
+
+  - name: remove-vlan-member-leaf1
+    action: remove-vlan-member
+    devices: [leaf1]
+    vlan_id: 100
+    interface: Ethernet1
+
+  - name: remove-vlan-member-leaf2
+    action: remove-vlan-member
+    devices: [leaf2]
+    vlan_id: 100
+    interface: Ethernet1
+
+  - name: delete-vlan-100-leaf1
+    action: delete-vlan
+    devices: [leaf1]
+    vlan_id: 100
+
+  - name: delete-vlan-100-leaf2
+    action: delete-vlan
+    devices: [leaf2]
+    vlan_id: 100

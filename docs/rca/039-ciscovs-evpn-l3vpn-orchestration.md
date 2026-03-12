@@ -5,11 +5,11 @@
 **Status**: Won't fix — Silicon One SAI cannot create L3 DECAP tunnel map entries.
 EVPN IRB L2 bridging (type-2, same subnet) works. L3 inter-subnet routing via L3VNI is also blocked by the same SAI limitation.
 
-**Note (Feb 2026):** The `2node-incremental` suite referenced here has been replaced by `2node-primitive` (21 scenarios, 20/20 PASS on CiscoVS — the 21st is health-check which now also passes). EVPN IRB (type-2) works end-to-end. EVPN L3VPN (type-5) remains blocked by the Silicon One SAI limitation described here. EVPN IRB L3 inter-subnet routing (different VLANs via L3VNI) confirmed blocked — same SAI limitation (Feb 2026).
+**Note (Feb 2026):** The `2node-ngdp-primitive` suite referenced here has been replaced by `2node-ngdp-primitive` (21 scenarios, 20/20 PASS on CiscoVS — the 21st is health-check which now also passes). EVPN IRB (type-2) works end-to-end. EVPN L3VPN (type-5) remains blocked by the Silicon One SAI limitation described here. EVPN IRB L3 inter-subnet routing (different VLANs via L3VNI) confirmed blocked — same SAI limitation (Feb 2026).
 
 ## Symptom
 
-EVPN L3VPN (`host3-ping-host6`, `2node-l3vpn` suite) fails with 100% packet loss.
+EVPN L3VPN (`host3-ping-host6`, `2node-ngdp-l3vpn` suite) fails with 100% packet loss.
 FRR shows VNI Up, BGP sessions are established, and APP_DB has correct EVPN type-5
 route entries (with `vni_label`, `nexthop`, `router_mac`).  ASIC_DB has only an ENCAP
 tunnel map entry (`VIRTUAL_ROUTER_ID_TO_VNI`) but **no DECAP entry**
@@ -48,8 +48,8 @@ Silicon One SAI handles L2 DECAP correctly — decap routes through the VLAN bri
 domain, and the SVI bound to the VRF provides L3 routing.  This is the standard
 EVPN IRB path and works end-to-end:
 
-- **3node-dataplane**: 6/6 PASS (including evpn-l2-irb scenario)
-- **2node-primitive**: 32/32 PASS
+- **3node-ngdp-dataplane**: 6/6 PASS (including evpn-l2-irb scenario)
+- **2node-ngdp-primitive**: 32/32 PASS
 
 ## EVPN IRB L3 Inter-Subnet Routing Also Blocked
 
@@ -154,8 +154,8 @@ ERR    swss#orchagent: Failed to add dummy vxlan switch svi for decap VRF ..., V
 - `pkg/newtron/network/node/evpn_ops.go` — Experimental `PrepareL3VNI`/`CleanupL3VNI`/
   `DisableEVPNNVO`/`EnableEVPNNVO` added and removed
 - `pkg/newtlab/patches/ciscovs/always/frrcfgd.py.tmpl` — `newtron-vni-poll` retained
-- `newtrun/suites/2node-l3vpn/` — Deleted (experimental)
-- `newtrun/suites/2node-primitive/70-evpn-l3-routing.yaml` — Deleted (referenced removed actions)
+- `newtrun/suites/2node-ngdp-l3vpn/` — Deleted (experimental)
+- `newtrun/suites/2node-ngdp-primitive/70-evpn-l3-routing.yaml` — Deleted (referenced removed actions)
 
 ## Related
 

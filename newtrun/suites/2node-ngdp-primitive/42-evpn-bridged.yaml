@@ -1,0 +1,117 @@
+name: evpn-bridged
+description: |
+  EVPN L2 bridging: VLAN 300 with VNI 50300 across switch1 and switch2.
+  Ethernet2 on both switches (→host2 and →host5) are access members.
+  Hosts communicate via L2 bridged over VXLAN — verifies the complete
+  EVPN L2 control and data plane path.
+topology: 2node-ngdp
+requires: [evpn-setup]
+
+steps:
+  - name: create-vlan300-switch1
+    action: create-vlan
+    devices: [switch1]
+    vlan_id: 300
+
+  - name: create-vlan300-switch2
+    action: create-vlan
+    devices: [switch2]
+    vlan_id: 300
+
+  - name: add-member-sw1-eth2
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet2
+    vlan_id: 300
+
+  - name: add-member-sw2-eth2
+    action: add-vlan-member
+    devices: [switch2]
+    interface: Ethernet2
+    vlan_id: 300
+
+  - name: bind-macvpn-switch1
+    action: bind-macvpn
+    devices: [switch1]
+    vlan_id: 300
+    params:
+      macvpn: vlan300
+
+  - name: bind-macvpn-switch2
+    action: bind-macvpn
+    devices: [switch2]
+    vlan_id: 300
+    params:
+      macvpn: vlan300
+
+  - name: verify-vlan300-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: true
+
+  - name: verify-vlan300-member-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan300|Ethernet2"
+    expect:
+      exists: true
+
+  - name: verify-tunnel-map-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI50300_Vlan300"
+    expect:
+      fields:
+        vlan: Vlan300
+        vni: "50300"
+
+  - name: verify-tunnel-map-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI50300_Vlan300"
+    expect:
+      fields:
+        vlan: Vlan300
+        vni: "50300"
+
+  - name: verify-arp-suppress-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan300
+    expect:
+      exists: true
+
+  - name: wait-vxlan-ready
+    action: wait
+    duration: 15s
+
+  - name: host2-configure-ip
+    action: host-exec
+    devices: [host2]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.3.0.2/24 dev eth0"
+
+  - name: host5-configure-ip
+    action: host-exec
+    devices: [host5]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.3.0.5/24 dev eth0"
+
+  - name: host2-ping-host5
+    action: host-exec
+    devices: [host2]
+    command: "ping -c 5 -W 2 10.3.0.5"
+    expect:
+      success_rate: 0.8
+
+  - name: host5-ping-host2
+    action: host-exec
+    devices: [host5]
+    command: "ping -c 5 -W 2 10.3.0.2"
+    expect:
+      success_rate: 0.8

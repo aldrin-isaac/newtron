@@ -75,10 +75,10 @@ curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=
 make build
 
 # 3. Deploy a single-switch lab
-bin/newtlab deploy 1node --monitor  # live status during deploy
+bin/newtlab deploy 1node-vs --monitor  # live status during deploy
 
 # 4. Start the server, initialize the device, and apply a service
-bin/newtron-server --spec-dir newtrun/topologies/1node/specs &
+bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
 bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
@@ -121,7 +121,7 @@ Config saved.
 Tear down when done:
 
 ```bash
-bin/newtlab destroy 1node
+bin/newtlab destroy 1node-vs
 ```
 
 ## Quick Start
@@ -139,7 +139,7 @@ make build              # → bin/newtron, bin/newtron-server, bin/newtlab, bin/
 Start the server with a shipped topology's specs and explore — no SONiC devices needed:
 
 ```bash
-bin/newtron-server --spec-dir newtrun/topologies/2node/specs &
+bin/newtron-server --spec-dir newtrun/topologies/2node-ngdp/specs &
 
 bin/newtron service list                    # List defined services
 bin/newtron show switch1                    # Show device profile
@@ -167,7 +167,7 @@ cp alpine-testhost.qcow2 ~/.newtlab/images/      # lightweight test host (option
 Deploy VMs and wire the topology:
 
 ```bash
-bin/newtlab deploy 2node
+bin/newtlab deploy 2node-ngdp
 bin/newtlab status                              # Check VM and link state
 bin/newtlab ssh switch1                         # SSH into a switch
 ```
@@ -193,7 +193,7 @@ curl localhost:8080/network/default/node/switch1/interface     # List interfaces
 ### 5. Run the E2E test suite
 
 ```bash
-bin/newtrun start --dir newtrun/suites/2node-primitive    # Full primitive test suite
+bin/newtrun start --dir newtrun/suites/2node-ngdp-primitive    # Full primitive test suite
 ```
 
 ### 6. Tear down
@@ -305,7 +305,7 @@ framework itself.
 ```yaml
 name: vrf-lifecycle
 description: Create VRF, add static route, verify, tear down
-topology: 2node
+topology: 2node-ngdp
 steps:
   - name: create-vrf
     action: create-vrf
@@ -339,9 +339,9 @@ Use `newtrun actions` for the full action reference, or `newtrun actions <name>`
 for details on any specific action.
 
 ```
-$ newtrun start --dir newtrun/suites/2node-service
+$ newtrun start --dir newtrun/suites/2node-ngdp-service
 
-newtrun: 6 scenarios, topology: 2node-service, platform: ciscovs
+newtrun: 6 scenarios, topology: 2node-ngdp-ngdp-service, platform: ciscovs
 
   [1/6]  boot-ssh ...............  PASS  (3s)
   [2/6]  provision ..............  PASS  (1m47s)
@@ -359,9 +359,9 @@ All shipped test suites pass on Cisco Silicon One (CiscoVS Palladium2):
 
 | Suite | What it tests |
 |-------|---------------|
-| 2node-primitive | Disaggregated operations: VLAN/VRF/VTEP lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
-| 2node-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
-| 3node-dataplane | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
+| 2node-ngdp-primitive | Disaggregated operations: VLAN/VRF/VTEP lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
+| 2node-ngdp-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
+| 3node-ngdp-dataplane | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
 
 EVPN VXLAN verified end-to-end: L2 bridging across switches and inter-subnet
 routing via asymmetric IRB, both running on Cisco Silicon One SAI.
@@ -408,7 +408,7 @@ pkg/
   util/             Errors, logging, IP/string helpers
 
 newtrun/
-  topologies/       Test topologies (1node, 2node, 2node-service, 3node, 4node)
+  topologies/       Test topologies (1node-vs, 2node-ngdp, 2node-ngdp-service, 3node-ngdp, 4node-ngdp)
   suites/           Test suites and scenarios (YAML)
 
 docs/

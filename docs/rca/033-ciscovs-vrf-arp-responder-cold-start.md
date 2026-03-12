@@ -2,9 +2,9 @@
 
 **Status**: Fixed (prime-arp step in vrf-routing scenario)
 
-**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+**Note (Feb 2026):** The `2node-ngdp-primitive` suite has been replaced by `2node-ngdp-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-ngdp-primitive` in this document refer to the predecessor suite.
 
-**Component**: CiscoVS NGDP (Silicon One network simulator), `newtrun/suites/2node-primitive/35-vrf-routing.yaml`
+**Component**: CiscoVS NGDP (Silicon One network simulator), `newtrun/suites/2node-ngdp-primitive/35-vrf-routing.yaml`
 **Affected**: Any test that configures a VRF interface IP and expects a host to reach it immediately
 **Discovered**: 2026-02-19
 
@@ -107,10 +107,10 @@ its success guarantees that `host6-ping-gateway` will also succeed.
 
 ---
 
-## Why This Wasn't Caught in 3node
+## Why This Wasn't Caught in 3node-ngdp
 
-The 3node topology does not have a scenario that creates a fresh VRF interface IP and
-immediately tests host → switch ARP. The vrf-routing scenario is 2node-specific.
+The 3node-ngdp topology does not have a scenario that creates a fresh VRF interface IP and
+immediately tests host → switch ARP. The vrf-routing scenario is 2node-ngdp-specific.
 
 ---
 

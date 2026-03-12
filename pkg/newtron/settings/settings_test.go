@@ -33,8 +33,8 @@ func TestSettings_FieldAssignment(t *testing.T) {
 		t.Errorf("GetSpecDir() = %q, want %q", s.GetSpecDir(), "/custom/path")
 	}
 
-	s.DefaultSuite = "newtrun/suites/2node-incremental"
-	if s.DefaultSuite != "newtrun/suites/2node-incremental" {
+	s.DefaultSuite = "newtrun/suites/2node-ngdp-incremental"
+	if s.DefaultSuite != "newtrun/suites/2node-ngdp-incremental" {
 		t.Errorf("DefaultSuite = %q", s.DefaultSuite)
 	}
 
@@ -58,7 +58,7 @@ func TestSettings_SaveLoad(t *testing.T) {
 	original := &Settings{
 		DefaultNetwork: "production",
 		SpecDir:        "/etc/newtron",
-		DefaultSuite:   "newtrun/suites/2node-incremental",
+		DefaultSuite:   "newtrun/suites/2node-ngdp-incremental",
 		TopologiesDir:  "newtrun/topologies",
 	}
 

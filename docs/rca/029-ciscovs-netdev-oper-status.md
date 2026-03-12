@@ -2,7 +2,7 @@
 
 **Status**: Workaround applied (YAML scenarios updated)
 
-**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+**Note (Mar 2026):** The original `2node-ngdp-incremental` suite has been replaced by `2node-ngdp-primitive`. The affected scenarios (`04-interface-set.yaml`, `32-acl-lifecycle.yaml`) have been renumbered to `50-interface-props.yaml` and `52-acl-lifecycle.yaml` respectively. The `netdev_oper_status` field name is still required on CiscoVS.
 
 **Component**: SONiC STATE_DB / CiscoVS platform
 **Affected**: Any newtrun scenario using `verify-state-db` on PORT_TABLE
@@ -62,7 +62,7 @@ CiscoVS. Affected scenarios:
 
 ## Fix
 
-Updated all STATE_DB PORT_TABLE field checks in 2node-primitive scenarios to use
+Updated all STATE_DB PORT_TABLE field checks in 2node-ngdp-primitive scenarios to use
 `netdev_oper_status`:
 
 ```yaml

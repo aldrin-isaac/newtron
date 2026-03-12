@@ -12,8 +12,8 @@ func TestSuiteName(t *testing.T) {
 		dir  string
 		want string
 	}{
-		{"newtrun/suites/2node-incremental", "2node-incremental"},
-		{"/home/user/newtrun/suites/4node-fabric", "4node-fabric"},
+		{"newtrun/suites/2node-ngdp-incremental", "2node-ngdp-incremental"},
+		{"/home/user/newtrun/suites/4node-ngdp-fabric", "4node-ngdp-fabric"},
 		{".", "."},
 	}
 	for _, tt := range tests {
@@ -34,7 +34,7 @@ func TestSaveLoadRunState(t *testing.T) {
 	state := &RunState{
 		Suite:    "test-suite",
 		SuiteDir: "/tmp/test",
-		Topology: "2node",
+		Topology: "2node-ngdp",
 		Platform: "sonic-vpp",
 		PID:      12345,
 		Status:   SuiteStatusRunning,

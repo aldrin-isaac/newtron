@@ -372,7 +372,7 @@ ready for deployment. It does not start any processes.
 
 Steps:
 
-1. Resolve `specDir` to absolute path. Derive lab name from parent directory (e.g., `newtrun/topologies/2node/specs` → `"2node"`).
+1. Resolve `specDir` to absolute path. Derive lab name from parent directory (e.g., `newtrun/topologies/2node-ngdp/specs` → `"2node-ngdp"`).
 2. Load and parse `topology.json`, `platforms.json`.
 3. If `topology.Links` is empty, derive links from `interface.link` fields via `DeriveLinksFromInterfaces()`.
 4. Load `profiles/<device>.json` for each device in the topology.
@@ -1132,24 +1132,24 @@ process.
 
 ---
 
-## 13. Worked Example: Deploy 2node
+## 13. Worked Example: Deploy 2node-ngdp
 
-Traces `newtlab deploy 2node --provision` through every subsystem at the
-function-call level. The 2node topology has two switches (switch1, switch2),
+Traces `newtlab deploy 2node-ngdp --provision` through every subsystem at the
+function-call level. The 2node-ngdp topology has two switches (switch1, switch2),
 six virtual hosts (host1–host6), and nine links (three switch-to-switch, six
 switch-to-host) on `sonic-ciscovs` platform. The trace focuses on the switch
 deploy path — hosts follow the coalescing path (§3.6, §4.6).
 
 ### Phase 0 — CLI dispatch
 
-`cmd_deploy.go` → `resolveSpecDir(["2node"])` → `resolveTopologyDir("2node")`
-→ `"newtrun/topologies/2node/specs"`.
+`cmd_deploy.go` → `resolveSpecDir(["2node-ngdp"])` → `resolveTopologyDir("2node-ngdp")`
+→ `"newtrun/topologies/2node-ngdp/specs"`.
 
 ### Phase 1 — NewLab
 
-`NewLab("newtrun/topologies/2node/specs")`:
+`NewLab("newtrun/topologies/2node-ngdp/specs")`:
 
-1. `absDir` = `/home/aldrin/src/newtron/newtrun/topologies/2node/specs`, name = `"2node"`.
+1. `absDir` = `/home/aldrin/src/newtron/newtrun/topologies/2node-ngdp/specs`, name = `"2node-ngdp"`.
 2. Load `topology.json` — 8 devices (2 switches, 6 hosts), 9 links derived from `interface.link` fields.
 3. Load `platforms.json` — platform `sonic-ciscovs`: `sequential` interface map, `e1000` NIC driver, 8192 MB memory, 6 CPUs, 600s boot timeout. Platform `alpine-host`: `linux` interface map, `device_type: "host"`.
 4. Load profiles for all 8 devices.
@@ -1171,9 +1171,9 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 `Lab.Deploy(ctx)`:
 
 1. **Pre-checks:** `CollectAllPorts()` → 25 allocations (3 SSH + 3 console + 18 link + 1 bridge stats). `ProbeAllPorts()` checks all free.
-2. **State init:** `LabState{Name: "2node", SpecDir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
-3. **Overlay disks:** `CreateOverlay(platform.VMImage, ~/.newtlab/labs/2node/disks/switch1.qcow2)` for switch1, switch2, and hostvm-0 (3 VMs).
-4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links, stats addr `127.0.0.1:9999`. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node/bridge.json`. Wait for ports 10000–10017.
+2. **State init:** `LabState{Name: "2node-ngdp", SpecDir: ..., Nodes: {}}`, 9 link state entries. `SaveState()`.
+3. **Overlay disks:** `CreateOverlay(platform.VMImage, ~/.newtlab/labs/2node-ngdp/disks/switch1.qcow2)` for switch1, switch2, and hostvm-0 (3 VMs).
+4. **Bridges:** `WriteBridgeConfig()` → `bridge.json` with 9 links, stats addr `127.0.0.1:9999`. `startBridgeProcess()` → `newtlink ~/.newtlab/labs/2node-ngdp/bridge.json`. Wait for ports 10000–10017.
 5. **Boot VMs:** `StartNode(switch1, stateDir, "")` → `QEMUCommand.Build()` → `qemu-system-x86_64 -m 8192 -smp 6 -cpu host -enable-kvm -drive file=.../switch1.qcow2,... -serial tcp::12006,server,nowait -netdev user,id=mgmt,hostfwd=tcp::13006-:22 -device e1000,... -netdev socket,id=eth1,connect=127.0.0.1:10000 ...`. Same for switch2 and hostvm-0.
 6. **Bootstrap:** Switches: `BootstrapNetwork(ctx, "127.0.0.1", 12006, "aldrin", "...", "admin", "...", 600s)` — serial login, eth0 DHCP, create admin user. Host VM: `BootstrapHostNetwork(ctx, "127.0.0.1", 12000, ...)` — wait for login prompt only (Alpine auto-starts DHCP+SSH). Then `WaitForSSH()` for all 3 VMs. Inject lab SSH key.
 7. **Patches:** `ResolveBootPatches("ciscovs", "")` → `patches/ciscovs/always/*.json` for switches. `buildPatchVars()` → `{NumPorts: 6, PCIAddrs: [...], PortStride: 1, ...}`. `ApplyBootPatches()` via SSH. Host VMs have no patches (no dataplane set).

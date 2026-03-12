@@ -1,0 +1,108 @@
+name: bridged
+description: |
+  VLAN 100 L2 bridging on switch1: Ethernet4 (→host1) and Ethernet12 (→host3) as
+  untagged members, Ethernet8 as a tagged member (config-only verification).
+  Verifies VLAN creation, member configuration (tagging modes), and that the NGDP
+  dataplane bridges traffic between the two untagged host-facing ports (pure L2).
+topology: 2node-vs
+requires: [boot-ssh]
+
+steps:
+  - name: create-vlan100
+    action: create-vlan
+    devices: [switch1]
+    vlan_id: 100
+
+  - name: add-member-eth1-untagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet4
+    vlan_id: 100
+
+  - name: add-member-eth3-untagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet12
+    vlan_id: 100
+
+  - name: add-member-eth2-tagged
+    action: add-vlan-member
+    devices: [switch1]
+    interface: Ethernet8
+    vlan_id: 100
+    tagging: tagged
+
+  - name: verify-vlan100-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: true
+
+  - name: verify-member-eth1-untagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet4"
+    expect:
+      fields:
+        tagging_mode: untagged
+
+  - name: verify-member-eth2-tagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet8"
+    expect:
+      fields:
+        tagging_mode: tagged
+
+  - name: verify-member-eth3-untagged
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet12"
+    expect:
+      fields:
+        tagging_mode: untagged
+
+  # Poll ASIC_DB for VLAN SAI objects (30s timeout)
+  - name: poll-asic-vlan-ready
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+
+  - name: poll-asic-vlanmember-ready
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+
+  # Wait for NGDP bridge plane
+  - name: wait-bridge-plane
+    action: wait
+    duration: 45s
+
+  - name: host1-configure-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr add 10.100.0.1/24 dev eth0 2>/dev/null || true"
+
+  - name: host3-configure-ip
+    action: host-exec
+    devices: [host3]
+    command: "ip addr add 10.100.0.3/24 dev eth0 2>/dev/null || true"
+
+  - name: host1-ping-host3
+    action: host-exec
+    devices: [host1]
+    command: "ping -c 3 -W 2 10.100.0.3"
+    expect:
+      success_rate: 0.8
+
+  - name: host3-ping-host1
+    action: host-exec
+    devices: [host3]
+    command: "ping -c 3 -W 2 10.100.0.1"
+    expect:
+      success_rate: 0.8

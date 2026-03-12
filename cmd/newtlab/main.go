@@ -7,10 +7,10 @@
 // Usage:
 //
 //	newtlab list                     # show topologies
-//	newtlab deploy 2node             # deploy VMs
-//	newtlab status 2node             # show VM status
+//	newtlab deploy 2node-ngdp        # deploy VMs
+//	newtlab status 2node-ngdp        # show VM status
 //	newtlab ssh spine1               # SSH to a VM
-//	newtlab destroy 2node            # tear down
+//	newtlab destroy 2node-ngdp       # tear down
 package main
 
 import (
@@ -52,7 +52,7 @@ var rootCmd = &cobra.Command{
 Topologies are resolved by name from newtrun/topologies/.
 
   newtlab list                       # show topologies
-  newtlab deploy 2node               # deploy VMs from topology
+  newtlab deploy 2node-ngdp           # deploy VMs from topology
   newtlab status [topology]          # show VM status
   newtlab ssh <node>                 # SSH to a VM
   newtlab console <node>             # serial console

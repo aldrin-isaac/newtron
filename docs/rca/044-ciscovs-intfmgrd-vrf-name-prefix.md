@@ -1,7 +1,7 @@
 # RCA-044: CiscoVS intfmgrd Requires Vrf_ Prefix for VRF Names
 
 **Severity**: High
-**Platform**: CiscoVS (SONiC 202505 / Silicon One NGDP)
+**Platform**: All SONiC (YANG constraint). Discovered on CiscoVS.
 **Status**: Fixed — use `Vrf_` prefix for all VRF names on CiscoVS
 
 ## Symptom
@@ -36,7 +36,7 @@ are never processed.
 
 ## Evidence
 
-On a fresh 2node CiscoVS deployment:
+On a fresh 2node-ngdp CiscoVS deployment:
 
 1. `VRF|CUSTOMER` created → vrfmgrd processes, kernel device exists, APP_DB VRF_TABLE:CUSTOMER written
 2. `INTERFACE|Ethernet2 vrf_name=CUSTOMER` written → swss.rec shows NO INTF_TABLE:Ethernet2|SET
@@ -56,7 +56,7 @@ should enforce this convention, or at minimum document it.
 ## Impact
 
 - simple-vrf-host test suite: changed `CUSTOMER` → `Vrf_CUSTOMER` (all 4 scenarios pass)
-- 2node-primitive routed scenario: already uses `Vrf_local` (unaffected)
+- 2node-ngdp-primitive routed scenario: already uses `Vrf_local` (unaffected)
 - Service-created VRFs: already use `Vrf_` prefix via newtron naming convention (unaffected)
 
 ## Related

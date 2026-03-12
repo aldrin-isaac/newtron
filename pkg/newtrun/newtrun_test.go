@@ -66,7 +66,7 @@ func TestParseScenario(t *testing.T) {
 	yamlContent := `
 name: test-basic
 description: Basic test scenario
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vs
 steps:
   - name: provision-all
@@ -92,8 +92,8 @@ steps:
 	if s.Name != "test-basic" {
 		t.Errorf("Name = %q, want %q", s.Name, "test-basic")
 	}
-	if s.Topology != "2node" {
-		t.Errorf("Topology = %q, want %q", s.Topology, "2node")
+	if s.Topology != "2node-ngdp" {
+		t.Errorf("Topology = %q, want %q", s.Topology, "2node-ngdp")
 	}
 	if s.Platform != "sonic-vs" {
 		t.Errorf("Platform = %q, want %q", s.Platform, "sonic-vs")
@@ -132,7 +132,7 @@ func TestParseAllScenarios(t *testing.T) {
 		content := `
 name: ` + name + `
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vs
 steps:
   - name: wait
@@ -617,7 +617,7 @@ func TestParseAndSortScenariosWithRequires(t *testing.T) {
 	writeScenario(t, dir, "01-a.yaml", `
 name: a
 description: first
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -627,7 +627,7 @@ steps:
 	writeScenario(t, dir, "02-b.yaml", `
 name: b
 description: second
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 requires: [a]
 steps:
@@ -661,7 +661,7 @@ func TestParseScenariosWithCycleError(t *testing.T) {
 	writeScenario(t, dir, "a.yaml", `
 name: a
 description: first
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 requires: [b]
 steps:
@@ -672,7 +672,7 @@ steps:
 	writeScenario(t, dir, "b.yaml", `
 name: b
 description: second
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 requires: [a]
 steps:
@@ -755,22 +755,22 @@ func TestHasRequires(t *testing.T) {
 
 func TestSharedTopology(t *testing.T) {
 	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node"},
-		{Name: "b", Topology: "2node"},
-	}, ""); got != "2node" {
-		t.Errorf("sharedTopology() = %q, want '2node'", got)
+		{Name: "a", Topology: "2node-ngdp"},
+		{Name: "b", Topology: "2node-ngdp"},
+	}, ""); got != "2node-ngdp" {
+		t.Errorf("sharedTopology() = %q, want '2node-ngdp'", got)
 	}
 
 	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node"},
-		{Name: "b", Topology: "4node"},
+		{Name: "a", Topology: "2node-ngdp"},
+		{Name: "b", Topology: "4node-ngdp"},
 	}, ""); got != "" {
 		t.Errorf("sharedTopology() = %q, want ''", got)
 	}
 
 	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node"},
-		{Name: "b", Topology: "4node"},
+		{Name: "a", Topology: "2node-ngdp"},
+		{Name: "b", Topology: "4node-ngdp"},
 	}, "override"); got != "override" {
 		t.Errorf("sharedTopology() = %q, want 'override'", got)
 	}
@@ -784,7 +784,7 @@ func TestWriteJUnit_SkipReason(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:       "skipped-test",
-			Topology:   "2node",
+			Topology:   "2node-ngdp",
 			Platform:   "sonic-vpp",
 			Status:     StepStatusSkipped,
 			SkipReason: "requires 'boot-ssh' which failed",
@@ -820,7 +820,7 @@ func TestParseScenario_Requires(t *testing.T) {
 	writeScenario(t, dir, "test.yaml", `
 name: test-requires
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 requires: [boot-ssh, provision]
 steps:
@@ -853,7 +853,7 @@ func TestParseScenario_Repeat(t *testing.T) {
 	writeScenario(t, dir, "churn.yaml", `
 name: service-churn
 description: stress test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 repeat: 20
 steps:
@@ -881,7 +881,7 @@ func TestParseScenario_RepeatDefault(t *testing.T) {
 	writeScenario(t, dir, "basic.yaml", `
 name: basic
 description: no repeat
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -902,7 +902,7 @@ func TestWriteJUnit_RepeatIterationInName(t *testing.T) {
 	results := []*ScenarioResult{
 		{
 			Name:     "churn",
-			Topology: "2node",
+			Topology: "2node-ngdp",
 			Platform: "sonic-vpp",
 			Status:   StepStatusPassed,
 			Repeat:   3,
@@ -1595,7 +1595,7 @@ func TestResolveScenarioPath_ExactMatch(t *testing.T) {
 	writeScenario(t, dir, "boot-ssh.yaml", `
 name: boot-ssh
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1616,7 +1616,7 @@ func TestResolveScenarioPath_NumberedPrefix(t *testing.T) {
 	writeScenario(t, dir, "03-bgp-converge.yaml", `
 name: bgp-converge
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1638,7 +1638,7 @@ func TestResolveScenarioPath_NameFieldScan(t *testing.T) {
 	writeScenario(t, dir, "scenario-alpha.yaml", `
 name: my-custom-name
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1659,7 +1659,7 @@ func TestResolveScenarioPath_NotFound(t *testing.T) {
 	writeScenario(t, dir, "other.yaml", `
 name: other
 description: test
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1681,7 +1681,7 @@ func TestResolveScenarioPath_PrefersExactOverNumbered(t *testing.T) {
 	writeScenario(t, dir, "vlan.yaml", `
 name: vlan
 description: exact match
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1691,7 +1691,7 @@ steps:
 	writeScenario(t, dir, "06-vlan.yaml", `
 name: vlan-numbered
 description: numbered prefix
-topology: 2node
+topology: 2node-ngdp
 platform: sonic-vpp
 steps:
   - name: wait
@@ -1981,8 +1981,8 @@ func TestDeviceSelector_Resolve_AllPreservesOriginal(t *testing.T) {
 func TestIterateScenarios_Normal(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
@@ -2007,8 +2007,8 @@ func TestIterateScenarios_Normal(t *testing.T) {
 	if results[0].Name != "sc1" || results[1].Name != "sc2" {
 		t.Errorf("names = [%q, %q], want [sc1, sc2]", results[0].Name, results[1].Name)
 	}
-	if results[0].Topology != "2node" || results[0].Platform != "sonic-vpp" {
-		t.Errorf("result[0] topology=%q platform=%q, want 2node/sonic-vpp",
+	if results[0].Topology != "2node-ngdp" || results[0].Platform != "sonic-vpp" {
+		t.Errorf("result[0] topology=%q platform=%q, want 2node-ngdp/sonic-vpp",
 			results[0].Topology, results[0].Platform)
 	}
 }
@@ -2016,27 +2016,27 @@ func TestIterateScenarios_Normal(t *testing.T) {
 func TestIterateScenarios_TopologyOverride(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	var gotTopology string
-	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node"}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node-ngdp"}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
 		gotTopology = topology
 		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
 	}
-	if gotTopology != "4node" {
-		t.Errorf("callback received topology=%q, want %q", gotTopology, "4node")
+	if gotTopology != "4node-ngdp" {
+		t.Errorf("callback received topology=%q, want %q", gotTopology, "4node-ngdp")
 	}
 }
 
 func TestIterateScenarios_Resume(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	callbackCalls := 0
@@ -2071,8 +2071,8 @@ func TestIterateScenarios_Resume(t *testing.T) {
 func TestIterateScenarios_RequiresSkip(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp", Requires: []string{"sc1"}},
+		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp", Requires: []string{"sc1"}},
 	}
 
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
@@ -2096,8 +2096,8 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 func TestIterateScenarios_CallbackError(t *testing.T) {
 	r := &Runner{}
 	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node", Platform: "sonic-vpp"},
-		{Name: "sc2", Topology: "2node", Platform: "sonic-vpp"},
+		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
+		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
 	sentinel := fmt.Errorf("deploy failed")

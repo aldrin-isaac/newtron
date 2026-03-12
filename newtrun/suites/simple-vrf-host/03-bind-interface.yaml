@@ -2,7 +2,7 @@ name: bind-interface
 description: >
   Step 2 of incremental VRF setup: bind switch2:Ethernet2 to Vrf_CUSTOMER,
   assign IP 10.10.1.1/31, and wait for intfmgrd + orchagent to process.
-topology: 2node
+topology: 2node-ngdp
 requires: [create-vrf]
 
 steps:

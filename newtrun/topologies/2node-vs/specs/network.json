@@ -1,0 +1,132 @@
+{
+  "version": "1.0",
+  "super_users": null,
+  "user_groups": null,
+  "permissions": null,
+  "zones": {
+    "amer": {}
+  },
+  "qos_policies": {
+    "TEST_4Q": {
+      "description": "Simple 4-queue DWRR policy for QoS lifecycle testing",
+      "queues": [
+        {
+          "name": "best-effort",
+          "type": "dwrr",
+          "weight": 50,
+          "dscp": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        {
+          "name": "standard",
+          "type": "dwrr",
+          "weight": 30,
+          "dscp": [
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ]
+        },
+        {
+          "name": "priority",
+          "type": "dwrr",
+          "weight": 15,
+          "dscp": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25
+          ]
+        },
+        {
+          "name": "control",
+          "type": "strict",
+          "dscp": [
+            46,
+            48
+          ]
+        }
+      ]
+    }
+  },
+  "ipvpns": {
+    "EVPN_IRB_VRF": {
+      "description": "L3 EVPN VRF for IRB gateway (evpn-irb scenario)",
+      "vrf": "Vrf_IRB",
+      "l3vni": 50002,
+      "l3vni_vlan": 3998,
+      "route_targets": [
+        "65000:50002"
+      ]
+    },
+    "EVPN_L3_VRF": {
+      "description": "L3 EVPN VRF for inter-switch L3 routing (evpn-l3-routing scenario)",
+      "vrf": "Vrf_L3EVPN",
+      "l3vni": 50001,
+      "l3vni_vlan": 3999,
+      "route_targets": [
+        "65000:50001"
+      ]
+    }
+  },
+  "macvpns": {
+    "SVC_VLAN200": {
+      "description": "VLAN 200 for composite bridged testing",
+      "vlan_id": 200,
+      "vni": 0
+    },
+    "SVC_VLAN400": {
+      "description": "VLAN 400 for composite EVPN IRB testing",
+      "vlan_id": 400,
+      "vni": 50400,
+      "anycast_ip": "10.4.0.1/24",
+      "anycast_mac": "00:00:00:01:04:00",
+      "route_targets": [
+        "65000:50400"
+      ],
+      "arp_suppression": true
+    },
+    "VLAN300": {
+      "description": "L2 overlay VLAN 300 (VNI 50300) — used by evpn-l2-bridge and evpn-irb scenarios",
+      "vlan_id": 300,
+      "vni": 50300,
+      "route_targets": [
+        "65000:50300"
+      ],
+      "arp_suppression": true
+    }
+  },
+  "services": {
+    "SVC_BRIDGED": {
+      "description": "Bridged service for composite testing",
+      "service_type": "bridged",
+      "macvpn": "SVC_VLAN200"
+    },
+    "SVC_EVPN_IRB": {
+      "description": "EVPN IRB service for composite testing",
+      "service_type": "evpn-irb",
+      "ipvpn": "EVPN_IRB_VRF",
+      "macvpn": "SVC_VLAN400",
+      "vrf_type": "shared"
+    }
+  }
+}

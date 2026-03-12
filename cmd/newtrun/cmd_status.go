@@ -34,7 +34,7 @@ func newStatusCmd() *cobra.Command {
 Without --dir or --suite, shows all suites with state.
 
   newtrun status                       # all suites
-  newtrun status --suite 2node         # suites whose name contains "2node"
+  newtrun status --suite 2node-ngdp    # suites whose name contains "2node-ngdp"
   newtrun status --detail              # show per-step timing and status
   newtrun status --monitor             # auto-refresh every 2s (implies --detail)
   newtrun status --dir /path/to/suite  # specific suite by directory

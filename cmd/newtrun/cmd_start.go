@@ -34,9 +34,9 @@ func newStartCmd() *cobra.Command {
 The suite can be a name (resolved under newtrun/suites/) or a path.
 All scenarios run by default. Use --scenario to run a single one.
 
-  newtrun start 2node-incremental                     # run all scenarios
-  newtrun start 2node-incremental --scenario boot-ssh
-  newtrun start 2node-incremental --monitor           # live status dashboard
+  newtrun start 2node-ngdp-incremental                     # run all scenarios
+  newtrun start 2node-ngdp-incremental --scenario boot-ssh
+  newtrun start 2node-ngdp-incremental --monitor           # live status dashboard
 
 If a previous run was paused, start resumes from where it left off.
 Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,

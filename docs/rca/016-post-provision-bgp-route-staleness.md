@@ -1,6 +1,6 @@
 # RCA-016: Post-provision BGP routes stale until manual soft clear
 
-**Note (Feb 2026):** The `ApplyFRRDefaults` mechanism has been eliminated. FRR configuration is now managed by `frrcfgd` (unified mode) via a patched `frrcfgd.py.tmpl` that includes `newtron-vni-poll`. The config apply ordering issues described here are mitigated by frrcfgd's subscription-based CONFIG_DB processing. The `restart-bgp` step in test suites handles the ASN change (RCA-019).
+**Note (Mar 2026):** The `ApplyFRRDefaults` mechanism and `refreshBGP` post-provision step referenced below were eliminated when frrcfgd unified mode was adopted. In unified mode, frrcfgd generates the full FRR configuration from CONFIG_DB (including `no bgp suppress-fib-pending`), so the timing issues described here no longer apply. The `restart-bgp` step in test suites handles the ASN change (RCA-019), and frrcfgd handles FRR config synchronization on startup.
 
 ## Symptom
 
@@ -14,13 +14,13 @@ the issue — all prefixes were exchanged and overlay sessions established.
 
 ## Root Cause
 
-When devices are provisioned in parallel, each device's post-provision sequence
-(BGP restart → 15s wait → ApplyFRRDefaults → clear bgp * soft out) runs
-independently. The soft clear on Device A happens before Device B's BGP is
-fully initialized, so A's re-advertisement has no effect on B.
+When devices were provisioned in parallel, each device's post-provision sequence
+(BGP restart -> 15s wait -> `ApplyFRRDefaults` -> `clear bgp * soft out`) ran
+independently. The soft clear on Device A happened before Device B's BGP was
+fully initialized, so A's re-advertisement had no effect on B.
 
-By the time Device B completes its own soft clear, Device A's stale route
-state is not refreshed. The routes remain "not yet sent" until the next
+By the time Device B completed its own soft clear, Device A's stale route
+state was not refreshed. The routes remained "not yet sent" until the next
 BGP timer event (ConnectRetry = 120s, Update timer), causing a multi-minute
 convergence delay.
 
@@ -30,39 +30,31 @@ convergence delay.
 - Overlay sessions stuck in Connect until underlay routes propagate
 - Intermittent: depends on provisioning order and timing
 
-## Fix
+## Fix (Historical)
 
-Two changes:
+Two changes were made at the time, both since superseded:
 
-### 1. Per-device: `ApplyFRRDefaults` — `clear bgp * soft` (both directions)
+### 1. Per-device: `ApplyFRRDefaults` -- `clear bgp * soft` (both directions)
 
-`ApplyFRRDefaults()` in `pkg/newtron/network/node/node.go` originally ran
-`clear bgp * soft out` (outbound only). This was insufficient: when device A
-runs before device B, device A re-advertises to B, but B still has
-`suppress-fib-pending` active and silently suppresses the routes. When B later
-runs its own `ApplyFRRDefaults`, it only clears outbound — never reprocessing
-the inbound routes it suppressed from A.
+`ApplyFRRDefaults()` originally ran `clear bgp * soft out` (outbound only).
+This was changed to `clear bgp * soft` (both inbound and outbound) so each
+device also reprocessed received routes after `no bgp suppress-fib-pending`
+took effect.
 
-Changed to `clear bgp * soft` (both inbound and outbound) so each device also
-reprocesses received routes after `no bgp suppress-fib-pending` takes effect.
+### 2. Global: `refreshBGP` -- post-provision convergence pass
 
-### 2. Global: `refreshBGP` — post-provision convergence pass
+A post-provision BGP refresh step was added that ran `clear bgp * soft` on all
+devices after provisioning completed, ensuring all devices re-advertised routes
+after all peers were ready.
 
-Added a post-provision BGP refresh step in `Lab.Provision()` in
-`pkg/newtlab/newtlab.go`. After all devices complete provisioning, the
-function waits 5 seconds then SSHs to each device and runs
-`vtysh -c 'clear bgp * soft'`:
+### Current state
 
-```go
-func (l *Lab) refreshBGP(state *LabState) {
-    time.Sleep(5 * time.Second)
-    for name, node := range state.Nodes {
-        // SSH to device, run: vtysh -c 'clear bgp * soft'
-    }
-}
-```
-
-This ensures all devices re-advertise routes after all peers are ready.
+Both mechanisms were eliminated when frrcfgd unified mode was adopted. In unified
+mode, `no bgp suppress-fib-pending` is included in the generated FRR config from
+the start, so routes are never suppressed during initial convergence. The
+`restart-bgp` newtrun step (which restarts the BGP service after provisioning
+writes the new ASN to CONFIG_DB) causes frrcfgd to regenerate the full FRR config,
+and BGP converges normally without manual soft clears.
 
 ## Lesson
 

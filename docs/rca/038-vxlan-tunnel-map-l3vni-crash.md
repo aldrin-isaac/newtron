@@ -1,7 +1,7 @@
 # RCA-038: VXLAN_TUNNEL_MAP L3VNI Causes vxlanmgrd Crash and EVPN L3VPN Failure
 
 **Severity**: Critical
-**Platform**: CiscoVS (Silicon One SAI), likely affects all platforms
+**Platform**: All SONiC (CONFIG_DB ordering constraint). Discovered on CiscoVS.
 **Status**: Fixed
 
 ## Symptom
@@ -95,7 +95,7 @@ After fix:
       advertise ipv4 unicast
       route-target both 65001:50001
   ```
-- `evpn-l3-routing` and `evpn-irb` scenarios pass in 2node-primitive suite
+- `evpn-l3-routing` and `evpn-irb` scenarios pass in 2node-ngdp-primitive suite
 
 ## Related
 

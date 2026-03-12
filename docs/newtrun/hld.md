@@ -153,16 +153,16 @@ newtron/
 │
 ├── newtrun/                   # Test assets
 │   ├── topologies/            # Topology spec directories
-│   │   ├── 2node/specs/       # 2 switches + 6 hosts
-│   │   ├── 2node-service/specs/  # 2 switches + 8 hosts (service-annotated)
-│   │   ├── 3node/specs/       # 2 leaves + 2 hosts
-│   │   └── 4node/specs/       # 2 spines + 2 leaves
+│   │   ├── 2node-ngdp/specs/       # 2 switches + 6 hosts
+│   │   ├── 2node-ngdp-service/specs/  # 2 switches + 8 hosts (service-annotated)
+│   │   ├── 3node-ngdp/specs/       # 2 leaves + 2 hosts
+│   │   └── 4node-ngdp/specs/       # 2 spines + 2 leaves
 │   ├── suites/                # Test suite directories
-│   │   ├── 2node-primitive/   # 20 scenarios (disaggregated operations)
-│   │   ├── 2node-service/     # 6 scenarios (service lifecycle + dataplane)
-│   │   ├── 3node-dataplane/   # 8 scenarios (EVPN L2/L3 dataplane)
+│   │   ├── 2node-ngdp-primitive/   # 20 scenarios (disaggregated operations)
+│   │   ├── 2node-ngdp-service/     # 6 scenarios (service lifecycle + dataplane)
+│   │   ├── 3node-ngdp-dataplane/   # 8 scenarios (EVPN L2/L3 dataplane)
 │   │   ├── simple-vrf-host/   # 5 scenarios (VRF + host reachability)
-│   │   └── 1node-basic/       # 4 scenarios (service lifecycle + VLAN/VRF)
+│   │   └── 1node-vs-basic/       # 4 scenarios (service lifecycle + VLAN/VRF)
 │   └── .generated/            # Runtime output (gitignored)
 │       └── report.md
 ```
@@ -185,12 +185,12 @@ directly — no generation step.
 
 | Topology | Devices | Purpose |
 |----------|---------|---------|
-| **2node** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
-| **2node-service** | switch1, switch2 + host1–host8 | Service lifecycle with dataplane verification |
-| **3node** | leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across two leaves |
-| **4node** | spine1, spine2, leaf1, leaf2 | Full fabric (route reflectors on spines) |
+| **2node-ngdp** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
+| **2node-ngdp-service** | switch1, switch2 + host1–host8 | Service lifecycle with dataplane verification |
+| **3node-ngdp** | leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across two leaves |
+| **4node-ngdp** | spine1, spine2, leaf1, leaf2 | Full fabric (route reflectors on spines) |
 
-#### 2node
+#### 2node-ngdp
 
 Two switches with three inter-switch links and three hosts per switch:
 
@@ -207,7 +207,7 @@ Two switches with three inter-switch links and three hosts per switch:
 No pre-configured services — interfaces are clean slates for disaggregated
 operation testing.
 
-#### 2node-service
+#### 2node-ngdp-service
 
 Same switch pair with service-annotated interfaces:
 
@@ -224,7 +224,7 @@ Each interface has a pre-assigned service in the topology spec. Provisioning
 applies all services atomically. The extra host pair (host7, host8) exercises
 EVPN IRB overlay scenarios.
 
-#### 3node
+#### 3node-ngdp
 
 Two leaves with a single transit link, one host per leaf:
 
@@ -239,7 +239,7 @@ host1                      host2
 Exercises EVPN L2/L3 forwarding across a two-leaf fabric with real data
 plane verification between hosts.
 
-#### 4node
+#### 4node-ngdp
 
 Full-mesh Clos topology: two spines with `route_reflector: true`, two leaves:
 
@@ -282,7 +282,7 @@ exercise specific network behaviors.
 ```yaml
 name: provision
 description: Provision switches and verify BGP convergence
-topology: 2node-service
+topology: 2node-ngdp-service
 requires: [boot-ssh]
 
 steps:
@@ -489,7 +489,7 @@ interface property (mtu, admin-status, description).
 
 The built-in suites demonstrate patterns for different testing strategies:
 
-- **Incremental suites** (2node-primitive, 2node-service, 3node-dataplane):
+- **Incremental suites** (2node-ngdp-primitive, 2node-ngdp-service, 3node-ngdp-dataplane):
   Ordered scenarios with `requires` chaining. A shared topology deployed once.
   Scenarios build on each other (boot → configure → verify → teardown).
 
@@ -669,7 +669,7 @@ newtrun uses **host devices** — Alpine Linux VMs defined alongside switches in
 ### 10.1 VM Coalescing
 
 Multiple host devices are coalesced into a single QEMU VM to reduce resource
-overhead. For example, host1 through host6 in the 2node topology share a
+overhead. For example, host1 through host6 in the 2node-ngdp topology share a
 single VM (`hostvm-0`). Inside the VM, each host gets its own **network
 namespace** matching its device name. newtlab creates the namespaces at deploy
 time — test scenarios do not manage namespace lifecycle.
@@ -738,7 +738,7 @@ newtrun produces three output formats: real-time console progress, a markdown su
 Non-verbose mode shows one line per scenario with dot-padded status:
 
 ```
-newtrun: 20 scenarios, topology: 2node, platform: sonic-cisco-8000
+newtrun: 20 scenarios, topology: 2node-ngdp, platform: sonic-cisco-8000
 
   #     SCENARIO                STEPS
   1     boot-ssh                2
@@ -765,8 +765,8 @@ Written to `newtrun/.generated/report.md` after each run:
 
 | Scenario | Topology | Platform | Result | Duration | Note |
 |----------|----------|----------|--------|----------|------|
-| boot-ssh | 2node | sonic-cisco-8000 | PASS | 3s | |
-| loopback | 2node | sonic-cisco-8000 | PASS | 8s | |
+| boot-ssh | 2node-ngdp | sonic-cisco-8000 | PASS | 3s | |
+| loopback | 2node-ngdp | sonic-cisco-8000 | PASS | 8s | |
 
 ## Failures
 
@@ -782,21 +782,21 @@ For CI systems that parse JUnit XML. Each `ScenarioResult` maps to a
 `<testsuite>`, each `StepResult` maps to a `<testcase>`.
 
 ```bash
-newtrun start 2node-primitive --junit results.xml
+newtrun start 2node-ngdp-primitive --junit results.xml
 ```
 
 ---
 
 ## 12. End-to-End Walkthrough
 
-A concrete trace of `newtrun start 2node-service` from command line to final
+A concrete trace of `newtrun start 2node-ngdp-service` from command line to final
 report:
 
 ```
 CLI (cmd/newtrun/cmd_start.go)
   │
-  │ 1. Resolve suite directory: newtrun/suites/2node-service/
-  │ 2. Check for paused state → LoadRunState("2node-service")
+  │ 1. Resolve suite directory: newtrun/suites/2node-ngdp-service/
+  │ 2. Check for paused state → LoadRunState("2node-ngdp-service")
   │ 3. AcquireLock → write PID to state.json
   │ 4. Resolve server URL (--server > env > settings > default)
   │ 5. Create Runner, assign ServerURL, NetworkID, Progress reporter
@@ -806,12 +806,12 @@ Runner.Run(opts)
   │
   │ 6. ParseAllScenarios → 6 scenarios
   │ 7. ValidateDependencyGraph → topological sort
-  │ 8. sharedTopology → "2node-service" (all scenarios agree)
+  │ 8. sharedTopology → "2node-ngdp-service" (all scenarios agree)
   │
   ▼
-runShared(ctx, scenarios, "2node-service", opts)
+runShared(ctx, scenarios, "2node-ngdp-service", opts)
   │
-  │ 9. EnsureTopology("newtrun/topologies/2node-service/specs/")
+  │ 9. EnsureTopology("newtrun/topologies/2node-ngdp-service/specs/")
   │    newtlab checks if VMs running → deploys fresh if needed
   │
   │ 10. connectDevices:

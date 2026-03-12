@@ -198,7 +198,7 @@ docker logs bgp | tail -50
 
 **Fix**: Use peer's `underlay_asn` from its device profile. Both underlay and overlay use all-eBGP (see RCA-026).
 
-**Example** (2node topology):
+**Example** (2node-ngdp topology):
 - switch1 runs AS 65001 (underlay_asn)
 - switch2 runs AS 65002 (underlay_asn)
 - Underlay peering: 65001 ↔ 65002 (interface IPs)

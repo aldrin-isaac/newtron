@@ -195,16 +195,16 @@ mv sonic-ciscovs.qcow2 ~/.newtlab/images/
 
 ### Validated Features
 
-- ✅ Full L3 routing (2node-primitive, 3node-dataplane)
+- ✅ Full L3 routing (2node-ngdp-primitive, 3node-ngdp-dataplane)
 - ✅ BGP eBGP underlay + overlay (all suites)
-- ✅ EVPN Type-2 MAC/IP — L2 bridging over VXLAN (3node-dataplane evpn-l2-irb)
-- ✅ VXLAN tunnel creation (2node-service, 3node-dataplane)
-- ✅ MAC-VPN L2 bridging over VXLAN (2node-service)
-- ✅ VRFs with services (2node-primitive, 2node-service)
-- ✅ Service apply/remove lifecycle (2node-service)
-- ✅ Port channels (2node-primitive)
-- ✅ ACL lifecycle — create/bind/unbind/delete (2node-primitive)
-- ✅ QoS lifecycle — apply/remove per-interface (2node-primitive)
+- ✅ EVPN Type-2 MAC/IP — L2 bridging over VXLAN (3node-ngdp-dataplane evpn-l2-irb)
+- ✅ VXLAN tunnel creation (2node-ngdp-service, 3node-ngdp-dataplane)
+- ✅ MAC-VPN L2 bridging over VXLAN (2node-ngdp-service)
+- ✅ VRFs with services (2node-ngdp-primitive, 2node-ngdp-service)
+- ✅ Service apply/remove lifecycle (2node-ngdp-service)
+- ✅ Port channels (2node-ngdp-primitive)
+- ✅ ACL lifecycle — create/bind/unbind/delete (2node-ngdp-primitive)
+- ✅ QoS lifecycle — apply/remove per-interface (2node-ngdp-primitive)
 
 ### Known Limitations
 
@@ -214,18 +214,18 @@ mv sonic-ciscovs.qcow2 ~/.newtlab/images/
 
 | Suite | Status |
 |-------|--------|
-| 2node-primitive | ✅ All scenarios pass |
-| 2node-service | ✅ All scenarios pass |
-| 3node-dataplane | ✅ All scenarios pass |
+| 2node-ngdp-primitive | ✅ All scenarios pass |
+| 2node-ngdp-service | ✅ All scenarios pass |
+| 3node-ngdp-dataplane | ✅ All scenarios pass |
 
 ### Current Test Status
 
 **Last Validated:** Feb 2026
 
 **Results:**
-- 2node-primitive: ✅ All pass (L3 services, BGP, EVPN, ACL, QoS, port channels)
-- 2node-service: ✅ All pass (provision, health, dataplane, deprovision, verify-clean)
-- 3node-dataplane: ✅ All pass (L3 routing, EVPN L2 IRB)
+- 2node-ngdp-primitive: ✅ All pass (L3 services, BGP, EVPN, ACL, QoS, port channels)
+- 2node-ngdp-service: ✅ All pass (provision, health, dataplane, deprovision, verify-clean)
+- 3node-ngdp-dataplane: ✅ All pass (L3 routing, EVPN L2 IRB)
 
 ## Performance Characteristics
 

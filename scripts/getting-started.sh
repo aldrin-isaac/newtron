@@ -10,7 +10,7 @@ set -euo pipefail
 SONIC_VS_URL="https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=202505&platform=vs&target=target/sonic-vs.img.gz"
 IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
-SPEC_DIR="newtrun/topologies/1node/specs"
+SPEC_DIR="newtrun/topologies/1node-vs/specs"
 SERVER_PID=""
 TOTAL_STEPS=11
 
@@ -132,8 +132,8 @@ if [ ! -f "Makefile" ] || [ ! -d "cmd/newtron" ]; then
 fi
 
 # Clean up any leftover state from a previous run
-bin/newtrun stop --dir newtrun/suites/1node-basic &>/dev/null || true
-bin/newtlab destroy 1node &>/dev/null || true
+bin/newtrun stop --dir newtrun/suites/1node-vs-basic &>/dev/null || true
+bin/newtlab destroy 1node-vs &>/dev/null || true
 
 # ── Title card ───────────────────────────────────────────────────────────────
 
@@ -268,7 +268,7 @@ echo -e "  ${GRAY}Boot takes 2-5 minutes depending on your machine.${RESET}"
 
 pause
 
-run_cmd bin/newtlab deploy 1node --monitor --force
+run_cmd bin/newtlab deploy 1node-vs --monitor --force
 
 pause
 
@@ -502,7 +502,7 @@ pause
 header 10 "Automated testing with ${MAGENTA_BOLD}newtrun${RESET}"
 
 echo -e "  ${MAGENTA_BOLD}newtrun${RESET} executes YAML test scenarios that exercise the full stack."
-echo "  The 1node-basic suite runs 4 scenarios with 25 steps:"
+echo "  The 1node-vs-basic suite runs 4 scenarios with 25 steps:"
 echo ""
 echo -e "    ${WHITE}1.${RESET} ${BOLD}boot-ssh${RESET}           Verify the switch is reachable"
 echo -e "    ${WHITE}2.${RESET} ${BOLD}service-lifecycle${RESET}  Apply transit --> verify --> remove --> verify clean"
@@ -517,10 +517,10 @@ echo -e "  The ${BOLD}--monitor${RESET} flag shows a live dashboard as steps exe
 
 pause
 
-run_cmd bin/newtrun start 1node-basic --server http://localhost:8080 --monitor
+run_cmd bin/newtrun start 1node-vs-basic --server http://localhost:8080 --monitor
 
 echo ""
-run_cmd bin/newtrun status --suite 1node-basic
+run_cmd bin/newtrun status --suite 1node-vs-basic
 
 pause
 
@@ -541,15 +541,15 @@ fi
 
 # newtrun stop destroys the topology and removes suite state,
 # so newtrun status / newtlab status show nothing afterward.
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun stop --dir newtrun/suites/1node-basic${RESET}"
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun stop --dir newtrun/suites/1node-vs-basic${RESET}"
 echo ""
-bin/newtrun stop --dir newtrun/suites/1node-basic 2>/dev/null
+bin/newtrun stop --dir newtrun/suites/1node-vs-basic 2>/dev/null
 
 echo ""
 echo "  Verify everything is cleaned up:"
 echo ""
-run_cmd bin/newtrun status --suite 1node-basic || true
-run_cmd bin/newtlab status 1node || true
+run_cmd bin/newtrun status --suite 1node-vs-basic || true
+run_cmd bin/newtlab status 1node-vs || true
 
 # ── Completion ───────────────────────────────────────────────────────────────
 
@@ -577,13 +577,13 @@ echo ""
 echo -e "  ${BOLD}Next steps${RESET}"
 echo ""
 echo -e "  ${WHITE}Multi-switch fabric:${RESET}"
-echo -e "    ${CYAN}bin/newtlab deploy 2node${RESET}"
-echo -e "    ${CYAN}bin/newtrun start 2node-primitive --server http://localhost:8080${RESET}"
+echo -e "    ${CYAN}bin/newtlab deploy 2node-ngdp${RESET}"
+echo -e "    ${CYAN}bin/newtrun start 2node-ngdp-primitive --server http://localhost:8080${RESET}"
 echo -e "    ${GRAY}(21 scenarios: BGP, EVPN, VLANs, VRFs, ACLs, QoS, PortChannels)${RESET}"
 echo ""
 echo -e "  ${WHITE}EVPN dataplane (requires Cisco Silicon One image):${RESET}"
-echo -e "    ${CYAN}bin/newtlab deploy 3node${RESET}"
-echo -e "    ${CYAN}bin/newtrun start 3node-dataplane --server http://localhost:8080${RESET}"
+echo -e "    ${CYAN}bin/newtlab deploy 3node-ngdp${RESET}"
+echo -e "    ${CYAN}bin/newtrun start 3node-ngdp-dataplane --server http://localhost:8080${RESET}"
 echo -e "    ${GRAY}(L3 routing + EVPN L2 bridged + IRB with host-to-host ping)${RESET}"
 echo ""
 echo -e "  ${WHITE}Documentation:${RESET}"

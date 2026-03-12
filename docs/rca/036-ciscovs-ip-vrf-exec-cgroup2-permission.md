@@ -1,9 +1,11 @@
 # RCA-036: `ip vrf exec` Fails over SSH without sudo (cgroup2 Permission Denied)
 
+**Platform**: All SONiC over SSH (Linux kernel cgroup2 behavior). Discovered on CiscoVS.
+
 ## Status
 Documented workaround in place. Upstream fix would require SONiC SSH session cgroup configuration.
 
-**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+**Note (Feb 2026):** The `2node-ngdp-primitive` suite has been replaced by `2node-ngdp-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-ngdp-primitive` in this document refer to the predecessor suite.
 
 ## Symptom
 
@@ -16,7 +18,7 @@ mkdir failed for /sys/fs/cgroup/unified/system.slice/ssh.service/vrf: Permission
 The exit code is non-zero. When the command is wrapped with `; true` or `|| true`, the error is
 silently masked, making the step appear to succeed while actually doing nothing.
 
-Observed in 2node-incremental test suite provisioning steps that tried to prime the CiscoVS NGDP
+Observed in 2node-ngdp-primitive test suite provisioning steps that tried to prime the CiscoVS NGDP
 ARP responder for VRF interfaces using `ip vrf exec CUSTOMER ping -c 1 -I EthernetX <host_ip>`.
 
 ## Root Cause
@@ -52,7 +54,7 @@ the same NGDP ARP priming effect without needing VRF exec context:
 
 ### Applied Changes
 
-`newtrun/suites/2node-primitive/01-provision.yaml` — `prime-ngdp-arp-customer-vrf` step:
+`newtrun/suites/2node-ngdp-primitive/01-provision.yaml` — `prime-ngdp-arp-customer-vrf` step:
 ```bash
 # Before (broken):
 ip vrf exec CUSTOMER ping -c 1 -W 5 10.10.1.0
@@ -61,7 +63,7 @@ ip vrf exec CUSTOMER ping -c 1 -W 5 10.10.1.0
 sudo ping -c 1 -W 5 -I Ethernet2 10.10.1.0
 ```
 
-`newtrun/suites/2node-primitive/35-vrf-routing.yaml` — `switch2-prime-arp` step:
+`newtrun/suites/2node-ngdp-primitive/35-vrf-routing.yaml` — `switch2-prime-arp` step:
 ```bash
 # Before (broken):
 ip vrf exec Vrf_dp_test ping -c 1 -W 5 -I Ethernet3 172.16.1.2

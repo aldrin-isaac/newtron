@@ -44,7 +44,12 @@ This is consistent with the existing workaround documented in project memory:
 
 ## Lesson
 
-Prefer `docker restart` over `systemctl restart` for SONiC service management.
-systemd units in SONiC carry platform-specific hooks (Dual-ToR, warm reboot)
-that may not work on all deployment types. Docker restart provides a reliable,
-platform-agnostic alternative.
+Service restart behavior is platform-specific:
+
+- **VPP:** Use `docker restart` — `systemctl restart` triggers `write_standby.py`
+  failure (this RCA). `docker restart` bypasses systemd hooks.
+- **CiscoVS:** Use `systemctl restart` — systemd manages the container lifecycle.
+  `docker restart` kills the container and systemd does not bring it back.
+
+When adding service restart calls, ensure the code path selects the correct
+method for the platform.

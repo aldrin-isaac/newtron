@@ -1,7 +1,7 @@
 # RCA-042: FRR vtysh "show bgp summary json" Intermittent Flat Format
 
 **Severity**: High
-**Platform**: CiscoVS (SONiC 202505 / FRR 10.x); may affect other SONiC platforms
+**Platform**: All SONiC platforms using FRR 10.x (CiscoVS 202505, sonic-vs 202505).
 **Status**: Fixed — `checkBGPFromVtysh` now handles both AF-keyed and flat formats
 
 ## Symptom
@@ -79,7 +79,7 @@ can contribute peers. The check succeeds as long as any path finds the expected 
 ## Impact
 
 `CheckBGPSessions` now returns correct results regardless of which format FRR
-returns. The 2node-service verify-health scenario passes 6/6 consistently (previously
+returns. The 2node-ngdp-service verify-health scenario passes 6/6 consistently (previously
 failed intermittently on either switch when the flat format was returned during the
 health check window).
 

@@ -179,7 +179,7 @@ the device — either the factory default or the value set by a boot patch.
 ## Current State
 
 - **Default PFE:** Palladium2 (`cisco-p200-32x100-vs`)
-- **platforms.json:** All topologies (2node, 2node-service, 3node) set to
+- **platforms.json:** All topologies (2node-ngdp, 2node-ngdp-service, 3node-ngdp) set to
   `cisco-p200-32x100-vs` (matches factory default)
 - **Boot patch for HWSKU switching:** Not yet implemented
 - **All test suites pass on Palladium2**

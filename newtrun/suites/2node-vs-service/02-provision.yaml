@@ -1,0 +1,47 @@
+name: provision
+description: |
+  Provision both switches via topology provisioner, then restart BGP so
+  frrcfgd startup replay processes all CONFIG_DB entries (RCA-045: sonic-vs
+  frrcfgd runtime notifications are broken — only startup replay works).
+
+  config reload is attempted first (handles vrfmgrd VRF_TABLE propagation),
+  but may be skipped if SwSS isn't ready. The explicit BGP restart ensures
+  frrcfgd processes BGP_GLOBALS and BGP_NEIGHBOR entries regardless.
+topology: 2node-vs-service
+requires: [boot-ssh]
+
+steps:
+  - name: provision-switches
+    action: provision
+    devices: [switch1, switch2]
+
+  # config reload stops all daemons, re-reads config_db.json, restarts them.
+  # May be skipped on sonic-vs if SwSS isn't ready within timeout.
+  - name: config-reload
+    action: config-reload
+    devices: [switch1, switch2]
+
+  # Explicit BGP restart ensures frrcfgd startup replay processes all
+  # BGP entries. Required on sonic-vs because:
+  # 1. config reload may be skipped (SwSS not ready)
+  # 2. frrcfgd runtime notifications are broken (RCA-045)
+  - name: restart-bgp
+    action: restart-service
+    devices: [switch1, switch2]
+    service: bgp
+
+  # Wait for FRR to fully restart after BGP service restart.
+  - name: wait-bgp-instance
+    action: ssh-command
+    devices: [switch1, switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+
+  # BGP convergence gate — wait for all sessions to establish before
+  # proceeding to health check and dataplane tests.
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

@@ -1,6 +1,6 @@
 # RCA-021: SONiC VPP Does Not Support EVPN VXLAN
 
-**Note (Feb 2026):** This VXLAN limitation is specific to the VPP platform. CiscoVS (Silicon One) fully supports EVPN VXLAN — the 3node-dataplane evpn-l2-irb scenario passes on CiscoVS. VPP remains blocked on sonic-platform-vpp#99.
+**Note (Feb 2026):** This VXLAN limitation is specific to the VPP platform. CiscoVS (Silicon One) fully supports EVPN VXLAN — the 3node-ngdp-dataplane evpn-l2-irb scenario passes on CiscoVS. VPP remains blocked on sonic-platform-vpp#99.
 
 ## Symptom
 

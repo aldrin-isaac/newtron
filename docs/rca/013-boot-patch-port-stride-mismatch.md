@@ -1,5 +1,7 @@
 # RCA-013: Boot patch port naming mismatch (stride-4 vs sequential)
 
+**Platform**: sonic-vpp only.
+
 ## Symptom
 
 After deploying the 4-node topology, only `Ethernet0` appeared on each device.

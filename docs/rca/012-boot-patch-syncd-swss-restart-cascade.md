@@ -1,4 +1,6 @@
-# RCA-012: Boot patch syncd restart cascades into swss failure
+# RCA-012: Boot patch syncd restart cascades into swss failure (VPP)
+
+**Platform**: sonic-vpp only.
 
 ## Symptom
 

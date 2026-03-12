@@ -1,0 +1,587 @@
+name: verify-clean
+description: |
+  Comprehensive CONFIG_DB audit: verify that ALL entries created during the test
+  suite have been cleaned up by deprovision primitives. Read-only verification.
+topology: 2node-vs
+requires: [teardown-infra]
+
+steps:
+  # LOOPBACK_INTERFACE
+  - name: verify-no-loopback-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: LOOPBACK_INTERFACE
+    key: Loopback0
+    expect:
+      exists: false
+
+  - name: verify-no-loopback-ip-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.1/32"
+    expect:
+      exists: false
+
+  - name: verify-no-loopback-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: LOOPBACK_INTERFACE
+    key: Loopback0
+    expect:
+      exists: false
+
+  - name: verify-no-loopback-ip-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: LOOPBACK_INTERFACE
+    key: "Loopback0|10.0.0.2/32"
+    expect:
+      exists: false
+
+  # BGP_GLOBALS
+  - name: verify-no-bgp-globals-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-globals-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      exists: false
+
+  # BGP_GLOBALS_AF
+  - name: verify-no-bgp-af-ipv4
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "default|ipv4_unicast"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-af-l2vpn
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "default|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # BGP_NEIGHBOR
+  - name: verify-no-bgp-neighbor-underlay-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.1"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-neighbor-underlay-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR
+    key: "default|10.1.0.0"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-neighbor-overlay-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR
+    key: "default|10.0.0.2"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-neighbor-overlay-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR
+    key: "default|10.0.0.1"
+    expect:
+      exists: false
+
+  # BGP_NEIGHBOR_AF (overlay peers)
+  - name: verify-no-bgp-neighbor-af-overlay-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_NEIGHBOR_AF
+    key: "default|10.0.0.2|l2vpn_evpn"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-neighbor-af-overlay-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_NEIGHBOR_AF
+    key: "default|10.0.0.1|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # ROUTE_REDISTRIBUTE
+  - name: verify-no-redistribute
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: ROUTE_REDISTRIBUTE
+    key: "default|connected|bgp|ipv4"
+    expect:
+      exists: false
+
+  # VXLAN_TUNNEL
+  - name: verify-no-vxlan-tunnel-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  - name: verify-no-vxlan-tunnel-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_TUNNEL
+    key: vtep1
+    expect:
+      exists: false
+
+  # VXLAN_EVPN_NVO
+  - name: verify-no-nvo-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  - name: verify-no-nvo-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VXLAN_EVPN_NVO
+    key: nvo1
+    expect:
+      exists: false
+
+  # INTERFACE (base entries + IP sub-entries)
+  - name: verify-no-eth0-base
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: INTERFACE
+    key: Ethernet0
+    expect:
+      exists: false
+
+  - name: verify-no-eth1-base
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: INTERFACE
+    key: Ethernet4
+    expect:
+      exists: false
+
+  - name: verify-no-eth0-ip-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: false
+
+  - name: verify-no-eth0-ip-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.1/31"
+    expect:
+      exists: false
+
+  - name: verify-no-eth1-ip-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet4|10.20.0.1/31"
+    expect:
+      exists: false
+
+  - name: verify-no-eth1-ip-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet4|10.20.1.1/31"
+    expect:
+      exists: false
+
+  # VLAN
+  - name: verify-no-vlan100
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: verify-no-vlan200
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan200
+    expect:
+      exists: false
+
+  - name: verify-no-vlan300-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-no-vlan300-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-no-vlan400-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan400
+    expect:
+      exists: false
+
+  - name: verify-no-vlan400-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN
+    key: Vlan400
+    expect:
+      exists: false
+
+  # VLAN_MEMBER
+  - name: verify-no-vlan100-eth1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan100|Ethernet4"
+    expect:
+      exists: false
+
+  - name: verify-no-vlan300-eth2-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan300|Ethernet8"
+    expect:
+      exists: false
+
+  - name: verify-no-vlan300-eth2-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN_MEMBER
+    key: "Vlan300|Ethernet8"
+    expect:
+      exists: false
+
+  - name: verify-no-vlan400-eth3-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_MEMBER
+    key: "Vlan400|Ethernet12"
+    expect:
+      exists: false
+
+  - name: verify-no-vlan400-eth3-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VLAN_MEMBER
+    key: "Vlan400|Ethernet12"
+    expect:
+      exists: false
+
+  # VLAN_INTERFACE
+  - name: verify-no-vlan100-intf
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN_INTERFACE
+    key: Vlan100
+    expect:
+      exists: false
+
+  - name: verify-no-vlan300-intf
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VLAN_INTERFACE
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-no-vlan400-intf
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VLAN_INTERFACE
+    key: Vlan400
+    expect:
+      exists: false
+
+  # VRF
+  - name: verify-no-vrf-local
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: Vrf_local
+    expect:
+      exists: false
+
+  - name: verify-no-vrf-irb-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: Vrf_IRB
+    expect:
+      exists: false
+
+  - name: verify-no-vrf-irb-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: VRF
+    key: Vrf_IRB
+    expect:
+      exists: false
+
+  # NEWTRON_SERVICE_BINDING
+  - name: verify-no-binding-eth1-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet4
+    expect:
+      exists: false
+
+  - name: verify-no-binding-eth3-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet12
+    expect:
+      exists: false
+
+  - name: verify-no-binding-eth3-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet12
+    expect:
+      exists: false
+
+  # VXLAN_TUNNEL_MAP
+  - name: verify-no-tunnel-map-300
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI50300_Vlan300"
+    expect:
+      exists: false
+
+  - name: verify-no-tunnel-map-400
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: VXLAN_TUNNEL_MAP
+    key: "vtep1|VNI50400_Vlan400"
+    expect:
+      exists: false
+
+  # SUPPRESS_VLAN_NEIGH
+  - name: verify-no-suppress-300
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan300
+    expect:
+      exists: false
+
+  - name: verify-no-suppress-400
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: SUPPRESS_VLAN_NEIGH
+    key: Vlan400
+    expect:
+      exists: false
+
+  # BGP_GLOBALS_EVPN_RT
+  - name: verify-no-evpn-rt-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_EVPN_RT
+    key: "Vrf_IRB|L2VPN_EVPN|65000:50002"
+    expect:
+      exists: false
+
+  # BGP_EVPN_VNI (from bind-macvpn and service-lifecycle)
+  - name: verify-no-bgp-evpn-vni-50300
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_EVPN_VNI
+    key: "default|50300"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-evpn-vni-50400
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_EVPN_VNI
+    key: "default|50400"
+    expect:
+      exists: false
+
+  # BGP_GLOBALS (VRF-level from bind-ipvpn)
+  - name: verify-no-bgp-globals-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS
+    key: Vrf_IRB
+    expect:
+      exists: false
+
+  # BGP_GLOBALS_AF (VRF-level from bind-ipvpn)
+  - name: verify-no-bgp-af-vrf-irb-ipv4
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_IRB|ipv4_unicast"
+    expect:
+      exists: false
+
+  - name: verify-no-bgp-af-vrf-irb-l2vpn
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_GLOBALS_AF
+    key: "Vrf_IRB|l2vpn_evpn"
+    expect:
+      exists: false
+
+  # ROUTE_REDISTRIBUTE (VRF-level from bind-ipvpn)
+  - name: verify-no-redistribute-vrf-irb
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: ROUTE_REDISTRIBUTE
+    key: "Vrf_IRB|connected|bgp|ipv4"
+    expect:
+      exists: false
+
+  # SAG_GLOBAL
+  - name: verify-no-sag-global
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: SAG_GLOBAL
+    key: IPv4
+    expect:
+      exists: false
+
+  # STATIC_ROUTE
+  - name: verify-no-static-route
+    action: verify-config-db
+    devices: [switch2]
+    table: STATIC_ROUTE
+    key: "Vrf_local|10.99.0.0/24"
+    expect:
+      exists: false
+
+  # PORTCHANNEL
+  - name: verify-no-portchannel-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: false
+
+  - name: verify-no-portchannel-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL
+    key: PortChannel1
+    expect:
+      exists: false
+
+  # PORTCHANNEL_MEMBER
+  - name: verify-no-portchannel-member-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet16"
+    expect:
+      exists: false
+
+  - name: verify-no-portchannel-member-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: PORTCHANNEL_MEMBER
+    key: "PortChannel1|Ethernet16"
+    expect:
+      exists: false
+
+  # ACL_TABLE
+  - name: verify-no-acl-table
+    action: verify-config-db
+    devices: [switch1]
+    table: ACL_TABLE
+    key: TEST_ACL
+    expect:
+      exists: false
+
+  # NEWTRON_SERVICE_BINDING (spec-authoring scenario)
+  - name: verify-no-binding-eth10-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: NEWTRON_SERVICE_BINDING
+    key: Ethernet40
+    expect:
+      exists: false
+
+  # ROUTE_MAP (from spec-authoring scenario)
+  - name: verify-no-route-map
+    action: verify-config-db
+    devices: [switch1]
+    table: ROUTE_MAP
+    expect:
+      max_entries: 0
+
+  # PREFIX_SET (from spec-authoring scenario)
+  - name: verify-no-prefix-set
+    action: verify-config-db
+    devices: [switch1]
+    table: PREFIX_SET
+    expect:
+      max_entries: 0
+
+  # BGP_PEER_GROUP (from service apply/remove lifecycle)
+  - name: verify-no-bgp-peer-group
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_PEER_GROUP
+    expect:
+      max_entries: 0
+
+  # BGP_PEER_GROUP_AF (from service apply/remove lifecycle)
+  - name: verify-no-bgp-peer-group-af
+    action: verify-config-db
+    devices: [switch1, switch2]
+    table: BGP_PEER_GROUP_AF
+    expect:
+      max_entries: 0
+
+  # PORT_QOS_MAP
+  - name: verify-no-qos-map
+    action: verify-config-db
+    devices: [switch1]
+    table: PORT_QOS_MAP
+    key: Ethernet44
+    expect:
+      exists: false

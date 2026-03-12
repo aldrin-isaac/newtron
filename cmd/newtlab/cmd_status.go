@@ -30,8 +30,8 @@ Without arguments, shows all deployed labs.
 With a topology name, shows detailed status for that lab.
 
   newtlab status                      # all labs
-  newtlab status 2node                # detailed view
-  newtlab status 2node --monitor      # auto-refresh every 2s
+  newtlab status 2node-ngdp                # detailed view
+  newtlab status 2node-ngdp --monitor      # auto-refresh every 2s
   newtlab status --json               # machine-readable output`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

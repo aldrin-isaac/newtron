@@ -25,7 +25,7 @@ func main() {
 		Short: "E2E testing for newtron",
 		Long: `Newtrun runs end-to-end test scenarios against newtron-managed topologies.
 
-A suite is a directory of YAML scenario files (e.g., "2node-incremental").
+A suite is a directory of YAML scenario files (e.g., "2node-ngdp-incremental").
 Each scenario defines steps like provision, configure, and verify.
 Suites can be specified by name (resolved under newtrun/suites/) or by path.
 

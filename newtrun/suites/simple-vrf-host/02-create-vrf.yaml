@@ -4,7 +4,7 @@ description: >
   is programmed in the kernel (vrfmgrd) AND in ASIC_DB (orchagent/SAI).
   Uses polling instead of fixed waits since CiscoVS Silicon One SAI is slow.
   VRF name uses Vrf_ prefix (required by CiscoVS intfmgrd — see RCA-044).
-topology: 2node
+topology: 2node-ngdp
 requires: [boot-ssh]
 
 steps:

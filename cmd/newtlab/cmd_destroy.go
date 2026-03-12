@@ -17,7 +17,7 @@ func newDestroyCmd() *cobra.Command {
 Kills all QEMU processes, removes overlay disks, and cleans up state.
 If only one lab is deployed, the topology name can be omitted.
 
-  newtlab destroy 2node
+  newtlab destroy 2node-ngdp
   newtlab destroy              # auto-selects if only one lab`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -68,19 +68,22 @@ func TestResolveBootPatches_SonicVS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBootPatches(sonic-vs, '') error: %v", err)
 	}
-	if len(patches) != 1 {
-		t.Fatalf("ResolveBootPatches(sonic-vs, '') returned %d patches, want 1", len(patches))
+	if len(patches) != 3 {
+		t.Fatalf("ResolveBootPatches(sonic-vs, '') returned %d patches, want 3", len(patches))
 	}
 
-	// Verify it's the frrcfgd mode patch
+	// Verify ordering: 00-frrcfgd-mode, 01-clean-factory-config, 02-frrcfgd-ebgp-policy
 	if !strings.Contains(patches[0].Description, "frrcfgd") {
 		t.Errorf("patch[0] description = %q, want to contain 'frrcfgd'", patches[0].Description)
 	}
 	if len(patches[0].Redis) != 1 {
 		t.Errorf("patch[0] redis = %d, want 1", len(patches[0].Redis))
 	}
-	if len(patches[0].PostCommands) != 3 {
-		t.Errorf("patch[0] post_commands = %d, want 3", len(patches[0].PostCommands))
+	if !strings.Contains(patches[1].Description, "factory") {
+		t.Errorf("patch[1] description = %q, want to contain 'factory'", patches[1].Description)
+	}
+	if !strings.Contains(patches[2].Description, "ebgp_requires_policy") {
+		t.Errorf("patch[2] description = %q, want to contain 'ebgp_requires_policy'", patches[2].Description)
 	}
 }
 

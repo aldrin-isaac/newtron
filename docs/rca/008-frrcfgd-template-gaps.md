@@ -2,7 +2,7 @@
 
 **Status**: RESOLVED
 
-> **Note (Feb 2026):** The `ApplyFRRDefaults` mechanism has been eliminated. FRR configuration is now handled by `frrcfgd` (unified mode) with a patched `frrcfgd.py.tmpl` that includes `newtron-vni-poll`. The timing issues described here no longer apply — frrcfgd handles FRR config synchronization automatically.
+> **Note (Mar 2026):** The `ApplyFRRDefaults` mechanism referenced in this RCA was eliminated when frrcfgd unified mode was adopted. FRR configuration is now handled by `frrcfgd` (unified mode) with boot patches that cover the template gaps described here.
 
 ## Symptom
 
@@ -31,30 +31,24 @@ missing features must be applied directly to FRR via `vtysh`.
 
 ## Fix
 
-Added an `ApplyFRRDefaults()` method in the device layer that applies
-these settings directly via `vtysh` after the BGP container restarts:
+Initially worked around via an `ApplyFRRDefaults()` method that applied settings
+directly via `vtysh` after BGP container restarts. This mechanism was later
+eliminated when frrcfgd unified mode was adopted.
 
-```go
-func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
-    cmds := []string{
-        "configure terminal",
-        "router bgp " + asn,
-        "no bgp ebgp-requires-policy",
-        "no bgp suppress-fib-pending",
-        "end",
-        "write memory",
-    }
-    return n.RunVtysh(cmds)
-}
-```
-
-This is called after `docker restart bgp` during provisioning.
+**Current approach (frrcfgd unified mode):** The boot patch
+(`patches/ciscovs/always/00-frrcfgd-mode.json`) sets `docker_routing_config_mode=unified`
+and `frr_mgmt_framework_config=true`. In unified mode, frrcfgd generates the full
+FRR configuration from CONFIG_DB, including `no bgp ebgp-requires-policy` and
+`no bgp suppress-fib-pending` when the corresponding CONFIG_DB fields are set.
+The template gaps that originally caused this issue are covered by the patched
+`frrcfgd.py.tmpl`.
 
 ## Lesson
 
-SONiC's CONFIG_DB is not a complete configuration interface — some features
-must be applied via `vtysh` directly. When a CONFIG_DB write has no effect,
-check both the field name (RCA-002) and whether the template supports the
-field at all. For unsupported fields, `vtysh` is the escape hatch, but
-these settings won't survive a `config reload` (they need to be reapplied
-after each BGP restart).
+SONiC's CONFIG_DB is not a complete configuration interface in all modes —
+some frrcfgd templates lack support for certain fields. When a CONFIG_DB write
+has no effect, check both the field name (RCA-002) and whether the template
+supports the field at all. The adoption of frrcfgd unified mode with patched
+templates resolved this class of issues for newtron. For deployments still using
+split mode, `vtysh` remains the escape hatch, but those settings won't survive
+a `config reload` (they need to be reapplied after each BGP restart).

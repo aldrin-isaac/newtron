@@ -1,10 +1,12 @@
 # RCA-037: intfmgrd VRF Binding Race at Provision Time
 
+**Platform**: All SONiC (intfmgrd is a community daemon). Discovered on CiscoVS.
+
 ## Status
 Documented workaround in place. Upstream fix would require intfmgrd to retry VRF binding
 when the kernel VRF device is not yet present.
 
-**Note (Feb 2026):** The `2node-incremental` suite has been replaced by `2node-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-incremental` in this document refer to the predecessor suite.
+**Note (Feb 2026):** The `2node-ngdp-primitive` suite has been replaced by `2node-ngdp-primitive` (21 scenarios, all passing on CiscoVS). References to `2node-ngdp-primitive` in this document refer to the predecessor suite.
 
 ## Symptom
 
@@ -24,7 +26,7 @@ $ ip addr show Ethernet2
 Ethernet2: ... (no IPv4 address)
 ```
 
-Observed on CiscoVS 2node topology where `switch2:Ethernet2` is provisioned into the
+Observed on CiscoVS 2node-ngdp topology where `switch2:Ethernet2` is provisioned into the
 CUSTOMER VRF at topology deploy time. Despite `VRF|CUSTOMER` and `INTERFACE|Ethernet2`
 (with `vrf_name=CUSTOMER`) being present in CONFIG_DB, the kernel VRF binding and IP
 assignment are absent after provision.
@@ -65,7 +67,7 @@ simultaneously. On CiscoVS, orchagent and the SAI Silicon One layer add addition
 
 ## Fix
 
-Kernel-level workaround in `newtrun/suites/2node-primitive/01-provision.yaml`:
+Kernel-level workaround in `newtrun/suites/2node-ngdp-primitive/01-provision.yaml`:
 
 ```yaml
 - name: fix-vrf-kernel-binding-switch2
