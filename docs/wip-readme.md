@@ -10,7 +10,7 @@
   <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
 </p>
 
-newtron is an opinionated network architecture for SONiC, delivered as
+newtron is opinionated network architecture for SONiC, delivered as
 software.
 
 Spec files define the architecture: services describe what an interface
