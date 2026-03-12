@@ -52,7 +52,7 @@ trap cleanup EXIT
 
 # Print a horizontal rule of a given width
 hrule() {
-    local width=${1:-62}
+    local width=${1:-76}
     local line=""
     for ((i=0; i<width; i++)); do line+="$H"; done
     echo "$line"
@@ -71,7 +71,7 @@ header() {
         if [ "$i" -lt "$step" ]; then
             progress+="${GREEN}●${RESET}"
         elif [ "$i" -eq "$step" ]; then
-            progress+="${BLUE_BOLD}◉${RESET}"
+            progress+="${MAGENTA_BOLD}◉${RESET}"
         else
             progress+="${GRAY}○${RESET}"
         fi
@@ -81,12 +81,12 @@ header() {
     done
 
     echo ""
-    echo -e "  ${GRAY}$(hrule 62)${RESET}"
+    echo -e "  ${GRAY}$(hrule 76)${RESET}"
     echo ""
-    echo -e "  ${BLUE_BOLD}STEP ${step}${RESET}${GRAY}/${TOTAL_STEPS}${RESET}  ${BOLD}${WHITE}${title}${RESET}"
+    echo -e "  ${MAGENTA_BOLD}STEP ${step}${RESET}${GRAY}/${TOTAL_STEPS}${RESET}  ${BOLD}${WHITE}${title}${RESET}"
     echo -e "  ${progress}"
     echo ""
-    echo -e "  ${GRAY}$(hrule 62)${RESET}"
+    echo -e "  ${GRAY}$(hrule 76)${RESET}"
     echo ""
 }
 
@@ -138,7 +138,7 @@ bin/newtlab destroy 1node-vs &>/dev/null || true
 # ── Title card ───────────────────────────────────────────────────────────────
 
 echo ""
-W=60  # box inner width
+W=76  # box inner width
 box_line() {
     local text="$1"
     local pad=$((W - ${#text}))
@@ -146,12 +146,12 @@ box_line() {
 }
 echo -e "  ${BLUE}${TL}$(hrule $W)${TR}${RESET}"
 box_line ""
-echo -e "  ${BLUE}${V}${RESET}   ${MAGENTA_BOLD}newtron${RESET}$(printf '%50s' '')${BLUE}${V}${RESET}"
-echo -e "  ${BLUE}${V}${RESET}   ${DIM}Getting Started${RESET}$(printf '%42s' '')${BLUE}${V}${RESET}"
+echo -e "  ${BLUE}${V}${RESET}   ${BLUE_BOLD}newtron${RESET}$(printf '%66s' '')${BLUE}${V}${RESET}"
+echo -e "  ${BLUE}${V}${RESET}   ${DIM}Getting Started${RESET}$(printf '%58s' '')${BLUE}${V}${RESET}"
 box_line ""
 echo -e "  ${BLUE}${BL}$(hrule $W)${BR}${RESET}"
 echo ""
-echo -e "  ${MAGENTA_BOLD}newtron${RESET} is a programmatic configuration system for SONiC switches."
+echo -e "  ${BLUE_BOLD}newtron${RESET} is a programmatic configuration system for SONiC switches."
 echo ""
 echo "  On a traditional SONiC switch, you configure things with CLI commands"
 echo "  (config vlan add, config interface ip add, vtysh) or by editing"
@@ -164,7 +164,7 @@ echo -e "    ${WHITE}3.${RESET} Validate before writing (catch bad values before
 echo -e "    ${WHITE}4.${RESET} Verify after writing (re-read every entry to confirm)"
 echo -e "    ${WHITE}5.${RESET} Clean up completely when removing (no orphaned config)"
 echo ""
-echo -e "  That's what ${MAGENTA_BOLD}newtron${RESET} does. This walkthrough shows the full cycle on"
+echo -e "  That's what ${BLUE_BOLD}newtron${RESET} does. This walkthrough shows the full cycle on"
 echo "  a single virtual SONiC switch."
 echo ""
 echo -e "  ${GRAY}Prerequisites: Linux x86_64 with KVM, Go, make, QEMU, sshpass${RESET}"
@@ -231,16 +231,16 @@ pause
 
 header 2 "Build"
 
-echo -e "  ${MAGENTA_BOLD}newtron${RESET} has five binaries, each with a distinct role:"
+echo -e "  ${BLUE_BOLD}newtron${RESET} has five binaries, each with a distinct role:"
 echo ""
-echo -e "    ${MAGENTA_BOLD}newtron${RESET}        CLI -- the command you type to configure switches"
-echo -e "    ${MAGENTA_BOLD}newtron-server${RESET} API server -- manages SSH connections to switches,"
+echo -e "    ${BLUE_BOLD}newtron${RESET}        CLI -- the command you type to configure switches"
+echo -e "    ${BLUE_BOLD}newtron-server${RESET} API server -- manages SSH connections to switches,"
 echo "                     loads specs, validates and applies config"
-echo -e "    ${MAGENTA_BOLD}newtlab${RESET}        Lab manager -- creates/destroys QEMU VMs, wires"
+echo -e "    ${BLUE_BOLD}newtlab${RESET}        Lab manager -- creates/destroys QEMU VMs, wires"
 echo "                     virtual links between them"
-echo -e "    ${MAGENTA_BOLD}newtrun${RESET}        Test runner -- executes YAML test scenarios"
+echo -e "    ${BLUE_BOLD}newtrun${RESET}        Test runner -- executes YAML test scenarios"
 echo "                     against a deployed topology"
-echo -e "    ${MAGENTA_BOLD}newtlink${RESET}       Link agent -- runs on each host to manage virtual"
+echo -e "    ${BLUE_BOLD}newtlink${RESET}       Link agent -- runs on each host to manage virtual"
 echo "                     Ethernet bridges between VMs"
 echo ""
 
@@ -252,7 +252,7 @@ pause
 
 header 3 "Deploy the lab"
 
-echo -e "  ${MAGENTA_BOLD}newtlab${RESET} boots a QEMU VM running SONiC and wires it to the host."
+echo -e "  ${BLUE_BOLD}newtlab${RESET} boots a QEMU VM running SONiC and wires it to the host."
 echo ""
 echo "  Inside the VM, the full SONiC stack starts up:"
 echo -e "    ${GRAY}${H}${RESET} Redis (database container) -- CONFIG_DB, APP_DB, ASIC_DB, STATE_DB"
@@ -274,7 +274,7 @@ pause
 
 # ─── Step 4: Start newtron-server ─────────────────────────────────────────────
 
-header 4 "Start ${MAGENTA_BOLD}newtron-server${RESET}"
+header 4 "Start ${BLUE_BOLD}newtron-server${RESET}"
 
 echo "  The architecture is:"
 echo ""
@@ -322,15 +322,15 @@ pause
 header 5 "Initialize the device"
 
 echo "  SONiC ships with bgpcfgd, which silently ignores dynamic CONFIG_DB"
-echo -e "  entries (BGP_NEIGHBOR, VRF, etc.). ${MAGENTA_BOLD}newtron${RESET} requires frrcfgd (unified"
+echo -e "  entries (BGP_NEIGHBOR, VRF, etc.). ${BLUE_BOLD}newtron${RESET} requires frrcfgd (unified"
 echo "  config mode) so all CONFIG_DB writes are processed by FRR."
 echo ""
-echo -e "  ${MAGENTA_BOLD}newtron init${RESET} enables frrcfgd, restarts the bgp container, and"
+echo -e "  ${BLUE_BOLD}newtron init${RESET} enables frrcfgd, restarts the bgp container, and"
 echo "  saves the config. It's idempotent -- safe to run multiple times."
 echo ""
-echo -e "  In this walkthrough, ${MAGENTA_BOLD}newtlab${RESET}'s boot patch already enabled frrcfgd"
-echo -e "  during deploy. On a production device without ${MAGENTA_BOLD}newtlab${RESET}, this is the"
-echo -e "  required first step before any ${MAGENTA_BOLD}newtron${RESET} operations."
+echo -e "  In this walkthrough, ${BLUE_BOLD}newtlab${RESET}'s boot patch already enabled frrcfgd"
+echo -e "  during deploy. On a production device without ${BLUE_BOLD}newtlab${RESET}, this is the"
+echo -e "  required first step before any ${BLUE_BOLD}newtron${RESET} operations."
 echo ""
 
 run_cmd bin/newtron switch1 init
@@ -346,7 +346,7 @@ pause
 
 header 6 "Understand the spec files"
 
-echo -e "  ${MAGENTA_BOLD}newtron${RESET} separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
+echo -e "  ${BLUE_BOLD}newtron${RESET} separates ${BOLD}what${RESET} (network intent) from ${BOLD}where${RESET} (device identity)."
 echo ""
 echo -e "  ${BOLD}network.json${RESET} defines services -- abstract descriptions of what"
 echo "  a port should do. This one defines a transit peering service:"
@@ -368,16 +368,16 @@ echo -e "  ${GRAY}$SPEC_DIR/profiles/switch1.json${RESET}"
 cat "$SPEC_DIR/profiles/switch1.json" | sed 's/^/    /'
 echo ""
 echo "  When you say 'apply transit to Ethernet0 with IP 10.1.0.0/31 and"
-echo -e "  peer AS 65002', ${MAGENTA_BOLD}newtron${RESET} combines the service spec + device profile"
+echo -e "  peer AS 65002', ${BLUE_BOLD}newtron${RESET} combines the service spec + device profile"
 echo "  + your parameters to compute the exact CONFIG_DB entries needed."
 
 pause
 
 # ─── Step 7: Dry-run a service operation ──────────────────────────────────────
 
-header 7 "Preview -- see what ${MAGENTA_BOLD}newtron${RESET}${BOLD}${WHITE} would write"
+header 7 "Preview -- see what ${BLUE_BOLD}newtron${RESET}${BOLD}${WHITE} would write"
 
-echo -e "  Let's apply a transit service to Ethernet0. Without -x, ${MAGENTA_BOLD}newtron${RESET}"
+echo -e "  Let's apply a transit service to Ethernet0. Without -x, ${BLUE_BOLD}newtron${RESET}"
 echo "  computes the CONFIG_DB entries but doesn't write them -- a dry run."
 echo ""
 
@@ -385,7 +385,7 @@ run_cmd bin/newtron switch1 service apply Ethernet0 transit \
     --ip 10.1.0.0/31 --peer-as 65002
 
 echo ""
-echo -e "  Read the output top to bottom -- ${MAGENTA_BOLD}newtron${RESET} is telling you exactly what"
+echo -e "  Read the output top to bottom -- ${BLUE_BOLD}newtron${RESET} is telling you exactly what"
 echo "  it will write to CONFIG_DB:"
 echo ""
 echo -e "    ${GRAY}DEVICE_METADATA|localhost${RESET}         Set BGP ASN and device type"
@@ -402,7 +402,7 @@ echo -e "    ${GRAY}NEWTRON_SERVICE_BINDING|Ethernet0${RESET}   Record what was 
 echo "                                      'remove' knows what to clean up)"
 echo ""
 echo "  The first four entries appear because the device has no BGP instance"
-echo -e "  yet -- ${MAGENTA_BOLD}newtron${RESET} auto-creates one from the profile's ASN and loopback."
+echo -e "  yet -- ${BLUE_BOLD}newtron${RESET} auto-creates one from the profile's ASN and loopback."
 echo "  On a provisioned device, only the service entries would appear."
 echo ""
 echo "  These are the same entries you'd create manually with 'config interface'"
@@ -415,7 +415,7 @@ pause
 
 header 8 "Apply -- write to the switch"
 
-echo -e "  Add ${BOLD}-x${RESET} to execute. ${MAGENTA_BOLD}newtron${RESET} will:"
+echo -e "  Add ${BOLD}-x${RESET} to execute. ${BLUE_BOLD}newtron${RESET} will:"
 echo -e "    ${WHITE}1.${RESET} Validate all entries against SONiC YANG constraints"
 echo -e "    ${WHITE}2.${RESET} Write to CONFIG_DB via Redis pipeline (atomic batch)"
 echo -e "    ${WHITE}3.${RESET} Re-read every entry to verify it was written correctly"
@@ -458,7 +458,7 @@ run_ssh "FRR: BGP neighbor (frrcfgd read CONFIG_DB and configured FRR)" \
 run_ssh "CONFIG_DB: service binding (newtron's record of what was applied)" \
     "redis-cli -n 4 hgetall 'NEWTRON_SERVICE_BINDING|Ethernet0'"
 
-echo -e "  The chain: ${MAGENTA_BOLD}newtron${RESET} writes CONFIG_DB --> frrcfgd reads it -->"
+echo -e "  The chain: ${BLUE_BOLD}newtron${RESET} writes CONFIG_DB --> frrcfgd reads it -->"
 echo "  FRR configures the BGP peer. The service binding records what"
 echo "  was applied so 'remove' knows what to clean up, even if the"
 echo "  service spec changes between apply and remove."
@@ -473,7 +473,7 @@ echo "  Every apply has an equal and opposite remove. This is critical for"
 echo "  network operations -- orphaned config (stale BGP peers, leftover IPs,"
 echo "  ghost VLAN members) is a constant source of outages."
 echo ""
-echo -e "  ${MAGENTA_BOLD}newtron${RESET} reads the NEWTRON_SERVICE_BINDING to know exactly what was"
+echo -e "  ${BLUE_BOLD}newtron${RESET} reads the NEWTRON_SERVICE_BINDING to know exactly what was"
 echo "  applied, then removes every entry in reverse dependency order:"
 echo "  BGP neighbor AF first, then BGP neighbor, then interface IP, then"
 echo "  the interface routing config, then the binding record itself."
@@ -499,9 +499,9 @@ pause
 
 # ─── Step 10: Run the test suite ──────────────────────────────────────────────
 
-header 10 "Automated testing with ${MAGENTA_BOLD}newtrun${RESET}"
+header 10 "Automated testing with ${BLUE_BOLD}newtrun${RESET}"
 
-echo -e "  ${MAGENTA_BOLD}newtrun${RESET} executes YAML test scenarios that exercise the full stack."
+echo -e "  ${BLUE_BOLD}newtrun${RESET} executes YAML test scenarios that exercise the full stack."
 echo "  The 1node-vs-basic suite runs 4 scenarios with 25 steps:"
 echo ""
 echo -e "    ${WHITE}1.${RESET} ${BOLD}boot-ssh${RESET}           Verify the switch is reachable"
@@ -509,7 +509,7 @@ echo -e "    ${WHITE}2.${RESET} ${BOLD}service-lifecycle${RESET}  Apply transit 
 echo -e "    ${WHITE}3.${RESET} ${BOLD}vlan-vrf${RESET}           Create VLAN 100, add member, create VRF, tear down"
 echo -e "    ${WHITE}4.${RESET} ${BOLD}verify-clean${RESET}       Assert zero leftover entries from any test"
 echo ""
-echo -e "  Each step calls ${MAGENTA_BOLD}newtron-server${RESET} via HTTP (same API the CLI uses)."
+echo -e "  Each step calls ${BLUE_BOLD}newtron-server${RESET} via HTTP (same API the CLI uses)."
 echo "  The verify steps read CONFIG_DB entries and assert expected values."
 echo "  The final scenario confirms no test left orphaned config behind."
 echo ""
@@ -561,7 +561,7 @@ gbox() {
 echo ""
 echo -e "  ${GREEN}${TL}$(hrule $W)${TR}${RESET}"
 gbox ""
-echo -e "  ${GREEN}${V}${RESET}   ${GREEN_BOLD}Complete${RESET}$(printf '%49s' '')${GREEN}${V}${RESET}"
+echo -e "  ${GREEN}${V}${RESET}   ${GREEN_BOLD}Complete${RESET}$(printf '%65s' '')${GREEN}${V}${RESET}"
 gbox ""
 gbox "   What you just did:"
 gbox ""

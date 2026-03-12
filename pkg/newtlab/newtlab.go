@@ -116,6 +116,7 @@ func NewLab(specDir string) (*Lab, error) {
 
 	// Resolve node configs
 	sortedNames := l.Topology.DeviceNames()
+	usedPorts := map[int]bool{} // track allocated ports to avoid double-use
 	for i, name := range sortedNames {
 		profile := l.Profiles[name]
 		var platform *spec.PlatformSpec
@@ -133,9 +134,28 @@ func NewLab(specDir string) (*Lab, error) {
 			return nil, err
 		}
 
-		// Allocate SSH and console ports
-		nc.SSHPort = l.Config.SSHPortBase + i
-		nc.ConsolePort = l.Config.ConsolePortBase + i
+		// Allocate SSH and console ports, auto-resolving conflicts
+		preferredSSH := l.Config.SSHPortBase + i
+		sshPort, err := findFreeLocalPort(preferredSSH, usedPorts)
+		if err != nil {
+			return nil, fmt.Errorf("newtlab: allocate SSH port for %s: %w", name, err)
+		}
+		if sshPort != preferredSSH {
+			util.Logger.Infof("newtlab: %s SSH port %d in use, using %d", name, preferredSSH, sshPort)
+		}
+		nc.SSHPort = sshPort
+		usedPorts[sshPort] = true
+
+		preferredConsole := l.Config.ConsolePortBase + i
+		consolePort, err := findFreeLocalPort(preferredConsole, usedPorts)
+		if err != nil {
+			return nil, fmt.Errorf("newtlab: allocate console port for %s: %w", name, err)
+		}
+		if consolePort != preferredConsole {
+			util.Logger.Infof("newtlab: %s console port %d in use, using %d", name, preferredConsole, consolePort)
+		}
+		nc.ConsolePort = consolePort
+		usedPorts[consolePort] = true
 
 		l.Nodes[name] = nc
 	}
@@ -154,7 +174,7 @@ func NewLab(specDir string) (*Lab, error) {
 	hostMap := l.buildHostMap()
 
 	// Allocate links (topology.Links populated by loader from interface.link fields)
-	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config, hostMap)
+	l.Links, err = AllocateLinks(l.Topology.Links, l.Nodes, l.Config, hostMap, usedPorts)
 	if err != nil {
 		return nil, err
 	}

@@ -66,12 +66,23 @@ func AllocateLinks(
 	nodes map[string]*NodeConfig,
 	config *VMLabConfig,
 	hostMap map[string]HostMapping,
+	usedPorts map[int]bool,
 ) ([]*LinkConfig, error) {
 	var result []*LinkConfig
 
 	for i, link := range links {
-		aPort := config.LinkPortBase + (i * 2)
-		zPort := config.LinkPortBase + (i * 2) + 1
+		preferredA := config.LinkPortBase + (i * 2)
+		preferredZ := config.LinkPortBase + (i * 2) + 1
+		aPort, err := findFreeLocalPort(preferredA, usedPorts)
+		if err != nil {
+			return nil, fmt.Errorf("newtlab: allocate link %d A-side port: %w", i, err)
+		}
+		usedPorts[aPort] = true
+		zPort, err := findFreeLocalPort(preferredZ, usedPorts)
+		if err != nil {
+			return nil, fmt.Errorf("newtlab: allocate link %d Z-side port: %w", i, err)
+		}
+		usedPorts[zPort] = true
 
 		aDevice, aIface, err := splitLinkEndpoint(link.A)
 		if err != nil {

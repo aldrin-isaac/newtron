@@ -184,6 +184,20 @@ func probePortLocal(port int) error {
 	return nil
 }
 
+// findFreeLocalPort finds a free local TCP port starting from preferred,
+// skipping any ports in the avoid set. Searches up to 100 ports above preferred.
+func findFreeLocalPort(preferred int, avoid map[int]bool) (int, error) {
+	for port := preferred; port < preferred+100; port++ {
+		if avoid[port] {
+			continue
+		}
+		if err := probePortLocal(port); err == nil {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port found in range %d-%d", preferred, preferred+99)
+}
+
 // probePortsRemote checks port availability on a remote host via SSH + ss.
 // Returns a map of port → error for ports that are in use.
 func probePortsRemote(hostIP string, ports []int) map[int]error {
