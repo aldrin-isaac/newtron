@@ -34,24 +34,34 @@ tool. They are how the architecture maintains its own integrity.
 
 ## The Architecture
 
-Six service types bind to interfaces — the interface is the point of
-service delivery, the unit of lifecycle, and the unit of isolation:
+newtron makes specific choices about how a SONiC network should be built.
+These aren't configuration options — they are the architecture.
 
-| Type | What it creates | Overlay |
-|------|----------------|---------|
-| `routed` | BGP neighbor + IP (optionally in a per-interface VRF) | — |
-| `bridged` | VLAN + VLAN member | MAC-VPN (local) |
-| `irb` | VLAN + SVI + IP (optionally in a VRF) | MAC-VPN (local) |
-| `evpn-bridged` | VLAN + VNI mapping + ARP suppression | MAC-VPN (EVPN) |
-| `evpn-irb` | VLAN + VNI + SVI + anycast GW + L3VNI + VRF | IP-VPN + MAC-VPN |
-| `evpn-routed` | VRF + L3VNI + BGP neighbor | IP-VPN |
+**The interface is the point of service.** Every service — transit peering,
+L2 bridging, EVPN overlay — binds to an interface. The interface is where
+abstract intent meets physical infrastructure. It is the unit of lifecycle
+(apply, remove, refresh), the unit of state (one service binding or none),
+and the unit of isolation (services on different interfaces are independent).
+You don't configure a device globally and hope the right things land on the
+right ports. You apply a service to an interface and get exactly the CONFIG_DB
+entries that interface needs.
 
-Spec files declare network-level intent — services, VPN parameters, route
-policies, filters, QoS — without reference to any specific device. newtron
-resolves them using each device's profile (loopback IP, AS number, EVPN
-peers), platform (port count, HWSKU), and zone. The same spec applied to
-different devices produces different CONFIG_DB entries. The same spec
-applied twice to the same device produces identical entries.
+**All-eBGP, everywhere.** The underlay is hop-by-hop eBGP between directly
+connected interfaces. The overlay is loopback-to-loopback eBGP between EVPN
+peers. No iBGP, no route reflectors, no full-mesh scaling problems. Each
+switch has its own AS number. This is a deliberate simplification — eBGP
+is the only peering model, which means every BGP session has the same
+operational characteristics regardless of whether it carries IPv4 prefixes
+or EVPN routes.
+
+**Specs are network-scoped; execution is device-scoped.** Service specs,
+VPN parameters, route policies, and filters are defined once at the network
+level — they describe what an interface should do, not how any particular
+switch should be configured. When you apply a service, newtron resolves
+the spec against the device's profile (AS number, loopback IP, EVPN peers)
+to produce device-specific CONFIG_DB entries. The same spec applied to
+different devices produces different entries. The same spec applied twice to
+the same device produces identical entries.
 
 ```
 specs/
@@ -62,26 +72,35 @@ specs/
     └── leaf1.json
 ```
 
-Specs resolve hierarchically: network → zone → node (lower-level wins).
+**The device is the source of truth.** Spec files are intent. Once
+configuration is applied, the device's CONFIG_DB is what matters. If someone
+edits CONFIG_DB directly — via CLI, Redis, or another tool — that is the
+new reality. newtron reads device state before every operation, and mutates
+what it finds. It does not try to reconcile the device back to spec. This
+is not Terraform; there is no desired-state diff. There is the device, and
+there is the change you are asking for.
 
-VPN specs define overlay parameters:
+**Content-hashed policy objects.** Shared resources like ACL tables, route
+maps, and prefix sets are named with an 8-character hash of their content.
+If the spec hasn't changed, the hash hasn't changed, and a refresh is a
+no-op. If the spec changes, the new version gets a new name — both exist
+simultaneously while interfaces migrate one by one. No coordinated
+switchover, no ordering dependencies, no window where half the interfaces
+have the old policy and half have the new one.
 
-```json
-{
-  "ipvpns": {
-    "irb-vrf": { "vrf": "Vrf_IRB", "l3vni": 50400, "l3vni_vlan": 3998,
-                 "route_targets": ["65000:50400"] }
-  },
-  "macvpns": {
-    "extend-vlan300": { "vlan_id": 300, "vni": 10300,
-                        "route_targets": ["65000:300"], "arp_suppression": true }
-  }
-}
-```
+**Operational symmetry.** Every forward operation has a reverse. Apply and
+remove. Create and delete. Bind and unbind. Service bindings stored on the
+device record exactly what was applied, so removal can always reconstruct
+the teardown — even if the spec has changed since the service was applied.
+This is not a nice-to-have. Without it, CONFIG_DB entries accumulate with
+no way to clean them up, and the device drifts from anything anyone intended.
 
-Every mutating operation produces a **ChangeSet** — an ordered list of
-CONFIG_DB mutations that serves as dry-run preview, execution receipt, and
-verification contract. All commands default to dry-run. Add `-x` to execute.
+**One code path.** Online operations against a live device and offline
+composite provisioning run the same code. An abstract node starts with an
+empty shadow CONFIG_DB and accumulates entries as you call the same methods
+used by the CLI. The result is a composite that can be delivered to a device
+in one atomic operation. There is no template engine, no separate
+provisioning pipeline — the operations *are* the provisioning.
 
 ## Have 10 Minutes? See It Work
 
@@ -285,86 +304,34 @@ See the [newtlab HOWTO](docs/newtlab/howto.md) and [newtrun HOWTO](docs/newtrun/
 
 ## Verification
 
-newtron distinguishes between asserting its own work and observing device state:
+Every mutating operation produces a **ChangeSet** — an ordered list of
+CONFIG_DB mutations. The ChangeSet is the dry-run preview (what will
+change), the execution receipt (what did change), and the verification
+contract (what to check). After execution, newtron re-reads every entry it
+wrote and diffs against the ChangeSet. If anything is missing or wrong,
+you know immediately.
 
-| Tier | Question | What newtron does |
-|------|----------|-------------------|
-| CONFIG_DB | Did my writes land? | **Asserts** — re-reads and diffs against ChangeSet |
-| APP_DB | Is the route present? | **Observes** — returns `RouteEntry` with ECMP nexthops |
-| ASIC_DB | Is it programmed in hardware? | **Observes** — resolves full SAI OID chain |
-| STATE_DB | Is the device healthy? | **Observes** — returns structured health report |
-| Cross-device | Did the route propagate? | **Not newtron's job** — orchestrators compose observations |
-
-newtron returns structured data — a `RouteEntry`, a health report — not
-pass/fail verdicts. The one exception is ChangeSet verification: newtron
-asserts that its own writes landed correctly. Everything else is observation
-that callers interpret according to their own correctness criteria.
+Beyond its own writes, newtron observes but does not judge. It reads
+APP_DB routes, resolves ASIC_DB SAI chains, and returns structured health
+reports from STATE_DB — but these are data, not verdicts. Cross-device
+assertions (did the route propagate? is the fabric converged?) belong to
+the test orchestrator, not to the device tool. newtron gives you the
+observations; you decide what they mean.
 
 ## Testing Infrastructure
 
 Proving the architecture works requires running it against real SONiC
-software. Two supporting tools provide that infrastructure.
+software.
 
-### newtlab — VM Topology Orchestration
+**newtlab** deploys QEMU virtual machines and wires them into topologies
+using userspace networking — no root, no Linux bridges, no Docker. Every
+packet between VMs passes through newtlink, a Go bridge that handles
+Ethernet frames in userspace. Topologies can span multiple servers.
 
-newtlab deploys QEMU virtual machines and wires them into topologies using
-**userspace networking** — no root, no Linux bridges, no kernel namespaces,
-no Docker. Every packet between VMs passes through newtlink, a Go bridge
-process that handles each Ethernet frame in userspace.
-
-- **Userspace socket links** — each inter-VM link is a bridge worker that
-  listens on two TCP ports and bridges Ethernet frames between them.
-- **Per-link telemetry** — bridge workers track byte counters and session
-  state per link.
-- **Multi-host deployment** — topologies span multiple servers. Define a
-  server pool in `topology.json` with capacity constraints; newtlab
-  auto-places VMs using a spread algorithm.
-- **No privileged access** — no root, no sudo, no kernel modules.
-- **Auto port allocation** — newtlab probes ports at allocation time and
-  automatically resolves conflicts, allowing multiple topologies to
-  coexist on the same host.
-- **Platform boot patches** — a declarative patch framework handles
-  platform-specific SONiC initialization without Go code changes.
-
-### newtrun — E2E Test Framework
-
-newtrun executes YAML test scenarios against newtron-server. Each scenario
-is a sequence of steps drawn from a vocabulary of actions — provisioning,
-CONFIG_DB/STATE_DB verification, service lifecycle, BGP, EVPN, VLANs, VRFs,
-ACLs, QoS, static routing, host commands, and more.
-
-```yaml
-name: vrf-lifecycle
-description: Create VRF, add static route, verify, tear down
-topology: 2node-vs
-steps:
-  - name: create-vrf
-    action: create-vrf
-    devices: [switch2]
-    vrf: Vrf_local
-
-  - name: add-static-route
-    action: add-static-route
-    devices: [switch2]
-    vrf: Vrf_local
-    prefix: "10.99.0.0/24"
-    params:
-      next_hop: "10.20.1.0"
-
-  - name: verify-route
-    action: verify-config-db
-    devices: [switch2]
-    table: STATIC_ROUTE
-    key: "Vrf_local|10.99.0.0/24"
-    expect:
-      fields:
-        nexthop: "10.20.1.0"
-
-  - name: delete-vrf
-    action: delete-vrf
-    devices: [switch2]
-    vrf: Vrf_local
-```
+**newtrun** executes YAML test scenarios against newtron-server — each
+scenario is a sequence of steps (provision, verify CONFIG_DB, apply service,
+check BGP, ping across VMs, tear down) that exercise the architecture
+end-to-end.
 
 ```
 $ newtrun start --dir newtrun/suites/2node-vs-service
@@ -383,7 +350,8 @@ newtrun: 6 scenarios: 6 passed  (2m38s)
 
 ### Validated
 
-All shipped test suites pass on community sonic-vs and Cisco Silicon One (CiscoVS Palladium2):
+All shipped test suites pass on community sonic-vs and Cisco Silicon One
+(CiscoVS Palladium2):
 
 | Suite | Platform | What it tests |
 |-------|----------|---------------|
@@ -391,16 +359,15 @@ All shipped test suites pass on community sonic-vs and Cisco Silicon One (CiscoV
 | 2node-vs-service | sonic-vs | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
 | 2node-ngdp-primitive | CiscoVS | Same as vs-primitive, plus EVPN VTEP lifecycle |
 | 2node-ngdp-service | CiscoVS | Same as vs-service, with EVPN overlay services |
-| 3node-ngdp-dataplane | CiscoVS | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
+| 3node-ngdp-dataplane | CiscoVS | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB |
 
-EVPN VXLAN verified end-to-end on CiscoVS: L2 bridging across switches and
-inter-subnet routing via asymmetric IRB, both running on Cisco Silicon One SAI.
-The vs suites run on the free community sonic-vs image — no proprietary platform needed.
+The vs suites run on the free community sonic-vs image — no proprietary
+platform needed. EVPN VXLAN is verified end-to-end on CiscoVS with Cisco
+Silicon One SAI.
 
 Every platform bug encountered along the way is documented in
-[`docs/rca/`](docs/rca/) — root-cause analyses covering frrcfgd, orchagent,
-SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the
-answer is probably already there.
+[`docs/rca/`](docs/rca/) — 40+ root-cause analyses covering frrcfgd,
+orchagent, SAI, and platform quirks.
 
 ## Repository Layout
 
