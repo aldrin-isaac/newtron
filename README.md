@@ -139,7 +139,7 @@ make build              # → bin/newtron, bin/newtron-server, bin/newtlab, bin/
 Start the server with a shipped topology's specs and explore — no SONiC devices needed:
 
 ```bash
-bin/newtron-server --spec-dir newtrun/topologies/2node-ngdp/specs &
+bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
 bin/newtron service list                    # List defined services
 bin/newtron show switch1                    # Show device profile
@@ -167,7 +167,7 @@ cp alpine-testhost.qcow2 ~/.newtlab/images/      # lightweight test host (option
 Deploy VMs and wire the topology:
 
 ```bash
-bin/newtlab deploy 2node-ngdp
+bin/newtlab deploy 2node-vs
 bin/newtlab status                              # Check VM and link state
 bin/newtlab ssh switch1                         # SSH into a switch
 ```
@@ -193,7 +193,7 @@ curl localhost:8080/network/default/node/switch1/interface     # List interfaces
 ### 5. Run the E2E test suite
 
 ```bash
-bin/newtrun start --dir newtrun/suites/2node-ngdp-primitive    # Full primitive test suite
+bin/newtrun start --dir newtrun/suites/2node-vs-primitive    # Full primitive test suite
 ```
 
 ### 6. Tear down
@@ -305,7 +305,7 @@ framework itself.
 ```yaml
 name: vrf-lifecycle
 description: Create VRF, add static route, verify, tear down
-topology: 2node-ngdp
+topology: 2node-vs
 steps:
   - name: create-vrf
     action: create-vrf
@@ -339,9 +339,9 @@ Use `newtrun actions` for the full action reference, or `newtrun actions <name>`
 for details on any specific action.
 
 ```
-$ newtrun start --dir newtrun/suites/2node-ngdp-service
+$ newtrun start --dir newtrun/suites/2node-vs-service
 
-newtrun: 6 scenarios, topology: 2node-ngdp-ngdp-service, platform: ciscovs
+newtrun: 6 scenarios, topology: 2node-vs-service, platform: sonic-vs
 
   [1/6]  boot-ssh ...............  PASS  (3s)
   [2/6]  provision ..............  PASS  (1m47s)
@@ -355,16 +355,19 @@ newtrun: 6 scenarios: 6 passed  (2m38s)
 
 ### Validated
 
-All shipped test suites pass on Cisco Silicon One (CiscoVS Palladium2):
+All shipped test suites pass on community sonic-vs and Cisco Silicon One (CiscoVS Palladium2):
 
-| Suite | What it tests |
-|-------|---------------|
-| 2node-ngdp-primitive | Disaggregated operations: VLAN/VRF/VTEP lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
-| 2node-ngdp-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
-| 3node-ngdp-dataplane | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
+| Suite | Platform | What it tests |
+|-------|----------|---------------|
+| 2node-vs-primitive | sonic-vs | Disaggregated operations: VLAN/VRF lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
+| 2node-vs-service | sonic-vs | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
+| 2node-ngdp-primitive | CiscoVS | Same as vs-primitive, plus EVPN VTEP lifecycle |
+| 2node-ngdp-service | CiscoVS | Same as vs-service, with EVPN overlay services |
+| 3node-ngdp-dataplane | CiscoVS | Spine-leaf fabric: L3 routing, EVPN L2 bridging, EVPN asymmetric IRB (inter-subnet routing via VXLAN) |
 
-EVPN VXLAN verified end-to-end: L2 bridging across switches and inter-subnet
-routing via asymmetric IRB, both running on Cisco Silicon One SAI.
+EVPN VXLAN verified end-to-end on CiscoVS: L2 bridging across switches and
+inter-subnet routing via asymmetric IRB, both running on Cisco Silicon One SAI.
+The vs suites run on the free community sonic-vs image — no proprietary platform needed.
 
 Every platform bug encountered along the way is documented in [`docs/rca/`](docs/rca/) — root-cause analyses covering frrcfgd, orchagent, SAI, and CiscoVS/VPP quirks. When SONiC does something unexpected, the answer is probably already there.
 
@@ -408,7 +411,7 @@ pkg/
   util/             Errors, logging, IP/string helpers
 
 newtrun/
-  topologies/       Test topologies (1node-vs, 2node-ngdp, 2node-ngdp-service, 3node-ngdp, 4node-ngdp)
+  topologies/       Test topologies (1node-vs, 2node-vs, 2node-vs-service, 2node-ngdp, 2node-ngdp-service, 3node-ngdp, 4node-ngdp)
   suites/           Test suites and scenarios (YAML)
 
 docs/
