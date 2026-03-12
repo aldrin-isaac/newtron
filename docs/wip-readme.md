@@ -1,6 +1,8 @@
 # newtron
 
-> **Note:** newtron is a SONiC automation demonstrator — a research and learning project exploring opinionated network architecture delivered as software. It is not intended for production use.
+> **Note:** newtron is a research project — an opinionated network
+> architecture for SONiC, validated against virtual topologies. It is not
+> intended for production use.
 
 <p align="center">
   <sub>Ron, the Newt</sub>
@@ -8,49 +10,29 @@
   <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
 </p>
 
-Network automation tools — Ansible, Terraform, Nornir — are frameworks. They
-push config but have no opinion about what that config should be. You bring
-the network architecture: your BGP design, your VLAN scheme, your overlay
-strategy. The tool renders templates and delivers them. If the architecture
-is wrong, the tool delivers it faithfully.
+newtron is an opinionated network architecture for SONiC, delivered as
+software.
 
-newtron is not a framework. It is an opinionated network architecture for
-SONiC, delivered as software. The spec files encode a specific way of
-building networks: all-eBGP underlay, service-on-interface model, EVPN
-overlays with symmetric and asymmetric IRB, content-hashed shared policies,
-structured route filtering. You don't configure newtron to match your
-network design — you adopt newtron's network design.
+Spec files define the architecture: services describe what an interface
+does (transit peering, L2 bridging, IRB, EVPN overlay), VPN specs define
+overlay parameters, route policies and filters control path selection.
+Device profiles identify each switch — AS number, loopback IP, platform,
+EVPN peers. When you apply a service to an interface, newtron resolves
+the spec against the device's profile and writes the resulting CONFIG_DB
+entries through SONiC's native Redis interface — validated against YANG
+constraints, applied atomically, and verified by re-reading every entry.
 
-The automation is how the architecture gets delivered. Every mechanism in
-newtron exists to enforce the architecture's invariants:
+The architecture is self-enforcing. Every CONFIG_DB write passes schema
+validation — invalid values and unknown fields are rejected before
+reaching the device. Every forward operation has a symmetric reverse —
+apply and remove, create and delete — with service bindings on the device
+that guarantee clean teardown even if specs change between apply and
+remove. Online operations and offline provisioning run the same code
+path, so there is no drift between what you preview and what gets
+applied. These aren't optional safety features bolted onto an automation
+tool. They are how the architecture maintains its own integrity.
 
-- **Redis-first** — newtron reads and writes all four SONiC databases
-  (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB) through a native Redis client,
-  not CLI commands. This isn't a performance choice — it's how the
-  architecture maintains typed, verified access to device state.
-
-- **YANG-derived validation** — every CONFIG_DB write is checked against
-  constraints extracted from SONiC's YANG models. Unknown tables and
-  unknown fields are rejected. The architecture cannot produce invalid
-  device state.
-
-- **Operational symmetry** — every forward action (apply, create, bind)
-  has an equal and opposite reverse (remove, delete, unbind). Service
-  bindings on the device record exactly what was applied, so teardown
-  is always correct — even if the spec changed since apply time. The
-  architecture guarantees zero orphaned config.
-
-- **Single code path** — online operations and offline provisioning run
-  the same code against the same object model. There is no template
-  engine, no separate config generation pipeline. If a service works
-  live, it works in provisioning. The architecture is internally
-  consistent by construction.
-
-These aren't features — they're the enforcement mechanism. Without them,
-you're pushing config and hoping. With them, the architecture is
-self-enforcing.
-
-## What the Architecture Looks Like
+## The Architecture
 
 Six service types bind to interfaces — the interface is the point of
 service delivery, the unit of lifecycle, and the unit of isolation:
