@@ -207,7 +207,7 @@ func init() {
 
 	// Option flags (global)
 	rootCmd.PersistentFlags().StringVarP(&app.rootDir, "specs", "S", "", "Network root directory (contains specs/)")
-	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (env: NEWTRON_SERVER)")
+	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (default: http://localhost:8080, env: NEWTRON_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 

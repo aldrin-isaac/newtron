@@ -247,7 +247,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
-	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (env: NEWTRON_SERVER)")
+	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (default: http://localhost:8080, env: NEWTRON_SERVER)")
 	cmd.Flags().StringVar(&networkID, "network-id", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
 

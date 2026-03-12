@@ -300,6 +300,14 @@ if [ -n "$existing_pid" ]; then
     sleep 1
 fi
 
+# Check that port 8080 is free
+if ss -tlnH 'sport = :8080' 2>/dev/null | grep -q 8080; then
+    echo ""
+    echo "  Error: port 8080 is already in use." >&2
+    echo "  newtron-server needs port 8080. Stop whatever is using it and re-run." >&2
+    exit 1
+fi
+
 echo ""
 echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtron-server --spec-dir $SPEC_DIR &${RESET}"
 echo ""
