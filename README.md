@@ -76,9 +76,9 @@ specs/
     └── leaf1.json
 ```
 
-**Device as source of reality.** Spec files are intent. Once
-configuration is applied, the device's CONFIG_DB is what exists —
-whether correct or not. If someone edits CONFIG_DB directly — via CLI,
+**Specs are the source of intent; the device is the source of
+reality.** Once configuration is applied, the device's CONFIG_DB is
+what exists — whether correct or not. If someone edits CONFIG_DB directly — via CLI,
 Redis, or another tool — that is the new reality. Basic operations
 read CONFIG_DB to check preconditions before acting. Service operations
 trust the binding record written at apply time — the binding is the

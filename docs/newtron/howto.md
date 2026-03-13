@@ -349,7 +349,7 @@ All 64 DSCP values are mapped: explicitly listed values go to their queue, unmap
 
 ### 3.3 Device Profiles
 
-Each device needs a profile JSON file in `profiles/`. The profile is the single source of truth for device-specific data:
+Each device needs a profile JSON file in `profiles/`. The profile is the source of reality for device-specific data:
 
 ```json
 {
@@ -394,7 +394,7 @@ newtron profile delete switch3 -x
 | `platform` | Maps to `platforms.json` for HWSKU |
 | `ssh_user`, `ssh_pass` | SSH credentials (enables SSH tunnel to Redis) |
 | `ssh_port` | SSH port override (default: 22) |
-| `underlay_asn` | eBGP AS number (unique per device) |
+| `underlay_asn` | eBGP AS number (per-profile assignment) |
 | `evpn.peers` | EVPN overlay peer loopback IPs |
 | `evpn.route_reflector` | Mark as EVPN route reflector |
 | `evpn.cluster_id` | Route reflector cluster ID |

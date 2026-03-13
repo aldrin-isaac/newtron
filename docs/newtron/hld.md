@@ -2,9 +2,9 @@
 
 ## 1. Purpose
 
-Newtron is an opinionated network automation tool for SONiC-based switches. It treats SONiC as what it is — a Redis database with daemons that react to table changes — and interacts with it accordingly. Where other tools SSH in and parse CLI output, newtron reads and writes CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB directly through an SSH-tunneled Redis client.
+Newtron defines architectural primitives for SONiC networks and automates any network built from them. It treats SONiC as what it is — a Redis database with daemons that react to table changes — and interacts with it accordingly. Where other tools SSH in and parse CLI output, newtron reads and writes CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB directly through an SSH-tunneled Redis client.
 
-Newtron enforces network design intent expressed as declarative spec files while allowing many degrees of freedom for actual deployments. The specs define what the network *must* look like (services, filters, routing policies); newtron translates that intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities).
+Specs are the source of intent — they describe what the network should look like (services, filters, routing policies). The device is the source of reality — CONFIG_DB is what exists, whether correct or not. Newtron translates intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities), but once applied, the device's state is the ground reality.
 
 For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
 

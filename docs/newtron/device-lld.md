@@ -759,7 +759,7 @@ type ServiceBindingEntry struct {
 
 ## 5. STATE_DB (`pkg/newtron/device/sonic/statedb.go`)
 
-STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. Where CONFIG_DB represents what you asked for, STATE_DB represents what the system is actually doing.
+STATE_DB (Redis DB 6) contains the operational/runtime state of the device, separate from configuration. CONFIG_DB is the device's configured state — ground reality, whether correct or not. STATE_DB is what the system is actually doing at runtime.
 
 **Consumer note:** newtrun's `verifyStateDBExecutor` reads STATE_DB tables via the HTTP API client (`Client.QueryStateDB()`), which calls the newtron-server, which internally calls `StateDBClient.GetEntry()`. Similarly, `verifyBGPExecutor` calls `Client.CheckBGPSessions()`, which reads BGP neighbor state from STATE_DB on the server side. Both executors poll with timeout until expected values appear.
 
