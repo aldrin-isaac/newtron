@@ -1,6 +1,6 @@
 # newtron
 
-> **Note:** newtron is a research project, validated against virtual
+> **Note:** **newtron** is a research project, validated against virtual
 > topologies. It is not intended for production use.
 
 <p align="center">
@@ -9,10 +9,10 @@
   <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
 </p>
 
-newtron explores network automation for SONiC through opinionated
+**newtron** explores network automation for SONiC through opinionated
 architectural primitives.
 
-newtron doesn't define a network. It defines a way of building
+**newtron** doesn't define a network. It defines a way of building
 networks — architectural primitives, codified in software — and then
 automates anything built from them. The networks you build are varied —
 different topologies, different services, different overlays, different
@@ -23,7 +23,7 @@ what an interface does (transit peering, L2 bridging, IRB, EVPN
 overlay). VPN specs define overlay parameters. Route policies and
 filters control path selection. Device profiles identify each switch —
 AS number, loopback IP, platform, EVPN peers. When you apply a service
-to an interface, newtron resolves the spec against the device's profile
+to an interface, **newtron** resolves the spec against the device's profile
 and writes the resulting CONFIG_DB entries through SONiC's native Redis
 interface — validated against YANG constraints, applied atomically, and
 verified by re-reading every entry.
@@ -40,8 +40,8 @@ how the primitives maintain their own integrity.
 
 ## The Primitives
 
-The architecture isn't newtron — the architecture is the constraints.
-newtron automates any network that conforms to them.
+The architecture isn't **newtron** — the architecture is the constraints.
+**newtron** automates any network that conforms to them.
 
 ### Today's primitives
 
@@ -61,7 +61,7 @@ in a spine tier can share one. One peering model for all sessions.
 parameters, route policies, and filters are defined once at the network
 level — they describe what an interface should do, not how any
 particular switch should be configured. When you apply a service,
-newtron resolves the spec against the device's profile (AS number,
+**newtron** resolves the spec against the device's profile (AS number,
 loopback IP, EVPN peers) to produce device-specific CONFIG_DB entries.
 The same spec applied to different devices produces different entries.
 The same spec applied twice to the same device produces identical
@@ -83,8 +83,8 @@ Redis, or another tool — that is the new reality. Basic operations
 read CONFIG_DB to check preconditions before acting. Service operations
 trust the binding record written at apply time — the binding is the
 ground reality of what was applied, and the sole input for teardown.
-If someone changes what newtron wrote — or configures other
-interfaces entirely outside of newtron — newtron will not notice or
+If someone changes what **newtron** wrote — or configures other
+interfaces entirely outside of **newtron** — **newtron** will not notice or
 undo it. There is no background process watching for drift. There is
 the device, and there is the change you are asking for.
 
@@ -118,15 +118,15 @@ provisioning.
 Every mutating operation produces a **ChangeSet** — an ordered list of
 CONFIG_DB mutations. The ChangeSet is the dry-run preview (what will
 change), the execution receipt (what did change), and the verification
-contract (what to check). After execution, newtron re-reads every entry it
+contract (what to check). After execution, **newtron** re-reads every entry it
 wrote and diffs against the ChangeSet. If anything is missing or wrong,
 you know immediately.
 
-Beyond its own writes, newtron observes but does not judge. It reads
+Beyond its own writes, **newtron** observes but does not judge. It reads
 APP_DB routes, resolves ASIC_DB SAI chains, and returns structured health
 reports from STATE_DB — but these are data, not verdicts. Cross-device
 assertions (did the route propagate? is the fabric converged?) belong to
-the test orchestrator, not to the device tool. newtron gives you the
+the test orchestrator, not to the device tool. **newtron** gives you the
 observations; you decide what they mean.
 
 ## Have 10 Minutes? See It Work
@@ -138,7 +138,7 @@ scripts/getting-started.sh
 ```
 
 The script walks you through downloading the SONiC community VM image,
-building newtron, deploying a single-switch lab, and applying your first
+building **newtron**, deploying a single-switch lab, and applying your first
 service — step by step, with explanations at each stage.
 
 Or run the steps yourself:
@@ -161,7 +161,7 @@ bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
 
-By default, newtron shows what it _would_ write to CONFIG_DB — every table, key, and field:
+By default, **newtron** shows what it _would_ write to CONFIG_DB — every table, key, and field:
 
 ```
 Operation: interface.apply-service
@@ -182,12 +182,12 @@ Changes to CONFIG_DB:
 DRY-RUN: No changes applied. Use -x to execute.
 ```
 
-These aren't templates rendered from Jinja. newtron computed them by running
+These aren't templates rendered from Jinja. **newtron** computed them by running
 its operations against the device's profile — AS 65001, loopback 10.0.0.1,
 the transit service spec, and the /31 address you provided. The same code
 path runs online against a live device or offline for composite provisioning.
 
-Add `-x` to execute. newtron writes atomically, re-reads to verify, then persists:
+Add `-x` to execute. **newtron** writes atomically, re-reads to verify, then persists:
 
 ```
 $ bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
@@ -205,7 +205,7 @@ bin/newtlab destroy 1node-vs
 
 ## Explore Without VMs
 
-You can explore newtron's specs and dry-run output without deploying
+You can explore **newtron**'s specs and dry-run output without deploying
 any SONiC devices. Build, start the server with a shipped topology's
 specs, and browse:
 
@@ -233,10 +233,10 @@ software.
 
 **newtlab** deploys QEMU virtual machines and wires them into topologies
 using userspace networking — no root, no Linux bridges, no Docker. Every
-packet between VMs passes through newtlink, a Go bridge that handles
+packet between VMs passes through **newtlink**, a Go bridge that handles
 Ethernet frames in userspace. Topologies can span multiple servers.
 
-**newtrun** executes YAML test scenarios against newtron-server — each
+**newtrun** executes YAML test scenarios against **newtron-server** — each
 scenario is a sequence of steps (provision, verify CONFIG_DB, apply service,
 check BGP, ping across VMs, tear down) that exercise the primitives
 end-to-end.
@@ -306,10 +306,10 @@ Five programs, two subsystems:
 └─────────┘                 └────────────────┘
 ```
 
-Both paths converge on the same SONiC devices. newtlab creates QEMU VMs
-running SONiC and wires them with newtlink; newtron-server connects to
-those same VMs via SSH-tunneled Redis. You can also point newtron-server at
-hardware switches or third-party labs — newtlab is only needed for local
+Both paths converge on the same SONiC devices. **newtlab** creates QEMU VMs
+running SONiC and wires them with **newtlink**; **newtron-server** connects to
+those same VMs via SSH-tunneled Redis. You can also point **newtron-server** at
+hardware switches or third-party labs — **newtlab** is only needed for local
 virtual topologies.
 
 ## Repository Layout
