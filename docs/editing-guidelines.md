@@ -453,3 +453,49 @@ Install Graph::Easy with `make tools` (works on Linux and macOS — requires Per
 - Every diagram in markdown must have a corresponding `.dot` source in `docs/diagrams/`
 - Never hand-edit rendered output — if the layout is wrong, fix the `.dot` source and re-render
 - Words in boxes and on edge labels must have at least 3 characters of clearance from the nearest box edge
+
+## 33. Metaphors Must Be Domain-Accurate, Not Just Evocative — HLD+LLD
+
+A metaphor that sounds good but builds the wrong mental model is worse than no metaphor at all — the reader walks away confident in an understanding that will mislead them.
+
+The test: does the metaphor help the reader *reason* about the actual system, or does it just make the prose more interesting? If the analogy breaks down the moment the reader pushes on it, it weakens rather than strengthens.
+
+**Bad:** "newtron's validation layer is the compiler." A compiler *transforms* source code into executable output. Validation doesn't transform anything — it *rejects* invalid input. The reader who internalizes "compiler" will expect transformation semantics that don't exist.
+
+**Bad:** "In programming, the function is the atomic unit of computation. In networking, the interface is the atomic unit of service." The parallel structure is pleasing, but functions compose (you call one from another); interfaces are attachment points (you bind services to them). The analogy is shallow — it matches on "atomic unit" but diverges on every other axis.
+
+**Good:** "Terraform owns its state file. Kubernetes owns its etcd. They can be reconcilers because they are the sole writer." This is contrast, not analogy — it establishes what newtron is *not* by showing systems that occupy a different position. The reader's existing knowledge of Terraform/K8s builds the correct mental model of why newtron's approach differs.
+
+**Good:** "CONFIG_DB is a flat key-value store, but its consumers are not." This reveals hidden structure — the reader already knows Redis is flat, and the sentence reframes their understanding by pointing at the daemons that impose invisible structure on top.
+
+Guideline #2 (precision before readability) covers factual accuracy. This guideline covers *analogical* accuracy — ensuring that metaphors, analogies, and cross-domain comparisons build the right mental model, not just an appealing one.
+
+## 34. Lead with Universal Truths, Not Feature Descriptions — HLD
+
+The strongest openings in design documents state something true *beyond* the system being described — a principle from the domain itself — before showing how the system embodies it. This draws the reader in by connecting to their existing experience rather than asking them to learn a new system's vocabulary first.
+
+**Flat:** "newtron validates every CONFIG_DB entry against a YANG-derived schema before writing it to Redis."
+
+**Illuminating:** "CONFIG_DB is a database without a schema. Redis accepts anything — misspelled field names, out-of-range values, entries that reference tables that don't exist. Nothing rejects the write. The daemons downstream discover the problem — minutes later, as a silent failure, a crash, or an unrecoverable state."
+
+The first version describes a feature. The second describes the *problem in the domain* that makes the feature necessary. A reader who has never used newtron learns something from the second version — about Redis, about SONiC's architecture, about the failure mode that any CONFIG_DB tool must handle. The feature description follows naturally once the problem is felt.
+
+This applies primarily to design documents and architecture sections. API references and HOWTOs should lead with what the reader needs to do, not why it matters philosophically — the design document already made that case.
+
+## 35. Write from Conviction, Not Summary — HLD
+
+Design prose has two voices: the voice of someone who *built* the system and is sharing hard-won lessons, and the voice of someone *reporting* on what was built. The first earns trust; the second reads like documentation.
+
+**Summary voice:** "We learned that reverse operations are important for preventing orphaned CONFIG_DB entries."
+
+**Conviction voice:** "A configuration database without reverse operations only accumulates. State grows monotonically. Given enough operations over enough time, the device becomes unknowable — crusted with orphaned entries that no one remembers creating and no tool knows how to remove."
+
+The summary tells the reader *that* something matters. The conviction shows them *why* — through concrete consequences that make the principle feel inevitable rather than chosen.
+
+This is distinct from guideline #27 (carry forward substance, not text), which is about preserving insight during rewrites. This guideline is about *generating* the conviction in the first place — writing as someone who has lived through the failure mode, not someone cataloguing the system's properties.
+
+Signs of summary voice that should be revised:
+- "We found that..." / "We learned that..." / "It turned out that..."
+- Leading with the solution rather than the problem it solves
+- Describing what the system does without explaining why the alternative fails
+- Passive constructions that distance the writer from the claim ("it was decided that...")

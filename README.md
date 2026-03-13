@@ -10,40 +10,35 @@
 </p>
 
 **newtron** explores network automation for SONiC through opinionated
-architectural primitives.
+configuration primitives.
 
-**newtron** doesn't define a network. It defines a way of building
-networks — architectural primitives, codified in software — and then
-automates anything built from them. The networks you build are varied —
-different topologies, different services, different overlays, different
-scale. The primitives are what make them sane.
+Every piece of SONiC configuration — a VLAN, a BGP session, a service
+binding, an ACL — can be configured many ways. **newtron** offers one
+pattern for each. The pattern is the opinion. What you build from those
+patterns — the topology, the overlays, the scale — is your design.
+Consistent primitives compose into a coherent network.
 
-Spec files describe a network within these primitives. Services define
-what an interface does (transit peering, L2 bridging, IRB, EVPN
-overlay). VPN specs define overlay parameters. Route policies and
-filters control path selection. Device profiles identify each switch —
-AS number, loopback IP, platform, EVPN peers. When you apply a service
-to an interface, **newtron** resolves the spec against the device's profile
-and writes the resulting CONFIG_DB entries through SONiC's native Redis
-interface — validated against YANG constraints, applied atomically, and
-verified by re-reading every entry.
+Spec files are the source of intent. Services define what an interface
+does (transit peering, L2 bridging, IRB, EVPN overlay). VPN specs
+define overlay parameters. Route policies and filters control path
+selection. Device profiles identify each switch — AS number, loopback
+IP, platform, EVPN peers. When you apply a service to an interface,
+**newtron** resolves the spec against the device's profile to produce
+device-specific CONFIG_DB entries.
 
-The primitives are self-enforcing. Every CONFIG_DB write passes schema
-validation — invalid values and unknown fields are rejected before
-reaching the device. Every forward operation has a symmetric reverse —
-apply and remove, create and delete — with service bindings on the
-device that guarantee clean teardown even if specs change between apply
-and remove. Online operations and offline provisioning run the same code
-path, so there is no drift between what you preview and what gets
-applied. These aren't safety features bolted onto automation. They are
-how the primitives maintain their own integrity.
+**newtron** doesn't just generate configuration — it delivers each
+primitive safely. Every CONFIG_DB entry is validated against SONiC's
+YANG schema before it reaches the device — invalid values never land.
+Entries are applied atomically — partial state never accumulates.
+Every write is verified by re-reading what was written — silent
+failures don't go unnoticed. Each operation records what it did so
+the reverse can undo it cleanly — even if the spec has changed or
+other operations have modified the device since.
 
-## The Primitives
+## Configuration Primitives
 
-The architecture isn't **newtron** — the architecture is the constraints.
-**newtron** automates any network that conforms to them.
-
-### Today's primitives
+The configuration architecture is embedded in the primitives — one
+pattern per unit of configuration. The topology architecture is yours.
 
 **Service-on-interface.** Every service — transit peering, L2 bridging,
 EVPN overlay — binds to an interface. The interface is where abstract
@@ -52,10 +47,30 @@ intent meets physical infrastructure. It is the unit of lifecycle
 none), and the unit of isolation (services on different interfaces are
 independent).
 
-**All-eBGP.** Underlay and overlay both use eBGP — hop-by-hop between
-interfaces for the underlay, loopback-to-loopback for EVPN peers. ASN
-assignment is per-profile: every leaf can have a unique ASN, or switches
-in a spine tier can share one. One peering model for all sessions.
+**All-eBGP routing.** Underlay and overlay both use eBGP — hop-by-hop
+between interfaces for the underlay, loopback-to-loopback for EVPN
+peers. ASN assignment is per-profile: every leaf can have a unique ASN,
+or switches in a spine tier can share one. One peering model for all
+sessions.
+
+**VLANs, VRFs, ACLs, QoS, LAGs, EVPN overlays, static routes, route
+policies, prefix filters.** Each has one pattern. Each pattern is
+an opinion about how that unit of configuration should look in
+CONFIG_DB.
+
+## Automation Principles
+
+The primitives define what gets configured. These principles govern
+how.
+
+**Specs are the source of intent; the device is the source of
+reality.** Specs describe what the network should look like. Once
+configuration is applied, the device's CONFIG_DB is what exists —
+whether correct or not. If someone changes what **newtron** wrote — or
+configures other interfaces entirely outside of **newtron** —
+**newtron** will not notice or undo it. There is no background process
+watching for drift. There is the device, and there is the change you
+are asking for.
 
 **Network-scoped specs, device-scoped execution.** Service specs, VPN
 parameters, route policies, and filters are defined once at the network
@@ -76,23 +91,12 @@ specs/
     └── leaf1.json
 ```
 
-**Specs are the source of intent; the device is the source of
-reality.** Once configuration is applied, the device's CONFIG_DB is
-what exists — whether correct or not. If someone edits CONFIG_DB directly — via CLI,
-Redis, or another tool — that is the new reality. Basic operations
-read CONFIG_DB to check preconditions before acting. Service operations
-trust the binding record written at apply time — the binding is the
-ground reality of what was applied, and the sole input for teardown.
-If someone changes what **newtron** wrote — or configures other
-interfaces entirely outside of **newtron** — **newtron** will not notice or
-undo it. There is no background process watching for drift. There is
-the device, and there is the change you are asking for.
-
-**Redis-first.** All device interaction goes through SONiC's Redis
-databases. CONFIG_DB writes use a native Go Redis client over SSH-
-tunneled connections — not `config` CLI commands. Route verification
-reads APP_DB. ASIC programming checks traverse ASIC_DB. Health checks
-read STATE_DB. CLI is a documented exception, not a normalized path.
+**Operational symmetry.** Every forward operation has a reverse. Apply
+and remove. Create and delete. Bind and unbind. Service bindings stored
+on the device record exactly what was applied, so removal always
+reconstructs the teardown — even if the spec has changed since the
+service was applied. Without this, CONFIG_DB entries accumulate with no
+way to clean them up.
 
 **Content-hashed policies.** Shared resources like ACL tables, route
 maps, and prefix sets are named with an 8-character hash of their
@@ -101,12 +105,13 @@ Spec changed means new name — both versions coexist while interfaces
 migrate one by one. No coordinated switchover, no window where half the
 interfaces have the old policy and half have the new one.
 
-**Operational symmetry.** Every forward operation has a reverse. Apply
-and remove. Create and delete. Bind and unbind. Service bindings stored
-on the device record exactly what was applied, so removal always
-reconstructs the teardown — even if the spec has changed since the
-service was applied. Without this, CONFIG_DB entries accumulate with no
-way to clean them up.
+## Engineering
+
+**Redis-first.** All device interaction goes through SONiC's Redis
+databases. CONFIG_DB writes use a native Go Redis client over SSH-
+tunneled connections — not `config` CLI commands. Route verification
+reads APP_DB. ASIC programming checks traverse ASIC_DB. Health checks
+read STATE_DB. CLI is a documented exception, not a normalized path.
 
 **One code path.** Online operations against a live device and offline
 composite provisioning run the same code. There is no template engine,

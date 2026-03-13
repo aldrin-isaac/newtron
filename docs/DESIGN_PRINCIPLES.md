@@ -93,13 +93,12 @@ relationship with the world:
   them together using socket-based links across one or more servers. No
   root, no bridges, no Docker. It doesn't define the topology or touch
   device configuration — it makes the topology physically exist.
-- **newtron** defines architectural primitives for SONiC networks and
-  automates any network built from them. The primitives are opinionated
-  (service-on-interface, all-eBGP, device-as-reality, Redis-first); the
-  networks you build with them are varied — different topologies,
-  different services, different scale. newtron operates on a single
-  device at a time, translating specs into CONFIG_DB through an SSH
-  tunnel. It never talks to two devices at once.
+- **newtron** defines opinionated configuration primitives for SONiC —
+  one pattern per unit of CONFIG_DB configuration — and delivers them
+  safely to devices. The configuration architecture is in the primitives;
+  the topology architecture is the operator's choice. newtron operates on
+  a single device at a time, translating specs into CONFIG_DB through an
+  SSH tunnel. It never talks to two devices at once.
 - **newtrun** is an orchestrator specifically for E2E testing. It tests
   two things: that newtron's automation produces correct device state,
   and that SONiC software on each device behaves correctly in its role
@@ -2319,47 +2318,102 @@ avoid compatibility code, use declarative overrides.
 
 ---
 
-## 42. Faithful Enforcement — The Primitives Change, the Contract Doesn't
+## 42. The Opinion Is in the Pattern
 
-newtron defines architectural primitives and automates any network built
-from them. The specific primitives can change — all-eBGP today, ISIS
-tomorrow; service-on-interface today, new binding models later. What
-doesn't change is the enforcement contract: whatever primitives newtron
-supports, it enforces them faithfully.
+Every piece of SONiC configuration — a VLAN, a BGP session, a service
+binding, an ACL rule — can be configured many ways in CONFIG_DB. newtron
+offers one pattern for each. The pattern is the opinion.
 
-The contract has four guarantees:
+This is what "opinionated configuration primitives" means. The opinions
+live at the smallest possible level — the individual CONFIG_DB entry
+pattern — not at the network level. newtron does not prescribe a network
+topology. It prescribes how each unit of configuration should look. The
+operator composes those units into whatever topology they need — any
+underlay, any overlay, any scale. The configuration architecture is
+embedded in the primitives. The topology architecture is the operator's
+choice.
 
-1. **Validated against schema.** Every CONFIG_DB write passes YANG-derived
-   validation before reaching the device. Invalid values and unknown
-   fields are rejected. (§30)
-2. **Applied atomically.** Every mutating operation produces a ChangeSet
-   that is computed fully before any write occurs. Dry-run is the default;
-   execution is opt-in. (§14, §17)
-3. **Verified by re-reading.** After execution, newtron re-reads every
-   entry it wrote and diffs against the ChangeSet. (§5, §17)
-4. **Reversible by construction.** Every forward operation has a symmetric
-   reverse. Service bindings record exactly what was applied so teardown
-   is self-sufficient. (§23)
+This produces two distinct layers:
 
-These mechanisms are not standalone features — they are enforcement
-infrastructure that exists to make any primitive newtron supports behave
-correctly. When a new primitive is added, it automatically inherits
-these guarantees because it flows through the same ChangeSet pipeline.
-When an existing primitive changes, the guarantees remain because they
-are properties of the pipeline, not of the primitive.
+- **Configuration architecture** — one pattern per primitive. How a VLAN
+  is structured, how a BGP neighbor is established, how a service binds
+  to an interface. This is where newtron's opinions live. These patterns
+  can evolve — all-eBGP today, new routing models tomorrow — but at any
+  point in time, each primitive has exactly one pattern.
 
-The primitives are the variable. The enforcement contract is the
-invariant.
+- **Topology architecture** — the operator's composition. Spine-leaf,
+  hub-spoke, single overlay, multiple overlays, two nodes or two hundred.
+  newtron constrains the building blocks, not the building.
+
+Consistent primitives compose into a coherent network. This is not a
+hope — it is a structural consequence of every building block following
+the same patterns.
 
 ---
 
-## 43. Summary
+## 43. Delivery Over Generation
+
+Generating configuration from patterns is familiar territory —
+configlet templates work similarly. The hard problem is what happens
+after generation: delivering each primitive to the device safely and
+maintaining the integrity of device state as operations accumulate over
+time.
+
+Without delivery guarantees, configuration degrades. Partial applies
+leave orphaned entries that nothing knows how to clean up. Overlapping
+writes from different operations munge shared state. Teardown, forced
+to guess what belongs to whom by inspecting current device state, corrupts
+what it doesn't understand.
+
+newtron's delivery pipeline prevents all three:
+
+1. **Validated against schema.** Every CONFIG_DB entry passes YANG-derived
+   validation before reaching the device — invalid values never land.
+   (§30)
+2. **Applied atomically.** Every mutating operation produces a ChangeSet
+   that is computed fully before any write occurs — partial state never
+   accumulates. Dry-run is the default; execution is opt-in. (§14, §17)
+3. **Verified by re-reading.** After execution, newtron re-reads every
+   entry it wrote and diffs against the ChangeSet — silent failures
+   don't go unnoticed. (§5, §17)
+4. **Reversible by construction.** Every forward operation records what it
+   did — on the device, as a service binding. Teardown reconstructs from
+   what was actually done, not from device state that other operations
+   may have changed since. (§23)
+
+These guarantees are properties of the ChangeSet pipeline, not of any
+specific primitive. When a new primitive is added, it inherits them
+automatically. When an existing primitive changes, they remain. The
+primitives are the variable. The delivery contract is the invariant.
+
+---
+
+## 44. Faithful Enforcement — The Primitives Change, the Contract Doesn't
+
+The specific primitives can change — all-eBGP today, ISIS tomorrow;
+service-on-interface today, new binding models later. What doesn't
+change is the enforcement contract: whatever primitives newtron supports,
+it enforces them faithfully.
+
+This is the synthesis of §42 and §43. The opinions (§42) define what
+each primitive looks like. The delivery pipeline (§43) ensures each
+primitive arrives safely. Together they form the enforcement contract:
+newtron will deliver your primitives to the device correctly, and it
+will be able to undo them cleanly.
+
+The enforcement machinery — schema validation, atomic application,
+post-write verification, symmetric reversal — is not a feature list.
+It is how the primitives maintain their own integrity.
+
+---
+
+## 45. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
 | SONiC is a database | Interact through Redis, not CLI parsing; CLI is an exception, not the norm |
 | Platform patching | Patch what's broken; don't build parallel infrastructure around it |
-| One level of abstraction per program | newtlab realizes the topology, newtron defines primitives and automates networks built from them, orchestrators decide what gets applied where |
+| One level of abstraction per program | newtlab realizes the topology, newtron defines opinionated configuration primitives and delivers them safely, orchestrators decide what gets applied where |
 | Objects own their methods | The interface is the point of service; a method belongs to the smallest object that has all the context to execute it |
 | If you change it, you verify it | The tool that writes the state must be able to verify the write |
 | Prevent bad writes | Application-level referential integrity for a database that has none; refuse invalid state, don't detect damage |
@@ -2398,4 +2452,7 @@ invariant.
 | Definition is network-scoped; execution is device-scoped | Specs live at the network level with their own lifecycle; devices consume them via `Get*` with live fallback; the two lifecycles must not be coupled |
 | Greenfield | No backwards compatibility; no legacy format handling in runtime; no API versioning; write code for the system as it is today, not as it was yesterday |
 | Multi-version readiness | All Redis through Device, all operations through Node, all entry generation in pure config functions — preserve these seams so version overrides are data-driven additions, not scattered code branches |
+| The opinion is in the pattern | One pattern per CONFIG_DB primitive; configuration architecture lives in the primitives, topology architecture is the operator's choice |
+| Delivery over generation | Generating config is table stakes; the delivery pipeline (validate, atomic, verify, record) prevents partial applies, munged state, and blind teardown |
+| Faithful enforcement | The primitives change, the contract doesn't; the enforcement machinery is how the primitives maintain their own integrity |
 | Faithful enforcement | The primitives change, the contract doesn't — validated against schema, applied atomically, verified by re-reading, reversible by construction; these are properties of the pipeline, not of any specific primitive |
