@@ -41,7 +41,9 @@ how the primitives maintain their own integrity.
 ## The Primitives
 
 The architecture isn't newtron — the architecture is the constraints.
-newtron automates any network that conforms to them. Today's primitives:
+newtron automates any network that conforms to them.
+
+### Today's primitives
 
 **Service-on-interface.** Every service — transit peering, L2 bridging,
 EVPN overlay — binds to an interface. The interface is where abstract
@@ -51,8 +53,9 @@ none), and the unit of isolation (services on different interfaces are
 independent).
 
 **All-eBGP.** Underlay and overlay both use eBGP — hop-by-hop between
-interfaces for the underlay, loopback-to-loopback for EVPN peers. Each
-switch has its own AS number. One peering model for all sessions.
+interfaces for the underlay, loopback-to-loopback for EVPN peers. ASN
+assignment is per-profile: every leaf can have a unique ASN, or switches
+in a spine tier can share one. One peering model for all sessions.
 
 **Network-scoped specs, device-scoped execution.** Service specs, VPN
 parameters, route policies, and filters are defined once at the network
@@ -76,10 +79,13 @@ specs/
 **Device as source of reality.** Spec files are intent. Once
 configuration is applied, the device's CONFIG_DB is what exists —
 whether correct or not. If someone edits CONFIG_DB directly — via CLI,
-Redis, or another tool — that is the new reality. newtron reads device
-state before every operation, and mutates what it finds. It does not
-try to reconcile the device back to spec. There is no desired-state
-diff. There is the device, and there is the change you are asking for.
+Redis, or another tool — that is the new reality. Basic operations
+read CONFIG_DB to check preconditions before acting. Service operations
+trust the binding record written at apply time — the binding is the
+ground reality of what was applied, and the sole input for teardown.
+newtron does not try to reconcile the device back to spec. There is no
+desired-state diff. There is the device, and there is the change you
+are asking for.
 
 **Redis-first.** All device interaction goes through SONiC's Redis
 databases. CONFIG_DB writes use a native Go Redis client over SSH-
