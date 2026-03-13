@@ -229,30 +229,15 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		vlanID = opts.VLAN
 	}
 
-	// Build change set with idempotency filtering.
-	// The shared generator always emits all entries (for topology provisioner's
-	// overwrite mode).  Here we skip entries that already exist on the device.
-	cs := NewChangeSet(n.Name(), "interface.apply-service")
-	configDB := n.ConfigDB()
-
-	// Auto-ensure BGP_GLOBALS for the default VRF if needed. Added first so
-	// BGP_GLOBALS entries precede BGP_NEIGHBOR entries (dependency order).
-	// Same entries as ConfigureBGP — DEVICE_METADATA, BGP_GLOBALS, BGP_GLOBALS_AF,
-	// ROUTE_REDISTRIBUTE — using the profile's ASN and router ID.
-	if needsBGPEnsure {
-		asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)
-		e := updateDeviceMetadataConfig(map[string]string{
-			"bgp_asn": asnStr,
-			"type":    "LeafRouter",
-		})
-		cs.Update(e.Table, e.Key, e.Fields)
-		cs.Adds(CreateBGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
-			"ebgp_requires_policy": "false",
-			"suppress_fib_pending": "false",
-			"log_neighbor_changes": "true",
-		}))
-		cs.Adds(CreateBGPGlobalsAFConfig("default", "ipv4_unicast", nil))
-		cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
+	// Determine VRF name for binding and infrastructure
+	var vrfName string
+	switch svc.VRFType {
+	case spec.VRFTypeInterface:
+		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
+	case spec.VRFTypeShared:
+		if ipvpnDef != nil {
+			vrfName = ipvpnDef.VRF
+		}
 	}
 
 	// Track ACL names from generated entries for interface-merging.
@@ -267,6 +252,155 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		if filterSpec, err := n.GetFilter(svc.EgressFilter); err == nil {
 			egressACLName = util.DeriveACLName(svc.EgressFilter, "out", computeFilterHash(filterSpec))
 		}
+	}
+
+	// Pre-compute QoS policy name (lookup only — entries added to CS later)
+	var qosPolicyName string
+	var qosPolicy *spec.QoSPolicy
+	if pn, policy := GetServiceQoSPolicy(i.Node(), svc); policy != nil {
+		qosPolicyName = pn
+		qosPolicy = policy
+	}
+
+	// Pre-compute BGP neighbor IP for binding (deterministic from opts.IPAddress)
+	var bgpNeighborIP string
+	if hasBGPRouting && opts.IPAddress != "" {
+		bgpNeighborIP, _ = util.DeriveNeighborIP(opts.IPAddress)
+	}
+
+	// Extract resolved peer AS from the generated BGP_NEIGHBOR entry (DRY — the
+	// resolution logic stays in generateBGPPeeringConfig; we read the result).
+	var bgpPeerAS string
+	for _, be := range baseEntries {
+		if be.Table == "BGP_NEIGHBOR" {
+			if asn := be.Fields["asn"]; asn != "" {
+				bgpPeerAS = asn
+				break
+			}
+		}
+	}
+
+	// =========================================================================
+	// Service binding — written FIRST (write-ahead manifest).
+	//
+	// The binding is the manifest of intent: it records what this operation
+	// will create. Writing it first ensures that if the operation is
+	// interrupted after some infrastructure entries are written, RemoveService
+	// can read the binding and clean up the partial state. Without the
+	// binding, orphaned CONFIG_DB entries accumulate with no way to remove
+	// them — exactly the failure mode §13 (Symmetric Operations) warns about.
+	//
+	// On remove, the binding is deleted LAST — after all infrastructure it
+	// references has been torn down. This means an interrupted removal can
+	// be re-run: the binding still exists, so RemoveService finds its input.
+	// =========================================================================
+	bindingFields := map[string]string{
+		"service_name": serviceName,
+		"service_type": svc.ServiceType,
+	}
+	if opts.IPAddress != "" {
+		bindingFields["ip_address"] = opts.IPAddress
+	}
+	if vrfName != "" {
+		bindingFields["vrf_name"] = vrfName
+	}
+	if svc.VRFType != "" {
+		bindingFields["vrf_type"] = svc.VRFType
+	}
+	if svc.IPVPN != "" {
+		bindingFields["ipvpn"] = svc.IPVPN
+	}
+	if svc.MACVPN != "" {
+		bindingFields["macvpn"] = svc.MACVPN
+	}
+	if ingressACLName != "" {
+		bindingFields["ingress_acl"] = ingressACLName
+	}
+	if egressACLName != "" {
+		bindingFields["egress_acl"] = egressACLName
+	}
+	if bgpNeighborIP != "" {
+		bindingFields["bgp_neighbor"] = bgpNeighborIP
+	}
+	if qosPolicyName != "" {
+		bindingFields["qos_policy"] = qosPolicyName
+	}
+	if vlanID > 0 {
+		bindingFields["vlan_id"] = fmt.Sprintf("%d", vlanID)
+	}
+	if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
+		bindingFields["l3vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
+	}
+	if ipvpnDef != nil && ipvpnDef.L3VNIVlan > 0 {
+		bindingFields["l3vni_vlan"] = fmt.Sprintf("%d", ipvpnDef.L3VNIVlan)
+	}
+	if svc.Routing != nil && svc.Routing.Redistribute != nil {
+		redistVRF := "default"
+		if vrfName != "" {
+			redistVRF = vrfName
+		}
+		bindingFields["redistribute_vrf"] = redistVRF
+	}
+	// Self-sufficiency fields: store everything the reverse path needs so
+	// RemoveService and RefreshService never re-resolve specs.
+	if macvpnDef != nil {
+		if macvpnDef.VNI > 0 {
+			bindingFields["l2vni"] = fmt.Sprintf("%d", macvpnDef.VNI)
+		}
+		if macvpnDef.AnycastIP != "" {
+			bindingFields["anycast_ip"] = macvpnDef.AnycastIP
+		}
+		if macvpnDef.AnycastMAC != "" {
+			bindingFields["anycast_mac"] = macvpnDef.AnycastMAC
+		}
+		if macvpnDef.ARPSuppression {
+			bindingFields["arp_suppression"] = "true"
+		}
+	}
+	if peerGroup != "" {
+		bindingFields["peer_group"] = peerGroup
+	}
+	// Topology params for RefreshService self-sufficiency (Principle 8):
+	// these BGP neighbor attributes must survive remove+reapply cycles.
+	if opts.Params["route_reflector_client"] == "true" {
+		bindingFields["route_reflector_client"] = "true"
+	}
+	if opts.Params["next_hop_self"] == "true" {
+		bindingFields["next_hop_self"] = "true"
+	}
+	if bgpPeerAS != "" {
+		bindingFields["bgp_peer_as"] = bgpPeerAS
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.apply-service")
+	configDB := n.ConfigDB()
+
+	// Binding is the first entry — write-ahead manifest for crash recovery.
+	e := createServiceBindingConfig(i.name, bindingFields)
+	cs.Add(e.Table, e.Key, e.Fields)
+
+	// =========================================================================
+	// Infrastructure entries
+	// =========================================================================
+
+	// Auto-ensure BGP_GLOBALS for the default VRF if needed. Added first so
+	// BGP_GLOBALS entries precede BGP_NEIGHBOR entries (dependency order).
+	// Same entries as ConfigureBGP — DEVICE_METADATA, BGP_GLOBALS, BGP_GLOBALS_AF,
+	// ROUTE_REDISTRIBUTE — using the profile's ASN and router ID.
+	if needsBGPEnsure {
+		asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)
+		bgpEnsureEntry := updateDeviceMetadataConfig(map[string]string{
+			"bgp_asn": asnStr,
+			"type":    "LeafRouter",
+		})
+		cs.Update(bgpEnsureEntry.Table, bgpEnsureEntry.Key, bgpEnsureEntry.Fields)
+		cs.Adds(CreateBGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, map[string]string{
+			"ebgp_requires_policy": "false",
+			"suppress_fib_pending": "false",
+			"log_neighbor_changes": "true",
+		}))
+		cs.Adds(CreateBGPGlobalsAFConfig("default", "ipv4_unicast", nil))
+		cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
 	}
 
 	for _, e := range baseEntries {
@@ -313,9 +447,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			// Skip — ACL rules are handled above via addACLRulesFromFilterSpec
 			continue
 
-		// For NEWTRON_SERVICE_BINDING, add extra fields (ACL names, BGP neighbor)
+		// Defensive: binding is constructed and added as first entry above.
+		// generateServiceEntries does not emit it, but guard against future changes.
 		case e.Table == "NEWTRON_SERVICE_BINDING":
-			// Handled separately below to add extra binding fields
 			continue
 		}
 
@@ -323,130 +457,36 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// QoS device-wide tables (not in shared generator, which only emits per-interface entries)
-	var qosPolicyName string
-	if pn, policy := GetServiceQoSPolicy(i.Node(), svc); policy != nil {
-		qosPolicyName = pn
-		for _, entry := range GenerateDeviceQoSConfig(pn, policy) {
+	if qosPolicy != nil {
+		for _, entry := range GenerateDeviceQoSConfig(qosPolicyName, qosPolicy) {
 			cs.Add(entry.Table, entry.Key, entry.Fields)
 		}
 	}
 
 	// Add route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) — these are only
 	// needed in the incremental path, not in topology provisioner.
-	var bgpResult bgpRoutePolicyResult
+	// Route map names (for informational binding fields) are computed here but
+	// the binding was already written above with all fields needed for teardown.
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpResult, err = i.addBGPRoutePolicies(cs, serviceName, svc, opts)
+		bgpResult, err := i.addBGPRoutePolicies(cs, serviceName, svc)
 		if err != nil {
 			return nil, fmt.Errorf("BGP route policies for %s: %w", i.name, err)
 		}
-	}
-
-	// Determine VRF name for binding and local state
-	var vrfName string
-	switch svc.VRFType {
-	case spec.VRFTypeInterface:
-		vrfName = util.DeriveVRFName(svc.VRFType, serviceName, i.name)
-	case spec.VRFTypeShared:
-		if ipvpnDef != nil {
-			vrfName = ipvpnDef.VRF
+		// Route map names are informational — RemoveService uses prefix scan
+		// (deleteRoutePoliciesConfig) not specific route map names.
+		//
+		// These mutations propagate into cs.Changes[0].Fields because Go maps
+		// are reference types — bindingFields is the same map stored in the
+		// ChangeSet by cs.Add() above. This is intentional: the binding is
+		// written first for crash recovery, and route map names are added once
+		// computed. Do not copy the map in cs.add() without adjusting this.
+		if bgpResult.routeMapIn != "" {
+			bindingFields["route_map_in"] = bgpResult.routeMapIn
+		}
+		if bgpResult.routeMapOut != "" {
+			bindingFields["route_map_out"] = bgpResult.routeMapOut
 		}
 	}
-
-	// Record service binding with extra fields
-	bindingFields := map[string]string{
-		"service_name": serviceName,
-	}
-	if opts.IPAddress != "" {
-		bindingFields["ip_address"] = opts.IPAddress
-	}
-	if vrfName != "" {
-		bindingFields["vrf_name"] = vrfName
-	}
-	if svc.IPVPN != "" {
-		bindingFields["ipvpn"] = svc.IPVPN
-	}
-	if svc.MACVPN != "" {
-		bindingFields["macvpn"] = svc.MACVPN
-	}
-	if ingressACLName != "" {
-		bindingFields["ingress_acl"] = ingressACLName
-	}
-	if egressACLName != "" {
-		bindingFields["egress_acl"] = egressACLName
-	}
-	if bgpResult.neighborIP != "" {
-		bindingFields["bgp_neighbor"] = bgpResult.neighborIP
-	}
-	if bgpResult.routeMapIn != "" {
-		bindingFields["route_map_in"] = bgpResult.routeMapIn
-	}
-	if bgpResult.routeMapOut != "" {
-		bindingFields["route_map_out"] = bgpResult.routeMapOut
-	}
-	if qosPolicyName != "" {
-		bindingFields["qos_policy"] = qosPolicyName
-	}
-	if vlanID > 0 {
-		bindingFields["vlan_id"] = fmt.Sprintf("%d", vlanID)
-	}
-	if ipvpnDef != nil && ipvpnDef.L3VNI > 0 {
-		bindingFields["l3vni"] = fmt.Sprintf("%d", ipvpnDef.L3VNI)
-	}
-	if ipvpnDef != nil && ipvpnDef.L3VNIVlan > 0 {
-		bindingFields["l3vni_vlan"] = fmt.Sprintf("%d", ipvpnDef.L3VNIVlan)
-	}
-	if svc.Routing != nil && svc.Routing.Redistribute != nil {
-		redistVRF := "default"
-		if vrfName != "" {
-			redistVRF = vrfName
-		}
-		bindingFields["redistribute_vrf"] = redistVRF
-	}
-
-	// Self-sufficiency fields: store everything the reverse path needs so
-	// RemoveService and RefreshService never re-resolve specs.
-	bindingFields["service_type"] = svc.ServiceType
-	if svc.VRFType != "" {
-		bindingFields["vrf_type"] = svc.VRFType
-	}
-	if macvpnDef != nil {
-		if macvpnDef.VNI > 0 {
-			bindingFields["l2vni"] = fmt.Sprintf("%d", macvpnDef.VNI)
-		}
-		if macvpnDef.AnycastIP != "" {
-			bindingFields["anycast_ip"] = macvpnDef.AnycastIP
-		}
-		if macvpnDef.AnycastMAC != "" {
-			bindingFields["anycast_mac"] = macvpnDef.AnycastMAC
-		}
-		if macvpnDef.ARPSuppression {
-			bindingFields["arp_suppression"] = "true"
-		}
-	}
-	if peerGroup != "" {
-		bindingFields["peer_group"] = peerGroup
-	}
-	// Topology params for RefreshService self-sufficiency (Principle 8):
-	// these BGP neighbor attributes must survive remove+reapply cycles.
-	if opts.Params["route_reflector_client"] == "true" {
-		bindingFields["route_reflector_client"] = "true"
-	}
-	if opts.Params["next_hop_self"] == "true" {
-		bindingFields["next_hop_self"] = "true"
-	}
-	// Extract resolved peer AS from the generated BGP_NEIGHBOR entry (DRY — the
-	// resolution logic stays in generateBGPPeeringConfig; we read the result).
-	for _, be := range baseEntries {
-		if be.Table == "BGP_NEIGHBOR" {
-			if asn := be.Fields["asn"]; asn != "" {
-				bindingFields["bgp_peer_as"] = asn
-				break
-			}
-		}
-	}
-
-	e := createServiceBindingConfig(i.name, bindingFields)
-	cs.Add(e.Table, e.Key, e.Fields)
 
 	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
@@ -455,7 +495,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 // bgpRoutePolicyResult holds the outputs of addBGPRoutePolicies needed by the caller.
 type bgpRoutePolicyResult struct {
-	neighborIP  string // BGP peer IP for binding record
 	routeMapIn  string // content-hashed import route map name (for binding self-sufficiency)
 	routeMapOut string // content-hashed export route map name (for binding self-sufficiency)
 }
@@ -464,23 +503,13 @@ type bgpRoutePolicyResult struct {
 // entries (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET), and attaches route maps to the
 // peer group AF (Principle 36). Also handles redistribution config.
 //
-// Returns the neighbor IP and route map names (for the service binding record).
-func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec, opts ApplyServiceOpts) (bgpRoutePolicyResult, error) {
+// Returns the route map names (for the service binding record).
+func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec) (bgpRoutePolicyResult, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return bgpRoutePolicyResult{}, nil
 	}
 
 	routing := svc.Routing
-
-	// Derive peer IP (same logic as generateBGPPeering, needed for return value)
-	var peerIP string
-	if opts.IPAddress != "" {
-		var err error
-		peerIP, err = util.DeriveNeighborIP(opts.IPAddress)
-		if err != nil {
-			return bgpRoutePolicyResult{}, fmt.Errorf("could not derive BGP peer IP: %w", err)
-		}
-	}
 
 	// Determine VRF key for route-map AF entries
 	vrfName := ""
@@ -565,7 +594,6 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	}
 
 	return bgpRoutePolicyResult{
-		neighborIP:  peerIP,
 		routeMapIn:  routeMapIn,
 		routeMapOut: routeMapOut,
 	}, nil
