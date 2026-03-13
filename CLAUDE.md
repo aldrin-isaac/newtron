@@ -20,26 +20,33 @@ Read these before making design decisions or writing code in unfamiliar areas:
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
 
-## Network Is Source of Truth
+## Device Is Source of Reality
 
-The device CONFIG_DB is ground reality. Spec files are templates and intent, but
-once configuration is applied, the device state is what matters. If someone edits
-CONFIG_DB directly (CLI, Redis, another tool), that's the new reality — newtron
-does not fight it or try to reconcile back to spec.
+The device CONFIG_DB is ground reality — what exists, whether correct or not.
+Spec files are templates and intent, but once configuration is applied, the
+device state is what matters. If someone edits CONFIG_DB directly (CLI, Redis,
+another tool), that's the new reality — newtron does not fight it or try to
+reconcile back to spec.
 
 This has concrete design implications:
 
 - **Provisioning** (CompositeOverwrite) is the one operation where intent replaces
   reality. Every other operation mutates existing reality.
-- **Operations** (service apply/remove, VLAN create/delete) are `Device + Delta → Device`.
-  They must read and respect what's already on the device.
-- **NEWTRON_SERVICE_BINDING** records live on the device, not in spec files. They are
-  ground truth for what was applied and must be consulted during removal.
+- **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
+  preconditions before acting, but generate entries from specs and profile.
+- **Service operations** trust the binding record as ground reality.
+  `ApplyService` reads CONFIG_DB for idempotency filtering on shared
+  infrastructure. `RemoveService` reads the NEWTRON_SERVICE_BINDING record —
+  not CONFIG_DB tables, not specs — to determine what to tear down.
+- **NEWTRON_SERVICE_BINDING** records live on the device, not in spec files. The
+  binding is the ground reality of what was applied, and the sole input for
+  teardown.
 - **Idempotency filtering** in `service_ops.go` checks device reality (VLANs, VRFs
   that already exist from other services), not spec intent.
 - **Do NOT implement a desired-state reconciler** (Terraform/Kubernetes model). There is
   no canonical "desired state" for incremental operations — only device reality + the
-  requested change.
+  requested change. newtron does not support brownfield — two opinionated architectures
+  cannot converge on the same device.
 - **Bindings must be self-sufficient for reverse operations.** NEWTRON_SERVICE_BINDING
   must contain every value needed for teardown — never re-resolve specs at removal time.
   The spec may have changed between apply and remove; the binding records what was

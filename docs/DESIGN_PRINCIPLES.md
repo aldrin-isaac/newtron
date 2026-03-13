@@ -93,12 +93,13 @@ relationship with the world:
   them together using socket-based links across one or more servers. No
   root, no bridges, no Docker. It doesn't define the topology or touch
   device configuration — it makes the topology physically exist.
-- **newtron** is an opinionated automation for SONiC devices. It enforces
-  a network design intent — the spec files define the constraints of
-  what the network should look like — while allowing many degrees of
-  freedom within those constraints for actual deployments. It operates
-  on a single device at a time, translating specs into CONFIG_DB through
-  an SSH tunnel. It never talks to two devices at once.
+- **newtron** defines architectural primitives for SONiC networks and
+  automates any network built from them. The primitives are opinionated
+  (service-on-interface, all-eBGP, device-as-reality, Redis-first); the
+  networks you build with them are varied — different topologies,
+  different services, different scale. newtron operates on a single
+  device at a time, translating specs into CONFIG_DB through an SSH
+  tunnel. It never talks to two devices at once.
 - **newtrun** is an orchestrator specifically for E2E testing. It tests
   two things: that newtron's automation produces correct device state,
   and that SONiC software on each device behaves correctly in its role
@@ -389,29 +390,37 @@ the spec says should be there. See Principle 8.
 
 ---
 
-## 8. The Network Is Source of Truth
+## 8. The Device Is Source of Reality
 
-The device CONFIG_DB is ground reality. Spec files are templates and
-intent, but once configuration is applied, the device state is what
-matters. If an admin edits CONFIG_DB directly — via the SONiC CLI,
-Redis, or another tool — that edit is the new reality. newtron does not
-fight it or attempt to reconcile back to the spec.
+The device CONFIG_DB is ground reality — what exists on the device,
+whether correct or not. Spec files are templates and intent, but once
+configuration is applied, the device state is what matters. If an admin
+edits CONFIG_DB directly — via the SONiC CLI, Redis, or another tool —
+that edit is the new reality. newtron does not fight it or attempt to
+reconcile back to the spec.
 
-This shapes every incremental operation in the system. **Provisioning
-(CompositeOverwrite)** is the one exception where intent replaces
-reality — it merges a full composite config on top of CONFIG_DB,
-removing stale keys while preserving factory defaults (MAC, platform
-metadata, port config). Every other operation is `Device + Delta →
-Device`: it reads what's on the device, applies a change, and leaves
-the result on the device. The spec provides the intent; the device
-provides the context.
+This shapes every operation in the system, but different operation types
+interact with device reality differently:
+
+- **Provisioning (CompositeOverwrite)** is the one exception where intent
+  replaces reality — it merges a full composite config on top of CONFIG_DB,
+  removing stale keys while preserving factory defaults (MAC, platform
+  metadata, port config).
+- **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
+  preconditions before acting — "does this VLAN already exist?" — but
+  generate entries from specs and profile, not from device state.
+- **Service operations** trust the binding record as ground reality.
+  `ApplyService` reads CONFIG_DB for idempotency filtering on shared
+  infrastructure (does the VLAN or VRF already exist?). `RemoveService`
+  reads the NEWTRON_SERVICE_BINDING record — not CONFIG_DB tables, not
+  specs — to determine what to tear down.
 
 **NEWTRON_SERVICE_BINDING records live on the device**, not in spec
 files. When a service is applied to an interface, newtron writes a
 binding record to CONFIG_DB that captures exactly what was applied —
-which VLANs, VRFs, ACLs, and VNIs were created for that service. When
-the service is later removed, `RemoveService` reads this binding from
-the device to know what to undo. It does not re-derive the removal from
+which VLANs, VRFs, ACLs, and VNIs were created for that service. The
+binding is the ground reality of what was applied, and the sole input
+for teardown. `RemoveService` does not re-derive the removal from
 the spec because the spec may have changed, and what matters is what was
 actually applied.
 
@@ -434,17 +443,17 @@ rather than blindly re-creating it. This check happens against
 CONFIG_DB, not against a spec-derived expected state.
 
 This is why newtron is not a Terraform or Kubernetes desired-state
-reconciler. A reconciler needs a single canonical source of truth to diff
-the device against. For incremental operations, no such canonical source
-exists — the "desired state" of the device is its current state plus the
-requested change, and the current state can only be read from the device
-itself. Building a reconciler would require newtron to maintain a shadow
-copy of the full device config, keep it in sync across all external
-changes, and resolve conflicts — that is a fundamentally different system
-with fundamentally different guarantees.
+reconciler — and why it does not support brownfield. A reconciler needs a
+single canonical source of desired state to diff the device against. For
+incremental operations, no such canonical source exists — the "desired
+state" of the device is its current state plus the requested change, and
+the current state can only be read from the device itself. And two
+opinionated architectures cannot converge on the same device — newtron's
+device-reality checks minimize harm, they do not accommodate existing
+config from a different architectural model.
 
-**The device is the truth; specs are the intent; operations transform
-truth using intent.**
+**The device is the reality; specs are the intent; operations transform
+reality using intent.**
 
 ---
 
@@ -2310,18 +2319,52 @@ avoid compatibility code, use declarative overrides.
 
 ---
 
-## 42. Summary
+## 42. Faithful Enforcement — The Primitives Change, the Contract Doesn't
+
+newtron defines architectural primitives and automates any network built
+from them. The specific primitives can change — all-eBGP today, ISIS
+tomorrow; service-on-interface today, new binding models later. What
+doesn't change is the enforcement contract: whatever primitives newtron
+supports, it enforces them faithfully.
+
+The contract has four guarantees:
+
+1. **Validated against schema.** Every CONFIG_DB write passes YANG-derived
+   validation before reaching the device. Invalid values and unknown
+   fields are rejected. (§30)
+2. **Applied atomically.** Every mutating operation produces a ChangeSet
+   that is computed fully before any write occurs. Dry-run is the default;
+   execution is opt-in. (§14, §17)
+3. **Verified by re-reading.** After execution, newtron re-reads every
+   entry it wrote and diffs against the ChangeSet. (§5, §17)
+4. **Reversible by construction.** Every forward operation has a symmetric
+   reverse. Service bindings record exactly what was applied so teardown
+   is self-sufficient. (§23)
+
+These mechanisms are not standalone features — they are enforcement
+infrastructure that exists to make any primitive newtron supports behave
+correctly. When a new primitive is added, it automatically inherits
+these guarantees because it flows through the same ChangeSet pipeline.
+When an existing primitive changes, the guarantees remain because they
+are properties of the pipeline, not of the primitive.
+
+The primitives are the variable. The enforcement contract is the
+invariant.
+
+---
+
+## 43. Summary
 
 | Principle | One-Line Rule |
 |-----------|---------------|
 | SONiC is a database | Interact through Redis, not CLI parsing; CLI is an exception, not the norm |
 | Platform patching | Patch what's broken; don't build parallel infrastructure around it |
-| One level of abstraction per program | newtlab realizes the topology, newtron translates specs to config, orchestrators decide what gets applied where |
+| One level of abstraction per program | newtlab realizes the topology, newtron defines primitives and automates networks built from them, orchestrators decide what gets applied where |
 | Objects own their methods | The interface is the point of service; a method belongs to the smallest object that has all the context to execute it |
 | If you change it, you verify it | The tool that writes the state must be able to verify the write |
 | Prevent bad writes | Application-level referential integrity for a database that has none; refuse invalid state, don't detect damage |
 | Spec vs config | Intent is declarative and version-controlled; state is imperative and generated |
-| The network is source of truth | The device is the truth; specs are the intent; operations transform truth using intent |
+| The device is source of reality | The device is the reality (not truth — reality may be wrong); specs are the intent; operations transform reality using intent; basic ops check preconditions, service ops trust the binding record |
 | Hierarchical spec resolution | Define once at the broadest scope; override only where necessary; resolve once at node creation |
 | DRY across programs | Every capability exists in exactly one place, even across program boundaries |
 | Single-owner CONFIG_DB tables | One file owns each table; everyone else calls the owner |
@@ -2355,3 +2398,4 @@ avoid compatibility code, use declarative overrides.
 | Definition is network-scoped; execution is device-scoped | Specs live at the network level with their own lifecycle; devices consume them via `Get*` with live fallback; the two lifecycles must not be coupled |
 | Greenfield | No backwards compatibility; no legacy format handling in runtime; no API versioning; write code for the system as it is today, not as it was yesterday |
 | Multi-version readiness | All Redis through Device, all operations through Node, all entry generation in pure config functions — preserve these seams so version overrides are data-driven additions, not scattered code branches |
+| Faithful enforcement | The primitives change, the contract doesn't — validated against schema, applied atomically, verified by re-reading, reversible by construction; these are properties of the pipeline, not of any specific primitive |
