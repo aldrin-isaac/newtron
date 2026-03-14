@@ -249,8 +249,11 @@ They are the vocabulary of the network — "a service called transit
 has eBGP peering with an ingress filter" — describing *how* each
 primitive should behave, not *where* it should be applied. Which
 interface gets which service is the operator's decision, made at
-apply time via newtron's CLI or HTTP API. Specs live in JSON files, are
-version-controlled, and are authored by network architects.
+apply time via newtron's CLI or HTTP API. Specs can live in
+version-controlled JSON files, or be pushed to newtron at runtime by
+an external system (a CMDB, a provisioning portal) via its API.
+newtron does not mandate where specs come from — only that they exist
+before an operation references them.
 
 **CONFIG_DB** is what exists on the device, whether correct or not. It
 is imperative — "VRF|Vrf-customer-Ethernet0 exists with vni=3001." It
