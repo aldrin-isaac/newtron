@@ -801,6 +801,7 @@ type StateDB struct {
 | `TRANSCEIVER_INFO` | `TRANSCEIVER_INFO\|<port>` | `TRANSCEIVER_INFO\|Ethernet0` |
 | `TRANSCEIVER_STATUS` | `TRANSCEIVER_STATUS\|<port>` | `TRANSCEIVER_STATUS\|Ethernet0` |
 | `NEWTRON_LOCK` | `NEWTRON_LOCK\|<device>` | `NEWTRON_LOCK\|spine1` |
+| `NEWTRON_INTENT` | `NEWTRON_INTENT\|<device>` | `NEWTRON_INTENT\|leaf1` |
 
 ### 5.2 State Entry Types
 
@@ -922,6 +923,12 @@ func (c *StateDBClient) GetNeighbor(iface, ip string) (*NeighEntry, error)
 // Distributed locking
 func (c *StateDBClient) AcquireLock(device, holder string, ttlSeconds int) error
 func (c *StateDBClient) ReleaseLock(device, holder string) error
+
+// Intent record operations (crash recovery)
+func (c *StateDBClient) WriteIntent(device string, intent *OperationIntent) error
+func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error)
+func (c *StateDBClient) UpdateIntentOps(device string, intent *OperationIntent) error
+func (c *StateDBClient) DeleteIntent(device string) error
 ```
 
 **`GetEntry`** reads a single STATE_DB entry as raw `map[string]string`. Returns `(nil, nil)` if the entry does not exist. Used by newtrun's `verifyStateDBExecutor` for generic table/key/field assertions.
@@ -996,6 +1003,63 @@ return 1
 **Write episode lifecycle:**
 
 `Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
+
+### 5.5 Intent Records
+
+Intent records are write-ahead manifests stored in STATE_DB that enable crash recovery for multi-entry CONFIG_DB writes. If the process dies between the first and last Redis write, the in-memory ChangeSet is lost and CONFIG_DB has orphaned partial state. The intent record survives the crash and tells the next operator exactly what was in progress.
+
+**NEWTRON_INTENT entry format** (Redis hash in STATE_DB):
+
+```
+NEWTRON_INTENT|leaf1
+  holder:           "aldrin@workstation1"
+  created:          "2026-03-10T14:30:00Z"
+  phase:            ""
+  rollback_holder:  ""
+  rollback_started: ""
+  operations:       "[{\"name\":\"CreateVLAN\",\"params\":{\"id\":\"100\"},\"reverse_op\":\"DeleteVLAN\",\"started\":\"...\",\"completed\":\"...\"}]"
+```
+
+The `operations` field is a JSON array stored as a single Redis hash value. Each element tracks one pending operation with its name, parameters, reverse operation name, and lifecycle timestamps (`started`, `completed`, `reversed`).
+
+**Intent types** (internal, in `statedb.go`):
+
+```go
+type IntentOperation struct {
+    Name      string            `json:"name"`
+    Params    map[string]string `json:"params"`
+    ReverseOp string            `json:"reverse_op,omitempty"`
+    Started   *time.Time        `json:"started,omitempty"`
+    Completed *time.Time        `json:"completed,omitempty"`
+    Reversed  *time.Time        `json:"reversed,omitempty"`
+}
+
+type OperationIntent struct {
+    Holder          string            `json:"holder"`
+    Created         time.Time         `json:"created"`
+    Phase           string            `json:"phase,omitempty"`
+    RollbackHolder  string            `json:"rollback_holder,omitempty"`
+    RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
+    Operations      []IntentOperation `json:"operations"`
+}
+```
+
+**Phase transitions:** The `Phase` field starts empty (applying). During rollback, it transitions to `"rolling_back"`. Each operation gets a `Reversed` timestamp as its reverse completes, so a crashed rollback can resume where it left off.
+
+**No Redis EXPIRE.** The distributed lock (§5.4) has a 1-hour EXPIRE — if the holder crashes, the lock auto-deletes and becomes available. The intent record intentionally has no EXPIRE. It must outlive the lock so the next operator can discover and resolve the partial state. Detection is structural: if you acquire the lock and an intent already exists, the previous holder crashed between `WriteIntent` and `DeleteIntent`. The lock acquisition proves the previous holder is gone — no staleness timer needed.
+
+**Why plain HSET (no Lua).** The distributed lock guarantees a single writer per device. While the lock is held, no concurrent access is possible, so the intent record's reads and writes do not need atomic Lua scripts. This is the same guarantee that makes CONFIG_DB writes safe without transactions.
+
+**Interaction with locking:**
+
+| Record | DB | EXPIRE | Survives crash? | Purpose |
+|--------|-----|--------|-----------------|---------|
+| `NEWTRON_LOCK` | STATE_DB | 1 hour | No (auto-deletes) | Mutual exclusion |
+| `NEWTRON_INTENT` | STATE_DB | None | Yes (persists) | Crash recovery manifest |
+
+The lock controls *access*; the intent records *what was being done*. Together they enable structural crash detection: lock available + intent present = previous holder crashed.
+
+For the full design rationale, see [Intent Records](intent-records.md).
 
 ---
 

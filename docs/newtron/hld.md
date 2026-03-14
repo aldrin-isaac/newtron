@@ -691,6 +691,23 @@ The init command is idempotent and intentionally one-way. There is no reverse op
 
 SONiC uses a dual-state model: Redis CONFIG_DB (runtime, immediate) and `/etc/sonic/config_db.json` (persistent, loaded at boot). Newtron writes to Redis; `config save -y` persists to disk. This runs automatically after every `-x` execution unless `--no-save` is used.
 
+### 9.5 Crash Recovery (Intent Records)
+
+A single newtron write operation may touch dozens of CONFIG_DB entries — a service apply creates VRF, VXLAN mappings, BGP neighbors, ACLs, and bindings across multiple tables. If the process crashes mid-apply (killed, SSH drop, OOM), the in-memory ChangeSet is lost. CONFIG_DB has some entries from the operation but not others, and no record of what was intended. The device is in an unknown partial state.
+
+Intent records solve this with a write-ahead manifest. Before `Commit` writes its first CONFIG_DB entry, it stores a `NEWTRON_INTENT` record in STATE_DB listing every operation about to be applied, along with the reverse operation for each. As entries are written, the intent is updated with `started` and `completed` timestamps per operation. On success, the intent is deleted. On crash, the intent survives — it is the forensic record of exactly what was in progress.
+
+**Detection uses structural proof, not heuristic.** The distributed lock (§9.2) has a 1-hour TTL that auto-expires on crash. The intent record has no TTL — it persists until explicitly deleted. When the next operator acquires the lock and finds an existing intent, the conclusion is certain: the previous holder crashed between `WriteIntent` and `DeleteIntent`. The lock acquisition itself proves the previous holder is gone. No staleness timer, no wall-clock comparison, no guessing.
+
+**Resolution uses domain-level reversal, not mechanical undo.** Each intent operation carries the name of its reverse operation (`CreateVLAN` → `DeleteVLAN`, `ApplyService` → `RemoveService`). Rollback dispatches each reverse operation in reverse order. Completed operations get full reversal. In-progress operations get partial reversal — the reverse operations are existence-checking, so they safely handle entries that were never created. Not-started operations are skipped. This is the same principle behind operational symmetry (§6.5): every forward action has a domain-level reverse that understands shared resources, reference counts, and dependency ordering.
+
+Three resolution paths:
+- **Inspect** (`device zombie`) — read the intent, see what happened, decide what to do
+- **Rollback** (`device zombie rollback`) — reverse each operation using domain-level reverse ops, restoring the device to its pre-operation state
+- **Clear** (`device zombie clear`) — dismiss the intent without reversing, for cases where the partial state is acceptable or was manually cleaned up
+
+For the full design, see [Intent Records](intent-records.md).
+
 ## 10. Verification
 
 ### 10.1 Principle
@@ -712,7 +729,7 @@ SONiC uses a dual-state model: Redis CONFIG_DB (runtime, immediate) and `/etc/so
 
 Every mutating operation produces a ChangeSet. `cs.Verify(n)` re-reads CONFIG_DB through a fresh connection and diffs against the ChangeSet. This works for all operations — disaggregated or composite — because they all produce ChangeSets. It is the only assertion newtron makes: checking its own writes.
 
-The public API wraps this: `Node.Execute()` runs Lock → fn → Commit (which applies + verifies) → Save → Unlock. ChangeSet is never exposed outside `pkg/newtron/`.
+The public API wraps this: `Node.Execute()` runs Lock → fn → Commit (which applies + verifies) → Save → Unlock. ChangeSet is never exposed outside `pkg/newtron/`. Commit now writes an intent manifest to STATE_DB before Apply and deletes it after Verify succeeds. On failure, the manifest remains as a crash marker for recovery (see §9.5).
 
 ### 10.4 Routing State Observation
 
@@ -735,6 +752,9 @@ APP_DB shows what FRR computed. ASIC_DB shows what the hardware installed. The g
 | Composite deliver | Yes | Yes (writes) | Yes (pipeline) |
 | ProvisionDevice | No (build) + Yes (deliver) | Yes (for delivery) | Yes (pipeline) |
 | ProvisionInterface | Yes | Yes (reads + writes) | Per-entry |
+| Zombie inspect | Yes | Yes (reads STATE_DB) | N/A |
+| Zombie rollback | Yes | Yes (lock + reverse ops) | Per-entry |
+| Zombie clear | Yes | Yes (lock + deletes intent) | N/A |
 
 ## 12. Security
 
@@ -821,3 +841,5 @@ E2E testing uses the newtrun framework (see `docs/newtrun/`).
 | **frrcfgd** | SONiC's FRR management framework daemon. Translates CONFIG_DB BGP tables to FRR commands. |
 | **Composite** | Offline CONFIG_DB configuration delivered atomically via Redis pipeline. |
 | **Abstract Node** | Offline Node with shadow ConfigDB. Same code path as physical, different initialization. |
+| **Intent record** | Write-ahead manifest in STATE_DB recording which operations are about to be applied, enabling crash recovery. Written before Commit, deleted on success. |
+| **Zombie operation** | An intent record whose owning process has died. Detected structurally at lock acquisition time (lock available + intent present = previous holder crashed). |

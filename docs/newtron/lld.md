@@ -756,6 +756,47 @@ HTTP status mapping (server-side `httpStatusFromError`):
 | `context.DeadlineExceeded` | 504 |
 | (other) | 500 |
 
+### 3.10 Intent and Recovery Types
+
+```go
+// IntentOperation represents a single pending operation within an intent record.
+type IntentOperation struct {
+    Name      string            `json:"name"`
+    Params    map[string]string `json:"params,omitempty"`
+    ReverseOp string            `json:"reverse_op,omitempty"`
+    Started   *time.Time        `json:"started,omitempty"`
+    Completed *time.Time        `json:"completed,omitempty"`
+    Reversed  *time.Time        `json:"reversed,omitempty"`
+}
+
+// OperationIntent is a crash-recovery record stored in STATE_DB.
+// Written before Commit applies ChangeSets, deleted on success.
+// If the process crashes, the intent remains for the operator to
+// inspect and roll back via 'device zombie'.
+type OperationIntent struct {
+    Holder          string            `json:"holder"`
+    Created         time.Time         `json:"created"`
+    Phase           string            `json:"phase,omitempty"`
+    RollbackHolder  string            `json:"rollback_holder,omitempty"`
+    RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
+    Operations      []IntentOperation `json:"operations"`
+}
+```
+
+These are the public types (in `types.go`). The internal `sonic.OperationIntent` has an identical structure — conversion functions at the API boundary map between them, following the uniform boundary principle (§3).
+
+**Key fields:**
+
+| Field | Description |
+|-------|-------------|
+| `Holder` | Identity of the process that created the intent (`user@hostname`) |
+| `Phase` | Empty during forward apply; `"rolling_back"` during rollback |
+| `RollbackHolder` | Identity of the process performing rollback (may differ from original holder) |
+| `Operations[].ReverseOp` | Name of the domain-level reverse operation (e.g., `DeleteVLAN` for `CreateVLAN`) |
+| `Operations[].Started` | Timestamp when Apply began writing this operation's entries |
+| `Operations[].Completed` | Timestamp when Apply finished writing this operation's entries |
+| `Operations[].Reversed` | Timestamp when rollback reversed this operation (enables idempotent retry) |
+
 ## 4. HTTP API Reference
 
 All routes are registered in `pkg/newtron/api/handler.go` via `buildMux()`. Request bodies use config types from §3.6–3.7; response bodies use view types from §3.2–3.5. Write endpoints accept `ExecOpts` (§3.1) via query parameters and return `WriteResult`. Every response uses the `APIResponse` envelope:
@@ -865,6 +906,7 @@ Write operations accept `?dry_run=true` and `?no_save=true` query parameters.
 | `GET` | `.../node/{device}/configdb/{table}/{key}` | `map[string]string` |
 | `GET` | `.../node/{device}/configdb/{table}/{key}/exists` | `bool` |
 | `GET` | `.../node/{device}/statedb/{table}/{key}` | `map[string]string` |
+| `GET` | `.../node/{device}/zombie` | `OperationIntent` (or null) |
 
 All node read paths use `prefix: /network/{netID}`.
 
@@ -914,6 +956,8 @@ All node read paths use `prefix: /network/{netID}`.
 | `POST` | `.../node/{device}/cleanup` | `CleanupRequest` | `CleanupSummary` |
 | `POST` | `.../node/{device}/ssh-command` | `SSHCommandRequest` | `SSHCommandResponse` |
 | `POST` | `.../node/{device}/execute` | `ExecuteRequest` | `WriteResult` |
+| `POST` | `.../node/{device}/zombie/rollback` | — | `WriteResult` |
+| `POST` | `.../node/{device}/zombie/clear` | — | — |
 
 ### 4.7 Node Composite Operations
 
@@ -1221,6 +1265,8 @@ Lock
 │  Acquires distributed Redis lock (SETNX with TTL)
 │  Refreshes CONFIG_DB cache from Redis
 │  Rebuilds Interface map from refreshed CONFIG_DB
+│  Checks for zombie intent (NEWTRON_INTENT exists in STATE_DB)
+│  If zombie found: Execute returns ErrDeviceZombieOperation
 │
 ├─ fn(ctx)
 │    Caller's operations run here. Each op (CreateVLAN, ApplyService, etc.)
@@ -1232,11 +1278,19 @@ Lock
 │    Rollback() discards pending ChangeSets. No Commit, no Save.
 │
 ├─ Commit
-│    Apply: iterates each pending ChangeSet's Changes, writes each entry
-│           to CONFIG_DB via Set/Delete. On failure at index N,
-│           AppliedCount = N. Already-written changes are NOT rolled back.
+│    WriteIntent: writes NEWTRON_INTENT to STATE_DB with all pending
+│                 operations and their reverse mappings. Fatal on failure —
+│                 if the manifest cannot be written, no CONFIG_DB writes occur.
+│    Apply: for each pending ChangeSet:
+│           - Update intent: mark operation started
+│           - Write entries to CONFIG_DB via Set/Delete
+│           - Update intent: mark operation completed
+│           On failure at index N, AppliedCount = N. Intent REMAINS
+│           with started/completed timestamps showing exactly what was written.
 │    Verify: fresh Redis connection, re-reads every entry, diffs field-by-field.
 │            Keys with multiple ops (delete+add) — only final state verified.
+│    DeleteIntent: removes NEWTRON_INTENT on success.
+│                  On verify failure, intent REMAINS as a crash marker.
 │
 ├─ Save (unless opts.NoSave)
 │    SSH: sudo config save -y
@@ -1246,6 +1300,8 @@ Lock
 ```
 
 On `fn()` error or Commit failure, `Rollback()` clears pending ChangeSets but does NOT undo already-applied Redis writes — partial writes are possible. The actor's `connectAndExecute` also calls `Rollback()` on error but keeps the cached connection alive for future requests.
+
+**Zombie detection:** When `Lock()` acquires the distributed lock and finds an existing `NEWTRON_INTENT` record, it stores the intent as `n.zombieOp`. Subsequent calls to `Execute()` check for this and return `ErrDeviceZombieOperation` before running any operations. The operator must resolve the zombie (inspect, rollback, or clear) before the device accepts new writes. `RollbackZombie` and `ClearZombie` bypass this check via `SetBypassZombieCheck`.
 
 ### 6.7 Value Derivation
 
@@ -1499,6 +1555,9 @@ The CLI is an HTTP client using `pkg/newtron/client/`. All operations route thro
 | `device config-reload` | Reload CONFIG_DB from disk |
 | `device save-config` | Persist runtime CONFIG_DB to disk |
 | `device cleanup` | Remove orphaned ACLs/VRFs/VNI mappings |
+| `device zombie` | Show zombie operation from a crashed process |
+| `device zombie rollback [-x]` | Preview or execute zombie rollback |
+| `device zombie clear` | Dismiss zombie without rollback |
 
 ### 9.4 Meta Commands
 
@@ -1524,6 +1583,17 @@ The CLI is an HTTP client using `pkg/newtron/client/`. All operations route thro
 Once applied, structural config is immutable. To change VRF, IP, ACLs, EVPN mappings, or QoS — remove and reapply.
 
 Mutable (while service is bound): `admin-status`, `cost-in`, `cost-out`.
+
+### 9.7 Zombie Operations
+
+| Command | Description |
+|---------|-------------|
+| `device zombie` | Show zombie operation from a crashed process |
+| `device zombie rollback` | Preview rollback (dry-run) |
+| `device zombie rollback -x` | Execute rollback (reverse operations) |
+| `device zombie clear` | Dismiss zombie without rollback |
+
+`device zombie` (inspect) uses `connectAndRead` — no lock required. `device zombie rollback` and `device zombie clear` use `connectAndLocked` with `SetBypassZombieCheck(true)` since they are resolving the zombie, not blocked by it.
 
 ## 10. Testing
 

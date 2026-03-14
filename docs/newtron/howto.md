@@ -45,6 +45,7 @@ For the architectural principles behind this design, see the [HLD](hld.md). For 
 14. [QoS Management](#14-qos-management)
 15. [Filter and Policy Management](#15-filter-and-policy-management)
 16. [Device Operations](#16-device-operations)
+    - [16.6 Crash Recovery (Zombie Operations)](#166-crash-recovery-zombie-operations)
 17. [Topology Provisioning](#17-topology-provisioning)
 18. [Troubleshooting](#18-troubleshooting)
 19. [Go API Usage](#19-go-api-usage)
@@ -2059,6 +2060,82 @@ ssh admin@<mgmt_ip> 'sudo config reload -y'
 
 This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any unsaved changes.
 
+### 16.6 Crash Recovery (Zombie Operations)
+
+If newtron (or newtron-server) crashes during a write operation — killed, SSH drop, OOM — the next operation on that device will fail with `zombie operation detected`. This means a previous operation left partial state on the device.
+
+**Inspect the zombie:**
+
+```bash
+newtron leaf1 device zombie
+
+# Output:
+# Zombie Operation
+#   Holder:  aldrin@workstation1
+#   Created: 2026-03-10T14:30:00Z
+#   Phase:   applying
+#
+# Operations:
+#   1. CreateVLAN (id=100)
+#      Reverse: DeleteVLAN
+#      Started:   14:30:00.123
+#      Completed: 14:30:00.456
+#
+#   2. CreateVRF (name=CUSTOMER)
+#      Reverse: DeleteVRF
+#      Started:   14:30:00.457
+#      Completed: (none)           ← crashed here
+#
+#   3. ApplyService (interface=Ethernet0, service=customer-l3)
+#      Reverse: RemoveService
+#      Started:   (none)           ← never started
+#      Completed: (none)
+```
+
+The timestamps tell you exactly what happened. Operation 1 completed (VLAN was fully created). Operation 2 started but didn't complete (VRF may be partially created). Operation 3 never started.
+
+**Rollback (reverse the partial operation):**
+
+```bash
+# Preview what will be reversed
+newtron leaf1 device zombie rollback
+
+# Output:
+# Rollback preview:
+#   [reverse] ApplyService → RemoveService (interface=Ethernet0)  SKIP (not started)
+#   [reverse] CreateVRF → DeleteVRF (name=CUSTOMER)               REVERSE
+#   [reverse] CreateVLAN → DeleteVLAN (id=100)                     REVERSE
+#
+# DRY-RUN: No changes applied. Use -x to execute.
+
+# Execute the rollback
+newtron leaf1 device zombie rollback -x
+```
+
+Rollback calls the reverse of each operation in reverse order. Completed operations get full reversal. In-progress operations get partial reversal — the reverse operations check what actually exists before acting, so they safely handle entries that were never created. Not-started operations are skipped.
+
+Rollback is idempotent. Each successfully reversed operation is marked with a `Reversed` timestamp in the intent record. If the rollback itself crashes, the next `rollback -x` reads the intent, skips already-reversed operations, and continues where it left off.
+
+**Clear (dismiss without rollback):**
+
+```bash
+newtron leaf1 device zombie clear
+# Zombie operation cleared.
+```
+
+Use clear when:
+- You've manually cleaned up the partial state (e.g., deleted the orphaned entries via individual commands)
+- The partial state is acceptable (e.g., a `CreateVLAN` that completed — the VLAN is fine, just clear the marker)
+- You want to start fresh and accept the current device state as the new reality
+
+**Troubleshooting:**
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `zombie operation detected` on any write | Previous process crashed mid-apply | `device zombie` to inspect, then rollback or clear |
+| Rollback fails with domain error | Partial state has active consumers | Manually resolve dependencies, then rollback or clear |
+| No zombie but device state is wrong | Intent was never written (pre-feature crash, or crash before WriteIntent) | Manual cleanup via individual delete commands |
+
 ---
 
 ## 17. Topology Provisioning
@@ -2213,6 +2290,7 @@ ssh admin@<mgmt_ip> 'sudo config reload -y'
 | `redis connection failed` | Port 6379 not forwarded | Add ssh_user/ssh_pass to profile for SSH tunnel |
 | `SSH dial...connection refused` | Port 22 not reachable | Check SSH service, network, VM health |
 | `device is locked` | Another operation in progress | Wait (lock has TTL auto-expiry) |
+| `zombie operation detected` | Previous process crashed mid-apply | `device zombie` to inspect, then `rollback -x` or `clear` |
 
 ---
 
@@ -2573,7 +2651,7 @@ Device-Scoped (requires device name)
 ├── bgp        status
 ├── qos        apply | remove
 ├── health     check
-└── device     cleanup
+└── device     cleanup | zombie | zombie rollback | zombie clear
 ```
 
 ### 21.2 Key Patterns
