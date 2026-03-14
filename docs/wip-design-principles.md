@@ -3,8 +3,9 @@
 Network automation tools have a habit of solving the easy problem
 brilliantly and ignoring the hard one. Generating configuration from
 templates is a solved problem — Jinja, YANG, intent engines, there is
-no shortage of ways to produce the right entries. The hard problem is
-what happens next: delivering those entries so that every write lands,
+no shortage of ways to produce the right CONFIG_DB entries. The hard
+problem is what happens next: delivering those entries so that every
+write lands,
 nothing is left half-applied, and the operation can be undone cleanly
 months later by someone who wasn't there when it was applied. Most
 tools treat delivery as someone else's problem. newtron treats it as
@@ -200,7 +201,7 @@ database's state into another's.
 
 newtron interacts with SONiC exclusively through Redis. CONFIG_DB writes
 go through a native Go Redis client over an SSH-tunneled connection —
-not through `config` CLI commands. Route verification reads APP_DB
+not through SONiC's `config` CLI commands. Route verification reads APP_DB
 directly. ASIC programming checks traverse ASIC_DB's SAI object chain.
 Health checks read STATE_DB.
 
@@ -247,17 +248,20 @@ interface gets which service is the operator's decision, made at
 apply time via CLI or API. Specs live in JSON files, are
 version-controlled, and are authored by network architects.
 
-**Config** is what exists on the device, whether correct or not. It is
-imperative — "VRF|Vrf-customer-Ethernet0 exists with vni=3001." It uses
-concrete values: IPs, VLAN IDs, AS numbers. It lives in Redis on each device and is generated at runtime — though
-admins and other tools can and do edit it directly.
+**CONFIG_DB** is what exists on the device, whether correct or not. It
+is imperative — "VRF|Vrf-customer-Ethernet0 exists with vni=3001." It
+uses concrete values: IPs, VLAN IDs, AS numbers. It lives in Redis on
+each device and is produced at apply time — though admins and other
+tools can and do edit it directly.
 
-The translation from spec to config happens inside newtron's object
-hierarchy, using device context (profile, platform) to derive concrete
-values. A service spec says `"peer_as": "request"` — newtron resolves
-this to a concrete AS number from the topology parameters. A filter
-reference says `"ingress_filter": "customer-in"` — newtron expands this
-into numbered ACL rules from the filter definition.
+The translation from spec to CONFIG_DB entries uses device context to
+derive concrete values. Each device has a **profile** — its identity in
+the network: AS number, loopback IP, EVPN peers, platform type. When
+a service spec says `"peer_as": "request"`, that means the AS number
+is supplied by the operator at apply time (via `--peer-as` on the CLI,
+or from a topology file during provisioning). A filter reference says
+`"ingress_filter": "customer-in"` — newtron expands this into numbered
+ACL rules from the filter definition.
 
 This separation enables two properties that matter:
 
@@ -285,11 +289,12 @@ expects to find.
 
 Different operation types interact with this reality differently:
 
-- **Provisioning (CompositeOverwrite)** is the one exception where intent
-  replaces reality. It merges a full composite config on top of
-  CONFIG_DB, removing stale keys while preserving factory defaults (MAC,
-  platform metadata, port config). This is the initial act of
-  establishing reality from intent.
+- **Provisioning** is the one exception where intent replaces reality.
+  It computes a complete device configuration from specs and profile,
+  then writes it to CONFIG_DB as a single atomic operation — removing
+  stale keys while preserving factory defaults (MAC, platform metadata,
+  port config). This is the initial act of establishing reality from
+  intent.
 
 - **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
   preconditions — "does this VLAN already exist?" — but generate entries
@@ -311,9 +316,10 @@ VLANs, VRFs, ACLs, and VNIs were created for that service.
 The binding is the sole input for teardown. `RemoveService` does not
 re-derive the removal from the spec, because the spec may have changed
 between apply and remove. What matters is what was *actually applied*.
-For example, `l3vni` and `l3vni_vlan` are stored in the binding so
-`RemoveService` can tear down transit VLAN infrastructure without
-looking up the IP-VPN spec.
+For example, EVPN overlay parameters (L3 VNI, its transit VLAN) are
+stored in the binding so removal can tear down overlay infrastructure
+without looking up the VPN spec — which may have changed since the
+service was applied.
 
 When adding a new forward operation that creates infrastructure, the
 question to ask is: *can the reverse operation find everything it needs
@@ -381,12 +387,12 @@ definitions independent of any device.
 └─────────────────────────────────────────────────┘
   │
   │ parent ref
-  │ (SpecProvider)
+  │ (spec lookup)
   ▼
 ┌─────────────────────────────────────────────────┐
 │                                                 │
 │                      Node                       │
-│ owns: profile, resolved config, Redis, ConfigDB │
+│  owns: profile, resolved specs, Redis, ConfigDB │
 │    ConfigureBGP(), SetupEVPN(), CreateVLAN()    │
 │                                                 │
 └─────────────────────────────────────────────────┘
@@ -406,7 +412,7 @@ definitions independent of any device.
 The general principle: **a method belongs to the smallest object that
 has all the context to execute it.** When `Interface.ApplyService()` is
 called, the interface reaches up to the Node for the AS number, up to
-the Network (via SpecProvider) for the service spec, and combines them
+the Network for the service spec, and combines them
 with its own identity to produce CONFIG_DB entries. No external
 function orchestrates this — the object has everything it needs through
 its parent chain.
@@ -470,37 +476,36 @@ spec at every level; you only define what differs.
 capabilities — HWSKU, port count, NIC driver — not network intent.
 They have no meaningful per-zone or per-node variation.
 
-The merge is performed once by `buildResolvedSpecs()`, producing a
-`ResolvedSpecs` struct for each node. This cleanly separates two
-concerns: **what specs exist** (the three-level hierarchy, owned by
-Network) and **what specs does this node see** (the merged view, owned
-by Node via its SpecProvider). Code inside `node/` does not know about
-zones, networks, or override logic. It asks its SpecProvider for a
-service by name and gets the right definition — already resolved.
+The merge is performed once at startup, producing a resolved view for
+each device. This cleanly separates two concerns: **what specs exist**
+(the three-level hierarchy) and **what specs does this device see**
+(the merged view). Device-level code does not know about zones,
+networks, or override logic. It asks for a service by name and gets
+the right definition — already resolved.
 
 ### The snapshot problem and live fallback
 
-Decoupling definition from execution creates a timing question.
-`ResolvedSpecs` is a snapshot taken at node creation time. Specs added
-to the network after the snapshot — and this is not hypothetical, since
-the spec authoring API adds entries at runtime — would be invisible to
-every connected device until the server restarts.
+Decoupling definition from execution creates a timing question. Each
+device receives a merged snapshot of its specs at connection time.
+Specs added to the network after the snapshot — and this is not
+hypothetical, since the API can add specs at runtime — would be
+invisible to every connected device until the server restarts.
 
-The resolution: `Get*` methods check the merged snapshot first
-(preserving override semantics — profile wins over zone wins over
-network). On miss, they fall through to the network-level maps via
-`network.Get*`. The hierarchy stays intact for overrides; the network
+The resolution: spec lookups check the device's merged snapshot first
+(preserving override semantics — device profile wins over zone wins
+over network). On miss, they fall through to the network-level
+definitions. The hierarchy stays intact for overrides; the network
 level stays open for additions:
 
 ```
-ResolvedSpecs.GetService("TRANSIT")
+device.GetService("TRANSIT")
   1. Check merged snapshot → found (profile override) → return it
   2. Miss → fall through to network.GetService("TRANSIT") → found
   3. Miss at both levels → "service not found" error
 ```
 
-Any new `Get*` method on `ResolvedSpecs` must include the network
-fallback. A merged-map-only lookup is a bug.
+Every spec lookup must include the network fallback. A snapshot-only
+lookup is a bug.
 
 **Define once at the broadest applicable scope; override only where
 necessary; resolve once at node creation.**
@@ -659,11 +664,10 @@ write an operation that "figures out what to do as it goes," because
 dry-run mode would have nowhere to stop.
 
 This forced separation produces a structural side effect that wasn't
-planned but proved essential: composite mode. Because newtron can
+planned but proved essential: offline provisioning. Because newtron can
 compute a full device configuration without connecting to a device —
-it's just spec translation — it can build a CompositeConfig offline
-and deliver it later as a single atomic operation. The abstract Node
-(§23) exists because dry-run already required the separation. Offline
+it's just spec translation — it can build a complete configuration in
+memory and deliver it later as a single atomic operation. Offline
 provisioning is not a second code path bolted on later; it falls out
 of the same constraint that makes dry-run work.
 
@@ -707,16 +711,16 @@ You cannot call `ApplyService` and skip the checks — they run as the
 first step of the operation. This is application-level referential
 integrity for a database that has none.
 
-For removal operations, `DependencyChecker` scans CONFIG_DB to determine
-if shared resources (VRFs, VLANs, ACLs) are still referenced by other
-service bindings before deleting them. A VRF used by three interfaces
-isn't removed until the last interface unbinds from it.
+For removal operations, newtron scans CONFIG_DB to determine if shared
+resources (VRFs, VLANs, ACLs) are still referenced by other service
+bindings before deleting them. A VRF used by three interfaces isn't
+removed until the last interface unbinds from it.
 
 ### Schema validation enforces data format
 
-Every ChangeSet passes through `Validate()` before any Redis write. The
-schema — defined in `schema.go` with constraints derived from SONiC YANG
-models — checks types, ranges, enums, and patterns for every table and
+Every ChangeSet passes through validation before any Redis write.
+newtron maintains an internal schema derived from SONiC YANG models
+that checks types, ranges, enums, and patterns for every table and
 field:
 
 ```go
@@ -730,15 +734,15 @@ func (cs *ChangeSet) Apply(n *Node) error {
 ```
 
 The schema is **fail-closed**. Unknown table → error. Unknown field →
-error. Every table newtron writes must have a schema entry. A developer
-who adds a new `configDB.Set("NEW_TABLE", ...)` in `*_ops.go` will see
-validation failures until they add `NEW_TABLE` to `schema.go`. This
-catches misspelled field names at the point of write, not when a daemon
-silently ignores the entry thirty seconds later.
+error. Every table newtron writes must have a schema entry. Adding a
+write to a new CONFIG_DB table without declaring its schema produces a
+validation failure — catching misspelled field names at the point of
+write, not when a SONiC daemon silently ignores the entry thirty
+seconds later.
 
 **YANG is the authority** for value constraints. Ranges, enums, and
-patterns in `schema.go` must match the SONiC YANG model. When they
-diverge, the deviation is documented with a comment explaining why.
+patterns in newtron's schema must match the SONiC YANG model. When
+they diverge, the deviation is documented with an explanation.
 
 **Preconditions and schema validation together make the invalid states
 unrepresentable at the API level.** The operator who passes a bad value
@@ -832,7 +836,8 @@ The symmetry extends to composite operations. `SetupEVPN` creates the
 VTEP, NVO, and tunnel map entries; `TeardownEVPN` removes all of them.
 `ApplyService` creates VRFs, VLANs, ACLs, BGP neighbors, and a service
 binding; `RemoveService` reads the binding and removes everything that
-was created, respecting shared resources via `DependencyChecker`.
+was created, checking whether shared resources are still in use before
+deleting them.
 
 The current operation pairs:
 
@@ -882,9 +887,9 @@ records low-level CONFIG_DB mutations (HSET, DEL) but not the sharing
 context in which they were made. Reversing those mutations would delete
 a VRF that two services share, remove a filter still bound to another
 interface, or tear down a VTEP that other overlays depend on. Every
-removal path uses `DependencyChecker` to scan CONFIG_DB for remaining
-consumers before deleting shared resources — a domain judgment that no
-mechanical reversal can replicate.
+removal path scans CONFIG_DB for remaining consumers before deleting
+shared resources — a domain judgment that no mechanical reversal can
+replicate.
 
 Only domain-level reverse operations (`RemoveService`, `UnbindACL`,
 `RemoveQoS`) have the context to determine whether a shared resource
@@ -911,13 +916,14 @@ system rejects it — and the rejection is silent.
 
 ### The dependency chain
 
-YANG `leafref` declarations define a directed dependency graph. A table
-with a leafref to another table cannot be meaningfully processed until
-the referenced entry exists. The critical chains:
+SONiC YANG schemas define cross-table references — a CONFIG_DB entry
+that references another table cannot be processed until the referenced
+entry exists. These references create a directed dependency graph.
+The critical chains:
 
 ```
 VLAN  ──→  VLAN_MEMBER  ──→  (interface must exist)
-VLAN  ──→  VLAN_INTERFACE  ──→  VRF (via vrf_name leafref)
+VLAN  ──→  VLAN_INTERFACE  ──→  VRF (via vrf_name reference)
 VRF   ──→  BGP_GLOBALS  ──→  BGP_NEIGHBOR  ──→  BGP_NEIGHBOR_AF
 VRF   ──→  INTERFACE (via vrf_name)
 VXLAN_TUNNEL  ──→  VXLAN_EVPN_NVO  ──→  VXLAN_TUNNEL_MAP
@@ -975,10 +981,9 @@ suites verify it with polling, not sleeps.**
 
 **When adding a new CONFIG_DB table:**
 
-1. Identify its YANG leafref dependencies — what must exist before it.
-2. Place its entries after the dependency in the config function's
-   return slice.
-3. Place its deletion before the dependency in the reverse function.
+1. Identify its YANG dependencies — what must exist before it.
+2. Place its entries after the dependency in the creation order.
+3. Place its deletion before the dependency in the removal order.
 4. If tests reveal a daemon race, document it as an RCA. Do not add
    `time.Sleep` to the write path.
 
@@ -1070,10 +1075,10 @@ ROUTE_MAP|ALLOW_CUST_IMPORT_A1B2C3D4|10
 PREFIX_SET|RFC1918_5F2A8B3E|10
 ```
 
-The hash is computed from the **generated CONFIG_DB entry fields** — the
-actual `map[string]string` that would be written to Redis — not the spec
-struct. Sorted keys, sorted entries, SHA256, first 4 bytes as uppercase
-hex. This means:
+The hash is computed from the **generated CONFIG_DB fields** — the
+actual key-value pairs that would be written to Redis — not the spec
+definition. Sorted keys, sorted entries, SHA256, first 4 bytes as
+uppercase hex. This means:
 
 - Future newtron versions that add new CONFIG_DB fields automatically
   produce different hashes (correct — new fields = new content).
@@ -1081,16 +1086,18 @@ hex. This means:
   to bump.
 - The hash is literally "what would this policy write to Redis?"
 
-Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes are
-computed first (leaves), then ROUTE_MAP entries reference the real
-PREFIX_SET names (including their hashes), so a prefix list content
-change cascades through the hash chain automatically. The cascade
-terminates at BGP_PEER_GROUP_AF — a field update, not a name change.
+When policy objects reference each other, their hashes cascade
+bottom-up. PREFIX_SET hashes are computed first, then ROUTE_MAP
+entries reference those hashed PREFIX_SET names. A prefix list content
+change propagates through the chain automatically — ROUTE_MAP gets a
+new hash because one of its referenced objects changed. The cascade
+stops at the peer group, where it becomes a field update rather than
+a name change.
 
-Spec unchanged → hash unchanged → `RefreshService` is a no-op for that
-object. Spec changed → new hash → new object created alongside old →
-interfaces migrate one by one → old object deleted when last consumer
-migrates. Blue-green at the object level, with zero disruption.
+This enables zero-disruption policy updates. Spec unchanged → hash
+unchanged → refreshing the service is a no-op for that object. Spec
+changed → new hash → new object created alongside old → interfaces
+migrate one by one → old object deleted when last consumer migrates.
 
 ### Hash placement: always suffix, never prefix
 
