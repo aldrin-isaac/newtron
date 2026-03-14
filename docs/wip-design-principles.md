@@ -245,7 +245,7 @@ They are the vocabulary of the network — "a service called transit
 has eBGP peering with an ingress filter" — describing *how* each
 primitive should behave, not *where* it should be applied. Which
 interface gets which service is the operator's decision, made at
-apply time via CLI or API. Specs live in JSON files, are
+apply time via newtron's CLI or HTTP API. Specs live in JSON files, are
 version-controlled, and are authored by network architects.
 
 **CONFIG_DB** is what exists on the device, whether correct or not. It
@@ -1787,8 +1787,8 @@ Before writing any CONFIG_DB entries to implement a SONiC feature:
 
 1. **Find the CLI path.** Read the SONiC CLI source to see what tables
    and fields it writes, in what order.
-2. **Run it on a real device.** On a clean device, configure via CLI.
-   Verify end-to-end. Capture CONFIG_DB state as ground truth.
+2. **Run it on a real device.** On a clean device, configure via SONiC
+   CLI. Verify end-to-end. Capture CONFIG_DB state as ground truth.
 3. **Read the daemon source.** Understand processing order, implicit
    dependencies, and what gets emitted to APP_DB.
 4. **Implement.** Write the same entries in the same order.
@@ -1796,7 +1796,7 @@ Before writing any CONFIG_DB entries to implement a SONiC feature:
    into composite suites.
 
 The anti-pattern: read the schema, guess the entries, debug from daemon
-logs. The logs tell you *that* something failed; the CLI path shows
+logs. The logs tell you *that* something failed; the SONiC CLI path shows
 *what* the correct sequence is.
 
 **Schema tells you what's valid. Behavior tells you what works. Only
