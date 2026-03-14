@@ -252,8 +252,8 @@ interface gets which service is the operator's decision, made at
 apply time via newtron's CLI or HTTP API. Specs can live in
 version-controlled JSON files, or be pushed to newtron at runtime by
 an external system (a CMDB, a provisioning portal) via its API.
-newtron does not mandate where specs come from — only that they exist
-before an operation references them.
+newtron does not mandate where specs come from — only that they are
+loaded into its running state before an operation references them.
 
 **CONFIG_DB** is what exists on the device, whether correct or not. It
 is imperative — "VRF|Vrf-customer-Ethernet0 exists with vni=3001." It
