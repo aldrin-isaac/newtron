@@ -231,12 +231,16 @@ doesn't yet). There is no third category.
 
 Terraform owns its state file. Kubernetes owns its etcd. They can be
 reconcilers because they are the sole writer — if state drifts, it
-drifted from *their* truth, and they can push it back.
+drifted from *their* truth, and they can push it back. The sanest
+architecture for any configuration system is a single owner.
 
-A SONiC device is not like this. Admins edit CONFIG_DB. Daemons write
-to it. Factory images leave artifacts in it. Other tools modify it.
-newtron is one writer among many, and the architecture must be designed
-for that reality.
+newtron would prefer to be that owner. But it does not assume it is.
+Admins edit CONFIG_DB directly. SONiC daemons write to it. Factory
+images leave artifacts in it. Other tools modify it. The architecture
+must not break when this happens — not because multi-writer is the
+goal, but because the real world is not always the ideal case. newtron
+is designed to do no harm: it tracks what it wrote, cleans up what it
+created, and leaves everything else untouched.
 
 The paired framing that follows from this governs every operation:
 
