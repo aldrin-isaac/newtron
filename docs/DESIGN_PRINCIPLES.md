@@ -334,6 +334,38 @@ The principle: **it is better to refuse an invalid write than to detect
 the damage afterward**. Preconditions make the invalid states
 unrepresentable at the API level.
 
+### Error Classification — "Doesn't Exist" vs "Can't Be Touched"
+
+Pre-operation checks fall into two categories, and they must return
+different error types:
+
+- **"Resource doesn't exist"** — the VLAN, VRF, interface, or ACL table
+  the operation targets is not present in CONFIG_DB. These checks go
+  through `PreconditionChecker` and return `PreconditionError` (wrapping
+  `ErrPreconditionFailed`). Examples: `RequireVLANExists`,
+  `RequireVRFExists`, `GetInterface` when the interface is not in
+  CONFIG_DB.
+
+- **"Resource exists but can't be safely modified"** — the resource is
+  present but has active consumers or dependencies that prevent the
+  operation. These are domain safety checks that return plain errors.
+  Examples: `DeleteVRF` refusing because interfaces are still bound,
+  `UnbindIPVPN` refusing because service bindings still reference the
+  VRF.
+
+The distinction matters for automated recovery. When rolling back a
+partially-applied operation, "doesn't exist" means the forward operation
+never created the resource — safe to skip. "Has active consumers" means
+something unexpected happened — the recovery tool should stop and let
+the operator investigate. Both are pre-operation checks, but they carry
+different semantic weight and demand different responses from the caller.
+
+Every "resource not found" check — whether in the `PreconditionChecker`,
+a lookup method like `GetInterface`, or an inline existence check — must
+return `PreconditionError`. This is not a style preference; it is a
+correctness requirement for any code path that needs to distinguish
+"missing" from "conflicting."
+
 ---
 
 ## 7. Spec vs Config — Intent vs State
@@ -1161,6 +1193,41 @@ an orchestrator provisions three interfaces and the second fails, it calls
 provides safe, reference-aware building blocks; the orchestrator decides
 when to invoke them.
 
+### Never Enter a State You Can't Recover From
+
+Symmetric operations guarantee that every forward action has a reverse.
+But the reverse only helps if you can find what needs reversing. If a
+process crashes mid-apply, the in-memory ChangeSet is lost.
+
+The intent record (`NEWTRON_INTENT|<device>`) records the operation list
+before applying, so crash recovery can call the reverse of each. But
+this only works if the record is written. If the intent write fails and
+the operation proceeds, crash recovery is impossible — partial CONFIG_DB
+writes with no record of what was attempted.
+
+**If the safety net cannot be established, do not create a situation
+that needs one.** A failed intent write aborts the operation. Proceeding
+without the intent is proceeding with the assumption that nothing will
+go wrong — exactly the assumption that crash recovery exists to
+challenge.
+
+### Structural Proof over Heuristic Detection
+
+When detecting whether a previous operation left orphaned state, use
+structural facts rather than heuristic thresholds.
+
+The intent record lifecycle is: WriteIntent → Apply → DeleteIntent →
+Unlock. If a new process acquires the lock and an intent exists, the
+previous process crashed between WriteIntent and DeleteIntent. Lock
+acquisition is the proof — no staleness timer, no TTL comparison, no
+edge cases.
+
+This pattern generalizes: anywhere a heuristic (timeout, polling
+interval, retry count) detects a condition, ask whether a structural
+fact already proves it. A lock that was acquired proves the previous
+holder is gone. Structural proofs are binary (true or false). Heuristics
+have thresholds, and thresholds have edge cases.
+
 ---
 
 ## 24. Respect Abstraction Boundaries
@@ -1502,6 +1569,32 @@ When adding new public API surface:
 
 **Public types expose what callers need; internal types expose what the
 implementation needs. The boundary conversion strips and maps as needed.**
+
+### Uniform Boundaries — If It Exists, It Exists Everywhere
+
+A structural boundary, once justified, applies to every type that crosses
+it. If `RouteEntry` needs a conversion function because `NextHop.IP`
+becomes `RouteNextHop.Address`, then `VerificationResult`,
+`OperationIntent`, and `NeighEntry` also get conversion functions — even
+when their fields happen to be identical today. The boundary is a property
+of the architecture, not a per-type decision.
+
+The alternative — type aliases for "simple" types, conversion functions
+for "complex" ones — creates an inconsistent boundary. A reader cannot
+predict which pattern a given type follows. Worse, when a type that was
+aliased later needs a vocabulary change, the alias must be replaced with
+a conversion function, changing every callsite that relied on the types
+being identical. The uniform boundary absorbs this change: the conversion
+function already exists, only its internals change.
+
+This is the same principle as operational symmetry (§23) applied to the
+type system. Operational symmetry says: if you can create, you must be
+able to remove — even if removal is trivial today. Uniform boundaries
+say: if one type needs boundary conversion, all types at that boundary
+get boundary conversion — even if the conversion is trivial today. Both
+resist the temptation to skip structure because the current case is
+simple. Simple cases become complex; the structure must already be there
+when they do.
 
 ---
 
@@ -2434,11 +2527,13 @@ It is how the primitives maintain their own integrity.
 | Pure config functions | Generate entries in pure functions; orchestrate them in operations |
 | On-demand Interface state | Read state from the snapshot, not from cached fields; snapshots are refreshed per episode |
 | Symmetric operations | If newtron creates it, newtron must be able to remove it; every forward config generator must have a reverse |
+| Never enter unrecoverable states | If the safety net (intent record) cannot be written, do not create a situation that needs one |
+| Structural proof over heuristics | Use structural facts (lock acquired + intent exists = previous holder crashed) instead of heuristic thresholds (staleness timers) |
 | Respect abstraction boundaries | If an object knows its own identity, callers must not re-supply it |
 | Verb-first, domain-intent naming | Verbs come first (`createVlan` not `vlanCreate`); names describe domain intent, not CONFIG_DB mechanics |
 | Node as device isolation boundary | Every device-scoped operation is a Node method; cross-device coordination belongs in the orchestrator |
 | Abstract Node | Same code path, different initialization; the shadow enforces the same ordering constraints as a physical device |
-| Public API boundary | Public types expose caller intent; internal types expose implementation; orchestrators are consumers, not insiders |
+| Public API boundary | Public types expose caller intent; internal types expose implementation; orchestrators are consumers, not insiders; a boundary justified by one type applies uniformly to all types at that boundary |
 | Transparent transport | The transport layer is a mechanical shim; domain logic lives in the public API; new endpoints are additive with zero infrastructure changes |
 | YANG-derived schema validation | YANG is the authority for value constraints; fail closed on unknown tables and fields; validate every ChangeSet before any Redis write |
 | Write ordering and daemon settling | Config functions encode dependency order in their return slice; daemon settling is verified by polling, never by sleeping in the write path |

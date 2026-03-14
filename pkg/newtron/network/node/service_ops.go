@@ -373,6 +373,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.apply-service")
+	cs.ReverseOp = "interface.remove-service"
+	cs.OperationParams = map[string]string{"interface": i.name}
 	configDB := n.ConfigDB()
 
 	// Binding is the first entry — write-ahead manifest for crash recovery.

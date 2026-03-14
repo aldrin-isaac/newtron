@@ -563,3 +563,30 @@ func (c *Client) Execute(device string, req api.ExecuteRequest) (*newtron.WriteR
 	}
 	return &result, nil
 }
+
+// ============================================================================
+// Zombie operation methods (crash recovery)
+// ============================================================================
+
+// ReadZombie reads the zombie operation record from STATE_DB (no lock required).
+func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
+	var result newtron.OperationIntent
+	if err := c.doGet(c.nodePath(device)+"/zombie", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RollbackZombie reverses a zombie operation's changes.
+func (c *Client) RollbackZombie(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	var result newtron.WriteResult
+	if err := c.doPost(c.nodePath(device)+"/zombie/rollback"+execQuery(opts), nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ClearZombie deletes the zombie operation record without rollback.
+func (c *Client) ClearZombie(device string) error {
+	return c.doPost(c.nodePath(device)+"/zombie/clear", nil, nil)
+}

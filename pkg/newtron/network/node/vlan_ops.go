@@ -147,10 +147,12 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 			pc.Check(vlanID >= 1 && vlanID <= 4094, "valid VLAN ID", fmt.Sprintf("must be 1-4094, got %d", vlanID)).
 				RequireVLANNotExists(vlanID)
 		},
-		func() []sonic.Entry { return createVlanConfig(vlanID, opts) })
+		func() []sonic.Entry { return createVlanConfig(vlanID, opts) },
+		"device.delete-vlan")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID)}
 	util.WithDevice(n.name).Infof("Created VLAN %d", vlanID)
 	return cs, nil
 }
@@ -203,10 +205,12 @@ func (n *Node) AddVLANMember(ctx context.Context, vlanID int, interfaceName stri
 		func(pc *PreconditionChecker) {
 			pc.RequireVLANExists(vlanID).RequireInterfaceExists(interfaceName)
 		},
-		func() []sonic.Entry { return createVlanMemberConfig(vlanID, interfaceName, tagged) })
+		func() []sonic.Entry { return createVlanMemberConfig(vlanID, interfaceName, tagged) },
+		"device.remove-vlan-member")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID), "interface": interfaceName}
 	taggingMode := "untagged"
 	if tagged {
 		taggingMode = "tagged"
@@ -242,10 +246,12 @@ func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*C
 				pc.RequireVRFExists(opts.VRF)
 			}
 		},
-		func() []sonic.Entry { return createSviConfig(vlanID, opts) })
+		func() []sonic.Entry { return createSviConfig(vlanID, opts) },
+		"device.remove-svi")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID)}
 	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
 	return cs, nil
 }

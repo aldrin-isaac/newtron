@@ -161,6 +161,9 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/node/{device}/statedb/{table}/{key}", s.handleQueryStateDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/check", s.handleCheckBGPSessions)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/lag/{name}", s.handleShowLAGDetail)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/zombie", s.handleReadZombie)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/zombie/rollback", s.handleRollbackZombie)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/zombie/clear", s.handleClearZombie)
 
 	// ====================================================================
 	// Node composite operations

@@ -2,7 +2,9 @@ package newtron
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +31,11 @@ type Node struct {
 
 	// history holds applied (committed) ChangeSets for VerifyCommitted.
 	history []*node.ChangeSet
+
+	// bypassZombieCheck is set by rollback/clear operations to skip the
+	// zombie-operation guard in Execute(). These operations ARE the
+	// resolution path for zombie operations.
+	bypassZombieCheck bool
 }
 
 // ============================================================================
@@ -186,10 +193,43 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 		result.ChangeCount += len(cs.Changes)
 	}
 
-	// Apply all pending changesets
-	for _, cs := range n.pending {
+	// Build and write intent record for crash recovery.
+	ops := make([]sonic.IntentOperation, len(n.pending))
+	for i, cs := range n.pending {
+		ops[i] = sonic.IntentOperation{
+			Name:      cs.Operation,
+			Params:    cs.OperationParams,
+			ReverseOp: cs.ReverseOp,
+		}
+	}
+	intent := &sonic.OperationIntent{
+		Holder:     node.BuildLockHolder(),
+		Created:    time.Now().UTC(),
+		Operations: ops,
+	}
+	if err := n.internal.WriteIntent(intent); err != nil {
+		return result, fmt.Errorf("writing intent: %w", err)
+	}
+
+	// Apply all pending changesets with per-operation progress tracking
+	for i, cs := range n.pending {
+		// Mark operation started
+		now := time.Now().UTC()
+		intent.Operations[i].Started = &now
+		if err := n.internal.UpdateIntentOps(intent); err != nil {
+			util.WithDevice(n.internal.Name()).Warnf("updating intent (started): %v", err)
+		}
+
 		if err := cs.Apply(n.internal); err != nil {
+			// Intent remains for recovery — do NOT delete
 			return result, fmt.Errorf("apply failed: %w", err)
+		}
+
+		// Mark operation completed
+		completed := time.Now().UTC()
+		intent.Operations[i].Completed = &completed
+		if err := n.internal.UpdateIntentOps(intent); err != nil {
+			util.WithDevice(n.internal.Name()).Warnf("updating intent (completed): %v", err)
 		}
 	}
 	result.Applied = true
@@ -199,6 +239,7 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	var vr VerificationResult
 	for _, cs := range n.pending {
 		if err := cs.Verify(n.internal); err != nil {
+			// Intent remains for recovery — do NOT delete
 			return result, fmt.Errorf("verify failed: %w", err)
 		}
 		if cs.Verification != nil {
@@ -220,7 +261,8 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	}
 	result.Verification = &vr
 	if !allPassed {
-		// Move to history even on partial failure so VerifyCommitted can recheck
+		// Move to history even on partial failure so VerifyCommitted can recheck.
+		// Intent remains — verification failure means state may be inconsistent.
 		n.history = append(n.history, n.pending...)
 		n.pending = nil
 		return result, &VerificationFailedError{
@@ -230,6 +272,11 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 		}
 	}
 	result.Verified = true
+
+	// Success — delete intent record
+	if err := n.internal.DeleteIntent(); err != nil {
+		util.WithDevice(n.internal.Name()).Warnf("deleting intent: %v", err)
+	}
 
 	n.history = append(n.history, n.pending...)
 	n.pending = nil
@@ -249,11 +296,19 @@ func (n *Node) Rollback() {
 //
 // If opts.Execute is false (dry-run), returns a preview without applying.
 // If opts.NoSave is true, skips config save after commit.
+// If a zombie operation is detected during Lock(), returns ErrDeviceZombieOperation
+// unless bypassZombieCheck is set (used by rollback/clear operations).
 func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.Context) error) (*WriteResult, error) {
 	if err := n.Lock(); err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
 	}
 	defer n.Unlock()
+
+	// Block if zombie operation exists — device is in unknown partial state.
+	// Rollback and ClearZombie bypass this check (they ARE the resolution).
+	if !n.bypassZombieCheck && n.internal.ZombieOperation() != nil {
+		return nil, util.ErrDeviceZombieOperation
+	}
 
 	if err := fn(ctx); err != nil {
 		return nil, err
@@ -306,6 +361,278 @@ func (n *Node) VerifyCommitted(ctx context.Context) (*VerificationResult, error)
 		}
 	}
 	return &vr, nil
+}
+
+// ============================================================================
+// Zombie Operation Methods (crash recovery)
+// ============================================================================
+
+// ZombieOperation returns the stale intent found during Lock(), or nil.
+func (n *Node) ZombieOperation() *OperationIntent {
+	z := n.internal.ZombieOperation()
+	if z == nil {
+		return nil
+	}
+	return convertIntent(z)
+}
+
+// ReadZombie reads the current intent from STATE_DB (live read, no lock required).
+// Returns nil if no intent exists.
+func (n *Node) ReadZombie(ctx context.Context) (*OperationIntent, error) {
+	z, err := n.internal.ReadIntent()
+	if err != nil {
+		return nil, err
+	}
+	if z == nil {
+		return nil, nil
+	}
+	return convertIntent(z), nil
+}
+
+// ClearZombie deletes the intent record from STATE_DB without reversing.
+// Must be called under lock (use within Execute with bypassZombieCheck).
+func (n *Node) ClearZombie(ctx context.Context) error {
+	return n.internal.ClearZombie()
+}
+
+// SetBypassZombieCheck enables or disables the zombie-operation guard bypass.
+// Used by rollback/clear endpoints which ARE the resolution path.
+func (n *Node) SetBypassZombieCheck(bypass bool) { n.bypassZombieCheck = bypass }
+
+// PreviewRollback returns a preview of what RollbackZombie would do without
+// executing any changes. Uses the same skip/done/reverse logic as RollbackZombie
+// so dry-run output exactly matches what execute would do.
+func PreviewRollback(intent *OperationIntent) string {
+	if intent == nil {
+		return "No zombie operation.\n"
+	}
+
+	var preview strings.Builder
+	preview.WriteString(fmt.Sprintf("Zombie operation by %s (created %s)\n",
+		intent.Holder, intent.Created.Format(time.RFC3339)))
+	if intent.Phase != "" {
+		preview.WriteString(fmt.Sprintf("Phase: %s\n", intent.Phase))
+	}
+	preview.WriteString("Operations (would be reversed in this order):\n")
+
+	step := 0
+	for i := len(intent.Operations) - 1; i >= 0; i-- {
+		op := intent.Operations[i]
+		step++
+
+		if op.Reversed != nil {
+			preview.WriteString(fmt.Sprintf("  %d. [DONE] %s (already reversed)\n", step, op.Name))
+			continue
+		}
+		if op.Started == nil {
+			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (never started)\n", step, op.Name))
+			continue
+		}
+		if op.ReverseOp == "" {
+			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (terminal)\n", step, op.Name))
+			continue
+		}
+
+		status := "partial"
+		if op.Completed != nil {
+			status = "complete"
+		}
+		preview.WriteString(fmt.Sprintf("  %d. [REVERSE] %s → %s (%s)\n", step, op.Name, op.ReverseOp, status))
+	}
+
+	return preview.String()
+}
+
+// RollbackZombie reverses a zombie operation's changes to restore the device
+// to its last known-good state. Calls the reverse of each operation in reverse
+// order. Must be called within Execute (needs lock). Sets bypassZombieCheck.
+//
+// Rollback is idempotent: each successfully reversed operation is marked with
+// a Reversed timestamp in the intent record. If rollback crashes, retry reads
+// the intent, skips already-reversed operations, and continues where it left off.
+// Precondition failures (resource doesn't exist) are treated as no-ops — the
+// resource was never created or was already cleaned up.
+func (n *Node) RollbackZombie(ctx context.Context) (*WriteResult, error) {
+	// Read the intent from STATE_DB (live read, authoritative)
+	intent, err := n.internal.ReadIntent()
+	if err != nil {
+		return nil, fmt.Errorf("reading intent: %w", err)
+	}
+	if intent == nil {
+		return &WriteResult{}, nil
+	}
+
+	// Transition to rolling_back phase (idempotent — may already be rolling_back
+	// from a crashed previous attempt)
+	if intent.Phase != sonic.IntentPhaseRollingBack {
+		now := time.Now().UTC()
+		intent.Phase = sonic.IntentPhaseRollingBack
+		intent.RollbackHolder = node.BuildLockHolder()
+		intent.RollbackStarted = &now
+		if err := n.internal.UpdateIntentOps(intent); err != nil {
+			util.WithDevice(n.internal.Name()).Warnf("updating intent phase: %v", err)
+		}
+	}
+
+	// Reverse each operation in reverse order
+	var preview strings.Builder
+	reversed := 0
+	for i := len(intent.Operations) - 1; i >= 0; i-- {
+		op := &intent.Operations[i]
+
+		// Skip operations already reversed (previous rollback attempt)
+		if op.Reversed != nil {
+			preview.WriteString(fmt.Sprintf("  [DONE] %s (already reversed)\n", op.Name))
+			continue
+		}
+
+		// Skip operations that never started (no timestamps)
+		if op.Started == nil {
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s (never started)\n", op.Name))
+			continue
+		}
+
+		// Skip terminal operations (no ReverseOp — nothing to undo)
+		if op.ReverseOp == "" {
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s (terminal)\n", op.Name))
+			continue
+		}
+
+		status := "partial"
+		if op.Completed != nil {
+			status = "complete"
+		}
+
+		cs, err := n.dispatchReverse(ctx, op.ReverseOp, op.Params)
+		if errors.Is(err, util.ErrPreconditionFailed) {
+			// Resource doesn't exist — nothing to reverse (partial apply
+			// that never wrote the resource, or already cleaned up)
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s → %s (resource not found)\n", op.Name, op.ReverseOp))
+		} else if err != nil {
+			return &WriteResult{
+				Preview:     preview.String(),
+				ChangeCount: reversed,
+			}, fmt.Errorf("reversing %s: %w", op.Name, err)
+		} else if cs != nil && !cs.IsEmpty() {
+			if err := cs.Apply(n.internal); err != nil {
+				return &WriteResult{
+					Preview:     preview.String(),
+					ChangeCount: reversed,
+				}, fmt.Errorf("applying reverse of %s: %w", op.Name, err)
+			}
+			reversed += cs.AppliedCount
+			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, %d changes)\n", op.Name, op.ReverseOp, status, cs.AppliedCount))
+		} else {
+			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, no changes)\n", op.Name, op.ReverseOp, status))
+		}
+
+		// Mark this operation as reversed and persist
+		now := time.Now().UTC()
+		op.Reversed = &now
+		if err := n.internal.UpdateIntentOps(intent); err != nil {
+			util.WithDevice(n.internal.Name()).Warnf("updating intent (reversed): %v", err)
+		}
+	}
+
+	// All operations reversed — delete the intent record
+	if err := n.internal.ClearZombie(); err != nil {
+		return nil, fmt.Errorf("deleting intent after rollback: %w", err)
+	}
+
+	return &WriteResult{
+		Preview:     preview.String(),
+		ChangeCount: reversed,
+		Applied:     true,
+	}, nil
+}
+
+// dispatchReverse calls the internal reverse operation by name and returns
+// its ChangeSet. Each reverse operation is existence-checking and
+// reference-aware — safe to call on partial state.
+func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map[string]string) (*node.ChangeSet, error) {
+	vlanID := func() int { id, _ := strconv.Atoi(params["vlan_id"]); return id }
+
+	switch reverseOp {
+	case "device.delete-vlan":
+		return n.internal.DeleteVLAN(ctx, vlanID())
+	case "device.remove-vlan-member":
+		return n.internal.RemoveVLANMember(ctx, vlanID(), params["interface"])
+	case "device.remove-svi":
+		return n.internal.RemoveSVI(ctx, vlanID())
+	case "device.delete-vrf":
+		return n.internal.DeleteVRF(ctx, params["vrf"])
+	case "device.unbind-ipvpn":
+		return n.internal.UnbindIPVPN(ctx, params["vrf"])
+	case "device.remove-bgp-globals":
+		return n.internal.RemoveBGPGlobals(ctx)
+	case "device.teardown-evpn":
+		return n.internal.TeardownEVPN(ctx)
+	case "device.unmap-l2vni":
+		return n.internal.UnmapL2VNI(ctx, vlanID())
+	case "device.delete-acl-table":
+		return n.internal.DeleteACLTable(ctx, params["name"])
+	case "device.delete-acl-rule":
+		return n.internal.DeleteACLRule(ctx, params["table_name"], params["rule_name"])
+	case "device.delete-portchannel":
+		return n.internal.DeletePortChannel(ctx, params["name"])
+	case "device.remove-portchannel-member":
+		return n.internal.RemovePortChannelMember(ctx, params["name"], params["member"])
+	case "device.remove-static-route":
+		return n.internal.RemoveStaticRoute(ctx, params["vrf"], params["prefix"])
+	case "device.remove-bgp-neighbor":
+		return n.internal.RemoveBGPNeighbor(ctx, params["neighbor_ip"])
+	case "device.remove-loopback":
+		return n.internal.RemoveLoopback(ctx)
+	case "interface.remove-service":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.RemoveService(ctx)
+	case "interface.remove-qos":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.RemoveQoS(ctx)
+	case "interface.unbind-acl":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.UnbindACL(ctx, params["acl_name"])
+	case "interface.unbind-macvpn":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.UnbindMACVPN(ctx)
+	default:
+		return nil, fmt.Errorf("unknown reverse operation %q", reverseOp)
+	}
+}
+
+// convertIntent converts internal sonic.OperationIntent to public OperationIntent.
+func convertIntent(z *sonic.OperationIntent) *OperationIntent {
+	ops := make([]IntentOperation, len(z.Operations))
+	for i, op := range z.Operations {
+		ops[i] = IntentOperation{
+			Name:      op.Name,
+			Params:    op.Params,
+			ReverseOp: op.ReverseOp,
+			Started:   op.Started,
+			Completed: op.Completed,
+			Reversed:  op.Reversed,
+		}
+	}
+	return &OperationIntent{
+		Holder:          z.Holder,
+		Created:         z.Created,
+		Phase:           z.Phase,
+		RollbackHolder:  z.RollbackHolder,
+		RollbackStarted: z.RollbackStarted,
+		Operations:      ops,
+	}
 }
 
 // ============================================================================

@@ -1,0 +1,11 @@
+digraph {
+    rankdir=TB;
+    node [shape=box];
+    "\n  Execute()  \n\n" -> "\n  Lock device  \n\n";
+    "\n  Lock device  \n\n" -> "\n  fn(ctx)  \n  builds pending  \n  ChangeSets  \n\n";
+    "\n  fn(ctx)  \n  builds pending  \n  ChangeSets  \n\n" -> "\n  WriteIntent  \n  holder, ops[], TTL  \n\n";
+    "\n  WriteIntent  \n  holder, ops[], TTL  \n\n" -> "\n  per op:  \n  Started > Apply > Completed  \n  (2 STATE_DB writes each)  \n\n";
+    "\n  per op:  \n  Started > Apply > Completed  \n  (2 STATE_DB writes each)  \n\n" -> "\n  Verify all  \n  ChangeSets  \n\n";
+    "\n  Verify all  \n  ChangeSets  \n\n" -> "\n  DeleteIntent  \n\n";
+    "\n  DeleteIntent  \n\n" -> "\n  Save + Unlock  \n\n";
+}

@@ -201,10 +201,12 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 	}
 	cs, err := n.op("create-acl-table", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
-		func() []sonic.Entry { return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) })
+		func() []sonic.Entry { return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) },
+		"device.delete-acl-table")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"name": name}
 	util.WithDevice(n.name).Infof("Created ACL table %s", name)
 	return cs, nil
 }
@@ -213,10 +215,12 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableCon
 func (n *Node) AddACLRule(ctx context.Context, tableName, ruleName string, opts ACLRuleConfig) (*ChangeSet, error) {
 	cs, err := n.op("add-acl-rule", tableName, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(tableName) },
-		func() []sonic.Entry { return createAclRuleConfig(tableName, ruleName, opts) })
+		func() []sonic.Entry { return createAclRuleConfig(tableName, ruleName, opts) },
+		"device.delete-acl-rule")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"table_name": tableName, "rule_name": ruleName}
 	util.WithDevice(n.name).Infof("Added rule %s to ACL table %s", ruleName, tableName)
 	return cs, nil
 }

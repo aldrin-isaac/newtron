@@ -20,6 +20,7 @@ func (n *Node) ConfigureLoopback(ctx context.Context) (*ChangeSet, error) {
 	}
 
 	cs := NewChangeSet(n.name, "device.configure-loopback")
+	cs.ReverseOp = "device.remove-loopback"
 
 	loopbackIP := ""
 	if n.resolved != nil {

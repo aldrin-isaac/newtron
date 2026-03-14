@@ -1,0 +1,12 @@
+digraph {
+    rankdir=TB;
+    node [shape=box];
+    "\n  WriteIntent  \n\n" -> "\n  op[0]  \n  Started + Completed  \n\n" [label=" ok"];
+    "\n  op[0]  \n  Started + Completed  \n\n" -> "\n  op[1]  \n  Started only  \n\n" [label=" ok"];
+    "\n  op[1]  \n  Started only  \n\n" -> "\n  CRASH  \n\n" [label=" Apply fails", style=dashed];
+    "\n  op[2]  \n  no timestamps  \n\n" [style=dashed];
+    "\n  op[1]  \n  Started only  \n\n" -> "\n  op[2]  \n  no timestamps  \n\n" [style=invis];
+
+    "\n  NEWTRON_INTENT|device  \n  remains in STATE_DB  \n\n" [shape=box, style=dashed];
+    "\n  CRASH  \n\n" -> "\n  NEWTRON_INTENT|device  \n  remains in STATE_DB  \n\n" [style=dashed, label=" intent survives"];
+}

@@ -41,6 +41,8 @@ func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string, macvpnDef
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.bind-macvpn")
+	cs.ReverseOp = "interface.unbind-macvpn"
+	cs.OperationParams = map[string]string{"interface": i.name}
 
 	vlanName := i.name // e.g., "Vlan100"
 

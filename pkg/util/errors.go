@@ -9,11 +9,12 @@ import (
 
 // Sentinel errors for precondition failures
 var (
-	ErrNotConnected       = errors.New("device not connected")
-	ErrPermissionDenied   = errors.New("permission denied")
-	ErrPreconditionFailed = errors.New("precondition not met")
-	ErrValidationFailed   = errors.New("validation failed")
-	ErrDeviceLocked       = errors.New("device is locked by another process")
+	ErrNotConnected          = errors.New("device not connected")
+	ErrPermissionDenied      = errors.New("permission denied")
+	ErrPreconditionFailed    = errors.New("precondition not met")
+	ErrValidationFailed      = errors.New("validation failed")
+	ErrDeviceLocked          = errors.New("device is locked by another process")
+	ErrDeviceZombieOperation = errors.New("device has a zombie operation from a crashed process — inspect with 'device zombie', then rollback or clear before proceeding")
 )
 
 // PreconditionError represents a failed precondition check with context

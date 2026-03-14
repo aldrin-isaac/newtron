@@ -1,0 +1,11 @@
+digraph {
+    rankdir=TB;
+    node [shape=box];
+
+    "\n  reverse op  \n  returns error  \n\n" -> "\n  PreconditionError  \n  (resource doesn't exist)  \n\n";
+    "\n  reverse op  \n  returns error  \n\n" -> "\n  domain error  \n  (has active consumers)  \n\n";
+
+    "\n  PreconditionError  \n  (resource doesn't exist)  \n\n" -> "\n  rollback: SKIP  \n  forward never  \n  created it  \n\n";
+
+    "\n  domain error  \n  (has active consumers)  \n\n" -> "\n  rollback: ABORT  \n  unexpected state,  \n  operator investigates  \n\n";
+}

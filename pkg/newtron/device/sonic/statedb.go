@@ -4,6 +4,7 @@ package sonic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -326,6 +327,156 @@ func (c *StateDBClient) ReleaseLock(device, holder string) error {
 		return fmt.Errorf("lock holder mismatch for %s", device)
 	case -1:
 		return nil // Lock doesn't exist, treat as success
+	}
+	return nil
+}
+
+// ============================================================================
+// Operation Intent Records — crash recovery for multi-entry writes
+// ============================================================================
+
+// IntentOperation represents a single pending operation within an intent record.
+type IntentOperation struct {
+	Name      string            `json:"name"`
+	Params    map[string]string `json:"params"`
+	ReverseOp string            `json:"reverse_op,omitempty"`
+	Started   *time.Time        `json:"started,omitempty"`
+	Completed *time.Time        `json:"completed,omitempty"`
+	Reversed  *time.Time        `json:"reversed,omitempty"`
+}
+
+// Intent phases. Empty string means "applying" (the default/forward phase).
+const (
+	IntentPhaseApplying    = ""
+	IntentPhaseRollingBack = "rolling_back"
+)
+
+// OperationIntent is the STATE_DB record for a pending multi-entry write.
+// Written before Apply begins, deleted after verification succeeds.
+// If the process crashes, the intent remains for recovery.
+//
+// During rollback, Phase transitions to "rolling_back" and each operation
+// gets a Reversed timestamp as its reverse completes. If rollback crashes,
+// retry skips already-reversed operations and continues where it left off.
+type OperationIntent struct {
+	Holder          string            `json:"holder"`
+	Created         time.Time         `json:"created"`
+	Phase           string            `json:"phase,omitempty"`
+	RollbackHolder  string            `json:"rollback_holder,omitempty"`
+	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
+	Operations      []IntentOperation `json:"operations"`
+}
+
+// WriteIntent writes an operation intent to STATE_DB.
+// Key format: NEWTRON_INTENT|<device>. No Redis EXPIRE — the intent
+// persists until explicitly deleted by DeleteIntent, rollback, or clear.
+func (c *StateDBClient) WriteIntent(device string, intent *OperationIntent) error {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+
+	opsJSON, err := json.Marshal(intent.Operations)
+	if err != nil {
+		return fmt.Errorf("marshaling intent operations: %w", err)
+	}
+
+	// Always write all fields — HSET merges, so omitting a field would
+	// leave stale values from a previous intent on the same key.
+	rbStarted := ""
+	if intent.RollbackStarted != nil {
+		rbStarted = intent.RollbackStarted.UTC().Format(time.RFC3339)
+	}
+	fields := map[string]any{
+		"holder":           intent.Holder,
+		"created":          intent.Created.UTC().Format(time.RFC3339),
+		"operations":       string(opsJSON),
+		"phase":            intent.Phase,
+		"rollback_holder":  intent.RollbackHolder,
+		"rollback_started": rbStarted,
+	}
+
+	if err := c.client.HSet(c.ctx, key, fields).Err(); err != nil {
+		return fmt.Errorf("writing intent for %s: %w", device, err)
+	}
+	return nil
+}
+
+// ReadIntent reads the operation intent from STATE_DB.
+// Returns (nil, nil) if no intent exists.
+func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error) {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+
+	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("reading intent for %s: %w", device, err)
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+
+	created, err := time.Parse(time.RFC3339, vals["created"])
+	if err != nil {
+		return nil, fmt.Errorf("parsing intent created time: %w", err)
+	}
+
+	var ops []IntentOperation
+	if opsStr, ok := vals["operations"]; ok && opsStr != "" {
+		if err := json.Unmarshal([]byte(opsStr), &ops); err != nil {
+			return nil, fmt.Errorf("parsing intent operations: %w", err)
+		}
+	}
+
+	intent := &OperationIntent{
+		Holder:     vals["holder"],
+		Created:    created,
+		Phase:      vals["phase"],
+		RollbackHolder: vals["rollback_holder"],
+		Operations: ops,
+	}
+	if rbStarted, ok := vals["rollback_started"]; ok && rbStarted != "" {
+		t, err := time.Parse(time.RFC3339, rbStarted)
+		if err != nil {
+			return nil, fmt.Errorf("parsing rollback_started: %w", err)
+		}
+		intent.RollbackStarted = &t
+	}
+	return intent, nil
+}
+
+// UpdateIntentOps updates the mutable fields of an existing intent:
+// operations, phase, rollback_holder, and rollback_started.
+// Called during both apply (started/completed timestamps) and rollback
+// (phase transition, reversed timestamps).
+func (c *StateDBClient) UpdateIntentOps(device string, intent *OperationIntent) error {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+
+	opsJSON, err := json.Marshal(intent.Operations)
+	if err != nil {
+		return fmt.Errorf("marshaling intent operations: %w", err)
+	}
+
+	fields := map[string]any{
+		"operations": string(opsJSON),
+	}
+	if intent.Phase != "" {
+		fields["phase"] = intent.Phase
+	}
+	if intent.RollbackHolder != "" {
+		fields["rollback_holder"] = intent.RollbackHolder
+	}
+	if intent.RollbackStarted != nil {
+		fields["rollback_started"] = intent.RollbackStarted.UTC().Format(time.RFC3339)
+	}
+
+	if err := c.client.HSet(c.ctx, key, fields).Err(); err != nil {
+		return fmt.Errorf("updating intent for %s: %w", device, err)
+	}
+	return nil
+}
+
+// DeleteIntent removes the operation intent from STATE_DB.
+func (c *StateDBClient) DeleteIntent(device string) error {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+	if err := c.client.Del(c.ctx, key).Err(); err != nil {
+		return fmt.Errorf("deleting intent for %s: %w", device, err)
 	}
 	return nil
 }

@@ -68,6 +68,12 @@ type Node struct {
 	offline     bool
 	accumulated []sonic.Entry
 
+	// zombieOp stores an existing intent found during Lock(). Any intent
+	// present at lock time indicates a crashed process — the lock
+	// acquisition proves the previous holder is gone. Execute() returns
+	// ErrDeviceZombieOperation to block further changes until resolved.
+	zombieOp *sonic.OperationIntent
+
 	mu sync.RWMutex
 }
 
@@ -421,7 +427,7 @@ func (n *Node) Lock() error {
 		return nil
 	}
 
-	holder := buildLockHolder()
+	holder := BuildLockHolder()
 	if err := n.conn.Lock(holder, defaultLockTTL); err != nil {
 		return err
 	}
@@ -441,11 +447,27 @@ func (n *Node) Lock() error {
 	n.interfaces = make(map[string]*Interface)
 	n.loadInterfaces()
 
+	// Check for existing intent from a crashed process.
+	// If you hold the lock and an intent exists, the previous holder
+	// crashed between WriteIntent and DeleteIntent. The lock acquisition
+	// proves the previous holder is gone — staleness is irrelevant.
+	n.zombieOp = nil
+	if stateClient := n.conn.StateClient(); stateClient != nil {
+		intent, err := stateClient.ReadIntent(n.name)
+		if err != nil {
+			util.WithDevice(n.name).Warnf("reading intent on lock: %v", err)
+		} else if intent != nil {
+			n.zombieOp = intent
+			util.WithDevice(n.name).Warnf("zombie operation detected: holder=%s, created=%s, operations=%d",
+				intent.Holder, intent.Created.Format(time.RFC3339), len(intent.Operations))
+		}
+	}
+
 	return nil
 }
 
-// buildLockHolder constructs a holder identity string: "user@hostname".
-func buildLockHolder() string {
+// BuildLockHolder constructs a holder identity string: "user@hostname".
+func BuildLockHolder() string {
 	username := "unknown"
 	if u, err := user.Current(); err == nil {
 		username = u.Username
@@ -533,7 +555,8 @@ func (n *Node) GetInterface(name string) (*Interface, error) {
 
 	// Verify interface exists in config_db
 	if !n.interfaceExistsInConfigDB(name) {
-		return nil, fmt.Errorf("interface %s not found on device %s", name, n.name)
+		return nil, util.NewPreconditionError("get-interface", name, "interface exists",
+			fmt.Sprintf("not found on device %s", n.name))
 	}
 
 	// Create Interface with parent reference to this Node
@@ -763,6 +786,77 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	_, _ = tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
 
 	return nil
+}
+
+// ============================================================================
+// Intent Record Methods
+// ============================================================================
+
+// ZombieOperation returns the existing intent found during Lock(), or nil.
+func (n *Node) ZombieOperation() *sonic.OperationIntent { return n.zombieOp }
+
+// ClearZombie deletes the zombie intent from STATE_DB without reversing.
+func (n *Node) ClearZombie() error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return fmt.Errorf("no STATE_DB client")
+	}
+	if err := stateClient.DeleteIntent(n.name); err != nil {
+		return err
+	}
+	n.zombieOp = nil
+	return nil
+}
+
+// WriteIntent writes an operation intent to STATE_DB.
+func (n *Node) WriteIntent(intent *sonic.OperationIntent) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return fmt.Errorf("no STATE_DB client")
+	}
+	return stateClient.WriteIntent(n.name, intent)
+}
+
+// UpdateIntentOps updates the mutable fields of the current intent.
+func (n *Node) UpdateIntentOps(intent *sonic.OperationIntent) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return fmt.Errorf("no STATE_DB client")
+	}
+	return stateClient.UpdateIntentOps(n.name, intent)
+}
+
+// DeleteIntent removes the operation intent from STATE_DB.
+func (n *Node) DeleteIntent() error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return fmt.Errorf("no STATE_DB client")
+	}
+	return stateClient.DeleteIntent(n.name)
+}
+
+// ReadIntent reads the current intent from STATE_DB (live read).
+func (n *Node) ReadIntent() (*sonic.OperationIntent, error) {
+	if n.conn == nil {
+		return nil, util.ErrNotConnected
+	}
+	stateClient := n.conn.StateClient()
+	if stateClient == nil {
+		return nil, fmt.Errorf("no STATE_DB client")
+	}
+	return stateClient.ReadIntent(n.name)
 }
 
 // ============================================================================

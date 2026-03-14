@@ -348,6 +348,7 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 
 	asnStr := fmt.Sprintf("%d", resolved.UnderlayASN)
 	cs := NewChangeSet(n.name, "device.configure-bgp")
+	cs.ReverseOp = "device.remove-bgp-globals"
 
 	// bgpcfgd requires DEVICE_METADATA["localhost"]["bgp_asn"] and
 	// DEVICE_METADATA["localhost"]["type"] as explicit dependencies.

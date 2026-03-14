@@ -79,6 +79,8 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 		ActivateIPv4: true,
 	})
 	cs := buildChangeSet(n.Name(), "interface.add-bgp-neighbor", config, ChangeAdd)
+	cs.ReverseOp = "device.remove-bgp-neighbor"
+	cs.OperationParams = map[string]string{"neighbor_ip": neighborIP}
 
 	util.WithDevice(n.Name()).Infof("Adding direct BGP neighbor %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)

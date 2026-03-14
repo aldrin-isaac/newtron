@@ -1,7 +1,7 @@
 // Package newtron provides the top-level API for the newtron network automation system.
 //
 // This file defines all types, constants, request/response structs, and error types
-// used by the newtron API layer. It imports only stdlib packages.
+// used by the newtron API layer.
 package newtron
 
 import (
@@ -746,6 +746,37 @@ type RoutePolicyRuleEntry struct {
 	PrefixList string              `json:"prefix_list,omitempty"`
 	Community  string              `json:"community,omitempty"`
 	Set        *RoutePolicySetSpec `json:"set,omitempty"`
+}
+
+// ============================================================================
+// Operation Intent Types (crash recovery)
+// ============================================================================
+
+// IntentOperation represents a single pending operation within an intent record.
+type IntentOperation struct {
+	Name      string            `json:"name"`
+	Params    map[string]string `json:"params,omitempty"`
+	ReverseOp string            `json:"reverse_op,omitempty"`
+	Started   *time.Time        `json:"started,omitempty"`
+	Completed *time.Time        `json:"completed,omitempty"`
+	Reversed  *time.Time        `json:"reversed,omitempty"`
+}
+
+// OperationIntent is a crash-recovery record stored in STATE_DB.
+// Written before Commit applies ChangeSets, deleted on success.
+// If the process crashes, the intent remains for the operator to
+// inspect and roll back via 'device zombie'.
+//
+// During rollback, Phase transitions to "rolling_back". Each operation
+// gets a Reversed timestamp as its reverse completes. If rollback crashes,
+// retry skips already-reversed operations and continues where it left off.
+type OperationIntent struct {
+	Holder          string            `json:"holder"`
+	Created         time.Time         `json:"created"`
+	Phase           string            `json:"phase,omitempty"`
+	RollbackHolder  string            `json:"rollback_holder,omitempty"`
+	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
+	Operations      []IntentOperation `json:"operations"`
 }
 
 // ============================================================================

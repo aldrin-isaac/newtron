@@ -1,0 +1,24 @@
+digraph {
+    rankdir=TB;
+    node [shape=box];
+
+    rollback [label="\n  RollbackZombie  \n\n"];
+    phase [label="\n  Phase = rolling_back  \n  set RollbackHolder  \n  set RollbackStarted  \n\n"];
+    iterate [label="\n  iterate ops in reverse order  \n\n"];
+    dispatch [label="\n  dispatchReverse  \n  call domain reverse op  \n\n"];
+    precond [label="\n  PreconditionError  \n  → skip (not found)  \n\n"];
+    abort [label="\n  other error  \n  → abort rollback  \n\n"];
+    apply [label="\n  Apply ChangeSet  \n  mark op.Reversed  \n  persist to STATE_DB  \n\n"];
+    done [label="\n  all ops processed  \n  → DeleteIntent  \n\n"];
+
+    rollback -> phase;
+    phase -> iterate;
+    iterate -> dispatch;
+    iterate -> done [label=" done"];
+
+    dispatch -> precond;
+    dispatch -> abort;
+    dispatch -> apply [label=" success"];
+
+    apply -> iterate [style=dashed, label=" next op"];
+}

@@ -151,6 +151,10 @@ func TestAPICompleteness(t *testing.T) {
 			"RestartService":    true,
 			"ExecCommand":       true,
 			"VerifyCommitted":   true,
+			// Zombie operations
+			"ReadZombie":      true,
+			"RollbackZombie":  true,
+			"ClearZombie":     true,
 			// Composite
 			"DeliverComposite": true,
 			"VerifyComposite":  true,
@@ -193,6 +197,8 @@ func TestAPICompleteness(t *testing.T) {
 			"Close":          "server handles connection lifecycle",
 			"Commit":         "server handles commit via Execute/connectAndExecute",
 			"Rollback":       "server handles rollback internally",
+			"ZombieOperation":      "server-internal: cached zombie from Lock time",
+			"SetBypassZombieCheck": "server-internal: set by rollback/clear handlers",
 			"PendingPreview": "exposed through WriteResult.Preview in Execute",
 			"PendingCount":   "exposed through WriteResult.ChangeCount",
 			"RegisterPort":   "abstract-mode only (topology provisioning)",

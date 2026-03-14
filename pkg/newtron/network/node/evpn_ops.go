@@ -117,10 +117,12 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 				}
 			}
 		},
-		func() []sonic.Entry { return createVniMapConfig(VLANName(vlanID), vni) })
+		func() []sonic.Entry { return createVniMapConfig(VLANName(vlanID), vni) },
+		"device.unmap-l2vni")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID)}
 	util.WithDevice(n.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
 	return cs, nil
 }
@@ -176,6 +178,7 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 	}
 
 	cs := NewChangeSet(n.name, "device.setup-evpn")
+	cs.ReverseOp = "device.teardown-evpn"
 
 	// Create VTEP (skip if exists)
 	if !n.VTEPExists() {

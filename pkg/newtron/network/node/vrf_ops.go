@@ -144,10 +144,12 @@ func (n *Node) destroyVrfConfig(vrfName string, l3vni, l3vniVlan int) []sonic.En
 func (n *Node) CreateVRF(ctx context.Context, name string, opts VRFConfig) (*ChangeSet, error) {
 	cs, err := n.op("create-vrf", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireVRFNotExists(name) },
-		func() []sonic.Entry { return createVrfConfig(name) })
+		func() []sonic.Entry { return createVrfConfig(name) },
+		"device.delete-vrf")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vrf": name}
 	util.WithDevice(n.name).Infof("Created VRF %s", name)
 	return cs, nil
 }
@@ -216,10 +218,12 @@ func (n *Node) BindIPVPN(ctx context.Context, vrfName string, ipvpnDef *spec.IPV
 	resolved := n.Resolved()
 	cs, err := n.op("bind-ipvpn", vrfName, ChangeModify,
 		func(pc *PreconditionChecker) { pc.RequireVTEPConfigured().RequireVRFExists(vrfName) },
-		func() []sonic.Entry { return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) })
+		func() []sonic.Entry { return bindIpvpnConfig(vrfName, ipvpnDef, resolved.UnderlayASN, resolved.RouterID) },
+		"device.unbind-ipvpn")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vrf": vrfName}
 	util.WithDevice(n.name).Infof("Bound VRF %s to IP-VPN (L3VNI %d, %d route-targets)", vrfName, ipvpnDef.L3VNI, len(ipvpnDef.RouteTargets))
 	return cs, nil
 }
@@ -329,10 +333,12 @@ func (n *Node) AddStaticRoute(ctx context.Context, vrfName, prefix, nextHop stri
 			pc.Check(vrfName == "" || vrfName == "default" || n.VRFExists(vrfName),
 				"VRF must exist", fmt.Sprintf("VRF '%s' not found", vrfName))
 		},
-		func() []sonic.Entry { return createStaticRouteConfig(vrfName, prefix, nextHop, metric) })
+		func() []sonic.Entry { return createStaticRouteConfig(vrfName, prefix, nextHop, metric) },
+		"device.remove-static-route")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"vrf": vrfName, "prefix": prefix}
 	util.WithDevice(n.name).Infof("Added static route %s via %s (VRF %s)", prefix, nextHop, vrfName)
 	return cs, nil
 }

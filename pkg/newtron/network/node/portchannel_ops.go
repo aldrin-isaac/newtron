@@ -33,6 +33,8 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	}
 
 	cs := NewChangeSet(n.name, "device.create-portchannel")
+	cs.ReverseOp = "device.delete-portchannel"
+	cs.OperationParams = map[string]string{"name": name}
 
 	fields := map[string]string{
 		"admin_status": "up",
@@ -114,10 +116,12 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 		},
 		func() []sonic.Entry {
 			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
-		})
+		},
+		"device.remove-portchannel-member")
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"name": pcName, "member": member}
 	util.WithDevice(n.name).Infof("Added %s to PortChannel %s", member, pcName)
 	return cs, nil
 }

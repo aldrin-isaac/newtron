@@ -138,6 +138,8 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.bind-acl")
+	cs.ReverseOp = "interface.unbind-acl"
+	cs.OperationParams = map[string]string{"interface": i.name, "acl_name": aclName}
 
 	// ACLs are shared - add this interface to existing binding list
 	configDB := n.ConfigDB()

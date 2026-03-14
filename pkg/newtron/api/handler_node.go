@@ -1453,3 +1453,66 @@ func intOrZero(v any) int {
 	n, _ := intFromAny(v)
 	return n
 }
+
+// ============================================================================
+// Zombie operation handlers
+// ============================================================================
+
+func (s *Server) handleReadZombie(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.ReadZombie(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleRollbackZombie(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
+		n.SetBypassZombieCheck(true)
+		if !opts.Execute {
+			// Dry-run: read intent and show what would be reversed
+			intent, err := n.ReadZombie(r.Context())
+			if err != nil {
+				return nil, err
+			}
+			return &newtron.WriteResult{
+				Preview: newtron.PreviewRollback(intent),
+			}, nil
+		}
+		return n.RollbackZombie(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleClearZombie(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
+		n.SetBypassZombieCheck(true)
+		return nil, n.ClearZombie(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+

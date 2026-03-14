@@ -33,6 +33,17 @@ type ChangeSet struct {
 	Changes      []Change                   `json:"changes"`
 	AppliedCount int                        `json:"applied_count"`            // number of changes successfully written by Apply(); 0 before Apply()
 	Verification *sonic.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
+
+	// OperationParams captures parameters for the intent record.
+	// Populated by the operation that creates the ChangeSet (e.g., CreateVLAN
+	// sets {"vlan_id": "100"}). Used by Commit() to build the operation list.
+	OperationParams map[string]string `json:"operation_params,omitempty"`
+
+	// ReverseOp is the operation name that undoes this operation.
+	// Set by forward operations at creation time (e.g., "device.create-vlan"
+	// sets ReverseOp="device.delete-vlan"). Empty for terminal/reverse
+	// operations that have nothing to undo.
+	ReverseOp string `json:"reverse_op,omitempty"`
 }
 
 // NewChangeSet creates a new ChangeSet.
@@ -118,9 +129,13 @@ func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeTy
 // Skip it for complex operations that need custom logic between precondition and return
 // (e.g., ApplyService, RemoveService, SetupEVPN).
 //
+// The optional reverseOp parameter sets ChangeSet.ReverseOp — the operation name
+// that undoes this one. Only forward operations set this; terminal/reverse
+// operations omit it.
+//
 // In offline mode, op() also updates the shadow ConfigDB and accumulates entries.
 func (n *Node) op(name, resource string, changeType sonic.ChangeType,
-	checks func(*PreconditionChecker), gen func() []sonic.Entry) (*ChangeSet, error) {
+	checks func(*PreconditionChecker), gen func() []sonic.Entry, reverseOp ...string) (*ChangeSet, error) {
 
 	pc := n.precondition(name, resource)
 	if checks != nil {
@@ -132,6 +147,10 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 
 	entries := gen()
 	cs := buildChangeSet(n.name, "device."+name, entries, changeType)
+
+	if len(reverseOp) > 0 {
+		cs.ReverseOp = reverseOp[0]
+	}
 
 	// Shadow update + accumulation (offline mode)
 	if n.offline {
