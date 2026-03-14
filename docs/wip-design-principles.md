@@ -239,11 +239,12 @@ for that reality.
 
 The paired framing that follows from this governs every operation:
 
-**Specs** describe what the network should look like. They are
-declarative design constraints — "this interface should have service
-customer-l3 with BGP peering" — defining the shape of the network while
-leaving room for the specifics of each deployment. They use names and
-references, never concrete values. They live in JSON files, are
+**Specs** define what services, policies, and overlays are available.
+They are the vocabulary of the network — "a service called transit
+has eBGP peering with an ingress filter" — describing *how* each
+primitive should behave, not *where* it should be applied. Which
+interface gets which service is the operator's decision, made at
+apply time via CLI or API. Specs live in JSON files, are
 version-controlled, and are authored by network architects.
 
 **Config** is what exists on the device, whether correct or not. It is
@@ -431,11 +432,12 @@ happens to mention an interface.
 
 ## 7. Definition Is Network-Scoped; Execution Is Device-Scoped
 
-"Transit peering on Ethernet0" describes what an interface should do —
-independent of which switch it's on, which AS number the switch has,
-which loopback IP it uses. The specific device context turns that
-abstract description into concrete CONFIG_DB entries. But the
-description itself belongs to the network, not to any device.
+The "transit" service defines what eBGP peering looks like — peer
+group, route policy, filter references. It says nothing about which
+interface, which switch, which AS number, or which loopback IP. When
+an operator applies it to Ethernet0 on switch1, the device context
+turns that abstract definition into concrete CONFIG_DB entries. The
+definition belongs to the network; the binding belongs to the operator.
 
 This is not organizational tidiness. It determines whether two
 lifecycles — defining what services exist and executing them on
