@@ -701,7 +701,10 @@ func (n *Node) ConfigReload(ctx context.Context) error {
 		return fmt.Errorf("config reload requires SSH connection (no SSH credentials configured)")
 	}
 
-	deadline := time.After(90 * time.Second)
+	// SONiC's _swss_ready() requires SwSS uptime > 120s. Timeout must exceed
+	// that threshold to handle cases where SwSS was recently restarted (boot
+	// patches, prior config reload).
+	deadline := time.After(150 * time.Second)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -718,7 +721,7 @@ func (n *Node) ConfigReload(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline:
-			return fmt.Errorf("config reload failed (SwSS not ready after 90s): %w (output: %s)", err, output)
+			return fmt.Errorf("config reload failed (SwSS not ready after 150s): %w (output: %s)", err, output)
 		case <-ticker.C:
 			// retry
 		}

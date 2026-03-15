@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron"
@@ -172,7 +173,7 @@ func strSliceParam(params map[string]any, key string) []string {
 	}
 }
 
-// executeForDevices runs an operation on each target device and collects results.
+// executeForDevices runs an operation on all target devices in parallel and collects results.
 // The callback fn receives the device name, returning a human-readable message and an error.
 func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, error)) *StepOutput {
 	names := r.resolveDevices(step)
@@ -182,28 +183,35 @@ func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, err
 			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
 		}}
 	}
-	details := make([]DeviceResult, 0, len(names))
-	allPassed := true
+	details := make([]DeviceResult, len(names))
 
-	for _, name := range names {
+	var wg sync.WaitGroup
+	for i, name := range names {
 		// Skip host devices for SONiC-specific operations (provision, restart-service, apply-frr-defaults, etc.)
 		// Host actions use the 'command' executor which doesn't call this helper.
 		if _, isHost := r.HostConns[name]; isHost {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC operation not applicable)"})
+			details[i] = DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC operation not applicable)"}
 			continue
 		}
-		msg, err := fn(name)
-		if err != nil {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: err.Error()})
-			allPassed = false
-			continue
-		}
-		details = append(details, DeviceResult{Device: name, Status: StepStatusPassed, Message: msg})
+		wg.Add(1)
+		go func(idx int, dev string) {
+			defer wg.Done()
+			msg, err := fn(dev)
+			if err != nil {
+				details[idx] = DeviceResult{Device: dev, Status: StepStatusError, Message: err.Error()}
+			} else {
+				details[idx] = DeviceResult{Device: dev, Status: StepStatusPassed, Message: msg}
+			}
+		}(i, name)
 	}
+	wg.Wait()
 
 	status := StepStatusPassed
-	if !allPassed {
-		status = StepStatusFailed
+	for _, d := range details {
+		if d.Status != StepStatusPassed && d.Status != StepStatusSkipped {
+			status = StepStatusFailed
+			break
+		}
 	}
 	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
 }
@@ -230,7 +238,7 @@ pollLoop:
 	return fmt.Errorf("timeout after %s", timeout)
 }
 
-// checkForDevices resolves devices, calls fn for each, and collects results.
+// checkForDevices resolves devices, calls fn for each in parallel, and collects results.
 // Use for non-polling verification executors. The callback returns status and message.
 func (r *Runner) checkForDevices(step *Step, fn func(name string) (StepStatus, string)) *StepOutput {
 	names := r.resolveDevices(step)
@@ -240,31 +248,36 @@ func (r *Runner) checkForDevices(step *Step, fn func(name string) (StepStatus, s
 			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
 		}}
 	}
-	details := make([]DeviceResult, 0, len(names))
-	allPassed := true
+	details := make([]DeviceResult, len(names))
 
-	for _, name := range names {
+	var wg sync.WaitGroup
+	for i, name := range names {
 		// Skip host devices for SONiC-specific verification (verify-health, verify-config-db, etc.)
 		// Host actions use the 'host-exec' executor which doesn't call this helper.
 		if _, isHost := r.HostConns[name]; isHost {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			details[i] = DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"}
 			continue
 		}
-		status, msg := fn(name)
-		details = append(details, DeviceResult{Device: name, Status: status, Message: msg})
-		if status != StepStatusPassed {
-			allPassed = false
-		}
+		wg.Add(1)
+		go func(idx int, dev string) {
+			defer wg.Done()
+			st, msg := fn(dev)
+			details[idx] = DeviceResult{Device: dev, Status: st, Message: msg}
+		}(i, name)
 	}
+	wg.Wait()
 
 	status := StepStatusPassed
-	if !allPassed {
-		status = StepStatusFailed
+	for _, d := range details {
+		if d.Status != StepStatusPassed && d.Status != StepStatusSkipped {
+			status = StepStatusFailed
+			break
+		}
 	}
 	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
 }
 
-// pollForDevices resolves devices, polls fn for each with timeout, and collects results.
+// pollForDevices resolves devices, polls fn for each device in parallel with timeout, and collects results.
 // The callback returns (done, message, error). On done=true, message is the success message.
 // On timeout, the last message is used as the failure detail.
 func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name string) (done bool, msg string, err error)) *StepOutput {
@@ -275,54 +288,59 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name st
 			Details: []DeviceResult{{Device: "(none)", Status: StepStatusError, Message: "no devices resolved"}},
 		}}
 	}
-	details := make([]DeviceResult, 0, len(names))
-	allPassed := true
+	details := make([]DeviceResult, len(names))
 
 	timeout := step.Expect.Timeout
 	interval := step.Expect.PollInterval
 
-	for _, name := range names {
+	var wg sync.WaitGroup
+	for i, name := range names {
 		// Skip host devices for SONiC-specific verification (verify-bgp, verify-health, etc.)
 		// Host actions use the 'host-exec' executor which doesn't call this helper.
 		if _, isHost := r.HostConns[name]; isHost {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"})
+			details[i] = DeviceResult{Device: name, Status: StepStatusSkipped, Message: "host device (SONiC verification not applicable)"}
 			continue
 		}
+		wg.Add(1)
+		go func(idx int, dev string) {
+			defer wg.Done()
 
-		var matched bool
-		var lastMsg string
-		var pollErr error
+			var matched bool
+			var lastMsg string
 
-		pollErr = pollUntil(ctx, timeout, interval, func() (bool, error) {
-			done, msg, err := fn(name)
-			lastMsg = msg
-			if err != nil {
-				return false, err
-			}
-			if done {
-				matched = true
-				return true, nil
-			}
-			return false, nil
-		})
+			pollErr := pollUntil(ctx, timeout, interval, func() (bool, error) {
+				done, msg, err := fn(dev)
+				lastMsg = msg
+				if err != nil {
+					return false, err
+				}
+				if done {
+					matched = true
+					return true, nil
+				}
+				return false, nil
+			})
 
-		if pollErr != nil && !strings.HasPrefix(pollErr.Error(), "timeout after") {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusError, Message: pollErr.Error()})
-			allPassed = false
-		} else if matched {
-			details = append(details, DeviceResult{Device: name, Status: StepStatusPassed, Message: lastMsg})
-		} else {
-			if lastMsg == "" {
-				lastMsg = fmt.Sprintf("timeout after %s", timeout)
+			if pollErr != nil && !strings.HasPrefix(pollErr.Error(), "timeout after") {
+				details[idx] = DeviceResult{Device: dev, Status: StepStatusError, Message: pollErr.Error()}
+			} else if matched {
+				details[idx] = DeviceResult{Device: dev, Status: StepStatusPassed, Message: lastMsg}
+			} else {
+				if lastMsg == "" {
+					lastMsg = fmt.Sprintf("timeout after %s", timeout)
+				}
+				details[idx] = DeviceResult{Device: dev, Status: StepStatusFailed, Message: lastMsg}
 			}
-			details = append(details, DeviceResult{Device: name, Status: StepStatusFailed, Message: lastMsg})
-			allPassed = false
-		}
+		}(i, name)
 	}
+	wg.Wait()
 
 	status := StepStatusPassed
-	if !allPassed {
-		status = StepStatusFailed
+	for _, d := range details {
+		if d.Status != StepStatusPassed && d.Status != StepStatusSkipped {
+			status = StepStatusFailed
+			break
+		}
 	}
 	return &StepOutput{Result: &StepResult{Status: status, Details: details}}
 }
@@ -334,30 +352,13 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name st
 type provisionExecutor struct{}
 
 func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	devices := r.resolveDevices(step)
-
-	var details []DeviceResult
+	var mu sync.Mutex
 	composites := make(map[string]string)
-	allPassed := true
 
-	for _, name := range devices {
-		// Skip host devices — they don't have SONiC CONFIG_DB to provision
-		if _, isHost := r.HostConns[name]; isHost {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusSkipped,
-				Message: "host device (no SONiC provisioning)",
-			})
-			continue
-		}
-
+	output := r.executeForDevices(step, func(name string) (string, error) {
 		handle, err := r.Client.GenerateComposite(name)
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("generate composite: %s", err),
-			})
-			allPassed = false
-			continue
+			return "", fmt.Errorf("generate composite: %s", err)
 		}
 
 		// Best-effort config reload to restore CONFIG_DB to saved defaults.
@@ -368,63 +369,37 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 			util.Logger.Warnf("[%s] config reload before provision skipped: %v", name, err)
 		} else {
 			if err := r.Client.RefreshWithRetry(name, 60*time.Second); err != nil {
-				details = append(details, DeviceResult{
-					Device: name, Status: StepStatusFailed,
-					Message: fmt.Sprintf("refresh after config reload: %s", err),
-				})
-				allPassed = false
-				continue
+				return "", fmt.Errorf("refresh after config reload: %s", err)
 			}
 		}
 
 		// Deliver composite — server handles lock→deliver→unlock internally
 		result, err := r.Client.DeliverComposite(name, handle.Handle, "overwrite")
 		if err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("deliver composite: %s", err),
-			})
-			allPassed = false
-			continue
+			return "", fmt.Errorf("deliver composite: %s", err)
 		}
 
 		// Refresh the device's cached CONFIG_DB and interface list so
 		// subsequent steps see the newly provisioned PORT entries.
 		if err := r.Client.Refresh(name); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("refresh after provision: %s", err),
-			})
-			allPassed = false
-			continue
+			return "", fmt.Errorf("refresh after provision: %s", err)
 		}
 
 		// Persist to config_db.json so subsequent config-reload steps
 		// re-read the provisioned config (not factory defaults).
 		if err := r.Client.SaveConfig(name); err != nil {
-			details = append(details, DeviceResult{
-				Device: name, Status: StepStatusFailed,
-				Message: fmt.Sprintf("config save after provision: %s", err),
-			})
-			allPassed = false
-			continue
+			return "", fmt.Errorf("config save after provision: %s", err)
 		}
 
+		mu.Lock()
 		composites[name] = handle.Handle
-		details = append(details, DeviceResult{
-			Device: name, Status: StepStatusPassed,
-			Message: fmt.Sprintf("provisioned (%d entries applied)", result.Applied),
-		})
-	}
+		mu.Unlock()
 
-	status := StepStatusPassed
-	if !allPassed {
-		status = StepStatusFailed
-	}
-	return &StepOutput{
-		Result:     &StepResult{Status: status, Details: details},
-		Composites: composites,
-	}
+		return fmt.Sprintf("provisioned (%d entries applied)", result.Applied), nil
+	})
+
+	output.Composites = composites
+	return output
 }
 
 // ============================================================================
