@@ -1,5 +1,7 @@
 name: boot-ssh
-description: Verify SSH reachability on both switches (factory boot baseline)
+description: |
+  Verify SSH reachability and SwSS readiness on both switches.
+  SwSS must be running for 120+ seconds before config reload will succeed.
 topology: 2node-vs
 requires: []
 
@@ -10,6 +12,8 @@ steps:
     command: "echo ok"
     expect:
       contains: "ok"
+      timeout: 120s
+      poll_interval: 5s
 
   - name: ssh-echo-switch2
     action: ssh-command
@@ -17,3 +21,21 @@ steps:
     command: "echo ok"
     expect:
       contains: "ok"
+      timeout: 120s
+      poll_interval: 5s
+
+  # SwSS must be active for 120+ seconds before config-reload will succeed.
+  # SONiC's _swss_ready() checks ActiveEnterTimestampMonotonic and rejects
+  # if uptime < 120s. On fresh boot, this means ~4 minutes after power-on.
+  - name: swss-ready
+    action: ssh-command
+    devices: [switch1, switch2]
+    command: >-
+      up=$(systemctl show swss.service --property=ActiveEnterTimestampMonotonic --value);
+      now=$(cat /proc/uptime | awk '{printf "%.0f", $1 * 1000000}');
+      elapsed=$(( (now - up) / 1000000 ));
+      [ "$elapsed" -ge 120 ] && echo "swss ready (${elapsed}s uptime)" || echo "swss not ready (${elapsed}s < 120s)"
+    expect:
+      contains: "swss ready"
+      timeout: 300s
+      poll_interval: 10s

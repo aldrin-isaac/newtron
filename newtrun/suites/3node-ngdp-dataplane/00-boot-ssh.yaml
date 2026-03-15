@@ -1,5 +1,7 @@
 name: boot-ssh
-description: SSH connectivity check for all devices (spine, leaf switches, virtual hosts)
+description: |
+  SSH connectivity check for all devices (spine, leaf switches, virtual hosts).
+  SwSS must be running for 120+ seconds before config reload will succeed.
 topology: 3node-ngdp
 
 steps:
@@ -29,6 +31,22 @@ steps:
       contains: "ok"
       timeout: 120s
       poll_interval: 5s
+
+  # SwSS must be active for 120+ seconds before config-reload will succeed.
+  # SONiC's _swss_ready() checks ActiveEnterTimestampMonotonic and rejects
+  # if uptime < 120s. On fresh boot, this means ~4 minutes after power-on.
+  - name: swss-ready
+    action: ssh-command
+    devices: [spine, leaf1, leaf2]
+    command: >-
+      up=$(systemctl show swss.service --property=ActiveEnterTimestampMonotonic --value);
+      now=$(cat /proc/uptime | awk '{printf "%.0f", $1 * 1000000}');
+      elapsed=$(( (now - up) / 1000000 ));
+      [ "$elapsed" -ge 120 ] && echo "swss ready (${elapsed}s uptime)" || echo "swss not ready (${elapsed}s < 120s)"
+    expect:
+      contains: "swss ready"
+      timeout: 300s
+      poll_interval: 10s
 
   - name: host1-echo
     action: host-exec
