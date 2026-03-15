@@ -247,7 +247,7 @@ func BGPPeerGroupAFKey(vrf, name, af string) string {
 
 // CreateBGPPeerGroupConfig returns entries for a BGP_PEER_GROUP + BGP_PEER_GROUP_AF.
 // Peer groups are service-named templates: shared attributes live here, not on neighbors.
-// Per DESIGN_PRINCIPLES.md principle 36.
+// Per DESIGN_PRINCIPLES.md §17 (BGP Peer Groups).
 func CreateBGPPeerGroupConfig(vrf, name string, afFields map[string]string) []sonic.Entry {
 	if vrf == "" {
 		vrf = "default"

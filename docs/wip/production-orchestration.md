@@ -37,8 +37,8 @@ A production orchestrator must compensate for partial failures.
 **Requirements:**
 - Track which operations succeeded on which devices during a suite run
 - On failure, invoke newtron's domain-level reverse operations to compensate
-  (not mechanical ChangeSet reversal — see DESIGN_PRINCIPLES.md Principle #23,
-  "Shared Resources and Safe Reversal")
+  (not mechanical ChangeSet reversal — see DESIGN_PRINCIPLES.md §13,
+  "Symmetric Operations — What You Create, You Can Remove")
 - Compensation must respect shared resources: RemoveService checks for remaining
   consumers before deleting VRFs, filters, etc.
 - Configurable compensation policy: auto-rollback, pause-and-ask, continue-on-error
@@ -48,7 +48,7 @@ A production orchestrator must compensate for partial failures.
 
 The HTTP API server exists (`cmd/newtron-server/`, `pkg/newtron/api/`) — it exposes
 every `pkg/newtron/` operation over HTTP with actor-based serialization. See
-DESIGN_PRINCIPLES.md Principle 29 for the architecture.
+DESIGN_PRINCIPLES.md §26 for the architecture.
 
 **Remaining gaps for production:**
 - Authentication and authorization (API keys at minimum, OIDC/RBAC eventually)

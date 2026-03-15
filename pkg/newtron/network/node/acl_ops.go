@@ -159,7 +159,7 @@ func updateAclPorts(aclName, ports string) sonic.Entry {
 
 // computeFilterHash computes the content hash for a filter spec by hashing
 // the ACL_RULE field maps that would be written to CONFIG_DB.
-// Per DESIGN_PRINCIPLES.md principle 35: hash the generated fields, not the spec.
+// Per DESIGN_PRINCIPLES.md §16 (Content-Hashed Naming): hash the generated fields, not the spec.
 func computeFilterHash(filterSpec *spec.FilterSpec) string {
 	var fieldMaps []map[string]string
 	for _, rule := range filterSpec.Rules {
