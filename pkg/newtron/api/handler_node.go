@@ -1516,3 +1516,135 @@ func (s *Server) handleClearZombie(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
+// ============================================================================
+// Zombie (new paths under /intents/zombies)
+// ============================================================================
+
+func (s *Server) handleReadZombieNew(w http.ResponseWriter, r *http.Request) {
+	s.handleReadZombie(w, r)
+}
+
+func (s *Server) handleRollbackZombieNew(w http.ResponseWriter, r *http.Request) {
+	s.handleRollbackZombie(w, r)
+}
+
+func (s *Server) handleClearZombieNew(w http.ResponseWriter, r *http.Request) {
+	s.handleClearZombie(w, r)
+}
+
+// ============================================================================
+// History operations
+// ============================================================================
+
+func (s *Server) handleReadHistory(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.ReadHistory(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleRollbackHistory(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
+		n.SetBypassZombieCheck(true)
+		n.SetSkipHistory(true)
+		if !opts.Execute {
+			preview, err := n.PreviewRollbackHistory(r.Context())
+			if err != nil {
+				return nil, err
+			}
+			return &newtron.WriteResult{Preview: preview}, nil
+		}
+		return n.RollbackHistory(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+// ============================================================================
+// Device settings
+// ============================================================================
+
+func (s *Server) handleReadSettings(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.ReadSettings(r.Context())
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleWriteSettings(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var settings newtron.DeviceSettings
+	if err := decodeJSON(r, &settings); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	_, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return nil, n.WriteSettings(r.Context(), &settings)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, &settings)
+}
+
+// ============================================================================
+// Drift detection
+// ============================================================================
+
+func (s *Server) handleDetectDrift(w http.ResponseWriter, r *http.Request) {
+	na, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	device := r.PathValue("device")
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return na.net.DetectDrift(r.Context(), device)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleNetworkDrift(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	val, err := na.net.NetworkDrift(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+

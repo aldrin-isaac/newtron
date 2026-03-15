@@ -530,6 +530,16 @@ func (tp *TopologyProvisioner) resolvePortChannelPeerASN(pc *spec.TopologyPortCh
 // Intent-based health verification
 // ============================================================================
 
+// DriftReport describes the differences between expected and actual CONFIG_DB
+// for a single device. Used by DetectDrift.
+type DriftReport struct {
+	Device   string             `json:"device"`
+	Status   string             `json:"status"` // "clean" or "drifted"
+	Missing  []sonic.DriftEntry `json:"missing,omitempty"`
+	Extra    []sonic.DriftEntry `json:"extra,omitempty"`
+	Modified []sonic.DriftEntry `json:"modified,omitempty"`
+}
+
 // HealthReport combines config intent verification with operational state checks.
 type HealthReport struct {
 	Device      string                     `json:"device"`
@@ -606,6 +616,64 @@ func (tp *TopologyProvisioner) VerifyDeviceHealth(ctx context.Context, deviceNam
 		if oc.Status == "warn" && report.Status == "pass" {
 			report.Status = "warn"
 		}
+	}
+
+	return report, nil
+}
+
+// DetectDrift compares expected CONFIG_DB (from topology + specs) against
+// actual CONFIG_DB on the device. Returns drift entries for newtron-owned tables.
+//
+// The expected state comes from GenerateDeviceComposite() — the same code
+// path that provisioning uses. The actual state comes from live CONFIG_DB.
+// Tables outside newtron's ownership map are excluded.
+func (tp *TopologyProvisioner) DetectDrift(ctx context.Context, deviceName string) (*DriftReport, error) {
+	// Step 1: Generate expected CONFIG_DB from topology + specs
+	composite, err := tp.GenerateDeviceComposite(deviceName)
+	if err != nil {
+		return nil, fmt.Errorf("generating expected config: %w", err)
+	}
+
+	// Step 2: Get the connected node and read actual CONFIG_DB
+	dev, err := tp.network.GetNode(deviceName)
+	if err != nil {
+		return nil, fmt.Errorf("getting device: %w", err)
+	}
+
+	configClient := dev.ConfigDBClient()
+	if configClient == nil {
+		return nil, fmt.Errorf("no CONFIG_DB client for %s", deviceName)
+	}
+
+	actual, err := configClient.GetRawOwnedTables(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading actual CONFIG_DB: %w", err)
+	}
+
+	// Step 3: Convert composite tables to RawConfigDB format
+	expected := sonic.RawConfigDB(composite.Tables)
+
+	// Step 4: Diff
+	ownedTables := sonic.OwnedTables()
+	diffs := sonic.DiffConfigDB(expected, actual, ownedTables)
+
+	// Build report
+	report := &DriftReport{
+		Device: deviceName,
+		Status: "clean",
+	}
+	for _, d := range diffs {
+		switch d.Type {
+		case "missing":
+			report.Missing = append(report.Missing, d)
+		case "extra":
+			report.Extra = append(report.Extra, d)
+		case "modified":
+			report.Modified = append(report.Modified, d)
+		}
+	}
+	if len(report.Missing) > 0 || len(report.Extra) > 0 || len(report.Modified) > 0 {
+		report.Status = "drifted"
 	}
 
 	return report, nil

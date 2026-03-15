@@ -568,10 +568,10 @@ func (c *Client) Execute(device string, req api.ExecuteRequest) (*newtron.WriteR
 // Zombie operation methods (crash recovery)
 // ============================================================================
 
-// ReadZombie reads the zombie operation record from STATE_DB (no lock required).
+// ReadZombie reads the zombie operation record from CONFIG_DB (no lock required).
 func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
 	var result newtron.OperationIntent
-	if err := c.doGet(c.nodePath(device)+"/zombie", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/intents/zombie", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -580,13 +580,75 @@ func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
 // RollbackZombie reverses a zombie operation's changes.
 func (c *Client) RollbackZombie(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	var result newtron.WriteResult
-	if err := c.doPost(c.nodePath(device)+"/zombie/rollback"+execQuery(opts), nil, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/intents/zombie/rollback"+execQuery(opts), nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// ClearZombie deletes the zombie operation record without rollback.
+// ClearZombie clears the zombie operation record without rollback.
 func (c *Client) ClearZombie(device string) error {
-	return c.doPost(c.nodePath(device)+"/zombie/clear", nil, nil)
+	return c.doPost(c.nodePath(device)+"/intents/zombie/clear", nil, nil)
+}
+
+// ============================================================================
+// Device settings
+// ============================================================================
+
+// ReadSettings reads newtron operational settings from a device.
+func (c *Client) ReadSettings(device string) (*newtron.DeviceSettings, error) {
+	var result newtron.DeviceSettings
+	if err := c.doGet(c.nodePath(device)+"/settings", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// WriteSettings writes newtron operational settings to a device.
+func (c *Client) WriteSettings(device string, s *newtron.DeviceSettings) error {
+	return c.doPut(c.nodePath(device)+"/settings", s, nil)
+}
+
+// ============================================================================
+// History operations
+// ============================================================================
+
+// ReadHistory returns the rolling history for a device.
+func (c *Client) ReadHistory(device string) (*newtron.HistoryResult, error) {
+	var result newtron.HistoryResult
+	if err := c.doGet(c.nodePath(device)+"/history", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RollbackHistory reverses the most recent history entry.
+func (c *Client) RollbackHistory(device string, opts newtron.ExecOpts) (*newtron.HistoryRollbackResult, error) {
+	var result newtron.HistoryRollbackResult
+	if err := c.doPost(c.nodePath(device)+"/history/rollback"+execQuery(opts), nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ============================================================================
+// Drift detection
+// ============================================================================
+
+// DetectDrift compares expected vs actual CONFIG_DB for a device.
+func (c *Client) DetectDrift(device string) (*newtron.DriftReport, error) {
+	var result newtron.DriftReport
+	if err := c.doGet(c.nodePath(device)+"/drift", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// NetworkDrift runs drift detection across all topology devices.
+func (c *Client) NetworkDrift() (*newtron.NetworkDriftSummary, error) {
+	var result newtron.NetworkDriftSummary
+	if err := c.doGet(c.networkPath()+"/drift", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }

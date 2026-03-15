@@ -76,6 +76,9 @@ func TestAPICompleteness(t *testing.T) {
 			"GenerateDeviceComposite": true,
 			"ProvisionDevices":        true,
 			"InitDevice":             true,
+			// Drift detection
+			"DetectDrift":  true,
+			"NetworkDrift": true,
 			// Connection
 			"Connect":   true,
 			"ListNodes": true,
@@ -155,6 +158,13 @@ func TestAPICompleteness(t *testing.T) {
 			"ReadZombie":      true,
 			"RollbackZombie":  true,
 			"ClearZombie":     true,
+			// History operations
+			"ReadHistory":           true,
+			"RollbackHistory":       true,
+			"PreviewRollbackHistory": true,
+			// Device settings
+			"ReadSettings":  true,
+			"WriteSettings": true,
 			// Composite
 			"DeliverComposite": true,
 			"VerifyComposite":  true,
@@ -199,6 +209,7 @@ func TestAPICompleteness(t *testing.T) {
 			"Rollback":       "server handles rollback internally",
 			"ZombieOperation":      "server-internal: cached zombie from Lock time",
 			"SetBypassZombieCheck": "server-internal: set by rollback/clear handlers",
+			"SetSkipHistory":       "server-internal: set by history rollback handler",
 			"PendingPreview": "exposed through WriteResult.Preview in Execute",
 			"PendingCount":   "exposed through WriteResult.ChangeCount",
 			"RegisterPort":   "abstract-mode only (topology provisioning)",

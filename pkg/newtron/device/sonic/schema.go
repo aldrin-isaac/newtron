@@ -492,6 +492,47 @@ var Schema = map[string]TableSchema{
 	},
 
 	// ========================================================================
+	// Newtron settings (per-device operational tuning)
+	// No YANG model — newtron-owned table
+	// ========================================================================
+
+	"NEWTRON_SETTINGS": {
+		// Key: "global" (singleton per device)
+		KeyPattern: `^global$`,
+		Fields: map[string]FieldConstraint{
+			"max_history": {Type: FieldInt, Range: intRange(0, 100)},
+		},
+	},
+
+	// ========================================================================
+	// Newtron intent/history tables (crash recovery + rolling history)
+	// No YANG model — newtron-owned tables, same pattern as NEWTRON_SERVICE_BINDING
+	// ========================================================================
+
+	"NEWTRON_INTENT": {
+		// Key: device name (singular per device — lock serializes operations)
+		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*$`,
+		Fields: map[string]FieldConstraint{
+			"holder":           {Type: FieldString},
+			"created":          {Type: FieldString}, // RFC3339
+			"phase":            {Type: FieldString, AllowEmpty: true},
+			"rollback_holder":  {Type: FieldString, AllowEmpty: true},
+			"rollback_started": {Type: FieldString, AllowEmpty: true}, // RFC3339
+			"operations":       {Type: FieldString},                   // JSON array
+		},
+	},
+
+	"NEWTRON_HISTORY": {
+		// Key: device|sequence (e.g., "leaf1|42"), max 10 entries per device
+		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*\|\d+$`,
+		Fields: map[string]FieldConstraint{
+			"holder":     {Type: FieldString},
+			"timestamp":  {Type: FieldString}, // RFC3339
+			"operations": {Type: FieldString}, // JSON array
+		},
+	},
+
+	// ========================================================================
 	// Service tables (service_ops.go)
 	// YANG: sonic-route-map.yang, sonic-routing-policy-sets.yang
 	// NEWTRON_SERVICE_BINDING: newtron-specific (no YANG model)

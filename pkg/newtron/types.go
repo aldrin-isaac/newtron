@@ -762,7 +762,7 @@ type IntentOperation struct {
 	Reversed  *time.Time        `json:"reversed,omitempty"`
 }
 
-// OperationIntent is a crash-recovery record stored in STATE_DB.
+// OperationIntent is a crash-recovery record stored in CONFIG_DB.
 // Written before Commit applies ChangeSets, deleted on success.
 // If the process crashes, the intent remains for the operator to
 // inspect and roll back via 'device zombie'.
@@ -906,6 +906,81 @@ func (us *UserSettings) GetNetworkID() string {
 		return us.NetworkID
 	}
 	return DefaultNetworkID
+}
+
+// ============================================================================
+// History Types (rolling operation history for rollback)
+// ============================================================================
+
+// HistoryEntry represents a completed commit archived for rollback.
+type HistoryEntry struct {
+	Sequence   int               `json:"sequence"`
+	Holder     string            `json:"holder"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Operations []IntentOperation `json:"operations"`
+}
+
+// HistoryResult wraps the rolling history for API responses.
+type HistoryResult struct {
+	Device  string         `json:"device"`
+	Entries []HistoryEntry `json:"entries"`
+}
+
+// HistoryRollbackResult reports the outcome of a history rollback.
+type HistoryRollbackResult struct {
+	RolledBack *HistoryRollbackEntry `json:"rolled_back,omitempty"`
+}
+
+// HistoryRollbackEntry identifies the rolled-back history entry.
+type HistoryRollbackEntry struct {
+	Sequence           int `json:"sequence"`
+	OperationsReversed int `json:"operations_reversed"`
+}
+
+// ============================================================================
+// Drift Detection Types
+// ============================================================================
+
+// DriftEntry describes a single difference between expected and actual CONFIG_DB.
+type DriftEntry struct {
+	Table    string            `json:"table"`
+	Key      string            `json:"key"`
+	Type     string            `json:"type"` // "missing", "extra", "modified"
+	Expected map[string]string `json:"expected,omitempty"`
+	Actual   map[string]string `json:"actual,omitempty"`
+}
+
+// DriftReport is the complete drift detection result for a device.
+type DriftReport struct {
+	Device   string       `json:"device"`
+	Status   string       `json:"status"` // "clean" or "drifted"
+	Missing  []DriftEntry `json:"missing,omitempty"`
+	Extra    []DriftEntry `json:"extra,omitempty"`
+	Modified []DriftEntry `json:"modified,omitempty"`
+}
+
+// NetworkDriftSummary is the per-device drift status for network-level views.
+type NetworkDriftSummary struct {
+	Devices []DeviceDriftStatus `json:"devices"`
+}
+
+// DeviceDriftStatus is a single device's drift summary.
+type DeviceDriftStatus struct {
+	Device   string `json:"device"`
+	Status   string `json:"status"`
+	Missing  int    `json:"missing,omitempty"`
+	Extra    int    `json:"extra,omitempty"`
+	Modified int    `json:"modified,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// ============================================================================
+// Device Settings
+// ============================================================================
+
+// DeviceSettings holds per-device newtron operational tuning stored in CONFIG_DB.
+type DeviceSettings struct {
+	MaxHistory int `json:"max_history"`
 }
 
 // ============================================================================

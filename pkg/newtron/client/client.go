@@ -142,6 +142,29 @@ func (c *Client) doPost(path string, body any, result any) error {
 	return c.decodeResponse(resp, result)
 }
 
+// doPut performs a PUT request with a JSON body.
+func (c *Client) doPut(path string, body any, result any) error {
+	var bodyReader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal body: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequest(http.MethodPut, c.baseURL+path, bodyReader)
+	if err != nil {
+		return fmt.Errorf("PUT %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("PUT %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	return c.decodeResponse(resp, result)
+}
+
 // doDelete performs a DELETE request.
 func (c *Client) doDelete(path string, result any) error {
 	req, err := http.NewRequest(http.MethodDelete, c.baseURL+path, nil)

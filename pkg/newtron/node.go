@@ -36,6 +36,11 @@ type Node struct {
 	// zombie-operation guard in Execute(). These operations ARE the
 	// resolution path for zombie operations.
 	bypassZombieCheck bool
+
+	// skipHistory is set for rollback operations (both zombie and history)
+	// so that rollback commits don't enter the history buffer. Rollback
+	// is consumption of history, not new history.
+	skipHistory bool
 }
 
 // ============================================================================
@@ -273,6 +278,11 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	}
 	result.Verified = true
 
+	// Archive to rolling history before deleting intent (unless this is a rollback)
+	if !n.skipHistory {
+		n.archiveToHistory(intent)
+	}
+
 	// Success — delete intent record
 	if err := n.internal.DeleteIntent(); err != nil {
 		util.WithDevice(n.internal.Name()).Warnf("deleting intent: %v", err)
@@ -398,6 +408,10 @@ func (n *Node) ClearZombie(ctx context.Context) error {
 // SetBypassZombieCheck enables or disables the zombie-operation guard bypass.
 // Used by rollback/clear endpoints which ARE the resolution path.
 func (n *Node) SetBypassZombieCheck(bypass bool) { n.bypassZombieCheck = bypass }
+
+// SetSkipHistory prevents the next Commit from archiving to history.
+// Used by rollback operations — rollback is consumption of history, not new history.
+func (n *Node) SetSkipHistory(skip bool) { n.skipHistory = skip }
 
 // PreviewRollback returns a preview of what RollbackZombie would do without
 // executing any changes. Uses the same skip/done/reverse logic as RollbackZombie
@@ -633,6 +647,271 @@ func convertIntent(z *sonic.OperationIntent) *OperationIntent {
 		RollbackStarted: z.RollbackStarted,
 		Operations:      ops,
 	}
+}
+
+// convertHistoryEntry converts internal sonic.HistoryEntry to public HistoryEntry.
+func convertHistoryEntry(h *sonic.HistoryEntry) HistoryEntry {
+	ops := make([]IntentOperation, len(h.Operations))
+	for i, op := range h.Operations {
+		ops[i] = IntentOperation{
+			Name:      op.Name,
+			Params:    op.Params,
+			ReverseOp: op.ReverseOp,
+			Started:   op.Started,
+			Completed: op.Completed,
+			Reversed:  op.Reversed,
+		}
+	}
+	return HistoryEntry{
+		Sequence:   h.Sequence,
+		Holder:     h.Holder,
+		Timestamp:  h.Timestamp,
+		Operations: ops,
+	}
+}
+
+// ============================================================================
+// Rolling History Methods
+// ============================================================================
+
+// archiveToHistory copies the completed intent's operations to the rolling
+// history buffer. Evicts the oldest entries beyond the device's max_history setting.
+func (n *Node) archiveToHistory(intent *sonic.OperationIntent) {
+	// Read max_history from device settings (falls back to default)
+	settings, err := n.internal.ReadSettings()
+	if err != nil {
+		util.WithDevice(n.internal.Name()).Warnf("reading settings for history: %v", err)
+		settings = &sonic.DeviceSettings{MaxHistory: sonic.DefaultMaxHistory}
+	}
+	if settings.MaxHistory == 0 {
+		return // history disabled
+	}
+
+	entries, err := n.internal.ReadHistory()
+	if err != nil {
+		util.WithDevice(n.internal.Name()).Warnf("reading history for archive: %v", err)
+		return
+	}
+
+	// Compute next sequence number (max existing + 1)
+	nextSeq := 1
+	for _, e := range entries {
+		if e.Sequence >= nextSeq {
+			nextSeq = e.Sequence + 1
+		}
+	}
+
+	entry := &sonic.HistoryEntry{
+		Sequence:   nextSeq,
+		Holder:     intent.Holder,
+		Timestamp:  time.Now().UTC(),
+		Operations: intent.Operations,
+	}
+
+	if err := n.internal.WriteHistory(entry); err != nil {
+		util.WithDevice(n.internal.Name()).Warnf("writing history entry: %v", err)
+		return
+	}
+
+	// Evict oldest entries beyond max_history
+	// entries is sorted newest-first; count includes the new entry
+	maxHistory := settings.MaxHistory
+	if len(entries)+1 > maxHistory {
+		// entries is sorted desc; oldest entries are at the end
+		for i := maxHistory - 1; i < len(entries); i++ {
+			if err := n.internal.DeleteHistory(entries[i].Sequence); err != nil {
+				util.WithDevice(n.internal.Name()).Warnf("evicting history entry %d: %v", entries[i].Sequence, err)
+			}
+		}
+	}
+}
+
+// ReadHistory returns the rolling history for this device (newest first).
+func (n *Node) ReadHistory(ctx context.Context) (*HistoryResult, error) {
+	entries, err := n.internal.ReadHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	result := &HistoryResult{
+		Device:  n.internal.Name(),
+		Entries: make([]HistoryEntry, len(entries)),
+	}
+	for i, e := range entries {
+		result.Entries[i] = convertHistoryEntry(e)
+	}
+	return result, nil
+}
+
+// RollbackHistory reverses the most recent un-reversed history entry.
+// Uses the same dispatchReverse mechanism as zombie rollback.
+func (n *Node) RollbackHistory(ctx context.Context) (*WriteResult, error) {
+	entries, err := n.internal.ReadHistory()
+	if err != nil {
+		return nil, fmt.Errorf("reading history: %w", err)
+	}
+
+	// Find the most recent un-reversed entry (entries are sorted newest-first)
+	var target *sonic.HistoryEntry
+	for _, e := range entries {
+		allReversed := true
+		for _, op := range e.Operations {
+			if op.Reversed == nil {
+				allReversed = false
+				break
+			}
+		}
+		if !allReversed {
+			target = e
+			break
+		}
+	}
+
+	if target == nil {
+		return &WriteResult{Preview: "No un-reversed history entries.\n"}, nil
+	}
+
+	// Reverse each operation in reverse order (same pattern as RollbackZombie)
+	var preview strings.Builder
+	reversed := 0
+	preview.WriteString(fmt.Sprintf("Rolling back history entry %d (by %s at %s)\n",
+		target.Sequence, target.Holder, target.Timestamp.Format(time.RFC3339)))
+
+	for i := len(target.Operations) - 1; i >= 0; i-- {
+		op := &target.Operations[i]
+
+		if op.Reversed != nil {
+			preview.WriteString(fmt.Sprintf("  [DONE] %s (already reversed)\n", op.Name))
+			continue
+		}
+
+		if op.Started == nil {
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s (never started)\n", op.Name))
+			continue
+		}
+
+		if op.ReverseOp == "" {
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s (terminal)\n", op.Name))
+			continue
+		}
+
+		status := "partial"
+		if op.Completed != nil {
+			status = "complete"
+		}
+
+		cs, err := n.dispatchReverse(ctx, op.ReverseOp, op.Params)
+		if errors.Is(err, util.ErrPreconditionFailed) {
+			preview.WriteString(fmt.Sprintf("  [SKIP] %s → %s (resource not found)\n", op.Name, op.ReverseOp))
+		} else if err != nil {
+			return &WriteResult{
+				Preview:     preview.String(),
+				ChangeCount: reversed,
+			}, fmt.Errorf("reversing %s: %w", op.Name, err)
+		} else if cs != nil && !cs.IsEmpty() {
+			if err := cs.Apply(n.internal); err != nil {
+				return &WriteResult{
+					Preview:     preview.String(),
+					ChangeCount: reversed,
+				}, fmt.Errorf("applying reverse of %s: %w", op.Name, err)
+			}
+			reversed += cs.AppliedCount
+			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, %d changes)\n", op.Name, op.ReverseOp, status, cs.AppliedCount))
+		} else {
+			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, no changes)\n", op.Name, op.ReverseOp, status))
+		}
+
+		// Mark this operation as reversed and persist
+		now := time.Now().UTC()
+		op.Reversed = &now
+		if err := n.internal.UpdateHistory(target); err != nil {
+			util.WithDevice(n.internal.Name()).Warnf("updating history (reversed): %v", err)
+		}
+	}
+
+	return &WriteResult{
+		Preview:     preview.String(),
+		ChangeCount: reversed,
+		Applied:     true,
+	}, nil
+}
+
+// PreviewRollbackHistory returns a preview of what RollbackHistory would do.
+func (n *Node) PreviewRollbackHistory(ctx context.Context) (string, error) {
+	entries, err := n.internal.ReadHistory()
+	if err != nil {
+		return "", fmt.Errorf("reading history: %w", err)
+	}
+
+	// Find the most recent un-reversed entry
+	var target *sonic.HistoryEntry
+	for _, e := range entries {
+		allReversed := true
+		for _, op := range e.Operations {
+			if op.Reversed == nil {
+				allReversed = false
+				break
+			}
+		}
+		if !allReversed {
+			target = e
+			break
+		}
+	}
+
+	if target == nil {
+		return "No un-reversed history entries.\n", nil
+	}
+
+	var preview strings.Builder
+	preview.WriteString(fmt.Sprintf("Would roll back history entry %d (by %s at %s)\n",
+		target.Sequence, target.Holder, target.Timestamp.Format(time.RFC3339)))
+	preview.WriteString("Operations (would be reversed in this order):\n")
+
+	step := 0
+	for i := len(target.Operations) - 1; i >= 0; i-- {
+		op := target.Operations[i]
+		step++
+
+		if op.Reversed != nil {
+			preview.WriteString(fmt.Sprintf("  %d. [DONE] %s (already reversed)\n", step, op.Name))
+			continue
+		}
+		if op.Started == nil {
+			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (never started)\n", step, op.Name))
+			continue
+		}
+		if op.ReverseOp == "" {
+			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (terminal)\n", step, op.Name))
+			continue
+		}
+
+		status := "partial"
+		if op.Completed != nil {
+			status = "complete"
+		}
+		preview.WriteString(fmt.Sprintf("  %d. [REVERSE] %s → %s (%s)\n", step, op.Name, op.ReverseOp, status))
+	}
+
+	return preview.String(), nil
+}
+
+// ============================================================================
+// Device Settings
+// ============================================================================
+
+// ReadSettings reads newtron operational settings from CONFIG_DB.
+func (n *Node) ReadSettings(ctx context.Context) (*DeviceSettings, error) {
+	s, err := n.internal.ReadSettings()
+	if err != nil {
+		return nil, err
+	}
+	return &DeviceSettings{MaxHistory: s.MaxHistory}, nil
+}
+
+// WriteSettings writes newtron operational settings to CONFIG_DB.
+func (n *Node) WriteSettings(ctx context.Context, s *DeviceSettings) error {
+	return n.internal.WriteSettings(&sonic.DeviceSettings{MaxHistory: s.MaxHistory})
 }
 
 // ============================================================================

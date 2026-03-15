@@ -447,13 +447,29 @@ func (n *Node) Lock() error {
 	n.interfaces = make(map[string]*Interface)
 	n.loadInterfaces()
 
+	// Migrate any legacy STATE_DB intent to CONFIG_DB (one-time per device).
+	// New intents are always written to CONFIG_DB (persistent across reboot).
+	if stateClient := n.conn.StateClient(); stateClient != nil {
+		if legacyIntent, err := stateClient.ReadIntentFromStateDB(n.name); err != nil {
+			util.WithDevice(n.name).Warnf("reading legacy STATE_DB intent: %v", err)
+		} else if legacyIntent != nil {
+			util.WithDevice(n.name).Info("migrating intent from STATE_DB to CONFIG_DB")
+			if err := n.conn.Client().WriteIntent(n.name, legacyIntent); err != nil {
+				util.WithDevice(n.name).Warnf("writing intent to CONFIG_DB during migration: %v", err)
+			} else {
+				_ = stateClient.DeleteIntentFromStateDB(n.name)
+			}
+		}
+	}
+
 	// Check for existing intent from a crashed process.
 	// If you hold the lock and an intent exists, the previous holder
 	// crashed between WriteIntent and DeleteIntent. The lock acquisition
 	// proves the previous holder is gone — staleness is irrelevant.
+	// Intent is now in CONFIG_DB (persistent across reboot).
 	n.zombieOp = nil
-	if stateClient := n.conn.StateClient(); stateClient != nil {
-		intent, err := stateClient.ReadIntent(n.name)
+	if configClient := n.conn.Client(); configClient != nil {
+		intent, err := configClient.ReadIntent(n.name)
 		if err != nil {
 			util.WithDevice(n.name).Warnf("reading intent on lock: %v", err)
 		} else if intent != nil {
@@ -798,32 +814,32 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 // ZombieOperation returns the existing intent found during Lock(), or nil.
 func (n *Node) ZombieOperation() *sonic.OperationIntent { return n.zombieOp }
 
-// ClearZombie deletes the zombie intent from STATE_DB without reversing.
+// ClearZombie deletes the zombie intent from CONFIG_DB without reversing.
 func (n *Node) ClearZombie() error {
 	if n.conn == nil {
 		return util.ErrNotConnected
 	}
-	stateClient := n.conn.StateClient()
-	if stateClient == nil {
-		return fmt.Errorf("no STATE_DB client")
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return fmt.Errorf("no CONFIG_DB client")
 	}
-	if err := stateClient.DeleteIntent(n.name); err != nil {
+	if err := configClient.DeleteIntent(n.name); err != nil {
 		return err
 	}
 	n.zombieOp = nil
 	return nil
 }
 
-// WriteIntent writes an operation intent to STATE_DB.
+// WriteIntent writes an operation intent to CONFIG_DB.
 func (n *Node) WriteIntent(intent *sonic.OperationIntent) error {
 	if n.conn == nil {
 		return util.ErrNotConnected
 	}
-	stateClient := n.conn.StateClient()
-	if stateClient == nil {
-		return fmt.Errorf("no STATE_DB client")
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return fmt.Errorf("no CONFIG_DB client")
 	}
-	return stateClient.WriteIntent(n.name, intent)
+	return configClient.WriteIntent(n.name, intent)
 }
 
 // UpdateIntentOps updates the mutable fields of the current intent.
@@ -831,35 +847,91 @@ func (n *Node) UpdateIntentOps(intent *sonic.OperationIntent) error {
 	if n.conn == nil {
 		return util.ErrNotConnected
 	}
-	stateClient := n.conn.StateClient()
-	if stateClient == nil {
-		return fmt.Errorf("no STATE_DB client")
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return fmt.Errorf("no CONFIG_DB client")
 	}
-	return stateClient.UpdateIntentOps(n.name, intent)
+	return configClient.UpdateIntentOps(n.name, intent)
 }
 
-// DeleteIntent removes the operation intent from STATE_DB.
+// DeleteIntent removes the operation intent from CONFIG_DB.
 func (n *Node) DeleteIntent() error {
 	if n.conn == nil {
 		return util.ErrNotConnected
 	}
-	stateClient := n.conn.StateClient()
-	if stateClient == nil {
-		return fmt.Errorf("no STATE_DB client")
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return fmt.Errorf("no CONFIG_DB client")
 	}
-	return stateClient.DeleteIntent(n.name)
+	return configClient.DeleteIntent(n.name)
 }
 
-// ReadIntent reads the current intent from STATE_DB (live read).
+// ReadIntent reads the current intent from CONFIG_DB (live read).
 func (n *Node) ReadIntent() (*sonic.OperationIntent, error) {
 	if n.conn == nil {
 		return nil, util.ErrNotConnected
 	}
-	stateClient := n.conn.StateClient()
-	if stateClient == nil {
-		return nil, fmt.Errorf("no STATE_DB client")
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return nil, fmt.Errorf("no CONFIG_DB client")
 	}
-	return stateClient.ReadIntent(n.name)
+	return configClient.ReadIntent(n.name)
+}
+
+// ============================================================================
+// Settings Methods
+// ============================================================================
+
+// ReadSettings reads NEWTRON_SETTINGS from CONFIG_DB.
+func (n *Node) ReadSettings() (*sonic.DeviceSettings, error) {
+	if n.conn == nil {
+		return nil, util.ErrNotConnected
+	}
+	return n.conn.Client().ReadSettings()
+}
+
+// WriteSettings writes NEWTRON_SETTINGS to CONFIG_DB.
+func (n *Node) WriteSettings(s *sonic.DeviceSettings) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	return n.conn.Client().WriteSettings(s)
+}
+
+// ============================================================================
+// History Methods
+// ============================================================================
+
+// WriteHistory writes a history entry to CONFIG_DB.
+func (n *Node) WriteHistory(entry *sonic.HistoryEntry) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	return n.conn.Client().WriteHistory(n.name, entry)
+}
+
+// ReadHistory reads all history entries for this device.
+func (n *Node) ReadHistory() ([]*sonic.HistoryEntry, error) {
+	if n.conn == nil {
+		return nil, util.ErrNotConnected
+	}
+	return n.conn.Client().ReadHistory(n.name)
+}
+
+// UpdateHistory updates a history entry (e.g., marking ops as reversed).
+func (n *Node) UpdateHistory(entry *sonic.HistoryEntry) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	return n.conn.Client().UpdateHistory(n.name, entry)
+}
+
+// DeleteHistory deletes a single history entry by sequence.
+func (n *Node) DeleteHistory(seq int) error {
+	if n.conn == nil {
+		return util.ErrNotConnected
+	}
+	return n.conn.Client().DeleteHistory(n.name, seq)
 }
 
 // ============================================================================

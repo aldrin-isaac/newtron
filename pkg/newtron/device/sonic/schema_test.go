@@ -359,6 +359,112 @@ func TestValidateChanges_DeleteUnknownTablePasses(t *testing.T) {
 // Schema coverage tests
 // ============================================================================
 
+// ============================================================================
+// NEWTRON_INTENT table tests
+// ============================================================================
+
+func TestValidateEntry_NEWTRON_INTENT_Valid(t *testing.T) {
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "leaf1", map[string]string{
+		"holder":     "admin@mgmt",
+		"created":    "2026-03-15T10:30:00Z",
+		"operations": `[{"name":"device.create-vlan"}]`,
+	})
+	if err != nil {
+		t.Errorf("valid NEWTRON_INTENT: %v", err)
+	}
+}
+
+func TestValidateEntry_NEWTRON_INTENT_EmptyPhase(t *testing.T) {
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "leaf1", map[string]string{
+		"holder":     "admin@mgmt",
+		"created":    "2026-03-15T10:30:00Z",
+		"phase":      "",
+		"operations": `[]`,
+	})
+	if err != nil {
+		t.Errorf("empty phase should be valid: %v", err)
+	}
+}
+
+func TestValidateEntry_NEWTRON_INTENT_InvalidKey(t *testing.T) {
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "123invalid", map[string]string{
+		"holder":     "admin@mgmt",
+		"created":    "2026-03-15T10:30:00Z",
+		"operations": `[]`,
+	})
+	if err == nil {
+		t.Error("key starting with digit should fail")
+	}
+}
+
+// ============================================================================
+// NEWTRON_HISTORY table tests
+// ============================================================================
+
+func TestValidateEntry_NEWTRON_HISTORY_Valid(t *testing.T) {
+	err := Schema["NEWTRON_HISTORY"].ValidateEntry("NEWTRON_HISTORY", "leaf1|42", map[string]string{
+		"holder":     "admin@mgmt",
+		"timestamp":  "2026-03-15T10:30:00Z",
+		"operations": `[{"name":"device.create-vlan"}]`,
+	})
+	if err != nil {
+		t.Errorf("valid NEWTRON_HISTORY: %v", err)
+	}
+}
+
+func TestValidateEntry_NEWTRON_HISTORY_InvalidKey(t *testing.T) {
+	err := Schema["NEWTRON_HISTORY"].ValidateEntry("NEWTRON_HISTORY", "leaf1", map[string]string{
+		"holder":     "admin@mgmt",
+		"timestamp":  "2026-03-15T10:30:00Z",
+		"operations": `[]`,
+	})
+	if err == nil {
+		t.Error("key without sequence should fail")
+	}
+}
+
+func TestValidateEntry_NEWTRON_HISTORY_UnknownField(t *testing.T) {
+	err := Schema["NEWTRON_HISTORY"].ValidateEntry("NEWTRON_HISTORY", "leaf1|1", map[string]string{
+		"holder":     "admin@mgmt",
+		"timestamp":  "2026-03-15T10:30:00Z",
+		"operations": `[]`,
+		"bogus":      "field",
+	})
+	if err == nil {
+		t.Error("unknown field should fail")
+	}
+}
+
+// NEWTRON_SETTINGS table tests
+// ============================================================================
+
+func TestValidateEntry_NEWTRON_SETTINGS_Valid(t *testing.T) {
+	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "global", map[string]string{
+		"max_history": "20",
+	})
+	if err != nil {
+		t.Errorf("valid entry should pass: %v", err)
+	}
+}
+
+func TestValidateEntry_NEWTRON_SETTINGS_InvalidKey(t *testing.T) {
+	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "local", map[string]string{
+		"max_history": "10",
+	})
+	if err == nil {
+		t.Error("non-global key should fail")
+	}
+}
+
+func TestValidateEntry_NEWTRON_SETTINGS_OutOfRange(t *testing.T) {
+	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "global", map[string]string{
+		"max_history": "999",
+	})
+	if err == nil {
+		t.Error("max_history > 100 should fail")
+	}
+}
+
 func TestSchema_AllTablesHaveFields(t *testing.T) {
 	// Tables with empty Fields maps are valid (key-only entries like ROUTE_REDISTRIBUTE)
 	for table, schema := range Schema {

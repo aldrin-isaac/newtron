@@ -173,6 +173,76 @@ func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
 	}, nil
 }
 
+// DetectDrift compares expected CONFIG_DB (from topology) against actual CONFIG_DB
+// on a device. Returns a DriftReport describing any differences in newtron-owned tables.
+// Requires a topology to be loaded and the device to be connected.
+func (net *Network) DetectDrift(ctx context.Context, device string) (*DriftReport, error) {
+	if !net.HasTopology() {
+		return nil, &ValidationError{Message: "no topology loaded — drift detection requires a topology"}
+	}
+	tp, err := network.NewTopologyProvisioner(net.internal)
+	if err != nil {
+		return nil, err
+	}
+	report, err := tp.DetectDrift(ctx, device)
+	if err != nil {
+		return nil, err
+	}
+	// Convert internal DriftReport to public type
+	pub := &DriftReport{
+		Device: report.Device,
+		Status: report.Status,
+	}
+	for _, d := range report.Missing {
+		pub.Missing = append(pub.Missing, DriftEntry{
+			Table: d.Table, Key: d.Key, Type: d.Type,
+			Expected: d.Expected,
+		})
+	}
+	for _, d := range report.Extra {
+		pub.Extra = append(pub.Extra, DriftEntry{
+			Table: d.Table, Key: d.Key, Type: d.Type,
+			Actual: d.Actual,
+		})
+	}
+	for _, d := range report.Modified {
+		pub.Modified = append(pub.Modified, DriftEntry{
+			Table: d.Table, Key: d.Key, Type: d.Type,
+			Expected: d.Expected, Actual: d.Actual,
+		})
+	}
+	return pub, nil
+}
+
+// NetworkDrift runs drift detection across all topology devices and returns
+// a summary. Each device is checked independently; errors on one device
+// don't prevent checking others.
+func (net *Network) NetworkDrift(ctx context.Context) (*NetworkDriftSummary, error) {
+	if !net.HasTopology() {
+		return nil, &ValidationError{Message: "no topology loaded — drift detection requires a topology"}
+	}
+	devices := net.TopologyDeviceNames()
+	summary := &NetworkDriftSummary{}
+	for _, name := range devices {
+		if net.IsHostDevice(name) {
+			continue
+		}
+		report, err := net.DetectDrift(ctx, name)
+		status := DeviceDriftStatus{Device: name}
+		if err != nil {
+			status.Error = err.Error()
+			status.Status = "error"
+		} else {
+			status.Status = report.Status
+			status.Missing = len(report.Missing)
+			status.Extra = len(report.Extra)
+			status.Modified = len(report.Modified)
+		}
+		summary.Devices = append(summary.Devices, status)
+	}
+	return summary, nil
+}
+
 func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {
 	if net.auth != nil {
 		return net.auth.Check(perm, authCtx)

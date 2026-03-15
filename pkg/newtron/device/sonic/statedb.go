@@ -367,10 +367,18 @@ type OperationIntent struct {
 	Operations      []IntentOperation `json:"operations"`
 }
 
-// WriteIntent writes an operation intent to STATE_DB.
+// ============================================================================
+// Operation Intent Records — now in CONFIG_DB (persistent across reboot)
+//
+// Intent methods use the ConfigDBClient (DB 4) instead of StateDBClient (DB 6).
+// STATE_DB is cleared on reboot; CONFIG_DB survives via config save/reload.
+// Same key format and lifecycle as before — just a different Redis database.
+// ============================================================================
+
+// WriteIntent writes an operation intent to CONFIG_DB.
 // Key format: NEWTRON_INTENT|<device>. No Redis EXPIRE — the intent
 // persists until explicitly deleted by DeleteIntent, rollback, or clear.
-func (c *StateDBClient) WriteIntent(device string, intent *OperationIntent) error {
+func (c *ConfigDBClient) WriteIntent(device string, intent *OperationIntent) error {
 	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
 
 	opsJSON, err := json.Marshal(intent.Operations)
@@ -399,9 +407,9 @@ func (c *StateDBClient) WriteIntent(device string, intent *OperationIntent) erro
 	return nil
 }
 
-// ReadIntent reads the operation intent from STATE_DB.
+// ReadIntent reads the operation intent from CONFIG_DB.
 // Returns (nil, nil) if no intent exists.
-func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error) {
+func (c *ConfigDBClient) ReadIntent(device string) (*OperationIntent, error) {
 	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
 
 	vals, err := c.client.HGetAll(c.ctx, key).Result()
@@ -425,11 +433,11 @@ func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error) {
 	}
 
 	intent := &OperationIntent{
-		Holder:     vals["holder"],
-		Created:    created,
-		Phase:      vals["phase"],
+		Holder:         vals["holder"],
+		Created:        created,
+		Phase:          vals["phase"],
 		RollbackHolder: vals["rollback_holder"],
-		Operations: ops,
+		Operations:     ops,
 	}
 	if rbStarted, ok := vals["rollback_started"]; ok && rbStarted != "" {
 		t, err := time.Parse(time.RFC3339, rbStarted)
@@ -441,11 +449,11 @@ func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error) {
 	return intent, nil
 }
 
-// UpdateIntentOps updates the mutable fields of an existing intent:
+// UpdateIntentOps updates the mutable fields of an existing intent in CONFIG_DB:
 // operations, phase, rollback_holder, and rollback_started.
 // Called during both apply (started/completed timestamps) and rollback
 // (phase transition, reversed timestamps).
-func (c *StateDBClient) UpdateIntentOps(device string, intent *OperationIntent) error {
+func (c *ConfigDBClient) UpdateIntentOps(device string, intent *OperationIntent) error {
 	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
 
 	opsJSON, err := json.Marshal(intent.Operations)
@@ -472,11 +480,209 @@ func (c *StateDBClient) UpdateIntentOps(device string, intent *OperationIntent) 
 	return nil
 }
 
-// DeleteIntent removes the operation intent from STATE_DB.
-func (c *StateDBClient) DeleteIntent(device string) error {
+// DeleteIntent removes the operation intent from CONFIG_DB.
+func (c *ConfigDBClient) DeleteIntent(device string) error {
 	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
 	if err := c.client.Del(c.ctx, key).Err(); err != nil {
 		return fmt.Errorf("deleting intent for %s: %w", device, err)
+	}
+	return nil
+}
+
+// ReadIntentFromStateDB reads an intent from STATE_DB (legacy location).
+// Used only for one-time migration in Lock() — new intents are always in CONFIG_DB.
+func (c *StateDBClient) ReadIntentFromStateDB(device string) (*OperationIntent, error) {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+
+	vals, err := c.client.HGetAll(c.ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("reading legacy intent for %s: %w", device, err)
+	}
+	if len(vals) == 0 {
+		return nil, nil
+	}
+
+	created, err := time.Parse(time.RFC3339, vals["created"])
+	if err != nil {
+		return nil, fmt.Errorf("parsing intent created time: %w", err)
+	}
+
+	var ops []IntentOperation
+	if opsStr, ok := vals["operations"]; ok && opsStr != "" {
+		if err := json.Unmarshal([]byte(opsStr), &ops); err != nil {
+			return nil, fmt.Errorf("parsing intent operations: %w", err)
+		}
+	}
+
+	intent := &OperationIntent{
+		Holder:         vals["holder"],
+		Created:        created,
+		Phase:          vals["phase"],
+		RollbackHolder: vals["rollback_holder"],
+		Operations:     ops,
+	}
+	if rbStarted, ok := vals["rollback_started"]; ok && rbStarted != "" {
+		t, err := time.Parse(time.RFC3339, rbStarted)
+		if err != nil {
+			return nil, fmt.Errorf("parsing rollback_started: %w", err)
+		}
+		intent.RollbackStarted = &t
+	}
+	return intent, nil
+}
+
+// DeleteIntentFromStateDB deletes an intent from STATE_DB (legacy location).
+// Used only for one-time migration.
+func (c *StateDBClient) DeleteIntentFromStateDB(device string) error {
+	key := fmt.Sprintf("NEWTRON_INTENT|%s", device)
+	if err := c.client.Del(c.ctx, key).Err(); err != nil {
+		return fmt.Errorf("deleting legacy intent for %s: %w", device, err)
+	}
+	return nil
+}
+
+// ============================================================================
+// Device Settings — CONFIG_DB (NEWTRON_SETTINGS|global)
+// ============================================================================
+
+// DefaultMaxHistory is the default rolling history buffer size when no
+// device-level override exists.
+const DefaultMaxHistory = 10
+
+// DeviceSettings holds per-device newtron operational tuning.
+// Stored in CONFIG_DB as NEWTRON_SETTINGS|global.
+type DeviceSettings struct {
+	MaxHistory int `json:"max_history"`
+}
+
+// ReadSettings reads NEWTRON_SETTINGS|global from CONFIG_DB.
+// Returns defaults if the key does not exist.
+func (c *ConfigDBClient) ReadSettings() (*DeviceSettings, error) {
+	vals, err := c.client.HGetAll(c.ctx, "NEWTRON_SETTINGS|global").Result()
+	if err != nil {
+		return nil, fmt.Errorf("reading NEWTRON_SETTINGS: %w", err)
+	}
+
+	settings := &DeviceSettings{MaxHistory: DefaultMaxHistory}
+	if v, ok := vals["max_history"]; ok {
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil && n >= 0 {
+			settings.MaxHistory = n
+		}
+	}
+	return settings, nil
+}
+
+// WriteSettings writes NEWTRON_SETTINGS|global to CONFIG_DB.
+func (c *ConfigDBClient) WriteSettings(s *DeviceSettings) error {
+	fields := map[string]any{
+		"max_history": fmt.Sprintf("%d", s.MaxHistory),
+	}
+	return c.client.HSet(c.ctx, "NEWTRON_SETTINGS|global", fields).Err()
+}
+
+// ============================================================================
+// Rolling History — CONFIG_DB (bounded per device settings)
+// ============================================================================
+
+// HistoryEntry represents a completed commit archived for rollback.
+type HistoryEntry struct {
+	Sequence   int               `json:"sequence"`
+	Holder     string            `json:"holder"`
+	Timestamp  time.Time         `json:"timestamp"`
+	Operations []IntentOperation `json:"operations"`
+}
+
+// WriteHistory writes a history entry to CONFIG_DB.
+// Key format: NEWTRON_HISTORY|<device>|<sequence>
+func (c *ConfigDBClient) WriteHistory(device string, entry *HistoryEntry) error {
+	key := fmt.Sprintf("NEWTRON_HISTORY|%s|%d", device, entry.Sequence)
+
+	opsJSON, err := json.Marshal(entry.Operations)
+	if err != nil {
+		return fmt.Errorf("marshaling history operations: %w", err)
+	}
+
+	fields := map[string]any{
+		"holder":     entry.Holder,
+		"timestamp":  entry.Timestamp.UTC().Format(time.RFC3339),
+		"operations": string(opsJSON),
+	}
+
+	if err := c.client.HSet(c.ctx, key, fields).Err(); err != nil {
+		return fmt.Errorf("writing history entry for %s seq %d: %w", device, entry.Sequence, err)
+	}
+	return nil
+}
+
+// ReadHistory reads all history entries for a device from CONFIG_DB.
+// Returns entries sorted by sequence descending (newest first).
+func (c *ConfigDBClient) ReadHistory(device string) ([]*HistoryEntry, error) {
+	pattern := fmt.Sprintf("NEWTRON_HISTORY|%s|*", device)
+	keys, err := scanKeys(c.ctx, c.client, pattern, 100)
+	if err != nil {
+		return nil, fmt.Errorf("scanning history for %s: %w", device, err)
+	}
+
+	var entries []*HistoryEntry
+	for _, key := range keys {
+		vals, err := c.client.HGetAll(c.ctx, key).Result()
+		if err != nil || len(vals) == 0 {
+			continue
+		}
+
+		// Parse sequence from key: NEWTRON_HISTORY|device|seq
+		parts := strings.SplitN(key, "|", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		var seq int
+		if _, err := fmt.Sscanf(parts[2], "%d", &seq); err != nil {
+			continue
+		}
+
+		ts, err := time.Parse(time.RFC3339, vals["timestamp"])
+		if err != nil {
+			continue
+		}
+
+		var ops []IntentOperation
+		if opsStr, ok := vals["operations"]; ok && opsStr != "" {
+			if err := json.Unmarshal([]byte(opsStr), &ops); err != nil {
+				continue
+			}
+		}
+
+		entries = append(entries, &HistoryEntry{
+			Sequence:   seq,
+			Holder:     vals["holder"],
+			Timestamp:  ts,
+			Operations: ops,
+		})
+	}
+
+	// Sort by sequence descending (newest first)
+	for i := 0; i < len(entries); i++ {
+		for j := i + 1; j < len(entries); j++ {
+			if entries[i].Sequence < entries[j].Sequence {
+				entries[i], entries[j] = entries[j], entries[i]
+			}
+		}
+	}
+
+	return entries, nil
+}
+
+// UpdateHistory updates a history entry's operations (for marking ops as reversed).
+func (c *ConfigDBClient) UpdateHistory(device string, entry *HistoryEntry) error {
+	return c.WriteHistory(device, entry)
+}
+
+// DeleteHistory deletes a single history entry.
+func (c *ConfigDBClient) DeleteHistory(device string, seq int) error {
+	key := fmt.Sprintf("NEWTRON_HISTORY|%s|%d", device, seq)
+	if err := c.client.Del(c.ctx, key).Err(); err != nil {
+		return fmt.Errorf("deleting history entry %s seq %d: %w", device, seq, err)
 	}
 	return nil
 }

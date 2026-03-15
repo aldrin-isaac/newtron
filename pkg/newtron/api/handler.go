@@ -161,9 +161,23 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/node/{device}/statedb/{table}/{key}", s.handleQueryStateDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/check", s.handleCheckBGPSessions)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/lag/{name}", s.handleShowLAGDetail)
-	mux.HandleFunc("GET /network/{netID}/node/{device}/zombie", s.handleReadZombie)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/zombie/rollback", s.handleRollbackZombie)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/zombie/clear", s.handleClearZombie)
+	// Intent zombie operations (was /zombie, moved per greenfield §32)
+	// Singular: only one zombie can exist per device at a time.
+	mux.HandleFunc("GET /network/{netID}/node/{device}/intents/zombie", s.handleReadZombieNew)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intents/zombie/rollback", s.handleRollbackZombieNew)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intents/zombie/clear", s.handleClearZombieNew)
+
+	// History
+	mux.HandleFunc("GET /network/{netID}/node/{device}/history", s.handleReadHistory)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/history/rollback", s.handleRollbackHistory)
+
+	// Device settings
+	mux.HandleFunc("GET /network/{netID}/node/{device}/settings", s.handleReadSettings)
+	mux.HandleFunc("PUT /network/{netID}/node/{device}/settings", s.handleWriteSettings)
+
+	// Drift detection
+	mux.HandleFunc("GET /network/{netID}/node/{device}/drift", s.handleDetectDrift)
+	mux.HandleFunc("GET /network/{netID}/drift", s.handleNetworkDrift)
 
 	// ====================================================================
 	// Node composite operations

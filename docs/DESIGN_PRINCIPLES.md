@@ -11,7 +11,7 @@ months later by someone who wasn't there when it was applied. Most
 tools treat delivery as someone else's problem. newtron treats it as
 *the* problem.
 
-This document explains the thirty-five principles behind that choice
+This document explains the thirty-eight principles behind that choice
 — not as a reference, but as a narrative. Part I states the thesis.
 Part II establishes the domain model. Part III describes the
 operational contract that keeps the promise. Part IV explains how
@@ -601,8 +601,10 @@ failure domain.
 
 Part I made a promise: every primitive, delivered safely. Part II
 established the domain model — SONiC as a database, the device as
-reality, the interface as the point of service. These six principles
-are the machinery that keeps the promise on real devices.
+reality, the interface as the point of service. These principles
+are the machinery that keeps the promise on real devices — from a
+single operation's ChangeSet (§9) through to drift detection across
+the device's lifetime (§36–38).
 
 ## 9. The ChangeSet Is the Universal Contract
 
@@ -1089,6 +1091,114 @@ suites verify it with polling, not sleeps.**
 3. Place its deletion before the dependency in the removal order.
 4. If tests reveal a daemon race, document it as an RCA. Do not add
    `time.Sleep` to the write path.
+
+---
+
+## 36. Reconstruct, Don't Record
+
+§9 through §14 govern the lifecycle of a single operation: build a
+ChangeSet, preview it, validate it, apply it, verify it, reverse it.
+But an operator eventually asks a question that spans the device's
+lifetime: "does this device match what I intended?" The remaining three
+principles in Part III answer that question without introducing an
+append-only journal or any mechanism that grows with time.
+
+The question "what should this device look like?" is always answerable
+from three persistent inputs: specs (on disk), device profile (on disk),
+and service bindings (in CONFIG_DB). Reconstructing expected state from
+these inputs — using the same abstract Node code path that provisioning
+uses (§23) — is cheaper, simpler, and more correct than maintaining a
+chronological journal and replaying it.
+
+A journal is a second copy of information that already exists in a more
+authoritative form. Specs change; the journal doesn't know. Profiles
+change; the journal doesn't know. The reconstruction approach uses
+current specs by definition — there is no stale copy to diverge.
+
+This principle extends §12 (verify writes, observe the rest) from
+immediate to historical. newtron can verify the cumulative effect of
+all its writes against current intent at any time — not just immediately
+after each operation — by reconstructing expected state and diffing
+against actual CONFIG_DB.
+
+CONFIG_DB contains intent — what the device should look like — not
+history. The in-flight intent record (§13) is intent: "I am currently
+doing X." Completed operation history is not intent. It belongs in
+structured logging or an external store, not in the device's
+configuration database.
+
+**Derive expected state from authoritative sources; don't maintain a
+parallel record of it.**
+
+---
+
+## 37. On-Device Intent Is Sufficient for Reconstruction
+
+The device carries enough intent to reconstruct its expected CONFIG_DB
+state. `NEWTRON_SERVICE_BINDING` records which services are applied to
+which interfaces, with all parameters needed for both teardown and
+reconstruction. Combined with current specs, the binding tells you
+exactly what CONFIG_DB entries should exist. No external history, no
+journal replay, no off-device state needed.
+
+This closes the gap between provisioning (topology-defined baseline)
+and the evolved device (post-provision operations). The topology gives
+you the baseline — `GenerateDeviceComposite()` with current specs
+produces the expected CONFIG_DB after provisioning. The bindings give
+you everything that happened since — each one carries enough
+information to replay the operation on an abstract Node and produce
+the incremental CONFIG_DB entries. Together, they reconstruct the full
+expected state at any point in the device's lifetime.
+
+The existing principle "bindings must be self-sufficient for reverse
+operations" (§13) extends here: **bindings must be self-sufficient for
+reconstruction of expected state.** Teardown is one consumer; drift
+detection is another. Same data, different purpose.
+
+This makes a specific demand on binding design: every field needed to
+regenerate the expected CONFIG_DB entries must be stored in the binding.
+When adding a new forward operation, ask not only "can the reverse find
+everything it needs in the binding alone?" but also "can reconstruction
+regenerate the expected entries from the binding alone?" If a future
+forward operation creates infrastructure that the binding can't
+reconstruct, drift detection breaks silently — and there is no test
+that catches it until someone asks "why doesn't drift show this entry?"
+
+**The device carries its own intent — not as history, but as living
+records that evolve as operations are applied and removed.**
+
+---
+
+## 38. Bounded Device Footprint
+
+Every newtron-owned record in CONFIG_DB must have a cost proportional
+to the device's physical infrastructure (ports, interfaces, VLANs) or
+bounded by a fixed constant — never proportional to the number of
+operations performed over time.
+
+CONFIG_DB is operational infrastructure: `config save` serializes it,
+`config reload` deserializes it, daemons scan it at startup. Unbounded
+growth degrades device operations for data that no SONiC daemon will
+ever consume.
+
+The intent record is O(1) per device — at most one in-flight operation.
+The rollback history is O(1) per device — capped at 10 entries, oldest
+evicted. Service bindings are O(interfaces) — proportional to physical
+ports, not to time. None grow with the number of operations performed
+over the device's lifetime.
+
+This principle killed the append-only journal design: after seven years
+of operations, CONFIG_DB would be dominated by thousands of history
+entries that no SONiC daemon reads, slowing every `config save`,
+`config reload`, and `KEYS *` scan. The fix was not to add compaction
+or archival — it was to recognize that history does not belong in the
+configuration database at all. Audit history belongs in structured
+logging or an external store. CONFIG_DB is for intent.
+
+When adding a new newtron-owned CONFIG_DB table, ask: **"does the entry
+count grow with time or with infrastructure?"** If the answer is time,
+either cap it with a fixed bound (rolling history) or move it out of
+CONFIG_DB entirely.
 
 ---
 
@@ -2182,6 +2292,27 @@ established baseline. newtron accommodates their writes. It does not
 accommodate a writer that disables unified mode or changes the baseline
 itself.
 
+### Reconstruction and device reality
+
+§36 reconstructs expected state from current specs. §5 says the device
+is reality — not specs. The resolution: reconstruction answers a
+different question. §5 says "what exists on the device is ground truth
+for operations." §36 says "what *should* exist on the device is
+derivable from specs + bindings." The first governs how operations
+behave (read CONFIG_DB, act on what's there). The second enables drift
+detection (compare what's there against what should be there). Neither
+overrides the other — they answer different questions about the same
+device.
+
+### Bounded footprint and rollback history
+
+§38 says CONFIG_DB cost must not grow with time. But the rollback
+history (§4.6 of the intent design) stores up to 10 completed commits.
+The resolution: 10 is a fixed constant, not a function of time. A
+device that has run 50,000 operations has the same 10 history entries
+as one that has run 11. The bound is structural — enforced by eviction,
+not by policy or operator discipline.
+
 ### Greenfield and multi-version
 
 §32 says no backwards compatibility. §33 says support multiple SONiC
@@ -2234,3 +2365,6 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 33 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
 | 34 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
 | 35 | Documentation freshness | Grep finds what you know is wrong; audits find what you don't know is wrong | P |
+| 36 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + bindings); CONFIG_DB is for intent, not history | C |
+| 37 | On-device intent sufficiency | The device carries enough intent (bindings) to reconstruct expected state; binding design must serve both teardown and reconstruction | C |
+| 38 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
