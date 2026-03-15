@@ -21,11 +21,12 @@ type Runner struct {
 	TopologiesDir string
 	ServerURL     string         // newtron-server HTTP address
 	NetworkID     string         // network identifier for server operations
-	Client        *client.Client // HTTP client for all SONiC operations
-	Lab           *newtlab.Lab
-	Composites    map[string]string      // device → composite handle UUID
-	HostConns     map[string]*ssh.Client // host device name → SSH client
-	Progress      ProgressReporter
+	Client             *client.Client // HTTP client for all SONiC operations
+	Lab                *newtlab.Lab
+	Composites         map[string]string      // device → composite handle UUID
+	HostConns          map[string]*ssh.Client // host device name → SSH client
+	Progress           ProgressReporter
+	discoveredPlatform string                 // platform discovered from connected devices
 
 	opts     RunOptions
 	scenario *Scenario
@@ -258,7 +259,8 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
 	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
 
-	// Determine the deployed platform (used for all scenarios in shared mode)
+	// Determine the deployed platform (used for all scenarios in shared mode).
+	// Will be enriched with discovered platform after connectDevices.
 	deployedPlatform := opts.Platform
 	if deployedPlatform == "" && len(scenarios) > 0 {
 		deployedPlatform = scenarios[0].Platform
@@ -312,6 +314,11 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 	}
 
 	r.Composites = make(map[string]string)
+
+	// Enrich with discovered platform if no explicit platform was set
+	if deployedPlatform == "" {
+		deployedPlatform = r.discoveredPlatform
+	}
 
 	// In shared mode, all capability checks use the deployed platform
 	return r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
@@ -490,6 +497,20 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
 		// No pre-connection for SONiC devices — server connects on demand
 	}
 
+	// Discover platform from the first non-host device's profile.
+	// This provides the fallback for hasDataplane() and checkPlatformFeatures()
+	// when no explicit platform is declared in the scenario YAML.
+	for _, name := range deviceNames {
+		if _, isHost := r.HostConns[name]; isHost {
+			continue
+		}
+		info, err := r.Client.DeviceInfo(name)
+		if err == nil && info.Platform != "" {
+			r.discoveredPlatform = info.Platform
+			break
+		}
+	}
+
 	return nil
 }
 
@@ -588,15 +609,27 @@ func (r *Runner) resolveDevices(step *Step) []string {
 
 // hasDataplane checks if the scenario platform supports dataplane forwarding.
 func (r *Runner) hasDataplane() bool {
-	platformName := r.scenario.Platform
-	if r.opts.Platform != "" {
-		platformName = r.opts.Platform
+	platformName := r.resolvePlatform()
+	if platformName == "" {
+		return false
 	}
 	p, err := r.Client.ShowPlatform(platformName)
 	if err != nil {
 		return false
 	}
 	return p.Dataplane != ""
+}
+
+// resolvePlatform returns the platform name from CLI override, scenario YAML,
+// or device discovery (in that priority order).
+func (r *Runner) resolvePlatform() string {
+	if r.opts.Platform != "" {
+		return r.opts.Platform
+	}
+	if r.scenario != nil && r.scenario.Platform != "" {
+		return r.scenario.Platform
+	}
+	return r.discoveredPlatform
 }
 
 // computeOverallStatus computes overall scenario status from step results.
@@ -672,10 +705,13 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 		return "" // Cannot check features without server connection (proceed and let operations fail)
 	}
 
-	// Use deployed platform (shared mode) if provided, otherwise use per-scenario platform
+	// Use deployed platform (shared mode), then per-scenario, then discovered
 	platformName := deployedPlatform
 	if platformName == "" {
 		platformName = scenarioPlatform
+	}
+	if platformName == "" {
+		platformName = r.discoveredPlatform
 	}
 
 	var unsupported []string
