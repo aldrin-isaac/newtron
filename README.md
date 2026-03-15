@@ -102,8 +102,8 @@ way to clean them up.
 maps, and prefix sets are named with an 8-character hash of their
 content. Spec unchanged means hash unchanged means refresh is a no-op.
 Spec changed means new name — both versions coexist while interfaces
-migrate one by one. No coordinated switchover, no window where half the
-interfaces have the old policy and half have the new one.
+migrate one by one. No coordinated switchover, no gap where an interface
+loses its policy mid-migration.
 
 ## Engineering
 
