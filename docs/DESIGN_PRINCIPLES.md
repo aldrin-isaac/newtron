@@ -148,21 +148,22 @@ reality share a type, a code path, and a set of invariants.
 Two modes of the same object yield two modes of use — not as separate
 systems, but as different initializations of the same computation.
 
-**Provisioning** is the one operation where intent replaces reality
-entirely. An offline Node builds the complete desired state — every
-VLAN, every VRF, every BGP session, every service binding — by running
-the same methods in the same order that an operator would run
-interactively. The accumulated entries are then delivered as a single
-composite, overwriting whatever the device had before. This is the only
-path where newtron asserts authority over device state.
+**Provisioning** — what the industry calls Day-1 or build provisioning
+— is the one operation where intent replaces reality entirely. An
+offline Node builds the complete desired state — every VLAN, every VRF,
+every BGP session, every service binding — by running the same methods
+in the same order that an operator would run interactively. The
+accumulated entries are then delivered as a single composite,
+overwriting whatever the device had before. This is the only path where
+newtron asserts authority over device state.
 
-**Operations** are mutations against existing reality. An online Node
-loads the device's current CONFIG_DB, checks preconditions against what
-actually exists, computes a delta, and applies it. The device's state
-before the operation is the starting point — not a spec file, not a
-template, not a desired-state store. If someone edited CONFIG_DB
-directly between operations, the online Node sees that edit as the
-new reality and operates on it without complaint.
+**Operations** — Day-2 in industry parlance — are mutations against
+existing reality. An online Node loads the device's current CONFIG_DB,
+checks preconditions against what actually exists, computes a delta,
+and applies it. The device's state before the operation is the starting
+point — not a spec file, not a template, not a desired-state store. If
+someone edited CONFIG_DB directly between operations, the online Node
+sees that edit as the new reality and operates on it without complaint.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
