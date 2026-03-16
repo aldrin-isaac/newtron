@@ -37,7 +37,7 @@ separation is itself the source of the divergence it tries to detect.
 newtron's central insight is that intent and reality are the same object
 viewed from different starting points. The Node is that object. An
 offline Node initialized from specs and profiles IS the expected
-state — intent before actualization. An online Node loaded from a live
+state — intent before actualization. A connected Node loaded from a live
 device's CONFIG_DB IS the actual state — reality as it exists. Same
 type, same methods, same preconditions, same validation. From this
 single design decision — one object, two modes — delivery guarantees,
@@ -87,7 +87,7 @@ intent and reality — it *is* both, depending on how it is initialized.
 
 The Node operates in two modes:
 
-- **Online mode**: ConfigDB loaded from Redis at connection time.
+- **Connected mode**: ConfigDB loaded from Redis at connection time.
   Preconditions check live device state. ChangeSets apply to Redis. The
   Node *is* the device — its ConfigDB is the device's CONFIG_DB, read
   and written through an SSH-tunneled Redis connection.
@@ -96,11 +96,11 @@ The Node operates in two modes:
   desired state. Entries accumulate for composite export. The Node *is*
   the intent — its ConfigDB is what the device should look like once
   the intent is delivered. Intent is inherently offline; delivery is
-  what brings it online.
+  what brings it to life — connecting it to its device.
 
 Same type, same methods, same preconditions. The topology provisioner
 creates an offline Node and calls the same methods the CLI uses
-against an online Node:
+against a connected Node:
 
 ```go
 n := node.NewAbstract(specs, name, profile, resolved)
@@ -132,8 +132,8 @@ output visible to subsequent preconditions:
 - Configure the VXLAN tunnel endpoint — shadow now has `VXLAN_TUNNEL`
 - Apply a service on the interface — precondition `VTEPConfigured` passes
 
-An offline Node with all intents actuated IS an online Node's expected
-state. An online Node's loaded CONFIG_DB IS what an offline Node would
+An offline Node with all intents actuated IS a connected Node's expected
+state. A connected Node's loaded CONFIG_DB IS what an offline Node would
 produce if initialized from the same specs and profile. The two modes
 are not analogous — they are literally the same computation, differing
 only in where the initial state comes from and where the final state
@@ -161,17 +161,17 @@ overwriting whatever the device had before. This is the only path where
 newtron asserts authority over device state.
 
 **Operations** — Day-2 in industry parlance — are mutations against
-existing reality. An online Node loads the device's current CONFIG_DB,
+existing reality. A connected Node loads the device's current CONFIG_DB,
 checks preconditions against what actually exists, computes a delta,
 and applies it. The device's state before the operation is the starting
 point — not a spec file, not a template, not a desired-state store. If
-someone edited CONFIG_DB directly between operations, the online Node
+someone edited CONFIG_DB directly between operations, the connected Node
 sees that edit as the new reality and operates on it without complaint.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
 delivery differ: offline Nodes start empty and export composites;
-online Nodes start from Redis and apply ChangeSets. This is not a
+connected Nodes start from Redis and apply ChangeSets. This is not a
 convenience — it is the guarantee. A feature added to one mode is
 immediately available in the other, because there is no other. A bug
 fixed in one mode is fixed in both, because there is only one code path
@@ -207,7 +207,7 @@ what it does look like normally requires a separate "expected state"
 representation — a desired-state store, a state file, a journal of
 applied operations. In newtron, the expected state IS an offline Node
 initialized from the device's specs, profile, and intent records.
-Reconstruct the offline Node, load the online Node from Redis,
+Reconstruct the offline Node, load the connected Node from Redis,
 compare the two ConfigDBs, and the diff is the drift. No journal, no
 state file, no reconciliation engine — the expected state is computed
 from the same code path that would produce it on a real device. If the
@@ -251,7 +251,7 @@ not of each feature that passes through it. The Node's operation method
 is where the pipeline lives — preconditions, schema validation,
 ChangeSet production, shadow update, intent recording. Every mutating
 operation flows through this pipeline. The one-code-path design (§1) is
-what makes this possible: because offline and online modes share the
+what makes this possible: because offline and connected modes share the
 same pipeline, a guarantee proven in one mode holds in both. The
 pipeline is not an aspiration documented above the code — it is the
 code.
@@ -469,10 +469,10 @@ What newtron adds beyond a reconciler:
   backend, separate from the target. newtron's intent records live on
   the device. No external state to lose, corrupt, or diverge.
 
-- **Same code path online and offline.** Terraform's plan runs against
+- **Same code path connected and offline.** Terraform's plan runs against
   provider APIs. newtron's offline Node runs the same methods
-  that run online — the composite IS the plan, generated by the same
-  code that executes incremental operations.
+  that run on connected Nodes — the composite IS the plan, generated by
+  the same code that executes incremental operations.
 
 For incremental operations, no single canonical desired state exists.
 The "desired state" is the device's current state plus the requested
@@ -1402,8 +1402,8 @@ intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
 the node's intent collection as part of the operation. In offline mode,
 intent records accumulate alongside shadow CONFIG_DB entries and are
 exportable to topology composites. This makes the node the single point
-of intent truth for its device — whether online or offline, whether
-connected or computing.
+of intent truth for its device — whether connected or offline, whether
+reading reality or computing it.
 
 Rollback operates at the intent level, not the ChangeSet level. To roll
 back an operation, the orchestrator calls the domain-level reverse for that
@@ -1729,7 +1729,7 @@ normal lifecycle.
 
 `RefreshService` solves this with a post-merge scan: after the
 remove+apply cycle, it reads existing route policy objects from CONFIG_DB
-(Redis in online mode, shadow in offline mode), compares against the set
+(Redis in connected mode, shadow in offline mode), compares against the set
 of objects just created by the apply phase, and deletes the difference.
 This is safe because all interfaces sharing a service use the same spec
 → the same hashes, and the shared peer group AF was already updated to
@@ -1864,7 +1864,7 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, err
 }
 ```
 
-The same config function is called by online operations, the offline
+The same config function is called by connected operations, the offline
 topology provisioner, and delete operations. Change the table
 format once; all paths update — because there is only one path.
 
