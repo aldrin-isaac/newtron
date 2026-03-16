@@ -1398,8 +1398,8 @@ intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
 the node's intent collection as part of the operation. In offline mode,
 intent records accumulate alongside shadow CONFIG_DB entries and are
 exportable to topology composites. This makes the node the single point
-of intent truth for its device — whether physical or abstract, whether
-connected or offline.
+of intent truth for its device — whether online or offline, whether
+connected or computing.
 
 Rollback operates at the intent level, not the ChangeSet level. To roll
 back an operation, the orchestrator calls the domain-level reverse for that
