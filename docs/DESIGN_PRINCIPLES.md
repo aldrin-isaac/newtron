@@ -81,9 +81,9 @@ else in this document follows from them.
 Drift is not a bug in the reconciliation logic. It is the structural
 consequence of maintaining parallel representations — one for intent,
 one for reality — with separate code paths that must stay synchronized
-forever. The Node eliminates the duality at the root. It does not
-bridge intent and reality — it *is* both, depending on how it is
-initialized.
+forever. The Node — a software object that represents a device, not the
+device itself — eliminates the duality at the root. It does not bridge
+intent and reality — it *is* both, depending on how it is initialized.
 
 The Node operates in two modes:
 
