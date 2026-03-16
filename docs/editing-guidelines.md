@@ -1,18 +1,41 @@
 # Documentation Editing Guidelines
 
-Principles for writing and editing newtron project documentation, captured from the HLD, LLD, HOWTO, and API reference rewrites (March 2026).
+Principles for writing and editing newtron project documentation, captured from the HLD, LLD, HOWTO, API reference, and DESIGN_PRINCIPLES rewrites (March 2026).
 
 **Scope key:** Each guideline is tagged with the document types it applies to.
 
 | Tag | Applies to |
 |-----|-----------|
-| ALL | HLD, LLD, Device LLD, HOWTO, README, API |
+| ALL | DESIGN_PRINCIPLES, HLD, LLD, Device LLD, HOWTO, README, API |
+| DESIGN | DESIGN_PRINCIPLES.md specifically |
 | HLD | High-Level Design |
 | LLD | Low-Level Design, Device LLD |
 | HLD+LLD | Both design documents |
+| DESIGN+HLD | DESIGN_PRINCIPLES and HLDs |
 | HOWTO | Operational guides (howto.md) |
 | README | Project and package READMEs |
 | API | HTTP API reference (api.md) |
+
+### Quality tiers
+
+Not all documents carry the same prose weight. The principles below are
+universal; the quality bar is tiered.
+
+| Document type | Quality tier | Notes |
+|---------------|-------------|-------|
+| DESIGN_PRINCIPLES | Highest | "The heart of newtron." Every sentence earns its place. |
+| HLDs | High | Explain the shape of the system; motivate every structural choice. |
+| RCAs | High | The reader needs to understand *why* the failure happened, not just *what*. |
+| LLDs | Standard | Precision over eloquence; method signatures matter more than prose. |
+| HOWTOs | Standard | Clarity and correctness; step-by-step accuracy over narrative arc. |
+| README | Standard | Concise orientation; don't over-explain. |
+| API | Standard | Route, method, params, response, example. |
+
+"Highest" means every guideline applies at full strength. "High" means all
+guidelines apply, but prose economy is valued over extended narrative.
+"Standard" means voice, metaphor, and anti-pattern rules apply; the reader
+experience rules (lean forward, illuminate) apply where natural but are not
+forced.
 
 ## 1. Examples Must Be Type-Valid — ALL
 
@@ -41,11 +64,13 @@ When drawing a diagram, ask:
 - What is the data flow direction between components?
 - Are there two paths that converge? Show where they meet.
 
-## 4. Each Concept Explained Exactly Once — HLD+LLD
+## 4. Each Concept Explained Exactly Once — ALL
 
 Pick the canonical section for a concept and explain it there. Every other section references it, never re-explains it. A glossary may define terms tersely but should not duplicate the prose explanation.
 
 When the same concept appears in multiple sections with slightly different nuance, none is authoritative and the reader cannot tell which to trust.
+
+This is especially critical in DESIGN_PRINCIPLES, where a concept like "delivery guarantees" might naturally belong in the thesis (why it matters), the enforcement contract (how the pipeline ensures it), and the delivery section (the ChangeSet mechanics). The concept is explained once — in the section that owns the mechanism. Other sections compress the idea to a one-sentence claim with a forward or back reference. The reader should never think "you told me this already." Triple coverage is the specific failure mode: a concept explained in three places because each place "needs" it. The reader's patience is finite; respect it.
 
 HOWTOs and READMEs may restate concepts for self-containment, but should link to the canonical explanation and never contradict it.
 
@@ -480,6 +505,8 @@ The strongest openings in design documents state something true *beyond* the sys
 
 The first version describes a feature. The second describes the *problem in the domain* that makes the feature necessary. A reader who has never used newtron learns something from the second version — about Redis, about SONiC's architecture, about the failure mode that any CONFIG_DB tool must handle. The feature description follows naturally once the problem is felt.
 
+**Anchor abstractions in the reader's world.** When the insight requires an abstraction the reader doesn't yet have ("The Node unifies intent and reality in one object"), arrive at it through the reader's experience rather than the author's vocabulary. Every NOS separates candidate config from running config; every NOS has bugs where they diverge. Start there — in something the network engineer has lived — then generalize to the Node concept. An insight that arrives through the reader's experience lands harder than one that arrives through the author's terminology.
+
 This applies primarily to design documents and architecture sections. API references and HOWTOs should lead with what the reader needs to do, not why it matters philosophically — the design document already made that case.
 
 ## 35. Write from Conviction, Not Summary — HLD
@@ -499,3 +526,48 @@ Signs of summary voice that should be revised:
 - Leading with the solution rather than the problem it solves
 - Describing what the system does without explaining why the alternative fails
 - Passive constructions that distance the writer from the claim ("it was decided that...")
+
+## 36. No Fourth-Wall Breaks — DESIGN+HLD
+
+Never reference the document's own structure as a transition. Each section must
+stand on its own conviction — not lean on the reader's memory of a previous section
+or preview of a later one.
+
+**Bad:** "The opening described the structural problem." "As mentioned in the
+previous section..." "This section will show..."
+
+**Good:** Forward references to specific sections ("§15 details the symmetric
+teardown mechanism") — these tell the reader *where to go*, not *what they already
+read*. They are navigation, not narration.
+
+The distinction: a forward reference says "go here for depth." A back-reference
+that summarizes what the reader just read is padding — it signals that the current
+section cannot make its case without borrowing from the last one. If §3 depends
+on the opening to make sense, §3 is incomplete.
+
+**Test:** Delete every sentence that references "the opening," "the previous
+section," or "as we discussed." If the section still makes its argument, the
+references were padding. If it doesn't, the section needs to be rewritten to
+stand alone.
+
+## 37. Structural Consistency — ALL
+
+If sections end with `---` separators, *every* section ends with one. If Parts
+open with a transition paragraph, *every* Part opens with one. If subsections
+use `###`, no subsection uses `**bold text**` as a heading substitute.
+
+Inconsistency in structure signals inconsistency in thought. The reader should
+never wonder "is this a subsection or just bold text?" or "did the author forget
+the separator?"
+
+Rules:
+- **Separators**: pick a pattern and enforce it everywhere. DESIGN_PRINCIPLES
+  uses `---` after every numbered section. No exceptions.
+- **Heading levels**: `##` for numbered sections, `###` for subsections within
+  them. Never use `**bold**` as a heading substitute.
+- **Part transitions**: every Part heading is preceded by `---` and a blank line.
+  Every Part gets a transition paragraph that connects what came before to what
+  comes next.
+- **Consistent formatting of lists, tables, and code blocks** within a document.
+  If one table uses `|` alignment, all tables do. If one code block has a language
+  tag, all code blocks do.

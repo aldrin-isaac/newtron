@@ -59,6 +59,12 @@ type Step struct {
 
 	// All verify-* actions, ssh-command
 	Expect *ExpectBlock `yaml:"expect,omitempty"`
+
+	// ExpectFailure inverts the pass/fail logic: the step MUST fail for the
+	// scenario to continue. Used to test that operations are correctly blocked
+	// (e.g., zombie intent blocks apply-service). If Expect.Contains is set,
+	// the error message must contain that substring.
+	ExpectFailure bool `yaml:"expect_failure,omitempty"`
 }
 
 // StepAction identifies the type of step to execute.
@@ -137,6 +143,13 @@ ActionSetInterface       StepAction = "set-interface"
 
 	// Loopback removal
 	ActionRemoveLoopback StepAction = "remove-loopback"
+
+	// Drift detection and crash recovery
+	ActionDetectDrift    StepAction = "detect-drift"
+	ActionVerifyDrift    StepAction = "verify-drift"
+	ActionReadZombie     StepAction = "read-zombie"
+	ActionRollbackZombie StepAction = "rollback-zombie"
+	ActionClearZombie    StepAction = "clear-zombie"
 
 	// Network-level spec authoring actions
 	ActionCreatePrefixList    StepAction = "create-prefix-list"
@@ -222,4 +235,7 @@ type ExpectBlock struct {
 
 	// ssh-command
 	Contains string `yaml:"contains,omitempty"`
+
+	// verify-drift
+	Status string `yaml:"status,omitempty"`
 }

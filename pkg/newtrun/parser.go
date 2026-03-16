@@ -171,6 +171,21 @@ ActionCleanup:           {needsDevices: true},
 	ActionAddPortChannelMember:    {needsDevices: true, params: []string{"name", "member"}},
 	ActionRemovePortChannelMember: {needsDevices: true, params: []string{"name", "member"}},
 
+	// Drift detection and crash recovery
+	ActionDetectDrift:    {needsDevices: true},
+	ActionVerifyDrift: {needsDevices: true, custom: func(prefix string, step *Step) error {
+		if step.Expect == nil || step.Expect.Status == "" {
+			return fmt.Errorf("%s: expect.status is required (\"clean\" or \"drifted\")", prefix)
+		}
+		if step.Expect.Status != "clean" && step.Expect.Status != "drifted" {
+			return fmt.Errorf("%s: expect.status must be \"clean\" or \"drifted\", got %q", prefix, step.Expect.Status)
+		}
+		return nil
+	}},
+	ActionReadZombie:     {needsDevices: true},
+	ActionRollbackZombie: {needsDevices: true},
+	ActionClearZombie:    {needsDevices: true},
+
 	ActionRemoveSVI:      {needsDevices: true, fields: []string{"vlan_id"}},
 	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
 	ActionTeardownEVPN:     {needsDevices: true},

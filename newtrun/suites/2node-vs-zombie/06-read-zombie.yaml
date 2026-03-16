@@ -1,0 +1,17 @@
+name: read-zombie
+description: |
+  Read the zombie intent to verify it's detected and reported correctly.
+  This is an observation step — proves the zombie API works.
+topology: 2node-vs-service
+requires: [verify-blocked]
+
+steps:
+  # Read zombie on the affected device — should report holder and ops
+  - name: read-zombie-sw1
+    action: read-zombie
+    devices: [switch1]
+
+  # Read zombie on unaffected device — should report no zombie
+  - name: read-zombie-sw2
+    action: read-zombie
+    devices: [switch2]

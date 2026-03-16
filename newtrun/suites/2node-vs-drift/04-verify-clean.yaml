@@ -1,0 +1,94 @@
+name: verify-clean
+description: |
+  After provisioning, verify that drift detection reports a clean state.
+  This proves the abstract Node reconstruction matches the physical CONFIG_DB.
+
+  The test verifies more than just a "clean" status — it also confirms that
+  specific provisioned entries actually exist on the device (proving the
+  abstract Node generated them and the device has them).
+topology: 2node-vs-service
+requires: [provision]
+
+steps:
+  # First: confirm drift detection returns clean status with zero counts.
+  # This is the core thesis test — abstract == physical.
+  - name: verify-drift-clean-sw1
+    action: verify-drift
+    devices: [switch1]
+    expect:
+      status: "clean"
+      fields:
+        missing: "0"
+        extra: "0"
+        modified: "0"
+
+  - name: verify-drift-clean-sw2
+    action: verify-drift
+    devices: [switch2]
+    expect:
+      status: "clean"
+      fields:
+        missing: "0"
+        extra: "0"
+        modified: "0"
+
+  # Second: spot-check specific CONFIG_DB entries to prove they exist.
+  # If the abstract Node failed to generate these, drift would have caught
+  # them as "missing" — but we verify independently to be thorough.
+
+  # BGP_GLOBALS must have the correct ASN from the profile
+  - name: verify-bgp-globals-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "65001"
+        router_id: "10.0.0.1"
+
+  - name: verify-bgp-globals-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "65002"
+        router_id: "10.0.0.2"
+
+  # Transit interface IP (the entry we'll delete in inject-drift)
+  - name: verify-transit-ip-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: true
+
+  - name: verify-transit-ip-sw2
+    action: verify-config-db
+    devices: [switch2]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.1/31"
+    expect:
+      exists: true
+
+  # VLAN 100 from local-irb service (the topology provisions this)
+  - name: verify-vlan100-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      fields:
+        vlanid: "100"
+
+  # VLAN 999 must NOT exist yet (we'll inject it as "extra" drift)
+  - name: verify-no-vlan999-sw1
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan999
+    expect:
+      exists: false

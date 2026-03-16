@@ -1,0 +1,70 @@
+name: teardown
+description: |
+  Standard teardown: remove services, then deprovision infrastructure.
+  Follows the service topology's reverse dependency order.
+topology: 2node-vs-service
+requires: [reprovision]
+
+steps:
+  # Remove services in reverse dependency order
+  - name: remove-overlay-irb-sw1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet16
+
+  - name: remove-overlay-irb-sw2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet16
+
+  - name: remove-l2-extend-sw1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet12
+
+  - name: remove-l2-extend-sw2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet12
+
+  - name: remove-local-bridge-sw1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet8
+
+  - name: remove-local-bridge-sw2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet8
+
+  - name: remove-local-irb-sw1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet4
+
+  - name: remove-local-irb-sw2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet4
+
+  - name: remove-transit-sw1
+    action: remove-service
+    devices: [switch1]
+    interface: Ethernet0
+
+  - name: remove-transit-sw2
+    action: remove-service
+    devices: [switch2]
+    interface: Ethernet0
+
+  - name: teardown-evpn
+    action: teardown-evpn
+    devices: [switch1, switch2]
+
+  - name: remove-bgp-globals
+    action: remove-bgp-globals
+    devices: [switch1, switch2]
+
+  - name: remove-loopback
+    action: remove-loopback
+    devices: [switch1, switch2]

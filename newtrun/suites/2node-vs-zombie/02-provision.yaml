@@ -1,0 +1,33 @@
+name: provision
+description: |
+  Provision both switches via topology provisioner. Establishes baseline
+  CONFIG_DB state before injecting a synthetic zombie intent.
+topology: 2node-vs-service
+requires: [boot-ssh]
+
+steps:
+  - name: provision-switches
+    action: provision
+    devices: [switch1, switch2]
+
+  - name: config-reload
+    action: config-reload
+    devices: [switch1, switch2]
+
+  - name: restart-bgp
+    action: restart-service
+    devices: [switch1, switch2]
+    service: bgp
+
+  - name: wait-bgp-instance
+    action: ssh-command
+    devices: [switch1, switch2]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s

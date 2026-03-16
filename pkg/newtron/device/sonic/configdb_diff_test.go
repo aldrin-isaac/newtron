@@ -147,19 +147,35 @@ func TestDiffConfigDB_MultipleDifferences(t *testing.T) {
 	}
 }
 
-func TestFieldsEqual_DifferentLengths(t *testing.T) {
-	a := map[string]string{"x": "1"}
-	b := map[string]string{"x": "1", "y": "2"}
-	if fieldsEqual(a, b) {
-		t.Error("different lengths should not be equal")
+func TestFieldsMatch_SubsetWithExtra(t *testing.T) {
+	expected := map[string]string{"x": "1"}
+	actual := map[string]string{"x": "1", "y": "2"}
+	if !fieldsMatch(expected, actual) {
+		t.Error("expected is a subset of actual — should match")
 	}
 }
 
-func TestFieldsEqual_SameContent(t *testing.T) {
+func TestFieldsMatch_SameContent(t *testing.T) {
 	a := map[string]string{"x": "1", "y": "2"}
 	b := map[string]string{"y": "2", "x": "1"}
-	if !fieldsEqual(a, b) {
-		t.Error("same content should be equal")
+	if !fieldsMatch(a, b) {
+		t.Error("same content should match")
+	}
+}
+
+func TestFieldsMatch_ValueDiffers(t *testing.T) {
+	expected := map[string]string{"x": "1"}
+	actual := map[string]string{"x": "2"}
+	if fieldsMatch(expected, actual) {
+		t.Error("different value for expected field — should not match")
+	}
+}
+
+func TestFieldsMatch_MissingInActual(t *testing.T) {
+	expected := map[string]string{"x": "1", "y": "2"}
+	actual := map[string]string{"x": "1"}
+	if fieldsMatch(expected, actual) {
+		t.Error("actual missing expected field — should not match")
 	}
 }
 

@@ -25,11 +25,15 @@ type DriftEntry struct {
 }
 
 // excludedFromDrift lists tables that should not be compared for drift.
-// Intent and history are ephemeral/rolling — not device configuration.
+//   - NEWTRON_INTENT, NEWTRON_HISTORY, NEWTRON_SETTINGS: ephemeral/rolling
+//   - PORT: factory-managed (all HWSKU ports exist in config_db.json)
+//   - DEVICE_METADATA: partially factory, partially newtron — too noisy
 var excludedFromDrift = map[string]bool{
 	"NEWTRON_INTENT":   true,
 	"NEWTRON_HISTORY":  true,
 	"NEWTRON_SETTINGS": true,
+	"PORT":             true,
+	"DEVICE_METADATA":  true,
 }
 
 // DiffConfigDB compares expected vs actual CONFIG_DB, returning differences.
@@ -71,8 +75,8 @@ func DiffConfigDB(expected, actual RawConfigDB, ownedTables []string) []DriftEnt
 				continue
 			}
 
-			// Check for modified fields
-			if !fieldsEqual(expectedFields, actualFields) {
+			// Check for modified fields (subset: expected fields must match actual)
+			if !fieldsMatch(expectedFields, actualFields) {
 				diffs = append(diffs, DriftEntry{
 					Table:    table,
 					Key:      key,
@@ -107,14 +111,12 @@ func DiffConfigDB(expected, actual RawConfigDB, ownedTables []string) []DriftEnt
 	return diffs
 }
 
-// fieldsEqual compares two field maps for equality.
-// Both must have the same keys with the same values.
-func fieldsEqual(a, b map[string]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if b[k] != v {
+// fieldsMatch checks that every field in expected is present in actual with the
+// same value. Extra fields in actual are ignored — the device may have fields
+// from factory config or config-reload that the provisioner doesn't manage.
+func fieldsMatch(expected, actual map[string]string) bool {
+	for k, v := range expected {
+		if actual[k] != v {
 			return false
 		}
 	}

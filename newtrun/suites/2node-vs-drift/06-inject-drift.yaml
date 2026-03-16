@@ -1,0 +1,71 @@
+name: inject-drift
+description: |
+  Inject three categories of CONFIG_DB drift via direct redis-cli writes:
+    - Missing: delete a VLAN member entry created by the provisioner
+    - Extra: add an unexpected VLAN entry not in the topology
+    - Modified: change the BGP ASN to a wrong value
+  This simulates out-of-band CONFIG_DB changes (CLI, other tools, operator).
+
+  Only inject on switch1. switch2 remains clean — this tests that drift
+  detection is per-device and doesn't cross-contaminate.
+topology: 2node-vs-service
+requires: [verify-clean]
+
+steps:
+  # MISSING: delete the transit interface IP that the provisioner created.
+  # The abstract Node will still generate INTERFACE|Ethernet0|10.1.0.0/31,
+  # but the physical device no longer has it → "missing" drift.
+  - name: inject-missing-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "sudo redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.0/31'"
+    expect:
+      contains: "1"
+
+  # Confirm it's actually gone
+  - name: verify-deleted
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: false
+
+  # EXTRA: add an unexpected VLAN not in the topology.
+  # The abstract Node doesn't generate VLAN|Vlan999 → "extra" drift.
+  - name: inject-extra-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"
+    expect:
+      contains: "1"
+
+  # Confirm it exists
+  - name: verify-extra-exists
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan999
+    expect:
+      fields:
+        vlanid: "999"
+
+  # MODIFIED: change BGP ASN to a wrong value.
+  # The abstract Node generates local_asn=65001 but the device now has 99999
+  # → "modified" drift.
+  - name: inject-modified-sw1
+    action: ssh-command
+    devices: [switch1]
+    command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 99999"
+    expect:
+      contains: "0"
+
+  # Confirm the modification took effect
+  - name: verify-modified
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "99999"

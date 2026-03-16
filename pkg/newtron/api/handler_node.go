@@ -1481,6 +1481,7 @@ func (s *Server) handleRollbackZombie(w http.ResponseWriter, r *http.Request) {
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
 		n.SetBypassZombieCheck(true)
+		defer n.SetBypassZombieCheck(false)
 		if !opts.Execute {
 			// Dry-run: read intent and show what would be reversed
 			intent, err := n.ReadZombie(r.Context())
@@ -1507,6 +1508,7 @@ func (s *Server) handleClearZombie(w http.ResponseWriter, r *http.Request) {
 	}
 	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
 		n.SetBypassZombieCheck(true)
+		defer n.SetBypassZombieCheck(false)
 		return nil, n.ClearZombie(r.Context())
 	})
 	if err != nil {
@@ -1579,6 +1581,8 @@ func (s *Server) handleRollbackHistory(w http.ResponseWriter, r *http.Request) {
 	val, err := nodeActor.connectAndLocked(r.Context(), func(n *newtron.Node) (any, error) {
 		n.SetBypassZombieCheck(true)
 		n.SetSkipHistory(true)
+		defer n.SetBypassZombieCheck(false)
+		defer n.SetSkipHistory(false)
 		if !opts.Execute {
 			preview, err := n.PreviewRollbackHistory(r.Context())
 			if err != nil {

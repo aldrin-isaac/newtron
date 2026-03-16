@@ -1520,6 +1520,8 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionCreateRoutePolicy, ActionDeleteRoutePolicy,
 		ActionAddRoutePolicyRule, ActionRemoveRoutePolicyRule,
 		ActionCreateService, ActionDeleteService,
+		ActionDetectDrift, ActionVerifyDrift,
+		ActionReadZombie, ActionRollbackZombie, ActionClearZombie,
 	}
 
 	if len(executors) != len(allActions) {

@@ -91,6 +91,13 @@ ActionSetInterface:       &setInterfaceExecutor{},
 	ActionRemoveBGPGlobals: &removeBGPGlobalsExecutor{},
 	ActionRemoveLoopback:   &removeLoopbackExecutor{},
 
+	// Drift detection and crash recovery executors
+	ActionDetectDrift:    &detectDriftExecutor{},
+	ActionVerifyDrift:    &verifyDriftExecutor{},
+	ActionReadZombie:     &readZombieExecutor{},
+	ActionRollbackZombie: &rollbackZombieExecutor{},
+	ActionClearZombie:    &clearZombieExecutor{},
+
 	// Network-level spec authoring executors
 	ActionCreatePrefixList:      &createPrefixListExecutor{},
 	ActionDeletePrefixList:      &deletePrefixListExecutor{},
@@ -1900,4 +1907,104 @@ func (e *deleteServiceExecutor) Execute(ctx context.Context, r *Runner, step *St
 		return &StepOutput{Result: &StepResult{Status: StepStatusFailed, Message: err.Error()}}
 	}
 	return &StepOutput{Result: &StepResult{Status: StepStatusPassed, Message: fmt.Sprintf("deleted service '%s'", name)}}
+}
+
+// ============================================================================
+// Drift detection executors
+// ============================================================================
+
+type detectDriftExecutor struct{}
+
+func (e *detectDriftExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		report, err := r.Client.DetectDrift(name)
+		if err != nil {
+			return "", fmt.Errorf("detect-drift: %s", err)
+		}
+		if report.Status == "clean" {
+			return "clean — no drift detected", nil
+		}
+		return fmt.Sprintf("drifted: %d missing, %d extra, %d modified",
+			len(report.Missing), len(report.Extra), len(report.Modified)), nil
+	})
+}
+
+type verifyDriftExecutor struct{}
+
+func (e *verifyDriftExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	expected := step.Expect.Status
+	return r.checkForDevices(step, func(name string) (StepStatus, string) {
+		report, err := r.Client.DetectDrift(name)
+		if err != nil {
+			return StepStatusError, fmt.Sprintf("detect-drift: %s", err)
+		}
+		summary := fmt.Sprintf("status=%s (missing=%d, extra=%d, modified=%d)",
+			report.Status, len(report.Missing), len(report.Extra), len(report.Modified))
+		if report.Status != expected {
+			return StepStatusFailed, fmt.Sprintf("expected status %q, got %s", expected, summary)
+		}
+		// Check optional count assertions from fields
+		if step.Expect.Fields != nil {
+			for key, want := range step.Expect.Fields {
+				var got string
+				switch key {
+				case "missing":
+					got = strconv.Itoa(len(report.Missing))
+				case "extra":
+					got = strconv.Itoa(len(report.Extra))
+				case "modified":
+					got = strconv.Itoa(len(report.Modified))
+				default:
+					return StepStatusError, fmt.Sprintf("unknown drift field %q", key)
+				}
+				if got != want {
+					return StepStatusFailed, fmt.Sprintf("drift %s: expected %s, got %s", key, want, got)
+				}
+			}
+		}
+		return StepStatusPassed, summary
+	})
+}
+
+// ============================================================================
+// Crash recovery (zombie) executors
+// ============================================================================
+
+type readZombieExecutor struct{}
+
+func (e *readZombieExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		intent, err := r.Client.ReadZombie(name)
+		if err != nil {
+			return "", fmt.Errorf("read-zombie: %s", err)
+		}
+		if intent == nil || intent.Holder == "" {
+			return "no zombie intent found", nil
+		}
+		return fmt.Sprintf("zombie: holder=%s, ops=%d, phase=%s",
+			intent.Holder, len(intent.Operations), intent.Phase), nil
+	})
+}
+
+type rollbackZombieExecutor struct{}
+
+func (e *rollbackZombieExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		result, err := r.Client.RollbackZombie(name, execOptsRun)
+		if err != nil {
+			return "", fmt.Errorf("rollback-zombie: %s", err)
+		}
+		return fmt.Sprintf("zombie rollback (%d changes, applied=%t)", result.ChangeCount, result.Applied), nil
+	})
+}
+
+type clearZombieExecutor struct{}
+
+func (e *clearZombieExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
+	return r.executeForDevices(step, func(name string) (string, error) {
+		if err := r.Client.ClearZombie(name); err != nil {
+			return "", fmt.Errorf("clear-zombie: %s", err)
+		}
+		return "zombie intent cleared", nil
+	})
 }

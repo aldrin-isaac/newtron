@@ -586,7 +586,42 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 		}
 	}
 
+	// Handle expect_failure: invert pass/fail logic
+	if step.ExpectFailure {
+		output.Result = applyExpectFailure(output.Result, step)
+	}
+
 	return output
+}
+
+// applyExpectFailure inverts the pass/fail result for steps with expect_failure: true.
+// If the step failed/errored → passes (expected). If it passed → fails (unexpected success).
+// When expect.contains is set, the error message must contain that substring.
+func applyExpectFailure(result *StepResult, step *Step) *StepResult {
+	switch result.Status {
+	case StepStatusFailed, StepStatusError:
+		// Step failed as expected — check error message if contains is specified
+		if step.Expect != nil && step.Expect.Contains != "" {
+			if !strings.Contains(result.Message, step.Expect.Contains) {
+				result.Status = StepStatusFailed
+				result.Message = fmt.Sprintf("expected failure containing %q, got: %s",
+					step.Expect.Contains, result.Message)
+				return result
+			}
+		}
+		result.Status = StepStatusPassed
+		result.Message = fmt.Sprintf("expected failure: %s", result.Message)
+		// Also flip device-level details so aggregation works
+		for i := range result.Details {
+			if result.Details[i].Status == StepStatusFailed || result.Details[i].Status == StepStatusError {
+				result.Details[i].Status = StepStatusPassed
+			}
+		}
+	case StepStatusPassed:
+		result.Status = StepStatusFailed
+		result.Message = "expected failure but step succeeded"
+	}
+	return result
 }
 
 // progress calls fn with the ProgressReporter if one is set.

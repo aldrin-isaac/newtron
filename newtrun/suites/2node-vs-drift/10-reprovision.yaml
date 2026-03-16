@@ -1,0 +1,86 @@
+name: reprovision
+description: |
+  Re-provision switch1 to remediate drift.
+  Provisioning (CompositeOverwrite) is the canonical remediation — it replaces
+  CONFIG_DB atomically with the abstract Node's generated state.
+
+  After re-provisioning:
+    - Missing entry (INTERFACE|Ethernet0|10.1.0.0/31) must be restored
+    - Extra entry (VLAN|Vlan999) must be removed
+    - Modified entry (BGP_GLOBALS local_asn) must be corrected
+    - Drift detection must report clean
+topology: 2node-vs-service
+requires: [detect-drift]
+
+steps:
+  # Re-provision only switch1 (switch2 was never drifted)
+  - name: reprovision-sw1
+    action: provision
+    devices: [switch1]
+
+  - name: config-reload
+    action: config-reload
+    devices: [switch1]
+
+  - name: restart-bgp
+    action: restart-service
+    devices: [switch1]
+    service: bgp
+
+  - name: wait-bgp-instance
+    action: ssh-command
+    devices: [switch1]
+    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+
+  - name: verify-bgp
+    action: verify-bgp
+    devices: [switch1, switch2]
+    expect:
+      state: Established
+      timeout: 120s
+      poll_interval: 5s
+
+  # Verify the missing entry was restored
+  - name: verify-restored-transit-ip
+    action: verify-config-db
+    devices: [switch1]
+    table: INTERFACE
+    key: "Ethernet0|10.1.0.0/31"
+    expect:
+      exists: true
+
+  # Verify the extra VLAN was removed
+  - name: verify-extra-removed
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan999
+    expect:
+      exists: false
+
+  # Verify the modified BGP ASN was corrected
+  - name: verify-asn-corrected
+    action: verify-config-db
+    devices: [switch1]
+    table: BGP_GLOBALS
+    key: default
+    expect:
+      fields:
+        local_asn: "65001"
+
+  # Final drift check: must be clean on both devices
+  - name: verify-drift-clean-sw1
+    action: verify-drift
+    devices: [switch1]
+    expect:
+      status: "clean"
+      fields:
+        missing: "0"
+        extra: "0"
+        modified: "0"
+
+  - name: verify-drift-clean-sw2
+    action: verify-drift
+    devices: [switch2]
+    expect:
+      status: "clean"

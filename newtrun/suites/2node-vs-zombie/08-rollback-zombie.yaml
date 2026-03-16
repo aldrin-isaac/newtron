@@ -1,0 +1,61 @@
+name: rollback-zombie
+description: |
+  Execute zombie rollback to reverse the crashed operation's changes.
+  The rollback dispatches reverse operations for each completed/started
+  operation in the intent (device.delete-vlan, device.delete-vrf).
+
+  After rollback, verify:
+    - VLAN 500 and VRF ZOMBIE_VRF are deleted from CONFIG_DB
+    - Zombie intent is cleared
+    - Idempotent: second rollback succeeds with no work to do
+topology: 2node-vs-service
+requires: [read-zombie]
+
+steps:
+  # Execute rollback — reverses create-vlan and create-vrf
+  - name: rollback-zombie-intent
+    action: rollback-zombie
+    devices: [switch1]
+
+  # Verify VLAN 500 was cleaned up
+  - name: verify-no-vlan500
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan500
+    expect:
+      exists: false
+
+  # Verify VRF ZOMBIE_VRF was cleaned up
+  - name: verify-no-zombie-vrf
+    action: verify-config-db
+    devices: [switch1]
+    table: VRF
+    key: ZOMBIE_VRF
+    expect:
+      exists: false
+
+  # Verify zombie intent was cleared after rollback
+  - name: verify-intent-gone
+    action: ssh-command
+    devices: [switch1]
+    command: "sudo redis-cli -n 4 EXISTS 'NEWTRON_INTENT|switch1'"
+    expect:
+      contains: "0"
+
+  # Idempotent rollback: calling again should succeed (no zombie to rollback)
+  # read-zombie returns nil → "no zombie intent found" (not an error)
+  - name: verify-no-zombie-after-rollback
+    action: read-zombie
+    devices: [switch1]
+
+  # Verify provisioned VLAN 100 (from local-irb service) was NOT affected
+  # by the rollback — rollback only reverses zombie operations
+  - name: verify-provisioned-state-intact
+    action: verify-config-db
+    devices: [switch1]
+    table: VLAN
+    key: Vlan100
+    expect:
+      fields:
+        vlanid: "100"

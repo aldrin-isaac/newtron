@@ -1,0 +1,38 @@
+name: detect-drift
+description: |
+  After injecting CONFIG_DB changes on switch1, verify that drift detection
+  correctly identifies the specific drifted state.
+
+  Key assertions:
+    - switch1: drifted with exactly 1 missing, 1 extra, 1 modified
+    - switch2: still clean (drift is per-device, no cross-contamination)
+topology: 2node-vs-service
+requires: [inject-drift]
+
+steps:
+  # Observe drift on switch1 (informational — always passes)
+  - name: detect-drift-sw1
+    action: detect-drift
+    devices: [switch1]
+
+  # Assert: switch1 has exactly 3 drifts (1 per category)
+  - name: verify-drift-sw1
+    action: verify-drift
+    devices: [switch1]
+    expect:
+      status: "drifted"
+      fields:
+        missing: "1"
+        extra: "1"
+        modified: "1"
+
+  # Assert: switch2 is still clean — per-device isolation
+  - name: verify-drift-sw2-still-clean
+    action: verify-drift
+    devices: [switch2]
+    expect:
+      status: "clean"
+      fields:
+        missing: "0"
+        extra: "0"
+        modified: "0"
