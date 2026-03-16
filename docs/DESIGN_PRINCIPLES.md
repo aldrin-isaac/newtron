@@ -36,13 +36,13 @@ separation is itself the source of the divergence it tries to detect.
 
 newtron's central insight is that intent and reality are the same object
 viewed from different starting points. The Node is that object. An
-abstract Node initialized from specs and profiles IS the expected
-state. A physical Node loaded from a live device's CONFIG_DB IS the
-actual state. Same type, same methods, same preconditions, same
-validation. From this single design decision — one object, two modes —
-delivery guarantees, offline provisioning, drift detection, and crash
-recovery all follow as structural consequences rather than independent
-features.
+offline Node initialized from specs and profiles IS the expected
+state — intent before actualization. An online Node loaded from a live
+device's CONFIG_DB IS the actual state — reality as it exists. Same
+type, same methods, same preconditions, same validation. From this
+single design decision — one object, two modes — delivery guarantees,
+offline provisioning, drift detection, and crash recovery all follow
+as structural consequences rather than independent features.
 
 This document explains the principles behind that architecture — not as
 a reference, but as a narrative. Part I states the thesis: the Node,
@@ -87,19 +87,20 @@ initialized.
 
 The Node operates in two modes:
 
-- **Physical mode**: ConfigDB loaded from Redis at connection time.
+- **Online mode**: ConfigDB loaded from Redis at connection time.
   Preconditions check live device state. ChangeSets apply to Redis. The
   Node *is* the device — its ConfigDB is the device's CONFIG_DB, read
   and written through an SSH-tunneled Redis connection.
 
-- **Abstract mode**: Shadow ConfigDB starts empty. Operations build
+- **Offline mode**: Shadow ConfigDB starts empty. Operations build
   desired state. Entries accumulate for composite export. The Node *is*
   the intent — its ConfigDB is what the device should look like once
-  the intent is delivered.
+  the intent is delivered. Intent is inherently offline; delivery is
+  what brings it online.
 
 Same type, same methods, same preconditions. The topology provisioner
-creates an abstract Node and calls the same methods the CLI uses
-against a physical Node:
+creates an offline Node and calls the same methods the CLI uses
+against an online Node:
 
 ```go
 n := node.NewAbstract(specs, name, profile, resolved)
@@ -114,13 +115,13 @@ composite := n.BuildComposite()            // export all accumulated entries
 
 The shadow ConfigDB is not a mock — it is what makes the code path
 genuinely identical. Without it, preconditions would have nothing to
-check in abstract mode. Applying a service needs to verify the VTEP
+check in offline mode. Applying a service needs to verify the VTEP
 exists. Binding an interface to a VRF needs to verify the VRF was
 created. The options without a shadow are to skip the checks — breaking
 the one-code-path guarantee — or to maintain a separate tracking
 mechanism, which creates the second representation this design
 eliminates. The shadow simulates the state transitions a real device
-would undergo, so preconditions in abstract mode are real preconditions
+would undergo, so preconditions in offline mode are real preconditions
 — not stubs.
 
 After every operation, the shadow is updated, making each operation's
@@ -131,12 +132,12 @@ output visible to subsequent preconditions:
 - Configure the VXLAN tunnel endpoint — shadow now has `VXLAN_TUNNEL`
 - Apply a service on the interface — precondition `VTEPConfigured` passes
 
-An abstract Node with all intents actuated IS a physical Node's
-expected state. A physical Node's loaded CONFIG_DB IS what an abstract
-Node would produce if initialized from the same specs and profile. The
-two modes are not analogous — they are literally the same computation,
-differing only in where the initial state comes from and where the
-final state goes.
+An offline Node with all intents actuated IS an online Node's expected
+state. An online Node's loaded CONFIG_DB IS what an offline Node would
+produce if initialized from the same specs and profile. The two modes
+are not analogous — they are literally the same computation, differing
+only in where the initial state comes from and where the final state
+goes.
 
 This is the thesis. Delivery guarantees, offline provisioning, drift
 detection, intent recording — all follow from a system where intent and
@@ -148,25 +149,25 @@ Two modes of the same object yield two modes of use — not as separate
 systems, but as different initializations of the same computation.
 
 **Provisioning** is the one operation where intent replaces reality
-entirely. An abstract Node builds the complete desired state — every
+entirely. An offline Node builds the complete desired state — every
 VLAN, every VRF, every BGP session, every service binding — by running
 the same methods in the same order that an operator would run
 interactively. The accumulated entries are then delivered as a single
 composite, overwriting whatever the device had before. This is the only
 path where newtron asserts authority over device state.
 
-**Operations** are mutations against existing reality. A physical Node
+**Operations** are mutations against existing reality. An online Node
 loads the device's current CONFIG_DB, checks preconditions against what
 actually exists, computes a delta, and applies it. The device's state
 before the operation is the starting point — not a spec file, not a
 template, not a desired-state store. If someone edited CONFIG_DB
-directly between operations, the physical Node sees that edit as the
+directly between operations, the online Node sees that edit as the
 new reality and operates on it without complaint.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
-delivery differ: abstract Nodes start empty and export composites;
-physical Nodes start from Redis and apply ChangeSets. This is not a
+delivery differ: offline Nodes start empty and export composites;
+online Nodes start from Redis and apply ChangeSets. This is not a
 convenience — it is the guarantee. A feature added to one mode is
 immediately available in the other, because there is no other. A bug
 fixed in one mode is fixed in both, because there is only one code path
@@ -187,10 +188,10 @@ ChangeSet that executes it — same object, not a copy, not a
 re-derivation. Preview and execution cannot diverge because there is
 nothing to diverge. (See §11 for the ChangeSet mechanism.)
 
-**2. Offline provisioning.** The abstract Node computes without writing
+**2. Offline provisioning.** The offline Node computes without writing
 to a device, so a complete device configuration can be built in memory
 and delivered later as a single atomic operation. This is not a second
-system — it is the same system in abstract mode. Adding a new feature
+system — it is the same system in offline mode. Adding a new feature
 to the incremental path automatically makes it available for
 provisioning, because there is no separate provisioning path. A service
 type that works interactively works in provisioning on the same day,
@@ -200,9 +201,9 @@ exercising the same code, validated by the same preconditions. (See
 **3. Drift detection.** Comparing what a device should look like against
 what it does look like normally requires a separate "expected state"
 representation — a desired-state store, a state file, a journal of
-applied operations. In newtron, the expected state IS an abstract Node
+applied operations. In newtron, the expected state IS an offline Node
 initialized from the device's specs, profile, and intent records.
-Reconstruct the abstract Node, load the physical Node from Redis,
+Reconstruct the offline Node, load the online Node from Redis,
 compare the two ConfigDBs, and the diff is the drift. No journal, no
 state file, no reconciliation engine — the expected state is computed
 from the same code path that would produce it on a real device. If the
@@ -246,7 +247,7 @@ not of each feature that passes through it. The Node's operation method
 is where the pipeline lives — preconditions, schema validation,
 ChangeSet production, shadow update, intent recording. Every mutating
 operation flows through this pipeline. The one-code-path design (§1) is
-what makes this possible: because abstract and physical modes share the
+what makes this possible: because offline and online modes share the
 same pipeline, a guarantee proven in one mode holds in both. The
 pipeline is not an aspiration documented above the code — it is the
 code.
@@ -465,7 +466,7 @@ What newtron adds beyond a reconciler:
   the device. No external state to lose, corrupt, or diverge.
 
 - **Same code path online and offline.** Terraform's plan runs against
-  provider APIs. newtron's abstract Node runs the same methods offline
+  provider APIs. newtron's offline Node runs the same methods
   that run online — the composite IS the plan, generated by the same
   code that executes incremental operations.
 
@@ -928,11 +929,11 @@ compute a full device configuration without connecting to a device —
 it's just spec translation — it can build a complete configuration in
 memory and deliver it later as a single atomic operation. Offline
 provisioning is not a second code path bolted on later; it falls out
-of the same constraint that makes dry-run work. The abstract Node
+of the same constraint that makes dry-run work. The offline Node
 (§1) exists because of this forced separation — computation that never
 touches Redis can run against a shadow ConfigDB just as well as a real
 one. The constraint that makes preview possible is the same constraint
-that makes the abstract Node possible.
+that makes offline mode possible.
 
 **Preview first. Execute deliberately. The same code does both — and
 the constraint that makes preview possible is what makes offline
@@ -1394,7 +1395,7 @@ new Operation value and the corresponding forward/reverse implementations.
 
 The Node intermediates all intent. On connect, the node loads existing
 intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
-the node's intent collection as part of the operation. In abstract mode,
+the node's intent collection as part of the operation. In offline mode,
 intent records accumulate alongside shadow CONFIG_DB entries and are
 exportable to topology composites. This makes the node the single point
 of intent truth for its device — whether physical or abstract, whether
@@ -1434,7 +1435,7 @@ and the evolved device (post-provision operations). The topology gives
 you the baseline — `GenerateDeviceComposite()` with current specs
 produces the expected CONFIG_DB after provisioning. The intent records give
 you everything that happened since — each one carries enough
-information to replay the operation on an abstract Node and produce
+information to replay the operation on an offline Node and produce
 the incremental CONFIG_DB entries. Together, they reconstruct the full
 expected state at any point in the device's lifetime.
 
@@ -1469,11 +1470,11 @@ mechanism that grows with time.
 The question "what should this device look like?" is always answerable
 from three persistent inputs: specs (on disk), device profile (on disk),
 and intent records (in CONFIG_DB). Reconstructing expected state from
-these inputs — by creating an abstract Node from specs and intents,
+these inputs — by creating an offline Node from specs and intents,
 running the same code paths that provisioning and operations use (§1)
 — is cheaper, simpler, and more correct than maintaining a
 chronological journal and replaying it. Reconstruction works because
-the abstract Node IS the expected state: the same operations that
+the offline Node IS the expected state: the same operations that
 produced the real CONFIG_DB entries produce identical entries when run
 against a shadow ConfigDB.
 
@@ -1831,11 +1832,11 @@ change a table format, change one file.**
 
 ## 26. Pure Config Functions — Separate Generation from Orchestration
 
-The abstract Node (§1) works because entry construction has no side
+The offline Node (§1) works because entry construction has no side
 effects. If a config function opened connections or checked
 preconditions, it couldn't run offline — and the one-code-path thesis
 would break. Purity is not a style preference; it is what makes
-abstract mode possible.
+offline mode possible.
 
 Config functions take identity parameters and CONFIG_DB state, return
 `[]sonic.Entry`, and do nothing else. Three forms:
