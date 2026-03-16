@@ -499,7 +499,7 @@ steps:
   - name: verify-clean
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: "Ethernet3"
     expect:
       exists: false
@@ -616,7 +616,7 @@ minimum entry count:
 - name: check-removed
   action: verify-config-db
   devices: [switch1]
-  table: NEWTRON_SERVICE_BINDING
+  table: NEWTRON_INTENT
   key: "Ethernet2"
   expect:
     exists: false
@@ -702,7 +702,7 @@ VRFs, EVPN mappings, and bindings in one operation.
 - name: verify-removed
   action: verify-config-db
   devices: [switch1]
-  table: NEWTRON_SERVICE_BINDING
+  table: NEWTRON_INTENT
   key: "Ethernet3"
   expect:
     exists: false

@@ -11,7 +11,7 @@ import (
 // newTestInterface creates an Interface backed by an offline Node for testing
 // config-generation methods that need i.node (SpecProvider) and i.name.
 func newTestInterface(sp SpecProvider, name string) *Interface {
-	n := &Node{SpecProvider: sp, configDB: sonic.NewEmptyConfigDB(), offline: true}
+	n := &Node{SpecProvider: sp, configDB: sonic.NewConfigDB(), offline: true}
 	return &Interface{node: n, name: name}
 }
 
@@ -41,9 +41,9 @@ func TestServiceConfig_EVPNBridged(t *testing.T) {
 	assertEntry(t, entries, "SUPPRESS_VLAN_NEIGH", "Vlan100", "suppress", "on")
 	assertEntry(t, entries, "VLAN_MEMBER", "Vlan100|Ethernet0", "tagging_mode", "untagged")
 
-	// NEWTRON_SERVICE_BINDING is NOT emitted by generateServiceEntries — ApplyService
+	// NEWTRON_INTENT is NOT emitted by generateServiceEntries — ApplyService
 	// constructs it with full self-sufficiency fields.
-	assertNoEntry(t, entries, "NEWTRON_SERVICE_BINDING", "Ethernet0")
+	assertNoEntry(t, entries, "NEWTRON_INTENT", "Ethernet0")
 }
 
 func TestServiceConfig_Routed_NoVRF(t *testing.T) {
@@ -820,7 +820,7 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 			LoopbackIP:  "10.255.0.1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB:   sonic.NewEmptyConfigDB(),
+		configDB:   sonic.NewConfigDB(),
 	}
 
 	// Register a port and set up the interface
@@ -849,9 +849,9 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 	}
 
 	// Verify route_map_in is stored in binding
-	binding := n.configDB.NewtronServiceBinding["Ethernet0"]
-	if binding.RouteMapIn == "" {
-		t.Fatal("binding.RouteMapIn is empty — route map name not stored in binding")
+	binding := n.configDB.NewtronIntent["Ethernet0"]
+	if binding["route_map_in"] == "" {
+		t.Fatal("binding route_map_in is empty — route map name not stored in binding")
 	}
 
 	// Step 2: Change the route policy spec (different content → different hash)
@@ -931,7 +931,7 @@ func TestRefreshService_NoStaleCleanupWhenHashUnchanged(t *testing.T) {
 			LoopbackIP:  "10.255.0.1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB:   sonic.NewEmptyConfigDB(),
+		configDB:   sonic.NewConfigDB(),
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
@@ -1004,7 +1004,7 @@ func TestRefreshService_PreservesTopologyParams(t *testing.T) {
 			LoopbackIP:  "10.255.0.1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB:   sonic.NewEmptyConfigDB(),
+		configDB:   sonic.NewConfigDB(),
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
@@ -1026,11 +1026,11 @@ func TestRefreshService_PreservesTopologyParams(t *testing.T) {
 
 	// Verify binding has topology params stored
 	b := iface.binding()
-	if b.RouteReflectorClient != "true" {
-		t.Errorf("binding route_reflector_client = %q, want %q", b.RouteReflectorClient, "true")
+	if b["route_reflector_client"] != "true" {
+		t.Errorf("binding route_reflector_client = %q, want %q", b["route_reflector_client"], "true")
 	}
-	if b.NextHopSelf != "true" {
-		t.Errorf("binding next_hop_self = %q, want %q", b.NextHopSelf, "true")
+	if b["next_hop_self"] != "true" {
+		t.Errorf("binding next_hop_self = %q, want %q", b["next_hop_self"], "true")
 	}
 
 	// RefreshService should preserve these params
@@ -1060,11 +1060,11 @@ func TestRefreshService_PreservesTopologyParams(t *testing.T) {
 
 	// Verify new binding still has params
 	b = iface.binding()
-	if b.RouteReflectorClient != "true" {
-		t.Errorf("post-refresh binding route_reflector_client = %q, want %q", b.RouteReflectorClient, "true")
+	if b["route_reflector_client"] != "true" {
+		t.Errorf("post-refresh binding route_reflector_client = %q, want %q", b["route_reflector_client"], "true")
 	}
-	if b.NextHopSelf != "true" {
-		t.Errorf("post-refresh binding next_hop_self = %q, want %q", b.NextHopSelf, "true")
+	if b["next_hop_self"] != "true" {
+		t.Errorf("post-refresh binding next_hop_self = %q, want %q", b["next_hop_self"], "true")
 	}
 }
 
@@ -1104,7 +1104,7 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 			LoopbackIP:  "10.255.0.1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB:   sonic.NewEmptyConfigDB(),
+		configDB:   sonic.NewConfigDB(),
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
@@ -1126,16 +1126,16 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	}
 
 	// Capture the original route map name from the binding
-	b0 := n.configDB.NewtronServiceBinding["Ethernet0"]
-	originalRM := b0.RouteMapIn
+	b0 := n.configDB.NewtronIntent["Ethernet0"]
+	originalRM := b0["route_map_in"]
 	if originalRM == "" {
 		t.Fatal("Ethernet0 binding has no route_map_in after apply")
 	}
 
 	// Verify both interfaces share the same route map via peer group
-	b4 := n.configDB.NewtronServiceBinding["Ethernet4"]
-	if b4.RouteMapIn != originalRM {
-		t.Fatalf("expected both interfaces to share route map %s, but Ethernet4 has %s", originalRM, b4.RouteMapIn)
+	b4 := n.configDB.NewtronIntent["Ethernet4"]
+	if b4["route_map_in"] != originalRM {
+		t.Fatalf("expected both interfaces to share route map %s, but Ethernet4 has %s", originalRM, b4["route_map_in"])
 	}
 
 	// Step 2: Change the route policy spec (different content → different hash)
@@ -1215,13 +1215,13 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	}
 
 	// Verify both interfaces now reference the new route map
-	b0After := n.configDB.NewtronServiceBinding["Ethernet0"]
-	b4After := n.configDB.NewtronServiceBinding["Ethernet4"]
-	if b0After.RouteMapIn != newRM {
-		t.Errorf("Ethernet0 binding should reference new route map %s, got %s", newRM, b0After.RouteMapIn)
+	b0After := n.configDB.NewtronIntent["Ethernet0"]
+	b4After := n.configDB.NewtronIntent["Ethernet4"]
+	if b0After["route_map_in"] != newRM {
+		t.Errorf("Ethernet0 binding should reference new route map %s, got %s", newRM, b0After["route_map_in"])
 	}
-	if b4After.RouteMapIn != newRM {
-		t.Errorf("Ethernet4 binding should reference new route map %s, got %s", newRM, b4After.RouteMapIn)
+	if b4After["route_map_in"] != newRM {
+		t.Errorf("Ethernet4 binding should reference new route map %s, got %s", newRM, b4After["route_map_in"])
 	}
 }
 
@@ -1252,7 +1252,7 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 			LoopbackIP:  "10.255.0.1",
 		},
 		interfaces: make(map[string]*Interface),
-		configDB:   sonic.NewEmptyConfigDB(),
+		configDB:   sonic.NewConfigDB(),
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})

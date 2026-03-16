@@ -10,6 +10,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -100,6 +101,44 @@ func (n *Node) LoopbackIP() string { return n.internal.LoopbackIP() }
 
 // HasConfigDB returns true if the CONFIG_DB has been loaded.
 func (n *Node) HasConfigDB() bool { return n.internal.ConfigDB() != nil }
+
+// Intents returns all intents on this node, converted to public API types.
+func (n *Node) Intents() []Intent {
+	internal := n.internal.Intents()
+	if internal == nil {
+		return nil
+	}
+	result := make([]Intent, 0, len(internal))
+	for _, si := range internal {
+		result = append(result, intentFromSonic(si))
+	}
+	return result
+}
+
+// Snapshot projects the node's actuated intents back into topology format.
+// Returns a TopologyDevice with service interfaces and their IPs.
+func (n *Node) Snapshot() *spec.TopologyDevice {
+	return n.internal.Snapshot()
+}
+
+// intentFromSonic converts an internal sonic.Intent to the public Intent type.
+func intentFromSonic(si *sonic.Intent) Intent {
+	i := Intent{
+		Resource:  si.Resource,
+		Operation: si.Operation,
+		Name:      si.Name,
+		State:     IntentState(si.State),
+		AppliedBy: si.AppliedBy,
+		AppliedAt: si.AppliedAt,
+	}
+	if si.Params != nil {
+		i.Params = make(map[string]string, len(si.Params))
+		for k, v := range si.Params {
+			i.Params[k] = v
+		}
+	}
+	return i
+}
 
 // QueryConfigDB reads a CONFIG_DB entry by table and key.
 // Returns an empty map (not error) if the entry does not exist.
@@ -306,7 +345,7 @@ func (n *Node) Rollback() {
 //
 // If opts.Execute is false (dry-run), returns a preview without applying.
 // If opts.NoSave is true, skips config save after commit.
-// If a zombie operation is detected during Lock(), returns ErrDeviceZombieOperation
+// If a zombie operation is detected during Lock(), returns ErrDeviceZombieIntent
 // unless bypassZombieCheck is set (used by rollback/clear operations).
 func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.Context) error) (*WriteResult, error) {
 	if err := n.Lock(); err != nil {
@@ -316,8 +355,8 @@ func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.C
 
 	// Block if zombie operation exists — device is in unknown partial state.
 	// Rollback and ClearZombie bypass this check (they ARE the resolution).
-	if !n.bypassZombieCheck && n.internal.ZombieOperation() != nil {
-		return nil, util.ErrDeviceZombieOperation
+	if !n.bypassZombieCheck && n.internal.ZombieIntent() != nil {
+		return nil, util.ErrDeviceZombieIntent
 	}
 
 	if err := fn(ctx); err != nil {
@@ -377,9 +416,9 @@ func (n *Node) VerifyCommitted(ctx context.Context) (*VerificationResult, error)
 // Zombie Operation Methods (crash recovery)
 // ============================================================================
 
-// ZombieOperation returns the stale intent found during Lock(), or nil.
-func (n *Node) ZombieOperation() *OperationIntent {
-	z := n.internal.ZombieOperation()
+// ZombieIntent returns the stale intent found during Lock(), or nil.
+func (n *Node) ZombieIntent() *OperationIntent {
+	z := n.internal.ZombieIntent()
 	if z == nil {
 		return nil
 	}

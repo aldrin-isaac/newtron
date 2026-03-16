@@ -21,7 +21,7 @@ steps:
   - name: verify-binding
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet0
     expect:
       exists: true
@@ -55,7 +55,7 @@ steps:
   - name: verify-binding-removed
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet0
     expect:
       exists: false

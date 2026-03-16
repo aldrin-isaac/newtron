@@ -14,7 +14,7 @@ var (
 	ErrPreconditionFailed    = errors.New("precondition not met")
 	ErrValidationFailed      = errors.New("validation failed")
 	ErrDeviceLocked          = errors.New("device is locked by another process")
-	ErrDeviceZombieOperation = errors.New("device has a zombie operation from a crashed process — inspect with 'device zombie', then rollback or clear before proceeding")
+	ErrDeviceZombieIntent = errors.New("device has a zombie operation from a crashed process — inspect with 'device zombie', then rollback or clear before proceeding")
 )
 
 // PreconditionError represents a failed precondition check with context

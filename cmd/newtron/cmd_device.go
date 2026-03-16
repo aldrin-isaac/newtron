@@ -48,6 +48,44 @@ Examples:
 	},
 }
 
+var deviceIntentsCmd = &cobra.Command{
+	Use:   "intents",
+	Short: "List intent records on the device",
+	Long: `Show all NEWTRON_INTENT records on the device. Each record tracks
+a service binding or device-level operation that newtron applied.
+
+Requires -D (device) flag. No lock required (read-only query).
+
+Examples:
+  newtron -D leaf1 device intents
+  newtron -D leaf1 device intents --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		intents, err := app.client.ListIntents(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(intents)
+		}
+
+		if len(intents) == 0 {
+			fmt.Println("No intents.")
+			return nil
+		}
+
+		for _, intent := range intents {
+			fmt.Printf("%-16s  %-15s  %-20s  %s\n",
+				intent.Resource, intent.State, intent.Operation, intent.Name)
+		}
+		return nil
+	},
+}
+
 var deviceZombieCmd = &cobra.Command{
 	Use:   "zombie",
 	Short: "Show zombie operation from a crashed process",
@@ -459,6 +497,7 @@ func init() {
 	deviceSettingsCmd.AddCommand(deviceSettingsSetCmd)
 
 	deviceCmd.AddCommand(deviceCleanupCmd)
+	deviceCmd.AddCommand(deviceIntentsCmd)
 	deviceCmd.AddCommand(deviceZombieCmd)
 	deviceCmd.AddCommand(deviceHistoryCmd)
 	deviceCmd.AddCommand(deviceDriftCmd)

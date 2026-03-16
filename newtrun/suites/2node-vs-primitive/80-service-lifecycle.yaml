@@ -24,7 +24,7 @@ steps:
   - name: verify-binding-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: true
@@ -32,7 +32,7 @@ steps:
   - name: verify-binding-sw2
     action: verify-config-db
     devices: [switch2]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: true
@@ -156,7 +156,7 @@ steps:
   - name: verify-binding-after-refresh-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: true
@@ -175,7 +175,7 @@ steps:
   - name: verify-binding-removed-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: false
@@ -183,7 +183,7 @@ steps:
   - name: verify-binding-removed-sw2
     action: verify-config-db
     devices: [switch2]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: false
@@ -214,7 +214,7 @@ steps:
   - name: verify-bridged-binding-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet4
     expect:
       exists: true
@@ -236,7 +236,7 @@ steps:
   - name: verify-bridged-binding-removed
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet4
     expect:
       exists: false

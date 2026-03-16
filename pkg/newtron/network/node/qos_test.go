@@ -136,7 +136,7 @@ func TestQoSBinding(t *testing.T) {
 		},
 	}
 
-	iface := &Interface{node: &Node{configDB: sonic.NewEmptyConfigDB(), offline: true}, name: "Ethernet0"}
+	iface := &Interface{node: &Node{configDB: sonic.NewConfigDB(), offline: true}, name: "Ethernet0"}
 	entries := iface.bindQos("TEST_3Q", policy)
 
 	// 1 PORT_QOS_MAP + 3 QUEUE = 4

@@ -167,7 +167,6 @@ func TestOwnedTables_ContainsCriticalTables(t *testing.T) {
 	tables := OwnedTables()
 	required := map[string]bool{
 		"VLAN": false, "VRF": false, "BGP_GLOBALS": false,
-		"NEWTRON_SERVICE_BINDING": false,
 	}
 	for _, table := range tables {
 		if _, ok := required[table]; ok {

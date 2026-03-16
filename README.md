@@ -182,7 +182,7 @@ Changes to CONFIG_DB:
   [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast   → map[]
   [ADD] BGP_NEIGHBOR|default|10.1.0.1                    → map[asn:65002 local_addr:10.1.0.0 admin_status:up peer_group_name:TRANSIT]
   [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast    → map[admin_status:true]
-  [ADD] NEWTRON_SERVICE_BINDING|Ethernet0                → map[service_name:transit ...]
+  [ADD] NEWTRON_INTENT|Ethernet0                         → map[operation:apply-service service_name:transit ...]
 
 DRY-RUN: No changes applied. Use -x to execute.
 ```

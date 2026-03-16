@@ -198,11 +198,11 @@ func (n *Node) validateMerge(composite *CompositeConfig) error {
 	}
 
 	// Check for existing service bindings on interfaces being merged
-	if bindings, ok := composite.Tables["NEWTRON_SERVICE_BINDING"]; ok {
-		for intfName := range bindings {
-			if existing, exists := configDB.NewtronServiceBinding[intfName]; exists {
+	if intents, ok := composite.Tables["NEWTRON_INTENT"]; ok {
+		for resource := range intents {
+			if existing, exists := configDB.NewtronIntent[resource]; exists {
 				return fmt.Errorf("interface %s already has service '%s' bound — remove existing service before merge",
-					intfName, existing.ServiceName)
+					resource, existing["service_name"])
 			}
 		}
 	}

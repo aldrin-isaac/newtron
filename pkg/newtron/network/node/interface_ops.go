@@ -348,8 +348,8 @@ func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
 	}
 
 	count := 0
-	for intfName, binding := range configDB.NewtronServiceBinding {
-		if binding.ServiceName == serviceName && intfName != dc.excludeInterface {
+	for intfName, fields := range configDB.NewtronIntent {
+		if fields["service_name"] == serviceName && intfName != dc.excludeInterface {
 			count++
 		}
 	}
@@ -366,8 +366,8 @@ func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
 	}
 
 	count := 0
-	for intfName, binding := range configDB.NewtronServiceBinding {
-		if binding.IPVPN == ipvpnName && intfName != dc.excludeInterface {
+	for intfName, fields := range configDB.NewtronIntent {
+		if fields["ipvpn"] == ipvpnName && intfName != dc.excludeInterface {
 			count++
 		}
 	}
@@ -381,11 +381,11 @@ func (dc *DependencyChecker) IsLastAnycastMACUser() bool {
 	if configDB == nil {
 		return true
 	}
-	for intfName, binding := range configDB.NewtronServiceBinding {
+	for intfName, fields := range configDB.NewtronIntent {
 		if intfName == dc.excludeInterface {
 			continue
 		}
-		if binding.AnycastMAC != "" {
+		if fields["anycast_mac"] != "" {
 			return false
 		}
 	}

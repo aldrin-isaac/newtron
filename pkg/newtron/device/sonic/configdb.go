@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -52,42 +53,156 @@ type ConfigDB struct {
 
 	StaticRoute map[string]map[string]string `json:"STATIC_ROUTE,omitempty"`
 
-	// Newtron-specific tables (custom, not standard SONiC)
-	NewtronServiceBinding map[string]ServiceBindingEntry `json:"NEWTRON_SERVICE_BINDING,omitempty"`
+	// Newtron-specific table — unified intent model (§39)
+	NewtronIntent map[string]map[string]string `json:"NEWTRON_INTENT,omitempty"`
 }
 
-// ServiceBindingEntry tracks service bindings applied by newtron.
-// Key format: interface name (e.g., "Ethernet0", "PortChannel100", "Vlan100")
-// This provides explicit tracking of what service was applied, enabling
-// proper removal and refresh without relying on naming conventions.
-type ServiceBindingEntry struct {
-	ServiceName string `json:"service_name"`           // Service name from network.json
-	IPAddress   string `json:"ip_address,omitempty"`   // IP assigned (for L3 services)
-	VRFName     string `json:"vrf_name,omitempty"`     // VRF created/bound
-	IPVPN       string `json:"ipvpn,omitempty"`        // IP-VPN name (for L3 EVPN)
-	MACVPN      string `json:"macvpn,omitempty"`       // MAC-VPN name (for L2 EVPN)
-	IngressACL  string `json:"ingress_acl,omitempty"`  // Generated ingress ACL name
-	EgressACL   string `json:"egress_acl,omitempty"`   // Generated egress ACL name
-	BGPNeighbor      string `json:"bgp_neighbor,omitempty"`      // BGP peer IP created by service
-	QoSPolicy        string `json:"qos_policy,omitempty"`        // QoS policy name (for device-wide cleanup)
-	VlanID           string `json:"vlan_id,omitempty"`           // VLAN ID used (for cleanup without macvpn)
-	RedistributeVRF  string `json:"redistribute_vrf,omitempty"`  // VRF where redistribution was overridden
-	L3VNI            string `json:"l3vni,omitempty"`             // L3VNI from ipvpn (for VRF teardown without spec re-resolution)
-	L3VNIVlan        string `json:"l3vni_vlan,omitempty"`        // L3VNI transit VLAN (for VRF teardown without spec re-resolution)
-	ServiceType      string `json:"service_type,omitempty"`      // "evpn-irb", "routed", etc. (for teardown path decisions)
-	VRFType          string `json:"vrf_type,omitempty"`          // "interface", "shared" (for VRF cleanup path)
-	L2VNI            string `json:"l2vni,omitempty"`             // L2VNI from macvpn (for VXLAN_TUNNEL_MAP cleanup)
-	AnycastIP        string `json:"anycast_ip,omitempty"`        // Anycast gateway IP from macvpn (for SVI IP deletion)
-	AnycastMAC       string `json:"anycast_mac,omitempty"`       // Anycast gateway MAC from macvpn (for SAG_GLOBAL cleanup)
-	ARPSuppression   string `json:"arp_suppression,omitempty"`   // "true" from macvpn (for SUPPRESS_VLAN_NEIGH cleanup)
-	BGPPeerAS        string `json:"bgp_peer_as,omitempty"`       // Resolved BGP peer AS number (for RefreshService)
-	PeerGroup        string `json:"peer_group,omitempty"`        // BGP peer group name (for peer group cleanup)
-	RouteMapIn            string `json:"route_map_in,omitempty"`            // Content-hashed import route map name (for stale cleanup)
-	RouteMapOut           string `json:"route_map_out,omitempty"`           // Content-hashed export route map name (for stale cleanup)
-	RouteReflectorClient  string `json:"route_reflector_client,omitempty"`  // "true" if topology params set rrclient (for RefreshService)
-	NextHopSelf           string `json:"next_hop_self,omitempty"`           // "true" if topology params set nhself (for RefreshService)
-	AppliedAt             string `json:"applied_at,omitempty"`              // Timestamp when applied
-	AppliedBy        string `json:"applied_by,omitempty"`        // User who applied
+// ============================================================================
+// Unified Intent Model (§39)
+// ============================================================================
+
+// IntentState represents the lifecycle state of an intent.
+type IntentState string
+
+const (
+	IntentUnrealized IntentState = "unrealized"
+	IntentInFlight   IntentState = "in-flight"
+	IntentActuated   IntentState = "actuated"
+)
+
+// Intent is the internal domain model for a desired-state record bound to
+// a device resource. See DESIGN_PRINCIPLES §39 for the full model.
+//
+// This is the internal (node-accessible) type. The public API type
+// (pkg/newtron.Intent) mirrors this with domain vocabulary for external
+// consumers. Conversions happen at the API boundary.
+type Intent struct {
+	// Identity
+	Resource  string `json:"resource"`            // binding point: "Ethernet0", "bgp", "evpn", "loopback"
+	Operation string `json:"operation"`           // composite op: "apply-service", "setup-evpn", "configure-bgp"
+	Name      string `json:"name,omitempty"`      // spec reference: "transit", "" if none
+
+	// Lifecycle
+	State     IntentState `json:"state"`
+	Holder    string      `json:"holder,omitempty"`
+	Created   time.Time   `json:"created,omitempty"`
+	AppliedAt *time.Time  `json:"applied_at,omitempty"`
+	AppliedBy string      `json:"applied_by,omitempty"`
+
+	// Resolved parameters — self-sufficient for teardown + reconstruction (§37).
+	Params map[string]string `json:"params,omitempty"`
+
+	// Composite operations — expanded primitive list for crash recovery.
+	Phase           string             `json:"phase,omitempty"`
+	RollbackHolder  string             `json:"rollback_holder,omitempty"`
+	RollbackStarted *time.Time         `json:"rollback_started,omitempty"`
+	Operations      []IntentOperation  `json:"operations,omitempty"`
+}
+
+// IsService returns true if this intent represents a service binding.
+func (i *Intent) IsService() bool {
+	return i.Operation == "apply-service"
+}
+
+// IsInFlight returns true if this intent is currently being actuated.
+func (i *Intent) IsInFlight() bool {
+	return i.State == IntentInFlight
+}
+
+// IsActuated returns true if this intent has been fully realized.
+func (i *Intent) IsActuated() bool {
+	return i.State == IntentActuated
+}
+
+// intentIdentityFields are the fields that describe intent identity/lifecycle
+// (as opposed to resolved parameters). These are stripped when extracting
+// params from a flat CONFIG_DB record.
+var intentIdentityFields = map[string]bool{
+	"state": true, "operation": true, "name": true,
+	"holder": true, "created": true,
+	"applied_at": true, "applied_by": true,
+	"phase": true, "rollback_holder": true, "rollback_started": true,
+	"operations": true,
+}
+
+// NewIntent constructs an Intent from a flat CONFIG_DB field map.
+// This is the primary constructor — CONFIG_DB stores intents as flat hashes
+// with identity fields (state, operation, name) alongside resolved params.
+func NewIntent(resource string, fields map[string]string) *Intent {
+	// Extract params: everything that isn't an identity field.
+	params := make(map[string]string)
+	for k, v := range fields {
+		if !intentIdentityFields[k] && v != "" {
+			params[k] = v
+		}
+	}
+
+	var appliedAt *time.Time
+	if s := fields["applied_at"]; s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			appliedAt = &t
+		}
+	}
+
+	var created time.Time
+	if s := fields["created"]; s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			created = t
+		}
+	}
+
+	state := IntentState(fields["state"])
+	if state == "" {
+		state = IntentActuated // default for records without explicit state
+	}
+
+	return &Intent{
+		Resource:  resource,
+		Operation: fields["operation"],
+		Name:      fields["name"],
+		State:     state,
+		Holder:    fields["holder"],
+		Created:   created,
+		AppliedAt: appliedAt,
+		AppliedBy: fields["applied_by"],
+		Params:    params,
+		Phase:     fields["phase"],
+	}
+}
+
+// ToFields converts an Intent to a flat CONFIG_DB field map.
+// This is the inverse of NewIntent — identity fields and params
+// are merged into a single flat hash for storage.
+func (i *Intent) ToFields() map[string]string {
+	result := make(map[string]string, len(i.Params)+8)
+	// Copy params first.
+	for k, v := range i.Params {
+		result[k] = v
+	}
+	// Add identity fields (overwrite any param collision).
+	result["state"] = string(i.State)
+	if i.Operation != "" {
+		result["operation"] = i.Operation
+	}
+	if i.Name != "" {
+		result["name"] = i.Name
+	}
+	if i.Holder != "" {
+		result["holder"] = i.Holder
+	}
+	if !i.Created.IsZero() {
+		result["created"] = i.Created.UTC().Format(time.RFC3339)
+	}
+	if i.AppliedAt != nil {
+		result["applied_at"] = i.AppliedAt.UTC().Format(time.RFC3339)
+	}
+	if i.AppliedBy != "" {
+		result["applied_by"] = i.AppliedBy
+	}
+	if i.Phase != "" {
+		result["phase"] = i.Phase
+	}
+	return result
 }
 
 // PortEntry represents a physical port configuration
@@ -462,34 +577,8 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 		}
 	case "DEVICE_METADATA":
 		db.DeviceMetadata[key] = copyFields(fields)
-	case "NEWTRON_SERVICE_BINDING":
-		db.NewtronServiceBinding[key] = ServiceBindingEntry{
-			ServiceName:     fields["service_name"],
-			IPAddress:       fields["ip_address"],
-			VRFName:         fields["vrf_name"],
-			IPVPN:           fields["ipvpn"],
-			MACVPN:          fields["macvpn"],
-			IngressACL:      fields["ingress_acl"],
-			EgressACL:       fields["egress_acl"],
-			BGPNeighbor:     fields["bgp_neighbor"],
-			QoSPolicy:       fields["qos_policy"],
-			VlanID:          fields["vlan_id"],
-			RedistributeVRF: fields["redistribute_vrf"],
-			L3VNI:           fields["l3vni"],
-			L3VNIVlan:       fields["l3vni_vlan"],
-			ServiceType:     fields["service_type"],
-			VRFType:         fields["vrf_type"],
-			L2VNI:           fields["l2vni"],
-			AnycastIP:       fields["anycast_ip"],
-			AnycastMAC:      fields["anycast_mac"],
-			ARPSuppression:  fields["arp_suppression"],
-			BGPPeerAS:       fields["bgp_peer_as"],
-			PeerGroup:       fields["peer_group"],
-			RouteMapIn:           fields["route_map_in"],
-			RouteMapOut:          fields["route_map_out"],
-			RouteReflectorClient: fields["route_reflector_client"],
-			NextHopSelf:          fields["next_hop_self"],
-		}
+	case "NEWTRON_INTENT":
+		db.NewtronIntent[key] = copyFields(fields)
 	case "SUPPRESS_VLAN_NEIGH":
 		db.SuppressVLANNeigh[key] = copyFields(fields)
 	case "ACL_TABLE":
@@ -625,8 +714,8 @@ func (db *ConfigDB) DeleteEntry(table, key string) {
 		delete(db.BGPGlobalsAF, key)
 	case "DEVICE_METADATA":
 		delete(db.DeviceMetadata, key)
-	case "NEWTRON_SERVICE_BINDING":
-		delete(db.NewtronServiceBinding, key)
+	case "NEWTRON_INTENT":
+		delete(db.NewtronIntent, key)
 	case "SUPPRESS_VLAN_NEIGH":
 		delete(db.SuppressVLANNeigh, key)
 	case "ACL_TABLE":
@@ -717,7 +806,7 @@ func (c *ConfigDBClient) GetAll() (*ConfigDB, error) {
 		return nil, err
 	}
 
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 
 	for _, key := range keys {
 		parts := strings.SplitN(key, "|", 2)

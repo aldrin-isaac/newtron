@@ -38,12 +38,15 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	}
 
 	// ConfigDB state: service binding + VRF + IP + INTERFACE base
-	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "CUSTOMER_L3",
-		ServiceType: spec.ServiceTypeEVPNRouted,
-		VRFType:     spec.VRFTypeInterface,
-		IPAddress:   "10.1.0.0/31",
-		VRFName:     "CUSTOMER_L3_ETH0",
+	d.configDB.NewtronIntent["Ethernet0"] = map[string]string{
+		"service_name": "CUSTOMER_L3",
+		"service_type": spec.ServiceTypeEVPNRouted,
+		"vrf_type":     spec.VRFTypeInterface,
+		"ip_address":   "10.1.0.0/31",
+		"vrf_name":     "CUSTOMER_L3_ETH0",
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         "CUSTOMER_L3",
 	}
 	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "CUSTOMER_L3_ETH0"}
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
@@ -61,7 +64,7 @@ func TestRemoveService_L3_Basic(t *testing.T) {
 	// Per-interface VRF deleted (derived name: SERVICE_INTF)
 	assertChange(t, cs, "VRF", "CUSTOMER_L3_ETH0", ChangeDelete)
 	// Service binding removed
-	assertChange(t, cs, "NEWTRON_SERVICE_BINDING", "Ethernet0", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "Ethernet0", ChangeDelete)
 }
 
 func TestRemoveService_SharedACL_LastUser(t *testing.T) {
@@ -78,10 +81,13 @@ func TestRemoveService_SharedACL_LastUser(t *testing.T) {
 		Ports: "Ethernet0",
 	}
 	d.configDB.ACLRule["CUSTOMER_L3_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
-	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "CUSTOMER_L3",
-		ServiceType: spec.ServiceTypeEVPNRouted,
-		IngressACL:  "CUSTOMER_L3_IN",
+	d.configDB.NewtronIntent["Ethernet0"] = map[string]string{
+		"service_name": "CUSTOMER_L3",
+		"service_type": spec.ServiceTypeEVPNRouted,
+		"ingress_acl":  "CUSTOMER_L3_IN",
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         "CUSTOMER_L3",
 	}
 
 	cs, err := intf.RemoveService(ctx)
@@ -107,10 +113,13 @@ func TestRemoveService_SharedACL_NotLastUser(t *testing.T) {
 		Type:  "L3",
 		Ports: "Ethernet0,Ethernet4",
 	}
-	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "CUSTOMER_L3",
-		ServiceType: spec.ServiceTypeEVPNRouted,
-		IngressACL:  "CUSTOMER_L3_IN",
+	d.configDB.NewtronIntent["Ethernet0"] = map[string]string{
+		"service_name": "CUSTOMER_L3",
+		"service_type": spec.ServiceTypeEVPNRouted,
+		"ingress_acl":  "CUSTOMER_L3_IN",
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         "CUSTOMER_L3",
 	}
 
 	cs, err := intf.RemoveService(ctx)
@@ -343,7 +352,7 @@ func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 
 func TestApplyService_AlreadyBound(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "EXISTING_SERVICE"}
+	d.configDB.NewtronIntent["Ethernet0"] = map[string]string{"service_name": "EXISTING_SERVICE", "state": "actuated", "operation": "apply-service", "name": "EXISTING_SERVICE"}
 	d.SpecProvider.(*testSpecProvider).services["NEW_SERVICE"] = &spec.ServiceSpec{
 		ServiceType: spec.ServiceTypeEVPNRouted,
 	}

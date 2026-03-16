@@ -200,11 +200,11 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		entries = append(entries, bgpEntries...)
 	}
 
-	// Note: NEWTRON_SERVICE_BINDING is NOT emitted here. ApplyService constructs
-	// the binding with full self-sufficiency fields (service_type, vrf_type, l2vni,
+	// Note: NEWTRON_INTENT is NOT emitted here. ApplyService constructs
+	// the intent record with full self-sufficiency fields (service_type, vrf_type, l2vni,
 	// anycast_ip, anycast_mac, arp_suppression, bgp_peer_as) that require context
-	// only available in the caller. The topology provisioner path skips the binding
-	// entry via the NEWTRON_SERVICE_BINDING continue guard in ApplyService.
+	// only available in the caller. The topology provisioner path skips the intent
+	// entry via the NEWTRON_INTENT continue guard in ApplyService.
 
 	return entries, nil
 }

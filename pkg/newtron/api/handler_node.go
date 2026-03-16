@@ -1517,6 +1517,25 @@ func (s *Server) handleClearZombie(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
+// Intents
+// ============================================================================
+
+func (s *Server) handleListIntents(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.Intents(), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+// ============================================================================
 // Zombie (new paths under /intents/zombies)
 // ============================================================================
 

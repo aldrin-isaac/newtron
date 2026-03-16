@@ -69,7 +69,7 @@ undo buffer, not an ever-growing record.
 ### 4.1 Why CONFIG_DB
 
 STATE_DB is cleared on reboot. CONFIG_DB survives reboot (via
-`config save`). `NEWTRON_SERVICE_BINDING` already proves the pattern:
+`config save`). `NEWTRON_INTENT` already proves the pattern:
 newtron-owned records in CONFIG_DB that SONiC daemons ignore (no YANG
 model, no daemon subscription).
 
@@ -142,7 +142,7 @@ After reboot + `config reload`, CONFIG_DB is restored from
 
 Add `NEWTRON_INTENT` to `schema.go`. No YANG model (newtron-owned
 table). Constraints derived from usage patterns. Same approach as
-`NEWTRON_SERVICE_BINDING`.
+`NEWTRON_INTENT`.
 
 ### 4.6 Rolling Operation History
 
@@ -251,7 +251,7 @@ etc.), the expected state is:
 
 - **Provisioned baseline:** `GenerateDeviceComposite()` with current
   specs and topology
-- **Plus incremental operations:** Derived from `NEWTRON_SERVICE_BINDING`
+- **Plus incremental operations:** Derived from `NEWTRON_INTENT`
   records on the device (which services are applied to which interfaces)
 
 The service bindings are already in CONFIG_DB. The specs and profiles
@@ -263,7 +263,7 @@ already persistent.
 ```
 1. Load current specs, profile, and topology for the device
 2. Call GenerateDeviceComposite() → expected CONFIG_DB after provisioning
-3. Read NEWTRON_SERVICE_BINDING records from actual CONFIG_DB
+3. Read NEWTRON_INTENT records from actual CONFIG_DB
 4. For each binding that is NOT in the topology (post-provision ops):
    a. Create abstract Node with expected state as shadow
    b. Replay the operation (ApplyService, BindACL, etc.)
@@ -548,31 +548,31 @@ the orchestrator decides the strategy (§8 scope boundaries).
 ### §37 On-Device Intent Is Sufficient for Reconstruction
 
 > **The device carries enough intent to reconstruct its expected state.**
-> `NEWTRON_SERVICE_BINDING` records which services are applied to which
+> `NEWTRON_INTENT` records which services are applied to which
 > interfaces, with all parameters needed for both teardown and
-> reconstruction. Combined with current specs, the binding tells you
+> reconstruction. Combined with current specs, the intent record tells you
 > exactly what CONFIG_DB entries should exist. No external history, no
 > journal replay, no off-device state needed.
 >
 > This closes the gap between provisioning (topology-defined) and the
 > evolved device (post-provision operations). The topology gives you the
-> baseline. The bindings give you everything that happened since.
+> baseline. The intent records give you everything that happened since.
 > Together with current specs, you can reconstruct expected state at any
 > time.
 >
-> The existing principle "bindings must be self-sufficient for reverse
-> operations" (§13) extends here: **bindings must be self-sufficient for
+> The existing principle "intent records must be self-sufficient for reverse
+> operations" (§13) extends here: **intent records must be self-sufficient for
 > reconstruction of expected state.** Teardown is one consumer;
 > drift detection is another. Same data, different purpose. If a future
-> forward operation creates infrastructure that the binding can't
+> forward operation creates infrastructure that the intent record can't
 > reconstruct, drift detection breaks silently — and there is no test
 > that catches it until someone asks "why doesn't drift show this entry?"
 >
-> This principle makes a specific demand on binding design: every field
+> This principle makes a specific demand on intent record design: every field
 > needed to regenerate the expected CONFIG_DB entries must be stored in
-> the binding. When adding a new forward operation, ask not only "can
+> the intent record. When adding a new forward operation, ask not only "can
 > the reverse find everything it needs?" but also "can reconstruction
-> regenerate the expected entries from the binding alone?"
+> regenerate the expected entries from the intent record alone?"
 
 ### §38 Bounded Device Footprint
 
@@ -614,8 +614,8 @@ the orchestrator decides the strategy (§8 scope boundaries).
 
 ## 9. What Does NOT Change
 
-- **NEWTRON_SERVICE_BINDING:** Unchanged. Bindings record what
-  infrastructure was applied per interface — the input for both
+- **NEWTRON_INTENT (service records):** Unchanged. Intent records
+  capture what infrastructure was applied per interface — the input for both
   `RemoveService` and drift reconstruction. They are intent (what
   should exist), not history.
 
@@ -655,7 +655,7 @@ the orchestrator decides the strategy (§8 scope boundaries).
 
 5. **Reconstruction:** Add `ReconstructExpectedState(device)` that:
    - Calls `GenerateDeviceComposite()` for provisioned baseline
-   - Reads `NEWTRON_SERVICE_BINDING` for post-provision ops
+   - Reads `NEWTRON_INTENT` records for post-provision ops
    - Replays incremental operations on abstract Node
    - Returns expected `*ConfigDB`
 

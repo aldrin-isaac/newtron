@@ -300,13 +300,13 @@ steps:
       exists: false
 
   # =========================================================================
-  # NEWTRON_SERVICE_BINDING — no service bindings should remain
+  # NEWTRON_INTENT — no service bindings should remain
   # =========================================================================
 
   - name: no-binding-eth0
     action: verify-config-db
     devices: [spine, leaf1, leaf2]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet0
     expect:
       exists: false
@@ -314,7 +314,7 @@ steps:
   - name: no-binding-eth1
     action: verify-config-db
     devices: [leaf1, leaf2]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet1
     expect:
       exists: false

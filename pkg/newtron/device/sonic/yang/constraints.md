@@ -336,7 +336,10 @@ configuration. newtron uses key format `VRF|protocol|bgp|AF`.
 Not found in the standard YANG models. newtron uses key format `VRF|VNI`
 with empty fields (presence-only entry).
 
-## NEWTRON_SERVICE_BINDING
+## NEWTRON_INTENT
 
 newtron-specific table — no SONiC YANG model. Constraints derived from
-newtron usage patterns.
+newtron usage patterns. Stores unified intent records (service bindings,
+infrastructure state, crash recovery) as flat hashes with identity fields
+alongside resolved parameters. Constructed via `NewIntent()`,
+serialized via `Intent.ToFields()`.

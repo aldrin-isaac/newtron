@@ -565,6 +565,19 @@ func (c *Client) Execute(device string, req api.ExecuteRequest) (*newtron.WriteR
 }
 
 // ============================================================================
+// Intent methods
+// ============================================================================
+
+// ListIntents returns all intents on a device (connects read-only, no lock).
+func (c *Client) ListIntents(device string) ([]newtron.Intent, error) {
+	var result []newtron.Intent
+	if err := c.doGet(c.nodePath(device)+"/intents", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ============================================================================
 // Zombie operation methods (crash recovery)
 // ============================================================================
 

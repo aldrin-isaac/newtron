@@ -10,8 +10,8 @@ automated rollback.
 ## The Problem
 
 newtron's write path has an asymmetry. Service operations write
-`NEWTRON_SERVICE_BINDING` as a write-ahead record — if the process
-crashes mid-apply, `RemoveService` can read the binding and clean up
+`NEWTRON_INTENT` as a write-ahead record — if the process
+crashes mid-apply, `RemoveService` can read the intent record and clean up
 partial state. But non-service multi-entry operations (`CreateVLAN`,
 `SetupEVPN`, `ConfigureBGP`, `BindIPVPN`, `ApplyQoS`) have no such
 protection. If `Apply()` fails midway and the process crashes, the
@@ -22,7 +22,7 @@ no recovery path.
 
 Record your intent on the device before acting, so recovery is
 possible across process boundaries. The intent record generalizes the
-`NEWTRON_SERVICE_BINDING` pattern to all operations.
+`NEWTRON_INTENT` pattern to all operations.
 
 **STATE_DB key:** `NEWTRON_INTENT|<device>` — singular, because the
 lock serializes operations per device. Mirrors `NEWTRON_LOCK|<device>`.
@@ -209,7 +209,7 @@ zombie is resolved.
                             ▼
                           ┌──────────────────────────┐
                           │    Execute() returns     │
-                          │ ErrDeviceZombieOperation │
+                          │ ErrDeviceZombieIntent │
                           └──────────────────────────┘
                     ╱              │              ╲
                    ╱               │               ╲
@@ -350,17 +350,18 @@ the classification the operations already provide.
 
 ## Interaction with Existing Mechanisms
 
-**NEWTRON_SERVICE_BINDING:** Unchanged. The binding serves a different
-purpose — domain-level teardown manifest, persistent, part of service
-lifecycle. The intent record is operation-level, ephemeral, for crash
-recovery. `ApplyService` gets both: the intent protects against process
-crash during the multi-entry write; the binding enables future
-`RemoveService`.
+**NEWTRON_INTENT (service records):** The unified intent model merges
+service binding and crash recovery into a single record per resource.
+The intent record serves both purposes: it is the domain-level teardown
+manifest (persistent, part of service lifecycle) and the operation-level
+crash recovery record. `ApplyService` writes a single `NEWTRON_INTENT`
+entry that both protects against process crash during the multi-entry
+write and enables future `RemoveService`.
 
-During recovery, the intent's operation entry
-(`name: "interface.apply-service"`, `params: {interface}`) gives the
+During recovery, the intent record
+(`operation: "apply-service"`, `resource: "Ethernet0"`) gives the
 recovery tool enough information to call `RemoveService` on the right
-interface. `RemoveService` reads the binding to discover what
+interface. `RemoveService` reads the same intent record to discover what
 infrastructure was applied and tears it down.
 
 **Composite delivery (MULTI/EXEC):** No intent needed. PipelineSet is

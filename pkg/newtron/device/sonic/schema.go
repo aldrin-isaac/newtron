@@ -505,43 +505,31 @@ var Schema = map[string]TableSchema{
 	},
 
 	// ========================================================================
-	// Newtron intent/history tables (crash recovery + rolling history)
-	// No YANG model — newtron-owned tables, same pattern as NEWTRON_SERVICE_BINDING
+	// Newtron intent table (unified intent model §39)
+	// No YANG model — newtron-owned table
+	// Replaced both NEWTRON_SERVICE_BINDING and per-device crash-recovery intent
 	// ========================================================================
 
 	"NEWTRON_INTENT": {
-		// Key: device name (singular per device — lock serializes operations)
-		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*$`,
+		// Key: device name OR interface name (e.g., "leaf1", "Ethernet0", "PortChannel100")
+		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_.|/-]*$`,
 		Fields: map[string]FieldConstraint{
+			// Identity fields (all intent types)
+			"state":     {Type: FieldEnum, Enum: []string{"unrealized", "in-flight", "actuated"}},
+			"operation": {Type: FieldString},              // e.g., "apply-service", "configure-bgp"
+			"name":      {Type: FieldString, AllowEmpty: true}, // spec reference
+			"applied_at":  {Type: FieldString, AllowEmpty: true}, // RFC3339
+			"applied_by":  {Type: FieldString, AllowEmpty: true},
+
+			// Crash-recovery fields (device-scoped intents)
 			"holder":           {Type: FieldString},
 			"created":          {Type: FieldString}, // RFC3339
 			"phase":            {Type: FieldString, AllowEmpty: true},
 			"rollback_holder":  {Type: FieldString, AllowEmpty: true},
 			"rollback_started": {Type: FieldString, AllowEmpty: true}, // RFC3339
 			"operations":       {Type: FieldString},                   // JSON array
-		},
-	},
 
-	"NEWTRON_HISTORY": {
-		// Key: device|sequence (e.g., "leaf1|42"), max 10 entries per device
-		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*\|\d+$`,
-		Fields: map[string]FieldConstraint{
-			"holder":     {Type: FieldString},
-			"timestamp":  {Type: FieldString}, // RFC3339
-			"operations": {Type: FieldString}, // JSON array
-		},
-	},
-
-	// ========================================================================
-	// Service tables (service_ops.go)
-	// YANG: sonic-route-map.yang, sonic-routing-policy-sets.yang
-	// NEWTRON_SERVICE_BINDING: newtron-specific (no YANG model)
-	// ========================================================================
-
-	"NEWTRON_SERVICE_BINDING": {
-		// Key: interface name
-		KeyPattern: `^(Ethernet|PortChannel)\d+$`,
-		Fields: map[string]FieldConstraint{
+			// Service binding fields (interface-scoped intents)
 			"service_name":    {Type: FieldString},
 			"service_type":    {Type: FieldEnum, Enum: []string{"routed", "irb", "bridged", "evpn-routed", "evpn-irb", "evpn-bridged"}},
 			"vrf_type":        {Type: FieldEnum, Enum: []string{"interface", "shared"}},
@@ -569,6 +557,21 @@ var Schema = map[string]TableSchema{
 			"next_hop_self":             {Type: FieldBool},
 		},
 	},
+
+	"NEWTRON_HISTORY": {
+		// Key: device|sequence (e.g., "leaf1|42"), max 10 entries per device
+		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_-]*\|\d+$`,
+		Fields: map[string]FieldConstraint{
+			"holder":     {Type: FieldString},
+			"timestamp":  {Type: FieldString}, // RFC3339
+			"operations": {Type: FieldString}, // JSON array
+		},
+	},
+
+	// ========================================================================
+	// Service tables (service_ops.go)
+	// YANG: sonic-route-map.yang, sonic-routing-policy-sets.yang
+	// ========================================================================
 
 	"ROUTE_MAP": {
 		// YANG: sonic-route-map.yang — key name|stmt_name (uint16 1..65535)

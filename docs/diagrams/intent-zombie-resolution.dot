@@ -4,11 +4,11 @@ digraph {
 
     "\n  New process  \n  calls Lock()  \n\n" -> "\n  ReadIntent  \n  from STATE_DB  \n\n";
     "\n  ReadIntent  \n  from STATE_DB  \n\n" -> "\n  intent exists?  \n\n";
-    "\n  intent exists?  \n\n" -> "\n  Store as  \n  zombieOp  \n\n" [label=" yes"];
+    "\n  intent exists?  \n\n" -> "\n  Store as  \n  zombie  \n\n" [label=" yes"];
     "\n  intent exists?  \n\n" -> "\n  Normal  \n  operation  \n\n" [label=" no"];
-    "\n  Store as  \n  zombieOp  \n\n" -> "\n  Execute() returns  \n  ErrDeviceZombieOperation  \n\n";
+    "\n  Store as  \n  zombie  \n\n" -> "\n  Execute() returns  \n  ErrDeviceZombieIntent  \n\n";
 
-    "\n  Execute() returns  \n  ErrDeviceZombieOperation  \n\n" -> "\n  device zombie  \n  (read-only inspect)  \n\n" [label=" operator"];
-    "\n  Execute() returns  \n  ErrDeviceZombieOperation  \n\n" -> "\n  zombie rollback -x  \n  (fresh lock)  \n\n" [label=" operator"];
-    "\n  Execute() returns  \n  ErrDeviceZombieOperation  \n\n" -> "\n  zombie clear  \n  (fresh lock)  \n\n" [label=" operator"];
+    "\n  Execute() returns  \n  ErrDeviceZombieIntent  \n\n" -> "\n  device zombie  \n  (read-only inspect)  \n\n" [label=" operator"];
+    "\n  Execute() returns  \n  ErrDeviceZombieIntent  \n\n" -> "\n  zombie rollback -x  \n  (fresh lock)  \n\n" [label=" operator"];
+    "\n  Execute() returns  \n  ErrDeviceZombieIntent  \n\n" -> "\n  zombie clear  \n  (fresh lock)  \n\n" [label=" operator"];
 }

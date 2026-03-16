@@ -10,7 +10,7 @@ principle established in DESIGN_PRINCIPLES.md §5:
 ## Status: ALL GAPS CLOSED (March 2026)
 
 All identified gaps have been fixed by adding 7 self-sufficiency fields to
-NEWTRON_SERVICE_BINDING: `service_type`, `vrf_type`, `l2vni`, `anycast_ip`,
+NEWTRON_INTENT: `service_type`, `vrf_type`, `l2vni`, `anycast_ip`,
 `anycast_mac`, `arp_suppression`, `bgp_peer_as`.
 
 RemoveService and RefreshService now read all values from the binding record.

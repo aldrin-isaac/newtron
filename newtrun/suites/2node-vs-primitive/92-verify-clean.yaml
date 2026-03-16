@@ -355,11 +355,11 @@ steps:
     expect:
       exists: false
 
-  # NEWTRON_SERVICE_BINDING
+  # NEWTRON_INTENT
   - name: verify-no-binding-eth1-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet4
     expect:
       exists: false
@@ -367,7 +367,7 @@ steps:
   - name: verify-no-binding-eth3-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: false
@@ -375,7 +375,7 @@ steps:
   - name: verify-no-binding-eth3-sw2
     action: verify-config-db
     devices: [switch2]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet12
     expect:
       exists: false
@@ -536,11 +536,11 @@ steps:
     expect:
       exists: false
 
-  # NEWTRON_SERVICE_BINDING (spec-authoring scenario)
+  # NEWTRON_INTENT (spec-authoring scenario)
   - name: verify-no-binding-eth10-sw1
     action: verify-config-db
     devices: [switch1]
-    table: NEWTRON_SERVICE_BINDING
+    table: NEWTRON_INTENT
     key: Ethernet40
     expect:
       exists: false

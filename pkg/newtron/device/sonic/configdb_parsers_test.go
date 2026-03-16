@@ -195,7 +195,7 @@ func TestParseEntry_RoundTrip(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.table, func(t *testing.T) {
-			db := newEmptyConfigDB()
+			db := newConfigDB()
 			parser, ok := tableParsers[tt.table]
 			if !ok {
 				t.Fatalf("no parser for table %q", tt.table)
@@ -207,14 +207,14 @@ func TestParseEntry_RoundTrip(t *testing.T) {
 }
 
 func TestParseEntry_UnknownTable(t *testing.T) {
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 	// Must not panic on unknown table names.
 	client := &ConfigDBClient{}
 	client.parseEntry(db, "NONEXISTENT_TABLE", "key1", map[string]string{"foo": "bar"})
 }
 
 func TestConfigDB_Has_Positive(t *testing.T) {
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 	db.VLAN["Vlan100"] = VLANEntry{VLANID: "100"}
 	db.VRF["Vrf_CUST1"] = VRFEntry{}
 	db.PortChannel["PortChannel100"] = PortChannelEntry{}
@@ -250,7 +250,7 @@ func TestConfigDB_Has_Positive(t *testing.T) {
 }
 
 func TestConfigDB_Has_Negative(t *testing.T) {
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 
 	if db.HasVLAN(100) {
 		t.Error("HasVLAN(100) = true on empty DB")
@@ -308,7 +308,7 @@ func TestConfigDB_Has_NilReceiver(t *testing.T) {
 
 func TestConfigDB_BGPConfigured(t *testing.T) {
 	// BGP_GLOBALS|default present → configured
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 	db.BGPGlobals["default"] = BGPGlobalsEntry{LocalASN: "65001", RouterID: "10.0.0.1"}
 	if !db.BGPConfigured() {
 		t.Error("BGPConfigured should be true with BGP_GLOBALS|default")
@@ -316,7 +316,7 @@ func TestConfigDB_BGPConfigured(t *testing.T) {
 
 	// BGP_NEIGHBOR without BGP_GLOBALS → not configured
 	// (legacy bgpcfgd entries don't constitute a working frrcfgd instance)
-	db2 := newEmptyConfigDB()
+	db2 := newConfigDB()
 	db2.BGPNeighbor["10.0.0.2"] = BGPNeighborEntry{ASN: "65001"}
 	if db2.BGPConfigured() {
 		t.Error("BGPConfigured should be false with only BGP_NEIGHBOR (no BGP_GLOBALS)")
@@ -324,7 +324,7 @@ func TestConfigDB_BGPConfigured(t *testing.T) {
 
 	// DEVICE_METADATA bgp_asn without BGP_GLOBALS → not configured
 	// (factory bgp_asn is a bgpcfgd-era field, not a frrcfgd BGP instance)
-	db3 := newEmptyConfigDB()
+	db3 := newConfigDB()
 	db3.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65100"}
 	if db3.BGPConfigured() {
 		t.Error("BGPConfigured should be false with only DEVICE_METADATA bgp_asn")
@@ -332,7 +332,7 @@ func TestConfigDB_BGPConfigured(t *testing.T) {
 }
 
 func TestNewEmptyConfigDB(t *testing.T) {
-	db := newEmptyConfigDB()
+	db := newConfigDB()
 	typ := reflect.TypeOf(*db)
 	val := reflect.ValueOf(*db)
 	for i := 0; i < typ.NumField(); i++ {

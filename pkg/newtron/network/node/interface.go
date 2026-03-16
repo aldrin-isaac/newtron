@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
 // Interface represents a network interface within the context of a Device.
@@ -153,17 +151,20 @@ func (i *Interface) IPAddresses() []string {
 }
 
 // ============================================================================
-// Service Binding (on-demand from NEWTRON_SERVICE_BINDING)
+// Intent (on-demand from NEWTRON_INTENT)
 // ============================================================================
 
-// binding returns the raw service binding entry from CONFIG_DB.
+// binding returns the raw intent entry from CONFIG_DB.
 // Used internally by RemoveService to read all binding fields at once.
-func (i *Interface) binding() sonic.ServiceBindingEntry {
+func (i *Interface) binding() map[string]string {
 	configDB := i.node.ConfigDB()
 	if configDB == nil {
-		return sonic.ServiceBindingEntry{}
+		return map[string]string{}
 	}
-	return configDB.NewtronServiceBinding[i.name]
+	if entry, ok := configDB.NewtronIntent[i.name]; ok {
+		return entry
+	}
+	return map[string]string{}
 }
 
 // ServiceName returns the name of the service bound to this interface.
@@ -172,8 +173,8 @@ func (i *Interface) ServiceName() string {
 	if configDB == nil {
 		return ""
 	}
-	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok {
-		return binding.ServiceName
+	if entry, ok := configDB.NewtronIntent[i.name]; ok {
+		return entry["service_name"]
 	}
 	return ""
 }
@@ -190,8 +191,8 @@ func (i *Interface) IngressACL() string {
 	if configDB == nil {
 		return ""
 	}
-	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok && binding.IngressACL != "" {
-		return binding.IngressACL
+	if entry, ok := configDB.NewtronIntent[i.name]; ok && entry["ingress_acl"] != "" {
+		return entry["ingress_acl"]
 	}
 	for aclName, acl := range configDB.ACLTable {
 		if acl.Stage == "ingress" {
@@ -212,8 +213,8 @@ func (i *Interface) EgressACL() string {
 	if configDB == nil {
 		return ""
 	}
-	if binding, ok := configDB.NewtronServiceBinding[i.name]; ok && binding.EgressACL != "" {
-		return binding.EgressACL
+	if entry, ok := configDB.NewtronIntent[i.name]; ok && entry["egress_acl"] != "" {
+		return entry["egress_acl"]
 	}
 	for aclName, acl := range configDB.ACLTable {
 		if acl.Stage == "egress" {

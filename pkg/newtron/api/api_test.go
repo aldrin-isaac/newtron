@@ -154,6 +154,8 @@ func TestAPICompleteness(t *testing.T) {
 			"RestartService":    true,
 			"ExecCommand":       true,
 			"VerifyCommitted":   true,
+			// Intent operations
+			"Intents":         true,
 			// Zombie operations
 			"ReadZombie":      true,
 			"RollbackZombie":  true,
@@ -207,7 +209,7 @@ func TestAPICompleteness(t *testing.T) {
 			"Close":          "server handles connection lifecycle",
 			"Commit":         "server handles commit via Execute/connectAndExecute",
 			"Rollback":       "server handles rollback internally",
-			"ZombieOperation":      "server-internal: cached zombie from Lock time",
+			"ZombieIntent":      "server-internal: cached zombie from Lock time",
 			"SetBypassZombieCheck": "server-internal: set by rollback/clear handlers",
 			"SetSkipHistory":       "server-internal: set by history rollback handler",
 			"PendingPreview": "exposed through WriteResult.Preview in Execute",
@@ -221,6 +223,7 @@ func TestAPICompleteness(t *testing.T) {
 			"VTEPExists":        "covered by EVPNStatus",
 			"GetServiceBinding": "covered by GetServiceBindingDetail",
 			"GetInterfaceProperty": "covered by ShowInterfaceDetail",
+			"Snapshot":             "caller-side projection from Intents (no separate endpoint needed)",
 		},
 		"Interface": {
 			// Read accessors — all exposed through ShowInterfaceDetail

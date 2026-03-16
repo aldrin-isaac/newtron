@@ -161,7 +161,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/node/{device}/statedb/{table}/{key}", s.handleQueryStateDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/check", s.handleCheckBGPSessions)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/lag/{name}", s.handleShowLAGDetail)
-	// Intent zombie operations (was /zombie, moved per greenfield §32)
+	// Intent operations
+	mux.HandleFunc("GET /network/{netID}/node/{device}/intents", s.handleListIntents)
 	// Singular: only one zombie can exist per device at a time.
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intents/zombie", s.handleReadZombieNew)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/intents/zombie/rollback", s.handleRollbackZombieNew)

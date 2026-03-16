@@ -260,29 +260,6 @@ func TestACLTableEntry_JSON(t *testing.T) {
 	}
 }
 
-func TestServiceBindingEntry_Structure(t *testing.T) {
-	binding := ServiceBindingEntry{
-		ServiceName: "customer-l3",
-		IPAddress:   "10.1.1.1/30",
-		VRFName:     "customer-l3-Ethernet0",
-		IPVPN:       "customer-vpn",
-		IngressACL:  "customer-l3-Ethernet0-in",
-		EgressACL:   "customer-l3-Ethernet0-out",
-		AppliedAt:   "2024-01-15T10:30:00Z",
-		AppliedBy:   "admin",
-	}
-
-	if binding.ServiceName != "customer-l3" {
-		t.Errorf("ServiceName = %q", binding.ServiceName)
-	}
-	if binding.VRFName != "customer-l3-Ethernet0" {
-		t.Errorf("VRFName = %q", binding.VRFName)
-	}
-	if binding.IngressACL != "customer-l3-Ethernet0-in" {
-		t.Errorf("IngressACL = %q", binding.IngressACL)
-	}
-}
-
 func TestRequireFrrcfgd_Unified(t *testing.T) {
 	d := &Device{
 		Name: "switch1",
@@ -390,7 +367,7 @@ func TestConfigDB_EmptyInit(t *testing.T) {
 // This prevents silent data loss in abstract/offline mode when new tables are
 // added to the schema but not to the shadow ConfigDB switch statements.
 func TestShadow_CoversAllSchemaTables(t *testing.T) {
-	db := NewEmptyConfigDB()
+	db := NewConfigDB()
 
 	for tableName := range Schema {
 		testFields := map[string]string{"test_field": "test_value"}
@@ -408,7 +385,7 @@ func TestShadow_CoversAllSchemaTables(t *testing.T) {
 func TestShadow_ApplyDeleteRoundTrip(t *testing.T) {
 	for tableName := range Schema {
 		t.Run(tableName, func(t *testing.T) {
-			db := NewEmptyConfigDB()
+			db := NewConfigDB()
 
 			// Apply an entry
 			fields := map[string]string{"NULL": "NULL"}

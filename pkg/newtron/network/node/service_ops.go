@@ -36,10 +36,10 @@ type ApplyServiceOpts struct {
 	Params    map[string]string // topology params (peer_as, route_reflector_client, next_hop_self)
 }
 
-// createServiceBindingConfig returns the NEWTRON_SERVICE_BINDING entry for tracking what service
+// createIntent returns the NEWTRON_INTENT entry for tracking what service
 // is applied to an interface.
-func createServiceBindingConfig(intfName string, fields map[string]string) sonic.Entry {
-	return sonic.Entry{Table: "NEWTRON_SERVICE_BINDING", Key: intfName, Fields: fields}
+func createIntent(intfName string, fields map[string]string) sonic.Entry {
+	return sonic.Entry{Table: "NEWTRON_INTENT", Key: intfName, Fields: fields}
 }
 
 // bindingInt parses a string field from a service binding record as int (0 if absent/invalid).
@@ -281,20 +281,25 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	}
 
 	// =========================================================================
-	// Service binding — written FIRST (write-ahead manifest).
+	// Intent record — written FIRST (write-ahead manifest).
 	//
-	// The binding is the manifest of intent: it records what this operation
-	// will create. Writing it first ensures that if the operation is
+	// The intent record is the manifest of intent: it records what this
+	// operation will create. Writing it first ensures that if the operation is
 	// interrupted after some infrastructure entries are written, RemoveService
-	// can read the binding and clean up the partial state. Without the
-	// binding, orphaned CONFIG_DB entries accumulate with no way to remove
-	// them — exactly the failure mode §13 (Symmetric Operations) warns about.
+	// can read the intent and clean up the partial state. Without the
+	// intent record, orphaned CONFIG_DB entries accumulate with no way to
+	// remove them — exactly the failure mode §13 (Symmetric Operations) warns
+	// about.
 	//
-	// On remove, the binding is deleted LAST — after all infrastructure it
-	// references has been torn down. This means an interrupted removal can
-	// be re-run: the binding still exists, so RemoveService finds its input.
+	// On remove, the intent record is deleted LAST — after all infrastructure
+	// it references has been torn down. This means an interrupted removal can
+	// be re-run: the intent record still exists, so RemoveService finds its
+	// input.
 	// =========================================================================
 	bindingFields := map[string]string{
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         serviceName,
 		"service_name": serviceName,
 		"service_type": svc.ServiceType,
 	}
@@ -378,7 +383,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	configDB := n.ConfigDB()
 
 	// Binding is the first entry — write-ahead manifest for crash recovery.
-	e := createServiceBindingConfig(i.name, bindingFields)
+	e := createIntent(i.name, bindingFields)
 	cs.Add(e.Table, e.Key, e.Fields)
 
 	// =========================================================================
@@ -451,7 +456,7 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 		// Defensive: binding is constructed and added as first entry above.
 		// generateServiceEntries does not emit it, but guard against future changes.
-		case e.Table == "NEWTRON_SERVICE_BINDING":
+		case e.Table == "NEWTRON_INTENT":
 			continue
 		}
 
@@ -967,7 +972,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, depCheck *DependencyChecker, 
 }
 
 // RemoveService removes the service from this interface.
-// Uses the stored service binding (NEWTRON_SERVICE_BINDING) to know exactly
+// Uses the stored intent record (NEWTRON_INTENT) to know exactly
 // what was applied and needs to be removed.
 // Shared resources (ACLs, VLANs) are only deleted when this is the last user.
 func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
@@ -984,17 +989,17 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Read binding values from CONFIG_DB — ground truth for what was applied
 	b := i.binding()
-	serviceName := b.ServiceName
-	vrfName := b.VRFName
-	ingressACL := b.IngressACL
-	egressACL := b.EgressACL
-	bgpNeighbor := b.BGPNeighbor
+	serviceName := b["service_name"]
+	vrfName := b["vrf_name"]
+	ingressACL := b["ingress_acl"]
+	egressACL := b["egress_acl"]
+	bgpNeighbor := b["bgp_neighbor"]
 
 	// Create dependency checker to determine what can be safely deleted
 	depCheck := NewDependencyChecker(n, i.name)
 
-	serviceType := b.ServiceType
-	vrfType := b.VRFType
+	serviceType := b["service_type"]
+	vrfType := b["vrf_type"]
 
 	// Derived booleans from serviceType
 	canRoute := serviceType == spec.ServiceTypeRouted || serviceType == spec.ServiceTypeEVPNRouted
@@ -1002,10 +1007,10 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		serviceType == spec.ServiceTypeIRB || serviceType == spec.ServiceTypeBridged
 	hasIRB := serviceType == spec.ServiceTypeEVPNIRB || serviceType == spec.ServiceTypeIRB
 
-	l2vni := bindingInt(b.L2VNI)
-	anycastIP := b.AnycastIP
-	anycastMAC := b.AnycastMAC
-	arpSuppression := b.ARPSuppression == "true"
+	l2vni := bindingInt(b["l2vni"])
+	anycastIP := b["anycast_ip"]
+	anycastMAC := b["anycast_mac"]
+	arpSuppression := b["arp_suppression"] == "true"
 
 	// Check if this is the last interface using this service (for shared resources)
 	isLastServiceUser := depCheck.IsLastServiceUser(serviceName)
@@ -1018,9 +1023,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	cs.Deletes(i.unbindQos())
 
 	// Remove QoS device-wide entries if no other interface references this policy
-	if b.QoSPolicy != "" {
-		if !n.isQoSPolicyReferenced(b.QoSPolicy, i.name) {
-			cs.Deletes(n.deleteDeviceQoSConfig(b.QoSPolicy))
+	if b["qos_policy"] != "" {
+		if !n.isQoSPolicyReferenced(b["qos_policy"], i.name) {
+			cs.Deletes(n.deleteDeviceQoSConfig(b["qos_policy"]))
 		}
 	}
 
@@ -1063,18 +1068,18 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	// Remove BGP peer group (Principle 36) — created per-service, deleted when last user removed.
 	// Peer group must be deleted AFTER all BGP_NEIGHBORs referencing it are deleted.
-	if b.PeerGroup != "" && isLastServiceUser {
+	if b["peer_group"] != "" && isLastServiceUser {
 		vrfKey := "default"
 		if vrfName != "" && vrfName != "default" {
 			vrfKey = vrfName
 		}
-		cs.Deletes(DeleteBGPPeerGroupConfig(vrfKey, b.PeerGroup))
+		cs.Deletes(DeleteBGPPeerGroupConfig(vrfKey, b["peer_group"]))
 	}
 
 	// Revert BGP_GLOBALS_AF redistribution override if this service set it.
 	// For per-interface VRFs, destroyVrf cascades this anyway — harmless redundancy.
-	if b.RedistributeVRF != "" && isLastServiceUser {
-		cs.Updates(revertRedistributionConfig(b.RedistributeVRF))
+	if b["redistribute_vrf"] != "" && isLastServiceUser {
+		cs.Updates(revertRedistributionConfig(b["redistribute_vrf"]))
 	}
 
 	// =========================================================================
@@ -1092,16 +1097,16 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// Per-interface VRF: delete VRF and related config
 		if vrfType == spec.VRFTypeInterface {
 			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
-			l3vni, l3vniVlan := bindingInt(b.L3VNI), bindingInt(b.L3VNIVlan)
+			l3vni, l3vniVlan := bindingInt(b["l3vni"]), bindingInt(b["l3vni_vlan"])
 			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni, l3vniVlan))
 		}
 
 		// Shared VRF: delete when last ipvpn user is removed.
 		// The shared VRF was auto-created by the first service apply and should
 		// be cleaned up when no service bindings reference the ipvpn anymore.
-		if vrfType == spec.VRFTypeShared && b.IPVPN != "" {
-			if depCheck.IsLastIPVPNUser(b.IPVPN) {
-				l3vni, l3vniVlan := bindingInt(b.L3VNI), bindingInt(b.L3VNIVlan)
+		if vrfType == spec.VRFTypeShared && b["ipvpn"] != "" {
+			if depCheck.IsLastIPVPNUser(b["ipvpn"]) {
+				l3vni, l3vniVlan := bindingInt(b["l3vni"]), bindingInt(b["l3vni_vlan"])
 				cs.Deletes(n.destroyVrfConfig(vrfName, l3vni, l3vniVlan))
 			}
 		}
@@ -1111,7 +1116,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-VLAN resources (delete only if last VLAN member)
 	// =========================================================================
 
-	vlanID := bindingInt(b.VlanID)
+	vlanID := bindingInt(b["vlan_id"])
 
 	if canBridge && vlanID > 0 {
 		vlanName := VLANName(vlanID)
@@ -1127,9 +1132,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			if hasIRB {
 				if anycastIP != "" {
 					cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
-				} else if b.IPAddress != "" {
+				} else if b["ip_address"] != "" {
 					// Local IRB: SVI IP comes from opts.IPAddress (stored in binding)
-					cs.Deletes(deleteSviIPConfig(vlanID, b.IPAddress))
+					cs.Deletes(deleteSviIPConfig(vlanID, b["ip_address"]))
 				}
 				cs.Deletes(deleteSviBaseConfig(vlanID))
 
@@ -1158,7 +1163,7 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Service binding tracking (always delete)
 	// =========================================================================
 
-	cs.Delete("NEWTRON_SERVICE_BINDING", i.name)
+	cs.Delete("NEWTRON_INTENT", i.name)
 
 	n.applyShadow(cs)
 
@@ -1186,10 +1191,10 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	// Capture all binding values before RemoveService deletes the binding.
 	// These values are needed to reconstruct the same ApplyService call.
 	b := i.binding()
-	serviceName := b.ServiceName
-	serviceIP := b.IPAddress
-	peerAS := bindingInt(b.BGPPeerAS)
-	vlanID := bindingInt(b.VlanID)
+	serviceName := b["service_name"]
+	serviceIP := b["ip_address"]
+	peerAS := bindingInt(b["bgp_peer_as"])
+	vlanID := bindingInt(b["vlan_id"])
 
 	// Remove the current service
 	removeCS, err := i.RemoveService(ctx)
@@ -1201,18 +1206,18 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	// HasService() check passes. The delete change is already recorded
 	// above; this cache mutation only affects reads within this episode.
 	configDB := n.ConfigDB()
-	delete(configDB.NewtronServiceBinding, i.name)
+	delete(configDB.NewtronIntent, i.name)
 
 	// Restore topology params from the binding (Principle 8: binding self-sufficiency).
 	// route_reflector_client and next_hop_self are topology attributes that must
 	// survive the remove+reapply cycle.
 	var params map[string]string
-	if b.RouteReflectorClient == "true" || b.NextHopSelf == "true" {
+	if b["route_reflector_client"] == "true" || b["next_hop_self"] == "true" {
 		params = make(map[string]string)
-		if b.RouteReflectorClient == "true" {
+		if b["route_reflector_client"] == "true" {
 			params["route_reflector_client"] = "true"
 		}
-		if b.NextHopSelf == "true" {
+		if b["next_hop_self"] == "true" {
 			params["next_hop_self"] = "true"
 		}
 	}

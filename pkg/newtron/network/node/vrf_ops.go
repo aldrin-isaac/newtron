@@ -258,7 +258,7 @@ func (n *Node) unbindIpvpnConfig(vrfName string) []sonic.Entry {
 // Also removes the L3VNI transit VLAN infrastructure (VLAN, SVI, VXLAN_TUNNEL_MAP) that
 // BindIPVPN created — operational symmetry requires the reverse to undo all forward effects.
 //
-// Refuses if any NEWTRON_SERVICE_BINDING references this VRF — callers must remove
+// Refuses if any NEWTRON_INTENT references this VRF — callers must remove
 // services first. RemoveService calls destroyVrfConfig directly (not UnbindIPVPN),
 // so this guard only protects standalone CLI/test usage.
 func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, error) {
@@ -266,11 +266,11 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 		return nil, err
 	}
 
-	// Refuse if service bindings still reference this VRF
+	// Refuse if intent records still reference this VRF
 	if n.configDB != nil {
 		var refs []string
-		for intfName, binding := range n.configDB.NewtronServiceBinding {
-			if binding.VRFName == vrfName {
+		for intfName, fields := range n.configDB.NewtronIntent {
+			if fields["vrf_name"] == vrfName {
 				refs = append(refs, intfName)
 			}
 		}

@@ -224,37 +224,7 @@ func init() {
 				TCToQueueMap: vals["tc_to_queue_map"],
 			}
 		},
-		"NEWTRON_SERVICE_BINDING": func(db *ConfigDB, entry string, vals map[string]string) {
-			db.NewtronServiceBinding[entry] = ServiceBindingEntry{
-				ServiceName:     vals["service_name"],
-				IPAddress:       vals["ip_address"],
-				VRFName:         vals["vrf_name"],
-				IPVPN:           vals["ipvpn"],
-				MACVPN:          vals["macvpn"],
-				IngressACL:      vals["ingress_acl"],
-				EgressACL:       vals["egress_acl"],
-				BGPNeighbor:     vals["bgp_neighbor"],
-				QoSPolicy:       vals["qos_policy"],
-				VlanID:          vals["vlan_id"],
-				RedistributeVRF: vals["redistribute_vrf"],
-				L3VNI:           vals["l3vni"],
-				L3VNIVlan:       vals["l3vni_vlan"],
-				ServiceType:     vals["service_type"],
-				VRFType:         vals["vrf_type"],
-				L2VNI:           vals["l2vni"],
-				AnycastIP:       vals["anycast_ip"],
-				AnycastMAC:      vals["anycast_mac"],
-				ARPSuppression:  vals["arp_suppression"],
-				BGPPeerAS:            vals["bgp_peer_as"],
-				PeerGroup:            vals["peer_group"],
-				RouteMapIn:           vals["route_map_in"],
-				RouteMapOut:          vals["route_map_out"],
-				RouteReflectorClient: vals["route_reflector_client"],
-				NextHopSelf:          vals["next_hop_self"],
-				AppliedAt:            vals["applied_at"],
-				AppliedBy:            vals["applied_by"],
-			}
-		},
+		"NEWTRON_INTENT": mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.NewtronIntent }),
 		"STATIC_ROUTE": func(db *ConfigDB, entry string, vals map[string]string) {
 			cp := make(map[string]string, len(vals))
 			for k, v := range vals {
@@ -344,16 +314,16 @@ func mergeParser(getMap func(*ConfigDB) map[string]map[string]string) tableParse
 	}
 }
 
-// newEmptyConfigDB returns a ConfigDB with all map fields initialized.
-func newEmptyConfigDB() *ConfigDB {
+// newConfigDB returns a ConfigDB with all map fields initialized.
+func newConfigDB() *ConfigDB {
 	db := &ConfigDB{}
 	initMaps(reflect.ValueOf(db).Elem())
 	return db
 }
 
-// NewEmptyConfigDB returns a ConfigDB with all map fields initialized.
+// NewConfigDB returns a ConfigDB with all map fields initialized.
 // Exported for use by abstract Node (offline mode).
-func NewEmptyConfigDB() *ConfigDB { return newEmptyConfigDB() }
+func NewConfigDB() *ConfigDB { return newConfigDB() }
 
 // initMaps initializes all nil map fields on a struct using reflection.
 func initMaps(v reflect.Value) {

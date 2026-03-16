@@ -11,7 +11,7 @@ months later by someone who wasn't there when it was applied. Most
 tools treat delivery as someone else's problem. newtron treats it as
 *the* problem.
 
-This document explains the thirty-eight principles behind that choice
+This document explains the thirty-nine principles behind that choice
 — not as a reference, but as a narrative. Part I states the thesis.
 Part II establishes the domain model. Part III describes the
 operational contract that keeps the promise. Part IV explains how
@@ -308,30 +308,30 @@ Different operation types interact with this reality differently:
   preconditions — "does this VLAN already exist?" — but generate entries
   from specs and profile, not from device state.
 
-- **Service operations** trust the binding record as ground reality.
+- **Service operations** trust the intent record as ground reality.
   `ApplyService` reads CONFIG_DB for idempotency filtering on shared
   infrastructure (does the VLAN or VRF already exist?). `RemoveService`
-  reads the NEWTRON_SERVICE_BINDING record — not CONFIG_DB tables, not
+  reads the NEWTRON_INTENT record — not CONFIG_DB tables, not
   specs — to determine what to tear down.
 
-### Bindings are ground reality for teardown
+### Intent records are ground reality for teardown
 
-NEWTRON_SERVICE_BINDING records live on the device, not in spec files.
-When a service is applied to an interface, newtron writes a binding
+NEWTRON_INTENT records live on the device, not in spec files.
+When an operation is applied to a resource, newtron writes an intent
 record to CONFIG_DB that captures exactly what was applied — which
-VLANs, VRFs, ACLs, and VNIs were created for that service.
+VLANs, VRFs, ACLs, and VNIs were created for that operation.
 
-The binding is the sole input for teardown. `RemoveService` does not
+The intent record is the sole input for teardown. `RemoveService` does not
 re-derive the removal from the spec, because the spec may have changed
 between apply and remove. What matters is what was *actually applied*.
 For example, EVPN overlay parameters (L3 VNI, its transit VLAN) are
-stored in the binding so removal can tear down overlay infrastructure
+stored in the intent record so removal can tear down overlay infrastructure
 without looking up the VPN spec — which may have changed since the
 service was applied.
 
 When adding a new forward operation that creates infrastructure, the
 question to ask is: *can the reverse operation find everything it needs
-in the binding alone?* If not, the binding is incomplete.
+in the intent record alone?* If not, the intent record is incomplete.
 
 ### Why newtron is not a reconciler
 
@@ -945,11 +945,15 @@ replicate.
 
 Only domain-level reverse operations (`RemoveService`, `UnbindACL`,
 `RemoveQoS`) have the context to determine whether a shared resource
-can be safely removed. Rollback is therefore an orchestrator concern:
-if an orchestrator provisions three interfaces and the second fails, it
-calls `RemoveService` on the first — not "reverse the first ChangeSet."
-newtron provides reference-aware building blocks; the orchestrator
-decides when to invoke them.
+can be safely removed. Dependency checking now scans the node's intent
+collection (actuated intents) in addition to CONFIG_DB, ensuring that
+shared resource removal accounts for all declared consumers — not just
+what happens to be present in the database at scan time. Rollback is
+therefore an orchestrator concern: if an orchestrator provisions three
+interfaces and the second fails, it calls `RemoveService` on the
+first — not "reverse the first ChangeSet." newtron provides
+reference-aware building blocks; the orchestrator decides when to
+invoke them.
 
 **If newtron creates it, newtron must be able to remove it. No orphans,
 no manual cleanup, no `redis-cli` required.**
@@ -1135,32 +1139,32 @@ parallel record of it.**
 ## 37. On-Device Intent Is Sufficient for Reconstruction
 
 The device carries enough intent to reconstruct its expected CONFIG_DB
-state. `NEWTRON_SERVICE_BINDING` records which services are applied to
-which interfaces, with all parameters needed for both teardown and
-reconstruction. Combined with current specs, the binding tells you
+state. `NEWTRON_INTENT` records which operations are applied to
+which resources, with all parameters needed for both teardown and
+reconstruction. Combined with current specs, the intent record tells you
 exactly what CONFIG_DB entries should exist. No external history, no
 journal replay, no off-device state needed.
 
 This closes the gap between provisioning (topology-defined baseline)
 and the evolved device (post-provision operations). The topology gives
 you the baseline — `GenerateDeviceComposite()` with current specs
-produces the expected CONFIG_DB after provisioning. The bindings give
+produces the expected CONFIG_DB after provisioning. The intent records give
 you everything that happened since — each one carries enough
 information to replay the operation on an abstract Node and produce
 the incremental CONFIG_DB entries. Together, they reconstruct the full
 expected state at any point in the device's lifetime.
 
-The existing principle "bindings must be self-sufficient for reverse
-operations" (§13) extends here: **bindings must be self-sufficient for
+The existing principle "intent records must be self-sufficient for reverse
+operations" (§13) extends here: **intent records must be self-sufficient for
 reconstruction of expected state.** Teardown is one consumer; drift
 detection is another. Same data, different purpose.
 
-This makes a specific demand on binding design: every field needed to
-regenerate the expected CONFIG_DB entries must be stored in the binding.
+This makes a specific demand on intent record design: every field needed to
+regenerate the expected CONFIG_DB entries must be stored in the intent record.
 When adding a new forward operation, ask not only "can the reverse find
-everything it needs in the binding alone?" but also "can reconstruction
-regenerate the expected entries from the binding alone?" If a future
-forward operation creates infrastructure that the binding can't
+everything it needs in the intent record alone?" but also "can reconstruction
+regenerate the expected entries from the intent record alone?" If a future
+forward operation creates infrastructure that the intent record can't
 reconstruct, drift detection breaks silently — and there is no test
 that catches it until someone asks "why doesn't drift show this entry?"
 
@@ -1181,11 +1185,11 @@ CONFIG_DB is operational infrastructure: `config save` serializes it,
 growth degrades device operations for data that no SONiC daemon will
 ever consume.
 
-The intent record is O(1) per device — at most one in-flight operation.
-The rollback history is O(1) per device — capped at 10 entries, oldest
-evicted. Service bindings are O(interfaces) — proportional to physical
-ports, not to time. None grow with the number of operations performed
-over the device's lifetime.
+The intent record is O(resources) per device — one per managed resource
+(interface, VRF, overlay). The rollback history is O(1) per device —
+capped at 10 entries, oldest evicted. Intent records are O(resources) —
+proportional to the device's managed infrastructure, not to time. None
+grow with the number of operations performed over the device's lifetime.
 
 This principle killed the append-only journal design: after seven years
 of operations, CONFIG_DB would be dominated by thousands of history
@@ -1458,7 +1462,7 @@ qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 interface_ops.go   → INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
+service_ops.go     → NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
@@ -2324,6 +2328,67 @@ multiple current SONiC schemas to produce.
 
 ---
 
+## 39. Unified Intent Model
+
+newtron started with a single intent record type — the service binding —
+because services were the only composite operation. As the system grew to
+manage VRFs, overlays, baselines, and QoS policies, the question arose:
+should each operation type have its own on-device record format, or should
+there be one model that captures all managed state?
+
+The answer is one model. An intent record is a composite of primitives,
+bound to a resource, with a state lifecycle. The resource might be an
+interface (service intent), a device (baseline intent), or a VRF (routing
+intent) — the record structure is the same. Operation identifies which
+composite was applied. Name references the spec that was consumed, if any.
+Params carry the resolved values that were actually written — the ground
+reality for teardown and reconstruction.
+
+Intent records move through three states. *Unrealized* means declared but
+not yet applied — the intent exists as a record of what should happen, but
+no CONFIG_DB entries have been written for it. *In-flight* means actuation
+is in progress — the record has been persisted, the ChangeSet is being
+applied, but the operation has not completed. If the process crashes
+during this state, the intent becomes a zombie: the record survives but
+the operation is incomplete, and the next operator can detect and recover
+from it. *Actuated* means the operation completed successfully — the
+CONFIG_DB entries exist and match what the intent record describes.
+
+There is no type discriminator field that says "this is a service intent"
+or "this is a VRF intent." The Operation field (e.g., `apply-service`,
+`configure-bgp`, `setup-evpn`) identifies the composite that was applied,
+and the code path for that operation knows what Params to expect. Adding a
+new operation type requires no schema change to the intent record — only a
+new Operation value and the corresponding forward/reverse implementations.
+
+The Node intermediates all intent. On connect, the node loads existing
+intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
+the node's intent collection as part of the operation. In abstract mode,
+intent records accumulate alongside shadow CONFIG_DB entries and are
+exportable to topology composites. This makes the node the single point
+of intent truth for its device — whether physical or abstract, whether
+connected or offline.
+
+Rollback operates at the intent level, not the ChangeSet level. To roll
+back an operation, the orchestrator calls the domain-level reverse for that
+intent (RemoveService, RemoveQoS, etc.). Shared resources are handled by
+the same dependency-aware logic described in §13: the reverse operation
+scans actuated intents for remaining consumers before deleting shared
+infrastructure. Mechanical ChangeSet reversal remains unsafe for the same
+reason it has always been unsafe — it lacks the sharing context that only
+domain operations possess.
+
+This unifies the former NEWTRON_SERVICE_BINDING with the general
+NEWTRON_INTENT model. Service bindings were always intent records — they
+captured what was applied, served as the sole input for teardown, and
+carried enough information for reconstruction. The unified model simply
+recognizes that every newtron-managed resource deserves the same
+treatment: a persistent record of what was applied, surviving crashes,
+sufficient for both reversal and drift detection, bounded by
+infrastructure rather than time.
+
+---
+
 # Summary
 
 Legend: **C** = conviction (specific to this project) · **P** = established practice (newtron subscribes) · **S** = style preference
@@ -2365,6 +2430,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 33 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
 | 34 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
 | 35 | Documentation freshness | Grep finds what you know is wrong; audits find what you don't know is wrong | P |
-| 36 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + bindings); CONFIG_DB is for intent, not history | C |
-| 37 | On-device intent sufficiency | The device carries enough intent (bindings) to reconstruct expected state; binding design must serve both teardown and reconstruction | C |
+| 36 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
+| 37 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
 | 38 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
+| 39 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C |

@@ -406,7 +406,7 @@ echo -e "    ${GRAY}BGP_PEER_GROUP|default|TRANSIT${RESET}    Create a peer grou
 echo -e "    ${GRAY}BGP_NEIGHBOR|default|10.1.0.1${RESET}     Create a BGP peer at 10.1.0.1"
 echo "                                      (the other end of the /31)"
 echo -e "    ${GRAY}BGP_NEIGHBOR_AF|...|ipv4_unicast${RESET}  Enable IPv4 unicast for the peer"
-echo -e "    ${GRAY}NEWTRON_SERVICE_BINDING|Ethernet0${RESET}   Record what was applied (so"
+echo -e "    ${GRAY}NEWTRON_INTENT|Ethernet0${RESET}            Record what was applied (so"
 echo "                                      'remove' knows what to clean up)"
 echo ""
 echo "  The first four entries appear because the device has no BGP instance"
@@ -463,11 +463,11 @@ run_ssh "Kernel: interface IP (intfmgrd processed the CONFIG_DB entry)" \
 run_ssh "FRR: BGP neighbor (frrcfgd read CONFIG_DB and configured FRR)" \
     "docker exec bgp vtysh -c 'show bgp neighbors 10.1.0.1' 2>/dev/null | head -5"
 
-run_ssh "CONFIG_DB: service binding (newtron's record of what was applied)" \
-    "redis-cli -n 4 hgetall 'NEWTRON_SERVICE_BINDING|Ethernet0'"
+run_ssh "CONFIG_DB: intent record (newtron's record of what was applied)" \
+    "redis-cli -n 4 hgetall 'NEWTRON_INTENT|Ethernet0'"
 
 echo -e "  The chain: ${BLUE_BOLD}newtron${RESET} writes CONFIG_DB --> frrcfgd reads it -->"
-echo "  FRR configures the BGP peer. The service binding records what"
+echo "  FRR configures the BGP peer. The intent record captures what"
 echo "  was applied so 'remove' knows what to clean up, even if the"
 echo "  service spec changes between apply and remove."
 
@@ -481,7 +481,7 @@ echo "  Every apply has an equal and opposite remove. This is critical for"
 echo "  network operations -- orphaned config (stale BGP peers, leftover IPs,"
 echo "  ghost VLAN members) is a constant source of outages."
 echo ""
-echo -e "  ${BLUE_BOLD}newtron${RESET} reads the NEWTRON_SERVICE_BINDING to know exactly what was"
+echo -e "  ${BLUE_BOLD}newtron${RESET} reads the NEWTRON_INTENT record to know exactly what was"
 echo "  applied, then removes every entry in reverse dependency order:"
 echo "  BGP neighbor AF first, then BGP neighbor, then interface IP, then"
 echo "  the interface routing config, then the binding record itself."

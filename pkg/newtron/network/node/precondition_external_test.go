@@ -29,7 +29,7 @@ func emptyConfigDB() *sonic.ConfigDB {
 		VXLANTunnel:           make(map[string]sonic.VXLANTunnelEntry),
 		BGPNeighbor:           make(map[string]sonic.BGPNeighborEntry),
 		ACLTable:              make(map[string]sonic.ACLTableEntry),
-		NewtronServiceBinding: make(map[string]sonic.ServiceBindingEntry),
+		NewtronIntent: make(map[string]map[string]string),
 		BGPPeerGroup:          make(map[string]sonic.BGPPeerGroupEntry),
 	}
 }
@@ -371,8 +371,11 @@ func TestDependencyChecker_IsLastVLANMember_MultipleMembers(t *testing.T) {
 
 func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{
-		ServiceName: "customer-l3",
+	db.NewtronIntent["Ethernet0"] = map[string]string{
+		"service_name": "customer-l3",
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"name":         "customer-l3",
 	}
 	dev := testNode(db, true, false)
 
@@ -384,8 +387,8 @@ func TestDependencyChecker_IsLastServiceUser_OnlyUser(t *testing.T) {
 
 func TestDependencyChecker_IsLastServiceUser_MultipleUsers(t *testing.T) {
 	db := emptyConfigDB()
-	db.NewtronServiceBinding["Ethernet0"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
-	db.NewtronServiceBinding["Ethernet4"] = sonic.ServiceBindingEntry{ServiceName: "customer-l3"}
+	db.NewtronIntent["Ethernet0"] = map[string]string{"service_name": "customer-l3", "state": "actuated", "operation": "apply-service", "name": "customer-l3"}
+	db.NewtronIntent["Ethernet4"] = map[string]string{"service_name": "customer-l3", "state": "actuated", "operation": "apply-service", "name": "customer-l3"}
 	dev := testNode(db, true, false)
 
 	dc := node.NewDependencyChecker(dev, "Ethernet0")

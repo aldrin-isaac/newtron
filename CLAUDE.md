@@ -34,26 +34,26 @@ This has concrete design implications:
   reality. Every other operation mutates existing reality.
 - **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
   preconditions before acting, but generate entries from specs and profile.
-- **Service operations** trust the binding record as ground reality.
+- **Service operations** trust the intent record as ground reality.
   `ApplyService` reads CONFIG_DB for idempotency filtering on shared
-  infrastructure. `RemoveService` reads the NEWTRON_SERVICE_BINDING record —
+  infrastructure. `RemoveService` reads the NEWTRON_INTENT record —
   not CONFIG_DB tables, not specs — to determine what to tear down.
-- **NEWTRON_SERVICE_BINDING** records live on the device, not in spec files. The
-  binding is the ground reality of what was applied, and the sole input for
-  teardown.
+- **NEWTRON_INTENT** records live on the device, not in spec files. The
+  intent record is the ground reality of what was applied, and the sole
+  input for teardown.
 - **Idempotency filtering** in `service_ops.go` checks device reality (VLANs, VRFs
   that already exist from other services), not spec intent.
 - **Do NOT implement a desired-state reconciler** (Terraform/Kubernetes model). There is
   no canonical "desired state" for incremental operations — only device reality + the
   requested change. newtron does not support brownfield — two opinionated architectures
   cannot converge on the same device.
-- **Bindings must be self-sufficient for reverse operations.** NEWTRON_SERVICE_BINDING
+- **Intent records must be self-sufficient for reverse operations.** NEWTRON_INTENT
   must contain every value needed for teardown — never re-resolve specs at removal time.
-  The spec may have changed between apply and remove; the binding records what was
-  actually applied. Example: `l3vni` and `l3vni_vlan` are stored in the binding so
+  The spec may have changed between apply and remove; the intent record captures what was
+  actually applied. Example: `l3vni` and `l3vni_vlan` are stored in the intent so
   `RemoveService` can tear down transit VLAN infrastructure without looking up the
   IP-VPN spec. When adding a new forward operation that creates infrastructure, ask:
-  "can the reverse operation find everything it needs in the binding alone?"
+  "can the reverse operation find everything it needs in the intent record alone?"
 
 ## Platform Patching Principle
 
@@ -92,7 +92,7 @@ qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 interface_ops.go   → INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     → NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET,
+service_ops.go     → NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
@@ -186,7 +186,7 @@ composite := n.BuildComposite()           // export all accumulated entries
 ```
 
 Key implementation:
-- `NewAbstract()` creates Node with `sonic.NewEmptyConfigDB()` + `offline=true`
+- `NewAbstract()` creates Node with `sonic.NewConfigDB()` + `offline=true`
 - `precondition()` skips connected/locked checks when offline
 - `op()` updates shadow ConfigDB + appends to `accumulated` when offline
 - Complex ops call `n.applyShadow(cs)` for shadow update
@@ -360,7 +360,7 @@ Rules:
   is implemented. Dependency validation (e.g., YANG `must` statements like
   "max_threshold >= min_threshold") should be added to `schema.go` as the
   relevant tables are exercised in production.
-- **Tables without YANG models** (NEWTRON_SERVICE_BINDING, SAG_GLOBAL,
+- **Tables without YANG models** (NEWTRON_INTENT, SAG_GLOBAL,
   SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI) derive constraints from newtron usage
   patterns. Document this in the schema entry comment.
 

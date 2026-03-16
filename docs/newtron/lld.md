@@ -51,7 +51,7 @@ pkg/newtron/network/node/             # Node internals
     baseline_ops.go                   # LOOPBACK_INTERFACE
     portchannel_ops.go                # PORTCHANNEL, PORTCHANNEL_MEMBER
     service_ops.go                    # ApplyService, RemoveService, RefreshService,
-                                      # NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET, etc.
+                                      # NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET, etc.
     service_gen.go                    # Service-to-entries translation
     cleanup_ops.go                    # Orphan cleanup (ACLs, VRFs, VNI mappings)
     qos.go                            # QoS policy → CONFIG_DB translation
@@ -113,7 +113,7 @@ Each CONFIG_DB table has exactly one owning file:
 | `interface_ops.go` | INTERFACE |
 | `baseline_ops.go` | LOOPBACK_INTERFACE |
 | `portchannel_ops.go` | PORTCHANNEL, PORTCHANNEL_MEMBER |
-| `service_ops.go` | NEWTRON_SERVICE_BINDING, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET |
+| `service_ops.go` | NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET |
 
 ## 2. Spec File Types
 
@@ -1065,29 +1065,33 @@ Every table newtron reads or writes, with key format and fields.
 
 | Table | Key Format | Purpose |
 |-------|-----------|---------|
-| `NEWTRON_SERVICE_BINDING` | Interface name (`Ethernet0`) | Service tracking |
+| `NEWTRON_INTENT` | Resource name (`Ethernet0`, `bgp`, `evpn`, `loopback`) | Unified intent records — service bindings, infrastructure state, crash recovery |
 
-**ServiceBinding fields:**
+**Intent record fields** (identity + resolved parameters in a flat hash):
 
 | Field | Purpose |
 |-------|---------|
-| `service_name` | Applied service name |
-| `service_type` | Service type for teardown path |
-| `ip_address` | Applied IP |
-| `vrf_name` | Applied VRF |
-| `vrf_type` | `"interface"` or `"shared"` |
-| `ipvpn`, `macvpn` | VPN references |
-| `l3vni`, `l3vni_vlan` | L3VNI values (for VRF teardown) |
-| `l2vni` | L2VNI (for VXLAN_TUNNEL_MAP cleanup) |
-| `ingress_acl`, `egress_acl` | ACL names |
-| `bgp_neighbor`, `bgp_peer_as` | BGP peer (for RefreshService) |
-| `qos_policy` | QoS policy name |
-| `anycast_ip`, `anycast_mac` | Anycast values (for SVI/SAG cleanup) |
-| `arp_suppression` | ARP suppression flag |
-| `redistribute_vrf` | VRF where redistribution was overridden |
+| `state` | Lifecycle: `unrealized`, `in-flight`, `actuated` |
+| `operation` | What created this intent: `apply-service`, `setup-evpn`, `configure-bgp` |
+| `name` | Spec reference (e.g., `transit`), empty if none |
+| `holder`, `created` | Who created and when |
 | `applied_at`, `applied_by` | Audit metadata |
+| `service_name` | Applied service name (param) |
+| `service_type` | Service type for teardown path (param) |
+| `ip_address` | Applied IP (param) |
+| `vrf_name` | Applied VRF (param) |
+| `vrf_type` | `"interface"` or `"shared"` (param) |
+| `ipvpn`, `macvpn` | VPN references (params) |
+| `l3vni`, `l3vni_vlan` | L3VNI values for VRF teardown (params) |
+| `l2vni` | L2VNI for VXLAN_TUNNEL_MAP cleanup (param) |
+| `ingress_acl`, `egress_acl` | ACL names (params) |
+| `bgp_neighbor`, `bgp_peer_as` | BGP peer for RefreshService (params) |
+| `qos_policy` | QoS policy name (param) |
+| `anycast_ip`, `anycast_mac` | Anycast values for SVI/SAG cleanup (params) |
+| `arp_suppression` | ARP suppression flag (param) |
+| `redistribute_vrf` | VRF where redistribution was overridden (param) |
 
-The binding is self-sufficient for reverse operations — every value needed for teardown is stored in the binding, never re-resolved from specs.
+The intent record is self-sufficient for reverse operations and drift reconstruction — every value needed for teardown is stored in the record's params, never re-resolved from specs. Constructed via `IntentFromFields()`, serialized via `Intent.ToFields()`.
 
 ## 6. Internal Implementation
 
@@ -1266,7 +1270,7 @@ Lock
 │  Refreshes CONFIG_DB cache from Redis
 │  Rebuilds Interface map from refreshed CONFIG_DB
 │  Checks for zombie intent (NEWTRON_INTENT exists in STATE_DB)
-│  If zombie found: Execute returns ErrDeviceZombieOperation
+│  If zombie found: Execute returns ErrDeviceZombieIntent
 │
 ├─ fn(ctx)
 │    Caller's operations run here. Each op (CreateVLAN, ApplyService, etc.)
@@ -1301,11 +1305,11 @@ Lock
 
 On `fn()` error or Commit failure, `Rollback()` clears pending ChangeSets but does NOT undo already-applied Redis writes — partial writes are possible. The actor's `connectAndExecute` also calls `Rollback()` on error but keeps the cached connection alive for future requests.
 
-**Zombie detection:** When `Lock()` acquires the distributed lock and finds an existing `NEWTRON_INTENT` record, it stores the intent as `n.zombieOp`. Subsequent calls to `Execute()` check for this and return `ErrDeviceZombieOperation` before running any operations. The operator must resolve the zombie (inspect, rollback, or clear) before the device accepts new writes. `RollbackZombie` and `ClearZombie` bypass this check via `SetBypassZombieCheck`.
+**Zombie detection:** When `Lock()` acquires the distributed lock and finds an existing `NEWTRON_INTENT` record, it stores the intent as `n.zombie`. Subsequent calls to `Execute()` check for this and return `ErrDeviceZombieIntent` before running any operations. The operator must resolve the zombie (inspect, rollback, or clear) before the device accepts new writes. `RollbackZombie` and `ClearZombie` bypass this check via `SetBypassZombieCheck`.
 
 ### 6.7 Value Derivation
 
-All values below are derived at `ApplyService` time and stored in `NEWTRON_SERVICE_BINDING` for teardown. Composite generation (abstract mode) derives identical values through the same code path. Auto-derived values from interface context:
+All values below are derived at `ApplyService` time and stored in `NEWTRON_INTENT` as intent record params for teardown. Composite generation (abstract mode) derives identical values through the same code path. Auto-derived values from interface context:
 
 | Value | Derivation |
 |-------|-----------|

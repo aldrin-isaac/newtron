@@ -486,7 +486,7 @@ func TestSchema_KnownTables(t *testing.T) {
 		"BGP_GLOBALS", "BGP_NEIGHBOR", "BGP_NEIGHBOR_AF",
 		"VXLAN_TUNNEL", "VXLAN_EVPN_NVO", "VXLAN_TUNNEL_MAP",
 		"ACL_TABLE", "ACL_RULE",
-		"NEWTRON_SERVICE_BINDING", "ROUTE_MAP", "PREFIX_SET",
+		"NEWTRON_INTENT", "ROUTE_MAP", "PREFIX_SET",
 	}
 	for _, r := range required {
 		if !IsKnownTable(r) {

@@ -68,11 +68,17 @@ type Node struct {
 	offline     bool
 	accumulated []sonic.Entry
 
-	// zombieOp stores an existing intent found during Lock(). Any intent
+	// zombie stores an existing intent found during Lock(). Any intent
 	// present at lock time indicates a crashed process — the lock
 	// acquisition proves the previous holder is gone. Execute() returns
-	// ErrDeviceZombieOperation to block further changes until resolved.
-	zombieOp *sonic.OperationIntent
+	// ErrDeviceZombieIntent to block further changes until resolved.
+	zombie *sonic.OperationIntent
+
+	// intents maps resource names to their intent records (§39).
+	// Populated from CONFIG_DB on connect (actuated + in-flight intents),
+	// from topology imports (unrealized intents), or from operations
+	// (write-through on mutations). The Node intermediates all intent.
+	intents map[string]*sonic.Intent
 
 	mu sync.RWMutex
 }
@@ -106,13 +112,126 @@ func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, reso
 		profile:      profile,
 		resolved:     resolved,
 		interfaces:   make(map[string]*Interface),
-		configDB:     sonic.NewEmptyConfigDB(),
+		configDB:     sonic.NewConfigDB(),
 		offline:      true,
 	}
 }
 
 // IsOffline returns true if this is an abstract node (no physical device).
 func (n *Node) IsOffline() bool { return n.offline }
+
+// ============================================================================
+// Intent Accessors (§39)
+// ============================================================================
+
+// GetIntent returns the intent for the given resource, or nil if none exists.
+func (n *Node) GetIntent(resource string) *sonic.Intent {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.intents == nil {
+		return nil
+	}
+	return n.intents[resource]
+}
+
+// SetIntent stores an intent for the given resource.
+func (n *Node) SetIntent(intent *sonic.Intent) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.intents == nil {
+		n.intents = make(map[string]*sonic.Intent)
+	}
+	n.intents[intent.Resource] = intent
+}
+
+// RemoveIntent removes the intent for the given resource.
+func (n *Node) RemoveIntent(resource string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.intents != nil {
+		delete(n.intents, resource)
+	}
+}
+
+// Intents returns a copy of all intents on this node.
+func (n *Node) Intents() map[string]*sonic.Intent {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.intents == nil {
+		return nil
+	}
+	result := make(map[string]*sonic.Intent, len(n.intents))
+	for k, v := range n.intents {
+		result[k] = v
+	}
+	return result
+}
+
+// ServiceIntents returns all actuated service intents (apply-service).
+func (n *Node) ServiceIntents() map[string]*sonic.Intent {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	result := make(map[string]*sonic.Intent)
+	for k, v := range n.intents {
+		if v.IsService() && v.IsActuated() {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// Snapshot projects the node's actuated intents back into topology format.
+// Service intents become TopologyInterface entries with Service + IP.
+//
+// This is the export direction: device reality → topology representation.
+// Resolved/derived values (VNI, ACL names, peer groups) are NOT included —
+// those are re-derived from specs at provision time.
+func (n *Node) Snapshot() *spec.TopologyDevice {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	dev := &spec.TopologyDevice{
+		Interfaces: make(map[string]*spec.TopologyInterface),
+	}
+
+	for resource, intent := range n.intents {
+		if !intent.IsActuated() {
+			continue
+		}
+		if intent.IsService() {
+			dev.Interfaces[resource] = &spec.TopologyInterface{
+				Service: intent.Name,
+				IP:      intent.Params["ip_address"],
+			}
+		}
+	}
+
+	return dev
+}
+
+// LoadIntents populates the intents map from NEWTRON_INTENT
+// entries in ConfigDB. Called on connect to reflect the device's
+// current intent state.
+func (n *Node) LoadIntents() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.loadIntentsLocked()
+}
+
+// loadIntentsLocked is the lock-free implementation.
+// Caller must hold n.mu.
+func (n *Node) loadIntentsLocked() {
+	if n.intents == nil {
+		n.intents = make(map[string]*sonic.Intent)
+	}
+	configDB := n.configDB
+	if configDB == nil {
+		return
+	}
+	for resource, fields := range configDB.NewtronIntent {
+		n.intents[resource] = sonic.NewIntent(resource, fields)
+	}
+}
 
 // RegisterPort creates a PORT entry in the shadow ConfigDB and accumulates it.
 // This enables GetInterface for offline mode (GetInterface checks PORT table).
@@ -324,8 +443,9 @@ func (n *Node) connectWithOpts(ctx context.Context, skipFrrcfgdCheck bool) error
 	n.configDB = n.conn.ConfigDB
 	n.connected = true
 
-	// Load interfaces
+	// Load interfaces and intents from CONFIG_DB
 	n.loadInterfaces()
+	n.loadIntentsLocked()
 
 	util.WithDevice(n.name).Info("Connected")
 	return nil
@@ -446,6 +566,7 @@ func (n *Node) Lock() error {
 	n.configDB = configDB
 	n.interfaces = make(map[string]*Interface)
 	n.loadInterfaces()
+	n.loadIntentsLocked()
 
 	// Migrate any legacy STATE_DB intent to CONFIG_DB (one-time per device).
 	// New intents are always written to CONFIG_DB (persistent across reboot).
@@ -467,13 +588,13 @@ func (n *Node) Lock() error {
 	// crashed between WriteIntent and DeleteIntent. The lock acquisition
 	// proves the previous holder is gone — staleness is irrelevant.
 	// Intent is now in CONFIG_DB (persistent across reboot).
-	n.zombieOp = nil
+	n.zombie = nil
 	if configClient := n.conn.Client(); configClient != nil {
 		intent, err := configClient.ReadIntent(n.name)
 		if err != nil {
 			util.WithDevice(n.name).Warnf("reading intent on lock: %v", err)
 		} else if intent != nil {
-			n.zombieOp = intent
+			n.zombie = intent
 			util.WithDevice(n.name).Warnf("zombie operation detected: holder=%s, created=%s, operations=%d",
 				intent.Holder, intent.Created.Format(time.RFC3339), len(intent.Operations))
 		}
@@ -811,8 +932,8 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 // Intent Record Methods
 // ============================================================================
 
-// ZombieOperation returns the existing intent found during Lock(), or nil.
-func (n *Node) ZombieOperation() *sonic.OperationIntent { return n.zombieOp }
+// ZombieIntent returns the existing intent found during Lock(), or nil.
+func (n *Node) ZombieIntent() *sonic.OperationIntent { return n.zombie }
 
 // ClearZombie deletes the zombie intent from CONFIG_DB without reversing.
 func (n *Node) ClearZombie() error {
@@ -826,7 +947,7 @@ func (n *Node) ClearZombie() error {
 	if err := configClient.DeleteIntent(n.name); err != nil {
 		return err
 	}
-	n.zombieOp = nil
+	n.zombie = nil
 	return nil
 }
 

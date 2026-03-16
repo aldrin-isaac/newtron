@@ -256,13 +256,13 @@ type ConfigDB struct {
     DSCPToTCMap       map[string]map[string]string   // DSCP_TO_TC_MAP
     TCToQueueMap      map[string]map[string]string   // TC_TO_QUEUE_MAP
 
-    // Newtron-specific
-    NewtronServiceBinding map[string]ServiceBindingEntry // NEWTRON_SERVICE_BINDING
+    // Newtron-specific — unified intent model (§39)
+    NewtronIntent map[string]map[string]string // NEWTRON_INTENT
 }
 
-// NewEmptyConfigDB returns a ConfigDB with all map fields initialized (no nil maps).
+// NewConfigDB returns a ConfigDB with all map fields initialized (no nil maps).
 // Used by abstract Node (offline mode) to start with an empty shadow CONFIG_DB.
-func NewEmptyConfigDB() *ConfigDB
+func NewConfigDB() *ConfigDB
 ```
 
 ### 3.2 ConfigDB Query Methods
@@ -361,14 +361,14 @@ const (
 CONFIG_DB entries are parsed from Redis hashes into typed Go structs via a registry in `configdb_parsers.go`. This avoids a giant switch statement and makes adding new tables mechanical.
 
 **39 registered parsers:**
-- **30 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, NEWTRON_SERVICE_BINDING, STATIC_ROUTE, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
-- **9 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP
+- **29 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, STATIC_ROUTE, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
+- **10 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, NEWTRON_INTENT
 
 Hash-merge parsers (`mergeParser`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
 
 **Redis serialization note:** Redis hashes store field names and values as strings. The Go struct `json` tags serve double duty: they define both the Redis hash field name mapping and JSON serialization format (for display/logging). Parsing uses the registry functions, not `json.Unmarshal` — there is no JSON to unmarshal from flat `map[string]string`.
 
-Map initialization uses reflection (`initMaps`) to ensure all map fields are non-nil after `newEmptyConfigDB()`, preventing nil-map panics in operations and precondition checks.
+Map initialization uses reflection (`initMaps`) to ensure all map fields are non-nil after `newConfigDB()`, preventing nil-map panics in operations and precondition checks.
 
 ### 3.7 Pipeline Operations (`pkg/newtron/device/sonic/pipeline.go`)
 
@@ -435,7 +435,7 @@ field must also be added to `schema.go` — tests fail until they are.
 **YANG reference:** Constraints are derived from
 `sonic-buildimage/src/sonic-yang-models/yang-models/*.yang`. The mapping is
 documented in `pkg/newtron/device/sonic/yang/constraints.md`. Tables without
-YANG models (NEWTRON_SERVICE_BINDING, SAG_GLOBAL, SUPPRESS_VLAN_NEIGH,
+YANG models (NEWTRON_INTENT, SAG_GLOBAL, SUPPRESS_VLAN_NEIGH,
 BGP_EVPN_VNI) derive constraints from newtron usage patterns.
 
 ---
@@ -714,46 +714,61 @@ type PortQoSMapEntry struct {         // Key: port_name
 }
 ```
 
-### 4.8 Service Binding Type
+### 4.8 Intent Record Type (Unified Intent Model)
+
+Intent records are stored in `NEWTRON_INTENT` as flat Redis hashes with
+identity fields alongside resolved parameters. The `Intent` struct is the
+internal domain model constructed via `NewIntent` / serialized via
+`Intent.ToFields()`.
 
 ```go
-// ServiceBindingEntry tracks service bindings applied by newtron.
-// Key format: interface name (e.g., "Ethernet0", "PortChannel100")
-// Stored in NEWTRON_SERVICE_BINDING — a custom table, not standard SONiC.
+// Intent is the internal domain model for a desired-state record bound to
+// a device resource. See DESIGN_PRINCIPLES §39 for the full model.
 //
-// The binding is self-sufficient for reverse operations: every value needed
-// for teardown is stored here, not re-resolved from specs (which may have
-// changed between apply and remove).
-type ServiceBindingEntry struct {
-    ServiceName      string `json:"service_name"`
-    IPAddress        string `json:"ip_address,omitempty"`
-    VRFName          string `json:"vrf_name,omitempty"`
-    IPVPN            string `json:"ipvpn,omitempty"`
-    MACVPN           string `json:"macvpn,omitempty"`
-    IngressACL       string `json:"ingress_acl,omitempty"`
-    EgressACL        string `json:"egress_acl,omitempty"`
-    BGPNeighbor      string `json:"bgp_neighbor,omitempty"`
-    QoSPolicy        string `json:"qos_policy,omitempty"`
-    VlanID           string `json:"vlan_id,omitempty"`
-    RedistributeVRF  string `json:"redistribute_vrf,omitempty"`
-    L3VNI            string `json:"l3vni,omitempty"`
-    L3VNIVlan        string `json:"l3vni_vlan,omitempty"`
-    ServiceType      string `json:"service_type,omitempty"`
-    VRFType          string `json:"vrf_type,omitempty"`
-    L2VNI            string `json:"l2vni,omitempty"`
-    AnycastIP        string `json:"anycast_ip,omitempty"`
-    AnycastMAC       string `json:"anycast_mac,omitempty"`
-    ARPSuppression   string `json:"arp_suppression,omitempty"`
-    BGPPeerAS             string `json:"bgp_peer_as,omitempty"`
-    PeerGroup             string `json:"peer_group,omitempty"`        // BGP peer group name (for cleanup)
-    RouteMapIn            string `json:"route_map_in,omitempty"`      // Content-hashed import route map (stale cleanup)
-    RouteMapOut           string `json:"route_map_out,omitempty"`     // Content-hashed export route map (stale cleanup)
-    RouteReflectorClient  string `json:"route_reflector_client,omitempty"` // "true" if rrclient
-    NextHopSelf           string `json:"next_hop_self,omitempty"`     // "true" if nhself
-    AppliedAt             string `json:"applied_at,omitempty"`
-    AppliedBy             string `json:"applied_by,omitempty"`
+// Key format: resource name (e.g., "Ethernet0", "bgp", "evpn", "loopback")
+// Stored in NEWTRON_INTENT — a custom table, not standard SONiC.
+//
+// The intent record is self-sufficient for reverse operations and drift
+// reconstruction: every value needed for teardown is stored in Params,
+// not re-resolved from specs (which may have changed between apply and
+// remove).
+type Intent struct {
+    // Identity
+    Resource  string      // binding point: "Ethernet0", "bgp", "evpn", "loopback"
+    Operation string      // composite op: "apply-service", "setup-evpn", "configure-bgp"
+    Name      string      // spec reference: "transit", "" if none
+
+    // Lifecycle
+    State     IntentState // "unrealized", "in-flight", "actuated"
+    Holder    string
+    Created   time.Time
+    AppliedAt *time.Time
+    AppliedBy string
+
+    // Resolved parameters — self-sufficient for teardown + reconstruction (§37).
+    Params map[string]string
+
+    // Composite operations — expanded primitive list for crash recovery.
+    Phase           string
+    RollbackHolder  string
+    RollbackStarted *time.Time
+    Operations      []IntentOperation
 }
+
+// NewIntent constructs an Intent from a flat CONFIG_DB field map.
+// Identity fields (state, operation, name, holder, etc.) are extracted;
+// all remaining fields become Params.
+func NewIntent(resource string, fields map[string]string) *Intent
+
+// ToFields serializes the Intent back to a flat map for CONFIG_DB storage.
+func (i *Intent) ToFields() map[string]string
 ```
+
+The CONFIG_DB representation is a flat `map[string]string` hash. Identity
+fields (`state`, `operation`, `name`, `holder`, `created`, `applied_at`,
+`applied_by`) live alongside resolved parameters (`service_name`,
+`ip_address`, `vrf_name`, etc.) in the same hash. `NewIntent`
+separates them; `ToFields` merges them back.
 
 ---
 
