@@ -147,10 +147,13 @@ reality share a type, a code path, and a set of invariants.
 
 Two modes of the same object yield two modes of use — not as separate
 systems, but as different initializations of the same computation.
+Day-0 — deploying hardware, imaging the OS, wiring the topology — is
+outside newtron's scope (newtlab handles it). newtron's world begins
+at Day-1.
 
-**Provisioning** — what the industry calls Day-1 or build provisioning
-— is the one operation where intent replaces reality entirely. An
-offline Node builds the complete desired state — every VLAN, every VRF,
+**Provisioning** — Day-1, build provisioning — is the one operation
+where intent replaces reality entirely. An offline Node builds the
+complete desired state — every VLAN, every VRF,
 every BGP session, every service binding — by running the same methods
 in the same order that an operator would run interactively. The
 accumulated entries are then delivered as a single composite,
