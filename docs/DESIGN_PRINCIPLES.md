@@ -1,5 +1,20 @@
 # Design Principles
 
+newtron is a configuration management system for SONiC — the
+open-source network operating system that runs on white-box switches
+from dozens of vendors. SONiC is unusual among network operating
+systems: its entire device configuration lives in a Redis database
+called CONFIG_DB. Every VLAN, every BGP session, every interface
+binding is a Redis hash. SONiC daemons subscribe to keyspace
+notifications on these hashes and program the forwarding ASIC in
+response. To configure a SONiC device is to write Redis entries in
+the correct format, in the correct order, and verify that the daemons
+downstream acted on them correctly. This is both SONiC's power — any
+tool that can talk Redis can configure the switch — and its danger:
+Redis accepts anything, validates nothing, and the consequences of a
+bad write surface minutes later in a daemon log, a silent packet drop,
+or an unrecoverable state.
+
 Every configuration management system eventually faces the same
 structural problem: it maintains two representations of a device. One
 for what the device should look like — the intent, the desired state,
