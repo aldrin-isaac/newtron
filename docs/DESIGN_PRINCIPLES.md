@@ -15,8 +15,9 @@ Redis accepts anything, validates nothing, and the consequences of a
 bad write surface minutes later in a daemon log, a silent packet drop,
 or an unrecoverable state.
 
-Every configuration management system eventually faces the same
-structural problem: it maintains two representations of a device. One
+But the hardest problem isn't SONiC-specific. Every configuration
+management system eventually faces the same structural problem: it
+maintains two representations of a device. One
 for what the device should look like — the intent, the desired state,
 the template output. Another for what the device does look like — the
 live state, the actual CONFIG_DB, the ground truth read back from
