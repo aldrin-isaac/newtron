@@ -164,9 +164,14 @@ newtron asserts authority over device state.
 existing reality. A connected Node loads the device's current CONFIG_DB,
 checks preconditions against what actually exists, computes a delta,
 and applies it. The device's state before the operation is the starting
-point — not a spec file, not a template, not a desired-state store. If
-someone edited CONFIG_DB directly between operations, the connected Node
-sees that edit as the new reality and operates on it without complaint.
+point — not a spec file, not a template, not a desired-state store.
+Out-of-band edits to CONFIG_DB are not prevented — they become reality.
+Every write episode begins by acquiring a lock, which refreshes the
+CONFIG_DB snapshot — so preconditions check current reality, not stale
+cache. Operations proceed from whatever they find. They do not
+auto-check whether reality still matches intent — drift detection (§19)
+answers that question when an orchestrator asks, and provisioning
+reconciles the device back to intent when directed.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
