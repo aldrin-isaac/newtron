@@ -1750,49 +1750,22 @@ peer groups — each has unique attributes derived from the specific link.
 
 # Part VII: Code Architecture
 
-A codebase that embodies the right principles in the wrong structure
-will lose them. Someone adds a VLAN entry in a second file because
-it's convenient. Someone bypasses the Interface to pass an interface
-name as a string. Someone writes a config-scanning function as a free
-function that takes a database handle as a parameter — and in a multi-device
-context, the wrong database is passed silently. Each shortcut is
-small. Together they erode the guarantees Parts I–VI describe.
-
-These nine principles encode Parts I–VI into code structure — file
-boundaries, method placement, type hierarchies — so that the
-guarantees are properties of the code, not just intentions documented
-above it.
+Parts I–VI describe what the system guarantees. These nine principles
+encode those guarantees into code structure — file boundaries, method
+placement, type hierarchies — so that the architecture is a property
+of the code, not an intention documented above it.
 
 ## 24. Single-Owner CONFIG_DB Tables
 
-In a typed language, the compiler prevents two functions from writing
-incompatible values to the same structure. CONFIG_DB has no such
-protection — it accepts whatever you write, with whatever field names
-and value encodings you choose, and the inconsistency surfaces at
-runtime, in a daemon log, hours later.
+The ChangeSet (§11) is the single representation of what an operation
+does. That guarantee breaks if two files construct entries for the same
+table with different field sets — the ChangeSet faithfully records
+whichever construction site ran, and the inconsistency surfaces as a
+daemon failure on a different platform, hours later.
 
-The deeper problem is that the inconsistency is *invisible at the
-point of introduction*. Developer A writes `VLAN|Vlan100` with
-`vlanid` and `admin_status` in `service_gen.go`. Developer B writes
-`VLAN|Vlan100` with just `vlanid` in `topology.go` — omitting
-`admin_status` because "it defaults to up anyway." On some platforms
-it does. On others, the daemon sees a missing field and silently
-ignores the entry. Both paths work in isolation. They produce
-different entries for the same table. The bug appears only when both
-paths are exercised against the same device, on a platform where the
-default doesn't hold — and the debugging session traces through two
-files, two commit histories, and two sets of assumptions about what
-the fields should be. Single ownership eliminates this class of bug
-at the source: if only one file constructs entries for a table,
-inconsistency between construction sites is structurally impossible.
-
-Each CONFIG_DB table has exactly one owner — a single file and
-function responsible for constructing, writing, and deleting entries
-in that table. Composite operations (ApplyService, SetupEVPN,
-ConfigureLoopback, topology provisioning) call the owning primitives
-and merge their ChangeSets rather than constructing entries inline.
-
-The ownership map:
+Each CONFIG_DB table has exactly one owner — a single file responsible
+for constructing, writing, and deleting entries in that table.
+Composites call the owning primitives and merge their ChangeSets.
 
 ```
 vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
@@ -1812,44 +1785,26 @@ service_ops.go     → NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
-When the `VLAN` table format changes, you change `vlan_ops.go`. Every
-caller — `service_gen.go`, `topology.go`, the CLI — calls into
-`vlan_ops.go` and gets the updated format automatically. The change
-propagates through callers, not beside them.
-
-This applies at every layer. If `vlan_ops.go` owns `VLAN` table writes,
-then `service_gen.go` must call into `vlan_ops.go`, not duplicate the
-entry construction. Convenience is not a justification for a second
-writer. **One file owns each table; everyone else calls the owner.**
+**One file owns each table; everyone else calls the owner.** When the
+table format changes, the change propagates through callers, not beside
+them.
 
 ---
 
 ## 25. File-Level Feature Cohesion
 
-Every codebase faces a choice of organizing axis: by layer (all reads
-together, all writes together, all types together) or by feature (all
-VLAN code together, all BGP code together). Organizing by layer keeps
-each file internally consistent — but forces a reader who wants to
-understand one feature to find it across three files, mentally merge
-them, and hope they haven't missed a fourth. The feature exists in the
-codebase but not in any single place a reader can point to. It is a
-reconstruction, not a location.
-
-newtron organizes by feature. All code for a feature — types, reads,
-writes, existence checks, list operations — belongs in one file.
-`GetVLAN` and `VLANInfo` belong in `vlan_ops.go` just as much as
-`CreateVLAN` does. This is stronger than §24: single ownership governs
-*writes*; feature cohesion governs the entire feature — reads, writes,
-types, and all.
+§24 governs writes. This principle governs the entire feature — reads,
+writes, types, existence checks. All code for a feature belongs in one
+file. `GetVLAN` and `VLANInfo` belong in `vlan_ops.go` just as much as
+`CreateVLAN` does.
 
 Four file roles enforce the boundary:
 
-- **`composite.go`** = delivery mechanics only. No CONFIG_DB table or
-  key format knowledge.
-- **`topology.go`** = provisioning orchestration. Calls config functions
-  but never constructs CONFIG_DB keys inline.
-- **Each `*_ops.go`** = sole owner of its feature. One file per feature;
-  one feature per file.
+- **`composite.go`** = delivery mechanics only (§10). No CONFIG_DB
+  table or key format knowledge.
+- **`topology.go`** = provisioning orchestration (§1). Calls config
+  functions but never constructs CONFIG_DB keys inline.
+- **Each `*_ops.go`** = sole owner of its feature.
 - **`service_gen.go`** = service-to-entries translation. Calls config
   functions from owning `*_ops.go` files and merges their output.
 
@@ -1860,39 +1815,22 @@ change a table format, change one file.**
 
 ## 26. Pure Config Functions — Separate Generation from Orchestration
 
-An operation that constructs CONFIG_DB entries, checks preconditions,
-opens connections, and applies writes in one function cannot be tested
-without a live device, cannot be reused in a different context, and
-cannot be read without mentally separating "what entries does this
-produce?" from "what else does this do?" The entanglement makes every
-simple question expensive to answer.
+The abstract Node (§1) works because entry construction has no side
+effects. If a config function opened connections or checked
+preconditions, it couldn't run offline — and the one-code-path thesis
+would break. Purity is not a style preference; it is what makes
+abstract mode possible.
 
-Entry construction is extracted into **pure config functions** —
-functions that take identity parameters and CONFIG_DB state, return
-`[]sonic.Entry`, and have no side effects. They don't check
-preconditions, don't build ChangeSets, don't log, and don't connect to
-devices. They answer one question: "what entries does this operation
-produce?"
+Config functions take identity parameters and CONFIG_DB state, return
+`[]sonic.Entry`, and do nothing else. Three forms:
 
-Config functions come in three forms, each driven by a different need:
-
-- **Package-level functions** for stateless entry construction where the
-  subject is not an interface: `createVlanConfig(vlanID, ...)`,
-  `createVrfConfig(vrfName)`, `CreateBGPNeighborConfig(peerIP, ...)`.
-  These take only the values needed to construct the entry — no device
-  state.
-
-- **Node methods** for config-scanning functions that need to read
-  ConfigDB to determine what to produce: `n.destroyVlanConfig(vlanID)`,
-  `n.destroyVrfConfig(vrfName, l3vni)`, `n.unbindIpvpnConfig(vrfName)`.
-  These scan `n.configDB` to find dependent entries for cascading
-  teardown. Making them Node methods ensures they always scan the correct
-  device's state. See §28.
-
-- **Interface methods** for tables where the interface is the subject:
-  `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`, `i.bindQos(...)`.
-  These use `i.name` and `i.node`, eliminating the interface name
-  parameter that a free function would require. See §27.
+- **Package-level functions** for stateless construction:
+  `createVlanConfig(vlanID, ...)`, `createVrfConfig(vrfName)`.
+- **Node methods** for config-scanning teardown that must read the
+  correct device's state (§28): `n.destroyVlanConfig(vlanID)`,
+  `n.unbindIpvpnConfig(vrfName)`.
+- **Interface methods** for tables where the interface is the subject
+  (§27): `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`.
 
 Operations call these functions and wrap the result:
 
@@ -1905,17 +1843,9 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, err
 }
 ```
 
-This layering serves three purposes:
-
-1. **Testability.** Config functions can be unit-tested with a fake
-   ConfigDB — no connections, locks, or preconditions.
-
-2. **Reuse.** The same config function is called by online operations,
-   offline composite provisioning, and delete operations. Change the
-   table format once; all paths update.
-
-3. **Clarity.** A reader can see exactly what entries an operation
-   produces, without wading through orchestration.
+The same config function is called by online operations, offline
+composite provisioning, and delete operations. Change the table
+format once; all paths update — because there is only one path.
 
 **Generate entries in pure functions; orchestrate them in operations.**
 
@@ -1923,66 +1853,40 @@ This layering serves three purposes:
 
 ## 27. Respect Abstraction Boundaries
 
-An abstraction that exists but is not used is worse than no
-abstraction at all. It creates two paths to the same outcome — the
-path through the abstraction, which carries its guarantees
-(precondition checks, identity derivation, isolation), and the path
-around it, which carries none. The second path works in testing. It
-works in the common case. It fails silently in the edge case the
-abstraction was designed to prevent — and by the time someone
-discovers the failure, the bypass is load-bearing in three call sites
-and can't be removed without a refactor.
-
-This principle is the structural enforcement of §6 (The Interface Is
-the Point of Service). §6 says *where* methods belong; this principle
-says *callers must use them*.
+§6 says the Interface is the point of service. This principle says
+callers must use it. A caller that bypasses Interface to pass an
+interface name as a string to a free function has two paths to the
+same outcome — the path through the abstraction, which carries its
+guarantees, and the path around it, which carries none. The second
+path works until the edge case the abstraction was designed to prevent.
 
 **Rule 1: If an operation is scoped to an interface, it is a method on
-Interface.** The Interface knows its own name — requiring callers to pass
-it is an abstraction leak. `i.bindVrf(vrfName)` not
-`interfaceVRFConfig(intfName, vrfName)`.
-
-Exception: container membership operations (VLAN members, PortChannel
+Interface.** `i.bindVrf(vrfName)` not `interfaceVRFConfig(intfName,
+vrfName)`. Exception: container membership (VLAN members, PortChannel
 members) where the container is the subject.
 
 **Rule 2: Config methods belong to the object they describe.** The
 object provides its own identity; callers express intent, not identity.
 
 **Rule 3: Node convenience methods delegate, not duplicate.**
-`Node.ApplyQoS(intfName, ...)` resolves a name string to an Interface
-and calls `iface.ApplyQoS(...)`. It never re-implements the operation.
+`Node.ApplyQoS(intfName, ...)` resolves a name to an Interface and
+calls `iface.ApplyQoS(...)`. It never re-implements the operation.
 
-**Rule 4: No "absolute blocker" for `i.node` access.** Interface methods
-that need ConfigDB or SpecProvider use `i.node.ConfigDB()` or `i.node`.
-Needing external data is not a reason to avoid being a method — it's
-the reason the parent pointer exists.
-
-**Abstractions exist to be used, not bypassed. If an object knows its
-own identity, callers must not re-supply it.**
+**If an object knows its own identity, callers must not re-supply it.**
 
 ---
 
 ## 28. Node as Device Isolation Boundary
 
-In a multi-device system, the most dangerous bugs are the silent ones:
-an operation that scans the wrong device's CONFIG_DB, a precondition
-check that reads switch1's state while configuring switch2. These bugs
-produce valid-looking output — just for the wrong device. They pass
-tests that exercise single-device paths and surface only in production,
-under multi-device orchestration.
-
-The Node eliminates this class of bug by construction. Every Node
-instance owns its own `configDB`, Redis connection, interface map, and
-resolved specs. Config-scanning functions are Node methods, not free
-functions that take `configDB` as a parameter — so the method *always*
-operates on `n.configDB`. A free function like
-`destroyVrf(configDB, vrfName, l3vni)` requires the caller to pass the
-correct `configDB`; a Node method makes the wrong device impossible.
+The Node (§1) is not just the unit of intent — it is the unit of
+isolation. Every Node instance owns its own `configDB`, Redis
+connection, interface map, and resolved specs. Config-scanning
+functions are Node methods, not free functions that take a database
+handle — so `n.destroyVrfConfig()` *always* scans the correct device.
+A free function requires the caller to pass the right `configDB`; a
+Node method makes the wrong device structurally impossible.
 
 ```go
-node1, _ := network.ConnectNode(ctx, "switch1")
-node2, _ := network.ConnectNode(ctx, "switch2")
-
 iface1, _ := node1.GetInterface("Ethernet0")  // switch1's Ethernet0
 iface2, _ := node2.GetInterface("Ethernet0")  // switch2's Ethernet0
 
@@ -1992,83 +1896,53 @@ cs2, _ := iface2.ApplyService(ctx, "transit", opts)  // scans switch2's configDB
 
 No shared mutable state crosses the Node boundary. A multi-device
 orchestrator is purely an iteration concern — loop over Nodes, call
-self-contained methods on each. The Node provides the isolation; the
-orchestrator provides the coordination.
+self-contained methods on each.
 
 **Every device-scoped operation is a Node method. Cross-device
 coordination belongs in the orchestrator, not in the Node.**
 
 ### The device is its own lock coordinator
 
-Most distributed systems coordinate through a central service — etcd,
-ZooKeeper, a database row lock. The lock manager is separate from the
-data it protects, which creates a category of failure: the lock service
-is reachable but the target device is not, or vice versa. Split-brain
-scenarios, stale locks, and coordination infrastructure that must
-itself be highly available.
+newtron's lock lives on the device's own Redis — STATE_DB, the
+ephemeral state database that clears on reboot. The lock and the data
+it protects share the same Redis instance: reachable together or
+unreachable together. No external lock service, no split-brain between
+lock manager and target device.
 
-newtron's lock lives on the device's own Redis — specifically STATE_DB,
-the ephemeral state database that clears on reboot. When a Node
-acquires a lock, it writes a key to the same Redis instance that holds
-the CONFIG_DB it is about to modify. No external service, no network
-partition between lock and data. If newtron cannot reach the device's
-Redis, it cannot reach the lock — and it also cannot write CONFIG_DB,
-so there is nothing to coordinate. The lock and the data share a fate:
-reachable together or unreachable together.
+STATE_DB is the right home — locks are operational state, not
+configuration. A rebooted device has no active sessions; its locks
+should not survive the reboot. CONFIG_DB persists across reboots;
+STATE_DB does not.
 
-STATE_DB is the right home for locks — they are operational state, not
-configuration. A device that reboots has no active sessions; its locks
-should not survive the reboot. CONFIG_DB persists across reboots (via
-`config save`); STATE_DB does not. A lock in CONFIG_DB would require
-explicit cleanup after every unexpected restart.
-
-This follows directly from single-device scope (§8). newtron never
-coordinates across devices — each device is its own coordination
-domain. Two newtron instances operating on different devices need no
-mutual awareness. Two instances targeting the same device coordinate
-through that device's Redis. The coordination topology mirrors the
-operational topology: per-device, not centralized.
+This follows directly from single-device scope (§8). Each device is
+its own coordination domain. Two newtron instances targeting different
+devices need no mutual awareness. Two targeting the same device
+coordinate through that device's Redis. The coordination topology
+mirrors the operational topology: per-device, not centralized.
 
 ---
 
 ## 29. Verb-First, Domain-Intent Naming
 
-Systems absorb the vocabulary of their infrastructure. A team that
-writes SQL all day names functions after queries. A team that works
-with gRPC names functions after message types. A team that talks to
-Redis all day starts naming things after Redis: `interfaceSubEntry`,
-`vlanBaseConfig`, `bgpTableUpdate`. The infrastructure vocabulary
-displaces the domain vocabulary, and the code stops describing what
-it *means* and starts describing what it *does to the database*.
+Symmetric operations (§15) require that every forward action has a
+reverse. If functions are named after infrastructure
+(`interfaceBaseConfig`, `vlanSubEntry`), the forward/reverse
+relationship is invisible — you can't tell from the name whether
+`interfaceBaseConfig(intfName, nil)` creates, deletes, or modifies.
+Domain-intent naming makes the symmetry legible:
+`i.bindVrf` / `i.unbindVrf`, `createVlanConfig` / `deleteVlanConfig`,
+`enableArpSuppression` / `disableArpSuppression`.
 
-The damage is subtle but cumulative. `interfaceBaseConfig(intfName,
-nil)` requires opening the function to discover it enables IP routing.
-`i.enableIpRouting()` tells you before you look. Multiply that by 40+
-config functions and the gap between a codebase that's readable and
-one that's merely navigable becomes the gap between a system you can
-reason about and one you must trace through.
+**Verbs come first.** The verb vocabulary maps to operational symmetry:
+`create`/`delete` for entities, `destroy` for cascading teardown,
+`enable`/`disable` for behaviors, `bind`/`unbind` for relationships,
+`assign`/`unassign` for values, `generate` for composite production.
+Noun-only names are reserved for types and constructors.
 
-Two rules resist the drift:
-
-**Rule 1: Verbs come first.** `createVlanConfig`, not `vlanCreate`.
-`i.bindVrf(vrfName)`, not `i.vrfBinding(vrfName)`. The verb vocabulary
-is deliberate — `create`/`delete` for single entities,
-`destroy` for cascading teardown, `enable`/`disable` for behaviors,
-`bind`/`unbind` for relationships, `assign`/`unassign` for values,
-`generate` for composite entry production. Noun-only names are reserved
-for types and constructors.
-
-**Rule 2: Names describe domain intent, not infrastructure mechanics.**
-`i.bindVrf(vrfName)` reads as "bind this interface to a VRF" — the
-verb plus the receiver is the complete sentence. A network engineer
-understands it without knowing CONFIG_DB table names.
+**Names describe domain intent.** `i.bindVrf(vrfName)` — a network
+engineer understands it without knowing CONFIG_DB table names.
 `interfaceBaseConfig(intfName, map[string]string{"vrf_name": vrfName})`
-says "write these fields to the INTERFACE table" — implementation
-detail, not intent.
-
-**Name things after the domain. The infrastructure is an implementation
-detail — and implementation details belong in implementations, not in
-names.**
+describes what it does to the database, not what it means.
 
 ---
 
@@ -2078,390 +1952,223 @@ names.**
 `device/sonic/` are internal. All external consumers — CLI, newtrun,
 newtron-server — import only `pkg/newtron/`.
 
-This boundary was learned the hard way. newtrun — the E2E test
-orchestrator — originally imported three internal packages directly.
-It constructed `node.ChangeSet` objects, resolved specs via
-`network.GetIPVPN()`, accessed `sonic.RouteEntry` structs, and called
-`dev.ConfigDBClient().Get()` for verification. The code worked. Then
-an internal refactor renamed `sonic.NextHop.IP` to
-`sonic.NextHop.Address` — and newtrun broke. A field reorder in
-`ChangeSet` broke newtrun. A method signature change in `network`
-broke newtrun. Every improvement to the internals required a
-corresponding fix to the orchestrator. The internal and external code
-were coupled through shared types that exposed implementation, not
-intent.
+This boundary exists because the ChangeSet (§11), the Node (§1), and
+the device layer (§4) must be free to evolve without breaking
+consumers. When newtrun imported internal packages directly, every
+internal refactor — a field rename, a method signature change, a type
+reorder — broke the orchestrator. The internal and external code were
+coupled through types that exposed implementation, not intent.
 
-The migration to a public API drew a type boundary. Public types use
-domain vocabulary: `RouteNextHop.Address` (a network address),
-`WriteResult.ChangeCount` (what happened). Internal types reflect
-implementation: `NextHop.IP` (a Redis field), `ChangeSet.Changes` (a
-list of Redis commands). The boundary conversion strips
-implementation details and maps to domain names. After the migration,
-internal refactors stopped breaking the orchestrator — because the
-orchestrator no longer knew or cared about internal types.
+Public types use domain vocabulary: `RouteNextHop.Address`,
+`WriteResult.ChangeCount`. Internal types reflect implementation:
+`NextHop.IP`, `ChangeSet.Changes`. The boundary conversion strips
+implementation details and maps to domain names.
 
-Five rules crystallized from that migration:
+Five rules:
 
 1. **Orchestrators are API consumers, not insiders.** Extend the API;
-   don't bypass it with internal imports.
-2. **Operations accept names; the API resolves specs.** Callers pass
-   string identifiers of intent. The API resolves internally.
-3. **Verification tokens are opaque.** `CompositeInfo` flows as an
-   opaque handle. Callers never inspect internal state.
-4. **Write results report outcomes, not internals.** Raw ChangeSets and
-   Redis commands never cross the boundary.
-5. **Public types are domain types, not wrappers.** They are designed
-   for what callers need to know, not mirrored from internal types.
+   don't bypass it.
+2. **Operations accept names; the API resolves specs internally.**
+3. **Verification tokens are opaque.** `CompositeInfo` flows as a
+   handle. Callers never inspect internal state.
+4. **Write results report outcomes, not internals.**
+5. **Public types are domain types, not wrappers.**
 
-**Public types expose what callers need; internal types expose what the
-implementation needs. The boundary conversion strips and maps as
-needed.**
-
-### Uniform boundaries
-
-A structural boundary applies uniformly or not at all. If one type
-needs a conversion function at the public API boundary
-(`NextHop.IP` → `RouteNextHop.Address`), every type at that boundary
-gets a conversion function — including types whose fields happen to
-be identical today (`VerificationResult`, `OperationIntent`,
-`NeighEntry`).
-
-The temptation is to use type aliases for "trivial" types and
-conversion functions for "interesting" ones. This creates an
-inconsistent boundary: some types pass through unchanged, others
-go through a conversion layer. A reader can't predict the pattern.
-And when a trivial type later needs a vocabulary change, the alias
-must be replaced with a conversion function — changing every
-callsite. The uniform boundary absorbs this: the conversion
-function already exists; only its body changes.
-
-This is operational symmetry (§15) applied to the type system.
-Symmetric operations says: every create must have a remove, even
-if removal is trivial today. Uniform boundaries says: every type
-at a boundary gets boundary conversion, even if the conversion is
-trivial today. Both resist the temptation to skip structure for
-simple cases. Simple cases become complex; the structure must
-already be in place when they do.
+The boundary applies uniformly. Every type that crosses it gets a
+conversion function — including types whose fields happen to be
+identical today. This is operational symmetry (§15) applied to the
+type system: every type at a boundary gets boundary treatment, even
+if the treatment is trivial today. Simple cases become complex; the
+structure must already be in place when they do.
 
 ---
 
 ## 31. Transparent Transport — The Middle Layer Has No Logic
 
-Before adding complexity to a layer, ask: **where is the bottleneck?**
-If the transport layer contributes nanoseconds and the downstream
-operation takes hundreds of milliseconds, every abstraction you add
-to the transport — typed message structs, dispatch tables,
-intermediate representations — is coordination overhead with zero
-latency benefit. You are not optimizing; you are creating places for
-drift.
+The Node (§1) and the ChangeSet (§11) are where the guarantees live.
+The HTTP transport between them and the caller is a mechanical
+translation: decode JSON → construct closure → send to per-device
+actor → encode result. No business logic. No typed message structs.
+No dispatch tables. Adding a new endpoint requires one handler
+function — nothing else changes.
 
-newtron's operations are gated by SSH connections and Redis round-trips.
-The HTTP transport is a mechanical translation: decode JSON → construct
-closure → send to actor → encode result. There is no business logic
-in the transport layer. The handler is the glue — there is nothing
-else in the middle.
+The server serializes access to each device via per-device channels
+(§28). SSH connections are reused within an idle timeout. CONFIG_DB is
+refreshed every request (§32) — the tunnel is reused; the device state
+is never assumed.
 
-The alternative — typed message structs for each of over a hundred
-operations, dispatch routing tables, intermediate representation
-layers — would create as many coordination points between the transport
-and the domain. Instead, adding a new endpoint requires one handler
-function. No new message types, no dispatch table entries, no
-infrastructure changes.
-
-The server serializes access to each device via per-device channels —
-one device's operation cannot interleave with another's. SSH connections
-are reused within an idle timeout
-(default 5 minutes). But CONFIG_DB is refreshed every request (§32) —
-the SSH tunnel is reused; the device state is never assumed.
-
-**Optimize where the bottleneck is. Everything else should be as thin
-as possible — because every layer with logic is a layer that can
-drift.**
+**Every layer with logic is a layer that can drift. The transport has
+no logic.**
 
 ---
 
 ## 32. Import Direction, Interface State, and Episodic Caching
 
-Three principles that each prevent a specific class of silent bug.
+Three structural rules that each prevent a class of silent bug.
 
 ### Import direction — dependencies flow one way
 
-`network/` imports `network/node/`, never the reverse. This is not a
-Go convention. It is a blast-radius constraint. If Node could import
-Network, a Node operation could call a Network method — and now a
-change to how Network resolves specs can break how Node configures
-BGP. The two packages would be one package in two directories: any
-change to either requires understanding both.
-
-The `SpecProvider` interface breaks what would otherwise be a circular
-dependency. Network implements it; Node accepts it at creation time.
-The dependency flows through an abstraction, not a concrete type.
+`network/` imports `network/node/`, never the reverse. The
+`SpecProvider` interface (§7) breaks what would otherwise be a circular
+dependency: Network implements it; Node accepts it at creation time.
 When you change a Node method, the blast radius is `node/` plus its
 callers. When you change a Network method, Node code is provably
 untouched — the import direction guarantees it.
 
-**Dependencies flow from orchestration to primitives, never backward.
-Interfaces break the cycles.**
-
 ### On-demand Interface state — no cached fields
 
-The Interface struct contains exactly two fields: a parent pointer and
-the interface name. All property accessors — `AdminStatus()`, `VRF()`,
-`IPAddresses()` — read on demand from the Node's ConfigDB snapshot.
-
-The previous design had 15 cached fields. The bug it invited: an
-operation mutates CONFIG_DB (via `cs.Apply()`), then a subsequent read
-within the same session returns the cached value — stale. The fix
-required remembering to update the cache after every mutation, in
-every code path, for every field. Fifteen opportunities to forget,
-per operation. The on-demand design has zero cached fields to go
-stale.
-
-**Read state from the snapshot, not from cached fields. Snapshots are
-refreshed per episode; fields go stale within one.**
+The Interface (§6) has exactly two fields: a parent pointer and the
+interface name. All accessors read on demand from the Node's ConfigDB
+snapshot. A previous design cached 15 fields — fifteen opportunities
+per operation for a mutation to leave stale state behind. The
+on-demand design has zero.
 
 ### Episodic caching — fresh snapshot per unit of work
 
-newtron caches CONFIG_DB to batch precondition checks into a single
-`GetAll()` call rather than a Redis round-trip per check. But a cache
-that outlives its purpose becomes a source of stale reads. The
-freshness rule:
-
-> Every self-contained unit of work — an **episode** — begins with a
-> fresh CONFIG_DB snapshot. No episode relies on cache from a prior
-> episode.
+The Node (§1) caches CONFIG_DB to batch precondition checks. The
+freshness rule: every self-contained unit of work — an **episode** —
+begins with a fresh snapshot. No episode relies on cache from a prior
+episode.
 
 - **Write episodes**: `Lock()` refreshes the cache.
 - **Read-only episodes**: `Refresh()` at the start.
 - **Composite episodes**: `Refresh()` after delivery.
 
-The refresh happens at the *start* of the next episode, not the end
-of the current one. Between episodes the cache may be stale — and
-that's fine, because no code reads it there. This is the key design
-choice: refresh where it serves the reader, not where it follows the
-writer.
-
 This is not transactional isolation. The distributed lock coordinates
 newtron instances but cannot prevent external writes. Precondition
-checks are advisory safety nets — they catch common mistakes but
-cannot prevent all race conditions.
-
-**Cache freshness is a property of episodes, not of individual
-reads.**
+checks are advisory safety nets, not guarantees.
 
 ---
 
 # Part VIII: Working Conventions
 
-Architecture without discipline drifts. The principles above describe
-what the system should be; these conventions describe how to keep it
-there — how to name things so they stay parseable, how to patch
-platform bugs without inventing parallel infrastructure, how to
-verify that a CONFIG_DB path works before committing to it, and what
-testing discipline a daemon-driven system requires. They are less
-dramatic than the architectural principles, but they prevent the kind
-of slow erosion that turns a well-designed system into one that merely
-used to be.
-
-One convention deserves mention before the numbered principles: documentation
-freshness. After a schema or API change, grep finds what you already know is
-wrong — stale field names, renamed flags. It cannot find what you don't know
-is wrong: prose descriptions using different wording, glossary tables, code
-examples, contradictory statements where one section uses the old name and
-another uses the new. The protocol: initial grep pass, then a full-file audit
-against complete ground truth, then one commit, fully clean. Grep gives
-confidence the job is done; the audit proves whether it actually is.
+Seven conventions that prevent the slow erosion of Parts I–VII.
 
 ## 33. Normalize at the Boundary
 
-Every system that accepts external input faces a choice: normalize it
-at every point of use, or normalize it once at the boundary and trust
-canonical form inside. The first approach scatters conversion logic
-throughout the codebase — and every call site that forgets to normalize
-is a latent bug. The second approach concentrates the conversion in one
-place and eliminates the category entirely.
+Content-hashed naming (§22) requires that two code paths computing the
+same hash from the same spec get identical results. If one path sees
+`"protect-re"` and another sees `"PROTECT_RE"`, the hashes diverge and
+blue-green migration breaks silently. Boundary normalization is the
+precondition.
 
-newtron normalizes names once, at spec load time. The spec loader
-converts all map keys and cross-references to canonical form (ALL
-UPPERCASE, hyphens → underscores, `[A-Z0-9_]` only) before returning
-specs to callers. After loading, every map key
+newtron normalizes names once, at spec load time: ALL UPPERCASE,
+hyphens → underscores, `[A-Z0-9_]` only. After loading, every map key
 (`Services["TRANSIT"]`), every cross-reference
 (`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows
 into CONFIG_DB key construction is already canonical. Operations code
 never calls `NormalizeName()`.
 
-The specific convention — uppercase, underscores, no redundant kind in
-key (`ACL_TABLE|PROTECT_RE_IN_1ED5F2C7`, not
-`ACL_TABLE|ACL_PROTECT_RE_IN_1ED5F2C7`), numeric IDs with type prefix
-(`VNI1001`, `VLAN100`) — is newtron's choice. The principle behind it
-is universal: **validate and normalize at system boundaries; trust
-canonical form inside the boundary.**
-
 ---
 
 ## 34. Platform Patching — Fix Bugs, Don't Reinvent Features
 
-When a platform has a bug, the temptation is to route around it — invent
-a custom table, add a parallel code path, work around the broken daemon
-entirely. This always feels faster than fixing the actual bug. And it
-always becomes technical debt that outlives the bug by years.
+newtron is Redis-first (§4). Every workaround that invents a custom
+CONFIG_DB table or a parallel code path replaces the community-intended
+mechanism with one that community daemons can't see, that breaks across
+SONiC upgrades, and that outlives the bug by years.
 
-The test is simple: **does the fix use the same CONFIG_DB signals and
-perform the same intended actions?** If yes, it's a valid bug fix. If it
-introduces a new table or a new code path replacing the
-community-intended mechanism, it's reinvention.
+The test: **does the fix use the same CONFIG_DB signals and perform the
+same intended actions?** If yes, it's a valid bug fix. If it introduces
+a new table or replaces the community mechanism, it's reinvention.
 
-Valid: `newtron-vni-poll` reads the standard `VRF` table and performs the
-same `vtysh vrf X; vni N` action. Polling instead of pub/sub is an
-implementation detail, not a reinvention.
+Valid: `newtron-vni-poll` reads the standard `VRF` table and performs
+`vtysh vrf X; vni N`. Same signal, same action, polling instead of
+pub/sub.
 
-Invalid: inventing a custom `NEWTRON_VNI` table. Callers must write to a
-non-standard table. Community daemons won't see it. When SONiC fixes
-the bug, the custom table remains as permanent debt.
+Invalid: a custom `NEWTRON_VNI` table. Callers write to a non-standard
+table. Community daemons never see it. When SONiC fixes the bug, the
+custom table remains as permanent debt.
 
-SONiC is a large community project. Invented mechanisms interact
-unpredictably with community daemons, break across SONiC upgrades, and
-create maintenance debt that compounds with every platform. **Patch
-what's broken; don't build parallel infrastructure around it.**
+**Patch what's broken; don't build parallel infrastructure around it.**
 
 ---
 
 ## 35. Observe Behavior, Don't Trust Schemas
 
-Documentation describes what a system *accepts*. Only observation
-reveals what it *does with what it accepts*. A schema says the VLAN ID
-field is an integer from 1 to 4094. It does not say that orchagent
-silently ignores the entry if `admin_status` is missing. It does not
-say that vrfmgrd crashes if the VRF entry arrives before the VLAN
-interface it references. It does not say that frrcfgd processes BGP
-entries only on startup, not at runtime. The gap between "what the
-schema permits" and "what the system actually does" is where the
-hardest bugs live — and no amount of documentation reading will close
-it.
+Write ordering (§16) exists because SONiC daemons have implicit
+dependencies that no schema documents. orchagent silently ignores a
+VLAN entry missing `admin_status`. vrfmgrd crashes if VRF arrives
+before its VLAN interface. frrcfgd processes BGP entries only at
+startup, not runtime. The gap between what the schema permits and what
+the system does is where the hardest bugs live.
 
-Before writing any CONFIG_DB entries to implement a SONiC feature:
+Before implementing a SONiC feature:
 
-1. **Find the CLI path.** Read the SONiC CLI source to see what tables
-   and fields it writes, in what order.
-2. **Run it on a real device.** On a clean device, configure via SONiC
-   CLI. Verify end-to-end. Capture CONFIG_DB state as ground truth.
-3. **Read the daemon source.** Understand processing order, implicit
-   dependencies, and what gets emitted to APP_DB.
-4. **Implement.** Write the same entries in the same order.
-5. **Test in isolation.** Create a focused test suite before integrating
-   into composite suites.
+1. **Find the CLI path.** Read SONiC CLI source for tables, fields, order.
+2. **Run it on a real device.** Configure via CLI. Capture CONFIG_DB.
+3. **Read the daemon source.** Understand processing order and APP_DB output.
+4. **Implement.** Same entries, same order.
+5. **Test in isolation.** Focused suite before composite integration.
 
-The anti-pattern: read the schema, guess the entries, debug from daemon
-logs. The logs tell you *that* something failed; the SONiC CLI path shows
-*what* the correct sequence is.
-
-**Schema tells you what's valid. Behavior tells you what works. Only
-observation reveals both simultaneously.**
+**Schema tells you what's valid. Behavior tells you what works.**
 
 ---
 
 ## 36. DRY Across Programs
 
-*This is a hygiene convention that extends standard DRY across
-newtron's program boundaries.*
-
-Every capability exists in exactly one place, even across programs:
-one spec directory (newtlab, newtron, and newtrun all read from it),
-one connection mechanism (SSH-tunneled Redis in the device layer), one
-verification mechanism (the ChangeSet), one platform definition
-(`platforms.json`), one profile per device (newtlab writes runtime
-fields *into the same profile* newtron reads).
-
-The anti-pattern: an orchestrator implementing its own CONFIG_DB reader
-"because it needs a slightly different format." Every time a capability
-is duplicated, the copies drift.
+Single ownership (§24) applies within a program. This convention
+extends it across program boundaries: one spec directory (newtlab,
+newtron, newtrun all read from it), one connection mechanism
+(SSH-tunneled Redis), one verification mechanism (the ChangeSet), one
+platform definition (`platforms.json`), one profile per device
+(newtlab writes runtime fields *into the same profile* newtron reads).
+Every time a capability is duplicated across programs, the copies
+drift.
 
 ---
 
 ## 37. Greenfield — Backwards Compatibility Is a Non-Goal
 
-Compatibility code is the single largest source of accidental complexity
-in mature systems. Every `if oldFormat { ... } else { ... }` branch
-doubles the test surface and forces every reader to understand both
-paths — a cost that compounds with every format change. In a greenfield
-system with no installed base, this complexity is entirely self-inflicted.
-
 newtron has no installed base. When a format or API changes, change it
-everywhere in one commit. No compatibility shims, no deprecated aliases,
-no dual-format detection. If something is unused, delete it. If something
-moved, update all references. The public API has one version: current.
-All consumers updated in the same commit.
-
-Operations assume a clean, initialized device. `newtron init` is the
-one-time boundary where factory state is scrubbed. After init, no
-operation checks for or works around legacy formats.
+everywhere in one commit. No compatibility shims, no deprecated
+aliases, no dual-format detection. The public API (§30) has one
+version: current. `newtron init` scrubs factory state once; after init,
+no operation checks for legacy formats.
 
 **Write code for the system as it is today, not as it was yesterday.**
 
-### Exception: SONiC release differences
-
-This principle applies to newtron's own code. It does **not** apply to
-the SONiC platform. SONiC releases change schemas, daemon behavior, and
-YANG models. newtron must support multiple releases — this is
-multi-platform support, analogous to a compiler targeting multiple
-architectures. Not backwards compatibility.
+Exception: SONiC releases change schemas and daemon behavior. newtron
+must support multiple releases — this is multi-platform support (§38),
+not backwards compatibility.
 
 ---
 
 ## 38. Multi-Version Readiness — Version Differences as Data, Not Code
 
-When a system must support multiple versions of a platform, the
-default approach is `if version >= X { ... } else { ... }` scattered
-across every affected code path. Each branch doubles the test matrix.
-Each new version adds another clause. The version checks accumulate
-until no one can confidently answer "what does this code do on
-platform Y?" without tracing every conditional.
+Version differences should be **data** — schema deltas, capability
+tables, field mappings — consumed by the same code path. Pure config
+functions (§26) that take a version-keyed schema table produce
+version-correct entries without branching.
 
-The alternative: version differences should be **data** — schema
-deltas, capability tables, field mappings — consumed by the same code
-path. A config function that takes a version-keyed schema table
-produces version-correct entries without branching.
-
-Three architectural boundaries make this possible in newtron:
-
-1. **All Redis through Device.** Version-aware schema resolution can be
-   introduced in one package.
-2. **All operations through Node.** Every operation has access to the
-   detected version through the existing chain.
-3. **Config functions are pure.** Adding a version parameter lets them
-   produce different entries without changing their structure.
-
-These boundaries exist today for other good reasons (§4, §28, §26).
-This principle says: **do not erode them.** Do not add direct Redis
-calls outside `device/sonic/`. Do not bypass Node. Do not put schema
-knowledge in the transport layer. The seams that make multi-version
-possible are the same seams that make the architecture clean.
+Three boundaries make this possible: all Redis through Device (§4),
+all operations through Node (§28), all entry construction in pure
+functions (§26). These boundaries exist for other good reasons. This
+principle says: **do not erode them.** The seams that make
+multi-version possible are the same seams that make the architecture
+clean.
 
 ---
 
 ## 39. Testing Discipline
 
-The most dangerous test bug is the one that passes. A verification
-check that finds zero items reports "all items pass" — vacuously true,
-logically correct, operationally catastrophic. The daemon hasn't
-processed entries yet, but the test says everything is fine. The test
-suite goes green. The real failure surfaces in production.
-
-SONiC's asynchronous, latency-variable daemons make this class of bug
-endemic. Three disciplines prevent it.
+Drift detection (§2) and verification (§14) depend on observing
+device state after daemons have processed CONFIG_DB entries. SONiC's
+asynchronous daemons make this observation unreliable without
+discipline.
 
 ### Verification must not pass vacuously
 
-A check that finds zero items to verify must **fail**, not pass. Zero
-results means the precondition isn't met — the daemon hasn't processed
-entries yet. It does not mean "all checks passed."
+A check that finds zero items must **fail**, not pass. Zero results
+means the daemon hasn't processed entries yet — not that all checks
+passed.
 
 ```go
 // WRONG — passes when results is empty
 for _, hc := range results {
     if hc.Status != "pass" { return false }
 }
-return true  // "all pass" — but zero items were checked
+return true
 
 // CORRECT
 if len(results) == 0 { return false }
@@ -2471,30 +2178,16 @@ for _, hc := range results {
 return true
 ```
 
-This class of bug is insidious because it passes in testing — the poll
-returns "success" instantly because the precondition hasn't happened yet.
-
-### Observation lag
-
-When a polling check passes but a subsequent observation contradicts it,
-the observation is stale — not the poll. Add a brief settle delay
-between them. This is a read-side concern in the test suite, not a
-`time.Sleep` in the write path.
-
 ### Convergence budget
 
 Each CONFIG_DB entry extends the post-provisioning convergence window.
-Before adding a new table or entry type, count the entries it adds per
-service × per interface × per device. Multiply by the daemon's per-entry
-latency. If the total exceeds the test suite's timing margin, increase
-the margin preemptively — don't discover it from flaky tests.
+Before adding a new entry type, count entries per service × per
+interface × per device. If the total exceeds test timing margins,
+increase preemptively.
 
-Always start tests on a freshly deployed topology. Prior state from
-previous test runs corrupts the convergence baseline — the same
-vacuous-truth problem from a different angle. A "clean" device that
-still has entries from a prior run may pass precondition checks it
-should fail, or converge faster than a truly fresh device because the
-daemons already processed half the entries.
+Always start tests on a freshly deployed topology. Prior state
+corrupts the convergence baseline — the same vacuous-truth problem
+from a different angle.
 
 ---
 
