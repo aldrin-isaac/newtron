@@ -571,3 +571,109 @@ Rules:
 - **Consistent formatting of lists, tables, and code blocks** within a document.
   If one table uses `|` alignment, all tables do. If one code block has a language
   tag, all code blocks do.
+
+## 38. Ground Abstractions Before Identifying Them — DESIGN
+
+When a document identifies an abstraction with the thing it represents — "The
+Node *is* the device," "The ChangeSet *is* the preview" — the reader must know
+it's an abstraction first. Otherwise the identification is taken literally and
+builds the wrong mental model.
+
+A network engineer who reads "The Node *is* the device" pictures a switch in a
+rack. When the document later says "An offline Node builds desired state," they
+think "an unplugged switch builds desired state" — which is nonsensical. One
+grounding clause before the identification — "a software object that represents
+a device, not the device itself" — prevents the conflation.
+
+**Rule:** Before any sentence that identifies a software abstraction with a
+physical or domain entity (X *is* Y), establish that X is a representation of Y,
+not Y itself. One grounding, placed before the first identification, is
+sufficient — the reader carries it forward. Repeating it deflates the rhetorical
+force of the identification language.
+
+**Test:** Read the identification sentence as if you've never seen the codebase.
+Does "The Node *is* the device" sound like the Node is literally a switch? If
+yes, ground the abstraction first.
+
+## 39. Bridge Project Vocabulary to Industry Vocabulary — DESIGN+HLD
+
+When a project gives a specific meaning to a general industry term, define the
+mapping explicitly on first use. The reader arrives with their own definition;
+the document must intercept it before they read further under a false assumption.
+
+newtron's "Provisioning" means specifically CompositeOverwrite — full-device
+replacement, Day-1. But a reader from the industry might use "provisioning" to
+mean anything from deploying a VM to applying a service to configuring a
+circuit. Without the bridge, they apply their own definition and get confused
+when the document treats provisioning and operations as a strict binary.
+
+**Rule:** On first use of a project-specific term that overloads an industry
+term, add a brief parenthetical or em-dash clause that maps to industry
+vocabulary. The mapping is subordinate to the definition — the reader sees the
+project's term first, then the bridge to their world.
+
+**Good:** "**Provisioning** — Day-1, build provisioning — is the one operation
+where intent replaces reality entirely."
+
+**Bad:** Defining "Provisioning" without mentioning Day-1, then using it 40
+more times, leaving the reader to guess whether it means the same thing they
+think it means.
+
+Where industry has a standard framing that triangulates the reader (Day-0 /
+Day-1 / Day-2), use it. The reader who knows Day-0 is outside newtron's scope,
+Day-1 is Provisioning, and Day-2 is Operations has three reference points — not
+just one definition to remember.
+
+## 40. Audit Overloaded Terms Throughout — ALL
+
+When a single word carries both a project-specific meaning and a general
+meaning, auditing the definition site is not enough. Every occurrence in the
+document must be checked — the word may have slipped back to its general meaning
+in a sentence written before the specific definition was established.
+
+During the DESIGN_PRINCIPLES review, "provisioning" was precisely defined in §1
+(CompositeOverwrite, full-device replacement). But in §15, a sentence read "if
+an orchestrator provisions three interfaces" — using "provisions" to mean
+"applies services to," contradicting the §1 definition. The definition was
+correct; a downstream usage was not.
+
+**Process:**
+1. Define the term precisely in its canonical section.
+2. Grep for every occurrence in the document.
+3. For each occurrence, ask: is this using the project-specific meaning? If not,
+   replace with the correct term or qualify it.
+4. Pay special attention to sentences written before the definition was
+   tightened — they are the most likely to use the word loosely.
+
+**Test:** A reader who ctrl-F's the term should find it used consistently. If
+occurrence #3 means something different from occurrence #27, the document has a
+silent contradiction.
+
+## 41. Terminology Changes Must Be Scoped to Purpose — ALL
+
+A terminology change in one document does not automatically propagate to all
+documents and code. Different contexts may use the same concept for different
+purposes, and the old term may be the correct one in its original context.
+
+DESIGN_PRINCIPLES renamed "physical mode" / "abstract mode" to "online mode" /
+"offline mode" because the thesis is about intent (inherently offline) being
+actualized (brought online). This framing serves the document's purpose —
+explaining *why* the Node unifies intent and reality. But in Go code comments
+and implementation docs, "abstract Node" is the correct term — it describes the
+*representation* (an abstraction of a physical device), not a mode of operation.
+The conceptual distinction between a device and its abstract representation is
+the point in implementation context; the online/offline framing is the point in
+thesis context.
+
+**Rule:** Before propagating a terminology change, ask: does the new term serve
+this context's purpose better than the old one? A thesis document explains *why*;
+implementation docs explain *what* and *how*. The same concept may need different
+names in different contexts because the reader is asking a different question.
+
+**Signs of overcorrection:**
+- Code comments that say "offline Node" where the reader needs to understand
+  it's an *abstraction* of a physical device
+- Implementation docs that say "online mode" where the reader needs to
+  understand the Node is *connected* to Redis
+- Renaming function names or API symbols to match thesis vocabulary (symbols are
+  stable interfaces, not prose)
