@@ -192,11 +192,11 @@ nothing to diverge. (See §11 for the ChangeSet mechanism.)
 to a device, so a complete device configuration can be built in memory
 and delivered later as a single atomic operation. This is not a second
 system — it is the same system in offline mode. Adding a new feature
-to the incremental path automatically makes it available for
-provisioning, because there is no separate provisioning path. A service
-type that works interactively works in provisioning on the same day,
-exercising the same code, validated by the same preconditions. (See
-§12.)
+to the incremental path automatically makes it available in the
+topology provisioner, because the provisioner calls the same methods
+on an offline Node. A service type that works interactively works in
+full-device provisioning on the same day, exercising the same code,
+validated by the same preconditions. (See §12.)
 
 **3. Drift detection.** Comparing what a device should look like against
 what it does look like normally requires a separate "expected state"
@@ -1200,8 +1200,8 @@ can be safely removed. Dependency checking now scans the node's intent
 collection (actuated intents) in addition to CONFIG_DB, ensuring that
 shared resource removal accounts for all declared consumers — not just
 what happens to be present in the database at scan time. Rollback is
-therefore an orchestrator concern: if an orchestrator provisions three
-interfaces and the second fails, it calls `RemoveService` on the
+therefore an orchestrator concern: if an orchestrator applies services to
+three interfaces and the second fails, it calls `RemoveService` on the
 first — not "reverse the first ChangeSet." newtron provides
 reference-aware building blocks; the orchestrator decides when to
 invoke them.
@@ -1860,8 +1860,8 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, ...) (*ChangeSet, err
 }
 ```
 
-The same config function is called by online operations, offline
-composite provisioning, and delete operations. Change the table
+The same config function is called by online operations, the offline
+topology provisioner, and delete operations. Change the table
 format once; all paths update — because there is only one path.
 
 **Generate entries in pure functions; orchestrate them in operations.**
