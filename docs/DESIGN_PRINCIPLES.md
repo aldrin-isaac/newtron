@@ -87,16 +87,16 @@ intent and reality — it *is* both, depending on how it is initialized.
 
 The Node operates in two modes:
 
-- **Connected mode**: ConfigDB loaded from Redis at connection time.
-  Preconditions check live device state. ChangeSets apply to Redis. The
-  Node *is* the device — its ConfigDB is the device's CONFIG_DB, read
-  and written through an SSH-tunneled Redis connection.
+- **Connected mode**: ConfigDB loaded from Redis, kept current before
+  every write. The Node *is* the device — its ConfigDB is the device's
+  CONFIG_DB, read and written through an SSH-tunneled Redis connection.
 
-- **Offline mode**: Shadow ConfigDB starts empty. Operations build
-  desired state. Entries accumulate for composite export. The Node *is*
-  the intent — its ConfigDB is what the device should look like once
-  the intent is delivered. Intent is inherently offline; delivery is
-  what brings it to life — connecting it to its device.
+- **Offline mode**: Shadow ConfigDB starts empty. The same ChangeSets
+  that would apply to Redis instead update the shadow — building
+  desired state entry by entry until the full composite is ready for
+  export. The Node *is* the intent — its ConfigDB is what the device
+  should look like once delivered. Intent is inherently offline;
+  delivery is what brings it to life — connecting it to its device.
 
 Same type, same methods, same preconditions. The topology provisioner
 creates an offline Node and calls the same methods the CLI uses
@@ -165,22 +165,20 @@ existing reality. A connected Node loads the device's current CONFIG_DB,
 checks preconditions against what actually exists, computes a delta,
 and applies it. The device's state before the operation is the starting
 point — not a spec file, not a template, not a desired-state store.
-Out-of-band edits to CONFIG_DB are not prevented — they become reality.
-Every write episode begins by acquiring a lock, which refreshes the
-CONFIG_DB snapshot — so preconditions check current reality, not stale
-cache. Operations proceed from whatever they find. They do not
-auto-check whether reality still matches intent — drift detection (§19)
-answers that question when an orchestrator asks, and provisioning
-reconciles the device back to intent when directed.
+Out-of-band edits to CONFIG_DB are not prevented — they become reality,
+visible to the next operation's preconditions (§32). Operations proceed
+from whatever they find — they do not auto-check whether reality still
+matches intent. Drift detection (§19) answers that question when asked;
+provisioning reconciles back to intent when directed.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
-delivery differ: offline Nodes start empty and export composites;
-connected Nodes start from Redis and apply ChangeSets. This is not a
-convenience — it is the guarantee. A feature added to one mode is
-immediately available in the other, because there is no other. A bug
-fixed in one mode is fixed in both, because there is only one code path
-to fix.
+output differ: offline Nodes start empty and accumulate entries for
+later delivery; connected Nodes start from Redis and apply changes
+directly. This is not a convenience — it is the guarantee. A feature
+added to one mode is immediately available in the other, because there
+is no other. A bug fixed in one mode is fixed in both, because there
+is only one code path to fix.
 
 ---
 
@@ -887,12 +885,13 @@ with table, key, operation type, old value, and new value:
 
 The three representations cannot diverge because they are one
 representation. Creating a VLAN produces a ChangeSet with one entry.
-Applying a service produces a ChangeSet with a dozen entries.
-Delivering a composite config produces a ChangeSet with hundreds of
-entries. `VerifyChangeSet` handles all of them identically — because it
-doesn't know or care what operation produced the ChangeSet. If it
-produces a ChangeSet, it's automatically previewable, executable, and
-verifiable. Adding a new operation never requires adding a new
+Applying a service produces a ChangeSet with a dozen. Composite
+delivery uses a different write path but the same verification:
+re-read every entry from CONFIG_DB, diff against what was expected.
+The verification doesn't know or care what produced the entries —
+ChangeSet or composite, one entry or hundreds. Any operation that
+writes CONFIG_DB entries is automatically previewable, executable,
+and verifiable. Adding a new operation never requires adding a new
 verification method.
 
 A ChangeSet is atomic within a single newtron invocation. If an
@@ -932,8 +931,8 @@ every key, every field — before any Redis write occurs. You cannot
 write an operation that "figures out what to do as it goes," because
 dry-run mode would have nowhere to stop.
 
-This forced separation produces a structural side effect that wasn't
-planned but proved essential: offline provisioning. Because newtron can
+This forced separation produces a second structural consequence:
+offline provisioning. Because newtron can
 compute a full device configuration without connecting to a device —
 it's just spec translation — it can build a complete configuration in
 memory and deliver it later as a single atomic operation. Offline
