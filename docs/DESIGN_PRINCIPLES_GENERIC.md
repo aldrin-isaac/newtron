@@ -562,7 +562,7 @@ definitions independent of any device.
   │
   │ parent ref
   │ (spec lookup)
-  v
+  ▼
 ┌─────────────────────────────────────────────────┐
 │                                                 │
 │                      Node                       │
@@ -572,7 +572,7 @@ definitions independent of any device.
 └─────────────────────────────────────────────────┘
   │
   │ parent ref
-  v
+  ▼
 ┌─────────────────────────────────────────────────┐
 │                                                 │
 │                    Interface                    │
