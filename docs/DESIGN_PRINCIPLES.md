@@ -13,7 +13,10 @@ downstream acted on them correctly. This is both SONiC's power — any
 tool that can talk Redis can configure the switch — and its danger:
 Redis accepts anything, validates nothing, and the consequences of a
 bad write surface minutes later in a daemon log, a silent packet drop,
-or an unrecoverable state.
+or an unrecoverable state. And because CONFIG_DB is just Redis,
+applications can also store their own data alongside SONiC's tables —
+intent records, operational metadata, anything that benefits from
+living on the device itself rather than in an external store.
 
 But the hardest problem isn't SONiC-specific. Every configuration
 management system eventually faces the same structural problem: it
