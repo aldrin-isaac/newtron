@@ -1,81 +1,82 @@
-# Design Principles
+# Design Principles for Software-Driven Networks
 
-These are principles for building the software behind a
-software-driven network running on SONiC — the open-source network
-operating system that runs on white-box switches from dozens of vendors. SONiC is unusual among network operating
-systems: its entire device configuration lives in a Redis database
-called CONFIG_DB. Every VLAN, every BGP session, every interface
-binding is a Redis hash. SONiC daemons subscribe to keyspace
-notifications on these hashes and program the forwarding ASIC in
-response. To configure a SONiC device is to write Redis entries in
-the correct format, in the correct order, and verify that the daemons
-downstream acted on them correctly. This is both SONiC's power — any
-tool that can talk Redis can configure the switch — and its danger:
-Redis accepts anything, validates nothing, and the consequences of a
-bad write surface minutes later in a daemon log, a silent packet drop,
-or an unrecoverable state. And because CONFIG_DB is just Redis,
-applications can also store their own data alongside SONiC's tables —
-intent records, operational metadata, anything that benefits from
-living on the device itself rather than in an external store.
+Networks have been automated for decades, and the automation keeps
+failing in the same way. Not catastrophically — erosively. Template
+engines push configs that may or may not match what the device actually
+has. Desired-state reconcilers maintain intent in one system and read
+reality from another, and the distance between them is where every hard
+bug lives. CLI scrapers parse output that changes between releases and
+breaks silently. Ansible playbooks return success without verifying that
+writes landed. Terraform state files diverge from reality after a crash
+and require manual surgery to recover.
 
-But the hardest problem isn't SONiC-specific. Every system that
-automates device configuration eventually faces the same structural
-problem: it
-maintains two representations of a device. One
-for what the device should look like — the intent, the desired state,
-the template output. Another for what the device does look like — the
-live state, the actual CONFIG_DB, the ground truth read back from
-Redis. Two data structures, two code paths, one for computing what
-should exist and another for reading what does exist, compared by a
-third code path that understands neither as well as the code that
-produced them.
+The tools are different. The failure mode is the same: two
+representations of a device — one for what should exist, another for
+what does exist — maintained by separate code, synchronized by hope,
+diverging by default. This is not a bug in any particular tool. It is
+the structural consequence of separating intent from reality into
+distinct types or stores. The separation is itself the source of the
+drift it tries to detect. Terraform has this problem. Kubernetes has
+this problem. Every system built on that separation has this problem.
 
-This is the architecture of drift. Not drift as a bug to be fixed, but
-drift as the structural consequence of maintaining parallel
-representations that must stay synchronized through every code change,
-every edge case, every midnight hotfix. Terraform has this problem.
-Kubernetes has this problem. Every system that separates "desired" from
-"actual" into distinct types or stores has this problem, because the
-separation is itself the source of the divergence it tries to detect.
+These are principles for building something different: the software
+behind a software-driven network. Not scripts that push configs to
+switches, but software that embodies how the network should be built,
+ensures each device is programmed correctly, tracks what has been done,
+and can prove — at any time — that reality matches intent.
 
-The central insight is that intent and reality are the same object
-viewed from different starting points. The Node is that object. An
-offline Node initialized from specs and profiles IS the expected
-state — intent before actualization. A connected Node loaded from a live
-device's CONFIG_DB IS the actual state — reality as it exists. Same
-type, same methods, same preconditions, same validation. From this
-single design decision — one object, two modes — delivery guarantees,
-offline provisioning, drift detection, and crash recovery all follow
-as structural consequences rather than independent features.
+The platform is SONiC — the open-source network operating system that
+runs on white-box switches from dozens of vendors. SONiC is unusual:
+its entire device configuration lives in a Redis database called
+CONFIG_DB. Every VLAN, every BGP session, every interface binding is a
+Redis hash. SONiC daemons subscribe to keyspace notifications on these
+hashes and program the forwarding ASIC in response. To configure a
+SONiC device is to write Redis entries in the correct format, in the
+correct order, and verify that the daemons downstream acted on them
+correctly. This is both SONiC's power — any tool that can talk Redis
+can configure the switch — and its danger: Redis accepts anything,
+validates nothing, and the consequences of a bad write surface minutes
+later in a daemon log, a silent packet drop, or an unrecoverable state.
+And because CONFIG_DB is just Redis, applications can also store their
+own data alongside SONiC's tables — intent records, operational
+metadata, anything that benefits from living on the device itself
+rather than in an external store.
 
-This document explains the principles behind that architecture — not as
-a reference, but as a narrative. Part I states the thesis: the Node,
-the properties it produces, and the contract that keeps the system
-sound as it grows. Part II establishes the domain model — how the system
-sees SONiC, how it treats device state, and where services live.
-Part III describes the opinions: one pattern per primitive, consistently
-enforced. Part IV defines the delivery contract — schema validation,
-atomic application, post-write verification, symmetric reversal.
-Part V explains what the Node records and why intent must be
-self-sufficient. Part VI covers shared objects and policy lifecycles.
-Part VII shows how the code reflects the model. Part VIII covers
-working conventions.
+The central insight is that intent and reality need not be two things.
+They are the same object viewed from different starting points. The
+Node is that object. An offline Node initialized from specs and
+profiles IS the expected state — intent before actualization. A
+connected Node loaded from a live device's CONFIG_DB IS the actual
+state — reality as it exists. Same type, same methods, same
+preconditions, same validation. From this single design decision — one
+object, two modes — delivery guarantees, offline provisioning, drift
+detection, and crash recovery all follow as structural consequences
+rather than independent features that must be built and maintained
+independently.
 
-Not all principles carry the same weight. Some are convictions specific
-to this architecture — ways of thinking about the Node, device reality,
-isolation, and platform relationships that shape the system from the
-ground up. Others are established engineering practices — single
-ownership, pure functions, API boundaries — that the system subscribes
-to and enforces rigorously. A few are style preferences where
-reasonable alternatives exist. The summary table at the end marks which
-is which.
+This document is in two parts. **Part 1 — The Architecture** presents
+the principles that define the system: the Node thesis, the domain
+model, the delivery contract, intent tracking, and shared object
+lifecycles. These are the ideas that make software-driven networking
+possible on SONiC. **Part 2 — The Discipline** presents the
+implementation conventions that keep the architecture sound as the
+system grows: code ownership, naming, API boundaries, and testing
+practices.
 
-Read this before design documents and implementation guides. It
-explains *why* things are the way they are.
+Not all principles carry the same weight. Some are convictions — ways
+of thinking about the Node, device reality, isolation, and platform
+relationships that shape the architecture from the ground up. Others
+are established engineering practices that the system subscribes to
+and enforces rigorously. A few are style preferences where reasonable
+alternatives exist. The summary table at the end marks which is which.
 
 ---
 
-# Part I: The Thesis
+# Part 1 — The Architecture
+
+---
+
+# I. The Thesis
 
 Three principles define what the system is and what it promises.
 Everything else in this document follows from them.
@@ -284,7 +285,7 @@ growth sound.
 
 ---
 
-# Part II: The Domain Model
+# II. The Domain Model
 
 The Node mediates between intent and reality — but what does reality
 look like, and where does intent come from? These five principles
@@ -747,7 +748,7 @@ failure domain.
 
 ---
 
-# Part III: The Opinions
+# III. The Opinions
 
 A Node without opinions is a general-purpose Redis writer — capable of
 anything, guaranteeing nothing about consistency across primitives.
@@ -856,7 +857,7 @@ growth; individual primitives do not need to earn their own reliability.
 
 ---
 
-# Part IV: The Delivery Contract
+# IV. The Delivery Contract
 
 Opinions and delivery guarantees are promises. Promises without
 machinery are aspirations. These six principles describe the concrete
@@ -1363,7 +1364,7 @@ suites verify it with polling, not sleeps.**
 
 ---
 
-# Part V: What the Node Records
+# V. What the Node Records
 
 Operations flow through the Node and produce CONFIG_DB entries. But
 the Node must also remember what it has done — for crash recovery, for
@@ -1579,7 +1580,7 @@ CONFIG_DB entirely.
 
 ---
 
-# Part VI: Shared Objects and Policy
+# VI. Shared Objects and Policy
 
 Parts I–V treat each operation as self-contained: one ChangeSet, one
 interface, one service. But CONFIG_DB resources are not always
@@ -1775,12 +1776,17 @@ peer groups — each has unique attributes derived from the specific link.
 
 ---
 
-# Part VII: Code Architecture
+# Part 2 — The Discipline
 
-Parts I–VI describe what the system guarantees. These nine principles
-encode those guarantees into code structure — file boundaries, method
-placement, type hierarchies — so that the architecture is a property
-of the code, not an intention documented above it.
+---
+
+# VII. Code Architecture
+
+The architecture in Part 1 is only as durable as the code that
+implements it. These nine principles encode the guarantees into code
+structure — file boundaries, method placement, type hierarchies — so
+that the architecture is a property of the code, not an intention
+documented above it.
 
 ## 24. Single-Owner CONFIG_DB Tables
 
@@ -2066,7 +2072,7 @@ checks are advisory safety nets, not guarantees.
 
 ---
 
-# Part VIII: Working Conventions
+# VIII. Working Conventions
 
 Seven conventions that prevent the slow erosion of Parts I–VII.
 
