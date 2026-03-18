@@ -2,7 +2,7 @@
 
 The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/sonic/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
-For the architectural principles behind newtron, see [Design Principles](../DESIGN_PRINCIPLES.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md). For the HTTP API, see [API Reference](api.md).
+For the architectural principles behind newtron, see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md). For the HTTP API, see [API Reference](api.md).
 
 **Scope:** This document describes the `sonic` package only — types, clients, connection management. Operations that *use* these primitives (ChangeSet apply, config save, health checks, route verification) live at the `node` layer (`pkg/newtron/network/node/`) and are documented in the [newtron LLD](lld.md).
 
@@ -723,7 +723,7 @@ internal domain model constructed via `NewIntent` / serialized via
 
 ```go
 // Intent is the internal domain model for a desired-state record bound to
-// a device resource. See DESIGN_PRINCIPLES §39 for the full model.
+// a device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
 //
 // Key format: resource name (e.g., "Ethernet0", "bgp", "evpn", "loopback")
 // Stored in NEWTRON_INTENT — a custom table, not standard SONiC.

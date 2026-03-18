@@ -7,7 +7,7 @@ Principles for writing and editing newtron project documentation, captured from 
 | Tag | Applies to |
 |-----|-----------|
 | ALL | DESIGN_PRINCIPLES, HLD, LLD, Device LLD, HOWTO, README, API |
-| DESIGN | DESIGN_PRINCIPLES.md specifically |
+| DESIGN | DESIGN_PRINCIPLES_NEWTRON.md specifically |
 | HLD | High-Level Design |
 | LLD | Low-Level Design, Device LLD |
 | HLD+LLD | Both design documents |

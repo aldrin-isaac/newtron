@@ -71,7 +71,7 @@ const (
 )
 
 // Intent is the internal domain model for a desired-state record bound to
-// a device resource. See DESIGN_PRINCIPLES §39 for the full model.
+// a device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
 //
 // This is the internal (node-accessible) type. The public API type
 // (pkg/newtron.Intent) mirrors this with domain vocabulary for external

@@ -107,7 +107,7 @@ func DeriveACLName(filterName, direction, contentHash string) string {
 // field maps. Used for content-addressed naming of shared policy objects (ACLs,
 // route maps, prefix sets). Entries are sorted by key for determinism.
 //
-// Per DESIGN_PRINCIPLES.md §16 (Content-Hashed Naming): the hash is computed from the actual
+// Per DESIGN_PRINCIPLES_NEWTRON.md §16 (Content-Hashed Naming): the hash is computed from the actual
 // CONFIG_DB fields that would be written, not the spec struct.
 func ContentHash(entries []map[string]string) string {
 	h := sha256.New()

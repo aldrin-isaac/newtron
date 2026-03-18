@@ -6,7 +6,7 @@ Newtron defines architectural primitives for SONiC networks and automates any ne
 
 Specs are the source of intent — they describe what the network should look like (services, filters, routing policies). The device is the source of reality — CONFIG_DB is what exists, whether correct or not. Newtron translates intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities), but once applied, the device's state is the ground reality.
 
-For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md).
 
 ## 2. Architecture
 

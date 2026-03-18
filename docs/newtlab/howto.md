@@ -5,7 +5,7 @@ reads newtron's spec files (`topology.json`, `platforms.json`, `profiles/`)
 and manages VM lifecycle without root privileges.
 
 For the architectural principles behind newtron, newtlab, and newtrun, see
-[Design Principles](../DESIGN_PRINCIPLES.md).
+[Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # newtrun — High-Level Design
 
-For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES.md).
+For the architectural principles behind newtron, newtlab, and newtrun, see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md).
 
 ## 1. Purpose
 

@@ -1072,7 +1072,7 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	// Blue-green migration: two interfaces share a service with route policies.
 	// Spec changes. Refresh interface 1 → old-hash objects deleted, new-hash created,
 	// peer group AF updated. Refresh interface 2 → no stale cleanup needed (already done).
-	// This tests the multi-interface coexistence path from DESIGN_PRINCIPLES §16.
+	// This tests the multi-interface coexistence path from DESIGN_PRINCIPLES_NEWTRON §16.
 	sp := &testSpecProvider{
 		services: map[string]*spec.ServiceSpec{
 			"TRANSIT": {

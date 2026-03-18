@@ -409,7 +409,7 @@ Every CONFIG_DB key name that newtron derives follows a single convention:
 - **Numeric IDs concatenated with type prefix**: `VNI1001`, `VLAN100`, `ETH0`, `Q0`
   (matching SONiC convention: `Vlan100`, `Loopback0`).
 
-See `docs/DESIGN_PRINCIPLES.md` §28 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §28 for rationale.
 
 ## Normalize at the Boundary
 
@@ -422,7 +422,7 @@ After loading, every map key (`Services["TRANSIT"]`), every cross-reference
 CONFIG_DB key construction is already canonical. Operations code never calls
 `NormalizeName()`.
 
-See `docs/DESIGN_PRINCIPLES.md` §28 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §28 for rationale.
 
 ## Definition Is Network-Scoped; Execution Is Device-Scoped
 
@@ -441,7 +441,7 @@ In newtrun, network-level steps (create-prefix-list, create-route-policy,
 create-service) call `r.Client.*` directly with no `devices:` field. Device-level
 steps use `executeForDevices`.
 
-See `docs/DESIGN_PRINCIPLES.md` §7 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §7 for rationale.
 
 ## Policy vs Infrastructure — Shared Object Lifecycles
 
@@ -467,7 +467,7 @@ Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes computed first
 then ROUTE_MAP entries reference real PREFIX_SET names (including hashes), so a
 content change cascades through the hash chain automatically.
 
-See `docs/DESIGN_PRINCIPLES.md` §15–16 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §15–16 for rationale.
 
 ## BGP Peer Groups — Native Sharing Mechanism
 
@@ -479,7 +479,7 @@ Peer groups are created on first `ApplyService` for a service with BGP routing,
 and deleted when the last interface using that service is removed. Topology-level
 underlay peers do NOT use peer groups — each has unique attributes.
 
-See `docs/DESIGN_PRINCIPLES.md` §17 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §17 for rationale.
 
 ## Allowed Commands
 
@@ -582,7 +582,7 @@ Dispatch subagents with `model: "sonnet"` for:
 ## Greenfield — No Backwards Compatibility
 
 newtron is a greenfield system with no installed base. Backwards compatibility is
-a non-goal. See `docs/DESIGN_PRINCIPLES.md` §32 for the full principle.
+a non-goal. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §32 for the full principle.
 
 Rules:
 - **No compatibility shims.** When a format or API changes, change it everywhere in
@@ -652,10 +652,10 @@ Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and de
   manually applied state. This ensures a clean, reproducible baseline.
 - **Polling checks must not pass vacuously.** If a poll finds zero items to verify,
   return false (keep polling) — not true. Zero results means the daemon hasn't
-  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES.md` §34.
+  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §34.
 - **Test timeouts must account for CONFIG_DB entry count.** Each new entry type extends
   the convergence window. When adding entries, verify that existing test timeouts still
-  have margin. See `docs/DESIGN_PRINCIPLES.md` §34.
+  have margin. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §34.
 
 ## Documentation Freshness Protocol
 

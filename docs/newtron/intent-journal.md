@@ -669,4 +669,4 @@ the orchestrator decides the strategy (§8 scope boundaries).
    Update zombie commands.
 
 9. **Documentation:** Update HLD, LLD, device-LLD, HOWTO, and
-   DESIGN_PRINCIPLES.
+   DESIGN_PRINCIPLES_NEWTRON.

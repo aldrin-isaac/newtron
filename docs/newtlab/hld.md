@@ -1,7 +1,7 @@
 # newtlab — High-Level Design
 
 For the architectural principles behind newtron, newtlab, and newtrun, see
-[Design Principles](../DESIGN_PRINCIPLES.md).
+[Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md).
 
 ---
 
@@ -953,5 +953,5 @@ ports. newtrun can orchestrate test scenarios against the topology.
 | [newtlab LLD](lld.md) | Types, functions, deploy phases in detail, port formulas, interface map resolution, complete CLI flags |
 | [newtron HLD](../newtron/hld.md) | Device configuration architecture, CONFIG_DB interaction, verification model |
 | [newtrun HLD](../newtrun/hld.md) | End-to-end test framework, step actions, suite mode |
-| [Design Principles](../DESIGN_PRINCIPLES.md) | Architectural philosophy behind all three tools |
+| [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md) | Architectural philosophy behind all three tools |
 | [newtlab HOWTO](howto.md) | Deploying topologies, troubleshooting, multi-host setup |

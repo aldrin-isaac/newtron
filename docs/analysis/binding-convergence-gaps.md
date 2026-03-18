@@ -2,7 +2,7 @@
 
 This document identifies design aspects in newtron's service binding and
 teardown paths that don't fully converge on the binding self-sufficiency
-principle established in DESIGN_PRINCIPLES.md §5:
+principle established in DESIGN_PRINCIPLES_NEWTRON.md §5:
 
 > The binding record must contain every value the reverse path needs to
 > tear down what the forward path created.
