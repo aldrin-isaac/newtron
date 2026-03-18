@@ -1,8 +1,8 @@
 # Design Principles
 
-These are principles for building a configuration delivery system for
-SONiC — the open-source network operating system that runs on white-box
-switches from dozens of vendors. SONiC is unusual among network operating
+These are principles for building the software behind a
+software-controlled network running on SONiC — the open-source network
+operating system that runs on white-box switches from dozens of vendors. SONiC is unusual among network operating
 systems: its entire device configuration lives in a Redis database
 called CONFIG_DB. Every VLAN, every BGP session, every interface
 binding is a Redis hash. SONiC daemons subscribe to keyspace
