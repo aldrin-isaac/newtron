@@ -18,8 +18,9 @@ applications can also store their own data alongside SONiC's tables —
 intent records, operational metadata, anything that benefits from
 living on the device itself rather than in an external store.
 
-But the hardest problem isn't SONiC-specific. Every configuration
-management system eventually faces the same structural problem: it
+But the hardest problem isn't SONiC-specific. Every system that
+automates device configuration eventually faces the same structural
+problem: it
 maintains two representations of a device. One
 for what the device should look like — the intent, the desired state,
 the template output. Another for what the device does look like — the
