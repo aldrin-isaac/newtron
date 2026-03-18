@@ -1280,6 +1280,27 @@ order and Redis reports success. The daemon silently ignores the entry,
 crashes, or enters an unrecoverable state. The database accepts it; the
 system rejects it — and the rejection is silent.
 
+This is not theoretical (see RCA-037). During provisioning of the
+2node-ngdp topology, switch2 received a VRF entry (`VRF|CUSTOMER`) and
+a VRF-bound interface entry (`INTERFACE|Ethernet2` with
+`vrf_name=CUSTOMER`) in the same atomic Redis pipeline. CONFIG_DB was
+perfect — every entry present, every field correct. But Ethernet2 had
+no IP address and no VRF binding in the kernel. Pings failed. Health
+checks failed. Nothing in any log said why.
+
+The root cause: two daemons processed related entries from the same
+burst of keyspace notifications. intfmgrd saw `INTERFACE|Ethernet2`
+and ran `ip link set Ethernet2 master CUSTOMER` — but vrfmgrd hadn't
+created the CUSTOMER kernel device yet. The command failed silently.
+intfmgrd did not retry. By the time vrfmgrd finished creating the VRF,
+intfmgrd had moved on. The interface remained unbound forever — in the
+kernel, not in CONFIG_DB. The database said the device was configured.
+The device was not.
+
+Sequential operations — writing the VRF first, waiting for the kernel
+device, then writing the interface — never hit this race. The fix was
+ordering, not timing.
+
 ### The dependency chain
 
 SONiC YANG schemas define cross-table references — a CONFIG_DB entry
