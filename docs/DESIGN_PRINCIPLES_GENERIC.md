@@ -1,4 +1,4 @@
-# Design Principles for Software-Driven Networks
+# Automation Design Principles for Open Networks
 
 Networks have been automated for decades, and the automation keeps
 failing in the same way. Not catastrophically — erosively. Template
@@ -171,7 +171,7 @@ checks preconditions against what actually exists, computes a delta,
 and applies it. The device's state before the operation is the starting
 point — not a spec file, not a template, not a desired-state store.
 Out-of-band edits to CONFIG_DB are not prevented — they become reality,
-visible to the next operation's preconditions (§32). Operations proceed
+visible to the next operation's preconditions (§31). Operations proceed
 from whatever they find — they do not auto-check whether reality still
 matches intent. Drift detection (§19) answers that question when asked;
 provisioning reconciles back to intent when directed.
@@ -719,7 +719,7 @@ orchestrator can make its own decisions.
 Good automation development requires a virtual twin — the ability to
 stand up a faithful replica of the target network running real SONiC
 software and exercise every primitive against it. Without this, you
-are testing against documentation, not behavior (§35). A separate lab
+are testing against documentation, not behavior (§34). A separate lab
 tool provides this: QEMU VMs wired into topologies that the
 system configures. The virtual twin is separate
 infrastructure — it validates the automation, it is not the automation.
@@ -1284,6 +1284,27 @@ order and Redis reports success. The daemon silently ignores the entry,
 crashes, or enters an unrecoverable state. The database accepts it; the
 system rejects it — and the rejection is silent.
 
+This is not theoretical. During provisioning of a two-node topology, a
+device received a VRF entry (`VRF|CUSTOMER`) and a VRF-bound interface
+entry (`INTERFACE|Ethernet2` with `vrf_name=CUSTOMER`) in the same
+atomic Redis pipeline. CONFIG_DB was perfect — every entry present,
+every field correct. But Ethernet2 had no IP address and no VRF
+binding in the kernel. Pings failed. Health checks failed. Nothing in
+any log said why.
+
+The root cause: two daemons processed related entries from the same
+burst of keyspace notifications. intfmgrd saw `INTERFACE|Ethernet2`
+and ran `ip link set Ethernet2 master CUSTOMER` — but vrfmgrd hadn't
+created the CUSTOMER kernel device yet. The command failed silently.
+intfmgrd did not retry. By the time vrfmgrd finished creating the VRF,
+intfmgrd had moved on. The interface remained unbound forever — in the
+kernel, not in CONFIG_DB. The database said the device was configured.
+The device was not.
+
+Sequential operations — writing the VRF first, waiting for the kernel
+device, then writing the interface — never hit this race. The fix was
+ordering, not timing.
+
 ### The dependency chain
 
 SONiC YANG schemas define cross-table references — a CONFIG_DB entry
@@ -1783,7 +1804,7 @@ peer groups — each has unique attributes derived from the specific link.
 # VII. Code Architecture
 
 The architecture in Part 1 is only as durable as the code that
-implements it. These nine principles encode the guarantees into code
+implements it. These eight principles encode the guarantees into code
 structure — file boundaries, method placement, type hierarchies — so
 that the architecture is a property of the code, not an intention
 documented above it.
@@ -2015,68 +2036,47 @@ structure must already be in place when they do.
 
 ---
 
-## 31. Transparent Transport — The Middle Layer Has No Logic
+## 31. Structural Guardrails
 
-The Node (§1) and the ChangeSet (§11) are where the guarantees live.
-The HTTP transport between them and the caller is a mechanical
-translation: decode JSON → construct closure → send to per-device
-actor → encode result. No business logic. No typed message structs.
-No dispatch tables. Adding a new endpoint requires one handler
-function — nothing else changes.
+Five rules that each prevent a specific class of silent bug.
 
-The server serializes access to each device via per-device channels
-(§28). SSH connections are reused within an idle timeout. CONFIG_DB is
-refreshed every request (§32) — the tunnel is reused; the device state
-is never assumed.
+**Transparent transport.** The HTTP layer between Node and caller is
+mechanical: decode → send to per-device actor → encode. No business
+logic, no typed message structs. The server serializes per-device
+access via channels (§28). SSH connections are reused; CONFIG_DB is
+refreshed every request. Every layer with logic can drift; the
+transport has none.
 
-**Every layer with logic is a layer that can drift. The transport has
-no logic.**
+**Import direction — dependencies flow one way.** The network package
+imports the node package, never the reverse. `SpecProvider` (§7) breaks
+what would otherwise be a circular dependency. Change a Node method →
+blast radius is the node package plus callers. Change a Network method →
+Node code is provably untouched.
 
----
+**On-demand Interface state.** The Interface (§6) has exactly two
+fields: parent pointer and name. All accessors read on demand from the
+Node's ConfigDB snapshot. A previous design cached 15 fields — fifteen
+opportunities per operation for stale state.
 
-## 32. Import Direction, Interface State, and Episodic Caching
+**Episodic caching — fresh snapshot per unit of work.** The Node (§1)
+caches CONFIG_DB to batch precondition checks. Every self-contained
+unit of work — an **episode** — begins with a fresh snapshot. `Lock()`
+refreshes for writes. `Refresh()` for reads. No episode relies on
+cache from a prior episode. This is not transactional isolation —
+precondition checks are advisory safety nets, not guarantees.
 
-Three structural rules that each prevent a class of silent bug.
-
-### Import direction — dependencies flow one way
-
-The network package imports the node package, never the reverse. The
-`SpecProvider` interface (§7) breaks what would otherwise be a circular
-dependency: Network implements it; Node accepts it at creation time.
-When you change a Node method, the blast radius is the node package
-plus its callers. When you change a Network method, Node code is
-provably untouched — the import direction guarantees it.
-
-### On-demand Interface state — no cached fields
-
-The Interface (§6) has exactly two fields: a parent pointer and the
-interface name. All accessors read on demand from the Node's ConfigDB
-snapshot. A previous design cached 15 fields — fifteen opportunities
-per operation for a mutation to leave stale state behind. The
-on-demand design has zero.
-
-### Episodic caching — fresh snapshot per unit of work
-
-The Node (§1) caches CONFIG_DB to batch precondition checks. The
-freshness rule: every self-contained unit of work — an **episode** —
-begins with a fresh snapshot. No episode relies on cache from a prior
-episode.
-
-- **Write episodes**: `Lock()` refreshes the cache.
-- **Read-only episodes**: `Refresh()` at the start.
-- **Composite episodes**: `Refresh()` after delivery.
-
-This is not transactional isolation. The distributed lock coordinates
-system instances but cannot prevent external writes. Precondition
-checks are advisory safety nets, not guarantees.
+**DRY across programs.** Single ownership (§24) extends across program
+boundaries: one spec directory, one connection mechanism (SSH-tunneled
+Redis), one verification mechanism (the ChangeSet), one profile per
+device. Every capability duplicated across programs drifts.
 
 ---
 
 # VIII. Working Conventions
 
-Seven conventions that prevent the slow erosion of Parts I–VII.
+Six conventions that prevent the slow erosion of Parts I–VII.
 
-## 33. Normalize at the Boundary
+## 32. Normalize at the Boundary
 
 Content-hashed naming (§22) requires that two code paths computing the
 same hash from the same spec get identical results. If one path sees
@@ -2093,7 +2093,7 @@ never calls `NormalizeName()`.
 
 ---
 
-## 34. Platform Patching — Fix Bugs, Don't Reinvent Features
+## 33. Platform Patching — Fix Bugs, Don't Reinvent Features
 
 A Redis-first system (§4) must resist workarounds that invent custom
 CONFIG_DB tables or parallel code paths to replace the community-intended
@@ -2116,7 +2116,7 @@ custom table remains as permanent debt.
 
 ---
 
-## 35. Observe Behavior, Don't Trust Schemas
+## 34. Observe Behavior, Don't Trust Schemas
 
 Write ordering (§16) exists because SONiC daemons have implicit
 dependencies that no schema documents. orchagent silently ignores a
@@ -2137,20 +2137,7 @@ Before implementing a SONiC feature:
 
 ---
 
-## 36. DRY Across Programs
-
-Single ownership (§24) applies within a program. This convention
-extends it across program boundaries: one spec directory (all tools
-read from it), one connection mechanism (SSH-tunneled Redis), one
-verification mechanism (the ChangeSet), one platform definition
-(`platforms.json`), one profile per device (the infrastructure tool
-writes runtime fields *into the same profile* the system
-reads). Every time a capability is duplicated across programs, the
-copies drift.
-
----
-
-## 37. Greenfield — Backwards Compatibility Is a Non-Goal
+## 35. Greenfield — Backwards Compatibility Is a Non-Goal
 
 A greenfield system has no installed base. When a format or API changes,
 change it everywhere in one commit. No compatibility shims, no
@@ -2161,12 +2148,12 @@ once; after that, no operation checks for legacy formats.
 **Write code for the system as it is today, not as it was yesterday.**
 
 Exception: SONiC releases change schemas and daemon behavior. The system
-must support multiple releases — this is multi-platform support (§38),
+must support multiple releases — this is multi-platform support (§36),
 not backwards compatibility.
 
 ---
 
-## 38. Multi-Version Readiness — Version Differences as Data, Not Code
+## 36. Multi-Version Readiness — Version Differences as Data, Not Code
 
 Version differences should be **data** — schema deltas, capability
 tables, field mappings — consumed by the same code path. Pure config
@@ -2182,7 +2169,7 @@ clean.
 
 ---
 
-## 39. Testing Discipline
+## 37. Testing Discipline
 
 Drift detection (§2) and verification (§14) depend on observing
 device state after daemons have processed CONFIG_DB entries. SONiC's
@@ -2314,9 +2301,9 @@ not by policy or operator discipline.
 
 ### Greenfield and multi-version
 
-§37 says no backwards compatibility. §38 says support multiple SONiC
-releases. §37 applies to the system's own code (types, APIs, key
-schemas). §38 applies to the SONiC platform underneath. Supporting
+§35 says no backwards compatibility. §36 says support multiple SONiC
+releases. §35 applies to the system's own code (types, APIs, key
+schemas). §36 applies to the SONiC platform underneath. Supporting
 202411 and 202505 is multi-platform support, like a compiler targeting
 multiple architectures. There is no "old format" to maintain — only
 multiple current SONiC schemas to produce.
@@ -2370,12 +2357,10 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 28 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C |
 | 29 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
 | 30 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
-| 31 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S |
-| 32 | Import direction, interface state, episodic caching | Three principles that each prevent a specific class of silent bug | P |
-| 33 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
-| 34 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
-| 35 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
-| 36 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P |
-| 37 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
-| 38 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
-| 39 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
+| 31 | Structural guardrails | Five rules — transparent transport, import direction, on-demand state, episodic caching, cross-program DRY — each preventing a class of silent bug | P |
+| 32 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
+| 33 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
+| 34 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
+| 35 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
+| 36 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
+| 37 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
