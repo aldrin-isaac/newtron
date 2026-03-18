@@ -1594,7 +1594,7 @@ how shared objects coexist with independent lifecycles.
 Some CONFIG_DB entries exist for a single interface and die with it.
 Others are shared across the network and must outlive any individual
 consumer. These are fundamentally different objects with fundamentally
-different lifecycles, and conflating them — as most config management
+different lifecycles, and conflating them — as most config automation
 systems do — forces a choice between two failure modes: premature
 deletion (removing an ACL that another interface still needs) or
 permanent leakage (never removing anything for fear of breaking a
