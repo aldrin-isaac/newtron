@@ -1,6 +1,6 @@
 # Design Principles
 
-newtron is the software behind a software-controlled network running on SONiC — the
+newtron is the software behind a software-driven network running on SONiC — the
 open-source network operating system that runs on white-box switches
 from dozens of vendors. SONiC is unusual among network operating
 systems: its entire device configuration lives in a Redis database
