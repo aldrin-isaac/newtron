@@ -342,7 +342,7 @@ doesn't yet). There is no third category.
 Terraform owns its state file. Kubernetes owns its etcd. They can be
 reconcilers because they are the sole writer — if state drifts, it
 drifted from *their* truth, and they can push it back. The sanest
-architecture for any configuration system is a single owner.
+architecture for any system that writes device state is a single owner.
 
 newtron would prefer to be that owner. But it does not assume it is.
 Admins edit CONFIG_DB directly. SONiC daemons write to it. Factory
@@ -698,8 +698,7 @@ is the entire tool, because the abstraction levels are entangled inside
 a single process. This is the default architecture of most automation
 systems, and it is the reason most automation systems are fragile.
 
-newtron owns single-device configuration delivery — one scope, one
-failure domain. Each operation targets one device, translating specs
+newtron operates per-device — one scope, one failure domain. Each operation targets one device, translating specs
 into CONFIG_DB entries through an SSH-tunneled Redis connection. newtron
 never talks to two devices at once. Multi-device coordination is not
 its job.
@@ -2346,7 +2345,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 5 | Specs are intent; device is reality | The device is the authority after application; newtron accommodates other writers but requires its baseline | C |
 | 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C |
 | 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C |
-| 8 | Scope boundaries | newtron owns single-device configuration delivery; mixing abstraction levels entangles failure domains | C |
+| 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C |
 | 9 | The opinion is in the pattern | newtron constrains the building blocks, not the building | C |
 | 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C |
 | 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C |

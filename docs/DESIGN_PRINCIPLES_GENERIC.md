@@ -152,7 +152,7 @@ reality share a type, a code path, and a set of invariants.
 Two modes of the same object yield two modes of use — not as separate
 systems, but as different initializations of the same computation.
 Day-0 — deploying hardware, imaging the OS, wiring the topology — is
-outside the configuration system's scope (a separate lab or
+outside the system's scope (a separate lab or
 infrastructure tool handles it). The system's world begins at Day-1.
 
 **Provisioning** — Day-1, build provisioning — is the one operation
@@ -342,9 +342,9 @@ doesn't yet). There is no third category.
 Terraform owns its state file. Kubernetes owns its etcd. They can be
 reconcilers because they are the sole writer — if state drifts, it
 drifted from *their* truth, and they can push it back. The sanest
-architecture for any configuration system is a single owner.
+architecture for any system that writes device state is a single owner.
 
-The ideal is to be that owner. But a SONiC configuration system cannot
+The ideal is to be that owner. But a system built on SONiC cannot
 assume it is. Admins edit CONFIG_DB directly. SONiC daemons write to
 it. Factory images leave artifacts in it. Other tools modify it. The
 architecture must not break when this happens — not because multi-writer
@@ -699,8 +699,7 @@ is the entire tool, because the abstraction levels are entangled inside
 a single process. This is the default architecture of most automation
 systems, and it is the reason most automation systems are fragile.
 
-The configuration system owns single-device configuration delivery —
-one scope, one failure domain. Each operation targets one device,
+The system operates per-device — one scope, one failure domain. Each operation targets one device,
 translating specs into CONFIG_DB entries through an SSH-tunneled Redis
 connection. The system never talks to two devices at once. Multi-device
 coordination is not its job.
@@ -711,7 +710,7 @@ HTTP API. The CLI is one thin client; orchestrators are another kind
 of client. Multi-device coordination — deciding what to apply, where,
 in what order — belongs to orchestrators that consume the same API.
 An E2E test orchestrator is one such consumer: it provisions
-devices through the configuration system, then asserts correctness
+devices through the system, then asserts correctness
 across the fabric. Observation primitives (`GetRoute`,
 `RunHealthChecks`) return structured data, not judgments (§14), so any
 orchestrator can make its own decisions.
@@ -721,7 +720,7 @@ stand up a faithful replica of the target network running real SONiC
 software and exercise every primitive against it. Without this, you
 are testing against documentation, not behavior (§35). A separate lab
 tool provides this: QEMU VMs wired into topologies that the
-configuration system configures. The virtual twin is separate
+system configures. The virtual twin is separate
 infrastructure — it validates the automation, it is not the automation.
 
 ### Integration through the spec directory
@@ -734,7 +733,7 @@ and its services:
 
 - Infrastructure tools write connectivity details (`ssh_port`,
   `console_port`, `mgmt_ip`) into device profile files.
-- The configuration system reads those profiles and uses them to
+- The system reads those profiles and uses them to
   connect.
 - Orchestrators invoke the system's API, passing spec references by
   name.
@@ -2139,7 +2138,7 @@ extends it across program boundaries: one spec directory (all tools
 read from it), one connection mechanism (SSH-tunneled Redis), one
 verification mechanism (the ChangeSet), one platform definition
 (`platforms.json`), one profile per device (the infrastructure tool
-writes runtime fields *into the same profile* the configuration system
+writes runtime fields *into the same profile* the system
 reads). Every time a capability is duplicated across programs, the
 copies drift.
 
@@ -2342,7 +2341,7 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 5 | Specs are intent; device is reality | The device is the authority after application; the system accommodates other writers but requires its baseline | C |
 | 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C |
 | 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C |
-| 8 | Scope boundaries | The system owns single-device configuration delivery; mixing abstraction levels entangles failure domains | C |
+| 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C |
 | 9 | The opinion is in the pattern | Constrain the building blocks, not the building | C |
 | 10 | Delivery over generation | Generation is solved; delivery — validate, apply atomically, verify, reverse — is not | C |
 | 11 | The ChangeSet is universal | Three representations of "what this operation does" will diverge; one representation cannot | C |
