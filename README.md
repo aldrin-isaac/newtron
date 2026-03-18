@@ -354,7 +354,7 @@ docs/
 
 ## Documentation
 
-[Design Principles](docs/DESIGN_PRINCIPLES_NEWTRON.md) explains the philosophy — program boundaries, object model, verification, spec-vs-config. Read it first.
+[Design Principles](docs/DESIGN_PRINCIPLES.md) explains the philosophy — program boundaries, object model, verification, spec-vs-config. Read it first.
 
 | | HLD | LLD | HOWTO |
 |-|-----|-----|-------|
