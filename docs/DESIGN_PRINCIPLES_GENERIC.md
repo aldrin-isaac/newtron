@@ -637,7 +637,7 @@ to succeed.
 
 Seven spec maps — Services, Filters, IPVPNs, MACVPNs, QoSPolicies,
 RoutePolicies, and PrefixLists — are defined in a three-level
-hierarchy: network --> zone --> node (device profile). **Lower level
+hierarchy: network —→ zone —→ node (device profile). **Lower level
 wins.** A service defined at the node level overrides the same-named
 service at the zone level, which overrides the network level.
 
@@ -673,9 +673,9 @@ level stays open for additions:
 
 ```
 device.GetService("TRANSIT")
-  1. Check merged snapshot --> found (profile override) --> return it
-  2. Miss --> fall through to network.GetService("TRANSIT") --> found
-  3. Miss at both levels --> "service not found" error
+  1. Check merged snapshot —→ found (profile override) —→ return it
+  2. Miss —→ fall through to network.GetService("TRANSIT") —→ found
+  3. Miss at both levels —→ "service not found" error
 ```
 
 Every spec lookup must include the network fallback. A snapshot-only
@@ -1003,11 +1003,11 @@ function ChangeSet.Apply(node):
     // ... precondition checks (business logic) ...
     error = this.Validate()
     if error:
-        return error  // schema violations --> no writes at all
+        return error  // schema violations —→ no writes at all
     // ... Redis writes ...
 ```
 
-The schema is **fail-closed**. Unknown table --> error. Unknown field -->
+The schema is **fail-closed**. Unknown table —→ error. Unknown field —→
 error. Every table the system writes must have a schema entry. Adding a
 write to a new CONFIG_DB table without declaring its schema produces a
 validation failure — catching misspelled field names at the point of
@@ -1255,7 +1255,7 @@ is skewed? What if the process is just slow?
 
 The structural proof is simpler: **if you hold the lock and an intent
 exists, the previous holder is dead.** The intent lifecycle is
-WriteIntent --> Apply --> DeleteIntent --> Unlock. If the intent still
+WriteIntent —→ Apply —→ DeleteIntent —→ Unlock. If the intent still
 exists when a new process acquires the lock, the previous process
 crashed between WriteIntent and DeleteIntent. Lock acquisition is the
 proof. No timer, no threshold, no edge cases.
@@ -1288,14 +1288,14 @@ entry exists. These references create a directed dependency graph.
 The critical chains:
 
 ```
-VLAN            --->  VLAN_MEMBER      --->  (interface must exist)
-VLAN            --->  VLAN_INTERFACE   --->  VRF (via vrf_name reference)
-VRF             --->  BGP_GLOBALS      --->  BGP_NEIGHBOR  --->  BGP_NEIGHBOR_AF
-VRF             --->  INTERFACE (via vrf_name)
-VXLAN_TUNNEL    --->  VXLAN_EVPN_NVO   --->  VXLAN_TUNNEL_MAP
-ACL_TABLE       --->  ACL_RULE
-SCHEDULER       --->  QUEUE (via bracket-ref)
-DSCP_TO_TC_MAP  --->  PORT_QOS_MAP (via bracket-ref)
+VLAN            -—→  VLAN_MEMBER      -—→  (interface must exist)
+VLAN            -—→  VLAN_INTERFACE   -—→  VRF (via vrf_name reference)
+VRF             -—→  BGP_GLOBALS      -—→  BGP_NEIGHBOR  -—→  BGP_NEIGHBOR_AF
+VRF             -—→  INTERFACE (via vrf_name)
+VXLAN_TUNNEL    -—→  VXLAN_EVPN_NVO   -—→  VXLAN_TUNNEL_MAP
+ACL_TABLE       -—→  ACL_RULE
+SCHEDULER       -—→  QUEUE (via bracket-ref)
+DSCP_TO_TC_MAP  -—→  PORT_QOS_MAP (via bracket-ref)
 ```
 
 ### Structural ordering, not timing hacks
@@ -1328,11 +1328,11 @@ depending on the hardware platform, the ASIC, and the SONiC release.
 
 | Daemon | Operation | Typical Latency |
 |--------|-----------|-----------------|
-| vrfmgrd | VRF --> kernel netdev | <1s – 5s |
+| vrfmgrd | VRF —→ kernel netdev | <1s – 5s |
 | intfmgrd | Interface VRF binding | 1–30s |
-| orchagent | VLAN/VRF/EVPN --> SAI | 60–90s+ |
-| bgpcfgd | BGP config --> FRR | <1s |
-| frrcfgd | VRF VNI --> FRR | 1–2s |
+| orchagent | VLAN/VRF/EVPN —→ SAI | 60–90s+ |
+| bgpcfgd | BGP config —→ FRR | <1s |
+| frrcfgd | VRF VNI —→ FRR | 1–2s |
 
 These latencies matter in two contexts:
 
@@ -1681,10 +1681,10 @@ new hash because one of its referenced objects changed. The cascade
 stops at the peer group, where it becomes a field update rather than
 a name change.
 
-This enables zero-disruption policy updates. Spec unchanged --> hash
-unchanged --> refreshing the service is a no-op for that object. Spec
-changed --> new hash --> new object created alongside old --> interfaces
-migrate one by one --> old object deleted when last consumer migrates.
+This enables zero-disruption policy updates. Spec unchanged —→ hash
+unchanged —→ refreshing the service is a no-op for that object. Spec
+changed —→ new hash —→ new object created alongside old —→ interfaces
+migrate one by one —→ old object deleted when last consumer migrates.
 
 ### Hash placement: always suffix, never prefix
 
@@ -1702,14 +1702,14 @@ convention.
 If the hash is a suffix, the prefix scan works:
 
 ```
-ROUTE_MAP|TRANSIT_IMPORT_A1B2C3D4|10     <-- starts with "TRANSIT_" ✓
-PREFIX_SET|TRANSIT_IMPORT_PL_10_F3E2|10   <-- starts with "TRANSIT_" ✓
+ROUTE_MAP|TRANSIT_IMPORT_A1B2C3D4|10     ←— starts with "TRANSIT_" ✓
+PREFIX_SET|TRANSIT_IMPORT_PL_10_F3E2|10   ←— starts with "TRANSIT_" ✓
 ```
 
 If the hash were a prefix, the scan would silently match nothing:
 
 ```
-ROUTE_MAP|A1B2C3D4_TRANSIT_IMPORT|10     <-- does NOT start with "TRANSIT_" ✗
+ROUTE_MAP|A1B2C3D4_TRANSIT_IMPORT|10     ←— does NOT start with "TRANSIT_" ✗
 ```
 
 The failure mode is particularly dangerous: the forward path (create)
@@ -1735,7 +1735,7 @@ remove+apply cycle, it reads existing route policy objects from CONFIG_DB
 (Redis in connected mode, shadow in offline mode), compares against the set
 of objects just created by the apply phase, and deletes the difference.
 This is safe because all interfaces sharing a service use the same spec
---> the same hashes, and the shared peer group AF was already updated to
+—→ the same hashes, and the shared peer group AF was already updated to
 reference new route map names.
 
 ---
@@ -1756,9 +1756,9 @@ named after the service; neighbors reference it; shared attributes
 (route maps, admin status) live on `BGP_PEER_GROUP_AF`:
 
 ```
-BGP_PEER_GROUP|TRANSIT                  --> { admin_status: up }
-BGP_PEER_GROUP_AF|TRANSIT|ipv4_unicast  --> { route_map_in: ..., route_map_out: ... }
-BGP_NEIGHBOR|default|10.1.0.1           --> { peer_group: TRANSIT, asn: 65002 }
+BGP_PEER_GROUP|TRANSIT                  —→ { admin_status: up }
+BGP_PEER_GROUP_AF|TRANSIT|ipv4_unicast  —→ { route_map_in: ..., route_map_out: ... }
+BGP_NEIGHBOR|default|10.1.0.1           —→ { peer_group: TRANSIT, asn: 65002 }
 ```
 
 When a route map hash changes, one update to the peer group AF
@@ -1792,20 +1792,20 @@ for constructing, writing, and deleting entries in that table.
 Composites call the owning primitives and merge their ChangeSets.
 
 ```
-vlan_ops.go        --> VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
-vrf_ops.go         --> VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
-bgp_ops.go         --> BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
+vlan_ops.go        —→ VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
+vrf_ops.go         —→ VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
+bgp_ops.go         —→ BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
                       BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
                       BGP_PEER_GROUP, BGP_PEER_GROUP_AF
-evpn_ops.go        --> VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
+evpn_ops.go        —→ VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
                       SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
-acl_ops.go         --> ACL_TABLE, ACL_RULE
-qos_ops.go         --> PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+acl_ops.go         —→ ACL_TABLE, ACL_RULE
+qos_ops.go         —→ PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
                       SCHEDULER, WRED_PROFILE
-interface_ops.go   --> INTERFACE
-baseline_ops.go    --> LOOPBACK_INTERFACE
-portchannel_ops.go --> PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     --> INTENT, ROUTE_MAP, PREFIX_SET,
+interface_ops.go   —→ INTERFACE
+baseline_ops.go    —→ LOOPBACK_INTERFACE
+portchannel_ops.go —→ PORTCHANNEL, PORTCHANNEL_MEMBER
+service_ops.go     —→ INTENT, ROUTE_MAP, PREFIX_SET,
                       COMMUNITY_SET
 ```
 
@@ -2010,8 +2010,8 @@ structure must already be in place when they do.
 
 The Node (§1) and the ChangeSet (§11) are where the guarantees live.
 The HTTP transport between them and the caller is a mechanical
-translation: decode JSON --> construct closure --> send to per-device
-actor --> encode result. No business logic. No typed message structs.
+translation: decode JSON —→ construct closure —→ send to per-device
+actor —→ encode result. No business logic. No typed message structs.
 No dispatch tables. Adding a new endpoint requires one handler
 function — nothing else changes.
 
@@ -2076,7 +2076,7 @@ blue-green migration breaks silently. Boundary normalization is the
 precondition.
 
 Names are normalized once, at spec load time: ALL UPPERCASE,
-hyphens --> underscores, `[A-Z0-9_]` only. After loading, every map key
+hyphens —→ underscores, `[A-Z0-9_]` only. After loading, every map key
 (`Services["TRANSIT"]`), every cross-reference
 (`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows
 into CONFIG_DB key construction is already canonical. Operations code
