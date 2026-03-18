@@ -1288,13 +1288,13 @@ entry exists. These references create a directed dependency graph.
 The critical chains:
 
 ```
-VLAN  --->  VLAN_MEMBER  --->  (interface must exist)
-VLAN  --->  VLAN_INTERFACE  --->  VRF (via vrf_name reference)
-VRF   --->  BGP_GLOBALS  --->  BGP_NEIGHBOR  --->  BGP_NEIGHBOR_AF
-VRF   --->  INTERFACE (via vrf_name)
-VXLAN_TUNNEL  --->  VXLAN_EVPN_NVO  --->  VXLAN_TUNNEL_MAP
-ACL_TABLE  --->  ACL_RULE
-SCHEDULER  --->  QUEUE (via bracket-ref)
+VLAN            --->  VLAN_MEMBER      --->  (interface must exist)
+VLAN            --->  VLAN_INTERFACE   --->  VRF (via vrf_name reference)
+VRF             --->  BGP_GLOBALS      --->  BGP_NEIGHBOR  --->  BGP_NEIGHBOR_AF
+VRF             --->  INTERFACE (via vrf_name)
+VXLAN_TUNNEL    --->  VXLAN_EVPN_NVO   --->  VXLAN_TUNNEL_MAP
+ACL_TABLE       --->  ACL_RULE
+SCHEDULER       --->  QUEUE (via bracket-ref)
 DSCP_TO_TC_MAP  --->  PORT_QOS_MAP (via bracket-ref)
 ```
 
