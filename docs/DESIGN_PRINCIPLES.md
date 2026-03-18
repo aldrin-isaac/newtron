@@ -1,6 +1,6 @@
 # Design Principles
 
-newtron is a configuration management system for SONiC — the
+newtron is a configuration delivery system for SONiC — the
 open-source network operating system that runs on white-box switches
 from dozens of vendors. SONiC is unusual among network operating
 systems: its entire device configuration lives in a Redis database
