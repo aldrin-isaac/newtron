@@ -15,36 +15,32 @@ steps:
   # =========================================================================
 
   - name: no-loopback
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: LOOPBACK_INTERFACE
-    key: Loopback0
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-loopback-ip-spine
-    action: verify-config-db
+    action: newtron
     devices: [spine]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.10/32"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.10%2F32/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-loopback-ip-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.11/32"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.11%2F32/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-loopback-ip-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [leaf2]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.12/32"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.12%2F32/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS — global BGP configuration
@@ -53,12 +49,11 @@ steps:
   # =========================================================================
 
   - name: no-bgp-globals
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS_AF — address-family configs
@@ -67,20 +62,18 @@ steps:
   # =========================================================================
 
   - name: no-bgp-af-ipv4
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: BGP_GLOBALS_AF
-    key: "default|ipv4_unicast"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-af-l2vpn
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: BGP_GLOBALS_AF
-    key: "default|l2vpn_evpn"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_NEIGHBOR — underlay + overlay peers
@@ -88,54 +81,48 @@ steps:
 
   # Spine underlay: peers with leaf1 (10.1.0.1) and leaf2 (10.1.0.3)
   - name: no-bgp-neighbor-spine-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [spine]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-neighbor-spine-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [spine]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.3"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.3/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Leaf underlay: leaf1 peers with spine (10.1.0.0), leaf2 peers with spine (10.1.0.2)
   - name: no-bgp-neighbor-underlay-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.0"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-neighbor-underlay-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [leaf2]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.2"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.2/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Overlay: leaf1 peers with 10.0.0.12, leaf2 peers with 10.0.0.11
   - name: no-bgp-neighbor-overlay-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: BGP_NEIGHBOR
-    key: "default|10.0.0.12"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.12/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-neighbor-overlay-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [leaf2]
-    table: BGP_NEIGHBOR
-    key: "default|10.0.0.11"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.11/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # ROUTE_REDISTRIBUTE — connected redistribution
@@ -144,40 +131,36 @@ steps:
   # =========================================================================
 
   - name: no-route-redistribute
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: ROUTE_REDISTRIBUTE
-    key: "default|connected|bgp|ipv4"
+    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # INTERFACE — L3 interface config (cleaned up by l3-routing + teardown)
   # =========================================================================
 
   - name: no-interface-eth0
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: INTERFACE
-    key: Ethernet0
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-interface-eth1-leafs
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: INTERFACE
-    key: Ethernet1
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-interface-eth1-spine
-    action: verify-config-db
+    action: newtron
     devices: [spine]
-    table: INTERFACE
-    key: Ethernet1
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_TUNNEL — VTEP infrastructure (leafs only)
@@ -186,12 +169,11 @@ steps:
   # =========================================================================
 
   - name: no-vtep
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VXLAN_TUNNEL
-    key: vtep1
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_EVPN_NVO — NVO infrastructure (leafs only)
@@ -200,121 +182,109 @@ steps:
   # =========================================================================
 
   - name: no-nvo
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VXLAN_EVPN_NVO
-    key: nvo1
+    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_TUNNEL_MAP — VNI-to-VLAN mappings (cleaned up by per-scenario cleanup)
   # =========================================================================
 
   - name: no-vni-map-10100
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10100_Vlan100"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vni-map-10200
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10200_Vlan200"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10200_Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # SUPPRESS_VLAN_NEIGH — ARP suppression (cleaned up by per-scenario cleanup)
   # =========================================================================
 
   - name: no-arp-suppress-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan100
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-arp-suppress-vlan200
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan200
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VLAN_INTERFACE — SVIs from IRB (cleaned up by per-scenario cleanup)
   # =========================================================================
 
   - name: no-svi-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VLAN_INTERFACE
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-svi-vlan200
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VLAN_INTERFACE
-    key: Vlan200
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # SAG_GLOBAL — anycast gateway MAC (cleaned up by per-scenario cleanup)
   # =========================================================================
 
   - name: no-sag-global
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: SAG_GLOBAL
-    key: IPv4
+    url: /node/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VLAN — per-scenario VLANs (cleaned up by per-scenario cleanup)
   # =========================================================================
 
   - name: no-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vlan200
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: VLAN
-    key: Vlan200
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # NEWTRON_INTENT — no service bindings should remain
   # =========================================================================
 
   - name: no-binding-eth0
-    action: verify-config-db
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    table: NEWTRON_INTENT
-    key: Ethernet0
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-binding-eth1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1, leaf2]
-    table: NEWTRON_INTENT
-    key: Ethernet1
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet1/exists
     expect:
-      exists: false
+      jq: '.exists == false'

@@ -15,37 +15,33 @@ steps:
   # =========================================================================
 
   - name: set-ip-leaf1
-    action: set-interface
+    action: newtron
     devices: [leaf1]
-    interface: Ethernet1
-    params:
-      property: ip
-      value: "10.1.100.1/24"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-ip
+    params: {ip: "10.1.100.1/24"}
 
   - name: set-ip-leaf2
-    action: set-interface
+    action: newtron
     devices: [leaf2]
-    interface: Ethernet1
-    params:
-      property: ip
-      value: "10.1.200.1/24"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-ip
+    params: {ip: "10.1.200.1/24"}
 
   # Verify interface IPs in CONFIG_DB
   - name: verify-ip-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: INTERFACE
-    key: "Ethernet1|10.1.100.1/24"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.100.1%2F24/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-ip-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [leaf2]
-    table: INTERFACE
-    key: "Ethernet1|10.1.200.1/24"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.1.200.1%2F24/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Redistribute connected is already active from provisioner's ConfigureBGP.
   # The new INTERFACE entries become connected routes and are automatically
@@ -59,22 +55,24 @@ steps:
   # =========================================================================
 
   - name: verify-route-leaf1
-    action: verify-route
+    action: newtron
     devices: [leaf1]
-    prefix: "10.1.200.0/24"
-    vrf: default
-    expect:
+    url: /node/{{device}}/route/default/10.1.200.0/24
+    poll:
       timeout: 30s
-      poll_interval: 3s
+      interval: 3s
+    expect:
+      jq: '.protocol == "bgp"'
 
   - name: verify-route-leaf2
-    action: verify-route
+    action: newtron
     devices: [leaf2]
-    prefix: "10.1.100.0/24"
-    vrf: default
-    expect:
+    url: /node/{{device}}/route/default/10.1.100.0/24
+    poll:
       timeout: 30s
-      poll_interval: 3s
+      interval: 3s
+    expect:
+      jq: '.protocol == "bgp"'
 
   # Gateway reachability
   - name: host1-gateway-ping
@@ -123,18 +121,18 @@ steps:
   # up in CONFIG_DB and it must remain active for loopback reachability.
 
   - name: remove-l3-ip-leaf1
-    action: remove-ip
+    action: newtron
     devices: [leaf1]
-    interface: Ethernet1
-    params:
-      ip: "10.1.100.1/24"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/remove-ip
+    params: {ip: "10.1.100.1/24"}
 
   - name: remove-l3-ip-leaf2
-    action: remove-ip
+    action: newtron
     devices: [leaf2]
-    interface: Ethernet1
-    params:
-      ip: "10.1.200.1/24"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/remove-ip
+    params: {ip: "10.1.200.1/24"}
 
   - name: wait-port-mode-change
     action: wait

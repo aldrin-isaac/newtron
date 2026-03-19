@@ -8,63 +8,79 @@ requires: [reprovision]
 steps:
   # Remove services in reverse dependency order
   - name: remove-overlay-irb-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet16
+    method: POST
+    url: /node/{{device}}/interface/Ethernet16/remove-service
 
   - name: remove-overlay-irb-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet16
+    method: POST
+    url: /node/{{device}}/interface/Ethernet16/remove-service
 
   - name: remove-l2-extend-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   - name: remove-l2-extend-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   - name: remove-local-bridge-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet8
+    method: POST
+    url: /node/{{device}}/interface/Ethernet8/remove-service
 
   - name: remove-local-bridge-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet8
+    method: POST
+    url: /node/{{device}}/interface/Ethernet8/remove-service
 
   - name: remove-local-irb-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet4
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/remove-service
 
   - name: remove-local-irb-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet4
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/remove-service
 
   - name: remove-transit-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
 
   - name: remove-transit-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet0
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
 
   - name: teardown-evpn
-    action: teardown-evpn
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/teardown-evpn
 
   - name: remove-bgp-globals
-    action: remove-bgp-globals
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/remove-bgp-globals
 
   - name: remove-loopback
-    action: remove-loopback
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/remove-loopback

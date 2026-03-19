@@ -11,17 +11,21 @@ steps:
     devices: [spine, leaf1, leaf2]
 
   - name: config-reload
-    action: config-reload
+    action: newtron
     devices: [spine, leaf1, leaf2]
+    method: POST
+    url: /node/{{device}}/config-reload
 
   - name: wait-reload
     action: wait
     duration: 45s
 
   - name: verify-bgp
-    action: verify-bgp
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'

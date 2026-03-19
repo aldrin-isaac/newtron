@@ -100,13 +100,3 @@ func (c *Client) InterfaceSet(device, iface, property, value string, opts newtro
 	return c.interfaceWrite(device, iface, "set", body, opts)
 }
 
-// InterfaceApplyQoS applies QoS to an interface.
-func (c *Client) InterfaceApplyQoS(device, iface, policy string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.ApplyQoSRequest{Policy: policy}
-	return c.interfaceWrite(device, iface, "apply-qos", body, opts)
-}
-
-// InterfaceRemoveQoS removes QoS from an interface.
-func (c *Client) InterfaceRemoveQoS(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.interfaceWrite(device, iface, "remove-qos", nil, opts)
-}

@@ -4,8 +4,13 @@ topology: 2node-ngdp
 
 steps:
   - name: ssh-echo-switch2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "echo ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 120s
+      interval: 5s
     expect:
-      contains: "ok"
+      jq: '.output | contains("ok")'

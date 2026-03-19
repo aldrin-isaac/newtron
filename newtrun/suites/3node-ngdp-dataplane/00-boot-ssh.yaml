@@ -6,47 +6,60 @@ topology: 3node-ngdp
 
 steps:
   - name: ssh-echo-spine
-    action: ssh-command
+    action: newtron
     devices: [spine]
-    command: "echo ok"
-    expect:
-      contains: "ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: '.output | contains("ok")'
 
   - name: ssh-echo-leaf1
-    action: ssh-command
+    action: newtron
     devices: [leaf1]
-    command: "echo ok"
-    expect:
-      contains: "ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: '.output | contains("ok")'
 
   - name: ssh-echo-leaf2
-    action: ssh-command
+    action: newtron
     devices: [leaf2]
-    command: "echo ok"
-    expect:
-      contains: "ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: '.output | contains("ok")'
 
   # SwSS must be active for 120+ seconds before config-reload will succeed.
   # SONiC's _swss_ready() checks ActiveEnterTimestampMonotonic and rejects
   # if uptime < 120s. On fresh boot, this means ~4 minutes after power-on.
   - name: swss-ready
-    action: ssh-command
+    action: newtron
     devices: [spine, leaf1, leaf2]
-    command: >-
-      up=$(systemctl show swss.service --property=ActiveEnterTimestampMonotonic --value);
-      now=$(cat /proc/uptime | awk '{printf "%.0f", $1 * 1000000}');
-      elapsed=$(( (now - up) / 1000000 ));
-      [ "$elapsed" -ge 120 ] && echo "swss ready (${elapsed}s uptime)" || echo "swss not ready (${elapsed}s < 120s)"
-    expect:
-      contains: "swss ready"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: >-
+        up=$(systemctl show swss.service --property=ActiveEnterTimestampMonotonic --value);
+        now=$(cat /proc/uptime | awk '{printf "%.0f", $1 * 1000000}');
+        elapsed=$(( (now - up) / 1000000 ));
+        [ "$elapsed" -ge 120 ] && echo "swss ready (${elapsed}s uptime)" || echo "swss not ready (${elapsed}s < 120s)"
+    poll:
       timeout: 300s
-      poll_interval: 10s
+      interval: 10s
+    expect:
+      jq: '.output | contains("swss ready")'
 
   - name: host1-echo
     action: host-exec

@@ -9,62 +9,58 @@ requires: [boot-ssh]
 steps:
   # Apply transit service on Ethernet0
   - name: apply-transit
-    action: apply-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
-    service: transit
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/apply-service
     params:
-      ip: "10.1.0.0/31"
-      peer_as: "65002"
+      service: transit
+      ip_address: "10.1.0.0/31"
+      peer_as: 65002
 
   # Verify service binding created
   - name: verify-binding
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet0
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify INTERFACE entry (IP routing enabled on port)
   - name: verify-interface
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: Ethernet0
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify BGP neighbor with correct ASN
   - name: verify-bgp-neighbor
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1
     expect:
-      fields:
-        asn: "65002"
+      jq: '.asn == "65002"'
 
   # Remove service
   - name: remove-transit
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
 
   # Verify binding removed
   - name: verify-binding-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet0
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Verify BGP neighbor removed
   - name: verify-bgp-neighbor-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'

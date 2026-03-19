@@ -19,68 +19,75 @@ steps:
     devices: [switch1]
 
   - name: config-reload
-    action: config-reload
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/config-reload
 
   - name: restart-bgp
-    action: restart-service
+    action: newtron
     devices: [switch1]
-    service: bgp
+    method: POST
+    url: /node/{{device}}/restart-service
+    params: {service: bgp}
 
   - name: wait-bgp-instance
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
 
   - name: verify-bgp
-    action: verify-bgp
+    action: newtron
     devices: [switch1, switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
 
   # Verify the missing entry was restored
   - name: verify-restored-transit-ip
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.0/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify the extra VLAN was removed
   - name: verify-extra-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan999
+    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Verify the modified BGP ASN was corrected
   - name: verify-asn-corrected
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
     expect:
-      fields:
-        local_asn: "65001"
+      jq: '.local_asn == "65001"'
 
   # Final drift check: must be clean on both devices
   - name: verify-drift-clean-sw1
-    action: verify-drift
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
-      fields:
-        missing: "0"
-        extra: "0"
-        modified: "0"
+      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
 
   - name: verify-drift-clean-sw2
-    action: verify-drift
+    action: newtron
     devices: [switch2]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
+      jq: '.status == "clean"'

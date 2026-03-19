@@ -5,17 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v3"
-)
-
-// Default timeouts and poll intervals for verify actions.
-const (
-	defaultVerifyTimeout  = 120 * time.Second
-	defaultRouteTimeout   = 60 * time.Second
-	defaultPingTimeout    = 30 * time.Second
-	defaultPollInterval   = 5 * time.Second
 )
 
 // ParseScenario reads a YAML scenario file and returns a validated Scenario.
@@ -83,11 +74,11 @@ func requireDevices(prefix string, step *Step) error {
 
 // stepValidation declares what fields/params each action requires.
 type stepValidation struct {
-	needsDevices  bool     // must have a device selector
-	singleDevice  bool     // exactly one device required (implies needsDevices)
-	fields        []string // required step-level fields: "interface", "service", "table", etc.
-	params        []string // required params map keys
-	custom        func(prefix string, step *Step) error
+	needsDevices bool     // must have a device selector
+	singleDevice bool     // exactly one device required (implies needsDevices)
+	fields       []string // required step-level fields: "command", etc.
+	params       []string // required params map keys
+	custom       func(prefix string, step *Step) error
 }
 
 // stepValidations is the declarative validation table for all step actions.
@@ -99,116 +90,20 @@ var stepValidations = map[StepAction]stepValidation{
 		}
 		return nil
 	}},
-	ActionProvision:         {needsDevices: true},
+	ActionProvision:          {needsDevices: true},
 	ActionVerifyProvisioning: {needsDevices: true},
-	ActionVerifyBGP:         {needsDevices: true},
-	ActionVerifyHealth:      {needsDevices: true},
-	ActionApplyFRRDefaults:  {needsDevices: true},
-ActionCleanup:           {needsDevices: true},
-	ActionVerifyConfigDB: {needsDevices: true, fields: []string{"table"}, custom: func(prefix string, step *Step) error {
-		if step.Expect == nil {
-			return fmt.Errorf("%s: expect is required", prefix)
-		}
-		if step.Expect.MinEntries == nil && step.Expect.MaxEntries == nil && step.Expect.Exists == nil && len(step.Expect.Fields) == 0 {
-			return fmt.Errorf("%s: expect must have min_entries, max_entries, exists, or fields", prefix)
+	ActionHostExec:           {singleDevice: true, fields: []string{"command"}},
+	ActionNewtron: {custom: func(prefix string, step *Step) error {
+		if step.URL == "" && len(step.Batch) == 0 {
+			return fmt.Errorf("%s: newtron requires url or batch", prefix)
 		}
 		return nil
 	}},
-	ActionVerifyStateDB: {needsDevices: true, fields: []string{"table", "key"}, custom: func(prefix string, step *Step) error {
-		if step.Expect == nil || len(step.Expect.Fields) == 0 {
-			return fmt.Errorf("%s: expect.fields is required", prefix)
-		}
-		return nil
-	}},
-	ActionVerifyRoute:        {singleDevice: true, fields: []string{"prefix", "vrf"}},
-	ActionVerifyPing:         {singleDevice: true, fields: []string{"target"}},
-	ActionApplyService:       {needsDevices: true, fields: []string{"interface", "service"}},
-	ActionRemoveService:      {needsDevices: true, fields: []string{"interface"}},
-	ActionConfigureLoopback:  {needsDevices: true},
-	ActionSSHCommand:         {needsDevices: true, fields: []string{"command"}},
-	ActionRestartService:     {needsDevices: true, fields: []string{"service"}},
-	ActionConfigReload:       {needsDevices: true},
-	ActionRefreshService:     {needsDevices: true, fields: []string{"interface"}},
-	ActionSetInterface:       {needsDevices: true, fields: []string{"interface"}, params: []string{"property"}},
-	ActionCreateVLAN:         {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionDeleteVLAN:         {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionAddVLANMember:      {needsDevices: true, fields: []string{"vlan_id", "interface"}},
-	ActionRemoveVLANMember:   {needsDevices: true, fields: []string{"vlan_id", "interface"}},
-	ActionCreateVRF:          {needsDevices: true, fields: []string{"vrf"}},
-	ActionDeleteVRF:          {needsDevices: true, fields: []string{"vrf"}},
-	ActionSetupEVPN:          {needsDevices: true},
-	ActionAddVRFInterface:    {needsDevices: true, fields: []string{"vrf", "interface"}},
-	ActionRemoveVRFInterface: {needsDevices: true, fields: []string{"vrf", "interface"}},
-	ActionBindIPVPN:          {needsDevices: true, fields: []string{"vrf"}, params: []string{"ipvpn"}},
-	ActionUnbindIPVPN:        {needsDevices: true, fields: []string{"vrf"}},
-	ActionBindMACVPN:         {needsDevices: true, fields: []string{"vlan_id"}, params: []string{"macvpn"}},
-	ActionUnbindMACVPN:       {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionAddStaticRoute:     {needsDevices: true, fields: []string{"vrf", "prefix"}, params: []string{"next_hop"}},
-	ActionRemoveStaticRoute:  {needsDevices: true, fields: []string{"vrf", "prefix"}},
-	ActionApplyQoS:           {needsDevices: true, fields: []string{"interface"}, params: []string{"qos_policy"}},
-	ActionRemoveQoS:          {needsDevices: true, fields: []string{"interface"}},
-	ActionConfigureSVI:       {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionBGPAddNeighbor:     {needsDevices: true, params: []string{"remote_asn"}},
-	ActionBGPRemoveNeighbor:  {needsDevices: true, params: []string{"neighbor_ip"}},
-
-	// Host test actions
-	ActionHostExec: {singleDevice: true, fields: []string{"command"}},
-
-	// ACL management actions
-	ActionCreateACLTable: {needsDevices: true, params: []string{"name"}},
-	ActionAddACLRule:     {needsDevices: true, params: []string{"name", "rule", "action"}},
-	ActionDeleteACLRule:  {needsDevices: true, params: []string{"name", "rule"}},
-	ActionDeleteACLTable: {needsDevices: true, params: []string{"name"}},
-	ActionBindACL:        {needsDevices: true, fields: []string{"interface"}, params: []string{"name", "direction"}},
-	ActionUnbindACL:      {needsDevices: true, fields: []string{"interface"}, params: []string{"name"}},
-
-	// BGP configuration
-	ActionConfigureBGP: {needsDevices: true},
-
-	// PortChannel management
-	ActionCreatePortChannel:       {needsDevices: true, params: []string{"name"}},
-	ActionDeletePortChannel:       {needsDevices: true, params: []string{"name"}},
-	ActionAddPortChannelMember:    {needsDevices: true, params: []string{"name", "member"}},
-	ActionRemovePortChannelMember: {needsDevices: true, params: []string{"name", "member"}},
-
-	// Drift detection and crash recovery
-	ActionDetectDrift:    {needsDevices: true},
-	ActionVerifyDrift: {needsDevices: true, custom: func(prefix string, step *Step) error {
-		if step.Expect == nil || step.Expect.Status == "" {
-			return fmt.Errorf("%s: expect.status is required (\"clean\" or \"drifted\")", prefix)
-		}
-		if step.Expect.Status != "clean" && step.Expect.Status != "drifted" {
-			return fmt.Errorf("%s: expect.status must be \"clean\" or \"drifted\", got %q", prefix, step.Expect.Status)
-		}
-		return nil
-	}},
-	ActionReadZombie:     {needsDevices: true},
-	ActionRollbackZombie: {needsDevices: true},
-	ActionClearZombie:    {needsDevices: true},
-
-	ActionRemoveSVI:      {needsDevices: true, fields: []string{"vlan_id"}},
-	ActionRemoveIP:       {needsDevices: true, fields: []string{"interface"}, params: []string{"ip"}},
-	ActionTeardownEVPN:     {needsDevices: true},
-	ActionRemoveBGPGlobals: {needsDevices: true},
-	ActionRemoveLoopback:   {needsDevices: true},
 }
 
 // stepFieldGetter maps step-level field names to their accessor functions.
 var stepFieldGetter = map[string]func(*Step) string{
-	"interface": func(s *Step) string { return s.Interface },
-	"service":   func(s *Step) string { return s.Service },
-	"table":     func(s *Step) string { return s.Table },
-	"key":       func(s *Step) string { return s.Key },
-	"prefix":    func(s *Step) string { return s.Prefix },
-	"vrf":       func(s *Step) string { return s.VRF },
-	"target":    func(s *Step) string { return s.Target },
-	"command":   func(s *Step) string { return s.Command },
-	"vlan_id": func(s *Step) string {
-		if s.VLANID == 0 {
-			return ""
-		}
-		return fmt.Sprintf("%d", s.VLANID)
-	},
+	"command": func(s *Step) string { return s.Command },
 }
 
 // validateStepFields checks required fields per action type using the
@@ -348,55 +243,5 @@ func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 
 // applyDefaults sets default values for steps.
 func applyDefaults(s *Scenario) {
-	for i := range s.Steps {
-		step := &s.Steps[i]
-
-		// Default ping count
-		if step.Action == ActionVerifyPing && step.Count == 0 {
-			step.Count = 5
-		}
-
-		if step.Expect == nil {
-			continue
-		}
-
-		// Default timeouts per action
-		switch step.Action {
-		case ActionVerifyStateDB:
-			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = defaultVerifyTimeout
-			}
-			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = defaultPollInterval
-			}
-		case ActionVerifyBGP:
-			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = defaultVerifyTimeout
-			}
-			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = defaultPollInterval
-			}
-			if step.Expect.State == "" {
-				step.Expect.State = "Established"
-			}
-		case ActionVerifyRoute:
-			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = defaultRouteTimeout
-			}
-			if step.Expect.PollInterval == 0 {
-				step.Expect.PollInterval = defaultPollInterval
-			}
-			if step.Expect.Source == "" {
-				step.Expect.Source = "app_db"
-			}
-		case ActionVerifyPing:
-			if step.Expect.Timeout == 0 {
-				step.Expect.Timeout = defaultPingTimeout
-			}
-			if step.Expect.SuccessRate == nil {
-				rate := 1.0
-				step.Expect.SuccessRate = &rate
-			}
-		}
-	}
+	// No defaults needed for the remaining 5 actions.
 }

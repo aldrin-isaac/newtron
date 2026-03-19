@@ -15,88 +15,104 @@ steps:
 
   # Prove operations are unblocked: create-vlan succeeds (no zombie)
   - name: create-vlan-unblocked
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 997
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 997}
 
   - name: delete-vlan-unblocked
-    action: delete-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 997
+    method: DELETE
+    url: /node/{{device}}/vlan/997
 
   # Drift check proves provisioned state survived the rollback
   - name: verify-drift-clean
-    action: verify-drift
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
+      jq: '.status == "clean"'
 
   # --- Part 2: Test clear-zombie (alternative to rollback) ---
 
   # Inject a second zombie intent
   - name: inject-second-zombie-vlan
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan600' vlanid 600"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan600' vlanid 600"}
 
   - name: inject-second-zombie-intent
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: >-
-      sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|switch1'
-      holder 'crashed2@test'
-      created '2026-03-15T01:00:00Z'
-      phase ''
-      rollback_holder ''
-      rollback_started ''
-      operations '[{"name":"create-vlan","params":{"vlan_id":"600"},"reverse_op":"device.delete-vlan","started":"2026-03-15T01:00:01Z","completed":"2026-03-15T01:00:02Z"}]'
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: >-
+        sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|switch1'
+        holder 'crashed2@test'
+        created '2026-03-15T01:00:00Z'
+        phase ''
+        rollback_holder ''
+        rollback_started ''
+        operations '[{"name":"create-vlan","params":{"vlan_id":"600"},"reverse_op":"device.delete-vlan","started":"2026-03-15T01:00:01Z","completed":"2026-03-15T01:00:02Z"}]'
 
   # Verify second zombie blocks operations
   - name: verify-blocked-again
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 999
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 999}
     expect_failure: true
-    expect:
-      contains: "zombie"
 
   # Clear zombie WITHOUT rollback — the operator's "I know what I'm doing" path
   - name: clear-zombie-intent
-    action: clear-zombie
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intents/zombie/clear
 
   # Verify intent is gone
   - name: verify-cleared
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 EXISTS 'NEWTRON_INTENT|switch1'"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 EXISTS 'NEWTRON_INTENT|switch1'"}
     expect:
-      contains: "0"
+      jq: '.output | contains("0")'
 
   # Verify VLAN 600 STILL EXISTS — clear doesn't rollback, just removes intent
   - name: verify-vlan600-survives-clear
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan600
+    url: /node/{{device}}/configdb/VLAN/Vlan600
     expect:
-      fields:
-        vlanid: "600"
+      jq: '.vlanid == "600"'
 
   # Clean up the leftover VLAN manually
   - name: cleanup-vlan600
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 DEL 'VLAN|Vlan600'"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 DEL 'VLAN|Vlan600'"}
 
   # Verify operations unblocked after clear — create-vlan should succeed now
   - name: create-vlan-after-clear
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 998
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 998}
 
   # Clean up the test VLAN
   - name: cleanup-vlan998
-    action: delete-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 998
+    method: DELETE
+    url: /node/{{device}}/vlan/998

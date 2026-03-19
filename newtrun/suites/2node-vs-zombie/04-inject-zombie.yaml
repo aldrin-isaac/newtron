@@ -14,52 +14,57 @@ requires: [provision]
 steps:
   # Write the CONFIG_DB entries that the zombie operations would have created
   - name: create-zombie-vlan
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan500' vlanid 500"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan500' vlanid 500"}
 
   - name: create-zombie-vrf
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HSET 'VRF|ZOMBIE_VRF' vrf_name ZOMBIE_VRF"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VRF|ZOMBIE_VRF' vrf_name ZOMBIE_VRF"}
 
   # Write the zombie intent record — JSON operations array in a single field
   - name: write-zombie-intent
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: >-
-      sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|switch1'
-      holder 'crashed@test'
-      created '2026-03-15T00:00:00Z'
-      phase ''
-      rollback_holder ''
-      rollback_started ''
-      operations '[{"name":"create-vlan","params":{"vlan_id":"500"},"reverse_op":"device.delete-vlan","started":"2026-03-15T00:00:01Z","completed":"2026-03-15T00:00:02Z"},{"name":"create-vrf","params":{"vrf":"ZOMBIE_VRF"},"reverse_op":"device.delete-vrf","started":"2026-03-15T00:00:03Z"}]'
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: >-
+        sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|switch1'
+        holder 'crashed@test'
+        created '2026-03-15T00:00:00Z'
+        phase ''
+        rollback_holder ''
+        rollback_started ''
+        operations '[{"name":"create-vlan","params":{"vlan_id":"500"},"reverse_op":"device.delete-vlan","started":"2026-03-15T00:00:01Z","completed":"2026-03-15T00:00:02Z"},{"name":"create-vrf","params":{"vrf":"ZOMBIE_VRF"},"reverse_op":"device.delete-vrf","started":"2026-03-15T00:00:03Z"}]'
 
   # Verify the intent was written correctly
   - name: verify-intent-holder
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HGET 'NEWTRON_INTENT|switch1' holder"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HGET 'NEWTRON_INTENT|switch1' holder"}
     expect:
-      contains: "crashed@test"
+      jq: '.output | contains("crashed@test")'
 
   # Verify the zombie VLAN exists
   - name: verify-zombie-vlan-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan500
+    url: /node/{{device}}/configdb/VLAN/Vlan500
     expect:
-      fields:
-        vlanid: "500"
+      jq: '.vlanid == "500"'
 
   # Verify the zombie VRF exists
   - name: verify-zombie-vrf-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VRF
-    key: ZOMBIE_VRF
+    url: /node/{{device}}/configdb/VRF/ZOMBIE_VRF
     expect:
-      fields:
-        vrf_name: "ZOMBIE_VRF"
+      jq: '.vrf_name == "ZOMBIE_VRF"'

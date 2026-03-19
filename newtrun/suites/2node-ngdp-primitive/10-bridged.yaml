@@ -9,74 +9,85 @@ requires: [boot-ssh]
 
 steps:
   - name: create-vlan100
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
   - name: add-member-eth1-untagged
-    action: add-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet1
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet1, tagged: false}
 
   - name: add-member-eth3-untagged
-    action: add-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet3
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet3, tagged: false}
 
   - name: add-member-eth2-tagged
-    action: add-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet2
-    vlan_id: 100
-    tagging: tagged
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet2, tagged: true}
 
   - name: verify-vlan100-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-member-eth1-untagged
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet1"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1
     expect:
-      fields:
-        tagging_mode: untagged
+      jq: '.tagging_mode == "untagged"'
 
   - name: verify-member-eth2-tagged
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet2"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet2
     expect:
-      fields:
-        tagging_mode: tagged
+      jq: '.tagging_mode == "tagged"'
 
   - name: verify-member-eth3-untagged
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet3"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet3
     expect:
-      fields:
-        tagging_mode: untagged
+      jq: '.tagging_mode == "untagged"'
 
   # Poll ASIC_DB for VLAN SAI objects (30s timeout)
   - name: poll-asic-vlan-ready
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN:*' | wc -l"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.output | contains("2")'
 
   - name: poll-asic-vlanmember-ready
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6; do count=$(sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l); [ $count -ge 2 ] && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 1 KEYS 'ASIC_STATE:SAI_OBJECT_TYPE_VLAN_MEMBER:*' | wc -l"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.output | contains("2")'
 
   # Wait for NGDP bridge plane
   - name: wait-bridge-plane

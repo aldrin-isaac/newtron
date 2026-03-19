@@ -11,23 +11,36 @@ steps:
     devices: [switch1, switch2]
 
   - name: config-reload
-    action: config-reload
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/config-reload
 
   - name: restart-bgp
-    action: restart-service
+    action: newtron
     devices: [switch1, switch2]
-    service: bgp
+    method: POST
+    url: /node/{{device}}/restart-service
+    params: {service: bgp}
 
   - name: wait-bgp-instance
-    action: ssh-command
+    action: newtron
     devices: [switch1, switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
 
   - name: verify-bgp
-    action: verify-bgp
+    action: newtron
     devices: [switch1, switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'

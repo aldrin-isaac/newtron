@@ -9,80 +9,72 @@ requires: [teardown-overlay]
 steps:
   # 8a: Apply svc-evpn-irb on Eth3 (both switches)
   - name: apply-svc-evpn-irb-sw1
-    action: apply-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet12
-    service: svc-evpn-irb
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/apply-service
+    params: {service: svc-evpn-irb}
 
   - name: apply-svc-evpn-irb-sw2
-    action: apply-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet12
-    service: svc-evpn-irb
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/apply-service
+    params: {service: svc-evpn-irb}
 
   # Verify service binding
   - name: verify-binding-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet12
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-binding-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet12
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify VLAN 400 created
   - name: verify-vlan400-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-vlan400-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: VLAN
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify VLAN member (tagged for apply-service)
   - name: verify-vlan-member-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan400|Ethernet12"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet12/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Verify VXLAN tunnel map
   - name: verify-tunnel-map-400-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI50400_Vlan400"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vlan400
     expect:
-      fields:
-        vlan: Vlan400
-        vni: "50400"
+      jq: '.vlan == "Vlan400" and .vni == "50400"'
 
   # Verify VLAN_INTERFACE (SVI with VRF)
   - name: verify-svi-vlan400-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_INTERFACE
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan400
     expect:
-      fields:
-        vrf_name: Vrf_IRB
+      jq: '.vrf_name == "Vrf_IRB"'
 
   # Configure host sub-interfaces while waiting (overlap with EVPN convergence)
   - name: host3-configure-subintf
@@ -105,23 +97,39 @@ steps:
 
   # Verify EVPN BGP sessions re-established after overlay rebuild
   - name: verify-evpn-bgp-sessions
-    action: verify-bgp
+    action: newtron
     devices: [switch1]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 10s
+      interval: 10s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
 
-  # Prime NGDP ARP from SVI (retry loop handles stragglers)
+  # Prime NGDP ARP from SVI (poll handles stragglers)
   - name: prime-arp-svi-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Vlan400 10.4.0.3 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.3"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: prime-arp-svi-sw2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Vlan400 10.4.0.6 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.6"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: wait-after-prime
     action: wait
@@ -144,107 +152,104 @@ steps:
 
   # 8b: Refresh service — verify no error, binding still present
   - name: refresh-svc-sw1
-    action: refresh-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/refresh-service
 
   - name: refresh-svc-sw2
-    action: refresh-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/refresh-service
 
   - name: verify-binding-after-refresh-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet12
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # 8c: Remove service from both Eth3
   - name: remove-svc-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   - name: remove-svc-sw2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   - name: verify-binding-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet12
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-binding-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet12
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-vlan400-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-vlan400-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: VLAN
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # 8d: Apply svc-bridged on sw1:Eth1
   - name: apply-svc-bridged-sw1
-    action: apply-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet4
-    service: svc-bridged
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/apply-service
+    params: {service: svc-bridged}
 
   - name: verify-bridged-binding-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet4
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet4/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-vlan200-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan200
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # 8e: Remove svc-bridged from sw1:Eth1
   - name: remove-svc-bridged-sw1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet4
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/remove-service
 
   - name: verify-bridged-binding-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet4
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-vlan200-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan200
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'

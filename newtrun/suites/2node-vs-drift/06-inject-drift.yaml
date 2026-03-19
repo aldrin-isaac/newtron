@@ -16,56 +16,57 @@ steps:
   # The abstract Node will still generate INTERFACE|Ethernet0|10.1.0.0/31,
   # but the physical device no longer has it → "missing" drift.
   - name: inject-missing-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.0/31'"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 DEL 'INTERFACE|Ethernet0|10.1.0.0/31'"}
     expect:
-      contains: "1"
+      jq: '.output | contains("1")'
 
   # Confirm it's actually gone
   - name: verify-deleted
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.0/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # EXTRA: add an unexpected VLAN not in the topology.
   # The abstract Node doesn't generate VLAN|Vlan999 → "extra" drift.
   - name: inject-extra-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"}
     expect:
-      contains: "1"
+      jq: '.output | contains("1")'
 
   # Confirm it exists
   - name: verify-extra-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan999
+    url: /node/{{device}}/configdb/VLAN/Vlan999
     expect:
-      fields:
-        vlanid: "999"
+      jq: '.vlanid == "999"'
 
   # MODIFIED: change BGP ASN to a wrong value.
   # The abstract Node generates local_asn=65001 but the device now has 99999
   # → "modified" drift.
   - name: inject-modified-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 99999"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 99999"}
     expect:
-      contains: "0"
+      jq: '.output | contains("0")'
 
   # Confirm the modification took effect
   - name: verify-modified
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
     expect:
-      fields:
-        local_asn: "99999"
+      jq: '.local_asn == "99999"'

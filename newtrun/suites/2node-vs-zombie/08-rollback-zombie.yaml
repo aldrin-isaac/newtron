@@ -14,48 +14,49 @@ requires: [read-zombie]
 steps:
   # Execute rollback — reverses create-vlan and create-vrf
   - name: rollback-zombie-intent
-    action: rollback-zombie
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intents/zombie/rollback
 
   # Verify VLAN 500 was cleaned up
   - name: verify-no-vlan500
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan500
+    url: /node/{{device}}/configdb/VLAN/Vlan500/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Verify VRF ZOMBIE_VRF was cleaned up
   - name: verify-no-zombie-vrf
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VRF
-    key: ZOMBIE_VRF
+    url: /node/{{device}}/configdb/VRF/ZOMBIE_VRF/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Verify zombie intent was cleared after rollback
   - name: verify-intent-gone
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "sudo redis-cli -n 4 EXISTS 'NEWTRON_INTENT|switch1'"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 EXISTS 'NEWTRON_INTENT|switch1'"}
     expect:
-      contains: "0"
+      jq: '.output | contains("0")'
 
   # Idempotent rollback: calling again should succeed (no zombie to rollback)
   # read-zombie returns nil → "no zombie intent found" (not an error)
   - name: verify-no-zombie-after-rollback
-    action: read-zombie
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/intents/zombie
 
   # Verify provisioned VLAN 100 (from local-irb service) was NOT affected
   # by the rollback — rollback only reverses zombie operations
   - name: verify-provisioned-state-intact
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100
     expect:
-      fields:
-        vlanid: "100"
+      jq: '.vlanid == "100"'

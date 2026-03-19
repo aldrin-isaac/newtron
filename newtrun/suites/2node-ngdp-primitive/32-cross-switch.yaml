@@ -9,77 +9,103 @@ requires: [teardown-local, bgp-underlay]
 
 steps:
   - name: set-ip-eth1-switch1
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: Ethernet1
-    params:
-      property: ip
-      value: "10.20.0.1/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-ip
+    params: {ip: "10.20.0.1/31"}
 
   - name: set-ip-eth1-switch2
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: Ethernet1
-    params:
-      property: ip
-      value: "10.20.1.1/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-ip
+    params: {ip: "10.20.1.1/31"}
 
   - name: verify-ip-sw1-eth1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet1|10.20.0.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.0.1%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-ip-sw2-eth1
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet1|10.20.1.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Poll for kernel IPs (90s)
   - name: wait-eth1-ip-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show Ethernet1 | grep -q '10.20.0.1' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show Ethernet1"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.20.0.1")'
 
   - name: wait-eth1-ip-sw2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show Ethernet1 | grep -q '10.20.1.1' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show Ethernet1"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.20.1.1")'
 
   # Verify BGP distributes connected routes (60s timeout)
   - name: verify-route-sw1
-    action: verify-route
+    action: newtron
     devices: [switch1]
-    prefix: "10.20.1.0/31"
-    vrf: "default"
-    expect:
-      protocol: "bgp"
+    url: /node/{{device}}/route/default/10.20.1.0/31
+    poll:
       timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.protocol == "bgp"'
 
   - name: verify-route-sw2
-    action: verify-route
+    action: newtron
     devices: [switch2]
-    prefix: "10.20.0.0/31"
-    vrf: "default"
-    expect:
-      protocol: "bgp"
+    url: /node/{{device}}/route/default/10.20.0.0/31
+    poll:
       timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.protocol == "bgp"'
 
   # Prime NGDP ARP
   - name: prime-arp-sw1-eth1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Ethernet1 10.20.0.0 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.0.0"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: prime-arp-sw2-eth1
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Ethernet1 10.20.1.0 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: wait-after-prime
     action: wait

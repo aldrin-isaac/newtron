@@ -12,15 +12,6 @@ import (
 // Network management
 // ============================================================================
 
-// ListNetworks returns all registered networks.
-func (c *Client) ListNetworks() ([]api.NetworkInfo, error) {
-	var result []api.NetworkInfo
-	if err := c.doGet("/network", &result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 // HasTopology returns whether the registered network has a topology.
 func (c *Client) HasTopology() (bool, error) {
 	var result []api.NetworkInfo

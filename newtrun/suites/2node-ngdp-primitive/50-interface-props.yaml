@@ -8,69 +8,57 @@ requires: [boot-ssh]
 
 steps:
   - name: set-mtu-9100
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      property: mtu
-      value: "9100"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/set
+    params: {property: mtu, value: "9100"}
 
   - name: verify-mtu
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT
-    key: Ethernet10
+    url: /node/{{device}}/configdb/PORT/Ethernet10
     expect:
-      fields:
-        mtu: "9100"
+      jq: '.mtu == "9100"'
 
   - name: set-admin-down
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      property: admin_status
-      value: down
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/set
+    params: {property: admin_status, value: down}
 
   - name: verify-admin-down
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT
-    key: Ethernet10
+    url: /node/{{device}}/configdb/PORT/Ethernet10
     expect:
-      fields:
-        admin_status: down
+      jq: '.admin_status == "down"'
 
   - name: set-admin-up
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      property: admin_status
-      value: up
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/set
+    params: {property: admin_status, value: up}
 
   - name: verify-admin-up
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT
-    key: Ethernet10
+    url: /node/{{device}}/configdb/PORT/Ethernet10
     expect:
-      fields:
-        admin_status: up
+      jq: '.admin_status == "up"'
 
   - name: set-description
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      property: description
-      value: "test-interface-props"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/set
+    params: {property: description, value: "test-interface-props"}
 
   - name: verify-description
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT
-    key: Ethernet10
+    url: /node/{{device}}/configdb/PORT/Ethernet10
     expect:
-      fields:
-        description: test-interface-props
+      jq: '.description == "test-interface-props"'

@@ -9,84 +9,81 @@ requires: [evpn-setup]
 
 steps:
   - name: create-vlan300-switch1
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 300
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 300}
 
   - name: create-vlan300-switch2
-    action: create-vlan
+    action: newtron
     devices: [switch2]
-    vlan_id: 300
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 300}
 
   - name: add-member-sw1-eth2
-    action: add-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet2
-    vlan_id: 300
+    method: POST
+    url: /node/{{device}}/vlan/300/member
+    params: {interface: Ethernet2, tagged: false}
 
   - name: add-member-sw2-eth2
-    action: add-vlan-member
+    action: newtron
     devices: [switch2]
-    interface: Ethernet2
-    vlan_id: 300
+    method: POST
+    url: /node/{{device}}/vlan/300/member
+    params: {interface: Ethernet2, tagged: false}
 
   - name: bind-macvpn-switch1
-    action: bind-macvpn
+    action: newtron
     devices: [switch1]
-    vlan_id: 300
-    params:
-      macvpn: vlan300
+    method: POST
+    url: /node/{{device}}/interface/Vlan300/bind-macvpn
+    params: {macvpn: vlan300}
 
   - name: bind-macvpn-switch2
-    action: bind-macvpn
+    action: newtron
     devices: [switch2]
-    vlan_id: 300
-    params:
-      macvpn: vlan300
+    method: POST
+    url: /node/{{device}}/interface/Vlan300/bind-macvpn
+    params: {macvpn: vlan300}
 
   - name: verify-vlan300-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan300
+    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-vlan300-member-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan300|Ethernet2"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet2/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-tunnel-map-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI50300_Vlan300"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50300_Vlan300
     expect:
-      fields:
-        vlan: Vlan300
-        vni: "50300"
+      jq: '.vlan == "Vlan300" and .vni == "50300"'
 
   - name: verify-tunnel-map-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI50300_Vlan300"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50300_Vlan300
     expect:
-      fields:
-        vlan: Vlan300
-        vni: "50300"
+      jq: '.vlan == "Vlan300" and .vni == "50300"'
 
   - name: verify-arp-suppress-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan300
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan300/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: wait-vxlan-ready
     action: wait

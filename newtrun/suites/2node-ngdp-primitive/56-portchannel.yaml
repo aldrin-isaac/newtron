@@ -9,133 +9,155 @@ requires: [cross-switch]
 steps:
   # 1. Create PortChannel on both switches
   - name: create-portchannel1-sw1
-    action: create-portchannel
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
+    method: POST
+    url: /node/{{device}}/portchannel
+    params: {name: PortChannel1}
 
   - name: create-portchannel1-sw2
-    action: create-portchannel
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
+    method: POST
+    url: /node/{{device}}/portchannel
+    params: {name: PortChannel1}
 
   # 2. Add members
   - name: add-member-eth4-sw1
-    action: add-portchannel-member
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
-      member: Ethernet4
+    method: POST
+    url: /node/{{device}}/portchannel/PortChannel1/member
+    params: {interface: Ethernet4}
 
   - name: add-member-eth5-sw1
-    action: add-portchannel-member
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
-      member: Ethernet5
+    method: POST
+    url: /node/{{device}}/portchannel/PortChannel1/member
+    params: {interface: Ethernet5}
 
   - name: add-member-eth4-sw2
-    action: add-portchannel-member
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
-      member: Ethernet4
+    method: POST
+    url: /node/{{device}}/portchannel/PortChannel1/member
+    params: {interface: Ethernet4}
 
   - name: add-member-eth5-sw2
-    action: add-portchannel-member
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
-      member: Ethernet5
+    method: POST
+    url: /node/{{device}}/portchannel/PortChannel1/member
+    params: {interface: Ethernet5}
 
   # 3. Verify CONFIG_DB entries
   - name: verify-portchannel-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORTCHANNEL
-    key: PortChannel1
+    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-portchannel-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: PORTCHANNEL
-    key: PortChannel1
+    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-member-eth4-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORTCHANNEL_MEMBER
-    key: "PortChannel1|Ethernet4"
+    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet4/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-member-eth5-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORTCHANNEL_MEMBER
-    key: "PortChannel1|Ethernet5"
+    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet5/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-member-eth4-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: PORTCHANNEL_MEMBER
-    key: "PortChannel1|Ethernet4"
+    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet4/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-member-eth5-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: PORTCHANNEL_MEMBER
-    key: "PortChannel1|Ethernet5"
+    url: /node/{{device}}/configdb/PORTCHANNEL_MEMBER/PortChannel1%7CEthernet5/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # 4. Set IPs on PortChannel1
   - name: set-ip-portchannel1-sw1
-    action: set-interface
+    action: newtron
     devices: [switch1]
-    interface: PortChannel1
-    params:
-      property: ip
-      value: "10.30.0.0/31"
+    method: POST
+    url: /node/{{device}}/interface/PortChannel1/set-ip
+    params: {ip: "10.30.0.0/31"}
 
   - name: set-ip-portchannel1-sw2
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: PortChannel1
-    params:
-      property: ip
-      value: "10.30.0.1/31"
+    method: POST
+    url: /node/{{device}}/interface/PortChannel1/set-ip
+    params: {ip: "10.30.0.1/31"}
 
   # 5. Wait for kernel IPs
   - name: wait-portchannel1-ip-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show PortChannel1 | grep -q '10.30.0.0' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show PortChannel1"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.30.0.0")'
 
   - name: wait-portchannel1-ip-sw2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do ip addr show PortChannel1 | grep -q '10.30.0.1' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show PortChannel1"}
+    poll:
+      timeout: 90s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.30.0.1")'
 
   # 6. Prime ARP
   - name: prime-arp-portchannel1-sw1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I PortChannel1 10.30.0.1 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I PortChannel1 10.30.0.1"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: prime-arp-portchannel1-sw2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I PortChannel1 10.30.0.0 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I PortChannel1 10.30.0.0"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: wait-after-prime
     action: wait
@@ -143,20 +165,18 @@ steps:
 
   # 7. Add static routes (AD=1 overrides BGP AD=20)
   - name: add-static-route-sw1
-    action: add-static-route
+    action: newtron
     devices: [switch1]
-    vrf: default
-    prefix: "10.20.1.0/31"
-    params:
-      next_hop: "10.30.0.1"
+    method: POST
+    url: /node/{{device}}/vrf/default/route
+    params: {prefix: "10.20.1.0/31", nexthop: "10.30.0.1"}
 
   - name: add-static-route-sw2
-    action: add-static-route
+    action: newtron
     devices: [switch2]
-    vrf: default
-    prefix: "10.20.0.0/31"
-    params:
-      next_hop: "10.30.0.0"
+    method: POST
+    url: /node/{{device}}/vrf/default/route
+    params: {prefix: "10.20.0.0/31", nexthop: "10.30.0.0"}
 
   - name: wait-routes-install
     action: wait
@@ -179,84 +199,78 @@ steps:
 
   # 9. Cleanup
   - name: remove-static-route-sw1
-    action: remove-static-route
+    action: newtron
     devices: [switch1]
-    vrf: default
-    prefix: "10.20.1.0/31"
+    method: DELETE
+    url: /node/{{device}}/vrf/default/route/10.20.1.0/31
 
   - name: remove-static-route-sw2
-    action: remove-static-route
+    action: newtron
     devices: [switch2]
-    vrf: default
-    prefix: "10.20.0.0/31"
+    method: DELETE
+    url: /node/{{device}}/vrf/default/route/10.20.0.0/31
 
   - name: remove-ip-portchannel1-sw1
-    action: remove-ip
+    action: newtron
     devices: [switch1]
-    interface: PortChannel1
-    params:
-      ip: "10.30.0.0/31"
+    method: POST
+    url: /node/{{device}}/interface/PortChannel1/remove-ip
+    params: {ip: "10.30.0.0/31"}
 
   - name: remove-ip-portchannel1-sw2
-    action: remove-ip
+    action: newtron
     devices: [switch2]
-    interface: PortChannel1
-    params:
-      ip: "10.30.0.1/31"
+    method: POST
+    url: /node/{{device}}/interface/PortChannel1/remove-ip
+    params: {ip: "10.30.0.1/31"}
 
   - name: remove-member-eth5-sw1
-    action: remove-portchannel-member
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
-      member: Ethernet5
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet5
 
   - name: remove-member-eth4-sw1
-    action: remove-portchannel-member
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
-      member: Ethernet4
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet4
 
   - name: remove-member-eth5-sw2
-    action: remove-portchannel-member
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
-      member: Ethernet5
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet5
 
   - name: remove-member-eth4-sw2
-    action: remove-portchannel-member
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
-      member: Ethernet4
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet4
 
   - name: delete-portchannel1-sw1
-    action: delete-portchannel
+    action: newtron
     devices: [switch1]
-    params:
-      name: PortChannel1
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1
 
   - name: delete-portchannel1-sw2
-    action: delete-portchannel
+    action: newtron
     devices: [switch2]
-    params:
-      name: PortChannel1
+    method: DELETE
+    url: /node/{{device}}/portchannel/PortChannel1
 
   # 10. Verify cleanup
   - name: verify-portchannel-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORTCHANNEL
-    key: PortChannel1
+    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-portchannel-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: PORTCHANNEL
-    key: PortChannel1
+    url: /node/{{device}}/configdb/PORTCHANNEL/PortChannel1/exists
     expect:
-      exists: false
+      jq: '.exists == false'

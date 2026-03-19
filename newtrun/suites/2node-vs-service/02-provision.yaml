@@ -18,30 +18,43 @@ steps:
   # config reload stops all daemons, re-reads config_db.json, restarts them.
   # May be skipped on sonic-vs if SwSS isn't ready within timeout.
   - name: config-reload
-    action: config-reload
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/config-reload
 
   # Explicit BGP restart ensures frrcfgd startup replay processes all
   # BGP entries. Required on sonic-vs because:
   # 1. config reload may be skipped (SwSS not ready)
   # 2. frrcfgd runtime notifications are broken (RCA-045)
   - name: restart-bgp
-    action: restart-service
+    action: newtron
     devices: [switch1, switch2]
-    service: bgp
+    method: POST
+    url: /node/{{device}}/restart-service
+    params: {service: bgp}
 
   # Wait for FRR to fully restart after BGP service restart.
   - name: wait-bgp-instance
-    action: ssh-command
+    action: newtron
     devices: [switch1, switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10; do sudo vtysh -c 'show running-config' 2>/dev/null | grep -q 'router bgp' && break; sleep 2; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
 
   # BGP convergence gate — wait for all sessions to establish before
   # proceeding to health check and dataplane tests.
   - name: verify-bgp
-    action: verify-bgp
+    action: newtron
     devices: [switch1, switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'

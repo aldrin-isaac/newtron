@@ -8,37 +8,36 @@ requires: [boot-ssh]
 
 steps:
   - name: apply-qos-ethernet11
-    action: apply-qos
+    action: newtron
     devices: [switch1]
-    interface: Ethernet44
-    params:
-      qos_policy: test-4q
+    method: POST
+    url: /node/{{device}}/apply-qos
+    params: {interface: Ethernet44, policy: test-4q}
 
   - name: verify-port-qos-map
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT_QOS_MAP
-    key: Ethernet44
+    url: /node/{{device}}/configdb/PORT_QOS_MAP/Ethernet44/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-dscp-tc-map
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: DSCP_TO_TC_MAP
-    key: TEST_4Q
+    url: /node/{{device}}/configdb/DSCP_TO_TC_MAP/TEST_4Q/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: remove-qos-ethernet11
-    action: remove-qos
+    action: newtron
     devices: [switch1]
-    interface: Ethernet44
+    method: POST
+    url: /node/{{device}}/remove-qos
+    params: {interface: Ethernet44}
 
   - name: verify-port-qos-map-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: PORT_QOS_MAP
-    key: Ethernet44
+    url: /node/{{device}}/configdb/PORT_QOS_MAP/Ethernet44/exists
     expect:
-      exists: false
+      jq: '.exists == false'

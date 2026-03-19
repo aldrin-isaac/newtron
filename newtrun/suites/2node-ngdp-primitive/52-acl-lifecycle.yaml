@@ -8,126 +8,114 @@ requires: [boot-ssh]
 
 steps:
   - name: create-acl-table
-    action: create-acl-table
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/acl
     params:
       name: TEST_ACL
       type: L3
       stage: ingress
 
   - name: verify-acl-table-created
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_TABLE
-    key: TEST_ACL
+    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: add-acl-rule-10
-    action: add-acl-rule
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/acl/TEST_ACL/rule
     params:
-      name: TEST_ACL
-      rule: RULE_10
+      rule_name: RULE_10
       action: FORWARD
       priority: 10
       src_ip: "10.0.0.0/8"
 
   - name: verify-acl-rule-10
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_RULE
-    key: "TEST_ACL|RULE_10"
+    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10
     expect:
-      fields:
-        PACKET_ACTION: FORWARD
-        PRIORITY: "10"
-        SRC_IP: "10.0.0.0/8"
+      jq: '.PACKET_ACTION == "FORWARD" and .PRIORITY == "10" and .SRC_IP == "10.0.0.0/8"'
 
   - name: add-acl-rule-20
-    action: add-acl-rule
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/acl/TEST_ACL/rule
     params:
-      name: TEST_ACL
-      rule: RULE_20
+      rule_name: RULE_20
       action: DROP
       priority: 20
       dst_ip: "192.168.0.0/16"
 
   - name: verify-acl-rule-20
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_RULE
-    key: "TEST_ACL|RULE_20"
+    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20
     expect:
-      fields:
-        PACKET_ACTION: DROP
-        PRIORITY: "20"
+      jq: '.PACKET_ACTION == "DROP" and .PRIORITY == "20"'
 
   - name: bind-acl-ethernet10
-    action: bind-acl
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      name: TEST_ACL
-      direction: ingress
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/bind-acl
+    params: {acl: TEST_ACL, direction: ingress}
 
   - name: verify-acl-bound
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_TABLE
-    key: TEST_ACL
+    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL
     expect:
-      fields:
-        ports: Ethernet10
+      jq: '.ports == "Ethernet10"'
 
   - name: unbind-acl-ethernet10
-    action: unbind-acl
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    params:
-      name: TEST_ACL
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/unbind-acl
+    params: {acl: TEST_ACL}
 
   - name: delete-acl-rule-20
-    action: delete-acl-rule
+    action: newtron
     devices: [switch1]
-    params:
-      name: TEST_ACL
-      rule: RULE_20
+    method: DELETE
+    url: /node/{{device}}/acl/TEST_ACL/rule/RULE_20
 
   - name: verify-rule-20-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_RULE
-    key: "TEST_ACL|RULE_20"
+    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_20/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: delete-acl-rule-10
-    action: delete-acl-rule
+    action: newtron
     devices: [switch1]
-    params:
-      name: TEST_ACL
-      rule: RULE_10
+    method: DELETE
+    url: /node/{{device}}/acl/TEST_ACL/rule/RULE_10
 
   - name: verify-rule-10-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_RULE
-    key: "TEST_ACL|RULE_10"
+    url: /node/{{device}}/configdb/ACL_RULE/TEST_ACL%7CRULE_10/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: delete-acl-table
-    action: delete-acl-table
+    action: newtron
     devices: [switch1]
-    params:
-      name: TEST_ACL
+    method: DELETE
+    url: /node/{{device}}/acl/TEST_ACL
 
   - name: verify-acl-table-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ACL_TABLE
-    key: TEST_ACL
+    url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
-      exists: false
+      jq: '.exists == false'

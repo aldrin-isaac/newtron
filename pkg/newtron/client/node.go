@@ -40,15 +40,6 @@ func (c *Client) ShowInterface(device, name string) (*newtron.InterfaceDetail, e
 	return &result, nil
 }
 
-// ShowServiceBinding returns the service binding detail for an interface.
-func (c *Client) ShowServiceBinding(device, iface string) (*newtron.ServiceBindingDetail, error) {
-	var result newtron.ServiceBindingDetail
-	if err := c.doGet(c.nodePath(device)+"/interface/"+url.PathEscape(iface)+"/binding", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
 // ListVLANs returns VLAN status entries.
 func (c *Client) ListVLANs(device string) ([]newtron.VLANStatusEntry, error) {
 	var result []newtron.VLANStatusEntry

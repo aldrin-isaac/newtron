@@ -8,60 +8,61 @@ requires: [bgp-underlay]
 
 steps:
   - name: setup-evpn-switch1
-    action: setup-evpn
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/setup-evpn
 
   - name: setup-evpn-switch2
-    action: setup-evpn
+    action: newtron
     devices: [switch2]
+    method: POST
+    url: /node/{{device}}/setup-evpn
 
   - name: verify-vxlan-tunnel-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_TUNNEL
-    key: vtep1
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
-      fields:
-        src_ip: "10.0.0.1"
+      jq: '.src_ip == "10.0.0.1"'
 
   - name: verify-vxlan-tunnel-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: VXLAN_TUNNEL
-    key: vtep1
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1
     expect:
-      fields:
-        src_ip: "10.0.0.2"
+      jq: '.src_ip == "10.0.0.2"'
 
   - name: verify-vxlan-nvo-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_EVPN_NVO
-    key: nvo1
+    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1
     expect:
-      fields:
-        source_vtep: vtep1
+      jq: '.source_vtep == "vtep1"'
 
   - name: verify-bgp-l2vpn-af
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS_AF
-    key: "default|l2vpn_evpn"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-bgp-evpn-switch1
-    action: verify-bgp
+    action: newtron
     devices: [switch1]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
 
   - name: verify-bgp-evpn-switch2
-    action: verify-bgp
+    action: newtron
     devices: [switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'

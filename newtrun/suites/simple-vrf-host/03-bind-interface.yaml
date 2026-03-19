@@ -8,63 +8,72 @@ requires: [create-vrf]
 steps:
   # Bind Ethernet2 to Vrf_CUSTOMER via newtron primitive.
   - name: bind-ethernet2-to-customer-vrf
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: Ethernet2
-    params:
-      property: vrf
-      value: Vrf_CUSTOMER
+    method: POST
+    url: /node/{{device}}/interface/Ethernet2/set-vrf
+    params: {vrf: Vrf_CUSTOMER}
 
   # Assign IP to Ethernet2 (already bound to Vrf_CUSTOMER in CONFIG_DB).
   - name: set-ip-ethernet2
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: Ethernet2
-    params:
-      property: ip
-      value: "10.10.1.1/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet2/set-ip
+    params: {ip: "10.10.1.1/31"}
 
   # Verify CONFIG_DB.
   - name: verify-vrf-binding-config-db
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: Ethernet2
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet2
     expect:
-      fields:
-        vrf_name: Vrf_CUSTOMER
+      jq: '.vrf_name == "Vrf_CUSTOMER"'
 
   - name: verify-ip-config-db
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet2|10.10.1.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet2%7C10.10.1.1%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Wait for intfmgrd to process VRF binding and IP assignment. Up to 90s.
   - name: wait-ethernet2-ip
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in $(seq 1 18); do ip addr show Ethernet2 | grep -q '10.10.1.1' && break; sleep 5; done; ip addr show Ethernet2 | grep -q '10.10.1.1'"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "for i in $(seq 1 18); do ip addr show Ethernet2 | grep -q '10.10.1.1' && break; sleep 5; done; ip addr show Ethernet2 | grep -q '10.10.1.1'"}
 
   # Verify kernel state.
   - name: verify-ethernet2-master-customer
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "ip link show Ethernet2"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip link show Ethernet2"}
+    poll:
+      timeout: 60s
+      interval: 5s
     expect:
-      contains: "master Vrf_CUSTOMER"
+      jq: '.output | contains("master Vrf_CUSTOMER")'
 
   - name: verify-ethernet2-ip
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "ip addr show Ethernet2"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show Ethernet2"}
+    poll:
+      timeout: 60s
+      interval: 5s
     expect:
-      contains: "10.10.1.1"
+      jq: '.output | contains("10.10.1.1")'
 
   # Wait for orchagent to process APP_DB INTF_TABLE and program SAI route.
   - name: wait-orchagent-route
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in $(seq 1 24); do redis-cli -n 1 keys 'ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:*' | grep -q '10.10.1.0' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "for i in $(seq 1 24); do redis-cli -n 1 keys 'ASIC_STATE:SAI_OBJECT_TYPE_ROUTE_ENTRY:*' | grep -q '10.10.1.0' && break; sleep 5; done; true"}

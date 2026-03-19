@@ -16,29 +16,33 @@ steps:
   # =========================================================================
 
   - name: create-vlan-100
-    action: create-vlan
+    action: newtron
     devices: [leaf1, leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
   - name: create-vlan-200
-    action: create-vlan
+    action: newtron
     devices: [leaf1, leaf2]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 200}
 
   # Physical members: host1 on VLAN 100 (leaf1), host2 on VLAN 200 (leaf2)
   - name: add-vlan-member-leaf1
-    action: add-vlan-member
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    interface: Ethernet1
-    tagging: untagged
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet1, tagged: false}
 
   - name: add-vlan-member-leaf2
-    action: add-vlan-member
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
-    interface: Ethernet1
-    tagging: untagged
+    method: POST
+    url: /node/{{device}}/vlan/200/member
+    params: {interface: Ethernet1, tagged: false}
 
   # =========================================================================
   # Configure anycast SVIs on BOTH leaves for BOTH VLANs
@@ -48,36 +52,40 @@ steps:
   # via VXLAN to the remote leaf's VLAN.
 
   - name: configure-svi-100-leaf1
-    action: configure-svi
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/svi
     params:
-      ip: 192.168.100.1/24
-      anycast: true
+      vlan_id: 100
+      ip_address: "192.168.100.1/24"
 
   - name: configure-svi-100-leaf2
-    action: configure-svi
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/svi
     params:
-      ip: 192.168.100.1/24
-      anycast: true
+      vlan_id: 100
+      ip_address: "192.168.100.1/24"
 
   - name: configure-svi-200-leaf1
-    action: configure-svi
+    action: newtron
     devices: [leaf1]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/svi
     params:
-      ip: 192.168.200.1/24
-      anycast: true
+      vlan_id: 200
+      ip_address: "192.168.200.1/24"
 
   - name: configure-svi-200-leaf2
-    action: configure-svi
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/svi
     params:
-      ip: 192.168.200.1/24
-      anycast: true
+      vlan_id: 200
+      ip_address: "192.168.200.1/24"
 
   # =========================================================================
   # Bind MAC-VPNs on BOTH leaves for BOTH VLANs
@@ -86,32 +94,32 @@ steps:
   # traffic for either VLAN.
 
   - name: bind-macvpn-100-leaf1
-    action: bind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    params:
-      macvpn: servers-vlan100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/bind-macvpn
+    params: {macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
-    action: bind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
-    params:
-      macvpn: servers-vlan100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/bind-macvpn
+    params: {macvpn: servers-vlan100}
 
   - name: bind-macvpn-200-leaf1
-    action: bind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 200
-    params:
-      macvpn: storage-vlan200
+    method: POST
+    url: /node/{{device}}/interface/Vlan200/bind-macvpn
+    params: {macvpn: storage-vlan200}
 
   - name: bind-macvpn-200-leaf2
-    action: bind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
-    params:
-      macvpn: storage-vlan200
+    method: POST
+    url: /node/{{device}}/interface/Vlan200/bind-macvpn
+    params: {macvpn: storage-vlan200}
 
   - name: wait-vxlan-convergence
     action: wait
@@ -140,18 +148,16 @@ steps:
   # =========================================================================
 
   - name: verify-gw-host1
-    action: verify-ping
+    action: host-exec
     devices: [host1]
-    target: 192.168.100.1
-    count: 3
+    command: "ping -c 3 -W 5 192.168.100.1"
     expect:
       success_rate: 0.8
 
   - name: verify-gw-host2
-    action: verify-ping
+    action: host-exec
     devices: [host2]
-    target: 192.168.200.1
-    count: 3
+    command: "ping -c 3 -W 5 192.168.200.1"
     expect:
       success_rate: 0.8
 
@@ -184,18 +190,16 @@ steps:
     duration: 3s
 
   - name: ping-inter-host1-to-host2
-    action: verify-ping
+    action: host-exec
     devices: [host1]
-    target: 192.168.200.20
-    count: 10
+    command: "ping -c 10 -W 5 192.168.200.20"
     expect:
       success_rate: 0.90
 
   - name: ping-inter-host2-to-host1
-    action: verify-ping
+    action: host-exec
     devices: [host2]
-    target: 192.168.100.10
-    count: 10
+    command: "ping -c 10 -W 5 192.168.100.10"
     expect:
       success_rate: 0.90
 
@@ -236,63 +240,77 @@ steps:
   # =========================================================================
 
   - name: unbind-macvpn-200-leaf1
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/interface/Vlan200/unbind-macvpn
 
   - name: unbind-macvpn-200-leaf2
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/interface/Vlan200/unbind-macvpn
 
   - name: unbind-macvpn-100-leaf1
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
 
   - name: unbind-macvpn-100-leaf2
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
 
   - name: remove-svi-200-leaf1
-    action: remove-svi
+    action: newtron
     devices: [leaf1]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/remove-svi
+    params: {vlan_id: 200}
 
   - name: remove-svi-200-leaf2
-    action: remove-svi
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
+    method: POST
+    url: /node/{{device}}/remove-svi
+    params: {vlan_id: 200}
 
   - name: remove-svi-100-leaf1
-    action: remove-svi
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/remove-svi
+    params: {vlan_id: 100}
 
   - name: remove-svi-100-leaf2
-    action: remove-svi
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/remove-svi
+    params: {vlan_id: 100}
 
   - name: remove-vlan-member-leaf1
-    action: remove-vlan-member
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    interface: Ethernet1
+    method: DELETE
+    url: /node/{{device}}/vlan/100/member/Ethernet1
 
   - name: remove-vlan-member-leaf2
-    action: remove-vlan-member
+    action: newtron
     devices: [leaf2]
-    vlan_id: 200
-    interface: Ethernet1
+    method: DELETE
+    url: /node/{{device}}/vlan/200/member/Ethernet1
 
   - name: delete-vlan-200
-    action: delete-vlan
+    action: newtron
     devices: [leaf1, leaf2]
-    vlan_id: 200
+    method: DELETE
+    url: /node/{{device}}/vlan/200
 
   - name: delete-vlan-100
-    action: delete-vlan
+    action: newtron
     devices: [leaf1, leaf2]
-    vlan_id: 100
+    method: DELETE
+    url: /node/{{device}}/vlan/100

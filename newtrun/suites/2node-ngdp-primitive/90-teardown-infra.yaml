@@ -8,159 +8,160 @@ requires: [service-lifecycle]
 steps:
   # 1. Teardown EVPN overlay
   - name: teardown-evpn-sw1
-    action: teardown-evpn
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/teardown-evpn
 
   - name: teardown-evpn-sw2
-    action: teardown-evpn
+    action: newtron
     devices: [switch2]
+    method: POST
+    url: /node/{{device}}/teardown-evpn
 
   - name: verify-vxlan-tunnel-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_TUNNEL
-    key: vtep1
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-vxlan-nvo-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VXLAN_EVPN_NVO
-    key: nvo1
+    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-bgp-l2vpn-af-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS_AF
-    key: "default|l2vpn_evpn"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # 2. Remove underlay BGP neighbors
   - name: bgp-remove-neighbor-sw1
-    action: bgp-remove-neighbor
+    action: newtron
     devices: [switch1]
-    params:
-      neighbor_ip: "10.1.0.1"
+    method: POST
+    url: /node/{{device}}/remove-bgp-neighbor
+    params: {ip: "10.1.0.1"}
 
   - name: bgp-remove-neighbor-sw2
-    action: bgp-remove-neighbor
+    action: newtron
     devices: [switch2]
-    params:
-      neighbor_ip: "10.1.0.0"
+    method: POST
+    url: /node/{{device}}/remove-bgp-neighbor
+    params: {ip: "10.1.0.0"}
 
   - name: verify-underlay-neighbor-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-underlay-neighbor-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.0"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # 3. Remove underlay IPs from Ethernet0
   - name: remove-ip-eth0-sw1
-    action: remove-ip
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
-    params:
-      ip: "10.1.0.0/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-ip
+    params: {ip: "10.1.0.0/31"}
 
   - name: remove-ip-eth0-sw2
-    action: remove-ip
+    action: newtron
     devices: [switch2]
-    interface: Ethernet0
-    params:
-      ip: "10.1.0.1/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-ip
+    params: {ip: "10.1.0.1/31"}
 
   - name: verify-eth0-ip-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.0/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-eth0-ip-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # 4. Remove BGP globals
   - name: remove-bgp-globals-sw1
-    action: remove-bgp-globals
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/remove-bgp-globals
 
   - name: remove-bgp-globals-sw2
-    action: remove-bgp-globals
+    action: newtron
     devices: [switch2]
+    method: POST
+    url: /node/{{device}}/remove-bgp-globals
 
   - name: verify-bgp-globals-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-bgp-globals-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-bgp-af-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS_AF
-    key: "default|ipv4_unicast"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-route-redistribute-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: ROUTE_REDISTRIBUTE
-    key: "default|connected|bgp|ipv4"
+    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # 5. Remove loopback
   - name: remove-loopback-sw1
-    action: remove-loopback
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/remove-loopback
 
   - name: remove-loopback-sw2
-    action: remove-loopback
+    action: newtron
     devices: [switch2]
+    method: POST
+    url: /node/{{device}}/remove-loopback
 
   - name: verify-loopback-removed-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: verify-loopback-removed-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
-      exists: false
+      jq: '.exists == false'

@@ -15,44 +15,39 @@ steps:
   # =========================================================================
 
   - name: no-binding-eth0
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet0
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-binding-eth1
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet1
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-binding-eth2
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet2
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet2/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-binding-eth3
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet3
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-binding-eth4
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: NEWTRON_INTENT
-    key: Ethernet4
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # INTERFACE — routed service (transit) creates base + IP sub-entry
@@ -61,29 +56,26 @@ steps:
   # =========================================================================
 
   - name: no-interface-eth0
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: INTERFACE
-    key: Ethernet0
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # switch1: 10.1.0.0/31, switch2: 10.1.0.1/31
   - name: no-interface-eth0-ip-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.0/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-interface-eth0-ip-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VLAN — one per macvpn (100, 200, 300, 400, 401, 3998 L3VNI)
@@ -92,53 +84,47 @@ steps:
   # =========================================================================
 
   - name: no-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vlan200
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan200
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vlan300
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan300
+    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vlan400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN/Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-vlan401
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan401
+    url: /node/{{device}}/configdb/VLAN/Vlan401/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # L3VNI VLAN for Vrf_IRB (evpn-irb shared VRF)
   - name: no-vlan3998
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN
-    key: Vlan3998
+    url: /node/{{device}}/configdb/VLAN/Vlan3998/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VLAN_MEMBER — one per interface+VLAN binding
@@ -148,48 +134,43 @@ steps:
 
   # local-irb: Ethernet1 tagged member of Vlan100
   - name: no-vlan-member-100-eth1
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet1"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # local-bridge: Ethernet2 untagged member of Vlan200
   - name: no-vlan-member-200-eth2
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_MEMBER
-    key: "Vlan200|Ethernet2"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan200%7CEthernet2/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # l2-extend: Ethernet3 untagged member of Vlan300
   - name: no-vlan-member-300-eth3
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_MEMBER
-    key: "Vlan300|Ethernet3"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan300%7CEthernet3/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-a: Ethernet4 tagged member of Vlan400 (switch1 only)
   - name: no-vlan-member-400-eth4
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_MEMBER
-    key: "Vlan400|Ethernet4"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan400%7CEthernet4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-b: Ethernet4 tagged member of Vlan401 (switch2 only)
   - name: no-vlan-member-401-eth4
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_MEMBER
-    key: "Vlan401|Ethernet4"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan401%7CEthernet4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VLAN_INTERFACE — SVI for irb and evpn-irb services
@@ -199,30 +180,27 @@ steps:
 
   # local-irb SVI on Vlan100
   - name: no-svi-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_INTERFACE
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-a SVI on Vlan400 (switch1)
   - name: no-svi-vlan400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_INTERFACE
-    key: Vlan400
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-b SVI on Vlan401 (switch2)
   - name: no-svi-vlan401
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VLAN_INTERFACE
-    key: Vlan401
+    url: /node/{{device}}/configdb/VLAN_INTERFACE/Vlan401/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # SAG_GLOBAL — anycast gateway MAC (shared across all evpn-irb SVIs)
@@ -231,12 +209,11 @@ steps:
   # =========================================================================
 
   - name: no-sag-global
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: SAG_GLOBAL
-    key: IPv4
+    url: /node/{{device}}/configdb/SAG_GLOBAL/IPv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VRF — shared VRF for evpn-irb
@@ -245,12 +222,11 @@ steps:
   # =========================================================================
 
   - name: no-vrf-irb
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VRF
-    key: Vrf_IRB
+    url: /node/{{device}}/configdb/VRF/Vrf_IRB/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_TUNNEL_MAP — VNI-to-VLAN/VRF mappings
@@ -260,39 +236,35 @@ steps:
 
   # l2-extend: VNI 10300 → Vlan300
   - name: no-vni-map-10300
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10300_Vlan300"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10300_Vlan300/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-a: VNI 10400 → Vlan400
   - name: no-vni-map-10400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10400_Vlan400"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10400_Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # overlay-irb-b: VNI 10401 → Vlan401
   - name: no-vni-map-10401
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10401_Vlan401"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10401_Vlan401/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # L3VNI: VNI 50400 → Vrf_IRB
   - name: no-vni-map-50400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI50400_Vrf_IRB"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI50400_Vrf_IRB/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # SUPPRESS_VLAN_NEIGH — ARP suppression on EVPN VLANs
@@ -301,28 +273,25 @@ steps:
   # =========================================================================
 
   - name: no-arp-suppress-vlan300
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan300
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan300/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-arp-suppress-vlan400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan400
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-arp-suppress-vlan401
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan401
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan401/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_EVPN_VNI — per-VNI BGP config (route targets)
@@ -331,28 +300,25 @@ steps:
   # =========================================================================
 
   - name: no-bgp-evpn-vni-10300
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_EVPN_VNI
-    key: "default|10300"
+    url: /node/{{device}}/configdb/BGP_EVPN_VNI/default%7C10300/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-evpn-vni-10400
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_EVPN_VNI
-    key: "default|10400"
+    url: /node/{{device}}/configdb/BGP_EVPN_VNI/default%7C10400/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-evpn-vni-10401
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_EVPN_VNI
-    key: "default|10401"
+    url: /node/{{device}}/configdb/BGP_EVPN_VNI/default%7C10401/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS — VRF-level BGP globals from bind-ipvpn
@@ -361,12 +327,11 @@ steps:
   # =========================================================================
 
   - name: no-bgp-globals-vrf-irb
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS
-    key: Vrf_IRB
+    url: /node/{{device}}/configdb/BGP_GLOBALS/Vrf_IRB/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS_AF — VRF-level address-family from bind-ipvpn
@@ -375,20 +340,18 @@ steps:
   # =========================================================================
 
   - name: no-bgp-af-vrf-irb-ipv4
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS_AF
-    key: "Vrf_IRB|ipv4_unicast"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cipv4_unicast/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-af-vrf-irb-l2vpn
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS_AF
-    key: "Vrf_IRB|l2vpn_evpn"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/Vrf_IRB%7Cl2vpn_evpn/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS_EVPN_RT — VRF route targets for EVPN
@@ -397,12 +360,11 @@ steps:
   # =========================================================================
 
   - name: no-bgp-evpn-rt-vrf-irb
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS_EVPN_RT
-    key: Vrf_IRB
+    url: /node/{{device}}/configdb/BGP_GLOBALS_EVPN_RT/Vrf_IRB/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_TUNNEL — VTEP (infrastructure)
@@ -411,12 +373,11 @@ steps:
   # =========================================================================
 
   - name: no-vtep
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_TUNNEL
-    key: vtep1
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # VXLAN_EVPN_NVO — NVO (infrastructure)
@@ -425,12 +386,11 @@ steps:
   # =========================================================================
 
   - name: no-nvo
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: VXLAN_EVPN_NVO
-    key: nvo1
+    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS — global BGP configuration
@@ -439,12 +399,11 @@ steps:
   # =========================================================================
 
   - name: no-bgp-globals
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_GLOBALS_AF — address-family configs (ipv4_unicast, l2vpn_evpn)
@@ -453,20 +412,18 @@ steps:
   # =========================================================================
 
   - name: no-bgp-af-ipv4
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS_AF
-    key: "default|ipv4_unicast"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-af-l2vpn
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: BGP_GLOBALS_AF
-    key: "default|l2vpn_evpn"
+    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # ROUTE_REDISTRIBUTE — connected route redistribution
@@ -475,21 +432,19 @@ steps:
   # =========================================================================
 
   - name: no-route-redistribute
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: ROUTE_REDISTRIBUTE
-    key: "default|connected|bgp|ipv4"
+    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # VRF-level redistribute from bind-ipvpn (overlay-irb services)
   - name: no-route-redistribute-vrf-irb
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: ROUTE_REDISTRIBUTE
-    key: "Vrf_IRB|connected|bgp|ipv4"
+    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # BGP_NEIGHBOR — underlay peers (transit) + overlay peers (EVPN)
@@ -499,37 +454,33 @@ steps:
 
   # Underlay: switch1 peers with 10.1.0.1 (switch2), switch2 peers with 10.1.0.0 (switch1)
   - name: no-bgp-neighbor-underlay-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-neighbor-underlay-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.0"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Overlay: switch1 peers with 10.0.0.2 (switch2 loopback), switch2 peers with 10.0.0.1
   - name: no-bgp-neighbor-overlay-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.0.0.2"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.2/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-bgp-neighbor-overlay-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: BGP_NEIGHBOR
-    key: "default|10.0.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # =========================================================================
   # LOOPBACK_INTERFACE — loopback interface
@@ -538,25 +489,22 @@ steps:
   # =========================================================================
 
   - name: no-loopback
-    action: verify-config-db
+    action: newtron
     devices: [switch1, switch2]
-    table: LOOPBACK_INTERFACE
-    key: Loopback0
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-loopback-ip-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.1/32"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: no-loopback-ip-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: LOOPBACK_INTERFACE
-    key: "Loopback0|10.0.0.2/32"
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.2%2F32/exists
     expect:
-      exists: false
+      jq: '.exists == false'

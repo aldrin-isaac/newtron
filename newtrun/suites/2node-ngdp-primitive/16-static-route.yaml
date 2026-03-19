@@ -7,32 +7,30 @@ requires: [routed]
 
 steps:
   - name: add-static-route
-    action: add-static-route
+    action: newtron
     devices: [switch2]
-    vrf: Vrf_local
-    prefix: "10.99.0.0/24"
+    method: POST
+    url: /node/{{device}}/vrf/Vrf_local/route
     params:
-      next_hop: "10.20.1.0"
+      prefix: "10.99.0.0/24"
+      nexthop: "10.20.1.0"
 
   - name: verify-static-route-added
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: STATIC_ROUTE
-    key: "Vrf_local|10.99.0.0/24"
+    url: /node/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24
     expect:
-      fields:
-        nexthop: "10.20.1.0"
+      jq: '.nexthop == "10.20.1.0"'
 
   - name: remove-static-route
-    action: remove-static-route
+    action: newtron
     devices: [switch2]
-    vrf: Vrf_local
-    prefix: "10.99.0.0/24"
+    method: DELETE
+    url: /node/{{device}}/vrf/Vrf_local/route/10.99.0.0/24
 
   - name: verify-static-route-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: STATIC_ROUTE
-    key: "Vrf_local|10.99.0.0/24"
+    url: /node/{{device}}/configdb/STATIC_ROUTE/Vrf_local%7C10.99.0.0%2F24/exists
     expect:
-      exists: false
+      jq: '.exists == false'

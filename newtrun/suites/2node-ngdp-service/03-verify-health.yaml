@@ -12,12 +12,14 @@ steps:
   # The health check's BGP neighbor read is point-in-time (not polled),
   # so it races with convergence if run immediately after provision.
   - name: wait-bgp-established
-    action: verify-bgp
+    action: newtron
     devices: [switch1, switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
 
   # Brief pause after BGP poll passes — vtysh JSON output can lag behind
   # FRR's internal state, causing point-in-time health checks to miss peers
@@ -27,9 +29,21 @@ steps:
     duration: 15s
 
   - name: verify-health-switch1
-    action: verify-health
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/health
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
 
   - name: verify-health-switch2
-    action: verify-health
+    action: newtron
     devices: [switch2]
+    url: /node/{{device}}/health
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'

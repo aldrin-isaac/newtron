@@ -8,60 +8,70 @@ requires: [boot-ssh]
 
 steps:
   - name: create-vrf-local
-    action: create-vrf
+    action: newtron
     devices: [switch2]
-    vrf: Vrf_local
+    method: POST
+    url: /node/{{device}}/vrf
+    params: {name: Vrf_local}
 
   - name: bind-ethernet1-to-vrf
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: Ethernet1
-    params:
-      property: vrf
-      value: Vrf_local
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-vrf
+    params: {vrf: Vrf_local}
 
   - name: set-ip-ethernet1
-    action: set-interface
+    action: newtron
     devices: [switch2]
-    interface: Ethernet1
-    params:
-      property: ip
-      value: "10.20.1.1/31"
+    method: POST
+    url: /node/{{device}}/interface/Ethernet1/set-ip
+    params: {ip: "10.20.1.1/31"}
 
   - name: verify-vrf-exists
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: VRF
-    key: Vrf_local
+    url: /node/{{device}}/configdb/VRF/Vrf_local/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-interface-vrf
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: Ethernet1
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1
     expect:
-      fields:
-        vrf_name: Vrf_local
+      jq: '.vrf_name == "Vrf_local"'
 
   - name: verify-ip-assigned
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet1|10.20.1.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: wait-ethernet1-ip
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do ip addr show Ethernet1 | grep -q '10.20.1.1' && break; sleep 5; done; true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip addr show Ethernet1"}
+    poll:
+      timeout: 60s
+      interval: 5s
+    expect:
+      jq: '.output | contains("10.20.1.1")'
 
   - name: prime-ngdp-arp-ethernet1
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "for i in 1 2 3 4 5; do sudo ping -c 1 -W 1 -I Ethernet1 10.20.1.0 && break; sleep 1; done || true"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0"}
+    poll:
+      timeout: 10s
+      interval: 2s
+    expect:
+      jq: '.output | contains("1 received")'
 
   - name: wait-after-prime
     action: wait

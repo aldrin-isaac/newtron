@@ -8,44 +8,42 @@ requires: [service-lifecycle, vlan-vrf]
 steps:
   # No service binding leftovers
   - name: verify-no-binding-eth0
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: Ethernet0
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # No VLAN leftovers
   - name: verify-no-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # No VRF leftovers
   - name: verify-no-vrf-test
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VRF
-    key: Vrf_test
+    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # No BGP neighbor leftovers
   - name: verify-no-bgp-neighbor
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_NEIGHBOR
-    key: "default|10.1.0.1"
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   # Confirm no test VLANs in kernel
   - name: verify-no-kernel-vlans
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "ip link show | grep -c 'Vlan100' || echo 0"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "ip link show | grep -c 'Vlan100' || echo 0"}
     expect:
-      contains: "0"
+      jq: '.output | contains("0")'

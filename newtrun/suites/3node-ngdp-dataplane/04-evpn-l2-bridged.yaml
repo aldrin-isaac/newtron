@@ -13,74 +13,71 @@ steps:
   # =========================================================================
 
   - name: create-vlan-100-leaf1
-    action: create-vlan
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
   - name: create-vlan-100-leaf2
-    action: create-vlan
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
   - name: add-vlan-member-leaf1
-    action: add-vlan-member
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    interface: Ethernet1
-    tagging: untagged
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet1, tagged: false}
 
   - name: add-vlan-member-leaf2
-    action: add-vlan-member
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
-    interface: Ethernet1
-    tagging: untagged
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet1, tagged: false}
 
   - name: bind-macvpn-100-leaf1
-    action: bind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    params:
-      macvpn: servers-vlan100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/bind-macvpn
+    params: {macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
-    action: bind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
-    params:
-      macvpn: servers-vlan100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/bind-macvpn
+    params: {macvpn: servers-vlan100}
 
   # =========================================================================
   # Verify CONFIG_DB
   # =========================================================================
 
   - name: verify-tunnel-map-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10100_Vlan100"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
     expect:
-      fields:
-        vlan: Vlan100
-        vni: "10100"
+      jq: '.vlan == "Vlan100" and .vni == "10100"'
 
   - name: verify-tunnel-map-leaf2
-    action: verify-config-db
+    action: newtron
     devices: [leaf2]
-    table: VXLAN_TUNNEL_MAP
-    key: "vtep1|VNI10100_Vlan100"
+    url: /node/{{device}}/configdb/VXLAN_TUNNEL_MAP/vtep1%7CVNI10100_Vlan100
     expect:
-      fields:
-        vlan: Vlan100
-        vni: "10100"
+      jq: '.vlan == "Vlan100" and .vni == "10100"'
 
   - name: verify-arp-suppress-leaf1
-    action: verify-config-db
+    action: newtron
     devices: [leaf1]
-    table: SUPPRESS_VLAN_NEIGH
-    key: Vlan100
+    url: /node/{{device}}/configdb/SUPPRESS_VLAN_NEIGH/Vlan100/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: wait-vxlan-convergence
     action: wait
@@ -105,18 +102,16 @@ steps:
     duration: 3s
 
   - name: ping-host1-to-host2
-    action: verify-ping
+    action: host-exec
     devices: [host1]
-    target: 192.168.100.20
-    count: 10
+    command: "ping -c 10 -W 5 192.168.100.20"
     expect:
       success_rate: 0.90
 
   - name: ping-host2-to-host1
-    action: verify-ping
+    action: host-exec
     devices: [host2]
-    target: 192.168.100.10
-    count: 10
+    command: "ping -c 10 -W 5 192.168.100.10"
     expect:
       success_rate: 0.90
 
@@ -143,33 +138,37 @@ steps:
   # =========================================================================
 
   - name: unbind-macvpn-100-leaf1
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
 
   - name: unbind-macvpn-100-leaf2
-    action: unbind-macvpn
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
 
   - name: remove-vlan-member-leaf1
-    action: remove-vlan-member
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
-    interface: Ethernet1
+    method: DELETE
+    url: /node/{{device}}/vlan/100/member/Ethernet1
 
   - name: remove-vlan-member-leaf2
-    action: remove-vlan-member
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
-    interface: Ethernet1
+    method: DELETE
+    url: /node/{{device}}/vlan/100/member/Ethernet1
 
   - name: delete-vlan-100-leaf1
-    action: delete-vlan
+    action: newtron
     devices: [leaf1]
-    vlan_id: 100
+    method: DELETE
+    url: /node/{{device}}/vlan/100
 
   - name: delete-vlan-100-leaf2
-    action: delete-vlan
+    action: newtron
     devices: [leaf2]
-    vlan_id: 100
+    method: DELETE
+    url: /node/{{device}}/vlan/100

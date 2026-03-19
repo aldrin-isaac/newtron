@@ -13,24 +13,18 @@ steps:
   # First: confirm drift detection returns clean status with zero counts.
   # This is the core thesis test — abstract == physical.
   - name: verify-drift-clean-sw1
-    action: verify-drift
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
-      fields:
-        missing: "0"
-        extra: "0"
-        modified: "0"
+      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
 
   - name: verify-drift-clean-sw2
-    action: verify-drift
+    action: newtron
     devices: [switch2]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
-      fields:
-        missing: "0"
-        extra: "0"
-        modified: "0"
+      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
 
   # Second: spot-check specific CONFIG_DB entries to prove they exist.
   # If the abstract Node failed to generate these, drift would have caught
@@ -38,57 +32,46 @@ steps:
 
   # BGP_GLOBALS must have the correct ASN from the profile
   - name: verify-bgp-globals-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
     expect:
-      fields:
-        local_asn: "65001"
-        router_id: "10.0.0.1"
+      jq: '.local_asn == "65001" and .router_id == "10.0.0.1"'
 
   - name: verify-bgp-globals-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: BGP_GLOBALS
-    key: default
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
     expect:
-      fields:
-        local_asn: "65002"
-        router_id: "10.0.0.2"
+      jq: '.local_asn == "65002" and .router_id == "10.0.0.2"'
 
   # Transit interface IP (the entry we'll delete in inject-drift)
   - name: verify-transit-ip-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.0/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.0%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   - name: verify-transit-ip-sw2
-    action: verify-config-db
+    action: newtron
     devices: [switch2]
-    table: INTERFACE
-    key: "Ethernet0|10.1.0.1/31"
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0%7C10.1.0.1%2F31/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # VLAN 100 from local-irb service (the topology provisions this)
   - name: verify-vlan100-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100
     expect:
-      fields:
-        vlanid: "100"
+      jq: '.vlanid == "100"'
 
   # VLAN 999 must NOT exist yet (we'll inject it as "extra" drift)
   - name: verify-no-vlan999-sw1
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan999
+    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
     expect:
-      exists: false
+      jq: '.exists == false'

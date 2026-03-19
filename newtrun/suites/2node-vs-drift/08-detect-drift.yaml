@@ -12,27 +12,22 @@ requires: [inject-drift]
 steps:
   # Observe drift on switch1 (informational — always passes)
   - name: detect-drift-sw1
-    action: detect-drift
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/drift
 
   # Assert: switch1 has exactly 3 drifts (1 per category)
   - name: verify-drift-sw1
-    action: verify-drift
+    action: newtron
     devices: [switch1]
+    url: /node/{{device}}/drift
     expect:
-      status: "drifted"
-      fields:
-        missing: "1"
-        extra: "1"
-        modified: "1"
+      jq: '.status == "drifted" and (.missing | length) == 1 and (.extra | length) == 1 and (.modified | length) == 1'
 
   # Assert: switch2 is still clean — per-device isolation
   - name: verify-drift-sw2-still-clean
-    action: verify-drift
+    action: newtron
     devices: [switch2]
+    url: /node/{{device}}/drift
     expect:
-      status: "clean"
-      fields:
-        missing: "0"
-        extra: "0"
-        modified: "0"
+      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'

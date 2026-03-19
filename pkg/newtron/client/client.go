@@ -45,6 +45,11 @@ func New(baseURL, networkID string) *Client {
 	}
 }
 
+// NetworkID returns the network identifier used for API paths.
+func (c *Client) NetworkID() string {
+	return c.networkID
+}
+
 // RegisterNetwork registers a network with the server. Returns nil if
 // the network is already registered (409 is treated as success).
 func (c *Client) RegisterNetwork(specDir string) error {
@@ -177,6 +182,68 @@ func (c *Client) doDelete(path string, result any) error {
 	}
 	defer resp.Body.Close()
 	return c.decodeResponse(resp, result)
+}
+
+// RawRequest performs an HTTP request and returns the response Data as raw JSON.
+// It unwraps the APIResponse envelope and returns the Data field without decoding
+// it into a typed struct — the caller receives the raw JSON for flexible evaluation.
+func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal body: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequest(method, c.baseURL+path, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if len(respBody) == 0 {
+		if resp.StatusCode >= 400 {
+			return nil, &ServerError{StatusCode: resp.StatusCode, Message: resp.Status}
+		}
+		return nil, nil
+	}
+
+	var envelope api.APIResponse
+	if err := json.Unmarshal(respBody, &envelope); err != nil {
+		if resp.StatusCode >= 400 {
+			return nil, &ServerError{StatusCode: resp.StatusCode, Message: string(respBody)}
+		}
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	if envelope.Error != "" {
+		return nil, &ServerError{StatusCode: resp.StatusCode, Message: envelope.Error}
+	}
+
+	if envelope.Data == nil {
+		return nil, nil
+	}
+
+	data, err := json.Marshal(envelope.Data)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal data: %w", err)
+	}
+	return data, nil
 }
 
 // decodeResponse unwraps the APIResponse envelope.

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -236,11 +237,17 @@ func writeError(w http.ResponseWriter, err error) {
 }
 
 // decodeJSON decodes a JSON request body into v.
+// Returns nil (no error) if the body is empty or absent — handlers with
+// optional request bodies work correctly when called with no payload.
 func decodeJSON(r *http.Request, v any) error {
 	if r.Body == nil {
 		return nil
 	}
-	return json.NewDecoder(r.Body).Decode(v)
+	err := json.NewDecoder(r.Body).Decode(v)
+	if err == io.EOF {
+		return nil
+	}
+	return err
 }
 
 // requireNetwork looks up the NetworkActor or writes a 404.

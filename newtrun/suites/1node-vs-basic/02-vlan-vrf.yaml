@@ -9,86 +9,85 @@ requires: [boot-ssh]
 steps:
   # Create VLAN 100
   - name: create-vlan100
-    action: create-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 100
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
   - name: verify-vlan100
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Add Ethernet0 as tagged member
   - name: add-member-eth0-tagged
-    action: add-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
-    vlan_id: 100
-    tagging: tagged
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet0, tagged: true}
 
   - name: verify-vlan-member
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet0"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0
     expect:
-      fields:
-        tagging_mode: tagged
+      jq: '.tagging_mode == "tagged"'
 
   # Create VRF
   - name: create-vrf-test
-    action: create-vrf
+    action: newtron
     devices: [switch1]
-    vrf: Vrf_test
+    method: POST
+    url: /node/{{device}}/vrf
+    params: {name: Vrf_test}
 
   - name: verify-vrf
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VRF
-    key: Vrf_test
+    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
-      exists: true
+      jq: '.exists == true'
 
   # Tear down: remove VLAN member, delete VLAN, delete VRF
   - name: remove-member-eth0
-    action: remove-vlan-member
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
-    vlan_id: 100
+    method: DELETE
+    url: /node/{{device}}/vlan/100/member/Ethernet0
 
   - name: verify-member-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN_MEMBER
-    key: "Vlan100|Ethernet0"
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet0/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: delete-vlan100
-    action: delete-vlan
+    action: newtron
     devices: [switch1]
-    vlan_id: 100
+    method: DELETE
+    url: /node/{{device}}/vlan/100
 
   - name: verify-vlan100-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VLAN
-    key: Vlan100
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 
   - name: delete-vrf-test
-    action: delete-vrf
+    action: newtron
     devices: [switch1]
-    vrf: Vrf_test
+    method: DELETE
+    url: /node/{{device}}/vrf/Vrf_test
 
   - name: verify-vrf-removed
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: VRF
-    key: Vrf_test
+    url: /node/{{device}}/configdb/VRF/Vrf_test/exists
     expect:
-      exists: false
+      jq: '.exists == false'

@@ -33,38 +33,19 @@ type Step struct {
 	// wait
 	Duration time.Duration `yaml:"duration,omitempty"`
 
-	// verify-config-db, verify-state-db
-	Table string `yaml:"table,omitempty"`
-	Key   string `yaml:"key,omitempty"`
+	// host-exec, newtron (shared)
+	Command string         `yaml:"command,omitempty"`
+	Params  map[string]any `yaml:"params,omitempty"`
 
-	// verify-route
-	Prefix string `yaml:"prefix,omitempty"`
-	VRF    string `yaml:"vrf,omitempty"`
+	// newtron (generic server action)
+	Method string      `yaml:"method,omitempty"` // HTTP method: GET, POST, DELETE
+	URL    string      `yaml:"url,omitempty"`    // URL template (e.g., /node/{{device}}/vlan)
+	Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
+	Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
 
-	// apply-service, remove-service
-	Interface string         `yaml:"interface,omitempty"`
-	Service   string         `yaml:"service,omitempty"`
-	Params    map[string]any `yaml:"params,omitempty"`
-
-	// ssh-command
-	Command string `yaml:"command,omitempty"`
-
-	// verify-ping
-	Target string `yaml:"target,omitempty"`
-	Count  int    `yaml:"count,omitempty"`
-
-	// create-vlan, delete-vlan, add-vlan-member, remove-vlan-member
-	VLANID  int    `yaml:"vlan_id,omitempty"`
-	Tagging string `yaml:"tagging,omitempty"` // "tagged" or "untagged"
-
-	// All verify-* actions, ssh-command
-	Expect *ExpectBlock `yaml:"expect,omitempty"`
-
-	// ExpectFailure inverts the pass/fail logic: the step MUST fail for the
-	// scenario to continue. Used to test that operations are correctly blocked
-	// (e.g., zombie intent blocks apply-service). If Expect.Contains is set,
-	// the error message must contain that substring.
-	ExpectFailure bool `yaml:"expect_failure,omitempty"`
+	// All actions
+	Expect        *ExpectBlock `yaml:"expect,omitempty"`
+	ExpectFailure bool         `yaml:"expect_failure,omitempty"`
 }
 
 // StepAction identifies the type of step to execute.
@@ -74,94 +55,8 @@ const (
 	ActionProvision          StepAction = "provision"
 	ActionWait               StepAction = "wait"
 	ActionVerifyProvisioning StepAction = "verify-provisioning"
-	ActionVerifyConfigDB     StepAction = "verify-config-db"
-	ActionVerifyStateDB      StepAction = "verify-state-db"
-	ActionVerifyBGP          StepAction = "verify-bgp"
-	ActionVerifyHealth       StepAction = "verify-health"
-	ActionVerifyRoute        StepAction = "verify-route"
-	ActionVerifyPing         StepAction = "verify-ping"
-	ActionApplyService       StepAction = "apply-service"
-	ActionRemoveService      StepAction = "remove-service"
-	ActionConfigureLoopback  StepAction = "configure-loopback"
-	ActionSSHCommand         StepAction = "ssh-command"
-	ActionRestartService     StepAction = "restart-service"
-	ActionConfigReload       StepAction = "config-reload"
-	ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
-ActionSetInterface       StepAction = "set-interface"
-	ActionCreateVLAN         StepAction = "create-vlan"
-	ActionDeleteVLAN         StepAction = "delete-vlan"
-	ActionAddVLANMember      StepAction = "add-vlan-member"
-	ActionCreateVRF          StepAction = "create-vrf"
-	ActionDeleteVRF          StepAction = "delete-vrf"
-	ActionSetupEVPN          StepAction = "setup-evpn"
-	ActionAddVRFInterface    StepAction = "add-vrf-interface"
-	ActionRemoveVRFInterface StepAction = "remove-vrf-interface"
-	ActionBindIPVPN          StepAction = "bind-ipvpn"
-	ActionUnbindIPVPN        StepAction = "unbind-ipvpn"
-	ActionBindMACVPN         StepAction = "bind-macvpn"
-	ActionUnbindMACVPN       StepAction = "unbind-macvpn"
-	ActionAddStaticRoute     StepAction = "add-static-route"
-	ActionRemoveStaticRoute  StepAction = "remove-static-route"
-	ActionRemoveVLANMember   StepAction = "remove-vlan-member"
-	ActionApplyQoS           StepAction = "apply-qos"
-	ActionRemoveQoS          StepAction = "remove-qos"
-	ActionConfigureSVI       StepAction = "configure-svi"
-	ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
-	ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
-	ActionRefreshService          StepAction = "refresh-service"
-	ActionCleanup                 StepAction = "cleanup"
-	ActionCreatePortChannel       StepAction = "create-portchannel"
-	ActionDeletePortChannel       StepAction = "delete-portchannel"
-	ActionAddPortChannelMember    StepAction = "add-portchannel-member"
-	ActionRemovePortChannelMember StepAction = "remove-portchannel-member"
-
-	// Host test actions
-	ActionHostExec StepAction = "host-exec"
-
-	// BGP global configuration
-	ActionConfigureBGP StepAction = "configure-bgp"
-
-	// ACL management actions
-	ActionCreateACLTable StepAction = "create-acl-table"
-	ActionAddACLRule     StepAction = "add-acl-rule"
-	ActionDeleteACLRule  StepAction = "delete-acl-rule"
-	ActionDeleteACLTable StepAction = "delete-acl-table"
-	ActionBindACL        StepAction = "bind-acl"
-	ActionUnbindACL      StepAction = "unbind-acl"
-
-	// SVI management
-	ActionRemoveSVI StepAction = "remove-svi"
-
-	// Interface IP management
-	ActionRemoveIP StepAction = "remove-ip"
-
-	// EVPN teardown
-	ActionTeardownEVPN StepAction = "teardown-evpn"
-
-	// BGP globals removal
-	ActionRemoveBGPGlobals StepAction = "remove-bgp-globals"
-
-	// Loopback removal
-	ActionRemoveLoopback StepAction = "remove-loopback"
-
-	// Drift detection and crash recovery
-	ActionDetectDrift    StepAction = "detect-drift"
-	ActionVerifyDrift    StepAction = "verify-drift"
-	ActionReadZombie     StepAction = "read-zombie"
-	ActionRollbackZombie StepAction = "rollback-zombie"
-	ActionClearZombie    StepAction = "clear-zombie"
-
-	// Network-level spec authoring actions
-	ActionCreatePrefixList    StepAction = "create-prefix-list"
-	ActionDeletePrefixList    StepAction = "delete-prefix-list"
-	ActionAddPrefixEntry      StepAction = "add-prefix-entry"
-	ActionRemovePrefixEntry   StepAction = "remove-prefix-entry"
-	ActionCreateRoutePolicy   StepAction = "create-route-policy"
-	ActionDeleteRoutePolicy   StepAction = "delete-route-policy"
-	ActionAddRoutePolicyRule  StepAction = "add-route-policy-rule"
-	ActionRemoveRoutePolicyRule StepAction = "remove-route-policy-rule"
-	ActionCreateService       StepAction = "create-service"
-	ActionDeleteService       StepAction = "delete-service"
+	ActionHostExec           StepAction = "host-exec"
+	ActionNewtron            StepAction = "newtron"
 )
 
 // validActions is the set of all recognized step actions, derived from the
@@ -210,32 +105,29 @@ func (ds *deviceSelector) Resolve(allDevices []string) []string {
 	return ds.Devices
 }
 
+// PollBlock configures polling for the generic newtron action.
+type PollBlock struct {
+	Timeout  time.Duration `yaml:"timeout"`
+	Interval time.Duration `yaml:"interval"`
+}
+
+// BatchCall is a single HTTP call within a batch sequence.
+type BatchCall struct {
+	Method string         `yaml:"method"`
+	URL    string         `yaml:"url"`
+	Params map[string]any `yaml:"params,omitempty"`
+}
+
 // ExpectBlock is a union of all action-specific expectation fields.
 type ExpectBlock struct {
-	// verify-config-db
-	MinEntries *int              `yaml:"min_entries,omitempty"`
-	MaxEntries *int              `yaml:"max_entries,omitempty"`
-	Exists     *bool             `yaml:"exists,omitempty"`
-	Fields     map[string]string `yaml:"fields,omitempty"`
-
-	// Polling
+	// Polling (used by host-exec via pollForDevices)
 	Timeout      time.Duration `yaml:"timeout,omitempty"`
 	PollInterval time.Duration `yaml:"poll_interval,omitempty"`
 
-	// verify-bgp
-	State string `yaml:"state,omitempty"`
-
-	// verify-route
-	Protocol  string `yaml:"protocol,omitempty"`
-	NextHopIP string `yaml:"nexthop_ip,omitempty"`
-	Source    string `yaml:"source,omitempty"`
-
-	// verify-ping
+	// host-exec
 	SuccessRate *float64 `yaml:"success_rate,omitempty"`
+	Contains    string   `yaml:"contains,omitempty"`
 
-	// ssh-command
-	Contains string `yaml:"contains,omitempty"`
-
-	// verify-drift
-	Status string `yaml:"status,omitempty"`
+	// newtron (generic server action) — jq expression evaluated against response body
+	JQ string `yaml:"jq,omitempty"`
 }

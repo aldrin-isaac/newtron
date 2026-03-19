@@ -21,56 +21,66 @@ steps:
 
   # Remove EVPN overlay services first (have VXLAN dependencies)
   - name: remove-overlay-irb-switch1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet16
+    method: POST
+    url: /node/{{device}}/interface/Ethernet16/remove-service
 
   - name: remove-overlay-irb-switch2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet16
+    method: POST
+    url: /node/{{device}}/interface/Ethernet16/remove-service
 
   - name: remove-l2-extend-switch1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   - name: remove-l2-extend-switch2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet12
+    method: POST
+    url: /node/{{device}}/interface/Ethernet12/remove-service
 
   # Remove local services
   - name: remove-local-bridge-switch1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet8
+    method: POST
+    url: /node/{{device}}/interface/Ethernet8/remove-service
 
   - name: remove-local-bridge-switch2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet8
+    method: POST
+    url: /node/{{device}}/interface/Ethernet8/remove-service
 
   - name: remove-local-irb-switch1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet4
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/remove-service
 
   - name: remove-local-irb-switch2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet4
+    method: POST
+    url: /node/{{device}}/interface/Ethernet4/remove-service
 
   # Remove transit (underlay BGP) last
   - name: remove-transit-switch1
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet0
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
 
   - name: remove-transit-switch2
-    action: remove-service
+    action: newtron
     devices: [switch2]
-    interface: Ethernet0
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
 
   # =========================================================================
   # Reverse of SetupEVPN — VTEP, NVO, overlay peers
@@ -79,8 +89,10 @@ steps:
   # =========================================================================
 
   - name: teardown-evpn
-    action: teardown-evpn
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/teardown-evpn
 
   # =========================================================================
   # Reverse of ConfigureBGP — BGP globals, AF, redistribution
@@ -89,8 +101,10 @@ steps:
   # =========================================================================
 
   - name: remove-bgp-globals
-    action: remove-bgp-globals
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/remove-bgp-globals
 
   # =========================================================================
   # Reverse of ConfigureLoopback — loopback interface
@@ -99,5 +113,7 @@ steps:
   # =========================================================================
 
   - name: remove-loopback
-    action: remove-loopback
+    action: newtron
     devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/remove-loopback
