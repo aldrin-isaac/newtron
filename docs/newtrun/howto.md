@@ -81,13 +81,13 @@ This is the minimum path from zero to a passing test suite.
 
 ```bash
 # 1. Start newtron-server (must be running before newtrun)
-bin/newtron-server --specs newtrun/topologies/2node-ngdp/specs &
+bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
 # 2. List available suites
 bin/newtrun list
 
-# 3. Run the 2node-ngdp-primitive suite (deploys topology automatically)
-bin/newtrun start 2node-ngdp-primitive
+# 3. Run the 2node-vs-primitive suite (deploys topology automatically)
+bin/newtrun start 2node-vs-primitive
 
 # 4. Check progress from another terminal
 bin/newtrun status
@@ -97,7 +97,7 @@ bin/newtrun stop
 ```
 
 The suite deploys a 2-switch topology (`switch1`, `switch2`) running
-`sonic-ciscovs`, provisions them through newtron-server, then runs 20
+`sonic-vs`, provisions them through newtron-server, then runs 21
 scenarios covering BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, and
 PortChannels — all with full teardown and clean-state verification.
 
@@ -113,9 +113,12 @@ test suites in `newtrun/suites/`. Use `newtrun topologies` and
 
 | Topology | Devices | Description |
 |----------|---------|-------------|
-| `2node-ngdp` | 2 switches + 6 hosts | General-purpose: BGP, VLANs, VRFs, services, ACLs, QoS, PortChannels. The workhorse topology. |
-| `2node-ngdp-service` | 2 switches + 8 hosts | Service-focused: end-to-end service provisioning with data plane verification across more host endpoints. |
-| `3node-ngdp` | 2 leaves + 2 hosts | EVPN/VXLAN and multi-hop: L2 bridging across a fabric, L3 inter-subnet routing via asymmetric IRB. |
+| `1node-vs` | 1 switch | Single switch (sonic-vs). Minimal topology for basic operations. |
+| `2node-ngdp` | 2 switches + 6 hosts | General-purpose CiscoVS: BGP, VLANs, VRFs, services, ACLs, QoS, PortChannels. |
+| `2node-ngdp-service` | 2 switches + 8 hosts | Service-focused CiscoVS: end-to-end service provisioning with data plane verification across more host endpoints. |
+| `2node-vs` | 2 switches + 6 hosts | General-purpose sonic-vs: same test coverage as 2node-ngdp on community SONiC. |
+| `2node-vs-service` | 2 switches + 8 hosts | Service-focused sonic-vs: service provisioning, drift detection, zombie intent testing. |
+| `3node-ngdp` | 1 spine + 2 leaves + 2 hosts | EVPN/VXLAN and multi-hop: L2 bridging across a fabric, L3 inter-subnet routing via asymmetric IRB. |
 | `4node-ngdp` | 2 spines + 2 leaves | Full fabric: ECMP, eBGP overlay, route reflection, shared VRFs. |
 
 Each topology lives at `newtrun/topologies/<name>/specs/` containing
@@ -127,13 +130,16 @@ in `profiles/`.
 | Suite | Topology | Scenarios | Description |
 |-------|----------|-----------|-------------|
 | `1node-vs-basic` | 1node-vs | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
-| `2node-ngdp-primitive` | 2node-ngdp | 20 | Incremental: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
-| `2node-ngdp-service` | 2node-ngdp-service | 6 | Service lifecycle: provision → health → data plane → deprovision → verify clean. |
+| `2node-ngdp-primitive` | 2node-ngdp | 21 | Incremental CiscoVS: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
+| `2node-ngdp-service` | 2node-ngdp-service | 6 | Service lifecycle on CiscoVS: provision, health, data plane, deprovision, verify clean. |
+| `2node-vs-primitive` | 2node-vs | 21 | Incremental sonic-vs: same coverage as 2node-ngdp-primitive on community SONiC. |
+| `2node-vs-service` | 2node-vs-service | 6 | Service lifecycle on sonic-vs: provision, health, data plane, deprovision, verify clean. |
+| `2node-vs-drift` | 2node-vs-service | 7 | Drift detection: inject CONFIG_DB changes, detect drift (missing/extra/modified), reprovision to fix. |
+| `2node-vs-zombie` | 2node-vs-service | 8 | Zombie intent: inject zombie state, verify write operations are blocked, resolve zombie, verify unblocked. |
 | `3node-ngdp-dataplane` | 3node-ngdp | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
-| `simple-vrf-host` | 2node-ngdp | 5 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
+| `simple-vrf-host` | 2node-ngdp | 4 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
 
-Suites in the `2node-ngdp-primitive`, `2node-ngdp-service`, and `3node-ngdp-dataplane`
-directories use dependency ordering (`requires`/`after`) — scenarios run in
+Suites use dependency ordering (`requires`/`after`) — scenarios run in
 the declared order and skip if prerequisites failed.
 
 ---
@@ -147,22 +153,22 @@ via newtlab, then runs scenarios in dependency order against newtron-server.
 ### Run All Scenarios in a Suite
 
 ```bash
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 ```
 
 This deploys the topology (or reuses an existing one), runs all scenarios
 in dependency order, and leaves the topology running. The suite name
-resolves to `newtrun/suites/2node-ngdp-primitive/`. You can also pass a full
+resolves to `newtrun/suites/2node-vs-primitive/`. You can also pass a full
 path with `--dir`:
 
 ```bash
-newtrun start --dir newtrun/suites/2node-ngdp-primitive
+newtrun start --dir newtrun/suites/2node-vs-primitive
 ```
 
 ### Run a Single Scenario
 
 ```bash
-newtrun start 2node-ngdp-primitive --scenario boot-ssh
+newtrun start 2node-vs-primitive --scenario boot-ssh
 ```
 
 ### Override Platform
@@ -185,11 +191,11 @@ newtrun resolves the server URL in this order: `--server` flag >
 
 ```bash
 # Explicit server
-newtrun start 2node-ngdp-primitive --server http://10.1.0.5:8080
+newtrun start 2node-vs-primitive --server http://10.1.0.5:8080
 
 # Or via environment
 export NEWTRON_SERVER=http://10.1.0.5:8080
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 ```
 
 ### Network ID
@@ -199,13 +205,13 @@ Resolution order: `--network-id` flag > `NEWTRON_NETWORK_ID` environment
 variable > settings file > default.
 
 ```bash
-newtrun start 2node-ngdp-primitive --network-id lab1
+newtrun start 2node-vs-primitive --network-id lab1
 ```
 
 ### Verbose Output
 
 ```bash
-newtrun start 2node-ngdp-primitive -v
+newtrun start 2node-vs-primitive -v
 ```
 
 Shows per-step results with timing, failure details, and device-level
@@ -214,7 +220,7 @@ messages.
 ### JUnit Output
 
 ```bash
-newtrun start 2node-ngdp-primitive --junit results.xml
+newtrun start 2node-vs-primitive --junit results.xml
 ```
 
 ---
@@ -228,7 +234,7 @@ monitor across terminal sessions.
 ### Start a Suite
 
 ```bash
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 ```
 
 This:
@@ -249,11 +255,11 @@ newtrun status
 Output:
 
 ```
-newtrun: 2node-ngdp-primitive
-  topology:  2node-ngdp (deployed, 2 nodes running)
-  platform:  sonic-ciscovs
+newtrun: 2node-vs-primitive
+  topology:  2node-vs (deployed, 2 nodes running)
+  platform:  sonic-vs
   status:    running (pid 12345)
-  started:   2026-02-14 10:30:00 (5m ago)
+  started:   2026-03-14 10:30:00 (5m ago)
 
   #  SCENARIO              STEPS  STATUS   REQUIRES             DURATION
   1  boot-ssh              2      PASS     —                    3s
@@ -262,7 +268,7 @@ newtrun: 2node-ngdp-primitive
   4  irb                   5      —        bridged              —
   5  routed                8      —        boot-ssh             —
 
-  progress: 2/20 passed
+  progress: 2/21 passed
 ```
 
 Use `--detail` to see per-step status within each scenario:
@@ -281,7 +287,7 @@ newtrun status --monitor
 Filter by suite name with `--suite`:
 
 ```bash
-newtrun status --suite 2node-ngdp
+newtrun status --suite 2node-vs
 ```
 
 ### Pause a Running Suite
@@ -296,7 +302,7 @@ deployed. State is saved as `paused`.
 ### Resume a Paused Suite
 
 ```bash
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 ```
 
 newtrun detects the paused state and resumes from where it left off.
@@ -315,7 +321,7 @@ paused or completed first — `stop` refuses to kill a running process.
 
 ```bash
 # Terminal 1: start the suite
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 
 # Terminal 2: check progress
 newtrun status --monitor
@@ -324,10 +330,10 @@ newtrun status --monitor
 newtrun pause
 
 # Terminal 1: runner finishes current scenario and exits
-# "paused after 3 scenarios; resume with: newtrun start 2node-ngdp-primitive"
+# "paused after 3 scenarios; resume with: newtrun start 2node-vs-primitive"
 
 # Later: resume
-newtrun start 2node-ngdp-primitive
+newtrun start 2node-vs-primitive
 
 # When done: tear down
 newtrun stop
@@ -349,24 +355,34 @@ steps. Here is a real scenario from the 2node-ngdp-primitive suite:
 ```yaml
 # newtrun/suites/2node-ngdp-primitive/00-boot-ssh.yaml
 name: boot-ssh
-description: Verify SSH reachability on both switches (factory boot baseline)
+description: Verify SSH reachability on both switches
 topology: 2node-ngdp
 requires: []
 
 steps:
   - name: ssh-echo-switch1
-    action: ssh-command
+    action: newtron
     devices: [switch1]
-    command: "echo ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 120s
+      interval: 5s
     expect:
-      contains: "ok"
+      jq: '.output | contains("ok")'
 
   - name: ssh-echo-switch2
-    action: ssh-command
+    action: newtron
     devices: [switch2]
-    command: "echo ok"
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 120s
+      interval: 5s
     expect:
-      contains: "ok"
+      jq: '.output | contains("ok")'
 ```
 
 **Scenario fields:**
@@ -386,72 +402,53 @@ steps:
 ### 6.2 Step Structure
 
 Each step has an action (what to do), a device selector (where to do it),
-and action-specific fields. Fields are divided into two groups: top-level
-fields used directly by the step executor, and the `params` map for
-action-specific extras.
+and action-specific fields. newtrun has exactly 5 actions:
 
-**Top-level fields** (used directly by the step executor):
+| Action | Purpose |
+|--------|---------|
+| `provision` | Generate and deliver device composite from topology specs |
+| `verify-provisioning` | Verify composite ChangeSet against CONFIG_DB |
+| `wait` | Context-aware sleep |
+| `host-exec` | Run command in host network namespace via direct SSH |
+| `newtron` | Generic HTTP call to newtron-server (replaces all former dedicated actions) |
 
-| Field | Used by | Description |
-|-------|---------|-------------|
-| `name` | all | Step identifier for output |
-| `action` | all | Which executor to run (see `newtrun actions`) |
-| `devices` | most | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
-| `duration` | wait | How long to wait |
-| `table` | verify-config-db, verify-state-db | CONFIG_DB/STATE_DB table name |
-| `key` | verify-config-db, verify-state-db | Table key |
-| `prefix` | verify-route | Route prefix (e.g., `10.1.0.0/31`) |
-| `vrf` | verify-route | VRF name (e.g., `default`) |
-| `interface` | apply-service, remove-service, refresh-service, set-interface, add-vlan-member, remove-vlan-member, bind-acl, unbind-acl, remove-ip | Interface name |
-| `service` | apply-service, restart-service | Service name from network spec |
-| `command` | ssh-command, host-exec | Shell command to run |
-| `target` | verify-ping | Target device name |
-| `count` | verify-ping | Ping count |
-| `vlan_id` | create-vlan, delete-vlan, add-vlan-member, remove-vlan-member, configure-svi, remove-svi, bind-macvpn, unbind-macvpn | VLAN ID (integer) |
-| `tagging` | add-vlan-member | `tagged` or `untagged` |
-| `expect` | verify-\*, ssh-command, host-exec | Assertion block |
-
-**Params map** (action-specific extras under `params:`):
-
-| Key | Used by | Description |
-|-----|---------|-------------|
-| `ip` | apply-service, remove-ip | IP address (e.g., `192.168.1.1/24`) |
-| `property` | set-interface | Property name (`ip`, `vrf`, `mtu`, etc.) |
-| `value` | set-interface | Property value |
-| `source_ip` | setup-evpn | VTEP source IP (optional — falls back to profile loopback) |
-| `ipvpn` | bind-ipvpn | IP-VPN spec name from network spec |
-| `macvpn` | bind-macvpn | MAC-VPN spec name from network spec |
-| `qos_policy` | apply-qos | QoS policy name from network spec |
-| `next_hop` | add-static-route | Next-hop IP |
-| `name` | create-acl-table, delete-acl-table, add-acl-rule, delete-acl-rule, bind-acl, unbind-acl | ACL table name |
-| `rule` | add-acl-rule, delete-acl-rule | ACL rule name (e.g., `RULE_10`) |
-| `action` | add-acl-rule | ACL rule action (`DROP`, `FORWARD`) |
-| `direction` | bind-acl | ACL binding direction (`ingress`, `egress`) |
-| `neighbor_ip` | bgp-add-neighbor, bgp-remove-neighbor | BGP peer IP |
-| `remote_asn` | bgp-add-neighbor | BGP peer ASN |
-
-Different actions expect different params — use `newtrun actions <action>`
-for the definitive parameter reference.
-
-### 6.3 Expect Block
-
-The `expect` block defines assertions for verification and command
-actions. Available fields:
+**Step fields:**
 
 | Field | Type | Used by | Description |
 |-------|------|---------|-------------|
-| `exists` | bool | verify-config-db | Assert key exists (`true`) or does not exist (`false`) |
-| `fields` | map | verify-config-db, verify-state-db | Assert field values match (e.g., `hostname: switch1`) |
-| `min_entries` | int | verify-config-db | Assert table has at least N entries |
-| `max_entries` | int | verify-config-db | Assert table has at most N entries |
-| `timeout` | duration | verify-state-db, verify-bgp, verify-route, verify-ping, host-exec | Poll until condition met or timeout (default: 120s for BGP/state, 60s for routes, 30s for ping) |
-| `poll_interval` | duration | verify-state-db, verify-bgp, verify-route | Time between polls (default: 5s) |
-| `state` | string | verify-bgp | Expected BGP peer state (default: `Established`) |
-| `protocol` | string | verify-route | Expected route protocol (e.g., `bgp`) |
-| `nexthop_ip` | string | verify-route | Expected next-hop IP |
-| `source` | string | verify-route | Route source: `app_db` (default) or `asic_db` |
-| `success_rate` | float | host-exec, verify-ping | Fraction of successful pings (default: 1.0) |
-| `contains` | string | ssh-command, host-exec | Regex match on command output |
+| `name` | string | all | Step identifier for output |
+| `action` | string | all | Which executor to run (`provision`, `verify-provisioning`, `wait`, `host-exec`, `newtron`) |
+| `devices` | selector | all except `wait` | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
+| `duration` | duration | `wait` | How long to wait (e.g., `30s`, `2m`) |
+| `command` | string | `host-exec` | Shell command to run inside the host namespace |
+| `params` | map | `newtron` | Request body for POST/PUT/DELETE requests |
+| `method` | string | `newtron` | HTTP method: `GET` (default), `POST`, `PUT`, `DELETE` |
+| `url` | string | `newtron` | URL template with `{{device}}` placeholder |
+| `poll` | object | `newtron` | Polling config: `{timeout: 120s, interval: 5s}` |
+| `batch` | list | `newtron` | Sequential list of HTTP calls |
+| `expect` | object | `host-exec`, `newtron` | Assertion block (see below) |
+| `expect_failure` | bool | all | Expect the step to fail — inverts pass/fail (applied by the runner after execution) |
+
+### 6.3 Expect Block
+
+The `expect` block defines assertions. Available fields depend on the
+action:
+
+**For `newtron` action:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jq` | string | jq expression evaluated against the HTTP response body. Must return boolean `true` to pass. |
+
+**For `host-exec` action:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success_rate` | float | Fraction of successful pings (e.g., `0.8` = 80%). Parses ping output for packet loss. |
+| `contains` | string | String match on combined stdout+stderr |
+
+Without `expect`, `host-exec` checks the exit code only. The `newtron`
+action checks that the HTTP response is non-error.
 
 ### 6.4 Dependency Ordering
 
@@ -480,29 +477,30 @@ exercise apply/remove cycles to detect resource leaks or state corruption:
 ```yaml
 name: service-churn
 description: Stress test service apply/remove cycles
-topology: 2node-ngdp
+topology: 2node-vs-service
 requires: [provision]
 repeat: 10
 
 steps:
   - name: apply-svc
-    action: apply-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet3
-    service: l2-extend
+    method: POST
+    url: /node/{{device}}/interface/Ethernet3/service
+    params: {service: l2-extend}
 
   - name: remove-svc
-    action: remove-service
+    action: newtron
     devices: [switch1]
-    interface: Ethernet3
+    method: DELETE
+    url: /node/{{device}}/interface/Ethernet3/service
 
   - name: verify-clean
-    action: verify-config-db
+    action: newtron
     devices: [switch1]
-    table: NEWTRON_INTENT
-    key: "Ethernet3"
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
     expect:
-      exists: false
+      jq: '.exists == false'
 ```
 
 Each iteration runs all three steps. If any step fails, the scenario
@@ -526,507 +524,490 @@ the scenario reports `SKIP` with a reason.
 ### 6.7 Discovering Actions
 
 ```bash
-# List all actions by category
+# List all actions
 newtrun actions
 
-# Show params, prerequisites, and example YAML for a specific action
+# Show detail for a specific action
 newtrun actions provision
-newtrun actions verify-config-db
-newtrun actions apply-service
+newtrun actions newtron
 ```
+
+newtrun has 5 actions: `provision`, `verify-provisioning`, `wait`,
+`host-exec`, and `newtron`. The `newtron` action is the general-purpose
+action — it makes HTTP calls to newtron-server and covers every
+operation that the old dedicated actions (create-vlan, apply-service,
+verify-bgp, etc.) used to handle individually.
 
 ---
 
 ## 7. Step Action Reference
 
-Every action maps to a step executor. Most call newtron-server over HTTP.
-Host actions use direct SSH. Use `newtrun actions <action>` for the
-definitive parameter reference — the listing below covers categories and
-representative examples.
+newtrun has exactly 5 actions. The first three handle the composite
+provisioning lifecycle. `host-exec` runs commands on host VMs via SSH.
+`newtron` is the generic action that covers everything else via HTTP
+calls to newtron-server.
 
-### 7.1 Provisioning & BGP
+### 7.1 provision
 
-Actions: `provision`, `configure-loopback`, `remove-loopback`,
-`configure-bgp`, `remove-bgp-globals`, `apply-frr-defaults`,
-`config-reload`
+Generates a device composite from topology specs and delivers it to the
+device. This is the one operation that replaces device reality with
+spec intent.
 
-Provisioning writes the full device composite (from topology specs) to
-CONFIG_DB. BGP actions configure underlay routing. `config-reload`
-restarts the BGP container to pick up ASN changes and applies VRF table
-entries — it replaces the separate `restart-service bgp` approach used in
-earlier topologies.
+The executor generates the composite, runs a best-effort config reload
+to establish a clean baseline, delivers the composite in overwrite mode,
+refreshes the server's cached CONFIG_DB, and saves config to
+`config_db.json` for subsequent config reloads.
 
 ```yaml
-# Provision both switches from topology spec
 - name: provision-switches
   action: provision
   devices: [switch1, switch2]
+```
 
-# Reload config (restarts BGP, applies VRF table)
-- name: reload
-  action: config-reload
+No additional fields. The composite handle is stored internally and
+used by `verify-provisioning`.
+
+### 7.2 verify-provisioning
+
+Verifies the most recent composite delivery by checking that all
+CONFIG_DB entries written by `provision` are present with the expected
+field values. Uses the ChangeSet stored from the `provision` step.
+
+```yaml
+- name: verify-config
+  action: verify-provisioning
   devices: [switch1, switch2]
-
-# Write BGP globals from device profile
-- name: configure-bgp
-  action: configure-bgp
-  devices: [switch1, switch2]
-
-# Configure loopback from profile (e.g., 10.0.0.1/32)
-- name: configure-loopback
-  action: configure-loopback
-  devices: all
 ```
 
-### 7.2 Verification
+**Precondition:** `provision` must have run on the target devices in an
+earlier step. If no composite handle is found, the step errors with
+"no composite accumulated."
 
-Actions: `verify-provisioning`, `verify-config-db`, `verify-state-db`,
-`verify-bgp`, `verify-health`, `verify-route`, `verify-ping`
+### 7.3 wait
 
-Verification actions read device state and assert conditions.
-`verify-provisioning` uses the ChangeSet from the most recent provision
-to automatically check all CONFIG_DB entries. The others are ad-hoc
-assertions on specific tables, keys, or protocols.
-
-**verify-config-db** has three modes — exists check, field match, and
-minimum entry count:
-
-```yaml
-# Assert a key exists
-- name: check-loopback
-  action: verify-config-db
-  devices: [switch1]
-  table: LOOPBACK_INTERFACE
-  key: "Loopback0"
-  expect:
-    exists: true
-
-# Assert specific field values
-- name: check-bgp-globals
-  action: verify-config-db
-  devices: [switch1]
-  table: BGP_GLOBALS
-  key: "default"
-  expect:
-    fields:
-      local_asn: "65001"
-      router_id: "10.0.0.1"
-
-# Assert a key does NOT exist (after removal)
-- name: check-removed
-  action: verify-config-db
-  devices: [switch1]
-  table: NEWTRON_INTENT
-  key: "Ethernet2"
-  expect:
-    exists: false
-
-# Assert minimum entries in a table
-- name: check-neighbors
-  action: verify-config-db
-  devices: [switch1]
-  table: BGP_NEIGHBOR
-  expect:
-    min_entries: 2
-```
-
-**verify-bgp** polls all BGP sessions until they reach the expected state:
-
-```yaml
-- name: check-bgp
-  action: verify-bgp
-  devices: all
-  expect:
-    state: Established
-    timeout: 120s
-    poll_interval: 5s
-```
-
-**verify-route** checks the routing table (APP_DB or ASIC_DB):
-
-```yaml
-- name: check-underlay-route
-  action: verify-route
-  devices: [switch1]
-  prefix: "10.1.0.0/31"
-  vrf: default
-  expect:
-    protocol: bgp
-    source: app_db
-    timeout: 60s
-```
-
-**verify-health** reads health checks from the device (a single-shot
-read, not polling — use a `wait` step before it if convergence time is
-needed):
+Context-aware sleep. Respects cancellation — if the suite is paused
+during a wait, it exits cleanly.
 
 ```yaml
 - name: wait-convergence
   action: wait
   duration: 30s
-
-- name: check-health
-  action: verify-health
-  devices: all
 ```
 
-### 7.3 Service Lifecycle
+The only required field is `duration`. No `devices` field needed.
 
-Actions: `apply-service`, `remove-service`, `refresh-service`
+### 7.4 host-exec
 
-Services are the primary abstraction — they bind a service definition
-from the network spec to an interface, creating all necessary VLANs,
-VRFs, EVPN mappings, and bindings in one operation.
-
-```yaml
-# Apply a service to an interface
-- name: apply-svc
-  action: apply-service
-  devices: [switch1]
-  interface: Ethernet3
-  service: l2-extend
-
-# Refresh (re-apply without remove — picks up spec changes)
-- name: refresh-svc
-  action: refresh-service
-  devices: [switch1]
-  interface: Ethernet3
-
-# Remove the service (reverse of apply)
-- name: remove-svc
-  action: remove-service
-  devices: [switch1]
-  interface: Ethernet3
-
-# Verify removal
-- name: verify-removed
-  action: verify-config-db
-  devices: [switch1]
-  table: NEWTRON_INTENT
-  key: "Ethernet3"
-  expect:
-    exists: false
-```
-
-### 7.4 VLAN
-
-Actions: `create-vlan`, `delete-vlan`, `add-vlan-member`,
-`remove-vlan-member`, `configure-svi`, `remove-svi`
-
-Note: `vlan_id` is a **top-level** step field, not under `params`.
+Runs a command inside a host device's network namespace via direct SSH.
+The namespace name matches the device name (e.g., `host1`, `host2`).
+newtlab creates these namespaces at deploy time.
 
 ```yaml
-# Create VLAN 100
-- name: create-vlan
-  action: create-vlan
-  devices: [switch1]
-  vlan_id: 100
-
-# Add interface as untagged member
-- name: add-member
-  action: add-vlan-member
-  devices: [switch1]
-  vlan_id: 100
-  interface: Ethernet1
-  tagging: untagged
-
-# Configure SVI (VLAN interface with IP)
-- name: configure-svi
-  action: configure-svi
-  devices: [switch1]
-  vlan_id: 100
-
-# Delete VLAN
-- name: delete-vlan
-  action: delete-vlan
-  devices: [switch1]
-  vlan_id: 100
-```
-
-### 7.5 VRF
-
-Actions: `create-vrf`, `delete-vrf`, `add-vrf-interface`,
-`remove-vrf-interface`
-
-```yaml
-# Create a VRF
-- name: create-vrf
-  action: create-vrf
-  devices: [switch2]
-  vrf: Vrf_local
-
-# Add interface to VRF
-- name: add-intf
-  action: add-vrf-interface
-  devices: [switch2]
-  vrf: Vrf_local
-  interface: Ethernet1
-
-# Remove interface from VRF
-- name: remove-intf
-  action: remove-vrf-interface
-  devices: [switch2]
-  vrf: Vrf_local
-  interface: Ethernet1
-
-# Delete VRF
-- name: delete-vrf
-  action: delete-vrf
-  devices: [switch2]
-  vrf: Vrf_local
-```
-
-### 7.6 EVPN & VPN
-
-Actions: `setup-evpn`, `teardown-evpn`, `bind-ipvpn`, `unbind-ipvpn`,
-`bind-macvpn`, `unbind-macvpn`
-
-`setup-evpn` creates the VTEP, NVO, and overlay eBGP sessions with
-L2VPN EVPN address-family. The `source_ip` param is optional — if
-omitted, it reads the loopback IP from the device profile.
-
-```yaml
-# Set up EVPN overlay
-- name: setup-evpn
-  action: setup-evpn
-  devices: [switch1]
-
-# Bind a MAC-VPN to a VLAN (vlan_id is top-level)
-- name: bind-macvpn
-  action: bind-macvpn
-  devices: [switch1]
-  vlan_id: 300
-  params:
-    macvpn: vlan300
-
-# Bind an IP-VPN to a VRF
-- name: bind-ipvpn
-  action: bind-ipvpn
-  devices: [switch1]
-  vrf: Vrf_IRB
-  params:
-    ipvpn: evpn-irb-vrf
-
-# Teardown EVPN (reverse of setup-evpn)
-- name: teardown-evpn
-  action: teardown-evpn
-  devices: [switch1, switch2]
-```
-
-### 7.7 ACL
-
-Actions: `create-acl-table`, `add-acl-rule`, `delete-acl-rule`,
-`delete-acl-table`, `bind-acl`, `unbind-acl`
-
-Full ACL lifecycle — create table, add rules, bind to interface, then
-reverse:
-
-```yaml
-- name: create-acl
-  action: create-acl-table
-  devices: [switch1]
-  params:
-    name: TEST_ACL
-
-- name: add-rule
-  action: add-acl-rule
-  devices: [switch1]
-  params:
-    name: TEST_ACL
-    rule: RULE_10
-    action: DROP
-
-- name: bind-acl
-  action: bind-acl
-  devices: [switch1]
-  interface: Ethernet10
-  params:
-    name: TEST_ACL
-    direction: ingress
-
-- name: unbind-acl
-  action: unbind-acl
-  devices: [switch1]
-  interface: Ethernet10
-  params:
-    name: TEST_ACL
-
-- name: delete-rule
-  action: delete-acl-rule
-  devices: [switch1]
-  params:
-    name: TEST_ACL
-    rule: RULE_10
-
-- name: delete-acl
-  action: delete-acl-table
-  devices: [switch1]
-  params:
-    name: TEST_ACL
-```
-
-### 7.8 QoS
-
-Actions: `apply-qos`, `remove-qos`
-
-```yaml
-- name: apply-qos
-  action: apply-qos
-  devices: [switch1]
-  interface: Ethernet11
-  params:
-    qos_policy: test-4q
-
-- name: remove-qos
-  action: remove-qos
-  devices: [switch1]
-  interface: Ethernet11
-```
-
-### 7.9 Interface & PortChannel
-
-Actions: `set-interface`, `remove-ip`, `create-portchannel`,
-`delete-portchannel`, `add-portchannel-member`, `remove-portchannel-member`
-
-`set-interface` dispatches based on `params.property`: `ip` calls SetIP,
-`vrf` calls SetVRF, anything else calls Set(property, value).
-
-```yaml
-# Set IP address
-- name: set-ip
-  action: set-interface
-  devices: [switch1]
-  interface: Ethernet0
-  params:
-    property: ip
-    value: "10.1.0.0/31"
-
-# Set MTU
-- name: set-mtu
-  action: set-interface
-  devices: [switch1]
-  interface: Ethernet10
-  params:
-    property: mtu
-    value: "9100"
-
-# Remove IP address
-- name: remove-ip
-  action: remove-ip
-  devices: [switch1]
-  interface: Ethernet0
-  params:
-    ip: "10.1.0.0/31"
-
-# Create PortChannel with members
-- name: create-lag
-  action: create-portchannel
-  devices: [switch1]
-  params:
-    name: PortChannel1
-    members: [Ethernet4, Ethernet5]
-    min_links: 1
-
-# Delete PortChannel
-- name: delete-lag
-  action: delete-portchannel
-  devices: [switch1]
-  params:
-    name: PortChannel1
-```
-
-### 7.10 Static Routing
-
-Actions: `add-static-route`, `remove-static-route`
-
-```yaml
-- name: add-route
-  action: add-static-route
-  devices: [switch2]
-  vrf: Vrf_local
-  prefix: "10.99.0.0/24"
-  params:
-    next_hop: "10.20.1.0"
-
-- name: remove-route
-  action: remove-static-route
-  devices: [switch2]
-  vrf: Vrf_local
-  prefix: "10.99.0.0/24"
-```
-
-### 7.11 BGP Neighbors
-
-Actions: `bgp-add-neighbor`, `bgp-remove-neighbor`
-
-Add or remove individual BGP peers. Useful for testing peering changes
-without full reprovisioning. The `interface` field is optional — if
-provided, the neighbor is added as a direct (interface-based) peer;
-if omitted, as a loopback-based peer.
-
-```yaml
-# Add a loopback-based BGP neighbor
-- name: add-loopback-peer
-  action: bgp-add-neighbor
-  devices: [switch1]
-  params:
-    neighbor_ip: "10.0.0.99"
-    remote_asn: 65099
-
-# Add a direct (interface-based) BGP neighbor
-- name: add-direct-peer
-  action: bgp-add-neighbor
-  devices: [switch1]
-  interface: Ethernet1
-  params:
-    neighbor_ip: "10.1.1.0"
-    remote_asn: 65001
-
-# Remove a BGP neighbor
-- name: remove-peer
-  action: bgp-remove-neighbor
-  devices: [switch1]
-  params:
-    neighbor_ip: "10.0.0.99"
-```
-
-### 7.12 Host & Utility
-
-Actions: `host-exec`, `ssh-command`, `wait`, `cleanup`,
-`restart-service`
-
-```yaml
-# Run a command on a host device (in its network namespace)
-- name: ping-test
+- name: ping-host3
   action: host-exec
   devices: [host1]
   command: "ping -c 3 -W 2 10.100.0.3"
   expect:
     success_rate: 0.8
+```
 
-# Run a command on a switch via SSH
-- name: check-vtysh
-  action: ssh-command
-  devices: [switch1]
-  command: "vtysh -c 'show ip bgp summary'"
+**Fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `command` | yes | Shell command to run. Compound commands (semicolons, pipes) work — the executor wraps in `sh -c`. |
+| `expect.success_rate` | no | Parse ping output for packet loss. `0.8` means 80% of pings must succeed. |
+| `expect.contains` | no | String match on combined stdout+stderr. |
+
+Without `expect`, the step checks the exit code only.
+
+**Examples:**
+
+```yaml
+# Ping with success rate threshold
+- name: ping-test
+  action: host-exec
+  devices: [host1]
+  command: "ping -c 5 -W 2 10.100.0.3"
   expect:
-    contains: "Established"
+    success_rate: 1.0
 
-# Wait for convergence
-- name: wait-convergence
-  action: wait
-  duration: 30s
+# String match on output
+- name: check-interface
+  action: host-exec
+  devices: [host1]
+  command: "ip addr show eth0"
+  expect:
+    contains: "10.100.0.1"
 
-# Run cleanup to remove orphaned resources
-- name: cleanup
-  action: cleanup
-  devices: [switch1, switch2]
+# Compound command
+- name: configure-host
+  action: host-exec
+  devices: [host1]
+  command: "ip addr add 10.100.0.1/24 dev eth0 2>/dev/null || true"
+```
 
-# Restart a SONiC service (e.g., bgp)
-- name: restart-bgp
-  action: restart-service
+### 7.5 newtron — Generic HTTP Action
+
+The `newtron` action makes HTTP calls to newtron-server. It replaces all
+the former dedicated actions (create-vlan, apply-service, verify-bgp,
+verify-config-db, setup-evpn, etc.) with a single generic mechanism.
+
+The action has three modes: one-shot, polling, and batch.
+
+#### URL Templates
+
+URLs start from the path after the network segment. The `/network/<id>`
+prefix is added automatically. Use `{{device}}` as a placeholder for
+per-device expansion:
+
+```yaml
+url: /node/{{device}}/vlan           # expands to /network/<id>/node/switch1/vlan
+url: /node/{{device}}/health         # expands to /network/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check      # expands to /network/<id>/node/switch1/bgp/check
+```
+
+If the URL contains `{{device}}`, the call runs in parallel across all
+target devices. If not, it runs once with no device scoping (for
+network-level operations like creating specs).
+
+#### URL Encoding
+
+CONFIG_DB keys use `|` as the table-key separator. In URLs, encode
+special characters:
+
+| Character | Encoding | Example |
+|-----------|----------|---------|
+| `\|` | `%7C` | `VLAN_MEMBER/Vlan100%7CEthernet1` |
+| `/` in key | `%2F` | `LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32` |
+
+```yaml
+# Verify a VLAN_MEMBER entry (pipe in key)
+- name: verify-member
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1
+  expect:
+    jq: '.tagging_mode == "untagged"'
+```
+
+#### One-Shot Mode
+
+The default mode. Makes a single HTTP call per device.
+
+```yaml
+# GET request (method defaults to GET)
+- name: check-health
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/health
+
+# POST with params (request body)
+- name: create-vlan
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/vlan
+  params: {id: 100}
+
+# DELETE request
+- name: remove-service
+  action: newtron
+  devices: [switch1]
+  method: DELETE
+  url: /node/{{device}}/interface/Ethernet3/service
+```
+
+#### Polling Mode
+
+When `poll` is set, the call repeats at the given interval until the
+`expect.jq` expression returns `true` or the timeout expires. Use
+polling for operations that depend on daemon convergence (BGP sessions,
+ASIC programming, health checks).
+
+```yaml
+- name: verify-bgp
+  action: newtron
   devices: all
-  service: bgp
+  url: /node/{{device}}/bgp/check
+  poll:
+    timeout: 120s
+    interval: 5s
+  expect:
+    jq: 'length > 0 and all(.[]; .status == "pass")'
+```
+
+During polling, HTTP errors are treated as "not ready yet" — the action
+keeps polling rather than failing immediately. This handles the common
+case where the device is still booting or a daemon hasn't started
+processing entries.
+
+```yaml
+# Poll SSH reachability during boot
+- name: ssh-echo
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/ssh-command
+  params: {command: "echo ok"}
+  poll:
+    timeout: 120s
+    interval: 5s
+  expect:
+    jq: '.output | contains("ok")'
+
+# Poll health checks with pass/warn tolerance
+- name: verify-health
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/health
+  poll:
+    timeout: 60s
+    interval: 5s
+  expect:
+    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
+```
+
+#### Batch Mode
+
+The `batch` field runs a sequence of HTTP calls as a single step. The
+batch fails on the first error. If any batch call URL contains
+`{{device}}`, the entire sequence runs per-device in parallel.
+
+```yaml
+- name: setup-vlan-with-members
+  action: newtron
+  devices: [switch1]
+  batch:
+    - method: POST
+      url: /node/{{device}}/vlan
+      params: {id: 200}
+    - method: POST
+      url: /node/{{device}}/vlan/200/member
+      params: {interface: Ethernet1, tagged: false}
+    - method: POST
+      url: /node/{{device}}/vlan/200/member
+      params: {interface: Ethernet3, tagged: false}
+```
+
+Batch calls do not support individual `expect` blocks — the batch
+succeeds if all calls return non-error responses.
+
+#### jq Expressions
+
+The `expect.jq` field is a jq expression evaluated against the HTTP
+response body (parsed as JSON). The expression must produce a single
+boolean `true` to pass. Any other value (including `false`, `null`, a
+string, or a number) is a failure.
+
+Common patterns:
+
+```yaml
+# Boolean field check
+jq: '.exists == true'
+
+# String field check
+jq: '.tagging_mode == "untagged"'
+
+# Array length check
+jq: 'length > 0'
+
+# All-pass check (every element satisfies a condition)
+jq: 'all(.[]; .status == "pass")'
+
+# Combined checks
+jq: 'length > 0 and all(.[]; .status == "pass")'
+
+# Nested field access
+jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
+
+# String containment
+jq: '.output | contains("ok")'
+
+# Drift detection
+jq: '.status == "drifted" and (.missing | length) == 1 and (.extra | length) == 1'
+```
+
+When a jq assertion fails, the error message includes the expression and
+the actual value — useful for debugging without re-running the scenario.
+
+#### expect_failure
+
+The `expect_failure` flag inverts pass/fail. Use it to assert that an
+operation fails — for example, verifying that a zombie intent blocks
+write operations:
+
+```yaml
+- name: create-vlan-blocked-by-zombie
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/vlan
+  params: {id: 999}
+  expect_failure: true
+```
+
+If the HTTP call fails (as expected), the step passes. If it succeeds
+unexpectedly, the step fails.
+
+#### Common Operations
+
+The `newtron` action covers every operation exposed by newtron-server.
+Here are representative examples organized by domain:
+
+**SSH commands:**
+
+```yaml
+- name: check-frr
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/ssh-command
+  params: {command: "vtysh -c 'show ip bgp summary'"}
+  expect:
+    jq: '.output | contains("Established")'
+```
+
+**CONFIG_DB verification:**
+
+```yaml
+# Check key existence
+- name: check-loopback
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+  expect:
+    jq: '.exists == true'
+
+# Read and check field values
+- name: check-bgp-globals
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/configdb/BGP_GLOBALS/default
+  expect:
+    jq: '.local_asn == "65001" and .router_id == "10.0.0.1"'
+
+# Verify key does NOT exist (after removal)
+- name: check-removed
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+  expect:
+    jq: '.exists == false'
+```
+
+**VLAN operations:**
+
+```yaml
+# Create VLAN
+- name: create-vlan100
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/vlan
+  params: {id: 100}
+
+# Add untagged member
+- name: add-member
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/vlan/100/member
+  params: {interface: Ethernet1, tagged: false}
+
+# Delete VLAN
+- name: delete-vlan100
+  action: newtron
+  devices: [switch1]
+  method: DELETE
+  url: /node/{{device}}/vlan/100
+```
+
+**VRF operations:**
+
+```yaml
+# Create VRF
+- name: create-vrf
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/vrf
+  params: {name: Vrf_local}
+
+# Delete VRF
+- name: delete-vrf
+  action: newtron
+  devices: [switch1]
+  method: DELETE
+  url: /node/{{device}}/vrf/Vrf_local
+```
+
+**Service lifecycle:**
+
+```yaml
+# Apply service to interface
+- name: apply-service
+  action: newtron
+  devices: [switch1]
+  method: POST
+  url: /node/{{device}}/interface/Ethernet3/service
+  params: {service: l2-extend}
+
+# Remove service from interface
+- name: remove-service
+  action: newtron
+  devices: [switch1]
+  method: DELETE
+  url: /node/{{device}}/interface/Ethernet3/service
+```
+
+**BGP verification:**
+
+```yaml
+- name: verify-bgp
+  action: newtron
+  devices: all
+  url: /node/{{device}}/bgp/check
+  poll:
+    timeout: 120s
+    interval: 5s
+  expect:
+    jq: 'length > 0 and all(.[]; .status == "pass")'
+```
+
+**Health checks:**
+
+```yaml
+- name: verify-health
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/health
+  poll:
+    timeout: 60s
+    interval: 5s
+  expect:
+    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
+```
+
+**Config reload:**
+
+```yaml
+- name: config-reload
+  action: newtron
+  devices: [switch1, switch2]
+  method: POST
+  url: /node/{{device}}/config-reload
+```
+
+**Drift detection:**
+
+```yaml
+- name: check-drift
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/drift
+  expect:
+    jq: '.status == "clean"'
 ```
 
 ---
@@ -1049,7 +1030,7 @@ topology coalesces host1-host6 across two host VMs (the 2node-ngdp-service
 topology has host1-host8). Each host's network namespace provides
 isolation.
 
-### host-exec
+### host-exec for Data Plane
 
 `host-exec` runs commands inside a host's network namespace via direct
 SSH. The namespace is automatically set to match the device name:
@@ -1070,25 +1051,9 @@ the namespace.
 The `expect` block supports two modes:
 - `success_rate`: parses ping output for packet loss (e.g., `0.8` means
   80% of pings must succeed)
-- `contains`: regex match on combined stdout+stderr
+- `contains`: string match on combined stdout+stderr
 
 Without `expect`, the step checks the exit code only.
-
-### verify-ping
-
-`verify-ping` is a higher-level action that resolves the target device's
-IP from DeviceInfo and runs a ping test:
-
-```yaml
-- name: ping-host2
-  action: verify-ping
-  devices: [host1]
-  target: host2
-  count: 5
-  expect:
-    success_rate: 0.8
-    timeout: 30s
-```
 
 ### Platform Requirements
 
@@ -1116,23 +1081,41 @@ on a single switch, and verifies L2 connectivity between two hosts:
 ```yaml
 # Create VLAN and add untagged members
 - name: create-vlan100
-  action: create-vlan
+  action: newtron
   devices: [switch1]
-  vlan_id: 100
+  method: POST
+  url: /node/{{device}}/vlan
+  params: {id: 100}
 
 - name: add-host1-port
-  action: add-vlan-member
+  action: newtron
   devices: [switch1]
-  vlan_id: 100
-  interface: Ethernet1
-  tagging: untagged
+  method: POST
+  url: /node/{{device}}/vlan/100/member
+  params: {interface: Ethernet1, tagged: false}
 
 - name: add-host3-port
-  action: add-vlan-member
+  action: newtron
   devices: [switch1]
-  vlan_id: 100
-  interface: Ethernet3
-  tagging: untagged
+  method: POST
+  url: /node/{{device}}/vlan/100/member
+  params: {interface: Ethernet3, tagged: false}
+
+# Wait for ASIC programming
+- name: wait-bridge
+  action: wait
+  duration: 45s
+
+# Configure host IPs
+- name: host1-ip
+  action: host-exec
+  devices: [host1]
+  command: "ip addr add 10.100.0.1/24 dev eth0 2>/dev/null || true"
+
+- name: host3-ip
+  action: host-exec
+  devices: [host3]
+  command: "ip addr add 10.100.0.3/24 dev eth0 2>/dev/null || true"
 
 # Verify L2 connectivity
 - name: host1-ping-host3
@@ -1160,22 +1143,22 @@ on a single switch, and verifies L2 connectivity between two hosts:
 Normal mode shows scenario-level results:
 
 ```
-newtrun: 20 scenarios, topology: 2node-ngdp, platform: sonic-ciscovs
+newtrun: 21 scenarios, topology: 2node-vs, platform: sonic-vs
 
-  [1/20]  boot-ssh .................. PASS  (3s)
-  [2/20]  loopback .................. PASS  (5s)
-  [3/20]  bridged ................... PASS  (18s)
+  [1/21]  boot-ssh .................. PASS  (3s)
+  [2/21]  loopback .................. PASS  (5s)
+  [3/21]  bridged ................... PASS  (18s)
   ...
-  [20/20] verify-clean .............. PASS  (12s)
+  [21/21] verify-clean .............. PASS  (12s)
 
 ---
-newtrun: 20 scenarios: 20 passed  (3m45s)
+newtrun: 21 scenarios: 21 passed  (3m45s)
 ```
 
 Verbose mode (`-v`) shows per-step results within each scenario:
 
 ```
-  [3/20]  bridged
+  [3/21]  bridged
           [1/15] create-vlan100 ......... PASS  (1s)
           [2/15] add-host1-port ......... PASS  (<1s)
           ...
@@ -1192,7 +1175,7 @@ details.
 ### JUnit XML
 
 ```bash
-newtrun start 2node-ngdp-primitive --junit results.xml
+newtrun start 2node-vs-primitive --junit results.xml
 ```
 
 ### GitHub Actions Example
@@ -1200,7 +1183,7 @@ newtrun start 2node-ngdp-primitive --junit results.xml
 ```yaml
 - name: Run newtrun
   run: |
-    bin/newtrun start 2node-ngdp-primitive --junit results.xml
+    bin/newtrun start 2node-vs-primitive --junit results.xml
   timeout-minutes: 30
 
 - name: Upload JUnit results
@@ -1251,10 +1234,10 @@ pgrep -f newtron-server
 curl http://localhost:8080/health
 
 # Start it manually
-bin/newtron-server --specs newtrun/topologies/2node-ngdp/specs &
+bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
 # Override the URL
-newtrun start 2node-ngdp-primitive --server http://localhost:8080
+newtrun start 2node-vs-primitive --server http://localhost:8080
 ```
 
 ### Provisioning Fails
@@ -1271,17 +1254,19 @@ newtlab ssh switch1
 
 ### BGP Verification Times Out
 
-BGP sessions may take time to establish after provisioning. Try:
+BGP sessions may take time to establish after provisioning. Increase
+the poll timeout in your scenario:
 
 ```yaml
-# Increase timeout in your scenario
-- name: check-bgp
-  action: verify-bgp
+- name: verify-bgp
+  action: newtron
   devices: all
-  expect:
-    state: Established
+  url: /node/{{device}}/bgp/check
+  poll:
     timeout: 180s
-    poll_interval: 5s
+    interval: 5s
+  expect:
+    jq: 'length > 0 and all(.[]; .status == "pass")'
 ```
 
 Or SSH in and check manually:
@@ -1293,14 +1278,25 @@ vtysh -c "show ip bgp summary"
 
 ### Health Checks Fail
 
-Health checks run 5 built-in checks (interfaces, BGP, EVPN, LAG,
-VXLAN). If one fails:
+Health checks verify interfaces, BGP, EVPN, LAG, and VXLAN. Use
+polling so the check retries during daemon convergence rather than
+failing on the first attempt:
+
+```yaml
+- name: verify-health
+  action: newtron
+  devices: [switch1]
+  url: /node/{{device}}/health
+  poll:
+    timeout: 60s
+    interval: 5s
+  expect:
+    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
+```
+
+If a check still fails, SSH in and inspect:
 
 ```bash
-# Run verbose to see which check failed
-newtrun start 2node-ngdp-primitive --scenario boot-ssh -v
-
-# SSH in and inspect
 newtlab ssh switch1
 show interfaces status
 vtysh -c "show ip bgp summary"
@@ -1357,9 +1353,9 @@ newtrun start <suite>
 Deploy topology (if needed), run scenarios, leave topology running.
 
 ```
-newtrun start 2node-ngdp-primitive                        # all scenarios
-newtrun start 2node-ngdp-primitive --scenario boot-ssh    # single scenario
-newtrun start --dir path/to/suite                    # explicit path
+newtrun start 2node-vs-primitive                        # all scenarios
+newtrun start 2node-vs-primitive --scenario boot-ssh    # single scenario
+newtrun start --dir path/to/suite                       # explicit path
 ```
 
 If a previous run was paused, `start` resumes from where it left off.
@@ -1410,7 +1406,7 @@ Show suite run status. Without flags, shows all suites with state.
 ```
 newtrun status                    # all suites
 newtrun status --dir <path>       # specific suite
-newtrun status --suite 2node-ngdp  # filter by name
+newtrun status --suite 2node-vs   # filter by name
 newtrun status --detail           # per-step status
 newtrun status --monitor          # auto-refresh (every 2s, implies --detail)
 newtrun status --json             # machine-readable output
@@ -1431,7 +1427,7 @@ lists the scenarios in that suite with dependency order.
 
 ```
 newtrun list                       # show all suites
-newtrun list 2node-ngdp-primitive       # show scenarios in suite
+newtrun list 2node-vs-primitive    # show scenarios in suite
 newtrun list --dir path/to/suite   # explicit path
 ```
 
@@ -1451,12 +1447,12 @@ No flags.
 
 ### `newtrun actions [action]`
 
-List all step actions organized by category. With an action name, shows
-detailed parameter info and example YAML.
+List all step actions. With an action name, shows detailed parameter
+info and example YAML.
 
 ```
-newtrun actions                    # list all actions by category
-newtrun actions provision          # show detail for one action
+newtrun actions                    # list all 5 actions
+newtrun actions newtron            # show detail for the generic action
 ```
 
 No flags.

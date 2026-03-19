@@ -120,7 +120,7 @@ type BatchCall struct {
 
 // ExpectBlock is a union of all action-specific expectation fields.
 type ExpectBlock struct {
-	// Polling (used by host-exec via pollForDevices)
+	// Polling (used internally by newtronExecutor.executePoll to bridge poll: config to pollForDevices)
 	Timeout      time.Duration `yaml:"timeout,omitempty"`
 	PollInterval time.Duration `yaml:"poll_interval,omitempty"`
 

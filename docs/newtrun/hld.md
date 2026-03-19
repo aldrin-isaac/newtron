@@ -85,7 +85,7 @@ newtrun Runner
 
 **All SONiC operations go through HTTP.** The Runner creates an HTTP client
 (`pkg/newtron/client`), registers the network spec directory with the server,
-and every subsequent operation — provisioning, VLAN creation, health checks,
+and every subsequent operation — provisioning, service lifecycle, health checks,
 route verification — is an HTTP request to newtron-server. The server manages
 SSH connections to SONiC devices; newtrun never connects to them directly.
 
@@ -141,7 +141,8 @@ newtron/
 │   ├── scenario.go            # Scenario, Step, StepAction constants, ExpectBlock
 │   ├── parser.go              # ParseScenario, validation, dependency graph (Kahn's)
 │   ├── runner.go              # Runner, RunOptions, iterateScenarios, connectDevices
-│   ├── steps.go               # stepExecutor interface, all executor implementations
+│   ├── steps.go               # stepExecutor interface, multi-device helpers, provision/wait/verify
+│   ├── steps_newtron.go       # newtron executor: URL expansion, jq eval, polling, batch
 │   ├── steps_host.go          # host-exec executor, shellQuote, runSSHCommand
 │   ├── deploy.go              # DeployTopology, EnsureTopology, DestroyTopology
 │   ├── state.go               # RunState, ScenarioState, SuiteStatus, persistence
@@ -153,16 +154,23 @@ newtron/
 │
 ├── newtrun/                   # Test assets
 │   ├── topologies/            # Topology spec directories
-│   │   ├── 2node-ngdp/specs/       # 2 switches + 6 hosts
-│   │   ├── 2node-ngdp-service/specs/  # 2 switches + 8 hosts (service-annotated)
-│   │   ├── 3node-ngdp/specs/       # 2 leaves + 2 hosts
-│   │   └── 4node-ngdp/specs/       # 2 spines + 2 leaves
+│   │   ├── 1node-vs/specs/          # 1 switch (sonic-vs)
+│   │   ├── 2node-ngdp/specs/        # 2 switches + 6 hosts
+│   │   ├── 2node-ngdp-service/specs/ # 2 switches + 8 hosts (service-annotated)
+│   │   ├── 2node-vs/specs/          # 2 switches + 6 hosts (sonic-vs)
+│   │   ├── 2node-vs-service/specs/  # 2 switches + 8 hosts (sonic-vs, service-annotated)
+│   │   ├── 3node-ngdp/specs/        # 1 spine + 2 leaves + 2 hosts
+│   │   └── 4node-ngdp/specs/        # 2 spines + 2 leaves
 │   ├── suites/                # Test suite directories
-│   │   ├── 2node-ngdp-primitive/   # 20 scenarios (disaggregated operations)
-│   │   ├── 2node-ngdp-service/     # 6 scenarios (service lifecycle + dataplane)
-│   │   ├── 3node-ngdp-dataplane/   # 8 scenarios (EVPN L2/L3 dataplane)
-│   │   ├── simple-vrf-host/   # 5 scenarios (VRF + host reachability)
-│   │   └── 1node-vs-basic/       # 4 scenarios (service lifecycle + VLAN/VRF)
+│   │   ├── 1node-vs-basic/          # 4 scenarios (service lifecycle + VLAN/VRF)
+│   │   ├── 2node-ngdp-primitive/    # 21 scenarios (disaggregated operations)
+│   │   ├── 2node-ngdp-service/      # 6 scenarios (service lifecycle + dataplane)
+│   │   ├── 2node-vs-primitive/      # 21 scenarios (disaggregated operations, sonic-vs)
+│   │   ├── 2node-vs-service/        # 6 scenarios (service lifecycle, sonic-vs)
+│   │   ├── 2node-vs-drift/          # 7 scenarios (config drift detection, sonic-vs)
+│   │   ├── 2node-vs-zombie/         # 8 scenarios (orphan cleanup, sonic-vs)
+│   │   ├── 3node-ngdp-dataplane/    # 8 scenarios (EVPN L2/L3 dataplane)
+│   │   └── simple-vrf-host/         # 4 scenarios (VRF + host reachability)
 │   └── .generated/            # Runtime output (gitignored)
 │       └── report.md
 ```
@@ -185,10 +193,18 @@ directly — no generation step.
 
 | Topology | Devices | Purpose |
 |----------|---------|---------|
+| **1node-vs** | switch1 | Single-switch basic operations (sonic-vs) |
 | **2node-ngdp** | switch1, switch2 + host1–host6 | Disaggregated primitive testing |
 | **2node-ngdp-service** | switch1, switch2 + host1–host8 | Service lifecycle with dataplane verification |
-| **3node-ngdp** | leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across two leaves |
+| **2node-vs** | switch1, switch2 + host1–host6 | Disaggregated primitive testing (sonic-vs) |
+| **2node-vs-service** | switch1, switch2 + host1–host8 | Service lifecycle, drift detection, orphan cleanup (sonic-vs) |
+| **3node-ngdp** | spine, leaf1, leaf2 + host1, host2 | EVPN L2/L3 dataplane across a two-leaf fabric |
 | **4node-ngdp** | spine1, spine2, leaf1, leaf2 | Full fabric (route reflectors on spines) |
+
+#### 1node-vs
+
+A single sonic-vs switch for testing basic operations (VLAN, VRF, service
+lifecycle) without inter-switch dependencies.
 
 #### 2node-ngdp
 
@@ -224,20 +240,33 @@ Each interface has a pre-assigned service in the topology spec. Provisioning
 applies all services atomically. The extra host pair (host7, host8) exercises
 EVPN IRB overlay scenarios.
 
+#### 2node-vs / 2node-vs-service
+
+Sonic-vs variants of the 2node-ngdp topologies. Same logical structure, but
+using the community sonic-vs platform (Force10-S6000 HWSKU, stride-4 port
+naming: Ethernet0, Ethernet4, Ethernet8, ...). The vs-service topology is
+shared by three suites — service lifecycle, drift detection, and orphan
+cleanup — each exercising different aspects of the same provisioned state.
+
 #### 3node-ngdp
 
-Two leaves with a single transit link, one host per leaf:
+One spine connecting two leaves, one host per leaf:
 
 ```
-leaf1 ── Eth0 (transit) ── leaf2
-  │                          │
-Eth1                       Eth1
-  │                          │
-host1                      host2
+             spine
+            ╱     ╲
+       Eth0         Eth1
+        │             │
+      leaf1         leaf2
+        │             │
+      Eth1          Eth1
+        │             │
+      host1         host2
 ```
 
 Exercises EVPN L2/L3 forwarding across a two-leaf fabric with real data
-plane verification between hosts.
+plane verification between hosts. The spine provides underlay connectivity
+between leaves.
 
 #### 4node-ngdp
 
@@ -282,7 +311,7 @@ exercise specific network behaviors.
 ```yaml
 name: provision
 description: Provision switches and verify BGP convergence
-topology: 2node-ngdp-service
+topology: 2node-vs-service
 requires: [boot-ssh]
 
 steps:
@@ -290,21 +319,19 @@ steps:
     action: provision
     devices: [switch1, switch2]
 
-  - name: config-reload
-    action: config-reload
-    devices: [switch1, switch2]
-
-  - name: wait-reload
+  - name: wait-convergence
     action: wait
-    duration: 45s
+    duration: 15s
 
   - name: verify-bgp
-    action: verify-bgp
+    action: newtron
     devices: [switch1, switch2]
-    expect:
-      state: Established
+    url: /node/{{device}}/bgp/check
+    poll:
       timeout: 120s
-      poll_interval: 5s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
 ```
 
 | Field | Required | Description |
@@ -326,9 +353,18 @@ ordering.
 
 ### 6.2 Step Actions
 
-Every step has an `action` that maps to a `stepExecutor` in the Runner. Most
-actions call `r.Client.X()` over HTTP to newtron-server. Host actions use
-direct SSH (run `newtrun actions` for the full list).
+newtrun has exactly five actions. Four are structural (provision a device,
+wait, verify provisioning, execute on a host). The fifth — `newtron` — is a
+generic HTTP action that replaces what was once 60+ dedicated step types.
+
+The insight: newtrun was accumulating a new executor for every newtron-server
+endpoint — `apply-service`, `verify-bgp`, `create-vlan`, `teardown-evpn`, and
+dozens more. Each was a thin wrapper that formatted an HTTP call. Every new
+newtron feature required a corresponding newtrun change. The generic `newtron`
+action eliminates this coupling: the YAML specifies the HTTP method, URL, and
+parameters directly, and newtrun forwards the call without needing to
+understand what it does. newtron-server can add new endpoints without newtrun
+changing at all.
 
 **Pattern:** Each action is a struct implementing `Execute(ctx, r, step)
 *StepOutput`. Device-targeting actions use one of three multi-device helpers
@@ -336,167 +372,104 @@ that iterate over `step.Devices`, executing the operation per-device and
 aggregating results. All three helpers automatically skip host devices (only
 SONiC switches receive newtron operations).
 
-#### Actions by Category
+| Action | Description | Key Fields |
+|--------|-------------|------------|
+| `provision` | Generate and deliver device composite (6-step sequence) | `devices` |
+| `wait` | Context-aware sleep | `duration` |
+| `verify-provisioning` | Verify CONFIG_DB matches composite ChangeSet | `devices` |
+| `host-exec` | Run command in host network namespace via direct SSH | `devices`, `command`, `expect` |
+| `newtron` | Generic HTTP call to newtron-server | `url`, `method`, `params`, `poll`, `batch`, `expect` |
 
-**Provisioning** — Full device setup and configuration reload.
+The `newtron` action is the workhorse. It covers every operation that
+newtron-server exposes — provisioning primitives, service lifecycle,
+verification, BGP checks, health monitoring, CONFIG_DB inspection, spec
+authoring — through a single executor that understands HTTP, not SONiC.
+Examples from real scenarios:
 
-| Action | Description |
-|--------|-------------|
-| `provision` | Generate and deliver device composite (6-step sequence) |
-| `configure-loopback` | Configure loopback interface |
-| `remove-loopback` | Remove loopback configuration |
-| `configure-bgp` | Write BGP globals from device profile |
-| `apply-frr-defaults` | Apply FRR runtime defaults |
-| `config-reload` | Reload SONiC configuration (restart bgp + apply pending) |
+```yaml
+# Verify BGP sessions (polling)
+- action: newtron
+  url: /node/{{device}}/bgp/check
+  poll: {timeout: 120s, interval: 5s}
+  expect:
+    jq: 'length > 0 and all(.[]; .status == "pass")'
 
-**Verification** — Observe device state, with optional polling.
+# Remove a service from an interface (one-shot mutation)
+- action: newtron
+  method: POST
+  url: /node/{{device}}/interface/Ethernet4/remove-service
 
-| Action | Description |
-|--------|-------------|
-| `verify-provisioning` | Verify CONFIG_DB matches composite ChangeSet |
-| `verify-config-db` | Assert CONFIG_DB table/key/field values |
-| `verify-state-db` | Assert STATE_DB entries (polling) |
-| `verify-bgp` | Check BGP sessions reach expected state (polling) |
-| `verify-health` | Health check: CONFIG_DB intent + BGP + interfaces [^1] |
-| `verify-route` | Check route in APP_DB or ASIC_DB (polling) |
-| `verify-ping` | Data plane ping, resolved from device info |
+# Verify CONFIG_DB entry exists
+- action: newtron
+  url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+  expect:
+    jq: '.exists == true'
 
-**Service lifecycle** — Apply, remove, and refresh interface services.
-
-| Action | Description |
-|--------|-------------|
-| `apply-service` | Apply named service to device interface |
-| `remove-service` | Remove service binding from interface |
-| `refresh-service` | Full remove + reapply cycle |
-
-**VLAN** — L2 domain management.
-
-| Action | Description |
-|--------|-------------|
-| `create-vlan` / `delete-vlan` | VLAN lifecycle |
-| `add-vlan-member` / `remove-vlan-member` | Interface membership |
-| `configure-svi` / `remove-svi` | Switched Virtual Interface (L3 on VLAN) |
-
-**VRF** — Virtual routing instances.
-
-| Action | Description |
-|--------|-------------|
-| `create-vrf` / `delete-vrf` | VRF lifecycle |
-| `add-vrf-interface` / `remove-vrf-interface` | Bind/unbind interface |
-
-**BGP** — Neighbor management.
-
-| Action | Description |
-|--------|-------------|
-| `bgp-add-neighbor` / `bgp-remove-neighbor` | Add/remove peer (interface or loopback) |
-| `remove-bgp-globals` | Remove BGP instance and globals |
-
-**EVPN** — Overlay setup and VPN bindings.
-
-| Action | Description |
-|--------|-------------|
-| `setup-evpn` / `teardown-evpn` | VTEP + NVO + BGP EVPN lifecycle |
-| `bind-ipvpn` / `unbind-ipvpn` | L3 VPN binding to VRF |
-| `bind-macvpn` / `unbind-macvpn` | L2 VPN binding to VLAN |
-
-**ACL** — Access control lists.
-
-| Action | Description |
-|--------|-------------|
-| `create-acl-table` / `delete-acl-table` | ACL table lifecycle |
-| `add-acl-rule` / `delete-acl-rule` | Rule management |
-| `bind-acl` / `unbind-acl` | Bind/unbind ACL to interface |
-
-**QoS** — Quality of service.
-
-| Action | Description |
-|--------|-------------|
-| `apply-qos` / `remove-qos` | Apply/remove QoS policy on interface |
-
-**Interface** — Property management.
-
-| Action | Description |
-|--------|-------------|
-| `set-interface` | Set properties (mtu, ip, vrf, admin-status) |
-| `remove-ip` | Remove IP address from interface |
-
-**PortChannel** — Link aggregation.
-
-| Action | Description |
-|--------|-------------|
-| `create-portchannel` / `delete-portchannel` | LAG lifecycle |
-| `add-portchannel-member` / `remove-portchannel-member` | Member management |
-
-**Static routing**
-
-| Action | Description |
-|--------|-------------|
-| `add-static-route` / `remove-static-route` | Static route in VRF |
-
-**Network-level spec authoring** — Create and modify specs without touching devices.
-These actions operate at network scope (no `devices:` field). They call
-`r.Client.*` directly — the spec exists in the network, not on any device.
-
-| Action | Description |
-|--------|-------------|
-| `create-service` / `delete-service` | Service spec lifecycle |
-| `create-prefix-list` / `delete-prefix-list` | Prefix list spec lifecycle |
-| `add-prefix-entry` / `remove-prefix-entry` | Add/remove prefix in list |
-| `create-route-policy` / `delete-route-policy` | Route policy spec lifecycle |
-| `add-route-policy-rule` / `remove-route-policy-rule` | Add/remove rule in policy |
-
-**Infrastructure** — Utility actions.
-
-| Action | Description |
-|--------|-------------|
-| `wait` | Wait for specified duration |
-| `ssh-command` | Run command via SSH, check output |
-| `host-exec` | Run command in host network namespace |
-| `restart-service` | Restart a SONiC service (bgp, swss) |
-| `cleanup` | Remove orphaned CONFIG_DB resources |
-
-[^1]: `verify-health` is a single-shot read — it does not poll. Use a `wait` step before `verify-health` if convergence time is needed.
+# Create a network-level prefix list (no devices: field)
+- action: newtron
+  method: POST
+  url: /prefix-list
+  params: {name: "MY_LIST", entries: [...]}
+```
 
 ### 6.3 Distinctive Actions
 
-Most actions follow a uniform pattern: resolve devices, call `r.Client.X()`,
-check result. A few deserve additional explanation.
+Most actions follow a uniform pattern: resolve devices, call an operation,
+check the result. A few deserve additional explanation.
 
-**`provision`** executes a 6-step sequence per device:
+**`provision`** executes a 7-step sequence per device:
 
-1. `GenerateDeviceComposite` — build CONFIG_DB offline (HTTP POST)
-2. Store returned composite handle in `r.Composites[device]`
-3. `DeliverComposite` — atomic write to Redis (HTTP POST)
-4. `VerifyComposite` — re-read CONFIG_DB and diff (HTTP POST)
-5. Save configuration to disk
-6. Report change count
-
-**`verify-ping`** resolves the target IP from the device's profile information
-(loopback IP), then runs a ping from each specified device. On platforms
-without a dataplane (`dataplane: ""` in platform definition), the step
-automatically returns SKIP instead of FAIL.
+1. `GenerateComposite` — build CONFIG_DB offline (HTTP POST)
+2. `ConfigReload` — best-effort reload to restore saved defaults
+3. `RefreshWithRetry` — wait for SwSS readiness after reload (60s timeout; skipped if reload failed)
+4. `DeliverComposite` — atomic write to Redis (HTTP POST)
+5. `Refresh` — update server's cached CONFIG_DB and interface list
+6. `SaveConfig` — persist to config_db.json for subsequent reloads
+7. Store returned composite handle in `r.Composites[device]`
 
 **`host-exec`** runs a command inside a network namespace on a host VM. The
 namespace name equals the device name (e.g., `host1`). The command is
 wrapped as `ip netns exec <device> sh -c '<command>'`, with single quotes
-escaped to handle compound commands with pipes and semicolons.
+escaped to handle compound commands with pipes and semicolons. Expectations
+check `success_rate` (ping parse), `contains` (string match), or bare exit
+code.
 
-**`set-interface`** dispatches three ways depending on parameters: `ip`
-parameter → set IP address, `vrf` parameter → bind to VRF, otherwise → set
-interface property (mtu, admin-status, description).
+**`newtron`** operates in four modes depending on step fields:
+
+- **One-shot with `{{device}}`**: URL contains `{{device}}` → parallel
+  execution across all target devices via `executeForDevices`. Each device
+  gets its own HTTP call with the device name substituted.
+- **One-shot without `{{device}}`**: No device template → single
+  network-scoped call (e.g., creating a prefix list). No `devices:` field
+  needed.
+- **Polling**: `poll:` block present → retries the HTTP call at the
+  specified interval until the `jq` expression passes or the timeout
+  expires. Per-device polling runs in parallel via `pollForDevices`.
+- **Batch**: `batch:` list present → sequential HTTP calls executed in
+  order. If any batch call URL contains `{{device}}`, the entire batch
+  runs per-device in parallel (each device executes the full sequence).
+
+URL templates use `{{device}}` as the only placeholder. The network prefix
+(`/network/<id>`) is prepended automatically — URLs start from the path
+after the network segment. The `jq` expression in `expect` must evaluate
+to boolean `true` to pass; any other value is a failure.
 
 ### 6.4 Custom Suites
 
 The built-in suites demonstrate patterns for different testing strategies:
 
-- **Incremental suites** (2node-ngdp-primitive, 2node-ngdp-service, 3node-ngdp-dataplane):
+- **Incremental suites** (2node-ngdp-primitive, 2node-vs-service, 3node-ngdp-dataplane):
   Ordered scenarios with `requires` chaining. A shared topology deployed once.
   Scenarios build on each other (boot → configure → verify → teardown).
 
-Users write new suites by creating a directory of YAML files. Any combination
-of the registered actions can appear in steps. Custom topologies work with custom
-suites — the only constraint is that the `topology:` field names a directory
-under `newtrun/topologies/`.
+- **Multi-suite topologies** (2node-vs-service topology): A single topology
+  shared by three suites (service, drift, zombie), each testing different
+  aspects of the same provisioned state.
+
+Users write new suites by creating a directory of YAML files. Any newtron-server
+endpoint can be exercised through the `newtron` action — no code changes
+required. Custom topologies work with custom suites — the only constraint is
+that the `topology:` field names a directory under `newtrun/topologies/`.
 
 ---
 
@@ -508,12 +481,14 @@ primitives; newtrun orchestrates them across devices and adds data-plane testing
 | Tier | What | Owner | Method | Failure Mode |
 |------|------|-------|--------|-------------|
 | **CONFIG_DB** | Redis entries match ChangeSet | **newtron** | via HTTP: composite verify | Hard fail (assertion) |
-| **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | via HTTP: `VerifyRoute` | Observation (data) |
-| **Operational state** | BGP sessions, interface health | **newtron** | via HTTP: `VerifyHealth` | Observation (report) |
+| **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | via HTTP: route check | Observation (data) |
+| **Operational state** | BGP sessions, interface health | **newtron** | via HTTP: health check | Observation (report) |
 | **Cross-device / data plane** | Route propagation, ping | **newtrun** | Composes newtron primitives | Topology-dependent |
 
 The first three tiers execute on newtron-server — newtrun sends an HTTP
-request and receives structured results. The fourth tier is newtrun's own
+request (via the `newtron` action) and receives structured results. The
+`jq` expression in the step's `expect` block evaluates the response against
+the scenario's correctness criteria. The fourth tier is newtrun's own
 contribution: it correlates observations from multiple devices to determine
 cross-device correctness.
 
@@ -522,8 +497,7 @@ cross-device correctness.
 Platforms declare capabilities in `platforms.json` (e.g., `dataplane: "vpp"`
 or `dataplane: ""`). Scenarios can declare `requires_features` — if the
 deployed platform lacks a required feature, the scenario is skipped with
-`SKIP` status rather than failing. Individual steps like `verify-ping` also
-check platform capabilities and auto-skip on control-plane-only platforms.
+`SKIP` status rather than failing.
 
 ---
 
@@ -562,9 +536,9 @@ across multiple devices:
 
 | Helper | Pattern | Used By |
 |--------|---------|---------|
-| `executeForDevices` | Run once per device, collect results | All mutating operations |
-| `checkForDevices` | Single-shot observation per device | `verify-health` |
-| `pollForDevices` | Retry with timeout/interval per device | `verify-bgp`, `verify-route`, `verify-state-db` |
+| `executeForDevices` | Run once per device, collect results | `provision`, `newtron` (one-shot + batch) |
+| `checkForDevices` | Single-shot observation per device | `verify-provisioning` |
+| `pollForDevices` | Retry with timeout/interval per device | `newtron` (polling mode) |
 
 All three automatically skip host devices — they check `r.HostConns[name]`
 and return SKIP for any device that is a host. Only SONiC switches receive
@@ -724,8 +698,7 @@ Example scenario step:
 The three multi-device helpers (§8.2) automatically skip host devices. When a
 step targets `all` devices, SONiC operations run only on switches — hosts are
 silently skipped with a SKIP result. This means `devices: all` is safe for
-operations like `provision` or `verify-bgp` even when the topology includes
-hosts.
+operations like `provision` even when the topology includes hosts.
 
 ---
 
@@ -738,20 +711,20 @@ newtrun produces three output formats: real-time console progress, a markdown su
 Non-verbose mode shows one line per scenario with dot-padded status:
 
 ```
-newtrun: 20 scenarios, topology: 2node-ngdp, platform: sonic-cisco-8000
+newtrun: 21 scenarios, topology: 2node-ngdp, platform: sonic-cisco-8000
 
   #     SCENARIO                STEPS
   1     boot-ssh                2
   2     loopback                4
   ...
 
-  [1/20]  boot-ssh ............. PASS  (3s)
-  [2/20]  loopback ............. PASS  (8s)
-  [3/20]  bridged .............. PASS  (15s)
+  [1/21]  boot-ssh ............. PASS  (3s)
+  [2/21]  loopback ............. PASS  (8s)
+  [3/21]  bridged .............. PASS  (15s)
   ...
 
 ---
-newtrun: 20 scenarios: 20 passed  (6m30s)
+newtrun: 21 scenarios: 21 passed  (6m30s)
 ```
 
 Verbose mode (`-v`) shows per-step detail within each scenario.
@@ -789,14 +762,14 @@ newtrun start 2node-ngdp-primitive --junit results.xml
 
 ## 12. End-to-End Walkthrough
 
-A concrete trace of `newtrun start 2node-ngdp-service` from command line to final
+A concrete trace of `newtrun start 2node-vs-service` from command line to final
 report:
 
 ```
 CLI (cmd/newtrun/cmd_start.go)
   │
-  │ 1. Resolve suite directory: newtrun/suites/2node-ngdp-service/
-  │ 2. Check for paused state → LoadRunState("2node-ngdp-service")
+  │ 1. Resolve suite directory: newtrun/suites/2node-vs-service/
+  │ 2. Check for paused state → LoadRunState("2node-vs-service")
   │ 3. AcquireLock → write PID to state.json
   │ 4. Resolve server URL (--server > env > settings > default)
   │ 5. Create Runner, assign ServerURL, NetworkID, Progress reporter
@@ -806,12 +779,12 @@ Runner.Run(opts)
   │
   │ 6. ParseAllScenarios → 6 scenarios
   │ 7. ValidateDependencyGraph → topological sort
-  │ 8. sharedTopology → "2node-ngdp-service" (all scenarios agree)
+  │ 8. sharedTopology → "2node-vs-service" (all scenarios agree)
   │
   ▼
-runShared(ctx, scenarios, "2node-ngdp-service", opts)
+runShared(ctx, scenarios, "2node-vs-service", opts)
   │
-  │ 9. EnsureTopology("newtrun/topologies/2node-ngdp-service/specs/")
+  │ 9. EnsureTopology("newtrun/topologies/2node-vs-service/specs/")
   │    newtlab checks if VMs running → deploys fresh if needed
   │
   │ 10. connectDevices:
@@ -824,27 +797,37 @@ runShared(ctx, scenarios, "2node-ngdp-service", opts)
   ▼
 iterateScenarios → for each of the 6 scenarios in order:
   │
-  │ 11. boot-ssh: ssh-command "echo ok" on switch1, switch2
-  │     → r.Client.SSHCommand("switch1", "echo ok") → HTTP → server → SSH → device
+  │ 11. boot-ssh: newtron action with polling
+  │     → POST /node/switch1/ssh-command {command: "echo ok"}
+  │     → poll until jq '.output | contains("ok")' passes
+  │     → also verifies SwSS readiness (uptime ≥ 120s)
   │
   │ 12. provision: per device:
-  │     a. r.Client.GenerateDeviceComposite("switch1")
+  │     a. r.Client.GenerateComposite("switch1")
   │        → HTTP POST → server builds composite offline → returns handle UUID
-  │     b. r.Composites["switch1"] = handle
-  │     c. r.Client.DeliverComposite("switch1", handle)
+  │     b. Config reload (best-effort baseline reset)
+  │     c. RefreshWithRetry (wait for SwSS readiness after reload)
+  │     d. r.Client.DeliverComposite("switch1", handle)
   │        → HTTP POST → server writes to Redis atomically
-  │     d. r.Client.VerifyComposite("switch1", handle)
-  │        → HTTP POST → server re-reads CONFIG_DB, diffs against ChangeSet
+  │     e. Refresh + SaveConfig
+  │     f. r.Composites["switch1"] = handle
   │
-  │ 13. verify-health: r.Client.VerifyHealth("switch1")
-  │     → HTTP GET → server checks CONFIG_DB, BGP, interfaces → report
+  │ 13. verify-health: newtron action with polling
+  │     → GET /node/switch1/health
+  │     → poll until jq '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
   │
   │ 14. dataplane: host-exec steps
   │     → SSH to hostvm-0 → "ip netns exec host3 sh -c 'ping ...'"
   │     → parse success rate from ping output
   │
-  │ 15. deprovision: remove services, teardown BGP/EVPN
-  │ 16. verify-clean: verify CONFIG_DB returns to baseline
+  │ 15. deprovision: newtron action sequence
+  │     → POST /node/switch1/interface/Ethernet4/remove-service
+  │     → POST /node/switch1/teardown-evpn
+  │     → POST /node/switch1/remove-bgp-globals
+  │     → POST /node/switch1/remove-loopback
+  │
+  │ 16. verify-clean: newtron action
+  │     → GET /node/switch1/configdb/... → jq assertions on empty state
   │
   ▼
 Results

@@ -26,10 +26,11 @@ newtron/
 │       └── cmd_actions.go        # actions subcommand (action metadata + detail view)
 ├── pkg/
 │   └── newtrun/
-│       ├── scenario.go           # Scenario, Step, StepAction constants, ExpectBlock
+│       ├── scenario.go           # Scenario, Step, StepAction constants, ExpectBlock, PollBlock, BatchCall
 │       ├── parser.go             # ParseScenario, stepValidations table, ValidateDependencyGraph
 │       ├── runner.go             # Runner (with Client, ServerURL, NetworkID), RunOptions, Run
-│       ├── steps.go              # stepExecutor interface, StepOutput, all executor implementations
+│       ├── steps.go              # stepExecutor interface, StepOutput, multi-device helpers, provision/wait/verify-provisioning executors
+│       ├── steps_newtron.go      # newtronExecutor: URL expansion, jq evaluation, one-shot/polling/batch modes
 │       ├── steps_host.go         # hostExecExecutor, shellQuote, runSSHCommand
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
@@ -40,16 +41,23 @@ newtron/
 │       └── newtrun_test.go       # Unit tests
 └── newtrun/                      # E2E test assets
     ├── topologies/
+    │   ├── 1node-vs/specs/            # Single-switch topology
     │   ├── 2node-ngdp/specs/          # 2-switch + 6-host topology
     │   ├── 2node-ngdp-service/specs/  # 2-switch + 8-host topology (service testing)
-    │   ├── 3node-ngdp/specs/          # 3-switch + 6-host topology (EVPN dataplane)
+    │   ├── 2node-vs/specs/            # 2-switch + 6-host topology (sonic-vs)
+    │   ├── 2node-vs-service/specs/    # 2-switch + 8-host topology (sonic-vs service testing)
+    │   ├── 3node-ngdp/specs/          # 1-spine + 2-leaf + 2-host topology (EVPN dataplane)
     │   └── 4node-ngdp/specs/          # 4-node topology
     ├── suites/
-    │   ├── 1node-vs-basic/           # Single-switch basics (4 scenarios)
-    │   ├── 2node-ngdp-primitive/      # Disaggregated operation tests (20 scenarios)
+    │   ├── 1node-vs-basic/            # Single-switch basics (4 scenarios)
+    │   ├── 2node-ngdp-primitive/      # Disaggregated operation tests (21 scenarios)
     │   ├── 2node-ngdp-service/        # Service lifecycle tests (6 scenarios)
+    │   ├── 2node-vs-primitive/        # Disaggregated operation tests, sonic-vs (21 scenarios)
+    │   ├── 2node-vs-service/          # Service lifecycle tests, sonic-vs (6 scenarios)
+    │   ├── 2node-vs-drift/            # Config drift detection tests (7 scenarios)
+    │   ├── 2node-vs-zombie/           # Zombie intent detection tests (8 scenarios)
     │   ├── 3node-ngdp-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
-    │   └── simple-vrf-host/      # Simple VRF with host verification
+    │   └── simple-vrf-host/           # Simple VRF with host verification (4 scenarios)
     └── .generated/               # Runtime output (gitignored)
 ```
 
@@ -89,24 +97,26 @@ type Scenario struct {
 
 ```go
 type Step struct {
-    Name      string         `yaml:"name"`
-    Action    StepAction     `yaml:"action"`
-    Devices   deviceSelector `yaml:"devices,omitempty"`
+    Name    string         `yaml:"name"`
+    Action  StepAction     `yaml:"action"`
+    Devices deviceSelector `yaml:"devices,omitempty"`
 
-    Duration  time.Duration  `yaml:"duration,omitempty"`      // wait
-    Table     string         `yaml:"table,omitempty"`          // verify-config-db, verify-state-db
-    Key       string         `yaml:"key,omitempty"`            // verify-config-db, verify-state-db
-    Prefix    string         `yaml:"prefix,omitempty"`         // verify-route
-    VRF       string         `yaml:"vrf,omitempty"`            // verify-route
-    Interface string         `yaml:"interface,omitempty"`      // apply-service, remove-service, etc.
-    Service   string         `yaml:"service,omitempty"`        // apply-service, restart-service
-    Params    map[string]any `yaml:"params,omitempty"`         // action-specific parameters
-    Command   string         `yaml:"command,omitempty"`        // ssh-command, host-exec
-    Target    string         `yaml:"target,omitempty"`         // verify-ping
-    Count     int            `yaml:"count,omitempty"`          // verify-ping
-    VLANID    int            `yaml:"vlan_id,omitempty"`        // create-vlan, delete-vlan, etc.
-    Tagging   string         `yaml:"tagging,omitempty"`        // add-vlan-member ("tagged"/"untagged")
-    Expect    *ExpectBlock   `yaml:"expect,omitempty"`         // verify-*, ssh-command, host-exec
+    // wait
+    Duration time.Duration `yaml:"duration,omitempty"`
+
+    // host-exec, newtron (shared)
+    Command string         `yaml:"command,omitempty"`
+    Params  map[string]any `yaml:"params,omitempty"`
+
+    // newtron (generic server action)
+    Method string      `yaml:"method,omitempty"` // HTTP method: GET, POST, DELETE
+    URL    string      `yaml:"url,omitempty"`    // URL template (e.g., /node/{{device}}/vlan)
+    Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
+    Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
+
+    // All actions
+    Expect        *ExpectBlock `yaml:"expect,omitempty"`
+    ExpectFailure bool         `yaml:"expect_failure,omitempty"`
 }
 ```
 
@@ -114,108 +124,22 @@ Step is intentionally a flat union — all action-specific fields live on one
 struct. Validation of which fields are required for which action happens at
 parse time via the declarative `stepValidations` table (see §3.2).
 
-**Step-Level Fields Are Canonical** — If the Step struct has a named field for
-a concept (`interface`, `vrf`, `prefix`, `table`, `key`, `service`, `command`,
-`target`, `vlan_id`), all actions MUST read from that field. `params:` contains
-only action-specific arguments that have no step-level equivalent (`ipvpn`,
-`macvpn`, `remote_asn`, `qos_policy`, `next_hop`, `name`, `member`, etc.).
-This ensures parse-time validation via `stepFieldGetter` and a single canonical
-location for each concept.
-
 ### 2.3 StepAction Constants
 
 ```go
 type StepAction string
 
 const (
-    // Provisioning
     ActionProvision          StepAction = "provision"
-    ActionConfigureLoopback  StepAction = "configure-loopback"
-    ActionRemoveLoopback     StepAction = "remove-loopback"
-    ActionApplyFRRDefaults   StepAction = "apply-frr-defaults"
-    ActionConfigReload       StepAction = "config-reload"
-
-    // Verification
-    ActionVerifyProvisioning StepAction = "verify-provisioning"
-    ActionVerifyConfigDB     StepAction = "verify-config-db"
-    ActionVerifyStateDB      StepAction = "verify-state-db"
-    ActionVerifyBGP          StepAction = "verify-bgp"
-    ActionVerifyHealth       StepAction = "verify-health"
-    ActionVerifyRoute        StepAction = "verify-route"
-    ActionVerifyPing         StepAction = "verify-ping"
-
-    // Service lifecycle
-    ActionApplyService       StepAction = "apply-service"
-    ActionRemoveService      StepAction = "remove-service"
-    ActionRefreshService     StepAction = "refresh-service"
-
-    // VLAN
-    ActionCreateVLAN         StepAction = "create-vlan"
-    ActionDeleteVLAN         StepAction = "delete-vlan"
-    ActionAddVLANMember      StepAction = "add-vlan-member"
-    ActionRemoveVLANMember   StepAction = "remove-vlan-member"
-    ActionConfigureSVI       StepAction = "configure-svi"
-    ActionRemoveSVI          StepAction = "remove-svi"
-
-    // VRF
-    ActionCreateVRF          StepAction = "create-vrf"
-    ActionDeleteVRF          StepAction = "delete-vrf"
-    ActionAddVRFInterface    StepAction = "add-vrf-interface"
-    ActionRemoveVRFInterface StepAction = "remove-vrf-interface"
-
-    // EVPN
-    ActionSetupEVPN          StepAction = "setup-evpn"
-    ActionTeardownEVPN       StepAction = "teardown-evpn"
-    ActionBindIPVPN          StepAction = "bind-ipvpn"
-    ActionUnbindIPVPN        StepAction = "unbind-ipvpn"
-    ActionBindMACVPN         StepAction = "bind-macvpn"
-    ActionUnbindMACVPN       StepAction = "unbind-macvpn"
-
-    // BGP
-    ActionConfigureBGP       StepAction = "configure-bgp"
-    ActionRemoveBGPGlobals   StepAction = "remove-bgp-globals"
-    ActionBGPAddNeighbor     StepAction = "bgp-add-neighbor"
-    ActionBGPRemoveNeighbor  StepAction = "bgp-remove-neighbor"
-
-    // ACL
-    ActionCreateACLTable     StepAction = "create-acl-table"
-    ActionDeleteACLTable     StepAction = "delete-acl-table"
-    ActionAddACLRule         StepAction = "add-acl-rule"
-    ActionDeleteACLRule      StepAction = "delete-acl-rule"
-    ActionBindACL            StepAction = "bind-acl"
-    ActionUnbindACL          StepAction = "unbind-acl"
-
-    // QoS
-    ActionApplyQoS           StepAction = "apply-qos"
-    ActionRemoveQoS          StepAction = "remove-qos"
-
-    // Interface
-    ActionSetInterface       StepAction = "set-interface"
-    ActionRemoveIP           StepAction = "remove-ip"
-
-    // Routing
-    ActionAddStaticRoute     StepAction = "add-static-route"
-    ActionRemoveStaticRoute  StepAction = "remove-static-route"
-
-    // PortChannel
-    ActionCreatePortChannel       StepAction = "create-portchannel"
-    ActionDeletePortChannel       StepAction = "delete-portchannel"
-    ActionAddPortChannelMember    StepAction = "add-portchannel-member"
-    ActionRemovePortChannelMember StepAction = "remove-portchannel-member"
-
-    // Host
-    ActionHostExec           StepAction = "host-exec"
-
-    // Utility
     ActionWait               StepAction = "wait"
-    ActionSSHCommand         StepAction = "ssh-command"
-    ActionRestartService     StepAction = "restart-service"
-    ActionCleanup            StepAction = "cleanup"
+    ActionVerifyProvisioning StepAction = "verify-provisioning"
+    ActionHostExec           StepAction = "host-exec"
+    ActionNewtron            StepAction = "newtron"
 )
 ```
 
-The `validActions` set is derived from the `executors` map at init time, ensuring
-the two stay synchronized without manual maintenance.
+Five action types. The `validActions` set is derived from the `executors` map
+at init time, ensuring the two stay synchronized without manual maintenance.
 
 ### 2.4 deviceSelector
 
@@ -233,40 +157,55 @@ Handles two YAML forms: `devices: all` sets `All: true`; `devices: [leaf1, leaf2
 populates `Devices`. `Resolve` returns the concrete device list — if `All` is true,
 returns all devices sorted by name for deterministic ordering.
 
-### 2.5 ExpectBlock
+### 2.5 PollBlock
 
 ```go
-type ExpectBlock struct {
-    MinEntries   *int              `yaml:"min_entries,omitempty"`
-    Exists       *bool             `yaml:"exists,omitempty"`
-    Fields       map[string]string `yaml:"fields,omitempty"`
-    Timeout      time.Duration     `yaml:"timeout,omitempty"`
-    PollInterval time.Duration     `yaml:"poll_interval,omitempty"`
-    State        string            `yaml:"state,omitempty"`
-    Overall      string            `yaml:"overall,omitempty"`
-    Protocol     string            `yaml:"protocol,omitempty"`
-    NextHopIP    string            `yaml:"nexthop_ip,omitempty"`
-    Source       string            `yaml:"source,omitempty"`
-    SuccessRate  *float64          `yaml:"success_rate,omitempty"`
-    Contains     string            `yaml:"contains,omitempty"`
+type PollBlock struct {
+    Timeout  time.Duration `yaml:"timeout"`
+    Interval time.Duration `yaml:"interval"`
 }
 ```
 
-**Default values per action:**
+Configures polling for the `newtron` action. The executor polls the URL at
+`Interval` until the jq assertion passes or `Timeout` expires.
 
-| Action | Timeout | PollInterval | Other Defaults |
-|--------|---------|--------------|----------------|
-| `verify-state-db` | 120s | 5s | — |
-| `verify-bgp` | 120s | 5s | State: `"Established"` |
-| `verify-route` | 60s | 5s | Source: `"app_db"` |
-| `verify-ping` | 30s† | — | Count: 5\*, SuccessRate: 1.0† |
+### 2.6 BatchCall
 
-\* **Unconditional default** — set on the step even without an `expect:` block
-(Count is a step-level field, not an expect field).
+```go
+type BatchCall struct {
+    Method string         `yaml:"method"`
+    URL    string         `yaml:"url"`
+    Params map[string]any `yaml:"params,omitempty"`
+}
+```
 
-† Requires an `expect:` block in YAML. If `expect:` is omitted, these defaults
-are not applied. The executor itself still applies a fallback (e.g.,
-`verifyPingExecutor` uses 100% success rate when `expect.SuccessRate` is nil).
+A single HTTP call within a batch sequence. Batch calls execute sequentially
+within a step, failing on the first error.
+
+### 2.7 ExpectBlock
+
+```go
+type ExpectBlock struct {
+    // Polling (used internally by newtronExecutor.executePoll to bridge poll: config to pollForDevices)
+    Timeout      time.Duration `yaml:"timeout,omitempty"`
+    PollInterval time.Duration `yaml:"poll_interval,omitempty"`
+
+    // host-exec
+    SuccessRate *float64 `yaml:"success_rate,omitempty"`
+    Contains    string   `yaml:"contains,omitempty"`
+
+    // newtron (generic server action) — jq expression evaluated against response body
+    JQ string `yaml:"jq,omitempty"`
+}
+```
+
+| Field | Used By | Description |
+|-------|---------|-------------|
+| `timeout` | `newtron` (internal) | Polling timeout; set by `newtronExecutor.executePoll` to bridge `step.Poll.Timeout` into `pollForDevices` |
+| `poll_interval` | `newtron` (internal) | Polling interval; set by `newtronExecutor.executePoll` to bridge `step.Poll.Interval` into `pollForDevices` |
+| `success_rate` | `host-exec` | Required ping success rate (0.0–1.0) |
+| `contains` | `host-exec` | Substring match against command output |
+| `jq` | `newtron` | jq expression evaluated against the JSON response body; must produce boolean `true` to pass |
 
 ---
 
@@ -284,10 +223,9 @@ func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error)
 
 1. Read file at `path`
 2. `yaml.Unmarshal` into `Scenario`
-3. `applyDefaults` — two-phase default injection:
-   - **Phase 1 (unconditional):** `verify-ping` sets `Count = 5` even without an `expect:` block (Count is a step-level field, not inside ExpectBlock)
-   - **Phase 2 (guarded):** if `step.Expect == nil`, remaining defaults are skipped; otherwise sets `Timeout`, `PollInterval`, `State`, `Source`, and `SuccessRate` per the §2.5 defaults table
-4. Return `*Scenario`
+3. `applyDefaults` — currently a no-op (empty function body). The five remaining actions require no default injection.
+4. `validateStepFields` — declarative validation per step (see §3.2)
+5. Return `*Scenario`
 
 **ParseAllScenarios**: reads all `.yaml` files in `dir`, returns parsed scenarios.
 Used when running all scenarios in a suite.
@@ -307,73 +245,24 @@ fields, required params keys, and optional custom validation functions:
 type stepValidation struct {
     needsDevices  bool     // must have a device selector
     singleDevice  bool     // exactly one device required (implies needsDevices)
-    fields        []string // required step-level fields: "interface", "service", "table", etc.
+    fields        []string // required step-level fields: "command"
     params        []string // required params map keys
     custom        func(prefix string, step *Step) error
 }
 ```
 
-The `stepFieldGetter` table maps field names (`"interface"`, `"service"`, `"table"`,
-`"key"`, `"prefix"`, `"vrf"`, `"target"`, `"command"`, `"vlan_id"`) to accessor
-functions on `*Step`, enabling generic validation of required step-level fields.
+The `stepFieldGetter` table maps field names to accessor functions on `*Step`.
+Currently it contains a single mapping: `"command"` → `s.Command`.
 
-**Required fields per action** (actions not listed here — `configure-bgp`,
-`create-portchannel`, `delete-portchannel`, `add-portchannel-member`,
-`remove-portchannel-member` — have no validation rules in `stepValidations`):
+**Validation rules per action:**
 
-| Action | Required Fields |
-|--------|----------------|
-| `provision` | `devices` |
-| `wait` | `duration` (custom) |
-| `verify-provisioning` | `devices` |
-| `verify-config-db` | `devices`, `table`, `expect` (custom: one of `min_entries`, `exists`, `fields`) |
-| `verify-state-db` | `devices`, `table`, `key`, `expect.fields` (custom) |
-| `verify-bgp` | `devices` |
-| `verify-health` | `devices` |
-| `verify-route` | `devices` (single), `prefix`, `vrf` |
-| `verify-ping` | `devices` (single), `target` |
-| `apply-service` | `devices`, `interface`, `service` |
-| `remove-service` | `devices`, `interface` |
-| `configure-loopback` | `devices` |
-| `remove-loopback` | `devices` |
-| `ssh-command` | `devices`, `command` |
-| `restart-service` | `devices`, `service` |
-| `config-reload` | `devices` |
-| `apply-frr-defaults` | `devices` |
-| `cleanup` | `devices` |
-| `set-interface` | `devices`, `interface`, `params.property` |
-| `create-vlan` | `devices`, `vlan_id` |
-| `delete-vlan` | `devices`, `vlan_id` |
-| `add-vlan-member` | `devices`, `vlan_id`, `interface` |
-| `remove-vlan-member` | `devices`, `vlan_id`, `interface` |
-| `configure-svi` | `devices`, `vlan_id` |
-| `remove-svi` | `devices`, `vlan_id` |
-| `create-vrf` | `devices`, `vrf` |
-| `delete-vrf` | `devices`, `vrf` |
-| `setup-evpn` | `devices`, `params.source_ip` |
-| `teardown-evpn` | `devices` |
-| `add-vrf-interface` | `devices`, `vrf`, `interface` |
-| `remove-vrf-interface` | `devices`, `vrf`, `interface` |
-| `bind-ipvpn` | `devices`, `vrf`, `params.ipvpn` |
-| `unbind-ipvpn` | `devices`, `vrf` |
-| `bind-macvpn` | `devices`, `vlan_id`, `params.macvpn` |
-| `unbind-macvpn` | `devices`, `vlan_id` |
-| `add-static-route` | `devices`, `vrf`, `prefix`, `params.next_hop` |
-| `remove-static-route` | `devices`, `vrf`, `prefix` |
-| `apply-qos` | `devices`, `interface`, `params.qos_policy` |
-| `remove-qos` | `devices`, `interface` |
-| `bgp-add-neighbor` | `devices`, `params.remote_asn` |
-| `bgp-remove-neighbor` | `devices`, `params.neighbor_ip` |
-| `remove-bgp-globals` | `devices` |
-| `refresh-service` | `devices`, `interface` |
-| `host-exec` | `devices` (single), `command` |
-| `create-acl-table` | `devices`, `params.name` |
-| `add-acl-rule` | `devices`, `params.name`, `params.rule`, `params.action` |
-| `delete-acl-rule` | `devices`, `params.name`, `params.rule` |
-| `delete-acl-table` | `devices`, `params.name` |
-| `bind-acl` | `devices`, `interface`, `params.name`, `params.direction` |
-| `unbind-acl` | `devices`, `interface`, `params.name` |
-| `remove-ip` | `devices`, `interface`, `params.ip` |
+| Action | Rule | Details |
+|--------|------|---------|
+| `provision` | `needsDevices: true` | |
+| `wait` | custom | `duration` must be non-zero |
+| `verify-provisioning` | `needsDevices: true` | |
+| `host-exec` | `singleDevice: true`, `fields: ["command"]` | Exactly one device; `command` field required |
+| `newtron` | custom | Either `url` or `batch` must be non-empty |
 
 ---
 
@@ -393,8 +282,9 @@ type Runner struct {
     HostConns     map[string]*ssh.Client // host device name → SSH client
     Progress      ProgressReporter
 
-    opts     RunOptions
-    scenario *Scenario
+    opts               RunOptions
+    scenario           *Scenario
+    discoveredPlatform string          // platform discovered from connected devices
 }
 ```
 
@@ -409,6 +299,7 @@ type Runner struct {
 | `Composites` | Last composite handle UUID per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce composite handles for the same device, only the latest is retained. Read by `verify-provisioning`. |
 | `HostConns` | SSH client connections keyed by host device name. Used by `host-exec` executor to run commands inside host network namespaces. |
 | `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
+| `discoveredPlatform` | Platform name discovered from the first non-host device profile after connection. Used as fallback for `hasDataplane()` and `checkPlatformFeatures()`. |
 
 ### 4.2 RunOptions
 
@@ -509,11 +400,13 @@ func (r *Runner) connectDevices(ctx context.Context, specDir string) error
 Creates the HTTP client and registers the network with newtron-server:
 
 1. Create `client.Client` from `r.ServerURL` and `r.NetworkID`
-2. Call `r.Client.RegisterNetwork(specDir)` — the server loads specs, topology, and platform definitions from the spec directory
-3. Query `r.Client.TopologyDeviceNames()` to discover all devices in the topology
-4. For each device, check `r.Client.IsHostDevice(name)`:
+2. Unregister first (`r.Client.UnregisterNetwork()`) to ensure fresh specs — different suites may use the same network ID with different spec dirs
+3. Call `r.Client.RegisterNetwork(specDir)` — the server loads specs, topology, and platform definitions from the spec directory
+4. Query `r.Client.TopologyDeviceNames()` to discover all devices in the topology
+5. For each device, check `r.Client.IsHostDevice(name)`:
    - **Host devices**: establish a direct SSH connection via `connectHostSSH` and store in `r.HostConns`
    - **SONiC devices**: no pre-connection — the server connects on demand when an operation targets the device
+6. Discover platform from the first non-host device's profile via `r.Client.DeviceInfo(name)` → store in `r.discoveredPlatform`
 
 `connectHostSSH` resolves the host's SSH credentials (user, password, port, management IP) from the device profile via `r.Client.GetHostProfile(name)`, then dials SSH directly.
 
@@ -523,6 +416,7 @@ Creates the HTTP client and registers the network with newtron-server:
 func (r *Runner) allDeviceNames() []string
 func (r *Runner) resolveDevices(step *Step) []string
 func (r *Runner) hasDataplane() bool
+func (r *Runner) resolvePlatform() string
 func HasRequires(scenarios []*Scenario) bool
 ```
 
@@ -530,6 +424,8 @@ func HasRequires(scenarios []*Scenario) bool
 
 `hasDataplane` calls `r.Client.ShowPlatform(platformName)` and checks if
 `PlatformSpec.Dataplane` is non-empty.
+
+`resolvePlatform` returns the platform name from CLI override → scenario YAML → device discovery (in that priority order).
 
 ---
 
@@ -588,7 +484,7 @@ type ScenarioState struct {
 ```
 
 `CurrentStepAction` enables the `status --detail` view to show which action type
-is currently executing (e.g., "provision", "verify-bgp"), not just the step name.
+is currently executing (e.g., "provision", "newtron"), not just the step name.
 
 ### 5.4 StepState
 
@@ -709,7 +605,7 @@ as warnings but do not abort execution.
 
 ---
 
-## 7. Step Executors (`steps.go`, `steps_host.go`)
+## 7. Step Executors (`steps.go`, `steps_newtron.go`, `steps_host.go`)
 
 ### 7.1 Executor Interface
 
@@ -732,7 +628,13 @@ each step.
 ### 7.2 Executor Dispatch
 
 ```go
-var executors = map[StepAction]stepExecutor{ ... } // see scenario.go for full list
+var executors = map[StepAction]stepExecutor{
+    ActionProvision:          &provisionExecutor{},
+    ActionWait:               &waitExecutor{},
+    ActionVerifyProvisioning: &verifyProvisioningExecutor{},
+    ActionHostExec:           &hostExecExecutor{},
+    ActionNewtron:            &newtronExecutor{},
+}
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
 ```
@@ -740,6 +642,11 @@ func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, 
 `executeStep` looks up the executor, calls `Execute`, sets duration and name
 on the result, and aggregates per-device error details into the `Message` field
 when executors only set `Details`.
+
+When `step.ExpectFailure` is true, `applyExpectFailure` inverts the result:
+FAIL/ERROR becomes PASS (expected failure), PASS becomes FAIL (unexpected
+success). If `expect.contains` is set, the error message must contain that
+substring for the inversion to apply.
 
 ### 7.3 Multi-Device Helpers
 
@@ -753,134 +660,38 @@ Three patterns used by executors. Note the callback signatures — they receive
 only the device `name` string. The callback body uses `r.Client` to perform
 all operations against the server:
 
-- **executeForDevices**: for mutating actions (provision, apply-service, create-vlan, etc.). Calls `r.Client.*()` for each device.
-- **checkForDevices**: for single-shot verification (verify-health, verify-config-db). Returns per-device status.
-- **pollForDevices**: for polling verification (verify-bgp, verify-state-db, verify-route). Polls until `step.Expect.Timeout` using `step.Expect.PollInterval`.
+- **executeForDevices**: for mutating actions and one-shot newtron calls. Calls `fn` for each device in parallel.
+- **checkForDevices**: for single-shot verification (verify-provisioning). Returns per-device status.
+- **pollForDevices**: for polling verification (newtron polling mode). Polls until `step.Expect.Timeout` using `step.Expect.PollInterval`.
 
-**Host-skip behavior:** all three helpers check `r.HostConns[name]` before invoking the callback. If the device is a host, it is skipped with status `SKIP` and message "host device (SONiC operation/verification not applicable)". This means `devices: all` in a mixed switch+host topology automatically restricts SONiC operations to switches only. The `provisionExecutor` implements the same host-skip inline (it does not use `executeForDevices`). The only executor that targets hosts is `hostExecExecutor`, which uses `r.HostConns` directly.
+| Helper | Used By |
+|--------|---------|
+| `executeForDevices` | `provision`, `newtron` (one-shot mode, batch mode) |
+| `checkForDevices` | `verify-provisioning` |
+| `pollForDevices` | `newtron` (polling mode) |
 
-### 7.4 Param Helpers
+**Host-skip behavior:** all three helpers check `r.HostConns[name]` before invoking the callback. If the device is a host, it is skipped with status `SKIP` and message "host device (SONiC operation/verification not applicable)". This means `devices: all` in a mixed switch+host topology automatically restricts SONiC operations to switches only. The only executor that targets hosts is `hostExecExecutor`, which uses `r.HostConns` directly.
+
+### 7.4 pollUntil
 
 ```go
-func strParam(params map[string]any, key string) string
-func intParam(params map[string]any, key string) int
-func boolParam(params map[string]any, key string) bool
-func strSliceParam(params map[string]any, key string) []string
+func pollUntil(ctx context.Context, timeout, interval time.Duration, fn func() (done bool, err error)) error
 ```
 
-Extract typed values from `step.Params`. Used by all operation executors to
-read action-specific parameters from YAML. `intParam` handles int, float64
-(from YAML), and string (via strconv). `strSliceParam` handles `[]any` (YAML
-default for lists) by converting each element to a string.
+Low-level polling primitive used by `pollForDevices`. Calls `fn` at `interval`
+until `fn` returns `done=true`, timeout expires, or `ctx` is cancelled.
 
 ### 7.5 Executor Summary
 
-All SONiC operations go through `r.Client.*()` HTTP client methods. The "Client Call" column shows the primary method invoked by each executor.
+| # | Executor | Action | File | Client Call |
+|---|----------|--------|------|-------------|
+| 1 | `provisionExecutor` | `provision` | `steps.go` | `GenerateComposite` → `ConfigReload` → `RefreshWithRetry` → `DeliverComposite` → `Refresh` → `SaveConfig` |
+| 2 | `waitExecutor` | `wait` | `steps.go` | — (context-aware `time.After`) |
+| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `steps.go` | `VerifyComposite(name, handle)` |
+| 4 | `hostExecExecutor` | `host-exec` | `steps_host.go` | — (direct SSH via `r.HostConns`) |
+| 5 | `newtronExecutor` | `newtron` | `steps_newtron.go` | `RawRequest(method, path, body)` |
 
-| # | Executor | Action | Client Call |
-|---|----------|--------|-------------|
-| 1 | `provisionExecutor` | `provision` | `GenerateComposite` → `ConfigReload` → `RefreshWithRetry` → `DeliverComposite` → `Refresh` → `SaveConfig` |
-| 2 | `waitExecutor` | `wait` | — (context-aware time.After) |
-| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `VerifyComposite(name, handle)` |
-| 4 | `verifyConfigDBExecutor` | `verify-config-db` | `ConfigDBTableKeys` / `QueryConfigDB` / `ConfigDBEntryExists` |
-| 5 | `verifyStateDBExecutor` | `verify-state-db` | `QueryStateDB` (polling) |
-| 6 | `verifyBGPExecutor` | `verify-bgp` | `CheckBGPSessions` (polling) |
-| 7 | `verifyHealthExecutor` | `verify-health` | `HealthCheck` |
-| 8 | `verifyRouteExecutor` | `verify-route` | `GetRoute` / `GetRouteASIC` (polling) |
-| 9 | `verifyPingExecutor` | `verify-ping` | `ShowPlatform` + `DeviceInfo` + `SSHCommand("ping ...")` |
-| 10 | `applyServiceExecutor` | `apply-service` | `ApplyService` |
-| 11 | `removeServiceExecutor` | `remove-service` | `RemoveService` |
-| 12 | `configureLoopbackExecutor` | `configure-loopback` | `ConfigureLoopback` |
-| 13 | `sshCommandExecutor` | `ssh-command` | `SSHCommand` |
-| 14 | `restartServiceExecutor` | `restart-service` | `RestartService` |
-| 15 | `configReloadExecutor` | `config-reload` | `ConfigReload` |
-| 16 | `applyFRRDefaultsExecutor` | `apply-frr-defaults` | `ApplyFRRDefaults` |
-| 17 | `setInterfaceExecutor` | `set-interface` | `SetIP` / `SetVRF` / `InterfaceSet` (by property) |
-| 18 | `createVLANExecutor` | `create-vlan` | `CreateVLAN` |
-| 19 | `deleteVLANExecutor` | `delete-vlan` | `DeleteVLAN` |
-| 20 | `addVLANMemberExecutor` | `add-vlan-member` | `AddVLANMember` |
-| 21 | `removeVLANMemberExecutor` | `remove-vlan-member` | `RemoveVLANMember` |
-| 22 | `configureSVIExecutor` | `configure-svi` | `ConfigureSVI` |
-| 23 | `removeSVIExecutor` | `remove-svi` | `RemoveSVI` |
-| 24 | `createVRFExecutor` | `create-vrf` | `CreateVRF` |
-| 25 | `deleteVRFExecutor` | `delete-vrf` | `DeleteVRF` |
-| 26 | `addVRFInterfaceExecutor` | `add-vrf-interface` | `AddVRFInterface` |
-| 27 | `removeVRFInterfaceExecutor` | `remove-vrf-interface` | `RemoveVRFInterface` |
-| 28 | `setupEVPNExecutor` | `setup-evpn` | `SetupEVPN` |
-| 29 | `teardownEVPNExecutor` | `teardown-evpn` | `TeardownEVPN` |
-| 30 | `bindIPVPNExecutor` | `bind-ipvpn` | `BindIPVPN` |
-| 31 | `unbindIPVPNExecutor` | `unbind-ipvpn` | `UnbindIPVPN` |
-| 32 | `bindMACVPNExecutor` | `bind-macvpn` | `BindMACVPN` |
-| 33 | `unbindMACVPNExecutor` | `unbind-macvpn` | `UnbindMACVPN` |
-| 34 | `configureBGPExecutor` | `configure-bgp` | `ConfigureBGP` |
-| 35 | `removeBGPGlobalsExecutor` | `remove-bgp-globals` | `RemoveBGPGlobals` |
-| 36 | `bgpAddNeighborExecutor` | `bgp-add-neighbor` | `InterfaceAddBGPNeighbor` / `AddBGPNeighbor` |
-| 37 | `bgpRemoveNeighborExecutor` | `bgp-remove-neighbor` | `InterfaceRemoveBGPNeighbor` / `RemoveBGPNeighbor` |
-| 38 | `createACLTableExecutor` | `create-acl-table` | `CreateACLTable` |
-| 39 | `deleteACLTableExecutor` | `delete-acl-table` | `DeleteACLTable` |
-| 40 | `addACLRuleExecutor` | `add-acl-rule` | `AddACLRule` |
-| 41 | `deleteACLRuleExecutor` | `delete-acl-rule` | `RemoveACLRule` |
-| 42 | `bindACLExecutor` | `bind-acl` | `BindACL` |
-| 43 | `unbindACLExecutor` | `unbind-acl` | `UnbindACL` |
-| 44 | `applyQoSExecutor` | `apply-qos` | `ApplyQoS` |
-| 45 | `removeQoSExecutor` | `remove-qos` | `RemoveQoS` |
-| 46 | `addStaticRouteExecutor` | `add-static-route` | `AddStaticRoute` |
-| 47 | `removeStaticRouteExecutor` | `remove-static-route` | `RemoveStaticRoute` |
-| 48 | `createPortChannelExecutor` | `create-portchannel` | `CreatePortChannel` |
-| 49 | `deletePortChannelExecutor` | `delete-portchannel` | `DeletePortChannel` |
-| 50 | `addPortChannelMemberExecutor` | `add-portchannel-member` | `AddPortChannelMember` |
-| 51 | `removePortChannelMemberExecutor` | `remove-portchannel-member` | `RemovePortChannelMember` |
-| 52 | `removeIPExecutor` | `remove-ip` | `RemoveIP` |
-| 53 | `removeLoopbackExecutor` | `remove-loopback` | `RemoveLoopback` |
-| 54 | `refreshServiceExecutor` | `refresh-service` | `RefreshService` |
-| 55 | `cleanupExecutor` | `cleanup` | `Cleanup` |
-| 56 | `hostExecExecutor` | `host-exec` | — (direct SSH via `r.HostConns`) |
-| 57 | `createPrefixListExecutor` | `create-prefix-list` | `CreatePrefixList` |
-| 58 | `deletePrefixListExecutor` | `delete-prefix-list` | `DeletePrefixList` |
-| 59 | `addPrefixEntryExecutor` | `add-prefix-entry` | `AddPrefixEntry` |
-| 60 | `removePrefixEntryExecutor` | `remove-prefix-entry` | `RemovePrefixEntry` |
-| 61 | `createRoutePolicyExecutor` | `create-route-policy` | `CreateRoutePolicy` |
-| 62 | `deleteRoutePolicyExecutor` | `delete-route-policy` | `DeleteRoutePolicy` |
-| 63 | `addRoutePolicyRuleExecutor` | `add-route-policy-rule` | `AddRoutePolicyRule` |
-| 64 | `removeRoutePolicyRuleExecutor` | `remove-route-policy-rule` | `RemoveRoutePolicyRule` |
-| 65 | `createServiceExecutor` | `create-service` | `CreateService` |
-| 66 | `deleteServiceExecutor` | `delete-service` | `DeleteService` |
-
-Executors 57–66 are **network-level spec authoring** actions. They operate at
-network scope (no `devices:` field) and call `r.Client.*` directly. These
-actions create or modify specs that services reference — they never touch
-device CONFIG_DB.
-
-### 7.6 Verification Executor Detail
-
-**verifyConfigDBExecutor** — three assertion modes via `r.Client`:
-1. `expect.MinEntries`: calls `ConfigDBTableKeys`/`QueryConfigDB` to count entries, pass if `≥ min`
-2. `expect.Exists`: calls `ConfigDBEntryExists`, checks boolean match
-3. `expect.Fields`: calls `QueryConfigDB`, compares each field value
-
-**verifyStateDBExecutor** — polls `r.Client.QueryStateDB(name, table, key)` until
-all `expect.Fields` match or timeout is reached.
-
-**verifyBGPExecutor** — polls `r.Client.CheckBGPSessions(name)`. Checks all
-results have `status: "pass"`. For non-default expected states, additionally
-verifies message strings contain the expected state.
-
-**verifyHealthExecutor** — single-shot call to `r.Client.HealthCheck(name)`.
-Returns structured report with config verification counts and operational check
-results. Does **not** poll. Use a `wait` step before `verify-health` if
-convergence time is needed.
-
-**verifyRouteExecutor** — polls `r.Client.GetRoute` (APP_DB) or
-`r.Client.GetRouteASIC` (ASIC_DB) depending on `expect.source`. Matches
-protocol and next-hop IP against the returned `RouteEntry`.
-
-**verifyPingExecutor** — checks `r.Client.ShowPlatform` for dataplane support
-first; skips on platforms without data plane. Resolves target to IP via
-`r.Client.DeviceInfo` (device name → loopback IP), runs
-`r.Client.SSHCommand(device, "ping -c N -W 5 <target>")`, parses packet loss
-from output.
-
-### 7.7 Provision Executor Detail
+### 7.6 Provision Executor Detail
 
 The `provisionExecutor` performs a multi-step sequence entirely via `r.Client`:
 
@@ -891,17 +702,9 @@ The `provisionExecutor` performs a multi-step sequence entirely via `r.Client`:
 5. `r.Client.Refresh(name)` — refresh cached CONFIG_DB and interface list
 6. `r.Client.SaveConfig(name)` — persist to config_db.json for future config-reload steps
 
-The handle UUID is stored in `r.Composites[name]` for later use by `verify-provisioning`.
+The handle UUID is stored in `StepOutput.Composites[name]` for later use by `verify-provisioning`.
 
-### 7.8 BGP Neighbor Executor Dispatch
-
-`bgpAddNeighborExecutor` dispatches based on `step.Interface`:
-- **Interface set** → `r.Client.InterfaceAddBGPNeighbor(device, interface, config, opts)`
-- **Interface empty** → `r.Client.AddBGPNeighbor(device, config, opts)` (loopback neighbor)
-
-Same pattern for `bgpRemoveNeighborExecutor`.
-
-### 7.9 Host Exec Executor (`steps_host.go`)
+### 7.7 Host Exec Executor (`steps_host.go`)
 
 The `hostExecExecutor` is unique — it does not use `r.Client` at all. It runs
 commands directly via the SSH connection stored in `r.HostConns`:
@@ -916,88 +719,78 @@ commands directly via the SSH connection stored in `r.HostConns`:
 
 `shellQuote` wraps strings in single quotes, escaping embedded single quotes.
 
-### 7.10 Executor Parameter Reference
+### 7.8 newtronExecutor Detail (`steps_newtron.go`)
 
-Most executors follow a common pattern: extract step fields and params, call
-one of the three multi-device helpers (§7.3), invoke an `r.Client` method inside
-the callback, and return `StepOutput`. The table below lists every step-level
-field and `params:` key consumed by each executor. **Bold** = required (enforced
-by `stepValidations`); regular = optional. `—` = none consumed.
+The `newtronExecutor` implements the generic `newtron` action — a single step type
+that makes arbitrary HTTP calls to newtron-server. It replaces the 60+ dedicated
+executors from the previous design with URL templates, jq-based assertions, and
+three execution modes.
 
-| Action | Step Fields | Params | Notes |
-|--------|-------------|--------|-------|
-| ***Provisioning*** | | | |
-| `provision` | — | — | Inline host-skip; multi-step sequence (see §7.7); populates `StepOutput.Composites` |
-| `configure-loopback` | — | — | |
-| `remove-loopback` | — | — | |
-| `apply-frr-defaults` | — | — | |
-| `config-reload` | — | — | |
-| ***Verification*** | | | |
-| `verify-provisioning` | — | — | Reads `r.Composites[device]` (UUID handle from prior `provision` step) |
-| `verify-config-db` | **table**, key | — | Three assertion modes via `expect:`: `min_entries` (count), `exists` (boolean), `fields` (value match) |
-| `verify-state-db` | **table**, **key** | — | Polls until `expect.fields` all match or timeout |
-| `verify-bgp` | — | — | Polls; reads `expect.state` (default: `"Established"`) |
-| `verify-health` | — | — | Single-shot check; does not poll |
-| `verify-route` | **prefix**, **vrf** | — | Polls; `expect.source`: `"asic_db"` → `GetRouteASIC`, else → `GetRoute`; matches `expect.protocol` and `expect.nexthop_ip` |
-| `verify-ping` | **target**, count | — | Skips on platforms without dataplane; resolves target name → loopback IP via `DeviceInfo`; parses `% packet loss` from output |
-| ***Service*** | | | |
-| `apply-service` | **interface**, **service** | ip | Reads `params["ip"]` via direct map lookup (not `strParam`) |
-| `remove-service` | **interface** | — | |
-| `refresh-service` | **interface** | — | |
-| ***VLAN*** | | | |
-| `create-vlan` | **vlan_id** | — | |
-| `delete-vlan` | **vlan_id** | — | |
-| `add-vlan-member` | **vlan_id**, **interface**, tagging | — | `tagging: "tagged"` → tagged member; absent/`"untagged"` → untagged |
-| `remove-vlan-member` | **vlan_id**, **interface** | — | |
-| `configure-svi` | **vlan_id** | vrf, ip | Sends `SVIConfigureRequest{VlanID, VRF, IPAddress}` |
-| `remove-svi` | **vlan_id** | — | |
-| ***VRF*** | | | |
-| `create-vrf` | **vrf** | — | |
-| `delete-vrf` | **vrf** | — | |
-| `add-vrf-interface` | **vrf**, **interface** | — | |
-| `remove-vrf-interface` | **vrf**, **interface** | — | |
-| ***EVPN*** | | | |
-| `setup-evpn` | — | **source_ip** | |
-| `teardown-evpn` | — | — | |
-| `bind-ipvpn` | **vrf** | **ipvpn** | |
-| `unbind-ipvpn` | **vrf** | — | |
-| `bind-macvpn` | **vlan_id** | **macvpn** | Constructs `Vlan<id>` from `step.VLANID` for the `BindMACVPN` call |
-| `unbind-macvpn` | **vlan_id** | — | Constructs `Vlan<id>` from `step.VLANID` |
-| ***BGP*** | | | |
-| `configure-bgp` | — | — | |
-| `remove-bgp-globals` | — | — | |
-| `bgp-add-neighbor` | interface | **remote_asn**, neighbor_ip | Dispatch: interface set → `InterfaceAddBGPNeighbor`, absent → `AddBGPNeighbor` |
-| `bgp-remove-neighbor` | interface | **neighbor_ip** | Same dispatch: interface set → `InterfaceRemoveBGPNeighbor`, absent → `RemoveBGPNeighbor` |
-| ***ACL*** | | | |
-| `create-acl-table` | — | **name**, type, stage, description | type default: L3; stage default: ingress |
-| `delete-acl-table` | — | **name** | Deletes ACL_TABLE + all ACL_RULE entries |
-| `add-acl-rule` | — | **name**, **rule**, **action**, priority, src_ip, dst_ip, protocol, src_port, dst_port | action = FORWARD/DROP; 9 params total |
-| `delete-acl-rule` | — | **name**, **rule** | |
-| `bind-acl` | **interface** | **name**, **direction** | direction = ingress/egress |
-| `unbind-acl` | **interface** | **name** | |
-| ***QoS*** | | | |
-| `apply-qos` | **interface** | **qos_policy** | |
-| `remove-qos` | **interface** | — | |
-| ***Interface*** | | | |
-| `set-interface` | **interface** | **property**, value | Dispatch on property: `ip` → `SetIP`, `vrf` → `SetVRF`, else → `InterfaceSet` |
-| `remove-ip` | **interface** | **ip** | |
-| ***Routing*** | | | |
-| `add-static-route` | **vrf**, **prefix** | **next_hop**, metric | metric via `intParam` (default 0) |
-| `remove-static-route` | **vrf**, **prefix** | — | |
-| ***PortChannel*** | | | |
-| `create-portchannel` | — | name, members, mtu, min_links, fallback, fast_rate | No `stepValidations` entry; members via `strSliceParam`; fallback, fast_rate via `boolParam` |
-| `delete-portchannel` | — | name | No `stepValidations` entry |
-| `add-portchannel-member` | — | name, member | No `stepValidations` entry |
-| `remove-portchannel-member` | — | name, member | No `stepValidations` entry |
-| ***Host*** | | | |
-| `host-exec` | **command** | — | Direct SSH via `r.HostConns`; wraps in `ip netns exec <device> sh -c`; checks `expect.success_rate` or `expect.contains` |
-| ***Utility*** | | | |
+**URL template expansion** (`expandURL`):
+
+```go
+func expandURL(urlTemplate, networkID, device string) string
+```
+
+Two substitutions:
+1. `{{device}}` → `url.PathEscape(device)` — per-device expansion
+2. Implicit `/network/<networkID>` prefix — URLs in YAML are relative to the
+   network (e.g., `/node/{{device}}/vlan` expands to
+   `/network/mynet/node/switch1/vlan`)
+
+**Three execution modes:**
+
+1. **One-shot mode** (no `poll`, no `batch`):
+   - If URL contains `{{device}}`: `executeForDevices` runs the call in parallel per device
+   - If URL has no `{{device}}`: single network-scoped call (no device parallelism)
+
+2. **Polling mode** (`poll:` block present):
+   - If URL contains `{{device}}`: `pollForDevices` polls each device in parallel
+   - If no `{{device}}`: `pollUntil` polls a network-scoped endpoint
+   - Polls until the jq assertion passes or timeout expires
+   - Errors during polling mean "not ready yet" — the poll continues
+
+3. **Batch mode** (`batch:` list present):
+   - Executes a sequence of HTTP calls within a single step
+   - If any batch URL contains `{{device}}`: `executeForDevices` runs the full
+     batch sequence per device (each device runs all calls in order)
+   - If no `{{device}}`: batch runs once with no device scoping
+   - Fails on the first error within the batch
+
+**jq evaluation** (`evalJQ`):
+
+```go
+func evalJQ(expr string, data json.RawMessage, method, path string) (string, error)
+```
+
+Uses the `gojq` library to compile and run a jq expression against the JSON
+response body. The expression must produce a single boolean `true` to pass.
+Any other value (including `false`, `null`, a non-boolean) is a failure. When
+no jq assertion is specified, a non-error HTTP response is sufficient to pass.
+
+**doCall flow:**
+
+```go
+func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, expect *ExpectBlock) (string, error)
+```
+
+1. `expandURL(urlTemplate, r.Client.NetworkID(), device)` — substitute `{{device}}` and prepend network prefix
+2. Build request body from `params` for POST/PUT/DELETE methods
+3. `r.Client.RawRequest(method, path, body)` — HTTP call to newtron-server
+4. If `expect.JQ` is set: `evalJQ(expr, data, method, path)` — evaluate jq assertion
+5. If no jq: return success message (`"GET /network/.../node/switch1/vlan: ok"`)
+
+### 7.9 Executor Parameter Reference
+
+| Action | Step Fields | Expect Fields | Notes |
+|--------|-------------|---------------|-------|
+| `provision` | — | — | Multi-step sequence (see §7.6); populates `StepOutput.Composites` |
 | `wait` | **duration** | — | Context-aware sleep; no device interaction |
-| `ssh-command` | **command** | — | Checks `expect.contains` for output matching |
-| `restart-service` | **service** | — | |
-| `cleanup` | — | type | Empty type → all cleanup categories (acl, vrf, vni) |
+| `verify-provisioning` | — | — | Reads `r.Composites[device]` (UUID handle from prior `provision` step) |
+| `host-exec` | **command** | `success_rate`, `contains` | Direct SSH via `r.HostConns`; wraps in `ip netns exec <device> sh -c` |
+| `newtron` | **url** or **batch**, method, params | `jq` | Generic HTTP action; `poll:` block for polling; `batch:` for sequential calls |
 
-### 7.11 YAML Examples
+### 7.10 YAML Examples
 
 Representative YAML patterns covering the major test categories. All examples
 are type-valid and can be copy-pasted into scenario files.
@@ -1010,107 +803,92 @@ steps:
     action: provision
     devices: [switch1, switch2]
 
-  - name: config-reload
-    action: config-reload
-    devices: [switch1, switch2]
-
   - name: wait-convergence
     action: wait
     duration: 45s
-
-  - name: verify-bgp
-    action: verify-bgp
-    devices: [switch1, switch2]
-    expect:
-      state: Established
-      timeout: 120s
-      poll_interval: 5s
 
   - name: verify-provisioning
     action: verify-provisioning
     devices: [switch1, switch2]
 ```
 
-**Service lifecycle** — apply with IP param, verify route propagation, remove:
+**SSH reachability check with polling** — verify device is SSH-reachable:
 
 ```yaml
 steps:
-  - name: apply-customer-service
-    action: apply-service
+  - name: ssh-echo-switch1
+    action: newtron
     devices: [switch1]
-    interface: Ethernet10
-    service: customer-l3
-    params:
-      ip: 10.1.1.1/30
-
-  - name: verify-route-propagation
-    action: verify-route
-    devices: [switch2]
-    prefix: 10.1.1.0/30
-    vrf: default
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 120s
+      interval: 5s
     expect:
-      timeout: 60s
-      protocol: bgp
-
-  - name: remove-customer-service
-    action: remove-service
-    devices: [switch1]
-    interface: Ethernet10
+      jq: '.output | contains("ok")'
 ```
 
-**VLAN + EVPN overlay** — create L2 domain and bind to MAC-VPN:
+**VLAN creation and verification** — create L2 domain, verify in CONFIG_DB:
 
 ```yaml
 steps:
-  - name: create-vlan-300
-    action: create-vlan
-    devices: [switch1, switch2]
-    vlan_id: 300
-
-  - name: add-member-vlan-300
-    action: add-vlan-member
+  - name: create-vlan100
+    action: newtron
     devices: [switch1]
-    vlan_id: 300
-    interface: Ethernet3
-    tagging: untagged
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 100}
 
-  - name: bind-l2-overlay
-    action: bind-macvpn
-    devices: [switch1, switch2]
-    vlan_id: 300
-    params:
-      macvpn: servers-vlan300
+  - name: add-member-untagged
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/vlan/100/member
+    params: {interface: Ethernet4, tagged: false}
+
+  - name: verify-vlan100-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-member-untagged
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet4
+    expect:
+      jq: '.tagging_mode == "untagged"'
 ```
 
-**ACL management** — create table, add rule, bind to interface:
+**Service apply via newtron action** — apply service to an interface:
 
 ```yaml
 steps:
-  - name: create-acl
-    action: create-acl-table
+  - name: apply-transit
+    action: newtron
     devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet2/apply-service
     params:
-      name: CUSTOMER_ACL
-      type: L3
-      stage: ingress
+      service: transit
+      ip_address: "10.10.1.1/31"
+```
 
-  - name: add-deny-rule
-    action: add-acl-rule
-    devices: [switch1]
-    params:
-      name: CUSTOMER_ACL
-      rule: RULE_10
-      action: DROP
-      priority: 10
-      src_ip: "10.0.0.0/8"
+**BGP verification with polling** — poll until sessions are established:
 
-  - name: bind-acl-to-port
-    action: bind-acl
-    devices: [switch1]
-    interface: Ethernet10
-    params:
-      name: CUSTOMER_ACL
-      direction: ingress
+```yaml
+steps:
+  - name: verify-bgp
+    action: newtron
+    devices: [switch1, switch2]
+    url: /node/{{device}}/bgp/sessions
+    poll:
+      timeout: 120s
+      interval: 5s
+    expect:
+      jq: '[.[] | select(.state != "Established")] | length == 0'
 ```
 
 **Host dataplane verification** — configure host IP, ping gateway via `host-exec`:
@@ -1134,65 +912,74 @@ steps:
       success_rate: 0.80
 ```
 
-### 7.12 Worked Example: apply-service
+**Expected failure** — verify that an operation fails with zombie intent:
 
-Tracing a single `apply-service` step from YAML through every layer
-(editing guideline #10: "trace one concrete operation through every layer").
+```yaml
+steps:
+  - name: create-vlan-blocked-by-zombie
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/vlan
+    params: {id: 999}
+    expect_failure: true
+```
+
+### 7.11 Worked Example: create-vlan via newtron
+
+Tracing a single `newtron` step from YAML through every layer.
 
 **1. YAML definition**
 
 ```yaml
-- name: apply-transit
-  action: apply-service
+- name: create-vlan100
+  action: newtron
   devices: [switch1]
-  interface: Ethernet2
-  service: transit
-  params:
-    ip: 10.10.1.1/31
+  method: POST
+  url: /node/{{device}}/vlan
+  params: {id: 100}
 ```
 
-**2. Parser — `applyDefaults`** (`parser.go:318`). `apply-service` has no
-defaults to inject (`verify-*` actions only). The step passes through unchanged.
+**2. Parser — `applyDefaults`** (`parser.go`). No-op — the `newtron` action
+has no defaults to inject.
 
-**3. Parser — `validateStepFields`** (`parser.go:184`). Looks up
-`stepValidations[ActionApplyService]`:
+**3. Parser — `validateStepFields`** (`parser.go`). Looks up
+`stepValidations[ActionNewtron]`:
 
 ```go
-ActionApplyService: {needsDevices: true, fields: []string{"interface", "service"}}
+ActionNewtron: {custom: func(prefix string, step *Step) error {
+    if step.URL == "" && len(step.Batch) == 0 {
+        return fmt.Errorf("%s: newtron requires url or batch", prefix)
+    }
+    return nil
+}}
 ```
 
-Checks: `devices` non-empty ✓, `step.Interface` ("Ethernet2") non-empty ✓,
-`step.Service` ("transit") non-empty ✓. Validation passes. Note that `params.ip`
-is not validated — it is optional and only checked by the executor.
+`step.URL` is `"/node/{{device}}/vlan"` (non-empty) → validation passes. No
+device or field validation is enforced by the parser — the `newtron` action
+delegates device handling to the executor.
 
 **4. Runner — `executeStep`** (`runner.go`). Looks up
-`executors[ActionApplyService]` → `&applyServiceExecutor{}`. Calls
+`executors[ActionNewtron]` → `&newtronExecutor{}`. Calls
 `executor.Execute(ctx, r, step)`.
 
-**5. Executor — `applyServiceExecutor.Execute`** (`steps.go:821`). Reads
-`step.Params["ip"]` via direct map lookup → `opts.IPAddress = "10.10.1.1/31"`.
-Calls `r.executeForDevices(step, fn)`. The helper resolves `devices: [switch1]`,
-checks `r.HostConns["switch1"]` (not a host — no skip), and invokes the callback
-with `name = "switch1"`.
+**5. Executor — `newtronExecutor.Execute`** (`steps_newtron.go`). No `batch`,
+no `poll`. `method` defaults to `"POST"` (from YAML). URL contains `{{device}}`
+→ enters one-shot per-device mode: calls `r.executeForDevices(step, fn)`.
 
-**6. Client — `r.Client.ApplyService`** (`client/client.go`). Sends HTTP POST:
+**6. Per-device callback — `doCall`**. For device `"switch1"`:
 
-```
-POST /networks/{id}/nodes/switch1/interfaces/Ethernet2/apply-service
-Body: {"service": "transit", "ip_address": "10.10.1.1/31", "exec_opts": {"execute": true}}
-```
+1. `expandURL("/node/{{device}}/vlan", "mynet", "switch1")` → `"/network/mynet/node/switch1/vlan"`
+2. `params` is `{"id": 100}`, method is `POST` → `body = {"id": 100}`
+3. `r.Client.RawRequest("POST", "/network/mynet/node/switch1/vlan", body)` → HTTP POST to newtron-server
+4. No `expect.JQ` set → returns `"POST /network/mynet/node/switch1/vlan: ok"`
 
-**7. Server** (`api/handler_interface.go`). The handler resolves the node, calls
-`node.GetInterface("Ethernet2")` → `iface.ApplyService(ctx, "transit", opts)`.
-The internal ApplyService resolves the "transit" ServiceSpec from the node's
-SpecProvider, generates CONFIG_DB entries (INTERFACE VRF binding, IP address, BGP
-neighbor, route policies), builds a ChangeSet, and applies it to Redis via
-`DEL + HSET` sequences (§CONFIG_DB Replace Semantics). Returns
-`WriteResult{ChangeCount: N}`.
+**7. Server** (`api/handler_node.go`). The handler resolves the node, calls
+`n.CreateVLAN(ctx, 100)`. Returns JSON response.
 
-**8. Response** — server serializes `WriteResult` as JSON. Client deserializes it.
-Executor formats message: `"applied service transit on Ethernet2 (N changes)"`.
-Returns `StepOutput{Result: &StepResult{Status: PASS, Message: ...}}`.
+**8. Result** — `executeForDevices` collects the per-device message into
+`DeviceResult{Device: "switch1", Status: PASS, Message: "POST .../vlan: ok"}`.
+Returns `StepOutput{Result: &StepResult{Status: PASS, Details: [...]}}`.
 
 **9. Runner** — `executeStep` sets `result.Duration` and `result.Name`. Reports
 progress via `r.Progress.StepEnd(...)`. The Runner advances to the next step.
@@ -1494,12 +1281,19 @@ Lists directories under `newtrun/topologies/`.
 newtrun actions [action]
 ```
 
-- No args: lists all actions grouped by category (Provisioning, Verification, VLAN, VRF, EVPN, Service, QoS, BGP, ACL, PortChannel, Interface, Routing, Host, Spec Authoring, Utility)
+- No args: lists all actions grouped by category (Provisioning, Verification, VLAN, VRF, EVPN, Service, QoS, BGP, ACL, PortChannel, Interface, Routing, Host, Utility)
 - With action name: shows detailed information including category, description, prerequisites, required/optional parameters, devices requirement, and YAML example
 
 The `ActionMetadata` struct and `getActionMetadata()` function provide structured
 metadata for each action, manually maintained in sync with `stepValidations` in
 `parser.go`.
+
+**Note:** The `actions` command still lists all metadata entries from
+`getActionMetadata()` in `cmd_actions.go`, which includes entries for the
+former dedicated actions (create-vlan, verify-bgp, etc.) as reference
+documentation. These metadata entries describe the server API endpoints that
+the `newtron` action calls — the same operations are still available, just
+accessed via URL templates rather than dedicated step actions.
 
 ### 11.9 version Command
 
