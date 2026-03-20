@@ -1,0 +1,12 @@
+Newtron
+Copyright 2025-2026 Aldrin Isaac
+
+This project includes software and design documentation for
+software-driven networking on SONiC, including:
+
+  - newtron: Network automation system for SONiC devices
+  - newtrun: End-to-end test orchestration framework
+  - newtlab: Virtual network lab orchestration (QEMU/KVM)
+  - Design principles for open network automation
+
+Project home: https://github.com/aldrin-isaac/newtron
