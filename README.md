@@ -63,8 +63,7 @@ CONFIG_DB.
 The primitives define what gets configured. These principles govern
 how.
 
-**Specs are the source of intent; the device is the source of
-reality.** Specs describe what the network should look like. Once
+**Specs are the source of intent; the device is ground reality.** Specs describe what the network should look like. Once
 configuration is applied, the device's CONFIG_DB is what exists —
 whether correct or not. If someone changes what **newtron** wrote — or
 configures other interfaces entirely outside of **newtron** —
@@ -109,9 +108,10 @@ loses its policy mid-migration.
 
 **Redis-first.** All device interaction goes through SONiC's Redis
 databases. CONFIG_DB writes use a native Go Redis client over SSH-
-tunneled connections — not `config` CLI commands. Route verification
+tunneled connections — not SONiC `config` commands. Route verification
 reads APP_DB. ASIC programming checks traverse ASIC_DB. Health checks
-read STATE_DB. CLI is a documented exception, not a normalized path.
+read STATE_DB. Device shell access is a documented exception, not a
+normalized path.
 
 **One code path.** Online operations against a live device and offline
 composite provisioning run the same code. There is no template engine,
@@ -242,9 +242,9 @@ packet between VMs passes through **newtlink**, a Go bridge that handles
 Ethernet frames in userspace. Topologies can span multiple servers.
 
 **newtrun** executes YAML test scenarios against **newtron-server** — each
-scenario is a sequence of steps (provision, verify CONFIG_DB, apply service,
-check BGP, ping across VMs, tear down) that exercise the primitives
-end-to-end.
+scenario is a sequence of HTTP calls to **newtron-server** (provision a device,
+check BGP sessions, verify CONFIG_DB entries) and host commands (ping across
+VMs, run traffic generators) that exercise the primitives end-to-end.
 
 ```
 $ newtrun start --dir newtrun/suites/2node-vs-service
