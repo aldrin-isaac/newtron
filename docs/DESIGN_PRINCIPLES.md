@@ -5,7 +5,7 @@ failing in the same way. Not catastrophically — erosively. Template
 engines push configs that may or may not match what the device actually
 has. Desired-state reconcilers maintain intent in one system and read
 reality from another, and the distance between them is where every hard
-bug lives. CLI scrapers parse output that changes between releases and
+bug lives. Device CLI scrapers parse output that changes between releases and
 breaks silently. Ansible playbooks return success without verifying that
 writes landed. Terraform state files diverge from reality after a crash
 and require manual surgery to recover.
@@ -104,7 +104,7 @@ The Node operates in two modes:
   delivery is what brings it to life — connecting it to its device.
 
 Same type, same methods, same preconditions. The topology provisioner
-creates an offline Node and calls the same methods the CLI uses
+creates an offline Node and calls the same methods the automation CLI uses
 against a connected Node:
 
 ```
@@ -296,7 +296,7 @@ scope boundaries that keep each component's failure domain contained.
 ## 4. SONiC Is a Database — Treat It as One
 
 Every layer of indirection between a tool and the system it manages is
-a layer where information is lost. CLI output is a rendered view — it
+a layer where information is lost. Device CLI output is a rendered view — it
 shows what the developer chose to show, formatted how they chose to
 format it, with errors they chose to surface. The database is the data
 itself.
@@ -316,7 +316,7 @@ not through SONiC's `config` CLI commands. Route verification reads
 APP_DB directly. ASIC programming checks traverse ASIC_DB's SAI object
 chain. Health checks read STATE_DB.
 
-The alternative — SSHing in and parsing CLI output — is fragile in ways
+The alternative — SSHing in and parsing device CLI output — is fragile in ways
 that compound silently. `show ip route` output varies between SONiC
 releases; a tool that parses it must be patched for every release.
 `config vlan add` returns exit code 0 even when it silently fails; a
@@ -324,14 +324,14 @@ tool that trusts the exit code believes the VLAN was created when it
 wasn't. Text parsing adds a translation layer between what the device
 knows and what the tool sees — and every translation layer is a place
 where meaning can be lost, reformatted, or silently dropped. Redis
-eliminates that layer: the data structures *are* the interface. A hash
+eliminates that layer: the data structures *are* the integration point. A hash
 in CONFIG_DB is the configuration, not a description of it.
 
 When Redis cannot express an operation (persisting config to disk,
-restarting daemons, reading platform files), CLI commands are used as
+restarting daemons, reading platform files), device shell commands are used as
 documented exceptions — each tagged `CLI-WORKAROUND` with a note on
 what upstream change would eliminate the workaround. The goal is to
-reduce these over time, not normalize them. Every CLI call in the
+reduce these over time, not normalize them. Every shell call in the
 codebase is either an inherent exception (the operation requires the
 filesystem) or a temporary workaround (Redis could provide this but
 doesn't yet). There is no third category.
@@ -360,7 +360,7 @@ They are the vocabulary of the network — "a service called transit
 has eBGP peering with an ingress filter" — describing *how* each
 primitive should behave, not *where* it should be applied. Which
 interface gets which service is the operator's decision, made at
-apply time via CLI or HTTP API. Specs can live in
+apply time via the automation CLI or HTTP API. Specs can live in
 version-controlled JSON files, or be pushed at runtime by
 an external system (a CMDB, a provisioning portal) via the API.
 The system does not mandate where specs come from — only that they are
@@ -376,7 +376,7 @@ The translation from spec to CONFIG_DB entries uses device context to
 derive concrete values. Each device has a **profile** — its identity in
 the network: AS number, loopback IP, EVPN peers, platform type. When
 a service spec says `"peer_as": "request"`, that means the AS number
-is supplied by the operator at apply time (via `--peer-as` on the CLI,
+is supplied by the operator at apply time (via `--peer-as` on the automation CLI,
 or from a topology file during provisioning). A filter reference says
 `"ingress_filter": "customer-in"` — the system expands this into
 numbered ACL rules from the filter definition.
@@ -707,7 +707,7 @@ coordination is not its job.
 
 The system is a client-server architecture. The server loads
 specs, maintains device connections, and exposes all operations as an
-HTTP API. The CLI is one thin client; orchestrators are another kind
+HTTP API. The automation CLI is one thin client; orchestrators are another kind
 of client. Multi-device coordination — deciding what to apply, where,
 in what order — belongs to orchestrators that consume the same API.
 An E2E test orchestrator is one such consumer: it provisions
@@ -2002,7 +2002,7 @@ describes what it does to the database, not what it means.
 ## 30. Public API Boundary — Types Express Intent, Not Implementation
 
 The public API package is the boundary. The node package, network
-package, and device layer are internal. All external consumers — CLI,
+package, and device layer are internal. All external consumers — the automation CLI,
 orchestrators, the HTTP server — import only the public API.
 
 This boundary exists because the ChangeSet (§11), the Node (§1), and
@@ -2127,8 +2127,8 @@ the system does is where the hardest bugs live.
 
 Before implementing a SONiC feature:
 
-1. **Find the CLI path.** Read SONiC CLI source for tables, fields, order.
-2. **Run it on a real device.** Configure via CLI. Capture CONFIG_DB.
+1. **Find the SONiC CLI path.** Read SONiC CLI source for tables, fields, order.
+2. **Run it on a real device.** Configure via the SONiC CLI. Capture CONFIG_DB.
 3. **Read the daemon source.** Understand processing order and APP_DB output.
 4. **Implement.** Same entries, same order.
 5. **Test in isolation.** Focused suite before composite integration.

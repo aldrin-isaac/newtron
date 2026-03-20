@@ -495,7 +495,26 @@ The test: does the metaphor help the reader *reason* about the actual system, or
 
 Guideline #2 (precision before readability) covers factual accuracy. This guideline covers *analogical* accuracy — ensuring that metaphors, analogies, and cross-domain comparisons build the right mental model, not just an appealing one.
 
-## 34. Lead with Universal Truths, Not Feature Descriptions — HLD
+## 34. Overloaded Terms Must Be Disambiguated — ALL
+
+When a term has different meanings depending on context, every occurrence must be qualified so the reader never has to guess which meaning is intended.
+
+The most common offender in this project is "CLI":
+
+| Bare term | Possible meanings | Qualified forms |
+|-----------|-------------------|-----------------|
+| CLI | newtron's CLI tool, SONiC device CLI (`show vlan`, `config interface`), any other command-line tool | "newtron CLI", "SONiC CLI" |
+| shell | the operator's local shell, a remote SSH session to a device, a container shell | "device shell", "local shell" |
+| config | CONFIG_DB entries, YAML spec files, newtron server configuration | "CONFIG_DB entries", "spec files", "server config" |
+| API | newtron-server HTTP API, SONiC REST API, SAI API | "newtron API", "SONiC REST API", "SAI API" |
+
+**Rule:** Never use a bare overloaded term. On first use in a section, use the fully qualified form. Subsequent uses in the same paragraph may use the short form if the referent is unambiguous from context — but when in doubt, qualify again.
+
+**Test:** For every bare "CLI", "shell", "config", or "API" in a document, ask: "if the reader's mental model is SONiC-first (not newtron-first), which meaning would they assume?" If the answer differs from the intended meaning, the term needs qualification.
+
+This is not pedantry — it is a prerequisite for precision (#2). A sentence like "the CLI reads CONFIG_DB" is factually different depending on whether "CLI" means newtron (which reads via Redis over SSH tunnel) or SONiC (which reads via `sonic-cfggen` or `redis-cli` locally). The reader who assumes the wrong meaning builds the wrong mental model, and no amount of subsequent precision can fix a wrong foundation.
+
+## 35. Lead with Universal Truths, Not Feature Descriptions — HLD
 
 The strongest openings in design documents state something true *beyond* the system being described — a principle from the domain itself — before showing how the system embodies it. This draws the reader in by connecting to their existing experience rather than asking them to learn a new system's vocabulary first.
 
@@ -509,7 +528,7 @@ The first version describes a feature. The second describes the *problem in the 
 
 This applies primarily to design documents and architecture sections. API references and HOWTOs should lead with what the reader needs to do, not why it matters philosophically — the design document already made that case.
 
-## 35. Write from Conviction, Not Summary — HLD
+## 36. Write from Conviction, Not Summary — HLD
 
 Design prose has two voices: the voice of someone who *built* the system and is sharing hard-won lessons, and the voice of someone *reporting* on what was built. The first earns trust; the second reads like documentation.
 
@@ -527,7 +546,7 @@ Signs of summary voice that should be revised:
 - Describing what the system does without explaining why the alternative fails
 - Passive constructions that distance the writer from the claim ("it was decided that...")
 
-## 36. No Fourth-Wall Breaks — DESIGN+HLD
+## 37. No Fourth-Wall Breaks — DESIGN+HLD
 
 Never reference the document's own structure as a transition. Each section must
 stand on its own conviction — not lean on the reader's memory of a previous section
@@ -550,7 +569,7 @@ section," or "as we discussed." If the section still makes its argument, the
 references were padding. If it doesn't, the section needs to be rewritten to
 stand alone.
 
-## 37. Structural Consistency — ALL
+## 38. Structural Consistency — ALL
 
 If sections end with `---` separators, *every* section ends with one. If Parts
 open with a transition paragraph, *every* Part opens with one. If subsections
@@ -572,7 +591,7 @@ Rules:
   If one table uses `|` alignment, all tables do. If one code block has a language
   tag, all code blocks do.
 
-## 38. Ground Abstractions Before Identifying Them — DESIGN
+## 39. Ground Abstractions Before Identifying Them — DESIGN
 
 When a document identifies an abstraction with the thing it represents — "The
 Node *is* the device," "The ChangeSet *is* the preview" — the reader must know
@@ -595,7 +614,7 @@ force of the identification language.
 Does "The Node *is* the device" sound like the Node is literally a switch? If
 yes, ground the abstraction first.
 
-## 39. Bridge Project Vocabulary to Industry Vocabulary — DESIGN+HLD
+## 40. Bridge Project Vocabulary to Industry Vocabulary — DESIGN+HLD
 
 When a project gives a specific meaning to a general industry term, define the
 mapping explicitly on first use. The reader arrives with their own definition;
