@@ -403,10 +403,11 @@ func (n *Node) AddOverlayPeer(ctx context.Context, neighborIP string, asn int, d
 
 	isEBGP := asn != n.resolved.UnderlayASN
 	config := CreateBGPNeighborConfig(neighborIP, asn, n.resolved.LoopbackIP, BGPNeighborOpts{
-		Description:  description,
-		EBGPMultihop: isEBGP,
-		MultihopTTL:  "255",
-		ActivateEVPN: evpn,
+		Description:      description,
+		EBGPMultihop:     isEBGP,
+		ActivateIPv4:     true,
+		ActivateEVPN:     evpn,
+		NextHopUnchanged: evpn && isEBGP,
 	})
 	cs := buildChangeSet(n.name, "device.add-overlay-peer", config, ChangeAdd)
 	n.applyShadow(cs)
