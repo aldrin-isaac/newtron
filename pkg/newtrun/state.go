@@ -30,6 +30,7 @@ type RunState struct {
 	SuiteDir  string          `json:"suite_dir"`
 	Topology  string          `json:"topology"`
 	Platform  string          `json:"platform"`
+	Target    string          `json:"target,omitempty"` // --target scenario (empty = all)
 	PID       int             `json:"pid"`
 	Status    SuiteStatus     `json:"status"`
 	Started   time.Time       `json:"started"`

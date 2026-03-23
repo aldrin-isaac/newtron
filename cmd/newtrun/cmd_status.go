@@ -161,6 +161,11 @@ func printSuiteStatus(suite string, jsonMode, detail bool) error {
 	}
 	fmt.Printf("  platform:  %s\n", platform)
 
+	// Target
+	if state.Target != "" {
+		fmt.Printf("  target:    %s\n", state.Target)
+	}
+
 	// Runner status
 	statusStr := string(state.Status)
 	if state.PID != 0 && newtrun.IsProcessAlive(state.PID) {

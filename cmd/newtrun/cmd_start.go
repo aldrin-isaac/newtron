@@ -66,6 +66,9 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			suite := newtrun.SuiteName(absDir)
 
 			fmt.Fprintf(os.Stderr, "newtrun: suite %s (%s)\n", suite, absDir)
+			if target != "" {
+				fmt.Fprintf(os.Stderr, "newtrun: target: %s\n", target)
+			}
 
 			// Check for paused state → resume
 			if scenario != "" && target != "" {
@@ -107,6 +110,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				SuiteDir: absDir,
 				Topology: topology,
 				Platform: platform,
+				Target:   target,
 				Status:   newtrun.SuiteStatusRunning,
 				Started:  time.Now(),
 			}
