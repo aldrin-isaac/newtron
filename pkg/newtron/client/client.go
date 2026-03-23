@@ -70,7 +70,7 @@ func (c *Client) RegisterNetwork(specDir string) error {
 // UnregisterNetwork removes a registered network from the server.
 // Returns nil if the network is not registered (404/500 treated as success).
 func (c *Client) UnregisterNetwork() error {
-	err := c.doDelete(c.networkPath(), nil)
+	err := c.doPost(c.networkPath()+"/unregister", nil, nil)
 	if err != nil {
 		if se, ok := err.(*ServerError); ok && (se.StatusCode == http.StatusNotFound || se.StatusCode == http.StatusInternalServerError) {
 			return nil // not registered — nothing to do
@@ -165,20 +165,6 @@ func (c *Client) doPut(path string, body any, result any) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("PUT %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	return c.decodeResponse(resp, result)
-}
-
-// doDelete performs a DELETE request.
-func (c *Client) doDelete(path string, result any) error {
-	req, err := http.NewRequest(http.MethodDelete, c.baseURL+path, nil)
-	if err != nil {
-		return fmt.Errorf("DELETE %s: %w", path, err)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("DELETE %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	return c.decodeResponse(resp, result)

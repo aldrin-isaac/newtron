@@ -4,7 +4,7 @@ description: |
   Uses symmetric reverse actions for every forward action in the provisioner:
     ApplyService   → RemoveService    (per-interface, reverse dependency order)
     SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers)
-    ConfigureBGP   → RemoveBGPGlobals (BGP globals, AF, redistribution)
+    ConfigureBGP   → RemoveBGP (BGP globals, AF, redistribution)
     ConfigureLoopback → RemoveLoopback (loopback interface)
   Validates the "no config leak" principle: every CONFIG_DB entry written
   by a forward action is removed by its corresponding reverse action.
@@ -88,23 +88,23 @@ steps:
   # Reverse:  node.TeardownEVPN(ctx)
   # =========================================================================
 
-  - name: teardown-evpn
+  - name: teardown-vtep
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
   # =========================================================================
   # Reverse of ConfigureBGP — BGP globals, AF, redistribution
   # Forward:  node.ConfigureBGP(ctx)
-  # Reverse:  node.RemoveBGPGlobals(ctx)
+  # Reverse:  node.RemoveBGP(ctx)
   # =========================================================================
 
-  - name: remove-bgp-globals
+  - name: remove-bgp
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/remove-bgp-globals
+    url: /node/{{device}}/remove-bgp
 
   # =========================================================================
   # Reverse of ConfigureLoopback — loopback interface

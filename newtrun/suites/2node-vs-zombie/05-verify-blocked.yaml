@@ -16,7 +16,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 999}
     expect_failure: true
 

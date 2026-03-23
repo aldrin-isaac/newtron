@@ -19,14 +19,14 @@ steps:
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 100}
 
   - name: create-vlan-200
     action: newtron
     devices: [leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 200}
 
   # Physical members: host1 on VLAN 100 (leaf1), host2 on VLAN 200 (leaf2)
@@ -34,15 +34,15 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 100, interface: Ethernet1, tagged: false}
 
   - name: add-vlan-member-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/vlan/200/member
-    params: {interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 200, interface: Ethernet1, tagged: false}
 
   # =========================================================================
   # Configure anycast SVIs on BOTH leaves for BOTH VLANs
@@ -55,7 +55,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -64,7 +64,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -73,7 +73,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -82,7 +82,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -294,23 +294,27 @@ steps:
   - name: remove-vlan-member-leaf1
     action: newtron
     devices: [leaf1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100/member/Ethernet1
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 100, interface: Ethernet1}
 
   - name: remove-vlan-member-leaf2
     action: newtron
     devices: [leaf2]
-    method: DELETE
-    url: /node/{{device}}/vlan/200/member/Ethernet1
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 200, interface: Ethernet1}
 
   - name: delete-vlan-200
     action: newtron
     devices: [leaf1, leaf2]
-    method: DELETE
-    url: /node/{{device}}/vlan/200
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 200}
 
   - name: delete-vlan-100
     action: newtron
     devices: [leaf1, leaf2]
-    method: DELETE
-    url: /node/{{device}}/vlan/100
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 100}

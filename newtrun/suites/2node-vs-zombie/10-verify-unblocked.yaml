@@ -18,14 +18,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 997}
 
   - name: delete-vlan-unblocked
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/997
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 997}
 
   # Drift check proves provisioned state survived the rollback
   - name: verify-drift-clean
@@ -65,7 +66,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 999}
     expect_failure: true
 
@@ -74,7 +75,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intents/zombie/clear
+    url: /node/{{device}}/clear-zombie
 
   # Verify intent is gone
   - name: verify-cleared
@@ -107,12 +108,13 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 998}
 
   # Clean up the test VLAN
   - name: cleanup-vlan998
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/998
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 998}

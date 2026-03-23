@@ -10,18 +10,18 @@ steps:
     action: provision
     devices: [switch1, switch2]
 
-  - name: config-reload
+  - name: reload-config
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/config-reload
+    url: /node/{{device}}/reload-config
 
   - name: restart-bgp
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-service
-    params: {service: bgp}
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
 
   - name: wait-bgp-instance
     action: newtron

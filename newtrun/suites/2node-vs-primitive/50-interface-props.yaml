@@ -11,7 +11,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/set
+    url: /node/{{device}}/interface/Ethernet40/set-port-property
     params: {property: mtu, value: "9100"}
 
   - name: verify-mtu
@@ -25,7 +25,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/set
+    url: /node/{{device}}/interface/Ethernet40/set-port-property
     params: {property: admin_status, value: down}
 
   - name: verify-admin-down
@@ -39,7 +39,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/set
+    url: /node/{{device}}/interface/Ethernet40/set-port-property
     params: {property: admin_status, value: up}
 
   - name: verify-admin-up
@@ -53,7 +53,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet40/set
+    url: /node/{{device}}/interface/Ethernet40/set-port-property
     params: {property: description, value: "test-interface-props"}
 
   - name: verify-description

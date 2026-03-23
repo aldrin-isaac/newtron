@@ -12,7 +12,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 100}
 
   - name: verify-vlan100
@@ -27,8 +27,8 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet0, tagged: true}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 100, interface: Ethernet0, tagged: true}
 
   - name: verify-vlan-member
     action: newtron
@@ -42,7 +42,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf
+    url: /node/{{device}}/create-vrf
     params: {name: Vrf_test}
 
   - name: verify-vrf
@@ -56,8 +56,9 @@ steps:
   - name: remove-member-eth0
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100/member/Ethernet0
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 100, interface: Ethernet0}
 
   - name: verify-member-removed
     action: newtron
@@ -69,8 +70,9 @@ steps:
   - name: delete-vlan100
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 100}
 
   - name: verify-vlan100-removed
     action: newtron
@@ -82,8 +84,9 @@ steps:
   - name: delete-vrf-test
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_test
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_test}
 
   - name: verify-vrf-removed
     action: newtron

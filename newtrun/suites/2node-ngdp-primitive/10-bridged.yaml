@@ -12,29 +12,29 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 100}
 
   - name: add-member-eth1-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 100, interface: Ethernet1, tagged: false}
 
   - name: add-member-eth3-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet3, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 100, interface: Ethernet3, tagged: false}
 
   - name: add-member-eth2-tagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet2, tagged: true}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 100, interface: Ethernet2, tagged: true}
 
   - name: verify-vlan100-exists
     action: newtron
@@ -75,7 +75,7 @@ steps:
       timeout: 60s
       interval: 5s
     expect:
-      jq: '.output | contains("2")'
+      jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'
 
   - name: poll-asic-vlanmember-ready
     action: newtron
@@ -87,7 +87,7 @@ steps:
       timeout: 60s
       interval: 5s
     expect:
-      jq: '.output | contains("2")'
+      jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'
 
   # Wait for NGDP bridge plane
   - name: wait-bridge-plane

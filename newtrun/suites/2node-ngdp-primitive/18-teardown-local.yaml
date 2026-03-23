@@ -27,20 +27,23 @@ steps:
   - name: remove-member-ethernet2
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100/member/Ethernet2
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 100, interface: Ethernet2}
 
   - name: remove-member-ethernet3
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100/member/Ethernet3
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 100, interface: Ethernet3}
 
   - name: remove-member-ethernet1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100/member/Ethernet1
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 100, interface: Ethernet1}
 
   - name: verify-member-eth1-removed
     action: newtron
@@ -53,8 +56,9 @@ steps:
   - name: delete-vlan100
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/100
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 100}
 
   - name: verify-vlan100-removed
     action: newtron
@@ -82,15 +86,17 @@ steps:
   - name: remove-vrf-interface
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_local/interface/Ethernet1
+    method: POST
+    url: /node/{{device}}/remove-vrf-interface
+    params: {vrf: Vrf_local, interface: Ethernet1}
 
   # 6. Delete Vrf_local
   - name: delete-vrf-local
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_local
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_local}
 
   - name: verify-vrf-removed
     action: newtron

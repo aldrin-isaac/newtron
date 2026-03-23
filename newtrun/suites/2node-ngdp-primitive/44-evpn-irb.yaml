@@ -12,14 +12,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf
+    url: /node/{{device}}/create-vrf
     params: {name: Vrf_IRB}
 
   - name: create-vrf-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf
+    url: /node/{{device}}/create-vrf
     params: {name: Vrf_IRB}
 
   # Bind IP-VPN
@@ -27,15 +27,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_IRB/bind-ipvpn
-    params: {ipvpn: evpn-irb-vrf}
+    url: /node/{{device}}/bind-ipvpn
+    params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
 
   - name: bind-ipvpn-irb-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_IRB/bind-ipvpn
-    params: {ipvpn: evpn-irb-vrf}
+    url: /node/{{device}}/bind-ipvpn
+    params: {vrf: Vrf_IRB, ipvpn: evpn-irb-vrf}
 
   # CONFIG_DB verification: VRF with VNI
   - name: verify-vrf-irb-vni
@@ -78,7 +78,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -88,7 +88,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/svi
+    url: /node/{{device}}/configure-svi
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -176,8 +176,8 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_IRB/interface
-    params: {interface: Ethernet3}
+    url: /node/{{device}}/add-vrf-interface
+    params: {vrf: Vrf_IRB, interface: Ethernet3}
 
   - name: verify-eth3-in-vrf
     action: newtron
@@ -189,8 +189,9 @@ steps:
   - name: remove-vrf-interface-eth3
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_IRB/interface/Ethernet3
+    method: POST
+    url: /node/{{device}}/remove-vrf-interface
+    params: {vrf: Vrf_IRB, interface: Ethernet3}
 
   - name: verify-eth3-vrf-removed
     action: newtron

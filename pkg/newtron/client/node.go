@@ -232,12 +232,12 @@ func (c *Client) ConfigureBGP(device string, opts newtron.ExecOpts) (*newtron.Wr
 
 // RemoveBGPGlobals removes BGP globals from a device.
 func (c *Client) RemoveBGPGlobals(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "remove-bgp-globals", nil, opts)
+	return c.nodeWrite(device, "remove-bgp", nil, opts)
 }
 
 // AddBGPNeighbor adds a loopback (overlay) BGP neighbor.
 func (c *Client) AddBGPNeighbor(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "add-bgp-neighbor", config, opts)
+	return c.nodeWrite(device, "add-overlay-peer", config, opts)
 }
 
 // RemoveBGPNeighbor removes a BGP neighbor by IP.
@@ -245,18 +245,18 @@ func (c *Client) RemoveBGPNeighbor(device, ip string, opts newtron.ExecOpts) (*n
 	body := struct {
 		IP string `json:"ip"`
 	}{IP: ip}
-	return c.nodeWrite(device, "remove-bgp-neighbor", body, opts)
+	return c.nodeWrite(device, "remove-overlay-peer", body, opts)
 }
 
 // SetupEVPN configures the EVPN overlay on a device.
 func (c *Client) SetupEVPN(device, sourceIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.SetupEVPNRequest{SourceIP: sourceIP}
-	return c.nodeWrite(device, "setup-evpn", body, opts)
+	body := api.SetupVTEPRequest{SourceIP: sourceIP}
+	return c.nodeWrite(device, "setup-vtep", body, opts)
 }
 
 // TeardownEVPN removes the EVPN overlay.
 func (c *Client) TeardownEVPN(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "teardown-evpn", nil, opts)
+	return c.nodeWrite(device, "teardown-vtep", nil, opts)
 }
 
 // ConfigureLoopback configures the loopback interface.
@@ -272,43 +272,35 @@ func (c *Client) RemoveLoopback(device string, opts newtron.ExecOpts) (*newtron.
 // CreateVLAN creates a VLAN.
 func (c *Client) CreateVLAN(device string, id int, description string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.VLANCreateRequest{ID: id, Description: description}
-	return c.nodeWrite(device, "vlan", body, opts)
+	return c.nodeWrite(device, "create-vlan", body, opts)
 }
 
 // DeleteVLAN deletes a VLAN.
 func (c *Client) DeleteVLAN(device string, id int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := fmt.Sprintf("%s/vlan/%d%s", c.nodePath(device), id, execQuery(opts))
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		ID int `json:"id"`
+	}{ID: id}
+	return c.nodeWrite(device, "delete-vlan", body, opts)
 }
 
 // AddVLANMember adds an interface to a VLAN.
 func (c *Client) AddVLANMember(device string, id int, iface string, tagged bool, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VLANMemberRequest{Interface: iface, Tagged: tagged}
-	var result newtron.WriteResult
-	path := fmt.Sprintf("%s/vlan/%d/member%s", c.nodePath(device), id, execQuery(opts))
-	if err := c.doPost(path, body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := api.VLANMemberRequest{ID: id, Interface: iface, Tagged: tagged}
+	return c.nodeWrite(device, "add-vlan-member", body, opts)
 }
 
 // RemoveVLANMember removes an interface from a VLAN.
 func (c *Client) RemoveVLANMember(device string, id int, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := fmt.Sprintf("%s/vlan/%d/member/%s%s", c.nodePath(device), id, url.PathEscape(iface), execQuery(opts))
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		ID        int    `json:"id"`
+		Interface string `json:"interface"`
+	}{ID: id, Interface: iface}
+	return c.nodeWrite(device, "remove-vlan-member", body, opts)
 }
 
 // ConfigureSVI configures an SVI.
 func (c *Client) ConfigureSVI(device string, config newtron.SVIConfigureRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "svi", config, opts)
+	return c.nodeWrite(device, "configure-svi", config, opts)
 }
 
 // RemoveSVI removes an SVI.
@@ -320,157 +312,142 @@ func (c *Client) RemoveSVI(device string, vlanID int, opts newtron.ExecOpts) (*n
 // CreateVRF creates a VRF.
 func (c *Client) CreateVRF(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.VRFCreateRequest{Name: name}
-	return c.nodeWrite(device, "vrf", body, opts)
+	return c.nodeWrite(device, "create-vrf", body, opts)
 }
 
 // DeleteVRF deletes a VRF.
 func (c *Client) DeleteVRF(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(name) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.nodeWrite(device, "delete-vrf", body, opts)
 }
 
 // AddVRFInterface adds an interface to a VRF.
 func (c *Client) AddVRFInterface(device, vrf, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VRFInterfaceRequest{Interface: iface}
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/interface" + execQuery(opts)
-	if err := c.doPost(path, body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := api.VRFInterfaceRequest{VRF: vrf, Interface: iface}
+	return c.nodeWrite(device, "add-vrf-interface", body, opts)
 }
 
 // RemoveVRFInterface removes an interface from a VRF.
 func (c *Client) RemoveVRFInterface(device, vrf, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/interface/" + url.PathEscape(iface) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := api.VRFInterfaceRequest{VRF: vrf, Interface: iface}
+	return c.nodeWrite(device, "remove-vrf-interface", body, opts)
 }
 
 // BindIPVPN binds an IP-VPN to a VRF.
 func (c *Client) BindIPVPN(device, vrf, ipvpn string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.BindIPVPNRequest{IPVPN: ipvpn}
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/bind-ipvpn" + execQuery(opts)
-	if err := c.doPost(path, body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := api.BindIPVPNRequest{VRF: vrf, IPVPN: ipvpn}
+	return c.nodeWrite(device, "bind-ipvpn", body, opts)
 }
 
 // UnbindIPVPN unbinds an IP-VPN from a VRF.
 func (c *Client) UnbindIPVPN(device, vrf string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/unbind-ipvpn" + execQuery(opts)
-	if err := c.doPost(path, nil, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		VRF string `json:"vrf"`
+	}{VRF: vrf}
+	return c.nodeWrite(device, "unbind-ipvpn", body, opts)
 }
 
 // AddStaticRoute adds a static route to a VRF.
 func (c *Client) AddStaticRoute(device, vrf, prefix, nexthop string, metric int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.StaticRouteRequest{Prefix: prefix, NextHop: nexthop, Metric: metric}
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/route" + execQuery(opts)
-	if err := c.doPost(path, body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := api.StaticRouteRequest{VRF: vrf, Prefix: prefix, NextHop: nexthop, Metric: metric}
+	return c.nodeWrite(device, "add-static-route", body, opts)
 }
 
 // RemoveStaticRoute removes a static route from a VRF.
 func (c *Client) RemoveStaticRoute(device, vrf, prefix string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/vrf/" + url.PathEscape(vrf) + "/route/" + prefix + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		VRF    string `json:"vrf"`
+		Prefix string `json:"prefix"`
+	}{VRF: vrf, Prefix: prefix}
+	return c.nodeWrite(device, "remove-static-route", body, opts)
 }
 
 // CreateACLTable creates an ACL table.
 func (c *Client) CreateACLTable(device string, config newtron.ACLCreateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "acl", config, opts)
+	return c.nodeWrite(device, "create-acl-table", config, opts)
 }
 
 // DeleteACLTable deletes an ACL table.
 func (c *Client) DeleteACLTable(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/acl/" + url.PathEscape(name) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.nodeWrite(device, "delete-acl-table", body, opts)
 }
 
 // AddACLRule adds a rule to an ACL.
 func (c *Client) AddACLRule(device, acl string, config newtron.ACLRuleAddRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/acl/" + url.PathEscape(acl) + "/rule" + execQuery(opts)
-	if err := c.doPost(path, config, &result); err != nil {
-		return nil, err
+	// The handler expects acl in the body alongside the rule fields.
+	body := struct {
+		ACL      string `json:"acl"`
+		RuleName string `json:"rule_name"`
+		Priority int    `json:"priority"`
+		Action   string `json:"action"`
+		SrcIP    string `json:"src_ip"`
+		DstIP    string `json:"dst_ip"`
+		Protocol string `json:"protocol"`
+		SrcPort  string `json:"src_port"`
+		DstPort  string `json:"dst_port"`
+	}{
+		ACL:      acl,
+		RuleName: config.RuleName,
+		Priority: config.Priority,
+		Action:   config.Action,
+		SrcIP:    config.SrcIP,
+		DstIP:    config.DstIP,
+		Protocol: config.Protocol,
+		SrcPort:  config.SrcPort,
+		DstPort:  config.DstPort,
 	}
-	return &result, nil
+	return c.nodeWrite(device, "add-acl-rule", body, opts)
 }
 
 // RemoveACLRule removes a rule from an ACL.
 func (c *Client) RemoveACLRule(device, acl, rule string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/acl/" + url.PathEscape(acl) + "/rule/" + url.PathEscape(rule) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		ACL  string `json:"acl"`
+		Rule string `json:"rule"`
+	}{ACL: acl, Rule: rule}
+	return c.nodeWrite(device, "remove-acl-rule", body, opts)
 }
 
 // CreatePortChannel creates a port channel.
 func (c *Client) CreatePortChannel(device string, config newtron.PortChannelCreateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "portchannel", config, opts)
+	return c.nodeWrite(device, "create-portchannel", config, opts)
 }
 
 // DeletePortChannel deletes a port channel.
 func (c *Client) DeletePortChannel(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/portchannel/" + url.PathEscape(name) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.nodeWrite(device, "delete-portchannel", body, opts)
 }
 
 // AddPortChannelMember adds a member to a port channel.
 func (c *Client) AddPortChannelMember(device, pc, member string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.PortChannelMemberRequest{Interface: member}
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/portchannel/" + url.PathEscape(pc) + "/member" + execQuery(opts)
-	if err := c.doPost(path, body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		PortChannel string `json:"portchannel"`
+		Interface   string `json:"interface"`
+	}{PortChannel: pc, Interface: member}
+	return c.nodeWrite(device, "add-portchannel-member", body, opts)
 }
 
 // RemovePortChannelMember removes a member from a port channel.
 func (c *Client) RemovePortChannelMember(device, pc, member string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	path := c.nodePath(device) + "/portchannel/" + url.PathEscape(pc) + "/member/" + url.PathEscape(member) + execQuery(opts)
-	if err := c.doDelete(path, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
+	body := struct {
+		PortChannel string `json:"portchannel"`
+		Interface   string `json:"interface"`
+	}{PortChannel: pc, Interface: member}
+	return c.nodeWrite(device, "remove-portchannel-member", body, opts)
 }
 
 // SetDeviceMetadata updates DEVICE_METADATA fields.
 func (c *Client) SetDeviceMetadata(device string, fields map[string]string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.SetDeviceMetadataRequest{Fields: fields}
-	return c.nodeWrite(device, "set-metadata", body, opts)
+	return c.nodeWrite(device, "set-device-metadata", body, opts)
 }
 
 // ApplyQoS applies a QoS policy to an interface (node-level).
@@ -506,7 +483,7 @@ func (c *Client) VerifyCommitted(device string) (*newtron.VerificationResult, er
 
 // ConfigReload runs config reload on the device.
 func (c *Client) ConfigReload(device string) error {
-	return c.doPost(c.nodePath(device)+"/config-reload", nil, nil)
+	return c.doPost(c.nodePath(device)+"/reload-config", nil, nil)
 }
 
 // SaveConfig saves the running config to config_db.json.
@@ -532,8 +509,8 @@ func (c *Client) ApplyFRRDefaults(device string) error {
 
 // RestartService restarts a SONiC Docker service.
 func (c *Client) RestartService(device, service string) error {
-	body := api.RestartServiceRequest{Service: service}
-	return c.doPost(c.nodePath(device)+"/restart-service", body, nil)
+	body := api.RestartDaemonRequest{Daemon: service}
+	return c.doPost(c.nodePath(device)+"/restart-daemon", body, nil)
 }
 
 // SSHCommand runs a command via SSH on the device.
@@ -575,7 +552,7 @@ func (c *Client) ListIntents(device string) ([]newtron.Intent, error) {
 // ReadZombie reads the zombie operation record from CONFIG_DB (no lock required).
 func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
 	var result newtron.OperationIntent
-	if err := c.doGet(c.nodePath(device)+"/intents/zombie", &result); err != nil {
+	if err := c.doGet(c.nodePath(device)+"/zombie", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -584,7 +561,7 @@ func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
 // RollbackZombie reverses a zombie operation's changes.
 func (c *Client) RollbackZombie(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	var result newtron.WriteResult
-	if err := c.doPost(c.nodePath(device)+"/intents/zombie/rollback"+execQuery(opts), nil, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/rollback-zombie"+execQuery(opts), nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -592,7 +569,7 @@ func (c *Client) RollbackZombie(device string, opts newtron.ExecOpts) (*newtron.
 
 // ClearZombie clears the zombie operation record without rollback.
 func (c *Client) ClearZombie(device string) error {
-	return c.doPost(c.nodePath(device)+"/intents/zombie/clear", nil, nil)
+	return c.doPost(c.nodePath(device)+"/clear-zombie", nil, nil)
 }
 
 // ============================================================================
@@ -629,7 +606,7 @@ func (c *Client) ReadHistory(device string) (*newtron.HistoryResult, error) {
 // RollbackHistory reverses the most recent history entry.
 func (c *Client) RollbackHistory(device string, opts newtron.ExecOpts) (*newtron.HistoryRollbackResult, error) {
 	var result newtron.HistoryRollbackResult
-	if err := c.doPost(c.nodePath(device)+"/history/rollback"+execQuery(opts), nil, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/rollback-history"+execQuery(opts), nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

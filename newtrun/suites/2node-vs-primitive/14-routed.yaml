@@ -11,7 +11,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf
+    url: /node/{{device}}/create-vrf
     params: {name: Vrf_local}
 
   - name: bind-ethernet1-to-vrf
@@ -61,22 +61,6 @@ steps:
     expect:
       jq: '.output | contains("10.20.1.1")'
 
-  - name: prime-ngdp-arp-ethernet1
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/ssh-command
-    params: {command: "sudo ping -c 1 -W 2 -I Ethernet4 10.20.1.0"}
-    poll:
-      timeout: 10s
-      interval: 2s
-    expect:
-      jq: '.output | contains("1 received")'
-
-  - name: wait-after-prime
-    action: wait
-    duration: 3s
-
   - name: host4-configure-ip
     action: host-exec
     devices: [host4]
@@ -86,6 +70,22 @@ steps:
     action: host-exec
     devices: [host4]
     command: "ip route add default via 10.20.1.1 dev eth0 2>/dev/null || true"
+
+  - name: prime-ngdp-arp-ethernet1
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo ping -c 1 -W 2 -I Ethernet4 10.20.1.0"}
+    poll:
+      timeout: 30s
+      interval: 5s
+    expect:
+      jq: '.output | contains("1 received")'
+
+  - name: wait-after-prime
+    action: wait
+    duration: 3s
 
   - name: host4-ping-gateway
     action: host-exec

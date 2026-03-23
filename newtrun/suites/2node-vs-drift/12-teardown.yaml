@@ -67,17 +67,17 @@ steps:
     method: POST
     url: /node/{{device}}/interface/Ethernet0/remove-service
 
-  - name: teardown-evpn
+  - name: teardown-vtep
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
-  - name: remove-bgp-globals
+  - name: remove-bgp
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/remove-bgp-globals
+    url: /node/{{device}}/remove-bgp
 
   - name: remove-loopback
     action: newtron

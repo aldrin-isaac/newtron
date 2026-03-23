@@ -194,7 +194,7 @@ func TestAPICompleteness(t *testing.T) {
 	// excludedMethods lists methods intentionally NOT exposed via HTTP.
 	excludedMethods := map[string]map[string]string{
 		"Network": {
-			"SetAuth": "server-internal initialization (auth not yet enabled)",
+			"SetAuth":           "server-internal initialization (auth not yet enabled)",
 		},
 		"Node": {
 			"Name":           "identity is known from the URL path",
@@ -210,7 +210,7 @@ func TestAPICompleteness(t *testing.T) {
 			"Commit":         "server handles commit via Execute/connectAndExecute",
 			"Rollback":       "server handles rollback internally",
 			"ZombieIntent":      "server-internal: cached zombie from Lock time",
-			"SetBypassZombieCheck": "server-internal: set by rollback/clear handlers",
+			"SetBypassZombieCheck":  "server-internal: set by rollback/clear handlers",
 			"SetSkipHistory":       "server-internal: set by history rollback handler",
 			"PendingPreview": "exposed through WriteResult.Preview in Execute",
 			"PendingCount":   "exposed through WriteResult.ChangeCount",

@@ -17,11 +17,11 @@ steps:
 
   # config reload stops all daemons, re-reads config_db.json, restarts them.
   # May be skipped on sonic-vs if SwSS isn't ready within timeout.
-  - name: config-reload
+  - name: reload-config
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/config-reload
+    url: /node/{{device}}/reload-config
 
   # Explicit BGP restart ensures frrcfgd startup replay processes all
   # BGP entries. Required on sonic-vs because:
@@ -31,8 +31,8 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-service
-    params: {service: bgp}
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
 
   # Wait for FRR to fully restart after BGP service restart.
   - name: wait-bgp-instance

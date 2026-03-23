@@ -17,11 +17,11 @@ steps:
   # 1. bgpcfgd picks up new ASN (RCA-019: can't change dynamically)
   # 2. vrfmgrd writes VRF_TABLE to STATE_DB (intfmgrd depends on this to
   #    bind VRF-bound VLAN interfaces like L3VNI transit VLANs and IRB SVIs)
-  - name: config-reload
+  - name: reload-config
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/config-reload
+    url: /node/{{device}}/reload-config
 
   # Wait for all services to fully restart after config reload.
   # CiscoVS platform takes longer than VPP to stabilize.

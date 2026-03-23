@@ -3,7 +3,7 @@ description: |
   Structured reverse of infrastructure provisioning:
     ApplyService   → RemoveService    (transit interfaces — all switches)
     SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers — leafs only)
-    ConfigureBGP   → RemoveBGPGlobals (BGP globals, AF, redistribution — all switches)
+    ConfigureBGP   → RemoveBGP (BGP globals, AF, redistribution — all switches)
     ConfigureLoopback → RemoveLoopback (loopback interface — all switches)
   Uses newtron actions exclusively (no raw redis-cli).
 topology: 3node-ngdp
@@ -42,17 +42,17 @@ steps:
   # Reverse of SetupEVPN (leafs only — spine has no EVPN)
   # =========================================================================
 
-  - name: teardown-evpn-leaf1
+  - name: teardown-vtep-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
-  - name: teardown-evpn-leaf2
+  - name: teardown-vtep-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
   - name: verify-vtep-removed
     action: newtron
@@ -79,11 +79,11 @@ steps:
   # Reverse of ConfigureBGP (all switches)
   # =========================================================================
 
-  - name: remove-bgp-globals
+  - name: remove-bgp
     action: newtron
     devices: [spine, leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/remove-bgp-globals
+    url: /node/{{device}}/remove-bgp
 
   - name: verify-bgp-globals-removed
     action: newtron

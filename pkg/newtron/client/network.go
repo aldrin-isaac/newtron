@@ -81,12 +81,15 @@ func (c *Client) ShowProfile(name string) (*newtron.DeviceProfileDetail, error) 
 
 // CreateProfile creates a new device profile.
 func (c *Client) CreateProfile(req newtron.CreateDeviceProfileRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/profile"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-profile"+execQuery(opts), req, nil)
 }
 
 // DeleteProfile deletes a device profile.
 func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/profile/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-profile"+execQuery(opts), body, nil)
 }
 
 // ============================================================================
@@ -113,12 +116,15 @@ func (c *Client) ShowZone(name string) (*newtron.ZoneDetail, error) {
 
 // CreateZone creates a new zone.
 func (c *Client) CreateZone(req newtron.CreateZoneRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/zone"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-zone"+execQuery(opts), req, nil)
 }
 
 // DeleteZone deletes a zone.
 func (c *Client) DeleteZone(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/zone/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-zone"+execQuery(opts), body, nil)
 }
 
 // ============================================================================
@@ -262,22 +268,29 @@ func (c *Client) ShowPrefixList(name string) (*newtron.PrefixListDetail, error) 
 
 // CreatePrefixList creates a new prefix list.
 func (c *Client) CreatePrefixList(req newtron.CreatePrefixListRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/prefix-list"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-prefix-list"+execQuery(opts), req, nil)
 }
 
 // DeletePrefixList deletes a prefix list.
 func (c *Client) DeletePrefixList(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/prefix-list/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-prefix-list"+execQuery(opts), body, nil)
 }
 
 // AddPrefixListEntry adds an entry to a prefix list.
 func (c *Client) AddPrefixListEntry(req newtron.AddPrefixListEntryRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/prefix-list/"+url.PathEscape(req.PrefixList)+"/entry"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/add-prefix-list-entry"+execQuery(opts), req, nil)
 }
 
 // RemovePrefixListEntry removes an entry from a prefix list.
 func (c *Client) RemovePrefixListEntry(prefixList, prefix string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/prefix-list/"+url.PathEscape(prefixList)+"/entry/"+prefix+execQuery(opts), nil)
+	body := struct {
+		PrefixList string `json:"prefix_list"`
+		Prefix     string `json:"prefix"`
+	}{PrefixList: prefixList, Prefix: prefix}
+	return c.doPost(c.networkPath()+"/remove-prefix-list-entry"+execQuery(opts), body, nil)
 }
 
 // ShowRoutePolicy returns the detail for a route policy.
@@ -291,23 +304,29 @@ func (c *Client) ShowRoutePolicy(name string) (*newtron.RoutePolicyDetail, error
 
 // CreateRoutePolicy creates a new route policy.
 func (c *Client) CreateRoutePolicy(req newtron.CreateRoutePolicyRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/route-policy"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-route-policy"+execQuery(opts), req, nil)
 }
 
 // DeleteRoutePolicy deletes a route policy.
 func (c *Client) DeleteRoutePolicy(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/route-policy/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-route-policy"+execQuery(opts), body, nil)
 }
 
 // AddRoutePolicyRule adds a rule to a route policy.
 func (c *Client) AddRoutePolicyRule(req newtron.AddRoutePolicyRuleRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/route-policy/"+url.PathEscape(req.Policy)+"/rule"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/add-route-policy-rule"+execQuery(opts), req, nil)
 }
 
 // RemoveRoutePolicyRule removes a rule from a route policy.
 func (c *Client) RemoveRoutePolicyRule(policy string, seq int, opts newtron.ExecOpts) error {
-	return c.doDelete(fmt.Sprintf("%s/route-policy/%s/rule/%d%s",
-		c.networkPath(), url.PathEscape(policy), seq, execQuery(opts)), nil)
+	body := struct {
+		Policy   string `json:"policy"`
+		Sequence int    `json:"sequence"`
+	}{Policy: policy, Sequence: seq}
+	return c.doPost(c.networkPath()+"/remove-route-policy-rule"+execQuery(opts), body, nil)
 }
 
 // GetAllFeatures returns all feature names.
@@ -354,74 +373,95 @@ func (c *Client) GetUnsupportedDueTo(feature string) ([]string, error) {
 
 // CreateService creates a new service spec.
 func (c *Client) CreateService(req newtron.CreateServiceRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/service"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-service"+execQuery(opts), req, nil)
 }
 
 // DeleteService deletes a service spec.
 func (c *Client) DeleteService(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/service/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-service"+execQuery(opts), body, nil)
 }
 
 // CreateIPVPN creates a new IP-VPN spec.
 func (c *Client) CreateIPVPN(req newtron.CreateIPVPNRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/ipvpn"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-ipvpn"+execQuery(opts), req, nil)
 }
 
 // DeleteIPVPN deletes an IP-VPN spec.
 func (c *Client) DeleteIPVPN(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/ipvpn/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-ipvpn"+execQuery(opts), body, nil)
 }
 
 // CreateMACVPN creates a new MAC-VPN spec.
 func (c *Client) CreateMACVPN(req newtron.CreateMACVPNRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/macvpn"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-macvpn"+execQuery(opts), req, nil)
 }
 
 // DeleteMACVPN deletes a MAC-VPN spec.
 func (c *Client) DeleteMACVPN(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/macvpn/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-macvpn"+execQuery(opts), body, nil)
 }
 
 // CreateQoSPolicy creates a new QoS policy spec.
 func (c *Client) CreateQoSPolicy(req newtron.CreateQoSPolicyRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/qos-policy"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-qos-policy"+execQuery(opts), req, nil)
 }
 
 // DeleteQoSPolicy deletes a QoS policy spec.
 func (c *Client) DeleteQoSPolicy(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/qos-policy/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-qos-policy"+execQuery(opts), body, nil)
 }
 
 // AddQoSQueue adds a queue to a QoS policy.
 func (c *Client) AddQoSQueue(req newtron.AddQoSQueueRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/qos-policy/"+url.PathEscape(req.Policy)+"/queue"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/add-qos-queue"+execQuery(opts), req, nil)
 }
 
 // RemoveQoSQueue removes a queue from a QoS policy.
 func (c *Client) RemoveQoSQueue(policy string, queueID int, opts newtron.ExecOpts) error {
-	return c.doDelete(fmt.Sprintf("%s/qos-policy/%s/queue/%d%s",
-		c.networkPath(), url.PathEscape(policy), queueID, execQuery(opts)), nil)
+	body := struct {
+		Policy  string `json:"policy"`
+		QueueID int    `json:"queue_id"`
+	}{Policy: policy, QueueID: queueID}
+	return c.doPost(c.networkPath()+"/remove-qos-queue"+execQuery(opts), body, nil)
 }
 
 // CreateFilter creates a new filter spec.
 func (c *Client) CreateFilter(req newtron.CreateFilterRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/filter"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/create-filter"+execQuery(opts), req, nil)
 }
 
 // DeleteFilter deletes a filter spec.
 func (c *Client) DeleteFilter(name string, opts newtron.ExecOpts) error {
-	return c.doDelete(c.networkPath()+"/filter/"+url.PathEscape(name)+execQuery(opts), nil)
+	body := struct {
+		Name string `json:"name"`
+	}{Name: name}
+	return c.doPost(c.networkPath()+"/delete-filter"+execQuery(opts), body, nil)
 }
 
 // AddFilterRule adds a rule to a filter.
 func (c *Client) AddFilterRule(req newtron.AddFilterRuleRequest, opts newtron.ExecOpts) error {
-	return c.doPost(c.networkPath()+"/filter/"+url.PathEscape(req.Filter)+"/rule"+execQuery(opts), req, nil)
+	return c.doPost(c.networkPath()+"/add-filter-rule"+execQuery(opts), req, nil)
 }
 
 // RemoveFilterRule removes a rule from a filter.
 func (c *Client) RemoveFilterRule(filter string, seq int, opts newtron.ExecOpts) error {
-	return c.doDelete(fmt.Sprintf("%s/filter/%s/rule/%d%s",
-		c.networkPath(), url.PathEscape(filter), seq, execQuery(opts)), nil)
+	body := struct {
+		Filter   string `json:"filter"`
+		Sequence int    `json:"sequence"`
+	}{Filter: filter, Sequence: seq}
+	return c.doPost(c.networkPath()+"/remove-filter-rule"+execQuery(opts), body, nil)
 }
 
 // ============================================================================
@@ -432,7 +472,7 @@ func (c *Client) RemoveFilterRule(filter string, seq int, opts newtron.ExecOpts)
 // Returns a handle that can be passed to DeliverComposite or VerifyComposite.
 func (c *Client) GenerateComposite(device string) (*api.CompositeHandleResponse, error) {
 	var result api.CompositeHandleResponse
-	if err := c.doPost(c.nodePath(device)+"/composite/generate", nil, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/generate-composite", nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -442,7 +482,7 @@ func (c *Client) GenerateComposite(device string) (*api.CompositeHandleResponse,
 func (c *Client) VerifyComposite(device, handle string) (*newtron.VerificationResult, error) {
 	var result newtron.VerificationResult
 	body := api.CompositeHandleRequest{Handle: handle}
-	if err := c.doPost(c.nodePath(device)+"/composite/verify", body, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/verify-composite", body, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -452,7 +492,7 @@ func (c *Client) VerifyComposite(device, handle string) (*newtron.VerificationRe
 func (c *Client) DeliverComposite(device, handle, mode string) (*newtron.DeliveryResult, error) {
 	var result newtron.DeliveryResult
 	body := api.CompositeHandleRequest{Handle: handle, Mode: mode}
-	if err := c.doPost(c.nodePath(device)+"/composite/deliver", body, &result); err != nil {
+	if err := c.doPost(c.nodePath(device)+"/deliver-composite", body, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -462,7 +502,7 @@ func (c *Client) DeliverComposite(device, handle, mode string) (*newtron.Deliver
 // Returns the status: "initialized" or "already_initialized".
 // If force is true, proceeds even if the device has active BGP configuration.
 func (c *Client) InitDevice(device string, force bool) (string, error) {
-	path := c.networkPath() + "/init/" + url.PathEscape(device)
+	path := c.nodePath(device) + "/init-device"
 	if force {
 		path += "?force=true"
 	}

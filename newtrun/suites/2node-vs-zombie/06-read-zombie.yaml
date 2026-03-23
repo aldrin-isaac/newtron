@@ -10,10 +10,10 @@ steps:
   - name: read-zombie-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intents/zombie
+    url: /node/{{device}}/zombie
 
   # Read zombie on unaffected device — should report no zombie
   - name: read-zombie-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/intents/zombie
+    url: /node/{{device}}/zombie

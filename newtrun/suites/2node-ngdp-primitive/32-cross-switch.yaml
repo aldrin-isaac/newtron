@@ -82,6 +82,17 @@ steps:
     expect:
       jq: '.protocol == "bgp"'
 
+  # Configure host IPs (before prime — hosts must have IPs for ARP to succeed)
+  - name: host1-configure-ip
+    action: host-exec
+    devices: [host1]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.20.0.0/31 dev eth0; ip route add default via 10.20.0.1 dev eth0 2>/dev/null || true"
+
+  - name: host4-configure-ip
+    action: host-exec
+    devices: [host4]
+    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.20.1.0/31 dev eth0; ip route add default via 10.20.1.1 dev eth0 2>/dev/null || true"
+
   # Prime NGDP ARP
   - name: prime-arp-sw1-eth1
     action: newtron
@@ -90,8 +101,8 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.0.0"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 5s
     expect:
       jq: '.output | contains("1 received")'
 
@@ -102,25 +113,14 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Ethernet1 10.20.1.0"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 5s
     expect:
       jq: '.output | contains("1 received")'
 
   - name: wait-after-prime
     action: wait
     duration: 3s
-
-  # Configure host IPs
-  - name: host1-configure-ip
-    action: host-exec
-    devices: [host1]
-    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.20.0.0/31 dev eth0; ip route add default via 10.20.0.1 dev eth0 2>/dev/null || true"
-
-  - name: host4-configure-ip
-    action: host-exec
-    devices: [host4]
-    command: "ip addr flush dev eth0 2>/dev/null; ip addr add 10.20.1.0/31 dev eth0; ip route add default via 10.20.1.1 dev eth0 2>/dev/null || true"
 
   # Host-to-host dataplane
   - name: host1-ping-host4

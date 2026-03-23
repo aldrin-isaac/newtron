@@ -11,7 +11,7 @@ steps:
   - name: create-prefix-list
     action: newtron
     method: POST
-    url: /prefix-list
+    url: /create-prefix-list
     params:
       name: test-prefixes
       prefixes:
@@ -20,7 +20,7 @@ steps:
   - name: add-prefix-entry
     action: newtron
     method: POST
-    url: /prefix-list/test-prefixes/entry
+    url: /add-prefix-list-entry
     params:
       prefix_list: test-prefixes
       prefix: "10.200.0.0/16"
@@ -28,7 +28,7 @@ steps:
   - name: create-route-policy
     action: newtron
     method: POST
-    url: /route-policy
+    url: /create-route-policy
     params:
       name: test-import-policy
       description: "Import policy for spec-authoring test"
@@ -36,7 +36,7 @@ steps:
   - name: add-policy-rule-10
     action: newtron
     method: POST
-    url: /route-policy/test-import-policy/rule
+    url: /add-route-policy-rule
     params:
       policy: test-import-policy
       seq: 10
@@ -48,7 +48,7 @@ steps:
   - name: add-policy-rule-20
     action: newtron
     method: POST
-    url: /route-policy/test-import-policy/rule
+    url: /add-route-policy-rule
     params:
       policy: test-import-policy
       seq: 20
@@ -58,7 +58,7 @@ steps:
   - name: create-test-service
     action: newtron
     method: POST
-    url: /service
+    url: /create-service
     params:
       name: test-routed-svc
       type: routed
@@ -160,30 +160,36 @@ steps:
   # --- Teardown specs in reverse dependency order ---
   - name: delete-test-service
     action: newtron
-    method: DELETE
-    url: /service/test-routed-svc
+    method: POST
+    url: /delete-service
+    params: {name: test-routed-svc}
 
   - name: remove-policy-rule-20
     action: newtron
-    method: DELETE
-    url: /route-policy/test-import-policy/rule/20
+    method: POST
+    url: /remove-route-policy-rule
+    params: {policy: test-import-policy, sequence: 20}
 
   - name: remove-policy-rule-10
     action: newtron
-    method: DELETE
-    url: /route-policy/test-import-policy/rule/10
+    method: POST
+    url: /remove-route-policy-rule
+    params: {policy: test-import-policy, sequence: 10}
 
   - name: delete-route-policy
     action: newtron
-    method: DELETE
-    url: /route-policy/test-import-policy
+    method: POST
+    url: /delete-route-policy
+    params: {name: test-import-policy}
 
   - name: remove-prefix-entry
     action: newtron
-    method: DELETE
-    url: /prefix-list/test-prefixes/entry/10.200.0.0/16
+    method: POST
+    url: /remove-prefix-list-entry
+    params: {prefix_list: test-prefixes, prefix: "10.200.0.0/16"}
 
   - name: delete-prefix-list
     action: newtron
-    method: DELETE
-    url: /prefix-list/test-prefixes
+    method: POST
+    url: /delete-prefix-list
+    params: {name: test-prefixes}

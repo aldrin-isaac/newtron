@@ -60,8 +60,8 @@ type SSHCommandResponse struct {
 	Output string `json:"output"`
 }
 
-// SetupEVPNRequest is the body for POST .../setup-evpn.
-type SetupEVPNRequest struct {
+// SetupVTEPRequest is the body for POST .../setup-vtep.
+type SetupVTEPRequest struct {
 	SourceIP string `json:"source_ip"`
 }
 
@@ -143,7 +143,7 @@ type ApplyQoSRequest struct {
 // HTTP Request Types — Node write operations that need JSON bodies
 // ============================================================================
 
-// VLANCreateRequest is the body for POST .../vlan.
+// VLANCreateRequest is the body for POST .../create-vlan.
 type VLANCreateRequest struct {
 	ID          int    `json:"id"`
 	Description string `json:"description,omitempty"`
@@ -152,31 +152,33 @@ type VLANCreateRequest struct {
 // SVIConfigureRequest is the body for POST .../svi.
 type SVIConfigureRequest = newtron.SVIConfigureRequest
 
-// VRFCreateRequest is the body for POST .../vrf.
+// VRFCreateRequest is the body for POST .../create-vrf.
 type VRFCreateRequest struct {
 	Name string `json:"name"`
 }
 
-// ACLCreateRequest is the body for POST .../acl.
+// ACLCreateRequest is the body for POST .../create-acl-table.
 type ACLCreateRequest = newtron.ACLCreateRequest
 
-// ACLRuleAddRequest is the body for POST .../acl/{name}/rule.
+// ACLRuleAddRequest is the body for POST .../add-acl-rule.
 type ACLRuleAddRequest = newtron.ACLRuleAddRequest
 
-// PortChannelCreateRequest is the body for POST .../portchannel.
+// PortChannelCreateRequest is the body for POST .../create-portchannel.
 type PortChannelCreateRequest = newtron.PortChannelCreateRequest
 
-// PortChannelMemberRequest is the body for POST .../portchannel/{name}/member.
+// PortChannelMemberRequest is the body for POST .../add-portchannel-member.
 type PortChannelMemberRequest struct {
-	Interface string `json:"interface"`
+	PortChannel string `json:"portchannel"`
+	Interface   string `json:"interface"`
 }
 
 // ============================================================================
 // HTTP Request Types — Missing Node Operations
 // ============================================================================
 
-// VLANMemberRequest is the body for POST .../vlan/{id}/member.
+// VLANMemberRequest is the body for POST .../add-vlan-member.
 type VLANMemberRequest struct {
+	ID        int    `json:"id"`
 	Interface string `json:"interface"`
 	Tagged    bool   `json:"tagged"`
 }
@@ -186,29 +188,32 @@ type RemoveSVIRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
-// VRFInterfaceRequest is the body for POST .../vrf/{name}/interface.
+// VRFInterfaceRequest is the body for POST .../add-vrf-interface.
 type VRFInterfaceRequest struct {
+	VRF       string `json:"vrf"`
 	Interface string `json:"interface"`
 }
 
-// BindIPVPNRequest is the body for POST .../vrf/{name}/bind-ipvpn.
+// BindIPVPNRequest is the body for POST .../bind-ipvpn.
 type BindIPVPNRequest struct {
+	VRF   string `json:"vrf"`
 	IPVPN string `json:"ipvpn"`
 }
 
-// StaticRouteRequest is the body for POST .../vrf/{name}/route.
+// StaticRouteRequest is the body for POST .../add-static-route.
 type StaticRouteRequest struct {
+	VRF     string `json:"vrf"`
 	Prefix  string `json:"prefix"`
 	NextHop string `json:"nexthop"`
 	Metric  int    `json:"metric,omitempty"`
 }
 
-// RestartServiceRequest is the body for POST .../restart-service.
-type RestartServiceRequest struct {
-	Service string `json:"service"`
+// RestartDaemonRequest is the body for POST .../restart-daemon.
+type RestartDaemonRequest struct {
+	Daemon string `json:"daemon"`
 }
 
-// SetDeviceMetadataRequest is the body for POST .../set-metadata.
+// SetDeviceMetadataRequest is the body for POST .../set-device-metadata.
 type SetDeviceMetadataRequest struct {
 	Fields map[string]string `json:"fields"`
 }

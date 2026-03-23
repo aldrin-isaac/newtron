@@ -395,7 +395,7 @@ steps:
   # =========================================================================
   # BGP_GLOBALS — global BGP configuration
   # Forward: ConfigureBGP → CreateBGPGlobals
-  # Reverse: RemoveBGPGlobals → delete BGP_GLOBALS
+  # Reverse: RemoveBGP → delete BGP_GLOBALS
   # =========================================================================
 
   - name: no-bgp-globals
@@ -408,7 +408,7 @@ steps:
   # =========================================================================
   # BGP_GLOBALS_AF — address-family configs (ipv4_unicast, l2vpn_evpn)
   # Forward: ConfigureBGP + SetupEVPN
-  # Reverse: TeardownEVPN (l2vpn_evpn) + RemoveBGPGlobals (ipv4_unicast)
+  # Reverse: TeardownEVPN (l2vpn_evpn) + RemoveBGP (ipv4_unicast)
   # =========================================================================
 
   - name: no-bgp-af-ipv4
@@ -428,7 +428,7 @@ steps:
   # =========================================================================
   # ROUTE_REDISTRIBUTE — connected route redistribution
   # Forward: ConfigureBGP → CreateRouteRedistribute
-  # Reverse: RemoveBGPGlobals → delete ROUTE_REDISTRIBUTE
+  # Reverse: RemoveBGP → delete ROUTE_REDISTRIBUTE
   # =========================================================================
 
   - name: no-route-redistribute

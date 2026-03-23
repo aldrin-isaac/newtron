@@ -7,17 +7,17 @@ requires: [service-lifecycle]
 
 steps:
   # 1. Teardown EVPN overlay
-  - name: teardown-evpn-sw1
+  - name: teardown-vtep-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
-  - name: teardown-evpn-sw2
+  - name: teardown-vtep-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/teardown-evpn
+    url: /node/{{device}}/teardown-vtep
 
   - name: verify-vxlan-tunnel-removed
     action: newtron
@@ -45,14 +45,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-bgp-neighbor
+    url: /node/{{device}}/interface/Ethernet0/remove-bgp-neighbor
     params: {ip: "10.1.0.1"}
 
   - name: bgp-remove-neighbor-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-bgp-neighbor
+    url: /node/{{device}}/interface/Ethernet0/remove-bgp-neighbor
     params: {ip: "10.1.0.0"}
 
   - name: verify-underlay-neighbor-removed-sw1
@@ -99,17 +99,17 @@ steps:
       jq: '.exists == false'
 
   # 4. Remove BGP globals
-  - name: remove-bgp-globals-sw1
+  - name: remove-bgp-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-bgp-globals
+    url: /node/{{device}}/remove-bgp
 
-  - name: remove-bgp-globals-sw2
+  - name: remove-bgp-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-bgp-globals
+    url: /node/{{device}}/remove-bgp
 
   - name: verify-bgp-globals-removed-sw1
     action: newtron

@@ -11,25 +11,25 @@ topology: 2node-vs
 requires: [bgp-underlay]
 
 steps:
-  - name: setup-evpn-switch1
+  - name: setup-vtep-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
-  - name: setup-evpn-switch2
+  - name: setup-vtep-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
   # Restart BGP so frrcfgd startup replay processes overlay BGP_NEIGHBOR entries.
   - name: restart-bgp-for-overlay
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-service
-    params: {service: bgp}
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
 
   - name: wait-bgp-instance-sw1
     action: newtron

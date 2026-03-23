@@ -10,8 +10,9 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_local/route
+    url: /node/{{device}}/add-static-route
     params:
+      vrf: Vrf_local
       prefix: "10.99.0.0/24"
       nexthop: "10.20.1.0"
 
@@ -25,8 +26,9 @@ steps:
   - name: remove-static-route
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_local/route/10.99.0.0/24
+    method: POST
+    url: /node/{{device}}/remove-static-route
+    params: {vrf: Vrf_local, prefix: "10.99.0.0/24"}
 
   - name: verify-static-route-removed
     action: newtron

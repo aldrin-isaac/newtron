@@ -7,17 +7,17 @@ topology: 3node-ngdp
 requires: [l3-routing]
 
 steps:
-  - name: setup-evpn-leaf1
+  - name: setup-vtep-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
-  - name: setup-evpn-leaf2
+  - name: setup-vtep-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
   - name: verify-vxlan-tunnel-leaf1
     action: newtron

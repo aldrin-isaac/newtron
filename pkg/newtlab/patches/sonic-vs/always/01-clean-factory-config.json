@@ -1,8 +1,8 @@
 {
-    "description": "Remove factory CONFIG_DB entries (INTERFACE IPs, BGP_NEIGHBOR, LOOPBACK_INTERFACE IPs) that conflict with newtron-managed config",
+    "description": "Remove factory CONFIG_DB entries (INTERFACE base+IPs, BGP_NEIGHBOR, LOOPBACK_INTERFACE IPs) that conflict with newtron-managed config. INTERFACE base entries (e.g. INTERFACE|Ethernet4) make ports router ports, blocking VLAN membership in ASIC_DB.",
     "post_commands": [
         "redis-cli -n 4 KEYS 'BGP_NEIGHBOR|*' | xargs -r redis-cli -n 4 DEL",
-        "redis-cli -n 4 KEYS 'INTERFACE|*|*' | xargs -r redis-cli -n 4 DEL",
+        "redis-cli -n 4 KEYS 'INTERFACE|*' | xargs -r redis-cli -n 4 DEL",
         "redis-cli -n 4 KEYS 'LOOPBACK_INTERFACE|*|*' | xargs -r redis-cli -n 4 DEL",
         "sudo config save -y"
     ]

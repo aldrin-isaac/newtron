@@ -10,11 +10,11 @@ steps:
     action: provision
     devices: [spine, leaf1, leaf2]
 
-  - name: config-reload
+  - name: reload-config
     action: newtron
     devices: [spine, leaf1, leaf2]
     method: POST
-    url: /node/{{device}}/config-reload
+    url: /node/{{device}}/reload-config
 
   - name: wait-reload
     action: wait

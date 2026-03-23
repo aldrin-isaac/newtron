@@ -7,17 +7,17 @@ topology: 2node-ngdp
 requires: [bgp-underlay]
 
 steps:
-  - name: setup-evpn-switch1
+  - name: setup-vtep-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
-  - name: setup-evpn-switch2
+  - name: setup-vtep-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/setup-evpn
+    url: /node/{{device}}/setup-vtep
 
   - name: verify-vxlan-tunnel-sw1
     action: newtron

@@ -12,29 +12,29 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 300}
 
   - name: create-vlan300-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vlan
+    url: /node/{{device}}/create-vlan
     params: {id: 300}
 
   - name: add-member-sw1-eth2
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vlan/300/member
-    params: {interface: Ethernet2, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 300, interface: Ethernet2, tagged: false}
 
   - name: add-member-sw2-eth2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vlan/300/member
-    params: {interface: Ethernet2, tagged: false}
+    url: /node/{{device}}/add-vlan-member
+    params: {id: 300, interface: Ethernet2, tagged: false}
 
   - name: bind-macvpn-switch1
     action: newtron

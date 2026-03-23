@@ -368,10 +368,16 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteService(name, opts)
+		return nil, na.net.DeleteService(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -406,10 +412,16 @@ func (s *Server) handleDeleteIPVPN(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteIPVPN(name, opts)
+		return nil, na.net.DeleteIPVPN(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -444,10 +456,16 @@ func (s *Server) handleDeleteMACVPN(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteMACVPN(name, opts)
+		return nil, na.net.DeleteMACVPN(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -482,10 +500,16 @@ func (s *Server) handleDeleteQoSPolicy(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteQoSPolicy(name, opts)
+		return nil, na.net.DeleteQoSPolicy(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -499,13 +523,11 @@ func (s *Server) handleAddQoSQueue(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	policy := r.PathValue("name")
 	var req newtron.AddQoSQueueRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	req.Policy = policy
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
 		return nil, na.net.AddQoSQueue(req, opts)
@@ -522,15 +544,17 @@ func (s *Server) handleRemoveQoSQueue(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	policy := r.PathValue("name")
-	queueID, err := pathInt(r, "id")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "id", Message: "invalid queue ID"})
+	var req struct {
+		Policy  string `json:"policy"`
+		QueueID int    `json:"queue_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
-	_, err = na.do(r.Context(), func() (any, error) {
-		return nil, na.net.RemoveQoSQueue(policy, queueID, opts)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.RemoveQoSQueue(req.Policy, req.QueueID, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -565,10 +589,16 @@ func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteFilter(name, opts)
+		return nil, na.net.DeleteFilter(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -582,13 +612,11 @@ func (s *Server) handleAddFilterRule(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	filter := r.PathValue("name")
 	var req newtron.AddFilterRuleRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	req.Filter = filter
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
 		return nil, na.net.AddFilterRule(req, opts)
@@ -605,15 +633,17 @@ func (s *Server) handleRemoveFilterRule(w http.ResponseWriter, r *http.Request) 
 	if na == nil {
 		return
 	}
-	filter := r.PathValue("name")
-	seq, err := pathInt(r, "seq")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "seq", Message: "invalid sequence number"})
+	var req struct {
+		Filter   string `json:"filter"`
+		Sequence int    `json:"sequence"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
-	_, err = na.do(r.Context(), func() (any, error) {
-		return nil, na.net.RemoveFilterRule(filter, seq, opts)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.RemoveFilterRule(req.Filter, req.Sequence, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -668,10 +698,16 @@ func (s *Server) handleDeletePrefixList(w http.ResponseWriter, r *http.Request) 
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeletePrefixList(name, opts)
+		return nil, na.net.DeletePrefixList(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -690,7 +726,6 @@ func (s *Server) handleAddPrefixListEntry(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	req.PrefixList = r.PathValue("name")
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
 		return nil, na.net.AddPrefixListEntry(req, opts)
@@ -707,11 +742,17 @@ func (s *Server) handleRemovePrefixListEntry(w http.ResponseWriter, r *http.Requ
 	if na == nil {
 		return
 	}
-	prefixList := r.PathValue("name")
-	prefix := r.PathValue("prefix")
+	var req struct {
+		PrefixList string `json:"prefix_list"`
+		Prefix     string `json:"prefix"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.RemovePrefixListEntry(prefixList, prefix, opts)
+		return nil, na.net.RemovePrefixListEntry(req.PrefixList, req.Prefix, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -766,10 +807,16 @@ func (s *Server) handleDeleteRoutePolicy(w http.ResponseWriter, r *http.Request)
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteRoutePolicy(name, opts)
+		return nil, na.net.DeleteRoutePolicy(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -788,7 +835,6 @@ func (s *Server) handleAddRoutePolicyRule(w http.ResponseWriter, r *http.Request
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	req.Policy = r.PathValue("name")
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
 		return nil, na.net.AddRoutePolicyRule(req, opts)
@@ -805,15 +851,17 @@ func (s *Server) handleRemoveRoutePolicyRule(w http.ResponseWriter, r *http.Requ
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
-	seq, err := pathInt(r, "seq")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "seq", Message: "invalid sequence number"})
+	var req struct {
+		Policy   string `json:"policy"`
+		Sequence int    `json:"sequence"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
-	_, err = na.do(r.Context(), func() (any, error) {
-		return nil, na.net.RemoveRoutePolicyRule(name, seq, opts)
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.RemoveRoutePolicyRule(req.Policy, req.Sequence, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -883,10 +931,16 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteProfile(name, opts)
+		return nil, na.net.DeleteProfile(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -956,10 +1010,16 @@ func (s *Server) handleDeleteZone(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteZone(name, opts)
+		return nil, na.net.DeleteZone(req.Name, opts)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1030,31 +1090,19 @@ func (s *Server) handleProvisionDevices(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleGenerateDeviceComposite(w http.ResponseWriter, r *http.Request) {
-	na := s.requireNetwork(w, r)
-	if na == nil {
-		return
-	}
-	device := r.PathValue("device")
-	val, err := na.do(r.Context(), func() (any, error) {
-		return na.net.GenerateDeviceComposite(device)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
 func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {
 		return
 	}
+	var req struct {
+		Force bool `json:"force"`
+	}
+	// Body is optional — force defaults to false.
+	_ = decodeJSON(r, &req)
 	device := r.PathValue("device")
-	force := r.URL.Query().Get("force") == "true"
 	val, err := na.do(r.Context(), func() (any, error) {
-		err := na.net.InitDevice(r.Context(), device, force)
+		err := na.net.InitDevice(r.Context(), device, req.Force)
 		if errors.Is(err, newtron.ErrAlreadyInitialized) {
 			return map[string]string{"status": "already_initialized"}, nil
 		}

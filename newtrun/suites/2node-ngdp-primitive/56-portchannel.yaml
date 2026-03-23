@@ -12,14 +12,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/portchannel
+    url: /node/{{device}}/create-portchannel
     params: {name: PortChannel1}
 
   - name: create-portchannel1-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/portchannel
+    url: /node/{{device}}/create-portchannel
     params: {name: PortChannel1}
 
   # 2. Add members
@@ -27,29 +27,29 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/portchannel/PortChannel1/member
-    params: {interface: Ethernet4}
+    url: /node/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet4}
 
   - name: add-member-eth5-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/portchannel/PortChannel1/member
-    params: {interface: Ethernet5}
+    url: /node/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet5}
 
   - name: add-member-eth4-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/portchannel/PortChannel1/member
-    params: {interface: Ethernet4}
+    url: /node/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet4}
 
   - name: add-member-eth5-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/portchannel/PortChannel1/member
-    params: {interface: Ethernet5}
+    url: /node/{{device}}/add-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet5}
 
   # 3. Verify CONFIG_DB entries
   - name: verify-portchannel-sw1
@@ -168,15 +168,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf/default/route
-    params: {prefix: "10.20.1.0/31", nexthop: "10.30.0.1"}
+    url: /node/{{device}}/add-static-route
+    params: {vrf: default, prefix: "10.20.1.0/31", nexthop: "10.30.0.1"}
 
   - name: add-static-route-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf/default/route
-    params: {prefix: "10.20.0.0/31", nexthop: "10.30.0.0"}
+    url: /node/{{device}}/add-static-route
+    params: {vrf: default, prefix: "10.20.0.0/31", nexthop: "10.30.0.0"}
 
   - name: wait-routes-install
     action: wait
@@ -201,14 +201,16 @@ steps:
   - name: remove-static-route-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vrf/default/route/10.20.1.0/31
+    method: POST
+    url: /node/{{device}}/remove-static-route
+    params: {vrf: default, prefix: "10.20.1.0/31"}
 
   - name: remove-static-route-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vrf/default/route/10.20.0.0/31
+    method: POST
+    url: /node/{{device}}/remove-static-route
+    params: {vrf: default, prefix: "10.20.0.0/31"}
 
   - name: remove-ip-portchannel1-sw1
     action: newtron
@@ -227,38 +229,44 @@ steps:
   - name: remove-member-eth5-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet5
+    method: POST
+    url: /node/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet5}
 
   - name: remove-member-eth4-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet4
+    method: POST
+    url: /node/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet4}
 
   - name: remove-member-eth5-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet5
+    method: POST
+    url: /node/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet5}
 
   - name: remove-member-eth4-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1/member/Ethernet4
+    method: POST
+    url: /node/{{device}}/remove-portchannel-member
+    params: {portchannel: PortChannel1, interface: Ethernet4}
 
   - name: delete-portchannel1-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1
+    method: POST
+    url: /node/{{device}}/delete-portchannel
+    params: {name: PortChannel1}
 
   - name: delete-portchannel1-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/portchannel/PortChannel1
+    method: POST
+    url: /node/{{device}}/delete-portchannel
+    params: {name: PortChannel1}
 
   # 10. Verify cleanup
   - name: verify-portchannel-removed-sw1

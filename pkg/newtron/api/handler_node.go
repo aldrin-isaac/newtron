@@ -319,10 +319,10 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 		return n.ConfigureLoopback(ctx)
 	case "remove-loopback":
 		return n.RemoveLoopback(ctx)
-	case "setup-evpn":
+	case "setup-vtep":
 		sourceIP, _ := op.Params["source_ip"].(string)
 		return n.SetupEVPN(ctx, sourceIP)
-	case "teardown-evpn":
+	case "teardown-vtep":
 		return n.TeardownEVPN(ctx)
 	case "create-vlan":
 		id, _ := intFromAny(op.Params["id"])
@@ -344,7 +344,7 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 	case "delete-vrf":
 		name := strFromAny(op.Params["name"])
 		return n.DeleteVRF(ctx, name)
-	case "create-acl":
+	case "create-acl-table":
 		name := strFromAny(op.Params["name"])
 		return n.CreateACLTable(ctx, name, newtron.ACLTableConfig{
 			Type:        strFromAny(op.Params["type"]),
@@ -352,7 +352,7 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 			Ports:       strFromAny(op.Params["ports"]),
 			Description: strFromAny(op.Params["description"]),
 		})
-	case "delete-acl":
+	case "delete-acl-table":
 		name := strFromAny(op.Params["name"])
 		return n.DeleteACLTable(ctx, name)
 	case "create-portchannel":
@@ -480,12 +480,12 @@ func (s *Server) handleConfigureBGP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleSetupEVPN(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetupVTEP(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	var req SetupEVPNRequest
+	var req SetupVTEPRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -501,7 +501,7 @@ func (s *Server) handleSetupEVPN(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleTeardownEVPN(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleTeardownVTEP(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -549,7 +549,7 @@ func (s *Server) handleRemoveLoopback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleConfigReload(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleReloadConfig(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -655,14 +655,16 @@ func (s *Server) handleDeleteVLAN(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	id, err := pathInt(r, "id")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "id", Message: "invalid VLAN ID"})
+	var req struct {
+		ID int `json:"id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.DeleteVLAN(ctx, id)
+		return n.DeleteVLAN(ctx, req.ID)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -722,10 +724,16 @@ func (s *Server) handleDeleteVRF(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.DeleteVRF(ctx, name)
+		return n.DeleteVRF(ctx, req.Name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -734,7 +742,7 @@ func (s *Server) handleDeleteVRF(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleCreateACL(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleCreateACLTable(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -760,15 +768,21 @@ func (s *Server) handleCreateACL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, val)
 }
 
-func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteACLTable(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.DeleteACLTable(ctx, name)
+		return n.DeleteACLTable(ctx, req.Name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -782,15 +796,24 @@ func (s *Server) handleAddACLRule(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	aclName := r.PathValue("name")
-	var req ACLRuleAddRequest
+	var req struct {
+		ACL      string `json:"acl"`
+		RuleName string `json:"rule_name"`
+		Priority int    `json:"priority"`
+		Action   string `json:"action"`
+		SrcIP    string `json:"src_ip"`
+		DstIP    string `json:"dst_ip"`
+		Protocol string `json:"protocol"`
+		SrcPort  string `json:"src_port"`
+		DstPort  string `json:"dst_port"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddACLRule(ctx, aclName, req.RuleName, newtron.ACLRuleConfig{
+		return n.AddACLRule(ctx, req.ACL, req.RuleName, newtron.ACLRuleConfig{
 			Priority: req.Priority,
 			Action:   req.Action,
 			SrcIP:    req.SrcIP,
@@ -812,11 +835,17 @@ func (s *Server) handleRemoveACLRule(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	aclName := r.PathValue("name")
-	ruleName := r.PathValue("rule")
+	var req struct {
+		ACL  string `json:"acl"`
+		Rule string `json:"rule"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveACLRule(ctx, aclName, ruleName)
+		return n.RemoveACLRule(ctx, req.ACL, req.Rule)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -858,10 +887,16 @@ func (s *Server) handleDeletePortChannel(w http.ResponseWriter, r *http.Request)
 	if nodeActor == nil {
 		return
 	}
-	name := r.PathValue("name")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.DeletePortChannel(ctx, name)
+		return n.DeletePortChannel(ctx, req.Name)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -875,7 +910,6 @@ func (s *Server) handleAddPortChannelMember(w http.ResponseWriter, r *http.Reque
 	if nodeActor == nil {
 		return
 	}
-	pcName := r.PathValue("name")
 	var req PortChannelMemberRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -883,7 +917,7 @@ func (s *Server) handleAddPortChannelMember(w http.ResponseWriter, r *http.Reque
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddPortChannelMember(ctx, pcName, req.Interface)
+		return n.AddPortChannelMember(ctx, req.PortChannel, req.Interface)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -897,11 +931,14 @@ func (s *Server) handleRemovePortChannelMember(w http.ResponseWriter, r *http.Re
 	if nodeActor == nil {
 		return
 	}
-	pcName := r.PathValue("name")
-	ifaceName := r.PathValue("iface")
+	var req PortChannelMemberRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemovePortChannelMember(ctx, pcName, ifaceName)
+		return n.RemovePortChannelMember(ctx, req.PortChannel, req.Interface)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -919,11 +956,6 @@ func (s *Server) handleAddVLANMember(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	id, err := pathInt(r, "id")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "id", Message: "invalid VLAN ID"})
-		return
-	}
 	var req VLANMemberRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -931,7 +963,7 @@ func (s *Server) handleAddVLANMember(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddVLANMember(ctx, id, req.Interface, req.Tagged)
+		return n.AddVLANMember(ctx, req.ID, req.Interface, req.Tagged)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -945,15 +977,17 @@ func (s *Server) handleRemoveVLANMember(w http.ResponseWriter, r *http.Request) 
 	if nodeActor == nil {
 		return
 	}
-	id, err := pathInt(r, "id")
-	if err != nil {
-		writeError(w, &newtron.ValidationError{Field: "id", Message: "invalid VLAN ID"})
+	var req struct {
+		ID        int    `json:"id"`
+		Interface string `json:"interface"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	ifaceName := r.PathValue("iface")
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveVLANMember(ctx, id, ifaceName)
+		return n.RemoveVLANMember(ctx, req.ID, req.Interface)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -992,15 +1026,17 @@ func (s *Server) handleAddVRFInterface(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
-	var req VRFInterfaceRequest
+	var req struct {
+		VRF       string `json:"vrf"`
+		Interface string `json:"interface"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddVRFInterface(ctx, vrfName, req.Interface)
+		return n.AddVRFInterface(ctx, req.VRF, req.Interface)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1014,11 +1050,17 @@ func (s *Server) handleRemoveVRFInterface(w http.ResponseWriter, r *http.Request
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
-	ifaceName := r.PathValue("iface")
+	var req struct {
+		VRF       string `json:"vrf"`
+		Interface string `json:"interface"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveVRFInterface(ctx, vrfName, ifaceName)
+		return n.RemoveVRFInterface(ctx, req.VRF, req.Interface)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1032,15 +1074,17 @@ func (s *Server) handleBindIPVPN(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
-	var req BindIPVPNRequest
+	var req struct {
+		VRF   string `json:"vrf"`
+		IPVPN string `json:"ipvpn"`
+	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.BindIPVPN(ctx, vrfName, req.IPVPN)
+		return n.BindIPVPN(ctx, req.VRF, req.IPVPN)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1054,10 +1098,16 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
+	var req struct {
+		VRF string `json:"vrf"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.UnbindIPVPN(ctx, vrfName)
+		return n.UnbindIPVPN(ctx, req.VRF)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1070,7 +1120,7 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 // BGP and static route operations
 // ============================================================================
 
-func (s *Server) handleAddBGPNeighborNode(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddOverlayPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -1091,7 +1141,7 @@ func (s *Server) handleAddBGPNeighborNode(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, val)
 }
 
-func (s *Server) handleRemoveBGPNeighborNode(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRemoveOverlayPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -1114,7 +1164,7 @@ func (s *Server) handleRemoveBGPNeighborNode(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleRemoveBGPGlobals(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRemoveBGP(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -1135,7 +1185,6 @@ func (s *Server) handleAddStaticRoute(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
 	var req StaticRouteRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
@@ -1143,7 +1192,7 @@ func (s *Server) handleAddStaticRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddStaticRoute(ctx, vrfName, req.Prefix, req.NextHop, req.Metric)
+		return n.AddStaticRoute(ctx, req.VRF, req.Prefix, req.NextHop, req.Metric)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1157,11 +1206,17 @@ func (s *Server) handleRemoveStaticRoute(w http.ResponseWriter, r *http.Request)
 	if nodeActor == nil {
 		return
 	}
-	vrfName := r.PathValue("name")
-	prefix := r.PathValue("prefix")
+	var req struct {
+		VRF    string `json:"vrf"`
+		Prefix string `json:"prefix"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveStaticRoute(ctx, vrfName, prefix)
+		return n.RemoveStaticRoute(ctx, req.VRF, req.Prefix)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1189,22 +1244,22 @@ func (s *Server) handleApplyFRRDefaults(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRestartDaemon(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	var req RestartServiceRequest
+	var req RestartDaemonRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
-	if req.Service == "" {
-		writeError(w, &newtron.ValidationError{Field: "service", Message: "required"})
+	if req.Daemon == "" {
+		writeError(w, &newtron.ValidationError{Field: "daemon", Message: "required"})
 		return
 	}
 	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return nil, n.RestartService(r.Context(), req.Service)
+		return nil, n.RestartService(r.Context(), req.Daemon)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1538,22 +1593,6 @@ func (s *Server) handleListIntents(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
-// Zombie (new paths under /intents/zombies)
-// ============================================================================
-
-func (s *Server) handleReadZombieNew(w http.ResponseWriter, r *http.Request) {
-	s.handleReadZombie(w, r)
-}
-
-func (s *Server) handleRollbackZombieNew(w http.ResponseWriter, r *http.Request) {
-	s.handleRollbackZombie(w, r)
-}
-
-func (s *Server) handleClearZombieNew(w http.ResponseWriter, r *http.Request) {
-	s.handleClearZombie(w, r)
-}
-
-// ============================================================================
 // History operations
 // ============================================================================
 
@@ -1663,11 +1702,12 @@ func (s *Server) handleNetworkDrift(w http.ResponseWriter, r *http.Request) {
 	if na == nil {
 		return
 	}
-	val, err := na.net.NetworkDrift(r.Context())
+	val, err := na.do(r.Context(), func() (any, error) {
+		return na.net.NetworkDrift(r.Context())
+	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, val)
 }
-

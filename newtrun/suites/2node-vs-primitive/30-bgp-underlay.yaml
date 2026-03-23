@@ -129,8 +129,8 @@ steps:
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/restart-service
-    params: {service: bgp}
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
 
   # Step 6: Poll for 'router bgp' in FRR running-config.
   - name: wait-bgp-instance-sw1

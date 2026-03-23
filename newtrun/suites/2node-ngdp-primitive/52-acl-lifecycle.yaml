@@ -11,7 +11,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/acl
+    url: /node/{{device}}/create-acl-table
     params:
       name: TEST_ACL
       type: L3
@@ -28,8 +28,9 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/acl/TEST_ACL/rule
+    url: /node/{{device}}/add-acl-rule
     params:
+      acl: TEST_ACL
       rule_name: RULE_10
       action: FORWARD
       priority: 10
@@ -46,8 +47,9 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/acl/TEST_ACL/rule
+    url: /node/{{device}}/add-acl-rule
     params:
+      acl: TEST_ACL
       rule_name: RULE_20
       action: DROP
       priority: 20
@@ -84,8 +86,9 @@ steps:
   - name: delete-acl-rule-20
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/acl/TEST_ACL/rule/RULE_20
+    method: POST
+    url: /node/{{device}}/remove-acl-rule
+    params: {acl: TEST_ACL, rule: RULE_20}
 
   - name: verify-rule-20-removed
     action: newtron
@@ -97,8 +100,9 @@ steps:
   - name: delete-acl-rule-10
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/acl/TEST_ACL/rule/RULE_10
+    method: POST
+    url: /node/{{device}}/remove-acl-rule
+    params: {acl: TEST_ACL, rule: RULE_10}
 
   - name: verify-rule-10-removed
     action: newtron
@@ -110,8 +114,9 @@ steps:
   - name: delete-acl-table
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/acl/TEST_ACL
+    method: POST
+    url: /node/{{device}}/delete-acl-table
+    params: {name: TEST_ACL}
 
   - name: verify-acl-table-removed
     action: newtron

@@ -15,7 +15,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf
+    url: /node/{{device}}/create-vrf
     params: {name: Vrf_CUSTOMER}
 
   # Verify VRF|Vrf_CUSTOMER is in CONFIG_DB.
@@ -51,4 +51,4 @@ steps:
       timeout: 120s
       interval: 5s
     expect:
-      jq: '.output | contains("2")'
+      jq: '.output | gsub("[\\n\\s]";"") | tonumber >= 2'

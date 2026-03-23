@@ -17,7 +17,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/intents/zombie/rollback
+    url: /node/{{device}}/rollback-zombie
 
   # Verify VLAN 500 was cleaned up
   - name: verify-no-vlan500
@@ -50,7 +50,7 @@ steps:
   - name: verify-no-zombie-after-rollback
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/intents/zombie
+    url: /node/{{device}}/zombie
 
   # Verify provisioned VLAN 100 (from local-irb service) was NOT affected
   # by the rollback — rollback only reverses zombie operations

@@ -41,13 +41,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_IRB/unbind-ipvpn
+    url: /node/{{device}}/unbind-ipvpn
+    params: {vrf: Vrf_IRB}
 
   - name: unbind-ipvpn-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/vrf/Vrf_IRB/unbind-ipvpn
+    url: /node/{{device}}/unbind-ipvpn
+    params: {vrf: Vrf_IRB}
 
   - name: verify-vrf-vni-cleared-sw1
     action: newtron
@@ -60,14 +62,16 @@ steps:
   - name: delete-vrf-irb-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_IRB
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_IRB}
 
   - name: delete-vrf-irb-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vrf/Vrf_IRB
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_IRB}
 
   - name: verify-vrf-irb-removed-sw1
     action: newtron
@@ -121,27 +125,31 @@ steps:
   - name: remove-member-sw1-eth2
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/300/member/Ethernet2
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 300, interface: Ethernet2}
 
   - name: remove-member-sw2-eth2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vlan/300/member/Ethernet2
+    method: POST
+    url: /node/{{device}}/remove-vlan-member
+    params: {id: 300, interface: Ethernet2}
 
   # 6. Delete VLAN 300
   - name: delete-vlan300-sw1
     action: newtron
     devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/vlan/300
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 300}
 
   - name: delete-vlan300-sw2
     action: newtron
     devices: [switch2]
-    method: DELETE
-    url: /node/{{device}}/vlan/300
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 300}
 
   - name: verify-vlan300-removed-sw1
     action: newtron
