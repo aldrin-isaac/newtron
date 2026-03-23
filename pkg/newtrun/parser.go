@@ -190,20 +190,32 @@ func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error) {
 }
 
 // topologicalSort returns scenarios in dependency order using Kahn's algorithm.
+// Only dependencies present in the input set are counted — references to
+// scenarios outside the set are ignored (allows subset sorting).
 func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	byName := make(map[string]*Scenario, len(scenarios))
+	for _, s := range scenarios {
+		byName[s.Name] = s
+	}
+
 	inDegree := make(map[string]int, len(scenarios))
 	dependents := make(map[string][]string) // name -> scenarios that depend on it
 
 	for _, s := range scenarios {
-		byName[s.Name] = s
-		inDegree[s.Name] = len(s.Requires) + len(s.After)
+		deg := 0
 		for _, req := range s.Requires {
-			dependents[req] = append(dependents[req], s.Name)
+			if _, ok := byName[req]; ok {
+				deg++
+				dependents[req] = append(dependents[req], s.Name)
+			}
 		}
 		for _, after := range s.After {
-			dependents[after] = append(dependents[after], s.Name)
+			if _, ok := byName[after]; ok {
+				deg++
+				dependents[after] = append(dependents[after], s.Name)
+			}
 		}
+		inDegree[s.Name] = deg
 	}
 
 	// Seed queue with scenarios that have no dependencies
@@ -239,6 +251,49 @@ func topologicalSort(scenarios []*Scenario) ([]*Scenario, error) {
 	}
 
 	return sorted, nil
+}
+
+// ComputeTargetChain returns the minimal set of scenarios needed to reach the
+// target, including all transitive requires dependencies, in dependency order.
+// Only hard dependencies (Requires) are traversed — soft dependencies (After)
+// are not included unless they are also in the requires chain.
+func ComputeTargetChain(scenarios []*Scenario, target string) ([]*Scenario, error) {
+	byName := make(map[string]*Scenario, len(scenarios))
+	for _, s := range scenarios {
+		byName[s.Name] = s
+	}
+
+	if _, ok := byName[target]; !ok {
+		return nil, fmt.Errorf("target scenario %q not found", target)
+	}
+
+	// BFS backwards through requires to collect the full chain
+	needed := make(map[string]bool)
+	queue := []string{target}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		if needed[name] {
+			continue
+		}
+		needed[name] = true
+		s := byName[name]
+		for _, req := range s.Requires {
+			if !needed[req] {
+				queue = append(queue, req)
+			}
+		}
+	}
+
+	// Filter to only needed scenarios and topologically sort
+	var chain []*Scenario
+	for _, s := range scenarios {
+		if needed[s.Name] {
+			chain = append(chain, s)
+		}
+	}
+
+	return topologicalSort(chain)
 }
 
 // applyDefaults sets default values for steps.

@@ -520,6 +520,95 @@ steps:
 }
 
 // ============================================================================
+// Target Chain Tests
+// ============================================================================
+
+func TestComputeTargetChain_Linear(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "c", Requires: []string{"b"}},
+		{Name: "d", Requires: []string{"c"}},
+	}
+	chain, err := ComputeTargetChain(scenarios, "c")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	names := scenarioNames(chain)
+	if len(names) != 3 {
+		t.Fatalf("expected 3 scenarios, got %d: %v", len(names), names)
+	}
+	// d should NOT be included
+	for _, n := range names {
+		if n == "d" {
+			t.Error("d should not be in the chain")
+		}
+	}
+}
+
+func TestComputeTargetChain_Diamond(t *testing.T) {
+	// a → b, a → c, b+c → d
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", Requires: []string{"a"}},
+		{Name: "c", Requires: []string{"a"}},
+		{Name: "d", Requires: []string{"b", "c"}},
+	}
+	chain, err := ComputeTargetChain(scenarios, "d")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(chain) != 4 {
+		t.Fatalf("expected 4 scenarios, got %d", len(chain))
+	}
+}
+
+func TestComputeTargetChain_RootTarget(t *testing.T) {
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", Requires: []string{"a"}},
+	}
+	chain, err := ComputeTargetChain(scenarios, "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(chain) != 1 || chain[0].Name != "a" {
+		t.Fatalf("expected just [a], got %v", scenarioNames(chain))
+	}
+}
+
+func TestComputeTargetChain_UnknownTarget(t *testing.T) {
+	scenarios := []*Scenario{{Name: "a"}}
+	_, err := ComputeTargetChain(scenarios, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for unknown target")
+	}
+}
+
+func TestComputeTargetChain_IgnoresAfter(t *testing.T) {
+	// "b" has After: ["a"] (soft dep) — should NOT be included when targeting "b"
+	scenarios := []*Scenario{
+		{Name: "a"},
+		{Name: "b", After: []string{"a"}},
+	}
+	chain, err := ComputeTargetChain(scenarios, "b")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(chain) != 1 || chain[0].Name != "b" {
+		t.Fatalf("expected just [b], got %v", scenarioNames(chain))
+	}
+}
+
+func scenarioNames(scenarios []*Scenario) []string {
+	names := make([]string, len(scenarios))
+	for i, s := range scenarios {
+		names[i] = s.Name
+	}
+	return names
+}
+
+// ============================================================================
 // Skip Propagation Tests
 // ============================================================================
 

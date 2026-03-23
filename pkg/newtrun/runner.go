@@ -35,6 +35,7 @@ type Runner struct {
 // RunOptions controls Runner behavior from CLI flags.
 type RunOptions struct {
 	Scenario  string
+	Target    string // run minimal dependency chain to reach this scenario
 	All       bool
 	Topology  string
 	Platform  string
@@ -62,8 +63,8 @@ func NewRunner(scenariosDir, topologiesDir string) *Runner {
 // shares connections. Scenarios with `requires` are sorted by dependency order
 // and skipped if a blocker fails.
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
-	if opts.Scenario == "" && !opts.All {
-		return nil, fmt.Errorf("specify --scenario <name> or --all")
+	if opts.Scenario == "" && opts.Target == "" && !opts.All {
+		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
 	}
 
 	// Validate --topology override exists
@@ -76,7 +77,7 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 
 	var scenarios []*Scenario
 
-	if opts.All {
+	if opts.All || opts.Target != "" {
 		var err error
 		scenarios, err = ParseAllScenarios(r.ScenariosDir)
 		if err != nil {
@@ -98,12 +99,21 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	}
 
 	// Validate and topologically sort if any scenario declares requires
-	if opts.All && HasRequires(scenarios) {
+	if (opts.All || opts.Target != "") && HasRequires(scenarios) {
 		sorted, err := ValidateDependencyGraph(scenarios)
 		if err != nil {
 			return nil, err
 		}
 		scenarios = sorted
+	}
+
+	// --target: filter to minimal dependency chain
+	if opts.Target != "" {
+		chain, err := ComputeTargetChain(scenarios, opts.Target)
+		if err != nil {
+			return nil, err
+		}
+		scenarios = chain
 	}
 
 	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })

@@ -18,6 +18,7 @@ func newStartCmd() *cobra.Command {
 	var (
 		dir       string
 		scenario  string
+		target    string
 		topology  string
 		platform  string
 		junitPath string
@@ -32,11 +33,13 @@ func newStartCmd() *cobra.Command {
 		Long: `Deploy topology (if needed), run scenarios, and leave topology up.
 
 The suite can be a name (resolved under newtrun/suites/) or a path.
-All scenarios run by default. Use --scenario to run a single one.
+All scenarios run by default. Use --scenario to run a single one,
+or --target to run the minimal dependency chain to reach a scenario.
 
-  newtrun start 2node-ngdp-incremental                     # run all scenarios
-  newtrun start 2node-ngdp-incremental --scenario boot-ssh
-  newtrun start 2node-ngdp-incremental --monitor           # live status dashboard
+  newtrun start 2node-ngdp-primitive                        # run all scenarios
+  newtrun start 2node-ngdp-primitive --scenario boot-ssh    # run one (no deps)
+  newtrun start 2node-ngdp-primitive --target cross-switch  # run deps + target
+  newtrun start 2node-ngdp-primitive --monitor              # live status dashboard
 
 If a previous run was paused, start resumes from where it left off.
 Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
@@ -65,9 +68,14 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 			fmt.Fprintf(os.Stderr, "newtrun: suite %s (%s)\n", suite, absDir)
 
 			// Check for paused state → resume
+			if scenario != "" && target != "" {
+				return fmt.Errorf("--scenario and --target are mutually exclusive")
+			}
+
 			opts := newtrun.RunOptions{
 				Scenario:  scenario,
-				All:       scenario == "",
+				Target:    target,
+				All:       scenario == "" && target == "",
 				Topology:  topology,
 				Platform:  platform,
 				Verbose:   verboseFlag,
@@ -244,6 +252,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 
 	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
 	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario (default: all)")
+	cmd.Flags().StringVar(&target, "target", "", "run minimal dependency chain to reach scenario")
 	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
