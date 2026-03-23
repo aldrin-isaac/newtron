@@ -259,6 +259,16 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, ip string) error {
 	return nil
 }
 
+// ConfigureInterface sets VRF binding and IP address in a single operation.
+func (i *Interface) ConfigureInterface(ctx context.Context, vrf, ip string) error {
+	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{VRF: vrf, IP: ip})
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
 // Set sets a property on this interface.
 // Supported properties: mtu, speed, admin-status, description.
 func (i *Interface) Set(ctx context.Context, property, value string) error {

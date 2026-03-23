@@ -384,13 +384,13 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 // BGP Neighbor Operations
 // ============================================================================
 
-// AddLoopbackBGPNeighbor adds an indirect BGP neighbor using loopback as update-source.
+// AddOverlayPeer adds an indirect BGP neighbor using loopback as update-source.
 // This is used for iBGP or multi-hop eBGP sessions (EVPN overlay peers).
 //
 // For DIRECT BGP neighbors that use a link IP as the update-source (typical
 // eBGP on point-to-point links), use Interface.AddBGPNeighbor() instead.
-func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if err := n.precondition("add-loopback-bgp-neighbor", neighborIP).Result(); err != nil {
+func (n *Node) AddOverlayPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
+	if err := n.precondition("add-overlay-peer", neighborIP).Result(); err != nil {
 		return nil, err
 	}
 
@@ -408,7 +408,7 @@ func (n *Node) AddLoopbackBGPNeighbor(ctx context.Context, neighborIP string, as
 		MultihopTTL:  "255",
 		ActivateEVPN: evpn,
 	})
-	cs := buildChangeSet(n.name, "bgp.add-loopback-neighbor", config, ChangeAdd)
+	cs := buildChangeSet(n.name, "device.add-overlay-peer", config, ChangeAdd)
 	n.applyShadow(cs)
 
 	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
@@ -436,7 +436,7 @@ func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*Chang
 // Deletes ROUTE_REDISTRIBUTE, BGP_GLOBALS_AF (ipv4_unicast), BGP_GLOBALS,
 // and clears bgp_asn from DEVICE_METADATA.
 //
-// Does NOT touch l2vpn_evpn AF or EVPN neighbors (owned by TeardownEVPN).
+// Does NOT touch l2vpn_evpn AF or EVPN neighbors (owned by TeardownVTEP).
 // Does NOT touch per-VRF BGP_GLOBALS (owned by UnbindIPVPN/DeleteVRF).
 func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 	if err := n.precondition("remove-bgp-globals", "bgp").Result(); err != nil {

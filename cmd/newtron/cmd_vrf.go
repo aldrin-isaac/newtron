@@ -374,7 +374,7 @@ Examples:
 		// a dot it's an IP; otherwise treat as interface name.
 		if strings.Contains(target, ".") {
 			// Treat as neighbor IP — use node-level remove
-			return displayWriteResult(app.client.RemoveBGPNeighbor(app.deviceName, target, execOpts()))
+			return displayWriteResult(app.client.RemoveOverlayPeer(app.deviceName, target, execOpts()))
 		}
 
 		// Treat as interface name — use interface-level remove

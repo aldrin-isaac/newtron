@@ -567,6 +567,22 @@ type EVPNDetail struct {
 	ClusterID      string   `json:"cluster_id,omitempty"`
 }
 
+// RouteReflectorPeer describes a BGP peer for route reflector configuration.
+type RouteReflectorPeer struct {
+	IP  string `json:"ip"`
+	ASN int    `json:"asn"`
+}
+
+// RouteReflectorOpts holds configuration for ConfigureRouteReflector.
+type RouteReflectorOpts struct {
+	ClusterID string               `json:"cluster_id"`
+	LocalASN  int                  `json:"local_asn"`
+	RouterID  string               `json:"router_id"`
+	LocalAddr string               `json:"local_addr"`
+	Clients   []RouteReflectorPeer `json:"clients"`
+	Peers     []RouteReflectorPeer `json:"peers"`
+}
+
 // ZoneDetail is the API view of a zone definition.
 type ZoneDetail struct {
 	Name string `json:"name"`

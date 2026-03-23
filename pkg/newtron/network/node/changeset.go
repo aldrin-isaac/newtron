@@ -127,7 +127,7 @@ func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeTy
 // checks, calls the entry generator, and wraps the result in a ChangeSet.
 // Use this for operations whose entire body is: preconditions → generate entries → done.
 // Skip it for complex operations that need custom logic between precondition and return
-// (e.g., ApplyService, RemoveService, SetupEVPN).
+// (e.g., ApplyService, RemoveService, SetupVTEP).
 //
 // The optional reverseOp parameter sets ChangeSet.ReverseOp — the operation name
 // that undoes this one. Only forward operations set this; terminal/reverse

@@ -128,11 +128,31 @@ type BindMACVPNRequest struct {
 	MACVPN string `json:"macvpn"`
 }
 
-// InterfaceSetRequest is the body for POST .../set.
+// InterfaceSetRequest is the body for POST .../set-port-property.
 type InterfaceSetRequest struct {
 	Property string `json:"property"`
 	Value    string `json:"value"`
 }
+
+// ConfigureInterfaceRequest is the body for POST .../configure-interface.
+type ConfigureInterfaceRequest struct {
+	VRF string `json:"vrf,omitempty"`
+	IP  string `json:"ip,omitempty"`
+}
+
+// MapL2VNIRequest is the body for POST .../map-l2vni.
+type MapL2VNIRequest struct {
+	VlanID int `json:"vlan_id"`
+	VNI    int `json:"vni"`
+}
+
+// UnmapL2VNIRequest is the body for POST .../unmap-l2vni.
+type UnmapL2VNIRequest struct {
+	VlanID int `json:"vlan_id"`
+}
+
+// ConfigureRouteReflectorRequest is the body for POST .../configure-route-reflector.
+type ConfigureRouteReflectorRequest = newtron.RouteReflectorOpts
 
 // ApplyQoSRequest is the body for POST .../apply-qos.
 type ApplyQoSRequest struct {

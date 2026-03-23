@@ -162,10 +162,10 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	return cs, nil
 }
 
-// SetupEVPN is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
+// SetupVTEP is an idempotent composite that creates VTEP + NVO + BGP EVPN sessions.
 // If sourceIP is empty, uses the device's resolved VTEP source IP (loopback).
-func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, error) {
-	if err := n.precondition("setup-evpn", "evpn").Result(); err != nil {
+func (n *Node) SetupVTEP(ctx context.Context, sourceIP string) (*ChangeSet, error) {
+	if err := n.precondition("setup-vtep", "evpn").Result(); err != nil {
 		return nil, err
 	}
 
@@ -177,8 +177,8 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
 	}
 
-	cs := NewChangeSet(n.name, "device.setup-evpn")
-	cs.ReverseOp = "device.teardown-evpn"
+	cs := NewChangeSet(n.name, "device.setup-vtep")
+	cs.ReverseOp = "device.teardown-vtep"
 
 	// Create VTEP (skip if exists)
 	if !n.VTEPExists() {
@@ -214,9 +214,10 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 				cs.Add(e.Table, e.Key, e.Fields)
 			} else {
 				cs.Adds(CreateBGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
-					EBGPMultihop: true,
-					ActivateIPv4: true,
-					ActivateEVPN: true,
+					EBGPMultihop:     true,
+					ActivateIPv4:     true,
+					ActivateEVPN:     true,
+					NextHopUnchanged: true, // Critical for eBGP overlay (RCA-026)
 				}))
 			}
 		}
@@ -227,16 +228,16 @@ func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) (*ChangeSet, erro
 	return cs, nil
 }
 
-// TeardownEVPN removes EVPN overlay configuration: BGP overlay neighbors,
+// TeardownVTEP removes EVPN overlay configuration: BGP overlay neighbors,
 // BGP EVPN address-family, VXLAN NVO, and VXLAN tunnel.
-// This is the reverse of SetupEVPN.
-func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
-	if err := n.precondition("teardown-evpn", "evpn").Result(); err != nil {
+// This is the reverse of SetupVTEP.
+func (n *Node) TeardownVTEP(ctx context.Context) (*ChangeSet, error) {
+	if err := n.precondition("teardown-vtep", "evpn").Result(); err != nil {
 		return nil, err
 	}
 
 	resolved := n.Resolved()
-	cs := NewChangeSet(n.name, "device.teardown-evpn")
+	cs := NewChangeSet(n.name, "device.teardown-vtep")
 
 	// Remove BGP EVPN overlay neighbors and their address-family entries
 	for _, rrIP := range resolved.BGPNeighbors {
@@ -254,5 +255,85 @@ func (n *Node) TeardownEVPN(ctx context.Context) (*ChangeSet, error) {
 	cs.Delete("VXLAN_TUNNEL", "vtep1")
 
 	util.WithDevice(n.name).Infof("Tore down EVPN overlay (%d neighbors removed)", len(resolved.BGPNeighbors))
+	return cs, nil
+}
+
+// ============================================================================
+// Route Reflector Configuration
+// ============================================================================
+
+// RouteReflectorPeer describes a BGP peer for route reflector configuration.
+type RouteReflectorPeer struct {
+	IP  string // Loopback IP of the peer
+	ASN int    // Autonomous system number
+}
+
+// RouteReflectorOpts holds configuration for ConfigureRouteReflector.
+type RouteReflectorOpts struct {
+	ClusterID string               // RR cluster ID
+	LocalASN  int                  // RR's own ASN
+	RouterID  string               // RR's router ID
+	LocalAddr string               // Local address for eBGP multihop (loopback IP)
+	Clients   []RouteReflectorPeer // RR clients (IPv4 unicast, RR-client)
+	Peers     []RouteReflectorPeer // RR-to-RR peers (IPv4+IPv6+EVPN, RR-client)
+}
+
+// ConfigureRouteReflector configures this node as a BGP route reflector.
+// Sets BGP globals with RR-specific settings, creates eBGP neighbors for
+// all clients (IPv4 unicast) and peers (IPv4+IPv6+EVPN), and enables
+// IPv6 route redistribution.
+func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorOpts) (*ChangeSet, error) {
+	if err := n.precondition("configure-route-reflector", "bgp").Result(); err != nil {
+		return nil, err
+	}
+	if opts.LocalASN == 0 {
+		return nil, fmt.Errorf("route reflector requires local ASN")
+	}
+	if opts.ClusterID == "" {
+		return nil, fmt.Errorf("route reflector requires cluster ID")
+	}
+
+	cs := NewChangeSet(n.name, "device.configure-route-reflector")
+
+	// BGP globals with RR-specific settings
+	cs.Adds(CreateBGPGlobalsConfig("default", opts.LocalASN, opts.RouterID, map[string]string{
+		"rr_cluster_id":         opts.ClusterID,
+		"load_balance_mp_relax": "true",
+		"ebgp_requires_policy":  "false",
+		"suppress_fib_pending":  "false",
+		"log_neighbor_changes":  "true",
+	}))
+
+	// RR clients: IPv4 unicast only, RR-client flag
+	for _, client := range opts.Clients {
+		cs.Adds(CreateBGPNeighborConfig(client.IP, client.ASN, opts.LocalAddr, BGPNeighborOpts{
+			EBGPMultihop: true,
+			ActivateIPv4: true,
+			RRClient:     true,
+			NextHopSelf:  true,
+		}))
+	}
+
+	// RR-to-RR peers: full AF set (IPv4+IPv6+EVPN), RR-client
+	for _, peer := range opts.Peers {
+		cs.Adds(CreateBGPNeighborConfig(peer.IP, peer.ASN, opts.LocalAddr, BGPNeighborOpts{
+			EBGPMultihop:    true,
+			ActivateIPv4:    true,
+			RRClient:        true,
+			NextHopSelf:     true,
+			ActivateIPv6:    true,
+			RRClientIPv6:    true,
+			NextHopSelfIPv6: true,
+			ActivateEVPN:    true,
+			RRClientEVPN:    true,
+		}))
+	}
+
+	// IPv6 route redistribution for RR
+	cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv6"))
+
+	n.applyShadow(cs)
+	util.WithDevice(n.name).Infof("Configured route reflector (cluster=%s, %d clients, %d peers)",
+		opts.ClusterID, len(opts.Clients), len(opts.Peers))
 	return cs, nil
 }

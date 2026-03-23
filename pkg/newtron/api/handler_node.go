@@ -321,9 +321,9 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 		return n.RemoveLoopback(ctx)
 	case "setup-vtep":
 		sourceIP, _ := op.Params["source_ip"].(string)
-		return n.SetupEVPN(ctx, sourceIP)
+		return n.SetupVTEP(ctx, sourceIP)
 	case "teardown-vtep":
-		return n.TeardownEVPN(ctx)
+		return n.TeardownVTEP(ctx)
 	case "create-vlan":
 		id, _ := intFromAny(op.Params["id"])
 		desc, _ := op.Params["description"].(string)
@@ -425,12 +425,32 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 			return err
 		}
 		return iface.UnbindMACVPN(ctx)
-	case "set":
+	case "set-port-property":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
 			return err
 		}
 		return iface.Set(ctx, strFromAny(op.Params["property"]), strFromAny(op.Params["value"]))
+	case "configure-interface":
+		iface, err := n.Interface(op.Interface)
+		if err != nil {
+			return err
+		}
+		return iface.ConfigureInterface(ctx, strFromAny(op.Params["vrf"]), strFromAny(op.Params["ip"]))
+	case "map-l2vni":
+		vlanID, _ := intFromAny(op.Params["vlan_id"])
+		vni, _ := intFromAny(op.Params["vni"])
+		return n.MapL2VNI(ctx, vlanID, vni)
+	case "unmap-l2vni":
+		vlanID, _ := intFromAny(op.Params["vlan_id"])
+		return n.UnmapL2VNI(ctx, vlanID)
+	case "configure-route-reflector":
+		return n.ConfigureRouteReflector(ctx, newtron.RouteReflectorOpts{
+			ClusterID: strFromAny(op.Params["cluster_id"]),
+			LocalASN:  intOrZero(op.Params["local_asn"]),
+			RouterID:  strFromAny(op.Params["router_id"]),
+			LocalAddr: strFromAny(op.Params["local_addr"]),
+		})
 	case "apply-qos":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
@@ -492,7 +512,7 @@ func (s *Server) handleSetupVTEP(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.SetupEVPN(ctx, req.SourceIP)
+		return n.SetupVTEP(ctx, req.SourceIP)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -508,7 +528,78 @@ func (s *Server) handleTeardownVTEP(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.TeardownEVPN(ctx)
+		return n.TeardownVTEP(ctx)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleMapL2VNI(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req MapL2VNIRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.VlanID == 0 || req.VNI == 0 {
+		writeError(w, &newtron.ValidationError{Message: "vlan_id and vni are required"})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		return n.MapL2VNI(ctx, req.VlanID, req.VNI)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleUnmapL2VNI(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req UnmapL2VNIRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.VlanID == 0 {
+		writeError(w, &newtron.ValidationError{Message: "vlan_id is required"})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		return n.UnmapL2VNI(ctx, req.VlanID)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleConfigureRouteReflector(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req ConfigureRouteReflectorRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		return n.ConfigureRouteReflector(ctx, newtron.RouteReflectorOpts(req))
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1132,7 +1223,7 @@ func (s *Server) handleAddOverlayPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddBGPNeighbor(ctx, req)
+		return n.AddOverlayPeer(ctx, req)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1155,7 +1246,7 @@ func (s *Server) handleRemoveOverlayPeer(w http.ResponseWriter, r *http.Request)
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveBGPNeighbor(ctx, body.IP)
+		return n.RemoveOverlayPeer(ctx, body.IP)
 	})
 	if err != nil {
 		writeError(w, err)

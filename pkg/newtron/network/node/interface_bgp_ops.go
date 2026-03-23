@@ -14,7 +14,7 @@ import (
 // from the interface IP (direct peering over a link).
 //
 // For iBGP neighbors using loopback IPs (indirect peering), use the
-// device-level BGP operations: Device.AddLoopbackBGPNeighbor() or
+// device-level BGP operations: Device.AddOverlayPeer() or
 // Device.SetupBGPEVPN().
 
 // DirectBGPNeighborConfig holds configuration for a direct BGP neighbor.

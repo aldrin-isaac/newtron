@@ -516,10 +516,10 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 
 		// EVPN
-		"setup-evpn": {
+		"setup-vtep": {
 			Category:  "EVPN",
-			ShortDesc: "Setup EVPN control plane",
-			LongDesc:  "Configures EVPN overlay including loopback peering and route reflector",
+			ShortDesc: "Setup VTEP and EVPN control plane",
+			LongDesc:  "Configures EVPN overlay including VTEP, NVO, loopback peering, and route reflector sessions",
 			Prerequisites: []string{
 				"Device profile with: loopback_ip (VTEP source), bgp_neighbors (route reflectors), underlay_asn, router_id",
 				"Underlay BGP sessions already established (use 'provision' first)",
@@ -528,8 +528,8 @@ func getActionMetadata() map[string]ActionMetadata {
 			OptionalParams: []ParamInfo{
 				{"source_ip", "VTEP source IP (optional — falls back to profile loopback)"},
 			},
-			Example: `- name: setup-evpn-leaf1
-  action: setup-evpn
+			Example: `- name: setup-vtep-leaf1
+  action: setup-vtep
   devices: [leaf1]
   params:
     source_ip: "10.0.0.11"`,
@@ -541,7 +541,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			Prerequisites: []string{
 				"IPVPNSpec defined in network.json, zone spec, or device profile (under 'ipvpns' section)",
 				"VRF already created (use 'create-vrf' first)",
-				"EVPN control plane configured (use 'setup-evpn' first)",
+				"EVPN control plane configured (use 'setup-vtep' first)",
 			},
 			Devices: "required",
 			RequiredFields: []ParamInfo{
@@ -577,7 +577,7 @@ func getActionMetadata() map[string]ActionMetadata {
 			Prerequisites: []string{
 				"MACVPNSpec defined in network.json, zone spec, or device profile (under 'macvpns' section)",
 				"VLAN already created (use 'create-vlan' first)",
-				"EVPN control plane configured (use 'setup-evpn' first)",
+				"EVPN control plane configured (use 'setup-vtep' first)",
 			},
 			Devices: "required",
 			RequiredFields: []ParamInfo{
@@ -1100,13 +1100,13 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 
 		// EVPN (additional)
-		"teardown-evpn": {
+		"teardown-vtep": {
 			Category:  "EVPN",
 			ShortDesc: "Remove EVPN overlay and VTEP",
-			LongDesc:  "Deletes EVPN overlay neighbors, L2VPN EVPN AF, NVO, and VXLAN tunnel (reverse of setup-evpn)",
+			LongDesc:  "Deletes EVPN overlay neighbors, L2VPN EVPN AF, NVO, and VXLAN tunnel (reverse of setup-vtep)",
 			Devices:   "required",
-			Example: `- name: teardown-evpn
-  action: teardown-evpn
+			Example: `- name: teardown-vtep
+  action: teardown-vtep
   devices: [leaf1, leaf2]`,
 		},
 

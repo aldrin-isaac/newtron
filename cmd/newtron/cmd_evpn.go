@@ -61,7 +61,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.SetupEVPN(app.deviceName, evpnSetupSourceIP, execOpts()))
+		return displayWriteResult(app.client.SetupVTEP(app.deviceName, evpnSetupSourceIP, execOpts()))
 	},
 }
 

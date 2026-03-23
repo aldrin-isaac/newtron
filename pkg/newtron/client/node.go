@@ -235,28 +235,45 @@ func (c *Client) RemoveBGPGlobals(device string, opts newtron.ExecOpts) (*newtro
 	return c.nodeWrite(device, "remove-bgp", nil, opts)
 }
 
-// AddBGPNeighbor adds a loopback (overlay) BGP neighbor.
-func (c *Client) AddBGPNeighbor(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// AddOverlayPeer adds a loopback (overlay) BGP neighbor.
+func (c *Client) AddOverlayPeer(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	return c.nodeWrite(device, "add-overlay-peer", config, opts)
 }
 
-// RemoveBGPNeighbor removes a BGP neighbor by IP.
-func (c *Client) RemoveBGPNeighbor(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// RemoveOverlayPeer removes an overlay BGP neighbor by IP.
+func (c *Client) RemoveOverlayPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		IP string `json:"ip"`
 	}{IP: ip}
 	return c.nodeWrite(device, "remove-overlay-peer", body, opts)
 }
 
-// SetupEVPN configures the EVPN overlay on a device.
-func (c *Client) SetupEVPN(device, sourceIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// SetupVTEP configures the EVPN overlay on a device.
+func (c *Client) SetupVTEP(device, sourceIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.SetupVTEPRequest{SourceIP: sourceIP}
 	return c.nodeWrite(device, "setup-vtep", body, opts)
 }
 
-// TeardownEVPN removes the EVPN overlay.
-func (c *Client) TeardownEVPN(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// TeardownVTEP removes the EVPN overlay.
+func (c *Client) TeardownVTEP(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	return c.nodeWrite(device, "teardown-vtep", nil, opts)
+}
+
+// MapL2VNI maps a VLAN to an L2VNI for EVPN.
+func (c *Client) MapL2VNI(device string, vlanID, vni int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.MapL2VNIRequest{VlanID: vlanID, VNI: vni}
+	return c.nodeWrite(device, "map-l2vni", body, opts)
+}
+
+// UnmapL2VNI removes the L2VNI mapping for a VLAN.
+func (c *Client) UnmapL2VNI(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.UnmapL2VNIRequest{VlanID: vlanID}
+	return c.nodeWrite(device, "unmap-l2vni", body, opts)
+}
+
+// ConfigureRouteReflector configures a device as a BGP route reflector.
+func (c *Client) ConfigureRouteReflector(device string, rrOpts newtron.RouteReflectorOpts, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "configure-route-reflector", rrOpts, opts)
 }
 
 // ConfigureLoopback configures the loopback interface.

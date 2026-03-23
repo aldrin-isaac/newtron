@@ -618,8 +618,8 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 		return n.internal.UnbindIPVPN(ctx, params["vrf"])
 	case "device.remove-bgp-globals":
 		return n.internal.RemoveBGPGlobals(ctx)
-	case "device.teardown-evpn":
-		return n.internal.TeardownEVPN(ctx)
+	case "device.teardown-vtep":
+		return n.internal.TeardownVTEP(ctx)
 	case "device.unmap-l2vni":
 		return n.internal.UnmapL2VNI(ctx, vlanID())
 	case "device.delete-acl-table":
@@ -1077,15 +1077,15 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) error {
 	return err
 }
 
-// AddBGPNeighbor adds a loopback BGP neighbor (indirect, EVPN overlay).
-func (n *Node) AddBGPNeighbor(ctx context.Context, config BGPNeighborConfig) error {
-	cs, err := n.internal.AddLoopbackBGPNeighbor(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
+// AddOverlayPeer adds a loopback BGP neighbor (indirect, EVPN overlay).
+func (n *Node) AddOverlayPeer(ctx context.Context, config BGPNeighborConfig) error {
+	cs, err := n.internal.AddOverlayPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
 	n.appendPending(cs)
 	return err
 }
 
-// RemoveBGPNeighbor removes a BGP neighbor by IP.
-func (n *Node) RemoveBGPNeighbor(ctx context.Context, ip string) error {
+// RemoveOverlayPeer removes an overlay BGP neighbor by IP.
+func (n *Node) RemoveOverlayPeer(ctx context.Context, ip string) error {
 	cs, err := n.internal.RemoveBGPNeighbor(ctx, ip)
 	n.appendPending(cs)
 	return err
@@ -1113,16 +1113,49 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error 
 // Device-level write ops — EVPN
 // ============================================================================
 
-// SetupEVPN configures the full EVPN stack (VTEP + NVO + BGP EVPN).
-func (n *Node) SetupEVPN(ctx context.Context, sourceIP string) error {
-	cs, err := n.internal.SetupEVPN(ctx, sourceIP)
+// SetupVTEP configures the full EVPN stack (VTEP + NVO + BGP EVPN).
+func (n *Node) SetupVTEP(ctx context.Context, sourceIP string) error {
+	cs, err := n.internal.SetupVTEP(ctx, sourceIP)
 	n.appendPending(cs)
 	return err
 }
 
-// TeardownEVPN removes the EVPN configuration from the device.
-func (n *Node) TeardownEVPN(ctx context.Context) error {
-	cs, err := n.internal.TeardownEVPN(ctx)
+// TeardownVTEP removes the EVPN configuration from the device.
+func (n *Node) TeardownVTEP(ctx context.Context) error {
+	cs, err := n.internal.TeardownVTEP(ctx)
+	n.appendPending(cs)
+	return err
+}
+
+// ConfigureRouteReflector configures this node as a BGP route reflector.
+func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorOpts) error {
+	internalOpts := node.RouteReflectorOpts{
+		ClusterID: opts.ClusterID,
+		LocalASN:  opts.LocalASN,
+		RouterID:  opts.RouterID,
+		LocalAddr: opts.LocalAddr,
+	}
+	for _, c := range opts.Clients {
+		internalOpts.Clients = append(internalOpts.Clients, node.RouteReflectorPeer{IP: c.IP, ASN: c.ASN})
+	}
+	for _, p := range opts.Peers {
+		internalOpts.Peers = append(internalOpts.Peers, node.RouteReflectorPeer{IP: p.IP, ASN: p.ASN})
+	}
+	cs, err := n.internal.ConfigureRouteReflector(ctx, internalOpts)
+	n.appendPending(cs)
+	return err
+}
+
+// MapL2VNI maps a VLAN to an L2VNI for EVPN.
+func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) error {
+	cs, err := n.internal.MapL2VNI(ctx, vlanID, vni)
+	n.appendPending(cs)
+	return err
+}
+
+// UnmapL2VNI removes the L2VNI mapping for a VLAN.
+func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) error {
+	cs, err := n.internal.UnmapL2VNI(ctx, vlanID)
 	n.appendPending(cs)
 	return err
 }

@@ -94,9 +94,15 @@ func (c *Client) InterfaceRemoveBGPNeighbor(device, iface, ip string, opts newtr
 	return c.interfaceWrite(device, iface, "remove-bgp-neighbor", body, opts)
 }
 
-// InterfaceSet sets a property on an interface.
-func (c *Client) InterfaceSet(device, iface, property, value string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// SetPortProperty sets a property on an interface.
+func (c *Client) SetPortProperty(device, iface, property, value string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.InterfaceSetRequest{Property: property, Value: value}
-	return c.interfaceWrite(device, iface, "set", body, opts)
+	return c.interfaceWrite(device, iface, "set-port-property", body, opts)
+}
+
+// ConfigureInterface sets VRF and IP on an interface in one operation.
+func (c *Client) ConfigureInterface(device, iface, vrf, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.ConfigureInterfaceRequest{VRF: vrf, IP: ip}
+	return c.interfaceWrite(device, iface, "configure-interface", body, opts)
 }
 

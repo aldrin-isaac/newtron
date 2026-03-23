@@ -117,6 +117,9 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/configure-bgp", s.handleConfigureBGP)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/setup-vtep", s.handleSetupVTEP)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/teardown-vtep", s.handleTeardownVTEP)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/map-l2vni", s.handleMapL2VNI)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/unmap-l2vni", s.handleUnmapL2VNI)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/configure-route-reflector", s.handleConfigureRouteReflector)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/configure-loopback", s.handleConfigureLoopback)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-loopback", s.handleRemoveLoopback)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/reload-config", s.handleReloadConfig)
@@ -202,6 +205,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/add-bgp-neighbor", s.handleAddBGPNeighbor)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/remove-bgp-neighbor", s.handleRemoveBGPNeighbor)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/set-port-property", s.handleInterfaceSet)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/configure-interface", s.handleConfigureInterface)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 

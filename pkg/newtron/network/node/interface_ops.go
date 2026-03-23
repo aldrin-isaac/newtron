@@ -122,6 +122,52 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 	return cs, nil
 }
 
+// InterfaceConfig holds the combined configuration for ConfigureInterface.
+type InterfaceConfig struct {
+	VRF string // VRF binding (empty = no VRF change)
+	IP  string // IP address in CIDR notation (empty = no IP change)
+}
+
+// ConfigureInterface is a combined operation that sets VRF binding and IP address
+// on an interface in a single ChangeSet. This is the intent-producing method that
+// topology steps should use instead of separate SetIP/SetVRF calls.
+func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
+	n := i.node
+
+	if err := n.precondition("configure-interface", i.name).Result(); err != nil {
+		return nil, err
+	}
+	if i.IsPortChannelMember() {
+		return nil, fmt.Errorf("cannot configure PortChannel member directly")
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.configure-interface")
+
+	// VRF binding first (creates the INTERFACE base entry with vrf_name)
+	if cfg.VRF != "" {
+		if cfg.VRF != "default" && !n.VRFExists(cfg.VRF) {
+			return nil, fmt.Errorf("VRF '%s' does not exist", cfg.VRF)
+		}
+		cs.Adds(i.bindVrf(cfg.VRF))
+	}
+
+	// IP address (requires base entry — either from VRF binding above or enableIpRouting)
+	if cfg.IP != "" {
+		if !util.IsValidIPv4CIDR(cfg.IP) {
+			return nil, fmt.Errorf("invalid IP address: %s", cfg.IP)
+		}
+		if cfg.VRF == "" && i.VRF() == "" {
+			// No VRF binding — need base INTERFACE entry for IP routing
+			cs.Adds(i.enableIpRouting())
+		}
+		cs.Adds(i.assignIpAddress(cfg.IP))
+	}
+
+	n.applyShadow(cs)
+	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s)", i.name, cfg.VRF, cfg.IP)
+	return cs, nil
+}
+
 // BindACL binds an ACL to this interface.
 // ACLs are shared - adds this interface to the ACL's binding list.
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
@@ -198,7 +244,7 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.set")
+	cs := NewChangeSet(n.Name(), "interface.set-port-property")
 	fields := make(map[string]string)
 
 	switch property {
