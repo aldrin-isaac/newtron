@@ -180,8 +180,8 @@ func (n *Node) ServiceIntents() map[string]*sonic.Intent {
 	return result
 }
 
-// Snapshot projects the node's actuated intents back into topology format.
-// Service intents become TopologyInterface entries with Service + IP.
+// Snapshot projects the node's actuated service intents back into topology step format.
+// Returns a TopologyDevice with Steps corresponding to actuated apply-service intents.
 //
 // This is the export direction: device reality → topology representation.
 // Resolved/derived values (VNI, ACL names, peer groups) are NOT included —
@@ -190,19 +190,21 @@ func (n *Node) Snapshot() *spec.TopologyDevice {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	dev := &spec.TopologyDevice{
-		Interfaces: make(map[string]*spec.TopologyInterface),
-	}
+	dev := &spec.TopologyDevice{}
 
 	for resource, intent := range n.intents {
 		if !intent.IsActuated() {
 			continue
 		}
 		if intent.IsService() {
-			dev.Interfaces[resource] = &spec.TopologyInterface{
-				Service: intent.Name,
-				IP:      intent.Params["ip_address"],
+			step := spec.TopologyStep{
+				URL:    "/interface/" + resource + "/apply-service",
+				Params: map[string]any{"service": intent.Name},
 			}
+			if ip := intent.Params["ip_address"]; ip != "" {
+				step.Params["ip_address"] = ip
+			}
+			dev.Steps = append(dev.Steps, step)
 		}
 	}
 

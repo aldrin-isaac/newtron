@@ -3,7 +3,11 @@
   "description": "Single SONiC switch for getting started",
   "devices": {
     "switch1": {
-      "interfaces": {}
+      "steps": [
+        {"url": "/configure-loopback"},
+        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "switch1", "bgp_asn": "65001", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/configure-bgp"}
+      ]
     }
   },
   "newtlab": {

@@ -496,10 +496,6 @@ func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 		return nil, err
 	}
 
-	// Normalize at the boundary: service name references in topology
-	// interfaces must match the normalized keys in the network spec.
-	normalizeTopologyRefs(&spec)
-
 	return &spec, nil
 }
 
@@ -507,45 +503,15 @@ func (l *Loader) loadTopologySpec() (*TopologySpecFile, error) {
 func (l *Loader) validateTopology() error {
 	v := &util.ValidationBuilder{}
 
-	for deviceName, device := range l.topology.Devices {
+	for deviceName := range l.topology.Devices {
 		// All device names must have profiles in profiles/
 		profilePath := filepath.Join(l.specDir, "profiles", deviceName+".json")
 		if _, err := os.Stat(profilePath); os.IsNotExist(err) {
 			v.AddErrorf("topology device '%s' has no profile at %s", deviceName, profilePath)
 		}
-
-		// Skip service/interface validation for host devices —
-		// they have no SONiC services, zones, or loopback IPs
-		if l.isHostDevice(deviceName) {
-			continue
-		}
-
-		for intfName, intf := range device.Interfaces {
-			// All service names must exist in network.json services
-			if intf.Service != "" {
-				if _, ok := l.network.Services[intf.Service]; !ok {
-					v.AddErrorf("topology device '%s' interface '%s' references unknown service '%s'",
-						deviceName, intfName, intf.Service)
-				}
-			}
-
-			// IP addresses must be valid CIDR
-			if intf.IP != "" {
-				if !util.IsValidIPv4CIDR(intf.IP) {
-					v.AddErrorf("topology device '%s' interface '%s' has invalid IP '%s'",
-						deviceName, intfName, intf.IP)
-				}
-			}
-		}
 	}
 
-	// Derive links from interface.link fields if not explicitly provided
-	if len(l.topology.Links) == 0 {
-		l.topology.Links = DeriveLinksFromInterfaces(l.topology)
-		util.Logger.Infof("spec: derived %d links from interface.link fields", len(l.topology.Links))
-	}
-
-	// Validate links: both endpoints must be defined in their respective device interfaces
+	// Validate links: both endpoints must reference devices in the topology
 	for i, link := range l.topology.Links {
 		l.validateLinkEndpoint(v, i, "a", link.A)
 		l.validateLinkEndpoint(v, i, "z", link.Z)
@@ -562,15 +528,9 @@ func (l *Loader) validateLinkEndpoint(v *util.ValidationBuilder, linkIdx int, si
 			linkIdx, side, endpoint)
 		return
 	}
-	deviceName, intfName := parts[0], parts[1]
-	device, ok := l.topology.Devices[deviceName]
-	if !ok {
+	deviceName := parts[0]
+	if _, ok := l.topology.Devices[deviceName]; !ok {
 		v.AddErrorf("link[%d].%s: device '%s' not found in topology", linkIdx, side, deviceName)
-		return
-	}
-	if _, ok := device.Interfaces[intfName]; !ok {
-		v.AddErrorf("link[%d].%s: interface '%s' not found on device '%s'",
-			linkIdx, side, intfName, deviceName)
 	}
 }
 
@@ -670,20 +630,6 @@ func NormalizeIPVPNRefs(ipvpn *IPVPNSpec) {
 	}
 }
 
-// normalizeTopologyRefs normalizes service name references in topology interfaces.
-func normalizeTopologyRefs(t *TopologySpecFile) {
-	if t == nil {
-		return
-	}
-	for _, device := range t.Devices {
-		for _, intf := range device.Interfaces {
-			intf.Service = normalizeRef(intf.Service)
-		}
-		for _, pc := range device.PortChannels {
-			pc.Service = normalizeRef(pc.Service)
-		}
-	}
-}
 
 // normalizeRef normalizes a single name reference (returns "" for empty strings).
 func normalizeRef(ref string) string {

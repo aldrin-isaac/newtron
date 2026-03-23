@@ -174,34 +174,41 @@ func TestSnapshot(t *testing.T) {
 	})
 
 	snap := n.Snapshot()
-	if len(snap.Interfaces) != 2 {
-		t.Fatalf("Snapshot interfaces = %d, want 2", len(snap.Interfaces))
+	if len(snap.Steps) != 2 {
+		t.Fatalf("Snapshot steps = %d, want 2", len(snap.Steps))
 	}
 
-	eth0 := snap.Interfaces["Ethernet0"]
-	if eth0 == nil {
-		t.Fatal("expected Ethernet0 in snapshot")
-	}
-	if eth0.Service != "transit" {
-		t.Errorf("Ethernet0 Service = %q, want transit", eth0.Service)
-	}
-	if eth0.IP != "10.1.1.1/30" {
-		t.Errorf("Ethernet0 IP = %q, want 10.1.1.1/30", eth0.IP)
+	// Build a map from steps for easier lookup
+	stepsByIntf := map[string]spec.TopologyStep{}
+	for _, step := range snap.Steps {
+		_, ifaceName := parseStepURL(step.URL)
+		stepsByIntf[ifaceName] = step
 	}
 
-	eth4 := snap.Interfaces["Ethernet4"]
-	if eth4 == nil {
-		t.Fatal("expected Ethernet4 in snapshot")
+	eth0, ok := stepsByIntf["Ethernet0"]
+	if !ok {
+		t.Fatal("expected Ethernet0 step in snapshot")
 	}
-	if eth4.Service != "customer" {
-		t.Errorf("Ethernet4 Service = %q, want customer", eth4.Service)
+	if eth0.Params["service"] != "transit" {
+		t.Errorf("Ethernet0 service = %q, want transit", eth0.Params["service"])
+	}
+	if eth0.Params["ip_address"] != "10.1.1.1/30" {
+		t.Errorf("Ethernet0 ip_address = %q, want 10.1.1.1/30", eth0.Params["ip_address"])
+	}
+
+	eth4, ok := stepsByIntf["Ethernet4"]
+	if !ok {
+		t.Fatal("expected Ethernet4 step in snapshot")
+	}
+	if eth4.Params["service"] != "customer" {
+		t.Errorf("Ethernet4 service = %q, want customer", eth4.Params["service"])
 	}
 
 	// bgp and Ethernet8 should NOT be in snapshot
-	if _, ok := snap.Interfaces["bgp"]; ok {
+	if _, ok := stepsByIntf["bgp"]; ok {
 		t.Error("bgp should not appear in topology snapshot")
 	}
-	if _, ok := snap.Interfaces["Ethernet8"]; ok {
+	if _, ok := stepsByIntf["Ethernet8"]; ok {
 		t.Error("unrealized Ethernet8 should not appear in topology snapshot")
 	}
 }
@@ -209,15 +216,19 @@ func TestSnapshot(t *testing.T) {
 func TestSnapshotRoundTrip(t *testing.T) {
 	// Simulate: topology.json said Ethernet0=transit(10.1.1.1/30), Ethernet4=customer
 	// After provisioning + connect, intents loaded from CONFIG_DB
-	// Snapshot should recover the original topology interface entries
+	// Snapshot should recover the original topology step entries
 
 	sp := &testSpecProvider{}
 	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
 
-	// Original topology input
-	originalInterfaces := map[string]spec.TopologyInterface{
-		"Ethernet0": {Service: "transit", IP: "10.1.1.1/30"},
-		"Ethernet4": {Service: "customer"},
+	// Original topology expectations (service + IP per interface)
+	type expected struct {
+		service string
+		ip      string
+	}
+	originalExpected := map[string]expected{
+		"Ethernet0": {service: "transit", ip: "10.1.1.1/30"},
+		"Ethernet4": {service: "customer"},
 	}
 
 	// Simulate what CONFIG_DB would have after provisioning
@@ -234,18 +245,24 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	n.LoadIntents()
 
-	// Snapshot should match original topology (service + IP)
+	// Snapshot should match original topology (service + IP as step params)
 	snap := n.Snapshot()
-	for intfName, orig := range originalInterfaces {
-		got := snap.Interfaces[intfName]
-		if got == nil {
+	stepsByIntf := map[string]spec.TopologyStep{}
+	for _, step := range snap.Steps {
+		_, ifaceName := parseStepURL(step.URL)
+		stepsByIntf[ifaceName] = step
+	}
+	for intfName, orig := range originalExpected {
+		got, ok := stepsByIntf[intfName]
+		if !ok {
 			t.Fatalf("snapshot missing %s", intfName)
 		}
-		if got.Service != orig.Service {
-			t.Errorf("%s Service = %q, want %q", intfName, got.Service, orig.Service)
+		if got.Params["service"] != orig.service {
+			t.Errorf("%s service = %q, want %q", intfName, got.Params["service"], orig.service)
 		}
-		if got.IP != orig.IP {
-			t.Errorf("%s IP = %q, want %q", intfName, got.IP, orig.IP)
+		ipGot, _ := got.Params["ip_address"].(string)
+		if ipGot != orig.ip {
+			t.Errorf("%s ip_address = %q, want %q", intfName, ipGot, orig.ip)
 		}
 	}
 }

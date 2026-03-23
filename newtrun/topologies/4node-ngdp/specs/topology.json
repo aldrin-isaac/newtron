@@ -3,69 +3,89 @@
   "description": "4-node topology: 2 spines + 2 leaves (full mesh)",
   "devices": {
     "spine1": {
-      "device_config": {
-        "route_reflector": true
-      },
-      "interfaces": {
-        "Ethernet0": {
-          "link": "leaf1:Ethernet0",
-          "service": "transit",
-          "ip": "10.1.0.0/31"
-        },
-        "Ethernet1": {
-          "link": "leaf2:Ethernet0",
-          "service": "transit",
-          "ip": "10.1.0.2/31"
-        }
+      "steps": [
+        {"url": "/configure-loopback"},
+        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "spine1", "bgp_asn": "65001", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/configure-bgp"},
+        {"url": "/configure-route-reflector", "params": {
+          "cluster_id": "10.0.0.1",
+          "local_asn": 65001,
+          "router_id": "10.0.0.1",
+          "local_addr": "10.0.0.1",
+          "clients": [
+            {"ip": "10.0.0.11", "asn": 65011},
+            {"ip": "10.0.0.12", "asn": 65012}
+          ],
+          "peers": [
+            {"ip": "10.0.0.2", "asn": 65002}
+          ]
+        }},
+        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65011}},
+        {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.2/31", "peer_as": 65012}}
+      ],
+      "ports": {
+        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet1": {"admin_status": "up", "mtu": "9100"}
       }
     },
     "spine2": {
-      "device_config": {
-        "route_reflector": true
-      },
-      "interfaces": {
-        "Ethernet0": {
-          "link": "leaf1:Ethernet1",
-          "service": "transit",
-          "ip": "10.1.0.4/31"
-        },
-        "Ethernet1": {
-          "link": "leaf2:Ethernet1",
-          "service": "transit",
-          "ip": "10.1.0.6/31"
-        }
+      "steps": [
+        {"url": "/configure-loopback"},
+        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "spine2", "bgp_asn": "65002", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/configure-bgp"},
+        {"url": "/configure-route-reflector", "params": {
+          "cluster_id": "10.0.0.2",
+          "local_asn": 65002,
+          "router_id": "10.0.0.2",
+          "local_addr": "10.0.0.2",
+          "clients": [
+            {"ip": "10.0.0.11", "asn": 65011},
+            {"ip": "10.0.0.12", "asn": 65012}
+          ],
+          "peers": [
+            {"ip": "10.0.0.1", "asn": 65001}
+          ]
+        }},
+        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.4/31", "peer_as": 65011}},
+        {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.6/31", "peer_as": 65012}}
+      ],
+      "ports": {
+        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet1": {"admin_status": "up", "mtu": "9100"}
       }
     },
     "leaf1": {
-      "interfaces": {
-        "Ethernet0": {
-          "link": "spine1:Ethernet0",
-          "service": "transit",
-          "ip": "10.1.0.1/31"
-        },
-        "Ethernet1": {
-          "link": "spine2:Ethernet0",
-          "service": "transit",
-          "ip": "10.1.0.5/31"
-        },
-        "Ethernet2": {},
-        "Ethernet3": {}
+      "steps": [
+        {"url": "/configure-loopback"},
+        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf1", "bgp_asn": "65011", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/configure-bgp"},
+        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
+        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
+        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.1/31", "peer_as": 65001}},
+        {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.5/31", "peer_as": 65002}}
+      ],
+      "ports": {
+        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet1": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet2": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet3": {"admin_status": "up", "mtu": "9100"}
       }
     },
     "leaf2": {
-      "interfaces": {
-        "Ethernet0": {
-          "link": "spine1:Ethernet1",
-          "service": "transit",
-          "ip": "10.1.0.3/31"
-        },
-        "Ethernet1": {
-          "link": "spine2:Ethernet1",
-          "service": "transit",
-          "ip": "10.1.0.7/31"
-        },
-        "Ethernet2": {},
-        "Ethernet3": {}
+      "steps": [
+        {"url": "/configure-loopback"},
+        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf2", "bgp_asn": "65012", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/configure-bgp"},
+        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
+        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
+        {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.3/31", "peer_as": 65001}},
+        {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.7/31", "peer_as": 65002}}
+      ],
+      "ports": {
+        "Ethernet0": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet1": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet2": {"admin_status": "up", "mtu": "9100"},
+        "Ethernet3": {"admin_status": "up", "mtu": "9100"}
       }
     }
   },

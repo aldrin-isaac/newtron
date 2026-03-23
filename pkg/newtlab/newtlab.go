@@ -82,10 +82,9 @@ func NewLab(specDir string) (*Lab, error) {
 		return nil, fmt.Errorf("newtlab: parse topology.json: %w", err)
 	}
 
-	// Derive links from interface.link fields if not explicitly provided
+	// Links must be explicit in topology.json
 	if len(l.Topology.Links) == 0 {
-		l.Topology.Links = spec.DeriveLinksFromInterfaces(l.Topology)
-		util.Logger.Infof("newtlab: derived %d links from interface.link fields", len(l.Topology.Links))
+		util.Logger.Infof("newtlab: no links defined in topology.json")
 	}
 
 	// Load platforms.json
@@ -566,37 +565,67 @@ func (l *Lab) provisionHostNamespaces(ctx context.Context) error {
 }
 
 // findPeerInterfaceIP finds the peer interface's IP for a given host device.
-// Searches all devices for an interface with .link pointing to this host.
+// Scans the links array to find which switch interface connects to this host,
+// then searches the switch device's steps for an IP address on that interface.
 // Returns the peer IP (without mask) and the mask (e.g., "/24"), or empty strings if not found.
 func (l *Lab) findPeerInterfaceIP(hostName string) (string, string) {
-	// Search all devices for interfaces that link to this host
-	for _, device := range l.Topology.Devices {
-		for _, iface := range device.Interfaces {
-			if iface.Link == "" {
-				continue
-			}
-
-			// Check if this interface links to the target host
-			// Format: "hostName:ethX"
-			peerDevice, _, err := splitLinkEndpoint(iface.Link)
-			if err != nil || peerDevice != hostName {
-				continue
-			}
-
-			// Found the peer - return its IP
-			if iface.IP == "" {
-				continue
-			}
-
-			// Parse "10.1.100.1/24" → ip="10.1.100.1", mask="/24"
-			parts := strings.SplitN(iface.IP, "/", 2)
+	// Step 1: Find the link connecting to this host
+	var switchName, switchIntf string
+	for _, link := range l.Topology.Links {
+		aDevice, _, errA := splitLinkEndpoint(link.A)
+		zDevice, _, errZ := splitLinkEndpoint(link.Z)
+		if errA != nil || errZ != nil {
+			continue
+		}
+		if aDevice == hostName {
+			// Z side is the switch
+			parts := strings.SplitN(link.Z, ":", 2)
 			if len(parts) == 2 {
-				return parts[0], "/" + parts[1]
+				switchName, switchIntf = parts[0], parts[1]
+				break
 			}
-			return iface.IP, ""
+		}
+		if zDevice == hostName {
+			// A side is the switch
+			parts := strings.SplitN(link.A, ":", 2)
+			if len(parts) == 2 {
+				switchName, switchIntf = parts[0], parts[1]
+				break
+			}
+		}
+	}
+	if switchName == "" || switchIntf == "" {
+		return "", ""
+	}
+
+	// Step 2: Find the IP in the switch device's steps
+	device, ok := l.Topology.Devices[switchName]
+	if !ok {
+		return "", ""
+	}
+	for _, step := range device.Steps {
+		// Match interface-scoped steps for this interface
+		if !strings.Contains(step.URL, "/interface/"+switchIntf+"/") {
+			continue
+		}
+		// Look for ip_address (apply-service) or ip (configure-interface)
+		if ip, ok := step.Params["ip_address"]; ok {
+			return splitIPMask(fmt.Sprintf("%v", ip))
+		}
+		if ip, ok := step.Params["ip"]; ok {
+			return splitIPMask(fmt.Sprintf("%v", ip))
 		}
 	}
 	return "", ""
+}
+
+// splitIPMask parses "10.1.100.1/24" → ("10.1.100.1", "/24").
+func splitIPMask(cidr string) (string, string) {
+	parts := strings.SplitN(cidr, "/", 2)
+	if len(parts) == 2 {
+		return parts[0], "/" + parts[1]
+	}
+	return cidr, ""
 }
 
 // deriveHostIP derives a host IP from the switch-side IP.

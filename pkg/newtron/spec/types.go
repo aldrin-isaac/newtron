@@ -489,36 +489,21 @@ type NewtLabConfig struct {
 }
 
 // TopologyDevice defines a device's configuration within a topology.
+// Switch devices have Steps (provisioning intent) and Ports (physical port config).
+// Host devices are empty entries — detection is via platform profile, not a type field.
 type TopologyDevice struct {
-	DeviceConfig *TopologyDeviceConfig              `json:"device_config,omitempty"`
-	Interfaces   map[string]*TopologyInterface      `json:"interfaces"`
-	PortChannels map[string]*TopologyPortChannel    `json:"portchannels,omitempty"`
+	Steps []TopologyStep                `json:"steps,omitempty"`
+	Ports map[string]map[string]string  `json:"ports,omitempty"`
 }
 
-// TopologyPortChannel defines a LAG aggregate within a topology.
-// Members reference physical interfaces from the Interfaces map.
-// Service and IP apply to the aggregate, not individual members.
-type TopologyPortChannel struct {
-	Members []string          `json:"members"`
-	Service string            `json:"service,omitempty"`
-	IP      string            `json:"ip,omitempty"`
-	Params  map[string]string `json:"params,omitempty"`
-}
-
-// TopologyDeviceConfig defines device-level settings for topology provisioning.
-// These are applied before interface-level services.
-type TopologyDeviceConfig struct {
-	RouteReflector bool `json:"route_reflector,omitempty"`
-}
-
-// TopologyInterface defines an interface's service binding within a topology.
-// Provides all parameters that would normally be supplied by the user at CLI.
-type TopologyInterface struct {
-	Link    string            `json:"link,omitempty"`    // "device:interface" (documentation/validation)
-	Service string            `json:"service"`           // service name from network.json
-	IP      string            `json:"ip,omitempty"`      // IP address (e.g., "10.1.1.1/30")
-	VRF     string            `json:"vrf,omitempty"`     // VRF name for non-service interfaces
-	Params  map[string]string `json:"params,omitempty"`  // service-specific params (e.g., peer_as)
+// TopologyStep is a single provisioning operation in the topology.
+// URL identifies the operation (last segment = verb, e.g., "/configure-bgp").
+// Interface-scoped operations include the interface name in the URL
+// (e.g., "/interface/Ethernet0/apply-service").
+// Params are structured JSON values matching the API request format.
+type TopologyStep struct {
+	URL    string         `json:"url"`
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // TopologyLink defines a point-to-point connection between two interfaces.
@@ -544,41 +529,3 @@ func (t *TopologySpecFile) DeviceNames() []string {
 	return names
 }
 
-// DeriveLinksFromInterfaces builds the links array from interface.link fields.
-// This allows defining topology connectivity directly in interface definitions
-// rather than maintaining a separate links array.
-func DeriveLinksFromInterfaces(topo *TopologySpecFile) []*TopologyLink {
-	var links []*TopologyLink
-	seen := make(map[string]bool) // track bidirectional pairs to avoid duplicates
-
-	for deviceName, device := range topo.Devices {
-		for ifaceName, iface := range device.Interfaces {
-			if iface.Link == "" {
-				continue
-			}
-
-			aEndpoint := deviceName + ":" + ifaceName
-			zEndpoint := iface.Link
-
-			// Create canonical key (alphabetically sorted to detect duplicates)
-			var key string
-			if aEndpoint < zEndpoint {
-				key = aEndpoint + "<->" + zEndpoint
-			} else {
-				key = zEndpoint + "<->" + aEndpoint
-			}
-
-			if seen[key] {
-				continue // Already added from peer side
-			}
-			seen[key] = true
-
-			links = append(links, &TopologyLink{
-				A: aEndpoint,
-				Z: zEndpoint,
-			})
-		}
-	}
-
-	return links
-}
