@@ -2,12 +2,11 @@
 /bin/
 /newtron
 /newtlab
-/test_acl
+/newtron-server
 
 # newtrun generated reports and runtime artifacts
 newtrun/.generated/
 newtrun/**/audit.log
-/test_derive
 
 # Claude Code local settings
 .claude/settings.local.json
@@ -20,5 +19,5 @@ newtrun/**/audit.log
 .DS_Store
 Thumbs.db
 
-# Analysis artifacts (generated LLD, scratch notes)
-/analysis/
+# Private content (managed in separate repo)
+/docs/book/
