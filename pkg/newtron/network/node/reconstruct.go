@@ -123,6 +123,42 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		})
 		return err
 
+	case "configure-svi":
+		vlanID := paramInt(p, "vlan_id")
+		if vlanID == 0 {
+			return fmt.Errorf("configure-svi: missing 'vlan_id' param")
+		}
+		_, err := n.ConfigureSVI(ctx, vlanID, SVIConfig{
+			VRF:        paramString(p, "vrf"),
+			IPAddress:  paramString(p, "ip_address"),
+			AnycastMAC: paramString(p, "anycast_mac"),
+		})
+		return err
+
+	case "bind-ipvpn":
+		vrfName := paramString(p, "vrf")
+		ipvpnName := paramString(p, "ipvpn")
+		if vrfName == "" || ipvpnName == "" {
+			return fmt.Errorf("bind-ipvpn: requires 'vrf' and 'ipvpn' params")
+		}
+		ipvpnDef, err := n.GetIPVPN(util.NormalizeName(ipvpnName))
+		if err != nil {
+			return fmt.Errorf("bind-ipvpn: %w", err)
+		}
+		_, err = n.BindIPVPN(ctx, vrfName, ipvpnDef)
+		return err
+
+	case "add-static-route":
+		vrfName := paramString(p, "vrf")
+		prefix := paramString(p, "prefix")
+		nextHop := paramString(p, "next_hop")
+		metric := paramInt(p, "metric")
+		if prefix == "" || nextHop == "" {
+			return fmt.Errorf("add-static-route: requires 'prefix' and 'next_hop' params")
+		}
+		_, err := n.AddStaticRoute(ctx, vrfName, prefix, nextHop, metric)
+		return err
+
 	default:
 		return fmt.Errorf("unknown node operation: %s", op)
 	}
@@ -161,6 +197,50 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 			RemoteAS:    asn,
 			Description: paramString(p, "description"),
 		})
+		return err
+
+	case "set-port-property":
+		property := paramString(p, "property")
+		value := paramString(p, "value")
+		if property == "" {
+			return fmt.Errorf("set-port-property: missing 'property' param")
+		}
+		_, err := iface.Set(ctx, property, value)
+		return err
+
+	case "bind-acl":
+		aclName := paramString(p, "acl_name")
+		direction := paramString(p, "direction")
+		if aclName == "" {
+			return fmt.Errorf("bind-acl: missing 'acl_name' param")
+		}
+		_, err := iface.BindACL(ctx, aclName, direction)
+		return err
+
+	case "apply-qos":
+		policyName := paramString(p, "policy")
+		if policyName == "" {
+			return fmt.Errorf("apply-qos: missing 'policy' param")
+		}
+		n := iface.Node()
+		policy, err := n.GetQoSPolicy(util.NormalizeName(policyName))
+		if err != nil {
+			return fmt.Errorf("apply-qos: %w", err)
+		}
+		_, err = iface.ApplyQoS(ctx, util.NormalizeName(policyName), policy)
+		return err
+
+	case "bind-macvpn":
+		macvpnName := paramString(p, "macvpn")
+		if macvpnName == "" {
+			return fmt.Errorf("bind-macvpn: missing 'macvpn' param")
+		}
+		n := iface.Node()
+		macvpnDef, err := n.GetMACVPN(util.NormalizeName(macvpnName))
+		if err != nil {
+			return fmt.Errorf("bind-macvpn: %w", err)
+		}
+		_, err = iface.BindMACVPN(ctx, util.NormalizeName(macvpnName), macvpnDef)
 		return err
 
 	default:
