@@ -136,7 +136,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.CreateACLTable(app.deviceName, newtron.ACLCreateRequest{
+		return displayWriteResult(app.client.CreateACL(app.deviceName, newtron.ACLCreateRequest{
 			Name:        aclName,
 			Type:        aclType,
 			Stage:       aclStage,
@@ -225,7 +225,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.DeleteACLTable(app.deviceName, aclName, execOpts()))
+		return displayWriteResult(app.client.DeleteACL(app.deviceName, aclName, execOpts()))
 	},
 }
 

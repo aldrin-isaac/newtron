@@ -101,8 +101,8 @@ func bindIpvpnConfig(vrfName string, ipvpnDef *spec.IPVPNSpec, underlayASN int, 
 	if ipvpnDef.L3VNIVlan > 0 {
 		// Transit VLAN (no ports, no IP — purely for VXLAN decap)
 		entries = append(entries, createVlanConfig(ipvpnDef.L3VNIVlan, VLANConfig{})...)
-		// SVI binding transit VLAN to VRF (enables VRF routing for decapped packets)
-		entries = append(entries, createSviConfig(ipvpnDef.L3VNIVlan, SVIConfig{VRF: vrfName})...)
+		// IRB binding transit VLAN to VRF (enables VRF routing for decapped packets)
+		entries = append(entries, createSviConfig(ipvpnDef.L3VNIVlan, IRBConfig{VRF: vrfName})...)
 		// VXLAN tunnel map for L3VNI
 		entries = append(entries, createVniMapConfig(VLANName(ipvpnDef.L3VNIVlan), ipvpnDef.L3VNI)...)
 	}
@@ -255,7 +255,7 @@ func (n *Node) unbindIpvpnConfig(vrfName string) []sonic.Entry {
 }
 
 // UnbindIPVPN removes the IP-VPN binding from a VRF (removes L3VNI mapping and BGP EVPN config).
-// Also removes the L3VNI transit VLAN infrastructure (VLAN, SVI, VXLAN_TUNNEL_MAP) that
+// Also removes the L3VNI transit VLAN infrastructure (VLAN, IRB, VXLAN_TUNNEL_MAP) that
 // BindIPVPN created — operational symmetry requires the reverse to undo all forward effects.
 //
 // Refuses if any NEWTRON_INTENT references this VRF — callers must remove
@@ -310,7 +310,7 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrfName string) (*ChangeSet, err
 	cs.Deletes(n.unbindIpvpnConfig(vrfName))
 
 	// Delete L3VNI transit VLAN infrastructure (reverse of bindIpvpnConfig).
-	// BindIPVPN creates: transit VLAN, SVI binding VLAN→VRF, VXLAN_TUNNEL_MAP.
+	// BindIPVPN creates: transit VLAN, IRB binding VLAN→VRF, VXLAN_TUNNEL_MAP.
 	// UnbindIPVPN must remove all three to satisfy operational symmetry.
 	if l3vni > 0 && l3vniVlan > 0 {
 		cs.Deletes(deleteVniMapConfig(l3vni, VLANName(l3vniVlan)))
@@ -406,7 +406,7 @@ func (n *Node) GetVRF(name string) (*VRFInfo, error) {
 		}
 	}
 
-	// Also check VLAN_INTERFACE for SVIs in this VRF
+	// Also check VLAN_INTERFACE for IRBs in this VRF
 	for key := range n.configDB.VLANInterface {
 		parts := splitKey(key)
 		vlanName := parts[0]

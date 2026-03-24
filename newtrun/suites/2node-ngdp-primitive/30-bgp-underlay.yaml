@@ -43,18 +43,18 @@ steps:
       jq: '.local_asn == "65002"'
 
   # Step 2: Set inter-switch link IPs on Ethernet0.
-  - name: set-ip-eth0-switch1
+  - name: configure-eth0-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/set-ip
+    url: /node/{{device}}/interface/Ethernet0/configure-interface
     params: {ip: "10.1.0.0/31"}
 
-  - name: set-ip-eth0-switch2
+  - name: configure-eth0-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/set-ip
+    url: /node/{{device}}/interface/Ethernet0/configure-interface
     params: {ip: "10.1.0.1/31"}
 
   - name: verify-ip-eth0-sw1
@@ -127,14 +127,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/add-bgp-neighbor
+    url: /node/{{device}}/interface/Ethernet0/add-bgp-peer
     params: {remote_as: 65002}
 
   - name: bgp-add-neighbor-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet0/add-bgp-neighbor
+    url: /node/{{device}}/interface/Ethernet0/add-bgp-peer
     params: {remote_as: 65001}
 
   - name: verify-bgp-neighbor-sw1

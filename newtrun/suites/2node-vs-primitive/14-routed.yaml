@@ -14,19 +14,12 @@ steps:
     url: /node/{{device}}/create-vrf
     params: {name: Vrf_local}
 
-  - name: bind-ethernet1-to-vrf
+  - name: configure-ethernet4
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet4/set-vrf
-    params: {vrf: Vrf_local}
-
-  - name: set-ip-ethernet1
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/interface/Ethernet4/set-ip
-    params: {ip: "10.20.1.1/31"}
+    url: /node/{{device}}/interface/Ethernet4/configure-interface
+    params: {vrf: Vrf_local, ip: "10.20.1.1/31"}
 
   - name: verify-vrf-exists
     action: newtron

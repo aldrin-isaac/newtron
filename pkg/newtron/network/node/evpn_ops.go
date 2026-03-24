@@ -101,9 +101,9 @@ func deleteBgpEvpnVNIConfig(vrfName string, vni int) []sonic.Entry {
 // EVPN Operations
 // ============================================================================
 
-// MapL2VNI maps a VLAN to an L2VNI for EVPN.
-func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	cs, err := n.op("map-l2vni", vlanResource(vlanID), ChangeAdd,
+// BindMACVPN maps a VLAN to an L2VNI for EVPN.
+func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
+	cs, err := n.op("bind-macvpn", vlanResource(vlanID), ChangeAdd,
 		func(pc *PreconditionChecker) {
 			pc.RequireVTEPConfigured().RequireVLANExists(vlanID)
 			// Check platform support for EVPN VXLAN
@@ -118,7 +118,7 @@ func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) (*ChangeSet, error
 			}
 		},
 		func() []sonic.Entry { return createVniMapConfig(VLANName(vlanID), vni) },
-		"device.unmap-l2vni")
+		"device.unbind-macvpn")
 	if err != nil {
 		return nil, err
 	}
@@ -144,21 +144,21 @@ func (n *Node) unmapVniConfig(vlanID int) []sonic.Entry {
 	return entries
 }
 
-// UnmapL2VNI removes the L2VNI mapping for a VLAN.
-func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := n.precondition("unmap-l2vni", vlanResource(vlanID)).
+// UnbindMACVPN removes the L2VNI mapping for a VLAN.
+func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	if err := n.precondition("unbind-macvpn", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := buildChangeSet(n.name, "device.unmap-l2vni", n.unmapVniConfig(vlanID), ChangeDelete)
+	cs := buildChangeSet(n.name, "device.unbind-macvpn", n.unmapVniConfig(vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
-		return nil, fmt.Errorf("no L2VNI mapping found for VLAN %d", vlanID)
+		return nil, fmt.Errorf("no MAC-VPN binding found for VLAN %d", vlanID)
 	}
 
-	util.WithDevice(n.name).Infof("Unmapped L2VNI for VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Unbound MAC-VPN for VLAN %d", vlanID)
 	return cs, nil
 }
 

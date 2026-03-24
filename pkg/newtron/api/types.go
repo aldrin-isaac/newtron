@@ -97,21 +97,6 @@ type ApplyServiceRequest struct {
 	Params    map[string]string `json:"params,omitempty"`
 }
 
-// SetIPRequest is the body for POST .../set-ip.
-type SetIPRequest struct {
-	IP string `json:"ip"`
-}
-
-// RemoveIPRequest is the body for POST .../remove-ip.
-type RemoveIPRequest struct {
-	IP string `json:"ip"`
-}
-
-// SetVRFRequest is the body for POST .../set-vrf.
-type SetVRFRequest struct {
-	VRF string `json:"vrf"`
-}
-
 // BindACLRequest is the body for POST .../bind-acl.
 type BindACLRequest struct {
 	ACL       string `json:"acl"`
@@ -140,14 +125,14 @@ type ConfigureInterfaceRequest struct {
 	IP  string `json:"ip,omitempty"`
 }
 
-// MapL2VNIRequest is the body for POST .../map-l2vni.
-type MapL2VNIRequest struct {
+// NodeBindMACVPNRequest is the body for POST .../bind-macvpn (node-level, maps VLAN to L2VNI).
+type NodeBindMACVPNRequest struct {
 	VlanID int `json:"vlan_id"`
 	VNI    int `json:"vni"`
 }
 
-// UnmapL2VNIRequest is the body for POST .../unmap-l2vni.
-type UnmapL2VNIRequest struct {
+// NodeUnbindMACVPNRequest is the body for POST .../unbind-macvpn (node-level).
+type NodeUnbindMACVPNRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
@@ -169,15 +154,15 @@ type VLANCreateRequest struct {
 	Description string `json:"description,omitempty"`
 }
 
-// SVIConfigureRequest is the body for POST .../svi.
-type SVIConfigureRequest = newtron.SVIConfigureRequest
+// IRBConfigureRequest is the body for POST .../configure-irb.
+type IRBConfigureRequest = newtron.IRBConfigureRequest
 
 // VRFCreateRequest is the body for POST .../create-vrf.
 type VRFCreateRequest struct {
 	Name string `json:"name"`
 }
 
-// ACLCreateRequest is the body for POST .../create-acl-table.
+// ACLCreateRequest is the body for POST .../create-acl.
 type ACLCreateRequest = newtron.ACLCreateRequest
 
 // ACLRuleAddRequest is the body for POST .../add-acl-rule.
@@ -203,15 +188,9 @@ type VLANMemberRequest struct {
 	Tagged    bool   `json:"tagged"`
 }
 
-// RemoveSVIRequest is the body for POST .../remove-svi.
-type RemoveSVIRequest struct {
+// RemoveIRBRequest is the body for POST .../remove-irb.
+type RemoveIRBRequest struct {
 	VlanID int `json:"vlan_id"`
-}
-
-// VRFInterfaceRequest is the body for POST .../add-vrf-interface.
-type VRFInterfaceRequest struct {
-	VRF       string `json:"vrf"`
-	Interface string `json:"interface"`
 }
 
 // BindIPVPNRequest is the body for POST .../bind-ipvpn.

@@ -112,8 +112,8 @@ type VLANConfig struct {
 	Description string
 }
 
-// SVIConfig holds parameters for configuring an SVI (VLAN interface).
-type SVIConfig struct {
+// IRBConfig holds parameters for configuring an IRB (Integrated Routing and Bridging) interface.
+type IRBConfig struct {
 	VlanID     int
 	VRF        string
 	IPAddress  string
@@ -134,8 +134,8 @@ type BGPNeighborConfig struct {
 	Description string `json:"description,omitempty"`
 }
 
-// ACLTableConfig holds parameters for creating an ACL table.
-type ACLTableConfig struct {
+// ACLConfig holds parameters for creating an ACL table.
+type ACLConfig struct {
 	Name        string
 	Type        string
 	Stage       string
@@ -791,7 +791,7 @@ const (
 // a device-wide concern (loopback, baseline).
 //
 // An intent is a composite of primitives: ApplyService expands into
-// CreateVLAN + CreateVRF + AddBGPNeighbor + ... Each primitive is tracked
+// CreateVLAN + CreateVRF + AddBGPPeer + ... Each primitive is tracked
 // in the Operations list for crash recovery and rollback.
 //
 // The same Intent type is used in all contexts:
@@ -1156,8 +1156,8 @@ type RouteNextHop struct {
 // need to import the internal server package (pkg/newtron/api).
 // ============================================================================
 
-// SVIConfigureRequest is the request body for configuring an SVI.
-type SVIConfigureRequest struct {
+// IRBConfigureRequest is the request body for configuring an IRB.
+type IRBConfigureRequest struct {
 	VlanID     int    `json:"vlan_id"`
 	VRF        string `json:"vrf,omitempty"`
 	IPAddress  string `json:"ip_address,omitempty"`

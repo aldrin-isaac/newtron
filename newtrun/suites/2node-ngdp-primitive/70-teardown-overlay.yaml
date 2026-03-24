@@ -166,18 +166,18 @@ steps:
       jq: '.exists == false'
 
   # 7. Remove cross-switch IPs from Ethernet1
-  - name: remove-ip-eth1-sw1
+  - name: unconfigure-eth1-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/remove-ip
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
     params: {ip: "10.20.0.1/31"}
 
-  - name: remove-ip-eth1-sw2
+  - name: unconfigure-eth1-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/remove-ip
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
     params: {ip: "10.20.1.1/31"}
 
   - name: verify-eth1-ip-removed-sw1

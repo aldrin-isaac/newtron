@@ -8,18 +8,18 @@ topology: 2node-ngdp
 requires: [teardown-local, bgp-underlay]
 
 steps:
-  - name: set-ip-eth1-switch1
+  - name: configure-eth1-switch1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/set-ip
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
     params: {ip: "10.20.0.1/31"}
 
-  - name: set-ip-eth1-switch2
+  - name: configure-eth1-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet1/set-ip
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
     params: {ip: "10.20.1.1/31"}
 
   - name: verify-ip-sw1-eth1

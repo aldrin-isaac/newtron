@@ -1088,8 +1088,8 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 	if vrfName != "" && vrfName != "default" {
 		// For routed services, delete the INTERFACE base entry entirely.
-		// For IRB/bridged types, the VRF binding is on the SVI (VLAN_INTERFACE),
-		// not the physical INTERFACE — SVI cleanup happens in the VLAN section below.
+		// For IRB/bridged types, the VRF binding is on the IRB (VLAN_INTERFACE),
+		// not the physical INTERFACE — IRB cleanup happens in the VLAN section below.
 		if canRoute {
 			cs.Deletes(i.enableIpRouting())
 		}
@@ -1128,12 +1128,12 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		if depCheck.IsLastVLANMember(vlanID) {
 			// Last member - clean up all VLAN-related config
 
-			// SVI (for IRB types)
+			// IRB (for IRB types)
 			if hasIRB {
 				if anycastIP != "" {
 					cs.Deletes(deleteSviIPConfig(vlanID, anycastIP))
 				} else if b["ip_address"] != "" {
-					// Local IRB: SVI IP comes from opts.IPAddress (stored in binding)
+					// Local IRB: IRB IP comes from opts.IPAddress (stored in binding)
 					cs.Deletes(deleteSviIPConfig(vlanID, b["ip_address"]))
 				}
 				cs.Deletes(deleteSviBaseConfig(vlanID))

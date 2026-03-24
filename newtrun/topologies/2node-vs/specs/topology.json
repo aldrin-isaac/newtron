@@ -7,7 +7,7 @@
         {"url": "/configure-loopback"},
         {"url": "/set-device-metadata", "params": {"fields": {"hostname": "switch1", "bgp_asn": "65001", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
         {"url": "/configure-bgp"},
-        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}}
+        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}}
       ],
       "ports": {
         "Ethernet0":  {"admin_status": "up", "mtu": "9100"},
@@ -23,7 +23,7 @@
         {"url": "/configure-loopback"},
         {"url": "/set-device-metadata", "params": {"fields": {"hostname": "switch2", "bgp_asn": "65002", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
         {"url": "/configure-bgp"},
-        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}}
+        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}}
       ],
       "ports": {
         "Ethernet0":  {"admin_status": "up", "mtu": "9100"},

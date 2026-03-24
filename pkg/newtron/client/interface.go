@@ -40,24 +40,6 @@ func (c *Client) RefreshService(device, iface string, opts newtron.ExecOpts) (*n
 	return c.interfaceWrite(device, iface, "refresh-service", nil, opts)
 }
 
-// SetIP sets an IP address on an interface.
-func (c *Client) SetIP(device, iface, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.SetIPRequest{IP: ip}
-	return c.interfaceWrite(device, iface, "set-ip", body, opts)
-}
-
-// RemoveIP removes an IP address from an interface.
-func (c *Client) RemoveIP(device, iface, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.RemoveIPRequest{IP: ip}
-	return c.interfaceWrite(device, iface, "remove-ip", body, opts)
-}
-
-// SetVRF assigns an interface to a VRF.
-func (c *Client) SetVRF(device, iface, vrf string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.SetVRFRequest{VRF: vrf}
-	return c.interfaceWrite(device, iface, "set-vrf", body, opts)
-}
-
 // BindACL binds an ACL to an interface.
 func (c *Client) BindACL(device, iface, acl, direction string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.BindACLRequest{ACL: acl, Direction: direction}
@@ -81,17 +63,17 @@ func (c *Client) UnbindMACVPN(device, iface string, opts newtron.ExecOpts) (*new
 	return c.interfaceWrite(device, iface, "unbind-macvpn", nil, opts)
 }
 
-// InterfaceAddBGPNeighbor adds a direct (interface-level) BGP neighbor.
-func (c *Client) InterfaceAddBGPNeighbor(device, iface string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.interfaceWrite(device, iface, "add-bgp-neighbor", config, opts)
+// InterfaceAddBGPPeer adds a direct (interface-level) BGP peer.
+func (c *Client) InterfaceAddBGPPeer(device, iface string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "add-bgp-peer", config, opts)
 }
 
-// InterfaceRemoveBGPNeighbor removes a BGP neighbor from an interface.
-func (c *Client) InterfaceRemoveBGPNeighbor(device, iface, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// InterfaceRemoveBGPPeer removes a BGP peer from an interface.
+func (c *Client) InterfaceRemoveBGPPeer(device, iface, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		IP string `json:"ip"`
 	}{IP: ip}
-	return c.interfaceWrite(device, iface, "remove-bgp-neighbor", body, opts)
+	return c.interfaceWrite(device, iface, "remove-bgp-peer", body, opts)
 }
 
 // SetPortProperty sets a property on an interface.
@@ -104,5 +86,11 @@ func (c *Client) SetPortProperty(device, iface, property, value string, opts new
 func (c *Client) ConfigureInterface(device, iface, vrf, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.ConfigureInterfaceRequest{VRF: vrf, IP: ip}
 	return c.interfaceWrite(device, iface, "configure-interface", body, opts)
+}
+
+// UnconfigureInterface removes VRF binding and/or IP address from an interface.
+func (c *Client) UnconfigureInterface(device, iface, vrf, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.ConfigureInterfaceRequest{VRF: vrf, IP: ip}
+	return c.interfaceWrite(device, iface, "unconfigure-interface", body, opts)
 }
 

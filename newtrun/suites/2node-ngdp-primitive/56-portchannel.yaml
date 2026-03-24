@@ -95,18 +95,18 @@ steps:
       jq: '.exists == true'
 
   # 4. Set IPs on PortChannel1
-  - name: set-ip-portchannel1-sw1
+  - name: configure-portchannel1-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/PortChannel1/set-ip
+    url: /node/{{device}}/interface/PortChannel1/configure-interface
     params: {ip: "10.30.0.0/31"}
 
-  - name: set-ip-portchannel1-sw2
+  - name: configure-portchannel1-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/PortChannel1/set-ip
+    url: /node/{{device}}/interface/PortChannel1/configure-interface
     params: {ip: "10.30.0.1/31"}
 
   # 5. Wait for kernel IPs
@@ -212,18 +212,18 @@ steps:
     url: /node/{{device}}/remove-static-route
     params: {vrf: default, prefix: "10.20.0.0/31"}
 
-  - name: remove-ip-portchannel1-sw1
+  - name: unconfigure-portchannel1-sw1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/PortChannel1/remove-ip
+    url: /node/{{device}}/interface/PortChannel1/unconfigure-interface
     params: {ip: "10.30.0.0/31"}
 
-  - name: remove-ip-portchannel1-sw2
+  - name: unconfigure-portchannel1-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/PortChannel1/remove-ip
+    url: /node/{{device}}/interface/PortChannel1/unconfigure-interface
     params: {ip: "10.30.0.1/31"}
 
   - name: remove-member-eth5-sw1

@@ -284,7 +284,7 @@ func TestVLANInfo_Structure(t *testing.T) {
 		ID:        100,
 		Name:      "ServerVLAN",
 		Members:   []string{"Ethernet0", "Ethernet4(t)"},
-		SVIStatus: "up",
+		IRBStatus: "up",
 	}
 
 	if info.ID != 100 {
@@ -296,8 +296,8 @@ func TestVLANInfo_Structure(t *testing.T) {
 	if len(info.Members) != 2 {
 		t.Errorf("Members count = %d, want %d", len(info.Members), 2)
 	}
-	if info.SVIStatus != "up" {
-		t.Errorf("SVIStatus = %q, want %q", info.SVIStatus, "up")
+	if info.IRBStatus != "up" {
+		t.Errorf("IRBStatus = %q, want %q", info.IRBStatus, "up")
 	}
 }
 

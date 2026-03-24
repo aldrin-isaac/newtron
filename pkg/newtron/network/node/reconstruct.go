@@ -56,15 +56,15 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		_, err := n.SetupVTEP(ctx, sourceIP)
 		return err
 
-	case "add-overlay-peer":
+	case "add-bgp-multihop-peer":
 		ip := paramString(p, "neighbor_ip")
 		asn := paramInt(p, "asn")
 		desc := paramString(p, "description")
 		evpn := paramBool(p, "evpn")
 		if ip == "" || asn == 0 {
-			return fmt.Errorf("add-overlay-peer: requires neighbor_ip and asn")
+			return fmt.Errorf("add-bgp-multihop-peer: requires neighbor_ip and asn")
 		}
-		_, err := n.AddOverlayPeer(ctx, ip, asn, desc, evpn)
+		_, err := n.AddBGPMultihopPeer(ctx, ip, asn, desc, evpn)
 		return err
 
 	case "configure-route-reflector":
@@ -91,13 +91,13 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		_, err := n.CreateVLAN(ctx, vlanID, VLANConfig{})
 		return err
 
-	case "map-l2vni":
+	case "bind-macvpn":
 		vlanID := paramInt(p, "vlan_id")
 		vni := paramInt(p, "vni")
 		if vlanID == 0 || vni == 0 {
-			return fmt.Errorf("map-l2vni: requires vlan_id and vni")
+			return fmt.Errorf("bind-macvpn: requires vlan_id and vni")
 		}
-		_, err := n.MapL2VNI(ctx, vlanID, vni)
+		_, err := n.BindMACVPN(ctx, vlanID, vni)
 		return err
 
 	case "create-portchannel":
@@ -111,24 +111,24 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		})
 		return err
 
-	case "create-acl-table":
+	case "create-acl":
 		name := paramString(p, "name")
 		if name == "" {
-			return fmt.Errorf("create-acl-table: missing 'name' param")
+			return fmt.Errorf("create-acl: missing 'name' param")
 		}
-		_, err := n.CreateACLTable(ctx, name, ACLTableConfig{
+		_, err := n.CreateACL(ctx, name, ACLConfig{
 			Type:  paramString(p, "type"),
 			Stage: paramString(p, "stage"),
 			Ports: paramString(p, "ports"),
 		})
 		return err
 
-	case "configure-svi":
+	case "configure-irb":
 		vlanID := paramInt(p, "vlan_id")
 		if vlanID == 0 {
-			return fmt.Errorf("configure-svi: missing 'vlan_id' param")
+			return fmt.Errorf("configure-irb: missing 'vlan_id' param")
 		}
-		_, err := n.ConfigureSVI(ctx, vlanID, SVIConfig{
+		_, err := n.ConfigureIRB(ctx, vlanID, IRBConfig{
 			VRF:        paramString(p, "vrf"),
 			IPAddress:  paramString(p, "ip_address"),
 			AnycastMAC: paramString(p, "anycast_mac"),
@@ -187,12 +187,12 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 		})
 		return err
 
-	case "add-bgp-neighbor":
+	case "add-bgp-peer":
 		asn := paramInt(p, "remote_as")
 		if asn == 0 {
-			return fmt.Errorf("add-bgp-neighbor: missing 'remote_as' param")
+			return fmt.Errorf("add-bgp-peer: missing 'remote_as' param")
 		}
-		_, err := iface.AddBGPNeighbor(ctx, DirectBGPNeighborConfig{
+		_, err := iface.AddBGPPeer(ctx, DirectBGPPeerConfig{
 			NeighborIP:  paramString(p, "neighbor_ip"),
 			RemoteAS:    asn,
 			Description: paramString(p, "description"),

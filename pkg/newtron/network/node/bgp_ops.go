@@ -332,7 +332,7 @@ func (n *Node) BGPNeighborExists(neighborIP string) bool {
 // node's resolved profile — no YAML params needed.
 //
 // This is a lightweight primitive that only sets up the BGP instance itself,
-// without adding any neighbors. Use bgp-add-neighbor / setup-evpn for peers.
+// without adding any peers. Use bgp-add-peer / setup-evpn for peers.
 func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	if err := n.precondition("configure-bgp", "bgp").Result(); err != nil {
 		return nil, err
@@ -384,13 +384,13 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 // BGP Neighbor Operations
 // ============================================================================
 
-// AddOverlayPeer adds an indirect BGP neighbor using loopback as update-source.
-// This is used for iBGP or multi-hop eBGP sessions (EVPN overlay peers).
+// AddBGPMultihopPeer adds an indirect BGP neighbor using loopback as update-source.
+// This is used for multi-hop eBGP sessions (EVPN overlay peers).
 //
-// For DIRECT BGP neighbors that use a link IP as the update-source (typical
-// eBGP on point-to-point links), use Interface.AddBGPNeighbor() instead.
-func (n *Node) AddOverlayPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if err := n.precondition("add-overlay-peer", neighborIP).Result(); err != nil {
+// For DIRECT BGP peers that use a link IP as the update-source (typical
+// eBGP on point-to-point links), use Interface.AddBGPPeer() instead.
+func (n *Node) AddBGPMultihopPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
+	if err := n.precondition("add-bgp-multihop-peer", neighborIP).Result(); err != nil {
 		return nil, err
 	}
 
@@ -398,7 +398,7 @@ func (n *Node) AddOverlayPeer(ctx context.Context, neighborIP string, asn int, d
 		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
 	}
 	if n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
+		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
 	}
 
 	isEBGP := asn != n.resolved.UnderlayASN
@@ -409,27 +409,27 @@ func (n *Node) AddOverlayPeer(ctx context.Context, neighborIP string, asn int, d
 		ActivateEVPN:     evpn,
 		NextHopUnchanged: evpn && isEBGP,
 	})
-	cs := buildChangeSet(n.name, "device.add-overlay-peer", config, ChangeAdd)
+	cs := buildChangeSet(n.name, "device.add-bgp-multihop-peer", config, ChangeAdd)
 	n.applyShadow(cs)
 
-	util.WithDevice(n.name).Infof("Adding loopback BGP neighbor %s (AS %d, update-source: %s)",
+	util.WithDevice(n.name).Infof("Adding multihop BGP peer %s (AS %d, update-source: %s)",
 		neighborIP, asn, n.resolved.LoopbackIP)
 	return cs, nil
 }
 
-// RemoveBGPNeighbor removes a BGP neighbor from the device.
-// This works for both direct (interface-level) and indirect (loopback-level) neighbors.
-func (n *Node) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	cs, err := n.op("remove-bgp-neighbor", neighborIP, ChangeDelete,
+// RemoveBGPPeer removes a BGP peer from the device.
+// This works for both direct (interface-level) and indirect (loopback-level) peers.
+func (n *Node) RemoveBGPPeer(ctx context.Context, neighborIP string) (*ChangeSet, error) {
+	cs, err := n.op("remove-bgp-peer", neighborIP, ChangeDelete,
 		func(pc *PreconditionChecker) {
-			pc.Check(n.BGPNeighborExists(neighborIP), "BGP neighbor must exist",
-				fmt.Sprintf("BGP neighbor %s not found", neighborIP))
+			pc.Check(n.BGPNeighborExists(neighborIP), "BGP peer must exist",
+				fmt.Sprintf("BGP peer %s not found", neighborIP))
 		},
 		func() []sonic.Entry { return DeleteBGPNeighborConfig("default", neighborIP) })
 	if err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.name).Infof("Removing BGP neighbor %s", neighborIP)
+	util.WithDevice(n.name).Infof("Removing BGP peer %s", neighborIP)
 	return cs, nil
 }
 

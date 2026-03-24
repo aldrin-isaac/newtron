@@ -101,7 +101,7 @@ func (i *Interface) BindMACVPN(ctx context.Context, ...) (*ChangeSet, error) {
 **Operations with platform checks**:
 - `BindMACVPN()` - checks `"macvpn"`
 - `UnbindMACVPN()` - checks `"macvpn"`
-- `MapL2VNI()` - checks `"evpn-vxlan"`
+- `BindMACVPN()` (node-level) - checks `"evpn-vxlan"`
 - Service generation with ACLs - checks `"acl"` (existing)
 
 ### 5. Test Scenario Filtering

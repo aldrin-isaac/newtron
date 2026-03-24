@@ -21,11 +21,11 @@ func TestParseStepURL(t *testing.T) {
 		{"/configure-loopback", "configure-loopback", ""},
 		{"/set-device-metadata", "set-device-metadata", ""},
 		{"/setup-vtep", "setup-vtep", ""},
-		{"/add-overlay-peer", "add-overlay-peer", ""},
+		{"/add-bgp-multihop-peer", "add-bgp-multihop-peer", ""},
 		{"/create-vrf", "create-vrf", ""},
 		{"/interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
 		{"/interface/Ethernet4/configure-interface", "configure-interface", "Ethernet4"},
-		{"/interface/Ethernet12/add-bgp-neighbor", "add-bgp-neighbor", "Ethernet12"},
+		{"/interface/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
 		{"/interface/Ethernet0/set-port-property", "set-port-property", "Ethernet0"},
 		{"/interface/Ethernet0/bind-acl", "bind-acl", "Ethernet0"},
 		{"/interface/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
@@ -205,7 +205,7 @@ func TestReplayStepConfigureBGP(t *testing.T) {
 	}
 }
 
-func TestReplayStepAddOverlayPeer(t *testing.T) {
+func TestReplayStepAddBGPMultihopPeer(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
 	// Setup prerequisites
@@ -217,7 +217,7 @@ func TestReplayStepAddOverlayPeer(t *testing.T) {
 	ReplayStep(ctx, n, spec.TopologyStep{URL: "/configure-bgp"})
 
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/add-overlay-peer",
+		URL: "/add-bgp-multihop-peer",
 		Params: map[string]any{
 			"neighbor_ip": "10.0.0.2",
 			"asn":         float64(65002),
@@ -225,7 +225,7 @@ func TestReplayStepAddOverlayPeer(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("add-overlay-peer: %v", err)
+		t.Fatalf("add-bgp-multihop-peer: %v", err)
 	}
 	// BGP_NEIGHBOR key includes VRF: "default|10.0.0.2"
 	if _, ok := n.ConfigDB().BGPNeighbor["default|10.0.0.2"]; !ok {

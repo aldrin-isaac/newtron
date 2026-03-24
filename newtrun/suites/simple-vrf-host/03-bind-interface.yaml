@@ -6,21 +6,13 @@ topology: 2node-ngdp
 requires: [create-vrf]
 
 steps:
-  # Bind Ethernet2 to Vrf_CUSTOMER via newtron primitive.
-  - name: bind-ethernet2-to-customer-vrf
+  # Bind Ethernet2 to Vrf_CUSTOMER and assign IP in a single operation.
+  - name: configure-ethernet2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet2/set-vrf
-    params: {vrf: Vrf_CUSTOMER}
-
-  # Assign IP to Ethernet2 (already bound to Vrf_CUSTOMER in CONFIG_DB).
-  - name: set-ip-ethernet2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/interface/Ethernet2/set-ip
-    params: {ip: "10.10.1.1/31"}
+    url: /node/{{device}}/interface/Ethernet2/configure-interface
+    params: {vrf: Vrf_CUSTOMER, ip: "10.10.1.1/31"}
 
   # Verify CONFIG_DB.
   - name: verify-vrf-binding-config-db

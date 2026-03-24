@@ -8,17 +8,17 @@ import (
 )
 
 // ============================================================================
-// Direct BGP Neighbor Operations (Interface-level, uses link IP as source)
+// Direct BGP Peer Operations (Interface-level, uses link IP as source)
 // ============================================================================
-// These operations are for eBGP neighbors where the BGP session is sourced
+// These operations are for eBGP peers where the BGP session is sourced
 // from the interface IP (direct peering over a link).
 //
-// For iBGP neighbors using loopback IPs (indirect peering), use the
-// device-level BGP operations: Device.AddOverlayPeer() or
+// For iBGP peers using loopback IPs (indirect peering), use the
+// device-level BGP operations: Device.AddBGPMultihopPeer() or
 // Device.SetupBGPEVPN().
 
-// DirectBGPNeighborConfig holds configuration for a direct BGP neighbor.
-type DirectBGPNeighborConfig struct {
+// DirectBGPPeerConfig holds configuration for a direct BGP peer.
+type DirectBGPPeerConfig struct {
 	NeighborIP  string // Neighbor IP (auto-derived for /30, /31 if empty)
 	RemoteAS    int    // Remote AS number (required for eBGP)
 	Description string // Optional description
@@ -27,13 +27,13 @@ type DirectBGPNeighborConfig struct {
 	Multihop    int    // eBGP multihop TTL (0 = directly connected)
 }
 
-// AddBGPNeighbor adds a direct BGP neighbor on this interface.
+// AddBGPPeer adds a direct BGP peer on this interface.
 // The BGP session will use this interface's IP as the update-source.
 // For point-to-point links (/30, /31), the neighbor IP is auto-derived if not specified.
-func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborConfig) (*ChangeSet, error) {
+func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("add-bgp-neighbor", i.name).Result(); err != nil {
+	if err := n.precondition("add-bgp-peer", i.name).Result(); err != nil {
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
@@ -64,9 +64,9 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 		return nil, fmt.Errorf("invalid neighbor IP: %s", neighborIP)
 	}
 
-	// Check if neighbor already exists
+	// Check if BGP peer already exists
 	if n.BGPNeighborExists(neighborIP) {
-		return nil, fmt.Errorf("BGP neighbor %s already exists", neighborIP)
+		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
 	}
 
 	// Extract local IP without mask for update-source
@@ -78,20 +78,20 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, cfg DirectBGPNeighborCon
 		MultihopTTL:  fmt.Sprintf("%d", cfg.Multihop),
 		ActivateIPv4: true,
 	})
-	cs := buildChangeSet(n.Name(), "interface.add-bgp-neighbor", config, ChangeAdd)
-	cs.ReverseOp = "device.remove-bgp-neighbor"
+	cs := buildChangeSet(n.Name(), "interface.add-bgp-peer", config, ChangeAdd)
+	cs.ReverseOp = "device.remove-bgp-peer"
 	cs.OperationParams = map[string]string{"neighbor_ip": neighborIP}
 
-	util.WithDevice(n.Name()).Infof("Adding direct BGP neighbor %s (AS %d) on interface %s",
+	util.WithDevice(n.Name()).Infof("Adding direct BGP peer %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)
 	return cs, nil
 }
 
-// RemoveBGPNeighbor removes a direct BGP neighbor from this interface.
-func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*ChangeSet, error) {
+// RemoveBGPPeer removes a direct BGP peer from this interface.
+func (i *Interface) RemoveBGPPeer(ctx context.Context, neighborIP string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("remove-bgp-neighbor", i.name).Result(); err != nil {
+	if err := n.precondition("remove-bgp-peer", i.name).Result(); err != nil {
 		return nil, err
 	}
 
@@ -105,7 +105,7 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, neighborIP string) (*
 		}
 	}
 
-	return n.RemoveBGPNeighbor(ctx, neighborIP)
+	return n.RemoveBGPPeer(ctx, neighborIP)
 }
 
 

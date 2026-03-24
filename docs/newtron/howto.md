@@ -776,7 +776,7 @@ newtron leaf1 service remove Ethernet0 -x
 2. Removes IP addresses from interface
 3. Handles shared policy objects (ACLs, route maps, prefix sets, BGP peer groups): removes interface from binding list, or deletes the object entirely if this was the last user (see [§15.5](#155-shared-policy-objects))
 4. Unbinds interface from VRF; for per-interface VRFs (`vrf_type: interface`), deletes the VRF and all associated EVPN config (BGP_EVPN_VNI, BGP_GLOBALS_AF, VXLAN_TUNNEL_MAP)
-5. For L2/IRB services: removes VLAN membership; if last member, removes all VLAN-related config (SVI, ARP suppression, L2VNI mapping, VLAN itself)
+5. For L2/IRB services: removes VLAN membership; if last member, removes all VLAN-related config (SVI, ARP suppression, MAC-VPN binding, VLAN itself)
 6. Deletes `NEWTRON_INTENT` entry
 
 **Dependency-aware cleanup:** Shared resources (ACLs, route maps, prefix sets, peer groups, VLANs, VRFs) are only deleted when the interface being cleaned up is the last user. This is determined by scanning CONFIG_DB for remaining consumers while excluding the current interface.

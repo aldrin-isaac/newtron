@@ -20,7 +20,7 @@
         {"url": "/configure-loopback"},
         {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf1", "bgp_asn": "65011", "type": "LeafRouter", "hwsku": "cisco-p200-32x100-vs", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
         {"url": "/configure-bgp"},
-        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.12", "asn": 65012, "evpn": false}},
+        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.12", "asn": 65012, "evpn": false}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.1/31", "peer_as": 65010}},
         {"url": "/interface/Ethernet1/configure-interface", "params": {"ip": "10.1.100.1/24"}}
       ],
@@ -34,7 +34,7 @@
         {"url": "/configure-loopback"},
         {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf2", "bgp_asn": "65012", "type": "LeafRouter", "hwsku": "cisco-p200-32x100-vs", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
         {"url": "/configure-bgp"},
-        {"url": "/add-overlay-peer", "params": {"neighbor_ip": "10.0.0.11", "asn": 65011, "evpn": false}},
+        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.11", "asn": 65011, "evpn": false}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.3/31", "peer_as": 65010}},
         {"url": "/interface/Ethernet1/configure-interface", "params": {"ip": "10.1.200.1/24"}}
       ],

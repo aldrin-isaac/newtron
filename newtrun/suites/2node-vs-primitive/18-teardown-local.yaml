@@ -68,11 +68,11 @@ steps:
       jq: '.exists == false'
 
   # 4. Remove IP from sw2:Ethernet4
-  - name: remove-ip-ethernet1
+  - name: unconfigure-ip-ethernet4
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Ethernet4/remove-ip
+    url: /node/{{device}}/interface/Ethernet4/unconfigure-interface
     params: {ip: "10.20.1.1/31"}
 
   - name: verify-ip-removed
@@ -83,12 +83,12 @@ steps:
       jq: '.exists == false'
 
   # 5. Unbind sw2:Ethernet4 from Vrf_local
-  - name: remove-vrf-interface
+  - name: unconfigure-vrf-ethernet4
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-vrf-interface
-    params: {vrf: Vrf_local, interface: Ethernet4}
+    url: /node/{{device}}/interface/Ethernet4/unconfigure-interface
+    params: {vrf: Vrf_local}
 
   # 6. Delete Vrf_local
   - name: delete-vrf-local

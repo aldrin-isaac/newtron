@@ -109,9 +109,7 @@ against a connected Node:
 ```go
 n := node.NewAbstract(specs, name, profile, resolved)
 n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
-n.ConfigureLoopback(ctx)
-n.ConfigureBGP(ctx)
-n.SetupEVPN(ctx, loopbackIP)
+n.SetupDevice(ctx, setupOpts)              // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)   // VTEP precondition passes ✓
 composite := n.BuildComposite()            // export all accumulated entries
@@ -170,9 +168,9 @@ checks preconditions against what actually exists, computes a delta,
 and applies it. The device's state before the operation is the starting
 point — not a spec file, not a template, not a desired-state store.
 Out-of-band edits to CONFIG_DB are not prevented — they become reality,
-visible to the next operation's preconditions (§32). Operations proceed
+visible to the next operation's preconditions (§35). Operations proceed
 from whatever they find — they do not auto-check whether reality still
-matches intent. Drift detection (§19) answers that question when asked;
+matches intent. Drift detection (§21) answers that question when asked;
 provisioning reconciles back to intent when directed.
 
 The same methods run in both cases. The same preconditions fire. The
@@ -219,7 +217,7 @@ compare the two ConfigDBs, and the diff is the drift. No journal, no
 state file, no reconciliation engine — the expected state is computed
 from the same code path that would produce it on a real device. If the
 code path is correct for deployment, it is correct for drift detection,
-because it is the same code path. (See §19.)
+because it is the same code path. (See §21.)
 
 These three properties reinforce each other. Delivery guarantees mean
 that what was previewed is what was applied — so drift detection can
@@ -266,7 +264,7 @@ code.
 Concretely, the pipeline enforces four guarantees — schema validation,
 atomic application, post-write verification, and symmetric reversal —
 for every mutating operation, regardless of which primitive produced
-it. §10 explains why each guarantee matters. §11–§16 describe the
+it. §10 explains why each guarantee matters. §11–§18 describe the
 machinery that implements them. The point here is structural: every
 guarantee is a property of the pipeline, not of any specific primitive.
 When a new primitive is added, it inherits them automatically. When an
@@ -451,9 +449,9 @@ automated version. Both require a single canonical source of desired
 state to diff the device against.
 
 newtron does not run a reconciliation loop — but it has every
-capability a reconciler has. Reconstruction (§19) produces expected
+capability a reconciler has. Reconstruction (§21) produces expected
 state from specs and intent records. Drift detection (§2) diffs
-expected against actual. Reprovision (§19) delivers the fix through
+expected against actual. Reprovision (§21) delivers the fix through
 the same pipeline that created the state. This is Terraform's
 `plan` + `apply` cycle, using the same code path that provisions
 and operates the device.
@@ -470,7 +468,7 @@ What newtron adds beyond a reconciler:
   after a crash — `terraform import` and manual state surgery are the
   recovery paths. newtron's intent lives on the device, detected
   automatically on `Lock()`, with mechanical rollback via
-  `dispatchReverse()` (§17).
+  `dispatchReverse()` (§19).
 
 - **On-device state.** Terraform stores state in a file or remote
   backend, separate from the target. newtron's intent records live on
@@ -570,7 +568,7 @@ definitions independent of any device.
 │                                                 │
 │                      Node                       │
 │  owns: profile, resolved specs, Redis, ConfigDB │
-│    ConfigureBGP(), SetupEVPN(), CreateVLAN()    │
+│   SetupDevice(), CreateVLAN(), CreateVRF()     │
 │                                                 │
 └─────────────────────────────────────────────────┘
   │
@@ -581,7 +579,7 @@ definitions independent of any device.
 │                    Interface                    │
 │  owns: interface identity (name + parent node)  │
 │   ApplyService(), RemoveService(), ApplyQoS()   │
-│    SetIP(), SetVRF(), BindACL(), UnbindACL()    │
+│  ConfigureInterface(), BindACL(), UnbindACL()  │
 │                                                 │
 └─────────────────────────────────────────────────┘
 ```
@@ -717,7 +715,7 @@ make its own decisions.
 Good automation development requires a virtual twin — the ability to
 stand up a faithful replica of the target network running real SONiC
 software and exercise every primitive against it. Without this, you
-are testing against documentation, not behavior (§35). newtlab
+are testing against documentation, not behavior (§38). newtlab
 provides this: QEMU VMs wired into topologies that newtron configures.
 The virtual twin is separate infrastructure — it validates the
 automation, it is not the automation.
@@ -856,11 +854,13 @@ growth; individual primitives do not need to earn their own reliability.
 # Part IV: The Delivery Contract
 
 Opinions and delivery guarantees are promises. Promises without
-machinery are aspirations. These six principles describe the concrete
+machinery are aspirations. These eight principles describe the concrete
 mechanisms — the ChangeSet that makes every operation previewable,
 executable, and verifiable; the validation that prevents bad writes
 from reaching the device; the symmetric operations that ensure
-nothing newtron creates becomes permanent debris; and the write
+nothing newtron creates becomes permanent debris; the verb vocabulary
+that encodes lifecycle contracts in operation names; the granularity
+rule that defines coherent operation boundaries; and the write
 ordering that respects SONiC's invisible dependency graph.
 
 ## 11. The ChangeSet Is the Universal Contract
@@ -1131,6 +1131,19 @@ bind an ACL to an interface, it must be able to unbind it. No
 CONFIG_DB state created by newtron should require a human with
 `redis-cli` to clean up.
 
+**Exception: baseline operations.** Device-lifetime initialization
+(`setup-device`) writes loopback, BGP globals, VTEP, device metadata,
+and optionally route-reflector configuration. These have no individual
+reverse — you never tear down BGP from a fabric switch without
+rebuilding the device. Their collective reverse is reprovision
+(`CompositeOverwrite`), which replaces the entire device configuration
+from current specs and profile. The `setup-*` verb signals this
+lifecycle: no individual reverse exists; remediation is reprovision.
+This is not a gap in symmetry — it is a recognition that baseline
+infrastructure is replaced as a unit, not dismantled piecewise. Every
+standalone resource operation (create-vrf, apply-service, bind-acl,
+etc.) retains a symmetric reverse.
+
 Symmetry is harder than it looks. CONFIG_DB entries have dependencies:
 a VRF references interfaces, a VLAN references members, an ACL
 references bound ports. A `DeleteVLAN` that leaves orphaned
@@ -1139,11 +1152,10 @@ entries cause silent failures in SONiC daemons that are nearly
 impossible to diagnose. Deletion must understand the dependency graph
 just as deeply as creation does.
 
-The symmetry extends to composite operations. `SetupEVPN` creates the
-VTEP, NVO, and tunnel map entries; `TeardownEVPN` removes all of them.
-`ApplyService` creates VRFs, VLANs, ACLs, BGP neighbors, and a service
-binding; `RemoveService` reads the binding and removes everything that
-was created, checking whether shared resources are still in use before
+The symmetry extends to composite operations. `ApplyService` creates
+VRFs, VLANs, ACLs, BGP neighbors, and a service binding;
+`RemoveService` reads the binding and removes everything that was
+created, checking whether shared resources are still in use before
 deleting them.
 
 The current operation pairs:
@@ -1153,15 +1165,21 @@ The current operation pairs:
 | `CreateVLAN` | `DeleteVLAN` |
 | `AddVLANMember` | `RemoveVLANMember` |
 | `CreateVRF` | `DeleteVRF` |
-| `AddVRFInterface` | `RemoveVRFInterface` |
+| `ConfigureInterface` | `UnconfigureInterface` |
 | `BindIPVPN` | `UnbindIPVPN` |
 | `CreatePortChannel` | `DeletePortChannel` |
-| `SetupEVPN` | `TeardownEVPN` |
 | `ApplyService` | `RemoveService` |
 | `ApplyQoS` | `RemoveQoS` |
 | `BindACL` | `UnbindACL` |
-| `AddBGPNeighbor` | `RemoveBGPNeighbor` |
-| `BindMACVPN` | `UnbindMACVPN` |
+| `AddBGPPeer` | `RemoveBGPPeer` |
+| `BindMACVPN` (node) | `UnbindMACVPN` (node) |
+| `AddBGPMultihopPeer` | `RemoveBGPMultihopPeer` |
+| `ConfigureIRB` | `RemoveIRB` |
+| `CreateACL` | `DeleteACL` |
+| `AddStaticRoute` | `RemoveStaticRoute` |
+
+Baseline operations (no individual reverse — remediation is reprovision):
+`SetupDevice`, `SetPortProperty`
 
 RefreshService is not a pair — it combines removal and reapplication
 as a single operation. When a service's spec changes after it was
@@ -1171,10 +1189,11 @@ definition in its place.
 
 When adding a new operation that creates CONFIG_DB state, the
 corresponding removal operation is not optional — it is part of the
-feature. Ship both or ship neither.
+feature. Ship both or ship neither. Baseline operations (`setup-*`,
+`set-*`) are the sole exception — their reverse is reprovision.
 
 The symmetry extends down to the config generator layer — the pure
-functions that construct CONFIG_DB entries (see §26):
+functions that construct CONFIG_DB entries (see §29):
 
 | Forward verb | Reverse verb | Example |
 |-------------|-------------|---------|
@@ -1270,7 +1289,89 @@ false. Heuristics have thresholds, and thresholds have edge cases.
 
 ---
 
-## 16. Write Ordering and Daemon Settling
+## 16. Verb Vocabulary — The Name Is the Lifecycle Contract
+
+The leading verb of an operation name is not a style choice — it is a
+contract about the operation's lifecycle behavior. An operator who knows
+the verb knows whether a teardown command exists, what it's called, and
+what happens if one doesn't exist — without consulting documentation.
+
+| Verb | Lifecycle | Reverse | Examples |
+|------|-----------|---------|----------|
+| `setup-*` | Device-lifetime. Done once at provisioning. | reprovision | `setup-device` |
+| `set-*` | Field assignment. Per-resource. | reprovision | `set-port-property` |
+| `create-*` | Named resource with independent lifecycle. | `delete-*` | `create-vrf`, `create-vlan` |
+| `add-*` | Instance in a collection. | `remove-*` | `add-bgp-peer`, `add-static-route` |
+| `bind-*` | Relationship between resources. | `unbind-*` | `bind-ipvpn`, `bind-acl` |
+| `apply-*` | Composite (service, policy). | `remove-*` | `apply-service`, `apply-qos` |
+| `configure-*` | Multi-field configuration of existing resource. | `unconfigure-*` | `configure-interface` |
+
+Two rules follow:
+- `setup-*` and `set-*` = no individual reverse. Remediation is
+  reprovision. A developer adding a `setup-*` operation knows they need
+  no reverse implementation.
+- Every other verb has a specific reverse verb. A developer adding a
+  `create-*` operation knows they must also implement `delete-*` in the
+  same commit (§15).
+
+This extends §32 (verb-first naming) from a style preference to a
+behavioral contract, and refines §15 (symmetric operations) with a
+vocabulary that encodes the symmetry into the name itself.
+
+---
+
+## 17. Operation Granularity — Coherent, Not Minimal
+
+An operation is the smallest unit that leaves the device in a
+consistent, independently useful state. This determines what gets one
+intent record, one ChangeSet, one API call, and one reverse operation.
+
+**Too small** — splitting below the coherence boundary:
+
+- Produces partial state that can't function alone. A switch with BGP
+  globals but no loopback has an ASN that points nowhere. A VTEP without
+  BGP has a tunnel that can't learn any routes. These fragments are not
+  operations — they are implementation steps of one operation.
+- Proliferates intent records. Five records for one conceptual activity
+  (set up this switch) means five crash recovery decisions, five
+  reconstruction orderings, and five places where partial completion
+  leaves the device broken.
+- Forces operators into multi-step sequences where failure mid-sequence
+  leaves a non-functional device with no single "undo."
+
+**Too large** — combining past the coherence boundary:
+
+- Loses independent lifecycle management. A VRF created inside a giant
+  "provision-everything" operation can't be added later without
+  reprovisioning. A service applied inside the same operation can't be
+  removed independently.
+- Makes the reverse operation all-or-nothing. If everything is one
+  operation, the only reverse is reprovision.
+- Prevents the incremental operations that operators use daily.
+
+**The test**: if this operation completes but nothing else runs afterward,
+is the device in a state that makes sense? A device after `setup-device`
+has a functioning baseline — loopback reachable, BGP running, VTEP ready.
+That makes sense. A device after `configure-loopback` alone has an IP
+address on lo but no routing protocol to advertise it. That doesn't make
+sense.
+
+The baseline collapse is the canonical example: `set-device-metadata`,
+`configure-loopback`, `configure-bgp`, `setup-vtep`, and
+`configure-route-reflector` became one `setup-device` because none of
+them produce a coherent state alone. Meanwhile `create-vrf`, `create-vlan`,
+and `apply-service` remain separate because VRFs, VLANs, and services
+have independent lifecycles — each is useful on its own and removable
+on its own.
+
+This principle connects to:
+- §15: the operation boundary defines what has a symmetric reverse
+- §19: one operation = one intent record
+- §11: one operation = one ChangeSet
+
+---
+
+## 18. Write Ordering and Daemon Settling
 
 CONFIG_DB is a flat key-value store, but its consumers are not. The
 daemons that react to CONFIG_DB changes — orchagent, vlanmgrd, vrfmgrd,
@@ -1389,7 +1490,7 @@ drift detection, for teardown months later by someone who wasn't there
 when the operation was applied. These four principles govern what the
 Node records and why.
 
-## 17. Unified Intent Model
+## 19. Unified Intent Model
 
 CONFIG_DB entries are ephemeral explanations of what the device should
 do right now. They say nothing about who created them, why, or what
@@ -1420,7 +1521,7 @@ CONFIG_DB entries exist and match what the intent record describes.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
-`configure-bgp`, `setup-evpn`) identifies the composite that was applied,
+`setup-device`, `create-vrf`) identifies the composite that was applied,
 and the code path for that operation knows what Params to expect. Adding a
 new operation type requires no schema change to the intent record — only a
 new Operation value and the corresponding forward/reverse implementations.
@@ -1453,7 +1554,7 @@ infrastructure rather than time.
 
 ---
 
-## 18. On-Device Intent Is Sufficient for Reconstruction
+## 20. On-Device Intent Is Sufficient for Reconstruction
 
 The device carries enough intent to reconstruct its expected CONFIG_DB
 state. `NEWTRON_INTENT` records which operations are applied to
@@ -1490,9 +1591,9 @@ records that evolve as operations are applied and removed.**
 
 ---
 
-## 19. Reconstruct, Don't Record
+## 21. Reconstruct, Don't Record
 
-§11 through §16 govern the lifecycle of a single operation: build a
+§11 through §18 govern the lifecycle of a single operation: build a
 ChangeSet, preview it, validate it, apply it, verify it, reverse it.
 But an operator eventually asks a question that spans the device's
 lifetime: "does this device match what I intended?" This principle
@@ -1522,7 +1623,7 @@ after each operation — by reconstructing expected state and diffing
 against actual CONFIG_DB.
 
 CONFIG_DB contains intent — what the device should look like — not
-history. The in-flight intent record (§17) is intent: "I am currently
+history. The in-flight intent record (§19) is intent: "I am currently
 doing X." Completed operation history is not intent. It belongs in
 structured logging or an external store, not in the device's
 configuration database.
@@ -1569,7 +1670,54 @@ changes. The code path is ready. The platform is not yet.
 
 ---
 
-## 20. Bounded Device Footprint
+## 22. Dual-Purpose Intent — User Params and Resolved Params
+
+Each intent record stores two kinds of parameters:
+
+- **User params**: what the operator requested. Service name, IP address,
+  peer AS, VRF name. These are the inputs to the operation — the
+  topology step in flat form.
+- **Resolved params**: what was actually derived from specs and written
+  to CONFIG_DB. L3VNI, VLAN ID, route map names with content hashes.
+  These are the outputs of spec resolution — values the operator didn't
+  specify but that the operation computed.
+
+The record is the union. The two purposes read different fields:
+
+**Snapshot** (§21) extracts user params only. When `Snapshot()` exports
+an intent as a topology step, it emits `service: transit` and
+`ip_address: 10.1.1.1/30` — not `l3vni: 1001` or `route_map_in:
+RM_IN_A1B2C3D4`. Replay re-derives resolved values from current specs.
+This is what §21 demands: derive expected state from authoritative
+sources, not from a frozen copy.
+
+**Teardown** (§20) reads resolved params. When `RemoveService` tears
+down a service, it reads `l3vni`, `vrf_name`, and `route_map_in` from
+the intent record — it never re-resolves specs. The spec may have
+changed between apply and remove. The intent record captures what was
+actually applied; that is what must be torn down.
+
+If you snapshot resolved params, you bake in stale spec values —
+reconstruction produces outdated expected state and §21 breaks. If
+teardown re-resolves specs, the spec might have changed and teardown
+removes the wrong things — §20 breaks. The union satisfies both
+because the two consumers read orthogonal fields.
+
+When adding a new operation, ask two questions:
+1. "Which params does the operator specify?" → those are user params,
+   Snapshot emits them.
+2. "Which additional values does the operation compute from specs?" →
+   those are resolved params, teardown reads them.
+
+If a resolved value is needed for teardown but missing from the intent
+record, teardown silently breaks when specs change. If a user param is
+missing, Snapshot produces an incomplete step that fails on replay. Both
+are silent failures caught only when someone eventually exercises the
+round-trip.
+
+---
+
+## 23. Bounded Device Footprint
 
 Every newtron-owned record in CONFIG_DB must have a cost proportional
 to the device's physical infrastructure (ports, interfaces, VLANs) or
@@ -1610,7 +1758,7 @@ shared — created by one operation, consumed by many, and dangerous to
 delete before the last consumer is gone. These three principles govern
 how shared objects coexist with independent lifecycles.
 
-## 21. Policy vs Infrastructure — Shared Objects Have Independent Lifecycles
+## 24. Policy vs Infrastructure — Shared Objects Have Independent Lifecycles
 
 Some CONFIG_DB entries exist for a single interface and die with it.
 Others are shared across the network and must outlive any individual
@@ -1662,14 +1810,14 @@ reference counting as an optimization; it is the only correct
 behavior. An ACL that protects four interfaces must survive the
 removal of three.
 
-The separation also enables content-hashed naming (§22) — because
+The separation also enables content-hashed naming (§25) — because
 policy objects have identities independent of any interface, their
 names can encode their content, allowing automatic change detection and
 blue-green updates without touching every consumer simultaneously.
 
 ---
 
-## 22. Content-Hashed Naming — Version Shared Objects by What They Write
+## 25. Content-Hashed Naming — Version Shared Objects by What They Write
 
 Naming is a coordination problem. Two independent code paths — the
 forward path that creates a policy object and the reverse path that
@@ -1765,7 +1913,7 @@ reference new route map names.
 
 ---
 
-## 23. BGP Peer Groups — The Protocol's Native Sharing Mechanism
+## 26. BGP Peer Groups — The Protocol's Native Sharing Mechanism
 
 When ten interfaces use the same transit service with BGP routing and
 the route map changes, the naive approach writes ten `BGP_NEIGHBOR_AF`
@@ -1804,7 +1952,7 @@ encode those guarantees into code structure — file boundaries, method
 placement, type hierarchies — so that the architecture is a property
 of the code, not an intention documented above it.
 
-## 24. Single-Owner CONFIG_DB Tables
+## 27. Single-Owner CONFIG_DB Tables
 
 The ChangeSet (§11) is the single representation of what an operation
 does. That guarantee breaks if two files construct entries for the same
@@ -1830,8 +1978,8 @@ qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 interface_ops.go   → INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     → NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET,
-                      COMMUNITY_SET
+intent_ops.go      → NEWTRON_INTENT
+service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
 **One file owns each table; everyone else calls the owner.** When the
@@ -1840,9 +1988,9 @@ them.
 
 ---
 
-## 25. File-Level Feature Cohesion
+## 28. File-Level Feature Cohesion
 
-§24 governs writes. This principle governs the entire feature — reads,
+§27 governs writes. This principle governs the entire feature — reads,
 writes, types, existence checks. All code for a feature belongs in one
 file. `GetVLAN` and `VLANInfo` belong in `vlan_ops.go` just as much as
 `CreateVLAN` does.
@@ -1862,7 +2010,7 @@ change a table format, change one file.**
 
 ---
 
-## 26. Pure Config Functions — Separate Generation from Orchestration
+## 29. Pure Config Functions — Separate Generation from Orchestration
 
 The offline Node (§1) works because entry construction has no side
 effects. If a config function opened connections or checked
@@ -1876,10 +2024,10 @@ Config functions take identity parameters and CONFIG_DB state, return
 - **Package-level functions** for stateless construction:
   `createVlanConfig(vlanID, ...)`, `createVrfConfig(vrfName)`.
 - **Node methods** for config-scanning teardown that must read the
-  correct device's state (§28): `n.destroyVlanConfig(vlanID)`,
+  correct device's state (§31): `n.destroyVlanConfig(vlanID)`,
   `n.unbindIpvpnConfig(vrfName)`.
 - **Interface methods** for tables where the interface is the subject
-  (§27): `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`.
+  (§30): `i.bindVrf(vrfName)`, `i.assignIpAddress(ipAddr)`.
 
 Operations call these functions and wrap the result:
 
@@ -1900,7 +2048,7 @@ format once; all paths update — because there is only one path.
 
 ---
 
-## 27. Respect Abstraction Boundaries
+## 30. Respect Abstraction Boundaries
 
 §6 says the Interface is the point of service. This principle says
 callers must use it. A caller that bypasses Interface to pass an
@@ -1925,7 +2073,7 @@ calls `iface.ApplyQoS(...)`. It never re-implements the operation.
 
 ---
 
-## 28. Node as Device Isolation Boundary
+## 31. Node as Device Isolation Boundary
 
 The Node (§1) is not just the unit of intent — it is the unit of
 isolation. Every Node instance owns its own `configDB`, Redis
@@ -1971,7 +2119,7 @@ mirrors the operational topology: per-device, not centralized.
 
 ---
 
-## 29. Verb-First, Domain-Intent Naming
+## 32. Verb-First, Domain-Intent Naming
 
 Symmetric operations (§15) require that every forward action has a
 reverse. If functions are named after infrastructure
@@ -1995,7 +2143,7 @@ describes what it does to the database, not what it means.
 
 ---
 
-## 30. Public API Boundary — Types Express Intent, Not Implementation
+## 33. Public API Boundary — Types Express Intent, Not Implementation
 
 `pkg/newtron/` is the public API. `network/`, `node/`, and
 `device/sonic/` are internal. All external consumers — the newtron CLI, newtrun,
@@ -2032,7 +2180,7 @@ structure must already be in place when they do.
 
 ---
 
-## 31. Transparent Transport — The Middle Layer Has No Logic
+## 34. Transparent Transport — The Middle Layer Has No Logic
 
 The Node (§1) and the ChangeSet (§11) are where the guarantees live.
 The HTTP transport between them and the caller is a mechanical
@@ -2042,8 +2190,8 @@ No dispatch tables. Adding a new endpoint requires one handler
 function — nothing else changes.
 
 The server serializes access to each device via per-device channels
-(§28). SSH connections are reused within an idle timeout. CONFIG_DB is
-refreshed every request (§32) — the tunnel is reused; the device state
+(§31). SSH connections are reused within an idle timeout. CONFIG_DB is
+refreshed every request (§35) — the tunnel is reused; the device state
 is never assumed.
 
 **Every layer with logic is a layer that can drift. The transport has
@@ -2051,7 +2199,7 @@ no logic.**
 
 ---
 
-## 32. Import Direction, Interface State, and Episodic Caching
+## 35. Import Direction, Interface State, and Episodic Caching
 
 Three structural rules that each prevent a class of silent bug.
 
@@ -2093,9 +2241,9 @@ checks are advisory safety nets, not guarantees.
 
 Seven conventions that prevent the slow erosion of Parts I–VII.
 
-## 33. Normalize at the Boundary
+## 36. Normalize at the Boundary
 
-Content-hashed naming (§22) requires that two code paths computing the
+Content-hashed naming (§25) requires that two code paths computing the
 same hash from the same spec get identical results. If one path sees
 `"protect-re"` and another sees `"PROTECT_RE"`, the hashes diverge and
 blue-green migration breaks silently. Boundary normalization is the
@@ -2110,7 +2258,7 @@ never calls `NormalizeName()`.
 
 ---
 
-## 34. Platform Patching — Fix Bugs, Don't Reinvent Features
+## 37. Platform Patching — Fix Bugs, Don't Reinvent Features
 
 newtron is Redis-first (§4). Every workaround that invents a custom
 CONFIG_DB table or a parallel code path replaces the community-intended
@@ -2133,9 +2281,9 @@ custom table remains as permanent debt.
 
 ---
 
-## 35. Observe Behavior, Don't Trust Schemas
+## 38. Observe Behavior, Don't Trust Schemas
 
-Write ordering (§16) exists because SONiC daemons have implicit
+Write ordering (§18) exists because SONiC daemons have implicit
 dependencies that no schema documents. orchagent silently ignores a
 VLAN entry missing `admin_status`. vrfmgrd crashes if VRF arrives
 before its VLAN interface. frrcfgd processes BGP entries only at
@@ -2154,9 +2302,9 @@ Before implementing a SONiC feature:
 
 ---
 
-## 36. DRY Across Programs
+## 39. DRY Across Programs
 
-Single ownership (§24) applies within a program. This convention
+Single ownership (§27) applies within a program. This convention
 extends it across program boundaries: one spec directory (newtlab,
 newtron, newtrun all read from it), one connection mechanism
 (SSH-tunneled Redis), one verification mechanism (the ChangeSet), one
@@ -2167,39 +2315,39 @@ drift.
 
 ---
 
-## 37. Greenfield — Backwards Compatibility Is a Non-Goal
+## 40. Greenfield — Backwards Compatibility Is a Non-Goal
 
 newtron has no installed base. When a format or API changes, change it
 everywhere in one commit. No compatibility shims, no deprecated
-aliases, no dual-format detection. The public API (§30) has one
+aliases, no dual-format detection. The public API (§33) has one
 version: current. `newtron init` scrubs factory state once; after init,
 no operation checks for legacy formats.
 
 **Write code for the system as it is today, not as it was yesterday.**
 
 Exception: SONiC releases change schemas and daemon behavior. newtron
-must support multiple releases — this is multi-platform support (§38),
+must support multiple releases — this is multi-platform support (§41),
 not backwards compatibility.
 
 ---
 
-## 38. Multi-Version Readiness — Version Differences as Data, Not Code
+## 41. Multi-Version Readiness — Version Differences as Data, Not Code
 
 Version differences should be **data** — schema deltas, capability
 tables, field mappings — consumed by the same code path. Pure config
-functions (§26) that take a version-keyed schema table produce
+functions (§29) that take a version-keyed schema table produce
 version-correct entries without branching.
 
 Three boundaries make this possible: all Redis through Device (§4),
-all operations through Node (§28), all entry construction in pure
-functions (§26). These boundaries exist for other good reasons. This
+all operations through Node (§31), all entry construction in pure
+functions (§29). These boundaries exist for other good reasons. This
 principle says: **do not erode them.** The seams that make
 multi-version possible are the same seams that make the architecture
 clean.
 
 ---
 
-## 39. Testing Discipline
+## 42. Testing Discipline
 
 Drift detection (§2) and verification (§14) depend on observing
 device state after daemons have processed CONFIG_DB entries. SONiC's
@@ -2270,7 +2418,7 @@ investigating daemon logs at 2 AM.
 
 ### Single owner and composite operations
 
-§24 says one file owns each table. But composite operations like
+§27 says one file owns each table. But composite operations like
 `ApplyService` touch a dozen tables. Composites don't own tables — they
 *call* the owning functions and merge the results. `service_gen.go`
 calls `createVlanConfig()`, `createVrfConfig()`, `i.bindVrf()`. It
@@ -2299,10 +2447,10 @@ itself.
 
 ### Reconstruction and device reality
 
-§19 reconstructs expected state from current specs. §5 says the device
+§21 reconstructs expected state from current specs. §5 says the device
 is reality — not specs. The resolution: reconstruction answers a
 different question. §5 says "what exists on the device is ground truth
-for operations." §19 says "what *should* exist on the device is
+for operations." §21 says "what *should* exist on the device is
 derivable from specs + bindings." The first governs how operations
 behave (read CONFIG_DB, act on what's there). The second enables drift
 detection (compare what's there against what should be there). Neither
@@ -2324,7 +2472,7 @@ The data exists; the three-way comparison is not yet built.
 
 ### Bounded footprint and rollback history
 
-§20 says CONFIG_DB cost must not grow with time. But the rollback
+§23 says CONFIG_DB cost must not grow with time. But the rollback
 history (§4.6 of the intent design) stores up to 10 completed commits.
 The resolution: 10 is a fixed constant, not a function of time. A
 device that has run 50,000 operations has the same 10 history entries
@@ -2333,9 +2481,9 @@ not by policy or operator discipline.
 
 ### Greenfield and multi-version
 
-§37 says no backwards compatibility. §38 says support multiple SONiC
-releases. §37 applies to newtron's own code (types, APIs, key schemas).
-§38 applies to the SONiC platform underneath. Supporting 202411 and
+§40 says no backwards compatibility. §41 says support multiple SONiC
+releases. §40 applies to newtron's own code (types, APIs, key schemas).
+§41 applies to the SONiC platform underneath. Supporting 202411 and
 202505 is multi-platform support, like a compiler targeting multiple
 architectures. There is no "old newtron format" to maintain — only
 multiple current SONiC schemas to produce.
@@ -2374,27 +2522,30 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 13 | Prevent bad writes | A bad write that lands is already damage; prevent it before it reaches the device | C |
 | 14 | Verify writes, observe the rest | Assert what you know (your own writes); observe what you don't (the network); return data, not judgments | C |
 | 15 | Symmetric operations | A config database without reverse operations only accumulates; never enter a state you can't recover from; use structural proof (lock + intent) over heuristic detection (staleness timers) | C |
-| 16 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
-| 17 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C |
-| 18 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
-| 19 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
-| 20 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
-| 21 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C |
-| 22 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C |
-| 23 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C |
-| 24 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
-| 25 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
-| 26 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P |
-| 27 | Respect abstraction boundaries | An abstraction that exists but is not used is worse than no abstraction at all | P |
-| 28 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C |
-| 29 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
-| 30 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
-| 31 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S |
-| 32 | Import direction, interface state, episodic caching | Three principles that each prevent a specific class of silent bug | P |
-| 33 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
-| 34 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
-| 35 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
-| 36 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P |
-| 37 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
-| 38 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
-| 39 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
+| 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C |
+| 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C |
+| 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
+| 19 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C |
+| 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
+| 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
+| 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |
+| 23 | Bounded device footprint | CONFIG_DB cost must be proportional to infrastructure or bounded by a constant, never proportional to operations over time | C |
+| 24 | Policy vs infrastructure | Infrastructure is 1:1 with interface; policy objects are shared, created on first reference, deleted on last | C |
+| 25 | Content-hashed naming | The name carries proof of its content; two code paths agree without calling each other | C |
+| 26 | BGP peer groups | N individual updates scale linearly; BGP's native template mechanism makes it O(1) | C |
+| 27 | Single-owner tables | If one file owns a table, inconsistency is structurally impossible | P |
+| 28 | File-level cohesion | Organize by feature, not by layer — a feature scattered across files is a reconstruction, not a location | S |
+| 29 | Pure config functions | Generate entries in pure functions; orchestrate them in operations | P |
+| 30 | Respect abstraction boundaries | An abstraction that exists but is not used is worse than no abstraction at all | P |
+| 31 | Node as isolation boundary | The most dangerous multi-device bugs are operations that silently target the wrong device | C |
+| 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
+| 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
+| 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S |
+| 35 | Import direction, interface state, episodic caching | Three principles that each prevent a specific class of silent bug | P |
+| 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
+| 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
+| 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
+| 39 | DRY across programs | Every capability exists in exactly one place, even across program boundaries | P |
+| 40 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
+| 41 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
+| 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |

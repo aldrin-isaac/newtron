@@ -2,7 +2,7 @@ name: evpn-irb
 description: |
   EVPN IRB: create Vrf_IRB with L3VNI, configure SVI for VLAN 300 as
   distributed anycast gateway. Verify IRB gateway reachability and L2
-  bridging still works. Includes add/remove-vrf-interface sub-lifecycle.
+  bridging still works. Includes configure/unconfigure-interface sub-lifecycle.
 topology: 2node-vs
 requires: [evpn-bridged]
 
@@ -171,13 +171,13 @@ steps:
     expect:
       success_rate: 0.8
 
-  # Sub-lifecycle: add-vrf-interface Eth3→Vrf_IRB on sw1
-  - name: add-vrf-interface-eth3
+  # Sub-lifecycle: configure-interface Eth12→Vrf_IRB on sw1
+  - name: configure-ethernet12
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vrf-interface
-    params: {vrf: Vrf_IRB, interface: Ethernet12}
+    url: /node/{{device}}/interface/Ethernet12/configure-interface
+    params: {vrf: Vrf_IRB}
 
   - name: verify-eth3-in-vrf
     action: newtron
@@ -186,12 +186,12 @@ steps:
     expect:
       jq: '.vrf_name == "Vrf_IRB"'
 
-  - name: remove-vrf-interface-eth3
+  - name: unconfigure-ethernet12
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vrf-interface
-    params: {vrf: Vrf_IRB, interface: Ethernet12}
+    url: /node/{{device}}/interface/Ethernet12/unconfigure-interface
+    params: {vrf: Vrf_IRB}
 
   - name: verify-eth3-vrf-removed
     action: newtron

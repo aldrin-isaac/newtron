@@ -610,8 +610,8 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 		return n.internal.DeleteVLAN(ctx, vlanID())
 	case "device.remove-vlan-member":
 		return n.internal.RemoveVLANMember(ctx, vlanID(), params["interface"])
-	case "device.remove-svi":
-		return n.internal.RemoveSVI(ctx, vlanID())
+	case "device.remove-irb":
+		return n.internal.RemoveIRB(ctx, vlanID())
 	case "device.delete-vrf":
 		return n.internal.DeleteVRF(ctx, params["vrf"])
 	case "device.unbind-ipvpn":
@@ -620,10 +620,10 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 		return n.internal.RemoveBGPGlobals(ctx)
 	case "device.teardown-vtep":
 		return n.internal.TeardownVTEP(ctx)
-	case "device.unmap-l2vni":
-		return n.internal.UnmapL2VNI(ctx, vlanID())
-	case "device.delete-acl-table":
-		return n.internal.DeleteACLTable(ctx, params["name"])
+	case "device.unbind-macvpn":
+		return n.internal.UnbindMACVPN(ctx, vlanID())
+	case "device.delete-acl":
+		return n.internal.DeleteACL(ctx, params["name"])
 	case "device.delete-acl-rule":
 		return n.internal.DeleteACLRule(ctx, params["table_name"], params["rule_name"])
 	case "device.delete-portchannel":
@@ -632,8 +632,8 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 		return n.internal.RemovePortChannelMember(ctx, params["name"], params["member"])
 	case "device.remove-static-route":
 		return n.internal.RemoveStaticRoute(ctx, params["vrf"], params["prefix"])
-	case "device.remove-bgp-neighbor":
-		return n.internal.RemoveBGPNeighbor(ctx, params["neighbor_ip"])
+	case "device.remove-bgp-peer":
+		return n.internal.RemoveBGPPeer(ctx, params["neighbor_ip"])
 	case "device.remove-loopback":
 		return n.internal.RemoveLoopback(ctx)
 	case "interface.remove-service":
@@ -985,9 +985,9 @@ func (n *Node) RemoveVLANMember(ctx context.Context, id int, iface string) error
 	return err
 }
 
-// ConfigureSVI configures the SVI (Layer 3 VLAN interface) for a VLAN.
-func (n *Node) ConfigureSVI(ctx context.Context, id int, config SVIConfig) error {
-	cs, err := n.internal.ConfigureSVI(ctx, id, node.SVIConfig{
+// ConfigureIRB configures the IRB (Integrated Routing and Bridging) interface for a VLAN.
+func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error {
+	cs, err := n.internal.ConfigureIRB(ctx, id, node.IRBConfig{
 		VRF:        config.VRF,
 		IPAddress:  config.IPAddress,
 		AnycastMAC: config.AnycastMAC,
@@ -996,9 +996,9 @@ func (n *Node) ConfigureSVI(ctx context.Context, id int, config SVIConfig) error
 	return err
 }
 
-// RemoveSVI removes the SVI configuration from a VLAN.
-func (n *Node) RemoveSVI(ctx context.Context, id int) error {
-	cs, err := n.internal.RemoveSVI(ctx, id)
+// RemoveIRB removes the IRB configuration from a VLAN.
+func (n *Node) RemoveIRB(ctx context.Context, id int) error {
+	cs, err := n.internal.RemoveIRB(ctx, id)
 	n.appendPending(cs)
 	return err
 }
@@ -1017,20 +1017,6 @@ func (n *Node) CreateVRF(ctx context.Context, name string, config VRFConfig) err
 // DeleteVRF deletes a VRF from the device.
 func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 	cs, err := n.internal.DeleteVRF(ctx, name)
-	n.appendPending(cs)
-	return err
-}
-
-// AddVRFInterface adds an interface to a VRF.
-func (n *Node) AddVRFInterface(ctx context.Context, vrf, iface string) error {
-	cs, err := n.internal.AddVRFInterface(ctx, vrf, iface)
-	n.appendPending(cs)
-	return err
-}
-
-// RemoveVRFInterface removes an interface from a VRF.
-func (n *Node) RemoveVRFInterface(ctx context.Context, vrf, iface string) error {
-	cs, err := n.internal.RemoveVRFInterface(ctx, vrf, iface)
 	n.appendPending(cs)
 	return err
 }
@@ -1077,16 +1063,16 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) error {
 	return err
 }
 
-// AddOverlayPeer adds a loopback BGP neighbor (indirect, EVPN overlay).
-func (n *Node) AddOverlayPeer(ctx context.Context, config BGPNeighborConfig) error {
-	cs, err := n.internal.AddOverlayPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
+// AddBGPMultihopPeer adds a loopback BGP neighbor (indirect, multi-hop eBGP).
+func (n *Node) AddBGPMultihopPeer(ctx context.Context, config BGPNeighborConfig) error {
+	cs, err := n.internal.AddBGPMultihopPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
 	n.appendPending(cs)
 	return err
 }
 
-// RemoveOverlayPeer removes an overlay BGP neighbor by IP.
-func (n *Node) RemoveOverlayPeer(ctx context.Context, ip string) error {
-	cs, err := n.internal.RemoveBGPNeighbor(ctx, ip)
+// RemoveBGPMultihopPeer removes a multihop BGP peer by IP.
+func (n *Node) RemoveBGPMultihopPeer(ctx context.Context, ip string) error {
+	cs, err := n.internal.RemoveBGPPeer(ctx, ip)
 	n.appendPending(cs)
 	return err
 }
@@ -1146,16 +1132,16 @@ func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorO
 	return err
 }
 
-// MapL2VNI maps a VLAN to an L2VNI for EVPN.
-func (n *Node) MapL2VNI(ctx context.Context, vlanID, vni int) error {
-	cs, err := n.internal.MapL2VNI(ctx, vlanID, vni)
+// BindMACVPN maps a VLAN to an L2VNI for EVPN.
+func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) error {
+	cs, err := n.internal.BindMACVPN(ctx, vlanID, vni)
 	n.appendPending(cs)
 	return err
 }
 
-// UnmapL2VNI removes the L2VNI mapping for a VLAN.
-func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) error {
-	cs, err := n.internal.UnmapL2VNI(ctx, vlanID)
+// UnbindMACVPN removes the MAC-VPN binding for a VLAN.
+func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) error {
+	cs, err := n.internal.UnbindMACVPN(ctx, vlanID)
 	n.appendPending(cs)
 	return err
 }
@@ -1164,9 +1150,9 @@ func (n *Node) UnmapL2VNI(ctx context.Context, vlanID int) error {
 // Device-level write ops — ACL
 // ============================================================================
 
-// CreateACLTable creates a new ACL table on the device.
-func (n *Node) CreateACLTable(ctx context.Context, name string, config ACLTableConfig) error {
-	cs, err := n.internal.CreateACLTable(ctx, name, node.ACLTableConfig{
+// CreateACL creates a new ACL table on the device.
+func (n *Node) CreateACL(ctx context.Context, name string, config ACLConfig) error {
+	cs, err := n.internal.CreateACL(ctx, name, node.ACLConfig{
 		Type:        config.Type,
 		Stage:       config.Stage,
 		Ports:       config.Ports,
@@ -1176,9 +1162,9 @@ func (n *Node) CreateACLTable(ctx context.Context, name string, config ACLTableC
 	return err
 }
 
-// DeleteACLTable deletes an ACL table and its rules from the device.
-func (n *Node) DeleteACLTable(ctx context.Context, name string) error {
-	cs, err := n.internal.DeleteACLTable(ctx, name)
+// DeleteACL deletes an ACL table and its rules from the device.
+func (n *Node) DeleteACL(ctx context.Context, name string) error {
+	cs, err := n.internal.DeleteACL(ctx, name)
 	n.appendPending(cs)
 	return err
 }
@@ -1729,7 +1715,7 @@ func (n *Node) VLANStatus() ([]VLANStatusEntry, error) {
 			ID:          vlan.ID,
 			Name:        vlan.Name,
 			L2VNI:       vlan.L2VNI(),
-			SVI:         vlan.SVIStatus,
+			SVI:         vlan.IRBStatus,
 			MemberCount: len(vlan.Members),
 			MemberNames: vlan.Members,
 		}
@@ -1756,7 +1742,7 @@ func (n *Node) ShowVLAN(id int) (*VLANStatusEntry, error) {
 		ID:          vlan.ID,
 		Name:        vlan.Name,
 		L2VNI:       vlan.L2VNI(),
-		SVI:         vlan.SVIStatus,
+		SVI:         vlan.IRBStatus,
 		MemberCount: len(vlan.Members),
 		MemberNames: vlan.Members,
 	}

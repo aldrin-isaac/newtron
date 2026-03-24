@@ -17,8 +17,8 @@ func VLANMemberKey(vlanID int, intfName string) string {
 	return fmt.Sprintf("%s|%s", VLANName(vlanID), intfName)
 }
 
-// SVIIPKey returns the CONFIG_DB key for a VLAN_INTERFACE IP entry.
-func SVIIPKey(vlanID int, ipAddr string) string {
+// IRBIPKey returns the CONFIG_DB key for a VLAN_INTERFACE IP entry.
+func IRBIPKey(vlanID int, ipAddr string) string {
 	return fmt.Sprintf("%s|%s", VLANName(vlanID), ipAddr)
 }
 
@@ -29,9 +29,9 @@ func vlanResource(id int) string { return VLANName(id) }
 // VLAN Operations
 // ============================================================================
 
-// SVIConfig holds configuration options for ConfigureSVI.
-type SVIConfig struct {
-	VRF        string // VRF to bind the SVI to
+// IRBConfig holds configuration options for ConfigureIRB.
+type IRBConfig struct {
+	VRF        string // VRF to bind the IRB to
 	IPAddress  string // IP address with prefix (e.g., "10.1.100.1/24")
 	AnycastMAC string // SAG anycast gateway MAC (e.g., "00:00:00:00:01:01")
 }
@@ -80,10 +80,10 @@ func createVlanMemberConfig(vlanID int, interfaceName string, tagged bool) []son
 	}
 }
 
-// createSviConfig returns CONFIG_DB entries for an SVI: a VLAN_INTERFACE base entry
+// createSviConfig returns CONFIG_DB entries for an IRB: a VLAN_INTERFACE base entry
 // with optional VRF binding, an optional IP address entry, and an optional
 // SAG_GLOBAL entry for anycast gateway MAC.
-func createSviConfig(vlanID int, opts SVIConfig) []sonic.Entry {
+func createSviConfig(vlanID int, opts IRBConfig) []sonic.Entry {
 	vlanName := VLANName(vlanID)
 
 	// VLAN_INTERFACE base entry with optional VRF binding
@@ -98,7 +98,7 @@ func createSviConfig(vlanID int, opts SVIConfig) []sonic.Entry {
 	// IP address binding
 	if opts.IPAddress != "" {
 		entries = append(entries, sonic.Entry{
-			Table: "VLAN_INTERFACE", Key: SVIIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
+			Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
 		})
 	}
 
@@ -126,7 +126,7 @@ func deleteVlanMemberConfig(vlanID int, intfName string) []sonic.Entry {
 
 // deleteSviIPConfig returns the delete entry for a specific SVI IP binding.
 func deleteSviIPConfig(vlanID int, ipAddr string) []sonic.Entry {
-	return []sonic.Entry{{Table: "VLAN_INTERFACE", Key: SVIIPKey(vlanID, ipAddr)}}
+	return []sonic.Entry{{Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, ipAddr)}}
 }
 
 // deleteSviBaseConfig returns the delete entry for a VLAN_INTERFACE base entry.
@@ -235,11 +235,11 @@ func (n *Node) RemoveVLANMember(ctx context.Context, vlanID int, interfaceName s
 	return cs, nil
 }
 
-// ConfigureSVI configures a VLAN's SVI (Layer 3 interface).
+// ConfigureIRB configures a VLAN's IRB (Integrated Routing and Bridging) interface.
 // This creates VLAN_INTERFACE entries for VRF binding and IP assignment,
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
-func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*ChangeSet, error) {
-	cs, err := n.op("configure-svi", vlanResource(vlanID), ChangeAdd,
+func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*ChangeSet, error) {
+	cs, err := n.op("configure-irb", vlanResource(vlanID), ChangeAdd,
 		func(pc *PreconditionChecker) {
 			pc.RequireVLANExists(vlanID)
 			if opts.VRF != "" {
@@ -247,12 +247,12 @@ func (n *Node) ConfigureSVI(ctx context.Context, vlanID int, opts SVIConfig) (*C
 			}
 		},
 		func() []sonic.Entry { return createSviConfig(vlanID, opts) },
-		"device.remove-svi")
+		"device.remove-irb")
 	if err != nil {
 		return nil, err
 	}
 	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID)}
-	util.WithDevice(n.name).Infof("Configured SVI for VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Configured IRB for VLAN %d", vlanID)
 	return cs, nil
 }
 
@@ -280,10 +280,10 @@ func (n *Node) destroySviConfig(vlanID int) []sonic.Entry {
 	return entries
 }
 
-// RemoveSVI removes a VLAN's SVI (Layer 3 interface) configuration.
-// This deletes VLAN_INTERFACE entries (base + IP) and SAG_GLOBAL if no other SVIs use it.
-func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
-	if err := n.precondition("remove-svi", vlanResource(vlanID)).Result(); err != nil {
+// RemoveIRB removes a VLAN's IRB (Integrated Routing and Bridging) interface configuration.
+// This deletes VLAN_INTERFACE entries (base + IP) and SAG_GLOBAL if no other IRBs use it.
+func (n *Node) RemoveIRB(ctx context.Context, vlanID int) (*ChangeSet, error) {
+	if err := n.precondition("remove-irb", vlanResource(vlanID)).Result(); err != nil {
 		return nil, err
 	}
 
@@ -291,13 +291,13 @@ func (n *Node) RemoveSVI(ctx context.Context, vlanID int) (*ChangeSet, error) {
 		return nil, fmt.Errorf("no CONFIG_DB available")
 	}
 
-	cs := buildChangeSet(n.name, "device.remove-svi", n.destroySviConfig(vlanID), ChangeDelete)
+	cs := buildChangeSet(n.name, "device.remove-irb", n.destroySviConfig(vlanID), ChangeDelete)
 
 	if cs.IsEmpty() {
-		return nil, fmt.Errorf("no SVI configuration found for VLAN %d", vlanID)
+		return nil, fmt.Errorf("no IRB configuration found for VLAN %d", vlanID)
 	}
 
-	util.WithDevice(n.name).Infof("Removed SVI for VLAN %d", vlanID)
+	util.WithDevice(n.name).Infof("Removed IRB for VLAN %d", vlanID)
 	return cs, nil
 }
 
@@ -310,7 +310,7 @@ type VLANInfo struct {
 	ID         int
 	Name       string      // VLAN name from config
 	Members    []string    // All member interfaces
-	SVIStatus  string      // "up" if VLAN_INTERFACE exists, empty otherwise
+	IRBStatus  string      // "up" if VLAN_INTERFACE exists, empty otherwise
 	MACVPNInfo *MACVPNInfo // MAC-VPN binding info (L2VNI, ARP suppression)
 }
 
@@ -360,9 +360,9 @@ func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
 		}
 	}
 
-	// Check for SVI (VLAN_INTERFACE)
+	// Check for IRB (VLAN_INTERFACE)
 	if _, ok := n.configDB.VLANInterface[vlanKey]; ok {
-		info.SVIStatus = "up"
+		info.IRBStatus = "up"
 	}
 
 	// Build MAC-VPN info from VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH

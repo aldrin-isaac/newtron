@@ -158,36 +158,6 @@ func (i *Interface) RefreshService(ctx context.Context) error {
 	return nil
 }
 
-// SetIP configures an IP address on this interface.
-func (i *Interface) SetIP(ctx context.Context, ip string) error {
-	cs, err := i.internal.SetIP(ctx, ip)
-	if err != nil {
-		return err
-	}
-	i.node.appendPending(cs)
-	return nil
-}
-
-// RemoveIP removes an IP address from this interface.
-func (i *Interface) RemoveIP(ctx context.Context, ip string) error {
-	cs, err := i.internal.RemoveIP(ctx, ip)
-	if err != nil {
-		return err
-	}
-	i.node.appendPending(cs)
-	return nil
-}
-
-// SetVRF binds this interface to a VRF.
-func (i *Interface) SetVRF(ctx context.Context, vrf string) error {
-	cs, err := i.internal.SetVRF(ctx, vrf)
-	if err != nil {
-		return err
-	}
-	i.node.appendPending(cs)
-	return nil
-}
-
 // BindACL binds an ACL to this interface.
 func (i *Interface) BindACL(ctx context.Context, acl, direction string) error {
 	cs, err := i.internal.BindACL(ctx, acl, direction)
@@ -235,9 +205,9 @@ func (i *Interface) UnbindMACVPN(ctx context.Context) error {
 	return nil
 }
 
-// AddBGPNeighbor adds a direct BGP neighbor on this interface.
-func (i *Interface) AddBGPNeighbor(ctx context.Context, config BGPNeighborConfig) error {
-	cs, err := i.internal.AddBGPNeighbor(ctx, node.DirectBGPNeighborConfig{
+// AddBGPPeer adds a direct BGP peer on this interface.
+func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
+	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
 		NeighborIP:  config.NeighborIP,
 		RemoteAS:    config.RemoteAS,
 		Description: config.Description,
@@ -249,9 +219,9 @@ func (i *Interface) AddBGPNeighbor(ctx context.Context, config BGPNeighborConfig
 	return nil
 }
 
-// RemoveBGPNeighbor removes a direct BGP neighbor from this interface.
-func (i *Interface) RemoveBGPNeighbor(ctx context.Context, ip string) error {
-	cs, err := i.internal.RemoveBGPNeighbor(ctx, ip)
+// RemoveBGPPeer removes a direct BGP peer from this interface.
+func (i *Interface) RemoveBGPPeer(ctx context.Context, ip string) error {
+	cs, err := i.internal.RemoveBGPPeer(ctx, ip)
 	if err != nil {
 		return err
 	}
@@ -262,6 +232,16 @@ func (i *Interface) RemoveBGPNeighbor(ctx context.Context, ip string) error {
 // ConfigureInterface sets VRF binding and IP address in a single operation.
 func (i *Interface) ConfigureInterface(ctx context.Context, vrf, ip string) error {
 	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{VRF: vrf, IP: ip})
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
+// UnconfigureInterface removes VRF binding and/or IP address from an interface.
+func (i *Interface) UnconfigureInterface(ctx context.Context, vrf, ip string) error {
+	cs, err := i.internal.UnconfigureInterface(ctx, node.InterfaceConfig{VRF: vrf, IP: ip})
 	if err != nil {
 		return err
 	}

@@ -88,13 +88,13 @@ func (s *Server) handleRefreshService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleSetIP(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUnconfigureInterface(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
 	ifName := interfaceName(r)
-	var req SetIPRequest
+	var req ConfigureInterfaceRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
@@ -105,59 +105,7 @@ func (s *Server) handleSetIP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return iface.SetIP(ctx, req.IP)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleRemoveIP(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	ifName := interfaceName(r)
-	var req RemoveIPRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		iface, err := n.Interface(ifName)
-		if err != nil {
-			return err
-		}
-		return iface.RemoveIP(ctx, req.IP)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleSetVRF(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	ifName := interfaceName(r)
-	var req SetVRFRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		iface, err := n.Interface(ifName)
-		if err != nil {
-			return err
-		}
-		return iface.SetVRF(ctx, req.VRF)
+		return iface.UnconfigureInterface(ctx, req.VRF, req.IP)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -265,7 +213,7 @@ func (s *Server) handleUnbindMACVPN(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleAddBGPNeighbor(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddBGPPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -282,7 +230,7 @@ func (s *Server) handleAddBGPNeighbor(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return iface.AddBGPNeighbor(ctx, req)
+		return iface.AddBGPPeer(ctx, req)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -291,7 +239,7 @@ func (s *Server) handleAddBGPNeighbor(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, val)
 }
 
-func (s *Server) handleRemoveBGPNeighbor(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRemoveBGPPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -310,7 +258,7 @@ func (s *Server) handleRemoveBGPNeighbor(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			return err
 		}
-		return iface.RemoveBGPNeighbor(ctx, body.IP)
+		return iface.RemoveBGPPeer(ctx, body.IP)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -336,14 +284,7 @@ func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		switch req.Property {
-		case "ip":
-			return iface.SetIP(ctx, req.Value)
-		case "vrf":
-			return iface.SetVRF(ctx, req.Value)
-		default:
-			return iface.Set(ctx, req.Property, req.Value)
-		}
+		return iface.Set(ctx, req.Property, req.Value)
 	})
 	if err != nil {
 		writeError(w, err)

@@ -244,22 +244,22 @@ func TestBindACL_EmptyBindingList(t *testing.T) {
 }
 
 // ============================================================================
-// BGP Neighbor Tests
+// BGP Peer Tests
 // ============================================================================
 
-func TestAddBGPNeighbor(t *testing.T) {
+func TestAddBGPPeer(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
 	// BGP must be configured
 	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "64512"}
 	ctx := context.Background()
 
-	cs, err := intf.AddBGPNeighbor(ctx, DirectBGPNeighborConfig{
+	cs, err := intf.AddBGPPeer(ctx, DirectBGPPeerConfig{
 		RemoteAS:    64513,
 		Description: "peer-leaf1",
 	})
 	if err != nil {
-		t.Fatalf("AddBGPNeighbor: %v", err)
+		t.Fatalf("AddBGPPeer: %v", err)
 	}
 
 	// Neighbor IP auto-derived from 10.1.0.0/31 → 10.1.0.1
@@ -274,7 +274,7 @@ func TestAddBGPNeighbor(t *testing.T) {
 	assertField(t, afC, "admin_status", "true")
 }
 
-func TestRemoveBGPNeighbor(t *testing.T) {
+func TestRemoveBGPPeer(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
 	// Pre-existing neighbor
@@ -283,9 +283,9 @@ func TestRemoveBGPNeighbor(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	cs, err := intf.RemoveBGPNeighbor(ctx, "10.1.0.1")
+	cs, err := intf.RemoveBGPPeer(ctx, "10.1.0.1")
 	if err != nil {
-		t.Fatalf("RemoveBGPNeighbor: %v", err)
+		t.Fatalf("RemoveBGPPeer: %v", err)
 	}
 
 	// AF entries removed first
@@ -312,8 +312,8 @@ func TestInterface_NotConnected(t *testing.T) {
 		{"SetIP", func() error { _, err := intf.SetIP(ctx, "10.0.0.1/30"); return err }},
 		{"SetVRF", func() error { _, err := intf.SetVRF(ctx, "default"); return err }},
 		{"BindACL", func() error { _, err := intf.BindACL(ctx, "ACL1", "ingress"); return err }},
-		{"AddBGPNeighbor", func() error {
-			_, err := intf.AddBGPNeighbor(ctx, DirectBGPNeighborConfig{RemoteAS: 65000})
+		{"AddBGPPeer", func() error {
+			_, err := intf.AddBGPPeer(ctx, DirectBGPPeerConfig{RemoteAS: 65000})
 			return err
 		}},
 	}

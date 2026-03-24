@@ -69,8 +69,8 @@ When a CiscoVS SAI call fails: document it as an RCA, and fix it at the SAI laye
 ## Single-Owner Principle for CONFIG_DB Tables (DRY)
 
 Each CONFIG_DB table MUST have exactly one owner — a single file/function responsible
-for writing and deleting entries in that table. Composites (ApplyService, SetupEVPN,
-ConfigureLoopback, topology provisioner) MUST call the owning primitives and merge their
+for writing and deleting entries in that table. Composites (ApplyService, SetupDevice, topology provisioner) MUST call the owning
+primitives and merge their
 ChangeSets rather than constructing entries inline.
 
 This applies at every layer: if `vlan_ops.go` owns `VLAN` table writes, then
@@ -92,8 +92,8 @@ qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 interface_ops.go   → INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     → NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET,
-                      COMMUNITY_SET
+intent_ops.go      → NEWTRON_INTENT
+service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
 When adding new CONFIG_DB writes, always check the ownership map — never add a second writer.
@@ -171,15 +171,14 @@ The Node operates in two modes:
 Same code path, different initialization. topology.json represents an abstract topology
 in which abstract nodes live — the abstract Node is the natural object model for it.
 The topology provisioner creates an abstract Node and calls the same methods the CLI
-uses (`iface.ApplyService`, `n.ConfigureBGP`, `n.SetupEVPN`), eliminating the need
-for topology.go to construct CONFIG_DB entries inline. Operations must be called in the
-correct order — the shadow enforces correctness without a physical device:
+uses (`iface.ApplyService`, `n.SetupDevice`), eliminating the need for topology.go
+to construct CONFIG_DB entries inline. Operations must be called in the correct
+order — the shadow enforces correctness without a physical device:
 
 ```
 n := node.NewAbstract(specs, name, profile, resolved)
 n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
-n.ConfigureBGP(ctx)                       // shadow now has BGP_GLOBALS
-n.SetupEVPN(ctx, loopbackIP)              // shadow now has VTEP + NVO
+n.SetupDevice(ctx, setupOpts)             // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)  // VTEP precondition passes ✓
 composite := n.BuildComposite()           // export all accumulated entries
@@ -255,6 +254,11 @@ must scan for remaining consumers before deleting shared resources. Mechanical
 ChangeSet reversal is unsafe — only domain-level reverse operations have the context
 to determine whether a shared resource can be safely removed. Rollback is an
 orchestrator concern that uses these domain-level operations, not a newtron concern.
+
+Baseline operations (`setup-*`, `set-*`) are the sole exception to "ship both or
+ship neither." These operations configure device-level infrastructure whose collective
+reverse is reprovision (CompositeOverwrite), not individual teardown. `SetupDevice`
+and `SetPortProperty` have no individual reverse operations.
 
 ## Public API Boundary Design
 
@@ -409,7 +413,7 @@ Every CONFIG_DB key name that newtron derives follows a single convention:
 - **Numeric IDs concatenated with type prefix**: `VNI1001`, `VLAN100`, `ETH0`, `Q0`
   (matching SONiC convention: `Vlan100`, `Loopback0`).
 
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §28 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §31 for rationale.
 
 ## Normalize at the Boundary
 
@@ -422,7 +426,7 @@ After loading, every map key (`Services["TRANSIT"]`), every cross-reference
 CONFIG_DB key construction is already canonical. Operations code never calls
 `NormalizeName()`.
 
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §28 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §31 for rationale.
 
 ## Definition Is Network-Scoped; Execution Is Device-Scoped
 
@@ -467,7 +471,7 @@ Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes computed first
 then ROUTE_MAP entries reference real PREFIX_SET names (including hashes), so a
 content change cascades through the hash chain automatically.
 
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §15–16 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §15, §18 for rationale.
 
 ## BGP Peer Groups — Native Sharing Mechanism
 
@@ -479,7 +483,7 @@ Peer groups are created on first `ApplyService` for a service with BGP routing,
 and deleted when the last interface using that service is removed. Topology-level
 underlay peers do NOT use peer groups — each has unique attributes.
 
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §17 for rationale.
+See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §19 for rationale.
 
 ## Allowed Commands
 
@@ -582,7 +586,7 @@ Dispatch subagents with `model: "sonnet"` for:
 ## Greenfield — No Backwards Compatibility
 
 newtron is a greenfield system with no installed base. Backwards compatibility is
-a non-goal. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §32 for the full principle.
+a non-goal. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §35 for the full principle.
 
 Rules:
 - **No compatibility shims.** When a format or API changes, change it everywhere in
@@ -652,10 +656,10 @@ Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and de
   manually applied state. This ensures a clean, reproducible baseline.
 - **Polling checks must not pass vacuously.** If a poll finds zero items to verify,
   return false (keep polling) — not true. Zero results means the daemon hasn't
-  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §34.
+  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §37.
 - **Test timeouts must account for CONFIG_DB entry count.** Each new entry type extends
   the convergence window. When adding entries, verify that existing test timeouts still
-  have margin. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §34.
+  have margin. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §37.
 
 ## Documentation Freshness Protocol
 

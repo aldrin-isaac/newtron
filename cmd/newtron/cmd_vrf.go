@@ -227,7 +227,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.AddVRFInterface(app.deviceName, vrfName, intfName, execOpts()))
+		return displayWriteResult(app.client.ConfigureInterface(app.deviceName, intfName, vrfName, "", execOpts()))
 	},
 }
 
@@ -247,7 +247,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.RemoveVRFInterface(app.deviceName, vrfName, intfName, execOpts()))
+		return displayWriteResult(app.client.UnconfigureInterface(app.deviceName, intfName, vrfName, "", execOpts()))
 	},
 }
 
@@ -337,7 +337,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.InterfaceAddBGPNeighbor(app.deviceName, intfName, newtron.BGPNeighborConfig{
+		return displayWriteResult(app.client.InterfaceAddBGPPeer(app.deviceName, intfName, newtron.BGPNeighborConfig{
 			VRF:         vrfName,
 			Interface:   intfName,
 			NeighborIP:  vrfNeighborIP,
@@ -374,11 +374,11 @@ Examples:
 		// a dot it's an IP; otherwise treat as interface name.
 		if strings.Contains(target, ".") {
 			// Treat as neighbor IP — use node-level remove
-			return displayWriteResult(app.client.RemoveOverlayPeer(app.deviceName, target, execOpts()))
+			return displayWriteResult(app.client.RemoveBGPMultihopPeer(app.deviceName, target, execOpts()))
 		}
 
 		// Treat as interface name — use interface-level remove
-		return displayWriteResult(app.client.InterfaceRemoveBGPNeighbor(app.deviceName, target, "", execOpts()))
+		return displayWriteResult(app.client.InterfaceRemoveBGPPeer(app.deviceName, target, "", execOpts()))
 	},
 }
 

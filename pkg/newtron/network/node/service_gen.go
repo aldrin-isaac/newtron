@@ -140,22 +140,22 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		}
 
 	case spec.ServiceTypeEVPNIRB:
-		// IRB overlay: tagged VLAN member + SVI with anycast gateway
+		// IRB overlay: tagged VLAN member + IRB with anycast gateway
 		if vlanID > 0 {
 			entries = append(entries, createVlanMemberConfig(vlanID, i.name, true)...)
-			sviOpts := SVIConfig{VRF: vrfName}
+			irbOpts := IRBConfig{VRF: vrfName}
 			if macvpnDef != nil {
-				sviOpts.IPAddress = macvpnDef.AnycastIP
-				sviOpts.AnycastMAC = macvpnDef.AnycastMAC
+				irbOpts.IPAddress = macvpnDef.AnycastIP
+				irbOpts.AnycastMAC = macvpnDef.AnycastMAC
 			}
-			entries = append(entries, createSviConfig(vlanID, sviOpts)...)
+			entries = append(entries, createSviConfig(vlanID, irbOpts)...)
 		}
 
 	case spec.ServiceTypeIRB:
-		// Local IRB: tagged VLAN member + SVI with IP from params
+		// Local IRB: tagged VLAN member + IRB with IP from params
 		if vlanID > 0 {
 			entries = append(entries, createVlanMemberConfig(vlanID, i.name, true)...)
-			entries = append(entries, createSviConfig(vlanID, SVIConfig{
+			entries = append(entries, createSviConfig(vlanID, IRBConfig{
 				VRF:       vrfName,
 				IPAddress: p.IPAddress,
 			})...)

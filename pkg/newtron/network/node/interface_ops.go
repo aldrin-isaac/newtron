@@ -168,6 +168,58 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	return cs, nil
 }
 
+// UnconfigureInterface is the reverse of ConfigureInterface. It removes IP address
+// and/or VRF binding from an interface in a single ChangeSet.
+func (i *Interface) UnconfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
+	n := i.node
+
+	if err := n.precondition("unconfigure-interface", i.name).Result(); err != nil {
+		return nil, err
+	}
+
+	cs := NewChangeSet(n.Name(), "interface.unconfigure-interface")
+
+	// Remove IP address first (before VRF unbinding)
+	if cfg.IP != "" {
+		ipKey := fmt.Sprintf("%s|%s", i.name, cfg.IP)
+		cs.Delete("INTERFACE", ipKey)
+	}
+
+	// Unbind VRF (set vrf_name to empty removes the binding)
+	if cfg.VRF != "" {
+		// Count remaining IPs after removal
+		remaining := 0
+		for _, addr := range i.IPAddresses() {
+			if addr != cfg.IP {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			// No IPs remain — remove the base INTERFACE entry entirely
+			cs.Delete("INTERFACE", i.name)
+		} else {
+			// IPs remain — just clear the VRF binding
+			cs.Adds(i.bindVrf(""))
+		}
+	} else if cfg.IP != "" {
+		// IP-only removal: check if other IPs remain
+		remaining := 0
+		for _, addr := range i.IPAddresses() {
+			if addr != cfg.IP {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			// No IPs remain — remove the base INTERFACE entry too
+			cs.Delete("INTERFACE", i.name)
+		}
+	}
+
+	n.applyShadow(cs)
+	util.WithDevice(n.Name()).Infof("Unconfigured interface %s (vrf=%s, ip=%s)", i.name, cfg.VRF, cfg.IP)
+	return cs, nil
+}
+
 // BindACL binds an ACL to this interface.
 // ACLs are shared - adds this interface to the ACL's binding list.
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {

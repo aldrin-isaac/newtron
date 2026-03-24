@@ -377,18 +377,18 @@ func TestDeleteVRF_BoundInterfacesBlocks(t *testing.T) {
 // ACL Operation Tests
 // ============================================================================
 
-func TestCreateACLTable_Basic(t *testing.T) {
+func TestCreateACL_Basic(t *testing.T) {
 	d := testDevice()
 	ctx := context.Background()
 
-	cs, err := d.CreateACLTable(ctx, "EDGE_IN", ACLTableConfig{
+	cs, err := d.CreateACL(ctx, "EDGE_IN", ACLConfig{
 		Type:        "L3",
 		Stage:       "ingress",
 		Description: "Edge ingress filter",
 		Ports:       "Ethernet0",
 	})
 	if err != nil {
-		t.Fatalf("CreateACLTable: %v", err)
+		t.Fatalf("CreateACL: %v", err)
 	}
 
 	c := assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeAdd)
@@ -398,7 +398,7 @@ func TestCreateACLTable_Basic(t *testing.T) {
 	assertField(t, c, "ports", "Ethernet0")
 }
 
-func TestDeleteACLTable_RemovesRules(t *testing.T) {
+func TestDeleteACL_RemovesRules(t *testing.T) {
 	d := testDevice()
 	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{Type: "L3", Stage: "ingress"}
 	d.configDB.ACLRule["EDGE_IN|RULE_10"] = sonic.ACLRuleEntry{Priority: "10", PacketAction: "FORWARD"}
@@ -407,9 +407,9 @@ func TestDeleteACLTable_RemovesRules(t *testing.T) {
 	d.configDB.ACLRule["OTHER_TABLE|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
 	ctx := context.Background()
 
-	cs, err := d.DeleteACLTable(ctx, "EDGE_IN")
+	cs, err := d.DeleteACL(ctx, "EDGE_IN")
 	if err != nil {
-		t.Fatalf("DeleteACLTable: %v", err)
+		t.Fatalf("DeleteACL: %v", err)
 	}
 
 	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
@@ -464,15 +464,15 @@ func TestAddACLRule(t *testing.T) {
 // EVPN/VXLAN Operation Tests
 // ============================================================================
 
-func TestMapL2VNI(t *testing.T) {
+func TestBindMACVPN(t *testing.T) {
 	d := testDevice()
 	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	ctx := context.Background()
 
-	cs, err := d.MapL2VNI(ctx, 100, 20100)
+	cs, err := d.BindMACVPN(ctx, 100, 20100)
 	if err != nil {
-		t.Fatalf("MapL2VNI: %v", err)
+		t.Fatalf("BindMACVPN: %v", err)
 	}
 
 	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", ChangeAdd)
@@ -480,19 +480,19 @@ func TestMapL2VNI(t *testing.T) {
 	assertField(t, c, "vni", "20100")
 }
 
-func TestConfigureSVI(t *testing.T) {
+func TestConfigureIRB(t *testing.T) {
 	d := testDevice()
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
 	ctx := context.Background()
 
-	cs, err := d.ConfigureSVI(ctx, 100, SVIConfig{
+	cs, err := d.ConfigureIRB(ctx, 100, IRBConfig{
 		VRF:        "Vrf_CUST1",
 		IPAddress:  "10.1.100.1/24",
 		AnycastMAC: "00:00:00:00:01:01",
 	})
 	if err != nil {
-		t.Fatalf("ConfigureSVI: %v", err)
+		t.Fatalf("ConfigureIRB: %v", err)
 	}
 
 	// Base VLAN_INTERFACE with VRF binding

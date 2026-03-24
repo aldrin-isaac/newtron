@@ -284,10 +284,10 @@ var (
 	sviAnycastGW string
 )
 
-var vlanConfigureSVICmd = &cobra.Command{
-	Use:   "configure-svi <vlan-id>",
-	Short: "Configure SVI (Layer 3 VLAN interface)",
-	Long: `Configure the SVI (Switched Virtual Interface) for a VLAN.
+var vlanConfigureIRBCmd = &cobra.Command{
+	Use:   "configure-irb <vlan-id>",
+	Short: "Configure IRB (Integrated Routing and Bridging) interface",
+	Long: `Configure the IRB (Integrated Routing and Bridging) interface for a VLAN.
 
 Creates VLAN_INTERFACE entries for VRF binding and IP address assignment,
 and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
@@ -295,13 +295,13 @@ and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 Requires -D (device) flag.
 
 Options:
-  --vrf <name>         VRF to bind the SVI to
+  --vrf <name>         VRF to bind the IRB to
   --ip <addr/prefix>   IP address with prefix length
   --anycast-gw <mac>   Anycast gateway MAC address (SAG)
 
 Examples:
-  newtron -D leaf1-ny vlan configure-svi 100 --vrf Vrf_CUST1 --ip 10.1.100.1/24 -x
-  newtron -D leaf1-ny vlan configure-svi 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:01:01 -x`,
+  newtron -D leaf1-ny vlan configure-irb 100 --vrf Vrf_CUST1 --ip 10.1.100.1/24 -x
+  newtron -D leaf1-ny vlan configure-irb 100 --ip 10.1.100.1/24 --anycast-gw 00:00:00:00:01:01 -x`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		vlanID, err := parseVLANID(args[0])
@@ -311,7 +311,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.ConfigureSVI(app.deviceName, newtron.SVIConfigureRequest{
+		return displayWriteResult(app.client.ConfigureIRB(app.deviceName, newtron.IRBConfigureRequest{
 			VlanID:     vlanID,
 			VRF:        sviVRF,
 			IPAddress:  sviIP,
@@ -396,9 +396,9 @@ func init() {
 
 	vlanAddInterfaceCmd.Flags().BoolVar(&vlanTagged, "tagged", false, "Add as tagged member")
 
-	vlanConfigureSVICmd.Flags().StringVar(&sviVRF, "vrf", "", "VRF to bind the SVI to")
-	vlanConfigureSVICmd.Flags().StringVar(&sviIP, "ip", "", "IP address with prefix (e.g., 10.1.100.1/24)")
-	vlanConfigureSVICmd.Flags().StringVar(&sviAnycastGW, "anycast-gw", "", "Anycast gateway MAC (SAG)")
+	vlanConfigureIRBCmd.Flags().StringVar(&sviVRF, "vrf", "", "VRF to bind the IRB to")
+	vlanConfigureIRBCmd.Flags().StringVar(&sviIP, "ip", "", "IP address with prefix (e.g., 10.1.100.1/24)")
+	vlanConfigureIRBCmd.Flags().StringVar(&sviAnycastGW, "anycast-gw", "", "Anycast gateway MAC (SAG)")
 
 	vlanCmd.AddCommand(vlanListCmd)
 	vlanCmd.AddCommand(vlanShowCmd)
@@ -407,7 +407,7 @@ func init() {
 	vlanCmd.AddCommand(vlanDeleteCmd)
 	vlanCmd.AddCommand(vlanAddInterfaceCmd)
 	vlanCmd.AddCommand(vlanRemoveInterfaceCmd)
-	vlanCmd.AddCommand(vlanConfigureSVICmd)
+	vlanCmd.AddCommand(vlanConfigureIRBCmd)
 	vlanCmd.AddCommand(vlanBindMacvpnCmd)
 	vlanCmd.AddCommand(vlanUnbindMacvpnCmd)
 }

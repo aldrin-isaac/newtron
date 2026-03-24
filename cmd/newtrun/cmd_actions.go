@@ -434,9 +434,9 @@ func getActionMetadata() map[string]ActionMetadata {
   vlan_id: 100
   interface: Ethernet1`,
 		},
-		"configure-svi": {
+		"configure-irb": {
 			Category:  "VLAN",
-			ShortDesc: "Configure VLAN SVI (IRB)",
+			ShortDesc: "Configure VLAN IRB (Integrated Routing and Bridging)",
 			LongDesc:  "Configures a VLAN interface with IP address and optional anycast gateway",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
@@ -444,11 +444,11 @@ func getActionMetadata() map[string]ActionMetadata {
 			},
 			OptionalParams: []ParamInfo{
 				{"ip", "IP address with prefix (e.g., 192.168.1.1/24)"},
-				{"vrf", "VRF to bind the SVI to"},
+				{"vrf", "VRF to bind the IRB to"},
 				{"anycast_mac", "Anycast gateway MAC address"},
 			},
-			Example: `- name: configure-svi-100
-  action: configure-svi
+			Example: `- name: configure-irb-100
+  action: configure-irb
   devices: [leaf1]
   vlan_id: 100
   params:
@@ -484,35 +484,45 @@ func getActionMetadata() map[string]ActionMetadata {
   devices: [leaf1]
   vrf: Vrf_CUST1`,
 		},
-		"add-vrf-interface": {
-			Category:  "VRF",
-			ShortDesc: "Add interface to VRF",
-			LongDesc:  "Binds an interface to a VRF",
+		"configure-interface": {
+			Category:  "Interface",
+			ShortDesc: "Configure VRF binding and/or IP on an interface",
+			LongDesc:  "Sets VRF binding and/or IP address on an interface in a single operation",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
-				{"vrf", "VRF name"},
 				{"interface", "Interface name"},
 			},
-			Example: `- name: add-to-vrf
-  action: add-vrf-interface
+			OptionalParams: []ParamInfo{
+				{"vrf", "VRF name to bind"},
+				{"ip", "IP address with prefix length (e.g., 10.1.0.0/31)"},
+			},
+			Example: `- name: configure-eth10
+  action: configure-interface
   devices: [leaf1]
-  vrf: Vrf_CUST1
-  interface: Ethernet10`,
+  interface: Ethernet10
+  params:
+    vrf: Vrf_CUST1
+    ip: "10.1.0.1/31"`,
 		},
-		"remove-vrf-interface": {
-			Category:  "VRF",
-			ShortDesc: "Remove interface from VRF",
-			LongDesc:  "Unbinds an interface from a VRF",
+		"unconfigure-interface": {
+			Category:  "Interface",
+			ShortDesc: "Remove VRF binding and/or IP from an interface",
+			LongDesc:  "Removes VRF binding and/or IP address from an interface (reverse of configure-interface)",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
-				{"vrf", "VRF name"},
 				{"interface", "Interface name"},
 			},
-			Example: `- name: remove-from-vrf
-  action: remove-vrf-interface
+			OptionalParams: []ParamInfo{
+				{"vrf", "VRF name to unbind"},
+				{"ip", "IP address to remove"},
+			},
+			Example: `- name: unconfigure-eth10
+  action: unconfigure-interface
   devices: [leaf1]
-  vrf: Vrf_CUST1
-  interface: Ethernet10`,
+  interface: Ethernet10
+  params:
+    vrf: Vrf_CUST1
+    ip: "10.1.0.1/31"`,
 		},
 
 		// EVPN
@@ -981,7 +991,7 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 
 		// ACL
-		"create-acl-table": {
+		"create-acl": {
 			Category:  "ACL",
 			ShortDesc: "Create an ACL table",
 			LongDesc:  "Creates an ACL_TABLE entry in CONFIG_DB with type, stage, and optional description",
@@ -995,7 +1005,7 @@ func getActionMetadata() map[string]ActionMetadata {
 				{"description", "Human-readable description"},
 			},
 			Example: `- name: create-acl
-  action: create-acl-table
+  action: create-acl
   devices: [leaf1]
   params:
     name: MY_ACL
@@ -1046,7 +1056,7 @@ func getActionMetadata() map[string]ActionMetadata {
     name: MY_ACL
     rule: RULE_10`,
 		},
-		"delete-acl-table": {
+		"delete-acl": {
 			Category:  "ACL",
 			ShortDesc: "Delete an ACL table and all its rules",
 			LongDesc:  "Removes the ACL_TABLE entry and all associated ACL_RULE entries",
@@ -1055,7 +1065,7 @@ func getActionMetadata() map[string]ActionMetadata {
 				{"name", "ACL table name to delete"},
 			},
 			Example: `- name: delete-acl
-  action: delete-acl-table
+  action: delete-acl
   devices: [leaf1]
   params:
     name: MY_ACL`,
@@ -1111,38 +1121,19 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 
 		// VLAN (additional)
-		"remove-svi": {
+		"remove-irb": {
 			Category:  "VLAN",
-			ShortDesc: "Remove SVI from a VLAN",
-			LongDesc:  "Deletes all VLAN_INTERFACE entries for the VLAN (reverse of configure-svi)",
+			ShortDesc: "Remove IRB from a VLAN",
+			LongDesc:  "Deletes all VLAN_INTERFACE entries for the VLAN (reverse of configure-irb)",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
-				{"vlan_id", "VLAN ID whose SVI to remove"},
+				{"vlan_id", "VLAN ID whose IRB to remove"},
 			},
-			Example: `- name: remove-svi
-  action: remove-svi
+			Example: `- name: remove-irb
+  action: remove-irb
   devices: [leaf1]
   vlan_id: 300`,
 		},
 
-		// Interface (additional)
-		"remove-ip": {
-			Category:  "Interface",
-			ShortDesc: "Remove IP address from interface",
-			LongDesc:  "Deletes an IP address entry from an interface; removes the base entry if last IP",
-			Devices:   "required",
-			RequiredFields: []ParamInfo{
-				{"interface", "Interface name"},
-			},
-			RequiredParams: []ParamInfo{
-				{"ip", "IP address with prefix length (e.g., 10.1.0.0/31)"},
-			},
-			Example: `- name: remove-ip
-  action: remove-ip
-  devices: [switch1]
-  interface: Ethernet0
-  params:
-    ip: "10.1.0.0/31"`,
-		},
 	}
 }

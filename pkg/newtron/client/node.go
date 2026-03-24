@@ -235,17 +235,17 @@ func (c *Client) RemoveBGPGlobals(device string, opts newtron.ExecOpts) (*newtro
 	return c.nodeWrite(device, "remove-bgp", nil, opts)
 }
 
-// AddOverlayPeer adds a loopback (overlay) BGP neighbor.
-func (c *Client) AddOverlayPeer(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "add-overlay-peer", config, opts)
+// AddBGPMultihopPeer adds a multihop BGP neighbor using loopback as update-source.
+func (c *Client) AddBGPMultihopPeer(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "add-bgp-multihop-peer", config, opts)
 }
 
-// RemoveOverlayPeer removes an overlay BGP neighbor by IP.
-func (c *Client) RemoveOverlayPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// RemoveBGPMultihopPeer removes a multihop BGP neighbor by IP.
+func (c *Client) RemoveBGPMultihopPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		IP string `json:"ip"`
 	}{IP: ip}
-	return c.nodeWrite(device, "remove-overlay-peer", body, opts)
+	return c.nodeWrite(device, "remove-bgp-multihop-peer", body, opts)
 }
 
 // SetupVTEP configures the EVPN overlay on a device.
@@ -259,16 +259,16 @@ func (c *Client) TeardownVTEP(device string, opts newtron.ExecOpts) (*newtron.Wr
 	return c.nodeWrite(device, "teardown-vtep", nil, opts)
 }
 
-// MapL2VNI maps a VLAN to an L2VNI for EVPN.
-func (c *Client) MapL2VNI(device string, vlanID, vni int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.MapL2VNIRequest{VlanID: vlanID, VNI: vni}
-	return c.nodeWrite(device, "map-l2vni", body, opts)
+// NodeBindMACVPN maps a VLAN to an L2VNI for EVPN at the device level.
+func (c *Client) NodeBindMACVPN(device string, vlanID, vni int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.NodeBindMACVPNRequest{VlanID: vlanID, VNI: vni}
+	return c.nodeWrite(device, "bind-macvpn", body, opts)
 }
 
-// UnmapL2VNI removes the L2VNI mapping for a VLAN.
-func (c *Client) UnmapL2VNI(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.UnmapL2VNIRequest{VlanID: vlanID}
-	return c.nodeWrite(device, "unmap-l2vni", body, opts)
+// NodeUnbindMACVPN removes the MAC-VPN binding for a VLAN at the device level.
+func (c *Client) NodeUnbindMACVPN(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.NodeUnbindMACVPNRequest{VlanID: vlanID}
+	return c.nodeWrite(device, "unbind-macvpn", body, opts)
 }
 
 // ConfigureRouteReflector configures a device as a BGP route reflector.
@@ -315,15 +315,15 @@ func (c *Client) RemoveVLANMember(device string, id int, iface string, opts newt
 	return c.nodeWrite(device, "remove-vlan-member", body, opts)
 }
 
-// ConfigureSVI configures an SVI.
-func (c *Client) ConfigureSVI(device string, config newtron.SVIConfigureRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "configure-svi", config, opts)
+// ConfigureIRB configures an IRB (Integrated Routing and Bridging) interface.
+func (c *Client) ConfigureIRB(device string, config newtron.IRBConfigureRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "configure-irb", config, opts)
 }
 
-// RemoveSVI removes an SVI.
-func (c *Client) RemoveSVI(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.RemoveSVIRequest{VlanID: vlanID}
-	return c.nodeWrite(device, "remove-svi", body, opts)
+// RemoveIRB removes an IRB interface.
+func (c *Client) RemoveIRB(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.RemoveIRBRequest{VlanID: vlanID}
+	return c.nodeWrite(device, "remove-irb", body, opts)
 }
 
 // CreateVRF creates a VRF.
@@ -338,18 +338,6 @@ func (c *Client) DeleteVRF(device, name string, opts newtron.ExecOpts) (*newtron
 		Name string `json:"name"`
 	}{Name: name}
 	return c.nodeWrite(device, "delete-vrf", body, opts)
-}
-
-// AddVRFInterface adds an interface to a VRF.
-func (c *Client) AddVRFInterface(device, vrf, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VRFInterfaceRequest{VRF: vrf, Interface: iface}
-	return c.nodeWrite(device, "add-vrf-interface", body, opts)
-}
-
-// RemoveVRFInterface removes an interface from a VRF.
-func (c *Client) RemoveVRFInterface(device, vrf, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VRFInterfaceRequest{VRF: vrf, Interface: iface}
-	return c.nodeWrite(device, "remove-vrf-interface", body, opts)
 }
 
 // BindIPVPN binds an IP-VPN to a VRF.
@@ -381,17 +369,17 @@ func (c *Client) RemoveStaticRoute(device, vrf, prefix string, opts newtron.Exec
 	return c.nodeWrite(device, "remove-static-route", body, opts)
 }
 
-// CreateACLTable creates an ACL table.
-func (c *Client) CreateACLTable(device string, config newtron.ACLCreateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "create-acl-table", config, opts)
+// CreateACL creates an ACL table.
+func (c *Client) CreateACL(device string, config newtron.ACLCreateRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "create-acl", config, opts)
 }
 
-// DeleteACLTable deletes an ACL table.
-func (c *Client) DeleteACLTable(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// DeleteACL deletes an ACL table.
+func (c *Client) DeleteACL(device, name string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.nodeWrite(device, "delete-acl-table", body, opts)
+	return c.nodeWrite(device, "delete-acl", body, opts)
 }
 
 // AddACLRule adds a rule to an ACL.

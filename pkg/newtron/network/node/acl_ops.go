@@ -172,8 +172,8 @@ func computeFilterHash(filterSpec *spec.FilterSpec) string {
 // ACL Operations
 // ============================================================================
 
-// ACLTableConfig holds configuration options for CreateACLTable.
-type ACLTableConfig struct {
+// ACLConfig holds configuration options for CreateACL.
+type ACLConfig struct {
 	Type        string // L3, L3V6
 	Stage       string // ingress, egress
 	Description string
@@ -191,18 +191,18 @@ type ACLRuleConfig struct {
 	DstPort  string
 }
 
-// CreateACLTable creates a new ACL table.
-func (n *Node) CreateACLTable(ctx context.Context, name string, opts ACLTableConfig) (*ChangeSet, error) {
+// CreateACL creates a new ACL table.
+func (n *Node) CreateACL(ctx context.Context, name string, opts ACLConfig) (*ChangeSet, error) {
 	if opts.Type == "" {
 		opts.Type = "L3"
 	}
 	if opts.Stage == "" {
 		opts.Stage = "ingress"
 	}
-	cs, err := n.op("create-acl-table", name, ChangeAdd,
+	cs, err := n.op("create-acl", name, ChangeAdd,
 		func(pc *PreconditionChecker) { pc.RequireACLTableNotExists(name) },
 		func() []sonic.Entry { return createAclTableConfig(name, opts.Type, opts.Stage, opts.Ports, opts.Description) },
-		"device.delete-acl-table")
+		"device.delete-acl")
 	if err != nil {
 		return nil, err
 	}
@@ -268,9 +268,9 @@ func (n *Node) deleteAclTableConfig(name string) []sonic.Entry {
 	return entries
 }
 
-// DeleteACLTable removes an ACL table and all its rules.
-func (n *Node) DeleteACLTable(ctx context.Context, name string) (*ChangeSet, error) {
-	cs, err := n.op("delete-acl-table", name, ChangeDelete,
+// DeleteACL removes an ACL table and all its rules.
+func (n *Node) DeleteACL(ctx context.Context, name string) (*ChangeSet, error) {
+	cs, err := n.op("delete-acl", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireACLTableExists(name) },
 		func() []sonic.Entry { return n.deleteAclTableConfig(name) })
 	if err != nil {
