@@ -77,8 +77,8 @@ func TestAPICompleteness(t *testing.T) {
 			"ProvisionDevices":        true,
 			"InitDevice":             true,
 			// Drift detection
-			"DetectDrift":  true,
-			"NetworkDrift": true,
+			"DetectDrift":         true,
+			"DetectTopologyDrift": true,
 			// Connection
 			"Connect":   true,
 			"ListNodes": true,
@@ -139,9 +139,6 @@ func TestAPICompleteness(t *testing.T) {
 			"DeletePortChannel":      true,
 			"AddPortChannelMember":   true,
 			"RemovePortChannelMember": true,
-			"ApplyQoS":          true,
-			"RemoveQoS":         true,
-			"Cleanup":           true,
 			"ConfigReload":      true,
 			"RestartService":    true,
 			"ExecCommand":       true,
@@ -163,6 +160,8 @@ func TestAPICompleteness(t *testing.T) {
 			"DeliverComposite": true,
 			"VerifyComposite":  true,
 			"BuildComposite":   true,
+			// Topology snapshot
+			"Snapshot": true,
 		},
 		"Interface": {
 			"ApplyService":         true,
@@ -170,11 +169,10 @@ func TestAPICompleteness(t *testing.T) {
 			"RefreshService":       true,
 			"BindACL":              true,
 			"UnbindACL":            true,
-			"BindMACVPN":           true,
-			"UnbindMACVPN":         true,
 			"AddBGPPeer":           true,
 			"RemoveBGPPeer":        true,
 			"SetProperty":          true,
+			"ClearProperty":        true,
 			"ConfigureInterface":   true,
 			"UnconfigureInterface": true,
 			"ApplyQoS":             true,
@@ -215,7 +213,6 @@ func TestAPICompleteness(t *testing.T) {
 			"VTEPExists":        "covered by EVPNStatus",
 			"GetServiceBinding": "covered by GetServiceBindingDetail",
 			"GetInterfaceProperty": "covered by ShowInterfaceDetail",
-			"Snapshot":             "caller-side projection from Intents (no separate endpoint needed)",
 		},
 		"Interface": {
 			// Read accessors — all exposed through ShowInterfaceDetail

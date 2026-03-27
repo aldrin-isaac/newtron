@@ -25,10 +25,9 @@ func TestParseStepURL(t *testing.T) {
 		{"/interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
 		{"/interface/Ethernet4/configure-interface", "configure-interface", "Ethernet4"},
 		{"/interface/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
-		{"/interface/Ethernet0/set-port-property", "set-port-property", "Ethernet0"},
+		{"/interface/Ethernet0/set-property", "set-property", "Ethernet0"},
 		{"/interface/Ethernet0/bind-acl", "bind-acl", "Ethernet0"},
 		{"/interface/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
-		{"/interface/Ethernet0/bind-macvpn", "bind-macvpn", "Ethernet0"},
 		// No leading slash
 		{"setup-device", "setup-device", ""},
 		{"interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
@@ -219,10 +218,10 @@ func TestReplayStepMissingInterface(t *testing.T) {
 	}
 }
 
-func TestReplayStepSetPortProperty(t *testing.T) {
+func TestReplayStepSetProperty(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
-	// set-port-property intent has parent "interface|Ethernet0", so
+	// set-property intent has parent "interface|Ethernet0", so
 	// configure-interface must run first to create that parent intent.
 	if err := ReplayStep(ctx, n, spec.TopologyStep{
 		URL:    "/interface/Ethernet0/configure-interface",
@@ -231,14 +230,14 @@ func TestReplayStepSetPortProperty(t *testing.T) {
 		t.Fatalf("configure-interface prerequisite: %v", err)
 	}
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/interface/Ethernet0/set-port-property",
+		URL: "/interface/Ethernet0/set-property",
 		Params: map[string]any{
 			"property": "mtu",
 			"value":    "1500",
 		},
 	})
 	if err != nil {
-		t.Fatalf("set-port-property: %v", err)
+		t.Fatalf("set-property: %v", err)
 	}
 	// Verify the changeset was produced (shadow ConfigDB update may not
 	// directly reflect in the Port struct if the changeset writes raw entries).

@@ -11,8 +11,8 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/apply-qos
-    params: {interface: Ethernet44, policy: test-4q}
+    url: /node/{{device}}/interface/Ethernet44/apply-qos
+    params: {policy: test-4q}
 
   - name: verify-port-qos-map
     action: newtron
@@ -32,8 +32,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-qos
-    params: {interface: Ethernet44}
+    url: /node/{{device}}/interface/Ethernet44/remove-qos
 
   - name: verify-port-qos-map-removed
     action: newtron

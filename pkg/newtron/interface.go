@@ -182,31 +182,6 @@ func (i *Interface) UnbindACL(ctx context.Context, acl string) error {
 	return nil
 }
 
-// BindMACVPN binds this VLAN interface to a MAC-VPN definition.
-func (i *Interface) BindMACVPN(ctx context.Context, macvpnName string) error {
-	macvpnName = util.NormalizeName(macvpnName)
-	macvpnDef, err := i.node.internal.GetMACVPN(macvpnName)
-	if err != nil {
-		return err
-	}
-	cs, err := i.internal.BindMACVPN(ctx, macvpnName, macvpnDef)
-	if err != nil {
-		return err
-	}
-	i.node.appendPending(cs)
-	return nil
-}
-
-// UnbindMACVPN removes the MAC-VPN binding from this VLAN interface.
-func (i *Interface) UnbindMACVPN(ctx context.Context) error {
-	cs, err := i.internal.UnbindMACVPN(ctx)
-	if err != nil {
-		return err
-	}
-	i.node.appendPending(cs)
-	return nil
-}
-
 // AddBGPPeer adds a direct BGP peer on this interface.
 func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) error {
 	cs, err := i.internal.AddBGPPeer(ctx, node.DirectBGPPeerConfig{
@@ -261,6 +236,17 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) error {
 // Supported properties: mtu, speed, admin-status, description.
 func (i *Interface) SetProperty(ctx context.Context, property, value string) error {
 	cs, err := i.internal.SetProperty(ctx, property, value)
+	if err != nil {
+		return err
+	}
+	i.node.appendPending(cs)
+	return nil
+}
+
+// ClearProperty removes a property override from this interface,
+// reverting the field to its default and deleting the property intent.
+func (i *Interface) ClearProperty(ctx context.Context, property string) error {
+	cs, err := i.internal.ClearProperty(ctx, property)
 	if err != nil {
 		return err
 	}

@@ -138,7 +138,11 @@ func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
 	if i.node.GetIntent(resource) != nil {
 		return nil
 	}
-	return i.node.writeIntent(cs, sonic.OpInterfaceInit, resource, map[string]string{}, []string{"device"})
+	parents := []string{"device"}
+	if i.IsPortChannel() {
+		parents = append(parents, "portchannel|"+i.name)
+	}
+	return i.node.writeIntent(cs, sonic.OpInterfaceInit, resource, map[string]string{}, parents)
 }
 
 // ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
@@ -186,6 +190,9 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	} else {
 		parents = []string{"device"}
 	}
+	if i.IsPortChannel() {
+		parents = append(parents, "portchannel|"+i.name)
+	}
 	if err := i.node.writeIntent(cs, sonic.OpConfigureInterface, "interface|"+i.name, configureIntentParams, parents); err != nil {
 		return nil, err
 	}
@@ -217,9 +224,10 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 	return cs, nil
 }
 
-// UnconfigureInterface is the reverse of ConfigureInterface. It reads the intent
-// record to determine what was configured, then undoes it. Parameterless — the
-// intent record is self-sufficient for teardown.
+// UnconfigureInterface is the reverse of ConfigureInterface. Performs a complete
+// teardown: removes all sub-resources (BGP peer, QoS, ACL bindings, properties),
+// then removes the interface role (VLAN membership or VRF/IP binding).
+// Parameterless — the intent records are self-sufficient for teardown.
 func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error) {
 	n := i.node
 
@@ -233,6 +241,48 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.unconfigure-interface")
+
+	// Remove all sub-resources (children before parent, per I5).
+	// Snapshot the children list since removals mutate it.
+	children := make([]string, len(intent.Children))
+	copy(children, intent.Children)
+
+	for _, childKey := range children {
+		childIntent := n.GetIntent(childKey)
+		if childIntent == nil {
+			continue
+		}
+		switch childIntent.Operation {
+		case sonic.OpAddBGPPeer:
+			subCS, err := i.RemoveBGPPeer(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("remove bgp-peer on %s: %w", i.name, err)
+			}
+			cs.Merge(subCS)
+
+		case sonic.OpApplyQoS:
+			subCS, err := i.RemoveQoS(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("remove qos on %s: %w", i.name, err)
+			}
+			cs.Merge(subCS)
+
+		case sonic.OpBindACL:
+			aclName := childIntent.Params[sonic.FieldACLName]
+			subCS, err := i.UnbindACL(ctx, aclName)
+			if err != nil {
+				return nil, fmt.Errorf("unbind acl %s on %s: %w", aclName, i.name, err)
+			}
+			cs.Merge(subCS)
+
+		case sonic.OpSetProperty:
+			// Properties are simple value overrides — just delete the intent.
+			// The CONFIG_DB field persists as device reality.
+			if err := n.deleteIntent(cs, childKey); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Bridged mode — remove VLAN membership
 	if vlanStr := intent.Params[sonic.FieldVLANID]; vlanStr != "" {
@@ -379,11 +429,11 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetPortProperty)
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetProperty)
 	if err := i.ensureInterfaceIntent(cs); err != nil {
 		return nil, err
 	}
-	if err := i.node.writeIntent(cs, sonic.OpSetPortProperty, "interface|"+i.name+"|"+property,
+	if err := i.node.writeIntent(cs, sonic.OpSetProperty, "interface|"+i.name+"|"+property,
 		map[string]string{sonic.FieldProperty: property, sonic.FieldValue: value},
 		[]string{"interface|" + i.name}); err != nil {
 		return nil, err
@@ -436,5 +486,50 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 	return cs, nil
 }
 
+// ClearProperty removes a property override from this interface, reverting
+// the field to its default. Deletes the property intent so it no longer
+// blocks parent intent deletion.
+func (i *Interface) ClearProperty(ctx context.Context, property string) (*ChangeSet, error) {
+	n := i.node
+
+	if err := n.precondition("clear-property", i.name).Result(); err != nil {
+		return nil, err
+	}
+
+	intentKey := "interface|" + i.name + "|" + property
+	intent := n.GetIntent(intentKey)
+	if intent == nil {
+		return nil, fmt.Errorf("no property intent for %s on %s", property, i.name)
+	}
+
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpClearProperty)
+
+	tableName := "PORT"
+	if i.IsPortChannel() {
+		tableName = "PORTCHANNEL"
+	}
+
+	switch property {
+	case "mtu":
+		cs.Update(tableName, i.name, map[string]string{"mtu": "9100"})
+	case "speed":
+		// Remove speed field — SONiC uses autoneg default
+		cs.Update(tableName, i.name, map[string]string{"speed": ""})
+	case "admin-status", "admin_status":
+		cs.Update(tableName, i.name, map[string]string{"admin_status": "up"})
+	case "description":
+		cs.Update(tableName, i.name, map[string]string{"description": ""})
+	default:
+		return nil, fmt.Errorf("unknown property: %s", property)
+	}
+
+	if err := n.deleteIntent(cs, intentKey); err != nil {
+		return nil, err
+	}
+	n.applyShadow(cs)
+
+	util.WithDevice(n.Name()).Infof("Cleared %s on interface %s", property, i.name)
+	return cs, nil
+}
 
 

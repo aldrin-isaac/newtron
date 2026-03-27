@@ -211,7 +211,7 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 // and optionally sets up SAG (Static Anycast Gateway) for anycast MAC.
 // Intent-idempotent: if the IRB intent already exists, returns empty ChangeSet.
 func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*ChangeSet, error) {
-	if n.GetIntent("irb|"+strconv.Itoa(vlanID)) != nil {
+	if n.GetIntent("interface|"+VLANName(vlanID)) != nil {
 		return NewChangeSet(n.name, "device."+sonic.OpConfigureIRB), nil
 	}
 
@@ -231,7 +231,7 @@ func (n *Node) ConfigureIRB(ctx context.Context, vlanID int, opts IRBConfig) (*C
 	if opts.VRF != "" {
 		irbParents = append(irbParents, "vrf|"+opts.VRF)
 	}
-	if err := n.writeIntent(cs, sonic.OpConfigureIRB, "irb|"+strconv.Itoa(vlanID), map[string]string{
+	if err := n.writeIntent(cs, sonic.OpConfigureIRB, "interface|"+VLANName(vlanID), map[string]string{
 		sonic.FieldVLANID:     strconv.Itoa(vlanID),
 		sonic.FieldVRF:        opts.VRF,
 		sonic.FieldIPAddress:  opts.IPAddress,
@@ -252,7 +252,7 @@ func (n *Node) UnconfigureIRB(ctx context.Context, vlanID int) (*ChangeSet, erro
 		return nil, err
 	}
 
-	intentKey := "irb|" + strconv.Itoa(vlanID)
+	intentKey := "interface|" + VLANName(vlanID)
 	intent := n.GetIntent(intentKey)
 	if intent == nil {
 		return nil, fmt.Errorf("no IRB intent for VLAN %d", vlanID)

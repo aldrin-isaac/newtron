@@ -44,15 +44,15 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/bind-macvpn
-    params: {macvpn: servers-vlan100}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/bind-macvpn
-    params: {macvpn: servers-vlan100}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 100, macvpn: servers-vlan100}
 
   # =========================================================================
   # Verify CONFIG_DB
@@ -141,13 +141,15 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 100}
 
   - name: unbind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 100}
 
   - name: unconfigure-bridged-leaf1-eth1
     action: newtron

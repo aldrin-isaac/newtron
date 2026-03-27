@@ -250,6 +250,7 @@ func init() {
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
 		showCmd, provisionCmd, healthCmd, deviceCmd, initCmd, intentCmd,
+		zombieCmd, historyCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)

@@ -114,7 +114,21 @@ principle against the actual code:
 
 This is literal, mechanical verification — not "does it feel right."
 
-### 8. Drift Detection = Stop and Escalate
+### 8. DO NOT SPECULATE
+
+Never assert what code does based on assumptions, naming conventions, or mental
+models. Before making any claim about what a function reads, writes, or depends
+on — **read the actual code**. Every wrong answer that could have been prevented
+by reading the source is a violation of this directive.
+
+- "Zombie uses NEWTRON_INTENT" → did you read `WriteIntent`/`ReadIntent`? What key does it actually write?
+- "History relies on intent records" → did you read `WriteHistory`/`ReadHistory`? What table?
+- "This function calls X" → did you grep for the call site?
+
+If you haven't verified it in source, say "I don't know, let me check" — never
+state it as fact.
+
+### 9. Drift Detection = Stop and Escalate
 
 During implementation, continuously check: "Am I drifting from architecture?"
 

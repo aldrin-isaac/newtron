@@ -211,11 +211,11 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 		})
 		return err
 
-	case "set-port-property":
+	case "set-property":
 		property := paramString(p, "property")
 		value := paramString(p, "value")
 		if property == "" {
-			return fmt.Errorf("set-port-property: missing 'property' param")
+			return fmt.Errorf("set-property: missing 'property' param")
 		}
 		_, err := iface.SetProperty(ctx, property, value)
 		return err
@@ -240,19 +240,6 @@ func replayInterfaceStep(ctx context.Context, iface *Interface, op string, p map
 			return fmt.Errorf("apply-qos: %w", err)
 		}
 		_, err = iface.ApplyQoS(ctx, util.NormalizeName(policyName), policy)
-		return err
-
-	case "bind-macvpn":
-		macvpnName := paramString(p, "macvpn")
-		if macvpnName == "" {
-			return fmt.Errorf("bind-macvpn: missing 'macvpn' param")
-		}
-		n := iface.Node()
-		macvpnDef, err := n.GetMACVPN(util.NormalizeName(macvpnName))
-		if err != nil {
-			return fmt.Errorf("bind-macvpn: %w", err)
-		}
-		_, err = iface.BindMACVPN(ctx, util.NormalizeName(macvpnName), macvpnDef)
 		return err
 
 	default:
@@ -307,21 +294,20 @@ func IntentToStep(resource string, fields map[string]string) spec.TopologyStep {
 
 // intentInterface returns the interface name if the operation is interface-scoped,
 // or "" for node-scoped operations.
-// Kind-prefixed keys: "interface|Ethernet0", "interface|Ethernet0|acl|ingress",
-// "vlan|100|macvpn" (VLAN sub-resources use vlan|ID prefix).
+// Kind-prefixed keys: "interface|Ethernet0", "interface|Ethernet0|acl|ingress".
+// Some node-scoped operations (create-portchannel, configure-irb) use interface|
+// keys because the created resource IS an interface, but the operation itself is
+// dispatched at node level.
 func intentInterface(op, resource string) string {
+	switch op {
+	case sonic.OpConfigureIRB, "unconfigure-irb":
+		return ""
+	}
 	if strings.HasPrefix(resource, "interface|") {
 		// Strip "interface|" prefix, extract the interface name (first segment)
 		rest := resource[len("interface|"):]
 		parts := strings.SplitN(rest, "|", 2)
 		return parts[0]
-	}
-	// VLAN sub-resources: macvpn|ID → Vlan{ID}
-	if strings.HasPrefix(resource, "macvpn|") && op == sonic.OpBindMACVPN {
-		parts := strings.SplitN(resource, "|", 2)
-		if len(parts) == 2 {
-			return "Vlan" + parts[1]
-		}
 	}
 	return ""
 }

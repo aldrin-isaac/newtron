@@ -285,7 +285,7 @@ orchestrator concern that uses these domain-level operations, not a newtron conc
 Baseline operations (`setup-*`, `set-*`) are the sole exception to "ship both or
 ship neither." These operations configure device-level infrastructure whose collective
 reverse is reprovision (CompositeOverwrite), not individual teardown. `SetupDevice`
-and `SetPortProperty` have no individual reverse operations.
+and `SetProperty` have no individual reverse operations.
 
 ## Public API Boundary Design
 

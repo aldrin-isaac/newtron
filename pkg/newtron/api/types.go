@@ -36,20 +36,6 @@ type NetworkInfo struct {
 // HTTP Request Types — Node Operations
 // ============================================================================
 
-// ExecuteRequest batches multiple operations in a single connect cycle.
-type ExecuteRequest struct {
-	Operations []Operation `json:"operations"`
-	Execute    bool        `json:"execute"`
-	NoSave     bool        `json:"no_save"`
-}
-
-// Operation is a single action within an ExecuteRequest.
-type Operation struct {
-	Action    string         `json:"action"`
-	Interface string         `json:"interface,omitempty"`
-	Params    map[string]any `json:"params,omitempty"`
-}
-
 // SSHCommandRequest is the body for POST .../ssh-command.
 type SSHCommandRequest struct {
 	Command string `json:"command"`
@@ -72,11 +58,6 @@ type CompositeHandleResponse struct {
 	DeviceName string         `json:"device_name"`
 	EntryCount int            `json:"entry_count"`
 	Tables     map[string]int `json:"tables"`
-}
-
-// CleanupRequest is the body for POST .../cleanup.
-type CleanupRequest struct {
-	Type string `json:"type,omitempty"` // "acls", "vrfs", "vnis", or "" for all
 }
 
 // ============================================================================
@@ -103,15 +84,15 @@ type UnbindACLRequest struct {
 	ACL string `json:"acl"`
 }
 
-// BindMACVPNRequest is the body for POST .../bind-macvpn.
-type BindMACVPNRequest struct {
-	MACVPN string `json:"macvpn"`
-}
-
-// InterfaceSetRequest is the body for POST .../set-port-property.
+// InterfaceSetRequest is the body for POST .../set-property.
 type InterfaceSetRequest struct {
 	Property string `json:"property"`
 	Value    string `json:"value"`
+}
+
+// InterfaceClearRequest is the body for POST .../clear-property.
+type InterfaceClearRequest struct {
+	Property string `json:"property"`
 }
 
 // ConfigureInterfaceRequest is the body for POST .../configure-interface.
@@ -125,8 +106,8 @@ type ConfigureInterfaceRequest struct {
 
 // NodeBindMACVPNRequest is the body for POST .../bind-macvpn (node-level, maps VLAN to L2VNI).
 type NodeBindMACVPNRequest struct {
-	VlanID int `json:"vlan_id"`
-	VNI    int `json:"vni"`
+	VlanID int    `json:"vlan_id"`
+	MACVPN string `json:"macvpn"`
 }
 
 // NodeUnbindMACVPNRequest is the body for POST .../unbind-macvpn (node-level).
@@ -198,17 +179,6 @@ type StaticRouteRequest struct {
 // RestartDaemonRequest is the body for POST .../restart-daemon.
 type RestartDaemonRequest struct {
 	Daemon string `json:"daemon"`
-}
-
-// NodeApplyQoSRequest is the body for POST .../apply-qos (node-level).
-type NodeApplyQoSRequest struct {
-	Interface string `json:"interface"`
-	Policy    string `json:"policy"`
-}
-
-// NodeRemoveQoSRequest is the body for POST .../remove-qos (node-level).
-type NodeRemoveQoSRequest struct {
-	Interface string `json:"interface"`
 }
 
 // ============================================================================

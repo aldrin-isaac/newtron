@@ -295,14 +295,12 @@ Examples:
 			return err
 		}
 
-		vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-
 		fmt.Printf("MAC-VPN: %s\n", macvpnName)
 		fmt.Printf("  VNI: %d\n", macvpnDef.VNI)
 		fmt.Printf("  ARP Suppression: %v\n", macvpnDef.ARPSuppression)
 		fmt.Println()
 
-		return displayWriteResult(app.client.BindMACVPN(app.deviceName, vlanIntf, macvpnName, execOpts()))
+		return displayWriteResult(app.client.NodeBindMACVPN(app.deviceName, vlanID, macvpnName, execOpts()))
 	},
 }
 
@@ -325,8 +323,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		vlanIntf := fmt.Sprintf("Vlan%d", vlanID)
-		return displayWriteResult(app.client.UnbindMACVPN(app.deviceName, vlanIntf, execOpts()))
+		return displayWriteResult(app.client.NodeUnbindMACVPN(app.deviceName, vlanID, execOpts()))
 	},
 }
 

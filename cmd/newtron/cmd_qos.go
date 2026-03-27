@@ -299,7 +299,7 @@ Examples:
 			return err
 		}
 
-		return displayWriteResult(app.client.ApplyQoS(app.deviceName, intfName, policyName, execOpts()))
+		return displayWriteResult(app.client.InterfaceApplyQoS(app.deviceName, intfName, policyName, execOpts()))
 	},
 }
 
@@ -320,7 +320,7 @@ Examples:
 			return err
 		}
 
-		return displayWriteResult(app.client.RemoveQoS(app.deviceName, intfName, execOpts()))
+		return displayWriteResult(app.client.InterfaceRemoveQoS(app.deviceName, intfName, execOpts()))
 	},
 }
 

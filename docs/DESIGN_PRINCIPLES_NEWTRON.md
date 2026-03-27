@@ -1179,7 +1179,7 @@ The current operation pairs:
 | `AddStaticRoute` | `RemoveStaticRoute` |
 
 Baseline operations (no individual reverse — remediation is reprovision):
-`SetupDevice`, `SetPortProperty`
+`SetupDevice`, `SetProperty`
 
 RefreshService is not a pair — it combines removal and reapplication
 as a single operation. When a service's spec changes after it was
@@ -1299,7 +1299,7 @@ what happens if one doesn't exist — without consulting documentation.
 | Verb | Lifecycle | Reverse | Examples |
 |------|-----------|---------|----------|
 | `setup-*` | Device-lifetime. Done once at provisioning. | reprovision | `setup-device` |
-| `set-*` | Field assignment. Per-resource. | reprovision | `set-port-property` |
+| `set-*` | Field assignment. Per-resource. | reprovision | `set-property` |
 | `create-*` | Named resource with independent lifecycle. | `delete-*` | `create-vrf`, `create-vlan` |
 | `add-*` | Instance in a collection. | `remove-*` | `add-bgp-peer`, `add-static-route` |
 | `bind-*` | Relationship between resources. | `unbind-*` | `bind-ipvpn`, `bind-acl` |

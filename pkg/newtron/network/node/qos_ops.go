@@ -106,29 +106,3 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 	return cs, nil
 }
 
-// ============================================================================
-// Node convenience delegators — resolve interface name, delegate to Interface
-// ============================================================================
-
-// ApplyQoS applies a QoS policy to a named interface.
-func (n *Node) ApplyQoS(ctx context.Context, intfName, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
-	intfName = util.NormalizeInterfaceName(intfName)
-	if !n.InterfaceExists(intfName) {
-		return nil, fmt.Errorf("interface %s does not exist", intfName)
-	}
-	iface, err := n.GetInterface(intfName)
-	if err != nil {
-		return nil, err
-	}
-	return iface.ApplyQoS(ctx, policyName, policy)
-}
-
-// RemoveQoS removes QoS configuration from a named interface.
-func (n *Node) RemoveQoS(ctx context.Context, intfName string) (*ChangeSet, error) {
-	intfName = util.NormalizeInterfaceName(intfName)
-	iface, err := n.GetInterface(intfName)
-	if err != nil {
-		return nil, err
-	}
-	return iface.RemoveQoS(ctx)
-}

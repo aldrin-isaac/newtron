@@ -173,22 +173,68 @@ func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
 	}, nil
 }
 
-// DetectDrift compares expected CONFIG_DB (from topology) against actual CONFIG_DB
-// on a device. Returns a DriftReport describing any differences in newtron-owned tables.
-// Requires a topology to be loaded and the device to be connected.
+// DetectDrift reconstructs expected CONFIG_DB from the device's NEWTRON_INTENT
+// records and diffs against actual CONFIG_DB. Returns drift entries for owned tables.
+//
+// Intent-based: the device's own intent records define expected state. Any CONFIG_DB
+// edit (manual or otherwise) that diverges from intent is reported as drift.
+// Requires the device to be connected.
 func (net *Network) DetectDrift(ctx context.Context, device string) (*DriftReport, error) {
+	dev, err := net.internal.GetNode(device)
+	if err != nil {
+		return nil, err
+	}
+
+	diffs, err := dev.DetectDrift(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	pub := &DriftReport{
+		Device: device,
+		Status: "clean",
+	}
+	for _, d := range diffs {
+		switch d.Type {
+		case "missing":
+			pub.Missing = append(pub.Missing, DriftEntry{
+				Table: d.Table, Key: d.Key, Type: d.Type,
+				Expected: d.Expected,
+			})
+		case "extra":
+			pub.Extra = append(pub.Extra, DriftEntry{
+				Table: d.Table, Key: d.Key, Type: d.Type,
+				Actual: d.Actual,
+			})
+		case "modified":
+			pub.Modified = append(pub.Modified, DriftEntry{
+				Table: d.Table, Key: d.Key, Type: d.Type,
+				Expected: d.Expected, Actual: d.Actual,
+			})
+		}
+	}
+	if len(pub.Missing) > 0 || len(pub.Extra) > 0 || len(pub.Modified) > 0 {
+		pub.Status = "drifted"
+	}
+	return pub, nil
+}
+
+// DetectTopologyDrift compares expected CONFIG_DB (from topology steps) against
+// actual CONFIG_DB on the device. Unlike DetectDrift (intent-based), this detects
+// operations done outside the topology — e.g., manual apply-service calls.
+// Requires a topology to be loaded and the device to be connected.
+func (net *Network) DetectTopologyDrift(ctx context.Context, device string) (*DriftReport, error) {
 	if !net.HasTopology() {
-		return nil, &ValidationError{Message: "no topology loaded — drift detection requires a topology"}
+		return nil, &ValidationError{Message: "no topology loaded — topology drift detection requires a topology"}
 	}
 	tp, err := network.NewTopologyProvisioner(net.internal)
 	if err != nil {
 		return nil, err
 	}
-	report, err := tp.DetectDrift(ctx, device)
+	report, err := tp.DetectTopologyDrift(ctx, device)
 	if err != nil {
 		return nil, err
 	}
-	// Convert internal DriftReport to public type
 	pub := &DriftReport{
 		Device: report.Device,
 		Status: report.Status,
@@ -211,36 +257,10 @@ func (net *Network) DetectDrift(ctx context.Context, device string) (*DriftRepor
 			Expected: d.Expected, Actual: d.Actual,
 		})
 	}
+	if len(pub.Missing) > 0 || len(pub.Extra) > 0 || len(pub.Modified) > 0 {
+		pub.Status = "drifted"
+	}
 	return pub, nil
-}
-
-// NetworkDrift runs drift detection across all topology devices and returns
-// a summary. Each device is checked independently; errors on one device
-// don't prevent checking others.
-func (net *Network) NetworkDrift(ctx context.Context) (*NetworkDriftSummary, error) {
-	if !net.HasTopology() {
-		return nil, &ValidationError{Message: "no topology loaded — drift detection requires a topology"}
-	}
-	devices := net.TopologyDeviceNames()
-	summary := &NetworkDriftSummary{}
-	for _, name := range devices {
-		if net.IsHostDevice(name) {
-			continue
-		}
-		report, err := net.DetectDrift(ctx, name)
-		status := DeviceDriftStatus{Device: name}
-		if err != nil {
-			status.Error = err.Error()
-			status.Status = "error"
-		} else {
-			status.Status = report.Status
-			status.Missing = len(report.Missing)
-			status.Extra = len(report.Extra)
-			status.Modified = len(report.Modified)
-		}
-		summary.Devices = append(summary.Devices, status)
-	}
-	return summary, nil
 }
 
 func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {

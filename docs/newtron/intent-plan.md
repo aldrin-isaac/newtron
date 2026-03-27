@@ -131,7 +131,7 @@ the natural provisioning sequence:
 |----------|------------|
 | 1 | setup-device |
 | 2 | create-portchannel |
-| 3 | set-port-property |
+| 3 | set-property |
 | 4 | add-bgp-multihop-peer |
 | 5 | create-vrf |
 | 6 | bind-ipvpn |
@@ -169,7 +169,7 @@ The leading verb in each operation name communicates its lifecycle:
 | Verb | Meaning | Reverse | Examples |
 |------|---------|---------|----------|
 | `setup-*` | Device-lifetime initialization. Done once at provisioning. No individual reverse — remediation is reprovision. | reprovision | setup-device |
-| `set-*` | Field assignment on existing entry. Per-resource. | reprovision | set-port-property |
+| `set-*` | Field assignment on existing entry. Per-resource. | reprovision | set-property |
 | `create-*` | Constructs a new named resource. | `delete-*` | create-vrf, create-vlan, create-portchannel, create-acl |
 | `add-*` | Adds an instance to a collection. | `remove-*` | add-bgp-multihop-peer, add-bgp-peer, add-static-route |
 | `bind-*` | Establishes a relationship between resources. | `unbind-*` | bind-ipvpn, bind-acl, bind-macvpn |
@@ -201,7 +201,7 @@ The verb tells you whether a reverse operation exists without looking it up:
 
 | # | Operation | Resource key | Reverse |
 |---|-----------|-------------|---------|
-| 11 | `set-port-property` | `{intf}\|port\|{prop}` | reprovision |
+| 11 | `set-property` | `{intf}\|port\|{prop}` | reprovision |
 | 12 | `configure-interface` | `{intf}\|configure` | `unconfigure-interface` |
 | 13 | `add-bgp-peer` | `{intf}\|bgp\|{ip}` | `remove-bgp-peer` |
 | 14 | `apply-service` | `{intf}\|service` | `remove-service` |
@@ -360,9 +360,9 @@ remote_as       = 65002           # user
 description     = underlay peer  # user (optional)
 ```
 
-### set-port-property (resource: `Ethernet0|port|mtu`)
+### set-property (resource: `Ethernet0|port|mtu`)
 ```
-operation       = set-port-property
+operation       = set-property
 state           = actuated
 property        = mtu             # user
 value           = 1500            # user
@@ -608,7 +608,7 @@ const (
     OpCreateACL           = "create-acl"
     OpAddBGPMultihopPeer  = "add-bgp-multihop-peer"
     OpCreatePortChannel   = "create-portchannel"
-    OpSetPortProperty     = "set-port-property"
+    OpSetProperty         = "set-property"
     OpConfigureIRB        = "configure-irb"
     OpConfigureInterface  = "configure-interface"
     OpAddBGPPeer      = "add-bgp-peer"
@@ -709,7 +709,7 @@ The same-coin principle demands that `add-bgp-multihop-peer` maps to
 
 | Operation | Expected method | Current method |
 |-----------|----------------|----------------|
-| `set-port-property` | `i.SetProperty()` | `i.Set()` |
+| `set-property` | `i.SetProperty()` | `i.Set()` |
 | `remove-bgp-multihop-peer` | `n.RemoveBGPMultihopPeer()` | `n.RemoveBGPPeer()` |
 | `unconfigure-irb` | `n.UnconfigureIRB()` | ~~`n.RemoveIRB()`~~ (renamed) |
 
@@ -1035,7 +1035,7 @@ case "create-acl":
     return n.CreateACL(ctx, ...)
 case "configure-irb":
     return n.ConfigureIRB(ctx, ...)
-case "set-port-property":
+case "set-property":
     iface, err := n.GetInterface(ifaceName)
     if err != nil { return err }
     return iface.SetProperty(ctx, ...)

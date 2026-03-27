@@ -604,7 +604,7 @@ ACL teardown path.
 
 ### 10.5 `portchannel|NAME`
 
-PortChannel container. Children include member interface intents.
+PortChannel container. Children include member intents.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -614,7 +614,10 @@ PortChannel container. Children include member interface intents.
 
 **Parents**: `[device]`
 **Note**: Per-member child intents (`portchannel|NAME|MEMBER`, §10.17) encode
-membership via `_children`.
+membership via `_children`. Once created, a PortChannel can be configured as
+an interface via `ConfigureInterface` or `ApplyService`, which writes a separate
+`interface|PortChannel100` intent with the appropriate role parents (`[vlan|ID]`,
+`[vrf|NAME]`, etc.).
 
 ---
 
@@ -649,7 +652,7 @@ lazily create the anchor if it does not already exist (§10.11.1).
 | Delete | remove-service | `RemoveService` | service_ops.go |
 | Create | interface-init (lazy anchor) | `ensureInterfaceIntent` | interface_ops.go |
 
-**Parents** (vary by operation and service type):
+**Parents** (vary by operation, service type, and interface type):
 - configure-interface bridged: `[vlan|ID]`
 - configure-interface routed: `[vrf|NAME]`
 - configure-interface IP-only: `[device]`
@@ -657,6 +660,11 @@ lazily create the anchor if it does not already exist (§10.11.1).
 - apply-service routed: `[vrf|NAME]`
 - apply-service irb/evpn-irb: `[vlan|ID, vrf|NAME]`
 - interface-init (lazy anchor): `[device]`
+
+When the interface is a PortChannel, `portchannel|NAME` is added as an
+additional parent. This ensures the container cannot be deleted while the
+interface role exists. Example: `interface|PortChannel100` configured as
+routed has parents `[vrf|CUST, portchannel|PortChannel100]`.
 
 **Mutual exclusivity**: An interface has exactly one role at a time. Changing
 roles requires the caller to remove the current intent (via the appropriate
@@ -722,8 +730,8 @@ gets its own intent record (e.g., `interface|Ethernet0|mtu`, `interface|Ethernet
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | set-port-property | `SetProperty` | interface_ops.go:373 |
-| Create (overwrite) | set-port-property | `SetProperty` (called again with new value) | interface_ops.go:373 |
+| Create | set-property | `SetProperty` | interface_ops.go:373 |
+| Create (overwrite) | set-property | `SetProperty` (called again with new value) | interface_ops.go:373 |
 
 **Parents**: `[interface|INTF]`
 **Reverse**: `SetProperty` is its own reverse — call it again with the new or
@@ -779,10 +787,13 @@ VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH entries.
 
 ---
 
-### 10.13 `irb|VLANID`
+### 10.13 `interface|Vlan{ID}` (IRB)
 
 IRB (Integrated Routing and Bridging) configuration on a VLAN. Creates
-VLAN_INTERFACE IP entries and SAG_GLOBAL anycast MAC.
+VLAN_INTERFACE IP entries and SAG_GLOBAL anycast MAC. Uses the `interface|`
+namespace because an IRB is a SONiC interface (`Vlan100`) — sub-resource
+operations (BindACL, AddBGPPeer, ApplyQoS) parent to it like any other
+interface.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -794,6 +805,11 @@ VLAN_INTERFACE IP entries and SAG_GLOBAL anycast MAC.
 `ConfigureIRB` creates VLAN_INTERFACE entries with a `vrf_name` binding — the
 IRB depends on the VRF existing. When no VRF is specified, the IRB is a
 pure L2 SVI and depends only on the VLAN.
+
+Sub-resources parent to `interface|Vlan{ID}` like any physical interface:
+- `interface|Vlan100|acl|ingress` — ACL binding on the IRB
+- `interface|Vlan100|bgp-peer` — BGP peer via the SVI
+- `interface|Vlan100|qos` — QoS policy on the SVI
 
 ---
 
@@ -880,13 +896,13 @@ All 18 intent resource keys at a glance:
 | 4 | `acl\|NAME` | `[device]` | CreateACL, ApplyService | DeleteACL, removeSharedACL |
 | 5 | `portchannel\|NAME` | `[device]` | CreatePortChannel | DeletePortChannel |
 | 6 | `evpn-peer\|ADDR` | `[device]` | AddBGPEVPNPeer | RemoveBGPEVPNPeer |
-| 7 | `interface\|INTF` | varies | ConfigureInterface, ApplyService, ensureInterfaceIntent | UnconfigureInterface, RemoveService |
+| 7 | `interface\|INTF` | varies; +`portchannel\|NAME` for PCs | ConfigureInterface, ApplyService, ensureInterfaceIntent | UnconfigureInterface, RemoveService |
 | 8 | `interface\|INTF\|acl\|DIR` | `[interface\|INTF, acl\|NAME]` | BindACL | UnbindACL |
 | 9 | `interface\|INTF\|qos` | `[interface\|INTF]` | ApplyQoS | RemoveQoS |
 | 10 | `interface\|INTF\|macvpn` | `[interface\|INTF]` | Interface.BindMACVPN | Interface.UnbindMACVPN |
 | 11 | `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | SetProperty (self-reverse) |
 | 12 | `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
-| 13 | `irb\|VLANID` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
+| 13 | `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
 | 14 | `ipvpn\|VRFNAME` | `[vrf\|NAME]` | BindIPVPN | UnbindIPVPN |
 | 15 | `route\|VRF\|PREFIX` | `[vrf\|NAME]` | AddStaticRoute | RemoveStaticRoute |
 | 16 | `acl\|NAME\|RULE` | `[acl\|NAME]` | AddACLRule | DeleteACLRule |
@@ -907,8 +923,8 @@ All 18 intent resource keys at a glance:
               └─┬──┬──┬──┘  └──┬──┬───┘  └──┬──┬────┘  └──┬──┬─────────┘
                 │  │  │        │  │         │  │           │  │
                 ▼  ▼  ▼        ▼  ▼         ▼  ▼           ▼  ▼
-         interface macvpn irb interface ipvpn acl|  ←──┐  portchannel| portchannel|
-         |Eth0 *  |100  |100 |Eth1 * |CUST  EDGE|     │  PC1|Eth8    PC1|Eth12
+         interface macvpn interface interface ipvpn acl|  ←──┐  portchannel| portchannel|
+         |Eth0 *  |100  |Vlan100* |Eth1 * |CUST  EDGE|     │  PC1|Eth8    PC1|Eth12
            │                               RULE  ─────┘
            ├─ interface|Eth0|qos          _10
            ├─ interface|Eth0|acl|ingress  acl|EDGE|
@@ -931,12 +947,12 @@ All 18 intent resource keys at a glance:
               Tree display shows it under interface|Eth0 (same kind);
               under acl|EDGE it appears as a leaf (§12.3.1).
 
-              irb|100 may have TWO parents: vlan|100 AND vrf|CUST
-              (when VRF is specified — §10.13). Shown under vlan|100
-              only for visual simplicity.
+              interface|Vlan100 (IRB) may have TWO parents: vlan|100
+              AND vrf|CUST (when VRF is specified — §10.13). Shown
+              under vlan|100 only for visual simplicity.
 
               Every key starts with its kind: device, interface, vlan, vrf,
-              acl, portchannel, macvpn, irb, ipvpn, route, evpn-peer
+              acl, portchannel, macvpn, ipvpn, route, evpn-peer
 ```
 
 ### 10.21 Multi-Parent Example
@@ -1050,7 +1066,7 @@ device (setup-device)
 ├── vlan|100 (create-vlan)
 │   ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
 │   ├── macvpn|100 (bind-macvpn) vni=20100
-│   └── irb|100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
+│   └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ├── vrf|CUSTOMER (create-vrf)
 │   ├── interface|Ethernet4 (configure-interface) vrf=CUSTOMER ip=10.0.1.0/31
 │   ├── ipvpn|CUSTOMER (bind-ipvpn) l3vni=1001 l3vni_vlan=1001
@@ -1069,7 +1085,7 @@ $ newtron intent tree switch1 vlan
 vlan|100 (create-vlan)
 ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
 ├── macvpn|100 (bind-macvpn) vni=20100
-└── irb|100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
+└── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 
 vlan|200 (create-vlan)
 └── interface|Ethernet8 (configure-interface) vlan_id=200 tagged=true
@@ -1081,7 +1097,7 @@ $ newtron intent tree switch1 vlan:100
 vlan|100 (create-vlan)
 ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
 ├── macvpn|100 (bind-macvpn) vni=20100
-└── irb|100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
+└── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ```
 
 **Filter by interface** — show an interface and its children:
@@ -1090,7 +1106,7 @@ $ newtron intent tree switch1 interface:Ethernet0
 interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
 ├── interface|Ethernet0|qos (apply-qos) policy=STRICT_PRIORITY
 ├── interface|Ethernet0|acl|ingress (bind-acl) acl_name=EDGE_IN
-└── interface|Ethernet0|mtu (set-port-property) mtu=9100
+└── interface|Ethernet0|mtu (set-property) mtu=9100
 ```
 
 **Ancestors mode** — show the path from a resource to the root:
@@ -1100,7 +1116,7 @@ device (setup-device)
 └── vlan|100 (create-vlan)
     ├── interface|Ethernet0 (configure-interface) vlan_id=100 tagged=false
     ├── macvpn|100 (bind-macvpn) vni=20100
-    └── irb|100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
+    └── interface|Vlan100 (configure-irb) vrf=CUSTOMER ip_address=10.10.100.1/24
 ```
 
 ### 12.3 Output Format
@@ -1149,10 +1165,9 @@ The `<resource-kind>` argument maps to resource key prefixes:
 | `acl` | `acl\|` | `acl\|EDGE_IN`, `acl\|EDGE_IN\|RULE_10` |
 | `portchannel` | `portchannel\|` | `portchannel\|PC1`, `portchannel\|PC1\|Ethernet8` |
 | `evpn-peer` | `evpn-peer\|` | `evpn-peer\|10.0.0.2` |
-| `interface` | `interface\|` | `interface\|Ethernet0`, `interface\|Ethernet0\|qos` |
+| `interface` | `interface\|` | `interface\|Ethernet0`, `interface\|Vlan100`, `interface\|Ethernet0\|qos` |
 | `ipvpn` | `ipvpn\|` | `ipvpn\|CUSTOMER` |
 | `macvpn` | `macvpn\|` | `macvpn\|100` |
-| `irb` | `irb\|` | `irb\|100` |
 | `route` | `route\|` | `route\|CUSTOMER\|10.0.0.0/8` |
 
 When `<resource-kind>:<resource>` is given, the resource key is constructed
@@ -1517,7 +1532,7 @@ This creates a two-level tree per interface:
 interface|Ethernet0 (configure-interface)
 ├── interface|Ethernet0|qos (apply-qos)
 ├── interface|Ethernet0|acl|ingress (bind-acl)
-└── interface|Ethernet0|mtu (set-port-property)
+└── interface|Ethernet0|mtu (set-property)
 ```
 
 Teardown respects the tree: `UnconfigureInterface` must first remove all

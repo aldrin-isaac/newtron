@@ -73,10 +73,6 @@ func TestChecker_SuperUser(t *testing.T) {
 	if err := checker.Check(PermServiceApply, nil); err != nil {
 		t.Errorf("Superuser should be allowed: %v", err)
 	}
-	if err := checker.Check(PermDeviceCleanup, nil); err != nil {
-		t.Errorf("Superuser should be allowed: %v", err)
-	}
-
 	if !checker.isSuperUser(checker.currentUser) {
 		t.Error("admin should be superuser")
 	}

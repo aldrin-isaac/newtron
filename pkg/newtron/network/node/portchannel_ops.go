@@ -125,6 +125,12 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 	pcName = util.NormalizeInterfaceName(pcName)
 	member = util.NormalizeInterfaceName(member)
 
+	// Member must be unconfigured — no active interface role (VRF, VLAN, service).
+	// A configured interface has an interface|{name} intent; reject if present.
+	if n.GetIntent("interface|"+member) != nil {
+		return nil, fmt.Errorf("interface %s has an active configuration — unconfigure it before adding to %s", member, pcName)
+	}
+
 	cs, err := n.op("add-portchannel-member", pcName, ChangeAdd,
 		func(pc *PreconditionChecker) {
 			pc.RequirePortChannelExists(pcName).

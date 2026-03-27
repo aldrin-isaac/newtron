@@ -267,8 +267,8 @@ func (c *Client) SetupDevice(device string, sdOpts newtron.SetupDeviceOpts, opts
 }
 
 // NodeBindMACVPN maps a VLAN to an L2VNI for EVPN at the device level.
-func (c *Client) NodeBindMACVPN(device string, vlanID, vni int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.NodeBindMACVPNRequest{VlanID: vlanID, VNI: vni}
+func (c *Client) NodeBindMACVPN(device string, vlanID int, macvpnName string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.NodeBindMACVPNRequest{VlanID: vlanID, MACVPN: macvpnName}
 	return c.nodeWrite(device, "bind-macvpn", body, opts)
 }
 
@@ -426,24 +426,6 @@ func (c *Client) RemovePortChannelMember(device, pc, member string, opts newtron
 	return c.nodeWrite(device, "remove-portchannel-member", body, opts)
 }
 
-// ApplyQoS applies a QoS policy to an interface (node-level).
-func (c *Client) ApplyQoS(device, iface, policy string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.NodeApplyQoSRequest{Interface: iface, Policy: policy}
-	return c.nodeWrite(device, "apply-qos", body, opts)
-}
-
-// RemoveQoS removes QoS from an interface (node-level).
-func (c *Client) RemoveQoS(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.NodeRemoveQoSRequest{Interface: iface}
-	return c.nodeWrite(device, "remove-qos", body, opts)
-}
-
-// Cleanup removes orphaned config.
-func (c *Client) Cleanup(device, cleanupType string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.CleanupRequest{Type: cleanupType}
-	return c.nodeWrite(device, "cleanup", body, opts)
-}
-
 // VerifyCommitted re-verifies all committed changes.
 func (c *Client) VerifyCommitted(device string) (*newtron.VerificationResult, error) {
 	var result newtron.VerificationResult
@@ -492,15 +474,6 @@ func (c *Client) SSHCommand(device, command string) (string, error) {
 		return "", err
 	}
 	return result.Output, nil
-}
-
-// Execute runs a batch of operations on a device.
-func (c *Client) Execute(device string, req api.ExecuteRequest) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	if err := c.doPost(c.nodePath(device)+"/execute", req, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 // ============================================================================
@@ -596,11 +569,22 @@ func (c *Client) DetectDrift(device string) (*newtron.DriftReport, error) {
 	return &result, nil
 }
 
-// NetworkDrift runs drift detection across all topology devices.
-func (c *Client) NetworkDrift() (*newtron.NetworkDriftSummary, error) {
-	var result newtron.NetworkDriftSummary
-	if err := c.doGet(c.networkPath()+"/drift", &result); err != nil {
+// TopologyIntents returns the device's actuated intents projected as topology steps.
+func (c *Client) TopologyIntents(device string) (*newtron.TopologySnapshot, error) {
+	var result newtron.TopologySnapshot
+	if err := c.doGet(c.nodePath(device)+"/topology/intents", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
+
+// DetectTopologyDrift compares expected CONFIG_DB (from topology steps) against
+// actual CONFIG_DB for a device. Detects operations done outside the topology.
+func (c *Client) DetectTopologyDrift(device string) (*newtron.DriftReport, error) {
+	var result newtron.DriftReport
+	if err := c.doGet(c.nodePath(device)+"/topology/drift", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+

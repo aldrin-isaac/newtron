@@ -84,7 +84,8 @@ const (
 	OpCreatePortChannel  = "create-portchannel"
 	OpConfigureIRB       = "configure-irb"
 	OpAddStaticRoute     = "add-static-route"
-	OpSetPortProperty    = "set-port-property"
+	OpSetProperty        = "set-property"
+	OpClearProperty      = "clear-property"
 	OpConfigureInterface = "configure-interface"
 	OpAddBGPPeer         = "add-bgp-peer"
 	OpApplyService       = "apply-service"
@@ -1047,6 +1048,16 @@ func (db *ConfigDB) ExportEntries() []Entry {
 	}
 
 	return entries
+}
+
+// ExportPorts returns the PORT table as raw map[string]map[string]string.
+// Used by drift detection to seed ReconstructExpected with port metadata.
+func (db *ConfigDB) ExportPorts() map[string]map[string]string {
+	result := make(map[string]map[string]string, len(db.Port))
+	for name, entry := range db.Port {
+		result[name] = structToFields(entry)
+	}
+	return result
 }
 
 // copyFields returns a shallow copy of the map (avoids aliasing caller's map).

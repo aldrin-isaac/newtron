@@ -127,16 +127,26 @@ func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) (*
 				}
 			}
 		},
-		func() []sonic.Entry { return createVniMapConfig(VLANName(vlanID), vni) },
+		func() []sonic.Entry {
+			entries := createVniMapConfig(VLANName(vlanID), vni)
+			if macvpnDef.ARPSuppression {
+				entries = append(entries, enableArpSuppressionConfig(VLANName(vlanID))...)
+			}
+			return entries
+		},
 		"device.unbind-macvpn")
 	if err != nil {
 		return nil, err
 	}
-	if err := n.writeIntent(cs, sonic.OpBindMACVPN, "macvpn|"+strconv.Itoa(vlanID), map[string]string{
+	intentParams := map[string]string{
 		sonic.FieldVLANID: strconv.Itoa(vlanID),
 		sonic.FieldMACVPN: macvpnName,
 		sonic.FieldVNI:    strconv.Itoa(vni),
-	}, []string{"vlan|" + strconv.Itoa(vlanID)}); err != nil {
+	}
+	if macvpnDef.ARPSuppression {
+		intentParams[sonic.FieldARPSuppression] = "true"
+	}
+	if err := n.writeIntent(cs, sonic.OpBindMACVPN, "macvpn|"+strconv.Itoa(vlanID), intentParams, []string{"vlan|" + strconv.Itoa(vlanID)}); err != nil {
 		return nil, err
 	}
 
@@ -166,6 +176,9 @@ func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) (*ChangeSet, error)
 	cs := NewChangeSet(n.name, "device.unbind-macvpn")
 	if vni > 0 {
 		cs.Deletes(deleteVniMapConfig(vni, VLANName(vlanID)))
+	}
+	if intent.Params[sonic.FieldARPSuppression] == "true" {
+		cs.Deletes(disableArpSuppressionConfig(VLANName(vlanID)))
 	}
 
 	if err := n.deleteIntent(cs, intentKey); err != nil {

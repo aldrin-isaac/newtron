@@ -114,12 +114,10 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	// Node write operations (RPC-style: verb in URL, POST for all writes)
 	// ====================================================================
-	mux.HandleFunc("POST /network/{netID}/node/{device}/execute", s.handleExecute)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/bind-macvpn", s.handleNodeBindMACVPN)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/unbind-macvpn", s.handleNodeUnbindMACVPN)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/reload-config", s.handleReloadConfig)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/save-config", s.handleSaveConfig)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/cleanup", s.handleCleanup)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/ssh-command", s.handleSSHCommand)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/create-vlan", s.handleCreateVLAN)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/delete-vlan", s.handleDeleteVLAN)
@@ -144,8 +142,6 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/restart-daemon", s.handleRestartDaemon)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/setup-device", s.handleSetupDevice)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/refresh", s.handleRefresh)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/apply-qos", s.handleNodeApplyQoS)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-qos", s.handleNodeRemoveQoS)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/verify-committed", s.handleVerifyCommitted)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}", s.handleConfigDBTableKeys)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}", s.handleQueryConfigDB)
@@ -169,7 +165,8 @@ func (s *Server) buildMux() http.Handler {
 
 	// Drift detection
 	mux.HandleFunc("GET /network/{netID}/node/{device}/drift", s.handleDetectDrift)
-	mux.HandleFunc("GET /network/{netID}/drift", s.handleNetworkDrift)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/topology/drift", s.handleDetectTopologyDrift)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/topology/intents", s.handleTopologyIntents)
 
 	// ====================================================================
 	// Node composite operations
@@ -187,11 +184,10 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/unconfigure-interface", s.handleUnconfigureInterface)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/bind-acl", s.handleBindACL)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/unbind-acl", s.handleUnbindACL)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/bind-macvpn", s.handleBindMACVPN)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/unbind-macvpn", s.handleUnbindMACVPN)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/add-bgp-peer", s.handleAddBGPPeer)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/remove-bgp-peer", s.handleRemoveBGPPeer)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/set-port-property", s.handleInterfaceSet)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/set-property", s.handleInterfaceSet)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/clear-property", s.handleClearProperty)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/configure-interface", s.handleConfigureInterface)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/remove-qos", s.handleRemoveInterfaceQoS)

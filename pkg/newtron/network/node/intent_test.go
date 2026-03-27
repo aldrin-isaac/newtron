@@ -535,17 +535,17 @@ func TestIntentToStep_CreatePortChannel(t *testing.T) {
 	}
 }
 
-func TestIntentToStep_SetPortProperty(t *testing.T) {
+func TestIntentToStep_SetProperty(t *testing.T) {
 	// Resource key is "interface|Ethernet0|mtu" — kind-prefixed, multi-property support
 	step := IntentToStep("interface|Ethernet0|mtu", map[string]string{
 		"state":     "actuated",
-		"operation": "set-port-property",
+		"operation": "set-property",
 		"property":  "mtu",
 		"value":     "9100",
 	})
 
-	if step.URL != "/interface/Ethernet0/set-port-property" {
-		t.Errorf("URL = %q, want /interface/Ethernet0/set-port-property", step.URL)
+	if step.URL != "/interface/Ethernet0/set-property" {
+		t.Errorf("URL = %q, want /interface/Ethernet0/set-property", step.URL)
 	}
 	if step.Params["property"] != "mtu" {
 		t.Errorf("Params[property] = %v, want mtu", step.Params["property"])

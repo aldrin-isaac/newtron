@@ -161,53 +161,6 @@ func (s *Server) handleUnbindACL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleBindMACVPN(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	ifName := interfaceName(r)
-	var req BindMACVPNRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		iface, err := n.Interface(ifName)
-		if err != nil {
-			return err
-		}
-		return iface.BindMACVPN(ctx, req.MACVPN)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleUnbindMACVPN(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	ifName := interfaceName(r)
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		iface, err := n.Interface(ifName)
-		if err != nil {
-			return err
-		}
-		return iface.UnbindMACVPN(ctx)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
 func (s *Server) handleAddBGPPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
@@ -273,6 +226,36 @@ func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return iface.SetProperty(ctx, req.Property, req.Value)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
+func (s *Server) handleClearProperty(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	ifName := interfaceName(r)
+	var req InterfaceClearRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.Property == "" {
+		writeError(w, &newtron.ValidationError{Field: "property", Message: "required"})
+		return
+	}
+	opts := execOpts(r)
+	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
+		iface, err := n.Interface(ifName)
+		if err != nil {
+			return err
+		}
+		return iface.ClearProperty(ctx, req.Property)
 	})
 	if err != nil {
 		writeError(w, err)

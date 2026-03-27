@@ -251,7 +251,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.SetPortProperty(app.deviceName, intfName, property, value, execOpts()))
+		return displayWriteResult(app.client.SetProperty(app.deviceName, intfName, property, value, execOpts()))
 	},
 }
 

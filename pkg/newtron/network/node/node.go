@@ -187,6 +187,50 @@ func (n *Node) Snapshot() *spec.TopologyDevice {
 	return dev
 }
 
+// DetectDrift reconstructs expected CONFIG_DB from the device's own NEWTRON_INTENT
+// records and diffs against actual CONFIG_DB. Returns drift entries for owned tables.
+//
+// This is intent-based drift: what the device's intents say should be configured
+// vs what CONFIG_DB actually contains. Requires a connected node with configDB loaded.
+func (n *Node) DetectDrift(ctx context.Context) ([]sonic.DriftEntry, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if n.configDB == nil {
+		return nil, fmt.Errorf("no CONFIG_DB loaded for %s", n.name)
+	}
+	if n.conn == nil {
+		return nil, fmt.Errorf("node %s not connected", n.name)
+	}
+	configClient := n.conn.Client()
+	if configClient == nil {
+		return nil, fmt.Errorf("no CONFIG_DB client for %s", n.name)
+	}
+
+	// Step 1: Reconstruct expected CONFIG_DB from intent records.
+	// Uses the same replay path as provisioning — same code, different input.
+	expected, err := ReconstructExpected(ctx, n.SpecProvider,
+		n.name, n.profile, n.resolved,
+		n.configDB.NewtronIntent,
+		n.configDB.ExportPorts())
+	if err != nil {
+		return nil, fmt.Errorf("reconstructing expected state: %w", err)
+	}
+
+	// Step 2: Export reconstructed state as RawConfigDB.
+	composite := expected.BuildComposite()
+	expectedRaw := sonic.RawConfigDB(composite.Tables)
+
+	// Step 3: Read actual CONFIG_DB owned tables from the device.
+	actual, err := configClient.GetRawOwnedTables(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading actual CONFIG_DB: %w", err)
+	}
+
+	// Step 4: Diff.
+	return sonic.DiffConfigDB(expectedRaw, actual, sonic.OwnedTables()), nil
+}
+
 // RegisterPort creates a PORT entry in the shadow ConfigDB.
 // This enables GetInterface for offline mode (GetInterface checks PORT table).
 func (n *Node) RegisterPort(name string, fields map[string]string) {

@@ -97,29 +97,29 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/bind-macvpn
-    params: {macvpn: servers-vlan100}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/bind-macvpn
-    params: {macvpn: servers-vlan100}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 100, macvpn: servers-vlan100}
 
   - name: bind-macvpn-200-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan200/bind-macvpn
-    params: {macvpn: storage-vlan200}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 200, macvpn: storage-vlan200}
 
   - name: bind-macvpn-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan200/bind-macvpn
-    params: {macvpn: storage-vlan200}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 200, macvpn: storage-vlan200}
 
   - name: wait-vxlan-convergence
     action: wait
@@ -243,25 +243,29 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan200/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 200}
 
   - name: unbind-macvpn-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan200/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 200}
 
   - name: unbind-macvpn-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 100}
 
   - name: unbind-macvpn-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/interface/Vlan100/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 100}
 
   - name: remove-svi-200-leaf1
     action: newtron

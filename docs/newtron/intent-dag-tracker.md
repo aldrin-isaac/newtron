@@ -337,7 +337,7 @@ and kind-prefixed resource key per §10.1–§10.17.
 
 - [x] **T8.1.11** Update `n.GetIntent("Ethernet0")` → `n.GetIntent("interface|Ethernet0")` in 3 locations
 - [x] **T8.1.12** (added) Seed `"device"` root intent in `newTestAbstract()`
-- [x] **T8.1.13** (added) `TestReplayStepSetPortProperty`: add `configure-interface` prerequisite for `interface|Ethernet0` parent
+- [x] **T8.1.13** (added) `TestReplayStepSetProperty`: add `configure-interface` prerequisite for `interface|Ethernet0` parent
 
 ### 8.1d Specific test file fixes (device_ops_test.go)
 

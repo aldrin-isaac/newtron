@@ -188,17 +188,6 @@ type ApplyServiceOpts struct {
 }
 
 // ============================================================================
-// Device Operation Request Types
-// ============================================================================
-
-// CleanupSummary provides details about orphaned resources found and removed.
-type CleanupSummary struct {
-	OrphanedACLs        []string `json:"orphaned_acls,omitempty"`
-	OrphanedVRFs        []string `json:"orphaned_vrfs,omitempty"`
-	OrphanedVNIMappings []string `json:"orphaned_vni_mappings,omitempty"`
-}
-
-// ============================================================================
 // Provision Operation Request/Result Types
 // ============================================================================
 
@@ -1129,19 +1118,16 @@ type DriftReport struct {
 	Modified []DriftEntry `json:"modified,omitempty"`
 }
 
-// NetworkDriftSummary is the per-device drift status for network-level views.
-type NetworkDriftSummary struct {
-	Devices []DeviceDriftStatus `json:"devices"`
+// TopologySnapshot is the device's actuated intents projected as topology steps.
+// Returned by Snapshot() — the export direction: device reality → topology format.
+type TopologySnapshot struct {
+	Steps []TopologyStep `json:"steps,omitempty"`
 }
 
-// DeviceDriftStatus is a single device's drift summary.
-type DeviceDriftStatus struct {
-	Device   string `json:"device"`
-	Status   string `json:"status"`
-	Missing  int    `json:"missing,omitempty"`
-	Extra    int    `json:"extra,omitempty"`
-	Modified int    `json:"modified,omitempty"`
-	Error    string `json:"error,omitempty"`
+// TopologyStep is a single provisioning operation in topology format.
+type TopologyStep struct {
+	URL    string         `json:"url"`
+	Params map[string]any `json:"params,omitempty"`
 }
 
 // ============================================================================

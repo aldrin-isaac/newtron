@@ -99,13 +99,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Vlan300/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 300}
 
   - name: unbind-macvpn-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Vlan300/unbind-macvpn
+    url: /node/{{device}}/unbind-macvpn
+    params: {vlan_id: 300}
 
   - name: verify-tunnel-map-removed-sw1
     action: newtron

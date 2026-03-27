@@ -9,7 +9,7 @@ via `writeIntent`. Every reverse operation MUST read teardown data from the inte
 record (via `GetIntent`) or delete the intent record (via `deleteIntent`). The
 intent record must contain every value needed for teardown.
 
-Baseline operations (setup-device, set-port-property) are exempt.
+Baseline operations (setup-device, set-property) are exempt.
 
 ## Fixes Applied
 

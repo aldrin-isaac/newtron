@@ -387,6 +387,9 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	default:
 		intentParents = []string{"device"}
 	}
+	if i.IsPortChannel() {
+		intentParents = append(intentParents, "portchannel|"+i.name)
+	}
 
 	// =========================================================================
 	// Infrastructure via intent-idempotent primitives.

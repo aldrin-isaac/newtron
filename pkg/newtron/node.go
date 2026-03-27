@@ -11,7 +11,6 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -269,9 +268,17 @@ func filterDisplayParams(params map[string]string) map[string]string {
 }
 
 // Snapshot projects the node's actuated intents back into topology format.
-// Returns a TopologyDevice with service interfaces and their IPs.
-func (n *Node) Snapshot() *spec.TopologyDevice {
-	return n.internal.Snapshot()
+// Returns steps that would reproduce the device's current intent state.
+func (n *Node) Snapshot() *TopologySnapshot {
+	dev := n.internal.Snapshot()
+	snap := &TopologySnapshot{}
+	for _, s := range dev.Steps {
+		snap.Steps = append(snap.Steps, TopologyStep{
+			URL:    s.URL,
+			Params: s.Params,
+		})
+	}
+	return snap
 }
 
 // intentFromSonic converts an internal sonic.Intent to the public Intent type.
@@ -807,12 +814,6 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 			return nil, err
 		}
 		return iface.UnbindACL(ctx, params["acl_name"])
-	case "interface.unbind-macvpn":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.UnbindMACVPN(ctx)
 	case "device.remove-bgp-peer":
 		iface, err := n.internal.GetInterface(params["interface"])
 		if err != nil {
@@ -1232,12 +1233,8 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error 
 // ============================================================================
 
 // BindMACVPN maps a VLAN to an L2VNI for EVPN.
-// Resolves the MAC-VPN name by VNI from the node's SpecProvider.
-func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) error {
-	macvpnName, _ := n.internal.FindMACVPNByVNI(vni)
-	if macvpnName == "" {
-		return fmt.Errorf("no MAC-VPN spec found for VNI %d", vni)
-	}
+func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) error {
+	macvpnName = util.NormalizeName(macvpnName)
 	cs, err := n.internal.BindMACVPN(ctx, vlanID, macvpnName)
 	n.appendPending(cs)
 	return err
@@ -1291,30 +1288,6 @@ func (n *Node) AddACLRule(ctx context.Context, acl, ruleName string, config ACLR
 // RemoveACLRule removes a rule from an ACL table.
 func (n *Node) RemoveACLRule(ctx context.Context, acl, ruleName string) error {
 	cs, err := n.internal.DeleteACLRule(ctx, acl, ruleName)
-	n.appendPending(cs)
-	return err
-}
-
-// ============================================================================
-// Device-level write ops — QoS
-// ============================================================================
-
-// ApplyQoS applies a QoS policy to an interface.
-// Resolves the QoS policy spec by name from the node's SpecProvider.
-func (n *Node) ApplyQoS(ctx context.Context, iface, policy string) error {
-	policy = util.NormalizeName(policy)
-	policyDef, err := n.internal.GetQoSPolicy(policy)
-	if err != nil {
-		return fmt.Errorf("qos policy '%s' not found: %w", policy, err)
-	}
-	cs, err := n.internal.ApplyQoS(ctx, iface, policy, policyDef)
-	n.appendPending(cs)
-	return err
-}
-
-// RemoveQoS removes QoS configuration from an interface.
-func (n *Node) RemoveQoS(ctx context.Context, iface string) error {
-	cs, err := n.internal.RemoveQoS(ctx, iface)
 	n.appendPending(cs)
 	return err
 }
@@ -1400,21 +1373,6 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 	cs, err := n.internal.SetDeviceMetadata(ctx, fields)
 	n.appendPending(cs)
 	return err
-}
-
-// Cleanup identifies and removes orphaned configurations on the device.
-// cleanupType may be "acls", "vrfs", "vnis", or "" for all.
-func (n *Node) Cleanup(ctx context.Context, cleanupType string) (*CleanupSummary, error) {
-	cs, summary, err := n.internal.Cleanup(ctx, cleanupType)
-	n.appendPending(cs)
-	if err != nil || summary == nil {
-		return nil, err
-	}
-	return &CleanupSummary{
-		OrphanedACLs:        summary.OrphanedACLs,
-		OrphanedVRFs:        summary.OrphanedVRFs,
-		OrphanedVNIMappings: summary.OrphanedVNIMappings,
-	}, nil
 }
 
 // ============================================================================

@@ -260,20 +260,19 @@ func (tp *TopologyProvisioner) VerifyDeviceHealth(ctx context.Context, deviceNam
 	return report, nil
 }
 
-// DetectDrift compares expected CONFIG_DB (from topology + specs) against
-// actual CONFIG_DB on the device. Returns drift entries for newtron-owned tables.
+// DetectTopologyDrift compares expected CONFIG_DB (from topology steps) against
+// actual CONFIG_DB on the device. Returns drift entries for owned tables.
 //
-// The expected state comes from GenerateDeviceComposite() — the same code
-// path that provisioning uses. The actual state comes from live CONFIG_DB.
-// Tables outside newtron's ownership map are excluded.
-func (tp *TopologyProvisioner) DetectDrift(ctx context.Context, deviceName string) (*DriftReport, error) {
-	// Step 1: Generate expected CONFIG_DB from topology + specs
+// Topology-based: the topology.json steps define what should be configured.
+// Detects both CONFIG_DB edits AND operations done outside the topology
+// (e.g., manual apply-service calls not in topology.json).
+func (tp *TopologyProvisioner) DetectTopologyDrift(ctx context.Context, deviceName string) (*DriftReport, error) {
+	// Generate expected CONFIG_DB from topology steps
 	composite, err := tp.GenerateDeviceComposite(deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("generating expected config: %w", err)
 	}
 
-	// Step 2: Get the connected node and read actual CONFIG_DB
 	dev, err := tp.network.GetNode(deviceName)
 	if err != nil {
 		return nil, fmt.Errorf("getting device: %w", err)
@@ -289,14 +288,9 @@ func (tp *TopologyProvisioner) DetectDrift(ctx context.Context, deviceName strin
 		return nil, fmt.Errorf("reading actual CONFIG_DB: %w", err)
 	}
 
-	// Step 3: Convert composite tables to RawConfigDB format
 	expected := sonic.RawConfigDB(composite.Tables)
+	diffs := sonic.DiffConfigDB(expected, actual, sonic.OwnedTables())
 
-	// Step 4: Diff
-	ownedTables := sonic.OwnedTables()
-	diffs := sonic.DiffConfigDB(expected, actual, ownedTables)
-
-	// Build report
 	report := &DriftReport{
 		Device: deviceName,
 		Status: "clean",

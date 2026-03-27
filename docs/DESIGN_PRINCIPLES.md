@@ -1212,7 +1212,7 @@ The current operation pairs:
 | `AddStaticRoute` | `RemoveStaticRoute` |
 
 Baseline operations (no individual reverse — remediation is reprovision):
-`SetupDevice`, `SetPortProperty`
+`SetupDevice`, `SetProperty`
 
 VLAN membership is not a standalone operation — it is a forwarding
 mode decision (§6). Joining a VLAN bridge domain and joining a VRF

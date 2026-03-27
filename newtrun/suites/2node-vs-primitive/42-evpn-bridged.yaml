@@ -40,15 +40,15 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/interface/Vlan300/bind-macvpn
-    params: {macvpn: vlan300}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 300, macvpn: vlan300}
 
   - name: bind-macvpn-switch2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/interface/Vlan300/bind-macvpn
-    params: {macvpn: vlan300}
+    url: /node/{{device}}/bind-macvpn
+    params: {vlan_id: 300, macvpn: vlan300}
 
   - name: verify-vlan300-exists
     action: newtron

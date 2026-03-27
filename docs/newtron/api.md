@@ -125,7 +125,6 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/add-portchannel-member`, `/remove-portchannel-member` | Add/remove PortChannel member |
 | `/add-bgp-evpn-peer`, `/remove-bgp-evpn-peer` | Add/remove EVPN overlay peer |
 | `/apply-qos`, `/remove-qos` | Apply/remove QoS (node-level) |
-| `/cleanup` | Remove orphaned resources |
 
 **Intent, History, Settings, Drift** (S11)
 
@@ -168,7 +167,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/bind-macvpn`, `/unbind-macvpn` | MAC-VPN binding |
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/apply-qos`, `/remove-qos` | QoS policy |
-| `/set-port-property` | Set port property |
+| `/set-property` | Set port property |
 
 **Batch** (S14) -- `POST /network/{n}/node/{d}/execute`
 
@@ -2004,23 +2003,6 @@ Remove QoS policy from a specific interface.
 
 **Response (200):** `WriteResult`
 
-### Cleanup
-
-#### POST /network/{netID}/node/{device}/cleanup
-
-Scan for and remove orphaned CONFIG_DB resources (ACLs, VRFs, VNI mappings not
-referenced by any service binding).
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `type` | string | no | `"acls"`, `"vrfs"`, `"vnis"`, or empty for all |
-
-**Response (200):** `WriteResult`
-
 ---
 
 ## 9. Node Lifecycle Operations
@@ -2386,7 +2368,7 @@ Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethe
 | MAC-VPN | `bind-macvpn`, `unbind-macvpn` | `macvpn` |
 | BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
 | QoS | `apply-qos`, `remove-qos` | `policy` |
-| Port property | `set-port-property` | `property`, `value` |
+| Port property | `set-property` | `property`, `value` |
 
 All endpoints use `POST` method.
 
@@ -2626,7 +2608,7 @@ Remove the QoS policy from this interface.
 
 ### Port Property
 
-#### POST /network/{netID}/node/{device}/interface/{name}/set-port-property
+#### POST /network/{netID}/node/{device}/interface/{name}/set-property
 
 Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 
@@ -2707,7 +2689,7 @@ If any operation fails, execution stops and the error includes the failed action
 | `unbind-acl` | `acl` | Unbind ACL |
 | `bind-macvpn` | `macvpn` | Bind MAC-VPN |
 | `unbind-macvpn` | none | Unbind MAC-VPN |
-| `set-port-property` | `property`, `value` | Set interface property |
+| `set-property` | `property`, `value` | Set interface property |
 | `apply-qos` | `policy` | Apply QoS policy |
 | `remove-qos` | none | Remove QoS policy |
 | `add-bgp-peer` | `neighbor_ip`, `remote_as`, `description`, `multihop` | Add BGP peer |
@@ -3305,13 +3287,6 @@ Returned in array by `GET /network`.
 | `spec_dir` | string | Spec directory path |
 | `has_topology` | boolean | Whether a topology file was loaded |
 | `nodes` | string[] | Device names from topology |
-
-### Cleanup Types
-
-The `CleanupSummary` type exists in the Go API (`pkg/newtron/types.go`) but the
-HTTP handler discards it -- `POST .../cleanup` returns the standard `WriteResult`
-from the Execute cycle. The cleanup details (which orphaned resources were found)
-are not currently exposed via HTTP.
 
 ---
 

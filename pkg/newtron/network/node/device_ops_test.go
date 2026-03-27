@@ -563,7 +563,7 @@ func TestConfigureIRB(t *testing.T) {
 	// SAG global
 	sagC := assertChange(t, cs, "SAG_GLOBAL", "IPv4", ChangeAdd)
 	assertField(t, sagC, "gwmac", "00:00:00:00:01:01")
-	assertChange(t, cs, "NEWTRON_INTENT", "irb|100", ChangeAdd)
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Vlan100", ChangeAdd)
 }
 
 // ============================================================================
@@ -858,18 +858,18 @@ func TestRoundTrip_ConfigureUnconfigureIRB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConfigureIRB: %v", err)
 	}
-	assertChange(t, cs1, "NEWTRON_INTENT", "irb|100", ChangeAdd)
+	assertChange(t, cs1, "NEWTRON_INTENT", "interface|Vlan100", ChangeAdd)
 
 	cs2, err := n.UnconfigureIRB(ctx, 100)
 	if err != nil {
 		t.Fatalf("UnconfigureIRB: %v", err)
 	}
-	assertChange(t, cs2, "NEWTRON_INTENT", "irb|100", ChangeDelete)
+	assertChange(t, cs2, "NEWTRON_INTENT", "interface|Vlan100", ChangeDelete)
 	assertChange(t, cs2, "VLAN_INTERFACE", "Vlan100|10.1.100.1/24", ChangeDelete)
 	assertChange(t, cs2, "VLAN_INTERFACE", "Vlan100", ChangeDelete)
 	assertChange(t, cs2, "SAG_GLOBAL", "IPv4", ChangeDelete)
 
-	if n.GetIntent("irb|100") != nil {
+	if n.GetIntent("interface|Vlan100") != nil {
 		t.Error("irb intent should be removed")
 	}
 }

@@ -12,81 +12,19 @@ import (
 
 var deviceCmd = &cobra.Command{
 	Use:   "device",
-	Short: "Device-scope operations",
-	Long: `Device-scope operations that don't fit a specific resource group.
+	Short: "Device-scope settings",
+	Long: `Manage per-device operational settings stored in CONFIG_DB.
 
 Examples:
-  newtron -D leaf1-ny device cleanup -x
-  newtron -D leaf1-ny device cleanup --type acls -x`,
+  newtron leaf1 device settings
+  newtron leaf1 device settings set --max-history 20`,
 }
 
-var cleanupType string
+// ============================================================================
+// Zombie — top-level device operation (operation journal / crash recovery)
+// ============================================================================
 
-var deviceCleanupCmd = &cobra.Command{
-	Use:   "cleanup",
-	Short: "Remove orphaned configurations from the device",
-	Long: `Remove orphaned configurations from the device.
-
-This command identifies and removes configurations that are no longer in use:
-  - ACL tables not bound to any interface
-  - VRFs with no interface bindings
-  - VNI mappings for deleted VLANs/VRFs
-  - Unused EVPN route targets
-
-Requires -D (device) flag.
-
-Examples:
-  newtron -D leaf1-ny device cleanup
-  newtron -D leaf1-ny device cleanup -x
-  newtron -D leaf1-ny device cleanup --type acls -x`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireDevice(); err != nil {
-			return err
-		}
-
-		return displayWriteResult(app.client.Cleanup(app.deviceName, cleanupType, execOpts()))
-	},
-}
-
-var deviceIntentsCmd = &cobra.Command{
-	Use:   "intents",
-	Short: "List intent records on the device",
-	Long: `Show all NEWTRON_INTENT records on the device. Each record tracks
-a service binding or device-level operation that newtron applied.
-
-Requires -D (device) flag. No lock required (read-only query).
-
-Examples:
-  newtron -D leaf1 device intents
-  newtron -D leaf1 device intents --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireDevice(); err != nil {
-			return err
-		}
-
-		intents, err := app.client.ListIntents(app.deviceName)
-		if err != nil {
-			return err
-		}
-
-		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(intents)
-		}
-
-		if len(intents) == 0 {
-			fmt.Println("No intents.")
-			return nil
-		}
-
-		for _, intent := range intents {
-			fmt.Printf("%-16s  %-15s  %-20s  %s\n",
-				intent.Resource, intent.State, intent.Operation, intent.Name)
-		}
-		return nil
-	},
-}
-
-var deviceZombieCmd = &cobra.Command{
+var zombieCmd = &cobra.Command{
 	Use:   "zombie",
 	Short: "Show zombie operation from a crashed process",
 	Long: `Show details of a zombie operation left by a crashed process.
@@ -98,7 +36,7 @@ until the zombie is resolved via 'zombie rollback' or 'zombie clear'.
 Requires -D (device) flag. No lock required (read-only CONFIG_DB query).
 
 Examples:
-  newtron -D leaf1 device zombie`,
+  newtron leaf1 zombie`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -145,14 +83,14 @@ Examples:
 			}
 		}
 		fmt.Println("\nResolve with:")
-		fmt.Printf("  newtron -D %s device zombie rollback     # preview rollback\n", app.deviceName)
-		fmt.Printf("  newtron -D %s device zombie rollback -x  # execute rollback\n", app.deviceName)
-		fmt.Printf("  newtron -D %s device zombie clear        # dismiss without rollback\n", app.deviceName)
+		fmt.Printf("  newtron %s zombie rollback     # preview rollback\n", app.deviceName)
+		fmt.Printf("  newtron %s zombie rollback -x  # execute rollback\n", app.deviceName)
+		fmt.Printf("  newtron %s zombie clear        # dismiss without rollback\n", app.deviceName)
 		return nil
 	},
 }
 
-var deviceZombieRollbackCmd = &cobra.Command{
+var zombieRollbackCmd = &cobra.Command{
 	Use:   "rollback",
 	Short: "Reverse a zombie operation's changes",
 	Long: `Reverse a zombie operation's changes to restore the device to its
@@ -165,8 +103,8 @@ a full reverse; operations that were in progress get a partial reverse
 Requires -D (device) flag. Use -x to execute (default is dry-run preview).
 
 Examples:
-  newtron -D leaf1 device zombie rollback     # preview
-  newtron -D leaf1 device zombie rollback -x  # execute`,
+  newtron leaf1 zombie rollback     # preview
+  newtron leaf1 zombie rollback -x  # execute`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -176,7 +114,7 @@ Examples:
 	},
 }
 
-var deviceZombieClearCmd = &cobra.Command{
+var zombieClearCmd = &cobra.Command{
 	Use:   "clear",
 	Short: "Dismiss zombie operation without rollback",
 	Long: `Delete the zombie operation record from CONFIG_DB without reversing
@@ -188,7 +126,7 @@ Acquires a fresh lock on the device.
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1 device zombie clear`,
+  newtron leaf1 zombie clear`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -203,10 +141,10 @@ Examples:
 }
 
 // ============================================================================
-// History commands
+// History — top-level device operation (NEWTRON_HISTORY table)
 // ============================================================================
 
-var deviceHistoryCmd = &cobra.Command{
+var historyCmd = &cobra.Command{
 	Use:   "history",
 	Short: "Show rolling operation history",
 	Long: `Show the rolling history of committed operations on this device.
@@ -215,8 +153,8 @@ Newtron keeps the last 10 operations in CONFIG_DB for rollback.
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1 device history
-  newtron -D leaf1 device history --json`,
+  newtron leaf1 history
+  newtron leaf1 history --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -266,7 +204,7 @@ Examples:
 	},
 }
 
-var deviceHistoryRollbackCmd = &cobra.Command{
+var historyRollbackCmd = &cobra.Command{
 	Use:   "rollback",
 	Short: "Reverse the most recent history entry",
 	Long: `Reverse the most recent un-reversed history entry.
@@ -275,8 +213,8 @@ Uses domain-level reverse operations (not mechanical ChangeSet reversal).
 Requires -D (device) flag. Use -x to execute (default is dry-run preview).
 
 Examples:
-  newtron -D leaf1 device history rollback     # preview
-  newtron -D leaf1 device history rollback -x  # execute`,
+  newtron leaf1 history rollback     # preview
+  newtron leaf1 history rollback -x  # execute`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -302,115 +240,6 @@ Examples:
 }
 
 // ============================================================================
-// Drift detection commands
-// ============================================================================
-
-var deviceDriftCmd = &cobra.Command{
-	Use:   "drift",
-	Short: "Detect CONFIG_DB drift from expected state",
-	Long: `Compare expected CONFIG_DB (from topology + specs) against actual
-CONFIG_DB on the device. Reports missing, extra, and modified entries
-in newtron-owned tables.
-
-Requires -D (device) flag and a loaded topology.
-
-Examples:
-  newtron -D leaf1 device drift
-  newtron -D leaf1 device drift --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireDevice(); err != nil {
-			return err
-		}
-
-		hasTopology, err := app.client.HasTopology()
-		if err != nil {
-			return err
-		}
-		if !hasTopology {
-			return fmt.Errorf("no topology loaded — drift detection requires a topology")
-		}
-
-		report, err := app.client.DetectDrift(app.deviceName)
-		if err != nil {
-			return err
-		}
-
-		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(report)
-		}
-
-		fmt.Printf("\nDrift Report for %s: %s\n", bold(app.deviceName), formatDriftStatus(report.Status))
-
-		if report.Status == "clean" {
-			fmt.Println("No drift detected in newtron-owned tables.")
-			return nil
-		}
-
-		if len(report.Missing) > 0 {
-			fmt.Printf("\n%s (%d):\n", red("Missing entries"), len(report.Missing))
-			t := cli.NewTable("TABLE", "KEY", "EXPECTED FIELDS")
-			for _, d := range report.Missing {
-				t.Row(d.Table, d.Key, formatFields(d.Expected))
-			}
-			t.Flush()
-		}
-
-		if len(report.Extra) > 0 {
-			fmt.Printf("\n%s (%d):\n", yellow("Extra entries"), len(report.Extra))
-			t := cli.NewTable("TABLE", "KEY", "ACTUAL FIELDS")
-			for _, d := range report.Extra {
-				t.Row(d.Table, d.Key, formatFields(d.Actual))
-			}
-			t.Flush()
-		}
-
-		if len(report.Modified) > 0 {
-			fmt.Printf("\n%s (%d):\n", yellow("Modified entries"), len(report.Modified))
-			t := cli.NewTable("TABLE", "KEY", "FIELD", "EXPECTED", "ACTUAL")
-			for _, d := range report.Modified {
-				for field, expectedVal := range d.Expected {
-					actualVal := d.Actual[field]
-					if expectedVal != actualVal {
-						t.Row(d.Table, d.Key, field, expectedVal, actualVal)
-					}
-				}
-				// Fields in actual not in expected
-				for field, actualVal := range d.Actual {
-					if _, ok := d.Expected[field]; !ok {
-						t.Row(d.Table, d.Key, field, "(none)", actualVal)
-					}
-				}
-			}
-			t.Flush()
-		}
-
-		return nil
-	},
-}
-
-func formatDriftStatus(status string) string {
-	switch status {
-	case "clean":
-		return green("CLEAN")
-	case "drifted":
-		return red("DRIFTED")
-	default:
-		return status
-	}
-}
-
-func formatFields(fields map[string]string) string {
-	if len(fields) == 0 {
-		return "(empty)"
-	}
-	parts := make([]string, 0, len(fields))
-	for k, v := range fields {
-		parts = append(parts, fmt.Sprintf("%s=%s", k, v))
-	}
-	return fmt.Sprintf("%v", parts)
-}
-
-// ============================================================================
 // Settings commands
 // ============================================================================
 
@@ -425,8 +254,8 @@ Settings control per-device operational behavior:
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1 device settings
-  newtron -D leaf1 device settings --json`,
+  newtron leaf1 device settings
+  newtron leaf1 device settings --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -459,8 +288,8 @@ var deviceSettingsSetCmd = &cobra.Command{
 Requires -D (device) flag.
 
 Examples:
-  newtron -D leaf1 device settings set --max-history 20
-  newtron -D leaf1 device settings set --max-history 0   # disable history`,
+  newtron leaf1 device settings set --max-history 20
+  newtron leaf1 device settings set --max-history 0   # disable history`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
@@ -486,20 +315,13 @@ Examples:
 }
 
 func init() {
-	deviceCleanupCmd.Flags().StringVar(&cleanupType, "type", "", "Cleanup specific type only (acls, vrfs, vnis)")
+	zombieCmd.AddCommand(zombieRollbackCmd)
+	zombieCmd.AddCommand(zombieClearCmd)
 
-	deviceZombieCmd.AddCommand(deviceZombieRollbackCmd)
-	deviceZombieCmd.AddCommand(deviceZombieClearCmd)
-
-	deviceHistoryCmd.AddCommand(deviceHistoryRollbackCmd)
+	historyCmd.AddCommand(historyRollbackCmd)
 
 	deviceSettingsSetCmd.Flags().IntVar(&settingsMaxHistory, "max-history", 10, "Maximum number of history entries (0 to disable)")
 	deviceSettingsCmd.AddCommand(deviceSettingsSetCmd)
 
-	deviceCmd.AddCommand(deviceCleanupCmd)
-	deviceCmd.AddCommand(deviceIntentsCmd)
-	deviceCmd.AddCommand(deviceZombieCmd)
-	deviceCmd.AddCommand(deviceHistoryCmd)
-	deviceCmd.AddCommand(deviceDriftCmd)
 	deviceCmd.AddCommand(deviceSettingsCmd)
 }
