@@ -161,7 +161,7 @@ func (i *Interface) binding() map[string]string {
 	if configDB == nil {
 		return map[string]string{}
 	}
-	if entry, ok := configDB.NewtronIntent[i.name]; ok {
+	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok {
 		return entry
 	}
 	return map[string]string{}
@@ -173,7 +173,7 @@ func (i *Interface) ServiceName() string {
 	if configDB == nil {
 		return ""
 	}
-	if entry, ok := configDB.NewtronIntent[i.name]; ok {
+	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok {
 		return entry["service_name"]
 	}
 	return ""
@@ -191,7 +191,7 @@ func (i *Interface) IngressACL() string {
 	if configDB == nil {
 		return ""
 	}
-	if entry, ok := configDB.NewtronIntent[i.name]; ok && entry["ingress_acl"] != "" {
+	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok && entry["ingress_acl"] != "" {
 		return entry["ingress_acl"]
 	}
 	for aclName, acl := range configDB.ACLTable {
@@ -213,7 +213,7 @@ func (i *Interface) EgressACL() string {
 	if configDB == nil {
 		return ""
 	}
-	if entry, ok := configDB.NewtronIntent[i.name]; ok && entry["egress_acl"] != "" {
+	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok && entry["egress_acl"] != "" {
 		return entry["egress_acl"]
 	}
 	for aclName, acl := range configDB.ACLTable {

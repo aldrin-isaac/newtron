@@ -4,10 +4,7 @@
   "devices": {
     "spine1": {
       "steps": [
-        {"url": "/configure-loopback"},
-        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "spine1", "bgp_asn": "65001", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
-        {"url": "/configure-bgp"},
-        {"url": "/configure-route-reflector", "params": {
+        {"url": "/setup-device", "params": {"fields": {"hostname": "spine1", "bgp_asn": "65001", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "route_reflector": {
           "cluster_id": "10.0.0.1",
           "local_asn": 65001,
           "router_id": "10.0.0.1",
@@ -19,7 +16,7 @@
           "peers": [
             {"ip": "10.0.0.2", "asn": 65002}
           ]
-        }},
+        }}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.0/31", "peer_as": 65011}},
         {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.2/31", "peer_as": 65012}}
       ],
@@ -30,10 +27,7 @@
     },
     "spine2": {
       "steps": [
-        {"url": "/configure-loopback"},
-        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "spine2", "bgp_asn": "65002", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
-        {"url": "/configure-bgp"},
-        {"url": "/configure-route-reflector", "params": {
+        {"url": "/setup-device", "params": {"fields": {"hostname": "spine2", "bgp_asn": "65002", "type": "SpineRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}, "route_reflector": {
           "cluster_id": "10.0.0.2",
           "local_asn": 65002,
           "router_id": "10.0.0.2",
@@ -45,7 +39,7 @@
           "peers": [
             {"ip": "10.0.0.1", "asn": 65001}
           ]
-        }},
+        }}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.4/31", "peer_as": 65011}},
         {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.6/31", "peer_as": 65012}}
       ],
@@ -56,11 +50,9 @@
     },
     "leaf1": {
       "steps": [
-        {"url": "/configure-loopback"},
-        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf1", "bgp_asn": "65011", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
-        {"url": "/configure-bgp"},
-        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
-        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
+        {"url": "/setup-device", "params": {"fields": {"hostname": "leaf1", "bgp_asn": "65011", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/add-bgp-evpn-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
+        {"url": "/add-bgp-evpn-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.1/31", "peer_as": 65001}},
         {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.5/31", "peer_as": 65002}}
       ],
@@ -73,11 +65,9 @@
     },
     "leaf2": {
       "steps": [
-        {"url": "/configure-loopback"},
-        {"url": "/set-device-metadata", "params": {"fields": {"hostname": "leaf2", "bgp_asn": "65012", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
-        {"url": "/configure-bgp"},
-        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
-        {"url": "/add-bgp-multihop-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
+        {"url": "/setup-device", "params": {"fields": {"hostname": "leaf2", "bgp_asn": "65012", "type": "LeafRouter", "hwsku": "Force10-S6000", "docker_routing_config_mode": "unified", "frr_mgmt_framework_config": "true"}}},
+        {"url": "/add-bgp-evpn-peer", "params": {"neighbor_ip": "10.0.0.1", "asn": 65001, "evpn": false}},
+        {"url": "/add-bgp-evpn-peer", "params": {"neighbor_ip": "10.0.0.2", "asn": 65002, "evpn": false}},
         {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.3/31", "peer_as": 65001}},
         {"url": "/interface/Ethernet1/apply-service", "params": {"service": "transit", "ip_address": "10.1.0.7/31", "peer_as": 65002}}
       ],

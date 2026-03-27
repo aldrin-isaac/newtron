@@ -7,6 +7,8 @@ package newtron
 import (
 	"fmt"
 	"time"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
 // ============================================================================
@@ -110,6 +112,7 @@ func (e *VerificationFailedError) Error() string {
 type VLANConfig struct {
 	VlanID      int
 	Description string
+	L2VNI       int
 }
 
 // IRBConfig holds parameters for configuring an IRB (Integrated Routing and Bridging) interface.
@@ -132,6 +135,7 @@ type BGPNeighborConfig struct {
 	RemoteAS    int    `json:"remote_as,omitempty"`
 	NeighborIP  string `json:"neighbor_ip,omitempty"`
 	Description string `json:"description,omitempty"`
+	Multihop    int    `json:"multihop,omitempty"`
 }
 
 // ACLConfig holds parameters for creating an ACL table.
@@ -154,6 +158,15 @@ type ACLRuleConfig struct {
 	Protocol string
 	SrcPort  string
 	DstPort  string
+}
+
+// InterfaceConfig holds parameters for ConfigureInterface. Routed mode (VRF+IP)
+// and bridged mode (VLAN membership) are mutually exclusive.
+type InterfaceConfig struct {
+	VRF    string // VRF binding (routed mode)
+	IP     string // IP address in CIDR notation (routed mode)
+	VLAN   int    // VLAN ID (bridged mode)
+	Tagged bool   // Tagged membership (bridged mode)
 }
 
 // PortChannelConfig holds parameters for creating a LAG/PortChannel.
@@ -583,6 +596,13 @@ type RouteReflectorOpts struct {
 	Peers     []RouteReflectorPeer `json:"peers"`
 }
 
+// SetupDeviceOpts holds configuration for the consolidated SetupDevice operation.
+type SetupDeviceOpts struct {
+	Fields   map[string]string  `json:"fields,omitempty"`    // device metadata fields
+	SourceIP string             `json:"source_ip,omitempty"` // VTEP source IP (empty = skip)
+	RR       *RouteReflectorOpts `json:"route_reflector,omitempty"`
+}
+
 // ZoneDetail is the API view of a zone definition.
 type ZoneDetail struct {
 	Name string `json:"name"`
@@ -821,6 +841,10 @@ type Intent struct {
 	AppliedAt *time.Time `json:"applied_at,omitempty"`
 	AppliedBy string     `json:"applied_by,omitempty"`
 
+	// DAG structure — parent/child relationships encoding structural deps.
+	Parents  []string `json:"parents,omitempty"`
+	Children []string `json:"children,omitempty"`
+
 	// Resolved parameters — concrete values for reconstruction + teardown.
 	// What the operation resolved to when applied. Self-sufficient: the
 	// reverse operation and drift reconstruction can work from Params alone
@@ -834,6 +858,16 @@ type Intent struct {
 	RollbackHolder  string            `json:"rollback_holder,omitempty"` // who is rolling back
 	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
 	Operations      []IntentOperation `json:"operations,omitempty"`
+}
+
+// IntentTreeNode represents a node in the intent DAG tree display.
+// Used by the intent tree CLI command and API endpoint (§12).
+type IntentTreeNode struct {
+	Resource  string            `json:"resource"`
+	Operation string            `json:"operation"`
+	Params    map[string]string `json:"params,omitempty"`
+	Children  []IntentTreeNode  `json:"children,omitempty"`
+	Leaf      bool              `json:"leaf,omitempty"` // multi-parent: rendered as leaf under this parent
 }
 
 // IntentOperation represents a single primitive within a composite intent.
@@ -871,7 +905,7 @@ type OperationIntent struct {
 
 // IsService returns true if this intent represents a service binding.
 func (i *Intent) IsService() bool {
-	return i.Operation == "apply-service"
+	return i.Operation == sonic.OpApplyService
 }
 
 // IsInFlight returns true if this intent is currently being actuated.

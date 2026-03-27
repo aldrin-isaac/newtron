@@ -102,6 +102,14 @@ func (cs *ChangeSet) Deletes(entries []sonic.Entry) {
 	}
 }
 
+// Prepend inserts a change at the beginning of the ChangeSet.
+// Used by writeIntent to ensure the intent entry is always first,
+// regardless of when intent recording is called.
+func (cs *ChangeSet) Prepend(table, key string, fields map[string]string) {
+	change := Change{Table: table, Key: key, Type: ChangeAdd, Fields: fields}
+	cs.Changes = append([]Change{change}, cs.Changes...)
+}
+
 // Merge appends all changes from other into cs.
 func (cs *ChangeSet) Merge(other *ChangeSet) {
 	cs.Changes = append(cs.Changes, other.Changes...)
@@ -133,7 +141,10 @@ func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeTy
 // that undoes this one. Only forward operations set this; terminal/reverse
 // operations omit it.
 //
-// In offline mode, op() also updates the shadow ConfigDB and accumulates entries.
+// op() always updates the in-memory ConfigDB via applyShadow so subsequent
+// operations (precondition checks, idempotency guards) see the effects of
+// prior ones. In offline mode, applyShadow also accumulates entries for
+// BuildComposite export.
 func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 	checks func(*PreconditionChecker), gen func() []sonic.Entry, reverseOp ...string) (*ChangeSet, error) {
 
@@ -152,11 +163,10 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 		cs.ReverseOp = reverseOp[0]
 	}
 
-	// Shadow update + accumulation (offline mode)
-	if n.offline {
-		n.configDB.ApplyEntries(entries)
-		n.accumulated = append(n.accumulated, entries...)
-	}
+	// Always update in-memory ConfigDB. applyShadow dispatches correctly
+	// by change type (DeleteEntry for deletes, ApplyEntries for adds) and
+	// gates accumulation on n.offline.
+	n.applyShadow(cs)
 
 	return cs, nil
 }

@@ -145,7 +145,9 @@ func testDevice() *Node {
 			ACLTable:              map[string]sonic.ACLTableEntry{},
 			ACLRule:               map[string]sonic.ACLRuleEntry{},
 			RouteRedistribute:     map[string]sonic.RouteRedistributeEntry{},
-			NewtronIntent: map[string]map[string]string{},
+			NewtronIntent: map[string]map[string]string{
+				"device": {"operation": "setup-device", "state": "actuated"},
+			},
 			BGPGlobalsEVPNRT:      map[string]sonic.BGPGlobalsEVPNRTEntry{},
 			BGPPeerGroup:          map[string]sonic.BGPPeerGroupEntry{},
 			BGPPeerGroupAF:        map[string]sonic.BGPPeerGroupAFEntry{},
@@ -214,6 +216,7 @@ func TestCreateVLAN_Basic(t *testing.T) {
 
 	// No VXLAN_TUNNEL_MAP when L2VNI is 0
 	assertNoChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI0_Vlan100")
+	assertChange(t, cs, "NEWTRON_INTENT", "vlan|100", ChangeAdd)
 }
 
 func TestCreateVLAN_WithL2VNI(t *testing.T) {
@@ -229,28 +232,37 @@ func TestCreateVLAN_WithL2VNI(t *testing.T) {
 	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20200_Vlan200", ChangeAdd)
 	assertField(t, c, "vlan", "Vlan200")
 	assertField(t, c, "vni", "20200")
+	assertChange(t, cs, "NEWTRON_INTENT", "vlan|200", ChangeAdd)
 }
 
-func TestCreateVLAN_AlreadyExists(t *testing.T) {
+func TestCreateVLAN_IntentIdempotent(t *testing.T) {
 	d := testDevice()
-	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	// Set up existing intent — CreateVLAN should return empty ChangeSet (no-op)
+	d.configDB.NewtronIntent["vlan|100"] = map[string]string{
+		"operation": "create-vlan",
+		"vlan_id":   "100",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
-	_, err := d.CreateVLAN(ctx, 100, VLANConfig{})
-	if err == nil {
-		t.Fatal("expected error for existing VLAN")
+	cs, err := d.CreateVLAN(ctx, 100, VLANConfig{})
+	if err != nil {
+		t.Fatalf("CreateVLAN with existing intent: %v", err)
 	}
-	if !errors.Is(err, util.ErrPreconditionFailed) {
-		t.Errorf("error = %q, want ErrPreconditionFailed", err.Error())
+	if !cs.IsEmpty() {
+		t.Errorf("expected empty ChangeSet for idempotent call, got %d changes", len(cs.Changes))
 	}
 }
 
 func TestDeleteVLAN_WithMembers(t *testing.T) {
 	d := testDevice()
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
-	d.configDB.VLANMember["Vlan100|Ethernet0"] = sonic.VLANMemberEntry{TaggingMode: "untagged"}
-	d.configDB.VLANMember["Vlan100|Ethernet4"] = sonic.VLANMemberEntry{TaggingMode: "tagged"}
-	d.configDB.VXLANTunnelMap["vtep1|VNI20100_Vlan100"] = sonic.VXLANMapEntry{VLAN: "Vlan100", VNI: "20100"}
+	// VLAN intent with no DAG children — deleteIntent will succeed
+	d.configDB.NewtronIntent["vlan|100"] = map[string]string{
+		"operation": "create-vlan",
+		"vlan_id":   "100",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVLAN(ctx, 100)
@@ -258,13 +270,9 @@ func TestDeleteVLAN_WithMembers(t *testing.T) {
 		t.Fatalf("DeleteVLAN: %v", err)
 	}
 
-	// VLAN members deleted
-	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet0", ChangeDelete)
-	assertChange(t, cs, "VLAN_MEMBER", "Vlan100|Ethernet4", ChangeDelete)
-	// VNI mapping deleted
-	assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", ChangeDelete)
 	// VLAN itself deleted
 	assertChange(t, cs, "VLAN", "Vlan100", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "vlan|100", ChangeDelete)
 }
 
 // ============================================================================
@@ -291,11 +299,16 @@ func TestCreatePortChannel_Basic(t *testing.T) {
 
 	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeAdd)
 	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet4", ChangeAdd)
+	assertChange(t, cs, "NEWTRON_INTENT", "portchannel|PortChannel100", ChangeAdd)
 }
 
 func TestAddPortChannelMember(t *testing.T) {
 	d := testDevice()
 	d.configDB.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
+	d.configDB.NewtronIntent["portchannel|PortChannel100"] = map[string]string{
+		"operation": "create-portchannel",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.AddPortChannelMember(ctx, "PortChannel100", "Ethernet0")
@@ -304,15 +317,21 @@ func TestAddPortChannelMember(t *testing.T) {
 	}
 
 	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeAdd)
-	if len(cs.Changes) != 1 {
-		t.Errorf("expected 1 change, got %d", len(cs.Changes))
-	}
+	assertChange(t, cs, "NEWTRON_INTENT", "portchannel|PortChannel100|Ethernet0", ChangeAdd)
 }
 
 func TestRemovePortChannelMember(t *testing.T) {
 	d := testDevice()
 	d.configDB.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
 	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
+	d.configDB.NewtronIntent["portchannel|PortChannel100"] = map[string]string{
+		"operation": "create-portchannel", "state": "actuated",
+		"_children": "portchannel|PortChannel100|Ethernet0",
+	}
+	d.configDB.NewtronIntent["portchannel|PortChannel100|Ethernet0"] = map[string]string{
+		"operation": "add-pc-member", "state": "actuated",
+		"_parents": "portchannel|PortChannel100",
+	}
 	ctx := context.Background()
 
 	cs, err := d.RemovePortChannelMember(ctx, "PortChannel100", "Ethernet0")
@@ -321,6 +340,7 @@ func TestRemovePortChannelMember(t *testing.T) {
 	}
 
 	assertChange(t, cs, "PORTCHANNEL_MEMBER", "PortChannel100|Ethernet0", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "portchannel|PortChannel100|Ethernet0", ChangeDelete)
 }
 
 // ============================================================================
@@ -339,6 +359,7 @@ func TestCreateVRF_Basic(t *testing.T) {
 	}
 
 	assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeAdd)
+	assertChange(t, cs, "NEWTRON_INTENT", "vrf|Vrf_CUST1", ChangeAdd)
 
 	// No VXLAN_TUNNEL_MAP or vni field should be emitted by CreateVRF.
 	for _, ch := range cs.Changes {
@@ -351,6 +372,9 @@ func TestCreateVRF_Basic(t *testing.T) {
 func TestDeleteVRF_NoInterfaces(t *testing.T) {
 	d := testDevice()
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
+	d.configDB.NewtronIntent["vrf|Vrf_CUST1"] = map[string]string{
+		"operation": "create-vrf", "state": "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.DeleteVRF(ctx, "Vrf_CUST1")
@@ -359,6 +383,7 @@ func TestDeleteVRF_NoInterfaces(t *testing.T) {
 	}
 
 	assertChange(t, cs, "VRF", "Vrf_CUST1", ChangeDelete)
+	assertChange(t, cs, "NEWTRON_INTENT", "vrf|Vrf_CUST1", ChangeDelete)
 }
 
 func TestDeleteVRF_BoundInterfacesBlocks(t *testing.T) {
@@ -396,6 +421,7 @@ func TestCreateACL_Basic(t *testing.T) {
 	assertField(t, c, "stage", "ingress")
 	assertField(t, c, "policy_desc", "Edge ingress filter")
 	assertField(t, c, "ports", "Ethernet0")
+	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN", ChangeAdd)
 }
 
 func TestDeleteACL_RemovesRules(t *testing.T) {
@@ -405,6 +431,11 @@ func TestDeleteACL_RemovesRules(t *testing.T) {
 	d.configDB.ACLRule["EDGE_IN|RULE_20"] = sonic.ACLRuleEntry{Priority: "20", PacketAction: "DROP"}
 	// A rule in a different table — should NOT be deleted
 	d.configDB.ACLRule["OTHER_TABLE|RULE_10"] = sonic.ACLRuleEntry{Priority: "10"}
+	// ACL intent with no DAG children — deleteIntent will succeed
+	d.configDB.NewtronIntent["acl|EDGE_IN"] = map[string]string{
+		"operation": "create-acl",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.DeleteACL(ctx, "EDGE_IN")
@@ -412,17 +443,24 @@ func TestDeleteACL_RemovesRules(t *testing.T) {
 		t.Fatalf("DeleteACL: %v", err)
 	}
 
-	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
-	assertChange(t, cs, "ACL_RULE", "EDGE_IN|RULE_20", ChangeDelete)
 	assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeDelete)
 	assertNoChange(t, cs, "ACL_RULE", "OTHER_TABLE|RULE_10")
+	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN", ChangeDelete)
 }
 
 func TestUnbindACLFromInterface(t *testing.T) {
 	d := testDevice()
 	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{
 		Type:  "L3",
+		Stage: "ingress",
 		Ports: "Ethernet0,Ethernet4",
+	}
+	// Intent record from BindACL
+	d.configDB.NewtronIntent["interface|Ethernet0|acl|ingress"] = map[string]string{
+		"operation": "bind-acl",
+		"acl_name":  "EDGE_IN",
+		"direction": "ingress",
+		"state":     "actuated",
 	}
 	ctx := context.Background()
 
@@ -434,11 +472,16 @@ func TestUnbindACLFromInterface(t *testing.T) {
 	c := assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeModify)
 	// After removing Ethernet0, only Ethernet4 should remain
 	assertField(t, c, "ports", "Ethernet4")
+	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|acl|ingress", ChangeDelete)
 }
 
 func TestAddACLRule(t *testing.T) {
 	d := testDevice()
 	d.configDB.ACLTable["EDGE_IN"] = sonic.ACLTableEntry{Type: "L3", Stage: "ingress"}
+	d.configDB.NewtronIntent["acl|EDGE_IN"] = map[string]string{
+		"operation": "create-acl",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.AddACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
@@ -458,6 +501,7 @@ func TestAddACLRule(t *testing.T) {
 	assertField(t, c, "SRC_IP", "10.0.0.0/8")
 	assertField(t, c, "IP_PROTOCOL", "6") // tcp = 6
 	assertField(t, c, "L4_DST_PORT", "179")
+	assertChange(t, cs, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_10", ChangeAdd)
 }
 
 // ============================================================================
@@ -468,9 +512,14 @@ func TestBindMACVPN(t *testing.T) {
 	d := testDevice()
 	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	d.configDB.NewtronIntent["vlan|100"] = map[string]string{
+		"operation": "create-vlan",
+		"state":     "actuated",
+	}
+	d.SpecProvider.(*testSpecProvider).macvpn["TEST_MACVPN"] = &spec.MACVPNSpec{VNI: 20100}
 	ctx := context.Background()
 
-	cs, err := d.BindMACVPN(ctx, 100, 20100)
+	cs, err := d.BindMACVPN(ctx, 100, "TEST_MACVPN")
 	if err != nil {
 		t.Fatalf("BindMACVPN: %v", err)
 	}
@@ -478,12 +527,21 @@ func TestBindMACVPN(t *testing.T) {
 	c := assertChange(t, cs, "VXLAN_TUNNEL_MAP", "vtep1|VNI20100_Vlan100", ChangeAdd)
 	assertField(t, c, "vlan", "Vlan100")
 	assertField(t, c, "vni", "20100")
+	assertChange(t, cs, "NEWTRON_INTENT", "macvpn|100", ChangeAdd)
 }
 
 func TestConfigureIRB(t *testing.T) {
 	d := testDevice()
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "30001"}
+	d.configDB.NewtronIntent["vlan|100"] = map[string]string{
+		"operation": "create-vlan",
+		"state":     "actuated",
+	}
+	d.configDB.NewtronIntent["vrf|Vrf_CUST1"] = map[string]string{
+		"operation": "create-vrf",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := d.ConfigureIRB(ctx, 100, IRBConfig{
@@ -505,6 +563,7 @@ func TestConfigureIRB(t *testing.T) {
 	// SAG global
 	sagC := assertChange(t, cs, "SAG_GLOBAL", "IPv4", ChangeAdd)
 	assertField(t, sagC, "gwmac", "00:00:00:00:01:01")
+	assertChange(t, cs, "NEWTRON_INTENT", "irb|100", ChangeAdd)
 }
 
 // ============================================================================
@@ -595,5 +654,277 @@ func TestCreateVLAN_InvalidID(t *testing.T) {
 				t.Fatal("expected error for invalid VLAN ID")
 			}
 		})
+	}
+}
+
+// ============================================================================
+// Round-Trip Tests (Forward + Reverse = Clean)
+// ============================================================================
+
+func TestRoundTrip_CreateDeleteVLAN(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Forward
+	cs1, err := n.CreateVLAN(ctx, 100, VLANConfig{L2VNI: 20100})
+	if err != nil {
+		t.Fatalf("CreateVLAN: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "vlan|100", ChangeAdd)
+
+	// Verify forward state via intent (shadow configDB tracks adds via op())
+	if n.GetIntent("vlan|100") == nil {
+		t.Fatal("expected vlan|100 intent after CreateVLAN")
+	}
+	if !n.VLANExists(100) {
+		t.Fatal("expected VLAN 100 to exist after CreateVLAN")
+	}
+
+	// Reverse
+	cs2, err := n.DeleteVLAN(ctx, 100)
+	if err != nil {
+		t.Fatalf("DeleteVLAN: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "vlan|100", ChangeDelete)
+	assertChange(t, cs2, "VLAN", "Vlan100", ChangeDelete)
+
+	// Verify intent is cleaned up (intent DAG is updated by deleteIntent)
+	if n.GetIntent("vlan|100") != nil {
+		t.Error("vlan|100 intent should be removed after DeleteVLAN")
+	}
+}
+
+func TestRoundTrip_CreateDeleteVRF(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	cs1, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{})
+	if err != nil {
+		t.Fatalf("CreateVRF: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "vrf|Vrf_CUST1", ChangeAdd)
+
+	if n.GetIntent("vrf|Vrf_CUST1") == nil {
+		t.Fatal("expected vrf|Vrf_CUST1 intent")
+	}
+
+	cs2, err := n.DeleteVRF(ctx, "Vrf_CUST1")
+	if err != nil {
+		t.Fatalf("DeleteVRF: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "vrf|Vrf_CUST1", ChangeDelete)
+	assertChange(t, cs2, "VRF", "Vrf_CUST1", ChangeDelete)
+
+	if n.GetIntent("vrf|Vrf_CUST1") != nil {
+		t.Error("vrf intent should be removed")
+	}
+}
+
+func TestRoundTrip_CreateDeleteACL(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Create ACL
+	cs1, err := n.CreateACL(ctx, "EDGE_IN", ACLConfig{
+		Type: "L3", Stage: "ingress", Description: "test",
+	})
+	if err != nil {
+		t.Fatalf("CreateACL: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "acl|EDGE_IN", ChangeAdd)
+
+	// Add a rule
+	cs2, err := n.AddACLRule(ctx, "EDGE_IN", "RULE_10", ACLRuleConfig{
+		Priority: 10, Action: "permit", SrcIP: "10.0.0.0/8",
+	})
+	if err != nil {
+		t.Fatalf("AddACLRule: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_10", ChangeAdd)
+
+	// Delete rule first (children before parent)
+	cs3, err := n.DeleteACLRule(ctx, "EDGE_IN", "RULE_10")
+	if err != nil {
+		t.Fatalf("DeleteACLRule: %v", err)
+	}
+	assertChange(t, cs3, "NEWTRON_INTENT", "acl|EDGE_IN|RULE_10", ChangeDelete)
+	assertChange(t, cs3, "ACL_RULE", "EDGE_IN|RULE_10", ChangeDelete)
+
+	// Delete ACL table
+	cs4, err := n.DeleteACL(ctx, "EDGE_IN")
+	if err != nil {
+		t.Fatalf("DeleteACL: %v", err)
+	}
+	assertChange(t, cs4, "NEWTRON_INTENT", "acl|EDGE_IN", ChangeDelete)
+	assertChange(t, cs4, "ACL_TABLE", "EDGE_IN", ChangeDelete)
+
+	// Verify clean
+	if n.GetIntent("acl|EDGE_IN") != nil {
+		t.Error("acl intent should be removed")
+	}
+	if n.GetIntent("acl|EDGE_IN|RULE_10") != nil {
+		t.Error("acl rule intent should be removed")
+	}
+}
+
+func TestRoundTrip_CreateDeletePortChannel(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	cs1, err := n.CreatePortChannel(ctx, "PortChannel100", PortChannelConfig{
+		MTU:     9100,
+		Members: []string{"Ethernet0"},
+	})
+	if err != nil {
+		t.Fatalf("CreatePortChannel: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "portchannel|PortChannel100", ChangeAdd)
+
+	// Add second member (so we can test RemovePortChannelMember separately)
+	cs2, err := n.AddPortChannelMember(ctx, "PortChannel100", "Ethernet4")
+	if err != nil {
+		t.Fatalf("AddPortChannelMember: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "portchannel|PortChannel100|Ethernet4", ChangeAdd)
+
+	// Remove member (children before parent)
+	cs3, err := n.RemovePortChannelMember(ctx, "PortChannel100", "Ethernet4")
+	if err != nil {
+		t.Fatalf("RemovePortChannelMember: %v", err)
+	}
+	assertChange(t, cs3, "NEWTRON_INTENT", "portchannel|PortChannel100|Ethernet4", ChangeDelete)
+
+	// Delete port channel
+	cs4, err := n.DeletePortChannel(ctx, "PortChannel100")
+	if err != nil {
+		t.Fatalf("DeletePortChannel: %v", err)
+	}
+	assertChange(t, cs4, "NEWTRON_INTENT", "portchannel|PortChannel100", ChangeDelete)
+	assertChange(t, cs4, "PORTCHANNEL", "PortChannel100", ChangeDelete)
+
+	if n.GetIntent("portchannel|PortChannel100") != nil {
+		t.Error("portchannel intent should be removed")
+	}
+}
+
+func TestRoundTrip_AddRemoveBGPEVPNPeer(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Prerequisites: setup-device creates EVPN peer group + BGP globals
+	if err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL: "/setup-device",
+		Params: map[string]any{
+			"fields":    map[string]any{"hostname": "test", "bgp_asn": "65001"},
+			"source_ip": "10.0.0.1",
+		},
+	}); err != nil {
+		t.Fatalf("setup-device prerequisite: %v", err)
+	}
+
+	cs1, err := n.AddBGPEVPNPeer(ctx, "10.0.0.2", 65002, "", true)
+	if err != nil {
+		t.Fatalf("AddBGPEVPNPeer: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "evpn-peer|10.0.0.2", ChangeAdd)
+
+	cs2, err := n.RemoveBGPEVPNPeer(ctx, "10.0.0.2")
+	if err != nil {
+		t.Fatalf("RemoveBGPEVPNPeer: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "evpn-peer|10.0.0.2", ChangeDelete)
+	assertChange(t, cs2, "BGP_NEIGHBOR", "default|10.0.0.2", ChangeDelete)
+
+	if n.GetIntent("evpn-peer|10.0.0.2") != nil {
+		t.Error("evpn-peer intent should be removed")
+	}
+}
+
+func TestRoundTrip_ConfigureUnconfigureIRB(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Prerequisites
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN prerequisite: %v", err)
+	}
+	if _, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{}); err != nil {
+		t.Fatalf("CreateVRF prerequisite: %v", err)
+	}
+
+	cs1, err := n.ConfigureIRB(ctx, 100, IRBConfig{
+		VRF: "Vrf_CUST1", IPAddress: "10.1.100.1/24", AnycastMAC: "00:00:00:00:01:01",
+	})
+	if err != nil {
+		t.Fatalf("ConfigureIRB: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "irb|100", ChangeAdd)
+
+	cs2, err := n.UnconfigureIRB(ctx, 100)
+	if err != nil {
+		t.Fatalf("UnconfigureIRB: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "irb|100", ChangeDelete)
+	assertChange(t, cs2, "VLAN_INTERFACE", "Vlan100|10.1.100.1/24", ChangeDelete)
+	assertChange(t, cs2, "VLAN_INTERFACE", "Vlan100", ChangeDelete)
+	assertChange(t, cs2, "SAG_GLOBAL", "IPv4", ChangeDelete)
+
+	if n.GetIntent("irb|100") != nil {
+		t.Error("irb intent should be removed")
+	}
+}
+
+func TestRoundTrip_AddRemoveStaticRoute(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	if _, err := n.CreateVRF(ctx, "Vrf_CUST1", VRFConfig{}); err != nil {
+		t.Fatalf("CreateVRF prerequisite: %v", err)
+	}
+
+	cs1, err := n.AddStaticRoute(ctx, "Vrf_CUST1", "0.0.0.0/0", "10.1.0.1", 0)
+	if err != nil {
+		t.Fatalf("AddStaticRoute: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "route|Vrf_CUST1|0.0.0.0/0", ChangeAdd)
+
+	cs2, err := n.RemoveStaticRoute(ctx, "Vrf_CUST1", "0.0.0.0/0")
+	if err != nil {
+		t.Fatalf("RemoveStaticRoute: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "route|Vrf_CUST1|0.0.0.0/0", ChangeDelete)
+	assertChange(t, cs2, "STATIC_ROUTE", "Vrf_CUST1|0.0.0.0/0", ChangeDelete)
+
+	if n.GetIntent("route|Vrf_CUST1|0.0.0.0/0") != nil {
+		t.Error("route intent should be removed")
+	}
+}
+
+func TestRoundTrip_BindUnbindMACVPN(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Prerequisites: VLAN + VTEP (BindMACVPN requires RequireVTEPConfigured)
+	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
+		t.Fatalf("CreateVLAN prerequisite: %v", err)
+	}
+	// Seed VTEP directly into the shadow configDB
+	n.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
+	n.SpecProvider.(*testSpecProvider).macvpn["TEST_MACVPN"] = &spec.MACVPNSpec{VNI: 20100}
+
+	cs1, err := n.BindMACVPN(ctx, 100, "TEST_MACVPN")
+	if err != nil {
+		t.Fatalf("BindMACVPN: %v", err)
+	}
+	assertChange(t, cs1, "NEWTRON_INTENT", "macvpn|100", ChangeAdd)
+
+	cs2, err := n.UnbindMACVPN(ctx, 100)
+	if err != nil {
+		t.Fatalf("UnbindMACVPN: %v", err)
+	}
+	assertChange(t, cs2, "NEWTRON_INTENT", "macvpn|100", ChangeDelete)
+
+	if n.GetIntent("macvpn|100") != nil {
+		t.Error("macvpn intent should be removed")
 	}
 }

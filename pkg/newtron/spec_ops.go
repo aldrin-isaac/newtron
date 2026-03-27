@@ -71,7 +71,7 @@ func (net *Network) CreateService(req CreateServiceRequest, opts ExecOpts) error
 // DeleteService removes a service definition.
 func (net *Network) DeleteService(name string, opts ExecOpts) error {
 	if _, err := net.internal.GetService(name); err != nil {
-		return err
+		return nil // idempotent: already absent
 	}
 	if opts.Execute {
 		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
@@ -504,7 +504,7 @@ func (net *Network) CreatePrefixList(req CreatePrefixListRequest, opts ExecOpts)
 // DeletePrefixList removes a prefix list.
 func (net *Network) DeletePrefixList(name string, opts ExecOpts) error {
 	if _, err := net.internal.GetPrefixList(name); err != nil {
-		return err
+		return nil // idempotent: already absent
 	}
 	if opts.Execute {
 		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
@@ -549,7 +549,7 @@ func (net *Network) RemovePrefixListEntry(prefixList, prefix string, opts ExecOp
 	}
 	prefixes, err := net.internal.GetPrefixList(prefixList)
 	if err != nil {
-		return err
+		return nil // idempotent: prefix list absent
 	}
 	found := false
 	newPrefixes := make([]string, 0, len(prefixes))
@@ -561,7 +561,7 @@ func (net *Network) RemovePrefixListEntry(prefixList, prefix string, opts ExecOp
 		newPrefixes = append(newPrefixes, p)
 	}
 	if !found {
-		return fmt.Errorf("prefix '%s' not found in prefix list '%s'", prefix, prefixList)
+		return nil // idempotent: prefix already absent
 	}
 	if !opts.Execute {
 		return nil
@@ -601,7 +601,7 @@ func (net *Network) CreateRoutePolicy(req CreateRoutePolicyRequest, opts ExecOpt
 // DeleteRoutePolicy removes a route policy.
 func (net *Network) DeleteRoutePolicy(name string, opts ExecOpts) error {
 	if _, err := net.internal.GetRoutePolicy(name); err != nil {
-		return err
+		return nil // idempotent: already absent
 	}
 	if opts.Execute {
 		if err := net.checkPermission(auth.PermSpecAuthor, auth.NewContext().WithResource(name)); err != nil {
@@ -662,7 +662,7 @@ func (net *Network) RemoveRoutePolicyRule(policy string, seq int, opts ExecOpts)
 	}
 	rp, err := net.internal.GetRoutePolicy(policy)
 	if err != nil {
-		return err
+		return nil // idempotent: policy absent
 	}
 	found := false
 	newRules := make([]*spec.RoutePolicyRule, 0, len(rp.Rules))
@@ -674,7 +674,7 @@ func (net *Network) RemoveRoutePolicyRule(policy string, seq int, opts ExecOpts)
 		newRules = append(newRules, r)
 	}
 	if !found {
-		return fmt.Errorf("rule with sequence %d not found in route policy '%s'", seq, policy)
+		return nil // idempotent: rule already absent
 	}
 	if !opts.Execute {
 		return nil

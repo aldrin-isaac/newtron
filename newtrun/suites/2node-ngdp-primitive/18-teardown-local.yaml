@@ -13,7 +13,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
   - name: verify-svi-removed
@@ -24,26 +24,23 @@ steps:
       jq: '.exists == false'
 
   # 2. Remove VLAN members
-  - name: remove-member-ethernet2
+  - name: unconfigure-bridged-ethernet2
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet2}
+    url: /node/{{device}}/interface/Ethernet2/unconfigure-interface
 
-  - name: remove-member-ethernet3
+  - name: unconfigure-bridged-ethernet3
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet3}
+    url: /node/{{device}}/interface/Ethernet3/unconfigure-interface
 
-  - name: remove-member-ethernet1
+  - name: unconfigure-bridged-ethernet1
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet1}
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
 
   - name: verify-member-eth1-removed
     action: newtron
@@ -67,13 +64,12 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # 4. Remove IP from sw2:Ethernet1
-  - name: unconfigure-ip-ethernet1
+  # 4. Unconfigure sw2:Ethernet1 (removes IP + VRF binding via intent)
+  - name: unconfigure-ethernet1
     action: newtron
     devices: [switch2]
     method: POST
     url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
-    params: {ip: "10.20.1.1/31"}
 
   - name: verify-ip-removed
     action: newtron
@@ -81,14 +77,6 @@ steps:
     url: /node/{{device}}/configdb/INTERFACE/Ethernet1%7C10.20.1.1%2F31/exists
     expect:
       jq: '.exists == false'
-
-  # 5. Unbind sw2:Ethernet1 from Vrf_local
-  - name: unconfigure-vrf-ethernet1
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
-    params: {vrf: Vrf_local}
 
   # 6. Delete Vrf_local
   - name: delete-vrf-local

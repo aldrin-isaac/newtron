@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
@@ -43,7 +44,9 @@ func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts 
 	fields := map[string]string{
 		"asn":          fmt.Sprintf("%d", asn),
 		"admin_status": "up",
-		"local_addr":   localAddr,
+	}
+	if localAddr != "" {
+		fields["local_addr"] = localAddr
 	}
 	if opts.Description != "" {
 		fields["name"] = opts.Description
@@ -285,6 +288,45 @@ func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
 	}
 }
 
+// CreateEVPNPeerGroupConfig returns entries for the EVPN BGP_PEER_GROUP
+// used by overlay (loopback-to-loopback) BGP sessions. The only address family
+// is l2vpn_evpn — these peers exist solely for EVPN route exchange.
+// Shared attributes live on the group; individual neighbors carry only per-peer ASN.
+func CreateEVPNPeerGroupConfig(vrf, localAddr string, isEBGP bool) []sonic.Entry {
+	if vrf == "" {
+		vrf = "default"
+	}
+	pgFields := map[string]string{
+		"admin_status": "up",
+		"local_addr":   localAddr,
+	}
+	if isEBGP {
+		pgFields["ebgp_multihop"] = "true"
+	}
+
+	evpnFields := map[string]string{"admin_status": "true"}
+	if isEBGP {
+		evpnFields["nexthop_unchanged"] = "true" // Critical for eBGP overlay (RCA-026)
+	}
+
+	return []sonic.Entry{
+		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, "EVPN"), Fields: pgFields},
+		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, "EVPN", "l2vpn_evpn"), Fields: evpnFields},
+	}
+}
+
+// DeleteEVPNPeerGroupConfig returns delete entries for the EVPN peer group
+// and its AF entry. Reverse of CreateEVPNPeerGroupConfig.
+func DeleteEVPNPeerGroupConfig(vrf string) []sonic.Entry {
+	if vrf == "" {
+		vrf = "default"
+	}
+	return []sonic.Entry{
+		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, "EVPN", "l2vpn_evpn")},
+		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, "EVPN")},
+	}
+}
+
 // BGPConfigured reports whether BGP_GLOBALS|default exists (a working frrcfgd instance).
 func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
 
@@ -384,13 +426,13 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 // BGP Neighbor Operations
 // ============================================================================
 
-// AddBGPMultihopPeer adds an indirect BGP neighbor using loopback as update-source.
+// AddBGPEVPNPeer adds an indirect BGP neighbor using loopback as update-source.
 // This is used for multi-hop eBGP sessions (EVPN overlay peers).
 //
 // For DIRECT BGP peers that use a link IP as the update-source (typical
 // eBGP on point-to-point links), use Interface.AddBGPPeer() instead.
-func (n *Node) AddBGPMultihopPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
-	if err := n.precondition("add-bgp-multihop-peer", neighborIP).Result(); err != nil {
+func (n *Node) AddBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, description string, evpn bool) (*ChangeSet, error) {
+	if err := n.precondition(sonic.OpAddBGPEVPNPeer, neighborIP).Result(); err != nil {
 		return nil, err
 	}
 
@@ -401,26 +443,41 @@ func (n *Node) AddBGPMultihopPeer(ctx context.Context, neighborIP string, asn in
 		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
 	}
 
-	isEBGP := asn != n.resolved.UnderlayASN
-	config := CreateBGPNeighborConfig(neighborIP, asn, n.resolved.LoopbackIP, BGPNeighborOpts{
-		Description:      description,
-		EBGPMultihop:     isEBGP,
-		ActivateIPv4:     true,
-		ActivateEVPN:     evpn,
-		NextHopUnchanged: evpn && isEBGP,
+	// EVPN peer group required (created by SetupVTEP).
+	// Shared attrs (local_addr, ebgp_multihop, nexthop_unchanged) inherited from group.
+	pgKey := BGPPeerGroupKey("default", "EVPN")
+	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
+		return nil, fmt.Errorf("EVPN peer group does not exist; run setup-device with source_ip first")
+	}
+	config := CreateBGPNeighborConfig(neighborIP, asn, "", BGPNeighborOpts{
+		Description:  description,
+		PeerGroup:    "EVPN",
+		ActivateEVPN: evpn,
 	})
-	cs := buildChangeSet(n.name, "device.add-bgp-multihop-peer", config, ChangeAdd)
+	cs := buildChangeSet(n.name, "device."+sonic.OpAddBGPEVPNPeer, config, ChangeAdd)
+	intentParams := map[string]string{
+		sonic.FieldNeighborIP:  neighborIP,
+		sonic.FieldASN:         strconv.Itoa(asn),
+		sonic.FieldDescription: description,
+	}
+	if evpn {
+		intentParams[sonic.FieldEVPN] = "true"
+	}
+	if err := n.writeIntent(cs, sonic.OpAddBGPEVPNPeer, "evpn-peer|"+neighborIP, intentParams, []string{"device"}); err != nil {
+		return nil, err
+	}
 	n.applyShadow(cs)
 
-	util.WithDevice(n.name).Infof("Adding multihop BGP peer %s (AS %d, update-source: %s)",
+	util.WithDevice(n.name).Infof("Adding EVPN BGP peer %s (AS %d, update-source: %s)",
 		neighborIP, asn, n.resolved.LoopbackIP)
 	return cs, nil
 }
 
-// RemoveBGPPeer removes a BGP peer from the device.
-// This works for both direct (interface-level) and indirect (loopback-level) peers.
-func (n *Node) RemoveBGPPeer(ctx context.Context, neighborIP string) (*ChangeSet, error) {
-	cs, err := n.op("remove-bgp-peer", neighborIP, ChangeDelete,
+// RemoveBGPEVPNPeer removes an EVPN BGP peer from the device.
+// Also used internally by Interface.RemoveBGPPeer for direct peer removal
+// (the CONFIG_DB operation — deleting BGP_NEIGHBOR entries — is identical).
+func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, neighborIP string) (*ChangeSet, error) {
+	cs, err := n.op("remove-bgp-evpn-peer", neighborIP, ChangeDelete,
 		func(pc *PreconditionChecker) {
 			pc.Check(n.BGPNeighborExists(neighborIP), "BGP peer must exist",
 				fmt.Sprintf("BGP peer %s not found", neighborIP))
@@ -429,7 +486,10 @@ func (n *Node) RemoveBGPPeer(ctx context.Context, neighborIP string) (*ChangeSet
 	if err != nil {
 		return nil, err
 	}
-	util.WithDevice(n.name).Infof("Removing BGP peer %s", neighborIP)
+	if err := n.deleteIntent(cs, "evpn-peer|"+neighborIP); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Removing EVPN BGP peer %s", neighborIP)
 	return cs, nil
 }
 

@@ -17,12 +17,11 @@ func TestParseStepURL(t *testing.T) {
 		wantOp   string
 		wantIf   string
 	}{
-		{"/configure-bgp", "configure-bgp", ""},
-		{"/configure-loopback", "configure-loopback", ""},
-		{"/set-device-metadata", "set-device-metadata", ""},
-		{"/setup-vtep", "setup-vtep", ""},
-		{"/add-bgp-multihop-peer", "add-bgp-multihop-peer", ""},
+		{"/setup-device", "setup-device", ""},
+		{"/add-bgp-evpn-peer", "add-bgp-evpn-peer", ""},
 		{"/create-vrf", "create-vrf", ""},
+		{"/create-vlan", "create-vlan", ""},
+		{"/create-portchannel", "create-portchannel", ""},
 		{"/interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
 		{"/interface/Ethernet4/configure-interface", "configure-interface", "Ethernet4"},
 		{"/interface/Ethernet12/add-bgp-peer", "add-bgp-peer", "Ethernet12"},
@@ -31,7 +30,7 @@ func TestParseStepURL(t *testing.T) {
 		{"/interface/Ethernet0/apply-qos", "apply-qos", "Ethernet0"},
 		{"/interface/Ethernet0/bind-macvpn", "bind-macvpn", "Ethernet0"},
 		// No leading slash
-		{"configure-bgp", "configure-bgp", ""},
+		{"setup-device", "setup-device", ""},
 		{"interface/Ethernet0/apply-service", "apply-service", "Ethernet0"},
 	}
 	for _, tt := range tests {
@@ -149,87 +148,53 @@ func newTestAbstract() *Node {
 	// Register some ports so interface ops can work
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up", "mtu": "9100"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up", "mtu": "9100"})
+	// Seed root "device" intent for DAG parent validation (I4).
+	// In production, SetupDevice creates this. Tests skip setup-device
+	// and need it pre-populated.
+	cs := NewChangeSet("test", "test")
+	n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
 	return n
 }
 
-func TestReplayStepConfigureLoopback(t *testing.T) {
+func TestReplayStepAddBGPEVPNPeer(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
-	err := ReplayStep(ctx, n, spec.TopologyStep{URL: "/configure-loopback"})
-	if err != nil {
-		t.Fatalf("configure-loopback: %v", err)
-	}
-	// Verify loopback exists in shadow ConfigDB
-	if _, ok := n.ConfigDB().LoopbackInterface["Loopback0"]; !ok {
-		t.Error("expected Loopback0 in ConfigDB after configure-loopback")
-	}
-}
 
-func TestReplayStepSetDeviceMetadata(t *testing.T) {
-	n := newTestAbstract()
-	ctx := context.Background()
+	// Setup prerequisites: setup-device creates EVPN peer group via SetupVTEP
 	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/set-device-metadata",
+		URL: "/setup-device",
 		Params: map[string]any{
-			"fields": map[string]any{
-				"hostname": "leaf1",
-				"bgp_asn":  "65001",
-			},
+			"fields":    map[string]any{"hostname": "test", "bgp_asn": "65001"},
+			"source_ip": "10.0.0.1",
 		},
 	})
 	if err != nil {
-		t.Fatalf("set-device-metadata: %v", err)
+		t.Fatalf("setup-device: %v", err)
 	}
-	dm := n.ConfigDB().DeviceMetadata
-	if dm["localhost"]["hostname"] != "leaf1" {
-		t.Errorf("hostname = %q, want leaf1", dm["localhost"]["hostname"])
-	}
-}
 
-func TestReplayStepConfigureBGP(t *testing.T) {
-	n := newTestAbstract()
-	ctx := context.Background()
-	// ConfigureBGP requires DEVICE_METADATA to exist
-	ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/set-device-metadata",
-		Params: map[string]any{
-			"fields": map[string]any{"hostname": "test", "bgp_asn": "65001"},
-		},
-	})
-	err := ReplayStep(ctx, n, spec.TopologyStep{URL: "/configure-bgp"})
-	if err != nil {
-		t.Fatalf("configure-bgp: %v", err)
+	// Verify EVPN peer group was created
+	if _, ok := n.ConfigDB().BGPPeerGroup["default|EVPN"]; !ok {
+		t.Fatal("expected BGP_PEER_GROUP|default|EVPN after setup-device")
 	}
-	if _, ok := n.ConfigDB().BGPGlobals["default"]; !ok {
-		t.Error("expected BGP_GLOBALS|default in ConfigDB")
-	}
-}
 
-func TestReplayStepAddBGPMultihopPeer(t *testing.T) {
-	n := newTestAbstract()
-	ctx := context.Background()
-	// Setup prerequisites
-	ReplayStep(ctx, n, spec.TopologyStep{URL: "/configure-loopback"})
-	ReplayStep(ctx, n, spec.TopologyStep{
-		URL:    "/set-device-metadata",
-		Params: map[string]any{"fields": map[string]any{"hostname": "test", "bgp_asn": "65001"}},
-	})
-	ReplayStep(ctx, n, spec.TopologyStep{URL: "/configure-bgp"})
-
-	err := ReplayStep(ctx, n, spec.TopologyStep{
-		URL: "/add-bgp-multihop-peer",
+	err = ReplayStep(ctx, n, spec.TopologyStep{
+		URL: "/add-bgp-evpn-peer",
 		Params: map[string]any{
 			"neighbor_ip": "10.0.0.2",
 			"asn":         float64(65002),
-			"evpn":        false,
+			"evpn":        true,
 		},
 	})
 	if err != nil {
-		t.Fatalf("add-bgp-multihop-peer: %v", err)
+		t.Fatalf("add-bgp-evpn-peer: %v", err)
 	}
 	// BGP_NEIGHBOR key includes VRF: "default|10.0.0.2"
-	if _, ok := n.ConfigDB().BGPNeighbor["default|10.0.0.2"]; !ok {
+	nb, ok := n.ConfigDB().BGPNeighbor["default|10.0.0.2"]
+	if !ok {
 		t.Errorf("expected BGP_NEIGHBOR|default|10.0.0.2, got keys: %v", mapKeys(n.ConfigDB().BGPNeighbor))
+	}
+	if nb.PeerGroup != "EVPN" {
+		t.Errorf("peer_group_name = %q, want EVPN", nb.PeerGroup)
 	}
 }
 
@@ -257,6 +222,14 @@ func TestReplayStepMissingInterface(t *testing.T) {
 func TestReplayStepSetPortProperty(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
+	// set-port-property intent has parent "interface|Ethernet0", so
+	// configure-interface must run first to create that parent intent.
+	if err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL:    "/interface/Ethernet0/configure-interface",
+		Params: map[string]any{"ip": "10.1.100.1/24"},
+	}); err != nil {
+		t.Fatalf("configure-interface prerequisite: %v", err)
+	}
 	err := ReplayStep(ctx, n, spec.TopologyStep{
 		URL: "/interface/Ethernet0/set-port-property",
 		Params: map[string]any{
@@ -288,6 +261,115 @@ func TestReplayStepConfigureInterface(t *testing.T) {
 	// Verify INTERFACE entry
 	if _, ok := n.ConfigDB().Interface["Ethernet0|10.1.100.1/24"]; !ok {
 		t.Error("expected INTERFACE|Ethernet0|10.1.100.1/24 in ConfigDB")
+	}
+}
+
+func TestReplayStepConfigureInterfaceBridged(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+	// Create VLAN first
+	err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL:    "/create-vlan",
+		Params: map[string]any{"vlan_id": float64(100)},
+	})
+	if err != nil {
+		t.Fatalf("create-vlan: %v", err)
+	}
+	// Configure interface in bridged mode
+	err = ReplayStep(ctx, n, spec.TopologyStep{
+		URL:    "/interface/Ethernet0/configure-interface",
+		Params: map[string]any{"vlan_id": float64(100), "tagged": false},
+	})
+	if err != nil {
+		t.Fatalf("configure-interface bridged: %v", err)
+	}
+	// Verify VLAN_MEMBER entry
+	if _, ok := n.ConfigDB().VLANMember["Vlan100|Ethernet0"]; !ok {
+		t.Error("expected VLAN_MEMBER|Vlan100|Ethernet0 in ConfigDB")
+	}
+	// Verify intent record
+	intent := n.GetIntent("interface|Ethernet0")
+	if intent == nil {
+		t.Fatal("expected intent for Ethernet0")
+	}
+	if intent.Params["vlan_id"] != "100" {
+		t.Errorf("intent vlan_id = %q, want 100", intent.Params["vlan_id"])
+	}
+}
+
+func TestUnconfigureInterfaceBridged(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Setup: create VLAN and configure interface in bridged mode
+	if err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL:    "/create-vlan",
+		Params: map[string]any{"vlan_id": float64(100)},
+	}); err != nil {
+		t.Fatalf("create-vlan: %v", err)
+	}
+	iface, err := n.GetInterface("Ethernet0")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VLAN: 100, Tagged: false}); err != nil {
+		t.Fatalf("ConfigureInterface bridged: %v", err)
+	}
+	// Verify VLAN_MEMBER exists
+	if _, ok := n.ConfigDB().VLANMember["Vlan100|Ethernet0"]; !ok {
+		t.Fatal("expected VLAN_MEMBER|Vlan100|Ethernet0 after configure")
+	}
+
+	// Unconfigure — should remove VLAN_MEMBER and intent
+	if _, err := iface.UnconfigureInterface(ctx); err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	if _, ok := n.ConfigDB().VLANMember["Vlan100|Ethernet0"]; ok {
+		t.Error("VLAN_MEMBER|Vlan100|Ethernet0 should be removed after unconfigure")
+	}
+	if intent := n.GetIntent("interface|Ethernet0"); intent != nil {
+		t.Error("intent for Ethernet0 should be removed after unconfigure")
+	}
+}
+
+func TestUnconfigureInterfaceRouted(t *testing.T) {
+	n := newTestAbstract()
+	ctx := context.Background()
+
+	// Setup: create VRF and configure interface in routed mode
+	if err := ReplayStep(ctx, n, spec.TopologyStep{
+		URL:    "/create-vrf",
+		Params: map[string]any{"name": "Vrf_test"},
+	}); err != nil {
+		t.Fatalf("create-vrf: %v", err)
+	}
+	iface, err := n.GetInterface("Ethernet0")
+	if err != nil {
+		t.Fatalf("GetInterface: %v", err)
+	}
+	if _, err := iface.ConfigureInterface(ctx, InterfaceConfig{VRF: "Vrf_test", IP: "10.1.0.1/31"}); err != nil {
+		t.Fatalf("ConfigureInterface routed: %v", err)
+	}
+	// Verify INTERFACE entries exist
+	if _, ok := n.ConfigDB().Interface["Ethernet0"]; !ok {
+		t.Fatal("expected INTERFACE|Ethernet0 after configure")
+	}
+	if _, ok := n.ConfigDB().Interface["Ethernet0|10.1.0.1/31"]; !ok {
+		t.Fatal("expected INTERFACE|Ethernet0|10.1.0.1/31 after configure")
+	}
+
+	// Unconfigure — should remove both INTERFACE entries and intent
+	if _, err := iface.UnconfigureInterface(ctx); err != nil {
+		t.Fatalf("UnconfigureInterface: %v", err)
+	}
+	if _, ok := n.ConfigDB().Interface["Ethernet0"]; ok {
+		t.Error("INTERFACE|Ethernet0 should be removed after unconfigure")
+	}
+	if _, ok := n.ConfigDB().Interface["Ethernet0|10.1.0.1/31"]; ok {
+		t.Error("INTERFACE|Ethernet0|10.1.0.1/31 should be removed after unconfigure")
+	}
+	if intent := n.GetIntent("interface|Ethernet0"); intent != nil {
+		t.Error("intent for Ethernet0 should be removed after unconfigure")
 	}
 }
 

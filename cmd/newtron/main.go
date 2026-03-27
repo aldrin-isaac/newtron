@@ -220,7 +220,7 @@ func init() {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
 	}
-	for _, cmd := range []*cobra.Command{healthCmd} {
+	for _, cmd := range []*cobra.Command{healthCmd, intentCmd} {
 		addOutputFlags(cmd)
 	}
 
@@ -249,7 +249,7 @@ func init() {
 
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
-		showCmd, provisionCmd, healthCmd, deviceCmd, initCmd,
+		showCmd, provisionCmd, healthCmd, deviceCmd, initCmd, intentCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)

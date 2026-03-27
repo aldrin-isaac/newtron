@@ -3,8 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
-
+	"strconv"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -123,25 +122,73 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 }
 
 // InterfaceConfig holds the combined configuration for ConfigureInterface.
+// Routed mode (VRF+IP) and bridged mode (VLAN) are mutually exclusive.
 type InterfaceConfig struct {
-	VRF string // VRF binding (empty = no VRF change)
-	IP  string // IP address in CIDR notation (empty = no IP change)
+	VRF    string // VRF binding (routed mode)
+	IP     string // IP address in CIDR notation (routed mode)
+	VLAN   int    // VLAN ID (bridged mode)
+	Tagged bool   // Tagged membership (bridged mode)
 }
 
-// ConfigureInterface is a combined operation that sets VRF binding and IP address
-// on an interface in a single ChangeSet. This is the intent-producing method that
-// topology steps should use instead of separate SetIP/SetVRF calls.
+// ensureInterfaceIntent lazily creates the interface|INTF intent if it doesn't
+// exist. Sub-resource operations (SetProperty, BindACL, ApplyQoS) call this so
+// they work on interfaces that haven't had ConfigureInterface called.
+func (i *Interface) ensureInterfaceIntent(cs *ChangeSet) error {
+	resource := "interface|" + i.name
+	if i.node.GetIntent(resource) != nil {
+		return nil
+	}
+	return i.node.writeIntent(cs, sonic.OpInterfaceInit, resource, map[string]string{}, []string{"device"})
+}
+
+// ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
+// and bridged mode (VLAN membership) are mutually exclusive. This is the
+// intent-producing method that topology steps should use.
 func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("configure-interface", i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpConfigureInterface, i.name).Result(); err != nil {
 		return nil, err
 	}
 	if i.IsPortChannelMember() {
 		return nil, fmt.Errorf("cannot configure PortChannel member directly")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.configure-interface")
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpConfigureInterface)
+	configureIntentParams := map[string]string{}
+
+	// Bridged mode — VLAN membership
+	if cfg.VLAN > 0 {
+		if cfg.VRF != "" || cfg.IP != "" {
+			return nil, fmt.Errorf("cannot mix routed (VRF/IP) and bridged (VLAN) config")
+		}
+		if !n.VLANExists(cfg.VLAN) {
+			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
+		}
+		cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, cfg.Tagged))
+		configureIntentParams[sonic.FieldVLANID] = strconv.Itoa(cfg.VLAN)
+		configureIntentParams[sonic.FieldTagged] = strconv.FormatBool(cfg.Tagged)
+	}
+
+	// Routed mode — VRF binding and/or IP address
+	if cfg.VRF != "" {
+		configureIntentParams[sonic.FieldVRF] = cfg.VRF
+	}
+	if cfg.IP != "" {
+		configureIntentParams[sonic.FieldIntfIP] = cfg.IP
+	}
+
+	var parents []string
+	if cfg.VLAN > 0 {
+		parents = []string{"vlan|" + strconv.Itoa(cfg.VLAN)}
+	} else if cfg.VRF != "" {
+		parents = []string{"vrf|" + cfg.VRF}
+	} else {
+		parents = []string{"device"}
+	}
+	if err := i.node.writeIntent(cs, sonic.OpConfigureInterface, "interface|"+i.name, configureIntentParams, parents); err != nil {
+		return nil, err
+	}
 
 	// VRF binding first (creates the INTERFACE base entry with vrf_name)
 	if cfg.VRF != "" {
@@ -163,60 +210,75 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		cs.Adds(i.assignIpAddress(cfg.IP))
 	}
 
+	cs.ReverseOp = "interface.unconfigure-interface"
+	cs.OperationParams = map[string]string{"interface": i.name}
 	n.applyShadow(cs)
-	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s)", i.name, cfg.VRF, cfg.IP)
+	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s, vlan=%d)", i.name, cfg.VRF, cfg.IP, cfg.VLAN)
 	return cs, nil
 }
 
-// UnconfigureInterface is the reverse of ConfigureInterface. It removes IP address
-// and/or VRF binding from an interface in a single ChangeSet.
-func (i *Interface) UnconfigureInterface(ctx context.Context, cfg InterfaceConfig) (*ChangeSet, error) {
+// UnconfigureInterface is the reverse of ConfigureInterface. It reads the intent
+// record to determine what was configured, then undoes it. Parameterless — the
+// intent record is self-sufficient for teardown.
+func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition("unconfigure-interface", i.name).Result(); err != nil {
 		return nil, err
 	}
 
+	intent := n.GetIntent("interface|" + i.name)
+	if intent == nil {
+		return nil, fmt.Errorf("no configuration intent for %s", i.name)
+	}
+
 	cs := NewChangeSet(n.Name(), "interface.unconfigure-interface")
 
-	// Remove IP address first (before VRF unbinding)
-	if cfg.IP != "" {
-		ipKey := fmt.Sprintf("%s|%s", i.name, cfg.IP)
-		cs.Delete("INTERFACE", ipKey)
+	// Bridged mode — remove VLAN membership
+	if vlanStr := intent.Params[sonic.FieldVLANID]; vlanStr != "" {
+		vlanID, _ := strconv.Atoi(vlanStr)
+		if vlanID > 0 {
+			cs.Deletes(deleteVlanMemberConfig(vlanID, i.name))
+		}
 	}
 
-	// Unbind VRF (set vrf_name to empty removes the binding)
-	if cfg.VRF != "" {
-		// Count remaining IPs after removal
+	// Routed mode — remove IP then VRF
+	ip := intent.Params[sonic.FieldIntfIP]
+	vrf := intent.Params[sonic.FieldVRF]
+
+	if ip != "" {
+		cs.Delete("INTERFACE", fmt.Sprintf("%s|%s", i.name, ip))
+	}
+
+	if vrf != "" {
 		remaining := 0
 		for _, addr := range i.IPAddresses() {
-			if addr != cfg.IP {
+			if addr != ip {
 				remaining++
 			}
 		}
 		if remaining == 0 {
-			// No IPs remain — remove the base INTERFACE entry entirely
 			cs.Delete("INTERFACE", i.name)
 		} else {
-			// IPs remain — just clear the VRF binding
 			cs.Adds(i.bindVrf(""))
 		}
-	} else if cfg.IP != "" {
-		// IP-only removal: check if other IPs remain
+	} else if ip != "" {
 		remaining := 0
 		for _, addr := range i.IPAddresses() {
-			if addr != cfg.IP {
+			if addr != ip {
 				remaining++
 			}
 		}
 		if remaining == 0 {
-			// No IPs remain — remove the base INTERFACE entry too
 			cs.Delete("INTERFACE", i.name)
 		}
 	}
 
+	if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
+		return nil, err
+	}
 	n.applyShadow(cs)
-	util.WithDevice(n.Name()).Infof("Unconfigured interface %s (vrf=%s, ip=%s)", i.name, cfg.VRF, cfg.IP)
+	util.WithDevice(n.Name()).Infof("Unconfigured interface %s", i.name)
 	return cs, nil
 }
 
@@ -225,7 +287,7 @@ func (i *Interface) UnconfigureInterface(ctx context.Context, cfg InterfaceConfi
 func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("bind-acl", i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpBindACL, i.name).Result(); err != nil {
 		return nil, err
 	}
 	if !n.ACLTableExists(aclName) {
@@ -235,19 +297,21 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 		return nil, fmt.Errorf("direction must be 'ingress' or 'egress'")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.bind-acl")
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpBindACL)
+	if err := i.ensureInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := i.node.writeIntent(cs, sonic.OpBindACL, "interface|"+i.name+"|acl|"+direction,
+		map[string]string{sonic.FieldACLName: aclName, sonic.FieldDirection: direction},
+		[]string{"interface|" + i.name, "acl|" + aclName}); err != nil {
+		return nil, err
+	}
 	cs.ReverseOp = "interface.unbind-acl"
 	cs.OperationParams = map[string]string{"interface": i.name, "acl_name": aclName}
 
-	// ACLs are shared - add this interface to existing binding list
+	// ACLs are shared — add this interface to existing binding list
 	configDB := n.ConfigDB()
-	dc := NewDependencyChecker(n, "")
-	var newBindings string
-	if dc.IsFirstACLUser(aclName) {
-		newBindings = i.name
-	} else {
-		newBindings = util.AddToCSV(configDB.ACLTable[aclName].Ports, i.name)
-	}
+	newBindings := util.AddToCSV(configDB.ACLTable[aclName].Ports, i.name)
 
 	e := bindAclConfig(aclName, newBindings, direction)
 	cs.Update(e.Table, e.Key, e.Fields)
@@ -266,8 +330,24 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 		return nil, err
 	}
 
+	// Find the intent record for this ACL binding. Try both directions since
+	// the caller passes aclName but not direction.
+	var direction string
+	for _, dir := range []string{"ingress", "egress"} {
+		if intent := n.GetIntent("interface|" + i.name + "|acl|" + dir); intent != nil {
+			if intent.Params[sonic.FieldACLName] == aclName {
+				direction = dir
+				break
+			}
+		}
+	}
+	if direction == "" {
+		return nil, fmt.Errorf("no ACL binding intent for %s on %s", aclName, i.name)
+	}
+
 	cs := NewChangeSet(n.Name(), "interface.unbind-acl")
 
+	// Remove this interface from the ACL's ports list (shared resource — must read current state)
 	configDB := n.ConfigDB()
 	if configDB != nil {
 		if table, ok := configDB.ACLTable[aclName]; ok {
@@ -276,6 +356,9 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 		}
 	}
 
+	if err := i.node.deleteIntent(cs, "interface|"+i.name+"|acl|"+direction); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Unbound ACL %s from interface %s", aclName, i.name)
 	return cs, nil
 }
@@ -284,9 +367,9 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 // Generic Property Setting
 // ============================================================================
 
-// Set sets a property on this interface.
+// SetProperty sets a property on this interface.
 // Supported properties: mtu, speed, admin-status, description
-func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet, error) {
+func (i *Interface) SetProperty(ctx context.Context, property, value string) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition("set-property", i.name).Result(); err != nil {
@@ -296,7 +379,15 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 		return nil, fmt.Errorf("cannot configure PortChannel member directly - configure the parent PortChannel")
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.set-port-property")
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpSetPortProperty)
+	if err := i.ensureInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := i.node.writeIntent(cs, sonic.OpSetPortProperty, "interface|"+i.name+"|"+property,
+		map[string]string{sonic.FieldProperty: property, sonic.FieldValue: value},
+		[]string{"interface|" + i.name}); err != nil {
+		return nil, err
+	}
 	fields := make(map[string]string)
 
 	switch property {
@@ -345,148 +436,5 @@ func (i *Interface) Set(ctx context.Context, property, value string) (*ChangeSet
 	return cs, nil
 }
 
-// ============================================================================
-// DependencyChecker - first/last membership checks for shared resources
-// ============================================================================
 
-// DependencyChecker answers "is this the first or last user of a shared resource?"
-// from the perspective of a specific interface.
-//
-// IsFirst* methods: the interface is about to be added — it is not yet in the
-// collection, so excludeInterface is not used. These check current state only.
-//
-// IsLast* methods: the interface is about to be removed — it is counted as
-// absent, so remaining users = (total − excludeInterface). These determine
-// whether shared resources (ACLs, VLANs, VRFs) can be safely deleted.
-//
-// Used by Interface.RemoveService() and Interface.BindACL().
-type DependencyChecker struct {
-	node             *Node
-	excludeInterface string // used only by IsLast* methods
-}
-
-// NewDependencyChecker creates a dependency checker for the given interface
-func NewDependencyChecker(d *Node, excludeInterface string) *DependencyChecker {
-	return &DependencyChecker{
-		node:           d,
-		excludeInterface: excludeInterface,
-	}
-}
-
-// IsFirstACLUser returns true if no interface is currently bound to the ACL.
-// excludeInterface is not used — the caller has not yet been added.
-func (dc *DependencyChecker) IsFirstACLUser(aclName string) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-	acl, ok := configDB.ACLTable[aclName]
-	if !ok {
-		return true
-	}
-	return acl.Ports == ""
-}
-
-// IsLastACLUser returns true if this is the last interface using the ACL
-func (dc *DependencyChecker) IsLastACLUser(aclName string) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	acl, ok := configDB.ACLTable[aclName]
-	if !ok {
-		return true
-	}
-
-	remaining := util.RemoveFromCSV(acl.Ports, dc.excludeInterface)
-	return remaining == ""
-}
-
-// GetACLRemainingInterfaces returns interfaces remaining after removing this one
-func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return ""
-	}
-
-	acl, ok := configDB.ACLTable[aclName]
-	if !ok {
-		return ""
-	}
-
-	return util.RemoveFromCSV(acl.Ports, dc.excludeInterface)
-}
-
-// IsLastVLANMember returns true if this is the last member of the VLAN
-func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	vlanName := fmt.Sprintf("Vlan%d", vlanID)
-	count := 0
-	for key := range configDB.VLANMember {
-		if strings.HasPrefix(key, vlanName+"|") {
-			memberPort := key[len(vlanName)+1:]
-			if memberPort != dc.excludeInterface {
-				count++
-			}
-		}
-	}
-	return count == 0
-}
-
-// IsLastServiceUser returns true if this is the last interface using the service
-func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	count := 0
-	for intfName, fields := range configDB.NewtronIntent {
-		if fields["service_name"] == serviceName && intfName != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}
-
-// IsLastIPVPNUser returns true if this is the last interface bound to a service
-// that references the given ipvpn name. Used for shared VRF cleanup — the VRF
-// is only deleted when no service binding references the ipvpn.
-func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-
-	count := 0
-	for intfName, fields := range configDB.NewtronIntent {
-		if fields["ipvpn"] == ipvpnName && intfName != dc.excludeInterface {
-			count++
-		}
-	}
-	return count == 0
-}
-
-// IsLastAnycastMACUser returns true if no other service binding references a
-// macvpn with AnycastMAC set. Used to gate SAG_GLOBAL cleanup.
-func (dc *DependencyChecker) IsLastAnycastMACUser() bool {
-	configDB := dc.node.ConfigDB()
-	if configDB == nil {
-		return true
-	}
-	for intfName, fields := range configDB.NewtronIntent {
-		if intfName == dc.excludeInterface {
-			continue
-		}
-		if fields["anycast_mac"] != "" {
-			return false
-		}
-	}
-	return true
-}
 

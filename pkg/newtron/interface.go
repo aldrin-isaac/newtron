@@ -130,6 +130,8 @@ func (i *Interface) ApplyService(ctx context.Context, service string, opts Apply
 	cs, err := i.internal.ApplyService(ctx, service, node.ApplyServiceOpts{
 		IPAddress: opts.IPAddress,
 		PeerAS:    opts.PeerAS,
+		VLAN:      opts.VLAN,
+		Params:    opts.Params,
 	})
 	if err != nil {
 		return err
@@ -211,6 +213,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 		NeighborIP:  config.NeighborIP,
 		RemoteAS:    config.RemoteAS,
 		Description: config.Description,
+		Multihop:    config.Multihop,
 	})
 	if err != nil {
 		return err
@@ -220,8 +223,9 @@ func (i *Interface) AddBGPPeer(ctx context.Context, config BGPNeighborConfig) er
 }
 
 // RemoveBGPPeer removes a direct BGP peer from this interface.
-func (i *Interface) RemoveBGPPeer(ctx context.Context, ip string) error {
-	cs, err := i.internal.RemoveBGPPeer(ctx, ip)
+// The neighbor IP is read from the intent record.
+func (i *Interface) RemoveBGPPeer(ctx context.Context) error {
+	cs, err := i.internal.RemoveBGPPeer(ctx)
 	if err != nil {
 		return err
 	}
@@ -229,9 +233,12 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context, ip string) error {
 	return nil
 }
 
-// ConfigureInterface sets VRF binding and IP address in a single operation.
-func (i *Interface) ConfigureInterface(ctx context.Context, vrf, ip string) error {
-	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{VRF: vrf, IP: ip})
+// ConfigureInterface sets forwarding mode on an interface. Routed mode (VRF+IP)
+// and bridged mode (VLAN membership) are mutually exclusive.
+func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig) error {
+	cs, err := i.internal.ConfigureInterface(ctx, node.InterfaceConfig{
+		VRF: cfg.VRF, IP: cfg.IP, VLAN: cfg.VLAN, Tagged: cfg.Tagged,
+	})
 	if err != nil {
 		return err
 	}
@@ -239,9 +246,10 @@ func (i *Interface) ConfigureInterface(ctx context.Context, vrf, ip string) erro
 	return nil
 }
 
-// UnconfigureInterface removes VRF binding and/or IP address from an interface.
-func (i *Interface) UnconfigureInterface(ctx context.Context, vrf, ip string) error {
-	cs, err := i.internal.UnconfigureInterface(ctx, node.InterfaceConfig{VRF: vrf, IP: ip})
+// UnconfigureInterface reverses ConfigureInterface. Reads the intent record to
+// determine what was configured, then undoes it. No parameters needed.
+func (i *Interface) UnconfigureInterface(ctx context.Context) error {
+	cs, err := i.internal.UnconfigureInterface(ctx)
 	if err != nil {
 		return err
 	}
@@ -249,10 +257,10 @@ func (i *Interface) UnconfigureInterface(ctx context.Context, vrf, ip string) er
 	return nil
 }
 
-// Set sets a property on this interface.
+// SetProperty sets a property on this interface.
 // Supported properties: mtu, speed, admin-status, description.
-func (i *Interface) Set(ctx context.Context, property, value string) error {
-	cs, err := i.internal.Set(ctx, property, value)
+func (i *Interface) SetProperty(ctx context.Context, property, value string) error {
+	cs, err := i.internal.SetProperty(ctx, property, value)
 	if err != nil {
 		return err
 	}

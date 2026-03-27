@@ -88,6 +88,7 @@ func (fc FieldConstraint) Check(value string) error {
 type TableSchema struct {
 	KeyPattern string                     // regex for key format validation
 	Fields     map[string]FieldConstraint // field name → constraint
+	AllowExtra bool                       // if true, unknown fields are accepted without validation
 }
 
 // ValidateEntry checks a key and field map against this schema.
@@ -104,7 +105,9 @@ func (ts TableSchema) ValidateEntry(table, key string, fields map[string]string)
 	for field, value := range fields {
 		fc, ok := ts.Fields[field]
 		if !ok {
-			vb.AddErrorf("%s|%s: unknown field %q", table, key, field)
+			if !ts.AllowExtra {
+				vb.AddErrorf("%s|%s: unknown field %q", table, key, field)
+			}
 			continue
 		}
 		if err := fc.Check(value); err != nil {
@@ -249,7 +252,9 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-bgp-peergroup, key vrf_name|peer_group_name
 		KeyPattern: `^[^|]+\|[A-Z0-9_]+$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status": {Type: FieldEnum, Enum: []string{"up", "down"}},
+			"admin_status":  {Type: FieldEnum, Enum: []string{"up", "down"}},
+			"local_addr":    {Type: FieldIP},     // YANG: union (IP, port, LAG, loopback, Vlan)
+			"ebgp_multihop": {Type: FieldString},  // YANG: boolean; newtron writes "true"/TTL
 		},
 	},
 
@@ -257,9 +262,10 @@ var Schema = map[string]TableSchema{
 		// YANG: sonic-bgp-peergroup, key vrf_name|peer_group_name|afi_safi
 		KeyPattern: `^[^|]+\|[^|]+\|(ipv4_unicast|ipv6_unicast|l2vpn_evpn)$`,
 		Fields: map[string]FieldConstraint{
-			"admin_status":  {Type: FieldBool},
-			"route_map_in":  {Type: FieldString},
-			"route_map_out": {Type: FieldString},
+			"admin_status":       {Type: FieldBool},
+			"route_map_in":       {Type: FieldString},
+			"route_map_out":      {Type: FieldString},
+			"nexthop_unchanged":  {Type: FieldBool}, // YANG: boolean; used by EVPN peer group for eBGP overlay
 		},
 	},
 
@@ -511,50 +517,25 @@ var Schema = map[string]TableSchema{
 	// ========================================================================
 
 	"NEWTRON_INTENT": {
-		// Key: device name OR interface name (e.g., "leaf1", "Ethernet0", "PortChannel100")
-		KeyPattern: `^[a-zA-Z][a-zA-Z0-9_.|/-]*$`,
+		// Key: resource identifier — device name, interface name, VRF name,
+		// composite keys like "CUSTOMER|10.0.0.0/8|10.10.1.0" for static routes.
+		// Format varies by operation; AllowExtra permits operation-specific params.
+		KeyPattern: `^[a-zA-Z0-9][a-zA-Z0-9_.|/-]*$`,
+		AllowExtra: true, // params vary by operation — no fixed field set
 		Fields: map[string]FieldConstraint{
-			// Identity fields (all intent types)
-			"state":     {Type: FieldEnum, Enum: []string{"unrealized", "in-flight", "actuated"}},
-			"operation": {Type: FieldString},              // e.g., "apply-service", "configure-bgp"
-			"name":      {Type: FieldString, AllowEmpty: true}, // spec reference
-			"applied_at":  {Type: FieldString, AllowEmpty: true}, // RFC3339
-			"applied_by":  {Type: FieldString, AllowEmpty: true},
-
-			// Crash-recovery fields (device-scoped intents)
-			"holder":           {Type: FieldString},
-			"created":          {Type: FieldString}, // RFC3339
-			"phase":            {Type: FieldString, AllowEmpty: true},
-			"rollback_holder":  {Type: FieldString, AllowEmpty: true},
-			"rollback_started": {Type: FieldString, AllowEmpty: true}, // RFC3339
-			"operations":       {Type: FieldString},                   // JSON array
-
-			// Service binding fields (interface-scoped intents)
-			"service_name":    {Type: FieldString},
-			"service_type":    {Type: FieldEnum, Enum: []string{"routed", "irb", "bridged", "evpn-routed", "evpn-irb", "evpn-bridged"}},
-			"vrf_type":        {Type: FieldEnum, Enum: []string{"interface", "shared"}},
-			"vrf_name":        {Type: FieldString},
-			"ip_address":      {Type: FieldString}, // CIDR notation
-			"ipvpn":           {Type: FieldString},
-			"macvpn":          {Type: FieldString},
-			"l2vni":           {Type: FieldInt, Range: intRange(1, 16777215)},
-			"l3vni":           {Type: FieldInt, Range: intRange(1, 16777215)},
-			"l3vni_vlan":      {Type: FieldInt, Range: intRange(2, 4094)},
-			"vlan_id":         {Type: FieldInt, Range: intRange(2, 4094)},
-			"ingress_acl":     {Type: FieldString},
-			"egress_acl":      {Type: FieldString},
-			"bgp_neighbor":    {Type: FieldIP},
-			"bgp_peer_as":     {Type: FieldInt, Range: intRange(1, 4294967295)},
-			"qos_policy":      {Type: FieldString},
-			"anycast_ip":      {Type: FieldString}, // may include mask
-			"anycast_mac":     {Type: FieldMAC},
-			"arp_suppression": {Type: FieldBool},
-			"redistribute_vrf": {Type: FieldString},
-			"peer_group":       {Type: FieldString},
-			"route_map_in":              {Type: FieldString},
-			"route_map_out":             {Type: FieldString},
-			"route_reflector_client":    {Type: FieldBool},
-			"next_hop_self":             {Type: FieldBool},
+			// Identity fields — present on every intent record
+			"state": {Type: FieldEnum, Enum: []string{"actuated"}},
+			"operation": {Type: FieldEnum, Enum: []string{
+				OpSetupDevice, OpCreateVRF, OpBindIPVPN, OpCreateVLAN,
+				OpBindMACVPN, OpCreateACL, OpAddBGPEVPNPeer,
+				OpCreatePortChannel, OpConfigureIRB, OpAddStaticRoute,
+				OpSetPortProperty, OpConfigureInterface, OpAddBGPPeer,
+				OpApplyService, OpBindACL, OpApplyQoS,
+				OpAddACLRule, OpAddPortChannelMember, OpInterfaceInit,
+			}},
+			// DAG metadata — structural dependencies between intent records
+			"_parents":  {Type: FieldString, AllowEmpty: true},
+			"_children": {Type: FieldString, AllowEmpty: true},
 		},
 	},
 
@@ -694,7 +675,9 @@ func ValidateChanges(changes []ConfigChange) error {
 		for field, value := range c.Fields {
 			fc, ok := schema.Fields[field]
 			if !ok {
-				vb.AddErrorf("%s|%s: unknown field %q", c.Table, c.Key, field)
+				if !schema.AllowExtra {
+					vb.AddErrorf("%s|%s: unknown field %q", c.Table, c.Key, field)
+				}
 				continue
 			}
 			if err := fc.Check(value); err != nil {

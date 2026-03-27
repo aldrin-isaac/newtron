@@ -23,12 +23,12 @@ steps:
       jq: '.exists == true'
 
   # Add Ethernet0 as tagged member
-  - name: add-member-eth0-tagged
+  - name: configure-bridged-eth0-tagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet0, tagged: true}
+    url: /node/{{device}}/interface/Ethernet0/configure-interface
+    params: {vlan_id: 100, tagged: true}
 
   - name: verify-vlan-member
     action: newtron
@@ -53,12 +53,11 @@ steps:
       jq: '.exists == true'
 
   # Tear down: remove VLAN member, delete VLAN, delete VRF
-  - name: remove-member-eth0
+  - name: unconfigure-bridged-eth0
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet0}
+    url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
 
   - name: verify-member-removed
     action: newtron

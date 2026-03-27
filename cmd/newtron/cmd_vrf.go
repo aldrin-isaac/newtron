@@ -11,6 +11,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/newtron-network/newtron/pkg/newtron/api"
 )
 
 var vrfCmd = &cobra.Command{
@@ -227,7 +228,7 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.ConfigureInterface(app.deviceName, intfName, vrfName, "", execOpts()))
+		return displayWriteResult(app.client.ConfigureInterface(app.deviceName, intfName, api.ConfigureInterfaceRequest{VRF: vrfName}, execOpts()))
 	},
 }
 
@@ -242,12 +243,12 @@ Examples:
   newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet4 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		vrfName := args[0]
+		_ = args[0] // vrfName — not needed, intent record has it
 		intfName := args[1]
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.UnconfigureInterface(app.deviceName, intfName, vrfName, "", execOpts()))
+		return displayWriteResult(app.client.UnconfigureInterface(app.deviceName, intfName, execOpts()))
 	},
 }
 
@@ -374,11 +375,11 @@ Examples:
 		// a dot it's an IP; otherwise treat as interface name.
 		if strings.Contains(target, ".") {
 			// Treat as neighbor IP — use node-level remove
-			return displayWriteResult(app.client.RemoveBGPMultihopPeer(app.deviceName, target, execOpts()))
+			return displayWriteResult(app.client.RemoveBGPEVPNPeer(app.deviceName, target, execOpts()))
 		}
 
 		// Treat as interface name — use interface-level remove
-		return displayWriteResult(app.client.InterfaceRemoveBGPPeer(app.deviceName, target, "", execOpts()))
+		return displayWriteResult(app.client.InterfaceRemoveBGPPeer(app.deviceName, target, execOpts()))
 	},
 }
 

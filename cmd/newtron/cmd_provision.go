@@ -133,12 +133,6 @@ Examples:
 					} else {
 						fmt.Println(green("ready"))
 					}
-					fmt.Print("  Applying FRR defaults... ")
-					if err := app.client.ApplyFRRDefaults(name); err != nil {
-						fmt.Printf("%s: %v\n", red("FAILED"), err)
-					} else {
-						fmt.Println(green("OK"))
-					}
 				}
 			}
 

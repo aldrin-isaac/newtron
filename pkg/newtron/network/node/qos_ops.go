@@ -18,11 +18,19 @@ import (
 func (i *Interface) ApplyQoS(ctx context.Context, policyName string, policy *spec.QoSPolicy) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("apply-qos", i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpApplyQoS, i.name).Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.Name(), "interface.apply-qos")
+	cs := NewChangeSet(n.Name(), "interface."+sonic.OpApplyQoS)
+	if err := i.ensureInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	if err := i.node.writeIntent(cs, sonic.OpApplyQoS, "interface|"+i.name+"|qos",
+		map[string]string{sonic.FieldQoSPolicy: policyName},
+		[]string{"interface|" + i.name}); err != nil {
+		return nil, err
+	}
 	cs.ReverseOp = "interface.remove-qos"
 	cs.OperationParams = map[string]string{"interface": i.name}
 
@@ -75,15 +83,13 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 		return nil, err
 	}
 
-	configDB := n.ConfigDB()
-
-	// Extract policy name before deleting per-interface entries
-	var policyName string
-	if configDB != nil {
-		if entry, ok := configDB.PortQoSMap[i.name]; ok {
-			policyName = parsePolicyName(entry.DSCPToTCMap)
-		}
+	// Read policy name from intent — not from CONFIG_DB
+	intentKey := "interface|" + i.name + "|qos"
+	intent := n.GetIntent(intentKey)
+	if intent == nil {
+		return nil, fmt.Errorf("no QoS intent for %s", i.name)
 	}
+	policyName := intent.Params[sonic.FieldQoSPolicy]
 
 	cs := buildChangeSet(n.Name(), "interface.remove-qos", i.unbindQos(), ChangeDelete)
 
@@ -92,6 +98,9 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 		cs.Deletes(n.deleteDeviceQoSConfig(policyName))
 	}
 
+	if err := i.node.deleteIntent(cs, "interface|"+i.name+"|qos"); err != nil {
+		return nil, err
+	}
 	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Removed QoS from interface %s", i.name)
 	return cs, nil

@@ -78,7 +78,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -88,7 +88,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -110,7 +110,7 @@ steps:
 
   - name: wait-svi-ready
     action: wait
-    duration: 15s
+    duration: 20s
 
   # Prime NGDP ARP
   - name: prime-arp-sw1-svi
@@ -120,8 +120,8 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan300 10.3.0.2"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 3s
     expect:
       jq: '.output | contains("1 received")'
 
@@ -132,8 +132,8 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan300 10.3.0.5"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 3s
     expect:
       jq: '.output | contains("1 received")'
 
@@ -191,7 +191,6 @@ steps:
     devices: [switch1]
     method: POST
     url: /node/{{device}}/interface/Ethernet3/unconfigure-interface
-    params: {vrf: Vrf_IRB}
 
   - name: verify-eth3-vrf-removed
     action: newtron

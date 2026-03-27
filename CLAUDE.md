@@ -55,6 +55,35 @@ This has concrete design implications:
   IP-VPN spec. When adding a new forward operation that creates infrastructure, ask:
   "can the reverse operation find everything it needs in the intent record alone?"
 
+## Intent Round-Trip Completeness
+
+Every operation that writes an intent record must satisfy a mechanical three-part rule.
+Violation means reconstruction produces different CONFIG_DB than the original operation
+— which renders as false drift on a correctly-configured device.
+
+**Rule: every param that affects CONFIG_DB output must complete the full round-trip:**
+
+1. **writeIntent** stores it in the intent record
+2. **intentParamsToStepParams** exports it to the topology step
+3. **ReplayStep** passes it back to the same method
+
+When adding or modifying a `writeIntent` call:
+
+1. List every argument and option field the method uses in CONFIG_DB writes
+   (cs.Add, cs.Update, or helper functions that return `[]sonic.Entry`)
+2. For each one that comes from caller arguments (not from profile or spec
+   resolution), verify it is stored in the intent params
+3. Verify the corresponding `ReplayStep` case reads it and passes it to the method
+4. Verify `intentParamsToStepParams` exports it (or the default pass-through handles it)
+
+Values re-resolved from specs or profiles at replay time (e.g., loopback IP from
+profile, L3VNI from IPVPN spec) do NOT need to be stored for reconstruction — they
+are re-derived. But values from caller arguments (opts, config structs) MUST be stored
+because they are the only source at reconstruction time.
+
+**This is not a guideline — it is a mechanical check. If a param affects CONFIG_DB and
+isn't in the intent, that's a bug.**
+
 ## Platform Patching Principle
 
 When a platform (CiscoVS, VPP, etc.) has a bug that prevents a SONiC feature from working:
@@ -181,16 +210,14 @@ n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 n.SetupDevice(ctx, setupOpts)             // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)  // VTEP precondition passes ✓
-composite := n.BuildComposite()           // export all accumulated entries
+composite := n.BuildComposite()           // export configDB as composite
 ```
 
 Key implementation:
 - `NewAbstract()` creates Node with `sonic.NewConfigDB()` + `offline=true`
 - `precondition()` skips connected/locked checks when offline
-- `op()` updates shadow ConfigDB + appends to `accumulated` when offline
-- Complex ops call `n.applyShadow(cs)` for shadow update
-- `BuildComposite()` feeds accumulated entries through `CompositeBuilder` (merges fields)
-- `AddEntries()` allows orchestrators to add config-function output directly
+- `op()` and `applyShadow(cs)` update shadow ConfigDB so subsequent ops see prior effects
+- `BuildComposite()` calls `configDB.ExportEntries()` — the configDB IS the accumulated state
 
 ## Separation of Concerns — File-Level Ownership
 

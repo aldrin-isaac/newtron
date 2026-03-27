@@ -355,6 +355,25 @@ func TestValidateChanges_DeleteUnknownTablePasses(t *testing.T) {
 	}
 }
 
+func TestValidateChanges_AllowExtraFields(t *testing.T) {
+	// NEWTRON_INTENT has AllowExtra: true — unknown fields should pass in ValidateChanges too
+	changes := []ConfigChange{
+		{Table: "NEWTRON_INTENT", Key: "Ethernet0", Type: ChangeTypeAdd, Fields: map[string]string{
+			"state":        "actuated",
+			"operation":    "apply-service",
+			"service_name": "TRANSIT",
+			"service_type": "routed",
+			"ip_address":   "10.0.1.1/31",
+			"bgp_neighbor": "10.0.1.0",
+			"bgp_peer_as":  "65001",
+			"peer_group":   "TRANSIT",
+		}},
+	}
+	if err := ValidateChanges(changes); err != nil {
+		t.Errorf("AllowExtra fields in ValidateChanges should pass: %v", err)
+	}
+}
+
 // ============================================================================
 // Schema coverage tests
 // ============================================================================
@@ -364,36 +383,51 @@ func TestValidateChanges_DeleteUnknownTablePasses(t *testing.T) {
 // ============================================================================
 
 func TestValidateEntry_NEWTRON_INTENT_Valid(t *testing.T) {
-	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "leaf1", map[string]string{
-		"holder":     "admin@mgmt",
-		"created":    "2026-03-15T10:30:00Z",
-		"operations": `[{"name":"device.create-vlan"}]`,
+	// Service intent on interface — identity fields + operation-specific params
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "Ethernet0", map[string]string{
+		"state":        "actuated",
+		"operation":    "apply-service",
+		"service_name": "TRANSIT",
+		"service_type": "routed",
+		"vrf_name":     "CUSTOMER",
+		"ip_address":   "10.0.1.1/31",
 	})
 	if err != nil {
-		t.Errorf("valid NEWTRON_INTENT: %v", err)
+		t.Errorf("valid service intent: %v", err)
 	}
 }
 
-func TestValidateEntry_NEWTRON_INTENT_EmptyPhase(t *testing.T) {
+func TestValidateEntry_NEWTRON_INTENT_ExtraParamsAllowed(t *testing.T) {
+	// Node-level intent with operation-specific params not in schema Fields map
 	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "leaf1", map[string]string{
-		"holder":     "admin@mgmt",
-		"created":    "2026-03-15T10:30:00Z",
-		"phase":      "",
-		"operations": `[]`,
+		"state":     "actuated",
+		"operation": "setup-device",
+		"hostname":  "leaf1",
+		"bgp_asn":   "65001",
+		"loopback":  "10.0.0.1/32",
 	})
 	if err != nil {
-		t.Errorf("empty phase should be valid: %v", err)
+		t.Errorf("extra params should be allowed: %v", err)
 	}
 }
 
-func TestValidateEntry_NEWTRON_INTENT_InvalidKey(t *testing.T) {
-	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "123invalid", map[string]string{
-		"holder":     "admin@mgmt",
-		"created":    "2026-03-15T10:30:00Z",
-		"operations": `[]`,
+func TestValidateEntry_NEWTRON_INTENT_InvalidOperation(t *testing.T) {
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "leaf1", map[string]string{
+		"state":     "actuated",
+		"operation": "unknown-op",
 	})
 	if err == nil {
-		t.Error("key starting with digit should fail")
+		t.Error("unknown operation should fail")
+	}
+}
+
+func TestValidateEntry_NEWTRON_INTENT_InvalidState(t *testing.T) {
+	err := Schema["NEWTRON_INTENT"].ValidateEntry("NEWTRON_INTENT", "Ethernet0", map[string]string{
+		"state":     "pending",
+		"operation": "apply-service",
+	})
+	if err == nil {
+		t.Error("invalid state should fail")
 	}
 }
 

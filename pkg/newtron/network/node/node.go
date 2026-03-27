@@ -64,21 +64,14 @@ type Node struct {
 	connected bool
 	locked    bool
 
-	// Abstract mode — no physical device, operations accumulate entries
-	offline     bool
-	accumulated []sonic.Entry
+	// Abstract mode — no physical device, operations build desired state
+	offline bool
 
 	// zombie stores an existing intent found during Lock(). Any intent
 	// present at lock time indicates a crashed process — the lock
 	// acquisition proves the previous holder is gone. Execute() returns
 	// ErrDeviceZombieIntent to block further changes until resolved.
 	zombie *sonic.OperationIntent
-
-	// intents maps resource names to their intent records (§39).
-	// Populated from CONFIG_DB on connect (actuated + in-flight intents),
-	// from topology imports (unrealized intents), or from operations
-	// (write-through on mutations). The Node intermediates all intent.
-	intents map[string]*sonic.Intent
 
 	mu sync.RWMutex
 }
@@ -121,48 +114,38 @@ func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, reso
 func (n *Node) IsOffline() bool { return n.offline }
 
 // ============================================================================
-// Intent Accessors (§39)
+// Intent Accessors
 // ============================================================================
+//
+// Intent state is ConfigDB state — configDB.NewtronIntent is the single source.
+// No separate in-memory map. applyShadow already updates ConfigDB, so writes
+// via ChangeSet are automatically visible to reads.
 
 // GetIntent returns the intent for the given resource, or nil if none exists.
+// Reads from configDB.NewtronIntent and constructs sonic.Intent on demand.
 func (n *Node) GetIntent(resource string) *sonic.Intent {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	if n.intents == nil {
+	if n.configDB == nil {
 		return nil
 	}
-	return n.intents[resource]
-}
-
-// SetIntent stores an intent for the given resource.
-func (n *Node) SetIntent(intent *sonic.Intent) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.intents == nil {
-		n.intents = make(map[string]*sonic.Intent)
+	fields, ok := n.configDB.NewtronIntent[resource]
+	if !ok {
+		return nil
 	}
-	n.intents[intent.Resource] = intent
+	return sonic.NewIntent(resource, fields)
 }
 
-// RemoveIntent removes the intent for the given resource.
-func (n *Node) RemoveIntent(resource string) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.intents != nil {
-		delete(n.intents, resource)
-	}
-}
-
-// Intents returns a copy of all intents on this node.
+// Intents returns all intents on this node.
 func (n *Node) Intents() map[string]*sonic.Intent {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	if n.intents == nil {
+	if n.configDB == nil || len(n.configDB.NewtronIntent) == 0 {
 		return nil
 	}
-	result := make(map[string]*sonic.Intent, len(n.intents))
-	for k, v := range n.intents {
-		result[k] = v
+	result := make(map[string]*sonic.Intent, len(n.configDB.NewtronIntent))
+	for resource, fields := range n.configDB.NewtronIntent {
+		result[resource] = sonic.NewIntent(resource, fields)
 	}
 	return result
 }
@@ -172,9 +155,13 @@ func (n *Node) ServiceIntents() map[string]*sonic.Intent {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	result := make(map[string]*sonic.Intent)
-	for k, v := range n.intents {
-		if v.IsService() && v.IsActuated() {
-			result[k] = v
+	if n.configDB == nil {
+		return result
+	}
+	for resource, fields := range n.configDB.NewtronIntent {
+		intent := sonic.NewIntent(resource, fields)
+		if intent.IsService() && intent.IsActuated() {
+			result[resource] = intent
 		}
 	}
 	return result
@@ -191,51 +178,16 @@ func (n *Node) Snapshot() *spec.TopologyDevice {
 	defer n.mu.RUnlock()
 
 	dev := &spec.TopologyDevice{}
-
-	for resource, intent := range n.intents {
-		if !intent.IsActuated() {
-			continue
-		}
-		if intent.IsService() {
-			step := spec.TopologyStep{
-				URL:    "/interface/" + resource + "/apply-service",
-				Params: map[string]any{"service": intent.Name},
-			}
-			if ip := intent.Params["ip_address"]; ip != "" {
-				step.Params["ip_address"] = ip
-			}
-			dev.Steps = append(dev.Steps, step)
-		}
+	if n.configDB == nil || len(n.configDB.NewtronIntent) == 0 {
+		return dev
 	}
 
+	// Convert all actuated intents to ordered topology steps.
+	dev.Steps = IntentsToSteps(n.configDB.NewtronIntent)
 	return dev
 }
 
-// LoadIntents populates the intents map from NEWTRON_INTENT
-// entries in ConfigDB. Called on connect to reflect the device's
-// current intent state.
-func (n *Node) LoadIntents() {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.loadIntentsLocked()
-}
-
-// loadIntentsLocked is the lock-free implementation.
-// Caller must hold n.mu.
-func (n *Node) loadIntentsLocked() {
-	if n.intents == nil {
-		n.intents = make(map[string]*sonic.Intent)
-	}
-	configDB := n.configDB
-	if configDB == nil {
-		return
-	}
-	for resource, fields := range configDB.NewtronIntent {
-		n.intents[resource] = sonic.NewIntent(resource, fields)
-	}
-}
-
-// RegisterPort creates a PORT entry in the shadow ConfigDB and accumulates it.
+// RegisterPort creates a PORT entry in the shadow ConfigDB.
 // This enables GetInterface for offline mode (GetInterface checks PORT table).
 func (n *Node) RegisterPort(name string, fields map[string]string) {
 	if fields == nil {
@@ -243,33 +195,16 @@ func (n *Node) RegisterPort(name string, fields map[string]string) {
 	}
 	entry := sonic.Entry{Table: "PORT", Key: name, Fields: fields}
 	n.configDB.ApplyEntries([]sonic.Entry{entry})
-	if n.offline {
-		n.accumulated = append(n.accumulated, entry)
-	}
 	n.interfaces[name] = &Interface{node: n, name: name}
 }
 
-// BuildComposite exports accumulated entries as a CompositeConfig.
+// BuildComposite exports the shadow ConfigDB as a CompositeConfig.
 // Only valid in offline mode.
 func (n *Node) BuildComposite() *CompositeConfig {
 	cb := NewCompositeBuilder(n.name, CompositeOverwrite).
 		SetGeneratedBy("abstract-node")
-	for _, e := range n.accumulated {
-		cb.AddEntry(e.Table, e.Key, e.Fields)
-	}
+	cb.AddEntries(n.configDB.ExportEntries())
 	return cb.Build()
-}
-
-// AddEntries accumulates entries and updates the shadow ConfigDB.
-// Used by orchestrators to add entries from config functions that don't
-// have corresponding Node methods (e.g., CreateVTEP, CreateBGPNeighbor).
-// Only valid in offline mode; no-op for physical nodes.
-func (n *Node) AddEntries(entries []sonic.Entry) {
-	if !n.offline {
-		return
-	}
-	n.configDB.ApplyEntries(entries)
-	n.accumulated = append(n.accumulated, entries...)
 }
 
 // SetDeviceMetadata writes fields to DEVICE_METADATA|localhost.
@@ -286,21 +221,19 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 	return cs, nil
 }
 
-// applyShadow updates the shadow ConfigDB so subsequent operations see the
-// effects of prior ones.  Also accumulates entries for BuildComposite export.
-// No-op when the Node is connected to a physical device.
+// applyShadow updates the in-memory ConfigDB so subsequent operations see the
+// effects of prior ones. Dispatches by change type: DeleteEntry for deletes,
+// ApplyEntries for adds/modifies.
 func (n *Node) applyShadow(cs *ChangeSet) {
-	if !n.offline || cs == nil {
+	if cs == nil {
 		return
 	}
 	for _, c := range cs.Changes {
-		entry := sonic.Entry{Table: c.Table, Key: c.Key, Fields: c.Fields}
 		if c.Type == sonic.ChangeTypeDelete {
 			n.configDB.DeleteEntry(c.Table, c.Key)
 		} else {
-			n.configDB.ApplyEntries([]sonic.Entry{entry})
+			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
 		}
-		n.accumulated = append(n.accumulated, entry)
 	}
 }
 
@@ -445,9 +378,9 @@ func (n *Node) connectWithOpts(ctx context.Context, skipFrrcfgdCheck bool) error
 	n.configDB = n.conn.ConfigDB
 	n.connected = true
 
-	// Load interfaces and intents from CONFIG_DB
+	// Load interfaces from CONFIG_DB.
+	// Intent state is read directly from configDB.NewtronIntent — no separate load step.
 	n.loadInterfaces()
-	n.loadIntentsLocked()
 
 	util.WithDevice(n.name).Info("Connected")
 	return nil
@@ -568,7 +501,6 @@ func (n *Node) Lock() error {
 	n.configDB = configDB
 	n.interfaces = make(map[string]*Interface)
 	n.loadInterfaces()
-	n.loadIntentsLocked()
 
 	// Migrate any legacy STATE_DB intent to CONFIG_DB (one-time per device).
 	// New intents are always written to CONFIG_DB (persistent across reboot).

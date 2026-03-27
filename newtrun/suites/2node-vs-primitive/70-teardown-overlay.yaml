@@ -12,14 +12,14 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 300}
 
   - name: remove-svi-sw2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 300}
 
   - name: verify-svi-removed-sw1
@@ -122,19 +122,17 @@ steps:
       jq: '.exists == false'
 
   # 5. Remove VLAN members
-  - name: remove-member-sw1-eth2
+  - name: unconfigure-bridged-sw1-eth8
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 300, interface: Ethernet8}
+    url: /node/{{device}}/interface/Ethernet8/unconfigure-interface
 
-  - name: remove-member-sw2-eth2
+  - name: unconfigure-bridged-sw2-eth8
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 300, interface: Ethernet8}
+    url: /node/{{device}}/interface/Ethernet8/unconfigure-interface
 
   # 6. Delete VLAN 300
   - name: delete-vlan300-sw1
@@ -171,14 +169,12 @@ steps:
     devices: [switch1]
     method: POST
     url: /node/{{device}}/interface/Ethernet4/unconfigure-interface
-    params: {ip: "10.20.0.1/31"}
 
   - name: unconfigure-eth1-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /node/{{device}}/interface/Ethernet4/unconfigure-interface
-    params: {ip: "10.20.1.1/31"}
 
   - name: verify-eth1-ip-removed-sw1
     action: newtron

@@ -15,26 +15,26 @@ steps:
     url: /node/{{device}}/create-vlan
     params: {id: 100}
 
-  - name: add-member-eth1-untagged
+  - name: configure-bridged-eth4-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet4, tagged: false}
+    url: /node/{{device}}/interface/Ethernet4/configure-interface
+    params: {vlan_id: 100, tagged: false}
 
-  - name: add-member-eth3-untagged
+  - name: configure-bridged-eth12-untagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet12, tagged: false}
+    url: /node/{{device}}/interface/Ethernet12/configure-interface
+    params: {vlan_id: 100, tagged: false}
 
-  - name: add-member-eth2-tagged
+  - name: configure-bridged-eth8-tagged
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet8, tagged: true}
+    url: /node/{{device}}/interface/Ethernet8/configure-interface
+    params: {vlan_id: 100, tagged: true}
 
   - name: verify-vlan100-exists
     action: newtron

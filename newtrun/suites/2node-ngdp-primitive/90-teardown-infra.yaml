@@ -1,46 +1,15 @@
 name: teardown-infra
 description: |
-  Tear down all infrastructure using deprovision primitives: EVPN overlay,
-  underlay BGP neighbors, interface IPs, BGP globals, and loopback.
+  Tear down per-interface infrastructure. Granular reverse operations handle
+  BGP neighbors and interface IPs. Baseline infrastructure (setup-device) has
+  no individual reverse — reprovisioning (CompositeOverwrite) is the
+  collective reverse. config reload restores saved state (not factory) since
+  every API write calls config save.
 topology: 2node-ngdp
 requires: [service-lifecycle]
 
 steps:
-  # 1. Teardown EVPN overlay
-  - name: teardown-vtep-sw1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/teardown-vtep
-
-  - name: teardown-vtep-sw2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/teardown-vtep
-
-  - name: verify-vxlan-tunnel-removed
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-vxlan-nvo-removed
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-bgp-l2vpn-af-removed
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  # 2. Remove underlay BGP neighbors
+  # 1. Remove underlay BGP neighbors (valid individual reverse)
   - name: bgp-remove-neighbor-sw1
     action: newtron
     devices: [switch1]
@@ -69,20 +38,18 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # 3. Remove underlay IPs from Ethernet0
+  # 2. Remove underlay IPs from Ethernet0 (valid individual reverse)
   - name: unconfigure-eth0-sw1
     action: newtron
     devices: [switch1]
     method: POST
     url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
-    params: {ip: "10.1.0.0/31"}
 
   - name: unconfigure-eth0-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /node/{{device}}/interface/Ethernet0/unconfigure-interface
-    params: {ip: "10.1.0.1/31"}
 
   - name: verify-eth0-ip-removed-sw1
     action: newtron
@@ -98,70 +65,6 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # 4. Remove BGP globals
-  - name: remove-bgp-sw1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/remove-bgp
-
-  - name: remove-bgp-sw2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/remove-bgp
-
-  - name: verify-bgp-globals-removed-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-bgp-globals-removed-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-bgp-af-removed-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-route-redistribute-removed-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
-    expect:
-      jq: '.exists == false'
-
-  # 5. Remove loopback
-  - name: remove-loopback-sw1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/remove-loopback
-
-  - name: remove-loopback-sw2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/remove-loopback
-
-  - name: verify-loopback-removed-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-loopback-removed-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
+  # Baseline infrastructure (loopback, BGP globals, VTEP) is NOT torn down
+  # here — setup-device has no individual reverse. These entries persist
+  # until reprovisioning.

@@ -5,7 +5,7 @@ description: |
   Hosts communicate via L2 bridged over VXLAN — verifies the complete
   EVPN L2 control and data plane path.
 topology: 2node-ngdp
-requires: [evpn-setup]
+requires: [evpn-verify]
 
 steps:
   - name: create-vlan300-switch1
@@ -22,19 +22,19 @@ steps:
     url: /node/{{device}}/create-vlan
     params: {id: 300}
 
-  - name: add-member-sw1-eth2
+  - name: configure-bridged-sw1-eth2
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 300, interface: Ethernet2, tagged: false}
+    url: /node/{{device}}/interface/Ethernet2/configure-interface
+    params: {vlan_id: 300, tagged: false}
 
-  - name: add-member-sw2-eth2
+  - name: configure-bridged-sw2-eth2
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 300, interface: Ethernet2, tagged: false}
+    url: /node/{{device}}/interface/Ethernet2/configure-interface
+    params: {vlan_id: 300, tagged: false}
 
   - name: bind-macvpn-switch1
     action: newtron

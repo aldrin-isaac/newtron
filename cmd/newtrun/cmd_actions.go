@@ -238,15 +238,6 @@ func getActionMetadata() map[string]ActionMetadata {
   action: verify-provisioning
   devices: [leaf1]`,
 		},
-		"apply-frr-defaults": {
-			Category:  "Provisioning",
-			ShortDesc: "Apply FRR default configuration",
-			LongDesc:  "Applies default FRR configuration to device",
-			Devices:   "required",
-			Example: `- name: apply-frr
-  action: apply-frr-defaults
-  devices: [leaf1, leaf2]`,
-		},
 
 		// Verification
 		"verify-ping": {
@@ -400,40 +391,6 @@ func getActionMetadata() map[string]ActionMetadata {
   devices: [leaf1]
   vlan_id: 100`,
 		},
-		"add-vlan-member": {
-			Category:  "VLAN",
-			ShortDesc: "Add interface to VLAN",
-			LongDesc:  "Adds an interface as a member of a VLAN",
-			Devices:   "required",
-			RequiredFields: []ParamInfo{
-				{"vlan_id", "VLAN ID"},
-				{"interface", "Interface name"},
-			},
-			OptionalFields: []ParamInfo{
-				{"tagging", "Tagged or untagged (default: untagged)"},
-			},
-			Example: `- name: add-member
-  action: add-vlan-member
-  devices: [leaf1]
-  vlan_id: 100
-  interface: Ethernet1
-  tagging: untagged`,
-		},
-		"remove-vlan-member": {
-			Category:  "VLAN",
-			ShortDesc: "Remove interface from VLAN",
-			LongDesc:  "Removes an interface from VLAN membership",
-			Devices:   "required",
-			RequiredFields: []ParamInfo{
-				{"vlan_id", "VLAN ID"},
-				{"interface", "Interface name"},
-			},
-			Example: `- name: remove-member
-  action: remove-vlan-member
-  devices: [leaf1]
-  vlan_id: 100
-  interface: Ethernet1`,
-		},
 		"configure-irb": {
 			Category:  "VLAN",
 			ShortDesc: "Configure VLAN IRB (Integrated Routing and Bridging)",
@@ -486,15 +443,17 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 		"configure-interface": {
 			Category:  "Interface",
-			ShortDesc: "Configure VRF binding and/or IP on an interface",
-			LongDesc:  "Sets VRF binding and/or IP address on an interface in a single operation",
+			ShortDesc: "Configure an interface (routed or bridged mode)",
+			LongDesc:  "Configures an interface in routed mode (VRF + IP) or bridged mode (VLAN membership). Modes are mutually exclusive.",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 			},
 			OptionalParams: []ParamInfo{
-				{"vrf", "VRF name to bind"},
-				{"ip", "IP address with prefix length (e.g., 10.1.0.0/31)"},
+				{"vrf", "VRF name to bind (routed mode)"},
+				{"ip", "IP address with prefix length (routed mode, e.g., 10.1.0.1/31)"},
+				{"vlan_id", "VLAN ID for bridged mode membership"},
+				{"tagged", "Tagged membership (bridged mode, default: false)"},
 			},
 			Example: `- name: configure-eth10
   action: configure-interface
@@ -506,23 +465,16 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 		"unconfigure-interface": {
 			Category:  "Interface",
-			ShortDesc: "Remove VRF binding and/or IP from an interface",
-			LongDesc:  "Removes VRF binding and/or IP address from an interface (reverse of configure-interface)",
+			ShortDesc: "Unconfigure an interface (reads intent to determine what to undo)",
+			LongDesc:  "Removes all configuration from an interface by reading its intent record. No params needed — the intent record drives teardown.",
 			Devices:   "required",
 			RequiredFields: []ParamInfo{
 				{"interface", "Interface name"},
 			},
-			OptionalParams: []ParamInfo{
-				{"vrf", "VRF name to unbind"},
-				{"ip", "IP address to remove"},
-			},
 			Example: `- name: unconfigure-eth10
   action: unconfigure-interface
   devices: [leaf1]
-  interface: Ethernet10
-  params:
-    vrf: Vrf_CUST1
-    ip: "10.1.0.1/31"`,
+  interface: Ethernet10`,
 		},
 
 		// EVPN
@@ -1121,7 +1073,7 @@ func getActionMetadata() map[string]ActionMetadata {
 		},
 
 		// VLAN (additional)
-		"remove-irb": {
+		"unconfigure-irb": {
 			Category:  "VLAN",
 			ShortDesc: "Remove IRB from a VLAN",
 			LongDesc:  "Deletes all VLAN_INTERFACE entries for the VLAN (reverse of configure-irb)",
@@ -1129,8 +1081,8 @@ func getActionMetadata() map[string]ActionMetadata {
 			RequiredFields: []ParamInfo{
 				{"vlan_id", "VLAN ID whose IRB to remove"},
 			},
-			Example: `- name: remove-irb
-  action: remove-irb
+			Example: `- name: unconfigure-irb
+  action: unconfigure-irb
   devices: [leaf1]
   vlan_id: 300`,
 		},

@@ -1,48 +1,20 @@
 name: bgp-underlay
 description: |
-  BGP underlay bringup: configure BGP globals, set Ethernet0 IPs, add eBGP
-  neighbors across the inter-switch link, and verify Established.
-  Builds on loopback (Loopback0 IPs already set).
+  BGP underlay bringup: set Ethernet0 IPs, add eBGP neighbors across the
+  inter-switch link, and verify Established.
+  Builds on setup-device (BGP_GLOBALS, DEVICE_METADATA, loopback, VTEP already set).
 
   Dependency ordering (critical):
-    1. Write BGP_GLOBALS and DEVICE_METADATA.bgp_asn — but NOT BGP_NEIGHBOR yet.
-    2. Set INTERFACE IPs on Ethernet0; poll for kernel IP (intfmgrd assignment).
-    3. restart-bgp — bgpcfgd starts with NO BGP_NEIGHBOR in CONFIG_DB.
-    4. poll-bgp-instance — wait for 'router bgp NNNNN' in show running-config.
-    5. bgp-add-neighbor — write BGP_NEIGHBOR AFTER bgpcfgd is initialized.
-    6. verify-bgp — poll until Established.
+    1. Set INTERFACE IPs on Ethernet0; poll for kernel IP (intfmgrd assignment).
+    2. restart-bgp — bgpcfgd starts with NO BGP_NEIGHBOR in CONFIG_DB.
+    3. poll-bgp-instance — wait for 'router bgp NNNNN' in show running-config.
+    4. bgp-add-neighbor — write BGP_NEIGHBOR AFTER bgpcfgd is initialized.
+    5. verify-bgp — poll until Established.
 topology: 2node-ngdp
-requires: [loopback]
+requires: [setup-device]
 
 steps:
-  # Step 1: Write BGP_GLOBALS + DEVICE_METADATA.bgp_asn.
-  - name: configure-bgp-switch1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/configure-bgp
-
-  - name: configure-bgp-switch2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/configure-bgp
-
-  - name: verify-bgp-globals-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
-    expect:
-      jq: '.local_asn == "65001"'
-
-  - name: verify-bgp-globals-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default
-    expect:
-      jq: '.local_asn == "65002"'
-
-  # Step 2: Set inter-switch link IPs on Ethernet0.
+  # Step 1: Set inter-switch link IPs on Ethernet0.
   - name: configure-eth0-switch1
     action: newtron
     devices: [switch1]

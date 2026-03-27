@@ -17,52 +17,17 @@ var evpnCmd = &cobra.Command{
 	Short: "Manage EVPN overlay system",
 	Long: `Manage the EVPN overlay system (VTEP + NVO + BGP EVPN).
 
-EVPN is the overlay transport for VXLAN. The 'setup' command is an idempotent
-composite that configures the full EVPN stack in one shot. The 'status' command
-shows both config and operational state.
+The 'status' command shows both config and operational state.
 
 IP-VPN and MAC-VPN definitions are spec-level objects in network.json that
 define L3 and L2 VPN parameters respectively. They do not require a device.
 
 Examples:
-  newtron leaf1 evpn setup -x
-  newtron leaf1 evpn setup --source-ip 10.0.0.10 -x
   newtron leaf1 evpn status
   newtron evpn ipvpn list
   newtron evpn ipvpn create customer-vpn --l3vni 10001 -x
   newtron evpn macvpn list
   newtron evpn macvpn create servers-vlan100 --vni 1100 --vlan-id 100 --arp-suppress -x`,
-}
-
-// ============================================================================
-// evpn setup — idempotent composite: VTEP + NVO + BGP EVPN
-// ============================================================================
-
-var evpnSetupSourceIP string
-
-var evpnSetupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Configure EVPN overlay (VTEP + NVO + BGP EVPN)",
-	Long: `Idempotent composite that configures the full EVPN stack:
-
-1. Creates VXLAN Tunnel Endpoint (VTEP) with source IP
-2. Creates EVPN NVO (Network Virtualization Overlay)
-3. Configures BGP EVPN sessions with route reflectors from site config
-
-If --source-ip is not specified, uses the device's loopback IP.
-Skips any components that are already configured.
-
-Requires -D (device) flag.
-
-Examples:
-  newtron leaf1 evpn setup -x
-  newtron leaf1 evpn setup --source-ip 10.0.0.10 -x`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireDevice(); err != nil {
-			return err
-		}
-		return displayWriteResult(app.client.SetupVTEP(app.deviceName, evpnSetupSourceIP, execOpts()))
-	},
 }
 
 // ============================================================================
@@ -540,9 +505,6 @@ Examples:
 }
 
 func init() {
-	// evpn setup flags
-	evpnSetupCmd.Flags().StringVar(&evpnSetupSourceIP, "source-ip", "", "Source IP address for VTEP (defaults to loopback IP)")
-
 	// ipvpn create flags
 	evpnIpvpnCreateCmd.Flags().IntVar(&ipvpnL3VNI, "l3vni", 0, "L3VNI for the IP-VPN (required)")
 	evpnIpvpnCreateCmd.Flags().StringVar(&ipvpnRouteTargets, "route-targets", "", "Comma-separated route targets")
@@ -571,7 +533,6 @@ func init() {
 	evpnMacvpnCmd.AddCommand(evpnMacvpnDeleteCmd)
 
 	// evpn subcommands
-	evpnCmd.AddCommand(evpnSetupCmd)
 	evpnCmd.AddCommand(evpnStatusCmd)
 	evpnCmd.AddCommand(evpnIpvpnCmd)
 	evpnCmd.AddCommand(evpnMacvpnCmd)

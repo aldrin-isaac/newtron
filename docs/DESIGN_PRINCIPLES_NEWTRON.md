@@ -112,7 +112,7 @@ n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 n.SetupDevice(ctx, setupOpts)              // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)   // VTEP precondition passes ✓
-composite := n.BuildComposite()            // export all accumulated entries
+composite := n.BuildComposite()            // export configDB as composite
 ```
 
 The shadow ConfigDB is not a mock — it is what makes the code path
@@ -158,7 +158,7 @@ where intent replaces reality entirely. An offline Node builds the
 complete desired state — every VLAN, every VRF,
 every BGP session, every service binding — by running the same methods
 in the same order that an operator would run interactively. The
-accumulated entries are then delivered as a single composite,
+configDB state is then exported and delivered as a single composite,
 overwriting whatever the device had before. This is the only path where
 newtron asserts authority over device state.
 
@@ -175,8 +175,8 @@ provisioning reconciles back to intent when directed.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
-output differ: offline Nodes start empty and accumulate entries for
-later delivery; connected Nodes start from Redis and apply changes
+output differ: offline Nodes start empty and build up configDB state for
+later export; connected Nodes start from Redis and apply changes
 directly. This is not a convenience — it is the guarantee. A feature
 added to one mode is immediately available in the other, because there
 is no other. A bug fixed in one mode is fixed in both, because there
@@ -1529,8 +1529,8 @@ new Operation value and the corresponding forward/reverse implementations.
 The Node intermediates all intent. On connect, the node loads existing
 intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
 the node's intent collection as part of the operation. In offline mode,
-intent records accumulate alongside shadow CONFIG_DB entries and are
-exportable to topology composites. This makes the node the single point
+intent records are written to the shadow ConfigDB and exported alongside
+all other entries via `ExportEntries()`. This makes the node the single point
 of intent truth for its device — whether connected or offline, whether
 reading reality or computing it.
 
@@ -2386,6 +2386,130 @@ Always start tests on a freshly deployed topology. Prior state
 corrupts the convergence baseline — the same vacuous-truth problem
 from a different angle.
 
+## 43. Intent DAG — Structural Dependencies Replace Scanning
+
+A VLAN has members. An ACL has rules. A VRF has routes and interfaces. A
+PortChannel has bonded ports. These parent-child relationships are knowable
+at the moment the child is created. The information exists; the question is
+where it lives.
+
+Before the DAG, it lived nowhere persistent. `DeleteVLAN` would scan
+CONFIG_DB for `VLAN_MEMBER` entries. `DependencyChecker` would scan CONFIG_DB
+tables to count remaining consumers of a VRF or ACL. Reconstruction would
+consult a `stepPriority` map to determine operation ordering. Each mechanism
+reimplemented the same structural knowledge — which resources depend on
+which — in a different form, in a different file, with different failure modes.
+
+The intent DAG makes these relationships first-class. Every `NEWTRON_INTENT`
+record carries two fields: `_parents` (what I depend on) and `_children`
+(what depends on me). When an interface joins VLAN 100, its `writeIntent`
+call declares `vlan|100` as a parent. The VLAN's `_children` field grows to
+include the interface automatically — as a side effect of `writeIntent`, not
+through a separate tracking mechanism. When the interface leaves,
+`deleteIntent` removes it from the VLAN's `_children`. The VLAN never
+participates in either decision.
+
+From these two fields, three capabilities follow mechanically:
+
+**Creation ordering** is enforced by invariant I4: `writeIntent` refuses if a
+declared parent does not exist. An interface cannot join a VLAN that hasn't
+been created. A QoS binding cannot be applied to an interface that has no
+intent. No precondition check code is needed — the invariant is checked once,
+in `writeIntent`, for every resource type.
+
+**Deletion ordering** is enforced by invariant I5: `deleteIntent` refuses if
+`_children` is non-empty. A VLAN cannot be deleted while interfaces are
+members. An ACL cannot be deleted while rules or bindings exist. No
+`DependencyChecker` scan is needed — the answer is in the record.
+
+**Reconstruction ordering** is a topological sort of the DAG. Parents before
+children, deterministic within each level. The `stepPriority` map — a
+manually maintained table mapping operation types to numeric priorities —
+becomes redundant. When a new operation type is added, its reconstruction
+order is determined by its parents, not by a number someone remembers to
+update.
+
+Children declare parents; parents are passive. A child's `writeIntent`
+registers with parents. A child's `deleteIntent` deregisters from parents.
+Parents never write to children. This makes relationship maintenance
+unidirectional and eliminates the coordination problem of bidirectional
+updates across independent operations.
+
+**Cascade deletes do not exist.** `deleteIntent` on a parent with children
+fails. The caller must remove children explicitly, in the correct order,
+using each child's own reverse method. Cascade deletes would require the
+parent to know how to tear down each child type, violating single
+responsibility and creating a second code path for every teardown operation.
+
+**CompositeOverwrite bypasses the DAG.** Reprovision replaces the entire
+CONFIG_DB atomically — including all intent records. It does not call
+`deleteIntent` or check `_children`. The abstract Node that builds the
+composite runs operations in order, accumulating fresh intent records with
+correct DAG links. This is consistent with §5: provisioning is the one
+operation where intent replaces reality.
+
+---
+
+## 44. Kind-Prefixed Intent Keys
+
+`NEWTRON_INTENT` is a single flat Redis hash namespace. CONFIG_DB tables carry
+their type in the table name — `VLAN`, `VRF`, `ACL_TABLE` — but intent keys
+share one table. The question every piece of code that processes intent keys
+must answer: what kind of resource does this key represent?
+
+Without a convention, the answer requires heuristics. Does `Ethernet0|qos`
+start with a kind prefix or an interface name? Is `CUSTOMER` a VRF name or
+an ACL name? Code that parses intent keys devolves into
+`if looksLikeInterfaceName(key)` branches — each one a special case that
+invites more special cases.
+
+The kind prefix eliminates the question. Every intent key follows
+`kind|identity`:
+
+```
+device                        kind=device  (singleton)
+vlan|100                      kind=vlan    identity=100
+interface|Ethernet0           kind=interface  identity=Ethernet0
+interface|Ethernet0|qos       kind=interface  identity=Ethernet0|qos
+acl|EDGE_IN|RULE_10           kind=acl     identity=EDGE_IN|RULE_10
+```
+
+The kind is always the first segment before the first `|`.
+`strings.SplitN(key, "|", 2)` extracts `[kind, rest]` for every key in the
+table. No regex, no name-detection heuristics, no special cases.
+
+This enables kind-based filtering (`newtron intent tree switch1 vlan`),
+self-describing keys (reading `interface|Ethernet0|qos` tells you what it is
+without external knowledge), and uniform parsing across tree walks, health
+checks, reconstruction, and orphan detection.
+
+The convention is consistent with the Unified Naming Convention (§31):
+CONFIG_DB tables carry the type in the table name, so keys don't repeat it.
+`NEWTRON_INTENT` has one table for all types — therefore the key must carry
+the type.
+
+**Every intent key starts with its kind. No exceptions.**
+
+---
+
+## 45. Multi-Parent Rendering in Tree Display
+
+Some sub-resources have multiple parents. An ACL binding
+(`interface|Ethernet0|acl|ingress`) depends on both the interface and the ACL
+table — neither can be deleted while the binding exists. The binding is a
+child of both parents simultaneously in the DAG.
+
+When displaying the DAG as a tree, a child with a different kind than its
+display parent is rendered as a leaf — its own children are shown only in its
+own subtree. The VLAN's tree shows its member interfaces as leaves; the
+interface's tree shows its full sub-resource hierarchy. This prevents
+redundant subtree expansion without losing information — query the child
+directly to see its full story.
+
+The rule: **render as a leaf when the child's kind differs from the parent
+being displayed.** Cross-kind edges are reference edges for DAG enforcement
+purposes, not containment edges for display purposes.
+
 ---
 
 # Tensions and Resolutions
@@ -2549,3 +2673,6 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 40 | Greenfield | Write code for the system as it is today, not as it was yesterday | C |
 | 41 | Multi-version readiness | Version differences should be data, not code; preserve the seams that make this possible | C |
 | 42 | Testing discipline | Verification must not pass vacuously; convergence budget scales with entry count | C |
+| 43 | Intent DAG — structural dependencies replace scanning | Declare parents at creation; the DAG enforces ordering, prevents premature deletion, and sorts reconstruction — without scanning | C |
+| 44 | Kind-prefixed intent keys | Every intent key starts with its kind (`vlan\|100`, `interface\|Ethernet0`); no heuristics, no special cases | C |
+| 45 | Multi-parent rendering | A child with multiple parents renders as a leaf under each parent; query the child directly to see its full subtree | C |

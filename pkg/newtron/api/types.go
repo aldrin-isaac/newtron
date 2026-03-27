@@ -60,11 +60,6 @@ type SSHCommandResponse struct {
 	Output string `json:"output"`
 }
 
-// SetupVTEPRequest is the body for POST .../setup-vtep.
-type SetupVTEPRequest struct {
-	SourceIP string `json:"source_ip"`
-}
-
 // CompositeHandleRequest references a stored composite by UUID.
 type CompositeHandleRequest struct {
 	Handle string `json:"handle"`
@@ -120,9 +115,12 @@ type InterfaceSetRequest struct {
 }
 
 // ConfigureInterfaceRequest is the body for POST .../configure-interface.
+// Routed mode (VRF+IP) and bridged mode (VLAN) are mutually exclusive.
 type ConfigureInterfaceRequest struct {
-	VRF string `json:"vrf,omitempty"`
-	IP  string `json:"ip,omitempty"`
+	VRF    string `json:"vrf,omitempty"`
+	IP     string `json:"ip,omitempty"`
+	VLAN   int    `json:"vlan_id,omitempty"`
+	Tagged bool   `json:"tagged,omitempty"`
 }
 
 // NodeBindMACVPNRequest is the body for POST .../bind-macvpn (node-level, maps VLAN to L2VNI).
@@ -135,9 +133,6 @@ type NodeBindMACVPNRequest struct {
 type NodeUnbindMACVPNRequest struct {
 	VlanID int `json:"vlan_id"`
 }
-
-// ConfigureRouteReflectorRequest is the body for POST .../configure-route-reflector.
-type ConfigureRouteReflectorRequest = newtron.RouteReflectorOpts
 
 // ApplyQoSRequest is the body for POST .../apply-qos.
 type ApplyQoSRequest struct {
@@ -181,15 +176,8 @@ type PortChannelMemberRequest struct {
 // HTTP Request Types — Missing Node Operations
 // ============================================================================
 
-// VLANMemberRequest is the body for POST .../add-vlan-member.
-type VLANMemberRequest struct {
-	ID        int    `json:"id"`
-	Interface string `json:"interface"`
-	Tagged    bool   `json:"tagged"`
-}
-
-// RemoveIRBRequest is the body for POST .../remove-irb.
-type RemoveIRBRequest struct {
+// UnconfigureIRBRequest is the body for POST .../unconfigure-irb.
+type UnconfigureIRBRequest struct {
 	VlanID int `json:"vlan_id"`
 }
 
@@ -210,11 +198,6 @@ type StaticRouteRequest struct {
 // RestartDaemonRequest is the body for POST .../restart-daemon.
 type RestartDaemonRequest struct {
 	Daemon string `json:"daemon"`
-}
-
-// SetDeviceMetadataRequest is the body for POST .../set-device-metadata.
-type SetDeviceMetadataRequest struct {
-	Fields map[string]string `json:"fields"`
 }
 
 // NodeApplyQoSRequest is the body for POST .../apply-qos (node-level).

@@ -94,18 +94,13 @@ func (s *Server) handleUnconfigureInterface(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	ifName := interfaceName(r)
-	var req ConfigureInterfaceRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
 		iface, err := n.Interface(ifName)
 		if err != nil {
 			return err
 		}
-		return iface.UnconfigureInterface(ctx, req.VRF, req.IP)
+		return iface.UnconfigureInterface(ctx)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -245,20 +240,13 @@ func (s *Server) handleRemoveBGPPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ifName := interfaceName(r)
-	var body struct {
-		IP string `json:"ip"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
 		iface, err := n.Interface(ifName)
 		if err != nil {
 			return err
 		}
-		return iface.RemoveBGPPeer(ctx, body.IP)
+		return iface.RemoveBGPPeer(ctx)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -284,7 +272,7 @@ func (s *Server) handleInterfaceSet(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return iface.Set(ctx, req.Property, req.Value)
+		return iface.SetProperty(ctx, req.Property, req.Value)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -336,7 +324,9 @@ func (s *Server) handleConfigureInterface(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return err
 		}
-		return iface.ConfigureInterface(ctx, req.VRF, req.IP)
+		return iface.ConfigureInterface(ctx, newtron.InterfaceConfig{
+			VRF: req.VRF, IP: req.IP, VLAN: req.VLAN, Tagged: req.Tagged,
+		})
 	})
 	if err != nil {
 		writeError(w, err)

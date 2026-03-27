@@ -7,6 +7,43 @@ topology: 2node-vs
 requires: [boot-ssh]
 
 steps:
+  # --- Cleanup stale specs from prior failed runs (all deletes are idempotent) ---
+  - name: cleanup-service
+    action: newtron
+    method: POST
+    url: /delete-service
+    params: {name: test-routed-svc}
+
+  - name: cleanup-policy-rule-20
+    action: newtron
+    method: POST
+    url: /remove-route-policy-rule
+    params: {policy: test-import-policy, sequence: 20}
+
+  - name: cleanup-policy-rule-10
+    action: newtron
+    method: POST
+    url: /remove-route-policy-rule
+    params: {policy: test-import-policy, sequence: 10}
+
+  - name: cleanup-route-policy
+    action: newtron
+    method: POST
+    url: /delete-route-policy
+    params: {name: test-import-policy}
+
+  - name: cleanup-prefix-entry
+    action: newtron
+    method: POST
+    url: /remove-prefix-list-entry
+    params: {prefix_list: test-prefixes, prefix: "10.200.0.0/16"}
+
+  - name: cleanup-prefix-list
+    action: newtron
+    method: POST
+    url: /delete-prefix-list
+    params: {name: test-prefixes}
+
   # --- Prefix list lifecycle ---
   - name: create-prefix-list
     action: newtron
@@ -153,9 +190,9 @@ steps:
   - name: verify-peer-group-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_PEER_GROUP
+    url: /node/{{device}}/configdb/BGP_PEER_GROUP/default%7CTEST_ROUTED_SVC/exists
     expect:
-      jq: 'length == 0'
+      jq: '.exists == false'
 
   # --- Teardown specs in reverse dependency order ---
   - name: delete-test-service

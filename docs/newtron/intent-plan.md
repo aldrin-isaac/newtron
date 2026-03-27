@@ -48,7 +48,7 @@ This means:
 - **Crash recovery covers only services.** A crash mid-operation leaves
   partial CONFIG_DB state with no breadcrumb for recovery.
 
-The design principles (S19, S20, S21) are explicit: every operation must
+The design principles (§19, §20, §21) are explicit: every operation must
 write an intent record sufficient for both teardown and reconstruction. This
 plan implements that directive.
 
@@ -101,7 +101,7 @@ persists until cleanup is complete).
 
 `setup-device` is a device-lifetime operation. You never tear down BGP
 from a fabric switch. Its intent enables reconstruction and drift detection.
-Its "reverse" is reprovision (CompositeOverwrite) per S21: "Drift
+Its "reverse" is reprovision (CompositeOverwrite) per §21: "Drift
 remediation is reprovision."
 
 Standalone resource operations (CreateVRF, CreateVLAN, etc.) have existing
@@ -141,7 +141,7 @@ the natural provisioning sequence:
 | 10 | create-acl |
 | 11 | configure-interface, add-bgp-peer |
 | 12 | apply-service |
-| 13 | add-static-route, bind-acl, apply-qos, bind-macvpn (interface-level) |
+| 13 | add-static-route, bind-acl, apply-qos |
 
 No complex dependency resolution. The priority is a static map.
 
@@ -174,7 +174,7 @@ The leading verb in each operation name communicates its lifecycle:
 | `add-*` | Adds an instance to a collection. | `remove-*` | add-bgp-multihop-peer, add-bgp-peer, add-static-route |
 | `bind-*` | Establishes a relationship between resources. | `unbind-*` | bind-ipvpn, bind-acl, bind-macvpn |
 | `apply-*` | Applies a composite (service, QoS policy). | `remove-*` | apply-service, apply-qos |
-| `configure-*` | Configures an existing resource. | reverse exists | configure-interface, configure-irb |
+| `configure-*` | Configures an existing resource. | `unconfigure-*` | configure-interface, configure-irb |
 
 The verb tells you whether a reverse operation exists without looking it up:
 - `setup-*` and `set-*` = no individual reverse
@@ -194,7 +194,7 @@ The verb tells you whether a reverse operation exists without looking it up:
 | 6 | `create-acl` | `acl\|{name}` | `delete-acl` |
 | 7 | `add-bgp-multihop-peer` | `multihop-peer\|{ip}` | `remove-bgp-multihop-peer` |
 | 8 | `create-portchannel` | `portchannel\|{name}` | `delete-portchannel` |
-| 9 | `configure-irb` | `irb\|{vlan_id}` | `remove-irb` |
+| 9 | `configure-irb` | `irb\|{vlan_id}` | `unconfigure-irb` |
 | 10 | `add-static-route` | `route\|{vrf}\|{prefix}` | `remove-static-route` |
 
 ### Interface-level (6)
@@ -331,7 +331,6 @@ anycast_mac     = 00:11:22:33:44:55  # user (optional)
 ```
 operation       = apply-service
 state           = actuated
-name            = transit
 service_name    = transit         # user
 ip_address      = 10.1.1.1/30    # user
 peer_as         = 65002           # user (optional)
@@ -428,6 +427,13 @@ Intent: service_name=transit, ip_address=10.1.1.1/30, vrf_name=Vrf_TRANSIT, l3vn
 Step:   {"url": "/interface/Ethernet0/apply-service", "params": {"service": "transit", "ip_address": "10.1.1.1/30"}}
 ```
 
+**bind-ipvpn**: Extract user params (vrf, ipvpn spec name).
+Skip resolved params (l3vni, l3vni_vlan).
+```
+Intent: vrf=Vrf_TRANSIT, ipvpn=TRANSIT, l3vni=1001, l3vni_vlan=3001
+Step:   {"url": "/bind-ipvpn", "params": {"vrf": "Vrf_TRANSIT", "ipvpn": "TRANSIT"}}
+```
+
 **bind-macvpn** (node-level): Extract user params (vlan_id, macvpn spec name).
 Skip resolved params (vni).
 ```
@@ -435,7 +441,8 @@ Intent: vlan_id=100, macvpn=CUSTOMER_L2, vni=10100
 Step:   {"url": "/bind-macvpn", "params": {"vlan_id": 100, "macvpn": "CUSTOMER_L2"}}
 ```
 
-**All other operations**: Params map directly (strings and ints).
+**All other operations**: All params are user params — map directly (strings
+and ints). No filtering needed.
 
 ## Shared Resource Protection
 
@@ -451,7 +458,7 @@ NEWTRON_INTENT for remaining consumers before deletion.
 
 - **DeleteVRF**: Scan NEWTRON_INTENT for intents referencing the VRF name
   in their params. Refuses if consumers exist (service intents, bind-ipvpn,
-  configure-interface with VRF binding).
+  configure-interface with VRF binding, configure-irb with VRF binding).
 
 - **DeleteVLAN**: Scan for service intents and standalone intents
   referencing the VLAN ID (bind-macvpn, configure-irb).
@@ -571,9 +578,8 @@ structured type. One constructor, one serializer — all paths use them.
 intent := &sonic.Intent{
     Resource:  i.name + "|service",
     Operation: sonic.OpApplyService,
-    Name:      serviceName,
     State:     sonic.IntentActuated,
-    Params:    bindingParams,  // only the domain params, not identity fields
+    Params:    bindingParams,  // includes service_name, ip_address, resolved fields
 }
 cs.Add("NEWTRON_INTENT", i.name+"|service", intent.ToFields())
 ```
@@ -662,20 +668,26 @@ Files: `reconstruct.go` (add stepURL, use in IntentToStep),
 `RollbackHolder`, `RollbackStarted`, `Operations`) that
 `intentFromSonic()` never populates. `newtron.IntentOperation` is dead
 code. `IsService()`/`IsActuated()` are duplicated at both layers with
-bare strings.
+bare strings. `sonic.Intent.Name` is an ApplyService-specific field
+that has no meaning for the other 15 operations — it duplicates
+`Params["service_name"]`.
 
 **Fix**: Remove phantom fields from public type. Remove
-`newtron.IntentOperation` if unused by any consumer. Public `IsService()`
+`newtron.IntentOperation` if unused by any consumer. Remove
+`sonic.Intent.Name` — ApplyService stores the service name in
+`Params[FieldServiceName]` (already present). `ToFields()` drops the
+`name` field; `NewIntent()` drops it from parsing. Public `IsService()`
 and `IsActuated()` should delegate to the constants defined in 0c (via
 the raw cast to `sonic.IntentState`, which is already how the conversion
 works).
 
-Files: `types.go`, `node.go` (intentFromSonic).
+Files: `types.go`, `node.go` (intentFromSonic), `sonic/configdb.go`
+(Intent struct, ToFields, NewIntent).
 
 #### 0f. Verify NEWTRON_INTENT schema handles variable params
 
 **Problem**: Each of the 16 operations writes different param fields to
-NEWTRON_INTENT. Schema validation (S13) is fail-closed — unknown fields
+NEWTRON_INTENT. Schema validation (§13) is fail-closed — unknown fields
 are errors. The schema must either enumerate all valid fields or use a
 permissive pattern for intent params.
 
@@ -687,6 +699,28 @@ definition of the intent catalog. This is consistent with how the
 existing schema already treats NEWTRON_INTENT in practice.
 
 Files: `sonic/schema.go`, `sonic/schema_test.go`.
+
+#### 0g. Rename methods to match operation names
+
+**Problem**: Three method names diverge from their operation names.
+The same-coin principle demands that `add-bgp-multihop-peer` maps to
+`AddBGPMultihopPeer` and its reverse `remove-bgp-multihop-peer` maps to
+`RemoveBGPMultihopPeer`. Currently the method names don't match:
+
+| Operation | Expected method | Current method |
+|-----------|----------------|----------------|
+| `set-port-property` | `i.SetProperty()` | `i.Set()` |
+| `remove-bgp-multihop-peer` | `n.RemoveBGPMultihopPeer()` | `n.RemoveBGPPeer()` |
+| `unconfigure-irb` | `n.UnconfigureIRB()` | ~~`n.RemoveIRB()`~~ (renamed) |
+
+**Fix**: Rename all three methods and update all call sites (CLI commands,
+client methods, API handlers, tests). Mechanical — one rename per method,
+no logic changes.
+
+Files: `interface_ops.go` (`Set` → `SetProperty`), `bgp_ops.go`
+(`RemoveBGPPeer` → `RemoveBGPMultihopPeer`), `vlan_ops.go`
+(`UnconfigureIRB` — already renamed), plus all callers in `cmd/newtron/`,
+`pkg/newtron/client/`, `pkg/newtron/api/`, and tests.
 
 ### Phase 1: Universal intent recording
 
@@ -751,7 +785,21 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSe
 }
 ```
 
-File: `baseline_ops.go`
+Files:
+- `baseline_ops.go`: `SetupDevice` (new), `setDeviceMetadataConfig`,
+  `configureLoopbackConfig`, `configureBGPConfig`, `setupVTEPConfig`,
+  `configureRouteReflectorConfig` (demoted from public methods)
+- `node.go`: Remove public `SetDeviceMetadata`, `ConfigureLoopback`,
+  `ConfigureBGP`, `SetupVTEP`, `ConfigureRouteReflector`
+- `pkg/newtron/node.go`: Remove public API wrappers for the 5 methods;
+  add `SetupDevice` wrapper
+- `pkg/newtron/api/handler_node.go`: Remove 5 handlers; add
+  `handleSetupDevice`
+- `pkg/newtron/api/handler.go`: Remove 5 route registrations; add
+  `POST .../setup-device`
+- `pkg/newtron/client/node.go`: Remove 5 client methods; add
+  `SetupDevice`
+- `cmd/newtron/`: Update CLI to route through SetupDevice
 
 #### Step 3: Add intent recording to each remaining operation
 
@@ -790,14 +838,29 @@ func (n *Node) CreateVRF(ctx context.Context, name string) (*ChangeSet, error) {
 }
 ```
 
-Files modified (15 operations, setup-device handled in Step 2):
+**Signature changes required** (§33: operations accept names, resolve specs internally):
+
+- `BindIPVPN(ctx, vrfName string, ipvpnDef *spec.IPVPNSpec)` →
+  `BindIPVPN(ctx, vrfName, ipvpnName string)`. Resolves `ipvpnDef` internally
+  via `n.GetIPVPN(ipvpnName)`. Enables writing user param `ipvpn = <name>` to
+  the intent record (§22 dual-purpose: name for Snapshot, resolved L3VNI/RTs
+  for teardown).
+
+- `BindMACVPN(ctx, vlanID, vni int)` →
+  `BindMACVPN(ctx, vlanID int, macvpnName string)`. Resolves VNI internally
+  via `n.GetMACVPN(macvpnName)`. Enables writing user param `macvpn = <name>`
+  to the intent record. Callers (ApplyService, topology steps) already know the
+  spec name — passing pre-resolved VNI was an abstraction leak.
+
+Files modified (all 16 operations):
 - `intent_ops.go`: `writeIntent`, `deleteIntent` helpers (new)
-- `vrf_ops.go`: CreateVRF, BindIPVPN, AddStaticRoute
+- `baseline_ops.go`: SetupDevice (migrate inline NEWTRON_INTENT write to `writeIntent`)
+- `vrf_ops.go`: CreateVRF, BindIPVPN (+ signature change), AddStaticRoute
 - `vlan_ops.go`: CreateVLAN, ConfigureIRB
 - `evpn_ops.go`: (SetupVTEP absorbed into setup-device)
-- `macvpn_ops.go`: BindMACVPN (node-level)
+- `macvpn_ops.go`: BindMACVPN (node-level, + signature change)
 - `portchannel_ops.go`: CreatePortChannel
-- `acl_ops.go`: CreateACL
+- `acl_ops.go`: CreateACL, BindACL (interface-level)
 - `interface_ops.go`: ConfigureInterface, SetProperty
 - `interface_bgp_ops.go`: AddBGPPeer
 - `bgp_ops.go`: AddBGPMultihopPeer
@@ -818,10 +881,10 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) (*ChangeSet, error) {
 
 Files modified:
 - `vrf_ops.go`: DeleteVRF, UnbindIPVPN, RemoveStaticRoute
-- `vlan_ops.go`: DeleteVLAN
+- `vlan_ops.go`: DeleteVLAN, UnconfigureIRB
 - `macvpn_ops.go`: UnbindMACVPN
 - `portchannel_ops.go`: DeletePortChannel
-- `acl_ops.go`: DeleteACL
+- `acl_ops.go`: DeleteACL, UnbindACL (interface-level)
 - `interface_ops.go`: UnconfigureInterface
 - `interface_bgp_ops.go`: RemoveBGPPeer
 - `bgp_ops.go`: RemoveBGPMultihopPeer
@@ -919,6 +982,7 @@ File: `vrf_ops.go`, `vlan_ops.go`, `qos_ops.go`
 8. `Snapshot()` on a fully provisioned abstract node returns steps that,
    when replayed on a fresh abstract node, produce identical CONFIG_DB
 9. Shared resource deletion scans all intent types
+10. Every method name matches its operation name (§16, §32)
 
 ## What This Plan Does NOT Do
 
@@ -938,7 +1002,7 @@ File: `vrf_ops.go`, `vlan_ops.go`, `qos_ops.go`
   centralized `writeIntent` helper and `{intf}|service` resource key
   (Phase 0b + Phase 1), but the service-to-entries flow is not modified.
 - **Intent entries participate in the ChangeSet pipeline by construction**
-  — schema validation (S13), dry-run preview (S12), verification (S14),
+  — schema validation (§13), dry-run preview (§12), verification (§14),
   and offline shadow updates all apply automatically.
 - **Offline mode writes intents to shadow ConfigDB** via `applyShadow`,
   which already processes all ChangeSet entries including NEWTRON_INTENT.
@@ -961,14 +1025,10 @@ case "bind-ipvpn":
 case "create-vlan":
     return n.CreateVLAN(ctx, paramInt(p, "vlan_id"))
 case "bind-macvpn":
-    if ifaceName == "" {
-        // Node-level: VLAN-to-VNI overlay mapping
-        return n.BindMACVPN(ctx, paramInt(p, "vlan_id"), paramString(p, "macvpn"))
-    }
-    // Interface-level: port-to-MAC-VPN attachment (within apply-service)
-    iface, err := n.GetInterface(ifaceName)
-    if err != nil { return err }
-    return iface.BindMACVPN(ctx, ...)
+    // Node-level only: VLAN-to-VNI overlay mapping.
+    // Interface-level bind-macvpn is not a standalone operation —
+    // it exists only within ApplyService's internal flow.
+    return n.BindMACVPN(ctx, paramInt(p, "vlan_id"), paramString(p, "macvpn"))
 case "create-portchannel":
     return n.CreatePortChannel(ctx, ...)
 case "create-acl":
@@ -1006,7 +1066,5 @@ default:
 }
 ```
 
-Note: `bind-macvpn` discriminates by scope — node-level (no interface in
-URL) creates the VNI overlay; interface-level (has interface) attaches a
-port. This is clean because the URL already carries the scope information
-and `parseStepURL` extracts the interface name.
+Note: `bind-macvpn` is node-level only. Interface-level MAC-VPN binding
+is an internal detail of ApplyService, not a standalone step or intent.

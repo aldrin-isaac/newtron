@@ -10,7 +10,7 @@ steps:
   - name: verify-no-binding-eth0
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 

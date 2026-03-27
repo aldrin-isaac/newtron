@@ -1,13 +1,9 @@
 name: deprovision
 description: |
   Deprovision all services and infrastructure from both switches.
-  Uses symmetric reverse actions for every forward action in the provisioner:
-    ApplyService   → RemoveService    (per-interface, reverse dependency order)
-    SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers)
-    ConfigureBGP   → RemoveBGP (BGP globals, AF, redistribution)
-    ConfigureLoopback → RemoveLoopback (loopback interface)
-  Validates the "no config leak" principle: every CONFIG_DB entry written
-  by a forward action is removed by its corresponding reverse action.
+  Services are removed with individual reverse actions (RemoveService per interface).
+  Baseline infrastructure (setup-device) has no individual reverse — config reload
+  restores CONFIG_DB to saved defaults, wiping loopback, BGP, and VTEP config.
 topology: 2node-ngdp-service
 requires: [provision]
 after: [dataplane]
@@ -82,38 +78,7 @@ steps:
     method: POST
     url: /node/{{device}}/interface/Ethernet0/remove-service
 
-  # =========================================================================
-  # Reverse of SetupEVPN — VTEP, NVO, overlay peers
-  # Forward:  node.SetupEVPN(ctx, loopbackIP)
-  # Reverse:  node.TeardownEVPN(ctx)
-  # =========================================================================
-
-  - name: teardown-vtep
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /node/{{device}}/teardown-vtep
-
-  # =========================================================================
-  # Reverse of ConfigureBGP — BGP globals, AF, redistribution
-  # Forward:  node.ConfigureBGP(ctx)
-  # Reverse:  node.RemoveBGP(ctx)
-  # =========================================================================
-
-  - name: remove-bgp
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /node/{{device}}/remove-bgp
-
-  # =========================================================================
-  # Reverse of ConfigureLoopback — loopback interface
-  # Forward:  node.ConfigureLoopback(ctx)
-  # Reverse:  node.RemoveLoopback(ctx)
-  # =========================================================================
-
-  - name: remove-loopback
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /node/{{device}}/remove-loopback
+  # Baseline infrastructure (setup-device) has no individual reverse.
+  # Reprovisioning (CompositeOverwrite) is the collective reverse.
+  # config reload restores saved state (not factory) since every API write
+  # calls config save — it cannot clean up baseline infrastructure.

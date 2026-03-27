@@ -19,18 +19,10 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// mapFilterType translates spec filter types to SONiC ACL_TABLE type values.
-func mapFilterType(specType string) string {
-	switch specType {
-	case "ipv6":
-		return "L3V6"
-	default:
-		return "L3"
-	}
-}
 
 // ServiceEntryParams contains everything needed to generate CONFIG_DB entries
 // for a service binding on a single interface.
+// Test helper — not used in production (ApplyService calls primitives directly).
 type ServiceEntryParams struct {
 	ServiceName  string
 	IPAddress    string
@@ -46,6 +38,7 @@ type ServiceEntryParams struct {
 // generateServiceEntries produces the CONFIG_DB entries for applying a service
 // to this interface. The returned slice is ordered by table dependency (VLANs
 // before members, VRFs before interfaces, etc.).
+// Test helper — not used in production (ApplyService calls primitives directly).
 func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry, error) {
 	sp := i.node
 	svc, err := sp.GetService(p.ServiceName)
@@ -193,7 +186,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 
 	// BGP routing configuration
 	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpEntries, err := generateBGPPeeringConfig(svc, p, vrfName)
+		bgpEntries, err := generateBGPPeeringConfig(svc, p.IPAddress, p.PeerAS, p.Params, p.UnderlayASN, p.PeerGroup, vrfName)
 		if err != nil {
 			return nil, fmt.Errorf("interface %s: BGP routing: %w", i.name, err)
 		}
@@ -210,8 +203,10 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 }
 
 // generateBGPPeeringConfig resolves BGP peer parameters from the service spec and
-// topology params, then delegates to BGPNeighbor for entry construction.
-func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfName string) ([]sonic.Entry, error) {
+// caller-provided values, then delegates to CreateBGPNeighborConfig for entry construction.
+func generateBGPPeeringConfig(svc *spec.ServiceSpec, ipAddress string,
+	optsPeerAS int, params map[string]string, underlayASN int,
+	peerGroup string, vrfName string) ([]sonic.Entry, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return nil, nil
 	}
@@ -220,9 +215,9 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfNa
 
 	// Derive peer IP from interface IP
 	var peerIP string
-	if p.IPAddress != "" {
+	if ipAddress != "" {
 		var err error
-		peerIP, err = util.DeriveNeighborIP(p.IPAddress)
+		peerIP, err = util.DeriveNeighborIP(ipAddress)
 		if err != nil {
 			return nil, fmt.Errorf("could not derive BGP peer IP: %w", err)
 		}
@@ -234,11 +229,11 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfNa
 	// Determine peer AS — from service spec, topology params, or CLI opts
 	var peerAS int
 	if routing.PeerAS == spec.PeerASRequest {
-		if peerASStr, ok := p.Params["peer_as"]; ok {
+		if peerASStr, ok := params["peer_as"]; ok {
 			fmt.Sscanf(peerASStr, "%d", &peerAS)
 		}
 		if peerAS == 0 {
-			peerAS = p.PeerAS
+			peerAS = optsPeerAS
 		}
 		if peerAS == 0 {
 			return nil, fmt.Errorf("service requires peer_as parameter")
@@ -251,18 +246,18 @@ func generateBGPPeeringConfig(svc *spec.ServiceSpec, p ServiceEntryParams, vrfNa
 	}
 
 	// All-eBGP design: UnderlayASN is required
-	if p.UnderlayASN == 0 {
+	if underlayASN == 0 {
 		return nil, fmt.Errorf("device has no AS number configured (underlay_asn required)")
 	}
 
-	localIP, _ := util.SplitIPMask(p.IPAddress)
+	localIP, _ := util.SplitIPMask(ipAddress)
 
 	return CreateBGPNeighborConfig(peerIP, peerAS, localIP, BGPNeighborOpts{
 		VRF:          vrfName,
 		ActivateIPv4: true,
-		RRClient:     p.Params["route_reflector_client"] == "true",
-		NextHopSelf:  p.Params["next_hop_self"] == "true",
-		PeerGroup:    p.PeerGroup,
+		RRClient:     params["route_reflector_client"] == "true",
+		NextHopSelf:  params["next_hop_self"] == "true",
+		PeerGroup:    peerGroup,
 	}), nil
 }
 

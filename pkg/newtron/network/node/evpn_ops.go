@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -102,8 +103,17 @@ func deleteBgpEvpnVNIConfig(vrfName string, vni int) []sonic.Entry {
 // ============================================================================
 
 // BindMACVPN maps a VLAN to an L2VNI for EVPN.
-func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) (*ChangeSet, error) {
-	cs, err := n.op("bind-macvpn", vlanResource(vlanID), ChangeAdd,
+func (n *Node) BindMACVPN(ctx context.Context, vlanID int, macvpnName string) (*ChangeSet, error) {
+	resource := "macvpn|" + strconv.Itoa(vlanID)
+	if n.GetIntent(resource) != nil {
+		return NewChangeSet(n.name, "device.bind-macvpn"), nil
+	}
+	macvpnDef, err := n.GetMACVPN(macvpnName)
+	if err != nil {
+		return nil, fmt.Errorf("bind-macvpn: %w", err)
+	}
+	vni := macvpnDef.VNI
+	cs, err := n.op(sonic.OpBindMACVPN, vlanResource(vlanID), ChangeAdd,
 		func(pc *PreconditionChecker) {
 			pc.RequireVTEPConfigured().RequireVLANExists(vlanID)
 			// Check platform support for EVPN VXLAN
@@ -122,29 +132,22 @@ func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) (*ChangeSet, err
 	if err != nil {
 		return nil, err
 	}
+	if err := n.writeIntent(cs, sonic.OpBindMACVPN, "macvpn|"+strconv.Itoa(vlanID), map[string]string{
+		sonic.FieldVLANID: strconv.Itoa(vlanID),
+		sonic.FieldMACVPN: macvpnName,
+		sonic.FieldVNI:    strconv.Itoa(vni),
+	}, []string{"vlan|" + strconv.Itoa(vlanID)}); err != nil {
+		return nil, err
+	}
+
 	cs.OperationParams = map[string]string{"vlan_id": fmt.Sprintf("%d", vlanID)}
 	util.WithDevice(n.name).Infof("Mapped VLAN %d to L2VNI %d", vlanID, vni)
 	return cs, nil
 }
 
-// unmapVniConfig returns the delete entry for a VLAN's L2VNI mapping.
-func (n *Node) unmapVniConfig(vlanID int) []sonic.Entry {
-	vlanName := VLANName(vlanID)
-	var entries []sonic.Entry
-
-	if n.configDB != nil {
-		for key, mapping := range n.configDB.VXLANTunnelMap {
-			if mapping.VLAN == vlanName {
-				entries = append(entries, sonic.Entry{Table: "VXLAN_TUNNEL_MAP", Key: key})
-				break
-			}
-		}
-	}
-
-	return entries
-}
 
 // UnbindMACVPN removes the L2VNI mapping for a VLAN.
+// Reads the VNI from the intent record to construct deterministic delete entries.
 func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 	if err := n.precondition("unbind-macvpn", vlanResource(vlanID)).
 		RequireVLANExists(vlanID).
@@ -152,12 +155,24 @@ func (n *Node) UnbindMACVPN(ctx context.Context, vlanID int) (*ChangeSet, error)
 		return nil, err
 	}
 
-	cs := buildChangeSet(n.name, "device.unbind-macvpn", n.unmapVniConfig(vlanID), ChangeDelete)
+	// Read VNI from intent — not from CONFIG_DB scan
+	intentKey := "macvpn|" + strconv.Itoa(vlanID)
+	intent := n.GetIntent(intentKey)
+	if intent == nil {
+		return nil, fmt.Errorf("no MAC-VPN intent for VLAN %d", vlanID)
+	}
+	vni, _ := strconv.Atoi(intent.Params[sonic.FieldVNI])
 
-	if cs.IsEmpty() {
-		return nil, fmt.Errorf("no MAC-VPN binding found for VLAN %d", vlanID)
+	cs := NewChangeSet(n.name, "device.unbind-macvpn")
+	if vni > 0 {
+		cs.Deletes(deleteVniMapConfig(vni, VLANName(vlanID)))
 	}
 
+	if err := n.deleteIntent(cs, intentKey); err != nil {
+		return nil, err
+	}
+
+	n.applyShadow(cs)
 	util.WithDevice(n.name).Infof("Unbound MAC-VPN for VLAN %d", vlanID)
 	return cs, nil
 }
@@ -185,41 +200,57 @@ func (n *Node) SetupVTEP(ctx context.Context, sourceIP string) (*ChangeSet, erro
 		cs.Adds(CreateVTEPConfig(sourceIP))
 	}
 
-	// Create BGP EVPN sessions with route reflectors (skip if already exist)
-	if len(resolved.BGPNeighbors) > 0 {
-		// Ensure BGP globals are set
-		cs.Adds(CreateBGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, nil))
+	// Ensure BGP globals and EVPN infrastructure exist.
+	// These are created unconditionally so that subsequent AddBGPEVPNPeer
+	// calls can reference the EVPN peer group even if no peers are in the profile.
+	cs.Adds(CreateBGPGlobalsConfig("default", resolved.UnderlayASN, resolved.RouterID, nil))
+	cs.Adds(CreateBGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
+		"advertise-all-vni": "true",
+	}))
 
-		// Enable L2VPN EVPN address-family
-		cs.Adds(CreateBGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
-			"advertise-all-vni": "true",
-		}))
+	// Create EVPN peer group — shared attributes for overlay sessions.
+	// eBGP determined by comparing local ASN against peer ASNs.
+	// Default to eBGP when no peers are configured (safe default for all-eBGP design).
+	isEBGP := true
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
+		if resolved.BGPNeighborASNs[rrIP] == resolved.UnderlayASN {
+			isEBGP = false // at least one iBGP peer — don't set ebgp_multihop
+			break
+		}
+	}
+	pgKey := BGPPeerGroupKey("default", "EVPN")
+	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
+		cs.Adds(CreateEVPNPeerGroupConfig("default", resolved.LoopbackIP, isEBGP))
+	}
 
-		for _, rrIP := range resolved.BGPNeighbors {
-			if rrIP == resolved.LoopbackIP {
-				continue
-			}
+	// Add overlay peers from profile
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
 
-			// Use peer's ASN for eBGP overlay (all-eBGP design; docs/rca/026-bgp-all-ebgp-design.md).
-			peerASN := resolved.BGPNeighborASNs[rrIP]
-			if peerASN == 0 {
-				return nil, fmt.Errorf("no ASN found for EVPN peer %s", rrIP)
-			}
+		// Use peer's ASN for eBGP overlay (all-eBGP design; docs/rca/026-bgp-all-ebgp-design.md).
+		peerASN := resolved.BGPNeighborASNs[rrIP]
+		if peerASN == 0 {
+			return nil, fmt.Errorf("no ASN found for EVPN peer %s", rrIP)
+		}
 
-			if n.BGPNeighborExists(rrIP) {
-				// Neighbor exists (e.g., provisioner created it without EVPN AF).
-				// Ensure the l2vpn_evpn AF entry is present — Add is
-				// idempotent so this is safe even if it already exists.
-				e := createBgpNeighborAFConfig("default", rrIP, "l2vpn_evpn", map[string]string{"admin_status": "true"})
-				cs.Add(e.Table, e.Key, e.Fields)
-			} else {
-				cs.Adds(CreateBGPNeighborConfig(rrIP, peerASN, resolved.LoopbackIP, BGPNeighborOpts{
-					EBGPMultihop:     true,
-					ActivateIPv4:     true,
-					ActivateEVPN:     true,
-					NextHopUnchanged: true, // Critical for eBGP overlay (RCA-026)
-				}))
-			}
+		if n.BGPNeighborExists(rrIP) {
+			// Neighbor exists (e.g., provisioner created it without EVPN AF).
+			// Ensure the l2vpn_evpn AF entry is present — Add is
+			// idempotent so this is safe even if it already exists.
+			e := createBgpNeighborAFConfig("default", rrIP, "l2vpn_evpn", map[string]string{"admin_status": "true"})
+			cs.Add(e.Table, e.Key, e.Fields)
+		} else {
+			// Neighbor references EVPN peer group — shared attrs
+			// (local_addr, ebgp_multihop, nexthop_unchanged) inherited.
+			cs.Adds(CreateBGPNeighborConfig(rrIP, peerASN, "", BGPNeighborOpts{
+				PeerGroup:    "EVPN",
+				ActivateEVPN: true,
+			}))
 		}
 	}
 
@@ -246,6 +277,9 @@ func (n *Node) TeardownVTEP(ctx context.Context) (*ChangeSet, error) {
 		}
 		cs.Deletes(DeleteBGPNeighborConfig("default", rrIP))
 	}
+
+	// Remove EVPN peer group (after all neighbors that reference it)
+	cs.Deletes(DeleteEVPNPeerGroupConfig("default"))
 
 	// Remove L2VPN EVPN address-family
 	cs.Deletes(CreateBGPGlobalsAFConfig("default", "l2vpn_evpn", nil))

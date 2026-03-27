@@ -1,24 +1,14 @@
-name: evpn-setup
+name: evpn-verify
 description: |
-  EVPN overlay bringup: create VTEP, NVO, and loopback BGP neighbors with
-  L2VPN EVPN address-family. Verify CONFIG_DB entries and BGP sessions
-  reach Established. Matches 2node-ngdp-primitive evpn-setup pattern.
+  EVPN overlay verification: confirm VTEP, NVO, and L2VPN EVPN address-family
+  are present on leaf1 and leaf2 (created by setup-device during provisioning)
+  and that EVPN BGP sessions reach Established.
+  Setup-device with source_ip creates all EVPN overlay infrastructure — this
+  file only verifies it and waits for BGP convergence.
 topology: 3node-ngdp
 requires: [l3-routing]
 
 steps:
-  - name: setup-vtep-leaf1
-    action: newtron
-    devices: [leaf1]
-    method: POST
-    url: /node/{{device}}/setup-vtep
-
-  - name: setup-vtep-leaf2
-    action: newtron
-    devices: [leaf2]
-    method: POST
-    url: /node/{{device}}/setup-vtep
-
   - name: verify-vxlan-tunnel-leaf1
     action: newtron
     devices: [leaf1]

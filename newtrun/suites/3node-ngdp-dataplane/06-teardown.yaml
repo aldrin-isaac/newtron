@@ -1,11 +1,9 @@
 name: teardown
 description: |
-  Structured reverse of infrastructure provisioning:
-    ApplyService   → RemoveService    (transit interfaces — all switches)
-    SetupEVPN      → TeardownEVPN     (VTEP, NVO, overlay peers — leafs only)
-    ConfigureBGP   → RemoveBGP (BGP globals, AF, redistribution — all switches)
-    ConfigureLoopback → RemoveLoopback (loopback interface — all switches)
-  Uses newtron actions exclusively (no raw redis-cli).
+  Teardown all services and infrastructure from the 3-node topology.
+  Transit services are removed with individual reverse actions (RemoveService per interface).
+  Baseline infrastructure (setup-device) has no individual reverse — config reload
+  restores CONFIG_DB to saved defaults, wiping loopback, BGP, and VTEP config.
 topology: 3node-ngdp
 requires: [evpn-irb]
 
@@ -38,73 +36,7 @@ steps:
     method: POST
     url: /node/{{device}}/interface/Ethernet0/remove-service
 
-  # =========================================================================
-  # Reverse of SetupEVPN (leafs only — spine has no EVPN)
-  # =========================================================================
-
-  - name: teardown-vtep-leaf1
-    action: newtron
-    devices: [leaf1]
-    method: POST
-    url: /node/{{device}}/teardown-vtep
-
-  - name: teardown-vtep-leaf2
-    action: newtron
-    devices: [leaf2]
-    method: POST
-    url: /node/{{device}}/teardown-vtep
-
-  - name: verify-vtep-removed
-    action: newtron
-    devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-nvo-removed
-    action: newtron
-    devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-l2vpn-af-removed
-    action: newtron
-    devices: [leaf1, leaf2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # Reverse of ConfigureBGP (all switches)
-  # =========================================================================
-
-  - name: remove-bgp
-    action: newtron
-    devices: [spine, leaf1, leaf2]
-    method: POST
-    url: /node/{{device}}/remove-bgp
-
-  - name: verify-bgp-globals-removed
-    action: newtron
-    devices: [spine, leaf1, leaf2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # Reverse of ConfigureLoopback (all switches)
-  # =========================================================================
-
-  - name: remove-loopback
-    action: newtron
-    devices: [spine, leaf1, leaf2]
-    method: POST
-    url: /node/{{device}}/remove-loopback
-
-  - name: verify-loopback-removed
-    action: newtron
-    devices: [spine, leaf1, leaf2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
+  # Baseline infrastructure (setup-device) has no individual reverse.
+  # Reprovisioning (CompositeOverwrite) is the collective reverse.
+  # config reload restores saved state (not factory) since every API write
+  # calls config save — it cannot clean up baseline infrastructure.

@@ -112,6 +112,29 @@ func (c *Client) EVPNStatus(device string) (*newtron.EVPNStatusResult, error) {
 	return &result, nil
 }
 
+// IntentTree returns the intent DAG as a tree structure.
+func (c *Client) IntentTree(device, kind, resource string, ancestors bool) ([]newtron.IntentTreeNode, error) {
+	path := c.nodePath(device) + "/intent/tree"
+	params := url.Values{}
+	if kind != "" {
+		params.Set("kind", kind)
+	}
+	if resource != "" {
+		params.Set("resource", resource)
+	}
+	if ancestors {
+		params.Set("ancestors", "true")
+	}
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+	var result []newtron.IntentTreeNode
+	if err := c.doGet(path, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // HealthCheck returns a health report for a device.
 func (c *Client) HealthCheck(device string) (*newtron.HealthReport, error) {
 	var result newtron.HealthReport
@@ -225,38 +248,22 @@ func (c *Client) nodeWrite(device, endpoint string, body any, opts newtron.ExecO
 	return &result, nil
 }
 
-// ConfigureBGP configures BGP globals on a device.
-func (c *Client) ConfigureBGP(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "configure-bgp", nil, opts)
+// AddBGPEVPNPeer adds an EVPN BGP neighbor using loopback as update-source.
+func (c *Client) AddBGPEVPNPeer(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "add-bgp-evpn-peer", config, opts)
 }
 
-// RemoveBGPGlobals removes BGP globals from a device.
-func (c *Client) RemoveBGPGlobals(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "remove-bgp", nil, opts)
-}
-
-// AddBGPMultihopPeer adds a multihop BGP neighbor using loopback as update-source.
-func (c *Client) AddBGPMultihopPeer(device string, config newtron.BGPNeighborConfig, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "add-bgp-multihop-peer", config, opts)
-}
-
-// RemoveBGPMultihopPeer removes a multihop BGP neighbor by IP.
-func (c *Client) RemoveBGPMultihopPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+// RemoveBGPEVPNPeer removes an EVPN BGP neighbor by IP.
+func (c *Client) RemoveBGPEVPNPeer(device, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := struct {
 		IP string `json:"ip"`
 	}{IP: ip}
-	return c.nodeWrite(device, "remove-bgp-multihop-peer", body, opts)
+	return c.nodeWrite(device, "remove-bgp-evpn-peer", body, opts)
 }
 
-// SetupVTEP configures the EVPN overlay on a device.
-func (c *Client) SetupVTEP(device, sourceIP string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.SetupVTEPRequest{SourceIP: sourceIP}
-	return c.nodeWrite(device, "setup-vtep", body, opts)
-}
-
-// TeardownVTEP removes the EVPN overlay.
-func (c *Client) TeardownVTEP(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "teardown-vtep", nil, opts)
+// SetupDevice performs consolidated device initialization.
+func (c *Client) SetupDevice(device string, sdOpts newtron.SetupDeviceOpts, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.nodeWrite(device, "setup-device", sdOpts, opts)
 }
 
 // NodeBindMACVPN maps a VLAN to an L2VNI for EVPN at the device level.
@@ -269,21 +276,6 @@ func (c *Client) NodeBindMACVPN(device string, vlanID, vni int, opts newtron.Exe
 func (c *Client) NodeUnbindMACVPN(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.NodeUnbindMACVPNRequest{VlanID: vlanID}
 	return c.nodeWrite(device, "unbind-macvpn", body, opts)
-}
-
-// ConfigureRouteReflector configures a device as a BGP route reflector.
-func (c *Client) ConfigureRouteReflector(device string, rrOpts newtron.RouteReflectorOpts, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "configure-route-reflector", rrOpts, opts)
-}
-
-// ConfigureLoopback configures the loopback interface.
-func (c *Client) ConfigureLoopback(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "configure-loopback", nil, opts)
-}
-
-// RemoveLoopback removes the loopback interface.
-func (c *Client) RemoveLoopback(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	return c.nodeWrite(device, "remove-loopback", nil, opts)
 }
 
 // CreateVLAN creates a VLAN.
@@ -300,30 +292,15 @@ func (c *Client) DeleteVLAN(device string, id int, opts newtron.ExecOpts) (*newt
 	return c.nodeWrite(device, "delete-vlan", body, opts)
 }
 
-// AddVLANMember adds an interface to a VLAN.
-func (c *Client) AddVLANMember(device string, id int, iface string, tagged bool, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.VLANMemberRequest{ID: id, Interface: iface, Tagged: tagged}
-	return c.nodeWrite(device, "add-vlan-member", body, opts)
-}
-
-// RemoveVLANMember removes an interface from a VLAN.
-func (c *Client) RemoveVLANMember(device string, id int, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		ID        int    `json:"id"`
-		Interface string `json:"interface"`
-	}{ID: id, Interface: iface}
-	return c.nodeWrite(device, "remove-vlan-member", body, opts)
-}
-
 // ConfigureIRB configures an IRB (Integrated Routing and Bridging) interface.
 func (c *Client) ConfigureIRB(device string, config newtron.IRBConfigureRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	return c.nodeWrite(device, "configure-irb", config, opts)
 }
 
-// RemoveIRB removes an IRB interface.
-func (c *Client) RemoveIRB(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.RemoveIRBRequest{VlanID: vlanID}
-	return c.nodeWrite(device, "remove-irb", body, opts)
+// UnconfigureIRB removes an IRB interface.
+func (c *Client) UnconfigureIRB(device string, vlanID int, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	body := api.UnconfigureIRBRequest{VlanID: vlanID}
+	return c.nodeWrite(device, "unconfigure-irb", body, opts)
 }
 
 // CreateVRF creates a VRF.
@@ -449,12 +426,6 @@ func (c *Client) RemovePortChannelMember(device, pc, member string, opts newtron
 	return c.nodeWrite(device, "remove-portchannel-member", body, opts)
 }
 
-// SetDeviceMetadata updates DEVICE_METADATA fields.
-func (c *Client) SetDeviceMetadata(device string, fields map[string]string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.SetDeviceMetadataRequest{Fields: fields}
-	return c.nodeWrite(device, "set-device-metadata", body, opts)
-}
-
 // ApplyQoS applies a QoS policy to an interface (node-level).
 func (c *Client) ApplyQoS(device, iface, policy string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
 	body := api.NodeApplyQoSRequest{Interface: iface, Policy: policy}
@@ -505,11 +476,6 @@ func (c *Client) Refresh(device string) error {
 func (c *Client) RefreshWithRetry(device string, timeout time.Duration) error {
 	path := fmt.Sprintf("%s/refresh?timeout=%s", c.nodePath(device), timeout)
 	return c.doPost(path, nil, nil)
-}
-
-// ApplyFRRDefaults applies FRR defaults on the device.
-func (c *Client) ApplyFRRDefaults(device string) error {
-	return c.doPost(c.nodePath(device)+"/apply-frr-defaults", nil, nil)
 }
 
 // RestartService restarts a SONiC Docker service.

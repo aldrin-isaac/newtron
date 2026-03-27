@@ -1065,9 +1065,23 @@ Every table newtron reads or writes, with key format and fields.
 
 | Table | Key Format | Purpose |
 |-------|-----------|---------|
-| `NEWTRON_INTENT` | Resource name (`Ethernet0`, `bgp`, `evpn`, `loopback`) | Unified intent records — service bindings, infrastructure state, crash recovery |
+| `NEWTRON_INTENT` | `kind\|identity` (e.g., `vlan\|100`, `interface\|Ethernet0`, `device`) | Unified intent records — service bindings, infrastructure state, crash recovery |
 
-**Intent record fields** (identity + resolved parameters in a flat hash):
+Every intent key starts with its kind — the first segment before the first `|`.
+`strings.SplitN(key, "|", 2)` extracts `[kind, rest]` uniformly for all resource
+types. See Design Principle §44 for rationale.
+
+Example keys:
+
+```
+device                          kind=device  (singleton)
+vlan|100                        kind=vlan    identity=100
+interface|Ethernet0             kind=interface  identity=Ethernet0
+interface|Ethernet0|qos         kind=interface  identity=Ethernet0|qos
+acl|EDGE_IN|RULE_10             kind=acl     identity=EDGE_IN|RULE_10
+```
+
+**Intent record fields** (identity + DAG links + resolved parameters in a flat hash):
 
 | Field | Purpose |
 |-------|---------|
@@ -1076,6 +1090,8 @@ Every table newtron reads or writes, with key format and fields.
 | `name` | Spec reference (e.g., `transit`), empty if none |
 | `holder`, `created` | Who created and when |
 | `applied_at`, `applied_by` | Audit metadata |
+| `_parents` | Comma-separated parent resource keys this record depends on |
+| `_children` | Comma-separated child resource keys that depend on this record |
 | `service_name` | Applied service name (param) |
 | `service_type` | Service type for teardown path (param) |
 | `ip_address` | Applied IP (param) |
@@ -1243,7 +1259,49 @@ All checks read from the in-memory ConfigDB cache — no Redis round-trips. Mult
 
 When `offline=true` (abstract Node), `RequireConnected` and `RequireLocked` are skipped.
 
-### 6.5 DependencyChecker
+### 6.5 Intent DAG Operations
+
+`intent_ops.go` owns the DAG-aware intent lifecycle. All managed resources call
+these methods — not `NEWTRON_INTENT` directly.
+
+```go
+// writeIntent writes an intent record for resource and registers it with each
+// parent's _children field. Fails (I4) if any declared parent does not exist.
+// Parents are kind-prefixed resource keys (e.g., "vlan|100", "interface|Ethernet0").
+func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string]string, parents []string) error
+
+// deleteIntent removes the intent record for resource and deregisters it from
+// each parent's _children field. Fails (I5) if _children is non-empty.
+func (n *Node) deleteIntent(cs *ChangeSet, resource string) error
+
+// cascadeDeleteChildren deletes a resource and all its descendants in
+// bottom-up order (leaves first). Used by destroy operations (e.g., DestroyVRF)
+// that must remove all children before removing the parent.
+func (n *Node) cascadeDeleteChildren(cs *ChangeSet, resource string) error
+
+// applyIntentToShadow updates the shadow ConfigDB with an intent entry so that
+// subsequent writeIntent calls in abstract mode see prior parents correctly.
+// Called by op() in offline mode after each writeIntent.
+func (n *Node) applyIntentToShadow(entry sonic.Entry)
+
+// ValidateIntentDAG checks bidirectional consistency of all NEWTRON_INTENT
+// records: every _parents entry must have the resource in its _children, and
+// every _children entry must have the resource in its _parents. Returns a
+// slice of DAGViolation describing any inconsistencies found.
+func ValidateIntentDAG(configDB *sonic.ConfigDB) []DAGViolation
+```
+
+**DAG invariants enforced by writeIntent / deleteIntent:**
+
+| ID | Invariant |
+|----|-----------|
+| I4 | `writeIntent` fails if a declared parent key does not exist in `NEWTRON_INTENT` |
+| I5 | `deleteIntent` fails if the record's `_children` field is non-empty |
+
+**Cascade deletes do not exist.** `deleteIntent` on a parent with children fails.
+The caller must remove children explicitly using each child's own reverse method.
+
+### 6.6 DependencyChecker
 
 Used by `RemoveService` to safely clean up shared resources. Scans CONFIG_DB for remaining consumers:
 
@@ -1260,7 +1318,7 @@ func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool
 func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool
 ```
 
-### 6.6 Node Execute Lifecycle
+### 6.7 Node Execute Lifecycle
 
 The public API method `Node.Execute()` wraps the full write lifecycle:
 
@@ -1307,7 +1365,7 @@ On `fn()` error or Commit failure, `Rollback()` clears pending ChangeSets but do
 
 **Zombie detection:** When `Lock()` acquires the distributed lock and finds an existing `NEWTRON_INTENT` record, it stores the intent as `n.zombie`. Subsequent calls to `Execute()` check for this and return `ErrDeviceZombieIntent` before running any operations. The operator must resolve the zombie (inspect, rollback, or clear) before the device accepts new writes. `RollbackZombie` and `ClearZombie` bypass this check via `SetBypassZombieCheck`.
 
-### 6.7 Value Derivation
+### 6.8 Value Derivation
 
 All values below are derived at `ApplyService` time and stored in `NEWTRON_INTENT` as intent record params for teardown. Composite generation (abstract mode) derives identical values through the same code path. Auto-derived values from interface context:
 
@@ -1330,7 +1388,7 @@ All values below are derived at `ApplyService` time and stored in `NEWTRON_INTEN
 | `Vl100` | `Vlan100` |
 | `Lo0` | `Loopback0` |
 
-### 6.8 Spec Resolution
+### 6.9 Spec Resolution
 
 Hierarchical resolution: profile > zone > global. `ResolvedSpecs` implements `node.SpecProvider`:
 
@@ -1348,7 +1406,7 @@ type SpecProvider interface {
 
 Resolution is union with lower-level wins: if `"customer-l3"` exists at network and device levels, the device-level definition wins.
 
-### 6.9 Composite Delivery
+### 6.10 Composite Delivery
 
 ```go
 type CompositeBuilder struct {
@@ -1366,7 +1424,7 @@ func (cb *CompositeBuilder) Build() *CompositeConfig
 
 **Merge mode:** Diffs each composite entry against current CONFIG_DB. Same key + same values = skip. Same key + different values = conflict error. New key = apply.
 
-### 6.10 Middleware Chain
+### 6.11 Middleware Chain
 
 Registered in `handler.go`, applied outermost to innermost:
 
@@ -1380,7 +1438,7 @@ Registered in `handler.go`, applied outermost to innermost:
 
 Handlers extract path params via `r.PathValue("device")`, decode JSON bodies via `decodeJSON(r, &req)`, and read write options via `execOpts(r)` which maps `?dry_run=true` → `Execute: false` and `?no_save=true` → `NoSave: true`. Responses go through `writeJSON(w, status, data)` which wraps the result in `APIResponse{Data: data}`, or `writeError(w, err)` which maps Go errors to HTTP status codes (§3.9).
 
-### 6.11 Actor Serialization
+### 6.12 Actor Serialization
 
 Each device gets a `NodeActor` — a single goroutine that serializes all operations to that device. The cached `*Node` (SSH connection) is only accessed from this goroutine, eliminating mutex contention:
 
@@ -1405,7 +1463,7 @@ Each device gets a `NodeActor` — a single goroutine that serializes all operat
 
 `connectAndRead` calls `Refresh()` to reload CONFIG_DB from Redis before reading, ensuring reads always reflect the latest device state. `connectAndExecute` delegates the full Lock/Commit/Save/Unlock lifecycle to `Node.Execute()` (§6.6). `connectAndLocked` is used for operations like `DeliverComposite` that write directly to Redis via pipeline without the ChangeSet model.
 
-### 6.12 Shared Policy Objects
+### 6.13 Shared Policy Objects
 
 When services reference filters, route policies, or prefix lists, newtron
 creates CONFIG_DB objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)

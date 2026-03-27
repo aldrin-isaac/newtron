@@ -1,71 +1,15 @@
 name: verify-clean
 description: |
-  Comprehensive CONFIG_DB audit: verify that ALL entries created during the test
-  suite have been cleaned up by deprovision primitives. Read-only verification.
+  CONFIG_DB audit: verify that entries created by individual operations during
+  the test suite have been cleaned up. Baseline infrastructure from setup-device
+  (loopback, BGP globals, VTEP, EVPN peer group, overlay peers) persists —
+  its collective reverse is reprovision (CompositeOverwrite), not individual
+  teardown. Only per-operation entries are verified clean.
 topology: 2node-vs
 requires: [teardown-infra]
 
 steps:
-  # LOOPBACK_INTERFACE
-  - name: verify-no-loopback-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-loopback-ip-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-loopback-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-loopback-ip-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.2%2F32/exists
-    expect:
-      jq: '.exists == false'
-
-  # BGP_GLOBALS
-  - name: verify-no-bgp-globals-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-bgp-globals-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  # BGP_GLOBALS_AF
-  - name: verify-no-bgp-af-ipv4
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-bgp-af-l2vpn
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  # BGP_NEIGHBOR
+  # BGP_NEIGHBOR — underlay peers (removed by teardown-infra)
   - name: verify-no-bgp-neighbor-underlay-sw1
     action: newtron
     devices: [switch1]
@@ -80,74 +24,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  - name: verify-no-bgp-neighbor-overlay-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.2/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-bgp-neighbor-overlay-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.1/exists
-    expect:
-      jq: '.exists == false'
-
-  # BGP_NEIGHBOR_AF (overlay peers)
-  - name: verify-no-bgp-neighbor-af-overlay-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR_AF/default%7C10.0.0.2%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-bgp-neighbor-af-overlay-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR_AF/default%7C10.0.0.1%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  # ROUTE_REDISTRIBUTE
-  - name: verify-no-redistribute
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
-    expect:
-      jq: '.exists == false'
-
-  # VXLAN_TUNNEL
-  - name: verify-no-vxlan-tunnel-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-vxlan-tunnel-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
-    expect:
-      jq: '.exists == false'
-
-  # VXLAN_EVPN_NVO
-  - name: verify-no-nvo-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: verify-no-nvo-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
-    expect:
-      jq: '.exists == false'
-
-  # INTERFACE (base entries + IP sub-entries)
+  # INTERFACE (base entries + IP sub-entries — removed by teardown-infra/unconfigure)
   - name: verify-no-eth0-base
     action: newtron
     devices: [switch1, switch2]
@@ -190,7 +67,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # VLAN
+  # VLAN — removed by teardown-local/teardown-overlay
   - name: verify-no-vlan100
     action: newtron
     devices: [switch1]
@@ -291,7 +168,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # VRF
+  # VRF — per-service/local VRFs removed; default-VRF BGP persists
   - name: verify-no-vrf-local
     action: newtron
     devices: [switch2]
@@ -313,29 +190,43 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # NEWTRON_INTENT
+  # NEWTRON_INTENT — per-interface service bindings
   - name: verify-no-binding-eth1-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet4/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth3-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-no-binding-eth3-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet12/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet12/exists
     expect:
       jq: '.exists == false'
 
-  # VXLAN_TUNNEL_MAP
+  - name: verify-no-binding-eth0-sw1
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-no-binding-eth0-sw2
+    action: newtron
+    devices: [switch2]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    expect:
+      jq: '.exists == false'
+
+  # VXLAN_TUNNEL_MAP — removed by teardown-overlay
   - name: verify-no-tunnel-map-300
     action: newtron
     devices: [switch1, switch2]
@@ -365,7 +256,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # BGP_GLOBALS_EVPN_RT
+  # BGP_GLOBALS_EVPN_RT — removed with VRF
   - name: verify-no-evpn-rt-irb
     action: newtron
     devices: [switch1, switch2]
@@ -373,7 +264,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # BGP_EVPN_VNI (from bind-macvpn and service-lifecycle)
+  # BGP_EVPN_VNI
   - name: verify-no-bgp-evpn-vni-50300
     action: newtron
     devices: [switch1, switch2]
@@ -388,7 +279,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # BGP_GLOBALS (VRF-level from bind-ipvpn)
+  # BGP_GLOBALS (VRF-level from bind-ipvpn — removed)
   - name: verify-no-bgp-globals-vrf-irb
     action: newtron
     devices: [switch1, switch2]
@@ -396,7 +287,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # BGP_GLOBALS_AF (VRF-level from bind-ipvpn)
+  # BGP_GLOBALS_AF (VRF-level from bind-ipvpn — removed)
   - name: verify-no-bgp-af-vrf-irb-ipv4
     action: newtron
     devices: [switch1, switch2]
@@ -411,7 +302,7 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # ROUTE_REDISTRIBUTE (VRF-level from bind-ipvpn)
+  # ROUTE_REDISTRIBUTE (VRF-level from bind-ipvpn — removed)
   - name: verify-no-redistribute-vrf-irb
     action: newtron
     devices: [switch1, switch2]
@@ -477,11 +368,11 @@ steps:
   - name: verify-no-binding-eth10-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet40/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet40/exists
     expect:
       jq: '.exists == false'
 
-  # ROUTE_MAP (from spec-authoring scenario)
+  # ROUTE_MAP (from spec-authoring)
   - name: verify-no-route-map
     action: newtron
     devices: [switch1]
@@ -489,27 +380,11 @@ steps:
     expect:
       jq: 'length == 0'
 
-  # PREFIX_SET (from spec-authoring scenario)
+  # PREFIX_SET (from spec-authoring)
   - name: verify-no-prefix-set
     action: newtron
     devices: [switch1]
     url: /node/{{device}}/configdb/PREFIX_SET
-    expect:
-      jq: 'length == 0'
-
-  # BGP_PEER_GROUP (from service apply/remove lifecycle)
-  - name: verify-no-bgp-peer-group
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_PEER_GROUP
-    expect:
-      jq: 'length == 0'
-
-  # BGP_PEER_GROUP_AF (from service apply/remove lifecycle)
-  - name: verify-no-bgp-peer-group-af
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_PEER_GROUP_AF
     expect:
       jq: 'length == 0'
 

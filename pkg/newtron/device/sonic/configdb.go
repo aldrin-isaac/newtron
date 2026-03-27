@@ -4,6 +4,7 @@ package sonic
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -70,6 +71,72 @@ const (
 	IntentActuated   IntentState = "actuated"
 )
 
+// Operation names — the 16 newtron operations (§19).
+// Each constant matches the operation's URL segment and intent record value.
+const (
+	OpSetupDevice        = "setup-device"
+	OpCreateVRF          = "create-vrf"
+	OpBindIPVPN          = "bind-ipvpn"
+	OpCreateVLAN         = "create-vlan"
+	OpBindMACVPN         = "bind-macvpn"
+	OpCreateACL          = "create-acl"
+	OpAddBGPEVPNPeer = "add-bgp-evpn-peer"
+	OpCreatePortChannel  = "create-portchannel"
+	OpConfigureIRB       = "configure-irb"
+	OpAddStaticRoute     = "add-static-route"
+	OpSetPortProperty    = "set-port-property"
+	OpConfigureInterface = "configure-interface"
+	OpAddBGPPeer         = "add-bgp-peer"
+	OpApplyService       = "apply-service"
+	OpBindACL            = "bind-acl"
+	OpApplyQoS              = "apply-qos"
+	OpAddACLRule            = "add-acl-rule"
+	OpAddPortChannelMember  = "add-pc-member"
+	OpInterfaceInit         = "interface-init" // Auto-created interface intent for sub-resource ops
+)
+
+// Intent param field names — shared across intent construction, teardown reads,
+// and IntentToStep conversion. Using constants prevents typo-induced data loss.
+const (
+	FieldServiceName = "service_name"
+	FieldServiceType = "service_type"
+	FieldVRFName     = "vrf_name"
+	FieldIPAddress   = "ip_address"
+	FieldVLANID      = "vlan_id"
+	FieldL3VNI       = "l3vni"
+	FieldL3VNIVlan    = "l3vni_vlan"
+	FieldRouteTargets = "route_targets"
+	FieldName        = "name"
+	FieldNeighborIP  = "neighbor_ip"
+	FieldVRF         = "vrf"
+	FieldPrefix      = "prefix"
+	FieldNextHop     = "next_hop"
+	FieldMetric      = "metric"
+	FieldASN         = "asn"
+	FieldEVPN        = "evpn"
+	FieldDescription = "description"
+	FieldProperty    = "property"
+	FieldValue       = "value"
+	FieldIntfIP      = "ip"
+	FieldRemoteAS    = "remote_as"
+	FieldQoSPolicy   = "policy"
+	FieldACLName     = "acl_name"
+	FieldDirection   = "direction"
+	FieldMembers     = "members"
+	FieldACLType     = "type"
+	FieldStage       = "stage"
+	FieldPorts       = "ports"
+	FieldAnycastMAC  = "anycast_mac"
+	FieldMACVPN      = "macvpn"
+	FieldIPVPN       = "ipvpn"
+	FieldVNI         = "vni"
+	FieldSourceIP    = "source_ip"
+	FieldBGPPeerAS   = "bgp_peer_as"
+	FieldTagged          = "tagged"
+	FieldARPSuppression  = "arp_suppression"
+	FieldRules           = "rules"
+)
+
 // Intent is the internal domain model for a desired-state record bound to
 // a device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
 //
@@ -78,9 +145,13 @@ const (
 // consumers. Conversions happen at the API boundary.
 type Intent struct {
 	// Identity
-	Resource  string `json:"resource"`            // binding point: "Ethernet0", "bgp", "evpn", "loopback"
-	Operation string `json:"operation"`           // composite op: "apply-service", "setup-evpn", "configure-bgp"
+	Resource  string `json:"resource"`            // binding point: "interface|Ethernet0", "vlan|100", "device"
+	Operation string `json:"operation"`           // composite op: "apply-service", "create-vlan", "setup-device"
 	Name      string `json:"name,omitempty"`      // spec reference: "transit", "" if none
+
+	// DAG — structural dependencies between intent records
+	Parents  []string `json:"parents,omitempty"`  // resource keys this intent depends on (_parents CSV)
+	Children []string `json:"children,omitempty"` // resource keys that depend on this intent (_children CSV)
 
 	// Lifecycle
 	State     IntentState `json:"state"`
@@ -101,7 +172,7 @@ type Intent struct {
 
 // IsService returns true if this intent represents a service binding.
 func (i *Intent) IsService() bool {
-	return i.Operation == "apply-service"
+	return i.Operation == OpApplyService
 }
 
 // IsInFlight returns true if this intent is currently being actuated.
@@ -123,6 +194,7 @@ var intentIdentityFields = map[string]bool{
 	"applied_at": true, "applied_by": true,
 	"phase": true, "rollback_holder": true, "rollback_started": true,
 	"operations": true,
+	"_parents": true, "_children": true,
 }
 
 // NewIntent constructs an Intent from a flat CONFIG_DB field map.
@@ -160,6 +232,8 @@ func NewIntent(resource string, fields map[string]string) *Intent {
 		Resource:  resource,
 		Operation: fields["operation"],
 		Name:      fields["name"],
+		Parents:   parseCSV(fields["_parents"]),
+		Children:  parseCSV(fields["_children"]),
 		State:     state,
 		Holder:    fields["holder"],
 		Created:   created,
@@ -202,7 +276,58 @@ func (i *Intent) ToFields() map[string]string {
 	if i.Phase != "" {
 		result["phase"] = i.Phase
 	}
+	// Always include _parents and _children — even when empty — because Redis
+	// HSET merges fields and won't delete a field that isn't in the update map.
+	// Omitting _children when empty would leave the old value in Redis.
+	result["_parents"] = strings.Join(i.Parents, ",")
+	result["_children"] = strings.Join(i.Children, ",")
 	return result
+}
+
+// parseCSV splits a comma-separated string into a slice, trimming whitespace
+// and filtering empty strings. Returns nil for empty input.
+func parseCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// AddToCSV appends an item to a CSV string if not already present.
+func AddToCSV(csv, item string) string {
+	items := parseCSV(csv)
+	for _, existing := range items {
+		if existing == item {
+			return csv // already present
+		}
+	}
+	if csv == "" {
+		return item
+	}
+	return csv + "," + item
+}
+
+// RemoveFromCSV removes an item from a CSV string.
+func RemoveFromCSV(csv, item string) string {
+	items := parseCSV(csv)
+	result := make([]string, 0, len(items))
+	for _, existing := range items {
+		if existing != item {
+			result = append(result, existing)
+		}
+	}
+	return strings.Join(result, ",")
 }
 
 // PortEntry represents a physical port configuration
@@ -563,6 +688,7 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			LocalAddr:    fields["local_addr"],
 			AdminStatus:  fields["admin_status"],
 			EBGPMultihop: fields["ebgp_multihop"],
+			PeerGroup:    fields["peer_group_name"],
 		}
 	case "BGP_NEIGHBOR_AF":
 		db.BGPNeighborAF[key] = BGPNeighborAFEntry{
@@ -614,7 +740,10 @@ func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
 			CommunityMember: fields["community_member"],
 		}
 	case "BGP_PEER_GROUP":
-		db.BGPPeerGroup[key] = BGPPeerGroupEntry{}
+		db.BGPPeerGroup[key] = BGPPeerGroupEntry{
+			AdminStatus: fields["admin_status"],
+			LocalAddr:   fields["local_addr"],
+		}
 	case "BGP_PEER_GROUP_AF":
 		db.BGPPeerGroupAF[key] = BGPPeerGroupAFEntry{
 			RouteMapIn:  fields["route_map_in"],
@@ -757,6 +886,167 @@ func (db *ConfigDB) DeleteEntry(table, key string) {
 	case "WRED_PROFILE":
 		delete(db.WREDProfile, key)
 	}
+}
+
+// structToFields converts a typed struct to map[string]string using json tags.
+// Zero-value (empty string) fields are omitted.
+func structToFields(v any) map[string]string {
+	val := reflect.ValueOf(v)
+	typ := val.Type()
+	fields := make(map[string]string)
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if s := val.Field(i).String(); s != "" {
+			fields[name] = s
+		}
+	}
+	return fields
+}
+
+// ExportEntries is the inverse of ApplyEntries. It returns all non-empty entries
+// from all tables in the ConfigDB.
+func (db *ConfigDB) ExportEntries() []Entry {
+	var entries []Entry
+
+	appendTyped := func(table string, key string, v any) {
+		fields := structToFields(v)
+		if len(fields) > 0 {
+			entries = append(entries, Entry{Table: table, Key: key, Fields: fields})
+		}
+	}
+
+	appendRaw := func(table string, key string, fields map[string]string) {
+		if len(fields) > 0 {
+			entries = append(entries, Entry{Table: table, Key: key, Fields: copyFields(fields)})
+		}
+	}
+
+	// Raw maps
+	for k, v := range db.DeviceMetadata {
+		appendRaw("DEVICE_METADATA", k, v)
+	}
+	for k, v := range db.VLANInterface {
+		appendRaw("VLAN_INTERFACE", k, v)
+	}
+	for k, v := range db.PortChannelMember {
+		appendRaw("PORTCHANNEL_MEMBER", k, v)
+	}
+	for k, v := range db.LoopbackInterface {
+		appendRaw("LOOPBACK_INTERFACE", k, v)
+	}
+	for k, v := range db.SuppressVLANNeigh {
+		appendRaw("SUPPRESS_VLAN_NEIGH", k, v)
+	}
+	for k, v := range db.SAG {
+		appendRaw("SAG", k, v)
+	}
+	for k, v := range db.SAGGlobal {
+		appendRaw("SAG_GLOBAL", k, v)
+	}
+	for k, v := range db.DSCPToTCMap {
+		appendRaw("DSCP_TO_TC_MAP", k, v)
+	}
+	for k, v := range db.TCToQueueMap {
+		appendRaw("TC_TO_QUEUE_MAP", k, v)
+	}
+	for k, v := range db.StaticRoute {
+		appendRaw("STATIC_ROUTE", k, v)
+	}
+	for k, v := range db.NewtronIntent {
+		appendRaw("NEWTRON_INTENT", k, v)
+	}
+
+	// Typed maps
+	for k, v := range db.Port {
+		appendTyped("PORT", k, v)
+	}
+	for k, v := range db.VLAN {
+		appendTyped("VLAN", k, v)
+	}
+	for k, v := range db.VLANMember {
+		appendTyped("VLAN_MEMBER", k, v)
+	}
+	for k, v := range db.Interface {
+		appendTyped("INTERFACE", k, v)
+	}
+	for k, v := range db.PortChannel {
+		appendTyped("PORTCHANNEL", k, v)
+	}
+	for k, v := range db.VRF {
+		appendTyped("VRF", k, v)
+	}
+	for k, v := range db.VXLANTunnel {
+		appendTyped("VXLAN_TUNNEL", k, v)
+	}
+	for k, v := range db.VXLANTunnelMap {
+		appendTyped("VXLAN_TUNNEL_MAP", k, v)
+	}
+	for k, v := range db.VXLANEVPNNVO {
+		appendTyped("VXLAN_EVPN_NVO", k, v)
+	}
+	for k, v := range db.BGPNeighbor {
+		appendTyped("BGP_NEIGHBOR", k, v)
+	}
+	for k, v := range db.BGPNeighborAF {
+		appendTyped("BGP_NEIGHBOR_AF", k, v)
+	}
+	for k, v := range db.BGPGlobals {
+		appendTyped("BGP_GLOBALS", k, v)
+	}
+	for k, v := range db.BGPGlobalsAF {
+		appendTyped("BGP_GLOBALS_AF", k, v)
+	}
+	for k, v := range db.BGPEVPNVNI {
+		appendTyped("BGP_EVPN_VNI", k, v)
+	}
+	for k, v := range db.RouteTable {
+		appendTyped("ROUTE_TABLE", k, v)
+	}
+	for k, v := range db.ACLTable {
+		appendTyped("ACL_TABLE", k, v)
+	}
+	for k, v := range db.ACLRule {
+		appendTyped("ACL_RULE", k, v)
+	}
+	for k, v := range db.Scheduler {
+		appendTyped("SCHEDULER", k, v)
+	}
+	for k, v := range db.Queue {
+		appendTyped("QUEUE", k, v)
+	}
+	for k, v := range db.WREDProfile {
+		appendTyped("WRED_PROFILE", k, v)
+	}
+	for k, v := range db.PortQoSMap {
+		appendTyped("PORT_QOS_MAP", k, v)
+	}
+	for k, v := range db.RouteRedistribute {
+		appendTyped("ROUTE_REDISTRIBUTE", k, v)
+	}
+	for k, v := range db.RouteMap {
+		appendTyped("ROUTE_MAP", k, v)
+	}
+	for k, v := range db.BGPPeerGroup {
+		appendTyped("BGP_PEER_GROUP", k, v)
+	}
+	for k, v := range db.BGPPeerGroupAF {
+		appendTyped("BGP_PEER_GROUP_AF", k, v)
+	}
+	for k, v := range db.BGPGlobalsEVPNRT {
+		appendTyped("BGP_GLOBALS_EVPN_RT", k, v)
+	}
+	for k, v := range db.PrefixSet {
+		appendTyped("PREFIX_SET", k, v)
+	}
+	for k, v := range db.CommunitySet {
+		appendTyped("COMMUNITY_SET", k, v)
+	}
+
+	return entries
 }
 
 // copyFields returns a shallow copy of the map (avoids aliasing caller's map).

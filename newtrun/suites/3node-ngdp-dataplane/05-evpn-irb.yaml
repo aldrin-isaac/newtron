@@ -7,7 +7,7 @@ description: |
   DECAP (no L3VNI required, works on CiscoVS per RCA-039).
   Self-cleaning: removes all config at end.
 topology: 3node-ngdp
-requires: [evpn-setup]
+requires: [evpn-verify]
 after: [evpn-l2-bridged]
 
 steps:
@@ -30,19 +30,19 @@ steps:
     params: {id: 200}
 
   # Physical members: host1 on VLAN 100 (leaf1), host2 on VLAN 200 (leaf2)
-  - name: add-vlan-member-leaf1
+  - name: configure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    params: {vlan_id: 100, tagged: false}
 
-  - name: add-vlan-member-leaf2
+  - name: configure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 200, interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    params: {vlan_id: 200, tagged: false}
 
   # =========================================================================
   # Configure anycast SVIs on BOTH leaves for BOTH VLANs
@@ -55,7 +55,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -64,7 +64,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 100
       ip_address: "192.168.100.1/24"
@@ -73,7 +73,7 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -82,7 +82,7 @@ steps:
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 200
       ip_address: "192.168.200.1/24"
@@ -267,43 +267,41 @@ steps:
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 200}
 
   - name: remove-svi-200-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 200}
 
   - name: remove-svi-100-leaf1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
   - name: remove-svi-100-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/remove-svi
+    url: /node/{{device}}/unconfigure-irb
     params: {vlan_id: 100}
 
-  - name: remove-vlan-member-leaf1
+  - name: unconfigure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet1}
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
 
-  - name: remove-vlan-member-leaf2
+  - name: unconfigure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 200, interface: Ethernet1}
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
 
   - name: delete-vlan-200
     action: newtron

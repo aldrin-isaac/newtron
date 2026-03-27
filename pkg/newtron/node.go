@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -115,6 +116,158 @@ func (n *Node) Intents() []Intent {
 	return result
 }
 
+// IntentTree returns the intent DAG as a tree structure rooted at the given
+// resource(s). If kind is empty, returns the full tree from the "device" root.
+// If kind is set, returns subtrees for all resources matching that kind prefix.
+// If resource is set, returns the subtree for kind|resource specifically.
+// If ancestors is true, includes the path from the matched resource up to root.
+func (n *Node) IntentTree(kind, resource string, ancestors bool) []IntentTreeNode {
+	configDB := n.internal.ConfigDB()
+	if configDB == nil {
+		return nil
+	}
+	intents := configDB.NewtronIntent
+	if len(intents) == 0 {
+		return nil
+	}
+
+	// Parse all intents
+	parsed := make(map[string]*sonic.Intent, len(intents))
+	for res, fields := range intents {
+		parsed[res] = sonic.NewIntent(res, fields)
+	}
+
+	// Determine root resources to display
+	var roots []string
+	if kind == "" && resource == "" {
+		// Full tree from device root
+		roots = []string{"device"}
+	} else if resource != "" {
+		// Specific resource: kind|resource
+		key := kind + "|" + resource
+		if _, ok := parsed[key]; ok {
+			roots = []string{key}
+		}
+	} else {
+		// All resources matching kind prefix
+		prefix := kind + "|"
+		for res := range parsed {
+			if res == kind || strings.HasPrefix(res, prefix) {
+				// Only top-level of this kind (those whose parents are not the same kind)
+				intent := parsed[res]
+				isTopLevel := true
+				for _, p := range intent.Parents {
+					if intentKindPrefix(p) == kind {
+						isTopLevel = false
+						break
+					}
+				}
+				if isTopLevel {
+					roots = append(roots, res)
+				}
+			}
+		}
+		sort.Strings(roots)
+	}
+
+	if ancestors && len(roots) == 1 {
+		// Walk up to device root, then display from there pruning to the target
+		roots = []string{findAncestorRoot(parsed, roots[0])}
+	}
+
+	var result []IntentTreeNode
+	for _, root := range roots {
+		visited := make(map[string]bool)
+		result = append(result, buildTreeNode(parsed, root, visited))
+	}
+	return result
+}
+
+// intentKindPrefix extracts the kind prefix from a resource key.
+func intentKindPrefix(resource string) string {
+	parts := strings.SplitN(resource, "|", 2)
+	return parts[0]
+}
+
+// findAncestorRoot walks up the parent chain to find the root ancestor.
+func findAncestorRoot(parsed map[string]*sonic.Intent, resource string) string {
+	visited := make(map[string]bool)
+	current := resource
+	for {
+		if visited[current] {
+			break // cycle guard
+		}
+		visited[current] = true
+		intent, ok := parsed[current]
+		if !ok || len(intent.Parents) == 0 {
+			break
+		}
+		current = intent.Parents[0] // follow first parent to root
+	}
+	return current
+}
+
+// buildTreeNode recursively builds an IntentTreeNode from the parsed intents.
+func buildTreeNode(parsed map[string]*sonic.Intent, resource string, visited map[string]bool) IntentTreeNode {
+	intent := parsed[resource]
+	node := IntentTreeNode{
+		Resource:  resource,
+		Operation: intent.Operation,
+		Params:    filterDisplayParams(intent.Params),
+	}
+
+	if visited[resource] {
+		node.Leaf = true
+		return node
+	}
+	visited[resource] = true
+
+	myKind := intentKindPrefix(resource)
+	children := make([]string, len(intent.Children))
+	copy(children, intent.Children)
+	sort.Strings(children)
+
+	for _, child := range children {
+		childIntent, ok := parsed[child]
+		if !ok {
+			continue
+		}
+		childKind := intentKindPrefix(child)
+		if childKind != myKind {
+			// Different kind → leaf only (multi-parent rendering §12.3.1)
+			node.Children = append(node.Children, IntentTreeNode{
+				Resource:  child,
+				Operation: childIntent.Operation,
+				Params:    filterDisplayParams(childIntent.Params),
+				Leaf:      true,
+			})
+		} else {
+			node.Children = append(node.Children, buildTreeNode(parsed, child, visited))
+		}
+	}
+
+	return node
+}
+
+// filterDisplayParams returns params suitable for display, omitting internal fields.
+func filterDisplayParams(params map[string]string) map[string]string {
+	if len(params) == 0 {
+		return nil
+	}
+	result := make(map[string]string)
+	for k, v := range params {
+		// Skip internal/lifecycle fields
+		if k == "_parents" || k == "_children" || k == "state" || k == "operation" {
+			continue
+		}
+		result[k] = v
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // Snapshot projects the node's actuated intents back into topology format.
 // Returns a TopologyDevice with service interfaces and their IPs.
 func (n *Node) Snapshot() *spec.TopologyDevice {
@@ -130,6 +283,8 @@ func intentFromSonic(si *sonic.Intent) Intent {
 		State:     IntentState(si.State),
 		AppliedBy: si.AppliedBy,
 		AppliedAt: si.AppliedAt,
+		Parents:   si.Parents,
+		Children:  si.Children,
 	}
 	if si.Params != nil {
 		i.Params = make(map[string]string, len(si.Params))
@@ -608,10 +763,8 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 	switch reverseOp {
 	case "device.delete-vlan":
 		return n.internal.DeleteVLAN(ctx, vlanID())
-	case "device.remove-vlan-member":
-		return n.internal.RemoveVLANMember(ctx, vlanID(), params["interface"])
-	case "device.remove-irb":
-		return n.internal.RemoveIRB(ctx, vlanID())
+	case "device.unconfigure-irb":
+		return n.internal.UnconfigureIRB(ctx, vlanID())
 	case "device.delete-vrf":
 		return n.internal.DeleteVRF(ctx, params["vrf"])
 	case "device.unbind-ipvpn":
@@ -632,8 +785,8 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 		return n.internal.RemovePortChannelMember(ctx, params["name"], params["member"])
 	case "device.remove-static-route":
 		return n.internal.RemoveStaticRoute(ctx, params["vrf"], params["prefix"])
-	case "device.remove-bgp-peer":
-		return n.internal.RemoveBGPPeer(ctx, params["neighbor_ip"])
+	case "device.remove-bgp-evpn-peer":
+		return n.internal.RemoveBGPEVPNPeer(ctx, params["neighbor_ip"])
 	case "device.remove-loopback":
 		return n.internal.RemoveLoopback(ctx)
 	case "interface.remove-service":
@@ -660,6 +813,18 @@ func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map
 			return nil, err
 		}
 		return iface.UnbindMACVPN(ctx)
+	case "device.remove-bgp-peer":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.RemoveBGPPeer(ctx)
+	case "interface.unconfigure-interface":
+		iface, err := n.internal.GetInterface(params["interface"])
+		if err != nil {
+			return nil, err
+		}
+		return iface.UnconfigureInterface(ctx)
 	default:
 		return nil, fmt.Errorf("unknown reverse operation %q", reverseOp)
 	}
@@ -959,7 +1124,7 @@ func (n *Node) WriteSettings(ctx context.Context, s *DeviceSettings) error {
 
 // CreateVLAN creates a VLAN on the device.
 func (n *Node) CreateVLAN(ctx context.Context, id int, config VLANConfig) error {
-	cs, err := n.internal.CreateVLAN(ctx, id, node.VLANConfig{Description: config.Description})
+	cs, err := n.internal.CreateVLAN(ctx, id, node.VLANConfig{Description: config.Description, L2VNI: config.L2VNI})
 	n.appendPending(cs)
 	return err
 }
@@ -967,20 +1132,6 @@ func (n *Node) CreateVLAN(ctx context.Context, id int, config VLANConfig) error 
 // DeleteVLAN deletes a VLAN from the device.
 func (n *Node) DeleteVLAN(ctx context.Context, id int) error {
 	cs, err := n.internal.DeleteVLAN(ctx, id)
-	n.appendPending(cs)
-	return err
-}
-
-// AddVLANMember adds an interface to a VLAN.
-func (n *Node) AddVLANMember(ctx context.Context, id int, iface string, tagged bool) error {
-	cs, err := n.internal.AddVLANMember(ctx, id, iface, tagged)
-	n.appendPending(cs)
-	return err
-}
-
-// RemoveVLANMember removes an interface from a VLAN.
-func (n *Node) RemoveVLANMember(ctx context.Context, id int, iface string) error {
-	cs, err := n.internal.RemoveVLANMember(ctx, id, iface)
 	n.appendPending(cs)
 	return err
 }
@@ -996,9 +1147,9 @@ func (n *Node) ConfigureIRB(ctx context.Context, id int, config IRBConfig) error
 	return err
 }
 
-// RemoveIRB removes the IRB configuration from a VLAN.
-func (n *Node) RemoveIRB(ctx context.Context, id int) error {
-	cs, err := n.internal.RemoveIRB(ctx, id)
+// UnconfigureIRB removes the IRB configuration from a VLAN.
+func (n *Node) UnconfigureIRB(ctx context.Context, id int) error {
+	cs, err := n.internal.UnconfigureIRB(ctx, id)
 	n.appendPending(cs)
 	return err
 }
@@ -1028,12 +1179,7 @@ func (n *Node) DeleteVRF(ctx context.Context, name string) error {
 // BindIPVPN binds a VRF to an IP-VPN definition.
 // Resolves the IPVPN spec by name from the node's SpecProvider.
 func (n *Node) BindIPVPN(ctx context.Context, vrf, ipvpnName string) error {
-	ipvpnName = util.NormalizeName(ipvpnName)
-	ipvpnDef, err := n.internal.GetIPVPN(ipvpnName)
-	if err != nil {
-		return fmt.Errorf("ipvpn '%s' not found: %w", ipvpnName, err)
-	}
-	cs, err := n.internal.BindIPVPN(ctx, vrf, ipvpnDef)
+	cs, err := n.internal.BindIPVPN(ctx, vrf, util.NormalizeName(ipvpnName))
 	n.appendPending(cs)
 	return err
 }
@@ -1049,30 +1195,16 @@ func (n *Node) UnbindIPVPN(ctx context.Context, vrf string) error {
 // Device-level write ops — BGP
 // ============================================================================
 
-// ConfigureBGP configures BGP globals on the device using its profile.
-func (n *Node) ConfigureBGP(ctx context.Context) error {
-	cs, err := n.internal.ConfigureBGP(ctx)
+// AddBGPEVPNPeer adds a loopback BGP neighbor (indirect, multi-hop eBGP).
+func (n *Node) AddBGPEVPNPeer(ctx context.Context, config BGPNeighborConfig) error {
+	cs, err := n.internal.AddBGPEVPNPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
 	n.appendPending(cs)
 	return err
 }
 
-// RemoveBGPGlobals removes BGP globals from the device.
-func (n *Node) RemoveBGPGlobals(ctx context.Context) error {
-	cs, err := n.internal.RemoveBGPGlobals(ctx)
-	n.appendPending(cs)
-	return err
-}
-
-// AddBGPMultihopPeer adds a loopback BGP neighbor (indirect, multi-hop eBGP).
-func (n *Node) AddBGPMultihopPeer(ctx context.Context, config BGPNeighborConfig) error {
-	cs, err := n.internal.AddBGPMultihopPeer(ctx, config.NeighborIP, config.RemoteAS, config.Description, false)
-	n.appendPending(cs)
-	return err
-}
-
-// RemoveBGPMultihopPeer removes a multihop BGP peer by IP.
-func (n *Node) RemoveBGPMultihopPeer(ctx context.Context, ip string) error {
-	cs, err := n.internal.RemoveBGPPeer(ctx, ip)
+// RemoveBGPEVPNPeer removes an EVPN BGP peer by IP.
+func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, ip string) error {
+	cs, err := n.internal.RemoveBGPEVPNPeer(ctx, ip)
 	n.appendPending(cs)
 	return err
 }
@@ -1099,42 +1231,14 @@ func (n *Node) RemoveStaticRoute(ctx context.Context, vrf, prefix string) error 
 // Device-level write ops — EVPN
 // ============================================================================
 
-// SetupVTEP configures the full EVPN stack (VTEP + NVO + BGP EVPN).
-func (n *Node) SetupVTEP(ctx context.Context, sourceIP string) error {
-	cs, err := n.internal.SetupVTEP(ctx, sourceIP)
-	n.appendPending(cs)
-	return err
-}
-
-// TeardownVTEP removes the EVPN configuration from the device.
-func (n *Node) TeardownVTEP(ctx context.Context) error {
-	cs, err := n.internal.TeardownVTEP(ctx)
-	n.appendPending(cs)
-	return err
-}
-
-// ConfigureRouteReflector configures this node as a BGP route reflector.
-func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorOpts) error {
-	internalOpts := node.RouteReflectorOpts{
-		ClusterID: opts.ClusterID,
-		LocalASN:  opts.LocalASN,
-		RouterID:  opts.RouterID,
-		LocalAddr: opts.LocalAddr,
-	}
-	for _, c := range opts.Clients {
-		internalOpts.Clients = append(internalOpts.Clients, node.RouteReflectorPeer{IP: c.IP, ASN: c.ASN})
-	}
-	for _, p := range opts.Peers {
-		internalOpts.Peers = append(internalOpts.Peers, node.RouteReflectorPeer{IP: p.IP, ASN: p.ASN})
-	}
-	cs, err := n.internal.ConfigureRouteReflector(ctx, internalOpts)
-	n.appendPending(cs)
-	return err
-}
-
 // BindMACVPN maps a VLAN to an L2VNI for EVPN.
+// Resolves the MAC-VPN name by VNI from the node's SpecProvider.
 func (n *Node) BindMACVPN(ctx context.Context, vlanID, vni int) error {
-	cs, err := n.internal.BindMACVPN(ctx, vlanID, vni)
+	macvpnName, _ := n.internal.FindMACVPNByVNI(vni)
+	if macvpnName == "" {
+		return fmt.Errorf("no MAC-VPN spec found for VNI %d", vni)
+	}
+	cs, err := n.internal.BindMACVPN(ctx, vlanID, macvpnName)
 	n.appendPending(cs)
 	return err
 }
@@ -1257,23 +1361,39 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pc, member string) e
 // Device-level write ops — Baseline
 // ============================================================================
 
-// ConfigureLoopback configures the loopback interface using the device's profile.
-func (n *Node) ConfigureLoopback(ctx context.Context) error {
-	cs, err := n.internal.ConfigureLoopback(ctx)
+// convertRROpts converts a public RouteReflectorOpts to the internal type.
+func convertRROpts(opts RouteReflectorOpts) node.RouteReflectorOpts {
+	result := node.RouteReflectorOpts{
+		ClusterID: opts.ClusterID,
+		LocalASN:  opts.LocalASN,
+		RouterID:  opts.RouterID,
+		LocalAddr: opts.LocalAddr,
+	}
+	for _, c := range opts.Clients {
+		result.Clients = append(result.Clients, node.RouteReflectorPeer{IP: c.IP, ASN: c.ASN})
+	}
+	for _, p := range opts.Peers {
+		result.Peers = append(result.Peers, node.RouteReflectorPeer{IP: p.IP, ASN: p.ASN})
+	}
+	return result
+}
+
+// SetupDevice performs consolidated device initialization: metadata, loopback,
+// BGP, VTEP (optional), and route reflector (optional). Writes a single
+// NEWTRON_INTENT record for the entire setup.
+func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) error {
+	internalOpts := node.SetupDeviceOpts{
+		Fields:   opts.Fields,
+		SourceIP: opts.SourceIP,
+	}
+	if opts.RR != nil {
+		rr := convertRROpts(*opts.RR)
+		internalOpts.RR = &rr
+	}
+	cs, err := n.internal.SetupDevice(ctx, internalOpts)
 	n.appendPending(cs)
 	return err
 }
-
-// RemoveLoopback removes the loopback interface configuration.
-func (n *Node) RemoveLoopback(ctx context.Context) error {
-	cs, err := n.internal.RemoveLoopback(ctx)
-	n.appendPending(cs)
-	return err
-}
-
-// ============================================================================
-// Device-level write ops — Device metadata
-// ============================================================================
 
 // SetDeviceMetadata writes fields to DEVICE_METADATA|localhost.
 func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) error {
@@ -1424,11 +1544,6 @@ func (n *Node) ExecCommand(ctx context.Context, cmd string) (string, error) {
 // ConfigReload runs 'config reload -y' on the device via SSH.
 func (n *Node) ConfigReload(ctx context.Context) error {
 	return n.internal.ConfigReload(ctx)
-}
-
-// ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
-func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
-	return n.internal.ApplyFRRDefaults(ctx)
 }
 
 // RestartService restarts a SONiC Docker container by name via SSH.

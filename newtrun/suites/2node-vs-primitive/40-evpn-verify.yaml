@@ -1,28 +1,18 @@
-name: evpn-setup
+name: evpn-verify
 description: |
-  EVPN overlay bringup: create VTEP, NVO, and loopback BGP neighbors with
-  L2VPN EVPN address-family. Verify CONFIG_DB and EVPN BGP sessions reach
+  EVPN overlay verification: confirm VTEP, NVO, and L2VPN EVPN address-family
+  are present (created by setup-device) and that EVPN BGP sessions reach
   Established.
 
-  sonic-vs frrcfgd workaround: overlay BGP_NEIGHBOR entries are written to
-  CONFIG_DB, then BGP is restarted so frrcfgd startup replay programs them
-  into FRR. See RCA-044.
+  sonic-vs frrcfgd workaround: setup-device wrote overlay BGP_NEIGHBOR entries
+  to CONFIG_DB, but frrcfgd doesn't process runtime notifications. A BGP restart
+  is needed so frrcfgd startup replay processes the overlay entries. The underlay
+  restart in 30-bgp-underlay.yaml may have already replayed them, but we restart
+  again as a safety measure to ensure overlay peers are processed. See RCA-044.
 topology: 2node-vs
 requires: [bgp-underlay]
 
 steps:
-  - name: setup-vtep-switch1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/setup-vtep
-
-  - name: setup-vtep-switch2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/setup-vtep
-
   # Restart BGP so frrcfgd startup replay processes overlay BGP_NEIGHBOR entries.
   - name: restart-bgp-for-overlay
     action: newtron

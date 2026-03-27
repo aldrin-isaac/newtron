@@ -344,3 +344,225 @@ func TestNewEmptyConfigDB(t *testing.T) {
 	}
 }
 
+// TestExportEntries_RoundTrip verifies that for each representative table, fields
+// written via ApplyEntries are reproduced faithfully by ExportEntries.  The
+// invariant checked is originalFields ⊆ exportedFields: every field that was
+// supplied to ApplyEntries must appear in the ExportEntries output with the same
+// value.  (applyEntry stores only the fields it knows about; ExportEntries
+// re-serialises via structToFields using json tags, so both sides must agree on
+// the field key name for the round-trip to hold.)
+func TestExportEntries_RoundTrip(t *testing.T) {
+	tests := []struct {
+		name   string
+		entry  Entry
+	}{
+		{
+			name: "PORT",
+			entry: Entry{
+				Table: "PORT",
+				Key:   "Ethernet0",
+				Fields: map[string]string{
+					"admin_status": "up",
+					"mtu":          "9100",
+					"speed":        "100000",
+					"alias":        "eth0",
+					"description":  "uplink",
+					"index":        "0",
+					"lanes":        "1,2,3,4",
+				},
+			},
+		},
+		{
+			name: "VLAN",
+			entry: Entry{
+				Table: "VLAN",
+				Key:   "Vlan100",
+				Fields: map[string]string{
+					"vlanid":      "100",
+					"description": "customer vlan",
+				},
+			},
+		},
+		{
+			name: "VRF",
+			entry: Entry{
+				Table: "VRF",
+				Key:   "Vrf_CUST1",
+				Fields: map[string]string{
+					"vni": "10001",
+				},
+			},
+		},
+		{
+			name: "BGP_NEIGHBOR",
+			entry: Entry{
+				Table: "BGP_NEIGHBOR",
+				Key:   "default|10.0.0.2",
+				Fields: map[string]string{
+					"asn":             "65002",
+					"local_addr":      "10.0.0.1",
+					"admin_status":    "up",
+					"ebgp_multihop":   "2",
+					"peer_group_name": "SPINE_PEERS",
+				},
+			},
+		},
+		{
+			name: "BGP_GLOBALS",
+			entry: Entry{
+				Table: "BGP_GLOBALS",
+				Key:   "default",
+				Fields: map[string]string{
+					"local_asn": "65001",
+					"router_id": "10.0.0.1",
+				},
+			},
+		},
+		{
+			name: "ACL_TABLE",
+			entry: Entry{
+				Table: "ACL_TABLE",
+				Key:   "PROTECT_RE_IN",
+				Fields: map[string]string{
+					"type":  "L3",
+					"stage": "ingress",
+					"ports": "Ethernet0,Ethernet4",
+				},
+			},
+		},
+		{
+			name: "INTERFACE",
+			entry: Entry{
+				Table: "INTERFACE",
+				Key:   "Ethernet0",
+				Fields: map[string]string{
+					"vrf_name": "Vrf_CUST1",
+				},
+			},
+		},
+		{
+			name: "VXLAN_TUNNEL",
+			entry: Entry{
+				Table: "VXLAN_TUNNEL",
+				Key:   "vtep1",
+				Fields: map[string]string{
+					"src_ip": "10.0.0.1",
+				},
+			},
+		},
+		{
+			name: "DEVICE_METADATA",
+			entry: Entry{
+				Table: "DEVICE_METADATA",
+				Key:   "localhost",
+				Fields: map[string]string{
+					"hostname":    "switch1",
+					"mac":         "aa:bb:cc:dd:ee:ff",
+					"platform":    "x86_64-grub",
+					"hwsku":       "Force10-S6000",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newConfigDB()
+			db.ApplyEntries([]Entry{tt.entry})
+
+			exported := db.ExportEntries()
+
+			// Find the exported entry for this table+key.
+			var found *Entry
+			for i := range exported {
+				if exported[i].Table == tt.entry.Table && exported[i].Key == tt.entry.Key {
+					found = &exported[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("ExportEntries: no entry for table=%q key=%q", tt.entry.Table, tt.entry.Key)
+			}
+
+			// Every original field must survive the round-trip with its value intact.
+			for field, want := range tt.entry.Fields {
+				got, ok := found.Fields[field]
+				if !ok {
+					t.Errorf("field %q missing from exported entry", field)
+					continue
+				}
+				if got != want {
+					t.Errorf("field %q: got %q, want %q", field, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestStructToFields exercises the reflection helper directly.
+func TestStructToFields(t *testing.T) {
+	t.Run("VLANEntry non-zero fields", func(t *testing.T) {
+		v := VLANEntry{VLANID: "100", Description: "test vlan"}
+		got := structToFields(v)
+
+		want := map[string]string{
+			"vlanid":      "100",
+			"description": "test vlan",
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("structToFields(VLANEntry) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("VLANEntry zero-value fields omitted", func(t *testing.T) {
+		v := VLANEntry{VLANID: "200"}
+		got := structToFields(v)
+
+		// Only vlanid should be present; description, mtu, admin_status, dhcp_servers are zero.
+		if _, ok := got["description"]; ok {
+			t.Error("zero-value field 'description' should be omitted")
+		}
+		if _, ok := got["mtu"]; ok {
+			t.Error("zero-value field 'mtu' should be omitted")
+		}
+		if got["vlanid"] != "200" {
+			t.Errorf("vlanid = %q, want %q", got["vlanid"], "200")
+		}
+	})
+
+	t.Run("BGPNeighborEntry json tags as keys", func(t *testing.T) {
+		v := BGPNeighborEntry{
+			ASN:          "65001",
+			LocalAddr:    "10.0.0.1",
+			PeerGroup:    "SPINE_PEERS",
+			EBGPMultihop: "2",
+		}
+		got := structToFields(v)
+
+		// Verify the json tag names are used, not the Go field names.
+		checks := map[string]string{
+			"asn":             "65001",
+			"local_addr":      "10.0.0.1",
+			"peer_group_name": "SPINE_PEERS",
+			"ebgp_multihop":   "2",
+		}
+		for field, want := range checks {
+			if got[field] != want {
+				t.Errorf("field %q = %q, want %q", field, got[field], want)
+			}
+		}
+		// AdminStatus was not set — must be absent.
+		if _, ok := got["admin_status"]; ok {
+			t.Error("zero-value field 'admin_status' should be omitted")
+		}
+	})
+
+	t.Run("empty struct returns empty map", func(t *testing.T) {
+		v := VRFEntry{}
+		got := structToFields(v)
+		if len(got) != 0 {
+			t.Errorf("structToFields(empty VRFEntry) = %v, want empty map", got)
+		}
+	})
+}
+

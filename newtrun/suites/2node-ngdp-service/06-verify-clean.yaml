@@ -17,35 +17,35 @@ steps:
   - name: no-binding-eth0
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet0/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
     expect:
       jq: '.exists == false'
 
   - name: no-binding-eth1
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet1/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet1/exists
     expect:
       jq: '.exists == false'
 
   - name: no-binding-eth2
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet2/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet2/exists
     expect:
       jq: '.exists == false'
 
   - name: no-binding-eth3
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == false'
 
   - name: no-binding-eth4
     action: newtron
     devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet4/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet4/exists
     expect:
       jq: '.exists == false'
 
@@ -366,145 +366,16 @@ steps:
     expect:
       jq: '.exists == false'
 
-  # =========================================================================
-  # VXLAN_TUNNEL — VTEP (infrastructure)
-  # Forward: SetupEVPN → CreateVTEP
-  # Reverse: TeardownEVPN → delete VTEP
-  # =========================================================================
+  # Baseline infrastructure (VXLAN_TUNNEL, VXLAN_EVPN_NVO, BGP_GLOBALS/default,
+  # BGP_GLOBALS_AF/default, ROUTE_REDISTRIBUTE/default, BGP_NEIGHBOR, LOOPBACK_INTERFACE)
+  # is NOT checked here — setup-device has no individual reverse.
+  # Reprovisioning (CompositeOverwrite) is the collective reverse.
 
-  - name: no-vtep
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VXLAN_TUNNEL/vtep1/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # VXLAN_EVPN_NVO — NVO (infrastructure)
-  # Forward: SetupEVPN → create NVO
-  # Reverse: TeardownEVPN → delete NVO
-  # =========================================================================
-
-  - name: no-nvo
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/VXLAN_EVPN_NVO/nvo1/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # BGP_GLOBALS — global BGP configuration
-  # Forward: ConfigureBGP → CreateBGPGlobals
-  # Reverse: RemoveBGP → delete BGP_GLOBALS
-  # =========================================================================
-
-  - name: no-bgp-globals
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # BGP_GLOBALS_AF — address-family configs (ipv4_unicast, l2vpn_evpn)
-  # Forward: ConfigureBGP + SetupEVPN
-  # Reverse: TeardownEVPN (l2vpn_evpn) + RemoveBGP (ipv4_unicast)
-  # =========================================================================
-
-  - name: no-bgp-af-ipv4
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cipv4_unicast/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: no-bgp-af-l2vpn
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/BGP_GLOBALS_AF/default%7Cl2vpn_evpn/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # ROUTE_REDISTRIBUTE — connected route redistribution
-  # Forward: ConfigureBGP → CreateRouteRedistribute
-  # Reverse: RemoveBGP → delete ROUTE_REDISTRIBUTE
-  # =========================================================================
-
-  - name: no-route-redistribute
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/default%7Cconnected%7Cbgp%7Cipv4/exists
-    expect:
-      jq: '.exists == false'
-
-  # VRF-level redistribute from bind-ipvpn (overlay-irb services)
+  # VRF-level redistribute from bind-ipvpn (overlay-irb services) —
+  # cleaned up by RemoveService → destroyVrf → unbindIpvpn
   - name: no-route-redistribute-vrf-irb
     action: newtron
     devices: [switch1, switch2]
     url: /node/{{device}}/configdb/ROUTE_REDISTRIBUTE/Vrf_IRB%7Cconnected%7Cbgp%7Cipv4/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # BGP_NEIGHBOR — underlay peers (transit) + overlay peers (EVPN)
-  # Forward: ApplyService (transit) + SetupEVPN (overlay)
-  # Reverse: RemoveService (transit) + TeardownEVPN (overlay)
-  # =========================================================================
-
-  # Underlay: switch1 peers with 10.1.0.1 (switch2), switch2 peers with 10.1.0.0 (switch1)
-  - name: no-bgp-neighbor-underlay-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: no-bgp-neighbor-underlay-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.0/exists
-    expect:
-      jq: '.exists == false'
-
-  # Overlay: switch1 peers with 10.0.0.2 (switch2 loopback), switch2 peers with 10.0.0.1
-  - name: no-bgp-neighbor-overlay-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.2/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: no-bgp-neighbor-overlay-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.0.0.1/exists
-    expect:
-      jq: '.exists == false'
-
-  # =========================================================================
-  # LOOPBACK_INTERFACE — loopback interface
-  # Forward: ConfigureLoopback → LOOPBACK_INTERFACE entries
-  # Reverse: RemoveLoopback → delete all Loopback0 entries
-  # =========================================================================
-
-  - name: no-loopback
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: no-loopback-ip-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
-    expect:
-      jq: '.exists == false'
-
-  - name: no-loopback-ip-sw2
-    action: newtron
-    devices: [switch2]
-    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.2%2F32/exists
     expect:
       jq: '.exists == false'

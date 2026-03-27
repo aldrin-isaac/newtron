@@ -26,14 +26,14 @@ steps:
   - name: verify-binding-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == true'
 
   - name: verify-binding-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == true'
 
@@ -166,7 +166,7 @@ steps:
   - name: verify-binding-after-refresh-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == true'
 
@@ -186,14 +186,14 @@ steps:
   - name: verify-binding-removed-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == false'
 
   - name: verify-binding-removed-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet3/exists
     expect:
       jq: '.exists == false'
 
@@ -222,7 +222,7 @@ steps:
   - name: verify-bridged-binding-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet1/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet1/exists
     expect:
       jq: '.exists == true'
 
@@ -243,7 +243,7 @@ steps:
   - name: verify-bridged-binding-removed
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet1/exists
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet1/exists
     expect:
       jq: '.exists == false'
 

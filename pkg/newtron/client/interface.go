@@ -69,11 +69,9 @@ func (c *Client) InterfaceAddBGPPeer(device, iface string, config newtron.BGPNei
 }
 
 // InterfaceRemoveBGPPeer removes a BGP peer from an interface.
-func (c *Client) InterfaceRemoveBGPPeer(device, iface, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := struct {
-		IP string `json:"ip"`
-	}{IP: ip}
-	return c.interfaceWrite(device, iface, "remove-bgp-peer", body, opts)
+// The neighbor IP is read from the intent record on the device.
+func (c *Client) InterfaceRemoveBGPPeer(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "remove-bgp-peer", nil, opts)
 }
 
 // SetPortProperty sets a property on an interface.
@@ -82,15 +80,14 @@ func (c *Client) SetPortProperty(device, iface, property, value string, opts new
 	return c.interfaceWrite(device, iface, "set-port-property", body, opts)
 }
 
-// ConfigureInterface sets VRF and IP on an interface in one operation.
-func (c *Client) ConfigureInterface(device, iface, vrf, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.ConfigureInterfaceRequest{VRF: vrf, IP: ip}
-	return c.interfaceWrite(device, iface, "configure-interface", body, opts)
+// ConfigureInterface sets forwarding mode on an interface.
+func (c *Client) ConfigureInterface(device, iface string, cfg api.ConfigureInterfaceRequest, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "configure-interface", cfg, opts)
 }
 
-// UnconfigureInterface removes VRF binding and/or IP address from an interface.
-func (c *Client) UnconfigureInterface(device, iface, vrf, ip string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	body := api.ConfigureInterfaceRequest{VRF: vrf, IP: ip}
-	return c.interfaceWrite(device, iface, "unconfigure-interface", body, opts)
+// UnconfigureInterface reverses ConfigureInterface. Reads the intent record to
+// determine what was configured, then undoes it.
+func (c *Client) UnconfigureInterface(device, iface string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
+	return c.interfaceWrite(device, iface, "unconfigure-interface", nil, opts)
 }
 

@@ -125,14 +125,12 @@ steps:
     devices: [leaf1]
     method: POST
     url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
-    params: {ip: "10.1.100.1/24"}
 
   - name: unconfigure-eth1-leaf2
     action: newtron
     devices: [leaf2]
     method: POST
     url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
-    params: {ip: "10.1.200.1/24"}
 
   - name: wait-port-mode-change
     action: wait

@@ -5,7 +5,7 @@ description: |
   Hosts communicate via L2 bridged over VXLAN — verifies the complete EVPN L2
   control and data plane path. Self-cleaning: removes all config at end.
 topology: 3node-ngdp
-requires: [evpn-setup]
+requires: [evpn-verify]
 
 steps:
   # =========================================================================
@@ -26,19 +26,19 @@ steps:
     url: /node/{{device}}/create-vlan
     params: {id: 100}
 
-  - name: add-vlan-member-leaf1
+  - name: configure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    params: {vlan_id: 100, tagged: false}
 
-  - name: add-vlan-member-leaf2
+  - name: configure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/add-vlan-member
-    params: {id: 100, interface: Ethernet1, tagged: false}
+    url: /node/{{device}}/interface/Ethernet1/configure-interface
+    params: {vlan_id: 100, tagged: false}
 
   - name: bind-macvpn-100-leaf1
     action: newtron
@@ -149,19 +149,17 @@ steps:
     method: POST
     url: /node/{{device}}/interface/Vlan100/unbind-macvpn
 
-  - name: remove-vlan-member-leaf1
+  - name: unconfigure-bridged-leaf1-eth1
     action: newtron
     devices: [leaf1]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet1}
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
 
-  - name: remove-vlan-member-leaf2
+  - name: unconfigure-bridged-leaf2-eth1
     action: newtron
     devices: [leaf2]
     method: POST
-    url: /node/{{device}}/remove-vlan-member
-    params: {id: 100, interface: Ethernet1}
+    url: /node/{{device}}/interface/Ethernet1/unconfigure-interface
 
   - name: delete-vlan-100-leaf1
     action: newtron

@@ -3,7 +3,9 @@ package node
 import (
 	"context"
 	"fmt"
+	"strconv"
 
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
@@ -14,7 +16,7 @@ import (
 // from the interface IP (direct peering over a link).
 //
 // For iBGP peers using loopback IPs (indirect peering), use the
-// device-level BGP operations: Device.AddBGPMultihopPeer() or
+// device-level BGP operations: Device.AddBGPEVPNPeer() or
 // Device.SetupBGPEVPN().
 
 // DirectBGPPeerConfig holds configuration for a direct BGP peer.
@@ -33,7 +35,7 @@ type DirectBGPPeerConfig struct {
 func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*ChangeSet, error) {
 	n := i.node
 
-	if err := n.precondition("add-bgp-peer", i.name).Result(); err != nil {
+	if err := n.precondition(sonic.OpAddBGPPeer, i.name).Result(); err != nil {
 		return nil, err
 	}
 	if cfg.RemoteAS == 0 {
@@ -78,9 +80,25 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 		MultihopTTL:  fmt.Sprintf("%d", cfg.Multihop),
 		ActivateIPv4: true,
 	})
-	cs := buildChangeSet(n.Name(), "interface.add-bgp-peer", config, ChangeAdd)
+	cs := buildChangeSet(n.Name(), "interface."+sonic.OpAddBGPPeer, config, ChangeAdd)
+	if err := i.ensureInterfaceIntent(cs); err != nil {
+		return nil, err
+	}
+	intentParams := map[string]string{
+		sonic.FieldNeighborIP: neighborIP,
+		sonic.FieldRemoteAS:   strconv.Itoa(cfg.RemoteAS),
+	}
+	if cfg.Description != "" {
+		intentParams[sonic.FieldDescription] = cfg.Description
+	}
+	if cfg.Multihop > 0 {
+		intentParams["multihop"] = strconv.Itoa(cfg.Multihop)
+	}
+	if err := n.writeIntent(cs, sonic.OpAddBGPPeer, "interface|"+i.name+"|bgp-peer", intentParams, []string{"interface|" + i.name}); err != nil {
+		return nil, err
+	}
 	cs.ReverseOp = "device.remove-bgp-peer"
-	cs.OperationParams = map[string]string{"neighbor_ip": neighborIP}
+	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": neighborIP}
 
 	util.WithDevice(n.Name()).Infof("Adding direct BGP peer %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)
@@ -88,24 +106,35 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 }
 
 // RemoveBGPPeer removes a direct BGP peer from this interface.
-func (i *Interface) RemoveBGPPeer(ctx context.Context, neighborIP string) (*ChangeSet, error) {
+// The neighbor IP is read from the intent record — callers do not need to specify it.
+func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	n := i.node
 
 	if err := n.precondition("remove-bgp-peer", i.name).Result(); err != nil {
 		return nil, err
 	}
 
-	// If no neighbor IP specified, try to derive it
-	ipAddresses := i.IPAddresses()
-	if neighborIP == "" && len(ipAddresses) > 0 {
-		var err error
-		neighborIP, err = util.DeriveNeighborIP(ipAddresses[0])
-		if err != nil {
-			return nil, fmt.Errorf("specify neighbor IP to remove")
-		}
+	// Read neighbor IP from intent record (sub-resource key)
+	intentKey := "interface|" + i.name + "|bgp-peer"
+	intent := n.GetIntent(intentKey)
+	if intent == nil {
+		return nil, fmt.Errorf("no BGP peer intent for %s", i.name)
+	}
+	neighborIP := intent.Params[sonic.FieldNeighborIP]
+	if neighborIP == "" {
+		return nil, fmt.Errorf("intent for %s has no neighbor IP", i.name)
 	}
 
-	return n.RemoveBGPPeer(ctx, neighborIP)
+	cs, err := n.RemoveBGPEVPNPeer(ctx, neighborIP)
+	if err != nil {
+		return nil, err
+	}
+	// Delete the bgp-peer sub-resource intent. The parent interface|<name>
+	// intent is preserved — it belongs to ConfigureInterface.
+	if err := n.deleteIntent(cs, intentKey); err != nil {
+		return nil, err
+	}
+	return cs, nil
 }
 
 

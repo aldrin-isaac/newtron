@@ -67,20 +67,15 @@ steps:
     method: POST
     url: /node/{{device}}/interface/Ethernet0/remove-service
 
-  - name: teardown-vtep
+  # Baseline infrastructure (setup-device) has no individual reverse.
+  # Config reload restores CONFIG_DB to saved defaults, wiping all
+  # newtron-applied config including loopback, BGP, VTEP.
+  - name: reload-config
     action: newtron
     devices: [switch1, switch2]
     method: POST
-    url: /node/{{device}}/teardown-vtep
+    url: /node/{{device}}/reload-config
 
-  - name: remove-bgp
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /node/{{device}}/remove-bgp
-
-  - name: remove-loopback
-    action: newtron
-    devices: [switch1, switch2]
-    method: POST
-    url: /node/{{device}}/remove-loopback
+  - name: wait-reload
+    action: wait
+    duration: 30s

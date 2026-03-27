@@ -78,7 +78,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -88,7 +88,7 @@ steps:
     action: newtron
     devices: [switch2]
     method: POST
-    url: /node/{{device}}/configure-svi
+    url: /node/{{device}}/configure-irb
     params:
       vlan_id: 300
       ip_address: "10.3.0.1/24"
@@ -191,7 +191,6 @@ steps:
     devices: [switch1]
     method: POST
     url: /node/{{device}}/interface/Ethernet12/unconfigure-interface
-    params: {vrf: Vrf_IRB}
 
   - name: verify-eth3-vrf-removed
     action: newtron

@@ -217,14 +217,12 @@ steps:
     devices: [switch1]
     method: POST
     url: /node/{{device}}/interface/PortChannel1/unconfigure-interface
-    params: {ip: "10.30.0.0/31"}
 
   - name: unconfigure-portchannel1-sw2
     action: newtron
     devices: [switch2]
     method: POST
     url: /node/{{device}}/interface/PortChannel1/unconfigure-interface
-    params: {ip: "10.30.0.1/31"}
 
   - name: remove-member-eth5-sw1
     action: newtron

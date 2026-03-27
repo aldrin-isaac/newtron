@@ -113,7 +113,7 @@ n.RegisterPort("Ethernet0", {"admin_status": "up"})
 n.SetupDevice(setupOpts)              // metadata + loopback + BGP + VTEP
 iface = n.GetInterface("Ethernet0")
 iface.ApplyService("transit", opts)   // VTEP precondition passes
-composite = n.BuildComposite()        // export all accumulated entries
+composite = n.BuildComposite()        // export configDB as composite
 ```
 
 The shadow ConfigDB is not a mock — it is what makes the code path
@@ -159,7 +159,7 @@ where intent replaces reality entirely. An offline Node builds the
 complete desired state — every VLAN, every VRF,
 every BGP session, every service binding — by running the same methods
 in the same order that an operator would run interactively. The
-accumulated entries are then delivered as a single composite,
+configDB state is then exported and delivered as a single composite,
 overwriting whatever the device had before. This is the only path where
 the system asserts authority over device state.
 
@@ -176,8 +176,8 @@ provisioning reconciles back to intent when directed.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
-output differ: offline Nodes start empty and accumulate entries for
-later delivery; connected Nodes start from Redis and apply changes
+output differ: offline Nodes start empty and build up configDB state for
+later export; connected Nodes start from Redis and apply changes
 directly. This is not a convenience — it is the guarantee. A feature
 added to one mode is immediately available in the other, because there
 is no other. A bug fixed in one mode is fixed in both, because there
@@ -610,6 +610,36 @@ configuration down to the most specific entity that fully determines
 it. Interface-level config is more composable, more independently
 testable, and easier to reason about than device-level config that
 happens to mention an interface.
+
+**Forwarding mode is the interface's fundamental configuration.**
+An interface participates in a forwarding domain — either a bridge
+domain (VLAN, L2) or a routing domain (VRF, L3). Both are the same
+conceptual operation: binding the interface to a forwarding domain.
+Bridged and routed are symmetric — same operation, same intent
+lifecycle, same reverse. An interface that joins a VLAN's bridge
+table and an interface that joins a VRF's routing table are making
+the same commitment: "I forward packets in this domain."
+
+The interface configuration layers naturally:
+
+- **Physical** — port properties (mtu, speed, admin_status). Set
+  once, rarely changed. Baseline infrastructure (§15) — its reverse
+  is reprovision, not individual undo.
+- **Forwarding mode** — which domain the interface joins. Bridge
+  domain or routing domain. One binding per interface.
+- **Policy** — ACL filtering, QoS shaping. Independent lifecycle
+  from forwarding mode — changing a QoS policy does not require
+  re-specifying the forwarding domain.
+- **Service** — composite that orchestrates the layers above. The
+  operator's primary tool; the individual layers exist for granular
+  control outside of services.
+
+Each layer above physical passes the coherence test (§17) — it
+produces independently useful state, has its own intent record, and
+has a symmetric reverse (§15). Forwarding mode is prerequisite:
+an interface must be in a forwarding domain before policy can be
+applied. But the layers are not coupled — they change independently,
+at different rates, for different reasons.
 
 ---
 
@@ -1167,7 +1197,6 @@ The current operation pairs:
 | Create | Remove |
 |--------|--------|
 | `CreateVLAN` | `DeleteVLAN` |
-| `AddVLANMember` | `RemoveVLANMember` |
 | `CreateVRF` | `DeleteVRF` |
 | `ConfigureInterface` | `UnconfigureInterface` |
 | `BindIPVPN` | `UnbindIPVPN` |
@@ -1178,14 +1207,22 @@ The current operation pairs:
 | `AddBGPPeer` | `RemoveBGPPeer` |
 | `BindMACVPN` | `UnbindMACVPN` |
 | `AddBGPMultihopPeer` | `RemoveBGPMultihopPeer` |
-| `ConfigureIRB` | `RemoveIRB` |
-| `BindMACVPN` (node) | `UnbindMACVPN` (node) |
+| `ConfigureIRB` | `UnconfigureIRB` |
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
-| `ConfigureInterface` | `UnconfigureInterface` |
 
 Baseline operations (no individual reverse — remediation is reprovision):
 `SetupDevice`, `SetPortProperty`
+
+VLAN membership is not a standalone operation — it is a forwarding
+mode decision (§6). Joining a VLAN bridge domain and joining a VRF
+routing domain are the same operation on an interface; the pair
+`ConfigureInterface`/`UnconfigureInterface` covers both.
+
+PortChannel members and ACL rules remain standalone symmetric pairs
+because they are container-subject operations (§30) — the operator
+manages the container's children directly, not through an interface
+forwarding-mode decision.
 
 RefreshService is not a pair — it combines removal and reapplication
 as a single operation. When a service's spec changes after it was
@@ -1357,8 +1394,57 @@ has an IP address with no routing protocol to advertise it.
 
 This principle connects to:
 - §15: the operation boundary defines what has a symmetric reverse
-- §19: one operation = one intent record
+- §19: one resource = one intent record
 - §11: one operation = one ChangeSet
+
+### Right-sizing intent records
+
+The coherence test determines not only what constitutes an operation
+but what constitutes an independent intent record. If a mutation
+doesn't produce independently useful state, it doesn't get its own
+record — it updates the intent of the resource it belongs to.
+
+The resource is the unit of intent (§19). Operations create, evolve,
+and delete a resource's intent record over its lifetime. The record
+captures the resource's current state — not a log of operations that
+acted on it.
+
+Three categories:
+
+- **Standalone resources** pass the coherence test and have
+  independent lifecycles. VLANs, VRFs, ACLs, PortChannels,
+  interfaces, overlays, static routes, the device baseline. Each
+  gets one intent record.
+
+  IRB is standalone but distinct from the forwarding mode pattern.
+  An IRB creates a routed interface on a bridge domain — it
+  requires both VLAN and VRF to exist, and spans both. It is not
+  an interface choosing bridged or routed; it is the entity that
+  bridges L2 and L3. This is why IRB has its own operation and
+  intent, separate from the interface forwarding mode.
+
+- **Structurally subordinate children** fail the coherence test —
+  they are not independently useful without their container. An ACL
+  rule without its ACL table is a fragment of nothing. A bonded port
+  without its LAG has surrendered its independent forwarding role.
+  These are tracked in the parent's intent, which evolves as
+  children are added and removed.
+
+- **Forwarding domain members** — interfaces that join a VLAN or
+  VRF — pass the coherence test. An interface in a VLAN is
+  independently useful; it forwards packets in that bridge domain.
+  These get their own intent record. The container doesn't need to
+  know its members because the members know which container they
+  joined.
+
+The distinction between the last two: is the relationship a
+forwarding decision or a structural subordination? A forwarding
+decision is an interface-level choice — the interface retains its
+identity and chooses which domain to participate in. The interface
+is the subject; the container is context. Structural subordination
+is the opposite — the child surrenders its identity to become a
+component of the parent. The container is the subject; the child
+is the component.
 
 ---
 
@@ -1500,6 +1586,18 @@ composite was applied. Name references the spec that was consumed, if any.
 Params carry the resolved values that were actually written — the ground
 reality for teardown and reconstruction.
 
+The resource is the unit of intent. The intent key is the resource
+— not the operation that created it. Multiple operations act on the
+same resource over its lifetime: creation writes the intent, deletion
+removes it, mutations in between evolve it. For containers with
+structurally subordinate children (§17), child mutations update the
+parent's intent — an ACL rule added to a table evolves the table's
+record. Forwarding domain members (§6, §17) carry their own intent
+on the interface — the container doesn't track them. The intent
+record captures the resource's current state — what should exist
+now — not a journal of operations. This keeps intent O(resources)
+per device (§23), not O(operations over time).
+
 Intent records move through three states. *Unrealized* means declared but
 not yet applied — the intent exists as a record of what should happen, but
 no CONFIG_DB entries have been written for it. *In-flight* means actuation
@@ -1575,6 +1673,19 @@ that catches it until someone asks "why doesn't drift show this entry?"
 
 **The device carries its own intent — not as history, but as living
 records that evolve as operations are applied and removed.**
+
+**Right-sizing intent for reconstruction.** An intent record must
+contain everything needed to reproduce its resource's CONFIG_DB
+entries. For simple resources, the creation parameters suffice. For
+containers with structurally subordinate children (§17) — ACL rules,
+PortChannel members — the intent must include the current membership
+state. Without it, reconstruction produces an empty container and the
+diff shows false drift on a correctly configured device.
+
+Forwarding domain membership is the opposite case. VLAN members and
+VRF interfaces carry their own intent (§6, §17), so the container's
+intent stays simple — just the container's own properties. Members
+are reconstructed from their own intents, not from the container's.
 
 ---
 
@@ -1688,6 +1799,13 @@ When adding a new operation, ask two questions:
    emits them.
 2. "Which additional values does the operation compute?" → resolved
    params, teardown reads them.
+
+**Container membership fields** — ACL rules, PortChannel members —
+are user params. The operator chose them explicitly; they are not
+derived from spec resolution. Snapshot emits them because there is
+no spec to re-derive them from. Teardown reads them for
+reconstruction but also scans CONFIG_DB for actual members (§5:
+device is reality).
 
 ---
 
@@ -2037,8 +2155,9 @@ path works until the edge case the abstraction was designed to prevent.
 
 **Rule 1: If an operation is scoped to an interface, it is a method on
 Interface.** `i.bindVrf(vrfName)` not `interfaceVRFConfig(intfName,
-vrfName)`. Exception: container membership (VLAN members, PortChannel
-members) where the container is the subject.
+vrfName)`. Exception: container membership (PortChannel members, ACL
+rules) where the container is the subject. VLAN membership is handled
+by `configure-interface` — the interface is the subject (§6).
 
 **Rule 2: Config methods belong to the object they describe.** The
 object provides its own identity; callers express intent, not identity.
@@ -2465,7 +2584,7 @@ Legend: **C** = conviction (specific to this architecture) · **P** = establishe
 | 16 | Verb vocabulary | The leading verb is a lifecycle contract: `setup-*` = no reverse, `create-*` = `delete-*`, `bind-*` = `unbind-*` | C |
 | 17 | Operation granularity | An operation is the smallest unit that leaves the device in a consistent, independently useful state | C |
 | 18 | Write ordering and daemon settling | The database is flat but its consumers are not; config functions encode dependency order in the slice | C |
-| 19 | Unified intent model | One record structure for all managed resources — operation, name, params, state lifecycle; the Node intermediates all intent | C |
+| 19 | Unified intent model | One record per managed resource — keyed by resource, evolved by operations, carrying params for teardown and reconstruction; the Node intermediates all intent | C |
 | 20 | On-device intent sufficiency | The device carries enough intent (intent records) to reconstruct expected state; intent record design must serve both teardown and reconstruction | C |
 | 21 | Reconstruct, don't record | Derive expected state from authoritative sources (specs + intent records); CONFIG_DB is for intent, not history | C |
 | 22 | Dual-purpose intent | User params for reconstruction (re-derive from current specs); resolved params for teardown (self-sufficient, spec-independent) | C |

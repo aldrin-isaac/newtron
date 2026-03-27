@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
@@ -22,19 +23,44 @@ type PortChannelConfig struct {
 }
 
 // CreatePortChannel creates a new LAG/PortChannel.
+// Intent-idempotent: if the portchannel intent already exists, returns empty ChangeSet.
 func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChannelConfig) (*ChangeSet, error) {
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
-	if err := n.precondition("create-portchannel", name).
+	if n.GetIntent("portchannel|"+name) != nil {
+		return NewChangeSet(n.name, "device."+sonic.OpCreatePortChannel), nil
+	}
+
+	if err := n.precondition(sonic.OpCreatePortChannel, name).
 		RequirePortChannelNotExists(name).
 		Result(); err != nil {
 		return nil, err
 	}
 
-	cs := NewChangeSet(n.name, "device.create-portchannel")
+	cs := NewChangeSet(n.name, "device."+sonic.OpCreatePortChannel)
 	cs.ReverseOp = "device.delete-portchannel"
 	cs.OperationParams = map[string]string{"name": name}
+
+	intentParams := map[string]string{sonic.FieldName: name}
+	if len(opts.Members) > 0 {
+		intentParams[sonic.FieldMembers] = strings.Join(opts.Members, ",")
+	}
+	if opts.MTU > 0 {
+		intentParams["mtu"] = fmt.Sprintf("%d", opts.MTU)
+	}
+	if opts.MinLinks > 0 {
+		intentParams["min_links"] = fmt.Sprintf("%d", opts.MinLinks)
+	}
+	if opts.Fallback {
+		intentParams["fallback"] = "true"
+	}
+	if opts.FastRate {
+		intentParams["fast_rate"] = "true"
+	}
+	if err := n.writeIntent(cs, sonic.OpCreatePortChannel, "portchannel|"+name, intentParams, []string{"device"}); err != nil {
+		return nil, err
+	}
 
 	fields := map[string]string{
 		"admin_status": "up",
@@ -71,22 +97,10 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 	return cs, nil
 }
 
-// destroyPortChannelConfig returns delete entries for a PortChannel: its members and the PortChannel itself.
+// destroyPortChannelConfig returns delete entries for a PortChannel.
+// Under the DAG, members are removed as children before the PortChannel can be deleted.
 func (n *Node) destroyPortChannelConfig(name string) []sonic.Entry {
-	var entries []sonic.Entry
-
-	// Remove members first
-	if n.configDB != nil {
-		for key := range n.configDB.PortChannelMember {
-			parts := splitKey(key)
-			if len(parts) == 2 && parts[0] == name {
-				entries = append(entries, sonic.Entry{Table: "PORTCHANNEL_MEMBER", Key: key})
-			}
-		}
-	}
-
-	entries = append(entries, sonic.Entry{Table: "PORTCHANNEL", Key: name})
-	return entries
+	return []sonic.Entry{{Table: "PORTCHANNEL", Key: name}}
 }
 
 // DeletePortChannel removes a LAG/PortChannel.
@@ -97,6 +111,9 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
 		func() []sonic.Entry { return n.destroyPortChannelConfig(name) })
 	if err != nil {
+		return nil, err
+	}
+	if err := n.deleteIntent(cs, "portchannel|"+name); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.name).Infof("Deleted PortChannel %s", name)
@@ -122,6 +139,13 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 		return nil, err
 	}
 	cs.OperationParams = map[string]string{"name": pcName, "member": member}
+
+	if err := n.writeIntent(cs, sonic.OpAddPortChannelMember, "portchannel|"+pcName+"|"+member,
+		map[string]string{sonic.FieldName: member},
+		[]string{"portchannel|" + pcName}); err != nil {
+		return nil, err
+	}
+
 	util.WithDevice(n.name).Infof("Added %s to PortChannel %s", member, pcName)
 	return cs, nil
 }
@@ -139,6 +163,12 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member strin
 	if err != nil {
 		return nil, err
 	}
+	cs.OperationParams = map[string]string{"name": pcName, "member": member}
+
+	if err := n.deleteIntent(cs, "portchannel|"+pcName+"|"+member); err != nil {
+		return nil, err
+	}
+
 	util.WithDevice(n.name).Infof("Removed %s from PortChannel %s", member, pcName)
 	return cs, nil
 }

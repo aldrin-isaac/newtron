@@ -1,8 +1,8 @@
 name: acl-lifecycle
 description: |
   Self-contained ACL lifecycle on sw1:Ethernet10 (config-only, no host wired).
-  Tests create-acl-table, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
-  and delete-acl-table primitives with full CONFIG_DB verification.
+  Tests create-acl, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
+  and delete-acl primitives with full CONFIG_DB verification.
 topology: 2node-ngdp
 requires: [boot-ssh]
 
@@ -11,7 +11,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/create-acl-table
+    url: /node/{{device}}/create-acl
     params:
       name: TEST_ACL
       type: L3
@@ -115,7 +115,7 @@ steps:
     action: newtron
     devices: [switch1]
     method: POST
-    url: /node/{{device}}/delete-acl-table
+    url: /node/{{device}}/delete-acl
     params: {name: TEST_ACL}
 
   - name: verify-acl-table-removed

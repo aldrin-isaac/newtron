@@ -752,7 +752,7 @@ func TestCreateRoutePolicy_ExtraCommunityAndPrefixList(t *testing.T) {
 
 func TestScanExistingRoutePolicies_OfflineMode(t *testing.T) {
 	// Verify that scanExistingRoutePolicies in offline mode correctly
-	// delegates to deleteRoutePoliciesConfig (reads shadow configDB).
+	// delegates to scanRoutePoliciesByPrefix (reads shadow configDB).
 	n := testDevice()
 	n.offline = true
 	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
@@ -825,6 +825,10 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 
 	// Register a port and set up the interface
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	{
+		cs := NewChangeSet(n.Name(), "test")
+		n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
+	}
 	iface, _ := n.GetInterface("Ethernet0")
 
 	// Step 1: Apply the service — creates route policies with hash v1
@@ -849,7 +853,7 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 	}
 
 	// Verify route_map_in is stored in binding
-	binding := n.configDB.NewtronIntent["Ethernet0"]
+	binding := n.configDB.NewtronIntent["interface|Ethernet0"]
 	if binding["route_map_in"] == "" {
 		t.Fatal("binding route_map_in is empty — route map name not stored in binding")
 	}
@@ -935,6 +939,10 @@ func TestRefreshService_NoStaleCleanupWhenHashUnchanged(t *testing.T) {
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	{
+		cs := NewChangeSet(n.Name(), "test")
+		n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
+	}
 	iface, _ := n.GetInterface("Ethernet0")
 
 	// Apply the service
@@ -1008,6 +1016,10 @@ func TestRefreshService_PreservesTopologyParams(t *testing.T) {
 	}
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
+	{
+		cs := NewChangeSet(n.Name(), "test")
+		n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
+	}
 	iface, _ := n.GetInterface("Ethernet0")
 
 	// Apply with topology params
@@ -1109,6 +1121,10 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up"})
+	{
+		cs := NewChangeSet(n.Name(), "test")
+		n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
+	}
 
 	ctx := t.Context()
 
@@ -1126,14 +1142,14 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	}
 
 	// Capture the original route map name from the binding
-	b0 := n.configDB.NewtronIntent["Ethernet0"]
+	b0 := n.configDB.NewtronIntent["interface|Ethernet0"]
 	originalRM := b0["route_map_in"]
 	if originalRM == "" {
 		t.Fatal("Ethernet0 binding has no route_map_in after apply")
 	}
 
 	// Verify both interfaces share the same route map via peer group
-	b4 := n.configDB.NewtronIntent["Ethernet4"]
+	b4 := n.configDB.NewtronIntent["interface|Ethernet4"]
 	if b4["route_map_in"] != originalRM {
 		t.Fatalf("expected both interfaces to share route map %s, but Ethernet4 has %s", originalRM, b4["route_map_in"])
 	}
@@ -1215,8 +1231,8 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	}
 
 	// Verify both interfaces now reference the new route map
-	b0After := n.configDB.NewtronIntent["Ethernet0"]
-	b4After := n.configDB.NewtronIntent["Ethernet4"]
+	b0After := n.configDB.NewtronIntent["interface|Ethernet0"]
+	b4After := n.configDB.NewtronIntent["interface|Ethernet4"]
 	if b0After["route_map_in"] != newRM {
 		t.Errorf("Ethernet0 binding should reference new route map %s, got %s", newRM, b0After["route_map_in"])
 	}
@@ -1257,6 +1273,10 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 
 	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 	n.RegisterPort("Ethernet4", map[string]string{"admin_status": "up"})
+	{
+		cs := NewChangeSet(n.Name(), "test")
+		n.writeIntent(cs, "setup-device", "device", map[string]string{}, nil)
+	}
 
 	ctx := t.Context()
 
@@ -1334,8 +1354,8 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 	}
 }
 
-func TestDeleteRoutePoliciesConfig_FindsHashedNames(t *testing.T) {
-	// Verify that deleteRoutePoliciesConfig scans by prefix and finds
+func TestScanRoutePoliciesByPrefix_FindsHashedNames(t *testing.T) {
+	// Verify that scanRoutePoliciesByPrefix scans by prefix and finds
 	// content-hashed route map, prefix set, and community set entries.
 	n := testDevice()
 	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
@@ -1344,7 +1364,7 @@ func TestDeleteRoutePoliciesConfig_FindsHashedNames(t *testing.T) {
 	n.configDB.PrefixSet["SVC_IMPORT_PL_10_F1E2D3C4|20"] = sonic.PrefixSetEntry{}
 	n.configDB.CommunitySet["SVC_IMPORT_CS_10_B7A4E9F1"] = sonic.CommunitySetEntry{}
 
-	entries := n.deleteRoutePoliciesConfig("SVC")
+	entries := n.scanRoutePoliciesByPrefix("SVC")
 
 	tables := map[string]int{}
 	for _, e := range entries {

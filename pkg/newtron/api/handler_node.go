@@ -217,6 +217,24 @@ func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
+func (s *Server) handleIntentTree(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	kind := r.URL.Query().Get("kind")
+	resource := r.URL.Query().Get("resource")
+	ancestors := r.URL.Query().Get("ancestors") == "true"
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.IntentTree(kind, resource, ancestors), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleListLAGs(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
@@ -313,21 +331,11 @@ func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
 // executeOperation dispatches a single Operation to the appropriate Node/Interface method.
 func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error {
 	switch op.Action {
-	case "configure-bgp":
-		return n.ConfigureBGP(ctx)
-	case "configure-loopback":
-		return n.ConfigureLoopback(ctx)
-	case "remove-loopback":
-		return n.RemoveLoopback(ctx)
-	case "setup-vtep":
-		sourceIP, _ := op.Params["source_ip"].(string)
-		return n.SetupVTEP(ctx, sourceIP)
-	case "teardown-vtep":
-		return n.TeardownVTEP(ctx)
 	case "create-vlan":
 		id, _ := intFromAny(op.Params["id"])
 		desc, _ := op.Params["description"].(string)
-		return n.CreateVLAN(ctx, id, newtron.VLANConfig{Description: desc})
+		vni, _ := intFromAny(op.Params["vni"])
+		return n.CreateVLAN(ctx, id, newtron.VLANConfig{Description: desc, L2VNI: vni})
 	case "delete-vlan":
 		id, _ := intFromAny(op.Params["id"])
 		return n.DeleteVLAN(ctx, id)
@@ -357,7 +365,14 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 		return n.DeleteACL(ctx, name)
 	case "create-portchannel":
 		name := strFromAny(op.Params["name"])
-		return n.CreatePortChannel(ctx, name, newtron.PortChannelConfig{Name: name})
+		return n.CreatePortChannel(ctx, name, newtron.PortChannelConfig{
+			Name:     name,
+			Members:  strSliceFromAny(op.Params["members"]),
+			MTU:      intOrZero(op.Params["mtu"]),
+			MinLinks: intOrZero(op.Params["min_links"]),
+			Fallback: boolFromAny(op.Params["fallback"]),
+			FastRate: boolFromAny(op.Params["fast_rate"]),
+		})
 	case "delete-portchannel":
 		name := strFromAny(op.Params["name"])
 		return n.DeletePortChannel(ctx, name)
@@ -367,10 +382,24 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 			return err
 		}
 		service := strFromAny(op.Params["service"])
-		return iface.ApplyService(ctx, service, newtron.ApplyServiceOpts{
+		opts := newtron.ApplyServiceOpts{
 			IPAddress: strFromAny(op.Params["ip_address"]),
 			PeerAS:    intOrZero(op.Params["peer_as"]),
-		})
+			VLAN:      intOrZero(op.Params["vlan_id"]),
+		}
+		if rrc := strFromAny(op.Params["route_reflector_client"]); rrc != "" {
+			if opts.Params == nil {
+				opts.Params = make(map[string]string)
+			}
+			opts.Params["route_reflector_client"] = rrc
+		}
+		if nhs := strFromAny(op.Params["next_hop_self"]); nhs != "" {
+			if opts.Params == nil {
+				opts.Params = make(map[string]string)
+			}
+			opts.Params["next_hop_self"] = nhs
+		}
+		return iface.ApplyService(ctx, service, opts)
 	case "remove-service":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
@@ -388,7 +417,7 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 		if err != nil {
 			return err
 		}
-		return iface.UnconfigureInterface(ctx, strFromAny(op.Params["vrf"]), strFromAny(op.Params["ip"]))
+		return iface.UnconfigureInterface(ctx)
 	case "bind-acl":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
@@ -418,13 +447,18 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 		if err != nil {
 			return err
 		}
-		return iface.Set(ctx, strFromAny(op.Params["property"]), strFromAny(op.Params["value"]))
+		return iface.SetProperty(ctx, strFromAny(op.Params["property"]), strFromAny(op.Params["value"]))
 	case "configure-interface":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
 			return err
 		}
-		return iface.ConfigureInterface(ctx, strFromAny(op.Params["vrf"]), strFromAny(op.Params["ip"]))
+		vlanID, _ := intFromAny(op.Params["vlan_id"])
+		tagged, _ := op.Params["tagged"].(bool)
+		return iface.ConfigureInterface(ctx, newtron.InterfaceConfig{
+			VRF: strFromAny(op.Params["vrf"]), IP: strFromAny(op.Params["ip"]),
+			VLAN: vlanID, Tagged: tagged,
+		})
 	case "node-bind-macvpn":
 		vlanID, _ := intFromAny(op.Params["vlan_id"])
 		vni, _ := intFromAny(op.Params["vni"])
@@ -432,13 +466,6 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 	case "node-unbind-macvpn":
 		vlanID, _ := intFromAny(op.Params["vlan_id"])
 		return n.UnbindMACVPN(ctx, vlanID)
-	case "configure-route-reflector":
-		return n.ConfigureRouteReflector(ctx, newtron.RouteReflectorOpts{
-			ClusterID: strFromAny(op.Params["cluster_id"]),
-			LocalASN:  intOrZero(op.Params["local_asn"]),
-			RouterID:  strFromAny(op.Params["router_id"]),
-			LocalAddr: strFromAny(op.Params["local_addr"]),
-		})
 	case "apply-qos":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
@@ -460,69 +487,17 @@ func executeOperation(ctx context.Context, n *newtron.Node, op Operation) error 
 			NeighborIP:  strFromAny(op.Params["neighbor_ip"]),
 			RemoteAS:    intOrZero(op.Params["remote_as"]),
 			Description: strFromAny(op.Params["description"]),
+			Multihop:    intOrZero(op.Params["multihop"]),
 		})
 	case "remove-bgp-peer":
 		iface, err := n.Interface(op.Interface)
 		if err != nil {
 			return err
 		}
-		return iface.RemoveBGPPeer(ctx, strFromAny(op.Params["ip"]))
+		return iface.RemoveBGPPeer(ctx)
 	default:
 		return fmt.Errorf("unknown action: %s", op.Action)
 	}
-}
-
-func (s *Server) handleConfigureBGP(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.ConfigureBGP(ctx)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleSetupVTEP(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	var req SetupVTEPRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.SetupVTEP(ctx, req.SourceIP)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleTeardownVTEP(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.TeardownVTEP(ctx)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
 }
 
 func (s *Server) handleNodeBindMACVPN(w http.ResponseWriter, r *http.Request) {
@@ -567,59 +542,6 @@ func (s *Server) handleNodeUnbindMACVPN(w http.ResponseWriter, r *http.Request) 
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
 		return n.UnbindMACVPN(ctx, req.VlanID)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleConfigureRouteReflector(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	var req ConfigureRouteReflectorRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.ConfigureRouteReflector(ctx, newtron.RouteReflectorOpts(req))
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleConfigureLoopback(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.ConfigureLoopback(ctx)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleRemoveLoopback(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveLoopback(ctx)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1026,68 +948,19 @@ func (s *Server) handleRemovePortChannelMember(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, val)
 }
 
-// ============================================================================
-// VLAN member operations
-// ============================================================================
-
-func (s *Server) handleAddVLANMember(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUnconfigureIRB(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	var req VLANMemberRequest
+	var req UnconfigureIRBRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddVLANMember(ctx, req.ID, req.Interface, req.Tagged)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, val)
-}
-
-func (s *Server) handleRemoveVLANMember(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	var req struct {
-		ID        int    `json:"id"`
-		Interface string `json:"interface"`
-	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveVLANMember(ctx, req.ID, req.Interface)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleRemoveIRB(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	var req RemoveIRBRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveIRB(ctx, req.VlanID)
+		return n.UnconfigureIRB(ctx, req.VlanID)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1151,7 +1024,7 @@ func (s *Server) handleUnbindIPVPN(w http.ResponseWriter, r *http.Request) {
 // BGP and static route operations
 // ============================================================================
 
-func (s *Server) handleAddBGPMultihopPeer(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAddBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -1163,7 +1036,7 @@ func (s *Server) handleAddBGPMultihopPeer(w http.ResponseWriter, r *http.Request
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.AddBGPMultihopPeer(ctx, req)
+		return n.AddBGPEVPNPeer(ctx, req)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1172,7 +1045,7 @@ func (s *Server) handleAddBGPMultihopPeer(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, val)
 }
 
-func (s *Server) handleRemoveBGPMultihopPeer(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRemoveBGPEVPNPeer(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
@@ -1186,23 +1059,7 @@ func (s *Server) handleRemoveBGPMultihopPeer(w http.ResponseWriter, r *http.Requ
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveBGPMultihopPeer(ctx, body.IP)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
-func (s *Server) handleRemoveBGP(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	opts := execOpts(r)
-	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.RemoveBGPGlobals(ctx)
+		return n.RemoveBGPEVPNPeer(ctx, body.IP)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1260,21 +1117,6 @@ func (s *Server) handleRemoveStaticRoute(w http.ResponseWriter, r *http.Request)
 // Device management operations
 // ============================================================================
 
-func (s *Server) handleApplyFRRDefaults(w http.ResponseWriter, r *http.Request) {
-	_, nodeActor := s.requireNodeActor(w, r)
-	if nodeActor == nil {
-		return
-	}
-	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
-		return nil, n.ApplyFRRDefaults(r.Context())
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
 func (s *Server) handleRestartDaemon(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
@@ -1299,25 +1141,25 @@ func (s *Server) handleRestartDaemon(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
-func (s *Server) handleSetDeviceMetadata(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
 		return
 	}
-	var req SetDeviceMetadataRequest
+	var req newtron.SetupDeviceOpts
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
 		return
 	}
 	opts := execOpts(r)
 	val, err := nodeActor.connectAndExecute(r.Context(), opts, func(ctx context.Context, n *newtron.Node) error {
-		return n.SetDeviceMetadata(ctx, req.Fields)
+		return n.SetupDevice(ctx, req)
 	})
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, val)
+	writeJSON(w, http.StatusCreated, val)
 }
 
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
@@ -1538,6 +1380,25 @@ func intFromAny(v any) (int, bool) {
 func intOrZero(v any) int {
 	n, _ := intFromAny(v)
 	return n
+}
+
+func boolFromAny(v any) bool {
+	b, _ := v.(bool)
+	return b
+}
+
+func strSliceFromAny(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // ============================================================================

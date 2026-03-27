@@ -24,8 +24,6 @@ Examples:
   newtron -D leaf1-ny vlan list
   newtron -D leaf1-ny vlan show 100
   newtron -D leaf1-ny vlan create 100
-  newtron -D leaf1-ny vlan add-interface 100 Ethernet0 --tagged
-  newtron -D leaf1-ny vlan remove-interface 100 Ethernet0
   newtron -D leaf1-ny vlan status`,
 }
 
@@ -206,56 +204,6 @@ Examples:
 	},
 }
 
-var vlanTagged bool
-
-var vlanAddInterfaceCmd = &cobra.Command{
-	Use:   "add-interface <vlan-id> <interface>",
-	Short: "Add an interface to a VLAN",
-	Long: `Add an interface to a VLAN as a tagged or untagged member.
-
-Requires -D (device) flag.
-
-Examples:
-  newtron -D leaf1-ny vlan add-interface 100 Ethernet0 --tagged
-  newtron -D leaf1-ny vlan add-interface 100 PortChannel100`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		vlanID, err := parseVLANID(args[0])
-		if err != nil {
-			return err
-		}
-		interfaceName := args[1]
-		if err := requireDevice(); err != nil {
-			return err
-		}
-		return displayWriteResult(app.client.AddVLANMember(app.deviceName, vlanID, interfaceName, vlanTagged, execOpts()))
-	},
-}
-
-var vlanRemoveInterfaceCmd = &cobra.Command{
-	Use:   "remove-interface <vlan-id> <interface>",
-	Short: "Remove an interface from a VLAN",
-	Long: `Remove an interface from a VLAN.
-
-Requires -D (device) flag.
-
-Examples:
-  newtron -D leaf1-ny vlan remove-interface 100 Ethernet0 -x
-  newtron -D leaf1-ny vlan remove-interface 100 PortChannel100 -x`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		vlanID, err := parseVLANID(args[0])
-		if err != nil {
-			return err
-		}
-		interfaceName := args[1]
-		if err := requireDevice(); err != nil {
-			return err
-		}
-		return displayWriteResult(app.client.RemoveVLANMember(app.deviceName, vlanID, interfaceName, execOpts()))
-	},
-}
-
 var vlanDeleteCmd = &cobra.Command{
 	Use:   "delete <vlan-id>",
 	Short: "Delete a VLAN",
@@ -394,8 +342,6 @@ func parseVLANID(s string) (int, error) {
 func init() {
 	vlanCreateCmd.Flags().StringVar(&vlanDescription, "description", "", "VLAN description")
 
-	vlanAddInterfaceCmd.Flags().BoolVar(&vlanTagged, "tagged", false, "Add as tagged member")
-
 	vlanConfigureIRBCmd.Flags().StringVar(&sviVRF, "vrf", "", "VRF to bind the IRB to")
 	vlanConfigureIRBCmd.Flags().StringVar(&sviIP, "ip", "", "IP address with prefix (e.g., 10.1.100.1/24)")
 	vlanConfigureIRBCmd.Flags().StringVar(&sviAnycastGW, "anycast-gw", "", "Anycast gateway MAC (SAG)")
@@ -405,8 +351,6 @@ func init() {
 	vlanCmd.AddCommand(vlanStatusCmd)
 	vlanCmd.AddCommand(vlanCreateCmd)
 	vlanCmd.AddCommand(vlanDeleteCmd)
-	vlanCmd.AddCommand(vlanAddInterfaceCmd)
-	vlanCmd.AddCommand(vlanRemoveInterfaceCmd)
 	vlanCmd.AddCommand(vlanConfigureIRBCmd)
 	vlanCmd.AddCommand(vlanBindMacvpnCmd)
 	vlanCmd.AddCommand(vlanUnbindMacvpnCmd)
