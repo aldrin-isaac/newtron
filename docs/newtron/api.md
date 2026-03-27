@@ -28,28 +28,28 @@ building tooling, integrating with CI/CD, or extending the CLI.
 8. [Node Write Operations](#8-node-write-operations)
 9. [Node Lifecycle Operations](#9-node-lifecycle-operations)
 10. [Node Diagnostics](#10-node-diagnostics)
-11. [Composite Operations](#11-composite-operations)
-12. [Interface Operations](#12-interface-operations)
-13. [Batch Execution](#13-batch-execution)
-14. [Types Reference](#14-types-reference)
-15. [Error Reference](#15-error-reference)
-16. [Server Configuration](#16-server-configuration)
+11. [Intent, History, Settings, and Drift](#11-intent-history-settings-and-drift)
+12. [Composite Operations](#12-composite-operations)
+13. [Interface Operations](#13-interface-operations)
+14. [Batch Execution](#14-batch-execution)
+15. [Types Reference](#15-types-reference)
+16. [Error Reference](#16-error-reference)
+17. [Server Configuration](#17-server-configuration)
 
 ### Endpoint Quick Reference
 
 All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{device}`, `{i}` = `{name}` (interface).
 
-**Server & Specs** (§3–§5)
+**Server & Specs** (S3-S5)
 
 | Method | Path | What it does |
 |--------|------|--------------|
 | POST | `/network` | Register a network |
 | GET | `/network` | List networks |
-| DELETE | `/network/{n}` | Unregister a network |
+| POST | `/network/{n}/unregister` | Unregister a network |
 | POST | `/network/{n}/reload` | Reload specs from disk |
-| GET | `/network/{n}/service` | List services (also: `/ipvpn`, `/macvpn`, `/qos-policy`, `/filter`, `/platform`) |
-| GET | `/network/{n}/service/{name}` | Show service (also: ipvpn, macvpn, qos-policy, filter, platform) |
-| GET | `/network/{n}/route-policy` | List route policy names (also: `/prefix-list`) |
+| GET | `/network/{n}/service` | List services (also: `/ipvpn`, `/macvpn`, `/qos-policy`, `/filter`, `/platform`, `/route-policy`, `/prefix-list`) |
+| GET | `/network/{n}/service/{name}` | Show service (also: ipvpn, macvpn, qos-policy, filter, platform, route-policy, prefix-list) |
 | GET | `/network/{n}/profile` | List device profile names |
 | GET | `/network/{n}/profile/{name}` | Show device profile |
 | GET | `/network/{n}/zone` | List zone names |
@@ -58,26 +58,32 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | GET | `/network/{n}/host/{name}` | Get host profile |
 | GET | `/network/{n}/feature` | List features (also: `/{name}/dependency`, `/{name}/unsupported-due-to`) |
 | GET | `/network/{n}/platform/{name}/supports/{feature}` | Check platform feature support |
-| POST | `/network/{n}/service` | Create service (also: ipvpn, macvpn, qos-policy, filter) |
-| DELETE | `/network/{n}/service/{name}` | Delete service (also: ipvpn, macvpn, qos-policy, filter) |
-| POST | `/network/{n}/profile` | Create device profile |
-| DELETE | `/network/{n}/profile/{name}` | Delete device profile |
-| POST | `/network/{n}/zone` | Create zone |
-| DELETE | `/network/{n}/zone/{name}` | Delete zone |
-| POST | `/network/{n}/qos-policy/{name}/queue` | Add queue to QoS policy |
-| POST | `/network/{n}/filter/{name}/rule` | Add rule to filter |
+| POST | `/network/{n}/create-service` | Create service (also: create-ipvpn, create-macvpn, etc.) |
+| POST | `/network/{n}/delete-service` | Delete service (also: delete-ipvpn, delete-macvpn, etc.) |
+| POST | `/network/{n}/create-profile` | Create device profile |
+| POST | `/network/{n}/delete-profile` | Delete device profile |
+| POST | `/network/{n}/create-zone` | Create zone |
+| POST | `/network/{n}/delete-zone` | Delete zone |
+| POST | `/network/{n}/add-qos-queue` | Add queue to QoS policy |
+| POST | `/network/{n}/remove-qos-queue` | Remove queue from QoS policy |
+| POST | `/network/{n}/add-filter-rule` | Add rule to filter |
+| POST | `/network/{n}/remove-filter-rule` | Remove rule from filter |
+| POST | `/network/{n}/add-prefix-list-entry` | Add entry to prefix list |
+| POST | `/network/{n}/remove-prefix-list-entry` | Remove entry from prefix list |
+| POST | `/network/{n}/add-route-policy-rule` | Add rule to route policy |
+| POST | `/network/{n}/remove-route-policy-rule` | Remove rule from route policy |
 
-**Provisioning & Composites** (§6, §11)
+**Provisioning & Composites** (S6, S12)
 
 | Method | Path | What it does |
 |--------|------|--------------|
 | POST | `/network/{n}/provision` | Provision devices from topology |
-| POST | `/network/{n}/composite/{d}` | Generate device composite (inspect only) |
-| POST | `/network/{n}/node/{d}/composite/generate` | Generate + store composite (returns UUID handle) |
-| POST | `/network/{n}/node/{d}/composite/verify` | Verify composite against device (handle in body) |
-| POST | `/network/{n}/node/{d}/composite/deliver` | Deliver composite to device (handle in body) |
+| POST | `/network/{n}/node/{d}/init-device` | Initialize device (clean factory config) |
+| POST | `/network/{n}/node/{d}/generate-composite` | Generate + store composite (returns UUID handle) |
+| POST | `/network/{n}/node/{d}/verify-composite` | Verify composite against device (handle in body) |
+| POST | `/network/{n}/node/{d}/deliver-composite` | Deliver composite to device (handle in body) |
 
-**Device Reads** (§7) — all `GET /network/{n}/node/{d}/...`
+**Device Reads** (S7) -- all `GET /network/{n}/node/{d}/...`
 
 | Path suffix | Returns |
 |-------------|---------|
@@ -99,34 +105,52 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/neighbor` | BGP sessions (alias for `/bgp/check`) |
 | `/route/{vrf}/{prefix...}` | APP_DB route lookup |
 | `/route-asic/{prefix...}` | ASIC_DB route lookup |
+| `/intent/tree` | Intent DAG tree view |
+| `/intents` | List all intent records |
 
-**Device Writes** (§8) — `POST` (and `DELETE`) under `/network/{n}/node/{d}/...`
+**Device Writes** (S8) -- `POST` under `/network/{n}/node/{d}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
-| `/vlan`, `DELETE /vlan/{id}` | Create/delete VLAN |
-| `/vrf`, `DELETE /vrf/{name}` | Create/delete VRF |
-| `/acl`, `DELETE /acl/{name}` | Create/delete ACL |
-| `/portchannel`, `DELETE /portchannel/{name}` | Create/delete PortChannel |
-| `/svi`, `/remove-svi` | Configure/remove SVI |
-| `/configure-bgp`, `/remove-bgp-globals` | Configure/remove BGP |
-| `/setup-evpn`, `/teardown-evpn` | Set up/tear down EVPN |
-| `/configure-loopback`, `/remove-loopback` | Configure/remove loopback |
+| `/setup-device` | Unified baseline setup (metadata + loopback + BGP + VTEP + RR) |
+| `/create-vlan`, `/delete-vlan` | Create/delete VLAN |
+| `/configure-irb`, `/unconfigure-irb` | Configure/unconfigure IRB (SVI) |
+| `/create-vrf`, `/delete-vrf` | Create/delete VRF |
+| `/bind-ipvpn`, `/unbind-ipvpn` | Bind/unbind IP-VPN to VRF |
+| `/bind-macvpn`, `/unbind-macvpn` | Bind/unbind MAC-VPN (node-level, VLAN to L2VNI) |
+| `/add-static-route`, `/remove-static-route` | Add/remove static route |
+| `/create-acl`, `/delete-acl` | Create/delete ACL table |
+| `/add-acl-rule`, `/remove-acl-rule` | Add/remove ACL rule |
+| `/create-portchannel`, `/delete-portchannel` | Create/delete PortChannel |
+| `/add-portchannel-member`, `/remove-portchannel-member` | Add/remove PortChannel member |
+| `/add-bgp-evpn-peer`, `/remove-bgp-evpn-peer` | Add/remove EVPN overlay peer |
 | `/apply-qos`, `/remove-qos` | Apply/remove QoS (node-level) |
-| `/set-metadata` | Update device metadata |
 | `/cleanup` | Remove orphaned resources |
 
-Plus sub-resource operations (members, routes, rules, neighbors) — see §8 for the full list.
+**Intent, History, Settings, Drift** (S11)
 
-**Lifecycle & Diagnostics** (§9–§10) — all `POST` unless noted
+| Method | Path suffix | What it does |
+|--------|-------------|--------------|
+| GET | `/intents` | List all intent records |
+| GET | `/intent/tree` | Intent DAG tree view |
+| GET | `/zombie` | Read zombie intent |
+| POST | `/rollback-zombie` | Rollback zombie intent |
+| POST | `/clear-zombie` | Clear zombie intent |
+| GET | `/history` | Read operation history |
+| POST | `/rollback-history` | Rollback last operation |
+| GET | `/settings` | Read device settings |
+| PUT | `/settings` | Write device settings |
+| GET | `/drift` | Per-device drift detection |
+| GET | `/network/{n}/drift` | Network-wide drift detection |
+
+**Lifecycle & Diagnostics** (S9-S10) -- all `POST` unless noted
 
 | Path suffix | What it does |
 |-------------|--------------|
-| `/config-reload` | Reload CONFIG_DB from disk |
+| `/reload-config` | Reload CONFIG_DB from disk |
 | `/save-config` | Save CONFIG_DB to disk |
 | `/refresh` | Refresh cached CONFIG_DB (supports `?timeout=`) |
-| `/restart-service` | Restart a SONiC service |
-| `/apply-frr-defaults` | Apply FRR default config |
+| `/restart-daemon` | Restart a SONiC daemon |
 | `/ssh-command` | Execute SSH command |
 | `/verify-committed` | Verify last ChangeSet |
 | `GET /configdb/{table}` | List CONFIG_DB keys |
@@ -134,20 +158,19 @@ Plus sub-resource operations (members, routes, rules, neighbors) — see §8 for
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
 | `GET /statedb/{table}/{key}` | Read STATE_DB entry |
 
-**Interface Operations** (§12) — all `POST /network/{n}/node/{d}/interface/{i}/...`
+**Interface Operations** (S13) -- all `POST /network/{n}/node/{d}/interface/{i}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
 | `/apply-service`, `/remove-service`, `/refresh-service` | Service lifecycle |
-| `/set-ip`, `/remove-ip` | IP address |
-| `/set-vrf` | VRF binding |
+| `/configure-interface`, `/unconfigure-interface` | Configure/unconfigure interface |
 | `/bind-acl`, `/unbind-acl` | ACL binding |
 | `/bind-macvpn`, `/unbind-macvpn` | MAC-VPN binding |
-| `/add-bgp-neighbor`, `/remove-bgp-neighbor` | BGP neighbor |
+| `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/apply-qos`, `/remove-qos` | QoS policy |
-| `/set` | Generic property |
+| `/set-port-property` | Set port property |
 
-**Batch** (§13) — `POST /network/{n}/node/{d}/execute`
+**Batch** (S14) -- `POST /network/{n}/node/{d}/execute`
 
 ---
 
@@ -203,16 +226,16 @@ The mapping from Go error types to HTTP status codes:
 
 Two query parameters control write behavior on endpoints that modify device
 CONFIG_DB (node write operations and interface operations that use the
-Lock → fn → Commit → Save cycle):
+Lock -> fn -> Commit -> Save cycle):
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `dry_run` | string | `"false"` | When `"true"`, builds the ChangeSet but does not commit to Redis. The response `preview` field shows what would change. |
 | `no_save` | string | `"false"` | When `"true"`, commits to Redis but skips `config save` (changes persist in running config only, lost on reboot). |
 
-These parameters apply to endpoints documented with "**Query parameters:** `dry_run`, `no_save`" below. Read-only endpoints and lifecycle operations (config-reload, save-config, restart-service, ssh-command) ignore them.
+These parameters apply to endpoints documented with "**Query parameters:** `dry_run`, `no_save`" below. Read-only endpoints and lifecycle operations (reload-config, save-config, restart-daemon, ssh-command) ignore them.
 
-Network spec write endpoints (§5) also accept `dry_run` — when `"true"`, the spec
+Network spec write endpoints (S5) also accept `dry_run` -- when `"true"`, the spec
 is validated but not persisted to disk.
 
 ### Path Parameters
@@ -230,7 +253,7 @@ integers return 400.
 ### Authentication
 
 The server has no authentication middleware. It is designed for trusted-network
-deployment — the management network where SONiC devices and automation tools run.
+deployment -- the management network where SONiC devices and automation tools run.
 Access control is enforced at the network level (firewall rules, SSH tunnels), not
 at the application level.
 
@@ -243,15 +266,15 @@ duration return 504 Gateway Timeout.
 
 The server caches SSH connections to devices between requests. After a configurable
 idle timeout (default 5 minutes), unused connections are automatically closed. Each
-request still refreshes CONFIG_DB from Redis before operating — only the SSH tunnel
-is reused. See [§16 Server Configuration](#16-server-configuration) for tuning.
+request still refreshes CONFIG_DB from Redis before operating -- only the SSH tunnel
+is reused. See [S17 Server Configuration](#17-server-configuration) for tuning.
 
 ### Example Request
 
 A complete curl example showing the request/response cycle:
 
 ```bash
-curl -s -X POST http://localhost:8080/network/default/node/switch1/vlan \
+curl -s -X POST http://localhost:8080/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{"id": 100, "description": "Customer VLAN"}' | jq .
 ```
@@ -271,7 +294,7 @@ curl -s -X POST http://localhost:8080/network/default/node/switch1/vlan \
 On error:
 
 ```bash
-curl -s -X POST http://localhost:8080/network/default/node/switch1/vlan \
+curl -s -X POST http://localhost:8080/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{}' | jq .
 ```
@@ -302,7 +325,7 @@ curl -X POST http://localhost:8080/network \
   -d '{"id": "default", "spec_dir": "/etc/newtron"}'
 ```
 
-See [§3 Server Management](#3-server-management).
+See [S3 Server Management](#3-server-management).
 
 ### 2. Provision devices from the topology
 
@@ -314,7 +337,7 @@ curl -X POST http://localhost:8080/network/default/provision \
 ```
 
 This generates a complete CONFIG_DB composite for each device (BGP, loopback,
-EVPN, interfaces) and delivers it. See [§6 Provisioning](#6-provisioning).
+EVPN, interfaces) and delivers it. See [S6 Provisioning](#6-provisioning).
 
 ### 3. Verify health after provisioning
 
@@ -326,7 +349,7 @@ curl http://localhost:8080/network/default/node/switch1/bgp/check
 curl http://localhost:8080/network/default/node/switch1/health
 ```
 
-See [§7 Node Read Operations](#7-node-read-operations).
+See [S7 Node Read Operations](#7-node-read-operations).
 
 ### 4. Apply services to interfaces
 
@@ -339,7 +362,7 @@ curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethern
 
 Services are the primary operational unit. `apply-service` creates all required
 CONFIG_DB infrastructure (VLANs, VRFs, VNI mappings, ACLs, QoS) automatically.
-See [§12 Interface Operations](#12-interface-operations).
+See [S13 Interface Operations](#13-interface-operations).
 
 ### 5. Verify the applied configuration
 
@@ -351,14 +374,14 @@ curl -X POST http://localhost:8080/network/default/node/switch1/verify-committed
 curl http://localhost:8080/network/default/node/switch1/route/default/10.1.1.0/30
 ```
 
-See [§9 Node Lifecycle Operations](#9-node-lifecycle-operations) and [§7 Node
+See [S9 Node Lifecycle Operations](#9-node-lifecycle-operations) and [S7 Node
 Read Operations](#7-node-read-operations).
 
 ### 6. Day-2 operations
 
 ```bash
 # Preview a change without applying (dry-run)
-curl -X POST 'http://localhost:8080/network/default/node/switch1/vlan?dry_run=true' \
+curl -X POST 'http://localhost:8080/network/default/node/switch1/create-vlan?dry_run=true' \
   -H "Content-Type: application/json" \
   -d '{"id": 200, "description": "New VLAN"}'
 
@@ -371,9 +394,9 @@ curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethern
 
 ### When to use batch execution
 
-For operations that should be atomic — all succeed or none take effect — use
-the batch execute endpoint ([§13](#13-batch-execution)). This is common during
-provisioning-like flows where you need to configure BGP, EVPN, and services
+For operations that should be atomic -- all succeed or none take effect -- use
+the batch execute endpoint ([S14](#14-batch-execution)). This is common during
+provisioning-like flows where you need to configure baseline and services
 in a single ChangeSet:
 
 ```bash
@@ -382,8 +405,8 @@ curl -X POST http://localhost:8080/network/default/node/switch1/execute \
   -d '{
     "execute": true,
     "operations": [
-      {"action": "configure-bgp"},
-      {"action": "setup-evpn", "params": {"source_ip": "10.0.0.1"}},
+      {"action": "create-vlan", "params": {"id": 100}},
+      {"action": "create-vrf", "params": {"name": "CUSTOMER"}},
       {"action": "apply-service", "interface": "Ethernet0",
        "params": {"service": "customer-l3", "ip_address": "10.1.1.1/30"}}
     ]
@@ -391,7 +414,7 @@ curl -X POST http://localhost:8080/network/default/node/switch1/execute \
 ```
 
 For ad-hoc, individual changes (adding a VLAN, checking status), use the
-dedicated endpoints — they're simpler and the response is the same `WriteResult`.
+dedicated endpoints -- they're simpler and the response is the same `WriteResult`.
 
 ---
 
@@ -450,9 +473,9 @@ List all registered networks.
 The `nodes` field lists device names from the topology file (empty if `has_topology`
 is false).
 
-### DELETE /network/{netID}
+### POST /network/{netID}/unregister
 
-Unregister a network. Fails if any device connections (NodeActors) are active.
+Unregister a network. Closes all cached SSH connections for the network.
 
 **Path parameters:**
 
@@ -467,10 +490,6 @@ Unregister a network. Fails if any device connections (NodeActors) are active.
 ```
 
 **Status codes:** 200 success, 500 network not registered or has active node connections
-
-Note: unlike `GET` endpoints that return 404 for unknown networks (via
-`notRegisteredError`), this endpoint returns 500 because `UnregisterNetwork`
-uses a plain error.
 
 ### POST /network/{netID}/reload
 
@@ -504,7 +523,7 @@ POST /network/default/reload
 
 **Notes:**
 - All cached SSH connections are closed. The next device operation will reconnect.
-- Spec mutations made via the API (service create, filter add-rule, etc.) are safe —
+- Spec mutations made via the API (service create, filter add-rule, etc.) are safe --
   they write to disk immediately via atomic temp+rename. Reload re-reads from disk,
   so no API changes are lost.
 - The operation is atomic from the caller's perspective: the old actor is stopped and
@@ -515,7 +534,7 @@ POST /network/default/reload
 
 ## 4. Network Spec Reads
 
-These endpoints read from the in-memory network spec — service definitions, VPN
+These endpoints read from the in-memory network spec -- service definitions, VPN
 specs, QoS policies, filters, platforms, device profiles, zones, and topology
 metadata. They do not connect to any device; they read what was loaded from the
 spec directory at registration time.
@@ -525,7 +544,7 @@ through the NetworkActor to prevent concurrent modification during spec writes.
 
 ### Spec Resource Endpoints (List / Show)
 
-Eight resource types follow an identical pattern — list all returns an array, show
+Ten resource types follow an identical pattern -- list all returns an array, show
 one by name returns a single object (or 404 if not found):
 
 | Resource | List endpoint | Show endpoint | Response type |
@@ -536,28 +555,20 @@ one by name returns a single object (or 404 if not found):
 | QoS Policies | `GET /network/{netID}/qos-policy` | `GET .../qos-policy/{name}` | [`QoSPolicyDetail`](#qospolicydetail) |
 | Filters | `GET /network/{netID}/filter` | `GET .../filter/{name}` | [`FilterDetail`](#filterdetail) |
 | Platforms | `GET /network/{netID}/platform` | `GET .../platform/{name}` | [`PlatformDetail`](#platformdetail) |
+| Route Policies | `GET /network/{netID}/route-policy` | `GET .../route-policy/{name}` | Route policy detail |
+| Prefix Lists | `GET /network/{netID}/prefix-list` | `GET .../prefix-list/{name}` | Prefix list detail |
 | Profiles | `GET /network/{netID}/profile` | `GET .../profile/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
 | Zones | `GET /network/{netID}/zone` | `GET .../zone/{name}` | [`ZoneDetail`](#zonedetail) |
 
-All response types are defined in [§14 Types Reference](#14-types-reference).
+All response types are defined in [S15 Types Reference](#15-types-reference).
 
 **Example:**
 
 ```
-GET /network/default/service          → {"data": [ ... array of ServiceDetail ... ]}
-GET /network/default/service/transit  → {"data": { ... single ServiceDetail ... }}
-GET /network/default/service/missing  → {"error": "not found: service 'missing'"}
+GET /network/default/service          -> {"data": [ ... array of ServiceDetail ... ]}
+GET /network/default/service/transit  -> {"data": { ... single ServiceDetail ... }}
+GET /network/default/service/missing  -> {"error": "not found: service 'missing'"}
 ```
-
-### Route Policies and Prefix Lists
-
-These two resources are list-only (no show-by-name endpoint). Both return an
-array of name strings, not full spec objects:
-
-| Endpoint | Response |
-|----------|----------|
-| `GET /network/{netID}/route-policy` | Array of strings (route policy names) |
-| `GET /network/{netID}/prefix-list` | Array of strings (prefix list names) |
 
 ### Topology
 
@@ -578,10 +589,10 @@ List device names from the topology file.
 #### GET /network/{netID}/host/{name}
 
 Get the host profile for a virtual host device. Returns 404 for switch devices
-(even if they exist in the topology) — the client uses 200 vs 404 from this
+(even if they exist in the topology) -- the client uses 200 vs 404 from this
 endpoint to classify devices as hosts vs switches.
 
-**Response (200):** `HostProfile` (see [§14](#hostprofile))
+**Response (200):** `HostProfile` (see [S15](#hostprofile))
 
 **Status codes:** 200 success, 404 not a host device or not found
 
@@ -597,7 +608,7 @@ List all features and their support status.
 
 Get the dependency list for a feature.
 
-**Path parameters:** `name` — feature name
+**Path parameters:** `name` -- feature name
 
 **Response (200):** Array of dependency strings
 
@@ -611,7 +622,7 @@ Get the features that cause a given feature to be unsupported.
 
 Check whether a platform supports a specific feature.
 
-**Path parameters:** `name` — platform name, `feature` — feature name
+**Path parameters:** `name` -- platform name, `feature` -- feature name
 
 **Response (200):**
 
@@ -624,16 +635,17 @@ Check whether a platform supports a specific feature.
 ## 5. Network Spec Writes
 
 These endpoints create and delete spec definitions (services, VPNs, QoS policies,
-filters, device profiles, zones). They modify the in-memory spec and persist
-changes to the spec directory on disk. Like spec reads, they are serialized
-through the NetworkActor.
+filters, device profiles, zones, prefix lists, route policies). They modify the
+in-memory spec and persist changes to the spec directory on disk. Like spec reads,
+they are serialized through the NetworkActor.
 
-All spec write endpoints accept the `dry_run` query parameter. When `dry_run=true`,
+All spec write endpoints use RPC-style naming: `POST .../create-X` and
+`POST .../delete-X`. They accept the `dry_run` query parameter. When `dry_run=true`,
 the spec is validated but not persisted.
 
 ### Services
 
-#### POST /network/{netID}/service
+#### POST /network/{netID}/create-service
 
 Create a new service definition.
 
@@ -664,7 +676,7 @@ Create a new service definition.
 **Example:**
 
 ```
-POST /network/default/service
+POST /network/default/create-service
 {
   "name": "customer-l3",
   "type": "evpn-routed",
@@ -673,11 +685,17 @@ POST /network/default/service
 }
 ```
 
-#### DELETE /network/{netID}/service/{name}
+#### POST /network/{netID}/delete-service
 
 Delete a service definition.
 
 **Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Service name to delete |
 
 **Response (200):**
 
@@ -689,7 +707,7 @@ Delete a service definition.
 
 ### IP-VPNs
 
-#### POST /network/{netID}/ipvpn
+#### POST /network/{netID}/create-ipvpn
 
 Create a new IP-VPN definition.
 
@@ -711,11 +729,17 @@ Create a new IP-VPN definition.
 {"data": {"name": "customer-vpn"}}
 ```
 
-#### DELETE /network/{netID}/ipvpn/{name}
+#### POST /network/{netID}/delete-ipvpn
 
 Delete an IP-VPN definition.
 
 **Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | IP-VPN name to delete |
 
 **Response (200):**
 
@@ -725,7 +749,7 @@ Delete an IP-VPN definition.
 
 ### MAC-VPNs
 
-#### POST /network/{netID}/macvpn
+#### POST /network/{netID}/create-macvpn
 
 Create a new MAC-VPN definition.
 
@@ -750,11 +774,17 @@ Create a new MAC-VPN definition.
 {"data": {"name": "l2-segment"}}
 ```
 
-#### DELETE /network/{netID}/macvpn/{name}
+#### POST /network/{netID}/delete-macvpn
 
 Delete a MAC-VPN definition.
 
 **Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | MAC-VPN name to delete |
 
 **Response (200):**
 
@@ -764,7 +794,7 @@ Delete a MAC-VPN definition.
 
 ### QoS Policies
 
-#### POST /network/{netID}/qos-policy
+#### POST /network/{netID}/create-qos-policy
 
 Create a new (empty) QoS policy definition.
 
@@ -783,22 +813,9 @@ Create a new (empty) QoS policy definition.
 {"data": {"name": "standard-qos"}}
 ```
 
-#### DELETE /network/{netID}/qos-policy/{name}
+#### POST /network/{netID}/delete-qos-policy
 
 Delete a QoS policy definition.
-
-**Query parameters:** `dry_run`
-
-**Response (200):**
-
-```json
-{"data": {"status": "deleted"}}
-```
-
-#### POST /network/{netID}/qos-policy/{name}/queue
-
-Add a queue to a QoS policy. The `{name}` path parameter identifies the policy;
-the `policy` field in the request body is set automatically from the path.
 
 **Query parameters:** `dry_run`
 
@@ -806,6 +823,25 @@ the `policy` field in the request body is set automatically from the path.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `name` | string | yes | Policy name to delete |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+#### POST /network/{netID}/add-qos-queue
+
+Add a queue to a QoS policy.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Policy name |
 | `queue_id` | integer | yes | Queue number |
 | `name` | string | yes | Queue name |
 | `type` | string | yes | Queue type (e.g., `"strict"`, `"wrr"`) |
@@ -819,13 +855,18 @@ the `policy` field in the request body is set automatically from the path.
 {"data": {"queue_id": 0}}
 ```
 
-#### DELETE /network/{netID}/qos-policy/{name}/queue/{id}
+#### POST /network/{netID}/remove-qos-queue
 
 Remove a queue from a QoS policy.
 
 **Query parameters:** `dry_run`
 
-**Path parameters:** `name` — policy name, `id` — queue ID (integer)
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Policy name |
+| `queue_id` | integer | yes | Queue ID to remove |
 
 **Response (200):**
 
@@ -833,11 +874,9 @@ Remove a queue from a QoS policy.
 {"data": {"status": "deleted"}}
 ```
 
-**Status codes:** 200 success, 400 invalid queue ID
-
 ### Filters
 
-#### POST /network/{netID}/filter
+#### POST /network/{netID}/create-filter
 
 Create a new (empty) filter definition.
 
@@ -857,22 +896,9 @@ Create a new (empty) filter definition.
 {"data": {"name": "customer-acl"}}
 ```
 
-#### DELETE /network/{netID}/filter/{name}
+#### POST /network/{netID}/delete-filter
 
 Delete a filter definition.
-
-**Query parameters:** `dry_run`
-
-**Response (200):**
-
-```json
-{"data": {"status": "deleted"}}
-```
-
-#### POST /network/{netID}/filter/{name}/rule
-
-Add a rule to a filter. The `{name}` path parameter identifies the filter;
-the `filter` field in the request body is set automatically from the path.
 
 **Query parameters:** `dry_run`
 
@@ -880,7 +906,26 @@ the `filter` field in the request body is set automatically from the path.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `seq` | integer | yes | Rule sequence number |
+| `name` | string | yes | Filter name to delete |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+#### POST /network/{netID}/add-filter-rule
+
+Add a rule to a filter.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `filter` | string | yes | Filter name |
+| `sequence` | integer | yes | Rule sequence number |
 | `action` | string | yes | `"permit"` or `"deny"` |
 | `src_ip` | string | no | Source IP/prefix |
 | `dst_ip` | string | no | Destination IP/prefix |
@@ -899,13 +944,18 @@ the `filter` field in the request body is set automatically from the path.
 {"data": {"seq": 10}}
 ```
 
-#### DELETE /network/{netID}/filter/{name}/rule/{seq}
+#### POST /network/{netID}/remove-filter-rule
 
 Remove a rule from a filter.
 
 **Query parameters:** `dry_run`
 
-**Path parameters:** `name` — filter name, `seq` — sequence number (integer)
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `filter` | string | yes | Filter name |
+| `sequence` | integer | yes | Sequence number to remove |
 
 **Response (200):**
 
@@ -913,7 +963,158 @@ Remove a rule from a filter.
 {"data": {"status": "deleted"}}
 ```
 
-**Status codes:** 200 success, 400 invalid sequence number
+### Prefix Lists
+
+#### POST /network/{netID}/create-prefix-list
+
+Create a new prefix list.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Prefix list name |
+
+**Response (201):**
+
+```json
+{"data": {"name": "customer-prefixes"}}
+```
+
+#### POST /network/{netID}/delete-prefix-list
+
+Delete a prefix list.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Prefix list name to delete |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+#### POST /network/{netID}/add-prefix-list-entry
+
+Add an entry to a prefix list.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prefix_list` | string | yes | Prefix list name |
+| `prefix` | string | yes | IP prefix (e.g., `"10.0.0.0/8"`) |
+
+**Response (201):**
+
+```json
+{"data": {"prefix": "10.0.0.0/8"}}
+```
+
+#### POST /network/{netID}/remove-prefix-list-entry
+
+Remove an entry from a prefix list.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `prefix_list` | string | yes | Prefix list name |
+| `prefix` | string | yes | Prefix to remove |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+### Route Policies
+
+#### POST /network/{netID}/create-route-policy
+
+Create a new route policy.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Route policy name |
+
+**Response (201):**
+
+```json
+{"data": {"name": "import-policy"}}
+```
+
+#### POST /network/{netID}/delete-route-policy
+
+Delete a route policy.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Route policy name to delete |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
+
+#### POST /network/{netID}/add-route-policy-rule
+
+Add a rule to a route policy.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Route policy name |
+| `sequence` | integer | yes | Rule sequence number |
+| (additional fields) | | | Rule match/action parameters |
+
+**Response (201):**
+
+```json
+{"data": {"seq": 10}}
+```
+
+#### POST /network/{netID}/remove-route-policy-rule
+
+Remove a rule from a route policy.
+
+**Query parameters:** `dry_run`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `policy` | string | yes | Route policy name |
+| `sequence` | integer | yes | Sequence number to remove |
+
+**Response (200):**
+
+```json
+{"data": {"status": "deleted"}}
+```
 
 ### Device Profiles
 
@@ -921,7 +1122,7 @@ Profiles are stored as individual JSON files under `profiles/{name}.json` in the
 spec directory. They define per-device settings (management IP, loopback, zone,
 platform, EVPN peering).
 
-#### POST /network/{netID}/profile
+#### POST /network/{netID}/create-profile
 
 Create a new device profile.
 
@@ -950,13 +1151,17 @@ Create a new device profile.
 
 **Status codes:** 201 created, 400 validation error, 409 already exists
 
-#### DELETE /network/{netID}/profile/{name}
+#### POST /network/{netID}/delete-profile
 
 Delete a device profile.
 
 **Query parameters:** `dry_run`
 
-**Path parameters:** `name` — profile name
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Profile name to delete |
 
 **Response (200):**
 
@@ -971,7 +1176,7 @@ Delete a device profile.
 Zones group devices by location or function and can carry zone-level spec
 overrides. They are stored in the `zones` map within `network.json`.
 
-#### POST /network/{netID}/zone
+#### POST /network/{netID}/create-zone
 
 Create a new zone.
 
@@ -991,13 +1196,17 @@ Create a new zone.
 
 **Status codes:** 201 created, 400 validation error, 409 already exists
 
-#### DELETE /network/{netID}/zone/{name}
+#### POST /network/{netID}/delete-zone
 
 Delete a zone. Returns error if any device profile references this zone.
 
 **Query parameters:** `dry_run`
 
-**Path parameters:** `name` — zone name
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Zone name to delete |
 
 **Response (200):**
 
@@ -1015,14 +1224,6 @@ Provisioning generates a complete CONFIG_DB composite from the topology file and
 device profiles, then delivers it to devices. This is the one operation where
 spec intent replaces device reality (CompositeOverwrite mode).
 
-The provisioning flow has two paths:
-
-- **Full provisioning** (`POST /provision`) — generates composites for multiple
-  devices and delivers them in one operation.
-- **Per-device composite** (`POST /composite/{device}`) — generates a composite
-  for a single device and returns it as a `CompositeInfo` for inspection. Delivery
-  happens through the [composite operations](#11-composite-operations) endpoints.
-
 ### POST /network/{netID}/provision
 
 Provision one or more devices from the topology.
@@ -1035,8 +1236,8 @@ Provision one or more devices from the topology.
 |-------|------|----------|-------------|
 | `devices` | string[] | no | Device names to provision. Empty = all devices in topology. |
 
-**Response (200):** `ProvisionResult` — an aggregate of per-device results. See
-[§14 ProvisionResult](#provisionresult) for the structure. On partial failure,
+**Response (200):** `ProvisionResult` -- an aggregate of per-device results. See
+[S15 ProvisionResult](#provisionresult) for the structure. On partial failure,
 successful devices are still provisioned; the error is reported per-device.
 
 **Example:**
@@ -1046,28 +1247,30 @@ POST /network/default/provision
 {"devices": ["switch1", "switch2"]}
 ```
 
-### POST /network/{netID}/composite/{device}
+### POST /network/{netID}/node/{device}/init-device
 
-Generate the composite CONFIG_DB for a single device without connecting to it.
-Uses the abstract node model — builds desired state from topology + profiles +
-service bindings. Returns a `CompositeInfo` snapshot for inspection.
+Initialize a device by cleaning factory CONFIG_DB entries that conflict with
+newtron-managed configuration. Idempotent -- returns `"already_initialized"`
+if the device was previously initialized.
 
-This is a NetworkActor operation (no device connection required).
+**Path parameters:** `device` -- device name from topology
 
-**Path parameters:** `device` — device name from topology
+**Request body (optional):**
 
-**Response (200):** `CompositeInfo` (see [§14](#compositeinfo))
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `force` | boolean | no | Force re-initialization even if already initialized |
 
-**Example response:**
+**Response (200):**
 
 ```json
-{
-  "data": {
-    "device_name": "switch1",
-    "entry_count": 42,
-    "tables": {"VLAN": 3, "BGP_GLOBALS": 1, "INTERFACE": 8, "VXLAN_TUNNEL": 1}
-  }
-}
+{"data": {"status": "initialized"}}
+```
+
+or if already initialized:
+
+```json
+{"data": {"status": "already_initialized"}}
 ```
 
 ---
@@ -1076,7 +1279,7 @@ This is a NetworkActor operation (no device connection required).
 
 These endpoints read live device state by connecting to the device via SSH,
 refreshing CONFIG_DB from Redis, and querying the cached data. They use the
-`connectAndRead` pattern: connect → refresh → read. No `dry_run`/`no_save`
+`connectAndRead` pattern: connect -> refresh -> read. No `dry_run`/`no_save`
 parameters apply.
 
 All node endpoints require `{netID}` (registered network) and `{device}` (device
@@ -1089,7 +1292,7 @@ establishes an SSH connection that is cached for subsequent requests.
 
 Get a structured overview of the device.
 
-**Response (200):** `DeviceInfo` (see [§14](#deviceinfo))
+**Response (200):** `DeviceInfo` (see [S15](#deviceinfo))
 
 **Example response:**
 
@@ -1119,15 +1322,15 @@ Get a structured overview of the device.
 
 List all interfaces with summary status.
 
-**Response (200):** Array of `InterfaceSummary` (see [§14](#interfacesummary))
+**Response (200):** Array of `InterfaceSummary` (see [S15](#interfacesummary))
 
 #### GET /network/{netID}/node/{device}/interface/{name}
 
 Show detailed properties of a single interface.
 
-**Path parameters:** `name` — interface name (URL-encode slashes: `Ethernet0%2F1`)
+**Path parameters:** `name` -- interface name (URL-encode slashes: `Ethernet0%2F1`)
 
-**Response (200):** `InterfaceDetail` (see [§14](#interfacedetail))
+**Response (200):** `InterfaceDetail` (see [S15](#interfacedetail))
 
 **Status codes:** 200 success, 404 interface not found
 
@@ -1135,9 +1338,9 @@ Show detailed properties of a single interface.
 
 Show the service binding on an interface.
 
-**Path parameters:** `name` — interface name
+**Path parameters:** `name` -- interface name
 
-**Response (200):** `ServiceBindingDetail` (see [§14](#servicebindingdetail)) or `null` if no binding
+**Response (200):** `ServiceBindingDetail` (see [S15](#servicebindingdetail)) or `null` if no binding
 
 ### VLANs
 
@@ -1145,13 +1348,13 @@ Show the service binding on an interface.
 
 List all VLANs with summary status.
 
-**Response (200):** Array of `VLANStatusEntry` (see [§14](#vlanstatusentry))
+**Response (200):** Array of `VLANStatusEntry` (see [S15](#vlanstatusentry))
 
 #### GET /network/{netID}/node/{device}/vlan/{id}
 
 Show a single VLAN with full details.
 
-**Path parameters:** `id` — VLAN ID (integer, 1–4094)
+**Path parameters:** `id` -- VLAN ID (integer, 1-4094)
 
 **Response (200):** `VLANStatusEntry`
 
@@ -1163,15 +1366,15 @@ Show a single VLAN with full details.
 
 List all VRFs with operational state.
 
-**Response (200):** Array of `VRFStatusEntry` (see [§14](#vrfstatusentry))
+**Response (200):** Array of `VRFStatusEntry` (see [S15](#vrfstatusentry))
 
 #### GET /network/{netID}/node/{device}/vrf/{name}
 
 Show a VRF with its interfaces and BGP neighbors.
 
-**Path parameters:** `name` — VRF name
+**Path parameters:** `name` -- VRF name
 
-**Response (200):** `VRFDetail` (see [§14](#vrfdetail))
+**Response (200):** `VRFDetail` (see [S15](#vrfdetail))
 
 **Status codes:** 200 success, 404 VRF not found
 
@@ -1181,15 +1384,15 @@ Show a VRF with its interfaces and BGP neighbors.
 
 List all ACL tables with summary info.
 
-**Response (200):** Array of `ACLTableSummary` (see [§14](#acltablesummary))
+**Response (200):** Array of `ACLTableSummary` (see [S15](#acltablesummary))
 
 #### GET /network/{netID}/node/{device}/acl/{name}
 
 Show an ACL table with all its rules.
 
-**Path parameters:** `name` — ACL table name
+**Path parameters:** `name` -- ACL table name
 
-**Response (200):** `ACLTableDetail` (see [§14](#acltabledetail))
+**Response (200):** `ACLTableDetail` (see [S15](#acltabledetail))
 
 **Status codes:** 200 success, 404 ACL not found
 
@@ -1199,7 +1402,7 @@ Show an ACL table with all its rules.
 
 Get BGP status including local AS, router ID, and all neighbors with operational state.
 
-**Response (200):** `BGPStatusResult` (see [§14](#bgpstatusresult))
+**Response (200):** `BGPStatusResult` (see [S15](#bgpstatusresult))
 
 **Example response:**
 
@@ -1228,7 +1431,7 @@ Get BGP status including local AS, router ID, and all neighbors with operational
 #### GET /network/{netID}/node/{device}/bgp/check
 
 Check BGP session states. Returns the same data as `bgp/status` (both call
-`CheckBGPSessions` internally) but is semantically a health probe — clients
+`CheckBGPSessions` internally) but is semantically a health probe -- clients
 use it to assert that all sessions are established.
 
 **Response (200):** `BGPStatusResult`
@@ -1240,7 +1443,7 @@ use it to assert that all sessions are established.
 Get EVPN overlay status: VTEP tunnels, NVO configuration, VNI mappings, L3VNI
 VRF bindings, remote VTEPs, and VNI count.
 
-**Response (200):** `EVPNStatusResult` (see [§14](#evpnstatusresult))
+**Response (200):** `EVPNStatusResult` (see [S15](#evpnstatusresult))
 
 ### Health
 
@@ -1250,7 +1453,7 @@ Run a comprehensive health check on the device. Includes CONFIG_DB verification
 (comparing committed config against running config) and operational checks (BGP
 sessions, interface status).
 
-**Response (200):** `HealthReport` (see [§14](#healthreport))
+**Response (200):** `HealthReport` (see [S15](#healthreport))
 
 **Example response:**
 
@@ -1274,13 +1477,13 @@ sessions, interface status).
 
 List all LAGs (PortChannels) with member and operational status.
 
-**Response (200):** Array of `LAGStatusEntry` (see [§14](#lagstatusentry))
+**Response (200):** Array of `LAGStatusEntry` (see [S15](#lagstatusentry))
 
 #### GET /network/{netID}/node/{device}/lag/{name}
 
 Show a single LAG with full details.
 
-**Path parameters:** `name` — LAG name (e.g., `PortChannel1`)
+**Path parameters:** `name` -- LAG name (e.g., `PortChannel1`)
 
 **Response (200):** `LAGStatusEntry`
 
@@ -1290,7 +1493,7 @@ Show a single LAG with full details.
 
 #### GET /network/{netID}/node/{device}/neighbor
 
-Get BGP session state. This is functionally identical to `bgp/check` — both
+Get BGP session state. This is functionally identical to `bgp/check` -- both
 call `CheckBGPSessions` internally and return `BGPStatusResult`.
 
 **Response (200):** `BGPStatusResult`
@@ -1302,11 +1505,11 @@ call `CheckBGPSessions` internally and return `BGPStatusResult`.
 Look up a route in APP_DB (FRR's routing table as synced by fpmsyncd).
 
 **Path parameters:**
-- `vrf` — VRF name (use `"default"` for the global table)
-- `prefix` — IP prefix with mask (e.g., `10.0.0.0/24`). Uses catch-all pattern;
+- `vrf` -- VRF name (use `"default"` for the global table)
+- `prefix` -- IP prefix with mask (e.g., `10.0.0.0/24`). Uses catch-all pattern;
   no URL encoding needed for the slash.
 
-**Response (200):** `RouteEntry` (see [§14](#routeentry))
+**Response (200):** `RouteEntry` (see [S15](#routeentry))
 
 **Status codes:** 200 success, 404 route not found
 
@@ -1320,7 +1523,7 @@ GET /network/default/node/switch1/route/default/10.0.0.0/24
 
 Look up a route in ASIC_DB (SAI route table as programmed by orchagent).
 
-**Path parameters:** `prefix` — IP prefix with mask (catch-all pattern)
+**Path parameters:** `prefix` -- IP prefix with mask (catch-all pattern)
 
 **Response (200):** `RouteEntry` with `source: "ASIC_DB"`
 
@@ -1330,36 +1533,79 @@ Look up a route in ASIC_DB (SAI route table as programmed by orchagent).
 GET /network/default/node/switch1/route-asic/10.0.0.0/24
 ```
 
+### Intent Tree
+
+#### GET /network/{netID}/node/{device}/intent/tree
+
+Get a tree view of the intent DAG (directed acyclic graph). The intent tree
+shows parent-child relationships between intent records.
+
+**Query parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `kind` | string | `""` | Filter by intent kind (e.g., `"service"`, `"vlan"`) |
+| `resource` | string | `""` | Filter by resource name |
+| `ancestors` | string | `"false"` | When `"true"`, include ancestor intents |
+
+**Response (200):** Intent tree structure
+
 ---
 
 ## 8. Node Write Operations
 
 These endpoints modify device CONFIG_DB. Most use the `connectAndExecute` pattern:
-connect → Lock (refresh) → fn (build ChangeSet) → Commit → Save → Unlock. They
+connect -> Lock (refresh) -> fn (build ChangeSet) -> Commit -> Save -> Unlock. They
 accept `dry_run` and `no_save` query parameters.
 
-Write operations return `WriteResult` (see [§14](#writeresult)) on success, which
+Write operations return `WriteResult` (see [S15](#writeresult)) on success, which
 reports the change count, whether changes were applied, verified, and saved.
 
-**Quick reference** — all node write endpoints under `/network/{netID}/node/{device}/`:
+### Setup Device
 
-| Category | Endpoints | Key params |
-|----------|-----------|------------|
-| VLANs | `POST /vlan`, `DELETE /vlan/{id}`, `POST /vlan/{id}/member`, `DELETE /vlan/{id}/member/{iface}` | `id`, `interface`, `tagged` |
-| SVIs | `POST /svi`, `POST /remove-svi` | `vlan_id`, `vrf`, `ip_address` |
-| VRFs | `POST /vrf`, `DELETE /vrf/{name}`, `POST /vrf/{name}/interface`, `DELETE /vrf/{name}/interface/{iface}`, `POST /vrf/{name}/bind-ipvpn`, `POST /vrf/{name}/unbind-ipvpn`, `POST /vrf/{name}/route`, `DELETE /vrf/{name}/route/{prefix...}` | `name`, `ipvpn`, `prefix`, `nexthop` |
-| ACLs | `POST /acl`, `DELETE /acl/{name}`, `POST /acl/{name}/rule`, `DELETE /acl/{name}/rule/{rule}` | `name`, `type`, `stage`, `rule_name`, `priority`, `action` |
-| PortChannels | `POST /portchannel`, `DELETE /portchannel/{name}`, `POST /portchannel/{name}/member`, `DELETE /portchannel/{name}/member/{iface}` | `name`, `members` |
-| BGP | `POST /configure-bgp`, `POST /add-bgp-neighbor`, `POST /remove-bgp-neighbor`, `POST /remove-bgp-globals` | `neighbor_ip`, `remote_as` |
-| EVPN | `POST /setup-evpn`, `POST /teardown-evpn` | `source_ip` |
-| Loopback | `POST /configure-loopback`, `POST /remove-loopback` | — |
-| QoS | `POST /apply-qos`, `POST /remove-qos` | `interface`, `policy` |
-| Metadata | `POST /set-metadata` | `fields` |
-| Cleanup | `POST /cleanup` | `type` |
+#### POST /network/{netID}/node/{device}/setup-device
+
+Unified baseline setup that configures device metadata, loopback interface, BGP
+globals, VTEP (optional), and route reflector (optional) in a single operation.
+This replaces the former individual endpoints (`configure-bgp`, `configure-loopback`,
+`setup-evpn`, `set-metadata`, `configure-route-reflector`).
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `fields` | object | no | Device metadata fields (e.g., `{"hostname": "switch1"}`) |
+| `source_ip` | string | no | VTEP source IP (empty = skip VTEP setup) |
+| `route_reflector` | object | no | Route reflector config (null = skip RR setup) |
+
+The `route_reflector` object:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `cluster_id` | string | yes | RR cluster ID |
+| `local_asn` | integer | yes | RR's own ASN |
+| `router_id` | string | yes | RR's router ID |
+| `local_addr` | string | yes | Local address for eBGP multihop (loopback IP) |
+| `clients` | array | no | RR clients |
+| `peers` | array | no | RR-to-RR peers |
+
+**Response (201):** `WriteResult`
+
+**Example:**
+
+```
+POST /network/default/node/switch1/setup-device
+{
+  "fields": {"hostname": "switch1"},
+  "source_ip": "10.0.0.1"
+}
+```
 
 ### VLANs
 
-#### POST /network/{netID}/node/{device}/vlan
+#### POST /network/{netID}/node/{device}/create-vlan
 
 Create a VLAN on the device.
 
@@ -1369,7 +1615,7 @@ Create a VLAN on the device.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `id` | integer | yes | VLAN ID (1–4094) |
+| `id` | integer | yes | VLAN ID (1-4094) |
 | `description` | string | no | VLAN description |
 
 **Response (201):** `WriteResult`
@@ -1377,54 +1623,29 @@ Create a VLAN on the device.
 **Example:**
 
 ```
-POST /network/default/node/switch1/vlan?dry_run=true
+POST /network/default/node/switch1/create-vlan?dry_run=true
 {"id": 100, "description": "Customer VLAN"}
 ```
 
-#### DELETE /network/{netID}/node/{device}/vlan/{id}
+#### POST /network/{netID}/node/{device}/delete-vlan
 
 Delete a VLAN and all its members.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `id` — VLAN ID (integer)
-
-**Response (200):** `WriteResult`
-
-**Status codes:** 200 success, 400 invalid VLAN ID
-
-#### POST /network/{netID}/node/{device}/vlan/{id}/member
-
-Add an interface as a VLAN member.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Path parameters:** `id` — VLAN ID (integer)
-
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `interface` | string | yes | Interface name (e.g., `"Ethernet0"`) |
-| `tagged` | boolean | yes | `true` for tagged (trunk), `false` for untagged (access) |
-
-**Response (201):** `WriteResult`
-
-#### DELETE /network/{netID}/node/{device}/vlan/{id}/member/{iface}
-
-Remove an interface from a VLAN.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Path parameters:** `id` — VLAN ID, `iface` — interface name
+| `id` | integer | yes | VLAN ID to delete |
 
 **Response (200):** `WriteResult`
 
-### SVIs
+### IRB (SVI)
 
-#### POST /network/{netID}/node/{device}/svi
+#### POST /network/{netID}/node/{device}/configure-irb
 
-Configure an SVI (VLAN interface) — creates the Vlan*N* interface with optional
+Configure an IRB interface (SVI) -- creates the Vlan*N* interface with optional
 VRF binding, IP address, and anycast MAC.
 
 **Query parameters:** `dry_run`, `no_save`
@@ -1440,9 +1661,9 @@ VRF binding, IP address, and anycast MAC.
 
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/remove-svi
+#### POST /network/{netID}/node/{device}/unconfigure-irb
 
-Remove an SVI (VLAN interface).
+Remove an IRB interface (SVI) configuration.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -1456,7 +1677,7 @@ Remove an SVI (VLAN interface).
 
 ### VRFs
 
-#### POST /network/{netID}/node/{device}/vrf
+#### POST /network/{netID}/node/{device}/create-vrf
 
 Create a VRF.
 
@@ -1470,102 +1691,120 @@ Create a VRF.
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/vrf/{name}
+#### POST /network/{netID}/node/{device}/delete-vrf
 
 Delete a VRF and clean up all associated resources (interfaces, routes, VNI
 mappings).
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — VRF name
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/vrf/{name}/interface
-
-Add an interface to a VRF.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Path parameters:** `name` — VRF name
-
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `interface` | string | yes | Interface name |
-
-**Response (201):** `WriteResult`
-
-#### DELETE /network/{netID}/node/{device}/vrf/{name}/interface/{iface}
-
-Remove an interface from a VRF.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Path parameters:** `name` — VRF name, `iface` — interface name
+| `name` | string | yes | VRF name to delete |
 
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/vrf/{name}/bind-ipvpn
+### IP-VPN Binding
+
+#### POST /network/{netID}/node/{device}/bind-ipvpn
 
 Bind an IP-VPN to a VRF (sets up L3VNI, route targets, EVPN VNI configuration).
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — VRF name
-
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `vrf` | string | yes | VRF name |
 | `ipvpn` | string | yes | IP-VPN spec name |
 
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/vrf/{name}/unbind-ipvpn
+#### POST /network/{netID}/node/{device}/unbind-ipvpn
 
 Unbind the IP-VPN from a VRF (tears down L3VNI infrastructure).
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — VRF name
+**Request body:**
 
-**Request body:** none
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vrf` | string | yes | VRF name |
 
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/vrf/{name}/route
+### MAC-VPN Binding (Node-Level)
 
-Add a static route to a VRF.
+#### POST /network/{netID}/node/{device}/bind-macvpn
+
+Bind a MAC-VPN to a VLAN at the node level (maps VLAN to L2VNI).
 
 **Query parameters:** `dry_run`, `no_save`
-
-**Path parameters:** `name` — VRF name
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `vlan_id` | integer | yes | VLAN ID |
+| `vni` | integer | yes | L2 VNI number |
+
+**Response (200):** `WriteResult`
+
+#### POST /network/{netID}/node/{device}/unbind-macvpn
+
+Unbind the MAC-VPN from a VLAN at the node level.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vlan_id` | integer | yes | VLAN ID |
+
+**Response (200):** `WriteResult`
+
+### Static Routes
+
+#### POST /network/{netID}/node/{device}/add-static-route
+
+Add a static route.
+
+**Query parameters:** `dry_run`, `no_save`
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vrf` | string | yes | VRF name (use `"default"` for global) |
 | `prefix` | string | yes | Destination prefix (e.g., `"0.0.0.0/0"`) |
 | `nexthop` | string | yes | Next-hop IP address |
 | `metric` | integer | no | Route metric (default 0) |
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/vrf/{name}/route/{prefix...}
+#### POST /network/{netID}/node/{device}/remove-static-route
 
-Remove a static route from a VRF.
+Remove a static route.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — VRF name, `prefix` — route prefix (catch-all)
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `vrf` | string | yes | VRF name |
+| `prefix` | string | yes | Route prefix to remove |
 
 **Response (200):** `WriteResult`
 
 ### ACLs
 
-#### POST /network/{netID}/node/{device}/acl
+#### POST /network/{netID}/node/{device}/create-acl
 
 Create an ACL table.
 
@@ -1583,26 +1822,31 @@ Create an ACL table.
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/acl/{name}
+#### POST /network/{netID}/node/{device}/delete-acl
 
 Delete an ACL table and all its rules.
 
 **Query parameters:** `dry_run`, `no_save`
 
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | ACL table name to delete |
+
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/acl/{name}/rule
+#### POST /network/{netID}/node/{device}/add-acl-rule
 
 Add a rule to an ACL table.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — ACL table name
-
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `acl` | string | yes | ACL table name |
 | `rule_name` | string | yes | Rule name (e.g., `"RULE_10"`) |
 | `priority` | integer | yes | Rule priority (higher = matched first) |
 | `action` | string | yes | `"FORWARD"` or `"DROP"` |
@@ -1614,19 +1858,24 @@ Add a rule to an ACL table.
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/acl/{name}/rule/{rule}
+#### POST /network/{netID}/node/{device}/remove-acl-rule
 
 Remove a rule from an ACL table.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — ACL table name, `rule` — rule name
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `acl` | string | yes | ACL table name |
+| `rule` | string | yes | Rule name to remove |
 
 **Response (200):** `WriteResult`
 
 ### PortChannels
 
-#### POST /network/{netID}/node/{device}/portchannel
+#### POST /network/{netID}/node/{device}/create-portchannel
 
 Create a PortChannel (LAG).
 
@@ -1645,57 +1894,56 @@ Create a PortChannel (LAG).
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/portchannel/{name}
+#### POST /network/{netID}/node/{device}/delete-portchannel
 
 Delete a PortChannel and remove all members.
 
 **Query parameters:** `dry_run`, `no_save`
 
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | PortChannel name to delete |
+
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/portchannel/{name}/member
+#### POST /network/{netID}/node/{device}/add-portchannel-member
 
 Add an interface to a PortChannel.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — PortChannel name
-
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
+| `portchannel` | string | yes | PortChannel name |
 | `interface` | string | yes | Interface name |
 
 **Response (201):** `WriteResult`
 
-#### DELETE /network/{netID}/node/{device}/portchannel/{name}/member/{iface}
+#### POST /network/{netID}/node/{device}/remove-portchannel-member
 
 Remove an interface from a PortChannel.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Path parameters:** `name` — PortChannel name, `iface` — interface name
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `portchannel` | string | yes | PortChannel name |
+| `interface` | string | yes | Interface name |
 
 **Response (200):** `WriteResult`
 
-### BGP
+### BGP EVPN Peers
 
-#### POST /network/{netID}/node/{device}/configure-bgp
+#### POST /network/{netID}/node/{device}/add-bgp-evpn-peer
 
-Configure BGP from the device profile (sets up BGP_GLOBALS with the profile's
-underlay ASN, router ID, and address families).
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/add-bgp-neighbor
-
-Add a BGP neighbor to the device (node-level — for neighbors not scoped to a
-specific interface).
+Add a BGP EVPN overlay peer. These are loopback-to-loopback eBGP sessions for
+L2VPN EVPN address family exchange.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -1703,17 +1951,16 @@ specific interface).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `vrf` | string | no | VRF for the neighbor (default: global) |
-| `interface` | string | no | Source interface |
-| `remote_as` | integer | no | Remote AS number |
-| `neighbor_ip` | string | no | Neighbor IP address |
+| `neighbor_ip` | string | yes | Neighbor IP address (loopback) |
+| `remote_as` | integer | yes | Remote AS number |
 | `description` | string | no | Neighbor description |
+| `multihop` | integer | no | eBGP multihop TTL |
 
 **Response (201):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/remove-bgp-neighbor
+#### POST /network/{netID}/node/{device}/remove-bgp-evpn-peer
 
-Remove a BGP neighbor from the device.
+Remove a BGP EVPN overlay peer.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -1722,64 +1969,6 @@ Remove a BGP neighbor from the device.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `ip` | string | yes | Neighbor IP address to remove |
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/remove-bgp-globals
-
-Remove all BGP global configuration from the device.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-### EVPN
-
-#### POST /network/{netID}/node/{device}/setup-evpn
-
-Set up the EVPN overlay (VTEP tunnel, NVO, EVPN peer configuration).
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `source_ip` | string | yes | VTEP source IP (typically the loopback IP) |
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/teardown-evpn
-
-Tear down the EVPN overlay (removes VTEP, NVO, VNI mappings).
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-### Loopback
-
-#### POST /network/{netID}/node/{device}/configure-loopback
-
-Configure the loopback interface from the device profile.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/remove-loopback
-
-Remove the loopback interface configuration.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
 
 **Response (200):** `WriteResult`
 
@@ -1812,22 +2001,6 @@ Remove QoS policy from a specific interface.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `interface` | string | yes | Interface name |
-
-**Response (200):** `WriteResult`
-
-### Device Metadata
-
-#### POST /network/{netID}/node/{device}/set-metadata
-
-Update fields in the device's DEVICE_METADATA|localhost entry.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `fields` | object | yes | Key-value pairs to set (e.g., `{"hostname": "switch1"}`) |
 
 **Response (200):** `WriteResult`
 
@@ -1866,7 +2039,7 @@ Most lifecycle operations return null data on success:
 Exceptions: `ssh-command` returns `SSHCommandResponse`, `verify-committed` returns
 `VerificationResult`.
 
-### POST /network/{netID}/node/{device}/config-reload
+### POST /network/{netID}/node/{device}/reload-config
 
 Trigger a SONiC config reload on the device (`config reload -y`). This reloads
 CONFIG_DB from `/etc/sonic/config_db.json` and restarts all SONiC services.
@@ -1904,23 +2077,15 @@ external changes (manual CLI, other tools) to ensure the server sees current sta
 POST /network/default/node/switch1/refresh?timeout=2m
 ```
 
-### POST /network/{netID}/node/{device}/restart-service
+### POST /network/{netID}/node/{device}/restart-daemon
 
-Restart a SONiC service on the device (`systemctl restart <service>`).
+Restart a SONiC daemon on the device (`systemctl restart <daemon>`).
 
 **Request body:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `service` | string | yes | Service name (e.g., `"bgp"`, `"swss"`) |
-
-**Response (200):** `null` data on success
-
-### POST /network/{netID}/node/{device}/apply-frr-defaults
-
-Apply FRR default configuration to the device (ensures frrcfgd mode flags are set).
-
-**Request body:** none
+| `daemon` | string | yes | Daemon name (e.g., `"bgp"`, `"swss"`) |
 
 **Response (200):** `null` data on success
 
@@ -1945,25 +2110,25 @@ Execute an arbitrary SSH command on the device and return the output.
 Verify that the last committed ChangeSet was persisted correctly in CONFIG_DB. Reads
 back the entries that were written and compares them against expected values.
 
-This uses `connectAndRead` — it reads current CONFIG_DB state and compares against
+This uses `connectAndRead` -- it reads current CONFIG_DB state and compares against
 the stored committed changes.
 
 **Request body:** none
 
-**Response (200):** `VerificationResult` (see [§14](#verificationresult))
+**Response (200):** `VerificationResult` (see [S15](#verificationresult))
 
 ---
 
 ## 10. Node Diagnostics
 
 These endpoints provide direct access to SONiC Redis databases for debugging and
-inspection. They use `connectAndRead` — no `dry_run`/`no_save`.
+inspection. They use `connectAndRead` -- no `dry_run`/`no_save`.
 
 ### GET /network/{netID}/node/{device}/configdb/{table}
 
 List all keys in a CONFIG_DB table.
 
-**Path parameters:** `table` — CONFIG_DB table name (e.g., `VLAN`, `BGP_GLOBALS`)
+**Path parameters:** `table` -- CONFIG_DB table name (e.g., `VLAN`, `BGP_GLOBALS`)
 
 **Response (200):** Array of key strings
 
@@ -1971,7 +2136,7 @@ List all keys in a CONFIG_DB table.
 
 Get all fields of a CONFIG_DB entry.
 
-**Path parameters:** `table` — table name, `key` — entry key (e.g., `Vlan100`)
+**Path parameters:** `table` -- table name, `key` -- entry key (e.g., `Vlan100`)
 
 **Response (200):** Field map (`map[string]string`)
 
@@ -1985,7 +2150,7 @@ GET /network/default/node/switch1/configdb/VLAN/Vlan100
 
 Check if a CONFIG_DB entry exists.
 
-**Path parameters:** `table` — table name, `key` — entry key
+**Path parameters:** `table` -- table name, `key` -- entry key
 
 **Response (200):**
 
@@ -1997,13 +2162,130 @@ Check if a CONFIG_DB entry exists.
 
 Get all fields of a STATE_DB entry.
 
-**Path parameters:** `table` — STATE_DB table name, `key` — entry key
+**Path parameters:** `table` -- STATE_DB table name, `key` -- entry key
 
 **Response (200):** Field map (`map[string]string`)
 
 ---
 
-## 11. Composite Operations
+## 11. Intent, History, Settings, and Drift
+
+These endpoints manage intent records, operation history, device settings, and
+drift detection. Intent records track what newtron has applied to a device; history
+tracks the sequence of operations; settings control device-level behavior; drift
+detection compares actual CONFIG_DB state against expected state from intents.
+
+### Intents
+
+#### GET /network/{netID}/node/{device}/intents
+
+List all intent records on the device. Returns the full set of NEWTRON_INTENT
+entries from CONFIG_DB.
+
+**Response (200):** Array of intent records
+
+#### GET /network/{netID}/node/{device}/intent/tree
+
+Get a tree view of the intent DAG. See [S7 Intent Tree](#intent-tree) for query parameters.
+
+### Zombie Intents
+
+A "zombie" intent is an intent record left behind by a failed operation. The
+forward operation partially succeeded (wrote some CONFIG_DB entries) but failed
+before completing. The zombie record captures what was partially applied so it
+can be rolled back.
+
+#### GET /network/{netID}/node/{device}/zombie
+
+Read the current zombie intent (if any).
+
+**Response (200):** Zombie intent record, or `null` if no zombie exists
+
+#### POST /network/{netID}/node/{device}/rollback-zombie
+
+Roll back the zombie intent by reversing its partial changes.
+
+**Query parameters:** `dry_run`, `no_save`
+
+When `dry_run=true`, returns a preview of what would be reversed without applying.
+
+**Request body:** none
+
+**Response (200):** `WriteResult`
+
+#### POST /network/{netID}/node/{device}/clear-zombie
+
+Clear the zombie intent without rolling back. Use when you have manually cleaned
+up the partial changes or when rollback is not needed.
+
+**Request body:** none
+
+**Response (200):** `null` data on success
+
+### History
+
+#### GET /network/{netID}/node/{device}/history
+
+Read the operation history for a device.
+
+**Response (200):** Operation history records
+
+#### POST /network/{netID}/node/{device}/rollback-history
+
+Roll back the most recent operation from history.
+
+**Query parameters:** `dry_run`, `no_save`
+
+When `dry_run=true`, returns a preview of what would be reversed.
+
+**Request body:** none
+
+**Response (200):** `WriteResult`
+
+### Device Settings
+
+#### GET /network/{netID}/node/{device}/settings
+
+Read device-level settings.
+
+**Response (200):** `DeviceSettings`
+
+```json
+{"data": {"max_history": 10}}
+```
+
+#### PUT /network/{netID}/node/{device}/settings
+
+Write device-level settings.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `max_history` | integer | yes | Maximum number of history entries to keep |
+
+**Response (200):** The written settings object
+
+### Drift Detection
+
+#### GET /network/{netID}/node/{device}/drift
+
+Detect configuration drift on a single device. Compares the device's actual
+CONFIG_DB state against the expected state derived from intent records and
+topology provisioning.
+
+**Response (200):** Drift detection result
+
+#### GET /network/{netID}/drift
+
+Detect configuration drift across all devices in the network. Connects to each
+device and checks for drift.
+
+**Response (200):** Network-wide drift detection result
+
+---
+
+## 12. Composite Operations
 
 The composite workflow is a three-phase process for generating, verifying, and
 delivering complete device configurations. It separates intent (generate) from
@@ -2011,16 +2293,16 @@ validation (verify) from effect (deliver), giving callers control over each step
 
 The flow:
 
-1. **Generate** — builds a `CompositeInfo` from the abstract node model and
+1. **Generate** -- builds a `CompositeInfo` from the abstract node model and
    returns a UUID handle. No device connection needed.
-2. **Verify** (optional) — connects to the device, reads current CONFIG_DB,
+2. **Verify** (optional) -- connects to the device, reads current CONFIG_DB,
    and compares against the composite. Reports drift.
-3. **Deliver** — connects to the device, locks CONFIG_DB, writes the composite,
+3. **Deliver** -- connects to the device, locks CONFIG_DB, writes the composite,
    and unlocks. The handle is consumed (one-time use).
 
 Composite handles expire after 10 minutes. An expired handle returns 500.
 
-### POST /network/{netID}/node/{device}/composite/generate
+### POST /network/{netID}/node/{device}/generate-composite
 
 Generate a composite CONFIG_DB for the device and store it under a UUID handle.
 
@@ -2039,7 +2321,7 @@ Generate a composite CONFIG_DB for the device and store it under a UUID handle.
 }
 ```
 
-### POST /network/{netID}/node/{device}/composite/verify
+### POST /network/{netID}/node/{device}/verify-composite
 
 Verify a generated composite against current device state.
 
@@ -2049,9 +2331,9 @@ Verify a generated composite against current device state.
 |-------|------|----------|-------------|
 | `handle` | string | yes | UUID from generate step |
 
-**Response (200):** `VerificationResult` (see [§14](#verificationresult))
+**Response (200):** `VerificationResult` (see [S15](#verificationresult))
 
-### POST /network/{netID}/node/{device}/composite/deliver
+### POST /network/{netID}/node/{device}/deliver-composite
 
 Deliver a generated composite to the device. Overwrites or merges CONFIG_DB
 entries. The handle is removed after successful delivery.
@@ -2063,12 +2345,12 @@ entries. The handle is removed after successful delivery.
 | `handle` | string | yes | UUID from generate step |
 | `mode` | string | no | `"overwrite"` (default) or `"merge"`. Overwrite removes stale keys; merge only adds. |
 
-**Response (200):** `DeliveryResult` (see [§14](#deliveryresult))
+**Response (200):** `DeliveryResult` (see [S15](#deliveryresult))
 
 **Example:**
 
 ```
-POST /network/default/node/switch1/composite/deliver
+POST /network/default/node/switch1/deliver-composite
 {"handle": "a1b2c3d4e5f6...", "mode": "overwrite"}
 ```
 
@@ -2086,33 +2368,32 @@ POST /network/default/node/switch1/composite/deliver
 
 ---
 
-## 12. Interface Operations
+## 13. Interface Operations
 
 These endpoints operate on a specific interface within a device. They are the
 primary way to apply and manage services. All use `connectAndExecute` and accept
 `dry_run`/`no_save` query parameters. Return `WriteResult` on success.
 
-Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` → `Ethernet0/1`.
+Interface names containing slashes must be URL-encoded: `Ethernet0%2F1` -> `Ethernet0/1`.
 
-**Quick reference** — all interface endpoints under `.../interface/{name}/`:
+**Quick reference** -- all interface endpoints under `.../interface/{name}/`:
 
 | Category | Endpoints | Key params |
 |----------|-----------|------------|
 | Service | `apply-service`, `remove-service`, `refresh-service` | `service`, `ip_address`, `vlan`, `peer_as` |
-| IP | `set-ip`, `remove-ip` | `ip` |
-| VRF | `set-vrf` | `vrf` |
+| Interface config | `configure-interface`, `unconfigure-interface` | `vrf`, `ip`, `vlan_id`, `tagged` |
 | ACL | `bind-acl`, `unbind-acl` | `acl`, `direction` |
 | MAC-VPN | `bind-macvpn`, `unbind-macvpn` | `macvpn` |
-| BGP | `add-bgp-neighbor`, `remove-bgp-neighbor` | `neighbor_ip`, `remote_as` |
+| BGP | `add-bgp-peer`, `remove-bgp-peer` | `neighbor_ip`, `remote_as` |
 | QoS | `apply-qos`, `remove-qos` | `policy` |
-| Generic | `set` | `property`, `value` |
+| Port property | `set-port-property` | `property`, `value` |
 
 All endpoints use `POST` method.
 
 ### Service Lifecycle
 
 The three core service operations: apply, remove, refresh. These are the most
-frequently used endpoints in the API — most network automation workflows center
+frequently used endpoints in the API -- most network automation workflows center
 on applying services to interfaces.
 
 #### POST /network/{netID}/node/{device}/interface/{name}/apply-service
@@ -2159,7 +2440,7 @@ POST /network/default/node/switch1/interface/Ethernet0/apply-service
 }
 ```
 
-Fields with `omitempty` are absent (not null) when empty — `preview` is absent
+Fields with `omitempty` are absent (not null) when empty -- `preview` is absent
 on non-dry-run, `errors` is absent when verification passes.
 
 With `?dry_run=true`, changes are not applied and `preview` shows the diff:
@@ -2190,7 +2471,7 @@ infrastructure that was created by `apply-service`, using the stored binding
 
 #### POST /network/{netID}/node/{device}/interface/{name}/refresh-service
 
-Refresh the service binding — removes the current configuration and re-applies
+Refresh the service binding -- removes the current configuration and re-applies
 from the current spec. Use after spec changes to update a running service
 without manual remove+apply.
 
@@ -2200,11 +2481,12 @@ without manual remove+apply.
 
 **Response (200):** `WriteResult`
 
-### IP Address
+### Interface Configuration
 
-#### POST /network/{netID}/node/{device}/interface/{name}/set-ip
+#### POST /network/{netID}/node/{device}/interface/{name}/configure-interface
 
-Set an IP address on the interface.
+Configure an interface in routed mode (VRF + IP) or bridged mode (VLAN membership).
+The two modes are mutually exclusive.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2212,37 +2494,21 @@ Set an IP address on the interface.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `ip` | string | yes | IP address in CIDR (e.g., `"10.1.1.1/30"`) |
+| `vrf` | string | no | VRF binding (routed mode) |
+| `ip` | string | no | IP address in CIDR (routed mode) |
+| `vlan_id` | integer | no | VLAN ID (bridged mode) |
+| `tagged` | boolean | no | Tagged membership (bridged mode) |
 
 **Response (200):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/interface/{name}/remove-ip
+#### POST /network/{netID}/node/{device}/interface/{name}/unconfigure-interface
 
-Remove an IP address from the interface.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `ip` | string | yes | IP address to remove (e.g., `"10.1.1.1/30"`) |
-
-**Response (200):** `WriteResult`
-
-### VRF Binding
-
-#### POST /network/{netID}/node/{device}/interface/{name}/set-vrf
-
-Bind the interface to a VRF.
+Remove all configuration from an interface (VRF binding, IP addresses, VLAN
+membership). Returns the interface to its unconfigured state.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `vrf` | string | yes | VRF name |
+**Request body:** none
 
 **Response (200):** `WriteResult`
 
@@ -2303,11 +2569,11 @@ Unbind the MAC-VPN from the interface.
 
 **Response (200):** `WriteResult`
 
-### BGP Neighbor
+### BGP Peer
 
-#### POST /network/{netID}/node/{device}/interface/{name}/add-bgp-neighbor
+#### POST /network/{netID}/node/{device}/interface/{name}/add-bgp-peer
 
-Add a BGP neighbor scoped to this interface.
+Add a BGP peer scoped to this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2315,25 +2581,20 @@ Add a BGP neighbor scoped to this interface.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `vrf` | string | no | VRF for the neighbor |
-| `interface` | string | no | Source interface |
-| `remote_as` | integer | no | Remote AS number |
 | `neighbor_ip` | string | no | Neighbor IP address |
+| `remote_as` | integer | no | Remote AS number |
 | `description` | string | no | Description |
+| `multihop` | integer | no | eBGP multihop TTL |
 
 **Response (201):** `WriteResult`
 
-#### POST /network/{netID}/node/{device}/interface/{name}/remove-bgp-neighbor
+#### POST /network/{netID}/node/{device}/interface/{name}/remove-bgp-peer
 
-Remove a BGP neighbor from this interface.
+Remove the BGP peer from this interface.
 
 **Query parameters:** `dry_run`, `no_save`
 
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `ip` | string | yes | Neighbor IP address |
+**Request body:** none
 
 **Response (200):** `WriteResult`
 
@@ -2363,13 +2624,11 @@ Remove the QoS policy from this interface.
 
 **Response (200):** `WriteResult`
 
-### Generic Property
+### Port Property
 
-#### POST /network/{netID}/node/{device}/interface/{name}/set
+#### POST /network/{netID}/node/{device}/interface/{name}/set-port-property
 
-Set an arbitrary property on the interface. For `"ip"` and `"vrf"` properties,
-this delegates to the dedicated `SetIP` and `SetVRF` methods respectively. For
-other properties, it sets the field directly on the INTERFACE table entry.
+Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 
 **Query parameters:** `dry_run`, `no_save`
 
@@ -2377,17 +2636,17 @@ other properties, it sets the field directly on the INTERFACE table entry.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `property` | string | yes | Property name (e.g., `"mtu"`, `"admin_status"`, `"ip"`, `"vrf"`) |
+| `property` | string | yes | Property name (e.g., `"mtu"`, `"admin_status"`) |
 | `value` | string | yes | Property value |
 
 **Response (200):** `WriteResult`
 
 ---
 
-## 13. Batch Execution
+## 14. Batch Execution
 
 The batch execute endpoint runs multiple operations within a single SSH connection
-and ChangeSet. All operations share one Lock → operations → Commit → Save → Unlock
+and ChangeSet. All operations share one Lock -> operations -> Commit -> Save -> Unlock
 cycle, reducing round trips and ensuring atomicity.
 
 ### POST /network/{netID}/node/{device}/execute
@@ -2423,40 +2682,36 @@ If any operation fails, execution stops and the error includes the failed action
 
 | Action | Params | Description |
 |--------|--------|-------------|
-| `configure-bgp` | none | Configure BGP from profile |
-| `configure-loopback` | none | Configure loopback from profile |
-| `remove-loopback` | none | Remove loopback |
-| `setup-evpn` | `source_ip` | Set up EVPN overlay |
-| `teardown-evpn` | none | Tear down EVPN |
-| `create-vlan` | `id`, `description` | Create a VLAN |
+| `create-vlan` | `id`, `description`, `vni` | Create a VLAN |
 | `delete-vlan` | `id` | Delete a VLAN |
-| `configure-svi` | `vlan_id`, `vrf`, `ip_address`, `anycast_mac` | Configure an SVI |
+| `configure-irb` | `vlan_id`, `vrf`, `ip_address`, `anycast_mac` | Configure an IRB |
 | `create-vrf` | `name` | Create a VRF |
 | `delete-vrf` | `name` | Delete a VRF |
 | `create-acl` | `name`, `type`, `stage`, `ports`, `description` | Create an ACL table |
 | `delete-acl` | `name` | Delete an ACL table |
-| `create-portchannel` | `name` | Create a PortChannel |
+| `create-portchannel` | `name`, `members`, `mtu`, `min_links`, `fallback`, `fast_rate` | Create a PortChannel |
 | `delete-portchannel` | `name` | Delete a PortChannel |
+| `node-bind-macvpn` | `vlan_id`, `vni` | Bind MAC-VPN (node-level) |
+| `node-unbind-macvpn` | `vlan_id` | Unbind MAC-VPN (node-level) |
 
 **Interface actions** (`interface` field required):
 
 | Action | Params | Description |
 |--------|--------|-------------|
-| `apply-service` | `service`, `ip_address`, `peer_as` | Apply service to interface. Note: `vlan` parameter is not supported in batch — use the dedicated endpoint for services requiring a VLAN ID. |
+| `apply-service` | `service`, `ip_address`, `peer_as`, `vlan_id`, `route_reflector_client`, `next_hop_self` | Apply service to interface |
 | `remove-service` | none | Remove service from interface |
 | `refresh-service` | none | Refresh service on interface |
-| `set-ip` | `ip` | Set IP address |
-| `remove-ip` | `ip` | Remove IP address |
-| `set-vrf` | `vrf` | Bind to VRF |
+| `unconfigure-interface` | none | Unconfigure interface |
+| `configure-interface` | `vrf`, `ip`, `vlan_id`, `tagged` | Configure interface |
 | `bind-acl` | `acl`, `direction` | Bind ACL |
 | `unbind-acl` | `acl` | Unbind ACL |
 | `bind-macvpn` | `macvpn` | Bind MAC-VPN |
 | `unbind-macvpn` | none | Unbind MAC-VPN |
-| `set` | `property`, `value` | Set interface property (always calls `iface.Set()` directly; does not special-case `"ip"`/`"vrf"` like the dedicated `POST .../set` endpoint) |
+| `set-port-property` | `property`, `value` | Set interface property |
 | `apply-qos` | `policy` | Apply QoS policy |
 | `remove-qos` | none | Remove QoS policy |
-| `add-bgp-neighbor` | `neighbor_ip`, `remote_as`, `description` | Add BGP neighbor |
-| `remove-bgp-neighbor` | `ip` | Remove BGP neighbor |
+| `add-bgp-peer` | `neighbor_ip`, `remote_as`, `description`, `multihop` | Add BGP peer |
+| `remove-bgp-peer` | none | Remove BGP peer |
 
 **Example:**
 
@@ -2466,8 +2721,8 @@ POST /network/default/node/switch1/execute
   "execute": true,
   "no_save": false,
   "operations": [
-    {"action": "configure-bgp"},
-    {"action": "setup-evpn", "params": {"source_ip": "10.0.0.1"}},
+    {"action": "create-vlan", "params": {"id": 100}},
+    {"action": "create-vrf", "params": {"name": "CUSTOMER"}},
     {
       "action": "apply-service",
       "interface": "Ethernet0",
@@ -2479,7 +2734,7 @@ POST /network/default/node/switch1/execute
 
 ---
 
-## 14. Types Reference
+## 15. Types Reference
 
 All request and response types used across the API, grouped by domain. Types are
 defined in `pkg/newtron/types.go` (public API) and `pkg/newtron/api/types.go`
@@ -2487,7 +2742,7 @@ defined in `pkg/newtron/types.go` (public API) and `pkg/newtron/api/types.go`
 
 ### Write Result Types
 
-These types are returned by all device write operations (§8, §12).
+These types are returned by all device write operations (S8, S13).
 
 #### WriteResult
 
@@ -2502,7 +2757,7 @@ These types are returned by all device write operations (§8, §12).
 
 #### VerificationResult
 
-Also returned standalone by composite verify (`POST .../composite/verify`, §11)
+Also returned standalone by composite verify (`POST .../verify-composite`, S12)
 and embedded in `DeliveryResult` from composite deliver.
 
 | Field | Type | Description |
@@ -2724,8 +2979,8 @@ Returned by `GET .../evpn/status`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `vteps` | object | VTEP tunnel map (name → source IP) |
-| `nvos` | object | NVO map (name → source VTEP) |
+| `vteps` | object | VTEP tunnel map (name -> source IP) |
+| `nvos` | object | NVO map (name -> source VTEP) |
 | `vni_mappings` | VNIMapping[] | VNI to VLAN/VRF mappings |
 | `l3vni_vrfs` | L3VNIEntry[] | L3VNI to VRF mappings |
 | `vtep_status` | string | VTEP operational status |
@@ -2817,10 +3072,20 @@ Returned by `GET .../host/{name}`.
 | `ssh_pass` | string | SSH password |
 | `ssh_port` | integer | SSH port |
 
+### Device Settings Types
+
+#### DeviceSettings
+
+Returned by `GET .../settings` and accepted by `PUT .../settings`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max_history` | integer | Maximum number of history entries to keep |
+
 ### Spec Detail Types
 
-These types are returned by the spec read endpoints in §4. They are the API's
-view of spec objects — they contain only the fields relevant to consumers, not
+These types are returned by the spec read endpoints in S4. They are the API's
+view of spec objects -- they contain only the fields relevant to consumers, not
 internal implementation details.
 
 #### ServiceDetail
@@ -2958,32 +3223,20 @@ Returned by `GET .../zone` (array of names) and `GET .../zone/{name}` (single).
 
 ### Composite Types
 
-#### CompositeInfo
-
-Returned by `POST /network/{netID}/composite/{device}`. Also used internally by
-the composite handle workflow — callers receive the `CompositeHandleResponse`
-wrapper instead.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `device_name` | string | Device name |
-| `entry_count` | integer | Total CONFIG_DB entries |
-| `tables` | object | Table name → entry count map |
-
 #### CompositeHandleResponse
 
-Returned by `POST .../composite/generate`.
+Returned by `POST .../generate-composite`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `handle` | string | UUID for subsequent verify/deliver calls |
 | `device_name` | string | Device name |
 | `entry_count` | integer | Total entries |
-| `tables` | object | Table name → entry count map |
+| `tables` | object | Table name -> entry count map |
 
 #### DeliveryResult
 
-Returned by `POST .../composite/deliver`.
+Returned by `POST .../deliver-composite`.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -3056,13 +3309,13 @@ Returned in array by `GET /network`.
 ### Cleanup Types
 
 The `CleanupSummary` type exists in the Go API (`pkg/newtron/types.go`) but the
-HTTP handler discards it — `POST .../cleanup` returns the standard `WriteResult`
+HTTP handler discards it -- `POST .../cleanup` returns the standard `WriteResult`
 from the Execute cycle. The cleanup details (which orphaned resources were found)
 are not currently exposed via HTTP.
 
 ---
 
-## 15. Error Reference
+## 16. Error Reference
 
 ### Error Response Format
 
@@ -3114,7 +3367,7 @@ All errors return the `APIResponse` envelope with the `error` field:
 
 ---
 
-## 16. Server Configuration
+## 17. Server Configuration
 
 ### Binary Flags
 
