@@ -1,6 +1,6 @@
 # Intent DAG Implementation Tracker
 
-Authoritative spec: `docs/newtron/intent-dag.md`
+Authoritative spec: `docs/newtron/intent-dag-architecture.md`
 
 Legend: `[ ]` = not started, `[x]` = completed, `[!]` = blocked/issue
 

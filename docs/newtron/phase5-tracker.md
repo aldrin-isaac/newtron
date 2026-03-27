@@ -72,7 +72,7 @@ Status: `[ ]` pending, `[~]` in progress, `[x]` resolved.
 - [x] **T13.2** `CreateACL` — add intent guard
 - [x] **T13.3** `ConfigureIRB` — add intent guard
 
-### T14. Update `docs/newtron/intent-dag.md`
+### T14. Update `docs/newtron/intent-dag-architecture.md`
 - [x] **T14.1** §4.1/§4.2: Remove "Signature change" framing
 - [x] **T14.2** §4.3: Delete `updateIntent` section (eliminated)
 - [x] **T14.3** §5.6: Add implementation note about cascadeDeleteChildren elimination
