@@ -63,13 +63,13 @@ CONFIG_DB.
 The primitives define what gets configured. These principles govern
 how.
 
-**Specs are the source of intent; the device is ground reality.** Specs describe what the network should look like. Once
-configuration is applied, the device's CONFIG_DB is what exists —
-whether correct or not. If someone changes what **newtron** wrote — or
-configures other interfaces entirely outside of **newtron** —
-**newtron** will not notice or undo it. There is no background process
-watching for drift. There is the device, and there is the change you
-are asking for.
+**Intent-first configuration with drift detection.** Every write
+operation records an intent. The expected CONFIG_DB state — the
+projection — is derived by replaying all intents. `intent drift`
+compares the projection against the actual device, reporting missing,
+extra, and modified entries. `intent reconcile` delivers the projection
+to the device, eliminating drift. External CONFIG_DB edits (Ansible,
+`redis-cli`, SONiC CLI) are detected as drift — not silently accepted.
 
 **Network-scoped specs, device-scoped execution.** Service specs, VPN
 parameters, route policies, and filters are defined once at the network
@@ -114,7 +114,7 @@ read STATE_DB. Device shell access is a documented exception, not a
 normalized path.
 
 **One code path.** Online operations against a live device and offline
-composite provisioning run the same code. There is no template engine,
+topology provisioning run the same code. There is no template engine,
 no separate provisioning pipeline — the operations *are* the
 provisioning.
 
@@ -190,7 +190,7 @@ DRY-RUN: No changes applied. Use -x to execute.
 These aren't templates rendered from Jinja. **newtron** computed them by running
 its operations against the device's profile — AS 65001, loopback 10.0.0.1,
 the transit service spec, and the /31 address you provided. The same code
-path runs online against a live device or offline for composite provisioning.
+path runs online against a live device or offline for topology provisioning.
 
 Add `-x` to execute. **newtron** writes atomically, re-reads to verify, then persists:
 
@@ -220,7 +220,7 @@ bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
 bin/newtron service list                    # List defined services
 bin/newtron show switch1                    # Show device profile
-bin/newtron switch1 provision               # Preview full composite (dry-run)
+bin/newtron switch1 --topology intent drift  # Compare topology intent vs device
 ```
 
 The same operations are available as HTTP endpoints:
@@ -333,7 +333,7 @@ pkg/
     api/            HTTP server: actors, handlers, middleware
     device/sonic/   SSH tunnels, Redis DB 0/1/4/6, 42 CONFIG_DB parsers, locking
     network/        Network type, topology graph, spec resolution
-      node/         Node + Interface types, all operations, composite provisioning
+      node/         Node + Interface types, all operations, topology provisioning
     settings/       Settings resolution (flag > env > file)
     spec/           Spec types and loader
   newtlab/          QEMU, multi-host placement, socket bridges, boot patches
