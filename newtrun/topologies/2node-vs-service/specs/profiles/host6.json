@@ -4,7 +4,5 @@
     "zone": "",
     "platform": "alpine-host",
     "ssh_user": "root",
-    "ssh_pass": "root",
-    "ssh_port": 13001,
-    "console_port": 12001
+    "ssh_pass": "root"
 }
