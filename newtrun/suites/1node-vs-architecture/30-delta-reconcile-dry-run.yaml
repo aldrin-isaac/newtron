@@ -1,0 +1,61 @@
+name: delta-reconcile-dry-run
+description: |
+  Delta reconcile dry-run: returns drift preview without modifying device.
+  Dry-run behavior is the same regardless of reconcile mode — it returns
+  the drift entries that would be patched.
+topology: 1node-vs
+requires: [delta-reconcile-noop]
+
+steps:
+  # Inject drift: extra VLAN
+  - name: inject-extra
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan666' vlanid 666"}
+
+  # Dry-run delta reconcile: should return drift preview
+  - name: delta-dry-run
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?reconcile=delta&dry_run=true
+    expect:
+      jq: >-
+        length >= 1
+        and any(.[]; .type == "extra" and .table == "VLAN" and .key == "Vlan666")
+
+  # Verify device NOT modified — VLAN still exists
+  - name: verify-drift-persists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan666/exists
+    expect:
+      jq: '.exists == true'
+
+  # Real delta reconcile fixes it
+  - name: real-delta-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?reconcile=delta
+    expect:
+      jq: '.mode == "delta" and .applied >= 1'
+
+  - name: verify-containers-healthy
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
+  # Verify zero drift after
+  - name: verify-zero-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

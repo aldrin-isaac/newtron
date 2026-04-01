@@ -60,9 +60,9 @@ This has concrete design implications:
 - **Drift guard refuses writes** when device CONFIG_DB diverges from the projection
   (actuated mode). External CONFIG_DB edits are drift — newtron detects them and refuses
   to operate on an inconsistent foundation.
-- **Reconcile overwrites the device** to match the projection. It is a first-class
-  operation: `Reconcile()` calls `ExportEntries()` + `ReplaceAll()` to deliver the full
-  projection. Use it to fix drift and to re-provision a device.
+- **Reconcile eliminates drift** — two modes: full (config reload + ReplaceAll, overwrites
+  everything) and delta (ApplyDrift, patches only drifted entries). Both restore the device
+  to match the projection.
 - **NEWTRON_INTENT** records live on the device and are the input for actuated mode.
   On connect, the node replays intents via `IntentsToSteps` + `ReplayStep` to reconstruct
   the projection. The intent record is the ground reality; the projection is its
@@ -265,7 +265,7 @@ Key implementation:
 - `Execute(ctx, opts, fn)` wraps writes with Lock/Unlock and supports dry-run via intent
   snapshot/restore. On dry-run, `RestoreIntentDB` puts the intent DB back; the dirty projection
   is cleaned by the next `execute()`'s `RebuildProjection`
-- `Reconcile()` calls `configDB.ExportEntries()` + `ReplaceAll()` — delivers the projection
+- `Reconcile()` in full mode calls `configDB.ExportEntries()` + `ReplaceAll()`. In delta mode it calls `Drift()` (via `DiffConfigDB`) + `ApplyDrift()` — same purpose, surgical delivery.
 - `SaveDeviceIntents()` persists the intent DB back to `topology.json`
 
 Crash recovery is structural: NEWTRON_INTENT records ARE the persistent state. The drift guard

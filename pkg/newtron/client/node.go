@@ -531,10 +531,10 @@ func (c *Client) IntentClear(device string) (*newtron.TopologySnapshot, error) {
 	return &result, nil
 }
 
-// Reconcile delivers the full projection to the device, eliminating drift.
-// Mode selects the source of expected state: "" or "intent" uses device
-// NEWTRON_INTENT records; "topology" uses topology.json steps.
-func (c *Client) Reconcile(device, mode string, opts newtron.ExecOpts) (*newtron.ReconcileResult, error) {
+// Reconcile delivers the projection to the device, eliminating drift.
+// mode selects the intent source: "topology" or "" (actuated).
+// reconcileMode selects the delivery mechanism: "full", "delta", or "" (default).
+func (c *Client) Reconcile(device, mode, reconcileMode string, opts newtron.ExecOpts) (*newtron.ReconcileResult, error) {
 	q := url.Values{}
 	if !opts.Execute {
 		q.Set("dry_run", "true")
@@ -544,6 +544,9 @@ func (c *Client) Reconcile(device, mode string, opts newtron.ExecOpts) (*newtron
 	}
 	if mode == "topology" {
 		q.Set("mode", "topology")
+	}
+	if reconcileMode != "" {
+		q.Set("reconcile", reconcileMode)
 	}
 	path := c.nodePath(device) + "/intent/reconcile"
 	if len(q) > 0 {

@@ -130,10 +130,19 @@ Examples:
 // intent reconcile — deliver projection to device to eliminate drift
 // ============================================================================
 
+var (
+	reconcileFull  bool
+	reconcileDelta bool
+)
+
 var intentReconcileCmd = &cobra.Command{
 	Use:   "reconcile",
 	Short: "Deliver expected state to device, eliminating drift",
 	Long: `Reconstruct expected CONFIG_DB and apply it to the device.
+
+Two delivery modes:
+  --full   Config reload + full ReplaceAll (default for topology mode)
+  --delta  Patch only drifted entries, no reload (default for actuated mode)
 
 Without --topology: reconciles from device NEWTRON_INTENT records.
 With --topology: reconciles from topology.json steps.
@@ -141,16 +150,22 @@ With --topology: reconciles from topology.json steps.
 Dry-run by default. Use -x to execute.
 
 Examples:
-  newtron leaf1 intent reconcile           # dry-run (shows drift)
-  newtron leaf1 intent reconcile -x        # execute
-  newtron leaf1 --topology intent reconcile -x  # topology mode`,
+  newtron leaf1 intent reconcile -x                      # delta (default, actuated)
+  newtron leaf1 intent reconcile --full -x               # full (actuated)
+  newtron leaf1 --topology intent reconcile -x           # full (default, topology)
+  newtron leaf1 --topology intent reconcile --delta -x   # delta (topology)`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
 		}
+		if reconcileFull && reconcileDelta {
+			return fmt.Errorf("--full and --delta are mutually exclusive")
+		}
 
 		mode := intentMode()
-		result, err := app.client.Reconcile(app.deviceName, mode, execOpts())
+		reconcileMode := reconcileModeFromFlags(mode)
+
+		result, err := app.client.Reconcile(app.deviceName, mode, reconcileMode, execOpts())
 		if err != nil {
 			return err
 		}
@@ -160,15 +175,31 @@ Examples:
 		}
 
 		if result.Applied == 0 {
-			fmt.Printf("Reconcile for %s: %s\n", bold(app.deviceName), green("no changes needed"))
+			fmt.Printf("Reconcile (%s) for %s: %s\n", result.Mode, bold(app.deviceName), green("no changes needed"))
 		} else {
-			fmt.Printf("Reconcile for %s: %d entries applied\n", bold(app.deviceName), result.Applied)
+			fmt.Printf("Reconcile (%s) for %s: %d entries applied", result.Mode, bold(app.deviceName), result.Applied)
+			if result.Mode == "delta" {
+				fmt.Printf(" (missing: %d, extra: %d, modified: %d)", result.Missing, result.Extra, result.Modified)
+			}
+			fmt.Println()
 		}
 		if !app.executeMode {
 			printDryRunNotice()
 		}
 		return nil
 	},
+}
+
+// reconcileModeFromFlags returns the reconcile mode from CLI flags.
+// Empty string means "use server default" (topology→full, actuated→delta).
+func reconcileModeFromFlags(intentSource string) string {
+	if reconcileFull {
+		return "full"
+	}
+	if reconcileDelta {
+		return "delta"
+	}
+	return "" // let server pick default
 }
 
 // ============================================================================
@@ -391,6 +422,10 @@ func formatIntentParams(params map[string]string) string {
 func init() {
 	// intent tree
 	intentTreeCmd.Flags().BoolVar(&intentAncestors, "ancestors", false, "Show path from resource to root")
+
+	// intent reconcile flags
+	intentReconcileCmd.Flags().BoolVar(&reconcileFull, "full", false, "Full reconcile (config reload + ReplaceAll)")
+	intentReconcileCmd.Flags().BoolVar(&reconcileDelta, "delta", false, "Delta reconcile (patch only drifted entries)")
 
 	// Register all under intentCmd
 	intentCmd.AddCommand(intentTreeCmd)

@@ -210,6 +210,37 @@ func TestOwnedTables_ExcludesInternalTables(t *testing.T) {
 	}
 }
 
+func TestTablePriority_AllSchemaTablesHavePriority(t *testing.T) {
+	for table := range Schema {
+		if _, ok := tablePriority[table]; !ok {
+			t.Errorf("table %s in Schema has no entry in tablePriority", table)
+		}
+	}
+}
+
+func TestTablePriority_ParentBeforeChild(t *testing.T) {
+	// Verify YANG leafref chains: parent priority < child priority.
+	chains := [][2]string{
+		{"VLAN", "VLAN_MEMBER"},
+		{"VLAN", "VLAN_INTERFACE"},
+		{"VRF", "BGP_GLOBALS"},
+		{"BGP_GLOBALS", "BGP_NEIGHBOR"},
+		{"BGP_NEIGHBOR", "BGP_NEIGHBOR_AF"},
+		{"BGP_GLOBALS", "BGP_GLOBALS_AF"},
+		{"VXLAN_TUNNEL", "VXLAN_EVPN_NVO"},
+		{"VXLAN_EVPN_NVO", "VXLAN_TUNNEL_MAP"},
+		{"ACL_TABLE", "ACL_RULE"},
+		{"BGP_PEER_GROUP", "BGP_PEER_GROUP_AF"},
+	}
+	for _, pair := range chains {
+		parent, child := pair[0], pair[1]
+		if TablePriority(parent) >= TablePriority(child) {
+			t.Errorf("%s (priority %d) should be lower than %s (priority %d)",
+				parent, TablePriority(parent), child, TablePriority(child))
+		}
+	}
+}
+
 func TestExportRaw_RoundTrip(t *testing.T) {
 	// Build a RawConfigDB with known data across three tables. Field names must
 	// match the json tags on the corresponding typed structs so they survive the

@@ -40,6 +40,15 @@ steps:
     action: wait
     duration: 5s
 
+  - name: verify-containers-healthy-after-empty-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
   # Verify device CONFIG_DB no longer has newtron-managed entries.
   # BGP_GLOBALS should be gone (owned by newtron, wiped by empty reconcile).
   - name: verify-bgp-wiped
@@ -107,6 +116,15 @@ steps:
       interval: 3s
     expect:
       jq: '.output | contains("router bgp")'
+
+  - name: verify-containers-healthy-after-reprovision
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
 
   # Verify restored: zero drift
   - name: verify-restored

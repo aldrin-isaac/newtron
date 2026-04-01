@@ -217,7 +217,7 @@ func init() {
 	// (PersistentFlags so subcommands inherit)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, qosCmd, filterCmd,
+		vrfCmd, serviceCmd, qosCmd, filterCmd, deviceCmd,
 	} {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
@@ -250,7 +250,7 @@ func init() {
 
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
-		showCmd, healthCmd, initCmd, intentCmd,
+		showCmd, healthCmd, initCmd, deviceCmd, intentCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)

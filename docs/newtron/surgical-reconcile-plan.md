@@ -8,6 +8,16 @@ Both modes work in both topology and actuated modes. The mode (full/delta)
 selects the delivery mechanism; the intent source (topology/actuated) is
 orthogonal.
 
+**This is a feature addition, not a refactor.** Do not reorganize, extract
+helpers from, or "clean up" the existing Reconcile code. The existing
+function has a natural structure — connect, reload, lock, deliver, save,
+unlock — where most steps are shared and only reload (full-only) and
+delivery (full vs delta) differ. Add branch points where behavior diverges;
+do not duplicate shared scaffolding.
+
+**Pass criteria:** `1node-vs-architecture` full E2E suite pass (all scenarios
+including the new delta reconcile scenarios).
+
 ---
 
 ## 1. Architecture Quotation
@@ -230,7 +240,7 @@ Every task maps to a specific file and function. Mark `[x]` as completed.
 
 ### Phase 1: Device Layer — `ApplyDrift`
 
-- [ ] **1.1** Add `ApplyDrift(diffs []DriftEntry) error` to
+- [x] **1.1** Add `ApplyDrift(diffs []DriftEntry) error` to
   `pkg/newtron/device/sonic/pipeline.go`
   - Single `TxPipeline` (atomic, same pattern as `PipelineSet`)
   - For "extra": `pipe.Del(ctx, table|key)`
@@ -238,24 +248,24 @@ Every task maps to a specific file and function. Mark `[x]` as completed.
   - Sorts entries before building pipeline: deletes first (descending table
     priority), then creates/modifies (ascending table priority)
 
-- [ ] **1.2** Add `tablePriority` map to `pkg/newtron/device/sonic/configdb_diff.go`
+- [x] **1.2** Add `tablePriority` map to `pkg/newtron/device/sonic/configdb_diff.go`
   - Numeric priority for each owned table based on YANG leafref chains
   - Lower number = parent (created first, deleted last)
   - Used by `ApplyDrift` for ordering
 
-- [ ] **1.3** Add unit tests in `pkg/newtron/device/sonic/configdb_diff_test.go`
+- [x] **1.3** Add unit tests in `pkg/newtron/device/sonic/configdb_diff_test.go`
   - `TestTablePriority` — verify all owned tables have a priority assigned
 
 ### Phase 2: Node Layer — Dual-Mode Reconcile
 
-- [ ] **2.1** Add `ReconcileOpts` to `pkg/newtron/network/node/node.go`
+- [x] **2.1** Add `ReconcileOpts` to `pkg/newtron/network/node/node.go`
   ```go
   type ReconcileOpts struct {
       Mode string // "full" or "delta"
   }
   ```
 
-- [ ] **2.2** Modify `Node.Reconcile` signature: `Reconcile(ctx, opts ReconcileOpts)`
+- [x] **2.2** Modify `Node.Reconcile` signature: `Reconcile(ctx, opts ReconcileOpts)`
   at `pkg/newtron/network/node/node.go:368`
   - `if opts.Mode == "full"`: existing code path, unchanged (config reload →
     `ExportEntries()` → `ReplaceAll(entries, deliveryTables)`)
@@ -265,38 +275,38 @@ Every task maps to a specific file and function. Mark `[x]` as completed.
   - Both paths share: connect → lock → *delivery* → SaveConfig →
     EnsureUnifiedConfigMode → unlock
 
-- [ ] **2.3** Update internal `ReconcileResult` at `node.go:358`
+- [x] **2.3** Update internal `ReconcileResult` at `node.go:358`
   - Add `Mode`, `Missing`, `Extra`, `Modified` fields
 
 ### Phase 3: Public API Layer
 
-- [ ] **3.1** Add public `ReconcileOpts` to `pkg/newtron/types.go`
+- [x] **3.1** Add public `ReconcileOpts` to `pkg/newtron/types.go`
   ```go
   type ReconcileOpts struct {
       Mode string `json:"mode"` // "full" or "delta"
   }
   ```
 
-- [ ] **3.2** Update public `ReconcileResult` in `pkg/newtron/types.go:978`
+- [x] **3.2** Update public `ReconcileResult` in `pkg/newtron/types.go:978`
   - Add `Mode`, `Missing`, `Extra`, `Modified` fields
 
-- [ ] **3.3** Update `Node.Reconcile` wrapper in `pkg/newtron/node.go:115`
+- [x] **3.3** Update `Node.Reconcile` wrapper in `pkg/newtron/node.go:115`
   - Accept `ReconcileOpts`, convert to internal opts, map result
 
 ### Phase 4: HTTP Handler + Client + CLI
 
-- [ ] **4.1** Update `handleReconcile` in `pkg/newtron/api/handler_node.go:1070`
+- [x] **4.1** Update `handleReconcile` in `pkg/newtron/api/handler_node.go:1070`
   - Parse `?reconcile=full|delta` query parameter
   - Pass `ReconcileOpts` to `node.Reconcile`
   - Dry-run path unchanged (returns drift preview regardless of mode)
 
-- [ ] **4.2** Update `Client.Reconcile` in `pkg/newtron/client/node.go:537`
+- [x] **4.2** Update `Client.Reconcile` in `pkg/newtron/client/node.go:537`
   - Add `reconcileMode string` parameter
   - Pass as `?reconcile=full|delta` query parameter when non-empty
   - newtrun caller (`pkg/newtrun/steps.go`) passes `mode="topology"` for
     intent source — unaffected (orthogonal parameter)
 
-- [ ] **4.3** Update `intentReconcileCmd` in `cmd/newtron/cmd_intent.go:133`
+- [x] **4.3** Update `intentReconcileCmd` in `cmd/newtron/cmd_intent.go:133`
   - Add `--full` and `--delta` flags (mutually exclusive)
   - Default depends on `--topology` flag: topology → full, actuated → delta
   - Pass mode to `client.Reconcile`
@@ -304,7 +314,7 @@ Every task maps to a specific file and function. Mark `[x]` as completed.
 
 ### Phase 5: Documentation
 
-- [ ] **5.1** Update architecture doc `docs/newtron/unified-pipeline-architecture.md`
+- [x] **5.1** Update architecture doc `docs/newtron/unified-pipeline-architecture.md`
   - Line 43: diagram label `Reconcile (full)` → `Reconcile (full/delta)`
   - Line 78: describe both write paths out of the Abstract Node
   - Lines 463-482: add delta procedure alongside full procedure
@@ -313,23 +323,94 @@ Every task maps to a specific file and function. Mark `[x]` as completed.
   - Lines 894-936: add note about mode selection to topology Reconcile trace
   - Add actuated delta Reconcile trace
 
-- [ ] **5.2** Update `CLAUDE.md`
+- [x] **5.2** Update `CLAUDE.md`
   - "Reconcile overwrites the device" → describe both modes
   - Update references to `ReplaceAll` as sole delivery mechanism
 
-- [ ] **5.3** Update LLD `docs/newtron/lld.md`
+- [x] **5.3** Update LLD `docs/newtron/lld.md`
   - Update `ReconcileResult` struct (line 642)
   - Update API table for reconcile endpoint (line 1110)
 
-### Phase 6: Verification
+### Phase 6: E2E Tests — `1node-vs-architecture`
 
-- [ ] **6.1** `go build ./...` — compilation
-- [ ] **6.2** `go vet ./...` — static analysis
-- [ ] **6.3** `go test ./... -count=1` — all tests pass
-- [ ] **6.4** Grep for stale references
+New scenarios added to `newtrun/suites/1node-vs-architecture/`. These test
+delta Reconcile end-to-end. Delta mode does NOT do config reload or BGP
+restart — it patches CONFIG_DB surgically. This means the post-reconcile
+verification is simpler (no reload/restart dance).
+
+- [x] **6.1** `27-delta-reconcile-actuated.yaml` — Delta reconcile in actuated mode
+  - Inject drift (all 3 types: missing loopback IP, extra VLAN, modified BGP ASN)
+  - Verify drift detected
+  - POST `/intent/reconcile?reconcile=delta` — delta reconcile
+  - Verify result: `mode == "delta"`, `applied >= 3`, breakdown fields populated
+  - Verify missing entry restored (loopback IP)
+  - Verify extra entry removed (VLAN)
+  - Verify modified entry corrected (BGP ASN)
+  - Verify zero drift after
+  - Verify writes unblocked (drift guard cleared)
+
+- [x] **6.2** `28-delta-reconcile-topology.yaml` — Delta reconcile in topology mode
+  - Inject drift (extra VLAN via redis-cli)
+  - POST `/intent/reconcile?mode=topology&reconcile=delta` — topology delta
+  - Verify extra VLAN removed
+  - Verify zero drift after
+
+- [x] **6.3** `29-delta-reconcile-noop.yaml` — Delta reconcile on clean device
+  - Verify zero drift before
+  - POST `/intent/reconcile?reconcile=delta` — delta on clean device
+  - Verify result: `applied == 0`
+  - Verify zero drift after (idempotent)
+
+- [x] **6.4** `30-delta-reconcile-dry-run.yaml` — Delta reconcile dry-run
+  - Inject drift (extra VLAN)
+  - POST `/intent/reconcile?reconcile=delta&dry_run=true` — dry-run
+  - Verify drift preview returned (shows extra VLAN)
+  - Verify device NOT modified (VLAN still exists)
+  - Real delta reconcile fixes it
+  - Verify zero drift after
+
+- [x] **6.5** `31-full-reconcile-explicit.yaml` — Explicit `?reconcile=full` still works
+  - Inject drift
+  - POST `/intent/reconcile?reconcile=full` — explicit full in actuated mode
+  - Verify drift fixed (full reload+replace cycle)
+  - Verify zero drift after
+  - Restore device state (reload-config + restart-bgp)
+
+- [x] **6.6** Update existing scenarios to use explicit `?reconcile=full` where
+  full mode is intended (07, 12, 14, 18, 21) — ensures existing tests are
+  not broken by the new default (actuated defaults to delta)
+
+### Phase 7: Documentation
+
+- [x] **7.1** Update architecture doc `docs/newtron/unified-pipeline-architecture.md`
+  - Line 43: diagram label `Reconcile (full)` → `Reconcile (full/delta)`
+  - Line 78: describe both write paths out of the Abstract Node
+  - Lines 463-482: add delta procedure alongside full procedure
+  - Line 1053: update glossary — "Eliminate drift. Two modes: full (config
+    reload + ReplaceAll) and delta (apply only drifted entries)."
+  - Lines 894-936: add note about mode selection to topology Reconcile trace
+  - Add actuated delta Reconcile trace
+
+- [x] **7.2** Update `CLAUDE.md`
+  - "Reconcile overwrites the device" → describe both modes
+  - Update references to `ReplaceAll` as sole delivery mechanism
+
+- [x] **7.3** Update LLD `docs/newtron/lld.md`
+  - Update `ReconcileResult` struct (line 642)
+  - Update API table for reconcile endpoint (line 1110)
+
+### Phase 8: Verification
+
+**Pass criteria: `1node-vs-architecture` full suite pass (all 32 scenarios).**
+
+- [x] **8.1** `go build ./...` — compilation
+- [x] **8.2** `go vet ./...` — static analysis
+- [x] **8.3** `go test ./... -count=1` — unit tests pass
+- [ ] **8.4** (PENDING: requires 1node-vs lab) `1node-vs-architecture` E2E suite — all scenarios pass
+- [x] **8.5** Grep for stale references
   - `ReplaceAll` in comments/docs — verify none imply it's the only Reconcile path
   - "full projection" in docs — verify updated to acknowledge delta mode
-- [ ] **6.5** Post-implementation conformance audit (ai-instructions §9):
+- [x] **8.6** Post-implementation conformance audit (ai-instructions §9):
   - Architecture conformance — both modes eliminate drift, both work in both intent source modes
   - Naming — "full" and "delta" are honest, descriptive names
   - Public API boundary — internal `node.ReconcileOpts` doesn't leak

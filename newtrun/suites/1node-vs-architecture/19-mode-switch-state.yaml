@@ -97,6 +97,15 @@ steps:
     expect:
       jq: '.output | contains("router bgp")'
 
+  - name: verify-containers-healthy
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
   # After reconcile, VLAN 900 should be on device
   - name: verify-vlan-on-device-after-reconcile
     action: newtron

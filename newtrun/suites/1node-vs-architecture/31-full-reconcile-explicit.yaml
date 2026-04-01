@@ -1,0 +1,91 @@
+name: full-reconcile-explicit
+description: |
+  Explicit ?reconcile=full in actuated mode: overrides the delta default.
+  Verifies that the full reconcile path (config reload + ReplaceAll) still
+  works when explicitly requested.
+topology: 1node-vs
+requires: [delta-reconcile-dry-run]
+
+steps:
+  # Inject drift: modified BGP ASN
+  - name: inject-drift
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 55555"}
+
+  # Verify drift
+  - name: verify-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length >= 1'
+
+  # Explicit full reconcile in actuated mode
+  - name: full-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?reconcile=full
+    expect:
+      jq: '.mode == "full"'
+
+  # Full mode does config reload — need reload+restart dance
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  - name: verify-containers-healthy
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
+  # Verify zero drift after full reconcile
+  - name: verify-zero-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Verify ASN corrected
+  - name: verify-asn-fixed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    expect:
+      jq: '.local_asn == "65001"'

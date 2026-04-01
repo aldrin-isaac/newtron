@@ -3,6 +3,7 @@ package sonic
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -41,6 +42,76 @@ func (c *ConfigDBClient) PipelineSet(changes []Entry) error {
 	return nil
 }
 
+
+// ApplyDrift applies only the drifted entries to CONFIG_DB, using a single
+// atomic TxPipeline. Entries are ordered by table dependency: deletes run
+// children-first (descending priority), creates/modifies run parents-first
+// (ascending priority). This matches YANG leafref ordering.
+//
+// Actions per drift type:
+//   - "extra": DEL (entry should not exist)
+//   - "missing"/"modified": DEL + HSET (clean replace per CONFIG_DB Replace Semantics)
+func (c *ConfigDBClient) ApplyDrift(diffs []DriftEntry) error {
+	if len(diffs) == 0 {
+		return nil
+	}
+
+	// Separate deletes from creates/modifies for ordering.
+	var deletes, upserts []DriftEntry
+	for _, d := range diffs {
+		if d.Type == "extra" {
+			deletes = append(deletes, d)
+		} else {
+			upserts = append(upserts, d)
+		}
+	}
+
+	// Deletes: children first (descending priority).
+	sort.Slice(deletes, func(i, j int) bool {
+		pi, pj := TablePriority(deletes[i].Table), TablePriority(deletes[j].Table)
+		if pi != pj {
+			return pi > pj
+		}
+		return deletes[i].Table < deletes[j].Table
+	})
+
+	// Upserts: parents first (ascending priority).
+	sort.Slice(upserts, func(i, j int) bool {
+		pi, pj := TablePriority(upserts[i].Table), TablePriority(upserts[j].Table)
+		if pi != pj {
+			return pi < pj
+		}
+		return upserts[i].Table < upserts[j].Table
+	})
+
+	pipe := c.client.TxPipeline()
+
+	// Deletes first.
+	for _, d := range deletes {
+		pipe.Del(c.ctx, fmt.Sprintf("%s|%s", d.Table, d.Key))
+	}
+
+	// Then creates/modifies (DEL + HSET per CONFIG_DB Replace Semantics).
+	for _, d := range upserts {
+		redisKey := fmt.Sprintf("%s|%s", d.Table, d.Key)
+		pipe.Del(c.ctx, redisKey)
+		if len(d.Expected) == 0 {
+			pipe.HSet(c.ctx, redisKey, "NULL", "NULL")
+		} else {
+			args := make([]interface{}, 0, len(d.Expected)*2)
+			for k, v := range d.Expected {
+				args = append(args, k, v)
+			}
+			pipe.HSet(c.ctx, redisKey, args...)
+		}
+	}
+
+	_, err := pipe.Exec(c.ctx)
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("apply drift pipeline exec: %w", err)
+	}
+	return nil
+}
 
 // platformMergeTables are CONFIG_DB tables managed by the SONiC platform
 // (portsyncd, port_config.ini). Newtron merges its settings into these

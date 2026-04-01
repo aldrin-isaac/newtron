@@ -108,17 +108,21 @@ func (n *Node) Drift(ctx context.Context) ([]DriftEntry, error) {
 	return result, nil
 }
 
-// Reconcile delivers the full projection to the device, eliminating drift.
+// Reconcile delivers the projection to the device, eliminating drift.
 // Auto-connects transport if not already connected.
 //
-// Architecture §6: "Deliver the full projection to the device."
-func (n *Node) Reconcile(ctx context.Context) (*ReconcileResult, error) {
-	result, err := n.internal.Reconcile(ctx)
+// Two modes: "full" (config reload + ReplaceAll) and "delta" (patch only drifted entries).
+func (n *Node) Reconcile(ctx context.Context, opts ReconcileOpts) (*ReconcileResult, error) {
+	result, err := n.internal.Reconcile(ctx, node.ReconcileOpts{Mode: opts.Mode})
 	if err != nil {
 		return nil, err
 	}
 	return &ReconcileResult{
-		Applied: result.Applied,
+		Mode:     result.Mode,
+		Applied:  result.Applied,
+		Missing:  result.Missing,
+		Extra:    result.Extra,
+		Modified: result.Modified,
 	}, nil
 }
 
