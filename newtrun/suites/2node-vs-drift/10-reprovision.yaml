@@ -1,21 +1,21 @@
 name: reprovision
 description: |
-  Re-provision switch1 to remediate drift.
-  Provisioning (CompositeOverwrite) is the canonical remediation — it replaces
-  CONFIG_DB atomically with the abstract Node's generated state.
+  Re-provision switch1 via topology reconcile to remediate drift.
+  Reconcile delivers the full topology projection to the device atomically,
+  replacing all owned CONFIG_DB tables.
 
   After re-provisioning:
     - Missing entry (INTERFACE|Ethernet0|10.1.0.0/31) must be restored
     - Extra entry (VLAN|Vlan999) must be removed
     - Modified entry (BGP_GLOBALS local_asn) must be corrected
-    - Drift detection must report clean
+    - Topology drift detection must report zero entries
 topology: 2node-vs-service
 requires: [detect-drift]
 
 steps:
   # Re-provision only switch1 (switch2 was never drifted)
   - name: reprovision-sw1
-    action: provision
+    action: topology-reconcile
     devices: [switch1]
 
   - name: reload-config
@@ -24,12 +24,19 @@ steps:
     method: POST
     url: /node/{{device}}/reload-config
 
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
   - name: restart-bgp
     action: newtron
     devices: [switch1]
     method: POST
     url: /node/{{device}}/restart-daemon
     params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
 
   - name: wait-bgp-instance
     action: newtron
@@ -81,13 +88,13 @@ steps:
   - name: verify-drift-clean-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
+      jq: 'length == 0'
 
   - name: verify-drift-clean-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "clean"'
+      jq: 'length == 0'

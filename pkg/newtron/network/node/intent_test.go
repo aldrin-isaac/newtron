@@ -160,7 +160,7 @@ func TestSnapshot(t *testing.T) {
 		},
 	}
 
-	snap := n.Snapshot()
+	snap := n.Tree()
 	// All 3 actuated intents become steps; non-actuated Ethernet8 is filtered out.
 	if len(snap.Steps) != 3 {
 		t.Fatalf("Snapshot steps = %d, want 3", len(snap.Steps))
@@ -229,7 +229,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 
 	// Snapshot should match original topology (service + IP as step params)
-	snap := n.Snapshot()
+	snap := n.Tree()
 	stepsByIntf := map[string]spec.TopologyStep{}
 	for _, step := range snap.Steps {
 		_, ifaceName := parseStepURL(step.URL)
@@ -250,7 +250,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
-func TestWriteIntentRecordsToShadow(t *testing.T) {
+func TestWriteIntentRecordsToProjection(t *testing.T) {
 	sp := &testSpecProvider{}
 	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
 
@@ -259,10 +259,10 @@ func TestWriteIntentRecordsToShadow(t *testing.T) {
 		"name": "Vrf_TRANSIT",
 	}, nil)
 
-	// Intent should be in shadow configDB
+	// Intent should be in projection
 	fields, ok := n.configDB.NewtronIntent["vrf|Vrf_TRANSIT"]
 	if !ok {
-		t.Fatal("intent not written to shadow configDB")
+		t.Fatal("intent not written to projection")
 	}
 	if fields["operation"] != sonic.OpCreateVRF {
 		t.Errorf("operation = %q, want %q", fields["operation"], sonic.OpCreateVRF)
@@ -309,11 +309,11 @@ func TestWriteIntentPrepends(t *testing.T) {
 	}
 }
 
-func TestDeleteIntentRemovesFromShadow(t *testing.T) {
+func TestDeleteIntentRemovesFromProjection(t *testing.T) {
 	sp := &testSpecProvider{}
 	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
 
-	// Pre-populate an intent in shadow
+	// Pre-populate an intent in projection
 	n.configDB.NewtronIntent["vrf|Vrf_TRANSIT"] = map[string]string{
 		"state":     "actuated",
 		"operation": "create-vrf",
@@ -323,9 +323,9 @@ func TestDeleteIntentRemovesFromShadow(t *testing.T) {
 	cs := NewChangeSet("test", "test")
 	n.deleteIntent(cs, "vrf|Vrf_TRANSIT")
 
-	// Should be removed from shadow
+	// Should be removed from projection
 	if _, ok := n.configDB.NewtronIntent["vrf|Vrf_TRANSIT"]; ok {
-		t.Error("intent not removed from shadow configDB")
+		t.Error("intent not removed from projection")
 	}
 
 	// ChangeSet should have a delete
@@ -1178,5 +1178,116 @@ func TestValidateIntentDAG_OrphanDetection(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("expected orphan violation for vrf|CUST, got %v", violations)
+	}
+}
+
+func TestIntentsByPrefix(t *testing.T) {
+	sp := &testSpecProvider{}
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+
+	n.configDB.NewtronIntent = map[string]map[string]string{
+		"device":            {"operation": "setup-device", "state": "actuated"},
+		"vlan|100":          {"operation": "create-vlan", "state": "actuated", "vlan_id": "100"},
+		"vlan|200":          {"operation": "create-vlan", "state": "actuated", "vlan_id": "200"},
+		"vrf|CUSTOMER":      {"operation": "create-vrf", "state": "actuated"},
+		"interface|Ethernet0": {"operation": "apply-service", "state": "actuated"},
+	}
+
+	// Prefix "vlan|" should match exactly 2
+	vlans := n.IntentsByPrefix("vlan|")
+	if len(vlans) != 2 {
+		t.Fatalf("IntentsByPrefix(\"vlan|\") = %d, want 2", len(vlans))
+	}
+	if _, ok := vlans["vlan|100"]; !ok {
+		t.Error("missing vlan|100")
+	}
+	if _, ok := vlans["vlan|200"]; !ok {
+		t.Error("missing vlan|200")
+	}
+
+	// Prefix "vrf|" should match 1
+	vrfs := n.IntentsByPrefix("vrf|")
+	if len(vrfs) != 1 {
+		t.Fatalf("IntentsByPrefix(\"vrf|\") = %d, want 1", len(vrfs))
+	}
+
+	// Prefix "nonexistent|" should match 0
+	empty := n.IntentsByPrefix("nonexistent|")
+	if len(empty) != 0 {
+		t.Fatalf("IntentsByPrefix(\"nonexistent|\") = %d, want 0", len(empty))
+	}
+
+	// Nil configDB should return empty
+	n2 := New(sp, "test2", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+	if got := n2.IntentsByPrefix("vlan|"); len(got) != 0 {
+		t.Fatalf("IntentsByPrefix on nil configDB = %d, want 0", len(got))
+	}
+}
+
+func TestIntentsByParam(t *testing.T) {
+	sp := &testSpecProvider{}
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+
+	n.configDB.NewtronIntent = map[string]map[string]string{
+		"interface|Ethernet0":    {"operation": "configure-interface", "state": "actuated", "vrf": "CUSTOMER"},
+		"interface|Ethernet4":    {"operation": "configure-interface", "state": "actuated", "vrf": "CUSTOMER"},
+		"interface|Ethernet8":    {"operation": "configure-interface", "state": "actuated", "vrf": "MGMT"},
+		"interface|Vlan100":      {"operation": "configure-irb", "state": "actuated", "vrf": "CUSTOMER"},
+	}
+
+	// vrf=CUSTOMER should match 3
+	cust := n.IntentsByParam("vrf", "CUSTOMER")
+	if len(cust) != 3 {
+		t.Fatalf("IntentsByParam(\"vrf\",\"CUSTOMER\") = %d, want 3", len(cust))
+	}
+
+	// vrf=MGMT should match 1
+	mgmt := n.IntentsByParam("vrf", "MGMT")
+	if len(mgmt) != 1 {
+		t.Fatalf("IntentsByParam(\"vrf\",\"MGMT\") = %d, want 1", len(mgmt))
+	}
+
+	// vrf=NONEXISTENT should match 0
+	empty := n.IntentsByParam("vrf", "NONEXISTENT")
+	if len(empty) != 0 {
+		t.Fatalf("IntentsByParam(\"vrf\",\"NONEXISTENT\") = %d, want 0", len(empty))
+	}
+}
+
+func TestIntentsByOp(t *testing.T) {
+	sp := &testSpecProvider{}
+	n := NewAbstract(sp, "test", &spec.DeviceProfile{}, &spec.ResolvedProfile{})
+
+	n.configDB.NewtronIntent = map[string]map[string]string{
+		"device":            {"operation": "setup-device", "state": "actuated"},
+		"vlan|100":          {"operation": "create-vlan", "state": "actuated"},
+		"vlan|200":          {"operation": "create-vlan", "state": "actuated"},
+		"vrf|CUSTOMER":      {"operation": "create-vrf", "state": "actuated"},
+		"interface|Vlan100": {"operation": "configure-irb", "state": "actuated", "anycast_mac": "00:00:5e:00:01:01"},
+		"interface|Vlan200": {"operation": "configure-irb", "state": "actuated"},
+	}
+
+	// "create-vlan" should match 2
+	vlans := n.IntentsByOp("create-vlan")
+	if len(vlans) != 2 {
+		t.Fatalf("IntentsByOp(\"create-vlan\") = %d, want 2", len(vlans))
+	}
+
+	// "configure-irb" should match 2
+	irbs := n.IntentsByOp("configure-irb")
+	if len(irbs) != 2 {
+		t.Fatalf("IntentsByOp(\"configure-irb\") = %d, want 2", len(irbs))
+	}
+
+	// "setup-device" should match 1
+	devs := n.IntentsByOp("setup-device")
+	if len(devs) != 1 {
+		t.Fatalf("IntentsByOp(\"setup-device\") = %d, want 1", len(devs))
+	}
+
+	// nonexistent op should match 0
+	empty := n.IntentsByOp("nonexistent")
+	if len(empty) != 0 {
+		t.Fatalf("IntentsByOp(\"nonexistent\") = %d, want 0", len(empty))
 	}
 }

@@ -9,6 +9,7 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtron HLD | `docs/newtron/hld.md` | Architecture, verification primitives, Redis interaction model |
 | newtron LLD | `docs/newtron/lld.md` | Type definitions, method signatures, package structure |
 | Device LLD | `docs/newtron/device-lld.md` | CONFIG_DB/APP_DB/ASIC_DB/STATE_DB layer, SSH tunneling, ChangeSets |
+| Pipeline Reference | `docs/newtron/unified-pipeline-architecture.md` | Unified pipeline: Intent → Replay → Render → [Deliver], end-to-end traces |
 | newtron HOWTO | `docs/newtron/howto.md` | Operational patterns, provisioning flow |
 | newtrun HLD | `docs/newtrun/hld.md` | E2E test framework design |
 | newtrun LLD | `docs/newtrun/lld.md` | Step actions, suite mode, dependency ordering |
@@ -17,36 +18,55 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
 | RCA index | `docs/rca/` | 40 root-cause analyses — SONiC pitfalls and workarounds |
+| AI Instructions | `docs/ai-instructions.md` | 21 behavioral directives scoped by activity phase |
+| Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
 
+**Definitions in this document are specifications, not suggestions.** When a
+section defines a term with precise meaning (e.g., "device is source of
+reality," "intent round-trip completeness"), that definition is binding — it
+overrides any natural-language interpretation of the phrase. Read the full
+definition before applying the concept. If the intuitive reading and the
+precise definition conflict, the precise definition wins.
+
+**This file is a derivative, not the authority.** CLAUDE.md summarizes
+principles from authoritative documents (`docs/newtron/unified-pipeline-architecture.md`,
+`docs/DESIGN_PRINCIPLES_NEWTRON.md`, `docs/ai-instructions.md`). When providing
+architectural context to agents, always include the authoritative source — never
+paraphrase from CLAUDE.md into agent prompts. When CLAUDE.md and an authoritative
+document conflict, the authoritative document is correct and CLAUDE.md is stale.
+See `docs/ai-instructions.md` §20 for the full precedence hierarchy.
+
 ## Device Is Source of Reality
 
-The device CONFIG_DB is ground reality — what exists, whether correct or not.
-Spec files are templates and intent, but once configuration is applied, the
-device state is what matters. If someone edits CONFIG_DB directly (CLI, Redis,
-another tool), that's the new reality — newtron does not fight it or try to
-reconcile back to spec.
+The phrase "device is source of reality" has a precise meaning in the intent-first
+architecture: in actuated mode, the device's own NEWTRON_INTENT records ARE the
+authoritative state. The projection (expected CONFIG_DB) is derived by replaying those
+intents. External CONFIG_DB edits are drift from what the device's own intents declare
+— not a new "reality" that newtron accepts.
 
 This has concrete design implications:
 
-- **Provisioning** (CompositeOverwrite) is the one operation where intent replaces
-  reality. Every other operation mutates existing reality.
-- **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
-  preconditions before acting, but generate entries from specs and profile.
-- **Service operations** trust the intent record as ground reality.
-  `ApplyService` reads CONFIG_DB for idempotency filtering on shared
-  infrastructure. `RemoveService` reads the NEWTRON_INTENT record —
-  not CONFIG_DB tables, not specs — to determine what to tear down.
-- **NEWTRON_INTENT** records live on the device, not in spec files. The
-  intent record is the ground reality of what was applied, and the sole
-  input for teardown.
-- **Idempotency filtering** in `service_ops.go` checks device reality (VLANs, VRFs
-  that already exist from other services), not spec intent.
-- **Do NOT implement a desired-state reconciler** (Terraform/Kubernetes model). There is
-  no canonical "desired state" for incremental operations — only device reality + the
-  requested change. newtron does not support brownfield — two opinionated architectures
-  cannot converge on the same device.
+- **Intent DB is primary state and the decision substrate for all operational logic.**
+  The projection (expected CONFIG_DB) is derived from intent replay, not loaded from
+  the device. All operational decisions — preconditions, idempotency, reference counting,
+  membership checks, query methods — read the intent DB. The projection exists solely
+  for device delivery (`ExportEntries` → `ReplaceAll`/`Apply`) and drift detection
+  (`ExportRaw` vs actual). No operational decision reads the projection. This keeps
+  SONiC CONFIG_DB knowledge contained to config generators and schema validation.
+- **A canonical desired state exists**: the projection. Every operation writes an intent
+  and renders it into the projection. The projection IS the desired state for that node.
+- **Drift guard refuses writes** when device CONFIG_DB diverges from the projection
+  (actuated mode). External CONFIG_DB edits are drift — newtron detects them and refuses
+  to operate on an inconsistent foundation.
+- **Reconcile overwrites the device** to match the projection. It is a first-class
+  operation: `Reconcile()` calls `ExportEntries()` + `ReplaceAll()` to deliver the full
+  projection. Use it to fix drift and to re-provision a device.
+- **NEWTRON_INTENT** records live on the device and are the input for actuated mode.
+  On connect, the node replays intents via `IntentsToSteps` + `ReplayStep` to reconstruct
+  the projection. The intent record is the ground reality; the projection is its
+  CONFIG_DB expression.
 - **Intent records must be self-sufficient for reverse operations.** NEWTRON_INTENT
   must contain every value needed for teardown — never re-resolve specs at removal time.
   The spec may have changed between apply and remove; the intent record captures what was
@@ -54,6 +74,11 @@ This has concrete design implications:
   `RemoveService` can tear down transit VLAN infrastructure without looking up the
   IP-VPN spec. When adding a new forward operation that creates infrastructure, ask:
   "can the reverse operation find everything it needs in the intent record alone?"
+- **InitDevice is the one exception.** Before any intents exist, the device CONFIG_DB
+  is the working state. `InitDevice` (pre-intent bootstrap) reads actual CONFIG_DB to
+  establish the starting point. Once intents are written, intent replay takes over.
+- **newtron does not support brownfield.** Two opinionated architectures cannot converge
+  on the same device. newtron owns the full CONFIG_DB for any node it manages.
 
 ## Intent Round-Trip Completeness
 
@@ -170,6 +195,18 @@ Rules:
 
 Abstractions > raw code efficiency.
 
+## Pipeline-First Explanations
+
+When explaining how something works — to the user or in documentation — describe
+its position in the pipeline: what feeds it, what it feeds, and which pipeline
+stage it belongs to. Never describe a component in isolation.
+
+The pipeline reference (`docs/newtron/unified-pipeline-architecture.md`) is the
+canonical source for data flow. One pipeline: Intent → Replay → Render → [Deliver].
+Every CONFIG_DB interaction passes through this pipeline. `RebuildProjection` in
+`execute()` ensures every operation sees fresh state by re-deriving the projection
+from the latest intents before the operation runs (architecture doc §8).
+
 ## Domain-Intent Naming
 
 Function and method names describe **what the operation means in the network domain**,
@@ -188,21 +225,25 @@ This applies at all levels: method names, function names, type names, field name
 When reading code, the name should tell you the domain purpose without needing to
 read the implementation.
 
-## Abstract Node — Same Code Path, Different Initialization
+## Abstract Node — Same Code Path, Three States
 
-The Node operates in two modes:
+The Node operates in three states — same code path, different initialization:
 
-- **Physical mode** (`offline=false`): ConfigDB loaded from Redis at Connect/Lock time.
-  Preconditions enforce connected+locked. ChangeSet applied to Redis.
-- **Abstract mode** (`offline=true`): shadow ConfigDB starts empty, operations build
-  desired state. Preconditions check the shadow. Entries accumulate for composite export.
+- **Topology offline**: Node created from topology.json without a device connection.
+  Projection starts empty; operations write intents and render them into the projection.
+  Used to build the expected state for a topology node before any device exists.
+- **Topology online**: Node connected to a device but not actuated. Projection still
+  built from intent replay. Used to apply operations and deliver them.
+- **Actuated online**: Node connected and actuated — intents loaded from the device's
+  own NEWTRON_INTENT records. Drift guard active: refuses writes when device CONFIG_DB
+  diverges from the projection.
 
-Same code path, different initialization. topology.json represents an abstract topology
-in which abstract nodes live — the abstract Node is the natural object model for it.
-The topology provisioner creates an abstract Node and calls the same methods the CLI
-uses (`iface.ApplyService`, `n.SetupDevice`), eliminating the need for topology.go
-to construct CONFIG_DB entries inline. Operations must be called in the correct
-order — the shadow enforces correctness without a physical device:
+topology.json represents an abstract topology in which abstract nodes live — the
+abstract Node is the natural object model for it. The topology provisioner creates
+an abstract Node and calls the same methods the CLI uses (`iface.ApplyService`,
+`n.SetupDevice`), eliminating the need for topology.go to construct CONFIG_DB entries
+inline. Operations must be called in the correct order — the projection enforces
+correctness without a physical device:
 
 ```
 n := node.NewAbstract(specs, name, profile, resolved)
@@ -210,14 +251,26 @@ n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 n.SetupDevice(ctx, setupOpts)             // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)  // VTEP precondition passes ✓
-composite := n.BuildComposite()           // export configDB as composite
+entries := n.configDB.ExportEntries()     // projection IS the accumulated state
 ```
 
 Key implementation:
-- `NewAbstract()` creates Node with `sonic.NewConfigDB()` + `offline=true`
-- `precondition()` skips connected/locked checks when offline
-- `op()` and `applyShadow(cs)` update shadow ConfigDB so subsequent ops see prior effects
-- `BuildComposite()` calls `configDB.ExportEntries()` — the configDB IS the accumulated state
+- `NewAbstract()` creates Node with `sonic.NewConfigDB()` (empty projection, no `actuatedIntent`)
+- `InitFromDeviceIntent()` creates Node from device's NEWTRON_INTENT records (actuated mode)
+- `precondition()` skips connected/locked checks when not actuated
+- `op()` and `render(cs)` update the projection so subsequent ops see prior effects
+- `RebuildProjection(ctx)` re-reads intents from device (or memory when offline), rebuilds
+  projection from scratch via full intent replay. Called in `execute()` before every operation
+  — reads and writes alike — to ensure fresh, authoritative state
+- `Execute(ctx, opts, fn)` wraps writes with Lock/Unlock and supports dry-run via intent
+  snapshot/restore. On dry-run, `RestoreIntentDB` puts the intent DB back; the dirty projection
+  is cleaned by the next `execute()`'s `RebuildProjection`
+- `Reconcile()` calls `configDB.ExportEntries()` + `ReplaceAll()` — delivers the projection
+- `SaveDeviceIntents()` persists the intent DB back to `topology.json`
+
+Crash recovery is structural: NEWTRON_INTENT records ARE the persistent state. The drift guard
+detects when projection ≠ device. `Reconcile` fixes it. No separate crash-recovery breadcrumbs
+(`OperationIntent`, zombie detection) — these are eliminated. See architecture doc §8.
 
 ## Separation of Concerns — File-Level Ownership
 
@@ -225,13 +278,12 @@ Code should be organized so that a reader can guess where a feature is implement
 by looking at file names alone.
 
 Rules:
-1. **composite.go** = delivery mechanics (CompositeBuilder, CompositeConfig, DeliverComposite).
-   No CONFIG_DB table or key format knowledge.
-2. **topology.go** = topology-driven provisioning orchestration.
-   Calls config functions from `node/` but never constructs CONFIG_DB keys inline.
-3. **Each `*_ops.go`** = sole owner of its CONFIG_DB tables' entry construction
+1. **topology.go** = topology-driven provisioning orchestration. Calls
+   `BuildAbstractNode` / `BuildEmptyAbstractNode` / `SaveDeviceIntents` and config
+   functions from `node/`. Never constructs CONFIG_DB keys inline.
+2. **Each `*_ops.go`** = sole owner of its CONFIG_DB tables' entry construction
    (as defined in the Single-Owner Principle ownership map).
-4. **service_gen.go** = service-to-entries translation. Calls config functions from
+3. **service_gen.go** = service-to-entries translation. Calls config functions from
    owning `*_ops.go` files.
 
 ## Verb-First Naming
@@ -284,8 +336,9 @@ orchestrator concern that uses these domain-level operations, not a newtron conc
 
 Baseline operations (`setup-*`, `set-*`) are the sole exception to "ship both or
 ship neither." These operations configure device-level infrastructure whose collective
-reverse is reprovision (CompositeOverwrite), not individual teardown. `SetupDevice`
-and `SetProperty` have no individual reverse operations.
+reverse is Reconcile — redelivering the full projection after removing the relevant
+intents — not individual teardown. `SetupDevice` and `SetProperty` have no individual
+reverse operations.
 
 ## Public API Boundary Design
 
@@ -296,8 +349,8 @@ newtron-server HTTP server) import only `pkg/newtron/`.
 Rules:
 
 - **Public types expose caller intent; internal types expose implementation.**
-  Public types use domain vocabulary (`RouteNextHop.Address`, `CompositeInfo.Tables`).
-  Internal types reflect implementation (`NextHop.IP`, `CompositeConfig.Entries`).
+  Public types use domain vocabulary (`RouteNextHop.Address`, `ReconcileResult.Applied`).
+  Internal types reflect implementation (`NextHop.IP`, projection entries).
   Boundary conversions strip implementation details and map to domain names.
 
 - **Orchestrators are API consumers, not insiders.** If an orchestrator (newtrun,
@@ -309,14 +362,14 @@ Rules:
   the spec from the Node's SpecProvider internally. Callers never pre-resolve specs
   and pass structs across the boundary.
 
-- **Verification tokens are opaque.** `CompositeInfo` flows from `GenerateDeviceComposite`
-  to `VerifyComposite` as an opaque handle. Callers store and return it; they never
-  inspect internal state. The verification mechanism (ChangeSet diffing) is entirely
-  hidden.
+- **Verification is Drift.** `Drift()` compares the projection (expected CONFIG_DB
+  derived from intents) against actual device CONFIG_DB and returns the diff. Callers
+  receive a structured diff result — the projection and comparison mechanism are
+  entirely hidden.
 
-- **Write results report outcomes, not internals.** `WriteResult.ChangeCount` and
-  `DeliveryResult.Applied` tell callers what happened. Raw ChangeSets, Redis
-  commands, and CONFIG_DB key formats never cross the boundary.
+- **Write results report outcomes, not internals.** `ReconcileResult.Applied` tells
+  callers what happened. Raw ChangeSets, Redis commands, and CONFIG_DB key formats
+  never cross the boundary.
 
 When adding new public API surface:
 1. Define the public type in `types.go` using domain vocabulary
@@ -401,6 +454,17 @@ When adding a new CONFIG_DB table or field:
 3. Add to `schema.go` with a `// YANG:` comment citing the source
 4. Update `yang/constraints.md` with the new table/field
 5. Add test cases in `schema_test.go`
+
+**Hydrator field completeness.** Schema validation covers the write path — but the
+read path (projection hydration) has its own completeness requirement. Typed
+hydrators in `configdb_parsers.go` reconstitute `map[string]string` wire fields
+into typed structs. `ExportEntries` does the reverse via `structToFields`. A field
+that exists in config generator output but is missing from the typed struct or
+hydrator is silently dropped during hydration — the projection loses it, and
+`ExportEntries` never exports it, causing false drift on a correctly-configured
+device. Every field written by a config generator must exist in three places:
+`schema.go` (validation), the typed struct in `configdb.go` (representation), and
+the hydrator in `configdb_parsers.go` (wire → struct). Missing any one is a bug.
 
 ## CONFIG_DB Write Ordering and Daemon Settling
 
@@ -700,6 +764,13 @@ When updating docs after schema/API changes (renamed fields, new types, changed 
    document end-to-end and checks every reference against the ground truth schema. Provide
    the complete ground truth (all field names, all CLI flags, all type values) so the agent
    can catch staleness in any form — not just the patterns you already know are wrong.
+
+**CLAUDE.md freshness**: After updating an architecture doc, verify that the CLAUDE.md
+sections summarizing the updated content still match. CLAUDE.md is a derivative (see
+meta-instruction at top of file). An architecture doc revision that adds mechanisms,
+renames concepts, or changes the pipeline model makes CLAUDE.md stale unless both are
+updated together. This is a step in the architecture update workflow — not a deferred
+TODO. See `docs/ai-instructions.md` §20.
 
 3. **Fix everything the audit finds before committing.** One commit, fully clean.
 

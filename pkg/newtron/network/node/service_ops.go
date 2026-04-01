@@ -14,9 +14,6 @@ import (
 // InterfaceHasService checks if an interface has a service bound.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
 func (n *Node) InterfaceHasService(name string) bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
 	name = util.NormalizeInterfaceName(name)
 	if intf, ok := n.interfaces[name]; ok {
 		return intf.HasService()
@@ -136,7 +133,8 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	// EVPN preconditions
 	isOverlay := strings.HasPrefix(svc.ServiceType, "evpn-")
 	if isOverlay {
-		if !n.VTEPExists() {
+		deviceIntent := n.GetIntent("device")
+		if deviceIntent == nil || deviceIntent.Params["source_ip"] == "" {
 			return nil, fmt.Errorf("service '%s' (%s) requires EVPN overlay, but no VTEP is configured on %s — run 'newtron -D %s evpn setup' first",
 				serviceName, svc.ServiceType, n.Name(), n.Name())
 		}
@@ -370,7 +368,6 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 	cs := NewChangeSet(n.Name(), "interface."+sonic.OpApplyService)
 	cs.ReverseOp = "interface.remove-service"
 	cs.OperationParams = map[string]string{"interface": i.name}
-	configDB := n.ConfigDB()
 
 	// Compute parents based on service type for the Intent DAG.
 	var intentParents []string
@@ -407,9 +404,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 			return nil, fmt.Errorf("create VLAN %d: %w", vlanID, err)
 		}
 		cs.Merge(vlanCS)
-		// ARP suppression only when VLAN was just created (vlanCS non-empty).
-		// If VLAN already existed, ARP suppression was configured on first create.
-		if !vlanCS.IsEmpty() && macvpnDef != nil && macvpnDef.ARPSuppression {
+		// ARP suppression: add unconditionally when the macvpn spec requires it.
+		// CreateVLAN is intent-idempotent (returns empty CS when vlan intent exists),
+		// but ARP suppression must still appear in the projection. render() handles
+		// upserts safely, so duplicate SUPPRESS_VLAN_NEIGH entries are harmless.
+		if macvpnDef != nil && macvpnDef.ARPSuppression {
 			cs.Adds(enableArpSuppressionConfig(VLANName(vlanID)))
 		}
 	}
@@ -432,8 +431,50 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		cs.Merge(ipvpnCS)
 	}
 
+	// =========================================================================
+	// Service intent — owns shared per-service CONFIG_DB objects (route
+	// policies, peer group for shared/default VRF). Created by the first
+	// ApplyService for this service; idempotently updated by subsequent
+	// applies. Interface intents reference it as a DAG parent for lifecycle.
+	// =========================================================================
+	serviceIntentKey := ""
+	if hasBGPRouting {
+		serviceIntentKey = "service|" + serviceName
+		serviceIntent := n.GetIntent(serviceIntentKey)
+
+		// For vrf_type:interface, each interface has its own VRF + peer group —
+		// always create. For shared/default VRF, only the first user creates.
+		createPeerGroup := svc.VRFType == spec.VRFTypeInterface || serviceIntent == nil
+
+		bgpResult, err := i.addBGPRoutePolicies(cs, serviceName, svc, createPeerGroup)
+		if err != nil {
+			return nil, fmt.Errorf("BGP route policies for %s: %w", i.name, err)
+		}
+
+		serviceParams := map[string]string{
+			sonic.FieldServiceName: serviceName,
+		}
+		if bgpResult.routeMapIn != "" {
+			serviceParams["route_map_in"] = bgpResult.routeMapIn
+		}
+		if bgpResult.routeMapOut != "" {
+			serviceParams["route_map_out"] = bgpResult.routeMapOut
+		}
+		if len(bgpResult.routePolicyKeys) > 0 {
+			serviceParams["route_policy_keys"] = strings.Join(bgpResult.routePolicyKeys, ";")
+		}
+
+		// writeIntent is idempotent: first call creates, subsequent calls
+		// update params while preserving DAG children.
+		if err := n.writeIntent(cs, sonic.OpDeployService, serviceIntentKey, serviceParams, []string{"device"}); err != nil {
+			return nil, err
+		}
+
+		intentParents = append(intentParents, serviceIntentKey)
+	}
+
 	// Interface intent — write-ahead manifest for crash recovery.
-	// Parents created above; I4 check passes.
+	// Parents created above (including service intent if BGP); I4 check passes.
 	if err := n.writeIntent(cs, sonic.OpApplyService, "interface|"+i.name, bindingParams, intentParents); err != nil {
 		return nil, err
 	}
@@ -468,12 +509,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	case spec.ServiceTypeEVPNRouted, spec.ServiceTypeRouted:
 		if vrfName != "" {
-			cs.Adds(i.bindVrf(vrfName))
+			cs.Adds(bindVrfConfig(i.name,vrfName))
 		} else {
-			cs.Adds(i.enableIpRouting())
+			cs.Adds(enableIpRoutingConfig(i.name))
 		}
 		if opts.IPAddress != "" {
-			cs.Adds(i.assignIpAddress(opts.IPAddress))
+			cs.Adds(assignIpAddressConfig(i.name,opts.IPAddress))
 		}
 	case spec.ServiceTypeEVPNIRB:
 		if vlanID > 0 {
@@ -506,9 +547,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 	if !skipACL && ingressACLName != "" {
-		existingACL, aclExists := configDB.ACLTable[ingressACLName]
-		if aclExists {
-			merged := updateAclPorts(ingressACLName, util.AddToCSV(existingACL.Ports, i.name))
+		aclIntent := n.GetIntent("acl|" + ingressACLName)
+		if aclIntent != nil {
+			// ACL already exists — update port list from intents (this interface's
+			// service intent was written above, so aclPortsFromIntents includes it)
+			currentPorts := n.aclPortsFromIntents(ingressACLName, "ingress")
+			merged := updateAclPorts(ingressACLName, currentPorts)
 			cs.Update(merged.Table, merged.Key, merged.Fields)
 		} else {
 			filterSpec, _ := n.GetFilter(svc.IngressFilter)
@@ -517,7 +561,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				cs.Adds(createAclTableConfig(ingressACLName, mapFilterType(filterSpec.Type), "ingress", i.name, desc))
 				ruleNames := i.addACLRulesFromFilterSpec(cs, ingressACLName, filterSpec)
 				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+ingressACLName, map[string]string{
-					sonic.FieldRules: strings.Join(ruleNames, ","),
+					sonic.FieldName:        ingressACLName,
+					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
+					sonic.FieldStage:       "ingress",
+					sonic.FieldPorts:       i.name,
+					sonic.FieldDescription: desc,
+					sonic.FieldRules:       strings.Join(ruleNames, ","),
 				}, []string{"device"}); err != nil {
 					return nil, err
 				}
@@ -525,9 +574,11 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 		}
 	}
 	if !skipACL && egressACLName != "" {
-		existingACL, aclExists := configDB.ACLTable[egressACLName]
-		if aclExists {
-			merged := updateAclPorts(egressACLName, util.AddToCSV(existingACL.Ports, i.name))
+		aclIntent := n.GetIntent("acl|" + egressACLName)
+		if aclIntent != nil {
+			// ACL already exists — update port list from intents
+			currentPorts := n.aclPortsFromIntents(egressACLName, "egress")
+			merged := updateAclPorts(egressACLName, currentPorts)
 			cs.Update(merged.Table, merged.Key, merged.Fields)
 		} else {
 			filterSpec, _ := n.GetFilter(svc.EgressFilter)
@@ -536,7 +587,12 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 				cs.Adds(createAclTableConfig(egressACLName, mapFilterType(filterSpec.Type), "egress", i.name, desc))
 				ruleNames := i.addACLRulesFromFilterSpec(cs, egressACLName, filterSpec)
 				if err := n.writeIntent(cs, sonic.OpCreateACL, "acl|"+egressACLName, map[string]string{
-					sonic.FieldRules: strings.Join(ruleNames, ","),
+					sonic.FieldName:        egressACLName,
+					sonic.FieldACLType:     mapFilterType(filterSpec.Type),
+					sonic.FieldStage:       "egress",
+					sonic.FieldPorts:       i.name,
+					sonic.FieldDescription: desc,
+					sonic.FieldRules:       strings.Join(ruleNames, ","),
 				}, []string{"device"}); err != nil {
 					return nil, err
 				}
@@ -546,34 +602,18 @@ func (i *Interface) ApplyService(ctx context.Context, serviceName string, opts A
 
 	// QoS entries (per-interface binding + device-wide tables)
 	if qosPolicy != nil {
-		cs.Adds(i.bindQos(qosPolicyName, qosPolicy))
+		if err := n.writeIntent(cs, sonic.OpApplyQoS, "interface|"+i.name+"|qos",
+			map[string]string{sonic.FieldQoSPolicy: qosPolicyName},
+			[]string{"interface|" + i.name}); err != nil {
+			return nil, err
+		}
+		cs.Adds(bindQosConfig(i.name, qosPolicyName, qosPolicy))
 		cs.Adds(GenerateDeviceQoSConfig(qosPolicyName, qosPolicy))
 	}
 
-	// Add route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) — these are only
-	// needed in the incremental path, not in topology provisioner.
-	// Route map names (for informational binding fields) are computed here but
-	// the binding was already written above with all fields needed for teardown.
-	if svc.Routing != nil && svc.Routing.Protocol == spec.RoutingProtocolBGP {
-		bgpResult, err := i.addBGPRoutePolicies(cs, serviceName, svc)
-		if err != nil {
-			return nil, fmt.Errorf("BGP route policies for %s: %w", i.name, err)
-		}
-		// Route map names are informational — RemoveService uses prefix scan
-		// Update the intent entry (cs.Changes[0]) directly with computed names
-		// and route policy keys for intent-driven teardown.
-		if bgpResult.routeMapIn != "" {
-			cs.Changes[0].Fields["route_map_in"] = bgpResult.routeMapIn
-		}
-		if bgpResult.routeMapOut != "" {
-			cs.Changes[0].Fields["route_map_out"] = bgpResult.routeMapOut
-		}
-		if len(bgpResult.routePolicyKeys) > 0 {
-			cs.Changes[0].Fields["route_policy_keys"] = strings.Join(bgpResult.routePolicyKeys, ";")
-		}
+	if err := n.render(cs); err != nil {
+		return nil, err
 	}
-
-	n.applyShadow(cs)
 	util.WithDevice(n.Name()).Infof("Applied service '%s' to interface %s", serviceName, i.name)
 	return cs, nil
 }
@@ -590,7 +630,7 @@ type bgpRoutePolicyResult struct {
 // peer group AF (Principle 36). Also handles redistribution config.
 //
 // Returns the route map names (for the service binding record).
-func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec) (bgpRoutePolicyResult, error) {
+func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *spec.ServiceSpec, createPeerGroup bool) (bgpRoutePolicyResult, error) {
 	if svc.Routing == nil || svc.Routing.Protocol != spec.RoutingProtocolBGP {
 		return bgpRoutePolicyResult{}, nil
 	}
@@ -617,15 +657,24 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	afFields := map[string]string{}
 	var routeMapIn, routeMapOut string
 
+	// Resolve all prefix lists referenced by routing policies up front.
+	// Discovery happens here; pure config generators receive resolved prefixes.
+	prefixLists := i.resolvePrefixLists(routing)
+
 	if routing.ImportPolicy != "" {
-		entries, rmName := i.createRoutePolicy(serviceName, "import", routing.ImportPolicy, routing.ImportCommunity, routing.ImportPrefixList)
-		cs.Adds(entries)
-		if rmName != "" {
-			afFields["route_map_in"] = rmName
-			routeMapIn = rmName
+		policy, err := i.node.GetRoutePolicy(routing.ImportPolicy)
+		if err != nil {
+			util.WithDevice(i.node.Name()).Warnf("Route policy '%s' not found: %v", routing.ImportPolicy, err)
+		} else {
+			entries, rmName := createRoutePolicyConfig(serviceName, "import", policy, prefixLists, routing.ImportCommunity, routing.ImportPrefixList)
+			cs.Adds(entries)
+			if rmName != "" {
+				afFields["route_map_in"] = rmName
+				routeMapIn = rmName
+			}
 		}
 	} else if routing.ImportCommunity != "" || routing.ImportPrefixList != "" {
-		entries, rmName := i.createInlineRoutePolicy(serviceName, "import", routing.ImportCommunity, routing.ImportPrefixList)
+		entries, rmName := createInlineRoutePolicyConfig(serviceName, "import", routing.ImportCommunity, prefixLists[routing.ImportPrefixList])
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_in"] = rmName
@@ -634,14 +683,19 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	}
 
 	if routing.ExportPolicy != "" {
-		entries, rmName := i.createRoutePolicy(serviceName, "export", routing.ExportPolicy, routing.ExportCommunity, routing.ExportPrefixList)
-		cs.Adds(entries)
-		if rmName != "" {
-			afFields["route_map_out"] = rmName
-			routeMapOut = rmName
+		policy, err := i.node.GetRoutePolicy(routing.ExportPolicy)
+		if err != nil {
+			util.WithDevice(i.node.Name()).Warnf("Route policy '%s' not found: %v", routing.ExportPolicy, err)
+		} else {
+			entries, rmName := createRoutePolicyConfig(serviceName, "export", policy, prefixLists, routing.ExportCommunity, routing.ExportPrefixList)
+			cs.Adds(entries)
+			if rmName != "" {
+				afFields["route_map_out"] = rmName
+				routeMapOut = rmName
+			}
 		}
 	} else if routing.ExportCommunity != "" || routing.ExportPrefixList != "" {
-		entries, rmName := i.createInlineRoutePolicy(serviceName, "export", routing.ExportCommunity, routing.ExportPrefixList)
+		entries, rmName := createInlineRoutePolicyConfig(serviceName, "export", routing.ExportCommunity, prefixLists[routing.ExportPrefixList])
 		cs.Adds(entries)
 		if rmName != "" {
 			afFields["route_map_out"] = rmName
@@ -650,11 +704,10 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	}
 
 	// Create peer group + AF with route maps (Principle 36).
-	// The peer group is created on first ApplyService for this service; subsequent
-	// applies reuse it. The peer group must be created BEFORE the BGP_NEIGHBOR
-	// that references it via peer_group_name.
-	pgKey := BGPPeerGroupKey(vrfKey, serviceName)
-	if _, exists := i.node.ConfigDB().BGPPeerGroup[pgKey]; !exists {
+	// The caller determines whether the peer group needs to be created based
+	// on the service intent DAG (first user of shared/default VRF) or VRF type
+	// (vrf_type:interface always creates — each interface has its own VRF).
+	if createPeerGroup {
 		cs.Adds(CreateBGPPeerGroupConfig(vrfKey, serviceName, afFields))
 	} else if len(afFields) > 0 {
 		// Peer group exists — update AF with route map references if needed
@@ -697,330 +750,80 @@ func (i *Interface) addBGPRoutePolicies(cs *ChangeSet, serviceName string, svc *
 	}, nil
 }
 
-// routeMapRule holds a single route-map rule's sequence and fields,
-// used during bottom-up Merkle hash computation (Principle 35).
-type routeMapRule struct {
-	seq    int
-	fields map[string]string
-}
-
-// createRoutePolicy translates a named RoutePolicy into CONFIG_DB ROUTE_MAP,
-// PREFIX_SET, and COMMUNITY_SET entries with content-hashed names (Principle 35).
-// Bottom-up Merkle: PREFIX_SET/COMMUNITY_SET hashes computed first (leaves),
-// then ROUTE_MAP hash includes those hashed names. Returns entries and the
-// route-map name.
-func (i *Interface) createRoutePolicy(serviceName, direction, policyName, extraCommunity, extraPrefixList string) ([]sonic.Entry, string) {
-	policy, err := i.Node().GetRoutePolicy(policyName)
-	if err != nil {
-		util.WithDevice(i.node.Name()).Warnf("Route policy '%s' not found: %v", policyName, err)
-		return nil, ""
-	}
-
-	// serviceName is already normalized (uppercase, underscores) by the spec loader.
-	baseRMName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
-
-	// Phase 1: Build leaf objects (PREFIX_SET, COMMUNITY_SET) with content hashes.
-	// Collect route-map rule fields that reference the hashed leaf names.
-	var leafEntries []sonic.Entry
-	var rules []routeMapRule
-
-	for _, rule := range policy.Rules {
-		fields := map[string]string{
-			"route_operation": rule.Action,
-		}
-
-		if rule.PrefixList != "" {
-			plBase := fmt.Sprintf("%s_PL_%d", baseRMName, rule.Sequence)
-			plEntries, plName := i.createHashedPrefixSet(plBase, rule.PrefixList)
-			leafEntries = append(leafEntries, plEntries...)
-			if plName != "" {
-				fields["match_prefix_set"] = plName
-			}
-		}
-
-		if rule.Community != "" {
-			csBase := fmt.Sprintf("%s_CS_%d", baseRMName, rule.Sequence)
-			csFields := map[string]string{
-				"set_type":         "standard",
-				"match_action":     "any",
-				"community_member": rule.Community,
-			}
-			csHash := util.ContentHash([]map[string]string{csFields})
-			csName := fmt.Sprintf("%s_%s", csBase, csHash)
-			leafEntries = append(leafEntries, sonic.Entry{
-				Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
-			})
-			fields["match_community"] = csName
-		}
-
-		if rule.Set != nil {
-			if rule.Set.LocalPref > 0 {
-				fields["set_local_pref"] = fmt.Sprintf("%d", rule.Set.LocalPref)
-			}
-			if rule.Set.Community != "" {
-				fields["set_community"] = rule.Set.Community
-			}
-			if rule.Set.MED > 0 {
-				fields["set_med"] = fmt.Sprintf("%d", rule.Set.MED)
-			}
-		}
-
-		rules = append(rules, routeMapRule{seq: rule.Sequence, fields: fields})
-	}
-
-	// Extra community AND condition from service routing spec
-	if extraCommunity != "" {
-		csBase := fmt.Sprintf("%s_EXTRA_CS", baseRMName)
-		csFields := map[string]string{
-			"set_type":         "standard",
-			"match_action":     "any",
-			"community_member": extraCommunity,
-		}
-		csHash := util.ContentHash([]map[string]string{csFields})
-		csName := fmt.Sprintf("%s_%s", csBase, csHash)
-		leafEntries = append(leafEntries, sonic.Entry{
-			Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
-		})
-		extraFields := map[string]string{
-			"route_operation": "permit",
-			"match_community": csName,
-		}
-		if direction == "export" {
-			extraFields["set_community"] = extraCommunity
-		}
-		rules = append(rules, routeMapRule{seq: 9000, fields: extraFields})
-	}
-
-	// Extra prefix list AND condition
-	if extraPrefixList != "" {
-		plBase := fmt.Sprintf("%s_EXTRA_PL", baseRMName)
-		plEntries, plName := i.createHashedPrefixSet(plBase, extraPrefixList)
-		leafEntries = append(leafEntries, plEntries...)
-		if plName != "" {
-			rules = append(rules, routeMapRule{seq: 9100, fields: map[string]string{
-				"route_operation":  "permit",
-				"match_prefix_set": plName,
-			}})
-		}
-	}
-
-	// Phase 2: Compute route-map hash from all rule fields (Merkle: includes hashed leaf names).
-	var rmFieldMaps []map[string]string
-	for _, r := range rules {
-		rmFieldMaps = append(rmFieldMaps, r.fields)
-	}
-	rmHash := util.ContentHash(rmFieldMaps)
-	rmName := fmt.Sprintf("%s_%s", baseRMName, rmHash)
-
-	// Phase 3: Build final entries — leaves first, then route-map rules.
-	entries := make([]sonic.Entry, 0, len(leafEntries)+len(rules))
-	entries = append(entries, leafEntries...)
-	for _, r := range rules {
-		entries = append(entries, sonic.Entry{
-			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, r.seq), Fields: r.fields,
-		})
-	}
-
-	return entries, rmName
-}
-
-// createInlineRoutePolicy creates a route-map from standalone community/prefix
-// filters with content-hashed names (Principle 35). Returns entries and the
-// route-map name.
-func (i *Interface) createInlineRoutePolicy(serviceName, direction, community, prefixList string) ([]sonic.Entry, string) {
-	// serviceName is already normalized (uppercase, underscores) by the spec loader.
-	baseRMName := fmt.Sprintf("%s_%s", serviceName, strings.ToUpper(direction))
-	var leafEntries []sonic.Entry
-	var rules []routeMapRule
-	seq := 10
-
-	if community != "" {
-		csBase := fmt.Sprintf("%s_CS", baseRMName)
-		csFields := map[string]string{
-			"set_type":         "standard",
-			"match_action":     "any",
-			"community_member": community,
-		}
-		csHash := util.ContentHash([]map[string]string{csFields})
-		csName := fmt.Sprintf("%s_%s", csBase, csHash)
-		leafEntries = append(leafEntries, sonic.Entry{
-			Table: "COMMUNITY_SET", Key: csName, Fields: csFields,
-		})
-		fields := map[string]string{
-			"route_operation": "permit",
-			"match_community": csName,
-		}
-		if direction == "export" {
-			fields["set_community"] = community
-		}
-		rules = append(rules, routeMapRule{seq: seq, fields: fields})
-		seq += 10
-	}
-
-	if prefixList != "" {
-		plBase := fmt.Sprintf("%s_PL", baseRMName)
-		plEntries, plName := i.createHashedPrefixSet(plBase, prefixList)
-		leafEntries = append(leafEntries, plEntries...)
-		if plName != "" {
-			rules = append(rules, routeMapRule{seq: seq, fields: map[string]string{
-				"route_operation":  "permit",
-				"match_prefix_set": plName,
-			}})
-		}
-	}
-
-	// Compute route-map hash from all rule fields (Merkle: includes hashed leaf names).
-	var rmFieldMaps []map[string]string
-	for _, r := range rules {
-		rmFieldMaps = append(rmFieldMaps, r.fields)
-	}
-	rmHash := util.ContentHash(rmFieldMaps)
-	rmName := fmt.Sprintf("%s_%s", baseRMName, rmHash)
-
-	entries := make([]sonic.Entry, 0, len(leafEntries)+len(rules))
-	entries = append(entries, leafEntries...)
-	for _, r := range rules {
-		entries = append(entries, sonic.Entry{
-			Table: "ROUTE_MAP", Key: fmt.Sprintf("%s|%d", rmName, r.seq), Fields: r.fields,
-		})
-	}
-
-	return entries, rmName
-}
-
-// createHashedPrefixSet resolves a prefix list and returns PREFIX_SET entries
-// with a content-hashed name (Principle 35). Returns entries and the hashed name.
-func (i *Interface) createHashedPrefixSet(baseName, prefixListName string) ([]sonic.Entry, string) {
-	prefixes, err := i.Node().GetPrefixList(prefixListName)
-	if err != nil || len(prefixes) == 0 {
-		util.WithDevice(i.node.Name()).Warnf("Prefix list '%s' not found or empty", prefixListName)
-		return nil, ""
-	}
-
-	// Compute content hash from the fields that will be written.
-	var fieldMaps []map[string]string
-	for _, prefix := range prefixes {
-		fieldMaps = append(fieldMaps, map[string]string{
-			"ip_prefix": prefix,
-			"action":    "permit",
-		})
-	}
-	hash := util.ContentHash(fieldMaps)
-	name := fmt.Sprintf("%s_%s", baseName, hash)
-
-	var entries []sonic.Entry
-	for seq, prefix := range prefixes {
-		entries = append(entries, sonic.Entry{
-			Table: "PREFIX_SET", Key: fmt.Sprintf("%s|%d", name, (seq+1)*10),
-			Fields: map[string]string{
-				"ip_prefix": prefix,
-				"action":    "permit",
-			},
-		})
-	}
-	return entries, name
-}
-
-// scanExistingRoutePolicies returns all ROUTE_MAP, PREFIX_SET, and COMMUNITY_SET
-// entries matching the service prefix. In online mode, reads live Redis (ground
-// truth, not stale cache). In offline mode, scans the shadow configDB.
-// Used by RefreshService to identify stale content-hashed objects (Principle 35).
-func (n *Node) scanExistingRoutePolicies(serviceName string) ([]sonic.Entry, error) {
-	if n.offline {
-		// Offline mode: shadow configDB has all entries (applyShadow only adds)
-		return n.scanRoutePoliciesByPrefix(serviceName), nil
-	}
-
-	// Online mode: read from Redis (cache may be stale if services were applied
-	// after the initial ConnectNode loaded the cache)
-	client := n.ConfigDBClient()
-	if client == nil {
-		return nil, nil
-	}
-
-	prefix := serviceName + "_"
-	var entries []sonic.Entry
-
-	for _, table := range []string{"ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET"} {
-		keys, err := client.TableKeys(table)
-		if err != nil {
-			return nil, fmt.Errorf("scanning %s for stale policies: %w", table, err)
-		}
-		for _, redisKey := range keys {
-			// redisKey is "TABLE|key_part" — strip table prefix
-			key := strings.TrimPrefix(redisKey, table+"|")
-			// Check if the base name (before first |) starts with service prefix
-			baseName := strings.SplitN(key, "|", 2)[0]
-			if strings.HasPrefix(baseName, prefix) {
-				entries = append(entries, sonic.Entry{Table: table, Key: key})
-			}
-		}
-	}
-	return entries, nil
-}
-
-// deleteRoutePoliciesFromIntent returns delete entries for all ROUTE_MAP, PREFIX_SET, and
-// COMMUNITY_SET entries created by a service. Reads keys from the service binding
-// intent record (route_policy_keys field) rather than scanning CONFIG_DB.
-func (n *Node) deleteRoutePoliciesFromIntent(intfName string) []sonic.Entry {
-	var entries []sonic.Entry
-
-	intent := n.GetIntent("interface|" + intfName)
-	if intent == nil {
-		return entries
-	}
-
-	keysCSV := intent.Params["route_policy_keys"]
-	if keysCSV == "" {
-		return entries
-	}
-
-	// Keys stored as "TABLE:key;TABLE:key;..." (semicolon-separated, colon table:key)
-	for _, tk := range strings.Split(keysCSV, ";") {
-		tk = strings.TrimSpace(tk)
-		if tk == "" {
+// resolvePrefixLists resolves all prefix list names referenced by a routing spec
+// (including those inside route policy rules) into their expanded prefix lists.
+// This is the discovery layer — it reads specs. Pure config generators receive
+// the resolved map.
+func (i *Interface) resolvePrefixLists(routing *spec.RoutingSpec) map[string][]string {
+	names := collectPrefixListNames(routing, i.node)
+	result := make(map[string][]string, len(names))
+	for name := range names {
+		prefixes, err := i.node.GetPrefixList(name)
+		if err != nil || len(prefixes) == 0 {
+			util.WithDevice(i.node.Name()).Warnf("Prefix list '%s' not found or empty", name)
 			continue
 		}
-		parts := strings.SplitN(tk, ":", 2)
-		if len(parts) == 2 {
-			entries = append(entries, sonic.Entry{Table: parts[0], Key: parts[1]})
-		}
+		result[name] = prefixes
 	}
-
-	return entries
+	return result
 }
 
-// scanRoutePoliciesByPrefix returns all ROUTE_MAP, PREFIX_SET, and COMMUNITY_SET
-// entries matching a service name prefix. Used by RefreshService to identify stale
-// content-hashed objects — this is a legitimate CONFIG_DB scan because RefreshService
-// needs to find what actually exists on the device (ground truth for diff).
-func (n *Node) scanRoutePoliciesByPrefix(serviceName string) []sonic.Entry {
-	var entries []sonic.Entry
-	if n.configDB == nil {
-		return entries
+// collectPrefixListNames returns the set of all prefix list names referenced by
+// a routing spec — both top-level (ImportPrefixList, ExportPrefixList) and
+// inside route policy rules (rule.PrefixList). The SpecProvider is needed to
+// resolve route policies by name.
+func collectPrefixListNames(routing *spec.RoutingSpec, sp SpecProvider) map[string]bool {
+	names := map[string]bool{}
+	if routing.ImportPrefixList != "" {
+		names[routing.ImportPrefixList] = true
 	}
-	prefix := serviceName + "_"
-
-	for key := range n.configDB.RouteMap {
-		parts := strings.SplitN(key, "|", 2)
-		if len(parts) >= 1 && strings.HasPrefix(parts[0], prefix) {
-			entries = append(entries, sonic.Entry{Table: "ROUTE_MAP", Key: key})
+	if routing.ExportPrefixList != "" {
+		names[routing.ExportPrefixList] = true
+	}
+	// Collect prefix lists referenced inside route policy rules.
+	for _, policyName := range []string{routing.ImportPolicy, routing.ExportPolicy} {
+		if policyName == "" {
+			continue
+		}
+		policy, err := sp.GetRoutePolicy(policyName)
+		if err != nil {
+			continue
+		}
+		for _, rule := range policy.Rules {
+			if rule.PrefixList != "" {
+				names[rule.PrefixList] = true
+			}
 		}
 	}
-	for key := range n.configDB.PrefixSet {
-		parts := strings.SplitN(key, "|", 2)
-		if len(parts) >= 1 && strings.HasPrefix(parts[0], prefix) {
-			entries = append(entries, sonic.Entry{Table: "PREFIX_SET", Key: key})
-		}
-	}
-	for key := range n.configDB.CommunitySet {
-		if strings.HasPrefix(key, prefix) {
-			entries = append(entries, sonic.Entry{Table: "COMMUNITY_SET", Key: key})
-		}
-	}
-	return entries
+	return names
 }
 
+
+
+
+// diffRoutePolicyKeyCSV returns the semicolon-separated keys present in oldCSV
+// but absent from newCSV. Pure string operation — no projection access.
+// Used by RefreshService for blue-green stale cleanup (Principle 35).
+func diffRoutePolicyKeyCSV(oldCSV, newCSV string) string {
+	if oldCSV == "" {
+		return ""
+	}
+	newSet := make(map[string]bool)
+	for _, k := range strings.Split(newCSV, ";") {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			newSet[k] = true
+		}
+	}
+	var stale []string
+	for _, k := range strings.Split(oldCSV, ";") {
+		k = strings.TrimSpace(k)
+		if k != "" && !newSet[k] {
+			stale = append(stale, k)
+		}
+	}
+	return strings.Join(stale, ";")
+}
 
 // addACLRulesFromFilterSpec adds ACL rules from a filter spec, expanding prefix lists
 func (i *Interface) addACLRulesFromFilterSpec(cs *ChangeSet, aclName string, filterSpec *spec.FilterSpec) []string {
@@ -1080,15 +883,6 @@ func (i *Interface) expandPrefixList(prefixListName, directIP string) []string {
 // Uses DAG children of the acl|NAME intent to determine remaining users
 // instead of scanning CONFIG_DB ports.
 func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return nil
-	}
-
-	if _, ok := configDB.ACLTable[aclName]; !ok {
-		return nil
-	}
-
 	aclIntentKey := "acl|" + aclName
 	aclIntent := i.node.GetIntent(aclIntentKey)
 
@@ -1127,8 +921,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 					// Rule child: "acl|ACLNAME|RULENAME" → delete ACL_RULE
 					parts := strings.SplitN(child, "|", 3)
 					if len(parts) == 3 {
-						ruleKey := parts[1] + "|" + parts[2]
-						cs.Delete("ACL_RULE", ruleKey)
+						cs.Deletes(deleteAclRuleConfig(parts[1], parts[2]))
 					}
 				}
 			}
@@ -1138,7 +931,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 					for _, ruleName := range strings.Split(rulesCSV, ",") {
 						ruleName = strings.TrimSpace(ruleName)
 						if ruleName != "" {
-							cs.Delete("ACL_RULE", aclName+"|"+ruleName)
+							cs.Deletes(deleteAclRuleConfig(aclName, ruleName))
 						}
 					}
 				}
@@ -1151,7 +944,7 @@ func (i *Interface) removeSharedACL(cs *ChangeSet, aclName string) error {
 				}
 			}
 		}
-		cs.Deletes(i.node.deleteAclTableConfig(aclName))
+		cs.Deletes(deleteAclTableConfig(aclName))
 		if err := i.node.deleteIntent(cs, aclIntentKey); err != nil {
 			return err
 		}
@@ -1212,14 +1005,19 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	egressACL := b["egress_acl"]
 	bgpNeighbor := b["bgp_neighbor"]
 
-	// Determine if this is the last interface using this service (for shared resources).
-	// Scan intent records directly instead of DependencyChecker.
+	// Determine if this is the last interface using this service via the
+	// service intent DAG. The service intent's children are the interface
+	// intents that reference it. If this is the only child, we are the last user.
 	excludeKey := "interface|" + i.name
+	serviceIntentKey := "service|" + serviceName
+	serviceIntent := n.GetIntent(serviceIntentKey)
 	isLastServiceUser := true
-	for intentKey, fields := range n.ConfigDB().NewtronIntent {
-		if fields[sonic.FieldServiceName] == serviceName && intentKey != excludeKey {
-			isLastServiceUser = false
-			break
+	if serviceIntent != nil {
+		for _, child := range serviceIntent.Children {
+			if strings.HasPrefix(child, "interface|") && child != "interface|"+i.name {
+				isLastServiceUser = false
+				break
+			}
 		}
 	}
 
@@ -1248,25 +1046,36 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 	// Per-interface resources (always delete)
 	// =========================================================================
 
-	// Remove QoS mapping and per-interface QUEUE entries
-	cs.Deletes(i.unbindQos())
-
-	// Remove QoS device-wide entries if no other interface references this policy
-	if b["qos_policy"] != "" {
-		if !n.isQoSPolicyReferenced(b["qos_policy"], i.name) {
-			cs.Deletes(n.deleteDeviceQoSConfig(b["qos_policy"]))
+	// Remove QoS: per-interface entries (PORT_QOS_MAP, QUEUE) + device-wide if last user
+	qosPolicyName := b["qos_policy"]
+	var qosPolicy *spec.QoSPolicy
+	var queueCount int
+	if qosPolicyName != "" {
+		qosPolicy, _ = n.GetQoSPolicy(qosPolicyName)
+		if qosPolicy != nil {
+			queueCount = len(qosPolicy.Queues)
 		}
+	}
+	cs.Deletes(unbindQosConfig(i.name, queueCount))
+	if qosPolicyName != "" {
+		if !n.isQoSPolicyReferenced(qosPolicyName, i.name) {
+			cs.Deletes(deleteDeviceQoSConfig(qosPolicyName, qosPolicy))
+		}
+	}
+	// Delete QoS sub-intent (child of interface intent — must precede parent deletion per I5)
+	if err := n.deleteIntent(cs, "interface|"+i.name+"|qos"); err != nil {
+		return nil, err
 	}
 
 	// Remove IP addresses from interface
 	for _, ipAddr := range i.IPAddresses() {
-		cs.Deletes(i.assignIpAddress(ipAddr))
+		cs.Deletes(assignIpAddressConfig(i.name,ipAddr))
 	}
 
 	// Remove INTERFACE base entry for routed services (created by service).
 	// Must come after IP deletions since intfmgrd enforces parent-child ordering.
 	if canRoute && (vrfName == "" || vrfName == "default") {
-		cs.Deletes(i.enableIpRouting())
+		cs.Deletes(enableIpRoutingConfig(i.name))
 	}
 
 	// Remove BGP neighbor created by this service (tracked in binding)
@@ -1294,9 +1103,10 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	// Remove route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
-	if isLastServiceUser {
-		cs.Deletes(n.deleteRoutePoliciesFromIntent(i.name))
+	// Remove route policies (ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) — keys
+	// are tracked in the service intent, not the per-interface binding.
+	if isLastServiceUser && serviceIntent != nil {
+		cs.Deletes(deleteRoutePoliciesConfig(serviceIntent.Params["route_policy_keys"]))
 	}
 
 	// Remove BGP peer group (Principle 36) — created per-service, deleted when last user removed.
@@ -1324,14 +1134,14 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		// For IRB/bridged types, the VRF binding is on the IRB (VLAN_INTERFACE),
 		// not the physical INTERFACE — IRB cleanup happens in the VLAN section below.
 		if canRoute {
-			cs.Deletes(i.enableIpRouting())
+			cs.Deletes(enableIpRoutingConfig(i.name))
 		}
 
 		// Per-interface VRF: delete VRF and related config
 		if vrfType == spec.VRFTypeInterface {
 			derivedVRF := util.DeriveVRFName(vrfType, serviceName, i.name)
 			l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
-			cs.Deletes(n.destroyVrfConfig(derivedVRF, l3vni, l3vniVlan))
+			cs.Deletes(destroyVrfConfig(derivedVRF, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
 			destroyedVRF = derivedVRF
 		}
 
@@ -1343,15 +1153,16 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 			// Only count interface|* intents — ipvpn|* intents are infrastructure,
 			// not service bindings.
 			isLastIPVPN := true
-			for ik, fields := range n.ConfigDB().NewtronIntent {
-				if strings.HasPrefix(ik, "interface|") && fields[sonic.FieldIPVPN] == b[sonic.FieldIPVPN] && ik != excludeKey {
+			for resource, intent := range n.IntentsByParam(sonic.FieldIPVPN, b[sonic.FieldIPVPN]) {
+				if strings.HasPrefix(resource, "interface|") && resource != excludeKey {
 					isLastIPVPN = false
+					_ = intent
 					break
 				}
 			}
 			if isLastIPVPN {
 				l3vni, l3vniVlan := bindingInt(b[sonic.FieldL3VNI]), bindingInt(b[sonic.FieldL3VNIVlan])
-				cs.Deletes(n.destroyVrfConfig(vrfName, l3vni, l3vniVlan))
+				cs.Deletes(destroyVrfConfig(vrfName, l3vni, l3vniVlan, parseRouteTargets(b[sonic.FieldRouteTargets])))
 				destroyedVRF = vrfName
 			}
 		}
@@ -1395,10 +1206,13 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 
 				// SAG_GLOBAL: clean up when last anycast MAC user is removed
 				isLastAnycastMAC := true
-				for ik, fields := range n.ConfigDB().NewtronIntent {
-					if ik != excludeKey && fields[sonic.FieldAnycastMAC] != "" {
-						isLastAnycastMAC = false
-						break
+				for resource := range n.IntentsByOp(sonic.OpApplyService) {
+					if resource != excludeKey {
+						intent := n.GetIntent(resource)
+						if intent != nil && intent.Params[sonic.FieldAnycastMAC] != "" {
+							isLastAnycastMAC = false
+							break
+						}
 					}
 				}
 				if anycastMAC != "" && isLastAnycastMAC {
@@ -1430,6 +1244,14 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		return nil, err
 	}
 
+	// Delete service intent when this is the last user. The interface intent
+	// deregistered above, so the service intent is now childless (I5 satisfied).
+	if isLastServiceUser && serviceIntent != nil {
+		if err := n.deleteIntent(cs, serviceIntentKey); err != nil {
+			return nil, err
+		}
+	}
+
 	// Clean up infrastructure intents whose CONFIG_DB entries were destroyed
 	// above. Must happen AFTER deleting the interface intent (which deregisters
 	// from its parents), so the parent intents satisfy I5 (no children).
@@ -1449,7 +1271,9 @@ func (i *Interface) RemoveService(ctx context.Context) (*ChangeSet, error) {
 		}
 	}
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	// Log if this was the last user of the service
 	if isLastServiceUser {
@@ -1480,17 +1304,19 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	peerAS := bindingInt(b[sonic.FieldBGPPeerAS])
 	vlanID := bindingInt(b[sonic.FieldVLANID])
 
+	// Capture old route policy keys from service intent before removal.
+	// After RemoveService, the service intent may be deleted (if last user)
+	// or updated (if not last). We need the old keys for stale diff.
+	oldRoutePolicyKeys := ""
+	if si := n.GetIntent("service|" + serviceName); si != nil {
+		oldRoutePolicyKeys = si.Params["route_policy_keys"]
+	}
+
 	// Remove the current service
 	removeCS, err := i.RemoveService(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("removing old service: %w", err)
 	}
-
-	// Clear the binding from the ConfigDB cache so ApplyService's
-	// HasService() check passes. The delete change is already recorded
-	// above; this cache mutation only affects reads within this episode.
-	configDB := n.ConfigDB()
-	delete(configDB.NewtronIntent, i.name)
 
 	// Restore topology params from the binding (Principle 8: binding self-sufficiency).
 	// route_reflector_client and next_hop_self are topology attributes that must
@@ -1525,35 +1351,20 @@ func (i *Interface) RefreshService(ctx context.Context) (*ChangeSet, error) {
 	cs.Merge(removeCS)
 	cs.Merge(applyCS)
 
-	// Clean up stale content-hashed route policy objects (Principle 35, Phase 4).
-	//
-	// When specs change, RefreshService creates new-hash objects but RemoveService
-	// (called above) skips shared policy deletion if other users exist. The peer
-	// group AF was updated to reference new route maps, leaving old objects orphaned.
-	//
-	// Scan for existing route policy objects in CONFIG_DB, compare against what
-	// the apply phase just created, and delete the difference.
-	existing, err := n.scanExistingRoutePolicies(serviceName)
-	if err != nil {
-		// Non-fatal: stale policies might persist but don't break functionality
-		util.WithDevice(n.Name()).Warnf("Could not scan for stale route policies: %v", err)
-	} else if len(existing) > 0 {
-		activeKeys := make(map[string]bool)
-		for _, c := range applyCS.Changes {
-			if c.Type == sonic.ChangeTypeAdd {
-				switch c.Table {
-				case "ROUTE_MAP", "PREFIX_SET", "COMMUNITY_SET":
-					activeKeys[c.Table+"|"+c.Key] = true
-				}
-			}
+	// Clean up stale content-hashed route policy objects (Principle 35).
+	// Pure key diff: old keys from the service intent before removal vs new
+	// keys after reapply. No projection scan — the intent DB is authoritative.
+	newRoutePolicyKeys := ""
+	if si := n.GetIntent("service|" + serviceName); si != nil {
+		newRoutePolicyKeys = si.Params["route_policy_keys"]
+	}
+	staleKeys := diffRoutePolicyKeyCSV(oldRoutePolicyKeys, newRoutePolicyKeys)
+	if staleKeys != "" {
+		staleCS := buildChangeSet(n.Name(), "stale-policy-cleanup",
+			deleteRoutePoliciesConfig(staleKeys), ChangeDelete)
+		if err := n.render(staleCS); err != nil {
+			return nil, err
 		}
-		staleCS := NewChangeSet(n.Name(), "stale-policy-cleanup")
-		for _, e := range existing {
-			if !activeKeys[e.Table+"|"+e.Key] {
-				staleCS.Delete(e.Table, e.Key)
-			}
-		}
-		n.applyShadow(staleCS)
 		cs.Merge(staleCS)
 	}
 

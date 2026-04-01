@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 )
 
 // Interface represents a network interface within the context of a Device.
@@ -55,16 +57,21 @@ func (i *Interface) Name() string {
 }
 
 // AdminStatus returns the administrative status (up/down).
+// SetProperty overrides are checked first, then pre-intent defaults.
 func (i *Interface) AdminStatus() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return ""
+	// Check for SetProperty override (works for both physical and PortChannel)
+	if propIntent := i.node.GetIntent("interface|" + i.name + "|admin_status"); propIntent != nil {
+		return propIntent.Params[sonic.FieldValue]
 	}
-	if port, ok := configDB.Port[i.name]; ok {
-		return port.AdminStatus
+	// PortChannel default from creation
+	if i.IsPortChannel() {
+		return "up"
 	}
-	if pc, ok := configDB.PortChannel[i.name]; ok {
-		return pc.AdminStatus
+	// Physical port from PORT table (pre-intent infrastructure)
+	if configDB := i.node.ConfigDB(); configDB != nil {
+		if port, ok := configDB.Port[i.name]; ok {
+			return port.AdminStatus
+		}
 	}
 	return ""
 }
@@ -101,7 +108,7 @@ func (i *Interface) Speed() string {
 }
 
 // MTU returns the interface MTU.
-// Prefers operational value from StateDB; falls back to ConfigDB.
+// Prefers operational value from StateDB; falls back to intent/ConfigDB.
 func (i *Interface) MTU() int {
 	if stateDB := i.node.StateDB(); stateDB != nil {
 		if ps, ok := stateDB.PortTable[i.name]; ok && ps.MTU != "" {
@@ -109,13 +116,25 @@ func (i *Interface) MTU() int {
 			return mtu
 		}
 	}
+	// Check for SetProperty override
+	if propIntent := i.node.GetIntent("interface|" + i.name + "|mtu"); propIntent != nil {
+		mtu, _ := strconv.Atoi(propIntent.Params[sonic.FieldValue])
+		return mtu
+	}
+	// PortChannel creation intent stores MTU
+	if i.IsPortChannel() {
+		if intent := i.node.GetIntent("portchannel|" + i.name); intent != nil {
+			if mtuStr := intent.Params["mtu"]; mtuStr != "" {
+				mtu, _ := strconv.Atoi(mtuStr)
+				return mtu
+			}
+		}
+		return 0
+	}
+	// Physical port from PORT table (pre-intent infrastructure)
 	if configDB := i.node.ConfigDB(); configDB != nil {
 		if port, ok := configDB.Port[i.name]; ok && port.MTU != "" {
 			mtu, _ := strconv.Atoi(port.MTU)
-			return mtu
-		}
-		if pc, ok := configDB.PortChannel[i.name]; ok && pc.MTU != "" {
-			mtu, _ := strconv.Atoi(pc.MTU)
 			return mtu
 		}
 	}
@@ -124,30 +143,28 @@ func (i *Interface) MTU() int {
 
 // VRF returns the VRF this interface is bound to.
 func (i *Interface) VRF() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
+	intent := i.node.GetIntent("interface|" + i.name)
+	if intent == nil {
 		return ""
 	}
-	if intf, ok := configDB.Interface[i.name]; ok {
-		return intf.VRFName
-	}
-	return ""
+	return intent.Params[sonic.FieldVRF]
 }
 
 // IPAddresses returns the IP addresses configured on this interface.
 func (i *Interface) IPAddresses() []string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
+	intent := i.node.GetIntent("interface|" + i.name)
+	if intent == nil {
 		return nil
 	}
-	var addrs []string
-	prefix := i.name + "|"
-	for key := range configDB.Interface {
-		if strings.HasPrefix(key, prefix) {
-			addrs = append(addrs, strings.TrimPrefix(key, prefix))
-		}
+	// configure-interface stores IP in FieldIntfIP ("ip") param
+	if ip := intent.Params[sonic.FieldIntfIP]; ip != "" {
+		return []string{ip}
 	}
-	return addrs
+	// configure-irb stores IP in FieldIPAddress ("ip_address") param
+	if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
+		return []string{ip}
+	}
+	return nil
 }
 
 // ============================================================================
@@ -185,45 +202,33 @@ func (i *Interface) HasService() bool {
 }
 
 // IngressACL returns the name of the ingress ACL bound to this interface.
-// Prefers the service binding record; falls back to scanning ACL_TABLE.
+// Checks service binding intent first, then standalone BindACL intent.
 func (i *Interface) IngressACL() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return ""
-	}
-	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok && entry["ingress_acl"] != "" {
-		return entry["ingress_acl"]
-	}
-	for aclName, acl := range configDB.ACLTable {
-		if acl.Stage == "ingress" {
-			for _, port := range strings.Split(acl.Ports, ",") {
-				if strings.TrimSpace(port) == i.name {
-					return aclName
-				}
-			}
+	// Service binding intent: interface|{name} → ingress_acl param
+	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
+		if aclName := intent.Params["ingress_acl"]; aclName != "" {
+			return aclName
 		}
+	}
+	// Standalone BindACL intent: interface|{name}|acl|ingress → acl_name param
+	if intent := i.node.GetIntent("interface|" + i.name + "|acl|ingress"); intent != nil {
+		return intent.Params[sonic.FieldACLName]
 	}
 	return ""
 }
 
 // EgressACL returns the name of the egress ACL bound to this interface.
-// Prefers the service binding record; falls back to scanning ACL_TABLE.
+// Checks service binding intent first, then standalone BindACL intent.
 func (i *Interface) EgressACL() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return ""
-	}
-	if entry, ok := configDB.NewtronIntent["interface|"+i.name]; ok && entry["egress_acl"] != "" {
-		return entry["egress_acl"]
-	}
-	for aclName, acl := range configDB.ACLTable {
-		if acl.Stage == "egress" {
-			for _, port := range strings.Split(acl.Ports, ",") {
-				if strings.TrimSpace(port) == i.name {
-					return aclName
-				}
-			}
+	// Service binding intent: interface|{name} → egress_acl param
+	if intent := i.node.GetIntent("interface|" + i.name); intent != nil {
+		if aclName := intent.Params["egress_acl"]; aclName != "" {
+			return aclName
 		}
+	}
+	// Standalone BindACL intent: interface|{name}|acl|egress → acl_name param
+	if intent := i.node.GetIntent("interface|" + i.name + "|acl|egress"); intent != nil {
+		return intent.Params[sonic.FieldACLName]
 	}
 	return ""
 }
@@ -239,30 +244,28 @@ func (i *Interface) IsPortChannelMember() bool {
 
 // PortChannelParent returns the name of the parent PortChannel (if this is a member).
 func (i *Interface) PortChannelParent() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return ""
-	}
-	for key := range configDB.PortChannelMember {
-		parts := strings.SplitN(key, "|", 2)
-		if len(parts) == 2 && parts[1] == i.name {
-			return parts[0]
+	for resource := range i.node.IntentsByPrefix("portchannel|") {
+		// Member intents have the form: portchannel|PortChannel100|Ethernet0
+		parts := strings.SplitN(resource, "|", 3)
+		if len(parts) == 3 && parts[2] == i.name {
+			return parts[1]
 		}
 	}
 	return ""
 }
 
-// Description returns the interface description (from PORT table).
+// Description returns the interface description.
+// Checks SetProperty intent first, then PORT table (pre-intent infrastructure).
 func (i *Interface) Description() string {
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return ""
+	// Check for SetProperty override
+	if propIntent := i.node.GetIntent("interface|" + i.name + "|description"); propIntent != nil {
+		return propIntent.Params[sonic.FieldValue]
 	}
-	if port, ok := configDB.Port[i.name]; ok {
-		return port.Description
-	}
-	if pc, ok := configDB.PortChannel[i.name]; ok {
-		return pc.Description
+	// Physical port from PORT table (pre-intent infrastructure)
+	if configDB := i.node.ConfigDB(); configDB != nil {
+		if port, ok := configDB.Port[i.name]; ok {
+			return port.Description
+		}
 	}
 	return ""
 }
@@ -272,16 +275,11 @@ func (i *Interface) PortChannelMembers() []string {
 	if !i.IsPortChannel() {
 		return nil
 	}
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return nil
-	}
+	memberIntents := i.node.IntentsByPrefix("portchannel|" + i.name + "|")
 	var members []string
-	prefix := i.name + "|"
-	for key := range configDB.PortChannelMember {
-		if strings.HasPrefix(key, prefix) {
-			member := strings.TrimPrefix(key, prefix)
-			members = append(members, member)
+	for _, intent := range memberIntents {
+		if memberName := intent.Params[sonic.FieldName]; memberName != "" {
+			members = append(members, memberName)
 		}
 	}
 	return members
@@ -292,40 +290,33 @@ func (i *Interface) VLANMembers() []string {
 	if !i.IsVLAN() {
 		return nil
 	}
-	configDB := i.node.ConfigDB()
-	if configDB == nil {
-		return nil
-	}
+	// Extract VLAN ID from name (e.g., "Vlan100" → "100")
+	vlanID := strings.TrimPrefix(i.name, "Vlan")
+
 	var members []string
-	prefix := i.name + "|"
-	for key := range configDB.VLANMember {
-		if strings.HasPrefix(key, prefix) {
-			member := strings.TrimPrefix(key, prefix)
-			members = append(members, member)
+	for resource := range i.node.IntentsByParam(sonic.FieldVLANID, vlanID) {
+		// Only interface intents (not vlan|, macvpn|, etc.)
+		if !strings.HasPrefix(resource, "interface|") {
+			continue
 		}
+		intfName := strings.TrimPrefix(resource, "interface|")
+		// Skip IRB intents (interface|Vlan*)
+		if strings.HasPrefix(intfName, "Vlan") {
+			continue
+		}
+		members = append(members, intfName)
 	}
 	return members
 }
 
 // BGPNeighbors returns BGP neighbors configured on this interface.
-// For direct peering, this looks for neighbors using this interface's IP as local_addr.
 func (i *Interface) BGPNeighbors() []string {
-	configDB := i.node.ConfigDB()
-	ipAddresses := i.IPAddresses()
-	if configDB == nil || len(ipAddresses) == 0 {
-		return nil
-	}
-
-	// Get the interface's IP without mask
-	localIP := ipAddresses[0]
-	if idx := strings.Index(localIP, "/"); idx > 0 {
-		localIP = localIP[:idx]
-	}
-
+	// Underlay peers: interface|{name}|bgp-peer intents
+	peerIntents := i.node.IntentsByPrefix("interface|" + i.name + "|bgp-peer")
 	var neighbors []string
-	for neighborIP, neighbor := range configDB.BGPNeighbor {
-		if neighbor.LocalAddr == localIP {
-			neighbors = append(neighbors, neighborIP)
+	for _, intent := range peerIntents {
+		if ip := intent.Params["neighbor_ip"]; ip != "" {
+			neighbors = append(neighbors, ip)
 		}
 	}
 	return neighbors
@@ -343,22 +334,6 @@ func (i *Interface) IsPortChannel() bool {
 // IsVLAN returns true if this is a VLAN interface (Vlan*).
 func (i *Interface) IsVLAN() bool {
 	return strings.HasPrefix(i.name, "Vlan")
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-// parseServiceFromACL extracts service name from ACL naming convention.
-// ACL name format: {SERVICE}_{DIRECTION} (per-service ACLs, shared across interfaces)
-func parseServiceFromACL(aclName string) string {
-	if strings.HasSuffix(aclName, "_IN") {
-		return strings.TrimSuffix(aclName, "_IN")
-	}
-	if strings.HasSuffix(aclName, "_OUT") {
-		return strings.TrimSuffix(aclName, "_OUT")
-	}
-	return ""
 }
 
 // ============================================================================

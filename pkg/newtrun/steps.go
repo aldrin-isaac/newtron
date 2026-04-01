@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/newtron-network/newtron/pkg/newtron"
 )
 
 // stepExecutor executes a single step and returns output.
@@ -19,8 +19,7 @@ type stepExecutor interface {
 
 // StepOutput is the return value from every executor.
 type StepOutput struct {
-	Result     *StepResult
-	Composites map[string]string
+	Result *StepResult
 }
 
 // executors maps each StepAction to its executor implementation.
@@ -211,53 +210,16 @@ func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name st
 type provisionExecutor struct{}
 
 func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
-	var mu sync.Mutex
-	composites := make(map[string]string)
-
 	output := r.executeForDevices(step, func(name string) (string, error) {
-		handle, err := r.Client.GenerateComposite(name)
+		// Reconcile: deliver full topology projection to the device.
+		// Reconcile handles ConfigReload, wait, lock, ReplaceAll, and SaveConfig internally.
+		result, err := r.Client.Reconcile(name, "topology", newtron.ExecOpts{Execute: true})
 		if err != nil {
-			return "", fmt.Errorf("generate composite: %s", err)
+			return "", fmt.Errorf("reconcile: %s", err)
 		}
-
-		// Best-effort config reload to restore CONFIG_DB to saved defaults.
-		// On fresh boot: services may still be starting (SwSS not ready),
-		// and CONFIG_DB is already in factory state — failure is safe.
-		// On re-provision: reload succeeds, giving a clean baseline.
-		if err := r.Client.ConfigReload(name); err != nil {
-			util.Logger.Warnf("[%s] config reload before provision skipped: %v", name, err)
-		} else {
-			if err := r.Client.RefreshWithRetry(name, 60*time.Second); err != nil {
-				return "", fmt.Errorf("refresh after config reload: %s", err)
-			}
-		}
-
-		// Deliver composite — server handles lock→deliver→unlock internally
-		result, err := r.Client.DeliverComposite(name, handle.Handle, "overwrite")
-		if err != nil {
-			return "", fmt.Errorf("deliver composite: %s", err)
-		}
-
-		// Refresh the device's cached CONFIG_DB and interface list so
-		// subsequent steps see the newly provisioned PORT entries.
-		if err := r.Client.Refresh(name); err != nil {
-			return "", fmt.Errorf("refresh after provision: %s", err)
-		}
-
-		// Persist to config_db.json so subsequent config-reload steps
-		// re-read the provisioned config (not factory defaults).
-		if err := r.Client.SaveConfig(name); err != nil {
-			return "", fmt.Errorf("config save after provision: %s", err)
-		}
-
-		mu.Lock()
-		composites[name] = handle.Handle
-		mu.Unlock()
-
 		return fmt.Sprintf("provisioned (%d entries applied)", result.Applied), nil
 	})
 
-	output.Composites = composites
 	return output
 }
 
@@ -289,19 +251,16 @@ type verifyProvisioningExecutor struct{}
 
 func (e *verifyProvisioningExecutor) Execute(ctx context.Context, r *Runner, step *Step) *StepOutput {
 	return r.checkForDevices(step, func(name string) (StepStatus, string) {
-		handle, ok := r.Composites[name]
-		if !ok {
-			return StepStatusError, "no composite accumulated (was provision run first?)"
-		}
-		vr, err := r.Client.VerifyComposite(name, handle)
+		// Verify by detecting drift: zero drift entries means the device
+		// matches the topology projection exactly.
+		entries, err := r.Client.IntentDrift(name, "topology")
 		if err != nil {
-			return StepStatusError, fmt.Sprintf("verification error: %s", err)
+			return StepStatusError, fmt.Sprintf("drift check error: %s", err)
 		}
-		total := vr.Passed + vr.Failed
-		if vr.Failed == 0 {
-			return StepStatusPassed, fmt.Sprintf("%d/%d CONFIG_DB entries verified", vr.Passed, total)
+		if len(entries) == 0 {
+			return StepStatusPassed, "no drift — device matches topology projection"
 		}
-		return StepStatusFailed, fmt.Sprintf("%d/%d CONFIG_DB entries verified (%d failed)", vr.Passed, total, vr.Failed)
+		return StepStatusFailed, fmt.Sprintf("%d drift entries found", len(entries))
 	})
 }
 

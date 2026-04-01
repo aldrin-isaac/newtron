@@ -84,9 +84,8 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/delete-zone", s.handleDeleteZone)
 
 	// ====================================================================
-	// Network provision
+	// Device initialization
 	// ====================================================================
-	mux.HandleFunc("POST /network/{netID}/provision", s.handleProvisionDevices)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/init-device", s.handleInitDevice)
 
 	// ====================================================================
@@ -105,7 +104,6 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/status", s.handleBGPStatus)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/evpn/status", s.handleEVPNStatus)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/health", s.handleHealthCheck)
-	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/tree", s.handleIntentTree)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/lag", s.handleListLAGs)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/neighbor", s.handleListNeighbors)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/route/{vrf}/{prefix...}", s.handleGetRoute)
@@ -141,39 +139,22 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-bgp-evpn-peer", s.handleRemoveBGPEVPNPeer)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/restart-daemon", s.handleRestartDaemon)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/setup-device", s.handleSetupDevice)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/refresh", s.handleRefresh)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/verify-committed", s.handleVerifyCommitted)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}", s.handleConfigDBTableKeys)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}", s.handleQueryConfigDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}/exists", s.handleConfigDBEntryExists)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/statedb/{table}/{key}", s.handleQueryStateDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/bgp/check", s.handleCheckBGPSessions)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/lag/{name}", s.handleShowLAGDetail)
+
+	// ====================================================================
 	// Intent operations
-	mux.HandleFunc("GET /network/{netID}/node/{device}/intents", s.handleListIntents)
-	mux.HandleFunc("GET /network/{netID}/node/{device}/zombie", s.handleReadZombie)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/rollback-zombie", s.handleRollbackZombie)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/clear-zombie", s.handleClearZombie)
-
-	// History
-	mux.HandleFunc("GET /network/{netID}/node/{device}/history", s.handleReadHistory)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/rollback-history", s.handleRollbackHistory)
-
-	// Device settings
-	mux.HandleFunc("GET /network/{netID}/node/{device}/settings", s.handleReadSettings)
-	mux.HandleFunc("PUT /network/{netID}/node/{device}/settings", s.handleWriteSettings)
-
-	// Drift detection
-	mux.HandleFunc("GET /network/{netID}/node/{device}/drift", s.handleDetectDrift)
-	mux.HandleFunc("GET /network/{netID}/node/{device}/topology/drift", s.handleDetectTopologyDrift)
-	mux.HandleFunc("GET /network/{netID}/node/{device}/topology/intents", s.handleTopologyIntents)
-
 	// ====================================================================
-	// Node composite operations
-	// ====================================================================
-	mux.HandleFunc("POST /network/{netID}/node/{device}/generate-composite", s.handleCompositeGenerate)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/verify-composite", s.handleCompositeVerify)
-	mux.HandleFunc("POST /network/{netID}/node/{device}/deliver-composite", s.handleCompositeDeliver)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/tree", s.handleTree)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/drift", s.handleDrift)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/reconcile", s.handleReconcile)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/save", s.handleSave)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/reload", s.handleReload)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/clear", s.handleClear)
 
 	// ====================================================================
 	// Interface operations
@@ -192,8 +173,9 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/apply-qos", s.handleApplyInterfaceQoS)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/interface/{name}/remove-qos", s.handleRemoveInterfaceQoS)
 
-	// Apply middleware chain: recovery → logger → requestID → timeout → mux
+	// Apply middleware chain: recovery → logger → requestID → timeout → mode → mux
 	var handler http.Handler = mux
+	handler = withMode(handler)
 	handler = withTimeout(5 * time.Minute)(handler)
 	handler = withRequestID(handler)
 	handler = withLogger(s.logger)(handler)

@@ -2,16 +2,31 @@ package sonic
 
 import "reflect"
 
-// tableParser populates a single ConfigDB field from a Redis hash entry.
-type tableParser func(db *ConfigDB, entry string, vals map[string]string)
+// coalesce returns the first non-empty string. Used by hydrators to accept
+// both the canonical CONFIG_DB field name (admin_status) and the legacy
+// name (activate) from devices with older frrcfgd versions.
+func coalesce(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
-// tableParsers maps SONiC CONFIG_DB table names to their parser functions.
-// Every ConfigDB struct field must have a corresponding entry here.
-var tableParsers map[string]tableParser
+// configTableHydrator populates a ConfigDB typed map from a flat field map.
+// Used by both paths: physical node (Redis HGETALL → struct) and abstract
+// node (Entry fields → projection struct).
+type configTableHydrator func(db *ConfigDB, entry string, vals map[string]string)
+
+// configTableHydrators is the single registry mapping CONFIG_DB table names
+// to their hydration functions. Every ConfigDB struct field must have a
+// corresponding entry here.
+var configTableHydrators map[string]configTableHydrator
 
 func init() {
-	tableParsers = map[string]tableParser{
-		// ---- Typed struct parsers (33 tables) ----
+	configTableHydrators = map[string]configTableHydrator{
+		// ---- Typed struct hydrators (33 tables) ----
 
 		"PORT": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.Port[entry] = PortEntry{
@@ -97,16 +112,17 @@ func init() {
 		},
 		"BGP_NEIGHBOR_AF": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.BGPNeighborAF[entry] = BGPNeighborAFEntry{
-				Activate:             vals["activate"],
-				RouteReflectorClient: vals["route_reflector_client"],
-				NextHopSelf:          vals["next_hop_self"],
-				SoftReconfiguration:  vals["soft_reconfiguration"],
-				AllowASIn:            vals["allowas_in"],
-				RouteMapIn:           vals["route_map_in"],
-				RouteMapOut:          vals["route_map_out"],
-				PrefixListIn:         vals["prefix_list_in"],
-				PrefixListOut:        vals["prefix_list_out"],
-				DefaultOriginate:     vals["default_originate"],
+				AdminStatus:         coalesce(vals["admin_status"], vals["activate"]),
+				RRClient:            coalesce(vals["rrclient"], vals["route_reflector_client"]),
+				NHSelf:              coalesce(vals["nhself"], vals["next_hop_self"]),
+				NextHopUnchanged:    vals["nexthop_unchanged"],
+				SoftReconfiguration: vals["soft_reconfiguration"],
+				AllowASIn:           vals["allowas_in"],
+				RouteMapIn:          vals["route_map_in"],
+				RouteMapOut:         vals["route_map_out"],
+				PrefixListIn:        vals["prefix_list_in"],
+				PrefixListOut:       vals["prefix_list_out"],
+				DefaultOriginate:    vals["default_originate"],
 				AddpathTxAll:         vals["addpath_tx_all_paths"],
 			}
 		},
@@ -137,8 +153,10 @@ func init() {
 				RTExport:           vals["rt_export"],
 				RTImportEVPN:       vals["route_target_import_evpn"],
 				RTExportEVPN:       vals["route_target_export_evpn"],
-				MaxEBGPPaths:       vals["max_ebgp_paths"],
-				MaxIBGPPaths:       vals["max_ibgp_paths"],
+				MaxEBGPPaths:           vals["max_ebgp_paths"],
+				MaxIBGPPaths:           vals["max_ibgp_paths"],
+				RedistributeConnected:  vals["redistribute_connected"],
+				RedistributeStatic:     vals["redistribute_static"],
 			}
 		},
 		"BGP_EVPN_VNI": func(db *ConfigDB, entry string, vals map[string]string) {
@@ -224,7 +242,7 @@ func init() {
 				TCToQueueMap: vals["tc_to_queue_map"],
 			}
 		},
-		"NEWTRON_INTENT": mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.NewtronIntent }),
+		"NEWTRON_INTENT": mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.NewtronIntent }),
 		"STATIC_ROUTE": func(db *ConfigDB, entry string, vals map[string]string) {
 			cp := make(map[string]string, len(vals))
 			for k, v := range vals {
@@ -253,22 +271,24 @@ func init() {
 		},
 		"BGP_PEER_GROUP": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.BGPPeerGroup[entry] = BGPPeerGroupEntry{
-				ASN:         vals["asn"],
-				LocalAddr:   vals["local_addr"],
-				AdminStatus: vals["admin_status"],
-				HoldTime:    vals["holdtime"],
-				Keepalive:   vals["keepalive"],
-				Password:    vals["password"],
+				ASN:          vals["asn"],
+				LocalAddr:    vals["local_addr"],
+				AdminStatus:  vals["admin_status"],
+				HoldTime:     vals["holdtime"],
+				Keepalive:    vals["keepalive"],
+				Password:     vals["password"],
+				EBGPMultihop: vals["ebgp_multihop"],
 			}
 		},
 		"BGP_PEER_GROUP_AF": func(db *ConfigDB, entry string, vals map[string]string) {
 			db.BGPPeerGroupAF[entry] = BGPPeerGroupAFEntry{
-				Activate:             vals["activate"],
-				RouteReflectorClient: vals["route_reflector_client"],
-				NextHopSelf:          vals["next_hop_self"],
-				RouteMapIn:           vals["route_map_in"],
-				RouteMapOut:          vals["route_map_out"],
-				SoftReconfiguration:  vals["soft_reconfiguration"],
+				AdminStatus:         coalesce(vals["admin_status"], vals["activate"]),
+				RRClient:            coalesce(vals["rrclient"], vals["route_reflector_client"]),
+				NHSelf:              coalesce(vals["nhself"], vals["next_hop_self"]),
+				NextHopUnchanged:    vals["nexthop_unchanged"],
+				RouteMapIn:          vals["route_map_in"],
+				RouteMapOut:         vals["route_map_out"],
+				SoftReconfiguration: vals["soft_reconfiguration"],
 			}
 		},
 		"PREFIX_SET": func(db *ConfigDB, entry string, vals map[string]string) {
@@ -285,24 +305,24 @@ func init() {
 				CommunityMember: vals["community_member"],
 			}
 		},
-		// ---- Hash-merge parsers (9 tables) ----
+		// ---- Hash-merge hydrators (9 tables) ----
 
-		"DEVICE_METADATA":     mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.DeviceMetadata }),
-		"VLAN_INTERFACE":      mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.VLANInterface }),
-		"LOOPBACK_INTERFACE":  mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.LoopbackInterface }),
-		"PORTCHANNEL_MEMBER":  mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.PortChannelMember }),
-		"SUPPRESS_VLAN_NEIGH": mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.SuppressVLANNeigh }),
-		"SAG":                 mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.SAG }),
-		"SAG_GLOBAL":          mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.SAGGlobal }),
-		"DSCP_TO_TC_MAP":      mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.DSCPToTCMap }),
-		"TC_TO_QUEUE_MAP":     mergeParser(func(db *ConfigDB) map[string]map[string]string { return db.TCToQueueMap }),
+		"DEVICE_METADATA":     mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.DeviceMetadata }),
+		"VLAN_INTERFACE":      mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.VLANInterface }),
+		"LOOPBACK_INTERFACE":  mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.LoopbackInterface }),
+		"PORTCHANNEL_MEMBER":  mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.PortChannelMember }),
+		"SUPPRESS_VLAN_NEIGH": mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.SuppressVLANNeigh }),
+		"SAG":                 mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.SAG }),
+		"SAG_GLOBAL":          mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.SAGGlobal }),
+		"DSCP_TO_TC_MAP":      mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.DSCPToTCMap }),
+		"TC_TO_QUEUE_MAP":     mergeHydrator(func(db *ConfigDB) map[string]map[string]string { return db.TCToQueueMap }),
 	}
 }
 
-// mergeParser returns a tableParser that copies all key-value pairs into a
-// nested map[string]map[string]string. Used for tables whose entries have
-// variable/unknown field names (DEVICE_METADATA, VLAN_INTERFACE, etc.).
-func mergeParser(getMap func(*ConfigDB) map[string]map[string]string) tableParser {
+// mergeHydrator returns a configTableHydrator that copies all key-value pairs
+// into a nested map[string]map[string]string. Used for tables whose entries
+// have variable/unknown field names (DEVICE_METADATA, VLAN_INTERFACE, etc.).
+func mergeHydrator(getMap func(*ConfigDB) map[string]map[string]string) configTableHydrator {
 	return func(db *ConfigDB, entry string, vals map[string]string) {
 		m := getMap(db)
 		if m[entry] == nil {

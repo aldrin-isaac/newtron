@@ -45,7 +45,6 @@ For the architectural principles behind this design, see the [HLD](hld.md). For 
 14. [QoS Management](#14-qos-management)
 15. [Filter and Policy Management](#15-filter-and-policy-management)
 16. [Device Operations](#16-device-operations)
-    - [16.6 Crash Recovery (Zombie Operations)](#166-crash-recovery-zombie-operations)
 17. [Topology Provisioning](#17-topology-provisioning)
 18. [Troubleshooting](#18-troubleshooting)
 19. [Go API Usage](#19-go-api-usage)
@@ -495,7 +494,7 @@ All specs from all levels are visible. If the same name exists at multiple level
 
 ### 3.6 Topology Specification (Optional)
 
-When present, enables automated provisioning via `newtron provision`:
+When present, enables automated provisioning via `intent reconcile --topology`:
 
 ```json
 {
@@ -875,7 +874,7 @@ newtron leaf1 health check
 # Overall: PASS (6 passed, 1 warning, 0 failed)
 ```
 
-Health checks require a topology to be present (the composite from provisioning provides the intent baseline for CONFIG_DB verification).
+Health checks require the device to have intent records (NEWTRON_INTENT). The intent projection provides the baseline for CONFIG_DB verification.
 
 ### 6.2 Check Specific Component
 
@@ -1884,27 +1883,175 @@ is removed.
 
 ## 16. Device Operations
 
-Operations that act on the device as a whole rather than on a specific resource (interface, VLAN, VRF). Cleanup removes orphaned config, platform shows hardware capabilities, audit tracks who changed what, and config persistence controls what survives a reboot.
+Operations that act on the device as a whole rather than on a specific resource. Intent operations inspect and reconcile the device's configuration state against its intent records. Initialization prepares a device for newtron management. Platform and audit provide visibility.
 
-### 16.1 Cleanup
+### 16.1 Intent Operations
 
-Identifies and removes orphaned CONFIG_DB entries — resources that are no longer in use:
+Every write operation (service apply, VRF create, EVPN setup) records an intent in the NEWTRON_INTENT table. The projection — the expected CONFIG_DB state — is derived by replaying all intents. Six intent commands let you inspect, compare, and reconcile this state.
+
+#### 16.1.1 Intent Tree
+
+View the intent DAG as a tree rooted at the device or scoped to a resource:
 
 ```bash
-newtron leaf1 device cleanup              # preview all
-newtron leaf1 device cleanup -x           # execute all
-newtron leaf1 device cleanup --type acls -x  # only orphaned ACLs
+# Full tree from device root
+newtron leaf1 intent tree
+
+# Scope to a resource kind
+newtron leaf1 intent tree vlan
+
+# Scope to a specific resource
+newtron leaf1 intent tree vlan:100
+
+# Scope to an interface subtree
+newtron leaf1 intent tree interface:Ethernet0
+
+# Include path from resource to root
+newtron leaf1 intent tree vlan:100 --ancestors
+
+# JSON output
+newtron leaf1 intent tree --json
 ```
 
-**Cleanup types:**
+The tree shows every intent record with its operation type and parameters. Use it to understand what newtron has configured and the dependency structure between resources.
 
-| Type | Detection | What Gets Deleted |
-|------|-----------|-------------------|
-| `acls` | ACL table with empty `ports` field | ACL rules, then ACL table |
-| `vrfs` | VRF with no interface references (skip `default`) | VRF entry |
-| `vnis` | VXLAN_TUNNEL_MAP pointing to deleted VRF or VLAN | Tunnel map entry |
+**Resource kind values:** `vlan`, `vrf`, `interface`, `bgp`, `evpn`, `acl`, `qos`, `service`, `portchannel`
 
-**When to run:** after removing services, after deleting VLANs/VRFs, as periodic maintenance, after test runs leave stale config.
+#### 16.1.2 Drift Detection
+
+Compare the expected CONFIG_DB (derived from intent replay) against the actual CONFIG_DB:
+
+```bash
+newtron leaf1 intent drift
+
+# Output (clean):
+# Drift Report for leaf1: CLEAN
+# No drift detected in newtron-owned tables.
+
+# Output (drifted):
+# Drift Report for leaf1: DRIFTED
+#
+# Missing entries (2):
+# TABLE          KEY              EXPECTED FIELDS
+# VLAN           Vlan100          [vlanid=100]
+# VLAN_MEMBER    Vlan100|Eth0     [tagging_mode=untagged]
+#
+# Extra entries (1):
+# TABLE          KEY              ACTUAL FIELDS
+# STATIC_ROUTE   default|0.0.0.0  [nexthop=10.0.0.1]
+#
+# Modified entries (1):
+# TABLE          KEY              FIELD         EXPECTED  ACTUAL
+# BGP_NEIGHBOR   10.1.1.2         admin_status  up        down
+```
+
+Three drift categories:
+
+| Category | Meaning |
+|----------|---------|
+| Missing | Intent says it should exist; device doesn't have it |
+| Extra | Device has it in a newtron-owned table; intent doesn't account for it |
+| Modified | Both have it; field values differ |
+
+**Topology mode** — reconstructs expected state from `topology.json` steps instead of device NEWTRON_INTENT records:
+
+```bash
+newtron leaf1 --topology intent drift
+```
+
+Use topology mode to detect drift from the topology's intended state on devices that haven't been provisioned yet, or to compare a live device against the topology definition.
+
+**When to run:**
+- After suspecting external CONFIG_DB edits (Ansible, redis-cli, SONiC CLI)
+- After a config reload to verify the saved config matches intent
+- As a periodic health check to detect configuration decay
+- Before reconcile, to preview what would change
+
+#### 16.1.3 Reconcile
+
+Deliver the expected CONFIG_DB to the device, eliminating all drift:
+
+```bash
+# Preview what would change (dry-run)
+newtron leaf1 intent reconcile
+
+# Execute — replaces device CONFIG_DB with projection
+newtron leaf1 intent reconcile -x
+
+# Topology mode — reconcile from topology.json
+newtron leaf1 --topology intent reconcile -x
+```
+
+Reconcile reconstructs the projection from intents, computes the diff against the device, and applies it. This is the primary mechanism for:
+
+- **Fixing drift** — external edits are overwritten to match the projection
+- **Re-provisioning** — after a config reload, reconcile restores all newtron-managed state
+- **Topology provisioning** — with `--topology`, delivers the full topology-defined state (see [§17](#17-topology-provisioning))
+
+**What reconcile does NOT do:** It does not add new intents or change the intent DAG. It delivers the existing projection. To change what's configured, use the normal write operations (service apply, VRF create, etc.), then reconcile if the device has drifted.
+
+#### 16.1.4 Intent Save
+
+Persist the device's current intent records back to `topology.json`:
+
+```bash
+newtron leaf1 intent save
+
+# Output:
+# Saved 12 steps for leaf1
+
+# With topology format
+newtron leaf1 --topology intent save
+```
+
+Use this after manually configuring a device (service apply, VRF create, etc.) to capture its intent state for later reprovisioning or topology-based drift detection. The saved steps can be delivered to a fresh device via `intent reload` + `intent reconcile --topology`.
+
+#### 16.1.5 Intent Reload (Topology Mode Only)
+
+Rebuild the node's intent DAG from `topology.json` steps:
+
+```bash
+newtron leaf1 intent reload
+
+# Output:
+# Reloaded 12 steps for leaf1
+```
+
+Implicitly uses topology mode. Use this when `topology.json` has been updated externally (edited by hand, saved from a different device) and you want the server's in-memory state to reflect the changes before reconciling.
+
+#### 16.1.6 Intent Clear (Topology Mode Only)
+
+Reset the node's intent DAG to an empty state with ports only:
+
+```bash
+newtron leaf1 intent clear
+
+# Output:
+# Cleared intent DAG for leaf1 (2 steps remain)
+```
+
+Implicitly uses topology mode. The remaining steps are port registrations — the minimal state for an empty node. Use this before rebuilding a topology node from scratch via service apply/VRF create/etc.
+
+#### 16.1.7 Intent Workflow
+
+Typical workflow for detecting and fixing drift:
+
+```bash
+# 1. Check for drift
+newtron leaf1 intent drift
+
+# 2. If drifted, inspect the intent tree to understand expected state
+newtron leaf1 intent tree
+
+# 3. Preview reconcile
+newtron leaf1 intent reconcile
+
+# 4. Execute reconcile to fix drift
+newtron leaf1 intent reconcile -x
+
+# 5. Verify drift is resolved
+newtron leaf1 intent drift
+```
 
 ### 16.2 Platform Information
 
@@ -1995,7 +2142,7 @@ newtron leaf1 init --force
 **When to run:**
 
 - Before using `newtron` on a new device for the first time (standalone, no topology)
-- Not needed after `newtron provision` — provisioning includes init automatically
+- Not needed after topology reconcile — provisioning includes init automatically
 - Not needed in newtlab — boot patches handle it during `newtlab deploy`
 
 **What it does:**
@@ -2060,107 +2207,48 @@ ssh admin@<mgmt_ip> 'sudo config reload -y'
 
 This reloads `/etc/sonic/config_db.json` into Redis, effectively undoing any unsaved changes.
 
-### 16.6 Crash Recovery (Zombie Operations)
+### 16.6 Crash Recovery
 
-If newtron (or newtron-server) crashes during a write operation — killed, SSH drop, OOM — the next operation on that device will fail with `zombie operation detected`. This means a previous operation left partial state on the device.
+If newtron crashes during a write operation (killed, SSH drop, OOM), the device may have partial state. Recovery is structural — NEWTRON_INTENT records are the persistent state, and the projection is derived from them:
 
-**Inspect the zombie:**
+1. **Check drift** — see what the device has vs. what intents expect:
+   ```bash
+   newtron leaf1 intent drift
+   ```
 
-```bash
-newtron leaf1 device zombie
+2. **Reconcile** — deliver the projection to fix any inconsistency:
+   ```bash
+   newtron leaf1 intent reconcile -x
+   ```
 
-# Output:
-# Zombie Operation
-#   Holder:  aldrin@workstation1
-#   Created: 2026-03-10T14:30:00Z
-#   Phase:   applying
-#
-# Operations:
-#   1. CreateVLAN (id=100)
-#      Reverse: DeleteVLAN
-#      Started:   14:30:00.123
-#      Completed: 14:30:00.456
-#
-#   2. CreateVRF (name=CUSTOMER)
-#      Reverse: DeleteVRF
-#      Started:   14:30:00.457
-#      Completed: (none)           ← crashed here
-#
-#   3. ApplyService (interface=Ethernet0, service=customer-l3)
-#      Reverse: RemoveService
-#      Started:   (none)           ← never started
-#      Completed: (none)
-```
+If the crash happened mid-write, some intents may have been recorded while others weren't. In that case, the projection reflects only the successfully recorded intents. Reconcile delivers that consistent subset. To add the missing operations, re-run them (they're idempotent) and reconcile again.
 
-The timestamps tell you exactly what happened. Operation 1 completed (VLAN was fully created). Operation 2 started but didn't complete (VRF may be partially created). Operation 3 never started.
-
-**Rollback (reverse the partial operation):**
-
-```bash
-# Preview what will be reversed
-newtron leaf1 device zombie rollback
-
-# Output:
-# Rollback preview:
-#   [reverse] ApplyService → RemoveService (interface=Ethernet0)  SKIP (not started)
-#   [reverse] CreateVRF → DeleteVRF (name=CUSTOMER)               REVERSE
-#   [reverse] CreateVLAN → DeleteVLAN (id=100)                     REVERSE
-#
-# DRY-RUN: No changes applied. Use -x to execute.
-
-# Execute the rollback
-newtron leaf1 device zombie rollback -x
-```
-
-Rollback calls the reverse of each operation in reverse order. Completed operations get full reversal. In-progress operations get partial reversal — the reverse operations check what actually exists before acting, so they safely handle entries that were never created. Not-started operations are skipped.
-
-Rollback is idempotent. Each successfully reversed operation is marked with a `Reversed` timestamp in the intent record. If the rollback itself crashes, the next `rollback -x` reads the intent, skips already-reversed operations, and continues where it left off.
-
-**Clear (dismiss without rollback):**
-
-```bash
-newtron leaf1 device zombie clear
-# Zombie operation cleared.
-```
-
-Use clear when:
-- You've manually cleaned up the partial state (e.g., deleted the orphaned entries via individual commands)
-- The partial state is acceptable (e.g., a `CreateVLAN` that completed — the VLAN is fine, just clear the marker)
-- You want to start fresh and accept the current device state as the new reality
-
-**Troubleshooting:**
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `zombie operation detected` on any write | Previous process crashed mid-apply | `device zombie` to inspect, then rollback or clear |
-| Rollback fails with domain error | Partial state has active consumers | Manually resolve dependencies, then rollback or clear |
-| No zombie but device state is wrong | Intent was never written (pre-feature crash, or crash before WriteIntent) | Manual cleanup via individual delete commands |
+**No separate crash-recovery mechanism.** The intent DAG + drift detection + reconcile is the universal recovery path. There are no zombie markers, no rollback breadcrumbs — just "what does the intent say?" vs "what does the device have?"
 
 ---
 
 ## 17. Topology Provisioning
 
-Why provisioning? Instead of manually creating VLANs, VRFs, BGP neighbors, and services one by one, provisioning generates the complete CONFIG_DB for a device from its topology spec and delivers it in one shot.
+Why provisioning? Instead of manually creating VLANs, VRFs, BGP neighbors, and services one by one, provisioning generates the complete CONFIG_DB for a device from its topology spec and delivers it in one operation.
+
+Topology provisioning uses the same intent pipeline as manual operations. The server builds an abstract Node from `topology.json`, replays the topology steps (setup-device, apply-service, add-neighbor, etc.) to build the projection, then delivers it to the device via reconcile.
 
 ```bash
-# Preview what would be provisioned (all devices)
-newtron provision
+# Preview what would change
+newtron leaf1 --topology intent reconcile
 
-# Provision a single device
-newtron -D leaf1 provision -x
-
-# Provision all devices in topology
-newtron provision -x
+# Provision a device from topology
+newtron leaf1 --topology intent reconcile -x
 ```
 
 **Provisioning flow (per device):**
 
-1. `GenerateComposite` — builds complete CONFIG_DB offline using an abstract Node. The abstract Node has no SSH connection; instead of writing to Redis, operations accumulate entries in a shadow CONFIG_DB. This uses the same code path as manual operations (`SetupEVPN`, `ApplyService`, `ConfigureBGP`, etc.) — the abstract node eliminates the need for a parallel "config generation" implementation.
-2. `ConfigReload` — best-effort reload to restore CONFIG_DB to saved defaults (factory fields like `mac`, `platform`, `hwsku` intact). Safe to fail on fresh boot.
-3. `DeliverComposite` — delivers the composite to the device via overwrite mode (merges on top of the reloaded baseline; stale keys removed).
-4. `EnsureUnifiedConfigMode` — if the device was using bgpcfgd, restarts the bgp container so frrcfgd takes over. No-op if already running.
+1. **Intent Replay** — the server reads `topology.json` steps for the device and replays them through the abstract Node. Each step calls the same code path as the corresponding manual operation (`SetupDevice`, `ApplyService`, `AddNeighbor`, etc.). The result is a projection — the expected CONFIG_DB.
+2. **Drift Comparison** — the projection is compared against the device's actual CONFIG_DB, producing a list of missing, extra, and modified entries.
+3. **Delivery** — the diff is applied to the device, bringing it into alignment with the topology definition.
+4. **Config Save** — the device config is persisted to survive reboots.
 
-Without `-x`, provisioning shows a summary of what would be generated (entry count, table breakdown).
+This is the same reconcile mechanism described in [§16.1.3](#1613-reconcile), but with `--topology` to source intents from `topology.json` instead of device NEWTRON_INTENT records.
 
 ---
 
@@ -2225,8 +2313,11 @@ newtron leaf1 service apply PortChannel100 customer-l3 --ip 10.1.1.1/30 -x
 ### 18.4 Stale State After Tests
 
 ```bash
-# Remove orphaned resources
-newtron leaf1 device cleanup -x
+# Check what's different from expected state
+newtron leaf1 intent drift
+
+# Reconcile to restore intent-defined state
+newtron leaf1 intent reconcile -x
 
 # Or reload persisted config (discards all runtime changes)
 ssh admin@<mgmt_ip> 'sudo config reload -y'
@@ -2267,8 +2358,8 @@ If configuration is in a bad state, use escalating options:
 # Option 1: Remove services from specific interfaces and start fresh
 newtron leaf1 service remove Ethernet0 -x
 
-# Option 2: Run cleanup to remove all orphaned resources
-newtron leaf1 device cleanup -x
+# Option 2: Reconcile to restore intent-defined state
+newtron leaf1 intent reconcile -x
 
 # Option 3: Reload persisted config (on switch, reverts to last saved state)
 ssh admin@<mgmt_ip> 'sudo config reload -y'
@@ -2290,7 +2381,6 @@ ssh admin@<mgmt_ip> 'sudo config reload -y'
 | `redis connection failed` | Port 6379 not forwarded | Add ssh_user/ssh_pass to profile for SSH tunnel |
 | `SSH dial...connection refused` | Port 22 not reachable | Check SSH service, network, VM health |
 | `device is locked` | Another operation in progress | Wait (lock has TTL auto-expiry) |
-| `zombie operation detected` | Previous process crashed mid-apply | `device zombie` to inspect, then `rollback -x` or `clear` |
 
 ---
 
@@ -2380,14 +2470,22 @@ result, err := c.ApplyService("leaf1", "Ethernet0", "customer-l3", serviceOpts, 
 result, err = c.RemoveService("leaf1", "Ethernet0", opts)
 ```
 
-**Composite operations** (provisioning):
+**Intent operations:**
 
 ```go
-handle, err := c.GenerateComposite("leaf1")
-fmt.Printf("Generated: %d entries across %d tables\n", handle.EntryCount, len(handle.Tables))
+// View intent tree
+tree, err := c.IntentTree("leaf1", "", "", false)
 
-delivery, err := c.DeliverComposite("leaf1", handle.Handle, "overwrite")
-fmt.Printf("Applied: %d, Skipped: %d\n", delivery.Applied, delivery.Skipped)
+// Detect drift
+entries, err := c.IntentDrift("leaf1", "")
+
+// Reconcile (topology mode)
+result, err := c.Reconcile("leaf1", "topology", newtron.ExecOpts{Execute: true})
+fmt.Printf("Reconciled: %d entries applied\n", result.Applied)
+
+// Save intents to topology.json
+snap, err := c.IntentSave("leaf1", "")
+fmt.Printf("Saved %d steps\n", len(snap.Steps))
 ```
 
 ### 19.3 Error Handling
@@ -2413,31 +2511,7 @@ if err != nil {
 
 ### 19.4 Direct Library Usage
 
-For embedding in the same process (no HTTP server), use `pkg/newtron` directly:
-
-```go
-net, err := newtron.LoadNetwork("/etc/newtron")
-dev, err := net.Connect(ctx, "leaf1")
-defer dev.Close()
-
-// Write operations accumulate as pending changes
-dev.CreateVLAN(ctx, 100, newtron.VLANConfig{Description: "Test"})
-dev.SetupEVPN(ctx, "")
-
-// Preview without applying
-fmt.Print(dev.PendingPreview())
-
-// Apply atomically
-result, err := dev.Commit(ctx)
-```
-
-Or use the `Execute` pattern which handles lock/commit/save automatically:
-
-```go
-result, err := dev.Execute(ctx, newtron.ExecOpts{Execute: true}, func(ctx context.Context) error {
-    return dev.CreateVLAN(ctx, 100, newtron.VLANConfig{Description: "Test"})
-})
-```
+The HTTP client is the recommended integration path. Direct library usage (`pkg/newtron/network/`, `pkg/newtron/network/node/`) is internal and subject to change. All external consumers — CLI, newtrun, custom tooling — should use the HTTP client against `newtron-server`.
 
 ---
 
@@ -2453,11 +2527,11 @@ Starting from a freshly deployed SONiC device with SSH access:
 # 1. Start the server (if not already running)
 newtron-server -spec-dir /etc/newtron &
 
-# 2. Set up overlay infrastructure
-newtron leaf1 evpn setup -x
+# 2. Initialize the device (enables frrcfgd unified config mode)
+newtron leaf1 init
 
-# 3. Provision from topology
-newtron provision -D leaf1 -x
+# 3. Provision from topology (reconcile delivers the full projection)
+newtron leaf1 --topology intent reconcile -x
 
 # 4. Verify BGP sessions
 newtron leaf1 bgp status
@@ -2563,8 +2637,8 @@ newtron leaf1 vrf remove-interface Vrf_CUST1 Ethernet12 -x
 # 5. Delete VRF
 newtron leaf1 vrf delete Vrf_CUST1 -x
 
-# 6. Clean up any orphaned resources
-newtron leaf1 device cleanup -x
+# 6. Verify no drift
+newtron leaf1 intent drift
 ```
 
 ### 20.7 Service Lifecycle: Apply, Modify, Remove
@@ -2583,8 +2657,8 @@ newtron leaf1 service refresh Ethernet0 -x
 # Eventually remove
 newtron leaf1 service remove Ethernet0 -x
 
-# Clean up any orphaned resources
-newtron leaf1 device cleanup -x
+# Verify no drift
+newtron leaf1 intent drift
 ```
 
 ### 20.8 Lab Deployment and Testing
@@ -2600,7 +2674,8 @@ bin/newtlab deploy newtrun/topologies/2node-ngdp
 bin/newtron-server -spec-dir newtrun/topologies/2node-ngdp/specs &
 
 # Provision switches from topology
-bin/newtron -S newtrun/topologies/2node-ngdp/specs provision -x
+bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 --topology intent reconcile -x
+bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch2 --topology intent reconcile -x
 
 # Verify health
 bin/newtron -S newtrun/topologies/2node-ngdp/specs -D switch1 health check
@@ -2626,13 +2701,16 @@ Spec-Level (no device needed)
 │   └── macvpn   list | show | create | delete
 ├── filter     list | show | create | delete | add-rule | remove-rule
 ├── qos        list | show | create | delete | add-queue | remove-queue
+├── profile    list | show | create | delete
+├── zone       list | create | delete
 ├── platform   list | show
 ├── settings   show | set | get | clear | path
-└── audit      list
+├── audit      list
+└── version
 
 Device-Scoped (requires device name)
 ├── show
-├── provision
+├── init
 ├── interface  list | show | get | set | list-acls | list-members
 ├── service    apply | remove | refresh | get
 ├── vlan       list | show | status | create | delete
@@ -2651,7 +2729,7 @@ Device-Scoped (requires device name)
 ├── bgp        status
 ├── qos        apply | remove
 ├── health     check
-└── device     cleanup | zombie | zombie rollback | zombie clear
+└── intent     tree | drift | reconcile | save | reload | clear
 ```
 
 ### 21.2 Key Patterns
@@ -2668,11 +2746,12 @@ Device-Scoped (requires device name)
 ### 21.3 Dependency Order for New Device
 
 1. Start server: `newtron-server -spec-dir /etc/newtron`
-2. Set up overlay: `newtron leaf1 evpn setup -x`
-3. Provision from topology: `newtron provision -D leaf1 -x`
+2. Initialize device: `newtron leaf1 init`
+3. Provision from topology: `newtron leaf1 --topology intent reconcile -x`
 4. Or apply services individually: `newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x`
 5. Verify: `newtron leaf1 health check`
-6. Persist: automatic with `-x` (or `ssh admin@<ip> 'sudo config save -y'` if `--no-save` was used)
+6. Check drift: `newtron leaf1 intent drift`
+7. Persist: automatic with `-x` (or `ssh admin@<ip> 'sudo config save -y'` if `--no-save` was used)
 
 ---
 

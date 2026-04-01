@@ -5,7 +5,7 @@ description: >
   Uses polling instead of fixed waits since CiscoVS Silicon One SAI is slow.
   VRF name uses Vrf_ prefix (required by CiscoVS intfmgrd — see RCA-044).
 topology: 2node-ngdp
-requires: [boot-ssh]
+requires: [setup-device]
 
 steps:
   # Create Vrf_CUSTOMER via newtron primitive.

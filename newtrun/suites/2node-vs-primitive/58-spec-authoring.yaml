@@ -4,7 +4,7 @@ description: |
   service creation with routing referencing those objects, apply/remove on device,
   and full teardown in reverse dependency order.
 topology: 2node-vs
-requires: [boot-ssh]
+requires: [setup-device]
 
 steps:
   # --- Cleanup stale specs from prior failed runs (all deletes are idempotent) ---

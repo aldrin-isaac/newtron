@@ -1,0 +1,71 @@
+name: detect-drift
+description: |
+  M8: Drift detection identifies all three categories (missing, extra, modified).
+
+  After injecting CONFIG_DB changes, verifies that /intent/drift correctly
+  reports the specific drifted entries. Tests both topology and actuated modes
+  — both should detect the same drift since the same intents are present.
+
+  Key assertions:
+    - At least 3 drift entries (1+ missing, 1+ extra, 1+ modified)
+    - Missing entry references LOOPBACK_INTERFACE
+    - Extra entry references VLAN|Vlan999
+    - Modified entry references BGP_GLOBALS with wrong ASN
+topology: 1node-vs
+requires: [inject-drift]
+
+steps:
+  # Topology mode drift: projection from topology.json vs actual CONFIG_DB
+  - name: drift-topology-mode
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: >-
+        length >= 3
+        and ([.[] | select(.type == "missing")] | length) >= 1
+        and ([.[] | select(.type == "extra")] | length) >= 1
+        and ([.[] | select(.type == "modified")] | length) >= 1
+
+  # Verify the missing entry is the loopback IP we deleted
+  - name: drift-missing-is-loopback
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: >-
+        [.[] | select(.type == "missing")]
+        | any(.[]; .table == "LOOPBACK_INTERFACE")
+
+  # Verify the extra entry is the VLAN we injected
+  - name: drift-extra-is-vlan999
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: >-
+        [.[] | select(.type == "extra")]
+        | any(.[]; .table == "VLAN" and .key == "Vlan999")
+
+  # Verify the modified entry is BGP_GLOBALS with wrong ASN
+  - name: drift-modified-is-bgp
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: >-
+        [.[] | select(.type == "modified")]
+        | any(.[]; .table == "BGP_GLOBALS")
+
+  # Actuated mode drift: projection from device NEWTRON_INTENT vs actual CONFIG_DB
+  # Same device, same intents → same drift results.
+  - name: drift-actuated-mode
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: >-
+        length >= 3
+        and ([.[] | select(.type == "missing")] | length) >= 1
+        and ([.[] | select(.type == "extra")] | length) >= 1
+        and ([.[] | select(.type == "modified")] | length) >= 1

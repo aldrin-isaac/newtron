@@ -1,0 +1,65 @@
+name: verify-actuated-clean
+description: |
+  Verify actuated-mode drift detection after provisioning. In actuated mode
+  (no ?mode=topology), the projection is built from the device's own
+  NEWTRON_INTENT records — not from topology.json.
+
+  After topology-reconcile, the device has NEWTRON_INTENT records matching
+  the topology. Actuated drift re-reads those intents, replays them into a
+  projection, and compares against actual CONFIG_DB. Should be clean.
+
+  Also exercises a CRUD write in actuated mode (create + delete VLAN) to
+  prove the actuated pipeline works end-to-end before we test the drift guard.
+topology: 2node-vs-service
+requires: [provision]
+
+steps:
+  # Actuated drift: re-read intents from device, rebuild projection, compare.
+  # Empty array = clean.
+  - name: verify-drift-clean-sw1
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Exercise actuated CRUD: create a VLAN through the API.
+  # This writes NEWTRON_INTENT|vlan|900 + VLAN|Vlan900 to the device.
+  - name: create-vlan-900
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 900}
+
+  # Verify the VLAN was created on the device
+  - name: verify-vlan900-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan900
+    expect:
+      jq: '.vlanid == "900"'
+
+  # Drift should still be clean — the intent and the CONFIG_DB entry match
+  - name: verify-drift-still-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Clean up: delete the test VLAN
+  - name: delete-vlan-900
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 900}
+
+  # Verify still clean after delete
+  - name: verify-drift-clean-after-delete
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

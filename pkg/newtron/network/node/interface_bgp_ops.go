@@ -100,6 +100,9 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	cs.ReverseOp = "device.remove-bgp-peer"
 	cs.OperationParams = map[string]string{"interface": i.name, "neighbor_ip": neighborIP}
 
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Adding direct BGP peer %s (AS %d) on interface %s",
 		neighborIP, cfg.RemoteAS, i.name)
 	return cs, nil

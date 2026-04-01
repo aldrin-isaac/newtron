@@ -1,0 +1,100 @@
+name: rebuild-external
+description: |
+  RebuildProjection picks up external NEWTRON_INTENT changes.
+
+  Architecture §8 (RebuildProjection): "RebuildProjection re-reads
+  NEWTRON_INTENT from the device (when connected)." This means if an
+  external tool writes a NEWTRON_INTENT record directly to Redis, the
+  next API operation will see it — because RebuildProjection runs at
+  the start of every execute() call.
+
+  Tests that:
+  1. Write a VLAN intent directly to Redis via redis-cli
+  2. The next intent/tree call shows the new VLAN
+  3. Cleanup restores clean state
+
+  The external intent must match newtron's NEWTRON_INTENT format:
+  - "operation" (not "op") — the operation type
+  - "_parents" (not "parents") — CSV of parent resources
+  - "_children" (not "children") — CSV of child resources
+  - "state" — intent state (actuated/pending)
+  - Params as individual hash fields (not a JSON blob)
+  - Parent's _children must also be updated (DAG is bidirectional)
+topology: 1node-vs
+requires: [clear-ports]
+
+steps:
+  # Write a NEWTRON_INTENT record for VLAN 950 directly to Redis.
+  # This simulates an external tool or another newtron instance writing
+  # intent records directly. We must also update device's _children
+  # because the intent DAG is bidirectional — IntentsToSteps uses
+  # parent._children for topological sort traversal.
+  - name: write-intent-via-redis
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: >-
+        sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|vlan|950'
+        operation create-vlan
+        state actuated
+        _parents device
+        vlan_id 950
+
+  # Update device's _children to include the new VLAN intent.
+  # The existing device intent has no _children (from setup-device).
+  - name: update-device-children
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: "sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|device' _children 'vlan|950'"
+
+  # Also write the corresponding VLAN CONFIG_DB entry so there's no drift.
+  # create-vlan produces: VLAN|Vlan950 with vlanid field.
+  - name: write-vlan-configdb-via-redis
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan950' vlanid 950"
+
+  # The next actuated-mode tree call triggers RebuildProjection, which
+  # re-reads NEWTRON_INTENT from Redis. The externally-written VLAN
+  # intent should appear in the tree.
+  - name: tree-sees-external-intent
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Cleanup: remove the externally-written intent and VLAN,
+  # and restore device's _children to empty.
+  - name: cleanup-external-intent
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params:
+      command: >-
+        sudo redis-cli -n 4 DEL 'NEWTRON_INTENT|vlan|950' 'VLAN|Vlan950'
+        && sudo redis-cli -n 4 HSET 'NEWTRON_INTENT|device' _children ''
+
+  # Verify clean — tree should no longer have the VLAN
+  - name: verify-clean-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | all(.[]; .url != "/create-vlan")'
+
+  - name: verify-clean-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

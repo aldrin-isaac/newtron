@@ -12,6 +12,15 @@ import (
 // Network management
 // ============================================================================
 
+// ListNetworks returns all registered networks.
+func (c *Client) ListNetworks() ([]api.NetworkInfo, error) {
+	var result []api.NetworkInfo
+	if err := c.doGet("/network", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // HasTopology returns whether the registered network has a topology.
 func (c *Client) HasTopology() (bool, error) {
 	var result []api.NetworkInfo
@@ -464,40 +473,6 @@ func (c *Client) RemoveFilterRule(filter string, seq int, opts newtron.ExecOpts)
 	return c.doPost(c.networkPath()+"/remove-filter-rule"+execQuery(opts), body, nil)
 }
 
-// ============================================================================
-// Network provision
-// ============================================================================
-
-// GenerateComposite generates a composite CONFIG_DB for a device.
-// Returns a handle that can be passed to DeliverComposite or VerifyComposite.
-func (c *Client) GenerateComposite(device string) (*api.CompositeHandleResponse, error) {
-	var result api.CompositeHandleResponse
-	if err := c.doPost(c.nodePath(device)+"/generate-composite", nil, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// VerifyComposite verifies a previously generated composite against CONFIG_DB.
-func (c *Client) VerifyComposite(device, handle string) (*newtron.VerificationResult, error) {
-	var result newtron.VerificationResult
-	body := api.CompositeHandleRequest{Handle: handle}
-	if err := c.doPost(c.nodePath(device)+"/verify-composite", body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// DeliverComposite delivers a composite to a device.
-func (c *Client) DeliverComposite(device, handle, mode string) (*newtron.DeliveryResult, error) {
-	var result newtron.DeliveryResult
-	body := api.CompositeHandleRequest{Handle: handle, Mode: mode}
-	if err := c.doPost(c.nodePath(device)+"/deliver-composite", body, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
 // InitDevice prepares a device for newtron management by enabling frrcfgd.
 // Returns the status: "initialized" or "already_initialized".
 // If force is true, proceeds even if the device has active BGP configuration.
@@ -513,11 +488,3 @@ func (c *Client) InitDevice(device string, force bool) (string, error) {
 	return result["status"], nil
 }
 
-// ProvisionDevices provisions devices from the topology.
-func (c *Client) ProvisionDevices(req newtron.ProvisionRequest, opts newtron.ExecOpts) (*newtron.ProvisionResult, error) {
-	var result newtron.ProvisionResult
-	if err := c.doPost(c.networkPath()+"/provision"+execQuery(opts), req, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}

@@ -1,0 +1,59 @@
+name: verify-guard
+description: |
+  The drift guard is the core safety mechanism: Lock() in actuated mode
+  compares the projection (from device intents) against actual CONFIG_DB.
+  If they diverge, Lock refuses to proceed — preventing writes on an
+  inconsistent foundation.
+
+  This scenario proves:
+    1. The drift guard blocks writes when the device has drifted
+    2. Drift detection correctly identifies the injected entry
+    3. switch2 (undrifted) is not affected
+topology: 2node-vs-service
+requires: [inject-drift]
+
+steps:
+  # Attempt a CRUD write on the drifted device — MUST fail.
+  # create-vlan goes through Execute() → Lock() → drift guard detects
+  # the rogue Vlan999 (extra entry) → refuses to acquire lock.
+  - name: write-blocked-by-drift-guard
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 800}
+    expect_failure: true
+    expect:
+      contains: "drifted from intents"
+
+  # Drift detection (read operation — no lock, no drift guard) still works.
+  # Must find at least 1 drift entry (the rogue VLAN).
+  - name: detect-drift-sw1
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length > 0 and ([.[] | select(.type == "extra")] | length) >= 1'
+
+  # switch2 is unaffected — drift is per-device
+  - name: switch2-not-drifted
+    action: newtron
+    devices: [switch2]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # switch2 writes still work — drift guard is per-device
+  - name: switch2-write-not-blocked
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 800}
+
+  - name: switch2-cleanup
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 800}

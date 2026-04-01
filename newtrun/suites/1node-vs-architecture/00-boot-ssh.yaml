@@ -1,0 +1,16 @@
+name: boot-ssh
+description: Verify SSH reachability on switch1
+topology: 1node-vs
+
+steps:
+  - name: ssh-echo-switch1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "echo ok"}
+    poll:
+      timeout: 120s
+      interval: 5s
+    expect:
+      jq: '.output | contains("ok")'

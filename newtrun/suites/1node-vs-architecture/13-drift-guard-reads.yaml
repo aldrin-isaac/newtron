@@ -1,0 +1,73 @@
+name: drift-guard-reads
+description: |
+  Drift guard does NOT block read operations on a drifted device.
+
+  Architecture §8 (Lock): the drift guard runs inside Lock(), which is only
+  acquired for write operations (connectAndExecute). Read operations
+  (connectAndRead) bypass Lock entirely — they call Ping + fn, not Lock + fn.
+  Therefore, reads must succeed even when the device is drifted.
+
+  Tests that intent/tree (read) and intent/drift (read) both succeed on a
+  drifted device in actuated mode, while a write (create-vlan) is correctly
+  blocked by the drift guard.
+topology: 1node-vs
+requires: [reconcile-idempotent]
+
+steps:
+  # Inject drift: add an unexpected VLAN via redis-cli
+  - name: inject-drift-for-read-test
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan888' vlanid 888"}
+    expect:
+      jq: '.output | contains("1")'
+
+  # READ: intent/tree must succeed — reads don't acquire Lock, so drift guard
+  # doesn't apply. The tree shows intents regardless of device state.
+  - name: tree-succeeds-on-drifted
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # READ: intent/drift must succeed — drift detection is itself a read.
+  # It should report the extra VLAN we just injected.
+  - name: drift-succeeds-on-drifted
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: >-
+        length >= 1
+        and any(.[]; .type == "extra" and .table == "VLAN" and .key == "Vlan888")
+
+  # WRITE: create-vlan must FAIL — the drift guard in Lock() detects drift
+  # and refuses the write.
+  - name: write-blocked-on-drifted
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 700}
+    expect_failure: true
+    expect:
+      contains: drift
+
+  # Cleanup: remove the injected drift
+  - name: cleanup-injected-drift
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 DEL 'VLAN|Vlan888'"}
+
+  # Verify clean state restored
+  - name: verify-clean-after-read-test
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

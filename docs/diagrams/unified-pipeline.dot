@@ -1,0 +1,37 @@
+digraph {
+    rankdir=TB;
+
+    "\n  Abstract Topology  \n  (topology.json)  \n\n"
+    "\n  API / CLI  \n\n"
+
+    subgraph cluster_node {
+        label="Abstract Node";
+        "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" -> "\n  Projection  \n  (typed CONFIG_DB)  \n\n" [label="  render  "];
+    }
+
+    subgraph cluster_device {
+        label="Physical Device";
+        "\n  Actual CONFIG_DB  \n  (Redis DB 4)  \n\n"
+    }
+
+    # Topology init (top-down authority)
+    "\n  Abstract Topology  \n  (topology.json)  \n\n" -> "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" [label="  ReplayStep  \n  TOPOLOGY MODE  \n  (topology authoritative)  "];
+
+    # Actuated init (bottom-up authority)
+    "\n  Actual CONFIG_DB  \n  (Redis DB 4)  \n\n" -> "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" [label="  IntentsToSteps + ReplayStep  \n  ACTUATED MODE  \n  (device authoritative)  "];
+
+    # API mutation (both modes)
+    "\n  API / CLI  \n\n" -> "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" [label="  config method  \n  (mutation, both modes)  "];
+
+    # Delivery
+    "\n  Projection  \n  (typed CONFIG_DB)  \n\n" -> "\n  Actual CONFIG_DB  \n  (Redis DB 4)  \n\n" [label="  Reconcile (full)  \n  Apply (incremental)  "];
+
+    # Drift
+    "\n  Projection  \n  (typed CONFIG_DB)  \n\n" -> "\n  Actual CONFIG_DB  \n  (Redis DB 4)  \n\n" [label="  Drift (compare)  "];
+
+    # Save
+    "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" -> "\n  Abstract Topology  \n  (topology.json)  \n\n" [label="  Save  "];
+
+    # Tree
+    "\n  Intent DB  \n  (NEWTRON_INTENT)  \n\n" -> "\n  API / CLI  \n\n" [label="  Tree  "];
+}

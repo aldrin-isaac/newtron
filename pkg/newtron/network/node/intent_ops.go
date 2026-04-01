@@ -44,7 +44,8 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 		}
 		fields := intent.ToFields()
 		cs.Prepend("NEWTRON_INTENT", resource, fields)
-		n.applyIntentToShadow(sonic.Entry{Table: "NEWTRON_INTENT", Key: resource, Fields: fields})
+		n.renderIntent(sonic.Entry{Table: "NEWTRON_INTENT", Key: resource, Fields: fields})
+		n.unsavedIntents = true
 		return nil
 	}
 
@@ -65,7 +66,7 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 		parentIntent.Children = appendUnique(parentIntent.Children, resource)
 		parentFields := parentIntent.ToFields()
 		cs.Add("NEWTRON_INTENT", p, parentFields)
-		n.applyIntentToShadow(sonic.Entry{Table: "NEWTRON_INTENT", Key: p, Fields: parentFields})
+		n.renderIntent(sonic.Entry{Table: "NEWTRON_INTENT", Key: p, Fields: parentFields})
 	}
 
 	// Create the intent record
@@ -78,7 +79,8 @@ func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string
 	}
 	fields := intent.ToFields()
 	cs.Prepend("NEWTRON_INTENT", resource, fields)
-	n.applyIntentToShadow(sonic.Entry{Table: "NEWTRON_INTENT", Key: resource, Fields: fields})
+	n.renderIntent(sonic.Entry{Table: "NEWTRON_INTENT", Key: resource, Fields: fields})
+	n.unsavedIntents = true
 	return nil
 }
 
@@ -105,20 +107,21 @@ func (n *Node) deleteIntent(cs *ChangeSet, resource string) error {
 		parentIntent.Children = removeItem(parentIntent.Children, resource)
 		parentFields := parentIntent.ToFields()
 		cs.Add("NEWTRON_INTENT", p, parentFields)
-		n.applyIntentToShadow(sonic.Entry{Table: "NEWTRON_INTENT", Key: p, Fields: parentFields})
+		n.renderIntent(sonic.Entry{Table: "NEWTRON_INTENT", Key: p, Fields: parentFields})
 	}
 
 	// Delete own intent record
 	cs.Delete("NEWTRON_INTENT", resource)
 	n.configDB.DeleteEntry("NEWTRON_INTENT", resource)
+	n.unsavedIntents = true
 	return nil
 }
 
-// applyIntentToShadow updates the in-memory configDB with an intent entry.
-// In both online and offline modes, intent records are written to the shadow
-// configDB immediately so that subsequent writeIntent calls within the same
+// renderIntent updates the projection with an intent entry.
+// In both online and offline modes, intent records are written to the
+// projection immediately so that subsequent writeIntent calls within the same
 // operation can see parent intents (I4 enforcement requires parents to exist).
-func (n *Node) applyIntentToShadow(entry sonic.Entry) {
+func (n *Node) renderIntent(entry sonic.Entry) {
 	n.configDB.ApplyEntries([]sonic.Entry{entry})
 }
 

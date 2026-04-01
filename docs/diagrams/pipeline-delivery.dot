@@ -1,0 +1,10 @@
+digraph {
+    rankdir=TB;
+    "\n  ProvisionDevice()  \n  topology.go:114  \n\n" -> "\n  GenerateDeviceComposite  \n  (abstract node pipeline)  \n\n";
+    "\n  GenerateDeviceComposite  \n  (abstract node pipeline)  \n\n" -> "\n  Connect + ConfigReload  \n  + Lock  \n\n" [label="  CompositeConfig  "];
+    "\n  Connect + ConfigReload  \n  + Lock  \n\n" -> "\n  DeliverComposite  \n  composite.go:143  \n\n";
+    "\n  DeliverComposite  \n  composite.go:143  \n\n" -> "\n  ValidateChanges()  \n  schema checks  \n\n";
+    "\n  ValidateChanges()  \n  schema checks  \n\n" -> "\n  ReplaceAll()  \n  pipeline.go:61  \n\n";
+    "\n  ReplaceAll()  \n  pipeline.go:61  \n\n" -> "\n  CONFIG_DB  \n  (Redis DB 4)  \n\n" [label="  DEL stale + HSET  "];
+    "\n  CONFIG_DB  \n  (Redis DB 4)  \n\n" -> "\n  SaveConfig + Unlock  \n\n";
+}

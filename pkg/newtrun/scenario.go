@@ -52,9 +52,9 @@ type Step struct {
 type StepAction string
 
 const (
-	ActionProvision          StepAction = "provision"
+	ActionProvision          StepAction = "topology-reconcile"
 	ActionWait               StepAction = "wait"
-	ActionVerifyProvisioning StepAction = "verify-provisioning"
+	ActionVerifyProvisioning StepAction = "verify-topology"
 	ActionHostExec           StepAction = "host-exec"
 	ActionNewtron            StepAction = "newtron"
 )

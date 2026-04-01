@@ -1,0 +1,61 @@
+name: clear-save
+description: |
+  Clear + Save: persist empty steps to topology.json.
+
+  Architecture §6 (Clear): "Clear + Save → Persists empty steps to
+  topology.json — the device's entry has no intents." After clear,
+  saving persists the empty intent set. Reloading after save should
+  produce an empty tree (confirming topology.json was updated).
+topology: 1node-vs
+requires: [clear-reconcile]
+
+steps:
+  # Clear the topology node
+  - name: clear-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear?mode=topology
+
+  # Save the empty state to topology.json
+  - name: save-empty
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save?mode=topology
+    expect:
+      jq: '.steps | length == 0'
+
+  # Reload from topology.json — should still be empty (save persisted it)
+  - name: reload-after-save
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  - name: verify-still-empty
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | length == 0'
+
+  # Restore: re-create setup-device and save so topology.json is back to normal
+  - name: restore-setup-device
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/setup-device?mode=topology
+    params:
+      fields:
+        hostname: switch1
+        bgp_asn: "65001"
+        type: LeafRouter
+
+  - name: save-restored
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'

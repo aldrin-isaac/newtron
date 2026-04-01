@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func TestParsers_AllTablesRegistered(t *testing.T) {
+func TestHydrators_AllTablesRegistered(t *testing.T) {
 	// Every ConfigDB struct field has a JSON tag like `json:"TABLE_NAME,omitempty"`.
-	// Verify that tableParsers has an entry for each one.
+	// Verify that configTableHydrators has an entry for each one.
 	typ := reflect.TypeOf(ConfigDB{})
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
@@ -17,8 +17,8 @@ func TestParsers_AllTablesRegistered(t *testing.T) {
 			continue
 		}
 		tableName := strings.SplitN(tag, ",", 2)[0]
-		if _, ok := tableParsers[tableName]; !ok {
-			t.Errorf("ConfigDB field %s (table %q) has no tableParsers entry", field.Name, tableName)
+		if _, ok := configTableHydrators[tableName]; !ok {
+			t.Errorf("ConfigDB field %s (table %q) has no configTableHydrators entry", field.Name, tableName)
 		}
 	}
 }
@@ -196,11 +196,11 @@ func TestParseEntry_RoundTrip(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.table, func(t *testing.T) {
 			db := newConfigDB()
-			parser, ok := tableParsers[tt.table]
+			hydrator, ok := configTableHydrators[tt.table]
 			if !ok {
-				t.Fatalf("no parser for table %q", tt.table)
+				t.Fatalf("no hydrator for table %q", tt.table)
 			}
-			parser(db, tt.entry, tt.vals)
+			hydrator(db, tt.entry, tt.vals)
 			tt.check(t, db)
 		})
 	}
@@ -348,7 +348,7 @@ func TestNewEmptyConfigDB(t *testing.T) {
 // written via ApplyEntries are reproduced faithfully by ExportEntries.  The
 // invariant checked is originalFields ⊆ exportedFields: every field that was
 // supplied to ApplyEntries must appear in the ExportEntries output with the same
-// value.  (applyEntry stores only the fields it knows about; ExportEntries
+// value.  (hydrateConfigTable stores only the fields it knows about; ExportEntries
 // re-serialises via structToFields using json tags, so both sides must agree on
 // the field key name for the round-trip to hold.)
 func TestExportEntries_RoundTrip(t *testing.T) {

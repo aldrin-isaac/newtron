@@ -4,13 +4,13 @@
 
 Newtron defines architectural primitives for SONiC networks and automates any network built from them. It treats SONiC as what it is — a Redis database with daemons that react to table changes — and interacts with it accordingly. Where other tools SSH in and parse CLI output, newtron reads and writes CONFIG_DB, APP_DB, ASIC_DB, and STATE_DB directly through an SSH-tunneled Redis client.
 
-Specs are the source of intent — they describe what the network should look like (services, filters, routing policies). The device is the source of reality — CONFIG_DB is what exists, whether correct or not. Newtron translates intent into concrete CONFIG_DB entries using each device's context (IPs, AS numbers, platform capabilities), but once applied, the device's state is the ground reality.
+Newtron is intent-first. Each device's primary state is its **intent DB** — the set of NEWTRON_INTENT records declaring what should be configured. The **projection** (expected CONFIG_DB) is derived by replaying intents through config functions. It is not a cache of Redis, not a copy of anything — it is the consequence of what the intents declare. The device's actual CONFIG_DB should match the projection; when it doesn't, that's drift.
 
-For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md).
+In actuated mode, intents come from the device's own NEWTRON_INTENT records — "intent is reality" means "device intents are reality," not "specs override the device." External CONFIG_DB edits are drift from what the device's own intents declare. The drift guard refuses writes on a drifted foundation; Reconcile fixes it by pushing the full projection to the device.
 
-## 2. Architecture
+For the architectural principles behind newtron, newtlab, and newtrun — including the object hierarchy, verification ownership, and DRY design — see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md). For the full pipeline specification with end-to-end traces, see [Unified Pipeline Architecture](unified-pipeline-architecture.md).
 
-### 2.1 System Architecture
+## 2. System Architecture
 
 ```
                                           ┌─────────────────────────────────┐
@@ -60,7 +60,7 @@ For the architectural principles behind newtron, newtlab, and newtrun — includ
   │                                       │           Node Layer            │
   │                                       │   (pkg/newtron/network/node/)   │
   │                                       │        Node, Interface,         │
-  │                         Connect()     │       ChangeSet, *_ops.go       │
+  │                  ConnectTransport()   │       ChangeSet, *_ops.go       │
   └─────────────────────────────────────▶ │                                 │
                                           └─────────────────────────────────┘
                                             │
@@ -85,31 +85,19 @@ For the architectural principles behind newtron, newtlab, and newtrun — includ
                                           └─────────────────────────────────┘
 ```
 
-### 2.2 How the Pieces Fit Together
+### 2.1 Layer Responsibilities
 
-**newtron-server** is the central process. It manages network specs and device connections through a hierarchy of actors, and exposes all operations as an HTTP REST API. The CLI and newtrun are HTTP clients — they import `pkg/newtron/client/` and shared types, never internal packages.
+| Layer | Package | Responsibility |
+|-------|---------|----------------|
+| **Public API** | `pkg/newtron/` | Entry point for all consumers; wraps internal types in domain vocabulary |
+| **Network** | `pkg/newtron/network/` | Spec loading, spec resolution (network→zone→node inheritance), topology provisioning |
+| **Node** | `pkg/newtron/network/node/` | Node, Interface, ChangeSet, all `*_ops.go` operations |
+| **Spec** | `pkg/newtron/spec/` | JSON file I/O for specs (network.json, profiles, platforms, topology) |
+| **Device** | `pkg/newtron/device/sonic/` | SSH tunnel, Redis clients (ConfigDB, StateDB, AppDB, AsicDB). Pure connection infrastructure — no domain logic |
 
-The server uses an **actor model** with a containment hierarchy:
+### 2.2 Object Hierarchy
 
-- A **NetworkActor** (one per registered network) owns a `*newtron.Network` and serializes spec operations. It also creates and manages **NodeActor** instances — one per device that has been accessed.
-- Each **NodeActor** holds a reference to the parent's `*Network` (for `Connect()` and spec access) and caches the SSH connection (`*newtron.Node`) with a configurable idle timeout (default 5 minutes), eliminating ~200ms SSH overhead per request.
-- Every request still refreshes CONFIG_DB from Redis (`Lock()` for writes, `Refresh()` for reads), so operations always see current device state.
-
-HTTP handlers follow a two-step resolution: server → NetworkActor (by network ID) → NodeActor (by device name). Spec operations (service list, filter create) dispatch to the NetworkActor directly. Device operations (VLAN create, health check) dispatch to the NodeActor.
-
-### 2.3 Layer Responsibilities
-
-| Layer | Package | Driven By | Responsibility |
-|-------|---------|-----------|----------------|
-| **Public API** | `pkg/newtron/` | Both actors | Entry point; wraps internal types in domain vocabulary. Write methods capture ChangeSets internally and return `error`. |
-| **Network** | `pkg/newtron/network/` | NetworkActor | Spec loading, spec resolution (network→zone→node inheritance), topology provisioning. Creates Nodes via `Connect()`. |
-| **Node** | `pkg/newtron/network/node/` | NodeActor | Node, Interface, ChangeSet, all `*_ops.go` operations. CONFIG_DB reads and writes. |
-| **Spec** | `pkg/newtron/spec/` | Network layer | JSON file I/O for specs (network.json, profiles, platforms, topology). |
-| **Device** | `pkg/newtron/device/sonic/` | Node layer | SSH tunnel, Redis clients (ConfigDB, StateDB, AppDB, AsicDB). Pure connection infrastructure — no domain logic. |
-
-### 2.4 Object Hierarchy
-
-The system uses an object-oriented design with parent references. The governing principle: **a method belongs to the smallest object that has all the context to execute it.**
+The governing principle: **a method belongs to the smallest object that has all the context to execute it.**
 
 ```
 ┌────────────────────┐
@@ -140,147 +128,140 @@ The system uses an object-oriented design with parent references. The governing 
 └────────────────────┘
 ```
 
-Whatever configuration can be right-shifted to the interface level, should be. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Route reflector peering is device-specific — it derives from the device's role and zone topology — so it lives on `Node.SetupEVPN()`.
+Whatever configuration can be right-shifted to the interface level, should be. eBGP neighbors are interface-specific — they derive from the interface's IP and the service's peer AS — so they are created by `Interface.ApplyService()`. Overlay peering is device-specific — it derives from the device's profile and EVPN peers — so it lives on `Node.SetupEVPN()`.
 
-### 2.5 Key Types
+### 2.3 Actor Model
 
-| Type | Package | Layer | Description |
-|------|---------|-------|-------------|
-| `newtron.Network` | `pkg/newtron/` | Public API | Entry point; wraps `network.Network` |
-| `newtron.Node` | `pkg/newtron/` | Public API | Device handle with pending change management; wraps `node.Node` |
-| `newtron.Interface` | `pkg/newtron/` | Public API | Interface handle; wraps `node.Interface` |
-| `network.Network` | `pkg/newtron/network/` | Network | Spec loading, topology provisioning, `Connect()` |
-| `node.Node` | `pkg/newtron/network/node/` | Node | Redis connection, CONFIG_DB operations, all `*_ops.go` |
-| `node.Interface` | `pkg/newtron/network/node/` | Node | Interface-scoped operations (ApplyService, etc.) |
+**newtron-server** is the central process. It manages network specs and device connections through a hierarchy of actors, and exposes all operations as an HTTP REST API. The CLI and newtrun are HTTP clients — they import `pkg/newtron/client/` and shared types, never internal packages.
 
-### 2.6 End-to-End Request Walkthrough
+| Actor | Scope | Owns | One Per |
+|-------|-------|------|---------|
+| `NetworkActor` | Spec operations | `*newtron.Network`, all `NodeActor` instances | Registered network |
+| `NodeActor` | Device operations | Cached `*newtron.Node`, `*Network` ref from parent | Device name |
 
-A concrete trace of `newtron leaf1 vlan create 100 --name servers -x` from keystroke to Redis:
+`NetworkActor` is the parent. It serializes spec operations and creates `NodeActor` instances on demand when a device is first accessed. Each `NodeActor` caches the SSH connection with a configurable idle timeout (default 5 minutes), eliminating ~200ms SSH overhead per request. The actor model naturally queues concurrent requests — essential when operations involve SSH round-trips.
 
-```
-CLI (cmd/newtron)
-  │  Sends POST /network/default/node/leaf1/vlan
-  │  Body: {"id": 100, "name": "servers"}
-  │  Query: ?execute=true
-  │
-  ▼
-newtron-server (pkg/newtron/api/)
-  │  handleVLANCreate():
-  │    server.getNetwork("default")        → NetworkActor
-  │    networkActor.getNodeActor("leaf1")   → NodeActor
-  │
-  ▼
-NodeActor
-  │  Dispatches via connectAndExecute:
-  │
-  │  1. getNode()        — returns cached *Node (or Connect() if first request)
-  │  2. node.Execute()   — Lock (refresh ConfigDB from Redis)
-  │                        → CreateVLAN(100, "servers") returns ChangeSet
-  │                        → Commit: Apply ChangeSet to Redis (HSET VLAN|Vlan100 ...)
-  │                                  Verify: re-read CONFIG_DB, diff against ChangeSet
-  │                        → Save: SSH `config save -y`
-  │                        → Unlock
-  │  3. Reset idle timer  — connection stays cached for next request
-  │
-  ▼
-Response → CLI
-  WriteResult{ChangeCount: 3, Applied: true, Verification: passed}
-  CLI prints: "Changes applied successfully."
-```
+Every request goes through `execute()`, which calls `RebuildProjection` before the operation function. This re-reads NEWTRON_INTENT from the device (when connected), rebuilds the projection from scratch, and ensures every operation sees fresh, authoritative state.
 
-A spec-only operation like `newtron service list` is simpler: CLI sends GET to server, server dispatches to NetworkActor (no NodeActor involved), NetworkActor reads specs from `*Network`, returns the list.
+Two dispatch patterns:
 
-## 3. Spec vs Config
+| Pattern | Lifecycle | Used By |
+|---------|----------|---------|
+| `connectAndRead` | execute → RebuildProjection → Ping → fn | Show, list, status, health, drift |
+| `connectAndExecute` | execute → RebuildProjection → Execute(Lock→snapshot→fn→commit-or-restore→Unlock) | All mutating operations |
 
-Newtron enforces a clear separation between **specification** (declarative intent) and **configuration** (imperative device state). This distinction governs every design decision.
+HTTP handlers follow a two-step resolution: server → NetworkActor (by network ID) → NodeActor (by device name). Spec operations dispatch to the NetworkActor directly. Device operations dispatch to the NodeActor.
 
-### 3.1 Specification (Intent)
+## 3. Intent Pipeline
 
-Specs describe **what you want**. They are declarative, abstract, and policy-driven.
-
-```json
-{
-  "services": {
-    "customer-l3": {
-      "service_type": "evpn-routed",
-      "ipvpn": "customer-vpn",
-      "vrf_type": "interface",
-      "routing": { "protocol": "bgp", "peer_as": "request" },
-      "ingress_filter": "customer-edge-in"
-    }
-  }
-}
-```
-
-This declares intent: "Customer interfaces should use EVPN L3 overlay with BGP, this IP-VPN, and this filter." It doesn't specify peer IPs, VRF names, VNIs, or ACL rule numbers — those are derived at runtime from the IP-VPN definition and device context.
-
-### 3.2 Configuration (Device State)
-
-Config is **what the device uses**. It is imperative, concrete, and device-specific, generated at runtime by combining a spec with context (interface, IP address, device profile).
-
-```json
-{
-  "VRF": { "customer-l3-Ethernet0": { "vni": "10001" } },
-  "VXLAN_TUNNEL_MAP": {
-    "vtep1|map_10001": { "vni": "10001", "vrf": "customer-l3-Ethernet0" }
-  },
-  "INTERFACE": {
-    "Ethernet0": { "vrf_name": "customer-l3-Ethernet0" },
-    "Ethernet0|10.1.1.1/30": {}
-  },
-  "BGP_NEIGHBOR": {
-    "10.1.1.2": { "asn": "65100", "local_asn": "64512", "local_addr": "10.1.1.1" }
-  },
-  "ACL_TABLE": {
-    "customer-l3-Ethernet0-in": { "type": "L3", "stage": "ingress", "ports": ["Ethernet0"] }
-  }
-}
-```
-
-The VNI (`10001`) comes from the IP-VPN definition `customer-vpn`, not from the service spec. The VRF name is derived from `{service}-{interface}` because `vrf_type` is `"interface"`.
-
-### 3.3 Translation
-
-The translation layer interprets specs in context to generate config:
+At the node level, all data flows through one pipeline:
 
 ```
-                                                 ┌───────────────────────────────────────┐
-                                                 │                                       │
-                                                 │                Context                │
-                                                 │ Interface: Ethernet0, IP: 10.1.1.1/30 │
-                                                 │   Device AS: 64512, Peer AS: 65100    │
-                                                 │   IP-VPN customer-vpn: L3VNI 10001    │
-                                                 │                                       │
-                                                 └───────────────────────────────────────┘
-                                                   │
-                                                   │
-                                                   ▼
-┌──────────────────────────────────────────┐     ┌───────────────────────────────────────┐
-│                                          │     │                                       │
-│            Spec (declarative)            │     │                                       │
-│     evpn-routed, ipvpn=customer-vpn,     │     │              Translation              │
-│ peer_as=request, filter=customer-edge-in │     │                                       │
-│                                          │ ──▶ │                                       │
-└──────────────────────────────────────────┘     └───────────────────────────────────────┘
-                                                   │
-                                                   │
-                                                   ▼
-                                                 ┌───────────────────────────────────────┐
-                                                 │                                       │
-                                                 │          Config (imperative)          │
-                                                 │        VRF, VXLAN_TUNNEL_MAP,         │
-                                                 │        BGP_NEIGHBOR, ACL_TABLE        │
-                                                 │                                       │
-                                                 └───────────────────────────────────────┘
+Intent → Replay → Render → [Deliver]
 ```
 
-Translation follows a three-layer pattern in the Node Layer:
+1. **Intent source**: Intents come from topology.json steps (topology mode) or device NEWTRON_INTENT records (actuated mode).
+2. **Replay**: `IntentsToSteps` → `ReplayStep` calls config methods. Each config method writes its intent record and generates CONFIG_DB entries.
+3. **Render**: `render(cs)` validates entries against the YANG-derived schema and updates the typed CONFIG_DB tables (the projection).
+4. **Deliver** (optional): `cs.Apply(n)` for interactive writes, `ReplaceAll()` for Reconcile. Skipped during replay — rendering is the point.
 
-1. **Config functions** — pure functions in each `*_ops.go` file that return `[]sonic.Entry`. No side effects.
-2. **`service_gen.go`** — translates a service spec into CONFIG_DB entries by calling config functions from owning `*_ops.go` files.
-3. **Operations** — methods on Interface/Node that run preconditions, call generators, and wrap results in a ChangeSet.
+### 3.1 Three Data Stores
 
-### 3.4 What Belongs Where
+| Store | What it holds | Authoritative? |
+|-------|--------------|----------------|
+| **Intent DB** | NEWTRON_INTENT records — what should be configured | Yes — primary state, decision substrate for all operational logic |
+| **Projection** | Typed CONFIG_DB tables derived from intent replay | Derived — exists for device delivery and drift detection only |
+| **Device** | Actual CONFIG_DB in Redis | Observed — transient reads, never stored on the Node |
+
+All operational decisions — preconditions, idempotency guards, reference counting, membership checks — read the intent DB, not the projection. The projection is the SONiC-specific rendering of domain-level intents. Operational logic speaks domain; only the delivery and drift layers speak SONiC.
+
+### 3.2 Config Methods
+
+Each config method (CreateVLAN, ConfigureBGP, ApplyService, etc.) does two things on the same ChangeSet:
+
+1. **Writes intent**: `writeIntent(cs, op, resource, params, parents)` → `cs.Prepend()` puts the intent record first, `renderIntent()` updates the intent DB immediately so subsequent intents can see parents.
+2. **Generates entries**: `op()` runs preconditions → calls the config generator → `render(cs)` validates and updates the projection.
+
+By return, the intent DB and projection are both updated, and the ChangeSet contains intent records (prepended) + config entries. The caller decides what happens with the ChangeSet:
+
+- **Replay** (`ReplayStep`): ChangeSet discarded — rendering was the point.
+- **Interactive** (`Execute`): `cs.Apply(n)` writes to Redis.
+- **Reconcile**: Full projection delivered via `ExportEntries()` + `ReplaceAll()`.
+
+Config generators themselves are pure functions — they take parameters and return `[]sonic.Entry` with no side effects. Intent management and rendering happen in the wrapping methods. Intent-idempotency: each config method checks `n.GetIntent(resource)` at the top; if the intent already exists, the method returns an empty ChangeSet.
+
+### 3.3 Three Node States
+
+The Node exists in one of three states. The pipeline is the same in all three — only the intent source and authority direction differ.
+
+| State | Intent source | Authority | Operations |
+|-------|--------------|-----------|------------|
+| **Topology offline** | topology.json | topology → device | Tree, Drift (auto-connects), Reconcile (auto-connects), Save, Reload, Clear, CRUD |
+| **Topology online** | topology.json | topology → device | Tree, Drift, Reconcile, Save, Reload, Clear |
+| **Actuated online** | device NEWTRON_INTENT | device → topology | Tree, Drift, Reconcile (drift repair), Save, CRUD (drift guard: refuse if drifted) |
+
+**Topology offline**: The abstract node is initialized from `topology.json`. New intents are created via the API. Save persists them back. No device connection.
+
+**Topology online**: The same topology-sourced node, now with transport connected via `ConnectTransport()`. Reconcile delivers the full projection to the device. The topology is authoritative — the device should match it.
+
+**Actuated online**: The abstract node is initialized from the device's NEWTRON_INTENT records via `InitFromDeviceIntent()`. API mutations create/modify intents which are delivered to the device. Save persists the device's current intents to `topology.json`. The device intents are authoritative.
+
+Node construction:
+
+| Source | Construction |
+|--------|--------------|
+| topology.json | `NewAbstract()` → `RegisterPort()` → `ReplayStep()` for each step |
+| Device intents | `NewAbstract()` → `ConnectTransport()` → read PORT + NEWTRON_INTENT → `RegisterPort()` → `IntentsToSteps()` → `ReplayStep()` |
+
+Both paths produce a Node whose intent DB and projection are populated. After replay, all operations work identically regardless of which source initialized the node.
+
+State transitions:
+- **Topology offline → topology online**: `ConnectTransport` adds the wire. Intent DB and projection unchanged.
+- **Topology offline → actuated online**: `ensureActuatedIntent` closes the offline node, creates a new one from device intents. Guarded: refuses if topology node has unsaved intents.
+- **Actuated online → topology offline**: `ensureTopologyIntent` closes the online node, creates a new one from `topology.json`.
+
+### 3.4 Six Operations on Expected State
+
+| Operation | What it does | Requires device? |
+|-----------|-------------|-----------------|
+| **Tree** | Read the intent DB → return intent DAG | No |
+| **Drift** | Compare projection vs actual CONFIG_DB → return differences | Yes (auto-connects) |
+| **Reconcile** | Deliver the full projection to the device (config reload + `ExportEntries` + `ReplaceAll`) | Yes (auto-connects) |
+| **Save** | `Tree()` → `SaveDeviceIntents()` — persist intent DB to `topology.json` | No |
+| **Reload** | Discard unsaved changes, rebuild from `topology.json` (topology mode only) | No |
+| **Clear** | Delete all intents, produce empty node with ports only (topology mode only) | No |
+
+Reconcile is the delivery mechanism for both initial provisioning and drift repair. It reloads CONFIG_DB from disk (factory baseline), then delivers the full projection via `ReplaceAll()`. Factory fields (mac, platform, hwsku) survive because `ReplaceAll` only DELs keys for tables the Node manages.
+
+### 3.5 Topology Provisioning
+
+The topology provisioner (`TopologyProvisioner`) creates abstract nodes from `topology.json` and delivers them via Reconcile:
+
+```
+topology.json → BuildAbstractNode(device) → Abstract Node
+                                              ├─ Intent DB: populated from topology steps
+                                              └─ Projection: rendered CONFIG_DB
+                                                    │
+                                              Reconcile → Device
+```
+
+`BuildAbstractNode` calls the same methods the CLI uses (`SetupDevice`, `iface.ApplyService`, etc.) on the abstract node. `Reconcile` delivers the accumulated projection atomically.
+
+This unifies day-1 and day-2 into the same workflow:
+
+```
+Create intents (API) → Save (topology.json) → Reconcile (device)
+                                                    │
+                                              API mutations (day-2)
+                                                    │
+                                              Save (topology.json)
+```
+
+**RMA recovery** follows naturally: Reconcile from the saved `topology.json` replays intents through the replacement device's profile. Intents are platform-agnostic; only the rendering differs.
+
+## 4. Spec Resolution
+
+Specs describe **what you want** — declarative, abstract, policy-driven. They name service types, VPN references, filter references, and routing intent. They do not contain concrete device values (peer IPs, VRF names, ACL rule numbers) — those are derived at runtime by combining a spec with device context.
 
 | In Spec (Declarative) | Derived at Runtime |
 |-----------------------|--------------------|
@@ -291,7 +272,13 @@ Translation follows a three-layer pattern in the Node Layer:
 | Filter-spec reference | Local AS (from device profile) |
 | Route policy references | Router ID (from loopback IP) |
 
-### 3.5 Hierarchical Spec Resolution
+Translation follows a three-layer pattern in the Node layer:
+
+1. **Config functions** — pure functions in each `*_ops.go` file that return `[]sonic.Entry`. No side effects.
+2. **`service_gen.go`** — translates a service spec into CONFIG_DB entries by calling config functions from owning `*_ops.go` files.
+3. **Operations** — methods on Interface/Node that run preconditions, call generators, and wrap results in a ChangeSet.
+
+### 4.1 Hierarchical Spec Resolution
 
 Specs participate in a three-level hierarchy: **network → zone → node**. Each level can define or override any of the 7 overridable spec types (services, filters, IP-VPNs, MAC-VPNs, QoS policies, route policies, prefix lists).
 
@@ -335,309 +322,21 @@ Resolution is **union with lower-level-wins**: if the same spec name exists at m
 
 At runtime, `buildResolvedSpecs()` merges all three levels into a `ResolvedSpecs` snapshot per node. This snapshot implements the `SpecProvider` interface used by all node operations — lookups fall through from node to zone to network until a match is found.
 
-### 3.6 Spec File Structure
+Specs are network-scoped; execution is device-scoped. A service can be defined before any device connects, and a device can consume a service defined after it connected. Operations accept spec names (strings) and resolve them internally — callers never pre-resolve specs.
 
-```
-specs/
-├── network.json      # Services, filters, VPNs, zones, permissions
-├── platforms.json    # Hardware platform definitions
-├── topology.json     # (optional) Topology for automated provisioning
-└── profiles/         # Per-device profiles
-    ├── leaf1-ny.json
-    └── spine1-ny.json
-```
+### 4.2 Service Model
 
-## 4. newtron-server
+Services are the primary abstraction — they bundle VPN, routing, filter, and QoS intent into reusable templates applied to interfaces. Six service types span local and overlay use cases. For the full service spec structure and per-type details, see the [LLD](lld.md) §2 and [HOWTO](howto.md) §5.
 
-### 4.1 Server Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--addr` | `:8080` | Listen address |
-| `--spec-dir` | (none) | Spec directory to auto-register as a network on startup |
-| `--net-id` | `default` | Network ID for the auto-registered spec directory |
-| `--idle-timeout` | `5m` | SSH connection idle timeout. `0` = default (5m). Negative = disable caching |
-
-### 4.2 Actor Model
-
-| Actor | Scope | Owns | Manages | One Per |
-|-------|-------|------|---------|---------|
-| `NetworkActor` | Spec operations | `*newtron.Network` | All `NodeActor` instances for its devices | Registered network |
-| `NodeActor` | Device operations | Cached `*newtron.Node`, `*Network` ref | — | Device name |
-
-`NetworkActor` is the parent actor. It serializes spec reads and writes (service create/delete, filter authoring) and creates `NodeActor` instances on demand when a device is first accessed. Each `NodeActor` receives a `*Network` reference from its parent (used for `Connect()` and spec resolution) and serializes all device operations (VLAN create, service apply, health check). The actor model naturally queues concurrent requests — essential when operations involve SSH round-trips.
-
-### 4.3 Connection Caching
-
-Each `NodeActor` caches the SSH connection (`*newtron.Node`) between requests:
-
-1. **First request**: `Connect()` establishes SSH tunnel + loads CONFIG_DB. Connection cached.
-2. **Subsequent requests**: Reuse cached connection. `Lock()` (writes) or `Refresh()` (reads) reloads CONFIG_DB from Redis.
-3. **Idle timeout**: After `idleTimeout` of no requests (default 5 minutes), the cached connection is closed automatically.
-4. **Error recovery**: If `Refresh()` or `Lock()` fails (SSH tunnel died), the connection is closed. Next request reconnects.
-
-This saves ~200ms per request while maintaining the episodic caching invariant: every operation begins with fresh CONFIG_DB state.
-
-### 4.4 HTTP API Design
-
-Every public API method has a 1:1 HTTP endpoint. Three helper patterns dispatch requests to the NodeActor:
-
-| Pattern | Server-Side Lifecycle | Used By |
-|---------|----------------------|---------|
-| `connectAndRead` | getNode → Refresh → fn | Show, list, status, health commands |
-| `connectAndLocked` | getNode → Lock → fn → Unlock | DeliverComposite, direct Redis writes |
-| `connectAndExecute` | getNode → Execute(Lock→fn→Commit→Save→Unlock) | All mutating operations |
-
-### 4.5 Network Registration
-
-Networks are registered at startup (via `--spec-dir`) or at runtime (via HTTP). Each registration loads the spec directory into a `*newtron.Network` and creates a `NetworkActor`. Multiple networks can be registered simultaneously.
-
-A registered network's specs can be reloaded from disk via `POST /network/{netID}/reload` without restarting the server. This uses an atomic stop-and-replace pattern: the server stops the old NetworkActor (draining all NodeActors and SSH connections), reloads specs from the stored spec directory, and creates a fresh NetworkActor. SSH connections reconnect lazily on the next request. This is the same proven pattern as unregister+register, avoiding the race conditions that a hot-swap of `na.net` would introduce.
-
-## 5. CLI Layer
-
-The CLI (`cmd/newtron`) is an HTTP client built with the Cobra framework. It imports `pkg/newtron/client/` and shared types — never internal packages. All device operations are HTTP requests to newtron-server.
-
-### 5.1 Command Pattern
-
-```
-newtron <device> <noun> <action> [args] [-x]
-```
-
-The first argument is the device name unless it matches a known command. This lets users write `newtron leaf1 vlan list` instead of `newtron -D leaf1 vlan list`.
-
-### 5.2 Flags
-
-**Context:**
-
-| Flag | Description |
-|------|-------------|
-| `-D, --device` | Target device name (alternative to positional first arg) |
-| `--server` | newtron-server URL (default `http://localhost:8080`, env `NEWTRON_SERVER`) |
-| `-N, --network-id` | Network ID on the server (default `default`, env `NEWTRON_NETWORK_ID`) |
-
-**Write:**
-
-| Flag | Description |
-|------|-------------|
-| `-x, --execute` | Execute changes (default is dry-run preview). Save runs automatically after apply. |
-| `--no-save` | Skip `config save -y` after execute (requires `-x`) |
-
-**Output:**
-
-| Flag | Description |
-|------|-------------|
-| `--json` | JSON output |
-| `-v, --verbose` | Verbose/debug output |
-
-### 5.3 Two Command Scopes
-
-| Scope | Target | Needs Device | Examples |
-|-------|--------|-------------|----------|
-| **Device-required** | CONFIG_DB on a SONiC switch (via server) | Yes | `vlan create`, `service apply`, `evpn setup` |
-| **No-device** | network.json specs (via server) | No | `service list`, `evpn ipvpn create`, `filter list` |
-
-The CLI is a thin rendering layer. The server handles all lifecycle management — connection, locking, pending changes, commit, verification, and save. The CLI sends the request, receives the result, and formats it for display.
-
-### 5.4 Interface Name Formats
-
-| Short Form | Full Form (SONiC) |
-|------------|-------------------|
-| `Eth0` | `Ethernet0` |
-| `Po100` | `PortChannel100` |
-| `Vl100` | `Vlan100` |
-| `Lo0` | `Loopback0` |
-
-## 6. Service Model
-
-Services are the primary abstraction — they bundle intent into reusable templates.
-
-### 6.1 Service Types
-
-| Type | Description | Requires |
-|------|-------------|----------|
-| `routed` | L3 routed interface (local) | IP address at apply time |
-| `bridged` | L2 bridged interface (local) | VLAN at apply time |
-| `irb` | Integrated routing and bridging (local) | VLAN + IP at apply time |
-| `evpn-routed` | L3 routed with EVPN overlay | `ipvpn` reference |
-| `evpn-bridged` | L2 bridged with EVPN overlay | `macvpn` reference |
-| `evpn-irb` | IRB with EVPN overlay + anycast GW | Both `ipvpn` and `macvpn` references |
-
-### 6.2 Service Spec Structure
-
-```json
-{
-  "customer-l3": {
-    "description": "L3 routed customer interface with EVPN overlay",
-    "service_type": "evpn-routed",
-    "ipvpn": "customer-vpn",
-    "vrf_type": "interface",
-    "qos_policy": "8q-datacenter",
-    "ingress_filter": "customer-edge-in",
-    "egress_filter": "customer-edge-out",
-    "routing": {
-      "protocol": "bgp",
-      "peer_as": "request",
-      "import_policy": "customer-import",
-      "export_policy": "customer-export"
-    }
-  }
-}
-```
-
-**In the spec (intent):** service type, VPN reference, VRF policy, routing protocol, filter references, QoS policy reference.
-
-**NOT in the spec (derived at runtime):** peer IP, VRF name, ACL table names, ACL rule numbers, local AS, router ID.
-
-### 6.3 VRF Instantiation
-
-| `vrf_type` | VRF Name | Use Case |
-|------------|----------|----------|
-| `"interface"` | `{service}-{interface}` | Per-customer isolation |
-| `"shared"` | ipvpn definition name | Multiple interfaces share one VRF |
-| (omitted) | Global routing table | Transit (no EVPN) |
-
-### 6.4 Routing Spec
-
-The `routing` section declares routing intent:
-
-| Field | Values | Description |
-|-------|--------|-------------|
-| `protocol` | `"bgp"`, `"static"`, `""` | Routing protocol |
-| `peer_as` | Number or `"request"` | Peer AS (fixed or user-provided) |
-| `import_policy` / `export_policy` | Policy name | BGP route policy |
-| `import_community` / `export_community` | Community string | BGP community filtering |
-| `import_prefix_list` / `export_prefix_list` | Prefix-list name | Prefix-list filtering |
-| `redistribute` | `true` / `false` / omit | Override default redistribution |
-
-**Redistribution defaults:** Service interfaces redistribute connected into BGP (default `true`). Transit interfaces do not (default `false`). Loopback always redistributed.
-
-### 6.5 Service Operations
-
-- **ApplyService** — translates spec + context into CONFIG_DB entries, applying them to the interface. Creates VRF, ACL, IP, BGP neighbor, EVPN mappings, service binding.
-- **RemoveService** — reverse of ApplyService. Reads the binding record to determine what was applied. Uses DependencyChecker to protect shared resources (VRFs, ACLs) referenced by other interfaces.
+- **ApplyService** — translates spec + context into CONFIG_DB entries, applying them to the interface. Creates VRF, ACL, IP, BGP neighbor, EVPN mappings as needed.
+- **RemoveService** — reverse of ApplyService. Reads the intent record to determine what was applied. Uses intent DAG `_children` to protect shared resources — scans for remaining consumers before deleting shared infrastructure.
 - **RefreshService** — full remove+reapply cycle. The two ChangeSets merge, preserving intermediate DEL operations (required because Redis HSET merges fields, so DEL is needed to remove stale fields).
 
-## 7. Resource Nouns
+## 5. Device Connection
 
-Each major CONFIG_DB resource is a CLI noun with read and write subcommands.
+### 5.1 Transport
 
-### 7.1 VRF
-
-First-class noun with 13 subcommands. Owns interfaces, BGP neighbors, static routes, and IP-VPN bindings.
-
-**Dependency chain:**
-```
-VRF exists
-  ├── bind interfaces (add-interface)
-  │     ├── add BGP neighbors (add-neighbor, requires interface IP)
-  │     └── add static routes (add-route)
-  └── bind IP-VPN (bind-ipvpn, requires VTEP from evpn setup)
-```
-
-**Auto-derived neighbor IP:** For `add-neighbor`, if `--neighbor` is omitted, the neighbor IP is derived from the interface's IP: `/30` XORs last 2 bits, `/31` XORs last bit.
-
-### 7.2 EVPN Overlay
-
-Two concerns: device-level overlay setup and spec-level VPN definition authoring.
-
-**`evpn setup`** — idempotent composite that configures the full EVPN stack:
-1. VXLAN Tunnel Endpoint (VTEP) with source IP (defaults to device loopback)
-2. EVPN NVO referencing the VTEP
-3. BGP EVPN sessions from device profile, with L2VPN EVPN AF activated
-
-**IP-VPN and MAC-VPN** — spec authoring sub-nouns under `evpn`. No device connection required.
-- **IP-VPN** (L3 VPN): VRF name, L3VNI, L3VNI VLAN (transit), route targets
-- **MAC-VPN** (L2 VPN): VNI, VLAN ID, anycast IP/MAC, route targets, ARP suppression
-
-VNIs are properties of VPN definitions, brought into CONFIG_DB through binding operations:
-- L2VNI: `vlan bind-macvpn <vlan-id> <macvpn-name>`
-- L3VNI: `vrf bind-ipvpn <vrf-name> <ipvpn-name>`
-
-### 7.3 BGP
-
-Visibility-only noun with a single `status` subcommand. Combines local identity, configured neighbors, operational state, and expected EVPN peers. All BGP peer management is through other nouns (`vrf add-neighbor`, `evpn setup`).
-
-SONiC BGP is managed via **frrcfgd** (FRR management framework) — full CONFIG_DB → FRR translation. This gives newtron complete BGP management through CONFIG_DB for underlay, IPv6, and L2/L3 EVPN overlays.
-
-### 7.4 Spec Authoring Nouns
-
-Several nouns support creating, modifying, and deleting definitions in network.json:
-
-| Noun | Definition Type |
-|------|----------------|
-| `evpn ipvpn` | IP-VPN (L3VNI, route targets) |
-| `evpn macvpn` | MAC-VPN (VNI, VLAN ID, anycast IP/MAC) |
-| `qos` | QoS policy (queues, DSCP mappings) |
-| `filter` | Filter spec (ACL template rules) |
-| `service` | Service (type, VPN refs, filters, QoS) |
-
-Spec changes persist atomically (write to temp file, then `os.Rename`). Deletes check for cross-references (e.g., cannot delete an IP-VPN referenced by a service).
-
-### 7.5 Per-Noun Status
-
-Each resource noun with operational state owns a `status` subcommand combining CONFIG_DB config with STATE_DB operational data:
-
-| Noun | `status` Shows |
-|------|---------------|
-| `vlan status` | All VLANs with ID, name, L2VNI, SVI status, member count, MAC-VPN binding |
-| `vrf status` | All VRFs with interface count, neighbor count, L3VNI, IP-VPN binding |
-| `lag status` | All LAGs with member count, min-links, oper status, LACP state |
-| `bgp status` | Local identity, neighbor summary, configured/operational state |
-| `evpn status` | VTEP config, NVO, VNI mappings, VRFs with L3VNI, operational state |
-
-### 7.6 QoS
-
-QoS policies are self-contained queue definitions from which newtron derives all CONFIG_DB tables (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE, PORT_QOS_MAP, QUEUE). Services reference policies by name. Device-wide tables are created once per policy; per-interface bindings are per-port.
-
-`qos apply` / `qos remove` provide surgical per-interface QoS override that takes precedence over service-managed QoS.
-
-### 7.7 Filters and ACLs
-
-Two-level design:
-- **Filter** (template) — spec-level reusable rule definitions in network.json, managed via `filter` noun
-- **ACL** (instance) — device-level CONFIG_DB entries, managed via `acl` noun
-
-When a service is applied, filter templates are instantiated as ACLs scoped to the specific interface. Filter types (`ipv4` → `L3`, `ipv6` → `L3V6`) map to ACL table types.
-
-## 8. Composite Mode and Topology Provisioning
-
-### 8.1 Composite Mode
-
-Composite mode generates a CONFIG_DB configuration offline (without connecting to a device), then delivers it atomically.
-
-| Mode | Behavior | Use Case |
-|------|----------|----------|
-| **Overwrite** | Merge composite on top of CONFIG_DB (stale keys removed, factory defaults preserved) | Initial provisioning |
-| **Merge** | Add entries to existing CONFIG_DB. Only for interface-level services with no existing binding. | Incremental deployment |
-
-Delivery uses a Redis pipeline (MULTI/EXEC) for atomicity — either all changes apply or none do.
-
-### 8.2 Topology Provisioning
-
-Topology provisioning automates device configuration from a `topology.json` spec. Two modes:
-
-| Mode | Method | Delivery | Use Case |
-|------|--------|----------|----------|
-| **Full device** | `ProvisionDevice` | CompositeOverwrite | Initial provisioning |
-| **Per-interface** | `ProvisionInterface` | `ApplyService` | Add service to running device |
-
-Full-device provisioning builds a CompositeConfig offline by creating an abstract Node and calling the same methods the CLI uses (`ConfigureBGP`, `SetupEVPN`, `iface.ApplyService`). The abstract Node accumulates entries in a shadow ConfigDB. The result is delivered to the device as a single atomic write.
-
-### 8.3 Abstract Node
-
-The Node operates in two modes with the same code path:
-
-- **Physical mode** (`offline=false`): ConfigDB loaded from Redis at Connect/Lock time. ChangeSet applied to Redis.
-- **Abstract mode** (`offline=true`): Shadow ConfigDB starts empty, operations build desired state. Entries accumulate for composite export via `BuildComposite()`.
-
-This eliminates topology.go constructing CONFIG_DB entries inline — it calls the same primitives as the online path.
-
-## 9. Device Connection
-
-### 9.1 Connection Flow
-
-When SSH credentials (`ssh_user`, `ssh_pass`) are present in the device profile, an SSH tunnel forwards a local random port to `127.0.0.1:6379` inside the device. Redis on SONiC listens only on localhost — SSH is the only path in.
+Redis on SONiC listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile.
 
 ```
 ┌────────────────────┐          ┌────────────┐            ┌────────────────┐
@@ -649,137 +348,171 @@ When SSH credentials (`ssh_user`, `ssh_pass`) are present in the device profile,
 └────────────────────┘          └────────────┘            └────────────────┘
 ```
 
-Four Redis clients are established: ConfigDB (DB 4), StateDB (DB 6), AppDB (DB 0), AsicDB (DB 1). StateDB/AppDB/AsicDB failures are non-fatal — the system can still read/write CONFIG_DB.
+Four Redis clients are established: ConfigDB (DB 4), StateDB (DB 6), AppDB (DB 0), AsicDB (DB 1). StateDB/AppDB/AsicDB failures are non-fatal — the system can still read/write CONFIG_DB. Without SSH credentials (integration tests), the address points directly at a standalone Redis container.
 
-Without SSH credentials (integration tests), the address points directly at a standalone Redis container.
+`ConnectTransport()` establishes the SSH tunnel and Redis clients. The projection stays unchanged — transport is additive, enabling device I/O without disturbing expected state.
 
-### 9.2 CONFIG_DB Cache
+### 5.2 Projection Freshness (RebuildProjection)
 
-newtron maintains an in-memory snapshot of CONFIG_DB loaded at connection time. The cache enables precondition checks without per-check Redis round-trips.
+The projection is derived from intents, not loaded from Redis. Freshness is provided by `RebuildProjection(ctx)`, called in `execute()` before every operation — reads and writes alike:
 
-**Episode model:** An episode is a time-boxed unit of work that reads the cache. Every episode starts with a fresh cache:
+```
+RebuildProjection(ctx)
+  ├─ if transport exists (n.conn != nil): fresh intents from Redis
+  ├─ else: intents from configDB.NewtronIntent (in-memory)
+  ├─ ports := configDB.ExportPorts()
+  ├─ configDB = NewConfigDB()          ← fresh projection
+  ├─ RegisterPort() for each port
+  ├─ configDB.NewtronIntent = intents
+  ├─ IntentsToSteps(intents) → topological sort
+  └─ ReplayStep() for each → intent DB + projection rebuilt
+```
 
-| Episode | How it refreshes |
-|---------|-----------------|
-| Write | `Lock()` refreshes after acquiring distributed lock |
-| Read-only | `Refresh()` at the start |
-| Initial | `Connect()` loads initial snapshot |
+**Invariant:** Every operation sees a projection derived from the latest intents. When connected, intents are re-read from the device, catching changes made by other actors since the last operation. When offline, in-memory intents are replayed.
 
-**Invariant:** *Every episode begins with a fresh CONFIG_DB snapshot. No episode relies on cache from a prior episode.*
+The write path wraps operations with Lock/Unlock and supports dry-run via intent snapshot/restore. On dry-run, `RestoreIntentDB` puts the intent DB back; the dirty projection is cleaned by the next `execute()`'s `RebuildProjection`.
 
-**Limitation:** Between refresh and code that reads the cache, an external actor can modify CONFIG_DB. Precondition checks are advisory safety nets, not transactional guarantees. Acceptable because newtron is typically the sole CONFIG_DB writer in lab/production environments.
+### 5.3 Drift Guard
 
-### 9.3 Device Initialization (Unified Config Mode)
+In actuated mode, `Lock()` performs a drift guard before allowing writes: it computes drift between the projection and the actual device CONFIG_DB. If drift is non-empty, Lock returns an error — the write is refused.
 
-SONiC ships with **bgpcfgd** by default — a daemon that processes only a subset of CONFIG_DB tables. Dynamic entries like BGP_NEIGHBOR, BGP_GLOBALS, and VRF are silently ignored. newtron requires **frrcfgd** (unified config mode), which translates all CONFIG_DB tables to FRR commands.
+Drift means the device no longer matches what its own intents declare. Writing new intents on top of a drifted foundation is unsafe: preconditions and config generators reason about the projection, but the device doesn't match. The resolution is explicit: `Reconcile()` first, then retry the write.
 
-**Three-layer enforcement** ensures frrcfgd is always active:
+The drift guard applies only in actuated mode because:
+- **Topology offline**: No device exists — nothing to drift from.
+- **Topology online**: Topology is authoritative — drift is expected (the device may not yet match the topology).
+- **Actuated online**: Device intents are authoritative — drift is unexpected and must be resolved.
 
-| Layer | When | How | Scope |
-|-------|------|-----|-------|
-| **Boot patch** | VM deploy (newtlab) | Redis HSET + bgp restart | Lab convenience — applied during `newtlab deploy` |
-| **`newtron init`** | Before first use | `SetDeviceMetadata` + bgp restart + config save | Any device — standalone or topology-managed |
-| **Connect-time check** | Every `Connect()` | Reads `DEVICE_METADATA\|localhost` `docker_routing_config_mode` | Safety net — blocks operations on misconfigured devices |
+### 5.4 Unified Config Mode (frrcfgd)
 
-The init command is idempotent and intentionally one-way. There is no reverse operation — reverting to bgpcfgd would silently break all CONFIG_DB-driven configuration that newtron manages.
+SONiC ships with **bgpcfgd** by default — a daemon that processes only a subset of CONFIG_DB tables. newtron requires **frrcfgd** (unified config mode), which translates all CONFIG_DB tables to FRR commands.
 
-**Safety guard for production devices.** Initialization restarts the bgp container, which drops all active BGP sessions and replaces `frr.conf` with frrcfgd-generated configuration from CONFIG_DB. Any FRR configuration applied via vtysh (not stored in CONFIG_DB) is permanently lost. If the device has active BGP neighbors, `newtron init` refuses and requires `--force` to proceed.
+Three-layer enforcement ensures frrcfgd is always active:
 
-**Provisioning** (`newtron provision`) includes the frrcfgd fields in the composite and runs `EnsureUnifiedConfigMode` after delivery, so separately running `newtron init` is unnecessary for topology-provisioned devices.
+| Layer | When | How |
+|-------|------|-----|
+| **Boot patch** | VM deploy (newtlab) | Redis HSET + bgp restart |
+| **`newtron init`** | Before first use | `SetDeviceMetadata` + bgp restart + config save |
+| **Connect-time check** | Every `ConnectTransport()` | Reads `DEVICE_METADATA\|localhost` `docker_routing_config_mode` |
 
-### 9.4 Config Persistence
+Reconcile includes frrcfgd fields in the projection and runs `EnsureUnifiedConfigMode` after delivery, so `newtron init` is unnecessary for topology-provisioned devices.
+
+### 5.5 Config Persistence
 
 SONiC uses a dual-state model: Redis CONFIG_DB (runtime, immediate) and `/etc/sonic/config_db.json` (persistent, loaded at boot). Newtron writes to Redis; `config save -y` persists to disk. This runs automatically after every `-x` execution unless `--no-save` is used.
 
-### 9.5 Crash Recovery (Intent Records)
+### 5.6 Crash Recovery
 
-A single newtron write operation may touch dozens of CONFIG_DB entries — a service apply creates VRF, VXLAN mappings, BGP neighbors, ACLs, and bindings across multiple tables. If the process crashes mid-apply (killed, SSH drop, OOM), the in-memory ChangeSet is lost. CONFIG_DB has some entries from the operation but not others, and no record of what was intended. The device is in an unknown partial state.
+Crash recovery is structural: NEWTRON_INTENT records ARE the persistent state, the drift guard detects inconsistency, Reconcile fixes it.
 
-Intent records solve this with a write-ahead manifest. Before `Commit` writes its first CONFIG_DB entry, it stores a `NEWTRON_INTENT` record in STATE_DB listing every operation about to be applied, along with the reverse operation for each. As entries are written, the intent is updated with `started` and `completed` timestamps per operation. On success, the intent is deleted. On crash, the intent survives — it is the forensic record of exactly what was in progress.
+A crash mid-apply leaves the device in a partial state. The NEWTRON_INTENT record for the operation may or may not have reached Redis — it is prepended to the ChangeSet, so it is written first.
 
-**Detection uses structural proof, not heuristic.** The distributed lock (§9.2) has a 1-hour TTL that auto-expires on crash. The intent record has no TTL — it persists until explicitly deleted. When the next operator acquires the lock and finds an existing intent, the conclusion is certain: the previous holder crashed between `WriteIntent` and `DeleteIntent`. The lock acquisition itself proves the previous holder is gone. No staleness timer, no wall-clock comparison, no guessing.
+| Crash scenario | What's on device | Recovery |
+|---|---|---|
+| Intent written, entries partially applied | NEWTRON_INTENT exists, some CONFIG_DB entries | Drift guard detects gap → Reconcile pushes full projection |
+| Intent not written (crash before any Redis write) | Nothing changed | No drift, no action needed |
+| All entries applied, intent exists | Full CONFIG_DB entries + intent | No drift — intent was fully applied |
 
-**Resolution uses domain-level reversal, not mechanical undo.** Each intent operation carries the name of its reverse operation (`CreateVLAN` → `DeleteVLAN`, `ApplyService` → `RemoveService`). Rollback dispatches each reverse operation in reverse order. Completed operations get full reversal. In-progress operations get partial reversal — the reverse operations are existence-checking, so they safely handle entries that were never created. Not-started operations are skipped. This is the same principle behind operational symmetry (§6.5): every forward action has a domain-level reverse that understands shared resources, reference counts, and dependency ordering.
+In every case: `InitFromDeviceIntent` replays whatever NEWTRON_INTENT records exist → projection reflects the declared intents → drift guard compares against actual CONFIG_DB → Reconcile pushes the full projection if needed. To undo a partially-applied intent, call the normal reverse operation (`DeleteVLAN`, `RemoveService`, etc.).
 
-Three resolution paths:
-- **Inspect** (`device zombie`) — read the intent, see what happened, decide what to do
-- **Rollback** (`device zombie rollback`) — reverse each operation using domain-level reverse ops, restoring the device to its pre-operation state
-- **Clear** (`device zombie clear`) — dismiss the intent without reversing, for cases where the partial state is acceptable or was manually cleaned up
+**Prepend ordering is load-bearing.** `writeIntent` uses `cs.Prepend()` to place the NEWTRON_INTENT record before config entries. When `cs.Apply` writes to Redis, the intent record reaches the device first. If a crash occurs mid-apply, the intent survives and replay produces the full projection — drift shows missing records, Reconcile completes delivery.
 
-For the full design, see [Intent Records](intent-records.md).
+## 6. Verification
 
-## 10. Verification
+**If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect.** Verification is the completion of provisioning, not a separate concern. For cross-device observations, newtron returns structured data, not verdicts — cross-device checks belong in the orchestrator (newtrun).
 
-### 10.1 Principle
+### 6.1 Four Tiers
 
-**If a tool changes the state of an entity, that same tool must be able to verify the change had the intended effect.** Verification is the completion of provisioning, not a separate concern.
+| Tier | What | Owner | Method |
+|------|------|-------|--------|
+| **CONFIG_DB** | Redis entries match ChangeSet | newtron | `cs.Verify(n)` |
+| **APP_DB/ASIC_DB** | Routes installed by FRR/ASIC | newtron | `GetRoute()`, `GetRouteASIC()` |
+| **Operational state** | BGP sessions, interface health | newtron | `VerifyDeviceHealth()` |
+| **Cross-device** | Route propagation, ping | newtrun | Composes newtron primitives |
 
-**For cross-device observations:** newtron returns structured data, not verdicts. If a check requires knowing what another device should have, it belongs in the orchestrator (newtrun).
+### 6.2 ChangeSet Verification
 
-### 10.2 Four Tiers
+Every mutating operation produces a ChangeSet. `cs.Verify(n)` re-reads CONFIG_DB and diffs against the ChangeSet — the only assertion newtron makes: checking its own writes. `Node.Execute()` runs Lock → snapshot → fn → Commit (apply + verify) → Unlock. On dry-run, `RestoreIntentDB` restores the intent DB; the dirty projection is cleaned by the next `RebuildProjection`.
 
-| Tier | What | Owner | Method | Failure Mode |
-|------|------|-------|--------|-------------|
-| **CONFIG_DB** | Redis entries match ChangeSet | newtron | `cs.Verify(n)` | Hard fail (assertion) |
-| **APP_DB/ASIC_DB** | Routes installed by FRR/ASIC | newtron | `GetRoute()`, `GetRouteASIC()` | Observation (data) |
-| **Operational state** | BGP sessions, interface health | newtron | `VerifyDeviceHealth()` | Observation (report) |
-| **Cross-device** | Route propagation, ping | newtrun | Composes newtron primitives | Topology-dependent |
-
-### 10.3 ChangeSet Verification
-
-Every mutating operation produces a ChangeSet. `cs.Verify(n)` re-reads CONFIG_DB through a fresh connection and diffs against the ChangeSet. This works for all operations — disaggregated or composite — because they all produce ChangeSets. It is the only assertion newtron makes: checking its own writes.
-
-The public API wraps this: `Node.Execute()` runs Lock → fn → Commit (which applies + verifies) → Save → Unlock. ChangeSet is never exposed outside `pkg/newtron/`. Commit now writes an intent manifest to STATE_DB before Apply and deletes it after Verify succeeds. On failure, the manifest remains as a crash marker for recovery (see §9.5).
-
-### 10.4 Routing State Observation
+### 6.3 Routing State Observation
 
 - **`GetRoute(vrf, prefix)`** — reads APP_DB (DB 0). Returns `RouteEntry` with prefix, protocol, next-hops. Nil if not present.
 - **`GetRouteASIC(vrf, prefix)`** — reads ASIC_DB (DB 1) via SAI object chain resolution. Confirms ASIC programming.
 
-APP_DB shows what FRR computed. ASIC_DB shows what the hardware installed. The gap is orchagent processing. These are building blocks for orchestrators — newtron provides the read; newtrun knows what to expect.
+APP_DB shows what FRR computed. ASIC_DB shows what the hardware installed. The gap is orchagent processing. These are building blocks — newtron provides the read; newtrun knows what to expect.
 
-### 10.5 Health Checks
+## 7. End-to-End Walkthrough
 
-`CheckBGPSessions()` verifies BGP neighbor states. `CheckInterfaceOper()` verifies interface oper-up status. `VerifyDeviceHealth()` composes both into a health report. These are local device observations.
+A concrete trace of `newtron leaf1 vlan create 100 --name servers -x` from keystroke to Redis:
 
-## 11. Execution Modes
+```
+CLI (cmd/newtron)
+  │  Sends POST /network/default/node/leaf1/vlan
+  │  Body: {"id": 100, "name": "servers"}
+  │  Query: ?execute=true
+  │
+  ▼
+newtron-server (pkg/newtron/api/)
+  │  handleVLANCreate():
+  │    server.getNetwork("default")        → NetworkActor
+  │    networkActor.getNodeActor("leaf1")   → NodeActor
+  │
+  ▼
+NodeActor.execute(ctx, connectAndExecute)
+  │
+  ├─ ensureActuatedIntent(ctx)
+  │    first request: InitFromDeviceIntent (read NEWTRON_INTENT, replay)
+  │    cached node: no-op (already actuated)
+  │
+  ├─ RebuildProjection(ctx)
+  │    re-reads NEWTRON_INTENT from Redis, rebuilds projection from scratch
+  │
+  └─ connectAndExecute(ctx) → node.Execute(ctx, opts, fn)
+       │
+       ├─ Lock(ctx)      — Redis SETNX + drift guard (projection vs actual)
+       ├─ fn(ctx)        — CreateVLAN(100, "servers"):
+       │                     writeIntent → intent DB: "vlan|100" added
+       │                     op() → render → projection updated
+       │                     returns ChangeSet
+       ├─ Commit(ctx)    — cs.Apply(n): Redis HSET (NEWTRON_INTENT first, then VLAN)
+       │                     cs.Verify(n): re-read CONFIG_DB, diff against ChangeSet
+       ├─ Save(ctx)     — SSH `config save -y`
+       ├─ Unlock
+       └─ Reset idle timer
 
-| Mode | Online? | Device Required? | Atomic? |
-|------|---------|-----------------|---------|
-| Dry-run (default) | Yes | Yes (reads CONFIG_DB) | N/A |
-| Execute (`-x`) | Yes | Yes (reads + writes) | Per-entry |
-| Composite generate | No | No | N/A |
-| Composite deliver | Yes | Yes (writes) | Yes (pipeline) |
-| ProvisionDevice | No (build) + Yes (deliver) | Yes (for delivery) | Yes (pipeline) |
-| ProvisionInterface | Yes | Yes (reads + writes) | Per-entry |
-| Zombie inspect | Yes | Yes (reads STATE_DB) | N/A |
-| Zombie rollback | Yes | Yes (lock + reverse ops) | Per-entry |
-| Zombie clear | Yes | Yes (lock + deletes intent) | N/A |
+Response → CLI
+  WriteResult{ChangeCount: 3, Applied: true, Verified: true}
+  CLI prints: "Changes applied successfully."
+```
 
-## 12. Security
+A spec-only operation like `newtron service list` is simpler: CLI sends GET to server, server dispatches to NetworkActor (no NodeActor involved), NetworkActor reads specs from `*Network`, returns the list.
 
-### 12.1 Transport
+## 8. Security
 
 Redis on SONiC has no authentication and listens only on localhost. SSH is the transport security layer — all Redis access goes through an SSH tunnel with password credentials from the device profile. In integration tests, a standalone Redis container is used without SSH.
 
-### 12.2 Permission Levels
+Permission types are defined covering service operations, resource CRUD, spec authoring, and device cleanup. Read/view operations have no permission requirement. **Current status:** permission types exist in code but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN).
 
-Permission types are defined covering service operations, resource CRUD, spec authoring, and device cleanup (see the LLD for the full permission table). Read/view operations have no permission requirement.
-
-**Current status:** Permission types exist in code but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN). Domain-level preconditions (VLAN exists, interface not already bound, etc.) are enforced. User-level authorization is planned for a future iteration.
-
-### 12.3 Audit Logging
-
-All operations logged with timestamp, user, device, operation name, changes made, success/failure, and execution mode.
-
-## 13. Testing
+## 9. Testing
 
 | Tier | How | Purpose |
 |------|-----|---------|
 | Unit | `go test ./...` | Pure logic: IP derivation, spec parsing, ACL expansion |
 | E2E | newtrun framework | Full stack: newtlab VMs, SSH tunnel, real SONiC |
 
-E2E testing uses the newtrun framework (see `docs/newtrun/`).
+E2E testing uses the newtrun framework (see [newtrun HLD](../newtrun/hld.md) and [newtrun HOWTO](../newtrun/howto.md)).
+
+## 10. Cross-References
+
+| Topic | Document |
+|-------|----------|
+| Full pipeline specification with end-to-end traces | [Unified Pipeline Architecture](unified-pipeline-architecture.md) |
+| Architectural principles and design rationale | [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md) |
+| Type definitions, method signatures, HTTP API routes, CLI commands, CONFIG_DB tables | [LLD](lld.md) |
+| Device-layer internals (SSH tunneling, Redis clients, write paths) | [Device LLD](device-lld.md) |
+| Operational procedures (CLI usage, service apply, provisioning) | [HOWTO](howto.md) |
+| Intent DAG hierarchy and intent record format | [Intent DAG Architecture](intent-dag-architecture.md) |
+| SONiC pitfalls and workarounds | [RCA Index](../rca/) |
 
 ## Appendix A: Glossary
 
@@ -788,26 +521,42 @@ E2E testing uses the newtrun framework (see `docs/newtrun/`).
 | Term | Definition |
 |------|------------|
 | **Spec** | Declarative intent describing what you want. JSON files, version controlled. Never contains concrete device values. |
-| **Config** | Imperative device state. Redis CONFIG_DB entries, generated at runtime from specs. |
+| **Config** | Imperative device state. Redis CONFIG_DB entries, generated at runtime from specs + device context. |
 | **Service** | Reusable template bundling VPN, filters, QoS. Applied to interfaces for consistent configuration. |
-| **ChangeSet** | Collection of pending CONFIG_DB changes. Serves as the verification contract — `cs.Verify(n)` diffs against live CONFIG_DB. |
+| **ChangeSet** | Collection of pending CONFIG_DB changes. Verification contract — `cs.Verify(n)` diffs against live CONFIG_DB. |
+
+### Intent Pipeline
+
+| Term | Definition |
+|------|------------|
+| **Intent DB** | The collection of NEWTRON_INTENT records in `configDB.NewtronIntent`. Primary state — all operational decisions read here. |
+| **Projection** | The typed CONFIG_DB tables derived from intent replay. Exists for device delivery and drift detection — no operational decision reads the projection. |
+| **Render** | Update the projection from a ChangeSet: validate entries against the schema, then apply to typed configDB structs. |
+| **Replay** | Execute a config function for an intent, producing entries that get rendered into the projection. |
+| **Drift** | Difference between projection (expected) and device (actual). Detected by comparing `ExportRaw()` against transient Redis read. |
+| **Drift guard** | In actuated mode, Lock computes drift before allowing writes. Non-empty drift → Lock refuses. Resolution: `Reconcile()` first. |
+| **Reconcile** | Deliver the full projection to the device: config reload → `ExportEntries()` → `ReplaceAll()`. Fixes drift and provisions devices. |
+| **RebuildProjection** | Re-read intents (from device when connected, from memory when offline), create fresh configDB, replay all intents. Called in `execute()` before every operation. |
+| **Execute** | Public write entry point: Lock → snapshot → fn → commit-or-restore → Unlock. Supports dry-run via intent snapshot/restore. |
+| **Transport** | SSH + Redis connection layered on top of expected state. `ConnectTransport()` adds the wire without disturbing intent DB or projection. |
 
 ### Architecture
 
 | Term | Definition |
 |------|------------|
-| **newtron-server** | Central HTTP server (`cmd/newtron-server`). Owns `NetworkActor` instances; device connections owned by `NodeActor` instances within each `NetworkActor`. |
-| **NetworkActor** | Parent actor that owns a `*newtron.Network`, serializes spec operations, and creates/manages `NodeActor` instances. One per registered network. |
-| **NodeActor** | Child actor (created by `NetworkActor`) that holds a `*Network` reference from its parent, serializes device operations, and caches `*newtron.Node` (SSH connection) with idle timeout. One per device. |
-| **Connection Caching** | SSH connections reused across requests within idle timeout (default 5m). CONFIG_DB refreshed every request via `Lock()` (writes) or `Refresh()` (reads). Only the SSH tunnel persists. |
+| **newtron-server** | Central HTTP server. Owns `NetworkActor` instances; device connections owned by `NodeActor` instances within. |
+| **NetworkActor** | Parent actor that owns `*newtron.Network`, serializes spec operations, creates/manages `NodeActor` instances. One per network. |
+| **NodeActor** | Child actor that serializes device operations and caches `*newtron.Node` (SSH connection) with idle timeout. One per device. |
+| **Abstract Node** | Node whose intent DB and projection are populated from intent replay, not from a device. Same code path in all three states — different intent source. |
+| **Abstract Topology** | `topology.json` — network-level intent declaring what devices, ports, and steps should exist. Container of Abstract Nodes. |
 
 ### Entities
 
 | Term | Definition |
 |------|------------|
 | **Network** | Top-level object. Owns all specs, provides access to devices. |
-| **Node** | Device handle. Holds parent *Network reference, ConfigDB cache, device profile. |
-| **Interface** | Interface handle. Holds parent *Node reference and interface name. Point of service delivery. |
+| **Node** | Device handle. Holds intent DB, projection, device profile, and optional transport connection. |
+| **Interface** | Interface handle. Holds parent Node reference and interface name. Point of service delivery. |
 | **Platform** | Hardware type definition (HWSKU, port count, speeds). |
 
 ### VPN
@@ -816,10 +565,7 @@ E2E testing uses the newtrun framework (see `docs/newtrun/`).
 |------|------------|
 | **IPVPN** | IP-VPN definition for L3 routing. Contains L3VNI and route targets. |
 | **MACVPN** | MAC-VPN definition for L2 bridging. Contains VNI, VLAN ID, anycast IP/MAC, route targets. |
-| **L2VNI** | Layer 2 VNI for VXLAN bridging. |
-| **L3VNI** | Layer 3 VNI for VXLAN routing. |
 | **VRF** | Virtual Routing and Forwarding instance. First-class CLI noun: owns interfaces, BGP neighbors, static routes, IP-VPN bindings. |
-| **Route Target (RT)** | BGP extended community controlling VPN route import/export. |
 
 ### Redis Databases
 
@@ -834,12 +580,9 @@ E2E testing uses the newtrun framework (see `docs/newtrun/`).
 
 | Term | Definition |
 |------|------------|
-| **Dry-Run** | Preview mode (default). Shows what would change without applying. |
-| **Execute (`-x`)** | Apply mode. Writes changes to CONFIG_DB. |
-| **Save** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json` after execute. `--no-save` to skip. |
-| **Device Lock** | Per-operation distributed lock in STATE_DB with TTL. Prevents concurrent modifications. |
-| **frrcfgd** | SONiC's FRR management framework daemon. Translates CONFIG_DB BGP tables to FRR commands. |
-| **Composite** | Offline CONFIG_DB configuration delivered atomically via Redis pipeline. |
-| **Abstract Node** | Offline Node with shadow ConfigDB. Same code path as physical, different initialization. |
-| **Intent record** | Write-ahead manifest in STATE_DB recording which operations are about to be applied, enabling crash recovery. Written before Commit, deleted on success. |
-| **Zombie operation** | An intent record whose owning process has died. Detected structurally at lock acquisition time (lock available + intent present = previous holder crashed). |
+| **Dry-Run** | Preview mode (default). Shows what would change without applying. Intent snapshot restored after. |
+| **Execute (`-x`)** | Apply mode. Writes changes to CONFIG_DB, verifies, saves to disk. |
+| **Save (config)** | Persist runtime CONFIG_DB to `/etc/sonic/config_db.json`. Runs automatically after `-x`. |
+| **Save (intent)** | Persist device's current intent DB to `topology.json` via `Tree()` + `SaveDeviceIntents()`. |
+| **Device Lock** | Distributed lock in STATE_DB with TTL. Prevents concurrent modifications. In actuated mode, Lock also performs drift guard. |
+| **frrcfgd** | SONiC's FRR management framework daemon. Translates CONFIG_DB BGP tables to FRR commands. Required by newtron (unified config mode). |

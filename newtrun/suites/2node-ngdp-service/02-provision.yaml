@@ -9,7 +9,7 @@ requires: [boot-ssh]
 
 steps:
   - name: provision-switches
-    action: provision
+    action: topology-reconcile
     devices: [switch1, switch2]
 
   # config reload stops all daemons, re-reads config_db.json, restarts them.

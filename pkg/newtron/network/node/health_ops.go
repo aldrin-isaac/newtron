@@ -13,11 +13,10 @@ import (
 // ============================================================================
 //
 // Config-presence checks (checkEVPN, checkPortChannels, checkInterfaces counting
-// admin-down) are deleted — they're subsumed by the topology-driven config intent
-// verification in topology.go's VerifyDeviceHealth.
+// admin-down) are deleted — they're subsumed by Drift() in the unified pipeline.
 //
 // What remains here: BGP session state (STATE_DB + vtysh fallback) and interface
-// oper-status checks. These are called by VerifyDeviceHealth for operational state.
+// oper-status checks. These are called by HealthCheck for operational state.
 
 // HealthCheckResult represents the result of a single health check.
 type HealthCheckResult struct {
@@ -27,33 +26,60 @@ type HealthCheckResult struct {
 }
 
 // CheckBGPSessions checks that all configured BGP neighbors are Established.
-// Reads expected neighbors from CONFIG_DB, then checks STATE_DB (with vtysh fallback).
+// Reads expected neighbors from intent DB (evpn-peer and bgp-peer intents),
+// then checks STATE_DB (with vtysh fallback).
+// Auto-connects transport if needed.
 func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error) {
-	if !n.IsConnected() {
-		return nil, fmt.Errorf("device not connected")
-	}
-
-	// Start a fresh read-only episode
-	if err := n.Refresh(); err != nil {
-		return nil, fmt.Errorf("refresh: %w", err)
-	}
-
-	if n.configDB == nil {
-		return []HealthCheckResult{{Check: "bgp", Status: "fail", Message: "Config not loaded"}}, nil
-	}
-
-	if len(n.configDB.BGPNeighbor) == 0 {
-		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}, nil
-	}
-
-	// Build expected neighbor set from CONFIG_DB: vrf → []ip
-	expected := make(map[string][]string)
-	for key := range n.configDB.BGPNeighbor {
-		parts := strings.SplitN(key, "|", 2)
-		if len(parts) != 2 {
-			continue
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport: %w", err)
 		}
-		expected[parts[0]] = append(expected[parts[0]], parts[1])
+	}
+
+	// Build expected neighbor set from intents.
+	//
+	// Three sources of BGP peers:
+	// 1. Overlay peers from ConfigureBGPOverlay: derived from device intent (source_ip) +
+	//    resolved.BGPNeighbors. ConfigureBGPOverlay creates BGP_NEIGHBOR entries as part of
+	//    the device intent's sub-operations — no separate evpn-peer intents.
+	// 2. Standalone overlay peers: evpn-peer|{ip} intents from AddBGPEVPNPeer.
+	// 3. Underlay peers: interface|{name}|bgp-peer intents from AddBGPPeer.
+	expected := make(map[string][]string)
+	seenOverlay := make(map[string]bool)
+
+	// Source 1: ConfigureBGPOverlay overlay peers (device intent + resolved profile)
+	deviceIntent := n.GetIntent("device")
+	if deviceIntent != nil && deviceIntent.Params["source_ip"] != "" && n.resolved != nil {
+		for _, peerIP := range n.resolved.BGPNeighbors {
+			if peerIP == n.resolved.LoopbackIP {
+				continue
+			}
+			expected["default"] = append(expected["default"], peerIP)
+			seenOverlay[peerIP] = true
+		}
+	}
+
+	// Source 2: Standalone evpn-peer intents (AddBGPEVPNPeer)
+	for _, intent := range n.IntentsByPrefix("evpn-peer|") {
+		if ip := intent.Params["neighbor_ip"]; ip != "" && !seenOverlay[ip] {
+			expected["default"] = append(expected["default"], ip)
+			seenOverlay[ip] = true
+		}
+	}
+
+	// Source 3: Underlay peers (interface|{name}|bgp-peer)
+	for resource, intent := range n.IntentsByPrefix("interface|") {
+		if strings.Contains(resource, "|bgp-peer") && intent.Params["neighbor_ip"] != "" {
+			vrf := "default"
+			if v := intent.Params["vrf"]; v != "" {
+				vrf = v
+			}
+			expected[vrf] = append(expected[vrf], intent.Params["neighbor_ip"])
+		}
+	}
+
+	if len(expected) == 0 {
+		return []HealthCheckResult{{Check: "bgp", Status: "warn", Message: "No BGP neighbors configured"}}, nil
 	}
 
 	// Try STATE_DB first (populated by bgpmon on hardware SONiC)
@@ -204,7 +230,7 @@ func (n *Node) checkBGPFromVtysh(expected map[string][]string) []HealthCheckResu
 // CheckInterfaceOper reads STATE_DB PORT_TABLE and checks oper_status for
 // the specified interfaces. Returns one HealthCheckResult per interface.
 func (n *Node) CheckInterfaceOper(interfaces []string) []HealthCheckResult {
-	if !n.IsConnected() {
+	if n.conn == nil {
 		return []HealthCheckResult{{Check: "interface-oper", Status: "fail", Message: "device not connected"}}
 	}
 

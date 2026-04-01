@@ -10,136 +10,9 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// VLANName returns the SONiC name for a VLAN (e.g., "Vlan100").
-func VLANName(vlanID int) string { return fmt.Sprintf("Vlan%d", vlanID) }
-
-// VLANMemberKey returns the CONFIG_DB key for a VLAN_MEMBER entry.
-func VLANMemberKey(vlanID int, intfName string) string {
-	return fmt.Sprintf("%s|%s", VLANName(vlanID), intfName)
-}
-
-// IRBIPKey returns the CONFIG_DB key for a VLAN_INTERFACE IP entry.
-func IRBIPKey(vlanID int, ipAddr string) string {
-	return fmt.Sprintf("%s|%s", VLANName(vlanID), ipAddr)
-}
-
-// vlanResource returns the canonical resource name for a VLAN (precondition locking).
-func vlanResource(id int) string { return VLANName(id) }
-
 // ============================================================================
 // VLAN Operations
 // ============================================================================
-
-// IRBConfig holds configuration options for ConfigureIRB.
-type IRBConfig struct {
-	VRF        string // VRF to bind the IRB to
-	IPAddress  string // IP address with prefix (e.g., "10.1.100.1/24")
-	AnycastMAC string // SAG anycast gateway MAC (e.g., "00:00:00:00:01:01")
-}
-
-// VLANConfig holds configuration options for CreateVLAN.
-type VLANConfig struct {
-	Name        string // VLAN name (alias for Description)
-	Description string
-	L2VNI       int
-}
-
-// createVlanConfig returns CONFIG_DB entries for a VLAN: a VLAN entry and an optional
-// VXLAN_TUNNEL_MAP entry when L2VNI is specified.
-func createVlanConfig(vlanID int, opts VLANConfig) []sonic.Entry {
-	vlanName := VLANName(vlanID)
-	fields := map[string]string{
-		"vlanid": fmt.Sprintf("%d", vlanID),
-	}
-	if opts.Description != "" {
-		fields["description"] = opts.Description
-	}
-
-	entries := []sonic.Entry{
-		{Table: "VLAN", Key: vlanName, Fields: fields},
-	}
-
-	if opts.L2VNI > 0 {
-		entries = append(entries, createVniMapConfig(vlanName, opts.L2VNI)...)
-	}
-
-	return entries
-}
-
-// createVlanMemberConfig returns a CONFIG_DB VLAN_MEMBER entry for adding an
-// interface to a VLAN with the specified tagging mode.
-func createVlanMemberConfig(vlanID int, interfaceName string, tagged bool) []sonic.Entry {
-	taggingMode := "untagged"
-	if tagged {
-		taggingMode = "tagged"
-	}
-
-	return []sonic.Entry{
-		{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, interfaceName), Fields: map[string]string{
-			"tagging_mode": taggingMode,
-		}},
-	}
-}
-
-// createSviConfig returns CONFIG_DB entries for an IRB: a VLAN_INTERFACE base entry
-// with optional VRF binding, an optional IP address entry, and an optional
-// SAG_GLOBAL entry for anycast gateway MAC.
-func createSviConfig(vlanID int, opts IRBConfig) []sonic.Entry {
-	vlanName := VLANName(vlanID)
-
-	// VLAN_INTERFACE base entry with optional VRF binding
-	fields := map[string]string{}
-	if opts.VRF != "" {
-		fields["vrf_name"] = opts.VRF
-	}
-	entries := []sonic.Entry{
-		{Table: "VLAN_INTERFACE", Key: vlanName, Fields: fields},
-	}
-
-	// IP address binding
-	if opts.IPAddress != "" {
-		entries = append(entries, sonic.Entry{
-			Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, opts.IPAddress), Fields: map[string]string{},
-		})
-	}
-
-	// Anycast gateway MAC (SAG)
-	if opts.AnycastMAC != "" {
-		entries = append(entries, sonic.Entry{
-			Table: "SAG_GLOBAL", Key: "IPv4", Fields: map[string]string{
-				"gwmac": opts.AnycastMAC,
-			},
-		})
-	}
-
-	return entries
-}
-
-// deleteSagGlobalConfig returns the delete entry for the SAG_GLOBAL IPv4 singleton.
-func deleteSagGlobalConfig() []sonic.Entry {
-	return []sonic.Entry{{Table: "SAG_GLOBAL", Key: "IPv4"}}
-}
-
-// deleteVlanMemberConfig returns the delete entry for a single VLAN member.
-func deleteVlanMemberConfig(vlanID int, intfName string) []sonic.Entry {
-	return []sonic.Entry{{Table: "VLAN_MEMBER", Key: VLANMemberKey(vlanID, intfName)}}
-}
-
-// deleteSviIPConfig returns the delete entry for a specific SVI IP binding.
-func deleteSviIPConfig(vlanID int, ipAddr string) []sonic.Entry {
-	return []sonic.Entry{{Table: "VLAN_INTERFACE", Key: IRBIPKey(vlanID, ipAddr)}}
-}
-
-// deleteSviBaseConfig returns the delete entry for a VLAN_INTERFACE base entry.
-func deleteSviBaseConfig(vlanID int) []sonic.Entry {
-	return []sonic.Entry{{Table: "VLAN_INTERFACE", Key: VLANName(vlanID)}}
-}
-
-// deleteVlanConfig returns the delete entry for a VLAN table entry.
-// Unlike destroyVlan, this does not scan configDB for members or VNI mappings.
-func deleteVlanConfig(vlanID int) []sonic.Entry {
-	return []sonic.Entry{{Table: "VLAN", Key: VLANName(vlanID)}}
-}
 
 // CreateVLAN creates a new VLAN on this device.
 // Intent-idempotent: if the vlan intent already exists, returns empty ChangeSet.
@@ -174,13 +47,6 @@ func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANConfig) (*Ch
 	return cs, nil
 }
 
-// destroyVlanConfig returns delete entries for a VLAN.
-// Under the DAG, children (members, IRB, VNI mapping) are already removed before
-// VLAN deletion, so only the VLAN entry itself needs to be deleted.
-func (n *Node) destroyVlanConfig(vlanID int) []sonic.Entry {
-	return deleteVlanConfig(vlanID)
-}
-
 // DeleteVLAN removes a VLAN from this device.
 // Checks DAG children first (I5) — if children exist, returns an error
 // before issuing any CONFIG_DB deletes.
@@ -195,7 +61,7 @@ func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
 
 	cs, err := n.op("delete-vlan", vlanResource(vlanID), ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequireVLANExists(vlanID) },
-		func() []sonic.Entry { return n.destroyVlanConfig(vlanID) })
+		func() []sonic.Entry { return deleteVlanConfig(vlanID) })
 	if err != nil {
 		return nil, err
 	}
@@ -258,38 +124,37 @@ func (n *Node) UnconfigureIRB(ctx context.Context, vlanID int) (*ChangeSet, erro
 		return nil, fmt.Errorf("no IRB intent for VLAN %d", vlanID)
 	}
 
-	vlanName := VLANName(vlanID)
 	cs := NewChangeSet(n.name, "device.unconfigure-irb")
 
 	// Remove IP address entry (children before parents)
 	if ip := intent.Params[sonic.FieldIPAddress]; ip != "" {
-		cs.Delete("VLAN_INTERFACE", IRBIPKey(vlanID, ip))
+		cs.Deletes(deleteSviIPConfig(vlanID, ip))
 	}
 
 	// Remove base VLAN_INTERFACE entry
-	cs.Delete("VLAN_INTERFACE", vlanName)
+	cs.Deletes(deleteSviBaseConfig(vlanID))
 
-	// Remove SAG_GLOBAL if anycast MAC was set and no other IRB uses it
+	// Remove SAG_GLOBAL if anycast MAC was set and no other IRB intent uses it
 	if intent.Params[sonic.FieldAnycastMAC] != "" {
-		// SAG_GLOBAL is shared — only remove if no other VLAN_INTERFACE references exist
-		otherSVI := false
-		if n.configDB != nil {
-			for key := range n.configDB.VLANInterface {
-				if key != vlanName && !strings.Contains(key, "|") {
-					otherSVI = true
-					break
-				}
+		// SAG_GLOBAL is shared — only remove if no other IRB intent uses anycast MAC
+		otherSAG := false
+		for resource, irbIntent := range n.IntentsByOp(sonic.OpConfigureIRB) {
+			if resource != intentKey && irbIntent.Params[sonic.FieldAnycastMAC] != "" {
+				otherSAG = true
+				break
 			}
 		}
-		if !otherSVI {
-			cs.Delete("SAG_GLOBAL", "IPv4")
+		if !otherSAG {
+			cs.Deletes(deleteSagGlobalConfig())
 		}
 	}
 
 	if err := n.deleteIntent(cs, intentKey); err != nil {
 		return nil, err
 	}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Removed IRB for VLAN %d", vlanID)
 	return cs, nil
 }
@@ -323,67 +188,60 @@ type MACVPNInfo struct {
 	ARPSuppression bool   `json:"arp_suppression"`  // ARP suppression enabled
 }
 
-// VLANExists checks if a VLAN exists.
-func (n *Node) VLANExists(id int) bool { return n.configDB.HasVLAN(id) }
 
-// GetVLAN retrieves VLAN information from config_db.
+// GetVLAN retrieves VLAN information from the intent DB.
 func (n *Node) GetVLAN(id int) (*VLANInfo, error) {
 	if n.configDB == nil {
 		return nil, util.ErrNotConnected
 	}
 
-	vlanKey := fmt.Sprintf("Vlan%d", id)
-	vlanEntry, ok := n.configDB.VLAN[vlanKey]
-	if !ok {
+	vlanIntent := n.GetIntent("vlan|" + strconv.Itoa(id))
+	if vlanIntent == nil {
 		return nil, fmt.Errorf("VLAN %d not found", id)
 	}
 
-	info := &VLANInfo{ID: id, Name: vlanEntry.Description}
+	info := &VLANInfo{ID: id, Name: vlanIntent.Params[sonic.FieldDescription]}
 
-	// Collect member interfaces from VLAN_MEMBER
-	for key, member := range n.configDB.VLANMember {
-		parts := splitKey(key)
-		if len(parts) == 2 && parts[0] == vlanKey {
-			iface := parts[1]
-			if member.TaggingMode == "tagged" {
-				info.Members = append(info.Members, iface+"(t)")
+	// Collect member interfaces from service/configure-interface intents
+	// that reference this VLAN ID.
+	for resource, intent := range n.IntentsByParam(sonic.FieldVLANID, strconv.Itoa(id)) {
+		// Skip the VLAN intent itself, macvpn intents, and IRB intents.
+		if resource == "vlan|"+strconv.Itoa(id) ||
+			strings.HasPrefix(resource, "macvpn|") ||
+			strings.HasPrefix(resource, "interface|Vlan") {
+			continue
+		}
+		parts := strings.SplitN(resource, "|", 2)
+		if len(parts) == 2 {
+			member := parts[1]
+			if intent.Params[sonic.FieldTagged] == "true" {
+				info.Members = append(info.Members, member+"(t)")
 			} else {
-				info.Members = append(info.Members, iface)
+				info.Members = append(info.Members, member)
 			}
 		}
 	}
 
-	// Check for IRB (VLAN_INTERFACE)
-	if _, ok := n.configDB.VLANInterface[vlanKey]; ok {
+	// Check for IRB from interface|Vlan{id} intent.
+	if n.GetIntent("interface|Vlan"+strconv.Itoa(id)) != nil {
 		info.IRBStatus = "up"
 	}
 
-	// Build MAC-VPN info from VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH
-	macvpn := &MACVPNInfo{}
-
-	// Find L2VNI from VXLAN_TUNNEL_MAP
-	for _, mapping := range n.configDB.VXLANTunnelMap {
-		if mapping.VLAN == vlanKey && mapping.VNI != "" {
-			fmt.Sscanf(mapping.VNI, "%d", &macvpn.L2VNI)
-			break
+	// Build MAC-VPN info from macvpn|{id} intent.
+	macvpnIntent := n.GetIntent("macvpn|" + strconv.Itoa(id))
+	if macvpnIntent != nil {
+		macvpn := &MACVPNInfo{
+			Name: macvpnIntent.Params[sonic.FieldMACVPN],
 		}
-	}
-
-	// Check ARP suppression
-	if _, ok := n.configDB.SuppressVLANNeigh[vlanKey]; ok {
-		macvpn.ARPSuppression = true
-	}
-
-	// Try to match to a macvpn definition by VNI
-	if macvpn.L2VNI > 0 && n.SpecProvider != nil {
-		if name, _ := n.FindMACVPNByVNI(macvpn.L2VNI); name != "" {
-			macvpn.Name = name
+		if vniStr := macvpnIntent.Params[sonic.FieldVNI]; vniStr != "" {
+			fmt.Sscanf(vniStr, "%d", &macvpn.L2VNI)
 		}
-	}
-
-	// Only set MACVPNInfo if there's actually some data
-	if macvpn.L2VNI > 0 || macvpn.ARPSuppression {
-		info.MACVPNInfo = macvpn
+		if macvpnIntent.Params[sonic.FieldARPSuppression] == "true" {
+			macvpn.ARPSuppression = true
+		}
+		if macvpn.L2VNI > 0 || macvpn.ARPSuppression {
+			info.MACVPNInfo = macvpn
+		}
 	}
 
 	return info, nil
@@ -395,11 +253,15 @@ func (n *Node) ListVLANs() []int {
 		return nil
 	}
 
+	intents := n.IntentsByPrefix("vlan|")
 	var ids []int
-	for name := range n.configDB.VLAN {
-		var id int
-		if _, err := fmt.Sscanf(name, "Vlan%d", &id); err == nil {
-			ids = append(ids, id)
+	for resource := range intents {
+		parts := strings.SplitN(resource, "|", 2)
+		if len(parts) == 2 {
+			var id int
+			if _, err := fmt.Sscanf(parts[1], "%d", &id); err == nil {
+				ids = append(ids, id)
+			}
 		}
 	}
 	return ids

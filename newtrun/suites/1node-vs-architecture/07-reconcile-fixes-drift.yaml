@@ -1,0 +1,90 @@
+name: reconcile-fixes-drift
+description: |
+  M7 + M8: Reconcile delivers full projection, eliminating all drift.
+
+  After drift was injected (scenario 04) and detected (scenario 05), reconcile
+  atomically delivers the projection to the device via ReplaceAll. This must:
+    - Restore missing entries (LOOPBACK_INTERFACE IP)
+    - Remove extra entries (VLAN|Vlan999)
+    - Correct modified entries (BGP_GLOBALS ASN)
+    - Result in zero drift
+topology: 1node-vs
+requires: [detect-drift]
+
+steps:
+  # Re-provision to fix all drift
+  - name: reconcile-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp-instance
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Verify missing entry restored
+  - name: verify-loopback-restored
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
+    expect:
+      jq: '.exists == true'
+
+  # Verify extra VLAN removed
+  - name: verify-extra-vlan-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
+    expect:
+      jq: '.exists == false'
+
+  # Verify BGP ASN corrected
+  - name: verify-asn-corrected
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    expect:
+      jq: '.local_asn == "65001"'
+
+  # M8: Zero drift in topology mode
+  - name: verify-zero-drift-topology
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'
+
+  # M8: Zero drift in actuated mode
+  - name: verify-zero-drift-actuated
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

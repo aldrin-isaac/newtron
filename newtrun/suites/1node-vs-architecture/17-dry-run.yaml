@@ -1,0 +1,87 @@
+name: dry-run
+description: |
+  CRUD dry-run via ?dry_run=true — operation previewed but not committed.
+
+  Architecture §8 (Execute): "On dry-run, RestoreIntentDB puts the intent DB
+  back to its pre-fn state. The projection remains dirty, but the NEXT call
+  to execute() will call RebuildProjection, which rebuilds the projection
+  from the (now-restored) intent DB."
+
+  Tests that:
+  - Dry-run create-vlan returns a result (preview)
+  - The VLAN intent does NOT exist on the device after dry-run
+  - The VLAN CONFIG_DB entry does NOT exist on the device after dry-run
+  - A subsequent real operation still works correctly
+topology: 1node-vs
+requires: [drift-guard-resolution]
+
+steps:
+  # Dry-run: create VLAN 800 with ?dry_run=true
+  - name: dry-run-create-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?dry_run=true
+    params: {id: 800}
+
+  # Verify intent was NOT written to device (dry-run restores intent DB)
+  - name: verify-no-intent-after-dry-run
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C800/exists
+    expect:
+      jq: '.exists == false'
+
+  # Verify CONFIG_DB VLAN was NOT written (dry-run doesn't commit)
+  - name: verify-no-configdb-after-dry-run
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan800/exists
+    expect:
+      jq: '.exists == false'
+
+  # Verify zero drift — dry-run left no trace
+  - name: verify-zero-drift-after-dry-run
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Verify intent tree unchanged — no VLAN in tree
+  - name: verify-tree-unchanged-after-dry-run
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | all(.[]; .url != "/create-vlan")'
+
+  # Real operation still works after dry-run (RebuildProjection cleans up)
+  - name: real-create-vlan-after-dry-run
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 800}
+
+  - name: verify-real-vlan-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan800/exists
+    expect:
+      jq: '.exists == true'
+
+  # Cleanup
+  - name: delete-vlan-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 800}
+
+  - name: verify-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

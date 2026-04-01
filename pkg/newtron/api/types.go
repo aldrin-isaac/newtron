@@ -46,20 +46,6 @@ type SSHCommandResponse struct {
 	Output string `json:"output"`
 }
 
-// CompositeHandleRequest references a stored composite by UUID.
-type CompositeHandleRequest struct {
-	Handle string `json:"handle"`
-	Mode   string `json:"mode,omitempty"` // "overwrite" or "merge"
-}
-
-// CompositeHandleResponse is returned by GenerateComposite.
-type CompositeHandleResponse struct {
-	Handle     string         `json:"handle"`
-	DeviceName string         `json:"device_name"`
-	EntryCount int            `json:"entry_count"`
-	Tables     map[string]int `json:"tables"`
-}
-
 // ============================================================================
 // HTTP Request Types — Interface Operations
 // ============================================================================

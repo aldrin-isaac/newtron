@@ -19,48 +19,6 @@ var intentCmd = &cobra.Command{
 }
 
 // ============================================================================
-// intent list — raw intent records
-// ============================================================================
-
-var intentListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List intent records on the device",
-	Long: `Show all NEWTRON_INTENT records on the device. Each record tracks
-a service binding or device-level operation that newtron applied.
-
-Requires -D (device) flag. No lock required (read-only query).
-
-Examples:
-  newtron leaf1 intent list
-  newtron leaf1 intent list --json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := requireDevice(); err != nil {
-			return err
-		}
-
-		intents, err := app.client.ListIntents(app.deviceName)
-		if err != nil {
-			return err
-		}
-
-		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(intents)
-		}
-
-		if len(intents) == 0 {
-			fmt.Println("No intents.")
-			return nil
-		}
-
-		for _, intent := range intents {
-			fmt.Printf("%-16s  %-15s  %-20s  %s\n",
-				intent.Resource, intent.State, intent.Operation, intent.Name)
-		}
-		return nil
-	},
-}
-
-// ============================================================================
 // intent tree — DAG tree view
 // ============================================================================
 
@@ -118,113 +76,123 @@ Forms:
 }
 
 // ============================================================================
-// intent drift — CONFIG_DB drift from intent records
+// intent drift — CONFIG_DB drift from intent or topology
 // ============================================================================
 
 var intentDriftCmd = &cobra.Command{
 	Use:   "drift",
 	Short: "Detect CONFIG_DB drift from expected state",
-	Long: `Reconstruct expected CONFIG_DB from the device's NEWTRON_INTENT records
-and compare against actual CONFIG_DB. Reports missing, extra, and modified
-entries in newtron-owned tables.
+	Long: `Reconstruct expected CONFIG_DB and compare against actual CONFIG_DB.
+Reports missing, extra, and modified entries in newtron-owned tables.
+
+Without --topology: uses device NEWTRON_INTENT records as expected state.
+With --topology: uses topology.json steps as expected state.
 
 Requires -D (device) flag and a connected device.
 
 Examples:
   newtron leaf1 intent drift
+  newtron leaf1 --topology intent drift
   newtron leaf1 intent drift --json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
 		}
 
-		report, err := app.client.DetectDrift(app.deviceName)
+		mode := intentMode()
+		entries, err := app.client.IntentDrift(app.deviceName, mode)
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(report)
+			return json.NewEncoder(os.Stdout).Encode(entries)
 		}
 
-		fmt.Printf("\nDrift Report for %s: %s\n", bold(app.deviceName), formatDriftStatus(report.Status))
+		label := app.deviceName
+		if mode == "topology" {
+			label += " (topology)"
+		}
 
-		if report.Status == "clean" {
+		if len(entries) == 0 {
+			fmt.Printf("\nDrift Report for %s: %s\n", bold(label), green("CLEAN"))
 			fmt.Println("No drift detected in newtron-owned tables.")
 			return nil
 		}
 
-		printDriftEntries(report)
+		fmt.Printf("\nDrift Report for %s: %s\n", bold(label), red("DRIFTED"))
+		printDriftEntries(entries)
 		return nil
 	},
 }
 
 // ============================================================================
-// intent topology — topology-based drift and snapshot
+// intent reconcile — deliver projection to device to eliminate drift
 // ============================================================================
 
-var intentTopologyCmd = &cobra.Command{
-	Use:   "topology",
-	Short: "Topology-related intent operations",
-}
+var intentReconcileCmd = &cobra.Command{
+	Use:   "reconcile",
+	Short: "Deliver expected state to device, eliminating drift",
+	Long: `Reconstruct expected CONFIG_DB and apply it to the device.
 
-var intentTopologyDriftCmd = &cobra.Command{
-	Use:   "drift",
-	Short: "Detect CONFIG_DB drift from topology-defined state",
-	Long: `Compare expected CONFIG_DB (from topology steps) against actual CONFIG_DB
-on the device. Reports operations applied outside the topology.
+Without --topology: reconciles from device NEWTRON_INTENT records.
+With --topology: reconciles from topology.json steps.
 
-Unlike 'intent drift' (intent-based), this compares against what the topology
-file says should be configured, not what the device's own intents say.
-
-Requires -D (device) flag and a loaded topology.
+Dry-run by default. Use -x to execute.
 
 Examples:
-  newtron leaf1 intent topology drift
-  newtron leaf1 intent topology drift --json`,
+  newtron leaf1 intent reconcile           # dry-run (shows drift)
+  newtron leaf1 intent reconcile -x        # execute
+  newtron leaf1 --topology intent reconcile -x  # topology mode`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
 		}
 
-		report, err := app.client.DetectTopologyDrift(app.deviceName)
+		mode := intentMode()
+		result, err := app.client.Reconcile(app.deviceName, mode, execOpts())
 		if err != nil {
 			return err
 		}
 
 		if app.jsonOutput {
-			return json.NewEncoder(os.Stdout).Encode(report)
+			return json.NewEncoder(os.Stdout).Encode(result)
 		}
 
-		fmt.Printf("\nTopology Drift Report for %s: %s\n", bold(app.deviceName), formatDriftStatus(report.Status))
-
-		if report.Status == "clean" {
-			fmt.Println("Device CONFIG_DB matches topology-defined state.")
-			return nil
+		if result.Applied == 0 {
+			fmt.Printf("Reconcile for %s: %s\n", bold(app.deviceName), green("no changes needed"))
+		} else {
+			fmt.Printf("Reconcile for %s: %d entries applied\n", bold(app.deviceName), result.Applied)
 		}
-
-		printDriftEntries(report)
+		if !app.executeMode {
+			printDryRunNotice()
+		}
 		return nil
 	},
 }
 
-var intentTopologyIntentsCmd = &cobra.Command{
-	Use:   "intents",
-	Short: "Show device intents projected as topology steps",
-	Long: `Project the device's actuated NEWTRON_INTENT records back into topology
-step format. Shows what topology steps would reproduce the device's current state.
+// ============================================================================
+// intent save — persist device intent DB to topology.json
+// ============================================================================
 
-Requires -D (device) flag and a connected device.
+var intentSaveCmd = &cobra.Command{
+	Use:   "save",
+	Short: "Persist device intent DB back to topology.json",
+	Long: `Persist the device's current NEWTRON_INTENT records back to topology.json.
+
+With --topology: writes topology-format steps.
+Without --topology: saves in intent format.
 
 Examples:
-  newtron leaf1 intent topology intents
-  newtron leaf1 intent topology intents --json`,
+  newtron leaf1 intent save
+  newtron leaf1 --topology intent save`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
 		}
 
-		snap, err := app.client.TopologyIntents(app.deviceName)
+		mode := intentMode()
+		snap, err := app.client.IntentSave(app.deviceName, mode)
 		if err != nil {
 			return err
 		}
@@ -233,25 +201,70 @@ Examples:
 			return json.NewEncoder(os.Stdout).Encode(snap)
 		}
 
-		fmt.Printf("\nTopology Intents for %s (%d steps)\n\n", bold(app.deviceName), len(snap.Steps))
-		if len(snap.Steps) == 0 {
-			fmt.Println("No actuated intents on this device.")
-			return nil
+		fmt.Printf("Saved %d steps for %s\n", len(snap.Steps), bold(app.deviceName))
+		return nil
+	},
+}
+
+// ============================================================================
+// intent reload — rebuild node from topology.json (topology mode only)
+// ============================================================================
+
+var intentReloadCmd = &cobra.Command{
+	Use:   "reload",
+	Short: "Rebuild node intent from topology.json",
+	Long: `Rebuild the node's intent DAG from topology.json steps.
+Topology mode only (implicitly uses --topology).
+
+Examples:
+  newtron leaf1 intent reload
+  newtron leaf1 intent reload --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
 		}
 
-		t := cli.NewTable("#", "URL", "PARAMS")
-		for i, step := range snap.Steps {
-			params := ""
-			if len(step.Params) > 0 {
-				parts := make([]string, 0, len(step.Params))
-				for k, v := range step.Params {
-					parts = append(parts, fmt.Sprintf("%s=%v", k, v))
-				}
-				params = fmt.Sprintf("%v", parts)
-			}
-			t.Row(fmt.Sprintf("%d", i+1), step.URL, params)
+		snap, err := app.client.IntentReload(app.deviceName)
+		if err != nil {
+			return err
 		}
-		t.Flush()
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(snap)
+		}
+
+		fmt.Printf("Reloaded %d steps for %s\n", len(snap.Steps), bold(app.deviceName))
+		return nil
+	},
+}
+
+// ============================================================================
+// intent clear — reset node to ports-only state (topology mode only)
+// ============================================================================
+
+var intentClearCmd = &cobra.Command{
+	Use:   "clear",
+	Short: "Reset node to ports-only state",
+	Long: `Reset the node's intent DAG to an empty state with ports only.
+Topology mode only (implicitly uses --topology).
+
+Examples:
+  newtron leaf1 intent clear`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		snap, err := app.client.IntentClear(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(snap)
+		}
+
+		fmt.Printf("Cleared intent DAG for %s (%d steps remain)\n", bold(app.deviceName), len(snap.Steps))
 		return nil
 	},
 }
@@ -260,40 +273,49 @@ Examples:
 // Shared display helpers
 // ============================================================================
 
-func formatDriftStatus(status string) string {
-	switch status {
-	case "clean":
-		return green("CLEAN")
-	case "drifted":
-		return red("DRIFTED")
-	default:
-		return status
+// intentMode returns "topology" if the --topology flag is set, otherwise "".
+func intentMode() string {
+	if app.topology {
+		return "topology"
 	}
+	return ""
 }
 
-func printDriftEntries(report *newtron.DriftReport) {
-	if len(report.Missing) > 0 {
-		fmt.Printf("\n%s (%d):\n", red("Missing entries"), len(report.Missing))
+func printDriftEntries(entries []newtron.DriftEntry) {
+	var missing, extra, modified []newtron.DriftEntry
+	for _, e := range entries {
+		switch e.Type {
+		case "missing":
+			missing = append(missing, e)
+		case "extra":
+			extra = append(extra, e)
+		case "modified":
+			modified = append(modified, e)
+		}
+	}
+
+	if len(missing) > 0 {
+		fmt.Printf("\n%s (%d):\n", red("Missing entries"), len(missing))
 		t := cli.NewTable("TABLE", "KEY", "EXPECTED FIELDS")
-		for _, d := range report.Missing {
+		for _, d := range missing {
 			t.Row(d.Table, d.Key, formatFields(d.Expected))
 		}
 		t.Flush()
 	}
 
-	if len(report.Extra) > 0 {
-		fmt.Printf("\n%s (%d):\n", yellow("Extra entries"), len(report.Extra))
+	if len(extra) > 0 {
+		fmt.Printf("\n%s (%d):\n", yellow("Extra entries"), len(extra))
 		t := cli.NewTable("TABLE", "KEY", "ACTUAL FIELDS")
-		for _, d := range report.Extra {
+		for _, d := range extra {
 			t.Row(d.Table, d.Key, formatFields(d.Actual))
 		}
 		t.Flush()
 	}
 
-	if len(report.Modified) > 0 {
-		fmt.Printf("\n%s (%d):\n", yellow("Modified entries"), len(report.Modified))
+	if len(modified) > 0 {
+		fmt.Printf("\n%s (%d):\n", yellow("Modified entries"), len(modified))
 		t := cli.NewTable("TABLE", "KEY", "FIELD", "EXPECTED", "ACTUAL")
-		for _, d := range report.Modified {
+		for _, d := range modified {
 			for field, expectedVal := range d.Expected {
 				actualVal := d.Actual[field]
 				if expectedVal != actualVal {
@@ -370,13 +392,11 @@ func init() {
 	// intent tree
 	intentTreeCmd.Flags().BoolVar(&intentAncestors, "ancestors", false, "Show path from resource to root")
 
-	// intent topology subcommands
-	intentTopologyCmd.AddCommand(intentTopologyDriftCmd)
-	intentTopologyCmd.AddCommand(intentTopologyIntentsCmd)
-
 	// Register all under intentCmd
-	intentCmd.AddCommand(intentListCmd)
 	intentCmd.AddCommand(intentTreeCmd)
 	intentCmd.AddCommand(intentDriftCmd)
-	intentCmd.AddCommand(intentTopologyCmd)
+	intentCmd.AddCommand(intentReconcileCmd)
+	intentCmd.AddCommand(intentSaveCmd)
+	intentCmd.AddCommand(intentReloadCmd)
+	intentCmd.AddCommand(intentClearCmd)
 }

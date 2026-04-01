@@ -1,0 +1,126 @@
+name: crud-actuated
+description: |
+  M4 + M8: CRUD in actuated mode writes intents to device, updating both
+  intent DB and projection. Verifies that:
+  - Creating a VLAN writes NEWTRON_INTENT and CONFIG_DB entries
+  - Intent tree reflects the new intent
+  - Drift remains zero (projection matches device after each write)
+  - Removing the VLAN cleans up both intent and CONFIG_DB
+topology: 1node-vs
+requires: [topology-reconcile]
+
+steps:
+  # Create VLAN 200 in actuated mode (default mode)
+  - name: create-vlan200
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 200}
+
+  # Verify intent record written to device
+  - name: verify-vlan-intent
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C200/exists
+    expect:
+      jq: '.exists == true'
+
+  # Verify CONFIG_DB VLAN entry exists
+  - name: verify-vlan-configdb
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
+    expect:
+      jq: '.exists == true'
+
+  # Verify intent tree includes the new VLAN
+  - name: verify-tree-includes-vlan
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # M8: Drift MUST remain zero after actuated CRUD — the write updates
+  # both the intent DB and CONFIG_DB atomically.
+  - name: verify-zero-drift-after-create
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Create VRF to test a second intent type
+  - name: create-vrf
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vrf
+    params: {name: Vrf_ARCH}
+
+  - name: verify-vrf-intent
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vrf%7CVrf_ARCH/exists
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-vrf-configdb
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VRF/Vrf_ARCH/exists
+    expect:
+      jq: '.exists == true'
+
+  # Still zero drift after two writes
+  - name: verify-zero-drift-after-vrf
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Teardown: remove VRF, then VLAN
+  - name: delete-vrf
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_ARCH}
+
+  - name: verify-vrf-intent-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vrf%7CVrf_ARCH/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: delete-vlan200
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 200}
+
+  - name: verify-vlan-intent-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C200/exists
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-vlan-configdb-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan200/exists
+    expect:
+      jq: '.exists == false'
+
+  # Final: zero drift after full round-trip
+  - name: verify-zero-drift-final
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

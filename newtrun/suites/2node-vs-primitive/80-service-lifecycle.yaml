@@ -87,15 +87,17 @@ steps:
     devices: [host6]
     command: "ip link add link eth0 name eth0.400 type vlan id 400 2>/dev/null || true; ip addr flush dev eth0.400 2>/dev/null; ip addr add 10.4.0.6/24 dev eth0.400; ip link set eth0.400 up"
 
-  # Wait for EVPN VXLAN convergence. teardown-overlay's VRF deletion causes
-  # frrcfgd to reconfigure FRR, which drops the overlay eBGP session. The
-  # session needs ~60-90s to re-establish (TCP connect retry timer + BGP open),
-  # then orchagent programs ASIC_DB, then BGP advertises VNIs to the peer.
-  - name: wait-evpn-convergence
+  # Wait for CONFIG_DB daemons (intfmgrd, vrfmgrd, orchagent) to process
+  # the new entries from apply-svc-evpn-irb. VRF creation + SVI IP assignment
+  # + VXLAN tunnel map programming take time on sonic-vs.
+  - name: wait-daemon-processing
     action: wait
-    duration: 90s
+    duration: 15s
 
-  # Verify EVPN BGP sessions re-established after overlay rebuild
+  # Verify EVPN BGP sessions are still established. Overlay BGP config
+  # (VTEP, peer group, neighbors) survives teardown-overlay — only VLANs,
+  # VRFs, and MAC-VPN bindings are removed. CheckBGPSessions derives
+  # expected overlay peers from the device intent + resolved profile.
   - name: verify-evpn-bgp-sessions
     action: newtron
     devices: [switch1]
@@ -106,7 +108,7 @@ steps:
     expect:
       jq: 'length > 0 and all(.[]; .status == "pass")'
 
-  # Prime NGDP ARP from SVI (poll handles stragglers)
+  # Prime ARP from SVI — poll with generous timeout for VRF/SVI readiness
   - name: prime-arp-svi-sw1
     action: newtron
     devices: [switch1]
@@ -114,8 +116,8 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.3"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 3s
     expect:
       jq: '.output | contains("1 received")'
 
@@ -126,8 +128,8 @@ steps:
     url: /node/{{device}}/ssh-command
     params: {command: "sudo ping -c 1 -W 2 -I Vlan400 10.4.0.6"}
     poll:
-      timeout: 10s
-      interval: 2s
+      timeout: 30s
+      interval: 3s
     expect:
       jq: '.output | contains("1 received")'
 

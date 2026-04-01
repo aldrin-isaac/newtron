@@ -1,7 +1,6 @@
 package node
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -135,16 +134,16 @@ func buildChangeSet(deviceName, operation string, config []sonic.Entry, changeTy
 // checks, calls the entry generator, and wraps the result in a ChangeSet.
 // Use this for operations whose entire body is: preconditions → generate entries → done.
 // Skip it for complex operations that need custom logic between precondition and return
-// (e.g., ApplyService, RemoveService, SetupVTEP).
+// (e.g., ApplyService, RemoveService, SetupVXLAN).
 //
 // The optional reverseOp parameter sets ChangeSet.ReverseOp — the operation name
 // that undoes this one. Only forward operations set this; terminal/reverse
 // operations omit it.
 //
-// op() always updates the in-memory ConfigDB via applyShadow so subsequent
-// operations (precondition checks, idempotency guards) see the effects of
-// prior ones. In offline mode, applyShadow also accumulates entries for
-// BuildComposite export.
+// op() always updates the projection via render so subsequent operations
+// (precondition checks, idempotency guards) see the effects of prior ones.
+// The projection is the single derived representation in both online and
+// offline modes.
 func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 	checks func(*PreconditionChecker), gen func() []sonic.Entry, reverseOp ...string) (*ChangeSet, error) {
 
@@ -163,10 +162,11 @@ func (n *Node) op(name, resource string, changeType sonic.ChangeType,
 		cs.ReverseOp = reverseOp[0]
 	}
 
-	// Always update in-memory ConfigDB. applyShadow dispatches correctly
-	// by change type (DeleteEntry for deletes, ApplyEntries for adds) and
-	// gates accumulation on n.offline.
-	n.applyShadow(cs)
+	// Always update the projection. render validates entries against the
+	// schema, then applies them (DeleteEntry for deletes, ApplyEntries for adds).
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	return cs, nil
 }
@@ -208,22 +208,27 @@ func (cs *ChangeSet) Preview() string {
 	return sb.String()
 }
 
-// Validate checks all entries in the ChangeSet against the CONFIG_DB schema.
-// Returns an error listing all violations. Called by Apply() before any writes.
-// Can also be called independently for dry-run / preview validation.
-func (cs *ChangeSet) Validate() error {
+// validate checks all entries in the ChangeSet against the CONFIG_DB schema.
+// Called by render() — the single validation point in the pipeline.
+func (cs *ChangeSet) validate() error {
 	return sonic.ValidateChanges(cs.Changes)
 }
 
 // Apply writes the changes to the device's config_db via Redis.
 func (cs *ChangeSet) Apply(n *Node) error {
+	// Transport guard — entries were already rendered into the projection
+	// by render(cs) in op(). Without transport, skip Redis delivery.
+	if n.conn == nil {
+		return nil
+	}
+
 	if err := n.precondition("apply-changeset", cs.Operation).Result(); err != nil {
 		return err
 	}
 
-	if err := cs.Validate(); err != nil {
-		return err
-	}
+	// No re-validation here — entries were validated at render() time before
+	// entering the projection. Architecture §5: "cs.Apply(n) does NOT
+	// re-validate — entries were validated when they entered the projection."
 
 	client := n.ConfigDBClient()
 	if client == nil {
@@ -251,8 +256,10 @@ func (cs *ChangeSet) Apply(n *Node) error {
 // ChangeSet to confirm that writes were persisted. Stores the result in
 // cs.Verification.
 func (cs *ChangeSet) Verify(n *Node) error {
-	if !n.IsConnected() {
-		return util.ErrNotConnected
+	// Transport guard — without a device connection, there is nothing to
+	// verify against Redis. Same pattern as Apply (architecture §8).
+	if n.conn == nil {
+		return nil
 	}
 
 	result, err := n.verifyConfigChanges(cs.Changes)
@@ -264,7 +271,7 @@ func (cs *ChangeSet) Verify(n *Node) error {
 }
 
 // verifyConfigChanges re-reads CONFIG_DB via a fresh connection and compares
-// against the given changes. Used by both ChangeSet.Verify and VerifyComposite.
+// against the given changes. Used by ChangeSet.Verify.
 //
 // When a key appears in multiple changes (e.g., RefreshService does delete+add
 // on the same key), only the final operation per key is verified. This replaces
@@ -374,8 +381,3 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 	return result, nil
 }
 
-// VerifyComposite verifies a composite config against live CONFIG_DB.
-// Used by topology health checks to verify the expected composite state.
-func (n *Node) VerifyComposite(ctx context.Context, composite *CompositeConfig) (*sonic.VerificationResult, error) {
-	return n.verifyConfigChanges(composite.ToConfigChanges())
-}

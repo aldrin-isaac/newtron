@@ -114,35 +114,25 @@ func (na *NetworkActor) stop() {
 // NodeActor — serializes device operations for a single Node
 // ============================================================================
 
-// NodeActor serializes all operations on a single device. It caches the SSH
-// connection (via *newtron.Node) between requests and closes it after an idle
-// timeout. Each request still locks/unlocks and refreshes CONFIG_DB — only the
-// SSH tunnel is reused.
+// NodeActor serializes all operations on a single device. It caches the
+// abstract node (via *newtron.Node) between requests. The node may be
+// topology-sourced or actuated — mode switching is handled by execute().
+//
+// Architecture §10: "NodeActor.execute — single entry point." All mode
+// dispatch happens in execute via one branch: ensureActuatedIntent vs
+// ensureTopologyIntent. No handler, no CRUD operation bypasses this.
 type NodeActor struct {
 	net         *newtron.Network
 	device      string
 	idleTimeout time.Duration
 
-	// Cached device connection. Nil when not connected.
+	// Cached abstract node. May be topology-sourced or actuated.
 	// Only accessed from the actor goroutine (run loop).
 	node *newtron.Node
-
-	// composites stores generated CompositeInfo by UUID with expiry.
-	compositeMu sync.Mutex
-	composites  map[string]*compositeEntry
 
 	requests chan request
 	done     chan struct{}
 }
-
-// compositeEntry holds a composite handle with expiry.
-type compositeEntry struct {
-	info      *newtron.CompositeInfo
-	expiresAt time.Time
-}
-
-// compositeExpiry is the TTL for stored composites.
-const compositeExpiry = 10 * time.Minute
 
 // newNodeActor creates and starts a NodeActor.
 func newNodeActor(net *newtron.Network, device string, idleTimeout time.Duration) *NodeActor {
@@ -150,7 +140,6 @@ func newNodeActor(net *newtron.Network, device string, idleTimeout time.Duration
 		net:         net,
 		device:      device,
 		idleTimeout: idleTimeout,
-		composites:  make(map[string]*compositeEntry),
 		requests:    make(chan request, 64),
 		done:        make(chan struct{}),
 	}
@@ -159,7 +148,7 @@ func newNodeActor(net *newtron.Network, device string, idleTimeout time.Duration
 }
 
 // run is the actor's event loop. It processes requests and closes the cached
-// SSH connection after idleTimeout of inactivity.
+// node after idleTimeout of inactivity.
 func (na *NodeActor) run() {
 	defer close(na.done)
 	defer na.closeNode()
@@ -178,7 +167,7 @@ func (na *NodeActor) run() {
 			}
 			val, err := req.fn()
 			req.result <- response{value: val, err: err}
-			// Reset idle timer if we have a cached connection.
+			// Reset idle timer if we have a cached node.
 			if na.node != nil {
 				resetTimer(idle, na.idleTimeout)
 			}
@@ -189,22 +178,7 @@ func (na *NodeActor) run() {
 	}
 }
 
-// getNode returns the cached SSH connection or establishes a new one.
-// Must only be called from within the actor goroutine (via do).
-func (na *NodeActor) getNode(ctx context.Context) (*newtron.Node, error) {
-	if na.node != nil {
-		return na.node, nil
-	}
-	node, err := na.net.Connect(ctx, na.device)
-	if err != nil {
-		return nil, err
-	}
-	na.node = node
-	log.Printf("newtron-server: connected to %s (idle timeout: %s)", na.device, na.idleTimeout)
-	return node, nil
-}
-
-// closeNode closes and discards the cached connection.
+// closeNode closes and discards the cached node.
 // Must only be called from within the actor goroutine.
 func (na *NodeActor) closeNode() {
 	if na.node != nil {
@@ -229,48 +203,6 @@ func (na *NodeActor) do(ctx context.Context, fn func() (any, error)) (any, error
 	}
 }
 
-// storeComposite saves a CompositeInfo with a UUID key and returns the UUID.
-func (na *NodeActor) storeComposite(id string, ci *newtron.CompositeInfo) {
-	na.compositeMu.Lock()
-	defer na.compositeMu.Unlock()
-
-	// Evict expired entries opportunistically
-	now := time.Now()
-	for k, v := range na.composites {
-		if now.After(v.expiresAt) {
-			delete(na.composites, k)
-		}
-	}
-
-	na.composites[id] = &compositeEntry{
-		info:      ci,
-		expiresAt: now.Add(compositeExpiry),
-	}
-}
-
-// getComposite retrieves a stored CompositeInfo by UUID.
-func (na *NodeActor) getComposite(id string) (*newtron.CompositeInfo, error) {
-	na.compositeMu.Lock()
-	defer na.compositeMu.Unlock()
-
-	entry, ok := na.composites[id]
-	if !ok {
-		return nil, fmt.Errorf("composite handle '%s' not found or expired", id)
-	}
-	if time.Now().After(entry.expiresAt) {
-		delete(na.composites, id)
-		return nil, fmt.Errorf("composite handle '%s' has expired", id)
-	}
-	return entry.info, nil
-}
-
-// removeComposite deletes a stored CompositeInfo by UUID.
-func (na *NodeActor) removeComposite(id string) {
-	na.compositeMu.Lock()
-	defer na.compositeMu.Unlock()
-	delete(na.composites, id)
-}
-
 // stop shuts down the NodeActor.
 func (na *NodeActor) stop() {
 	close(na.requests)
@@ -278,68 +210,130 @@ func (na *NodeActor) stop() {
 }
 
 // ============================================================================
-// Node operation helpers
+// Mode dispatch — the ONE branch point for all operations
 // ============================================================================
 
-// connectAndRead gets a connection, refreshes CONFIG_DB from Redis, and runs
-// a read-only function. Refresh ensures reads always see current device state.
+// ensureActuatedIntent ensures the cached node was built from the device's
+// own NEWTRON_INTENT records. If the current node is topology-sourced, it is
+// destroyed and replaced with a node built from device intents.
+//
+// Architecture §3: "Topology offline → actuated online: ensureActuatedIntent
+// closes the offline node, creates a new one from device intents."
+//
+// Guarded: refuses to destroy a topology node with unsaved CRUD mutations.
+// The user must `intent save --topology` first or `intent reload --topology`
+// to discard.
+func (na *NodeActor) ensureActuatedIntent(ctx context.Context) error {
+	if na.node != nil && na.node.HasActuatedIntent() {
+		return nil // already actuated
+	}
+	if na.node != nil && na.node.HasUnsavedIntents() {
+		return fmt.Errorf("topology node has unsaved intents — run 'intent save --topology' first, or 'intent reload --topology' to discard")
+	}
+	na.closeNode()
+	node, err := na.net.InitFromDeviceIntent(ctx, na.device)
+	if err != nil {
+		return err
+	}
+	na.node = node
+	log.Printf("newtron-server: initialized %s from device intents", na.device)
+	return nil
+}
+
+// ensureTopologyIntent ensures the cached node was built from topology.json
+// steps. If the current node is actuated, it is destroyed and replaced with
+// a topology-sourced node. If the node is already topology-sourced but has
+// transport connected (left over from a previous Drift/Reconcile), transport
+// is disconnected to prevent CRUD from leaking to Redis.
+//
+// Architecture §3: "Actuated online → topology offline: ensureTopologyIntent
+// closes the online node, creates a new one from topology.json."
+func (na *NodeActor) ensureTopologyIntent() error {
+	if na.node != nil && !na.node.HasActuatedIntent() {
+		// Already topology-sourced. Disconnect transport if present so
+		// CRUD operations don't leak to Redis through a leftover connection.
+		na.node.DisconnectTransport()
+		return nil
+	}
+	na.closeNode()
+	node, err := na.net.BuildTopologyNode(na.device)
+	if err != nil {
+		return err
+	}
+	na.node = node
+	log.Printf("newtron-server: built %s from topology", na.device)
+	return nil
+}
+
+// execute is the unified entry point for all operations. It reads mode from
+// the request context (injected by withMode middleware), ensures the node is
+// in the correct state, then rebuilds the projection from fresh intents.
+//
+// All operations — reads and writes — see authoritative state after execute().
+// Writes acquire their own lock via Execute(); reads
+// don't need a lock.
+//
+// Architecture §10: "execute — single entry point. ONE branch for mode
+// resolution."
+// Architecture §1: "Intent DB is primary state."
+// CLAUDE.md: "In actuated mode, the device's own NEWTRON_INTENT records
+// ARE the authoritative state."
+func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, error) {
+	return na.do(ctx, func() (any, error) {
+		mode := modeFromCtx(ctx)
+		if mode == ModeTopology {
+			if err := na.ensureTopologyIntent(); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := na.ensureActuatedIntent(ctx); err != nil {
+				return nil, err
+			}
+		}
+		// Re-read intents from device (when connected) and rebuild projection.
+		// All operations — reads and writes — see fresh, authoritative state.
+		if err := na.node.RebuildProjection(ctx); err != nil {
+			na.closeNode()
+			return nil, err
+		}
+		return fn()
+	})
+}
+
+// ============================================================================
+// Node operation helpers — compositions on execute
+// ============================================================================
+
+// connectAndRead ensures the correct node mode, checks connectivity via Ping,
+// and runs a read-only function. Ping is a no-op without transport (topology
+// offline mode — architecture §7 transport guard).
 func (na *NodeActor) connectAndRead(ctx context.Context, fn func(n *newtron.Node) (any, error)) (any, error) {
-	return na.do(ctx, func() (any, error) {
-		node, err := na.getNode(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err := node.Refresh(ctx); err != nil {
-			// Refresh failure means the SSH tunnel is likely dead.
+	return na.execute(ctx, func() (any, error) {
+		if err := na.node.Ping(ctx); err != nil {
+			// Ping failure means the SSH tunnel is dead.
 			na.closeNode()
 			return nil, err
 		}
-		return fn(node)
+		return fn(na.node)
 	})
 }
 
-// connectAndLocked gets a connection, locks (Lock refreshes CONFIG_DB), runs
-// fn, then unlocks. Use for operations that write directly to Redis (e.g.
-// DeliverComposite) rather than going through the ChangeSet/Commit model.
-func (na *NodeActor) connectAndLocked(ctx context.Context, fn func(n *newtron.Node) (any, error)) (any, error) {
-	return na.do(ctx, func() (any, error) {
-		node, err := na.getNode(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if err := node.Lock(); err != nil {
-			// Lock failure means Redis/SSH is unreachable.
-			na.closeNode()
-			return nil, err
-		}
-		defer node.Unlock()
-		return fn(node)
-	})
-}
 
-// connectAndExecute gets a connection and runs fn inside Execute
-// (lock → fn → commit → save → unlock). Lock refreshes CONFIG_DB, so writes
-// always operate on current device state.
+// connectAndExecute ensures the correct node mode and runs fn inside Execute
+// (lock → fn → commit → save → unlock). In topology offline mode, Lock/Apply/
+// Unlock are no-ops — intents accumulate in the projection without delivery.
+//
+// Dry-run and error paths restore the intent DB; the projection is rebuilt
+// by execute() at the start of the next operation.
 func (na *NodeActor) connectAndExecute(
 	ctx context.Context,
 	opts newtron.ExecOpts,
 	fn func(ctx context.Context, n *newtron.Node) error,
 ) (any, error) {
-	return na.do(ctx, func() (any, error) {
-		node, err := na.getNode(ctx)
-		if err != nil {
-			return nil, err
-		}
-		val, err := node.Execute(ctx, opts, func(ctx context.Context) error {
-			return fn(ctx, node)
+	return na.execute(ctx, func() (any, error) {
+		return na.node.Execute(ctx, opts, func(ctx context.Context) error {
+			return fn(ctx, na.node)
 		})
-		if err != nil {
-			// Clear any partial pending changesets so the next request
-			// starts clean. Close the connection if the error looks like
-			// a transport failure (Lock/Commit/Save use SSH+Redis).
-			node.Rollback()
-		}
-		return val, err
 	})
 }
 

@@ -4,34 +4,32 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
 // InterfaceExists checks if an interface exists.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
+// Three-way check: physical ports from RegisterPort map, PortChannels and VLAN SVIs from intents.
 func (n *Node) InterfaceExists(name string) bool {
-	return n.configDB.HasInterface(util.NormalizeInterfaceName(name))
-}
-
-// bindVrf returns the INTERFACE entry for binding this interface to a VRF.
-// Always includes the vrf_name field: pass "" to clear the VRF binding.
-func (i *Interface) bindVrf(vrfName string) []sonic.Entry {
-	return []sonic.Entry{{Table: "INTERFACE", Key: i.name,
-		Fields: map[string]string{"vrf_name": vrfName}}}
-}
-
-// enableIpRouting returns the base INTERFACE entry that enables IP routing on this interface.
-// No VRF binding — just empty fields so SONiC intfmgrd creates the routing entry.
-func (i *Interface) enableIpRouting() []sonic.Entry {
-	return []sonic.Entry{{Table: "INTERFACE", Key: i.name,
-		Fields: map[string]string{}}}
-}
-
-// assignIpAddress returns the INTERFACE entry for assigning an IP address.
-func (i *Interface) assignIpAddress(ipAddr string) []sonic.Entry {
-	return []sonic.Entry{{Table: "INTERFACE",
-		Key: fmt.Sprintf("%s|%s", i.name, ipAddr), Fields: map[string]string{}}}
+	name = util.NormalizeInterfaceName(name)
+	// Physical ports: populated by RegisterPort
+	if _, ok := n.interfaces[name]; ok {
+		return true
+	}
+	// PortChannels: intent-managed
+	if strings.HasPrefix(name, "PortChannel") && n.GetIntent("portchannel|"+name) != nil {
+		return true
+	}
+	// VLAN SVIs: intent-managed
+	if strings.HasPrefix(name, "Vlan") {
+		vlanID := strings.TrimPrefix(name, "Vlan")
+		if n.GetIntent("vlan|"+vlanID) != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================
@@ -59,13 +57,15 @@ func (i *Interface) SetIP(ctx context.Context, ipAddr string) (*ChangeSet, error
 	// disrupts intfmgrd on CiscoVS (see RCA-037). Skip enableIpRouting in that case.
 	var entries []sonic.Entry
 	if i.VRF() == "" {
-		entries = append(i.enableIpRouting(), i.assignIpAddress(ipAddr)...)
+		entries = append(enableIpRoutingConfig(i.name), assignIpAddressConfig(i.name,ipAddr)...)
 	} else {
-		entries = i.assignIpAddress(ipAddr)
+		entries = assignIpAddressConfig(i.name,ipAddr)
 	}
 	cs := buildChangeSet(n.Name(), "interface.set-ip", entries, ChangeAdd)
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Configured IP %s on interface %s", ipAddr, i.name)
 	return cs, nil
 }
@@ -82,8 +82,7 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 	}
 
 	cs := NewChangeSet(n.Name(), "interface.remove-ip")
-	ipKey := fmt.Sprintf("%s|%s", i.name, ipAddr)
-	cs.Delete("INTERFACE", ipKey)
+	cs.Deletes(deleteInterfaceIPConfig(i.name, ipAddr))
 
 	// If no other IPs remain, remove the base INTERFACE entry too
 	remaining := 0
@@ -93,9 +92,12 @@ func (i *Interface) RemoveIP(ctx context.Context, ipAddr string) (*ChangeSet, er
 		}
 	}
 	if remaining == 0 {
-		cs.Delete("INTERFACE", i.name)
+		cs.Deletes(deleteInterfaceBaseConfig(i.name))
 	}
 
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Removed IP %s from interface %s", ipAddr, i.name)
 	return cs, nil
 }
@@ -107,16 +109,18 @@ func (i *Interface) SetVRF(ctx context.Context, vrfName string) (*ChangeSet, err
 	if err := n.precondition("set-vrf", i.name).Result(); err != nil {
 		return nil, err
 	}
-	if vrfName != "" && vrfName != "default" && !n.VRFExists(vrfName) {
+	if vrfName != "" && vrfName != "default" && n.GetIntent("vrf|"+vrfName) == nil {
 		return nil, fmt.Errorf("VRF '%s' does not exist", vrfName)
 	}
 	if i.IsPortChannelMember() {
 		return nil, fmt.Errorf("cannot bind PortChannel member to VRF")
 	}
 
-	cs := buildChangeSet(n.Name(), "interface.set-vrf", i.bindVrf(vrfName), ChangeModify)
+	cs := buildChangeSet(n.Name(), "interface.set-vrf", bindVrfConfig(i.name,vrfName), ChangeModify)
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Bound interface %s to VRF %s", i.name, vrfName)
 	return cs, nil
 }
@@ -166,7 +170,7 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		if cfg.VRF != "" || cfg.IP != "" {
 			return nil, fmt.Errorf("cannot mix routed (VRF/IP) and bridged (VLAN) config")
 		}
-		if !n.VLANExists(cfg.VLAN) {
+		if n.GetIntent(fmt.Sprintf("vlan|%d", cfg.VLAN)) == nil {
 			return nil, fmt.Errorf("VLAN %d does not exist", cfg.VLAN)
 		}
 		cs.Adds(createVlanMemberConfig(cfg.VLAN, i.name, cfg.Tagged))
@@ -199,10 +203,10 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 
 	// VRF binding first (creates the INTERFACE base entry with vrf_name)
 	if cfg.VRF != "" {
-		if cfg.VRF != "default" && !n.VRFExists(cfg.VRF) {
+		if cfg.VRF != "default" && n.GetIntent("vrf|"+cfg.VRF) == nil {
 			return nil, fmt.Errorf("VRF '%s' does not exist", cfg.VRF)
 		}
-		cs.Adds(i.bindVrf(cfg.VRF))
+		cs.Adds(bindVrfConfig(i.name,cfg.VRF))
 	}
 
 	// IP address (requires base entry — either from VRF binding above or enableIpRouting)
@@ -212,14 +216,16 @@ func (i *Interface) ConfigureInterface(ctx context.Context, cfg InterfaceConfig)
 		}
 		if cfg.VRF == "" && i.VRF() == "" {
 			// No VRF binding — need base INTERFACE entry for IP routing
-			cs.Adds(i.enableIpRouting())
+			cs.Adds(enableIpRoutingConfig(i.name))
 		}
-		cs.Adds(i.assignIpAddress(cfg.IP))
+		cs.Adds(assignIpAddressConfig(i.name,cfg.IP))
 	}
 
 	cs.ReverseOp = "interface.unconfigure-interface"
 	cs.OperationParams = map[string]string{"interface": i.name}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Configured interface %s (vrf=%s, ip=%s, vlan=%d)", i.name, cfg.VRF, cfg.IP, cfg.VLAN)
 	return cs, nil
 }
@@ -297,7 +303,7 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 	vrf := intent.Params[sonic.FieldVRF]
 
 	if ip != "" {
-		cs.Delete("INTERFACE", fmt.Sprintf("%s|%s", i.name, ip))
+		cs.Deletes(deleteInterfaceIPConfig(i.name, ip))
 	}
 
 	if vrf != "" {
@@ -308,9 +314,9 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 			}
 		}
 		if remaining == 0 {
-			cs.Delete("INTERFACE", i.name)
+			cs.Deletes(deleteInterfaceBaseConfig(i.name))
 		} else {
-			cs.Adds(i.bindVrf(""))
+			cs.Adds(bindVrfConfig(i.name,""))
 		}
 	} else if ip != "" {
 		remaining := 0
@@ -320,14 +326,16 @@ func (i *Interface) UnconfigureInterface(ctx context.Context) (*ChangeSet, error
 			}
 		}
 		if remaining == 0 {
-			cs.Delete("INTERFACE", i.name)
+			cs.Deletes(deleteInterfaceBaseConfig(i.name))
 		}
 	}
 
 	if err := n.deleteIntent(cs, "interface|"+i.name); err != nil {
 		return nil, err
 	}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Unconfigured interface %s", i.name)
 	return cs, nil
 }
@@ -340,7 +348,7 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	if err := n.precondition(sonic.OpBindACL, i.name).Result(); err != nil {
 		return nil, err
 	}
-	if !n.ACLTableExists(aclName) {
+	if n.GetIntent("acl|"+aclName) == nil {
 		return nil, fmt.Errorf("ACL table '%s' does not exist", aclName)
 	}
 	if direction != "ingress" && direction != "egress" {
@@ -359,12 +367,15 @@ func (i *Interface) BindACL(ctx context.Context, aclName, direction string) (*Ch
 	cs.ReverseOp = "interface.unbind-acl"
 	cs.OperationParams = map[string]string{"interface": i.name, "acl_name": aclName}
 
-	// ACLs are shared — add this interface to existing binding list
-	configDB := n.ConfigDB()
-	newBindings := util.AddToCSV(configDB.ACLTable[aclName].Ports, i.name)
+	// ACLs are shared — collect port list from intents (this interface's
+	// binding intent was written above, so aclPortsFromIntents includes it)
+	currentPorts := n.aclPortsFromIntents(aclName, direction)
 
-	e := bindAclConfig(aclName, newBindings, direction)
+	e := bindAclConfig(aclName, currentPorts, direction)
 	cs.Update(e.Table, e.Key, e.Fields)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	util.WithDevice(n.Name()).Infof("Bound ACL %s to interface %s (%s)", aclName, i.name, direction)
 	return cs, nil
@@ -397,16 +408,17 @@ func (i *Interface) UnbindACL(ctx context.Context, aclName string) (*ChangeSet, 
 
 	cs := NewChangeSet(n.Name(), "interface.unbind-acl")
 
-	// Remove this interface from the ACL's ports list (shared resource — must read current state)
-	configDB := n.ConfigDB()
-	if configDB != nil {
-		if table, ok := configDB.ACLTable[aclName]; ok {
-			e := updateAclPorts(aclName, util.RemoveFromCSV(table.Ports, i.name))
-			cs.Update(e.Table, e.Key, e.Fields)
-		}
-	}
+	// Collect remaining ports from intents (this interface's intent hasn't been
+	// deleted yet, so explicitly exclude it)
+	allPorts := n.aclPortsFromIntents(aclName, direction)
+	remainingPorts := util.RemoveFromCSV(allPorts, i.name)
+	e := updateAclPorts(aclName, remainingPorts)
+	cs.Update(e.Table, e.Key, e.Fields)
 
 	if err := i.node.deleteIntent(cs, "interface|"+i.name+"|acl|"+direction); err != nil {
+		return nil, err
+	}
+	if err := n.render(cs); err != nil {
 		return nil, err
 	}
 	util.WithDevice(n.Name()).Infof("Unbound ACL %s from interface %s", aclName, i.name)
@@ -480,7 +492,10 @@ func (i *Interface) SetProperty(ctx context.Context, property, value string) (*C
 		tableName = "PORTCHANNEL"
 	}
 
-	cs.Update(tableName, i.name, fields)
+	cs.Updates(setPropertyConfig(tableName, i.name, fields))
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	util.WithDevice(n.Name()).Infof("Set %s=%s on interface %s", property, value, i.name)
 	return cs, nil
@@ -510,15 +525,8 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 	}
 
 	switch property {
-	case "mtu":
-		cs.Update(tableName, i.name, map[string]string{"mtu": "9100"})
-	case "speed":
-		// Remove speed field — SONiC uses autoneg default
-		cs.Update(tableName, i.name, map[string]string{"speed": ""})
-	case "admin-status", "admin_status":
-		cs.Update(tableName, i.name, map[string]string{"admin_status": "up"})
-	case "description":
-		cs.Update(tableName, i.name, map[string]string{"description": ""})
+	case "mtu", "speed", "admin-status", "admin_status", "description":
+		cs.Updates(clearPropertyConfig(tableName, i.name, property))
 	default:
 		return nil, fmt.Errorf("unknown property: %s", property)
 	}
@@ -526,7 +534,9 @@ func (i *Interface) ClearProperty(ctx context.Context, property string) (*Change
 	if err := n.deleteIntent(cs, intentKey); err != nil {
 		return nil, err
 	}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	util.WithDevice(n.Name()).Infof("Cleared %s on interface %s", property, i.name)
 	return cs, nil

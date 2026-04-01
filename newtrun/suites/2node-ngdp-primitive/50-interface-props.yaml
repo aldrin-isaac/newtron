@@ -1,12 +1,20 @@
 name: interface-props
 description: |
-  Self-contained interface property lifecycle on sw1:Ethernet10 (CiscoVS has 32 ports,
-  Ethernet10 exists but has no host wired). Tests mtu, admin_status, and description
-  set/verify primitives.
+  Self-contained interface property lifecycle on sw1:Ethernet10.
+  Tests mtu, admin_status, and description set/verify primitives.
+  ConfigureInterface creates the interface intent anchor that property
+  sub-resources attach to (I4 enforcement).
 topology: 2node-ngdp
-requires: [boot-ssh]
+requires: [setup-device]
 
 steps:
+  # Create interface intent anchor (parent for property sub-resources)
+  - name: configure-ethernet10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/configure-interface
+
   - name: set-mtu-9100
     action: newtron
     devices: [switch1]
@@ -62,3 +70,24 @@ steps:
     url: /node/{{device}}/configdb/PORT/Ethernet10
     expect:
       jq: '.description == "test-interface-props"'
+
+  # Cleanup: clear sub-resource intents, then unconfigure interface
+  - name: clear-mtu
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/clear-property
+    params: {property: mtu}
+
+  - name: clear-description
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/clear-property
+    params: {property: description}
+
+  - name: unconfigure-ethernet10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/unconfigure-interface

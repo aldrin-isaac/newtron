@@ -631,7 +631,7 @@ func (n *Network) GetNode(name string) (*node.Node, error) {
 
 // GetAbstractNode creates an offline abstract Node for the named device.
 // Same profile/spec resolution as GetNode, but the Node starts with an empty
-// shadow ConfigDB and no device connection. Used for composite generation.
+// projection and no device connection. Used for composite generation.
 func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 	// Host devices have no SONiC — cannot create a Node
 	if n.IsHostDevice(name) {
@@ -652,20 +652,6 @@ func (n *Network) GetAbstractNode(name string) (*node.Node, error) {
 	return node.NewAbstract(resolvedSpecs, name, profile, resolved), nil
 }
 
-// ConnectDevice loads a device and establishes connection.
-func (n *Network) ConnectNode(ctx context.Context, name string) (*node.Node, error) {
-	dev, err := n.GetNode(name)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := dev.Connect(ctx); err != nil {
-		return nil, err
-	}
-
-	return dev, nil
-}
-
 // ConnectNodeForSetup connects without requiring frrcfgd. Used by
 // provisioning and InitDevice — both write unified config mode and
 // restart bgp afterward, so the check is skipped.
@@ -679,6 +665,24 @@ func (n *Network) ConnectNodeForSetup(ctx context.Context, name string) (*node.N
 		return nil, err
 	}
 
+	return dev, nil
+}
+
+// InitFromDeviceIntent creates a fresh abstract node, connects to the device,
+// and replays its NEWTRON_INTENT records to build the projection. The node's
+// projection is derived entirely from intent replay — the device's raw CONFIG_DB
+// is never assigned to the node. Returns the fully-initialized node.
+//
+// Architecture §3: "Device intents → New() → ConnectTransport() → read PORT +
+// NEWTRON_INTENT → RegisterPort() → IntentsToSteps() → ReplayStep()"
+func (n *Network) InitFromDeviceIntent(ctx context.Context, name string) (*node.Node, error) {
+	dev, err := n.GetAbstractNode(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := dev.InitFromDeviceIntent(ctx); err != nil {
+		return nil, err
+	}
 	return dev, nil
 }
 

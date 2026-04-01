@@ -10,325 +10,9 @@ import (
 	"github.com/newtron-network/newtron/pkg/util"
 )
 
-// ============================================================================
-// BGP Config Functions (pure, no Node state)
-// ============================================================================
-
-// BGPNeighborOpts controls optional aspects of BGP neighbor configuration.
-type BGPNeighborOpts struct {
-	Description      string
-	EBGPMultihop     bool   // set ebgp_multihop (value "true" for loopback, TTL string for explicit)
-	MultihopTTL      string // explicit TTL value (e.g., "255"); if empty and EBGPMultihop=true, uses "true"
-	ActivateIPv4     bool   // activate ipv4_unicast AF (default true for direct peers)
-	ActivateEVPN     bool   // activate l2vpn_evpn AF
-	VRF              string // VRF name (default "default")
-	RRClient         bool   // route-reflector-client on ipv4_unicast AF
-	NextHopSelf      bool   // next-hop-self on ipv4_unicast AF
-	NextHopUnchanged bool   // nexthop_unchanged on l2vpn_evpn AF
-	ActivateIPv6     bool   // activate ipv6_unicast AF
-	RRClientIPv6     bool   // rrclient on ipv6_unicast AF
-	NextHopSelfIPv6  bool   // nhself on ipv6_unicast AF
-	RRClientEVPN     bool   // rrclient on l2vpn_evpn AF
-	PeerGroup        string // peer group name (for service-level BGP neighbors, per Principle 36)
-}
-
-// CreateBGPNeighborConfig returns sonic.Entry for a BGP_NEIGHBOR + BGP_NEIGHBOR_AF.
-func CreateBGPNeighborConfig(neighborIP string, asn int, localAddr string, opts BGPNeighborOpts) []sonic.Entry {
-	var entries []sonic.Entry
-
-	vrf := opts.VRF
-	if vrf == "" {
-		vrf = "default"
-	}
-
-	fields := map[string]string{
-		"asn":          fmt.Sprintf("%d", asn),
-		"admin_status": "up",
-	}
-	if localAddr != "" {
-		fields["local_addr"] = localAddr
-	}
-	if opts.Description != "" {
-		fields["name"] = opts.Description
-	}
-	if opts.EBGPMultihop {
-		if opts.MultihopTTL != "" {
-			fields["ebgp_multihop"] = opts.MultihopTTL
-		} else {
-			fields["ebgp_multihop"] = "true"
-		}
-	}
-	if opts.PeerGroup != "" {
-		fields["peer_group_name"] = opts.PeerGroup
-	}
-
-	entries = append(entries, sonic.Entry{
-		Table:  "BGP_NEIGHBOR",
-		Key:    fmt.Sprintf("%s|%s", vrf, neighborIP),
-		Fields: fields,
-	})
-
-	// Activate IPv4 unicast (default for most peers)
-	if opts.ActivateIPv4 {
-		afFields := map[string]string{"admin_status": "true"}
-		if opts.RRClient {
-			afFields["rrclient"] = "true"
-		}
-		if opts.NextHopSelf {
-			afFields["nhself"] = "true"
-		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|ipv4_unicast", vrf, neighborIP),
-			Fields: afFields,
-		})
-	}
-
-	// Activate IPv6 unicast
-	if opts.ActivateIPv6 {
-		afFields := map[string]string{"admin_status": "true"}
-		if opts.RRClientIPv6 {
-			afFields["rrclient"] = "true"
-		}
-		if opts.NextHopSelfIPv6 {
-			afFields["nhself"] = "true"
-		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|ipv6_unicast", vrf, neighborIP),
-			Fields: afFields,
-		})
-	}
-
-	// Activate L2VPN EVPN
-	if opts.ActivateEVPN {
-		evpnFields := map[string]string{"admin_status": "true"}
-		if opts.NextHopUnchanged {
-			evpnFields["nexthop_unchanged"] = "true"
-		}
-		if opts.RRClientEVPN {
-			evpnFields["rrclient"] = "true"
-		}
-		entries = append(entries, sonic.Entry{
-			Table:  "BGP_NEIGHBOR_AF",
-			Key:    fmt.Sprintf("%s|%s|l2vpn_evpn", vrf, neighborIP),
-			Fields: evpnFields,
-		})
-	}
-
-	return entries
-}
-
-// DeleteBGPNeighborConfig returns sonic.Entry for deleting a BGP neighbor
-// and all its address-family entries.
-func DeleteBGPNeighborConfig(vrf, neighborIP string) []sonic.Entry {
-	if vrf == "" {
-		vrf = "default"
-	}
-
-	var entries []sonic.Entry
-
-	// Remove address-family entries first
-	for _, af := range []string{"ipv4_unicast", "ipv6_unicast", "l2vpn_evpn"} {
-		entries = append(entries, sonic.Entry{
-			Table: "BGP_NEIGHBOR_AF",
-			Key:   BGPNeighborAFKey(vrf, neighborIP, af),
-		})
-	}
-
-	// Remove neighbor entry
-	entries = append(entries, sonic.Entry{
-		Table: "BGP_NEIGHBOR",
-		Key:   fmt.Sprintf("%s|%s", vrf, neighborIP),
-	})
-
-	return entries
-}
-
-// CreateBGPGlobalsConfig returns sonic.Entry for BGP_GLOBALS.
-func CreateBGPGlobalsConfig(vrf string, asn int, routerID string, extra map[string]string) []sonic.Entry {
-	fields := map[string]string{
-		"local_asn": fmt.Sprintf("%d", asn),
-		"router_id": routerID,
-	}
-	for k, v := range extra {
-		fields[k] = v
-	}
-	return []sonic.Entry{
-		{Table: "BGP_GLOBALS", Key: vrf, Fields: fields},
-	}
-}
-
-// BGPGlobalsAFKey returns the CONFIG_DB key for a BGP_GLOBALS_AF entry.
-func BGPGlobalsAFKey(vrf, af string) string {
-	return fmt.Sprintf("%s|%s", vrf, af)
-}
-
-// CreateBGPGlobalsAFConfig returns sonic.Entry for BGP_GLOBALS_AF.
-func CreateBGPGlobalsAFConfig(vrf, af string, fields map[string]string) []sonic.Entry {
-	if fields == nil {
-		fields = map[string]string{}
-	}
-	return []sonic.Entry{
-		{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrf, af), Fields: fields},
-	}
-}
-
-// revertRedistributionConfig resets BGP_GLOBALS_AF redistribution fields to false.
-// This is the reverse of the redistribution override in addBGPRoutePolicies.
-func revertRedistributionConfig(vrfKey string) []sonic.Entry {
-	return CreateBGPGlobalsAFConfig(vrfKey, "ipv4_unicast", map[string]string{
-		"redistribute_connected": "false",
-		"redistribute_static":    "false",
-	})
-}
-
-// RouteRedistributeKey returns the CONFIG_DB key for a ROUTE_REDISTRIBUTE entry.
-func RouteRedistributeKey(vrf, protocol, af string) string {
-	return fmt.Sprintf("%s|%s|bgp|%s", vrf, protocol, af)
-}
-
-// CreateRouteRedistributeConfig returns sonic.Entry for ROUTE_REDISTRIBUTE.
-func CreateRouteRedistributeConfig(vrf, protocol, af string) []sonic.Entry {
-	return []sonic.Entry{
-		{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af), Fields: map[string]string{}},
-	}
-}
-
-// BGPNeighborAFKey returns the CONFIG_DB key for a BGP_NEIGHBOR_AF entry.
-// Used by callers that need to modify an existing AF entry (e.g. adding route-maps).
-func BGPNeighborAFKey(vrf, neighborIP, af string) string {
-	return fmt.Sprintf("%s|%s|%s", vrf, neighborIP, af)
-}
-
-// deleteBgpGlobalsConfig returns the delete entry for a BGP_GLOBALS entry.
-func deleteBgpGlobalsConfig(vrf string) []sonic.Entry {
-	return []sonic.Entry{{Table: "BGP_GLOBALS", Key: vrf}}
-}
-
-// deleteBgpGlobalsAFConfig returns the delete entry for a BGP_GLOBALS_AF entry.
-func deleteBgpGlobalsAFConfig(vrf, af string) []sonic.Entry {
-	return []sonic.Entry{{Table: "BGP_GLOBALS_AF", Key: BGPGlobalsAFKey(vrf, af)}}
-}
-
-// deleteRouteRedistributeConfig returns the delete entry for a ROUTE_REDISTRIBUTE entry.
-func deleteRouteRedistributeConfig(vrf, protocol, af string) []sonic.Entry {
-	return []sonic.Entry{{Table: "ROUTE_REDISTRIBUTE", Key: RouteRedistributeKey(vrf, protocol, af)}}
-}
-
-// updateDeviceMetadataConfig returns a DEVICE_METADATA entry for updating localhost fields.
-func updateDeviceMetadataConfig(fields map[string]string) sonic.Entry {
-	return sonic.Entry{Table: "DEVICE_METADATA", Key: "localhost", Fields: fields}
-}
-
-// createBgpNeighborAFConfig returns a BGP_NEIGHBOR_AF entry for a specific address family.
-func createBgpNeighborAFConfig(vrf, neighborIP, af string, fields map[string]string) sonic.Entry {
-	return sonic.Entry{Table: "BGP_NEIGHBOR_AF", Key: BGPNeighborAFKey(vrf, neighborIP, af), Fields: fields}
-}
-
-// ============================================================================
-// BGP Peer Group Config Functions (pure, no Node state)
-// ============================================================================
-
-// BGPPeerGroupKey returns the CONFIG_DB key for a BGP_PEER_GROUP entry.
-// Format: vrf|peer_group_name (e.g., "default|TRANSIT")
-func BGPPeerGroupKey(vrf, name string) string {
-	if vrf == "" {
-		vrf = "default"
-	}
-	return fmt.Sprintf("%s|%s", vrf, name)
-}
-
-// BGPPeerGroupAFKey returns the CONFIG_DB key for a BGP_PEER_GROUP_AF entry.
-// Format: vrf|peer_group_name|af (e.g., "default|TRANSIT|ipv4_unicast")
-func BGPPeerGroupAFKey(vrf, name, af string) string {
-	if vrf == "" {
-		vrf = "default"
-	}
-	return fmt.Sprintf("%s|%s|%s", vrf, name, af)
-}
-
-// CreateBGPPeerGroupConfig returns entries for a BGP_PEER_GROUP + BGP_PEER_GROUP_AF.
-// Peer groups are service-named templates: shared attributes live here, not on neighbors.
-// Per DESIGN_PRINCIPLES_NEWTRON.md §17 (BGP Peer Groups).
-func CreateBGPPeerGroupConfig(vrf, name string, afFields map[string]string) []sonic.Entry {
-	if vrf == "" {
-		vrf = "default"
-	}
-	entries := []sonic.Entry{
-		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, name), Fields: map[string]string{
-			"admin_status": "up",
-		}},
-		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, name, "ipv4_unicast"), Fields: util.MergeMaps(
-			map[string]string{"admin_status": "true"},
-			afFields,
-		)},
-	}
-	return entries
-}
-
-// UpdateBGPPeerGroupAF returns an update entry for a peer group's address-family fields.
-// Used when the peer group already exists but AF attributes (e.g., route maps) need updating.
-func UpdateBGPPeerGroupAF(vrf, name string, afFields map[string]string) sonic.Entry {
-	return sonic.Entry{
-		Table:  "BGP_PEER_GROUP_AF",
-		Key:    BGPPeerGroupAFKey(vrf, name, "ipv4_unicast"),
-		Fields: afFields,
-	}
-}
-
-// DeleteBGPPeerGroupConfig returns delete entries for a peer group and its AF entry.
-func DeleteBGPPeerGroupConfig(vrf, name string) []sonic.Entry {
-	if vrf == "" {
-		vrf = "default"
-	}
-	return []sonic.Entry{
-		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, name, "ipv4_unicast")},
-		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, name)},
-	}
-}
-
-// CreateEVPNPeerGroupConfig returns entries for the EVPN BGP_PEER_GROUP
-// used by overlay (loopback-to-loopback) BGP sessions. The only address family
-// is l2vpn_evpn — these peers exist solely for EVPN route exchange.
-// Shared attributes live on the group; individual neighbors carry only per-peer ASN.
-func CreateEVPNPeerGroupConfig(vrf, localAddr string, isEBGP bool) []sonic.Entry {
-	if vrf == "" {
-		vrf = "default"
-	}
-	pgFields := map[string]string{
-		"admin_status": "up",
-		"local_addr":   localAddr,
-	}
-	if isEBGP {
-		pgFields["ebgp_multihop"] = "true"
-	}
-
-	evpnFields := map[string]string{"admin_status": "true"}
-	if isEBGP {
-		evpnFields["nexthop_unchanged"] = "true" // Critical for eBGP overlay (RCA-026)
-	}
-
-	return []sonic.Entry{
-		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, "EVPN"), Fields: pgFields},
-		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, "EVPN", "l2vpn_evpn"), Fields: evpnFields},
-	}
-}
-
-// DeleteEVPNPeerGroupConfig returns delete entries for the EVPN peer group
-// and its AF entry. Reverse of CreateEVPNPeerGroupConfig.
-func DeleteEVPNPeerGroupConfig(vrf string) []sonic.Entry {
-	if vrf == "" {
-		vrf = "default"
-	}
-	return []sonic.Entry{
-		{Table: "BGP_PEER_GROUP_AF", Key: BGPPeerGroupAFKey(vrf, "EVPN", "l2vpn_evpn")},
-		{Table: "BGP_PEER_GROUP", Key: BGPPeerGroupKey(vrf, "EVPN")},
-	}
-}
-
-// BGPConfigured reports whether BGP_GLOBALS|default exists (a working frrcfgd instance).
-func (n *Node) BGPConfigured() bool { return n.configDB.BGPConfigured() }
+// BGPConfigured reports whether BGP is configured on this device.
+// Checks the device intent — BGP globals are created by SetupDevice.
+func (n *Node) BGPConfigured() bool { return n.GetIntent("device") != nil }
 
 // RemoveLegacyBGPEntries deletes bgpcfgd-format BGP_NEIGHBOR entries from
 // CONFIG_DB. These use the key format "BGP_NEIGHBOR|<ip>" (no VRF prefix),
@@ -360,9 +44,20 @@ func (n *Node) RemoveLegacyBGPEntries(ctx context.Context) (int, error) {
 }
 
 // BGPNeighborExists checks if a BGP neighbor exists.
-// Looks up using the SONiC key format: "default|<IP>" (vrf|neighborIP).
+// Checks overlay peers (evpn-peer|IP intents) and underlay peers
+// (interface|*|bgp-peer intents with matching neighbor_ip).
 func (n *Node) BGPNeighborExists(neighborIP string) bool {
-	return n.configDB.HasBGPNeighbor(fmt.Sprintf("default|%s", neighborIP))
+	// Overlay peers: evpn-peer|{ip}
+	if n.GetIntent("evpn-peer|"+neighborIP) != nil {
+		return true
+	}
+	// Underlay peers: interface|{name}|bgp-peer with neighbor_ip param
+	for _, intent := range n.IntentsByPrefix("interface|") {
+		if intent.Operation == "add-bgp-peer" && intent.Params["neighbor_ip"] == neighborIP {
+			return true
+		}
+	}
+	return false
 }
 
 // ============================================================================
@@ -399,9 +94,8 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	// frrcfgd flags (docker_routing_config_mode, frr_mgmt_framework_config)
 	// are NOT written here — they are infrastructure init set by:
 	//   - newtron init (manual)
-	//   - topology provisioner (GenerateDeviceComposite)
 	//   - newtlab boot patch (lab VMs)
-	// Connect() enforces frrcfgd as a precondition before any operation.
+	// ConnectTransport() enforces frrcfgd as a precondition before any operation.
 	e := updateDeviceMetadataConfig(map[string]string{
 		"bgp_asn": asnStr,
 		"type":    "LeafRouter",
@@ -417,7 +111,9 @@ func (n *Node) ConfigureBGP(ctx context.Context) (*ChangeSet, error) {
 	cs.Updates(CreateBGPGlobalsAFConfig("default", "ipv4_unicast", nil))
 	cs.Updates(CreateRouteRedistributeConfig("default", "connected", "ipv4"))
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Configured BGP (AS %d, router-id %s)", resolved.UnderlayASN, resolved.RouterID)
 	return cs, nil
 }
@@ -443,10 +139,10 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, d
 		return nil, fmt.Errorf("BGP peer %s already exists", neighborIP)
 	}
 
-	// EVPN peer group required (created by SetupVTEP).
-	// Shared attrs (local_addr, ebgp_multihop, nexthop_unchanged) inherited from group.
-	pgKey := BGPPeerGroupKey("default", "EVPN")
-	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
+	// EVPN peer group required (created by ConfigureBGPOverlay, called by SetupDevice with source_ip).
+	// Check device intent for source_ip — if present, SetupDevice ran ConfigureBGPOverlay which created the peer group.
+	deviceIntent := n.GetIntent("device")
+	if deviceIntent == nil || deviceIntent.Params["source_ip"] == "" {
 		return nil, fmt.Errorf("EVPN peer group does not exist; run setup-device with source_ip first")
 	}
 	config := CreateBGPNeighborConfig(neighborIP, asn, "", BGPNeighborOpts{
@@ -466,7 +162,9 @@ func (n *Node) AddBGPEVPNPeer(ctx context.Context, neighborIP string, asn int, d
 	if err := n.writeIntent(cs, sonic.OpAddBGPEVPNPeer, "evpn-peer|"+neighborIP, intentParams, []string{"device"}); err != nil {
 		return nil, err
 	}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 
 	util.WithDevice(n.name).Infof("Adding EVPN BGP peer %s (AS %d, update-source: %s)",
 		neighborIP, asn, n.resolved.LoopbackIP)
@@ -497,7 +195,7 @@ func (n *Node) RemoveBGPEVPNPeer(ctx context.Context, neighborIP string) (*Chang
 // Deletes ROUTE_REDISTRIBUTE, BGP_GLOBALS_AF (ipv4_unicast), BGP_GLOBALS,
 // and clears bgp_asn from DEVICE_METADATA.
 //
-// Does NOT touch l2vpn_evpn AF or EVPN neighbors (owned by TeardownVTEP).
+// Does NOT touch l2vpn_evpn AF or EVPN neighbors (owned by TeardownBGPOverlay).
 // Does NOT touch per-VRF BGP_GLOBALS (owned by UnbindIPVPN/DeleteVRF).
 func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 	if err := n.precondition("remove-bgp-globals", "bgp").Result(); err != nil {
@@ -519,6 +217,208 @@ func (n *Node) RemoveBGPGlobals(ctx context.Context) (*ChangeSet, error) {
 	e := updateDeviceMetadataConfig(map[string]string{"bgp_asn": ""})
 	cs.Update(e.Table, e.Key, e.Fields)
 
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Removed BGP globals")
+	return cs, nil
+}
+
+// ============================================================================
+// BGP Overlay (EVPN control plane)
+// ============================================================================
+
+// ConfigureBGPOverlay sets up the BGP EVPN control plane: l2vpn_evpn address-family,
+// EVPN peer group, and overlay BGP neighbors from the resolved profile.
+// Called by SetupDevice after SetupVXLAN to separate data-plane (VXLAN) from
+// control-plane (BGP EVPN) concerns.
+func (n *Node) ConfigureBGPOverlay(ctx context.Context, sourceIP string) (*ChangeSet, error) {
+	if err := n.precondition("configure-bgp-overlay", "bgp").Result(); err != nil {
+		return nil, err
+	}
+
+	resolved := n.Resolved()
+	if sourceIP == "" {
+		sourceIP = resolved.VTEPSourceIP
+	}
+	if sourceIP == "" {
+		return nil, fmt.Errorf("no VTEP source IP available (specify sourceIP or set loopback_ip in profile)")
+	}
+
+	cs := NewChangeSet(n.name, "device.configure-bgp-overlay")
+	cs.ReverseOp = "device.teardown-bgp-overlay"
+
+	// EVPN address-family on the default VRF's BGP instance.
+	// BGP_GLOBALS|default is already created by ConfigureBGP (called earlier
+	// in SetupDevice) with the correct extra fields (ebgp_requires_policy, etc.).
+	// We only add the l2vpn_evpn AF here — NOT a second BGP_GLOBALS|default
+	// write, which would overwrite ConfigureBGP's fields (hydrator replaces
+	// the full struct, so a write with nil extra strips the fields).
+	cs.Adds(CreateBGPGlobalsAFConfig("default", "l2vpn_evpn", map[string]string{
+		"advertise-all-vni": "true",
+	}))
+
+	// Create EVPN peer group — shared attributes for overlay sessions.
+	// eBGP determined by comparing local ASN against peer ASNs.
+	// Default to eBGP when no peers are configured (safe default for all-eBGP design).
+	isEBGP := true
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
+		if resolved.BGPNeighborASNs[rrIP] == resolved.UnderlayASN {
+			isEBGP = false // at least one iBGP peer — don't set ebgp_multihop
+			break
+		}
+	}
+	// Peer group creation is unconditional — render() handles upserts safely.
+	// SetupDevice guards cross-execution idempotency via GetIntent("device").
+	cs.Adds(CreateEVPNPeerGroupConfig("default", resolved.LoopbackIP, isEBGP))
+
+	// Add overlay peers from profile
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
+
+		// Use peer's ASN for eBGP overlay (all-eBGP design; docs/rca/026-bgp-all-ebgp-design.md).
+		peerASN := resolved.BGPNeighborASNs[rrIP]
+		if peerASN == 0 {
+			return nil, fmt.Errorf("no ASN found for EVPN peer %s", rrIP)
+		}
+
+		if n.BGPNeighborExists(rrIP) {
+			// Neighbor exists (e.g., provisioner created it without EVPN AF).
+			// Ensure the l2vpn_evpn AF entry is present — Add is
+			// idempotent so this is safe even if it already exists.
+			cs.Adds([]sonic.Entry{createBgpNeighborAFConfig("default", rrIP, "l2vpn_evpn", map[string]string{"admin_status": "true"})})
+		} else {
+			// Neighbor references EVPN peer group — shared attrs
+			// (local_addr, ebgp_multihop, nexthop_unchanged) inherited.
+			cs.Adds(CreateBGPNeighborConfig(rrIP, peerASN, "", BGPNeighborOpts{
+				PeerGroup:    "EVPN",
+				ActivateEVPN: true,
+			}))
+		}
+	}
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Configured BGP overlay (source IP %s, %d peers)", sourceIP, len(resolved.BGPNeighbors))
+	return cs, nil
+}
+
+// TeardownBGPOverlay removes the BGP EVPN control plane: overlay neighbors,
+// EVPN peer group, and l2vpn_evpn address-family.
+// This is the reverse of ConfigureBGPOverlay.
+func (n *Node) TeardownBGPOverlay(ctx context.Context) (*ChangeSet, error) {
+	if err := n.precondition("teardown-bgp-overlay", "bgp").Result(); err != nil {
+		return nil, err
+	}
+
+	resolved := n.Resolved()
+	cs := NewChangeSet(n.name, "device.teardown-bgp-overlay")
+
+	// Remove BGP EVPN overlay neighbors and their address-family entries
+	for _, rrIP := range resolved.BGPNeighbors {
+		if rrIP == resolved.LoopbackIP {
+			continue
+		}
+		cs.Deletes(DeleteBGPNeighborConfig("default", rrIP))
+	}
+
+	// Remove EVPN peer group (after all neighbors that reference it)
+	cs.Deletes(DeleteEVPNPeerGroupConfig("default"))
+
+	// Remove L2VPN EVPN address-family
+	cs.Deletes(CreateBGPGlobalsAFConfig("default", "l2vpn_evpn", nil))
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Tore down BGP overlay (%d neighbors removed)", len(resolved.BGPNeighbors))
+	return cs, nil
+}
+
+// ============================================================================
+// Route Reflector Configuration
+// ============================================================================
+
+// RouteReflectorPeer describes a BGP peer for route reflector configuration.
+type RouteReflectorPeer struct {
+	IP  string // Loopback IP of the peer
+	ASN int    // Autonomous system number
+}
+
+// RouteReflectorOpts holds configuration for ConfigureRouteReflector.
+type RouteReflectorOpts struct {
+	ClusterID string               // RR cluster ID
+	LocalASN  int                  // RR's own ASN
+	RouterID  string               // RR's router ID
+	LocalAddr string               // Local address for eBGP multihop (loopback IP)
+	Clients   []RouteReflectorPeer // RR clients (IPv4 unicast, RR-client)
+	Peers     []RouteReflectorPeer // RR-to-RR peers (IPv4+IPv6+EVPN, RR-client)
+}
+
+// ConfigureRouteReflector configures this node as a BGP route reflector.
+// Sets BGP globals with RR-specific settings, creates eBGP neighbors for
+// all clients (IPv4 unicast) and peers (IPv4+IPv6+EVPN), and enables
+// IPv6 route redistribution.
+func (n *Node) ConfigureRouteReflector(ctx context.Context, opts RouteReflectorOpts) (*ChangeSet, error) {
+	if err := n.precondition("configure-route-reflector", "bgp").Result(); err != nil {
+		return nil, err
+	}
+	if opts.LocalASN == 0 {
+		return nil, fmt.Errorf("route reflector requires local ASN")
+	}
+	if opts.ClusterID == "" {
+		return nil, fmt.Errorf("route reflector requires cluster ID")
+	}
+
+	cs := NewChangeSet(n.name, "device.configure-route-reflector")
+
+	// BGP globals with RR-specific settings
+	cs.Adds(CreateBGPGlobalsConfig("default", opts.LocalASN, opts.RouterID, map[string]string{
+		"rr_cluster_id":         opts.ClusterID,
+		"load_balance_mp_relax": "true",
+		"ebgp_requires_policy":  "false",
+		"suppress_fib_pending":  "false",
+		"log_neighbor_changes":  "true",
+	}))
+
+	// RR clients: IPv4 unicast only, RR-client flag
+	for _, client := range opts.Clients {
+		cs.Adds(CreateBGPNeighborConfig(client.IP, client.ASN, opts.LocalAddr, BGPNeighborOpts{
+			EBGPMultihop: true,
+			ActivateIPv4: true,
+			RRClient:     true,
+			NextHopSelf:  true,
+		}))
+	}
+
+	// RR-to-RR peers: full AF set (IPv4+IPv6+EVPN), RR-client
+	for _, peer := range opts.Peers {
+		cs.Adds(CreateBGPNeighborConfig(peer.IP, peer.ASN, opts.LocalAddr, BGPNeighborOpts{
+			EBGPMultihop:    true,
+			ActivateIPv4:    true,
+			RRClient:        true,
+			NextHopSelf:     true,
+			ActivateIPv6:    true,
+			RRClientIPv6:    true,
+			NextHopSelfIPv6: true,
+			ActivateEVPN:    true,
+			RRClientEVPN:    true,
+		}))
+	}
+
+	// IPv6 route redistribution for RR
+	cs.Adds(CreateRouteRedistributeConfig("default", "connected", "ipv6"))
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
+	util.WithDevice(n.name).Infof("Configured route reflector (cluster=%s, %d clients, %d peers)",
+		opts.ClusterID, len(opts.Clients), len(opts.Peers))
 	return cs, nil
 }

@@ -93,7 +93,8 @@ const (
 	OpApplyQoS              = "apply-qos"
 	OpAddACLRule            = "add-acl-rule"
 	OpAddPortChannelMember  = "add-pc-member"
-	OpInterfaceInit         = "interface-init" // Auto-created interface intent for sub-resource ops
+	OpInterfaceInit         = "interface-init"
+	OpDeployService         = "deploy-service"
 )
 
 // Intent param field names — shared across intent construction, teardown reads,
@@ -432,8 +433,10 @@ type BGPGlobalsAFEntry struct {
 	RTExportEVPN       string `json:"route_target_export_evpn,omitempty"`
 
 	// v3: frrcfgd extended fields
-	MaxEBGPPaths string `json:"max_ebgp_paths,omitempty"`
-	MaxIBGPPaths string `json:"max_ibgp_paths,omitempty"`
+	MaxEBGPPaths           string `json:"max_ebgp_paths,omitempty"`
+	MaxIBGPPaths           string `json:"max_ibgp_paths,omitempty"`
+	RedistributeConnected  string `json:"redistribute_connected,omitempty"`
+	RedistributeStatic     string `json:"redistribute_static,omitempty"`
 }
 
 // BGPGlobalsEVPNRTEntry represents a per-VRF EVPN route-target entry (frrcfgd managed).
@@ -469,12 +472,13 @@ type BGPNeighborEntry struct {
 // BGPNeighborAFEntry represents per-neighbor address-family settings
 // Key format: "neighbor_ip|address_family" (e.g., "10.0.0.2|l2vpn_evpn")
 type BGPNeighborAFEntry struct {
-	Activate             string `json:"activate,omitempty"`
-	RouteReflectorClient string `json:"route_reflector_client,omitempty"`
-	NextHopSelf          string `json:"next_hop_self,omitempty"`
-	SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
+	AdminStatus         string `json:"admin_status,omitempty"`
+	RRClient            string `json:"rrclient,omitempty"`
+	NHSelf              string `json:"nhself,omitempty"`
+	NextHopUnchanged    string `json:"nexthop_unchanged,omitempty"`
+	SoftReconfiguration string `json:"soft_reconfiguration,omitempty"`
 
-	// v3: frrcfgd extended fields
+	// frrcfgd extended fields
 	AllowASIn        string `json:"allowas_in,omitempty"`
 	RouteMapIn       string `json:"route_map_in,omitempty"`
 	RouteMapOut      string `json:"route_map_out,omitempty"`
@@ -583,23 +587,25 @@ type RouteMapEntry struct {
 // BGPPeerGroupEntry represents a BGP peer group template.
 // Key format: peer_group_name (e.g., "SPINE_PEERS")
 type BGPPeerGroupEntry struct {
-	ASN         string `json:"asn,omitempty"`
-	LocalAddr   string `json:"local_addr,omitempty"`
-	AdminStatus string `json:"admin_status,omitempty"`
-	HoldTime    string `json:"holdtime,omitempty"`
-	Keepalive   string `json:"keepalive,omitempty"`
-	Password    string `json:"password,omitempty"`
+	ASN          string `json:"asn,omitempty"`
+	LocalAddr    string `json:"local_addr,omitempty"`
+	AdminStatus  string `json:"admin_status,omitempty"`
+	HoldTime     string `json:"holdtime,omitempty"`
+	Keepalive    string `json:"keepalive,omitempty"`
+	Password     string `json:"password,omitempty"`
+	EBGPMultihop string `json:"ebgp_multihop,omitempty"`
 }
 
 // BGPPeerGroupAFEntry represents per-AF settings for a peer group.
 // Key format: "peer_group_name|address_family" (e.g., "SPINE_PEERS|ipv4_unicast")
 type BGPPeerGroupAFEntry struct {
-	Activate             string `json:"activate,omitempty"`
-	RouteReflectorClient string `json:"route_reflector_client,omitempty"`
-	NextHopSelf          string `json:"next_hop_self,omitempty"`
-	RouteMapIn           string `json:"route_map_in,omitempty"`
-	RouteMapOut          string `json:"route_map_out,omitempty"`
-	SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
+	AdminStatus         string `json:"admin_status,omitempty"`
+	RRClient            string `json:"rrclient,omitempty"`
+	NHSelf              string `json:"nhself,omitempty"`
+	NextHopUnchanged    string `json:"nexthop_unchanged,omitempty"`
+	RouteMapIn          string `json:"route_map_in,omitempty"`
+	RouteMapOut         string `json:"route_map_out,omitempty"`
+	SoftReconfiguration string `json:"soft_reconfiguration,omitempty"`
 }
 
 // PrefixSetEntry represents an IP prefix list entry for route-map matching.
@@ -619,197 +625,32 @@ type CommunitySetEntry struct {
 }
 
 // ============================================================================
-// Shadow ConfigDB Updates (for offline/abstract mode)
+// Projection Updates (for offline/abstract mode)
 // ============================================================================
 
 // ApplyEntries updates the ConfigDB's typed maps from a slice of entries.
-// Used by abstract Node to keep the shadow ConfigDB in sync as operations
+// Used by abstract Node to keep the projection in sync as operations
 // generate entries. Only tables needed for precondition checks and property
 // accessors are handled — unrecognized tables are silently skipped (entries
 // still accumulate in the abstract Node for composite export).
 func (db *ConfigDB) ApplyEntries(entries []Entry) {
 	for _, e := range entries {
-		db.applyEntry(e.Table, e.Key, e.Fields)
+		db.hydrateConfigTable(e.Table, e.Key, e.Fields)
 	}
 }
 
-func (db *ConfigDB) applyEntry(table, key string, fields map[string]string) {
-	switch table {
-	case "PORT":
-		db.Port[key] = PortEntry{
-			AdminStatus: fields["admin_status"],
-			MTU:         fields["mtu"],
-			Speed:       fields["speed"],
-			Alias:       fields["alias"],
-			Description: fields["description"],
-			Index:       fields["index"],
-			Lanes:       fields["lanes"],
-		}
-	case "PORTCHANNEL":
-		db.PortChannel[key] = PortChannelEntry{
-			AdminStatus: fields["admin_status"],
-			MTU:         fields["mtu"],
-			MinLinks:    fields["min_links"],
-			Fallback:    fields["fallback"],
-			FastRate:    fields["fast_rate"],
-		}
-	case "PORTCHANNEL_MEMBER":
-		db.PortChannelMember[key] = fields
-	case "VLAN":
-		db.VLAN[key] = VLANEntry{
-			VLANID:      fields["vlanid"],
-			Description: fields["description"],
-		}
-	case "VLAN_MEMBER":
-		db.VLANMember[key] = VLANMemberEntry{TaggingMode: fields["tagging_mode"]}
-	case "VRF":
-		db.VRF[key] = VRFEntry{VNI: fields["vni"]}
-	case "INTERFACE":
-		db.Interface[key] = InterfaceEntry{VRFName: fields["vrf_name"]}
-	case "VLAN_INTERFACE":
-		db.VLANInterface[key] = fields
-	case "VXLAN_TUNNEL":
-		db.VXLANTunnel[key] = VXLANTunnelEntry{SrcIP: fields["src_ip"]}
-	case "VXLAN_TUNNEL_MAP":
-		db.VXLANTunnelMap[key] = VXLANMapEntry{
-			VLAN: fields["vlan"],
-			VRF:  fields["vrf"],
-			VNI:  fields["vni"],
-		}
-	case "VXLAN_EVPN_NVO":
-		db.VXLANEVPNNVO[key] = EVPNNVOEntry{SourceVTEP: fields["source_vtep"]}
-	case "BGP_GLOBALS":
-		db.BGPGlobals[key] = BGPGlobalsEntry{
-			LocalASN: fields["local_asn"],
-			RouterID: fields["router_id"],
-		}
-	case "BGP_NEIGHBOR":
-		db.BGPNeighbor[key] = BGPNeighborEntry{
-			ASN:          fields["asn"],
-			LocalAddr:    fields["local_addr"],
-			AdminStatus:  fields["admin_status"],
-			EBGPMultihop: fields["ebgp_multihop"],
-			PeerGroup:    fields["peer_group_name"],
-		}
-	case "BGP_NEIGHBOR_AF":
-		db.BGPNeighborAF[key] = BGPNeighborAFEntry{
-			Activate:             fields["admin_status"],
-			RouteReflectorClient: fields["rrclient"],
-			NextHopSelf:          fields["nhself"],
-		}
-	case "BGP_GLOBALS_AF":
-		db.BGPGlobalsAF[key] = BGPGlobalsAFEntry{
-			AdvertiseAllVNI: fields["advertise-all-vni"],
-			AdvertiseIPv4:   fields["advertise_ipv4_unicast"],
-		}
-	case "DEVICE_METADATA":
-		db.DeviceMetadata[key] = copyFields(fields)
-	case "NEWTRON_INTENT":
-		db.NewtronIntent[key] = copyFields(fields)
-	case "SUPPRESS_VLAN_NEIGH":
-		db.SuppressVLANNeigh[key] = copyFields(fields)
-	case "ACL_TABLE":
-		db.ACLTable[key] = ACLTableEntry{
-			Type:  fields["type"],
-			Ports: fields["ports"],
-			Stage: fields["stage"],
-		}
-	case "LOOPBACK_INTERFACE":
-		db.LoopbackInterface[key] = copyFields(fields)
-	case "ROUTE_REDISTRIBUTE":
-		db.RouteRedistribute[key] = RouteRedistributeEntry{RouteMap: fields["route_map"]}
-	case "SAG_GLOBAL":
-		db.SAGGlobal[key] = copyFields(fields)
-	case "ROUTE_MAP":
-		db.RouteMap[key] = RouteMapEntry{
-			Action: fields["route_operation"],
-			MatchPrefixSet: fields["match_prefix_set"],
-			MatchCommunity: fields["match_community"],
-			SetLocalPref:   fields["set_local_pref"],
-			SetCommunity:   fields["set_community"],
-			SetMED:         fields["set_med"],
-		}
-	case "PREFIX_SET":
-		db.PrefixSet[key] = PrefixSetEntry{
-			IPPrefix: fields["ip_prefix"],
-			Action:   fields["action"],
-		}
-	case "COMMUNITY_SET":
-		db.CommunitySet[key] = CommunitySetEntry{
-			SetType:         fields["set_type"],
-			MatchAction:     fields["match_action"],
-			CommunityMember: fields["community_member"],
-		}
-	case "BGP_PEER_GROUP":
-		db.BGPPeerGroup[key] = BGPPeerGroupEntry{
-			AdminStatus: fields["admin_status"],
-			LocalAddr:   fields["local_addr"],
-		}
-	case "BGP_PEER_GROUP_AF":
-		db.BGPPeerGroupAF[key] = BGPPeerGroupAFEntry{
-			RouteMapIn:  fields["route_map_in"],
-			RouteMapOut: fields["route_map_out"],
-		}
-	case "ACL_RULE":
-		db.ACLRule[key] = ACLRuleEntry{
-			Priority:     fields["PRIORITY"],
-			PacketAction: fields["PACKET_ACTION"],
-			SrcIP:        fields["SRC_IP"],
-			DstIP:        fields["DST_IP"],
-			IPProtocol:   fields["IP_PROTOCOL"],
-			L4SrcPort:    fields["L4_SRC_PORT"],
-			L4DstPort:    fields["L4_DST_PORT"],
-		}
-	case "BGP_EVPN_VNI":
-		db.BGPEVPNVNI[key] = BGPEVPNVNIEntry{
-			RD:                 fields["rd"],
-			RTImport:           fields["route_target_import"],
-			RTExport:           fields["route_target_export"],
-			AdvertiseDefaultGW: fields["advertise_default_gw"],
-		}
-	case "BGP_GLOBALS_EVPN_RT":
-		db.BGPGlobalsEVPNRT[key] = BGPGlobalsEVPNRTEntry{
-			RouteTargetType: fields["route-target-type"],
-		}
-	case "STATIC_ROUTE":
-		db.StaticRoute[key] = copyFields(fields)
-	case "PORT_QOS_MAP":
-		db.PortQoSMap[key] = PortQoSMapEntry{
-			DSCPToTCMap:  fields["dscp_to_tc_map"],
-			TCToQueueMap: fields["tc_to_queue_map"],
-		}
-	case "QUEUE":
-		db.Queue[key] = QueueEntry{
-			Scheduler:   fields["scheduler"],
-			WREDProfile: fields["wred_profile"],
-		}
-	case "DSCP_TO_TC_MAP":
-		db.DSCPToTCMap[key] = copyFields(fields)
-	case "TC_TO_QUEUE_MAP":
-		db.TCToQueueMap[key] = copyFields(fields)
-	case "SCHEDULER":
-		db.Scheduler[key] = SchedulerEntry{
-			Type:   fields["type"],
-			Weight: fields["weight"],
-		}
-	case "WRED_PROFILE":
-		db.WREDProfile[key] = WREDProfileEntry{
-			GreenMinThreshold:     fields["green_min_threshold"],
-			GreenMaxThreshold:     fields["green_max_threshold"],
-			GreenDropProbability:  fields["green_drop_probability"],
-			YellowMinThreshold:    fields["yellow_min_threshold"],
-			YellowMaxThreshold:    fields["yellow_max_threshold"],
-			YellowDropProbability: fields["yellow_drop_probability"],
-			RedMinThreshold:       fields["red_min_threshold"],
-			RedMaxThreshold:       fields["red_max_threshold"],
-			RedDropProbability:    fields["red_drop_probability"],
-		}
-	// Tables not needed for preconditions: silently skip
+// hydrateConfigTable populates the ConfigDB from a flat field map using the
+// unified configTableHydrators registry. This is the single code path for
+// both physical nodes (Redis HGETALL → struct) and abstract nodes (Entry
+// fields → projection struct).
+func (db *ConfigDB) hydrateConfigTable(table, key string, fields map[string]string) {
+	if hydrator, ok := configTableHydrators[table]; ok {
+		hydrator(db, key, fields)
 	}
 }
 
 // DeleteEntry removes an entry from the ConfigDB by table and key.
-// Used by applyShadow to keep the shadow consistent when processing deletes.
+// Used by render to keep the projection consistent when processing deletes.
 func (db *ConfigDB) DeleteEntry(table, key string) {
 	switch table {
 	case "PORT":
@@ -874,6 +715,10 @@ func (db *ConfigDB) DeleteEntry(table, key string) {
 		delete(db.BGPGlobalsEVPNRT, key)
 	case "STATIC_ROUTE":
 		delete(db.StaticRoute, key)
+	case "ROUTE_TABLE":
+		delete(db.RouteTable, key)
+	case "SAG":
+		delete(db.SAG, key)
 	case "PORT_QOS_MAP":
 		delete(db.PortQoSMap, key)
 	case "QUEUE":
@@ -915,15 +760,14 @@ func (db *ConfigDB) ExportEntries() []Entry {
 
 	appendTyped := func(table string, key string, v any) {
 		fields := structToFields(v)
-		if len(fields) > 0 {
-			entries = append(entries, Entry{Table: table, Key: key, Fields: fields})
-		}
+		// Export even with empty fields — SONiC uses field-less entries for
+		// IP assignments (INTERFACE|Eth0|10.0.0.1/31), portchannel members,
+		// etc. The delivery layer writes NULL:NULL sentinels for these.
+		entries = append(entries, Entry{Table: table, Key: key, Fields: fields})
 	}
 
 	appendRaw := func(table string, key string, fields map[string]string) {
-		if len(fields) > 0 {
-			entries = append(entries, Entry{Table: table, Key: key, Fields: copyFields(fields)})
-		}
+		entries = append(entries, Entry{Table: table, Key: key, Fields: copyFields(fields)})
 	}
 
 	// Raw maps
@@ -1060,6 +904,19 @@ func (db *ConfigDB) ExportPorts() map[string]map[string]string {
 	return result
 }
 
+// ExportRaw converts the ConfigDB to a RawConfigDB for drift detection.
+// Equivalent to the former CompositeConfig.Tables — same data, built from ExportEntries.
+func (db *ConfigDB) ExportRaw() RawConfigDB {
+	raw := make(RawConfigDB)
+	for _, e := range db.ExportEntries() {
+		if raw[e.Table] == nil {
+			raw[e.Table] = make(map[string]map[string]string)
+		}
+		raw[e.Table][e.Key] = e.Fields
+	}
+	return raw
+}
+
 // copyFields returns a shallow copy of the map (avoids aliasing caller's map).
 func copyFields(fields map[string]string) map[string]string {
 	if fields == nil {
@@ -1130,9 +987,7 @@ func (c *ConfigDBClient) GetAll() (*ConfigDB, error) {
 }
 
 func (c *ConfigDBClient) parseEntry(db *ConfigDB, table, entry string, vals map[string]string) {
-	if parser, ok := tableParsers[table]; ok {
-		parser(db, entry, vals)
-	}
+	db.hydrateConfigTable(table, entry, vals)
 }
 
 // Set writes a table entry. If fields is empty, a "NULL":"NULL" sentinel is

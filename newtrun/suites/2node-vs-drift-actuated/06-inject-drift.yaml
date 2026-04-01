@@ -1,0 +1,30 @@
+name: inject-drift
+description: |
+  Inject external CONFIG_DB drift on switch1 via direct redis-cli writes.
+  This simulates an out-of-band change — someone (or another tool) modified
+  CONFIG_DB without going through the intent system.
+
+  Injects a rogue VLAN (Vlan999) that has no corresponding NEWTRON_INTENT
+  record. The actuated projection (built from device intents) won't include
+  it, so drift detection will flag it as "extra".
+topology: 2node-vs-service
+requires: [verify-actuated-clean]
+
+steps:
+  # Inject a rogue VLAN directly into Redis — no intent record
+  - name: inject-rogue-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"}
+    expect:
+      jq: '.output | contains("1")'
+
+  # Verify the rogue VLAN exists on the device
+  - name: verify-rogue-vlan-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan999
+    expect:
+      jq: '.vlanid == "999"'

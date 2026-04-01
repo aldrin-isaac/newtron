@@ -1,0 +1,140 @@
+name: save-roundtrip
+description: |
+  Save round-trip fidelity: tree structure (params, ordering) survives
+  save → reload.
+
+  Architecture §6 (Save): "Save() → Tree() → ordered intent steps →
+  update topology.json → persist." Architecture §6 (Reload): "Destroys
+  the current node and rebuilds from topology.json."
+
+  This tests that Save captures all intent parameters and ordering, and
+  Reload reconstructs the exact same tree. The round-trip must be lossless
+  for the intent-first architecture to work — topology.json is the durable
+  intent store, and any loss means a different projection after reload.
+
+  Tests that:
+  1. Create intents with specific params (VLAN + VRF in actuated mode)
+  2. Save intents
+  3. Reload from saved topology.json
+  4. Verify tree has same intents with same params and ordering
+topology: 1node-vs
+requires: [nonowned-survive]
+
+steps:
+  # Create a VLAN with specific params
+  - name: create-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 123, description: "arch-test-roundtrip"}
+
+  # Create a VRF
+  - name: create-vrf
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vrf
+    params: {name: Vrf_ROUNDTRIP}
+
+  # Capture the pre-save tree
+  - name: tree-before-save
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: >-
+        .steps | any(.[]; .url == "/setup-device")
+        and any(.[]; .url == "/create-vlan")
+        and any(.[]; .url == "/create-vrf")
+
+  # Save actuated intents to topology.json
+  - name: save-intents
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save
+
+  # Reload from topology.json — rebuild from the saved file
+  - name: reload-from-saved
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Verify tree after reload matches: same intents present
+  - name: tree-after-reload-has-intents
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        .steps | any(.[]; .url == "/setup-device")
+        and any(.[]; .url == "/create-vlan")
+        and any(.[]; .url == "/create-vrf")
+
+  # Verify VLAN params survived round-trip: the create-vlan step should
+  # have the original params (id: 123)
+  - name: verify-vlan-params-survived
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        [.steps[] | select(.url == "/create-vlan")]
+        | length == 1
+        and .[0].params.vlan_id == "123"
+
+  # Verify VRF params survived
+  - name: verify-vrf-params-survived
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        [.steps[] | select(.url == "/create-vrf")]
+        | length == 1
+        and .[0].params.name == "Vrf_ROUNDTRIP"
+
+  # Verify ordering: setup-device comes before create-vlan and create-vrf
+  # (topological sort: device is parent of vlan and vrf)
+  - name: verify-ordering
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        (.steps | to_entries
+          | (map(select(.value.url == "/setup-device")) | .[0].key) as $setup
+          | (map(select(.value.url == "/create-vlan")) | .[0].key) as $vlan
+          | (map(select(.value.url == "/create-vrf")) | .[0].key) as $vrf
+          | $setup < $vlan and $setup < $vrf)
+
+  # Cleanup: delete the test intents in actuated mode
+  - name: delete-vrf
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vrf
+    params: {name: Vrf_ROUNDTRIP}
+
+  - name: delete-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 123}
+
+  # Save cleaned-up state
+  - name: save-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save
+
+  # Reload to sync topology node
+  - name: reload-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology

@@ -189,7 +189,12 @@ func TestSetIP(t *testing.T) {
 func TestSetIP_VRFBound(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
-	d.configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
+	// VRF() reads from intent DB (Phase 2: intent-based reads).
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"vrf":       "Vrf_CUST1",
+	}
 	ctx := context.Background()
 
 	cs, err := intf.SetIP(ctx, "10.1.0.0/31")
@@ -219,6 +224,8 @@ func TestSetIP_Invalid(t *testing.T) {
 func TestSetVRF(t *testing.T) {
 	d, intf := testInterface()
 	d.configDB.VRF["Vrf_CUST1"] = sonic.VRFEntry{}
+	// VRF intent required for the VRFExists check (intent-first)
+	d.configDB.NewtronIntent["vrf|Vrf_CUST1"] = map[string]string{"op": "create-vrf", "name": "Vrf_CUST1"}
 	ctx := context.Background()
 
 	cs, err := intf.SetVRF(ctx, "Vrf_CUST1")
@@ -254,6 +261,13 @@ func TestBindACL(t *testing.T) {
 		"operation": "create-acl",
 		"state":     "actuated",
 	}
+	// Existing binding intent for Ethernet4 (already bound to this ACL)
+	d.configDB.NewtronIntent["interface|Ethernet4|acl|ingress"] = map[string]string{
+		"operation": "bind-acl",
+		"acl_name":  "EDGE_IN",
+		"direction": "ingress",
+		"state":     "actuated",
+	}
 	ctx := context.Background()
 
 	cs, err := intf.BindACL(ctx, "EDGE_IN", "ingress")
@@ -262,7 +276,7 @@ func TestBindACL(t *testing.T) {
 	}
 
 	c := assertChange(t, cs, "ACL_TABLE", "EDGE_IN", ChangeModify)
-	assertField(t, c, "ports", "Ethernet4,Ethernet0")
+	assertField(t, c, "ports", "Ethernet0,Ethernet4")
 	assertField(t, c, "stage", "ingress")
 	assertChange(t, cs, "NEWTRON_INTENT", "interface|Ethernet0|acl|ingress", ChangeAdd)
 }
@@ -300,7 +314,12 @@ func TestBindACL_EmptyBindingList(t *testing.T) {
 
 func TestAddBGPPeer(t *testing.T) {
 	d, intf := testInterface()
-	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
+	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"ip":        "10.1.0.0/31",
+	}
 	// BGP must be configured
 	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "64512"}
 	ctx := context.Background()
@@ -366,6 +385,7 @@ func TestRemoveBGPPeer(t *testing.T) {
 func TestInterface_NotConnected(t *testing.T) {
 	_, intf := testInterface()
 	intf.node.connected = false
+	intf.node.actuatedIntent = true // online mode: connected checks are enforced
 	ctx := context.Background()
 
 	ops := []struct {
@@ -396,8 +416,12 @@ func TestInterface_NotConnected(t *testing.T) {
 
 func TestInterface_PortChannelMemberBlocksConfig(t *testing.T) {
 	d, intf := testInterface()
-	// Make Ethernet0 a PortChannel member
-	d.configDB.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
+	// Make Ethernet0 a PortChannel member (via intent DB — Phase 2: intent-based reads).
+	d.configDB.NewtronIntent["portchannel|PortChannel100|Ethernet0"] = map[string]string{
+		"operation": "add-portchannel-member",
+		"state":     "actuated",
+		"name":      "Ethernet0",
+	}
 	ctx := context.Background()
 
 	// SetIP should fail for PortChannel member
@@ -484,12 +508,17 @@ func TestRoundTrip_ConfigureUnconfigureInterface_Routed(t *testing.T) {
 func TestRoundTrip_AddRemoveBGPPeer(t *testing.T) {
 	// Use a connected node so that the BGP neighbor written by AddBGPPeer is
 	// visible in configDB when RemoveBGPPeer checks preconditions.
-	// (AddBGPPeer uses buildChangeSet without applyShadow — correct for connected
+	// (AddBGPPeer uses buildChangeSet without render — correct for connected
 	// nodes where ChangeSets are applied to Redis separately.)
 	d, intf := testInterface()
 	ctx := context.Background()
 
-	d.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
+	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
+	d.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"ip":        "10.1.0.0/31",
+	}
 	d.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
 
 	cs1, err := intf.AddBGPPeer(ctx, DirectBGPPeerConfig{
@@ -529,9 +558,14 @@ func TestRoundTrip_BindUnbindACL(t *testing.T) {
 		t.Fatalf("CreateACL: %v", err)
 	}
 
-	// Create interface intent (parent for ACL binding) via AddBGPPeer
+	// Create interface intent (parent for ACL binding) via AddBGPPeer.
+	// IPAddresses reads from intent DB (Phase 2: intent-based reads).
 	n.configDB.DeviceMetadata["localhost"] = map[string]string{"bgp_asn": "65001"}
-	n.configDB.Interface["Ethernet0|10.1.0.0/31"] = sonic.InterfaceEntry{}
+	n.configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"ip":        "10.1.0.0/31",
+	}
 	iface, err := n.GetInterface("Ethernet0")
 	if err != nil {
 		t.Fatalf("GetInterface: %v", err)

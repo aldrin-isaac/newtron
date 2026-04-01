@@ -1,0 +1,39 @@
+name: verify-unblocked
+description: |
+  After reconcile, the drift guard must pass — writes succeed again.
+  This completes the cycle: clean → drift → blocked → reconcile → clean.
+topology: 2node-vs-service
+requires: [reconcile]
+
+steps:
+  # Create a VLAN — must succeed (drift guard passes on clean device)
+  - name: create-vlan-after-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 800}
+
+  # Verify it exists
+  - name: verify-vlan800
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan800
+    expect:
+      jq: '.vlanid == "800"'
+
+  # Drift still clean — the new VLAN has a matching intent
+  - name: verify-drift-still-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Clean up
+  - name: delete-vlan-800
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 800}

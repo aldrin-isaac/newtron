@@ -27,11 +27,11 @@ func NewPreconditionChecker(d *Node, operation, resource string) *PreconditionCh
 
 // precondition returns a PreconditionChecker with RequireConnected + RequireLocked
 // already called, since every write op needs both. This replaces requireWritable(d).
-// In offline mode, connected/locked checks are skipped — the shadow ConfigDB serves
+// In offline mode, connected/locked checks are skipped — the projection serves
 // as the precondition state.
 func (n *Node) precondition(operation, resource string) *PreconditionChecker {
 	pc := NewPreconditionChecker(n, operation, resource)
-	if !n.offline {
+	if n.actuatedIntent {
 		pc.RequireConnected().RequireLocked()
 	}
 	return pc
@@ -75,9 +75,9 @@ func (p *PreconditionChecker) RequireInterfaceNotPortChannelMember(name string) 
 	return p
 }
 
-// RequireVLANExists checks that a VLAN exists
+// RequireVLANExists checks that a VLAN exists by checking the intent DB.
 func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker {
-	if !p.node.VLANExists(id) {
+	if p.node.GetIntent(fmt.Sprintf("vlan|%d", id)) == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VLAN must exist",
 			fmt.Sprintf("VLAN %d not found - create it first", id)))
@@ -85,9 +85,9 @@ func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker {
 	return p
 }
 
-// RequireVLANNotExists checks that a VLAN does not exist
+// RequireVLANNotExists checks that a VLAN does not exist by checking the intent DB.
 func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker {
-	if p.node.VLANExists(id) {
+	if p.node.GetIntent(fmt.Sprintf("vlan|%d", id)) != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VLAN must not exist",
 			fmt.Sprintf("VLAN %d already exists", id)))
@@ -95,9 +95,9 @@ func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker 
 	return p
 }
 
-// RequireVRFExists checks that a VRF exists
+// RequireVRFExists checks that a VRF exists by checking the intent DB.
 func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker {
-	if !p.node.VRFExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("vrf|%s", name)) == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VRF must exist",
 			fmt.Sprintf("VRF '%s' not found - create it first", name)))
@@ -105,9 +105,9 @@ func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker
 	return p
 }
 
-// RequireVRFNotExists checks that a VRF does not exist
+// RequireVRFNotExists checks that a VRF does not exist by checking the intent DB.
 func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChecker {
-	if p.node.VRFExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("vrf|%s", name)) != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VRF must not exist",
 			fmt.Sprintf("VRF '%s' already exists", name)))
@@ -115,9 +115,9 @@ func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChec
 	return p
 }
 
-// RequirePortChannelExists checks that a PortChannel exists
+// RequirePortChannelExists checks that a PortChannel exists by checking the intent DB.
 func (p *PreconditionChecker) RequirePortChannelExists(name string) *PreconditionChecker {
-	if !p.node.PortChannelExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("portchannel|%s", name)) == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "PortChannel must exist",
 			fmt.Sprintf("PortChannel '%s' not found - create it first", name)))
@@ -125,9 +125,9 @@ func (p *PreconditionChecker) RequirePortChannelExists(name string) *Preconditio
 	return p
 }
 
-// RequirePortChannelNotExists checks that a PortChannel does not exist
+// RequirePortChannelNotExists checks that a PortChannel does not exist by checking the intent DB.
 func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *PreconditionChecker {
-	if p.node.PortChannelExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("portchannel|%s", name)) != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "PortChannel must not exist",
 			fmt.Sprintf("PortChannel '%s' already exists", name)))
@@ -135,9 +135,12 @@ func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *Precondi
 	return p
 }
 
-// RequireVTEPConfigured checks that VTEP is configured (for EVPN)
+// RequireVTEPConfigured checks that VTEP is configured (for EVPN) by checking
+// the device intent's source_ip param. SetupDevice with source_ip always calls
+// SetupVXLAN + ConfigureBGPOverlay, so the param is a reliable proxy for "VTEP is configured."
 func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
-	if !p.node.VTEPExists() {
+	intent := p.node.GetIntent("device")
+	if intent == nil || intent.Params["source_ip"] == "" {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "VTEP must be configured",
 			fmt.Sprintf("no VTEP found on %s — run 'newtron -D %s evpn setup' first", p.node.Name(), p.node.Name())))
@@ -145,9 +148,9 @@ func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker {
 	return p
 }
 
-// RequireACLTableExists checks that an ACL table exists
+// RequireACLTableExists checks that an ACL table exists by checking the intent DB.
 func (p *PreconditionChecker) RequireACLTableExists(name string) *PreconditionChecker {
-	if !p.node.ACLTableExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("acl|%s", name)) == nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "ACL table must exist",
 			fmt.Sprintf("ACL table '%s' not found - create it first", name)))
@@ -155,9 +158,9 @@ func (p *PreconditionChecker) RequireACLTableExists(name string) *PreconditionCh
 	return p
 }
 
-// RequireACLTableNotExists checks that an ACL table does not exist
+// RequireACLTableNotExists checks that an ACL table does not exist by checking the intent DB.
 func (p *PreconditionChecker) RequireACLTableNotExists(name string) *PreconditionChecker {
-	if p.node.ACLTableExists(name) {
+	if p.node.GetIntent(fmt.Sprintf("acl|%s", name)) != nil {
 		p.errors = append(p.errors, util.NewPreconditionError(
 			p.operation, p.resource, "ACL table must not exist",
 			fmt.Sprintf("ACL table '%s' already exists", name)))

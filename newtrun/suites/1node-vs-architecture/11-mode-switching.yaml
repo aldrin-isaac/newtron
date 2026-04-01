@@ -1,0 +1,83 @@
+name: mode-switching
+description: |
+  M3 + M4 + M5: Mode switching between topology and actuated modes.
+
+  Tests that the server correctly switches between modes:
+  - Topology → actuated: cached topology node destroyed, new node built from
+    device NEWTRON_INTENT records
+  - Actuated → topology: cached actuated node destroyed, new node built from
+    topology.json
+  - Unsaved topology intents block mode switch to actuated (unsaved intent guard)
+
+  Each mode switch is a full node reconstruction. The projection is rebuilt
+  from the new intent source. ConnectTransport (M3) is exercised implicitly
+  during actuated mode operations.
+topology: 1node-vs
+requires: [intent-clear]
+
+steps:
+  # Start in topology mode — read the tree
+  - name: topology-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # Switch to actuated mode — read the tree (forces mode switch)
+  - name: actuated-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # Switch back to topology mode
+  - name: back-to-topology
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # M5: Unsaved topology intent guard.
+  # Create a VLAN in topology mode (unsaved), then try to read in actuated mode.
+  # The mode switch should fail because the topology node has unsaved intents.
+  - name: create-unsaved-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?mode=topology
+    params: {id: 600}
+
+  # Verify the unsaved VLAN is in the topology tree
+  - name: verify-unsaved-in-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Switching to actuated mode should FAIL because of unsaved topology intents
+  - name: mode-switch-blocked-by-unsaved
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect_failure: true
+    expect:
+      contains: unsaved
+
+  # Resolve by reloading (discards unsaved mutations)
+  - name: reload-to-unblock
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Now actuated mode should work
+  - name: actuated-after-reload
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'

@@ -1,0 +1,48 @@
+digraph intent_dag {
+  rankdir=TB;
+  node [shape=box, fontname="monospace", fontsize=10];
+  edge [fontname="monospace", fontsize=9];
+
+  device;
+  vlan_id      [label="vlan|ID"];
+  vrf_name     [label="vrf|NAME"];
+  acl_name     [label="acl|NAME"];
+  pc_name      [label="portchannel|NAME"];
+  evpn_peer    [label="evpn-peer|ADDR"];
+  svc_name     [label="service|NAME"];
+  rt_default   [label="route|default|PREFIX"];
+  intf         [label="interface|INTF"];
+
+  macvpn       [label="macvpn|VLANID"];
+  irb          [label="interface|Vlan{ID}"];
+  ipvpn        [label="ipvpn|VRFNAME"];
+  rt_vrf       [label="route|VRF|PREFIX"];
+  acl_rule     [label="acl|NAME|RULE"];
+  pc_member    [label="portchannel|NAME|MEMBER"];
+
+  intf_bgp     [label="interface|INTF|bgp-peer"];
+  intf_qos     [label="interface|INTF|qos"];
+  intf_acl     [label="interface|INTF|acl|DIR"];
+  intf_prop    [label="interface|INTF|PROPERTY"];
+
+  device -> vlan_id;
+  device -> vrf_name;
+  device -> acl_name;
+  device -> pc_name;
+  device -> evpn_peer;
+  device -> svc_name;
+  device -> rt_default;
+  device -> intf;
+
+  vlan_id -> macvpn;
+  vlan_id -> irb;
+  vrf_name -> ipvpn;
+  vrf_name -> rt_vrf;
+  acl_name -> acl_rule;
+  pc_name -> pc_member;
+
+  intf -> intf_bgp;
+  intf -> intf_qos;
+  intf -> intf_acl;
+  intf -> intf_prop;
+}

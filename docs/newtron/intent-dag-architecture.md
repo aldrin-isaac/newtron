@@ -13,7 +13,8 @@ answers three questions:
 The DAG replaced:
 - `DependencyChecker` CONFIG_DB scanning for reference counting
 - `stepPriority` map for reconstruction ordering
-- Dual-tracking CSV fields (`members`, `rules`) on parent intents
+- Dual-tracking CSV fields (`members`, `vni`) on parent intents (see §7 for
+  fields retained for self-sufficient teardown)
 - Manual precondition checks that verify prerequisite resources exist
 
 ## 2. Intent Record Structure
@@ -168,11 +169,12 @@ The `parents` parameter may be nil or empty for root resources.
    - If P does not exist → return error (I4 violated)
    - Append `resource` to P's `_children` CSV
    - Add updated P intent record to ChangeSet (via `cs.Add`)
-   - In offline mode: apply P update to shadow configDB immediately
+   - Apply P update to shadow configDB immediately (both modes — so
+     subsequent `writeIntent` calls within the same operation see it)
 3. Build intent fields with `_parents` = CSV of `parents`,
    `_children` = existing children (idempotent update) or "" (new)
 4. Add intent record to ChangeSet (via `cs.Prepend`)
-5. In offline mode: apply to shadow configDB
+5. Apply to shadow configDB (both modes)
 
 **Post-conditions:**
 - Intent record exists at `resource` with `_parents` set
@@ -193,19 +195,19 @@ func (n *Node) deleteIntent(cs *ChangeSet, resource string) error
 ```
 
 **Preconditions:**
-- Intent record exists at `resource`
-- `_children` is empty (I5)
+- `_children` is empty (I5) — if the record exists and has children, error
+- If the record does not exist, `deleteIntent` returns nil (idempotent no-op)
 
 **Actions:**
-1. Read own intent record
+1. Read own intent record; if nil → return nil (nothing to delete)
 2. If `_children` is non-empty → return error (I5 violated)
 3. For each parent P in `_parents`:
    - Read P's intent record from configDB
    - Remove `resource` from P's `_children` CSV
    - Add updated P intent record to ChangeSet
-   - In offline mode: apply P update to shadow configDB immediately
+   - Apply P update to shadow configDB immediately (both modes)
 4. Add delete entry for own intent to ChangeSet (via `cs.Delete`)
-5. In offline mode: delete from shadow configDB
+5. Delete from shadow configDB (both modes)
 
 **Post-conditions:**
 - No intent record at `resource`
@@ -343,8 +345,6 @@ manually maintained priority numbers are needed.
 | Former mechanism | DAG replacement |
 |---|---|
 | `stepPriority` map | Topological sort of DAG |
-| `pc.RequireVLANExists()` | I4: parent must exist |
-| `pc.RequireVRFExists()` | I4: parent must exist |
 | `pc.RequireACLExists()` | I4: parent must exist |
 | `DependencyChecker.IsLastVRFUser()` | Check `vrf|NAME._children` emptiness |
 | `DependencyChecker.IsLastACLUser()` | Check `acl|NAME._children` emptiness |
@@ -354,6 +354,9 @@ manually maintained priority numbers are needed.
 - CONFIG_DB entry ordering within a ChangeSet (Redis/SONiC daemon processing
   order — leafref dependencies between CONFIG_DB entries)
 - State-based preconditions (device connected, locked, admin_status)
+- State-based CONFIG_DB preconditions (`RequireVLANExists`, `RequireVRFExists`) —
+  these validate that the CONFIG_DB table entry exists, complementing the DAG's
+  I4 check which validates that the intent record exists
 - `RefreshService` CONFIG_DB scanning (observation of ground truth, not
   teardown — justified exception per intent-audit-checklist.md)
 
@@ -370,12 +373,17 @@ function reduces to deleting its own CONFIG_DB entry and its own intent record.
 |---|---|---|
 | `members` | `vlan\|ID` | `_children` |
 | `vni` | `vlan\|ID` | `_children` (VNI in child intent) |
-| `rules` | `acl\|NAME` | `_children` |
+| `rules` | `acl\|NAME` | `_children` for standalone ACLs; `FieldRules` CSV retained on service-created ACL intents for self-sufficient teardown |
 | `members` | `portchannel\|NAME` | `_children` |
-| `route_policy_keys` | `interface\|INTF` | `_children` |
+| `route_policy_keys` | `interface\|INTF` | Retained on interface intent for self-sufficient route policy teardown |
 
-The `_children` field provides the same information (which resources depend
-on me) without domain-specific CSV formats.
+The `_children` field provides the same dependency information for most
+resources. Two fields are retained as intent params rather than replaced
+by `_children`: `rules` (on service-created ACL intents) and
+`route_policy_keys` (on interface intents). These are kept for
+self-sufficient teardown — the reverse operation reads them from the
+intent record to know exactly which policy objects to clean up, without
+re-resolving specs.
 
 **Consequence: simpler destroy functions.** `destroyVlanConfig` is now
 "delete VLAN" — not "read members from intent, generate VLAN_MEMBER deletes,
@@ -389,21 +397,23 @@ Every destroy function follows the same pattern:
 ```go
 func (n *Node) DeleteVLAN(ctx context.Context, vlanID int) (*ChangeSet, error) {
     resource := "vlan|" + strconv.Itoa(vlanID)
-    cs := NewChangeSet(n.Name(), "delete-vlan")
-    // Check DAG first — refuse if children exist (I5)
-    if err := n.deleteIntent(cs, resource); err != nil {
-        return nil, err  // "has children [interface|Ethernet0, macvpn|100]"
+    // Pre-check: refuse if children exist (I5) — fail before CONFIG_DB deletes
+    intent := n.GetIntent(resource)
+    if intent != nil && len(intent.Children) > 0 {
+        return nil, fmt.Errorf("deleteIntent %q: has children %v", resource, intent.Children)
     }
-    // Only add CONFIG_DB deletes after DAG check passes
-    cs.Delete("VLAN", VLANName(vlanID))
-    n.applyShadow(cs)
-    return cs, nil
+    cs, err := n.op("delete-vlan", func(cs *ChangeSet) error {
+        cs.Delete("VLAN", VLANName(vlanID))
+        return n.deleteIntent(cs, resource)
+    })
+    return cs, err
 }
 ```
 
-`deleteIntent` returns an error if `_children` is non-empty (I5). The caller
-must handle the error — which means if children exist, no CONFIG_DB
-modifications are made.
+The function pre-checks `_children` before calling `n.op()`, so no
+CONFIG_DB modifications are generated when children exist. Inside `n.op()`,
+the CONFIG_DB deletes and `deleteIntent` deregistration happen together
+in the same ChangeSet.
 
 The function does not enumerate members, VNI mappings, IRBs, or any other
 child resources. If any children still exist, `deleteIntent` returns an error
@@ -435,7 +445,7 @@ policies):
 - The interface intent (`interface|INTF`) declares infrastructure as parents:
   `_parents: ["vlan|ID", "vrf|NAME"]` (varies by service type — see §10.7)
 - Interface sub-resource intents (QoS, ACL bindings) declare the interface
-  intent as parent (§10.11.1)
+  intent as parent (§10.10.1)
 
 This creates a multi-level tree per service application:
 
@@ -542,7 +552,7 @@ Universal root. Every other intent is a direct or transitive descendant.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | setup-device | `SetupDevice` | baseline_ops.go:48 |
+| Create | setup-device | `SetupDevice` | baseline_ops.go |
 
 **Parents**: `[]` (root — no parents)
 **Reverse**: reprovision (CompositeOverwrite). No individual reverse operation.
@@ -573,8 +583,8 @@ apply-service in routed/IRB mode), IP-VPN bindings, and static routes.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | create-vrf | `CreateVRF` | vrf_ops.go:154 |
-| Delete | delete-vrf | `DeleteVRF` | vrf_ops.go:184 |
+| Create | create-vrf | `CreateVRF` | vrf_ops.go |
+| Delete | delete-vrf | `DeleteVRF` | vrf_ops.go |
 
 **Parents**: `[device]`
 
@@ -597,7 +607,7 @@ Children include ACL rules and interface ACL bindings.
 **Note**: `CreateACL` and `ApplyService` both write the same resource key format.
 Two creators for one intent — the ACL is shared infrastructure. `RemoveService`
 deletes the ACL intent only when it is the last consumer (via `_children` check).
-Per-rule child intents (`acl|NAME|RULE`, §10.16) exist for the "is last user"
+Per-rule child intents (`acl|NAME|RULE`, §10.15) exist for the "is last user"
 ACL teardown path.
 
 ---
@@ -613,7 +623,7 @@ PortChannel container. Children include member intents.
 | Delete | delete-portchannel | `DeletePortChannel` | portchannel_ops.go |
 
 **Parents**: `[device]`
-**Note**: Per-member child intents (`portchannel|NAME|MEMBER`, §10.17) encode
+**Note**: Per-member child intents (`portchannel|NAME|MEMBER`, §10.16) encode
 membership via `_children`. Once created, a PortChannel can be configured as
 an interface via `ConfigureInterface` or `ApplyService`, which writes a separate
 `interface|PortChannel100` intent with the appropriate role parents (`[vlan|ID]`,
@@ -627,8 +637,8 @@ EVPN overlay BGP peer (loopback-to-loopback eBGP). Leaf intent — no children.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | add-bgp-evpn-peer | `AddBGPEVPNPeer` | bgp_ops.go:466 |
-| Delete | remove-bgp-evpn-peer | `RemoveBGPEVPNPeer` | bgp_ops.go:487 |
+| Create | add-bgp-evpn-peer | `AddBGPEVPNPeer` | bgp_ops.go |
+| Delete | remove-bgp-evpn-peer | `RemoveBGPEVPNPeer` | bgp_ops.go |
 
 **Parents**: `[device]`
 
@@ -639,8 +649,8 @@ EVPN overlay BGP peer (loopback-to-loopback eBGP). Leaf intent — no children.
 The interface anchor intent. Two operations write intent directly at
 `interface|INTF` (e.g., `"interface|Ethernet0"`): `ConfigureInterface` and
 `ApplyService`. `AddBGPPeer` creates a sub-resource intent at
-`interface|INTF|bgp-peer` (§10.18) and uses `ensureInterfaceIntent` to
-lazily create the anchor if it does not already exist (§10.11.1).
+`interface|INTF|bgp-peer` (§10.17) and requires the interface intent to
+already exist (I4 enforcement).
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -650,7 +660,6 @@ lazily create the anchor if it does not already exist (§10.11.1).
 | Create | apply-service | `ApplyService` | service_ops.go |
 | Read | remove-service | `RemoveService` (via `deleteRoutePoliciesFromIntent`) | service_ops.go |
 | Delete | remove-service | `RemoveService` | service_ops.go |
-| Create | interface-init (lazy anchor) | `ensureInterfaceIntent` | interface_ops.go |
 
 **Parents** (vary by operation, service type, and interface type):
 - configure-interface bridged: `[vlan|ID]`
@@ -659,8 +668,7 @@ lazily create the anchor if it does not already exist (§10.11.1).
 - apply-service bridged/evpn-bridged: `[vlan|ID]`
 - apply-service routed: `[vrf|NAME]`
 - apply-service irb/evpn-irb: `[vlan|ID, vrf|NAME]`
-- interface-init (lazy anchor): `[device]`
-
+- apply-service (no VLAN, no VRF): `[device]`
 When the interface is a PortChannel, `portchannel|NAME` is added as an
 additional parent. This ensures the container cannot be deleted while the
 interface role exists. Example: `interface|PortChannel100` configured as
@@ -684,9 +692,9 @@ resource key (e.g., `interface|Ethernet0|acl|ingress`).
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | bind-acl | `BindACL` | interface_ops.go:294 |
-| Read | unbind-acl | `UnbindACL` (scans ingress+egress) | interface_ops.go:329 |
-| Delete | unbind-acl | `UnbindACL` | interface_ops.go:351 |
+| Create | bind-acl | `BindACL` | interface_ops.go |
+| Read | unbind-acl | `UnbindACL` (scans ingress+egress) | interface_ops.go |
+| Delete | unbind-acl | `UnbindACL` | interface_ops.go |
 
 **Parents**: `[interface|INTF, acl|NAME]` — multi-parent. The interface must
 have an intent and the ACL table must exist before a binding can be created.
@@ -700,42 +708,29 @@ QoS policy binding on an interface.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | apply-qos | `Interface.ApplyQoS` | qos_ops.go:26 |
-| Read | remove-qos | `Interface.RemoveQoS` | qos_ops.go:81 |
-| Delete | remove-qos | `Interface.RemoveQoS` | qos_ops.go:94 |
+| Create | apply-qos | `Interface.ApplyQoS` | qos_ops.go |
+| Read | remove-qos | `Interface.RemoveQoS` | qos_ops.go |
+| Delete | remove-qos | `Interface.RemoveQoS` | qos_ops.go |
 
 **Parents**: `[interface|INTF]`
 
 ---
 
-### 10.10 `interface|INTF|macvpn`
-
-Interface-level MAC-VPN binding (binds the physical interface to the VXLAN
-tunnel map). Distinct from the node-level `macvpn|VLANID` intent.
-
-| Action | Operation | Function | File |
-|--------|-----------|----------|------|
-| Create | bind-macvpn | `Interface.BindMACVPN` | macvpn_ops.go:68 |
-| Read | unbind-macvpn | `Interface.UnbindMACVPN` | macvpn_ops.go:89 |
-| Delete | unbind-macvpn | `Interface.UnbindMACVPN` | macvpn_ops.go:108 |
-
-**Parents**: `[interface|INTF]`
-
----
-
-### 10.11 `interface|INTF|PROPERTY`
+### 10.10 `interface|INTF|PROPERTY`
 
 Port property intent (mtu, speed, admin_status, description). Each property
 gets its own intent record (e.g., `interface|Ethernet0|mtu`, `interface|Ethernet0|speed`).
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | set-property | `SetProperty` | interface_ops.go:373 |
-| Create (overwrite) | set-property | `SetProperty` (called again with new value) | interface_ops.go:373 |
+| Create | set-property | `SetProperty` | interface_ops.go |
+| Create (overwrite) | set-property | `SetProperty` (called again with new value) | interface_ops.go |
+| Delete | clear-property | `ClearProperty` | interface_ops.go |
 
 **Parents**: `[interface|INTF]`
-**Reverse**: `SetProperty` is its own reverse — call it again with the new or
-default value. `writeIntent` on an existing key with the same
+**Reverse**: `ClearProperty` deletes the property intent and removes the
+CONFIG_DB field. `SetProperty` can also overwrite an existing property
+(idempotent update with same parents). `writeIntent` on an existing key with the same
 parents is treated as an idempotent update: params are replaced, `_parents`
 and `_children` are preserved, and no parent re-registration occurs (the
 child is already in the parent's `_children`). If a `writeIntent` call
@@ -744,26 +739,23 @@ must delete and recreate. `SetProperty` always uses the same parent
 (`interface|INTF`), so the idempotent path applies. These are persistent
 leaves that remain until reprovision.
 
-### 10.11.1 Interface Intent as Anchor
+### 10.10.1 Interface Intent as Anchor
 
 The `interface|INTF` intent is the anchor for all interface-scoped
-sub-resources. QoS, ACL bindings, MAC-VPN bindings, and port properties
+sub-resources. QoS, ACL bindings, and port properties
 cannot exist without an interface intent — there is no purpose in configuring
 properties on an interface that the intent system doesn't know about.
 
-The interface intent is created by `ConfigureInterface`, `ApplyService`, or
-`ensureInterfaceIntent` (§10.7). Sub-resource operations (`ApplyQoS`,
-`BindACL`, `SetProperty`, `AddBGPPeer`, etc.) require the interface intent
-to exist and declare it as their parent. `UnconfigureInterface` /
-`RemoveService` / `RemoveBGPPeer` must first remove all sub-resources
-(I5 — `deleteIntent` refuses if children exist), then delete the interface
-intent.
+The interface intent is created by `ConfigureInterface` or `ApplyService`
+(§10.7). Sub-resource operations (`ApplyQoS`, `BindACL`, `SetProperty`,
+`AddBGPPeer`, etc.) require the interface intent to exist (I4 enforcement)
+and declare it as their parent. `UnconfigureInterface` / `RemoveService`
+must first remove all sub-resources (I5 — `deleteIntent` refuses if children
+exist), then delete the interface intent.
 
-Sub-resource operations that can run before `ConfigureInterface` or
-`ApplyService` use `ensureInterfaceIntent` to lazily create the anchor. This
-writes an `OpInterfaceInit` intent — a distinct operation tag that is skipped
-during reconstruction (the sub-resource operation's own replay re-invokes
-`ensureInterfaceIntent`).
+There is no lazy anchor creation — sub-resource operations fail if the
+interface intent does not exist. The caller must configure the interface
+first via `ConfigureInterface` or `ApplyService`.
 
 **Tree rendering**: When a parent resource (like `vlan|100`) lists an
 interface as a child (membership), the tree display shows the interface as
@@ -772,22 +764,22 @@ under the parent's subtree. They belong to the interface's subtree (§12.3.1).
 
 ---
 
-### 10.12 `macvpn|VLANID`
+### 10.11 `macvpn|VLANID`
 
 Node-level MAC-VPN binding (maps VLAN to VNI via VXLAN tunnel). Creates
 VXLAN_TUNNEL_MAP and SUPPRESS_VLAN_NEIGH entries.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | bind-macvpn | `Node.BindMACVPN` | evpn_ops.go:131 |
-| Read | unbind-macvpn | `Node.UnbindMACVPN` | evpn_ops.go:160 |
-| Delete | unbind-macvpn | `Node.UnbindMACVPN` | evpn_ops.go:171 |
+| Create | bind-macvpn | `Node.BindMACVPN` | evpn_ops.go |
+| Read | unbind-macvpn | `Node.UnbindMACVPN` | evpn_ops.go |
+| Delete | unbind-macvpn | `Node.UnbindMACVPN` | evpn_ops.go |
 
 **Parents**: `[vlan|ID]`
 
 ---
 
-### 10.13 `interface|Vlan{ID}` (IRB)
+### 10.12 `interface|Vlan{ID}` (IRB)
 
 IRB (Integrated Routing and Bridging) configuration on a VLAN. Creates
 VLAN_INTERFACE IP entries and SAG_GLOBAL anycast MAC. Uses the `interface|`
@@ -797,9 +789,9 @@ interface.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | configure-irb | `ConfigureIRB` | vlan_ops.go:233 |
-| Read | unconfigure-irb | `UnconfigureIRB` | vlan_ops.go:253 |
-| Delete | unconfigure-irb | `UnconfigureIRB` | vlan_ops.go:286 |
+| Create | configure-irb | `ConfigureIRB` | vlan_ops.go |
+| Read | unconfigure-irb | `UnconfigureIRB` | vlan_ops.go |
+| Delete | unconfigure-irb | `UnconfigureIRB` | vlan_ops.go |
 
 **Parents**: `[vlan|ID]` always; `[vlan|ID, vrf|NAME]` when VRF is specified.
 `ConfigureIRB` creates VLAN_INTERFACE entries with a `vrf_name` binding — the
@@ -813,35 +805,35 @@ Sub-resources parent to `interface|Vlan{ID}` like any physical interface:
 
 ---
 
-### 10.14 `ipvpn|VRFNAME`
+### 10.13 `ipvpn|VRFNAME`
 
 IP-VPN binding on a VRF. Creates L3VNI mapping, transit VLAN, and route targets.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | bind-ipvpn | `BindIPVPN` | vrf_ops.go:245 |
-| Read | unbind-ipvpn | `unbindIpvpnConfig` | vrf_ops.go:266 |
-| Read | unbind-ipvpn | `UnbindIPVPN` | vrf_ops.go:313 |
-| Delete | unbind-ipvpn | `UnbindIPVPN` | vrf_ops.go:340 |
+| Create | bind-ipvpn | `BindIPVPN` | vrf_ops.go |
+| Read | unbind-ipvpn | `unbindIpvpnConfig` | vrf_ops.go |
+| Read | unbind-ipvpn | `UnbindIPVPN` | vrf_ops.go |
+| Delete | unbind-ipvpn | `UnbindIPVPN` | vrf_ops.go |
 
 **Parents**: `[vrf|NAME]`
 
 ---
 
-### 10.15 `route|VRF|PREFIX`
+### 10.14 `route|VRF|PREFIX`
 
 Static route in a VRF. Leaf intent — no children.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
-| Create | add-static-route | `AddStaticRoute` | vrf_ops.go:369 |
-| Delete | remove-static-route | `RemoveStaticRoute` | vrf_ops.go:390 |
+| Create | add-static-route | `AddStaticRoute` | vrf_ops.go |
+| Delete | remove-static-route | `RemoveStaticRoute` | vrf_ops.go |
 
-**Parents**: `[vrf|NAME]`
+**Parents**: `[vrf|NAME]` when VRF is specified; `[device]` for default VRF routes
 
 ---
 
-### 10.16 `acl|NAME|RULE`
+### 10.15 `acl|NAME|RULE`
 
 ACL rule. Each rule has its own intent record as a child of the ACL table.
 
@@ -854,7 +846,7 @@ ACL rule. Each rule has its own intent record as a child of the ACL table.
 
 ---
 
-### 10.17 `portchannel|NAME|MEMBER`
+### 10.16 `portchannel|NAME|MEMBER`
 
 PortChannel member. Each member has its own intent record as a child of the
 PortChannel container. The kind prefix matches the parent container's kind.
@@ -868,11 +860,11 @@ PortChannel container. The kind prefix matches the parent container's kind.
 
 ---
 
-### 10.18 `interface|INTF|bgp-peer`
+### 10.17 `interface|INTF|bgp-peer`
 
 BGP peer binding on an interface. Stores neighbor IP and remote AS for
-self-sufficient teardown. `AddBGPPeer` calls `ensureInterfaceIntent` to
-lazily create the anchor (§10.11.1) before writing this sub-resource intent.
+self-sufficient teardown. Requires the interface intent to exist (I4
+enforcement) before writing this sub-resource intent.
 
 | Action | Operation | Function | File |
 |--------|-----------|----------|------|
@@ -884,9 +876,9 @@ lazily create the anchor (§10.11.1) before writing this sub-resource intent.
 
 ---
 
-### 10.19 Summary Table
+### 10.18 Summary Table
 
-All 18 intent resource keys at a glance:
+All 17 intent resource keys at a glance:
 
 | # | Resource Key | Parents | Create | Delete |
 |---|---|---|---|---|
@@ -896,20 +888,19 @@ All 18 intent resource keys at a glance:
 | 4 | `acl\|NAME` | `[device]` | CreateACL, ApplyService | DeleteACL, removeSharedACL |
 | 5 | `portchannel\|NAME` | `[device]` | CreatePortChannel | DeletePortChannel |
 | 6 | `evpn-peer\|ADDR` | `[device]` | AddBGPEVPNPeer | RemoveBGPEVPNPeer |
-| 7 | `interface\|INTF` | varies; +`portchannel\|NAME` for PCs | ConfigureInterface, ApplyService, ensureInterfaceIntent | UnconfigureInterface, RemoveService |
+| 7 | `interface\|INTF` | varies; +`portchannel\|NAME` for PCs | ConfigureInterface, ApplyService | UnconfigureInterface, RemoveService |
 | 8 | `interface\|INTF\|acl\|DIR` | `[interface\|INTF, acl\|NAME]` | BindACL | UnbindACL |
 | 9 | `interface\|INTF\|qos` | `[interface\|INTF]` | ApplyQoS | RemoveQoS |
-| 10 | `interface\|INTF\|macvpn` | `[interface\|INTF]` | Interface.BindMACVPN | Interface.UnbindMACVPN |
-| 11 | `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | SetProperty (self-reverse) |
-| 12 | `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
-| 13 | `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
-| 14 | `ipvpn\|VRFNAME` | `[vrf\|NAME]` | BindIPVPN | UnbindIPVPN |
-| 15 | `route\|VRF\|PREFIX` | `[vrf\|NAME]` | AddStaticRoute | RemoveStaticRoute |
-| 16 | `acl\|NAME\|RULE` | `[acl\|NAME]` | AddACLRule | DeleteACLRule |
-| 17 | `portchannel\|NAME\|MEMBER` | `[portchannel\|NAME]` | AddPortChannelMember | RemovePortChannelMember |
-| 18 | `interface\|INTF\|bgp-peer` | `[interface\|INTF]` | AddBGPPeer | RemoveBGPPeer |
+| 10 | `interface\|INTF\|PROPERTY` | `[interface\|INTF]` | SetProperty | ClearProperty |
+| 11 | `macvpn\|VLANID` | `[vlan\|ID]` | Node.BindMACVPN | Node.UnbindMACVPN |
+| 12 | `interface\|Vlan{ID}` | `[vlan\|ID]` or `[vlan\|ID, vrf\|NAME]` | ConfigureIRB | UnconfigureIRB |
+| 13 | `ipvpn\|VRFNAME` | `[vrf\|NAME]` | BindIPVPN | UnbindIPVPN |
+| 14 | `route\|VRF\|PREFIX` | `[vrf\|NAME]` or `[device]` | AddStaticRoute | RemoveStaticRoute |
+| 15 | `acl\|NAME\|RULE` | `[acl\|NAME]` | AddACLRule | DeleteACLRule |
+| 16 | `portchannel\|NAME\|MEMBER` | `[portchannel\|NAME]` | AddPortChannelMember | RemovePortChannelMember |
+| 17 | `interface\|INTF\|bgp-peer` | `[interface\|INTF]` | AddBGPPeer | RemoveBGPPeer |
 
-### 10.20 Visual DAG
+### 10.19 Visual DAG
 
 ```
                                ┌──────────┐
@@ -936,11 +927,11 @@ All 18 intent resource keys at a glance:
 
               * = interface|INTF key is shared by configure-interface
                   and apply-service; add-bgp-peer creates at
-                  interface|INTF|bgp-peer (sub-resource, §10.18)
+                  interface|INTF|bgp-peer (sub-resource, §10.17)
 
               Interface sub-resources (qos, acl binding, bgp-peer,
-              macvpn, property) are children of their interface intent
-              (§10.11.1).
+              property) are children of their interface intent
+              (§10.10.1).
 
               interface|Eth0|acl|ingress has TWO parents:
               interface|Eth0 (the interface) AND acl|EDGE (the ACL table).
@@ -948,14 +939,14 @@ All 18 intent resource keys at a glance:
               under acl|EDGE it appears as a leaf (§12.3.1).
 
               interface|Vlan100 (IRB) may have TWO parents: vlan|100
-              AND vrf|CUST (when VRF is specified — §10.13). Shown
+              AND vrf|CUST (when VRF is specified — §10.12). Shown
               under vlan|100 only for visual simplicity.
 
               Every key starts with its kind: device, interface, vlan, vrf,
               acl, portchannel, macvpn, ipvpn, route, evpn-peer
 ```
 
-### 10.21 Multi-Parent Example
+### 10.20 Multi-Parent Example
 
 A service application depends on both VLAN and VRF infrastructure:
 
@@ -975,7 +966,7 @@ parent can be deleted while the service intent exists. RemoveService deletes
 the service intent, which deregisters from both parents. If VLAN 100 and VRF
 CUSTOMER have no other children, they can then be deleted.
 
-### 10.22 Single-Root Discoverability
+### 10.21 Single-Root Discoverability
 
 The entire intent tree is reachable from `device`:
 
@@ -1001,9 +992,9 @@ This enables:
 - **Orphan detection**: any intent NOT reachable from `device` is orphaned
 - **DAG visualization**: walk produces a tree suitable for display
 
-### 10.23 Completeness Verification
+### 10.22 Completeness Verification
 
-Every `writeIntent` call site in the codebase must appear in §10.1–§10.18.
+Every `writeIntent` call site in the codebase must appear in §10.1–§10.17.
 Every `deleteIntent` call site must appear as a Delete action. Verify with:
 
 ```
@@ -1051,7 +1042,7 @@ runs as part of device health checks and can be invoked manually.
 ### 12.1 Synopsis
 
 ```
-newtron intent tree <device> [<resource-kind>[:<resource>]]
+newtron <device> intent tree [<resource-kind>[:<resource>]]
 ```
 
 Displays the intent DAG as a tree, rooted at `device` or scoped to a
@@ -1175,41 +1166,23 @@ as `<kind>\|<resource>` (e.g., `vlan:100` → `vlan\|100`).
 
 ### 12.5 Implementation
 
-The tree walk is a depth-first traversal of `_children`, with cycle
-detection as a safety net (should never trigger given I1, but guards
-against corrupted data):
+The tree is built server-side and rendered client-side:
+
+1. **Server** (`node.go`): `buildTreeNode` walks `_children` depth-first from
+   the root, building an `IntentTreeNode` tree. Cycle detection guards against
+   corrupted data (should never trigger given I1). Children with a different
+   kind than their parent are marked as leaves (§12.3.1 multi-parent rendering).
+
+2. **API**: The tree is returned as a JSON structure via
+   `GET /network/{netID}/node/{device}/intent/tree`.
+
+3. **CLI** (`cmd_intent.go`): `printIntentTree` renders the pre-built
+   `IntentTreeNode` tree with Unicode box-drawing connectors. It does not
+   access configDB directly.
+
+The `intentKind` helper (`intent_ops.go`) extracts the kind prefix:
 
 ```go
-func printIntentTree(configDB *sonic.ConfigDB, resource string, prefix string, last bool, visited map[string]bool) {
-    if visited[resource] { return }  // cycle guard
-    visited[resource] = true
-
-    fields := configDB.NewtronIntent[resource]
-    intent := sonic.NewIntent(resource, fields)
-
-    connector := "├── "
-    if last { connector = "└── " }
-    fmt.Printf("%s%s%s (%s) %s\n", prefix, connector, resource, intent.Operation, formatParams(intent.Params))
-
-    childPrefix := prefix + "│   "
-    if last { childPrefix = prefix + "    " }
-
-    // Multi-parent rendering (§12.3.1): children with a different kind than
-    // this resource are rendered as leaves — no recursion into their subtrees.
-    myKind := intentKind(resource)
-    children := parseCSV(fields["_children"])
-    sort.Strings(children)  // deterministic output
-    for i, child := range children {
-        childKind := intentKind(child)
-        if childKind != myKind {
-            // Different kind → leaf only (membership relationship)
-            printIntentLeaf(configDB, child, childPrefix, i == len(children)-1)
-        } else {
-            printIntentTree(configDB, child, childPrefix, i == len(children)-1, visited)
-        }
-    }
-}
-
 // intentKind extracts the kind prefix from a resource key.
 // "interface|Ethernet0|qos" → "interface", "device" → "device"
 func intentKind(resource string) string {
@@ -1221,7 +1194,7 @@ func intentKind(resource string) string {
 ### 12.6 API Endpoint
 
 ```
-GET /node/{device}/intent/tree[?kind=vlan&resource=100&ancestors=true]
+GET /network/{netID}/node/{device}/intent/tree[?kind=vlan&resource=100&ancestors=true]
 ```
 
 Returns the same tree structure as JSON for programmatic access:

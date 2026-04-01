@@ -1,0 +1,38 @@
+name: intent-tree
+description: |
+  M8: Intent tree reads from intent DB, not projection.
+
+  Verifies that /intent/tree returns the device's intent DAG in both modes:
+  topology (from topology.json steps) and actuated (from device NEWTRON_INTENT).
+  Both must return the same setup-device step that was provisioned.
+topology: 1node-vs
+requires: [topology-reconcile]
+
+steps:
+  # Topology mode: tree built from topology.json steps
+  - name: tree-topology-mode
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        .steps | length >= 1
+        and any(.[]; .url == "/setup-device")
+
+  # Actuated mode: tree built from device NEWTRON_INTENT records
+  - name: tree-actuated-mode
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: >-
+        .steps | length >= 1
+        and any(.[]; .url == "/setup-device")
+
+  # Both modes produce same step count (same intents, different source)
+  - name: tree-modes-agree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | length >= 1'

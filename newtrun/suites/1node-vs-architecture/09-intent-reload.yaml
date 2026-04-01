@@ -1,0 +1,69 @@
+name: intent-reload
+description: |
+  M10: Reload discards unsaved topology mutations and rebuilds from topology.json.
+
+  Creates a VLAN in topology mode (unsaved mutation), verifies it's in the tree,
+  then reloads. After reload, the tree must NOT contain the VLAN — the unsaved
+  mutation was discarded. Also tests that reload is rejected in actuated mode.
+topology: 1node-vs
+requires: [intent-save]
+
+steps:
+  # Create VLAN 500 in topology mode (unsaved — only in projection)
+  - name: create-vlan500-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?mode=topology
+    params: {id: 500}
+
+  # Verify the unsaved VLAN appears in topology tree
+  - name: verify-vlan500-in-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Reload: discard unsaved topology mutations, rebuild from topology.json
+  - name: reload-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # After reload: VLAN 500 must be gone (unsaved mutation discarded)
+  - name: verify-vlan500-gone-after-reload
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | all(.[]; .url != "/create-vlan")'
+
+  # Tree should still have setup-device (from topology.json)
+  - name: verify-setup-device-survives
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # Verify the VLAN is NOT on the device — topology offline mode doesn't write
+  # to Redis. Placed after reload so unsaved intents are cleared, unblocking
+  # the mode switch to actuated.
+  - name: verify-vlan500-not-on-device
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan500/exists
+    expect:
+      jq: '.exists == false'
+
+  # Reload in actuated mode must fail (reload is topology-only)
+  - name: reload-actuated-fails
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload
+    expect_failure: true
+    expect:
+      contains: topology mode

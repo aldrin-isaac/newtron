@@ -124,12 +124,12 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 		// Routed: interface with VRF and IP
 		// Bug fix #3: always emit base INTERFACE entry (SONiC intfmgrd requires it)
 		if vrfName != "" {
-			entries = append(entries, i.bindVrf(vrfName)...)
+			entries = append(entries, bindVrfConfig(i.name,vrfName)...)
 		} else {
-			entries = append(entries, i.enableIpRouting()...)
+			entries = append(entries, enableIpRoutingConfig(i.name)...)
 		}
 		if p.IPAddress != "" {
-			entries = append(entries, i.assignIpAddress(p.IPAddress)...)
+			entries = append(entries, assignIpAddressConfig(i.name,p.IPAddress)...)
 		}
 
 	case spec.ServiceTypeEVPNIRB:
@@ -181,7 +181,7 @@ func (i *Interface) generateServiceEntries(p ServiceEntryParams) ([]sonic.Entry,
 
 	// QoS configuration
 	if policyName, policy := GetServiceQoSPolicy(sp, svc); policy != nil {
-		entries = append(entries, i.bindQos(policyName, policy)...)
+		entries = append(entries, bindQosConfig(i.name, policyName, policy)...)
 	}
 
 	// BGP routing configuration

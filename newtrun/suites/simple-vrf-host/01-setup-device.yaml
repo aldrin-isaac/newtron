@@ -1,0 +1,29 @@
+name: setup-device
+description: >
+  Create the device root intent on switch2. All resource intents (VRFs,
+  interfaces) declare [device] as parent — the device intent must exist
+  before any resource operations (intents.md §4.1, I4).
+topology: 2node-ngdp
+requires: [boot-ssh]
+
+steps:
+  - name: setup-device-switch2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/setup-device
+    params:
+      fields:
+        hostname: switch2
+        bgp_asn: "65002"
+        type: LeafRouter
+        hwsku: cisco-p200-32x100-vs
+        docker_routing_config_mode: unified
+        frr_mgmt_framework_config: "true"
+
+  - name: verify-device-intent
+    action: newtron
+    devices: [switch2]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    expect:
+      jq: '.exists == true'

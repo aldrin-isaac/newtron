@@ -159,7 +159,7 @@ func TestReplayStepAddBGPEVPNPeer(t *testing.T) {
 	n := newTestAbstract()
 	ctx := context.Background()
 
-	// Setup prerequisites: setup-device creates EVPN peer group via SetupVTEP
+	// Setup prerequisites: setup-device creates EVPN peer group via ConfigureBGPOverlay
 	err := ReplayStep(ctx, n, spec.TopologyStep{
 		URL: "/setup-device",
 		Params: map[string]any{
@@ -239,7 +239,7 @@ func TestReplayStepSetProperty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set-property: %v", err)
 	}
-	// Verify the changeset was produced (shadow ConfigDB update may not
+	// Verify the changeset was produced (projection update may not
 	// directly reflect in the Port struct if the changeset writes raw entries).
 	// Just verify no error — the operation succeeded.
 	_ = n

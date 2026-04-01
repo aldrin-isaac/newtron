@@ -1,0 +1,50 @@
+name: clear-ports
+description: |
+  Clear preserves PORT entries on the device.
+
+  Architecture §6 (Clear): "Creates a fresh abstract node with ports
+  registered but no intents replayed. The intent DB is empty, the
+  projection contains only PORT entries." Reconciling a cleared node
+  pushes only PORT entries — all other owned tables are wiped. But
+  PORT itself (in platformMergeTables) is never deleted by ReplaceAll.
+
+  Tests that after clear+reconcile, PORT entries still exist on the
+  device. The device's physical ports survive the empty-projection
+  delivery because ReplaceAll skips platformMergeTables (PORT).
+
+  Note: the 1node-vs topology doesn't define ports in topology.json,
+  so this test verifies the device-side behavior rather than the
+  abstract node's projection.
+topology: 1node-vs
+requires: [clear-save]
+
+steps:
+  # Read PORT before clear+reconcile — verify ports exist
+  - name: verify-port-before
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/PORT
+    expect:
+      jq: 'length > 0'
+
+  # Clear the topology node
+  - name: clear-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear?mode=topology
+
+  # Verify PORT still exists on device (clear+reconcile doesn't delete PORT)
+  - name: verify-port-after-clear
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/PORT
+    expect:
+      jq: 'length > 0'
+
+  # Restore: reload from topology.json
+  - name: reload-to-restore
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology

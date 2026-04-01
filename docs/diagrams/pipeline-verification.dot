@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  cs.Verify(n)  \n  changeset.go:253  \n\n" -> "\n  fresh Redis connection  \n  (bypass configDB cache)  \n\n";
+    "\n  fresh Redis connection  \n  (bypass configDB cache)  \n\n" -> "\n  HGETALL / EXISTS  \n  per expected entry  \n\n";
+    "\n  HGETALL / EXISTS  \n  per expected entry  \n\n" -> "\n  VerificationResult  \n  {Passed, Failed, Errors}  \n\n" [label="  compare  "];
+}

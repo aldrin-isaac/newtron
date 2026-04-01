@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
@@ -136,8 +135,7 @@ func TestQoSBinding(t *testing.T) {
 		},
 	}
 
-	iface := &Interface{node: &Node{configDB: sonic.NewConfigDB(), offline: true}, name: "Ethernet0"}
-	entries := iface.bindQos("TEST_3Q", policy)
+	entries := bindQosConfig("Ethernet0", "TEST_3Q", policy)
 
 	// 1 PORT_QOS_MAP + 3 QUEUE = 4
 	if len(entries) != 4 {

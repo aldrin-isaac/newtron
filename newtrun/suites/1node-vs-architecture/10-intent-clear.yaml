@@ -1,0 +1,54 @@
+name: intent-clear
+description: |
+  M10: Clear creates an empty node with ports only (topology mode).
+
+  Clears the topology node, verifies the tree is empty (no intents), then
+  verifies that ports still exist (pre-intent infrastructure preserved).
+  Also tests that clear is rejected in actuated mode.
+
+  After clearing, reconcile would factory-reset the device (empty CONFIG_DB
+  except ports) — we don't do that here, but verify the tree is empty.
+topology: 1node-vs
+requires: [intent-reload]
+
+steps:
+  # Clear: destroy all intents, create empty node with ports only
+  - name: clear-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear?mode=topology
+
+  # After clear: tree must have zero steps (no intents)
+  - name: verify-empty-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | length == 0'
+
+  # Clear in actuated mode must fail (clear is topology-only)
+  - name: clear-actuated-fails
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear
+    expect_failure: true
+    expect:
+      contains: topology mode
+
+  # Reload after clear to restore topology from topology.json
+  # (so the device is back to its provisioned state for any subsequent tests)
+  - name: reload-after-clear
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Verify setup-device is back after reload
+  - name: verify-restored-after-reload
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'

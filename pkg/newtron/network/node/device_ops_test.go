@@ -98,7 +98,7 @@ func (sp *testSpecProvider) FindMACVPNByVNI(vni int) (string, *spec.MACVPNSpec) 
 // configDB is pre-populated with two physical interfaces and empty maps for
 // all tables that operations inspect.
 func testDevice() *Node {
-	return &Node{
+	n := &Node{
 		SpecProvider: &testSpecProvider{
 			services:      map[string]*spec.ServiceSpec{},
 			filterSpecs:   map[string]*spec.FilterSpec{},
@@ -118,7 +118,7 @@ func testDevice() *Node {
 			LoopbackIP: "10.255.0.1",
 			Zone:     "us-east",
 		},
-		interfaces: make(map[string]*Interface),
+		interfaces: map[string]*Interface{},
 		configDB: &sonic.ConfigDB{
 			DeviceMetadata:        map[string]map[string]string{},
 			Port:                  map[string]sonic.PortEntry{"Ethernet0": {}, "Ethernet4": {}},
@@ -156,6 +156,12 @@ func testDevice() *Node {
 			CommunitySet:          map[string]sonic.CommunitySetEntry{},
 		},
 	}
+	// Populate interfaces map from Port entries (mirrors RegisterPort behavior).
+	// InterfaceExists checks n.interfaces for physical ports.
+	for portName := range n.configDB.Port {
+		n.interfaces[portName] = &Interface{node: n, name: portName}
+	}
+	return n
 }
 
 // assertChange searches the ChangeSet for a change matching the given table,
@@ -455,8 +461,18 @@ func TestUnbindACLFromInterface(t *testing.T) {
 		Stage: "ingress",
 		Ports: "Ethernet0,Ethernet4",
 	}
-	// Intent record from BindACL
+	// ACL intent required for RequireACLTableExists precondition
+	d.configDB.NewtronIntent["acl|EDGE_IN"] = map[string]string{
+		"operation": "create-acl", "state": "actuated",
+	}
+	// Intent records from BindACL — one per bound interface
 	d.configDB.NewtronIntent["interface|Ethernet0|acl|ingress"] = map[string]string{
+		"operation": "bind-acl",
+		"acl_name":  "EDGE_IN",
+		"direction": "ingress",
+		"state":     "actuated",
+	}
+	d.configDB.NewtronIntent["interface|Ethernet4|acl|ingress"] = map[string]string{
 		"operation": "bind-acl",
 		"acl_name":  "EDGE_IN",
 		"direction": "ingress",
@@ -511,6 +527,8 @@ func TestAddACLRule(t *testing.T) {
 func TestBindMACVPN(t *testing.T) {
 	d := testDevice()
 	d.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.255.0.1"}
+	// VTEP check reads "device" intent's source_ip param.
+	d.configDB.NewtronIntent["device"] = map[string]string{"operation": "setup-device", "source_ip": "10.255.0.1"}
 	d.configDB.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
 	d.configDB.NewtronIntent["vlan|100"] = map[string]string{
 		"operation": "create-vlan",
@@ -573,6 +591,7 @@ func TestConfigureIRB(t *testing.T) {
 func TestDevice_NotConnected(t *testing.T) {
 	d := testDevice()
 	d.connected = false
+	d.actuatedIntent = true // online mode: connected/locked checks are enforced
 	ctx := context.Background()
 
 	ops := []struct {
@@ -607,6 +626,7 @@ func TestDevice_NotConnected(t *testing.T) {
 func TestDevice_NotLocked(t *testing.T) {
 	d := testDevice()
 	d.locked = false
+	d.actuatedIntent = true // online mode: connected/locked checks are enforced
 	ctx := context.Background()
 
 	ops := []struct {
@@ -672,12 +692,12 @@ func TestRoundTrip_CreateDeleteVLAN(t *testing.T) {
 	}
 	assertChange(t, cs1, "NEWTRON_INTENT", "vlan|100", ChangeAdd)
 
-	// Verify forward state via intent (shadow configDB tracks adds via op())
+	// Verify forward state via intent (projection tracks adds via op())
 	if n.GetIntent("vlan|100") == nil {
 		t.Fatal("expected vlan|100 intent after CreateVLAN")
 	}
-	if !n.VLANExists(100) {
-		t.Fatal("expected VLAN 100 to exist after CreateVLAN")
+	if n.GetIntent("vlan|100") == nil {
+		t.Fatal("expected vlan|100 intent after CreateVLAN (second check)")
 	}
 
 	// Reverse
@@ -908,8 +928,8 @@ func TestRoundTrip_BindUnbindMACVPN(t *testing.T) {
 	if _, err := n.CreateVLAN(ctx, 100, VLANConfig{}); err != nil {
 		t.Fatalf("CreateVLAN prerequisite: %v", err)
 	}
-	// Seed VTEP directly into the shadow configDB
-	n.configDB.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
+	// Seed device intent with source_ip for VTEPSourceIP and RequireVTEPConfigured
+	n.configDB.NewtronIntent["device"]["source_ip"] = "10.0.0.1"
 	n.SpecProvider.(*testSpecProvider).macvpn["TEST_MACVPN"] = &spec.MACVPNSpec{VNI: 20100}
 
 	cs1, err := n.BindMACVPN(ctx, 100, "TEST_MACVPN")

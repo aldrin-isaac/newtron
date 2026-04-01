@@ -1,0 +1,74 @@
+name: intent-save
+description: |
+  M9: Save persists the device's current intent DB back to topology.json.
+
+  Creates a VLAN via actuated CRUD, then saves in topology mode. After save,
+  reloading the topology should produce a tree that includes the new VLAN —
+  proving the intent was persisted to topology.json and survives node
+  reconstruction.
+topology: 1node-vs
+requires: [reconcile-fixes-drift]
+
+steps:
+  # Create VLAN 400 in actuated mode (writes to device)
+  - name: create-vlan400
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 400}
+
+  # Verify the intent exists on the device
+  - name: verify-vlan400-intent
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/vlan%7C400/exists
+    expect:
+      jq: '.exists == true'
+
+  # Save: persist current actuated intents back to topology.json.
+  # The returned tree should include setup-device + create-vlan steps.
+  - name: save-actuated-intents
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save
+    expect:
+      jq: >-
+        .steps | length >= 2
+        and any(.[]; .url == "/setup-device")
+        and any(.[]; .url == "/create-vlan")
+
+  # Reload topology node from topology.json — this destroys the cached node
+  # and rebuilds from the saved file. If save worked, the VLAN step persists.
+  - name: reload-from-saved
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Verify the reloaded tree still has the VLAN intent from the save
+  - name: verify-reloaded-tree-has-vlan
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        .steps | any(.[]; .url == "/create-vlan")
+
+  # Cleanup: delete VLAN 400 in actuated mode, then save to update topology.json
+  - name: delete-vlan400
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 400}
+
+  - name: save-after-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save
+    expect:
+      jq: >-
+        .steps | all(.[]; .url != "/create-vlan")

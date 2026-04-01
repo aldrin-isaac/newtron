@@ -1,0 +1,122 @@
+name: actuated-reconcile
+description: |
+  Actuated-mode reconcile: POST /intent/reconcile without ?mode=topology.
+
+  Architecture §6 (Reconcile): "Deliver the full projection to the device."
+  In actuated mode, the projection is derived from the device's own
+  NEWTRON_INTENT records. Reconcile pushes this projection back to the
+  device, fixing any drift between the device's intents and its CONFIG_DB.
+
+  This is the "drift repair" path — the user runs reconcile after the
+  drift guard blocks writes. It differs from topology-reconcile which
+  delivers the topology.json projection.
+topology: 1node-vs
+requires: [drift-guard-reads]
+
+steps:
+  # Inject drift: modify BGP ASN to wrong value
+  - name: inject-drift-for-actuated-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 77777"}
+
+  # Verify drift exists in actuated mode
+  - name: verify-drift-before-reconcile
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length >= 1'
+
+  # Verify write is blocked (drift guard)
+  - name: write-blocked-before-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 701}
+    expect_failure: true
+    expect:
+      contains: drift
+
+  # Actuated-mode reconcile: POST /intent/reconcile (no ?mode=topology)
+  # This delivers the projection derived from device NEWTRON_INTENT back
+  # to the device, fixing the drift.
+  - name: actuated-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Verify drift is now zero — reconcile fixed it
+  - name: verify-zero-drift-after-reconcile
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'
+
+  # Verify BGP ASN corrected back to 65001
+  - name: verify-asn-fixed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    expect:
+      jq: '.local_asn == "65001"'
+
+  # Verify writes now succeed (drift guard unblocked)
+  - name: create-vlan-after-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 701}
+
+  # Cleanup
+  - name: delete-vlan-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 701}
+
+  - name: verify-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

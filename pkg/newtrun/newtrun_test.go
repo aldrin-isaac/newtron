@@ -68,7 +68,7 @@ topology: 2node-ngdp
 platform: sonic-vs
 steps:
   - name: provision-all
-    action: provision
+    action: topology-reconcile
     devices: all
   - name: wait-convergence
     action: wait
@@ -899,6 +899,13 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 		ActionProvision, ActionWait, ActionVerifyProvisioning,
 		ActionHostExec, ActionNewtron,
 	}
+	// Verify the constant values match the expected action names
+	if ActionProvision != "topology-reconcile" {
+		t.Errorf("ActionProvision = %q, want %q", ActionProvision, "topology-reconcile")
+	}
+	if ActionVerifyProvisioning != "verify-topology" {
+		t.Errorf("ActionVerifyProvisioning = %q, want %q", ActionVerifyProvisioning, "verify-topology")
+	}
 
 	if len(executors) != len(allActions) {
 		t.Errorf("executors map has %d entries, but there are %d StepAction constants",
@@ -917,9 +924,7 @@ func TestExecutorCountMatchesActionConstants(t *testing.T) {
 // ============================================================================
 
 func TestExecuteStep_UnknownAction(t *testing.T) {
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	step := &Step{Action: "nonexistent-action", Name: "test-unknown"}
 	output := r.executeStep(context.Background(), step, 0, 1, RunOptions{})
 
@@ -940,9 +945,7 @@ func TestExecuteStep_UnknownAction(t *testing.T) {
 func TestExecuteStep_SetsNameAndAction(t *testing.T) {
 	// The wait executor is the simplest — it just sleeps.
 	// With 0 duration it returns immediately.
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	step := &Step{
 		Action:   ActionWait,
 		Name:     "quick-wait",
@@ -1354,9 +1357,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 // ============================================================================
 
 func TestRunScenarioSteps_SingleStep(t *testing.T) {
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	scenario := &Scenario{
 		Name: "test",
 		Steps: []Step{
@@ -1378,9 +1379,7 @@ func TestRunScenarioSteps_SingleStep(t *testing.T) {
 }
 
 func TestRunScenarioSteps_FailFast(t *testing.T) {
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	scenario := &Scenario{
 		Name: "test",
 		Steps: []Step{
@@ -1400,9 +1399,7 @@ func TestRunScenarioSteps_FailFast(t *testing.T) {
 }
 
 func TestRunScenarioSteps_Repeat(t *testing.T) {
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	scenario := &Scenario{
 		Name:   "test",
 		Repeat: 3,
@@ -1430,9 +1427,7 @@ func TestRunScenarioSteps_Repeat(t *testing.T) {
 }
 
 func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
-	r := &Runner{
-		Composites: make(map[string]string),
-	}
+	r := &Runner{}
 	scenario := &Scenario{
 		Name:   "test",
 		Repeat: 3,
@@ -1451,22 +1446,6 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 	}
 	if result.Status != StepStatusError {
 		t.Errorf("Status = %v, want StepStatusError", result.Status)
-	}
-}
-
-func TestRunScenarioSteps_InitComposites(t *testing.T) {
-	r := &Runner{} // nil Composites
-	scenario := &Scenario{
-		Name: "test",
-		Steps: []Step{
-			{Name: "quick-wait", Action: ActionWait, Duration: 0},
-		},
-	}
-	result := &ScenarioResult{Name: "test"}
-	r.runScenarioSteps(context.Background(), scenario, RunOptions{}, result)
-
-	if r.Composites == nil {
-		t.Error("expected Composites to be initialized, got nil")
 	}
 }
 

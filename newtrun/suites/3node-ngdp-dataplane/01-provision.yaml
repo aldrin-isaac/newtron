@@ -7,7 +7,7 @@ requires: [boot-ssh]
 
 steps:
   - name: provision-switches
-    action: provision
+    action: topology-reconcile
     devices: [spine, leaf1, leaf2]
 
   - name: reload-config

@@ -1,0 +1,116 @@
+name: reconcile-idempotent
+description: |
+  M7: Reconcile is idempotent — running it twice produces zero drift both times.
+
+  This tests that ReplaceAll (DEL+HSET for all owned tables) is safe to repeat.
+  After the first reconcile, the device matches the projection. A second
+  reconcile should change nothing — zero drift before AND after.
+topology: 1node-vs
+requires: [mode-switching]
+
+steps:
+  # Verify current state is clean
+  - name: pre-drift-check
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'
+
+  # First reconcile
+  - name: reconcile-1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config-1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload-1
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp-1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp-1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Zero drift after first reconcile
+  - name: drift-after-reconcile-1
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'
+
+  # Second reconcile (same projection, same device state)
+  - name: reconcile-2
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config-2
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload-2
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp-2
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp-2
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Zero drift after second reconcile — idempotent
+  - name: drift-after-reconcile-2
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'
+
+  # Actuated drift also zero
+  - name: drift-actuated-after-reconcile-2
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

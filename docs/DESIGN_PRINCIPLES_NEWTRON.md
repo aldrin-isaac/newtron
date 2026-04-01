@@ -547,8 +547,8 @@ meets physical infrastructure:
 Because the interface is the unit of service in the domain, it is the
 unit of service in the code. `ApplyService` lives on Interface — not
 on Node, not on Network — because the interface is the entity being
-configured, the point where a service becomes real. `VerifyChangeSet`
-lives on Node because the node holds the Redis connection.
+configured, the point where a service becomes real. `cs.Verify(n)`
+lives on ChangeSet (passing the Node for its Redis connection).
 `GetService` lives on Network because services are network-wide
 definitions independent of any device.
 
@@ -882,7 +882,7 @@ with table, key, operation type, old value, and new value:
    written. The ChangeSet *is* the preview.
 2. **Execution receipt** — the same ChangeSet drives the Redis writes.
    What was previewed is what gets written.
-3. **Verification contract** — `VerifyChangeSet` re-reads CONFIG_DB and
+3. **Verification contract** — `cs.Verify(n)` re-reads CONFIG_DB and
    diffs against the same ChangeSet. What was written is what gets
    verified.
 
@@ -1073,7 +1073,7 @@ didn't anticipate.
 newtron draws the line at what it can *know* versus what it can only
 *see*.
 
-**Assertions** check newtron's own work. `VerifyChangeSet` re-reads
+**Assertions** check newtron's own work. `cs.Verify(n)` re-reads
 every CONFIG_DB entry newtron just wrote and diffs against the
 ChangeSet. If anything is missing or different, it's a bug in newtron
 or a device anomaly. There is exactly one assertion primitive — because
@@ -1106,7 +1106,7 @@ This creates a clean four-tier verification hierarchy:
 
 Orchestrators compose newtron's primitives across devices — they never
 re-implement them. When newtrun needs to check CONFIG_DB, it calls
-`VerifyChangeSet`. When it needs to read a route, it calls `GetRoute`.
+`cs.Verify(n)`. When it needs to read a route, it calls `GetRoute`.
 
 **Return data, not judgments.** A method that returns a `RouteEntry` is
 useful to any caller. A method that returns `true`/`false` for "is this
@@ -1165,15 +1165,15 @@ The current operation pairs:
 | `CreateVLAN` | `DeleteVLAN` |
 | `AddVLANMember` | `RemoveVLANMember` |
 | `CreateVRF` | `DeleteVRF` |
-| `ConfigureInterface` | `UnconfigureInterface` |
+| `ConfigureInterface` (interface) | `UnconfigureInterface` (interface) |
 | `BindIPVPN` | `UnbindIPVPN` |
 | `CreatePortChannel` | `DeletePortChannel` |
-| `ApplyService` | `RemoveService` |
-| `ApplyQoS` | `RemoveQoS` |
-| `BindACL` | `UnbindACL` |
-| `AddBGPPeer` | `RemoveBGPPeer` |
+| `ApplyService` (interface) | `RemoveService` (interface) |
+| `ApplyQoS` (interface) | `RemoveQoS` (interface) |
+| `BindACL` (interface) | `UnbindACL` (interface) |
+| `AddBGPPeer` (interface) | `RemoveBGPPeer` (interface) |
 | `BindMACVPN` (node) | `UnbindMACVPN` (node) |
-| `AddBGPMultihopPeer` | `RemoveBGPMultihopPeer` |
+| `AddBGPEVPNPeer` | `RemoveBGPEVPNPeer` |
 | `ConfigureIRB` | `RemoveIRB` |
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
@@ -1731,7 +1731,7 @@ ever consume.
 
 The intent record is O(resources) per device — one per managed resource
 (interface, VRF, overlay). The rollback history is O(1) per device —
-capped at 10 entries, oldest evicted. Neither grows with the number of
+capped at a configurable limit (default 10 entries), oldest evicted. Neither grows with the number of
 operations performed over the device's lifetime.
 
 This principle killed the append-only journal design: after seven years
@@ -2483,7 +2483,7 @@ self-describing keys (reading `interface|Ethernet0|qos` tells you what it is
 without external knowledge), and uniform parsing across tree walks, health
 checks, reconstruction, and orphan detection.
 
-The convention is consistent with the Unified Naming Convention (§31):
+The convention is consistent with the naming rules in §36:
 CONFIG_DB tables carry the type in the table name, so keys don't repeat it.
 `NEWTRON_INTENT` has one table for all types — therefore the key must carry
 the type.
@@ -2597,7 +2597,7 @@ The data exists; the three-way comparison is not yet built.
 ### Bounded footprint and rollback history
 
 §23 says CONFIG_DB cost must not grow with time. But the rollback
-history (§4.6 of the intent design) stores up to 10 completed commits.
+history stores up to a configurable number of completed commits (default 10, set via `DefaultMaxHistory`).
 The resolution: 10 is a fixed constant, not a function of time. A
 device that has run 50,000 operations has the same 10 history entries
 as one that has run 11. The bound is structural — enforced by eviction,

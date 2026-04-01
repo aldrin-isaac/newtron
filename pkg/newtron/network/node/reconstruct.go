@@ -107,6 +107,15 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 		})
 		return err
 
+	case "add-pc-member":
+		pcName := paramString(p, "portchannel")
+		member := paramString(p, "name")
+		if pcName == "" || member == "" {
+			return fmt.Errorf("add-pc-member: missing 'portchannel' or 'name' param")
+		}
+		_, err := n.AddPortChannelMember(ctx, pcName, member)
+		return err
+
 	case "create-acl":
 		name := paramString(p, "name")
 		if name == "" {
@@ -117,6 +126,23 @@ func replayNodeStep(ctx context.Context, n *Node, op string, p map[string]any) e
 			Stage:       paramString(p, "stage"),
 			Ports:       paramString(p, "ports"),
 			Description: paramString(p, "description"),
+		})
+		return err
+
+	case "add-acl-rule":
+		aclName := paramString(p, "acl")
+		ruleName := paramString(p, "name")
+		if aclName == "" || ruleName == "" {
+			return fmt.Errorf("add-acl-rule: missing 'acl' or 'name' param")
+		}
+		_, err := n.AddACLRule(ctx, aclName, ruleName, ACLRuleConfig{
+			Priority: paramInt(p, "priority"),
+			Action:   paramString(p, "action"),
+			SrcIP:    paramString(p, "src_ip"),
+			DstIP:    paramString(p, "dst_ip"),
+			Protocol: paramString(p, "protocol"),
+			SrcPort:  paramString(p, "src_port"),
+			DstPort:  paramString(p, "dst_port"),
 		})
 		return err
 
@@ -417,9 +443,8 @@ func intentParamsToStepParams(op string, intent *sonic.Intent) map[string]any {
 // of their parent operation during replay. These are skipped in IntentsToSteps
 // because replaying the parent re-creates the child intents automatically.
 var skipInReconstruct = map[string]bool{
-	sonic.OpAddACLRule:           true, // Re-created by ApplyService (filter spec) or CreateACL
-	sonic.OpAddPortChannelMember: true, // Re-created by CreatePortChannel (members in opts)
-	sonic.OpInterfaceInit:        true, // Auto-created by sub-resource ops (SetProperty, BindACL, ApplyQoS)
+	sonic.OpInterfaceInit: true,  // Auto-created by sub-resource ops (SetProperty, BindACL, ApplyQoS)
+	sonic.OpDeployService: true,  // Auto-created by first ApplyService for a service
 }
 
 // IntentsToSteps converts a map of NEWTRON_INTENT records to an ordered

@@ -2,15 +2,10 @@ package newtron
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
 	"github.com/newtron-network/newtron/pkg/newtron/network/node"
 	"github.com/newtron-network/newtron/pkg/util"
 )
@@ -19,29 +14,15 @@ import (
 //
 // Each ops method delegates to the internal node.Node, captures the returned
 // *node.ChangeSet, appends it to n.pending, and returns only an error.
-// Commit() applies all pending changesets, verifies, and moves them to history.
+// Commit() applies all pending changesets and verifies them.
 // Execute() is the one-shot pattern: lock → fn → commit → save → unlock.
 type Node struct {
 	net      *Network
 	internal *node.Node
-	abstract bool // true when this is an abstract (offline) node
 
 	// pending collects ChangeSets produced by Interface write operations.
 	// Accumulated via appendPending; applied and cleared by Commit.
 	pending []*node.ChangeSet
-
-	// history holds applied (committed) ChangeSets for VerifyCommitted.
-	history []*node.ChangeSet
-
-	// bypassZombieCheck is set by rollback/clear operations to skip the
-	// zombie-operation guard in Execute(). These operations ARE the
-	// resolution path for zombie operations.
-	bypassZombieCheck bool
-
-	// skipHistory is set for rollback operations (both zombie and history)
-	// so that rollback commits don't enter the history buffer. Rollback
-	// is consumption of history, not new history.
-	skipHistory bool
 }
 
 // ============================================================================
@@ -51,11 +32,8 @@ type Node struct {
 // Name returns the device name.
 func (n *Node) Name() string { return n.internal.Name() }
 
-// IsAbstract returns true if this is an abstract (offline) node.
-func (n *Node) IsAbstract() bool { return n.abstract }
-
 // Lock acquires a distributed lock for configuration changes.
-func (n *Node) Lock() error { return n.internal.Lock() }
+func (n *Node) Lock(ctx context.Context) error { return n.internal.Lock(ctx) }
 
 // Unlock releases the distributed lock.
 func (n *Node) Unlock() error { return n.internal.Unlock() }
@@ -63,22 +41,85 @@ func (n *Node) Unlock() error { return n.internal.Unlock() }
 // Save persists the device's running CONFIG_DB to disk.
 func (n *Node) Save(ctx context.Context) error { return n.internal.SaveConfig(ctx) }
 
-// Close disconnects from the device. No-op for abstract nodes.
+// Close disconnects from the device.
 func (n *Node) Close() error {
-	if n.abstract {
-		return nil
-	}
 	return n.internal.Disconnect()
 }
 
-// Refresh reloads CONFIG_DB from Redis and rebuilds the interface list.
-// The ctx parameter is accepted for API consistency but not forwarded
-// (node.Node.Refresh does not take a context).
-func (n *Node) Refresh(ctx context.Context) error { return n.internal.Refresh() }
+// Ping checks Redis connectivity without touching the projection.
+// No-op without transport (topology offline mode).
+func (n *Node) Ping(ctx context.Context) error { return n.internal.Ping(ctx) }
 
-// RefreshWithRetry polls Refresh until CONFIG_DB is available or timeout expires.
-func (n *Node) RefreshWithRetry(ctx context.Context, timeout time.Duration) error {
-	return n.internal.RefreshWithRetry(ctx, timeout)
+// HasActuatedIntent returns true if this node was initialized from device intents.
+func (n *Node) HasActuatedIntent() bool { return n.internal.HasActuatedIntent() }
+
+// HasUnsavedIntents returns true if CRUD mutations have been made since the last Save.
+func (n *Node) HasUnsavedIntents() bool { return n.internal.HasUnsavedIntents() }
+
+// ClearUnsavedIntents resets the unsaved flag after a successful Save.
+func (n *Node) ClearUnsavedIntents() { n.internal.ClearUnsavedIntents() }
+
+// DisconnectTransport closes the SSH+Redis transport without affecting the projection.
+func (n *Node) DisconnectTransport() { n.internal.DisconnectTransport() }
+
+// RebuildProjection rebuilds the projection from the current intent DB.
+// Called at the start of each operation to ensure the projection is the
+// canonical derivation of the intents — not a cumulative approximation.
+func (n *Node) RebuildProjection(ctx context.Context) error {
+	return n.internal.RebuildProjection(ctx)
+}
+
+// Tree reads the intent DB and returns the ordered intent steps that
+// reproduce the node's current expected state.
+//
+// Architecture §6: "Read the intent DB → build intent DAG."
+func (n *Node) Tree() *TopologySnapshot {
+	dev := n.internal.Tree()
+	snap := &TopologySnapshot{}
+	for _, s := range dev.Steps {
+		snap.Steps = append(snap.Steps, TopologyStep{
+			URL:    s.URL,
+			Params: s.Params,
+		})
+	}
+	return snap
+}
+
+// Drift compares the node's projection (expected state) against the device's
+// actual CONFIG_DB. Returns drift entries for owned tables. Auto-connects
+// transport if not already connected.
+//
+// Architecture §6: "Compare projection vs device → drift entries."
+func (n *Node) Drift(ctx context.Context) ([]DriftEntry, error) {
+	diffs, err := n.internal.Drift(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DriftEntry, 0, len(diffs))
+	for _, d := range diffs {
+		result = append(result, DriftEntry{
+			Table:    d.Table,
+			Key:      d.Key,
+			Type:     d.Type,
+			Expected: d.Expected,
+			Actual:   d.Actual,
+		})
+	}
+	return result, nil
+}
+
+// Reconcile delivers the full projection to the device, eliminating drift.
+// Auto-connects transport if not already connected.
+//
+// Architecture §6: "Deliver the full projection to the device."
+func (n *Node) Reconcile(ctx context.Context) (*ReconcileResult, error) {
+	result, err := n.internal.Reconcile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ReconcileResult{
+		Applied: result.Applied,
+	}, nil
 }
 
 // Interface returns a wrapped Interface for the given interface name.
@@ -101,206 +142,6 @@ func (n *Node) LoopbackIP() string { return n.internal.LoopbackIP() }
 
 // HasConfigDB returns true if the CONFIG_DB has been loaded.
 func (n *Node) HasConfigDB() bool { return n.internal.ConfigDB() != nil }
-
-// Intents returns all intents on this node, converted to public API types.
-func (n *Node) Intents() []Intent {
-	internal := n.internal.Intents()
-	if internal == nil {
-		return nil
-	}
-	result := make([]Intent, 0, len(internal))
-	for _, si := range internal {
-		result = append(result, intentFromSonic(si))
-	}
-	return result
-}
-
-// IntentTree returns the intent DAG as a tree structure rooted at the given
-// resource(s). If kind is empty, returns the full tree from the "device" root.
-// If kind is set, returns subtrees for all resources matching that kind prefix.
-// If resource is set, returns the subtree for kind|resource specifically.
-// If ancestors is true, includes the path from the matched resource up to root.
-func (n *Node) IntentTree(kind, resource string, ancestors bool) []IntentTreeNode {
-	configDB := n.internal.ConfigDB()
-	if configDB == nil {
-		return nil
-	}
-	intents := configDB.NewtronIntent
-	if len(intents) == 0 {
-		return nil
-	}
-
-	// Parse all intents
-	parsed := make(map[string]*sonic.Intent, len(intents))
-	for res, fields := range intents {
-		parsed[res] = sonic.NewIntent(res, fields)
-	}
-
-	// Determine root resources to display
-	var roots []string
-	if kind == "" && resource == "" {
-		// Full tree from device root
-		roots = []string{"device"}
-	} else if resource != "" {
-		// Specific resource: kind|resource
-		key := kind + "|" + resource
-		if _, ok := parsed[key]; ok {
-			roots = []string{key}
-		}
-	} else {
-		// All resources matching kind prefix
-		prefix := kind + "|"
-		for res := range parsed {
-			if res == kind || strings.HasPrefix(res, prefix) {
-				// Only top-level of this kind (those whose parents are not the same kind)
-				intent := parsed[res]
-				isTopLevel := true
-				for _, p := range intent.Parents {
-					if intentKindPrefix(p) == kind {
-						isTopLevel = false
-						break
-					}
-				}
-				if isTopLevel {
-					roots = append(roots, res)
-				}
-			}
-		}
-		sort.Strings(roots)
-	}
-
-	if ancestors && len(roots) == 1 {
-		// Walk up to device root, then display from there pruning to the target
-		roots = []string{findAncestorRoot(parsed, roots[0])}
-	}
-
-	var result []IntentTreeNode
-	for _, root := range roots {
-		visited := make(map[string]bool)
-		result = append(result, buildTreeNode(parsed, root, visited))
-	}
-	return result
-}
-
-// intentKindPrefix extracts the kind prefix from a resource key.
-func intentKindPrefix(resource string) string {
-	parts := strings.SplitN(resource, "|", 2)
-	return parts[0]
-}
-
-// findAncestorRoot walks up the parent chain to find the root ancestor.
-func findAncestorRoot(parsed map[string]*sonic.Intent, resource string) string {
-	visited := make(map[string]bool)
-	current := resource
-	for {
-		if visited[current] {
-			break // cycle guard
-		}
-		visited[current] = true
-		intent, ok := parsed[current]
-		if !ok || len(intent.Parents) == 0 {
-			break
-		}
-		current = intent.Parents[0] // follow first parent to root
-	}
-	return current
-}
-
-// buildTreeNode recursively builds an IntentTreeNode from the parsed intents.
-func buildTreeNode(parsed map[string]*sonic.Intent, resource string, visited map[string]bool) IntentTreeNode {
-	intent := parsed[resource]
-	node := IntentTreeNode{
-		Resource:  resource,
-		Operation: intent.Operation,
-		Params:    filterDisplayParams(intent.Params),
-	}
-
-	if visited[resource] {
-		node.Leaf = true
-		return node
-	}
-	visited[resource] = true
-
-	myKind := intentKindPrefix(resource)
-	children := make([]string, len(intent.Children))
-	copy(children, intent.Children)
-	sort.Strings(children)
-
-	for _, child := range children {
-		childIntent, ok := parsed[child]
-		if !ok {
-			continue
-		}
-		childKind := intentKindPrefix(child)
-		if childKind != myKind {
-			// Different kind → leaf only (multi-parent rendering §12.3.1)
-			node.Children = append(node.Children, IntentTreeNode{
-				Resource:  child,
-				Operation: childIntent.Operation,
-				Params:    filterDisplayParams(childIntent.Params),
-				Leaf:      true,
-			})
-		} else {
-			node.Children = append(node.Children, buildTreeNode(parsed, child, visited))
-		}
-	}
-
-	return node
-}
-
-// filterDisplayParams returns params suitable for display, omitting internal fields.
-func filterDisplayParams(params map[string]string) map[string]string {
-	if len(params) == 0 {
-		return nil
-	}
-	result := make(map[string]string)
-	for k, v := range params {
-		// Skip internal/lifecycle fields
-		if k == "_parents" || k == "_children" || k == "state" || k == "operation" {
-			continue
-		}
-		result[k] = v
-	}
-	if len(result) == 0 {
-		return nil
-	}
-	return result
-}
-
-// Snapshot projects the node's actuated intents back into topology format.
-// Returns steps that would reproduce the device's current intent state.
-func (n *Node) Snapshot() *TopologySnapshot {
-	dev := n.internal.Snapshot()
-	snap := &TopologySnapshot{}
-	for _, s := range dev.Steps {
-		snap.Steps = append(snap.Steps, TopologyStep{
-			URL:    s.URL,
-			Params: s.Params,
-		})
-	}
-	return snap
-}
-
-// intentFromSonic converts an internal sonic.Intent to the public Intent type.
-func intentFromSonic(si *sonic.Intent) Intent {
-	i := Intent{
-		Resource:  si.Resource,
-		Operation: si.Operation,
-		Name:      si.Name,
-		State:     IntentState(si.State),
-		AppliedBy: si.AppliedBy,
-		AppliedAt: si.AppliedAt,
-		Parents:   si.Parents,
-		Children:  si.Children,
-	}
-	if si.Params != nil {
-		i.Params = make(map[string]string, len(si.Params))
-		for k, v := range si.Params {
-			i.Params[k] = v
-		}
-	}
-	return i
-}
 
 // QueryConfigDB reads a CONFIG_DB entry by table and key.
 // Returns an empty map (not error) if the entry does not exist.
@@ -370,25 +211,8 @@ func (n *Node) PendingCount() int {
 	return count
 }
 
-// Commit applies all pending changesets, verifies them, and moves to history.
-//
-// In abstract mode the shadow ConfigDB was already updated during ops, so
-// Commit just records the pending list to history without re-applying.
+// Commit applies all pending changesets, verifies them, and clears the pending list.
 func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
-	if n.abstract {
-		// Abstract mode: shadow already updated during ops
-		result := &WriteResult{}
-		for _, cs := range n.pending {
-			result.Preview += cs.Preview()
-			result.ChangeCount += len(cs.Changes)
-		}
-		result.Applied = true
-		result.Verified = true
-		n.history = append(n.history, n.pending...)
-		n.pending = nil
-		return result, nil
-	}
-
 	if len(n.pending) == 0 {
 		return &WriteResult{}, nil
 	}
@@ -399,43 +223,10 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 		result.ChangeCount += len(cs.Changes)
 	}
 
-	// Build and write intent record for crash recovery.
-	ops := make([]sonic.IntentOperation, len(n.pending))
-	for i, cs := range n.pending {
-		ops[i] = sonic.IntentOperation{
-			Name:      cs.Operation,
-			Params:    cs.OperationParams,
-			ReverseOp: cs.ReverseOp,
-		}
-	}
-	intent := &sonic.OperationIntent{
-		Holder:     node.BuildLockHolder(),
-		Created:    time.Now().UTC(),
-		Operations: ops,
-	}
-	if err := n.internal.WriteIntent(intent); err != nil {
-		return result, fmt.Errorf("writing intent: %w", err)
-	}
-
-	// Apply all pending changesets with per-operation progress tracking
-	for i, cs := range n.pending {
-		// Mark operation started
-		now := time.Now().UTC()
-		intent.Operations[i].Started = &now
-		if err := n.internal.UpdateIntentOps(intent); err != nil {
-			util.WithDevice(n.internal.Name()).Warnf("updating intent (started): %v", err)
-		}
-
+	// Apply all pending changesets
+	for _, cs := range n.pending {
 		if err := cs.Apply(n.internal); err != nil {
-			// Intent remains for recovery — do NOT delete
 			return result, fmt.Errorf("apply failed: %w", err)
-		}
-
-		// Mark operation completed
-		completed := time.Now().UTC()
-		intent.Operations[i].Completed = &completed
-		if err := n.internal.UpdateIntentOps(intent); err != nil {
-			util.WithDevice(n.internal.Name()).Warnf("updating intent (completed): %v", err)
 		}
 	}
 	result.Applied = true
@@ -445,7 +236,6 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	var vr VerificationResult
 	for _, cs := range n.pending {
 		if err := cs.Verify(n.internal); err != nil {
-			// Intent remains for recovery — do NOT delete
 			return result, fmt.Errorf("verify failed: %w", err)
 		}
 		if cs.Verification != nil {
@@ -467,9 +257,6 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	}
 	result.Verification = &vr
 	if !allPassed {
-		// Move to history even on partial failure so VerifyCommitted can recheck.
-		// Intent remains — verification failure means state may be inconsistent.
-		n.history = append(n.history, n.pending...)
 		n.pending = nil
 		return result, &VerificationFailedError{
 			Device: n.internal.Name(),
@@ -479,59 +266,48 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	}
 	result.Verified = true
 
-	// Archive to rolling history before deleting intent (unless this is a rollback)
-	if !n.skipHistory {
-		n.archiveToHistory(intent)
-	}
-
-	// Success — delete intent record
-	if err := n.internal.DeleteIntent(); err != nil {
-		util.WithDevice(n.internal.Name()).Warnf("deleting intent: %v", err)
-	}
-
-	n.history = append(n.history, n.pending...)
 	n.pending = nil
 	return result, nil
 }
 
-// Rollback discards all pending changes without applying them.
-func (n *Node) Rollback() {
-	n.pending = nil
-}
 
 // ============================================================================
 // Execute (one-shot pattern)
 // ============================================================================
 
-// Execute is the one-shot pattern: lock → fn → commit → save → unlock.
+// Execute acquires the distributed lock, runs fn, then commits or previews.
+// The projection is already fresh when Execute is called — execute() in the
+// actor layer rebuilt it from device intents.
 //
-// If opts.Execute is false (dry-run), returns a preview without applying.
+// If opts.Execute is false (dry-run), snapshots the intent DB before running
+// fn, captures the preview, then restores the intent DB. The projection is
+// left dirty — execute() rebuilds it at the start of the next operation.
+//
 // If opts.NoSave is true, skips config save after commit.
-// If a zombie operation is detected during Lock(), returns ErrDeviceZombieIntent
-// unless bypassZombieCheck is set (used by rollback/clear operations).
 func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.Context) error) (*WriteResult, error) {
-	if err := n.Lock(); err != nil {
-		return nil, fmt.Errorf("lock: %w", err)
+	if err := n.Lock(ctx); err != nil {
+		return nil, err
 	}
 	defer n.Unlock()
 
-	// Block if zombie operation exists — device is in unknown partial state.
-	// Rollback and ClearZombie bypass this check (they ARE the resolution).
-	if !n.bypassZombieCheck && n.internal.ZombieIntent() != nil {
-		return nil, util.ErrDeviceZombieIntent
-	}
+	// Snapshot intent DB before running fn so we can restore on dry-run or error.
+	snapshot := n.internal.SnapshotIntentDB()
 
 	if err := fn(ctx); err != nil {
+		// Error: restore intent DB to pre-operation state.
+		n.internal.RestoreIntentDB(snapshot)
+		n.pending = nil
 		return nil, err
 	}
 
 	if !opts.Execute {
-		// Dry-run: return preview only
+		// Dry-run: capture preview, then restore intent DB.
 		result := &WriteResult{
 			Preview:     n.PendingPreview(),
 			ChangeCount: n.PendingCount(),
 		}
-		n.Rollback()
+		n.internal.RestoreIntentDB(snapshot)
+		n.pending = nil
 		return result, nil
 	}
 
@@ -550,574 +326,6 @@ func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.C
 	return result, nil
 }
 
-// VerifyCommitted re-verifies all committed changesets against live CONFIG_DB.
-func (n *Node) VerifyCommitted(ctx context.Context) (*VerificationResult, error) {
-	var vr VerificationResult
-	for _, cs := range n.history {
-		if err := cs.Verify(n.internal); err != nil {
-			return nil, fmt.Errorf("verify failed: %w", err)
-		}
-		if cs.Verification != nil {
-			vr.Passed += cs.Verification.Passed
-			vr.Failed += cs.Verification.Failed
-			for _, e := range cs.Verification.Errors {
-				vr.Errors = append(vr.Errors, VerificationError{
-					Table:    e.Table,
-					Key:      e.Key,
-					Field:    e.Field,
-					Expected: e.Expected,
-					Actual:   e.Actual,
-				})
-			}
-		}
-	}
-	return &vr, nil
-}
-
-// ============================================================================
-// Zombie Operation Methods (crash recovery)
-// ============================================================================
-
-// ZombieIntent returns the stale intent found during Lock(), or nil.
-func (n *Node) ZombieIntent() *OperationIntent {
-	z := n.internal.ZombieIntent()
-	if z == nil {
-		return nil
-	}
-	return convertIntent(z)
-}
-
-// ReadZombie reads the current intent from STATE_DB (live read, no lock required).
-// Returns nil if no intent exists.
-func (n *Node) ReadZombie(ctx context.Context) (*OperationIntent, error) {
-	z, err := n.internal.ReadIntent()
-	if err != nil {
-		return nil, err
-	}
-	if z == nil {
-		return nil, nil
-	}
-	return convertIntent(z), nil
-}
-
-// ClearZombie deletes the intent record from STATE_DB without reversing.
-// Must be called under lock (use within Execute with bypassZombieCheck).
-func (n *Node) ClearZombie(ctx context.Context) error {
-	return n.internal.ClearZombie()
-}
-
-// SetBypassZombieCheck enables or disables the zombie-operation guard bypass.
-// Used by rollback/clear endpoints which ARE the resolution path.
-func (n *Node) SetBypassZombieCheck(bypass bool) { n.bypassZombieCheck = bypass }
-
-// SetSkipHistory prevents the next Commit from archiving to history.
-// Used by rollback operations — rollback is consumption of history, not new history.
-func (n *Node) SetSkipHistory(skip bool) { n.skipHistory = skip }
-
-// PreviewRollback returns a preview of what RollbackZombie would do without
-// executing any changes. Uses the same skip/done/reverse logic as RollbackZombie
-// so dry-run output exactly matches what execute would do.
-func PreviewRollback(intent *OperationIntent) string {
-	if intent == nil {
-		return "No zombie operation.\n"
-	}
-
-	var preview strings.Builder
-	preview.WriteString(fmt.Sprintf("Zombie operation by %s (created %s)\n",
-		intent.Holder, intent.Created.Format(time.RFC3339)))
-	if intent.Phase != "" {
-		preview.WriteString(fmt.Sprintf("Phase: %s\n", intent.Phase))
-	}
-	preview.WriteString("Operations (would be reversed in this order):\n")
-
-	step := 0
-	for i := len(intent.Operations) - 1; i >= 0; i-- {
-		op := intent.Operations[i]
-		step++
-
-		if op.Reversed != nil {
-			preview.WriteString(fmt.Sprintf("  %d. [DONE] %s (already reversed)\n", step, op.Name))
-			continue
-		}
-		if op.Started == nil {
-			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (never started)\n", step, op.Name))
-			continue
-		}
-		if op.ReverseOp == "" {
-			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (terminal)\n", step, op.Name))
-			continue
-		}
-
-		status := "partial"
-		if op.Completed != nil {
-			status = "complete"
-		}
-		preview.WriteString(fmt.Sprintf("  %d. [REVERSE] %s → %s (%s)\n", step, op.Name, op.ReverseOp, status))
-	}
-
-	return preview.String()
-}
-
-// RollbackZombie reverses a zombie operation's changes to restore the device
-// to its last known-good state. Calls the reverse of each operation in reverse
-// order. Must be called within Execute (needs lock). Sets bypassZombieCheck.
-//
-// Rollback is idempotent: each successfully reversed operation is marked with
-// a Reversed timestamp in the intent record. If rollback crashes, retry reads
-// the intent, skips already-reversed operations, and continues where it left off.
-// Precondition failures (resource doesn't exist) are treated as no-ops — the
-// resource was never created or was already cleaned up.
-func (n *Node) RollbackZombie(ctx context.Context) (*WriteResult, error) {
-	// Read the intent from STATE_DB (live read, authoritative)
-	intent, err := n.internal.ReadIntent()
-	if err != nil {
-		return nil, fmt.Errorf("reading intent: %w", err)
-	}
-	if intent == nil {
-		return &WriteResult{}, nil
-	}
-
-	// Transition to rolling_back phase (idempotent — may already be rolling_back
-	// from a crashed previous attempt)
-	if intent.Phase != sonic.IntentPhaseRollingBack {
-		now := time.Now().UTC()
-		intent.Phase = sonic.IntentPhaseRollingBack
-		intent.RollbackHolder = node.BuildLockHolder()
-		intent.RollbackStarted = &now
-		if err := n.internal.UpdateIntentOps(intent); err != nil {
-			util.WithDevice(n.internal.Name()).Warnf("updating intent phase: %v", err)
-		}
-	}
-
-	// Reverse each operation in reverse order
-	var preview strings.Builder
-	reversed := 0
-	for i := len(intent.Operations) - 1; i >= 0; i-- {
-		op := &intent.Operations[i]
-
-		// Skip operations already reversed (previous rollback attempt)
-		if op.Reversed != nil {
-			preview.WriteString(fmt.Sprintf("  [DONE] %s (already reversed)\n", op.Name))
-			continue
-		}
-
-		// Skip operations that never started (no timestamps)
-		if op.Started == nil {
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s (never started)\n", op.Name))
-			continue
-		}
-
-		// Skip terminal operations (no ReverseOp — nothing to undo)
-		if op.ReverseOp == "" {
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s (terminal)\n", op.Name))
-			continue
-		}
-
-		status := "partial"
-		if op.Completed != nil {
-			status = "complete"
-		}
-
-		cs, err := n.dispatchReverse(ctx, op.ReverseOp, op.Params)
-		if errors.Is(err, util.ErrPreconditionFailed) {
-			// Resource doesn't exist — nothing to reverse (partial apply
-			// that never wrote the resource, or already cleaned up)
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s → %s (resource not found)\n", op.Name, op.ReverseOp))
-		} else if err != nil {
-			return &WriteResult{
-				Preview:     preview.String(),
-				ChangeCount: reversed,
-			}, fmt.Errorf("reversing %s: %w", op.Name, err)
-		} else if cs != nil && !cs.IsEmpty() {
-			if err := cs.Apply(n.internal); err != nil {
-				return &WriteResult{
-					Preview:     preview.String(),
-					ChangeCount: reversed,
-				}, fmt.Errorf("applying reverse of %s: %w", op.Name, err)
-			}
-			reversed += cs.AppliedCount
-			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, %d changes)\n", op.Name, op.ReverseOp, status, cs.AppliedCount))
-		} else {
-			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, no changes)\n", op.Name, op.ReverseOp, status))
-		}
-
-		// Mark this operation as reversed and persist
-		now := time.Now().UTC()
-		op.Reversed = &now
-		if err := n.internal.UpdateIntentOps(intent); err != nil {
-			util.WithDevice(n.internal.Name()).Warnf("updating intent (reversed): %v", err)
-		}
-	}
-
-	// All operations reversed — delete the intent record
-	if err := n.internal.ClearZombie(); err != nil {
-		return nil, fmt.Errorf("deleting intent after rollback: %w", err)
-	}
-
-	return &WriteResult{
-		Preview:     preview.String(),
-		ChangeCount: reversed,
-		Applied:     true,
-	}, nil
-}
-
-// dispatchReverse calls the internal reverse operation by name and returns
-// its ChangeSet. Each reverse operation is existence-checking and
-// reference-aware — safe to call on partial state.
-func (n *Node) dispatchReverse(ctx context.Context, reverseOp string, params map[string]string) (*node.ChangeSet, error) {
-	vlanID := func() int { id, _ := strconv.Atoi(params["vlan_id"]); return id }
-
-	switch reverseOp {
-	case "device.delete-vlan":
-		return n.internal.DeleteVLAN(ctx, vlanID())
-	case "device.unconfigure-irb":
-		return n.internal.UnconfigureIRB(ctx, vlanID())
-	case "device.delete-vrf":
-		return n.internal.DeleteVRF(ctx, params["vrf"])
-	case "device.unbind-ipvpn":
-		return n.internal.UnbindIPVPN(ctx, params["vrf"])
-	case "device.remove-bgp-globals":
-		return n.internal.RemoveBGPGlobals(ctx)
-	case "device.teardown-vtep":
-		return n.internal.TeardownVTEP(ctx)
-	case "device.unbind-macvpn":
-		return n.internal.UnbindMACVPN(ctx, vlanID())
-	case "device.delete-acl":
-		return n.internal.DeleteACL(ctx, params["name"])
-	case "device.delete-acl-rule":
-		return n.internal.DeleteACLRule(ctx, params["table_name"], params["rule_name"])
-	case "device.delete-portchannel":
-		return n.internal.DeletePortChannel(ctx, params["name"])
-	case "device.remove-portchannel-member":
-		return n.internal.RemovePortChannelMember(ctx, params["name"], params["member"])
-	case "device.remove-static-route":
-		return n.internal.RemoveStaticRoute(ctx, params["vrf"], params["prefix"])
-	case "device.remove-bgp-evpn-peer":
-		return n.internal.RemoveBGPEVPNPeer(ctx, params["neighbor_ip"])
-	case "device.remove-loopback":
-		return n.internal.RemoveLoopback(ctx)
-	case "interface.remove-service":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.RemoveService(ctx)
-	case "interface.remove-qos":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.RemoveQoS(ctx)
-	case "interface.unbind-acl":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.UnbindACL(ctx, params["acl_name"])
-	case "device.remove-bgp-peer":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.RemoveBGPPeer(ctx)
-	case "interface.unconfigure-interface":
-		iface, err := n.internal.GetInterface(params["interface"])
-		if err != nil {
-			return nil, err
-		}
-		return iface.UnconfigureInterface(ctx)
-	default:
-		return nil, fmt.Errorf("unknown reverse operation %q", reverseOp)
-	}
-}
-
-// convertIntent converts internal sonic.OperationIntent to public OperationIntent.
-func convertIntent(z *sonic.OperationIntent) *OperationIntent {
-	ops := make([]IntentOperation, len(z.Operations))
-	for i, op := range z.Operations {
-		ops[i] = IntentOperation{
-			Name:      op.Name,
-			Params:    op.Params,
-			ReverseOp: op.ReverseOp,
-			Started:   op.Started,
-			Completed: op.Completed,
-			Reversed:  op.Reversed,
-		}
-	}
-	return &OperationIntent{
-		Holder:          z.Holder,
-		Created:         z.Created,
-		Phase:           z.Phase,
-		RollbackHolder:  z.RollbackHolder,
-		RollbackStarted: z.RollbackStarted,
-		Operations:      ops,
-	}
-}
-
-// convertHistoryEntry converts internal sonic.HistoryEntry to public HistoryEntry.
-func convertHistoryEntry(h *sonic.HistoryEntry) HistoryEntry {
-	ops := make([]IntentOperation, len(h.Operations))
-	for i, op := range h.Operations {
-		ops[i] = IntentOperation{
-			Name:      op.Name,
-			Params:    op.Params,
-			ReverseOp: op.ReverseOp,
-			Started:   op.Started,
-			Completed: op.Completed,
-			Reversed:  op.Reversed,
-		}
-	}
-	return HistoryEntry{
-		Sequence:   h.Sequence,
-		Holder:     h.Holder,
-		Timestamp:  h.Timestamp,
-		Operations: ops,
-	}
-}
-
-// ============================================================================
-// Rolling History Methods
-// ============================================================================
-
-// archiveToHistory copies the completed intent's operations to the rolling
-// history buffer. Evicts the oldest entries beyond the device's max_history setting.
-func (n *Node) archiveToHistory(intent *sonic.OperationIntent) {
-	// Read max_history from device settings (falls back to default)
-	settings, err := n.internal.ReadSettings()
-	if err != nil {
-		util.WithDevice(n.internal.Name()).Warnf("reading settings for history: %v", err)
-		settings = &sonic.DeviceSettings{MaxHistory: sonic.DefaultMaxHistory}
-	}
-	if settings.MaxHistory == 0 {
-		return // history disabled
-	}
-
-	entries, err := n.internal.ReadHistory()
-	if err != nil {
-		util.WithDevice(n.internal.Name()).Warnf("reading history for archive: %v", err)
-		return
-	}
-
-	// Compute next sequence number (max existing + 1)
-	nextSeq := 1
-	for _, e := range entries {
-		if e.Sequence >= nextSeq {
-			nextSeq = e.Sequence + 1
-		}
-	}
-
-	entry := &sonic.HistoryEntry{
-		Sequence:   nextSeq,
-		Holder:     intent.Holder,
-		Timestamp:  time.Now().UTC(),
-		Operations: intent.Operations,
-	}
-
-	if err := n.internal.WriteHistory(entry); err != nil {
-		util.WithDevice(n.internal.Name()).Warnf("writing history entry: %v", err)
-		return
-	}
-
-	// Evict oldest entries beyond max_history
-	// entries is sorted newest-first; count includes the new entry
-	maxHistory := settings.MaxHistory
-	if len(entries)+1 > maxHistory {
-		// entries is sorted desc; oldest entries are at the end
-		for i := maxHistory - 1; i < len(entries); i++ {
-			if err := n.internal.DeleteHistory(entries[i].Sequence); err != nil {
-				util.WithDevice(n.internal.Name()).Warnf("evicting history entry %d: %v", entries[i].Sequence, err)
-			}
-		}
-	}
-}
-
-// ReadHistory returns the rolling history for this device (newest first).
-func (n *Node) ReadHistory(ctx context.Context) (*HistoryResult, error) {
-	entries, err := n.internal.ReadHistory()
-	if err != nil {
-		return nil, err
-	}
-
-	result := &HistoryResult{
-		Device:  n.internal.Name(),
-		Entries: make([]HistoryEntry, len(entries)),
-	}
-	for i, e := range entries {
-		result.Entries[i] = convertHistoryEntry(e)
-	}
-	return result, nil
-}
-
-// RollbackHistory reverses the most recent un-reversed history entry.
-// Uses the same dispatchReverse mechanism as zombie rollback.
-func (n *Node) RollbackHistory(ctx context.Context) (*WriteResult, error) {
-	entries, err := n.internal.ReadHistory()
-	if err != nil {
-		return nil, fmt.Errorf("reading history: %w", err)
-	}
-
-	// Find the most recent un-reversed entry (entries are sorted newest-first)
-	var target *sonic.HistoryEntry
-	for _, e := range entries {
-		allReversed := true
-		for _, op := range e.Operations {
-			if op.Reversed == nil {
-				allReversed = false
-				break
-			}
-		}
-		if !allReversed {
-			target = e
-			break
-		}
-	}
-
-	if target == nil {
-		return &WriteResult{Preview: "No un-reversed history entries.\n"}, nil
-	}
-
-	// Reverse each operation in reverse order (same pattern as RollbackZombie)
-	var preview strings.Builder
-	reversed := 0
-	preview.WriteString(fmt.Sprintf("Rolling back history entry %d (by %s at %s)\n",
-		target.Sequence, target.Holder, target.Timestamp.Format(time.RFC3339)))
-
-	for i := len(target.Operations) - 1; i >= 0; i-- {
-		op := &target.Operations[i]
-
-		if op.Reversed != nil {
-			preview.WriteString(fmt.Sprintf("  [DONE] %s (already reversed)\n", op.Name))
-			continue
-		}
-
-		if op.Started == nil {
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s (never started)\n", op.Name))
-			continue
-		}
-
-		if op.ReverseOp == "" {
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s (terminal)\n", op.Name))
-			continue
-		}
-
-		status := "partial"
-		if op.Completed != nil {
-			status = "complete"
-		}
-
-		cs, err := n.dispatchReverse(ctx, op.ReverseOp, op.Params)
-		if errors.Is(err, util.ErrPreconditionFailed) {
-			preview.WriteString(fmt.Sprintf("  [SKIP] %s → %s (resource not found)\n", op.Name, op.ReverseOp))
-		} else if err != nil {
-			return &WriteResult{
-				Preview:     preview.String(),
-				ChangeCount: reversed,
-			}, fmt.Errorf("reversing %s: %w", op.Name, err)
-		} else if cs != nil && !cs.IsEmpty() {
-			if err := cs.Apply(n.internal); err != nil {
-				return &WriteResult{
-					Preview:     preview.String(),
-					ChangeCount: reversed,
-				}, fmt.Errorf("applying reverse of %s: %w", op.Name, err)
-			}
-			reversed += cs.AppliedCount
-			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, %d changes)\n", op.Name, op.ReverseOp, status, cs.AppliedCount))
-		} else {
-			preview.WriteString(fmt.Sprintf("  [REVERSE] %s → %s (%s, no changes)\n", op.Name, op.ReverseOp, status))
-		}
-
-		// Mark this operation as reversed and persist
-		now := time.Now().UTC()
-		op.Reversed = &now
-		if err := n.internal.UpdateHistory(target); err != nil {
-			util.WithDevice(n.internal.Name()).Warnf("updating history (reversed): %v", err)
-		}
-	}
-
-	return &WriteResult{
-		Preview:     preview.String(),
-		ChangeCount: reversed,
-		Applied:     true,
-	}, nil
-}
-
-// PreviewRollbackHistory returns a preview of what RollbackHistory would do.
-func (n *Node) PreviewRollbackHistory(ctx context.Context) (string, error) {
-	entries, err := n.internal.ReadHistory()
-	if err != nil {
-		return "", fmt.Errorf("reading history: %w", err)
-	}
-
-	// Find the most recent un-reversed entry
-	var target *sonic.HistoryEntry
-	for _, e := range entries {
-		allReversed := true
-		for _, op := range e.Operations {
-			if op.Reversed == nil {
-				allReversed = false
-				break
-			}
-		}
-		if !allReversed {
-			target = e
-			break
-		}
-	}
-
-	if target == nil {
-		return "No un-reversed history entries.\n", nil
-	}
-
-	var preview strings.Builder
-	preview.WriteString(fmt.Sprintf("Would roll back history entry %d (by %s at %s)\n",
-		target.Sequence, target.Holder, target.Timestamp.Format(time.RFC3339)))
-	preview.WriteString("Operations (would be reversed in this order):\n")
-
-	step := 0
-	for i := len(target.Operations) - 1; i >= 0; i-- {
-		op := target.Operations[i]
-		step++
-
-		if op.Reversed != nil {
-			preview.WriteString(fmt.Sprintf("  %d. [DONE] %s (already reversed)\n", step, op.Name))
-			continue
-		}
-		if op.Started == nil {
-			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (never started)\n", step, op.Name))
-			continue
-		}
-		if op.ReverseOp == "" {
-			preview.WriteString(fmt.Sprintf("  %d. [SKIP] %s (terminal)\n", step, op.Name))
-			continue
-		}
-
-		status := "partial"
-		if op.Completed != nil {
-			status = "complete"
-		}
-		preview.WriteString(fmt.Sprintf("  %d. [REVERSE] %s → %s (%s)\n", step, op.Name, op.ReverseOp, status))
-	}
-
-	return preview.String(), nil
-}
-
-// ============================================================================
-// Device Settings
-// ============================================================================
-
-// ReadSettings reads newtron operational settings from CONFIG_DB.
-func (n *Node) ReadSettings(ctx context.Context) (*DeviceSettings, error) {
-	s, err := n.internal.ReadSettings()
-	if err != nil {
-		return nil, err
-	}
-	return &DeviceSettings{MaxHistory: s.MaxHistory}, nil
-}
-
-// WriteSettings writes newtron operational settings to CONFIG_DB.
-func (n *Node) WriteSettings(ctx context.Context, s *DeviceSettings) error {
-	return n.internal.WriteSettings(&sonic.DeviceSettings{MaxHistory: s.MaxHistory})
-}
 
 // ============================================================================
 // Device-level write ops — VLAN
@@ -1409,12 +617,12 @@ func (n *Node) ListVRFs() []string { return n.internal.ListVRFs() }
 func (n *Node) ListPortChannels() []string { return n.internal.ListPortChannels() }
 
 // ACLTableExists checks if an ACL table exists on the device.
-func (n *Node) ACLTableExists(name string) bool { return n.internal.ACLTableExists(name) }
-
-
+func (n *Node) ACLTableExists(name string) bool {
+	return n.internal.GetIntent("acl|"+name) != nil
+}
 
 // VTEPExists checks if a VTEP is configured on the device.
-func (n *Node) VTEPExists() bool { return n.internal.VTEPExists() }
+func (n *Node) VTEPExists() bool { return n.internal.GetIntent("evpn") != nil }
 
 // CheckBGPSessions checks that all configured BGP neighbors are Established.
 func (n *Node) CheckBGPSessions(ctx context.Context) ([]HealthCheckResult, error) {
@@ -1513,134 +721,88 @@ func (n *Node) RestartService(ctx context.Context, name string) error {
 // Abstract mode
 // ============================================================================
 
-// RegisterPort creates a PORT entry in the shadow ConfigDB.
+// RegisterPort creates a PORT entry in the projection.
 // Only valid in abstract mode — enables Interface() for the port.
 func (n *Node) RegisterPort(name string, fields map[string]string) {
 	n.internal.RegisterPort(name, fields)
-}
-
-// BuildComposite exports accumulated entries as a CompositeInfo.
-// Only valid in abstract mode.
-func (n *Node) BuildComposite() *CompositeInfo {
-	cc := n.internal.BuildComposite()
-	return wrapComposite(cc)
-}
-
-// wrapComposite wraps a *node.CompositeConfig into a *CompositeInfo.
-func wrapComposite(cc *node.CompositeConfig) *CompositeInfo {
-	if cc == nil {
-		return nil
-	}
-	ci := &CompositeInfo{
-		DeviceName: cc.Metadata.DeviceName,
-		Tables:     make(map[string]int),
-		internal:   cc,
-	}
-	for table, keys := range cc.Tables {
-		ci.Tables[table] = len(keys)
-		ci.EntryCount += len(keys)
-	}
-	return ci
-}
-
-// ============================================================================
-// Composite delivery
-// ============================================================================
-
-// DeliverComposite delivers a composite config to the device.
-func (n *Node) DeliverComposite(ctx context.Context, ci *CompositeInfo, mode CompositeMode) (*DeliveryResult, error) {
-	if ci == nil || ci.internal == nil {
-		return nil, fmt.Errorf("nil CompositeInfo or missing internal state")
-	}
-	cc, ok := ci.internal.(*node.CompositeConfig)
-	if !ok {
-		return nil, fmt.Errorf("invalid CompositeInfo: unexpected internal type")
-	}
-	result, err := n.internal.DeliverComposite(cc, node.CompositeMode(mode))
-	if err != nil {
-		return nil, err
-	}
-	return &DeliveryResult{
-		Applied: result.Applied,
-		Skipped: result.Skipped,
-		Failed:  result.Failed,
-	}, nil
-}
-
-// VerifyComposite verifies a composite config against live CONFIG_DB.
-func (n *Node) VerifyComposite(ctx context.Context, ci *CompositeInfo) (*VerificationResult, error) {
-	if ci == nil || ci.internal == nil {
-		return nil, fmt.Errorf("nil CompositeInfo or missing internal state")
-	}
-	cc, ok := ci.internal.(*node.CompositeConfig)
-	if !ok {
-		return nil, fmt.Errorf("invalid CompositeInfo: unexpected internal type")
-	}
-	result, err := n.internal.VerifyComposite(ctx, cc)
-	if err != nil {
-		return nil, err
-	}
-	vr := &VerificationResult{
-		Passed: result.Passed,
-		Failed: result.Failed,
-	}
-	for _, e := range result.Errors {
-		vr.Errors = append(vr.Errors, VerificationError{
-			Table:    e.Table,
-			Key:      e.Key,
-			Field:    e.Field,
-			Expected: e.Expected,
-			Actual:   e.Actual,
-		})
-	}
-	return vr, nil
 }
 
 // ============================================================================
 // HealthCheck
 // ============================================================================
 
-// HealthCheck runs topology-driven health checks on this device.
-// Requires the Network to have a loaded topology.
+// HealthCheck runs health checks on this device using the unified pipeline.
+// Config check: compares the node's projection against actual CONFIG_DB (Drift).
+// Oper checks: BGP session state and wired interface oper-up.
+// Auto-connects transport if not already connected.
 func (n *Node) HealthCheck(ctx context.Context) (*HealthReport, error) {
-	if n.net == nil || !n.net.HasTopology() {
-		return nil, &ValidationError{Message: "no topology loaded — health checks require a topology"}
-	}
-	provisioner, err := network.NewTopologyProvisioner(n.net.internal)
+	// Config check: projection vs actual CONFIG_DB
+	driftEntries, err := n.internal.Drift(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config drift check: %w", err)
 	}
-	report, err := provisioner.VerifyDeviceHealth(ctx, n.internal.Name())
-	if err != nil {
-		return nil, err
-	}
-	return convertHealthReport(report), nil
-}
 
-// convertHealthReport converts a *network.HealthReport to a *HealthReport.
-func convertHealthReport(r *network.HealthReport) *HealthReport {
-	hr := &HealthReport{
-		Device: r.Device,
-		Status: r.Status,
+	// BGP operational check
+	bgpResults, err := n.internal.CheckBGPSessions(ctx)
+	if err != nil {
+		bgpResults = []node.HealthCheckResult{{
+			Check: "bgp", Status: "fail",
+			Message: fmt.Sprintf("BGP check error: %s", err),
+		}}
 	}
-	if r.ConfigCheck != nil {
-		hr.ConfigCheck = &VerificationResult{
-			Passed: r.ConfigCheck.Passed,
-			Failed: r.ConfigCheck.Failed,
-		}
-		for _, e := range r.ConfigCheck.Errors {
-			hr.ConfigCheck.Errors = append(hr.ConfigCheck.Errors, VerificationError{
-				Table: e.Table, Key: e.Key, Field: e.Field,
-				Expected: e.Expected, Actual: e.Actual,
-			})
-		}
+
+	// Interface oper-up check for wired interfaces from the projection
+	wiredInterfaces := n.internal.WiredInterfaces()
+	var intfResults []node.HealthCheckResult
+	if len(wiredInterfaces) > 0 {
+		intfResults = n.internal.CheckInterfaceOper(wiredInterfaces)
 	}
-	for _, oc := range r.OperChecks {
-		hr.OperChecks = append(hr.OperChecks, HealthCheckResult{
-			Check: oc.Check, Status: oc.Status, Message: oc.Message,
+
+	// Build report
+	report := &HealthReport{
+		Device: n.internal.Name(),
+		Status: "pass",
+	}
+
+	// Config check: any drift = fail
+	configCheck := &ConfigDriftResult{
+		DriftCount: len(driftEntries),
+	}
+	for _, d := range driftEntries {
+		configCheck.Entries = append(configCheck.Entries, DriftEntry{
+			Table:    d.Table,
+			Key:      d.Key,
+			Type:     string(d.Type),
+			Expected: d.Expected,
+			Actual:   d.Actual,
 		})
 	}
-	return hr
+	report.ConfigCheck = configCheck
+	if len(driftEntries) > 0 {
+		report.Status = "fail"
+	}
+
+	// Oper checks
+	var operChecks []HealthCheckResult
+	for _, r := range bgpResults {
+		operChecks = append(operChecks, HealthCheckResult{Check: r.Check, Status: r.Status, Message: r.Message})
+	}
+	for _, r := range intfResults {
+		operChecks = append(operChecks, HealthCheckResult{Check: r.Check, Status: r.Status, Message: r.Message})
+	}
+	report.OperChecks = operChecks
+
+	for _, oc := range operChecks {
+		if oc.Status == "fail" {
+			report.Status = "fail"
+			break
+		}
+		if oc.Status == "warn" && report.Status == "pass" {
+			report.Status = "warn"
+		}
+	}
+
+	return report, nil
 }
 
 // ============================================================================

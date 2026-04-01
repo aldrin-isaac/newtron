@@ -1,0 +1,71 @@
+name: drift-guard
+description: |
+  M4: Drift guard refuses writes on a drifted device in actuated mode.
+
+  When device CONFIG_DB diverges from the projection (drift injected in
+  scenario 04), Lock() in actuated mode detects the drift and refuses to
+  proceed. This prevents new intents from being applied on an inconsistent
+  foundation — the user must reconcile first.
+
+  Tests that CRUD operations fail with a drift-related error message.
+  Topology mode is NOT guarded (topology is authoritative, drift is expected).
+topology: 1node-vs
+requires: [inject-drift]
+
+steps:
+  # Actuated mode: VLAN create must fail because device is drifted
+  - name: drift-guard-blocks-vlan-create
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 300}
+    expect_failure: true
+    expect:
+      contains: drift
+
+  # Actuated mode: VRF create must also fail
+  - name: drift-guard-blocks-vrf-create
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vrf
+    params: {name: Vrf_BLOCKED}
+    expect_failure: true
+    expect:
+      contains: drift
+
+  # Topology mode: VLAN create should SUCCEED (topology is authoritative,
+  # drift guard does not apply)
+  - name: topology-mode-bypasses-drift-guard
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?mode=topology
+    params: {id: 300}
+
+  # Verify the VLAN intent IS in the topology tree (still in topology mode)
+  - name: verify-vlan-in-topology-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Reload to discard the topology VLAN (clears unsaved intents, unblocks
+  # mode switching back to actuated for subsequent scenarios)
+  - name: reload-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Verify the VLAN is NOT on the device — topology offline mode doesn't
+  # write to Redis. This step runs in actuated mode (no ?mode=topology),
+  # so it must come after reload cleared unsaved intents.
+  - name: verify-vlan-not-on-device
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan300/exists
+    expect:
+      jq: '.exists == false'

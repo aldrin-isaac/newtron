@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
@@ -38,9 +38,10 @@ type SpecProvider interface {
 // direct access to all Network-level configuration (services, filters, etc.)
 // without importing the network package (avoiding circular imports).
 //
-// Two modes of operation:
-//   - Physical mode (offline=false): connected to real device, ConfigDB loaded from Redis
-//   - Abstract mode (offline=true): shadow ConfigDB starts empty, operations build desired state
+// The Node's primary state is its intent collection (NEWTRON_INTENT records)
+// and the projection (typed CONFIG_DB tables derived from intent replay).
+// The projection is never loaded from the device — it is always built by
+// replaying intents through config functions.
 //
 // Same code path, different initialization. The Interface is the point of service in both modes.
 //
@@ -64,16 +65,15 @@ type Node struct {
 	connected bool
 	locked    bool
 
-	// Abstract mode — no physical device, operations build desired state
-	offline bool
+	// actuatedIntent is true when the node was initialized from device
+	// NEWTRON_INTENT records (actuated mode). False when initialized from
+	// topology.json (topology mode). Controls drift guard in Lock.
+	actuatedIntent bool
 
-	// zombie stores an existing intent found during Lock(). Any intent
-	// present at lock time indicates a crashed process — the lock
-	// acquisition proves the previous holder is gone. Execute() returns
-	// ErrDeviceZombieIntent to block further changes until resolved.
-	zombie *sonic.OperationIntent
-
-	mu sync.RWMutex
+	// unsavedIntents tracks whether CRUD mutations have been made since
+	// the last Save or construction. Set by writeIntent/deleteIntent,
+	// cleared by ClearUnsavedIntents after Save.
+	unsavedIntents bool
 }
 
 // New creates a new Node with the given SpecProvider and profile.
@@ -87,9 +87,9 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 	}
 }
 
-// NewAbstract creates an abstract Node with an empty shadow ConfigDB.
-// Operations work against the shadow and accumulate entries for composite export.
-// Preconditions check the shadow (no connected/locked requirement).
+// NewAbstract creates an abstract Node with an empty projection.
+// Operations replay intents, rendering entries into the projection.
+// Preconditions check the intent DB (no connected/locked requirement).
 //
 // Usage:
 //
@@ -97,7 +97,7 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 //	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
-//	composite := n.BuildComposite()
+//	n.Drift(ctx) // or n.Reconcile(ctx)
 func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
 	return &Node{
 		SpecProvider: sp,
@@ -106,26 +106,136 @@ func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, reso
 		resolved:     resolved,
 		interfaces:   make(map[string]*Interface),
 		configDB:     sonic.NewConfigDB(),
-		offline:      true,
 	}
 }
 
-// IsOffline returns true if this is an abstract node (no physical device).
-func (n *Node) IsOffline() bool { return n.offline }
+// HasActuatedIntent returns true if this node was initialized from device intents.
+func (n *Node) HasActuatedIntent() bool { return n.actuatedIntent }
+
+// HasUnsavedIntents returns true if CRUD mutations were made since last Save/construction.
+func (n *Node) HasUnsavedIntents() bool { return n.unsavedIntents }
+
+// ClearUnsavedIntents resets the unsaved mutation flag after Save.
+func (n *Node) ClearUnsavedIntents() { n.unsavedIntents = false }
+
+// SnapshotIntentDB returns a deep copy of the intent DB (NEWTRON_INTENT map).
+// Used before dry-run operations so the intent DB can be restored afterward.
+// The projection is NOT included — it is rebuilt separately via RebuildProjection.
+func (n *Node) SnapshotIntentDB() map[string]map[string]string {
+	snap := make(map[string]map[string]string, len(n.configDB.NewtronIntent))
+	for resource, fields := range n.configDB.NewtronIntent {
+		copied := make(map[string]string, len(fields))
+		for k, v := range fields {
+			copied[k] = v
+		}
+		snap[resource] = copied
+	}
+	return snap
+}
+
+// RestoreIntentDB replaces the intent DB with a previously snapshotted copy.
+// The projection is left dirty — the caller is responsible for rebuilding it
+// via RebuildProjection (or relying on the next execute() to do so).
+func (n *Node) RestoreIntentDB(snapshot map[string]map[string]string) {
+	n.configDB.NewtronIntent = snapshot
+}
+
+// RebuildProjection rebuilds the projection from the intent DB.
+// In actuated mode (transport connected), re-reads NEWTRON_INTENT from the
+// device's CONFIG_DB via Redis — the device's intents are the authority.
+// In topology mode (no transport), replays from the cached intent DB.
+//
+// Creates a fresh configDB, re-registers ports, and replays all intents.
+// The SSH connection and transport state are preserved.
+//
+// Architecture §1: "Intent DB is primary state. The projection is derived
+// from intent replay."
+// CLAUDE.md: "In actuated mode, the device's own NEWTRON_INTENT records
+// ARE the authoritative state."
+func (n *Node) RebuildProjection(ctx context.Context) error {
+	// In actuated mode, re-read intents from the device — they are the authority.
+	intents := n.configDB.NewtronIntent
+	if n.conn != nil {
+		client := n.conn.Client()
+		if client != nil {
+			fresh, err := client.GetRawTable("NEWTRON_INTENT")
+			if err != nil {
+				return fmt.Errorf("re-reading intents from device: %w", err)
+			}
+			intents = fresh
+		}
+	}
+
+	// Save port entries — ports come from init, not from intents.
+	ports := n.configDB.ExportPorts()
+
+	// Fresh projection.
+	n.configDB = sonic.NewConfigDB()
+	n.interfaces = make(map[string]*Interface)
+
+	// Re-register ports.
+	for portName, fields := range ports {
+		n.RegisterPort(portName, fields)
+	}
+
+	// Replay is reconstruction, not mutation. Temporarily clear actuatedIntent
+	// so precondition() skips the Connected+Locked check during replay — same
+	// approach as InitFromDeviceIntent which sets actuatedIntent AFTER replay.
+	wasActuated := n.actuatedIntent
+	wasUnsaved := n.unsavedIntents
+	n.actuatedIntent = false
+
+	// Do NOT pre-populate configDB.NewtronIntent — let writeIntent populate it
+	// during replay. Pre-populating causes idempotency guards (GetIntent check
+	// at the top of config methods) to see existing intents and skip rendering,
+	// which leaves the projection empty. This matches BuildAbstractNode and
+	// InitFromDeviceIntent where the intent DB starts empty before replay.
+	steps := IntentsToSteps(intents)
+	for _, step := range steps {
+		if err := ReplayStep(ctx, n, step); err != nil {
+			n.actuatedIntent = wasActuated
+			return fmt.Errorf("rebuilding projection, replay %s: %w", step.URL, err)
+		}
+	}
+
+	// Restore actuated state and unsavedIntents. writeIntent sets
+	// unsavedIntents = true during replay, but replay is reconstruction,
+	// not a new CRUD mutation. Restoring from the saved value preserves the
+	// pre-rebuild semantics:
+	// - After initial construction (BuildAbstractNode/InitFromDeviceIntent
+	//   cleared it): stays false — topology replay is not a mutation.
+	// - After CRUD (user created a VLAN without saving): stays true — the
+	//   unsaved intent guard must still block mode switching.
+	// - After re-reading from device (actuated rebuild): stays false —
+	//   device intents are persisted, not unsaved.
+	n.actuatedIntent = wasActuated
+	n.unsavedIntents = wasUnsaved
+	return nil
+}
+
+// DisconnectTransport closes the SSH tunnel + Redis connection without
+// disturbing the projection. Used when switching from topology-online
+// back to topology-offline.
+func (n *Node) DisconnectTransport() {
+	if n.conn != nil {
+		n.conn.Disconnect()
+		n.conn = nil
+		n.connected = false
+		n.locked = false
+	}
+}
 
 // ============================================================================
 // Intent Accessors
 // ============================================================================
 //
 // Intent state is ConfigDB state — configDB.NewtronIntent is the single source.
-// No separate in-memory map. applyShadow already updates ConfigDB, so writes
+// No separate in-memory map. render already updates ConfigDB, so writes
 // via ChangeSet are automatically visible to reads.
 
 // GetIntent returns the intent for the given resource, or nil if none exists.
 // Reads from configDB.NewtronIntent and constructs sonic.Intent on demand.
 func (n *Node) GetIntent(resource string) *sonic.Intent {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	if n.configDB == nil {
 		return nil
 	}
@@ -138,8 +248,6 @@ func (n *Node) GetIntent(resource string) *sonic.Intent {
 
 // Intents returns all intents on this node.
 func (n *Node) Intents() map[string]*sonic.Intent {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	if n.configDB == nil || len(n.configDB.NewtronIntent) == 0 {
 		return nil
 	}
@@ -152,8 +260,6 @@ func (n *Node) Intents() map[string]*sonic.Intent {
 
 // ServiceIntents returns all actuated service intents (apply-service).
 func (n *Node) ServiceIntents() map[string]*sonic.Intent {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	result := make(map[string]*sonic.Intent)
 	if n.configDB == nil {
 		return result
@@ -167,16 +273,60 @@ func (n *Node) ServiceIntents() map[string]*sonic.Intent {
 	return result
 }
 
-// Snapshot projects the node's actuated service intents back into topology step format.
-// Returns a TopologyDevice with Steps corresponding to actuated apply-service intents.
-//
-// This is the export direction: device reality → topology representation.
-// Resolved/derived values (VNI, ACL names, peer groups) are NOT included —
-// those are re-derived from specs at provision time.
-func (n *Node) Snapshot() *spec.TopologyDevice {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
+// IntentsByPrefix returns all intents whose resource key starts with prefix.
+// Example: IntentsByPrefix("vlan|") → all VLAN intents.
+// Scans the intent DB (NEWTRON_INTENT), not the projection.
+func (n *Node) IntentsByPrefix(prefix string) map[string]*sonic.Intent {
+	result := make(map[string]*sonic.Intent)
+	if n.configDB == nil {
+		return result
+	}
+	for resource, fields := range n.configDB.NewtronIntent {
+		if strings.HasPrefix(resource, prefix) {
+			result[resource] = sonic.NewIntent(resource, fields)
+		}
+	}
+	return result
+}
 
+// IntentsByParam returns intents where params[key] == value.
+// Example: IntentsByParam("vrf", "CUSTOMER") → intents bound to that VRF.
+// Scans the intent DB (NEWTRON_INTENT), not the projection.
+func (n *Node) IntentsByParam(key, value string) map[string]*sonic.Intent {
+	result := make(map[string]*sonic.Intent)
+	if n.configDB == nil {
+		return result
+	}
+	for resource, fields := range n.configDB.NewtronIntent {
+		intent := sonic.NewIntent(resource, fields)
+		if intent.Params[key] == value {
+			result[resource] = intent
+		}
+	}
+	return result
+}
+
+// IntentsByOp returns intents with the given operation type.
+// Example: IntentsByOp("configure-irb") → all IRB configuration intents.
+// Scans the intent DB (NEWTRON_INTENT), not the projection.
+func (n *Node) IntentsByOp(op string) map[string]*sonic.Intent {
+	result := make(map[string]*sonic.Intent)
+	if n.configDB == nil {
+		return result
+	}
+	for resource, fields := range n.configDB.NewtronIntent {
+		intent := sonic.NewIntent(resource, fields)
+		if intent.Operation == op {
+			result[resource] = intent
+		}
+	}
+	return result
+}
+
+// Tree reads the intent DB and returns the ordered intent steps.
+// Works in both modes — intents exist from topology replay (offline) or
+// device intent replay (online).
+func (n *Node) Tree() *spec.TopologyDevice {
 	dev := &spec.TopologyDevice{}
 	if n.configDB == nil || len(n.configDB.NewtronIntent) == 0 {
 		return dev
@@ -187,51 +337,91 @@ func (n *Node) Snapshot() *spec.TopologyDevice {
 	return dev
 }
 
-// DetectDrift reconstructs expected CONFIG_DB from the device's own NEWTRON_INTENT
-// records and diffs against actual CONFIG_DB. Returns drift entries for owned tables.
-//
-// This is intent-based drift: what the device's intents say should be configured
-// vs what CONFIG_DB actually contains. Requires a connected node with configDB loaded.
-func (n *Node) DetectDrift(ctx context.Context) ([]sonic.DriftEntry, error) {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
-	if n.configDB == nil {
-		return nil, fmt.Errorf("no CONFIG_DB loaded for %s", n.name)
-	}
+// Drift compares the projection (expected state from intent replay) against
+// the device's actual CONFIG_DB. Auto-connects transport if needed.
+func (n *Node) Drift(ctx context.Context) ([]sonic.DriftEntry, error) {
 	if n.conn == nil {
-		return nil, fmt.Errorf("node %s not connected", n.name)
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return nil, fmt.Errorf("no CONFIG_DB client for %s", n.name)
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for drift: %w", err)
+		}
 	}
 
-	// Step 1: Reconstruct expected CONFIG_DB from intent records.
-	// Uses the same replay path as provisioning — same code, different input.
-	expected, err := ReconstructExpected(ctx, n.SpecProvider,
-		n.name, n.profile, n.resolved,
-		n.configDB.NewtronIntent,
-		n.configDB.ExportPorts())
-	if err != nil {
-		return nil, fmt.Errorf("reconstructing expected state: %w", err)
-	}
-
-	// Step 2: Export reconstructed state as RawConfigDB.
-	composite := expected.BuildComposite()
-	expectedRaw := sonic.RawConfigDB(composite.Tables)
-
-	// Step 3: Read actual CONFIG_DB owned tables from the device.
-	actual, err := configClient.GetRawOwnedTables(ctx)
+	expected := n.configDB.ExportRaw()
+	actual, err := n.conn.Client().GetRawOwnedTables(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading actual CONFIG_DB: %w", err)
 	}
-
-	// Step 4: Diff.
-	return sonic.DiffConfigDB(expectedRaw, actual, sonic.OwnedTables()), nil
+	return sonic.DiffConfigDB(expected, actual, sonic.OwnedTables()), nil
 }
 
-// RegisterPort creates a PORT entry in the shadow ConfigDB.
+// ReconcileResult reports the outcome of a Reconcile operation.
+type ReconcileResult struct {
+	Applied int
+}
+
+// Reconcile delivers the full projection to the device, eliminating drift.
+// Auto-connects transport if needed. Performs config reload, waits for Redis,
+// then atomically replaces all owned tables with the projection.
+//
+// Reconcile acquires the Redis lock directly (bypassing the drift guard in
+// Lock) — its purpose IS to fix drift.
+func (n *Node) Reconcile(ctx context.Context) (*ReconcileResult, error) {
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for reconcile: %w", err)
+		}
+	}
+
+	// Config reload — reset device to factory baseline (best-effort).
+	if err := n.ConfigReload(ctx); err != nil {
+		util.WithDevice(n.name).Warnf("config reload failed (continuing): %v", err)
+	}
+
+	// Wait for Redis after config reload.
+	if err := n.PingWithRetry(ctx, 60*time.Second); err != nil {
+		return nil, fmt.Errorf("waiting for Redis after config reload: %w", err)
+	}
+
+	// Acquire lock directly — bypass Node-level Lock() to avoid drift guard.
+	// Reconcile's purpose IS to fix drift; circular to refuse it.
+	holder := BuildLockHolder()
+	if err := n.conn.Lock(holder, defaultLockTTL); err != nil {
+		return nil, fmt.Errorf("acquiring lock for reconcile: %w", err)
+	}
+	n.locked = true
+
+	// Export projection and deliver atomically.
+	// OwnedTables() excludes NEWTRON_INTENT (correctly — it's not compared for
+	// drift). But Reconcile delivers the full state including intent records
+	// (architecture §4: "In Redis delivery order, intent records arrive BEFORE
+	// config entries"). ExportEntries includes NEWTRON_INTENT; ReplaceAll must
+	// clean stale intent keys too — otherwise Clear + Reconcile leaves orphaned
+	// NEWTRON_INTENT records on the device.
+	entries := n.configDB.ExportEntries()
+	deliveryTables := append(sonic.OwnedTables(), "NEWTRON_INTENT")
+	if err := n.conn.Client().ReplaceAll(entries, deliveryTables); err != nil {
+		n.conn.Unlock()
+		n.locked = false
+		return nil, fmt.Errorf("delivering projection: %w", err)
+	}
+
+	// Persist to config_db.json.
+	if err := n.SaveConfig(ctx); err != nil {
+		util.WithDevice(n.name).Warnf("config save after reconcile failed: %v", err)
+	}
+
+	// Ensure unified config mode (restart bgp if needed).
+	if err := n.EnsureUnifiedConfigMode(ctx); err != nil {
+		util.WithDevice(n.name).Warnf("ensure unified config mode failed: %v", err)
+	}
+
+	n.conn.Unlock()
+	n.locked = false
+
+	return &ReconcileResult{Applied: len(entries)}, nil
+}
+
+// RegisterPort creates a PORT entry in the projection.
 // This enables GetInterface for offline mode (GetInterface checks PORT table).
 func (n *Node) RegisterPort(name string, fields map[string]string) {
 	if fields == nil {
@@ -242,13 +432,17 @@ func (n *Node) RegisterPort(name string, fields map[string]string) {
 	n.interfaces[name] = &Interface{node: n, name: name}
 }
 
-// BuildComposite exports the shadow ConfigDB as a CompositeConfig.
-// Only valid in offline mode.
-func (n *Node) BuildComposite() *CompositeConfig {
-	cb := NewCompositeBuilder(n.name, CompositeOverwrite).
-		SetGeneratedBy("abstract-node")
-	cb.AddEntries(n.configDB.ExportEntries())
-	return cb.Build()
+// WiredInterfaces returns sorted Ethernet and PortChannel interface names
+// from the projection's PORT table.
+func (n *Node) WiredInterfaces() []string {
+	var interfaces []string
+	for portName := range n.configDB.Port {
+		if strings.HasPrefix(portName, "Ethernet") || strings.HasPrefix(portName, "PortChannel") {
+			interfaces = append(interfaces, portName)
+		}
+	}
+	sort.Strings(interfaces)
+	return interfaces
 }
 
 // SetDeviceMetadata writes fields to DEVICE_METADATA|localhost.
@@ -261,16 +455,24 @@ func (n *Node) SetDeviceMetadata(ctx context.Context, fields map[string]string) 
 	cs := NewChangeSet(n.name, "device.set-device-metadata")
 	e := updateDeviceMetadataConfig(fields)
 	cs.Update(e.Table, e.Key, e.Fields)
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	return cs, nil
 }
 
-// applyShadow updates the in-memory ConfigDB so subsequent operations see the
-// effects of prior ones. Dispatches by change type: DeleteEntry for deletes,
-// ApplyEntries for adds/modifies.
-func (n *Node) applyShadow(cs *ChangeSet) {
+// render validates entries against the schema, then updates the projection.
+// Runs on every path — replay, interactive, online, offline. Invalid entries
+// are rejected before they enter the projection.
+//
+// Architecture §5: "render(cs) validates entries against the schema and
+// updates the typed CONFIG_DB tables."
+func (n *Node) render(cs *ChangeSet) error {
 	if cs == nil {
-		return
+		return nil
+	}
+	if err := cs.validate(); err != nil {
+		return err
 	}
 	for _, c := range cs.Changes {
 		if c.Type == sonic.ChangeTypeDelete {
@@ -279,6 +481,7 @@ func (n *Node) applyShadow(cs *ChangeSet) {
 			n.configDB.ApplyEntries([]sonic.Entry{{Table: c.Table, Key: c.Key, Fields: c.Fields}})
 		}
 	}
+	return nil
 }
 
 // ============================================================================
@@ -337,12 +540,12 @@ func (n *Node) ConfigDB() *sonic.ConfigDB {
 
 // IsUnifiedConfigMode returns true if the device has frrcfgd (unified config
 // mode) enabled in DEVICE_METADATA. Delegates to sonic.Device for connected
-// nodes; checks shadow ConfigDB for abstract/offline nodes.
+// nodes; checks projection for abstract/offline nodes.
 func (n *Node) IsUnifiedConfigMode() bool {
 	if n.conn != nil {
 		return n.conn.IsUnifiedConfigMode()
 	}
-	// Offline/abstract mode — no sonic.Device, check shadow directly.
+	// Offline/abstract mode — no sonic.Device, check projection directly.
 	// This is the only place that duplicates the check logic; physical
 	// nodes always delegate to sonic.Device.IsUnifiedConfigMode().
 	if n.configDB == nil || n.configDB.DeviceMetadata == nil {
@@ -392,49 +595,111 @@ func (n *Node) StateDB() *sonic.StateDB {
 // Connection Management
 // ============================================================================
 
-// Connect establishes connection to the device via Redis/config_db.
-func (n *Node) Connect(ctx context.Context) error {
-	return n.connectWithOpts(ctx, false)
-}
-
-// ConnectForSetup connects to the device without requiring frrcfgd.
-// Used by provisioning and InitDevice — both write unified config mode
-// to DEVICE_METADATA and restart bgp afterward, so the check is skipped.
+// ConnectForSetup connects to the device for one-time bootstrap (InitDevice).
+// Unlike intent-first operations, InitDevice needs the actual CONFIG_DB as
+// working state — this is pre-intent, before any intents exist on the device.
 func (n *Node) ConnectForSetup(ctx context.Context) error {
-	return n.connectWithOpts(ctx, true)
-}
-
-func (n *Node) connectWithOpts(ctx context.Context, skipFrrcfgdCheck bool) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if n.connected {
 		return nil
 	}
 
-	// Create connection using sonic package
 	n.conn = sonic.NewDevice(n.name, n.resolved)
-	n.conn.SkipFrrcfgdCheck = skipFrrcfgdCheck
+	n.conn.SkipFrrcfgdCheck = true
 	if err := n.conn.Connect(ctx); err != nil {
 		return err
 	}
 
+	// InitDevice is pre-intent bootstrap — the device's actual CONFIG_DB
+	// IS the working state. Load it into the projection.
 	n.configDB = n.conn.ConfigDB
 	n.connected = true
-
-	// Load interfaces from CONFIG_DB.
-	// Intent state is read directly from configDB.NewtronIntent — no separate load step.
 	n.loadInterfaces()
 
-	util.WithDevice(n.name).Info("Connected")
+	util.WithDevice(n.name).Info("Connected for setup")
+	return nil
+}
+
+// ConnectTransport establishes SSH tunnel + Redis connection without
+// overwriting the projection. Transport is additive — it enables device
+// I/O without disturbing expected state built from intent replay.
+func (n *Node) ConnectTransport(ctx context.Context) error {
+	if n.conn != nil {
+		return nil // already connected
+	}
+
+	n.conn = sonic.NewDevice(n.name, n.resolved)
+	if err := n.conn.Connect(ctx); err != nil {
+		return err
+	}
+
+	n.connected = true
+	util.WithDevice(n.name).Info("Transport connected")
+	return nil
+}
+
+// InitFromDeviceIntent initializes the node's projection by reading NEWTRON_INTENT
+// records from the device and replaying them. This is the actuated-mode boot sequence:
+// transport → legacy migration → register ports → replay intents → mark actuated.
+//
+// Architecture §3: Device intents → ConnectTransport() → read PORT + NEWTRON_INTENT
+// → RegisterPort() → IntentsToSteps() → ReplayStep() for each step.
+func (n *Node) InitFromDeviceIntent(ctx context.Context) error {
+	// Step 1: Establish SSH + Redis transport.
+	if err := n.ConnectTransport(ctx); err != nil {
+		return fmt.Errorf("connecting transport: %w", err)
+	}
+
+	// Step 2: Legacy STATE_DB intent migration.
+	// Intents were historically stored in STATE_DB (volatile). New writes go to
+	// CONFIG_DB (persistent across reboot). Migrate any legacy records before
+	// reading CONFIG_DB intents so they are visible in the subsequent read.
+	if stateClient := n.conn.StateClient(); stateClient != nil {
+		if legacyIntents, err := stateClient.ReadIntentFromStateDB(n.name); err != nil {
+			util.WithDevice(n.name).Warnf("reading legacy STATE_DB intent: %v", err)
+		} else if legacyIntents != nil {
+			util.WithDevice(n.name).Info("migrating intent from STATE_DB to CONFIG_DB")
+			if err := n.conn.Client().WriteIntent(n.name, legacyIntents); err != nil {
+				util.WithDevice(n.name).Warnf("writing intent to CONFIG_DB during migration: %v", err)
+			} else {
+				_ = stateClient.DeleteIntentFromStateDB(n.name)
+			}
+		}
+	}
+
+	// Initialize a fresh projection — intents will be replayed into it.
+	// The device's ConfigDB (n.conn.ConfigDB) is the actual state; the
+	// node's configDB is the projection built from intent replay.
+	n.configDB = sonic.NewConfigDB()
+
+	// Step 3: Register ports from the device's actual CONFIG_DB.
+	// Ports are the bridge between physical infrastructure and the
+	// abstract node — they come from the device, not from intents.
+	for portName, fields := range n.conn.ConfigDB.ExportPorts() {
+		n.RegisterPort(portName, fields)
+	}
+
+	// Step 4: Read NEWTRON_INTENT records from the device's actual CONFIG_DB.
+	// Step 5: Convert intents to an ordered replay sequence.
+	steps := IntentsToSteps(n.conn.ConfigDB.NewtronIntent)
+
+	// Step 6: Replay each step to rebuild the projection.
+	for _, step := range steps {
+		if err := ReplayStep(ctx, n, step); err != nil {
+			return fmt.Errorf("replaying step %s: %w", step.URL, err)
+		}
+	}
+
+	// Step 7: Mark node as actuated — Lock will enforce drift guard.
+	n.actuatedIntent = true
+	// Step 8: Clear unsaved flag — this is loaded state, not new mutations.
+	n.unsavedIntents = false
+
+	util.WithDevice(n.name).Infof("InitFromDeviceIntent: replayed %d intent steps", len(steps))
 	return nil
 }
 
 // Disconnect closes the connection.
 func (n *Node) Disconnect() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if !n.connected {
 		return nil
 	}
@@ -450,41 +715,22 @@ func (n *Node) Disconnect() error {
 
 // IsConnected returns true if connected.
 func (n *Node) IsConnected() bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	return n.connected
 }
 
-// Refresh reloads CONFIG_DB from Redis and rebuilds the interface list.
-// Call after operations that write to CONFIG_DB outside the normal device flow
-// (e.g., composite provisioning).
-func (n *Node) Refresh() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if !n.connected || n.conn == nil {
-		return util.ErrNotConnected
+// Ping checks Redis connectivity without touching the projection.
+// Returns nil if transport is not connected (no-op — nothing to ping).
+func (n *Node) Ping(ctx context.Context) error {
+	if n.conn == nil {
+		return nil
 	}
-
-	configDB, err := n.conn.Client().GetAll()
-	if err != nil {
-		return fmt.Errorf("reloading config_db: %w", err)
-	}
-	n.conn.ConfigDB = configDB
-	n.configDB = configDB
-
-	// Rebuild interfaces from the refreshed CONFIG_DB
-	n.interfaces = make(map[string]*Interface)
-	n.loadInterfaces()
-
-	return nil
+	return n.conn.Client().Connect()
 }
 
-// RefreshWithRetry polls Refresh until CONFIG_DB is available or timeout
-// expires. Used after config reload when Redis may be briefly unavailable
-// as services restart.
-func (n *Node) RefreshWithRetry(ctx context.Context, timeout time.Duration) error {
-	if err := n.Refresh(); err == nil {
+// PingWithRetry polls Ping until Redis is reachable or timeout expires.
+// Used by Reconcile after config reload when Redis may be briefly unavailable.
+func (n *Node) PingWithRetry(ctx context.Context, timeout time.Duration) error {
+	if err := n.Ping(ctx); err == nil {
 		return nil
 	}
 
@@ -497,9 +743,9 @@ func (n *Node) RefreshWithRetry(ctx context.Context, timeout time.Duration) erro
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline:
-			return n.Refresh() // final attempt
+			return n.Ping(ctx) // final attempt
 		case <-ticker.C:
-			if err := n.Refresh(); err == nil {
+			if err := n.Ping(ctx); err == nil {
 				return nil
 			}
 		}
@@ -507,21 +753,19 @@ func (n *Node) RefreshWithRetry(ctx context.Context, timeout time.Duration) erro
 }
 
 // Lock acquires a distributed lock for configuration changes.
-// Constructs a holder identity from the current user and hostname,
-// and acquires the lock with a default TTL of 3600 seconds.
+// Transport guard: no-op when n.conn == nil (topology-offline mode).
+// After lock acquisition, performs legacy STATE_DB migration and drift
+// guard (actuated mode only).
 //
-// After acquiring the lock, Lock refreshes the CONFIG_DB cache to guarantee
-// that precondition checks within the subsequent write episode see all changes
-// made by prior lock holders. If the cache refresh fails, the lock is released
-// and an error is returned — operating with a stale cache under lock is worse
-// than failing the operation.
-func (n *Node) Lock() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	if !n.connected {
-		return util.ErrNotConnected
+// Architecture §8: Lock acquires exclusive access. No-op without transport.
+// The projection is already fresh when Lock is called — execute() rebuilds
+// it from device intents before any operation touches the node.
+func (n *Node) Lock(ctx context.Context) error {
+	// Transport guard — Lock is a no-op without a wire.
+	if n.conn == nil {
+		return nil
 	}
+
 	if n.locked {
 		return nil
 	}
@@ -531,20 +775,6 @@ func (n *Node) Lock() error {
 		return err
 	}
 	n.locked = true
-
-	// Refresh CONFIG_DB cache — guarantees precondition checks see
-	// all changes made by prior lock holders.
-	configDB, err := n.conn.Client().GetAll()
-	if err != nil {
-		// Release lock on refresh failure — don't hold a lock with stale cache
-		n.conn.Unlock()
-		n.locked = false
-		return fmt.Errorf("refresh config_db after lock: %w", err)
-	}
-	n.conn.ConfigDB = configDB
-	n.configDB = configDB
-	n.interfaces = make(map[string]*Interface)
-	n.loadInterfaces()
 
 	// Migrate any legacy STATE_DB intent to CONFIG_DB (one-time per device).
 	// New intents are always written to CONFIG_DB (persistent across reboot).
@@ -561,20 +791,29 @@ func (n *Node) Lock() error {
 		}
 	}
 
-	// Check for existing intent from a crashed process.
-	// If you hold the lock and an intent exists, the previous holder
-	// crashed between WriteIntent and DeleteIntent. The lock acquisition
-	// proves the previous holder is gone — staleness is irrelevant.
-	// Intent is now in CONFIG_DB (persistent across reboot).
-	n.zombie = nil
-	if configClient := n.conn.Client(); configClient != nil {
-		intent, err := configClient.ReadIntent(n.name)
+	// Drift guard (actuated mode only): refuse writes if device has
+	// drifted from its intents. Compares the projection (rebuilt by
+	// execute() from fresh device intents) against actual CONFIG_DB.
+	//
+	// Skip when the intent DB is empty — a fresh device with no intents
+	// has no basis for drift. Factory CONFIG_DB entries are pre-intent
+	// infrastructure, not drift from intents that don't exist yet.
+	// Architecture §8: "the drift guard ensures new intents are never
+	// applied on a drifted foundation" — but with zero intents, there
+	// is no foundation to drift from.
+	if n.actuatedIntent && len(n.configDB.NewtronIntent) > 0 {
+		expected := n.configDB.ExportRaw()
+		actual, err := n.conn.Client().GetRawOwnedTables(ctx)
 		if err != nil {
-			util.WithDevice(n.name).Warnf("reading intent on lock: %v", err)
-		} else if intent != nil {
-			n.zombie = intent
-			util.WithDevice(n.name).Warnf("zombie operation detected: holder=%s, created=%s, operations=%d",
-				intent.Holder, intent.Created.Format(time.RFC3339), len(intent.Operations))
+			n.conn.Unlock()
+			n.locked = false
+			return fmt.Errorf("drift guard: reading actual CONFIG_DB: %w", err)
+		}
+		drift := sonic.DiffConfigDB(expected, actual, sonic.OwnedTables())
+		if len(drift) > 0 {
+			n.conn.Unlock()
+			n.locked = false
+			return fmt.Errorf("device drifted from intents (%d entries) — reconcile first", len(drift))
 		}
 	}
 
@@ -595,10 +834,11 @@ func BuildLockHolder() string {
 }
 
 // Unlock releases the lock.
+// Transport guard: no-op when n.conn == nil (topology-offline mode).
 func (n *Node) Unlock() error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
+	if n.conn == nil {
+		return nil
+	}
 	if !n.locked {
 		return nil
 	}
@@ -613,40 +853,7 @@ func (n *Node) Unlock() error {
 
 // IsLocked returns true if locked.
 func (n *Node) IsLocked() bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
 	return n.locked
-}
-
-// ExecuteOp locks the device, runs the operation function, applies the
-// resulting ChangeSet to CONFIG_DB, and unlocks. This is the standard
-// pattern for all state-mutating operations — used by both the CLI
-// (execute mode) and the test runner, ensuring identical behavior.
-//
-// The operation function should build a ChangeSet without side effects
-// (e.g., iface.ApplyService, iface.RemoveService, dev.ConfigureLoopback).
-// ExecuteOp handles the lock/apply/unlock lifecycle.
-//
-// Write episode lifecycle: Lock() refreshes the CONFIG_DB cache (start of
-// episode) → fn() reads preconditions from cache → Apply() writes to Redis →
-// Unlock() ends the episode. No post-Apply refresh — the next episode
-// (whether write or read-only) will refresh itself.
-func (n *Node) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
-	if err := n.Lock(); err != nil {
-		return nil, fmt.Errorf("lock: %w", err)
-	}
-	defer n.Unlock()
-
-	cs, err := fn()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := cs.Apply(n); err != nil {
-		return nil, fmt.Errorf("apply: %w", err)
-	}
-
-	return cs, nil
 }
 
 // ============================================================================
@@ -657,9 +864,6 @@ func (n *Node) ExecuteOp(fn func() (*ChangeSet, error)) (*ChangeSet, error) {
 // The Interface has access to Device properties AND Network configuration.
 // Accepts both short (Eth0, Po100) and full (Ethernet0, PortChannel100) interface names.
 func (n *Node) GetInterface(name string) (*Interface, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	// Normalize interface name (e.g., Eth0 -> Ethernet0, Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
@@ -668,8 +872,8 @@ func (n *Node) GetInterface(name string) (*Interface, error) {
 		return intf, nil
 	}
 
-	// Verify interface exists in config_db
-	if !n.interfaceExistsInConfigDB(name) {
+	// Verify interface exists
+	if !n.InterfaceExists(name) {
 		return nil, util.NewPreconditionError("get-interface", name, "interface exists",
 			fmt.Sprintf("not found on device %s", n.name))
 	}
@@ -686,28 +890,24 @@ func (n *Node) GetInterface(name string) (*Interface, error) {
 
 // ListInterfaces returns all interface names.
 func (n *Node) ListInterfaces() []string {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-
 	var names []string
 
-	// Physical interfaces from PORT table
+	// Physical interfaces from PORT table (pre-intent infrastructure)
 	if n.configDB != nil {
 		for name := range n.configDB.Port {
 			names = append(names, name)
 		}
-		// Port channels
-		for name := range n.configDB.PortChannel {
-			names = append(names, name)
+	}
+
+	// PortChannels from intent DB
+	for resource := range n.IntentsByPrefix("portchannel|") {
+		parts := strings.SplitN(resource, "|", 2)
+		if len(parts) == 2 && !strings.Contains(parts[1], "|") {
+			names = append(names, parts[1])
 		}
 	}
 
 	return names
-}
-
-// interfaceExistsInConfigDB checks if interface exists.
-func (n *Node) interfaceExistsInConfigDB(name string) bool {
-	return n.configDB.HasInterface(name)
 }
 
 // loadInterfaces populates the interfaces map from config_db.
@@ -725,20 +925,13 @@ func (n *Node) loadInterfaces() {
 	}
 }
 
-// splitKey splits a config_db key on "|"
-func splitKey(key string) []string {
-	for i := range key {
-		if key[i] == '|' {
-			return []string{key[:i], key[i+1:]}
-		}
-	}
-	return []string{key}
-}
 
 // SaveConfig persists the device's running CONFIG_DB to disk via SSH.
 func (n *Node) SaveConfig(ctx context.Context) error {
-	if !n.connected {
-		return util.ErrNotConnected
+	// Transport guard — config save writes to the device filesystem via SSH.
+	// Without transport, skip (same pattern as Apply, Lock, Unlock).
+	if n.conn == nil {
+		return nil
 	}
 	tunnel := n.Tunnel()
 	if tunnel == nil {
@@ -862,6 +1055,10 @@ func (n *Node) RestartService(ctx context.Context, name string) error {
 // ApplyFRRDefaults sets FRR runtime defaults not supported by frrcfgd templates.
 // Handles: no bgp ebgp-requires-policy, no bgp suppress-fib-pending.
 // Must be called after a BGP container restart since frr.conf is regenerated.
+//
+// CLI-WORKAROUND(frr-defaults): Sets FRR runtime defaults via vtysh.
+// Gap: frrcfgd templates don't support ebgp-requires-policy and suppress-fib-pending.
+// Resolution: Upstream frrcfgd template patch to include these defaults.
 func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	if !n.connected {
 		return util.ErrNotConnected
@@ -871,21 +1068,13 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 		return fmt.Errorf("ApplyFRRDefaults requires SSH connection")
 	}
 
-	// Read BGP ASN from CONFIG_DB — check DEVICE_METADATA first (provision path),
-	// then fall back to BGP_GLOBALS.local_asn (configure-bgp path).
+	// Read BGP ASN from resolved profile (set by device profile).
 	asn := ""
-	if n.configDB != nil {
-		if meta, ok := n.configDB.DeviceMetadata["localhost"]; ok {
-			asn = meta["bgp_asn"]
-		}
-		if asn == "" {
-			if globals, ok := n.configDB.BGPGlobals["default"]; ok {
-				asn = globals.LocalASN
-			}
-		}
+	if n.resolved != nil && n.resolved.UnderlayASN > 0 {
+		asn = fmt.Sprintf("%d", n.resolved.UnderlayASN)
 	}
 	if asn == "" {
-		return fmt.Errorf("cannot determine BGP ASN from CONFIG_DB")
+		return fmt.Errorf("cannot determine BGP ASN from device profile")
 	}
 
 	cmds := fmt.Sprintf(
@@ -904,133 +1093,6 @@ func (n *Node) ApplyFRRDefaults(ctx context.Context) error {
 	_, _ = tunnel.ExecCommand("vtysh -c 'clear bgp * soft'")
 
 	return nil
-}
-
-// ============================================================================
-// Intent Record Methods
-// ============================================================================
-
-// ZombieIntent returns the existing intent found during Lock(), or nil.
-func (n *Node) ZombieIntent() *sonic.OperationIntent { return n.zombie }
-
-// ClearZombie deletes the zombie intent from CONFIG_DB without reversing.
-func (n *Node) ClearZombie() error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return fmt.Errorf("no CONFIG_DB client")
-	}
-	if err := configClient.DeleteIntent(n.name); err != nil {
-		return err
-	}
-	n.zombie = nil
-	return nil
-}
-
-// WriteIntent writes an operation intent to CONFIG_DB.
-func (n *Node) WriteIntent(intent *sonic.OperationIntent) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return fmt.Errorf("no CONFIG_DB client")
-	}
-	return configClient.WriteIntent(n.name, intent)
-}
-
-// UpdateIntentOps updates the mutable fields of the current intent.
-func (n *Node) UpdateIntentOps(intent *sonic.OperationIntent) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return fmt.Errorf("no CONFIG_DB client")
-	}
-	return configClient.UpdateIntentOps(n.name, intent)
-}
-
-// DeleteIntent removes the operation intent from CONFIG_DB.
-func (n *Node) DeleteIntent() error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return fmt.Errorf("no CONFIG_DB client")
-	}
-	return configClient.DeleteIntent(n.name)
-}
-
-// ReadIntent reads the current intent from CONFIG_DB (live read).
-func (n *Node) ReadIntent() (*sonic.OperationIntent, error) {
-	if n.conn == nil {
-		return nil, util.ErrNotConnected
-	}
-	configClient := n.conn.Client()
-	if configClient == nil {
-		return nil, fmt.Errorf("no CONFIG_DB client")
-	}
-	return configClient.ReadIntent(n.name)
-}
-
-// ============================================================================
-// Settings Methods
-// ============================================================================
-
-// ReadSettings reads NEWTRON_SETTINGS from CONFIG_DB.
-func (n *Node) ReadSettings() (*sonic.DeviceSettings, error) {
-	if n.conn == nil {
-		return nil, util.ErrNotConnected
-	}
-	return n.conn.Client().ReadSettings()
-}
-
-// WriteSettings writes NEWTRON_SETTINGS to CONFIG_DB.
-func (n *Node) WriteSettings(s *sonic.DeviceSettings) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	return n.conn.Client().WriteSettings(s)
-}
-
-// ============================================================================
-// History Methods
-// ============================================================================
-
-// WriteHistory writes a history entry to CONFIG_DB.
-func (n *Node) WriteHistory(entry *sonic.HistoryEntry) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	return n.conn.Client().WriteHistory(n.name, entry)
-}
-
-// ReadHistory reads all history entries for this device.
-func (n *Node) ReadHistory() ([]*sonic.HistoryEntry, error) {
-	if n.conn == nil {
-		return nil, util.ErrNotConnected
-	}
-	return n.conn.Client().ReadHistory(n.name)
-}
-
-// UpdateHistory updates a history entry (e.g., marking ops as reversed).
-func (n *Node) UpdateHistory(entry *sonic.HistoryEntry) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	return n.conn.Client().UpdateHistory(n.name, entry)
-}
-
-// DeleteHistory deletes a single history entry by sequence.
-func (n *Node) DeleteHistory(seq int) error {
-	if n.conn == nil {
-		return util.ErrNotConnected
-	}
-	return n.conn.Client().DeleteHistory(n.name, seq)
 }
 
 // ============================================================================

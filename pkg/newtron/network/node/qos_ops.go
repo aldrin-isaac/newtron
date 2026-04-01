@@ -3,7 +3,6 @@ package node
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/spec"
@@ -35,42 +34,16 @@ func (i *Interface) ApplyQoS(ctx context.Context, policyName string, policy *spe
 	cs.OperationParams = map[string]string{"interface": i.name}
 
 	// Generate device-wide entries (DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE)
-	for _, entry := range GenerateDeviceQoSConfig(policyName, policy) {
-		cs.Add(entry.Table, entry.Key, entry.Fields)
-	}
+	cs.Adds(GenerateDeviceQoSConfig(policyName, policy))
 
 	// Generate per-interface entries (PORT_QOS_MAP, QUEUE)
-	for _, entry := range i.bindQos(policyName, policy) {
-		cs.Add(entry.Table, entry.Key, entry.Fields)
-	}
+	cs.Adds(bindQosConfig(i.name, policyName, policy))
 
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Applied QoS policy '%s' to interface %s", policyName, i.name)
 	return cs, nil
-}
-
-// unbindQos returns delete entries for QoS on this interface: QUEUE entries and PORT_QOS_MAP.
-func (i *Interface) unbindQos() []sonic.Entry {
-	configDB := i.node.ConfigDB()
-	var entries []sonic.Entry
-
-	// Find and remove QUEUE entries for this interface
-	if configDB != nil {
-		prefix := i.name + "|"
-		for key := range configDB.Queue {
-			if strings.HasPrefix(key, prefix) {
-				entries = append(entries, sonic.Entry{Table: "QUEUE", Key: key})
-			}
-		}
-	}
-
-	// Remove PORT_QOS_MAP entry for this interface
-	if configDB != nil {
-		if _, ok := configDB.PortQoSMap[i.name]; ok {
-			entries = append(entries, sonic.Entry{Table: "PORT_QOS_MAP", Key: i.name})
-		}
-	}
-
-	return entries
 }
 
 // RemoveQoS removes QoS configuration from this interface.
@@ -91,17 +64,29 @@ func (i *Interface) RemoveQoS(ctx context.Context) (*ChangeSet, error) {
 	}
 	policyName := intent.Params[sonic.FieldQoSPolicy]
 
-	cs := buildChangeSet(n.Name(), "interface.remove-qos", i.unbindQos(), ChangeDelete)
+	// Resolve spec for queue count — needed for deterministic unbind
+	var queueCount int
+	var policy *spec.QoSPolicy
+	if policyName != "" {
+		policy, _ = n.GetQoSPolicy(policyName)
+		if policy != nil {
+			queueCount = len(policy.Queues)
+		}
+	}
+
+	cs := buildChangeSet(n.Name(), "interface.remove-qos", unbindQosConfig(i.name, queueCount), ChangeDelete)
 
 	// Clean up device-wide entries if no other interface references this policy
 	if policyName != "" && !n.isQoSPolicyReferenced(policyName, i.name) {
-		cs.Deletes(n.deleteDeviceQoSConfig(policyName))
+		cs.Deletes(deleteDeviceQoSConfig(policyName, policy))
 	}
 
 	if err := i.node.deleteIntent(cs, "interface|"+i.name+"|qos"); err != nil {
 		return nil, err
 	}
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.Name()).Infof("Removed QoS from interface %s", i.name)
 	return cs, nil
 }

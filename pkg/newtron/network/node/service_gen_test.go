@@ -11,7 +11,7 @@ import (
 // newTestInterface creates an Interface backed by an offline Node for testing
 // config-generation methods that need i.node (SpecProvider) and i.name.
 func newTestInterface(sp SpecProvider, name string) *Interface {
-	n := &Node{SpecProvider: sp, configDB: sonic.NewConfigDB(), offline: true}
+	n := &Node{SpecProvider: sp, configDB: sonic.NewConfigDB()}
 	return &Interface{node: n, name: name}
 }
 
@@ -514,9 +514,14 @@ func TestCreateRoutePolicy_ContentHashedNames(t *testing.T) {
 			"RFC1918": {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		},
 	}
-	iface := newTestInterface(sp, "Ethernet0")
-
-	entries, rmName := iface.createRoutePolicy("TRANSIT", "import", "ALLOW_CUST", "", "")
+	policy, _ := sp.GetRoutePolicy("ALLOW_CUST")
+	prefixLists := map[string][]string{}
+	for _, rule := range policy.Rules {
+		if rule.PrefixList != "" {
+			prefixLists[rule.PrefixList] = sp.prefixLists[rule.PrefixList]
+		}
+	}
+	entries, rmName := createRoutePolicyConfig("TRANSIT", "import", policy, prefixLists, "", "")
 
 	// Route-map name must contain content hash
 	if rmName == "TRANSIT_IMPORT" {
@@ -566,11 +571,11 @@ func TestCreateRoutePolicy_DifferentContentDifferentHash(t *testing.T) {
 		prefixLists: map[string][]string{},
 	}
 
-	iface1 := newTestInterface(sp1, "Ethernet0")
-	iface2 := newTestInterface(sp2, "Ethernet0")
+	policy1, _ := sp1.GetRoutePolicy("POL")
+	policy2, _ := sp2.GetRoutePolicy("POL")
 
-	_, name1 := iface1.createRoutePolicy("SVC", "import", "POL", "", "")
-	_, name2 := iface2.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, name1 := createRoutePolicyConfig("SVC", "import", policy1, map[string][]string{}, "", "")
+	_, name2 := createRoutePolicyConfig("SVC", "import", policy2, map[string][]string{}, "", "")
 
 	if name1 == name2 {
 		t.Errorf("different policy content should produce different hashes, both got %s", name1)
@@ -585,10 +590,10 @@ func TestCreateRoutePolicy_SameContentSameHash(t *testing.T) {
 		prefixLists: map[string][]string{},
 	}
 
-	iface := newTestInterface(sp, "Ethernet0")
+	policy, _ := sp.GetRoutePolicy("POL")
 
-	_, name1 := iface.createRoutePolicy("SVC", "import", "POL", "", "")
-	_, name2 := iface.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, name1 := createRoutePolicyConfig("SVC", "import", policy, map[string][]string{}, "", "")
+	_, name2 := createRoutePolicyConfig("SVC", "import", policy, map[string][]string{}, "", "")
 
 	if name1 != name2 {
 		t.Errorf("same content should produce same hash: %s != %s", name1, name2)
@@ -616,11 +621,13 @@ func TestCreateRoutePolicy_MerkleHashCascade(t *testing.T) {
 		},
 	}
 
-	iface1 := newTestInterface(sp1, "Ethernet0")
-	iface2 := newTestInterface(sp2, "Ethernet0")
+	policy1, _ := sp1.GetRoutePolicy("POL")
+	prefixLists1 := map[string][]string{"PL1": sp1.prefixLists["PL1"]}
+	policy2, _ := sp2.GetRoutePolicy("POL")
+	prefixLists2 := map[string][]string{"PL1": sp2.prefixLists["PL1"]}
 
-	_, rmName1 := iface1.createRoutePolicy("SVC", "import", "POL", "", "")
-	_, rmName2 := iface2.createRoutePolicy("SVC", "import", "POL", "", "")
+	_, rmName1 := createRoutePolicyConfig("SVC", "import", policy1, prefixLists1, "", "")
+	_, rmName2 := createRoutePolicyConfig("SVC", "import", policy2, prefixLists2, "", "")
 
 	if rmName1 == rmName2 {
 		t.Errorf("changing prefix list content should cascade to different route-map hash, both got %s", rmName1)
@@ -636,9 +643,8 @@ func TestCreateRoutePolicy_WithCommunity(t *testing.T) {
 		},
 		prefixLists: map[string][]string{},
 	}
-	iface := newTestInterface(sp, "Ethernet0")
-
-	entries, rmName := iface.createRoutePolicy("SVC", "import", "POL", "", "")
+	policy, _ := sp.GetRoutePolicy("POL")
+	entries, rmName := createRoutePolicyConfig("SVC", "import", policy, map[string][]string{}, "", "")
 
 	if rmName == "" {
 		t.Fatal("expected non-empty route-map name")
@@ -665,9 +671,8 @@ func TestCreateInlineRoutePolicy_ContentHashedNames(t *testing.T) {
 			"ALLOWED": {"10.1.0.0/16", "10.2.0.0/16"},
 		},
 	}
-	iface := newTestInterface(sp, "Ethernet0")
-
-	entries, rmName := iface.createInlineRoutePolicy("SVC", "import", "", "ALLOWED")
+	prefixes := sp.prefixLists["ALLOWED"]
+	entries, rmName := createInlineRoutePolicyConfig("SVC", "import", "", prefixes)
 
 	if rmName == "SVC_IMPORT" {
 		t.Fatal("inline route-map name should include content hash")
@@ -696,9 +701,8 @@ func TestCreateHashedPrefixSet_ContentHash(t *testing.T) {
 			"PL1": {"10.0.0.0/8", "172.16.0.0/12"},
 		},
 	}
-	iface := newTestInterface(sp, "Ethernet0")
-
-	entries, name := iface.createHashedPrefixSet("TEST_PL", "PL1")
+	prefixes := sp.prefixLists["PL1"]
+	entries, name := createHashedPrefixSetConfig("TEST_PL", prefixes)
 
 	if name == "TEST_PL" {
 		t.Fatal("prefix set name should include content hash")
@@ -708,7 +712,7 @@ func TestCreateHashedPrefixSet_ContentHash(t *testing.T) {
 	}
 
 	// Verify determinism
-	_, name2 := iface.createHashedPrefixSet("TEST_PL", "PL1")
+	_, name2 := createHashedPrefixSetConfig("TEST_PL", prefixes)
 	if name != name2 {
 		t.Errorf("same content should produce same hash: %s != %s", name, name2)
 	}
@@ -725,9 +729,11 @@ func TestCreateRoutePolicy_ExtraCommunityAndPrefixList(t *testing.T) {
 			"EXTRA_PL": {"192.168.0.0/16"},
 		},
 	}
-	iface := newTestInterface(sp, "Ethernet0")
-
-	entries, rmName := iface.createRoutePolicy("SVC", "export", "POL", "65000:200", "EXTRA_PL")
+	policy, _ := sp.GetRoutePolicy("POL")
+	prefixLists := map[string][]string{
+		"EXTRA_PL": sp.prefixLists["EXTRA_PL"],
+	}
+	entries, rmName := createRoutePolicyConfig("SVC", "export", policy, prefixLists, "65000:200", "EXTRA_PL")
 
 	if rmName == "" {
 		t.Fatal("expected non-empty route-map name")
@@ -750,39 +756,37 @@ func TestCreateRoutePolicy_ExtraCommunityAndPrefixList(t *testing.T) {
 	}
 }
 
-func TestScanExistingRoutePolicies_OfflineMode(t *testing.T) {
-	// Verify that scanExistingRoutePolicies in offline mode correctly
-	// delegates to scanRoutePoliciesByPrefix (reads shadow configDB).
-	n := testDevice()
-	n.offline = true
-	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
-	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|20"] = sonic.RouteMapEntry{}
-	n.configDB.PrefixSet["SVC_IMPORT_PL_10_FFFF|10"] = sonic.PrefixSetEntry{}
-	n.configDB.CommunitySet["SVC_IMPORT_CS_10_EEEE"] = sonic.CommunitySetEntry{}
-	// Unrelated entries for other services should NOT be returned
-	n.configDB.RouteMap["OTHER_IMPORT_DEADBEEF|10"] = sonic.RouteMapEntry{}
-
-	entries, err := n.scanExistingRoutePolicies("SVC")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestDiffRoutePolicyKeyCSV(t *testing.T) {
+	// Same keys → no stale
+	old := "ROUTE_MAP:SVC_IMPORT_AAAA|10;PREFIX_SET:SVC_IMPORT_PL_BBBB|10"
+	same := old
+	if got := diffRoutePolicyKeyCSV(old, same); got != "" {
+		t.Errorf("identical keys should produce empty diff, got %q", got)
 	}
 
-	tables := map[string]int{}
-	for _, e := range entries {
-		tables[e.Table]++
+	// Hash changed → old keys are stale
+	newKeys := "ROUTE_MAP:SVC_IMPORT_CCCC|10;PREFIX_SET:SVC_IMPORT_PL_DDDD|10"
+	got := diffRoutePolicyKeyCSV(old, newKeys)
+	if got == "" {
+		t.Fatal("expected non-empty diff for changed hashes")
 	}
-	if tables["ROUTE_MAP"] != 2 {
-		t.Errorf("expected 2 ROUTE_MAP entries, got %d", tables["ROUTE_MAP"])
+	// Should contain both old keys
+	if !strings.Contains(got, "ROUTE_MAP:SVC_IMPORT_AAAA|10") {
+		t.Errorf("diff missing old ROUTE_MAP key, got %q", got)
 	}
-	if tables["PREFIX_SET"] != 1 {
-		t.Errorf("expected 1 PREFIX_SET entry, got %d", tables["PREFIX_SET"])
+	if !strings.Contains(got, "PREFIX_SET:SVC_IMPORT_PL_BBBB|10") {
+		t.Errorf("diff missing old PREFIX_SET key, got %q", got)
 	}
-	if tables["COMMUNITY_SET"] != 1 {
-		t.Errorf("expected 1 COMMUNITY_SET entry, got %d", tables["COMMUNITY_SET"])
+
+	// Empty old → no stale
+	if got := diffRoutePolicyKeyCSV("", newKeys); got != "" {
+		t.Errorf("empty old should produce empty diff, got %q", got)
 	}
-	// Total should be 4 (not 5 — OTHER_IMPORT should be excluded)
-	if len(entries) != 4 {
-		t.Errorf("expected 4 total entries, got %d", len(entries))
+
+	// Empty new → all old keys are stale
+	got = diffRoutePolicyKeyCSV(old, "")
+	if got == "" {
+		t.Error("empty new should produce all old keys as stale")
 	}
 }
 
@@ -813,8 +817,7 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 	n := &Node{
 		SpecProvider: sp,
 		name:         "test-dev",
-		offline:      true,
-		resolved: &spec.ResolvedProfile{
+				resolved: &spec.ResolvedProfile{
 			UnderlayASN: 64512,
 			RouterID:    "10.255.0.1",
 			LoopbackIP:  "10.255.0.1",
@@ -852,10 +855,10 @@ func TestRefreshService_CleansUpStaleRoutePolicies(t *testing.T) {
 		t.Fatal("ApplyService did not create any ROUTE_MAP entries")
 	}
 
-	// Verify route_map_in is stored in binding
-	binding := n.configDB.NewtronIntent["interface|Ethernet0"]
-	if binding["route_map_in"] == "" {
-		t.Fatal("binding route_map_in is empty — route map name not stored in binding")
+	// Verify route_map_in is stored in service intent (not interface binding)
+	serviceBinding := n.configDB.NewtronIntent["service|TRANSIT"]
+	if serviceBinding["route_map_in"] == "" {
+		t.Fatal("service intent route_map_in is empty — route map name not stored")
 	}
 
 	// Step 2: Change the route policy spec (different content → different hash)
@@ -928,8 +931,7 @@ func TestRefreshService_NoStaleCleanupWhenHashUnchanged(t *testing.T) {
 	n := &Node{
 		SpecProvider: sp,
 		name:         "test-dev",
-		offline:      true,
-		resolved: &spec.ResolvedProfile{
+				resolved: &spec.ResolvedProfile{
 			UnderlayASN: 64512,
 			RouterID:    "10.255.0.1",
 			LoopbackIP:  "10.255.0.1",
@@ -1005,8 +1007,7 @@ func TestRefreshService_PreservesTopologyParams(t *testing.T) {
 	n := &Node{
 		SpecProvider: sp,
 		name:         "test-dev",
-		offline:      true,
-		resolved: &spec.ResolvedProfile{
+				resolved: &spec.ResolvedProfile{
 			UnderlayASN: 64512,
 			RouterID:    "10.255.0.1",
 			LoopbackIP:  "10.255.0.1",
@@ -1109,8 +1110,7 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 	n := &Node{
 		SpecProvider: sp,
 		name:         "test-dev",
-		offline:      true,
-		resolved: &spec.ResolvedProfile{
+				resolved: &spec.ResolvedProfile{
 			UnderlayASN: 64512,
 			RouterID:    "10.255.0.1",
 			LoopbackIP:  "10.255.0.1",
@@ -1141,17 +1141,11 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 		t.Fatalf("ApplyService on Ethernet4 failed: %v", err)
 	}
 
-	// Capture the original route map name from the binding
-	b0 := n.configDB.NewtronIntent["interface|Ethernet0"]
-	originalRM := b0["route_map_in"]
+	// Capture the original route map name from the service intent
+	si := n.configDB.NewtronIntent["service|TRANSIT"]
+	originalRM := si["route_map_in"]
 	if originalRM == "" {
-		t.Fatal("Ethernet0 binding has no route_map_in after apply")
-	}
-
-	// Verify both interfaces share the same route map via peer group
-	b4 := n.configDB.NewtronIntent["interface|Ethernet4"]
-	if b4["route_map_in"] != originalRM {
-		t.Fatalf("expected both interfaces to share route map %s, but Ethernet4 has %s", originalRM, b4["route_map_in"])
+		t.Fatal("service intent has no route_map_in after apply")
 	}
 
 	// Step 2: Change the route policy spec (different content → different hash)
@@ -1196,10 +1190,10 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 		t.Errorf("stale route map %s was not cleaned up after first interface refresh", originalRM)
 	}
 
-	// Verify shadow ConfigDB no longer has old route map entries
+	// Verify projection no longer has old route map entries
 	for key := range n.configDB.RouteMap {
 		if strings.HasPrefix(key, originalRM) {
-			t.Errorf("shadow ConfigDB still contains old route map entry: %s", key)
+			t.Errorf("projection still contains old route map entry: %s", key)
 		}
 	}
 
@@ -1230,14 +1224,10 @@ func TestBlueGreenPolicyMigration_TwoInterfaces(t *testing.T) {
 		}
 	}
 
-	// Verify both interfaces now reference the new route map
-	b0After := n.configDB.NewtronIntent["interface|Ethernet0"]
-	b4After := n.configDB.NewtronIntent["interface|Ethernet4"]
-	if b0After["route_map_in"] != newRM {
-		t.Errorf("Ethernet0 binding should reference new route map %s, got %s", newRM, b0After["route_map_in"])
-	}
-	if b4After["route_map_in"] != newRM {
-		t.Errorf("Ethernet4 binding should reference new route map %s, got %s", newRM, b4After["route_map_in"])
+	// Verify service intent now references the new route map
+	siAfter := n.configDB.NewtronIntent["service|TRANSIT"]
+	if siAfter["route_map_in"] != newRM {
+		t.Errorf("service intent should reference new route map %s, got %s", newRM, siAfter["route_map_in"])
 	}
 }
 
@@ -1261,8 +1251,7 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 	n := &Node{
 		SpecProvider: sp,
 		name:         "test-dev",
-		offline:      true,
-		resolved: &spec.ResolvedProfile{
+				resolved: &spec.ResolvedProfile{
 			UnderlayASN: 64512,
 			RouterID:    "10.255.0.1",
 			LoopbackIP:  "10.255.0.1",
@@ -1298,7 +1287,7 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 		t.Error("First ApplyService should create BGP_PEER_GROUP")
 	}
 	if _, exists := n.configDB.BGPPeerGroup[pgKey]; !exists {
-		t.Error("BGP_PEER_GROUP should exist in shadow ConfigDB after first apply")
+		t.Error("BGP_PEER_GROUP should exist in projection after first apply")
 	}
 
 	// Step 2: Apply service on second interface → peer group reused (not recreated)
@@ -1354,29 +1343,13 @@ func TestBGPPeerGroup_CreateOnFirst_DeleteOnLast(t *testing.T) {
 	}
 }
 
-func TestScanRoutePoliciesByPrefix_FindsHashedNames(t *testing.T) {
-	// Verify that scanRoutePoliciesByPrefix scans by prefix and finds
-	// content-hashed route map, prefix set, and community set entries.
-	n := testDevice()
-	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|10"] = sonic.RouteMapEntry{}
-	n.configDB.RouteMap["SVC_IMPORT_A1B2C3D4|20"] = sonic.RouteMapEntry{}
-	n.configDB.PrefixSet["SVC_IMPORT_PL_10_F1E2D3C4|10"] = sonic.PrefixSetEntry{}
-	n.configDB.PrefixSet["SVC_IMPORT_PL_10_F1E2D3C4|20"] = sonic.PrefixSetEntry{}
-	n.configDB.CommunitySet["SVC_IMPORT_CS_10_B7A4E9F1"] = sonic.CommunitySetEntry{}
-
-	entries := n.scanRoutePoliciesByPrefix("SVC")
-
-	tables := map[string]int{}
-	for _, e := range entries {
-		tables[e.Table]++
-	}
-	if tables["ROUTE_MAP"] != 2 {
-		t.Errorf("expected 2 ROUTE_MAP deletes, got %d", tables["ROUTE_MAP"])
-	}
-	if tables["PREFIX_SET"] != 2 {
-		t.Errorf("expected 2 PREFIX_SET deletes, got %d", tables["PREFIX_SET"])
-	}
-	if tables["COMMUNITY_SET"] != 1 {
-		t.Errorf("expected 1 COMMUNITY_SET delete, got %d", tables["COMMUNITY_SET"])
+func TestDiffRoutePolicyKeyCSV_PartialOverlap(t *testing.T) {
+	// ROUTE_MAP key is shared (same hash), COMMUNITY_SET key changed
+	old := "ROUTE_MAP:SVC_IMPORT_AAAA|10;COMMUNITY_SET:SVC_IMPORT_CS_BBBB"
+	newKeys := "ROUTE_MAP:SVC_IMPORT_AAAA|10;COMMUNITY_SET:SVC_IMPORT_CS_CCCC"
+	got := diffRoutePolicyKeyCSV(old, newKeys)
+	// Only the changed COMMUNITY_SET key should be stale
+	if got != "COMMUNITY_SET:SVC_IMPORT_CS_BBBB" {
+		t.Errorf("expected only stale COMMUNITY_SET key, got %q", got)
 	}
 }

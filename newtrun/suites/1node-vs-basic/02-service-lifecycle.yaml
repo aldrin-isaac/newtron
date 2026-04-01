@@ -1,0 +1,66 @@
+name: service-lifecycle
+description: |
+  Apply a transit service on Ethernet0, verify CONFIG_DB entries, then remove
+  and verify cleanup. Exercises the full service apply/remove lifecycle on a
+  single switch.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # Apply transit service on Ethernet0
+  - name: apply-transit
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/apply-service
+    params:
+      service: transit
+      ip_address: "10.1.0.0/31"
+      peer_as: 65002
+
+  # Verify service binding created
+  - name: verify-binding
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    expect:
+      jq: '.exists == true'
+
+  # Verify INTERFACE entry (IP routing enabled on port)
+  - name: verify-interface
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/INTERFACE/Ethernet0/exists
+    expect:
+      jq: '.exists == true'
+
+  # Verify BGP neighbor with correct ASN
+  - name: verify-bgp-neighbor
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1
+    expect:
+      jq: '.asn == "65002"'
+
+  # Remove service
+  - name: remove-transit
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet0/remove-service
+
+  # Verify binding removed
+  - name: verify-binding-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/interface%7CEthernet0/exists
+    expect:
+      jq: '.exists == false'
+
+  # Verify BGP neighbor removed
+  - name: verify-bgp-neighbor-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_NEIGHBOR/default%7C10.1.0.1/exists
+    expect:
+      jq: '.exists == false'

@@ -117,8 +117,10 @@ func TestPreconditionChecker_ChainedChecks_MultipleFailures(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireVLANExists_Pass(t *testing.T) {
+	// Preconditions check the intent DB, not the projection.
+	// Populate NewtronIntent with a vlan|100 entry to simulate an existing VLAN.
 	db := emptyConfigDB()
-	db.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	db.NewtronIntent["vlan|100"] = map[string]string{"op": "create-vlan", "vlan_id": "100"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -150,8 +152,9 @@ func TestPreconditionChecker_RequireVLANNotExists_Pass(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
+	// Preconditions check the intent DB — populate it to simulate an existing VLAN.
 	db := emptyConfigDB()
-	db.VLAN["Vlan100"] = sonic.VLANEntry{VLANID: "100"}
+	db.NewtronIntent["vlan|100"] = map[string]string{"op": "create-vlan", "vlan_id": "100"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -163,8 +166,9 @@ func TestPreconditionChecker_RequireVLANNotExists_Fail(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireVRFExists(t *testing.T) {
+	// Preconditions check the intent DB — populate it to simulate an existing VRF.
 	db := emptyConfigDB()
-	db.VRF["Vrf_CUST1"] = sonic.VRFEntry{VNI: "10001"}
+	db.NewtronIntent["vrf|Vrf_CUST1"] = map[string]string{"op": "create-vrf", "name": "Vrf_CUST1"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -183,8 +187,9 @@ func TestPreconditionChecker_RequireVRFExists(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequirePortChannelExists(t *testing.T) {
+	// Preconditions check the intent DB — populate it to simulate an existing PortChannel.
 	db := emptyConfigDB()
-	db.PortChannel["PortChannel100"] = sonic.PortChannelEntry{AdminStatus: "up"}
+	db.NewtronIntent["portchannel|PortChannel100"] = map[string]string{"op": "create-portchannel", "name": "PortChannel100"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -203,12 +208,9 @@ func TestPreconditionChecker_RequirePortChannelExists(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
+	// Preconditions check the intent DB — populate it to simulate an existing ACL table.
 	db := emptyConfigDB()
-	db.ACLTable["CUSTOMER-IN"] = sonic.ACLTableEntry{
-		Type:  "L3",
-		Stage: "ingress",
-		Ports: "Ethernet0",
-	}
+	db.NewtronIntent["acl|CUSTOMER-IN"] = map[string]string{"op": "create-acl-table", "name": "CUSTOMER-IN"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -227,8 +229,9 @@ func TestPreconditionChecker_RequireACLTableExists(t *testing.T) {
 }
 
 func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
+	// VTEP check reads "device" intent's source_ip param.
 	db := emptyConfigDB()
-	db.VXLANTunnel["vtep1"] = sonic.VXLANTunnelEntry{SrcIP: "10.0.0.1"}
+	db.NewtronIntent["device"] = map[string]string{"operation": "setup-device", "source_ip": "10.0.0.1"}
 	dev := testNode(db, true, false)
 
 	err := node.NewPreconditionChecker(dev, "test-op", "test-res").
@@ -250,6 +253,10 @@ func TestPreconditionChecker_RequireVTEPConfigured(t *testing.T) {
 func TestPreconditionChecker_RequireInterfaceNotPortChannelMember(t *testing.T) {
 	db := emptyConfigDB()
 	db.PortChannelMember["PortChannel100|Ethernet0"] = map[string]string{}
+	// Portchannel member intent required for intent-based membership check
+	db.NewtronIntent["portchannel|PortChannel100|Ethernet0"] = map[string]string{
+		"operation": "add-pc-member", "state": "actuated",
+	}
 	dev := testNode(db, true, false)
 
 	// Ethernet0 IS a PortChannel member — should fail
@@ -305,5 +312,3 @@ func TestPreconditionChecker_NoErrors(t *testing.T) {
 		t.Errorf("Errors should be empty: %v", errs)
 	}
 }
-
-

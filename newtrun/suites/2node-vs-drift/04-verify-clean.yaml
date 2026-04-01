@@ -1,34 +1,33 @@
 name: verify-clean
 description: |
-  After provisioning, verify that drift detection reports a clean state.
-  This proves the abstract Node reconstruction matches the physical CONFIG_DB.
+  After provisioning, verify that topology drift detection reports zero entries.
+  This proves the topology projection matches the physical CONFIG_DB exactly.
 
-  The test verifies more than just a "clean" status — it also confirms that
-  specific provisioned entries actually exist on the device (proving the
-  abstract Node generated them and the device has them).
+  Uses ?mode=topology so the projection is built from topology.json, not from
+  device intents. This tests: "does the device match what topology declares?"
+
+  Also spot-checks specific CONFIG_DB entries to prove they exist independently.
 topology: 2node-vs-service
 requires: [provision]
 
 steps:
-  # First: confirm drift detection returns clean status with zero counts.
-  # This is the core thesis test — abstract == physical.
+  # Core thesis test: topology projection == physical CONFIG_DB.
+  # Drift returns []DriftEntry — empty array means clean.
   - name: verify-drift-clean-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
+      jq: 'length == 0'
 
   - name: verify-drift-clean-sw2
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
+      jq: 'length == 0'
 
-  # Second: spot-check specific CONFIG_DB entries to prove they exist.
-  # If the abstract Node failed to generate these, drift would have caught
-  # them as "missing" — but we verify independently to be thorough.
+  # Spot-check specific CONFIG_DB entries to prove they exist.
 
   # BGP_GLOBALS must have the correct ASN from the profile
   - name: verify-bgp-globals-sw1

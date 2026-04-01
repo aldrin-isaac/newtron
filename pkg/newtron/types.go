@@ -188,27 +188,6 @@ type ApplyServiceOpts struct {
 }
 
 // ============================================================================
-// Provision Operation Request/Result Types
-// ============================================================================
-
-// ProvisionRequest is the request for provisioning devices.
-type ProvisionRequest struct {
-	Devices []string `json:"devices,omitempty"` // empty = all devices in topology
-}
-
-// ProvisionDeviceResult holds the result of provisioning a single device.
-type ProvisionDeviceResult struct {
-	Device  string
-	Applied int
-	Err     error
-}
-
-// ProvisionResult holds the aggregate result of a provisioning operation.
-type ProvisionResult struct {
-	Results []ProvisionDeviceResult
-}
-
-// ============================================================================
 // Read Response Types
 // ============================================================================
 
@@ -410,9 +389,15 @@ type VLANMACVPNDetail struct {
 // HealthReport is the complete health status for a device.
 type HealthReport struct {
 	Device      string              `json:"device"`
-	Status      string              `json:"status"` // "healthy", "degraded", "unhealthy"
-	ConfigCheck *VerificationResult `json:"config_check,omitempty"`
+	Status      string              `json:"status"` // "pass", "warn", "fail"
+	ConfigCheck *ConfigDriftResult  `json:"config_check,omitempty"`
 	OperChecks  []HealthCheckResult `json:"oper_checks,omitempty"`
+}
+
+// ConfigDriftResult reports config drift found during health check.
+type ConfigDriftResult struct {
+	DriftCount int          `json:"drift_count"`
+	Entries    []DriftEntry `json:"entries,omitempty"`
 }
 
 // HealthCheckResult represents the result of a single operational health check.
@@ -420,37 +405,6 @@ type HealthCheckResult struct {
 	Check   string `json:"check"`   // Check name (e.g., "bgp", "interface-oper")
 	Status  string `json:"status"`  // "pass", "warn", "fail"
 	Message string `json:"message"` // Human-readable message
-}
-
-// ============================================================================
-// Composite Types
-// ============================================================================
-
-// CompositeInfo holds metadata about a generated composite config.
-type CompositeInfo struct {
-	DeviceName string         `json:"device_name"`
-	EntryCount int            `json:"entry_count"`
-	Tables     map[string]int `json:"tables"` // table name → entry count
-	internal   any            // opaque reference to the underlying CompositeConfig
-}
-
-// CompositeMode defines the delivery mode for composite configs.
-type CompositeMode string
-
-const (
-	// CompositeOverwrite merges composite entries on top of existing CONFIG_DB,
-	// preserving factory defaults. Only stale keys are removed.
-	CompositeOverwrite CompositeMode = "overwrite"
-
-	// CompositeMerge adds entries to existing CONFIG_DB.
-	CompositeMerge CompositeMode = "merge"
-)
-
-// DeliveryResult reports the outcome of delivering a composite config.
-type DeliveryResult struct {
-	Applied int `json:"applied"` // Number of entries written
-	Skipped int `json:"skipped"` // Number of entries skipped
-	Failed  int `json:"failed"`  // Number of entries that failed
 }
 
 // ============================================================================
@@ -872,26 +826,6 @@ type IntentOperation struct {
 	Reversed  *time.Time        `json:"reversed,omitempty"`
 }
 
-// OperationIntent is the crash-recovery record stored in CONFIG_DB
-// (NEWTRON_INTENT table). This is the persistence adapter for the
-// in-flight subset of the Intent model.
-//
-// Written before Commit applies ChangeSets, deleted on success.
-// If the process crashes, the intent remains for the operator to
-// inspect and roll back via 'device zombie'.
-//
-// During rollback, Phase transitions to "rolling_back". Each operation
-// gets a Reversed timestamp as its reverse completes. If rollback crashes,
-// retry skips already-reversed operations and continues where it left off.
-type OperationIntent struct {
-	Holder          string            `json:"holder"`
-	Created         time.Time         `json:"created"`
-	Phase           string            `json:"phase,omitempty"`
-	RollbackHolder  string            `json:"rollback_holder,omitempty"`
-	RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
-	Operations      []IntentOperation `json:"operations"`
-}
-
 // IsService returns true if this intent represents a service binding.
 func (i *Intent) IsService() bool {
 	return i.Operation == sonic.OpApplyService
@@ -905,37 +839,6 @@ func (i *Intent) IsInFlight() bool {
 // IsActuated returns true if this intent has been fully realized on the device.
 func (i *Intent) IsActuated() bool {
 	return i.State == IntentActuated
-}
-
-// ToOperationIntent converts the in-flight aspects of an Intent to the
-// CONFIG_DB persistence format (OperationIntent). Used when writing the
-// crash-recovery record to NEWTRON_INTENT.
-func (i *Intent) ToOperationIntent() *OperationIntent {
-	return &OperationIntent{
-		Holder:          i.Holder,
-		Created:         i.Created,
-		Phase:           i.Phase,
-		RollbackHolder:  i.RollbackHolder,
-		RollbackStarted: i.RollbackStarted,
-		Operations:      i.Operations,
-	}
-}
-
-// IntentFromOperationIntent creates an Intent from a CONFIG_DB
-// OperationIntent record (crash recovery). The resulting intent
-// is in-flight state — it was found on-device after a crash.
-func IntentFromOperationIntent(resource string, oi *OperationIntent) *Intent {
-	return &Intent{
-		Resource:        resource,
-		Operation:       "commit", // generic — the operations list carries specifics
-		State:           IntentInFlight,
-		Holder:          oi.Holder,
-		Created:         oi.Created,
-		Phase:           oi.Phase,
-		RollbackHolder:  oi.RollbackHolder,
-		RollbackStarted: oi.RollbackStarted,
-		Operations:      oi.Operations,
-	}
 }
 
 // ============================================================================
@@ -1068,32 +971,13 @@ func (us *UserSettings) GetNetworkID() string {
 }
 
 // ============================================================================
-// History Types (rolling operation history for rollback)
+// Intent Operation Result Types
 // ============================================================================
 
-// HistoryEntry represents a completed commit archived for rollback.
-type HistoryEntry struct {
-	Sequence   int               `json:"sequence"`
-	Holder     string            `json:"holder"`
-	Timestamp  time.Time         `json:"timestamp"`
-	Operations []IntentOperation `json:"operations"`
-}
-
-// HistoryResult wraps the rolling history for API responses.
-type HistoryResult struct {
-	Device  string         `json:"device"`
-	Entries []HistoryEntry `json:"entries"`
-}
-
-// HistoryRollbackResult reports the outcome of a history rollback.
-type HistoryRollbackResult struct {
-	RolledBack *HistoryRollbackEntry `json:"rolled_back,omitempty"`
-}
-
-// HistoryRollbackEntry identifies the rolled-back history entry.
-type HistoryRollbackEntry struct {
-	Sequence           int `json:"sequence"`
-	OperationsReversed int `json:"operations_reversed"`
+// ReconcileResult reports the outcome of delivering the full projection to a device.
+type ReconcileResult struct {
+	Applied int    `json:"applied"` // Number of entries written
+	Message string `json:"message,omitempty"`
 }
 
 // ============================================================================
@@ -1109,15 +993,6 @@ type DriftEntry struct {
 	Actual   map[string]string `json:"actual,omitempty"`
 }
 
-// DriftReport is the complete drift detection result for a device.
-type DriftReport struct {
-	Device   string       `json:"device"`
-	Status   string       `json:"status"` // "clean" or "drifted"
-	Missing  []DriftEntry `json:"missing,omitempty"`
-	Extra    []DriftEntry `json:"extra,omitempty"`
-	Modified []DriftEntry `json:"modified,omitempty"`
-}
-
 // TopologySnapshot is the device's actuated intents projected as topology steps.
 // Returned by Snapshot() — the export direction: device reality → topology format.
 type TopologySnapshot struct {
@@ -1128,15 +1003,6 @@ type TopologySnapshot struct {
 type TopologyStep struct {
 	URL    string         `json:"url"`
 	Params map[string]any `json:"params,omitempty"`
-}
-
-// ============================================================================
-// Device Settings
-// ============================================================================
-
-// DeviceSettings holds per-device newtron operational tuning stored in CONFIG_DB.
-type DeviceSettings struct {
-	MaxHistory int `json:"max_history"`
 }
 
 // ============================================================================

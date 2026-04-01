@@ -57,6 +57,7 @@ type App struct {
 	noSave      bool
 	verbose     bool
 	jsonOutput  bool
+	topology    bool   // --topology flag: use topology mode (?mode=topology)
 
 	// Initialized state (set in PersistentPreRunE)
 	settings *newtron.UserSettings
@@ -210,12 +211,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&app.serverURL, "server", "", "newtron-server URL (default: http://localhost:8080, env: NEWTRON_SERVER)")
 	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().BoolVar(&app.topology, "topology", false, "Use topology mode (?mode=topology)")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
 	// (PersistentFlags so subcommands inherit)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, deviceCmd, qosCmd, filterCmd,
+		vrfCmd, serviceCmd, qosCmd, filterCmd,
 	} {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
@@ -226,7 +228,6 @@ func init() {
 
 	// Top-level commands that need their own flags
 	addOutputFlags(showCmd)
-	addWriteFlags(provisionCmd)
 
 	// ============================================================================
 	// Command Groups
@@ -249,8 +250,7 @@ func init() {
 
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
-		showCmd, provisionCmd, healthCmd, deviceCmd, initCmd, intentCmd,
-		zombieCmd, historyCmd,
+		showCmd, healthCmd, initCmd, intentCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)

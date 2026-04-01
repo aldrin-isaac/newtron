@@ -503,16 +503,30 @@ The most common offender in this project is "CLI":
 
 | Bare term | Possible meanings | Qualified forms |
 |-----------|-------------------|-----------------|
-| CLI | newtron's CLI tool, SONiC device CLI (`show vlan`, `config interface`), any other command-line tool | "newtron CLI", "SONiC CLI" |
+| CLI | newtron's CLI tool, SONiC device CLI (`show vlan`, `config interface`) | "newtron CLI", "SONiC CLI" |
 | shell | the operator's local shell, a remote SSH session to a device, a container shell | "device shell", "local shell" |
 | config | CONFIG_DB entries, YAML spec files, newtron server configuration | "CONFIG_DB entries", "spec files", "server config" |
 | API | newtron-server HTTP API, SONiC REST API, SAI API | "newtron API", "SONiC REST API", "SAI API" |
+| configDB | Physical mode: cache of CONFIG_DB (stale after unlock). Abstract mode: the reality itself (no Redis behind it) | "configDB cache" (physical), "shadow configDB" (abstract) |
+| node | A SONiC device (VM or switch), the `Node` Go struct, a DAG vertex | "device" or "switch" (physical), "`Node`" (Go struct), "DAG node" or "intent node" (graph) |
+| interface | A network port (Ethernet0), the `Interface` Go struct, a Go behavioral contract | "network interface" or "port" (physical), "`Interface`" (Go struct), "Go interface" (contract) |
+| intent | A `NEWTRON_INTENT` CONFIG_DB record, the abstract design goal expressed in specs | "intent record" (CONFIG_DB), "spec intent" or "design intent" (abstract) |
+| service | A newtron service spec + lifecycle, a SONiC daemon / systemd unit | "newtron service" or "service spec", "SONiC service" or "daemon" |
+| pipeline | The newtron write/read/export/delivery/verification pipeline, a Redis MULTI/EXEC batch | "write pipeline" / "delivery pipeline" (architecture), "Redis pipeline" (wire protocol) |
+| validation | YANG schema validation (rejects invalid entries), precondition checks (rejects invalid state), newtrun step field validation (rejects invalid YAML) | "schema validation", "precondition check", "step validation" |
+| state | STATE_DB (Redis DB 6), newtrun run state (`state.json`), device CONFIG_DB contents | "STATE_DB", "run state" or "suite state", "device state" or "CONFIG_DB state" |
+| composite | A `CompositeConfig` (full-device snapshot), a composite operation (ApplyService, SetupDevice), `CompositeMode` (overwrite/merge) | "composite config" (data), "composite operation" (orchestration), "composite mode" (enum) |
+| profile | Device identity (`DeviceProfile`), a QoS spec, a WRED CONFIG_DB entry | "device profile", "QoS policy", "WRED profile" |
+| lock | Device distributed lock (Redis SETNX in STATE_DB), newtrun suite lock (PID file) | "device lock", "suite lock" |
+| port | A network interface (Ethernet0), an SSH/TCP management port number | "network port" or "data port", "SSH port" or "management port" |
 
 **Rule:** Never use a bare overloaded term. On first use in a section, use the fully qualified form. Subsequent uses in the same paragraph may use the short form if the referent is unambiguous from context — but when in doubt, qualify again.
 
-**Test:** For every bare "CLI", "shell", "config", or "API" in a document, ask: "if the reader's mental model is SONiC-first (not newtron-first), which meaning would they assume?" If the answer differs from the intended meaning, the term needs qualification.
+**Test:** For every bare overloaded term in a document, ask: "if the reader's mental model is SONiC-first (not newtron-first), which meaning would they assume?" If the answer differs from the intended meaning, the term needs qualification.
 
 This is not pedantry — it is a prerequisite for precision (#2). A sentence like "the CLI reads CONFIG_DB" is factually different depending on whether "CLI" means newtron (which reads via Redis over SSH tunnel) or SONiC (which reads via `sonic-cfggen` or `redis-cli` locally). The reader who assumes the wrong meaning builds the wrong mental model, and no amount of subsequent precision can fix a wrong foundation.
+
+The `configDB` overloading is especially dangerous: in physical mode it's a cache that goes stale after unlock; in abstract mode it IS the reality. "configDB contains the device state" is true in both modes but means fundamentally different things — one is a snapshot, the other is the source of truth. The qualified forms ("configDB cache" vs "shadow configDB") prevent the reader from assuming one when the other is meant.
 
 ## 35. Lead with Universal Truths, Not Feature Descriptions — HLD
 
@@ -643,7 +657,7 @@ Day-1 / Day-2), use it. The reader who knows Day-0 is outside newtron's scope,
 Day-1 is Provisioning, and Day-2 is Operations has three reference points — not
 just one definition to remember.
 
-## 40. Audit Overloaded Terms Throughout — ALL
+## 41. Audit Overloaded Terms Throughout — ALL
 
 When a single word carries both a project-specific meaning and a general
 meaning, auditing the definition site is not enough. Every occurrence in the
@@ -668,7 +682,7 @@ correct; a downstream usage was not.
 occurrence #3 means something different from occurrence #27, the document has a
 silent contradiction.
 
-## 41. Terminology Changes Must Be Scoped to Purpose — ALL
+## 42. Terminology Changes Must Be Scoped to Purpose — ALL
 
 A terminology change in one document does not automatically propagate to all
 documents and code. Different contexts may use the same concept for different

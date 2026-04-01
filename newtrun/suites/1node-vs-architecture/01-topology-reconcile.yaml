@@ -1,0 +1,97 @@
+name: topology-reconcile
+description: |
+  M7: Reconcile delivers full topology projection to device.
+
+  Provisions switch1 from topology.json via topology-reconcile, then verifies
+  that the projection was fully delivered: NEWTRON_INTENT records exist,
+  CONFIG_DB entries match the topology-declared intent (device metadata, BGP
+  globals, loopback), and zero drift remains.
+
+  Also tests M3 (ConnectTransport — reconcile connects to device without
+  overwriting the projection) and M8 (Drift — post-reconcile drift must be zero).
+topology: 1node-vs
+requires: [boot-ssh]
+
+steps:
+  # Reconcile from topology.json — delivers full projection atomically.
+  - name: provision-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp-instance
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # M7: Verify NEWTRON_INTENT device record exists (intent DB populated)
+  - name: verify-device-intent-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    expect:
+      jq: '.exists == true'
+
+  # M7: Verify CONFIG_DB entries match topology-declared values
+  - name: verify-device-metadata
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/DEVICE_METADATA/localhost
+    expect:
+      jq: '.hostname == "switch1" and .type == "LeafRouter"'
+
+  - name: verify-bgp-globals
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    expect:
+      jq: '.local_asn == "65001"'
+
+  - name: verify-loopback
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
+    expect:
+      jq: '.exists == true'
+
+  # M8: Post-reconcile drift MUST be zero — projection == device
+  - name: verify-zero-drift-topology
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'
+
+  # M8: Actuated drift also zero — device intents match device CONFIG_DB
+  - name: verify-zero-drift-actuated
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

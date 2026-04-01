@@ -13,11 +13,11 @@ import (
 var healthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Health check operations",
-	Long: `Run intent-based health checks on SONiC devices.
+	Long: `Run health checks on SONiC devices.
 
-Requires a loaded topology. Compares live CONFIG_DB against the topology-derived
-expected config (same entries the provisioner would write), then checks BGP
-session state and interface oper-up status.
+Compares the device's projection (expected state from intent replay) against
+the live CONFIG_DB for drift, then checks BGP session state and interface
+oper-up status.
 
 Requires -D (device) flag.
 
@@ -28,18 +28,10 @@ Examples:
 
 var healthCheckCmd = &cobra.Command{
 	Use:   "check",
-	Short: "Run intent-based health checks on the device",
+	Short: "Run health checks on the device",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireDevice(); err != nil {
 			return err
-		}
-
-		hasTopology, err := app.client.HasTopology()
-		if err != nil {
-			return err
-		}
-		if !hasTopology {
-			return fmt.Errorf("no topology loaded — health checks require a topology to define expected state")
 		}
 
 		report, err := app.client.HealthCheck(app.deviceName)
@@ -53,23 +45,28 @@ var healthCheckCmd = &cobra.Command{
 
 		fmt.Printf("\nHealth Report for %s\n\n", bold(app.deviceName))
 
-		// Config intent section
+		// Config drift section
 		cc := report.ConfigCheck
-		total := cc.Passed + cc.Failed
-		fmt.Printf("Config Intent: %s (%d/%d entries match)\n",
-			formatHealthStatus(configStatus(cc.Failed)), cc.Passed, total)
-		if cc.Failed > 0 {
-			t := cli.NewTable("TABLE", "KEY", "FIELD", "EXPECTED", "ACTUAL")
-			limit := 20
-			if len(cc.Errors) < limit {
-				limit = len(cc.Errors)
+		if cc != nil {
+			driftStatus := "pass"
+			if cc.DriftCount > 0 {
+				driftStatus = "fail"
 			}
-			for _, ve := range cc.Errors[:limit] {
-				t.Row(ve.Table, ve.Key, ve.Field, ve.Expected, ve.Actual)
-			}
-			t.Flush()
-			if len(cc.Errors) > 20 {
-				fmt.Printf("  ... and %d more errors\n", len(cc.Errors)-20)
+			fmt.Printf("Config Drift: %s (%d drift entries)\n",
+				formatHealthStatus(driftStatus), cc.DriftCount)
+			if cc.DriftCount > 0 {
+				t := cli.NewTable("TABLE", "KEY", "TYPE")
+				limit := 20
+				if len(cc.Entries) < limit {
+					limit = len(cc.Entries)
+				}
+				for _, de := range cc.Entries[:limit] {
+					t.Row(de.Table, de.Key, de.Type)
+				}
+				t.Flush()
+				if len(cc.Entries) > 20 {
+					fmt.Printf("  ... and %d more drift entries\n", len(cc.Entries)-20)
+				}
 			}
 		}
 
@@ -85,13 +82,6 @@ var healthCheckCmd = &cobra.Command{
 
 		return nil
 	},
-}
-
-func configStatus(failed int) string {
-	if failed == 0 {
-		return "pass"
-	}
-	return "fail"
 }
 
 func formatHealthStatus(status string) string {

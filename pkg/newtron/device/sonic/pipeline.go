@@ -58,9 +58,21 @@ var platformMergeTables = map[string]bool{
 //
 // Platform-managed tables (PORT) are merge-only — their keys are never deleted
 // even if absent from the composite, since port config comes from port_config.ini.
-func (c *ConfigDBClient) ReplaceAll(changes []Entry) error {
-	// Collect the set of tables being replaced (excluding merge-only tables)
+//
+// ownedTables lists all tables the node manages. Tables in ownedTables that have
+// zero entries in the delivery set are fully cleaned (all keys DELeted). This
+// ensures Clear + Reconcile wipes all owned tables — even those with no entries
+// in the empty projection. Architecture §6 (Clear): "ReplaceAll with only PORT
+// entries clears all other owned tables."
+func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error {
+	// Collect the set of tables being replaced (excluding merge-only tables).
+	// Start with all owned tables — even those with zero entries.
 	tables := make(map[string]bool)
+	for _, table := range ownedTables {
+		if !platformMergeTables[table] {
+			tables[table] = true
+		}
+	}
 	for _, change := range changes {
 		if !platformMergeTables[change.Table] {
 			tables[change.Table] = true

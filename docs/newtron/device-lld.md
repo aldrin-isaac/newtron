@@ -364,7 +364,7 @@ CONFIG_DB entries are parsed from Redis hashes into typed Go structs via a regis
 - **29 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, STATIC_ROUTE, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
 - **10 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, NEWTRON_INTENT
 
-Hash-merge parsers (`mergeParser`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
+Hash-merge hydrators (`mergeHydrator`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
 
 **Redis serialization note:** Redis hashes store field names and values as strings. The Go struct `json` tags serve double duty: they define both the Redis hash field name mapping and JSON serialization format (for display/logging). Parsing uses the registry functions, not `json.Unmarshal` — there is no JSON to unmarshal from flat `map[string]string`.
 

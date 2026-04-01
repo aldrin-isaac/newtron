@@ -1,0 +1,28 @@
+name: setup-device
+description: |
+  Baseline device setup. Creates the 'device' root intent required by all
+  subsequent operations.
+topology: 1node-vs
+requires: [boot-ssh]
+
+steps:
+  - name: setup-device-switch1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/setup-device
+    params:
+      fields:
+        hostname: switch1
+        bgp_asn: "65001"
+        type: LeafRouter
+        hwsku: Force10-S6000
+        docker_routing_config_mode: unified
+        frr_mgmt_framework_config: "true"
+
+  - name: verify-device-intent
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    expect:
+      jq: '.exists == true'

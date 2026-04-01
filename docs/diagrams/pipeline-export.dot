@@ -1,0 +1,8 @@
+digraph {
+    rankdir=TB;
+    "\n  n.configDB  \n  (shadow)  \n\n" -> "\n  ExportEntries()  \n  configdb.go:754  \n\n" [label="  BuildComposite()  "];
+    "\n  ExportEntries()  \n  configdb.go:754  \n\n" -> "\n  structToFields()  \n  (reflection)  \n\n" [label="  typed tables  "];
+    "\n  ExportEntries()  \n  configdb.go:754  \n\n" -> "\n  copyFields()  \n\n" [label="  raw tables  "];
+    "\n  structToFields()  \n  (reflection)  \n\n" -> "\n  CompositeConfig  \n  table > key > field > value  \n\n";
+    "\n  copyFields()  \n\n" -> "\n  CompositeConfig  \n  table > key > field > value  \n\n";
+}

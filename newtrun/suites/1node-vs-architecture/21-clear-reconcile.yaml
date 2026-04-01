@@ -1,0 +1,117 @@
+name: clear-reconcile
+description: |
+  Clear + Reconcile: push empty projection to device (factory-like reset).
+
+  Architecture §6 (Clear): "Clear + Reconcile → factory-resets the device
+  (empty CONFIG_DB except ports)." After clear, the projection contains
+  only PORT entries. Reconciling this pushes an empty owned-table set to
+  the device, effectively wiping all newtron-managed CONFIG_DB tables.
+
+  After verifying the wipe, we re-reconcile from topology.json to restore
+  the device to its normal state for subsequent tests.
+topology: 1node-vs
+requires: [clear-crud]
+
+steps:
+  # Clear the topology node — empty canvas with ports only
+  - name: clear-for-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear?mode=topology
+
+  # Verify empty tree
+  - name: verify-empty-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | length == 0'
+
+  # Reconcile the empty projection to the device
+  - name: reconcile-empty
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?mode=topology
+
+  # Wait for config to settle
+  - name: wait-settle
+    action: wait
+    duration: 5s
+
+  # Verify device CONFIG_DB no longer has newtron-managed entries.
+  # BGP_GLOBALS should be gone (owned by newtron, wiped by empty reconcile).
+  - name: verify-bgp-wiped
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default/exists
+    expect:
+      jq: '.exists == false'
+
+  # LOOPBACK_INTERFACE should be gone
+  - name: verify-loopback-wiped
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
+    expect:
+      jq: '.exists == false'
+
+  # NEWTRON_INTENT should be gone (no intents)
+  - name: verify-intents-wiped
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/NEWTRON_INTENT/device/exists
+    expect:
+      jq: '.exists == false'
+
+  # Restore: reload topology from topology.json, then reconcile to reprovision
+  - name: reload-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  - name: reprovision
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Verify restored: zero drift
+  - name: verify-restored
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

@@ -1,0 +1,100 @@
+name: reconcile-dry-run
+description: |
+  Reconcile dry-run returns drift preview without modifying the device.
+
+  Architecture §8 (Execute) + handler_node.go handleReconcile: when
+  dry_run=true, handleReconcile returns drift (via Drift()) as a preview
+  of what reconcile would fix, without actually delivering anything.
+
+  Tests that:
+  - POST /intent/reconcile?dry_run=true returns drift entries
+  - The device is NOT modified (drift still exists after dry-run)
+  - A real reconcile then fixes the drift
+topology: 1node-vs
+requires: [dry-run]
+
+steps:
+  # Inject drift to give reconcile something to fix
+  - name: inject-drift-for-dry-run
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan555' vlanid 555"}
+
+  # Dry-run reconcile in actuated mode: should return drift entries
+  - name: reconcile-dry-run-actuated
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?dry_run=true
+    expect:
+      jq: >-
+        length >= 1
+        and any(.[]; .type == "extra" and .table == "VLAN" and .key == "Vlan555")
+
+  # Verify device NOT modified — the extra VLAN still exists
+  - name: verify-drift-persists-after-dry-run
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan555/exists
+    expect:
+      jq: '.exists == true'
+
+  # Dry-run reconcile in topology mode: same behavior
+  - name: reconcile-dry-run-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?mode=topology&dry_run=true
+    expect:
+      jq: >-
+        length >= 1
+        and any(.[]; .type == "extra" and .table == "VLAN")
+
+  # Real reconcile to fix drift
+  - name: real-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Verify drift is now zero
+  - name: verify-clean-after-real-reconcile
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

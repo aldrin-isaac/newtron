@@ -1,0 +1,6 @@
+digraph {
+    rankdir=TB;
+    "\n  CONFIG_DB  \n  (Redis DB 4)  \n\n" -> "\n  ConfigDBClient.GetAll()  \n  configdb.go:942  \n\n" [label="  SCAN + HGETALL  "];
+    "\n  ConfigDBClient.GetAll()  \n  configdb.go:942  \n\n" -> "\n  parseEntry()  \n  hydrateConfigTable()  \n\n" [label="  per key  "];
+    "\n  parseEntry()  \n  hydrateConfigTable()  \n\n" -> "\n  n.configDB  \n  typed structs  \n\n";
+}

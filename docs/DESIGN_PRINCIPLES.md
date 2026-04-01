@@ -108,7 +108,7 @@ creates an offline Node and calls the same methods the automation CLI uses
 against a connected Node:
 
 ```
-n = NewAbstractNode(specs, name, profile, resolved)
+n = NewAbstract(specs, name, profile, resolved)
 n.RegisterPort("Ethernet0", {"admin_status": "up"})
 n.SetupDevice(setupOpts)              // metadata + loopback + BGP + VTEP
 iface = n.GetInterface("Ethernet0")
@@ -218,7 +218,7 @@ Redis, compare the two ConfigDBs, and the diff is the drift. No
 journal, no state file, no reconciliation engine — the expected state
 is computed from the same code path that would produce it on a real
 device. If the code path is correct for deployment, it is correct for
-drift detection, because it is the same code path. (See §19.)
+drift detection, because it is the same code path. (See §21.)
 
 These three properties reinforce each other. Delivery guarantees mean
 that what was previewed is what was applied — so drift detection can
@@ -741,7 +741,7 @@ in what order — belongs to orchestrators that consume the same API.
 An E2E test orchestrator is one such consumer: it provisions
 devices through the system, then asserts correctness
 across the fabric. Observation primitives (`GetRoute`,
-`RunHealthChecks`) return structured data, not judgments (§14), so any
+`HealthCheck`) return structured data, not judgments (§14), so any
 orchestrator can make its own decisions.
 
 Good automation development requires a virtual twin — the ability to
@@ -1011,7 +1011,7 @@ precondition("apply-service", ifName)
     .RequireInterfaceExists(ifName)
     .RequireInterfaceNotLAGMember(ifName)
     .RequireNoExistingService(ifName)
-    .RequireVTEPExists()    // if EVPN service
+    .RequireVTEPExists()        // if EVPN service
     .Result()
 ```
 
@@ -1116,7 +1116,7 @@ certainty.
 
 **Observations** return device state as structured data. `GetRoute`
 returns a route entry (or nil). `GetRouteASIC` returns a resolved SAI
-chain. `RunHealthChecks` returns a health report. These methods don't
+chain. `HealthCheck` returns a health report. These methods don't
 know what the "correct" answer is — they report what they see and let
 the caller decide what it means.
 
@@ -1205,8 +1205,8 @@ The current operation pairs:
 | `ApplyQoS` | `RemoveQoS` |
 | `BindACL` | `UnbindACL` |
 | `AddBGPPeer` | `RemoveBGPPeer` |
+| `AddBGPEVPNPeer` | `RemoveBGPEVPNPeer` |
 | `BindMACVPN` | `UnbindMACVPN` |
-| `AddBGPMultihopPeer` | `RemoveBGPMultihopPeer` |
 | `ConfigureIRB` | `UnconfigureIRB` |
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
@@ -2075,8 +2075,8 @@ qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
 interface_ops.go   → INTERFACE
 baseline_ops.go    → LOOPBACK_INTERFACE
 portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-service_ops.go     → INTENT, ROUTE_MAP, PREFIX_SET,
-                      COMMUNITY_SET
+intent_ops.go      → NEWTRON_INTENT
+service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
 **One file owns each table; everyone else calls the owner.** When the

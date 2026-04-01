@@ -1,0 +1,135 @@
+name: mode-switch-state
+description: |
+  Mode switch destroys stale topology state — topology intents do NOT
+  leak into actuated mode.
+
+  Architecture §3 (Three States): "Topology offline → actuated online:
+  ensureActuatedIntent — close offline node, create new from device intents."
+  The topology node is destroyed and a new node is built from device
+  NEWTRON_INTENT. Any topology-only intents (created via ?mode=topology
+  CRUD but NOT saved + reconciled) must not appear in actuated mode.
+
+  Tests that:
+  1. Create VLAN in topology mode (unsaved)
+  2. Save (persist to topology.json)
+  3. Switch to actuated mode — VLAN should NOT be in actuated tree
+     (it was saved to topology.json but never reconciled to device)
+  4. Reconcile from topology — now VLAN appears on device
+topology: 1node-vs
+requires: [reconcile-dry-run]
+
+steps:
+  # Create VLAN 900 in topology mode
+  - name: create-vlan-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?mode=topology
+    params: {id: 900}
+
+  # Verify VLAN in topology tree
+  - name: verify-vlan-in-topology
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Save topology intents to topology.json (required before mode switch)
+  - name: save-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save?mode=topology
+
+  # Switch to actuated mode — the actuated node is built from device
+  # NEWTRON_INTENT, which does NOT include the topology-only VLAN 900
+  # (it was never reconciled to the device).
+  - name: actuated-tree-no-topology-vlan
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | all(.[]; .url != "/create-vlan")'
+
+  # VLAN 900 should NOT be on the device (never reconciled)
+  - name: verify-vlan-not-on-device
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan900/exists
+    expect:
+      jq: '.exists == false'
+
+  # Now reconcile from topology to deliver the VLAN to the device
+  - name: reconcile-topology
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # After reconcile, VLAN 900 should be on device
+  - name: verify-vlan-on-device-after-reconcile
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan900/exists
+    expect:
+      jq: '.exists == true'
+
+  # Actuated tree now includes the VLAN (device intents updated by reconcile)
+  - name: actuated-tree-has-vlan
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree
+    expect:
+      jq: '.steps | any(.[]; .url == "/create-vlan")'
+
+  # Cleanup: delete VLAN in actuated mode and save
+  - name: delete-vlan-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/delete-vlan
+    params: {id: 900}
+
+  - name: save-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/save
+
+  # Reload topology to pick up the cleaned-up save
+  - name: reload-topology-cleanup
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology

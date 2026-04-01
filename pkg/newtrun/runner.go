@@ -23,7 +23,6 @@ type Runner struct {
 	NetworkID     string         // network identifier for server operations
 	Client             *client.Client // HTTP client for all SONiC operations
 	Lab                *newtlab.Lab
-	Composites         map[string]string      // device → composite handle UUID
 	HostConns          map[string]*ssh.Client // host device name → SSH client
 	Progress           ProgressReporter
 	discoveredPlatform string                 // platform discovered from connected devices
@@ -323,8 +322,6 @@ func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology 
 		return results, nil
 	}
 
-	r.Composites = make(map[string]string)
-
 	// Enrich with discovered platform if no explicit platform was set
 	if deployedPlatform == "" {
 		deployedPlatform = r.discoveredPlatform
@@ -425,10 +422,6 @@ func (r *Runner) runScenario(ctx context.Context, scenario *Scenario, opts RunOp
 // When scenario.Repeat > 1, all steps are executed in a loop for the specified
 // number of iterations. Execution stops on the first failed iteration.
 func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult) {
-	if r.Composites == nil {
-		r.Composites = make(map[string]string)
-	}
-
 	repeat := scenario.Repeat
 	if repeat <= 1 {
 		repeat = 1
@@ -442,11 +435,6 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 			r.progress(func(p ProgressReporter) { p.StepStart(scenario.Name, &stepCopy, i, len(scenario.Steps)) })
 
 			output := r.executeStep(ctx, &step, i, len(scenario.Steps), opts)
-
-			// Merge Composites (provision step produces these)
-			for name, ci := range output.Composites {
-				r.Composites[name] = ci
-			}
 
 			sr := *output.Result
 			if repeat > 1 {

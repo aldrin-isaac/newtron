@@ -242,40 +242,6 @@ func TestChangeSet_Preview(t *testing.T) {
 }
 
 // ============================================================================
-// splitKey Tests
-// ============================================================================
-
-func TestSplitConfigDBKey(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected []string
-	}{
-		{"PortChannel100|Ethernet0", []string{"PortChannel100", "Ethernet0"}},
-		{"Vlan100|Ethernet4", []string{"Vlan100", "Ethernet4"}},
-		{"INTERFACE|Ethernet0|10.1.1.1/30", []string{"INTERFACE", "Ethernet0|10.1.1.1/30"}},
-		{"Ethernet0", []string{"Ethernet0"}},
-		{"", []string{""}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := splitKey(tt.input)
-			if len(got) != len(tt.expected) {
-				t.Errorf("splitKey(%q) = %v (len %d), want %v (len %d)",
-					tt.input, got, len(got), tt.expected, len(tt.expected))
-				return
-			}
-			for i, v := range got {
-				if v != tt.expected[i] {
-					t.Errorf("splitKey(%q)[%d] = %q, want %q",
-						tt.input, i, v, tt.expected[i])
-				}
-			}
-		})
-	}
-}
-
-// ============================================================================
 // VLANInfo Tests
 // ============================================================================
 
@@ -444,8 +410,13 @@ func TestInterface_Properties(t *testing.T) {
 		ACLTable:              map[string]sonic.ACLTableEntry{},
 	}
 	configDB.Port["Ethernet0"] = sonic.PortEntry{AdminStatus: "up", Speed: "100G", MTU: "9100"}
-	configDB.Interface["Ethernet0"] = sonic.InterfaceEntry{VRFName: "Vrf_CUST1"}
-	configDB.Interface["Ethernet0|10.1.1.1/30"] = sonic.InterfaceEntry{}
+	// VRF and IP are read from the intent DB (Phase 2: intent-based reads).
+	configDB.NewtronIntent["interface|Ethernet0"] = map[string]string{
+		"operation": "configure-interface",
+		"state":     "actuated",
+		"vrf":       "Vrf_CUST1",
+		"ip":        "10.1.1.1/30",
+	}
 	stateDB := &sonic.StateDB{
 		PortTable: map[string]sonic.PortStateEntry{
 			"Ethernet0": {OperStatus: "up", Speed: "100G", MTU: "9100"},
@@ -564,9 +535,15 @@ func TestInterface_ServiceBindingProperties(t *testing.T) {
 
 func TestInterface_PortChannelMembership(t *testing.T) {
 	t.Run("is member", func(t *testing.T) {
+		// PortChannelParent reads from intent DB (Phase 2: intent-based reads).
 		configDB := &sonic.ConfigDB{
-			PortChannelMember: map[string]map[string]string{
-				"PortChannel100|Ethernet0": {},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent: map[string]map[string]string{
+				"portchannel|PortChannel100|Ethernet0": {
+					"operation": "add-portchannel-member",
+					"state":     "actuated",
+					"name":      "Ethernet0",
+				},
 			},
 		}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
@@ -582,6 +559,7 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 	t.Run("not member", func(t *testing.T) {
 		configDB := &sonic.ConfigDB{
 			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent:     map[string]map[string]string{},
 		}
 		d := &Node{configDB: configDB, interfaces: make(map[string]*Interface)}
 		intf := &Interface{node: d, name: "Ethernet0"}
@@ -592,34 +570,6 @@ func TestInterface_PortChannelMembership(t *testing.T) {
 			t.Errorf("PortChannelParent() = %q, want empty", intf.PortChannelParent())
 		}
 	})
-}
-
-// ============================================================================
-// Interface parseServiceFromACL Tests
-// ============================================================================
-
-func TestExtractServiceFromACL(t *testing.T) {
-	tests := []struct {
-		aclName  string
-		expected string
-	}{
-		{"CUSTOMER_EDGE_IN", "CUSTOMER_EDGE"},
-		{"CUSTOMER_EDGE_OUT", "CUSTOMER_EDGE"},
-		{"TRANSIT_PROTECT_IN", "TRANSIT_PROTECT"},
-		{"SIMPLE_OUT", "SIMPLE"},
-		{"NO_SUFFIX", ""},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.aclName, func(t *testing.T) {
-			got := parseServiceFromACL(tt.aclName)
-			if got != tt.expected {
-				t.Errorf("parseServiceFromACL(%q) = %q, want %q",
-					tt.aclName, got, tt.expected)
-			}
-		})
-	}
 }
 
 // ============================================================================
@@ -685,13 +635,18 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("interface with IP", func(t *testing.T) {
+		// IPAddresses reads from intent DB (Phase 2: intent-based reads).
 		configDB := &sonic.ConfigDB{
-			Port: map[string]sonic.PortEntry{},
-			Interface: map[string]sonic.InterfaceEntry{
-				"Ethernet0|10.1.1.1/30": {},
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent: map[string]map[string]string{
+				"interface|Ethernet0": {
+					"operation": "configure-interface",
+					"state":     "actuated",
+					"ip":        "10.1.1.1/30",
+				},
 			},
-			PortChannelMember:     map[string]map[string]string{},
-			NewtronIntent: map[string]map[string]string{},
 		}
 		intf := stringTestIntf(
 			sonic.PortEntry{AdminStatus: "up"},
@@ -705,13 +660,18 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("interface with VRF", func(t *testing.T) {
+		// VRF reads from intent DB (Phase 2: intent-based reads).
 		configDB := &sonic.ConfigDB{
-			Port: map[string]sonic.PortEntry{},
-			Interface: map[string]sonic.InterfaceEntry{
-				"Ethernet0": {VRFName: "Vrf_CUST1"},
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent: map[string]map[string]string{
+				"interface|Ethernet0": {
+					"operation": "configure-interface",
+					"state":     "actuated",
+					"vrf":       "Vrf_CUST1",
+				},
 			},
-			PortChannelMember:     map[string]map[string]string{},
-			NewtronIntent: map[string]map[string]string{},
 		}
 		intf := stringTestIntf(
 			sonic.PortEntry{AdminStatus: "up"},
@@ -725,13 +685,18 @@ func TestInterface_String(t *testing.T) {
 	})
 
 	t.Run("PortChannel member", func(t *testing.T) {
+		// PortChannelParent reads from intent DB (Phase 2: intent-based reads).
 		configDB := &sonic.ConfigDB{
-			Port:      map[string]sonic.PortEntry{},
-			Interface: map[string]sonic.InterfaceEntry{},
-			PortChannelMember: map[string]map[string]string{
-				"PortChannel100|Ethernet0": {},
+			Port:              map[string]sonic.PortEntry{},
+			Interface:         map[string]sonic.InterfaceEntry{},
+			PortChannelMember: map[string]map[string]string{},
+			NewtronIntent: map[string]map[string]string{
+				"portchannel|PortChannel100|Ethernet0": {
+					"operation": "add-portchannel-member",
+					"state":     "actuated",
+					"name":      "Ethernet0",
+				},
 			},
-			NewtronIntent: map[string]map[string]string{},
 		}
 		intf := stringTestIntf(
 			sonic.PortEntry{AdminStatus: "up"},

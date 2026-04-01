@@ -1,0 +1,64 @@
+name: inject-drift
+description: |
+  Setup for drift detection tests. Injects three categories of CONFIG_DB drift
+  via direct redis-cli writes:
+    - Missing: delete an intent-created entry (LOOPBACK_INTERFACE IP)
+    - Extra: add an unexpected VLAN not in any intent
+    - Modified: change the BGP ASN to a wrong value
+  These simulate out-of-band CONFIG_DB changes that diverge from the projection.
+topology: 1node-vs
+requires: [crud-actuated]
+
+steps:
+  # MISSING: delete the loopback IP that setup-device created.
+  # The projection still expects LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32
+  # but the device no longer has it.
+  - name: inject-missing
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 DEL 'LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32'"}
+    expect:
+      jq: '.output | contains("1")'
+
+  - name: verify-missing-gone
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32/exists
+    expect:
+      jq: '.exists == false'
+
+  # EXTRA: add an unexpected VLAN not in any intent.
+  - name: inject-extra
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan999' vlanid 999"}
+    expect:
+      jq: '.output | contains("1")'
+
+  - name: verify-extra-exists
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan999
+    expect:
+      jq: '.vlanid == "999"'
+
+  # MODIFIED: change the BGP ASN to a wrong value.
+  - name: inject-modified
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 99999"}
+    expect:
+      jq: '.output | contains("0")'
+
+  - name: verify-modified
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/BGP_GLOBALS/default
+    expect:
+      jq: '.local_asn == "99999"'

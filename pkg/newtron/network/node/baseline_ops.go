@@ -25,7 +25,7 @@ type SetupDeviceOpts struct {
 // route reflector (optional). One intent record for the whole composite.
 //
 // The sub-operations (SetDeviceMetadata, ConfigureLoopback, ConfigureBGP,
-// SetupVTEP, ConfigureRouteReflector) remain available as individual methods
+// SetupVXLAN, ConfigureBGPOverlay, ConfigureRouteReflector) remain available as individual methods
 // but do NOT write intent records — SetupDevice is the intent-producing entry point.
 func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSet, error) {
 	if err := n.precondition(sonic.OpSetupDevice, n.name).Result(); err != nil {
@@ -72,13 +72,19 @@ func (n *Node) SetupDevice(ctx context.Context, opts SetupDeviceOpts) (*ChangeSe
 	}
 	cs.Merge(bgpCS)
 
-	// 4. VTEP (optional — skip if no source IP and no resolved VTEP IP)
+	// 4. VXLAN + BGP overlay (optional — skip if no source IP and no resolved VTEP IP)
 	if opts.SourceIP != "" || (n.resolved != nil && n.resolved.VTEPSourceIP != "") {
-		vtepCS, err := n.SetupVTEP(ctx, opts.SourceIP)
+		vxlanCS, err := n.SetupVXLAN(ctx, opts.SourceIP)
 		if err != nil {
-			return nil, fmt.Errorf("setup-vtep: %w", err)
+			return nil, fmt.Errorf("setup-vxlan: %w", err)
 		}
-		cs.Merge(vtepCS)
+		cs.Merge(vxlanCS)
+
+		overlayCS, err := n.ConfigureBGPOverlay(ctx, opts.SourceIP)
+		if err != nil {
+			return nil, fmt.Errorf("configure-bgp-overlay: %w", err)
+		}
+		cs.Merge(overlayCS)
 	}
 
 	// 5. Route reflector (optional)
@@ -147,17 +153,18 @@ func (n *Node) ConfigureLoopback(ctx context.Context) (*ChangeSet, error) {
 		return nil, fmt.Errorf("no loopback IP configured for device %s", n.name)
 	}
 
-	// Base entry required for intfmgrd to bind the IP (Update = idempotent create-or-update)
-	cs.Update("LOOPBACK_INTERFACE", "Loopback0", map[string]string{})
-	cs.Add("LOOPBACK_INTERFACE", fmt.Sprintf("Loopback0|%s/32", loopbackIP), map[string]string{})
+	cs.Adds(createLoopbackConfig(loopbackIP))
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Configured Loopback0 with IP %s/32", loopbackIP)
 	return cs, nil
 }
 
 // RemoveLoopback removes all Loopback0 entries from CONFIG_DB.
 // Reverses ConfigureLoopback: deletes base entry and all IP sub-entries.
+// Deterministic from device intent params (source_ip).
 func (n *Node) RemoveLoopback(ctx context.Context) (*ChangeSet, error) {
 	if err := n.precondition("remove-loopback", "loopback").Result(); err != nil {
 		return nil, err
@@ -165,18 +172,21 @@ func (n *Node) RemoveLoopback(ctx context.Context) (*ChangeSet, error) {
 
 	cs := NewChangeSet(n.name, "device.remove-loopback")
 
-	configDB := n.ConfigDB()
-	if configDB == nil {
+	// Determine loopback IP from device intent
+	intent := n.GetIntent("device")
+	if intent == nil {
 		return cs, nil
 	}
-
-	// Delete all LOOPBACK_INTERFACE entries for Loopback0 (IP sub-entries first, then base)
-	for key := range configDB.LoopbackInterface {
-		if key == "Loopback0" || strings.HasPrefix(key, "Loopback0|") {
-			cs.Delete("LOOPBACK_INTERFACE", key)
-		}
+	sourceIP := intent.Params["source_ip"]
+	if sourceIP == "" {
+		sourceIP = n.resolved.LoopbackIP
 	}
 
+	cs.Deletes(deleteLoopbackConfig(sourceIP))
+
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Removed Loopback0 configuration")
 	return cs, nil
 }

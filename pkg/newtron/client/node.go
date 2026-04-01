@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"net/url"
-	"time"
 
 	"github.com/newtron-network/newtron/pkg/newtron"
 	"github.com/newtron-network/newtron/pkg/newtron/api"
@@ -38,6 +37,24 @@ func (c *Client) ShowInterface(device, name string) (*newtron.InterfaceDetail, e
 		return nil, err
 	}
 	return &result, nil
+}
+
+// ShowServiceBinding returns the service binding on an interface.
+func (c *Client) ShowServiceBinding(device, iface string) (*newtron.ServiceBindingDetail, error) {
+	var result newtron.ServiceBindingDetail
+	if err := c.doGet(c.interfacePath(device, iface)+"/binding", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListNeighbors returns BGP neighbor health checks (alias for CheckBGPSessions).
+func (c *Client) ListNeighbors(device string) ([]newtron.HealthCheckResult, error) {
+	var result []newtron.HealthCheckResult
+	if err := c.doGet(c.nodePath(device)+"/neighbor", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ListVLANs returns VLAN status entries.
@@ -426,14 +443,6 @@ func (c *Client) RemovePortChannelMember(device, pc, member string, opts newtron
 	return c.nodeWrite(device, "remove-portchannel-member", body, opts)
 }
 
-// VerifyCommitted re-verifies all committed changes.
-func (c *Client) VerifyCommitted(device string) (*newtron.VerificationResult, error) {
-	var result newtron.VerificationResult
-	if err := c.doPost(c.nodePath(device)+"/verify-committed", nil, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
 
 // ============================================================================
 // Device lifecycle operations (no ChangeSet)
@@ -447,17 +456,6 @@ func (c *Client) ConfigReload(device string) error {
 // SaveConfig saves the running config to config_db.json.
 func (c *Client) SaveConfig(device string) error {
 	return c.doPost(c.nodePath(device)+"/save-config", nil, nil)
-}
-
-// Refresh reloads the ConfigDB cache from Redis.
-func (c *Client) Refresh(device string) error {
-	return c.doPost(c.nodePath(device)+"/refresh", nil, nil)
-}
-
-// RefreshWithRetry polls Refresh until successful.
-func (c *Client) RefreshWithRetry(device string, timeout time.Duration) error {
-	path := fmt.Sprintf("%s/refresh?timeout=%s", c.nodePath(device), timeout)
-	return c.doPost(path, nil, nil)
 }
 
 // RestartService restarts a SONiC Docker service.
@@ -480,109 +478,79 @@ func (c *Client) SSHCommand(device, command string) (string, error) {
 // Intent methods
 // ============================================================================
 
-// ListIntents returns all intents on a device (connects read-only, no lock).
-func (c *Client) ListIntents(device string) ([]newtron.Intent, error) {
-	var result []newtron.Intent
-	if err := c.doGet(c.nodePath(device)+"/intents", &result); err != nil {
+
+// ============================================================================
+// Intent operations
+// ============================================================================
+
+// IntentDrift compares the node projection (expected state) against actual
+// CONFIG_DB. Mode selects the source of expected state: "" or "intent" uses
+// device NEWTRON_INTENT records; "topology" uses topology.json steps.
+func (c *Client) IntentDrift(device, mode string) ([]newtron.DriftEntry, error) {
+	path := c.nodePath(device) + "/intent/drift"
+	if mode == "topology" {
+		path += "?mode=topology"
+	}
+	var result []newtron.DriftEntry
+	if err := c.doGet(path, &result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-// ============================================================================
-// Zombie operation methods (crash recovery)
-// ============================================================================
-
-// ReadZombie reads the zombie operation record from CONFIG_DB (no lock required).
-func (c *Client) ReadZombie(device string) (*newtron.OperationIntent, error) {
-	var result newtron.OperationIntent
-	if err := c.doGet(c.nodePath(device)+"/zombie", &result); err != nil {
-		return nil, err
+// IntentSave persists the device's current intent DB back to topology.json.
+func (c *Client) IntentSave(device, mode string) (*newtron.TopologySnapshot, error) {
+	path := c.nodePath(device) + "/intent/save"
+	if mode == "topology" {
+		path += "?mode=topology"
 	}
-	return &result, nil
-}
-
-// RollbackZombie reverses a zombie operation's changes.
-func (c *Client) RollbackZombie(device string, opts newtron.ExecOpts) (*newtron.WriteResult, error) {
-	var result newtron.WriteResult
-	if err := c.doPost(c.nodePath(device)+"/rollback-zombie"+execQuery(opts), nil, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// ClearZombie clears the zombie operation record without rollback.
-func (c *Client) ClearZombie(device string) error {
-	return c.doPost(c.nodePath(device)+"/clear-zombie", nil, nil)
-}
-
-// ============================================================================
-// Device settings
-// ============================================================================
-
-// ReadSettings reads newtron operational settings from a device.
-func (c *Client) ReadSettings(device string) (*newtron.DeviceSettings, error) {
-	var result newtron.DeviceSettings
-	if err := c.doGet(c.nodePath(device)+"/settings", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// WriteSettings writes newtron operational settings to a device.
-func (c *Client) WriteSettings(device string, s *newtron.DeviceSettings) error {
-	return c.doPut(c.nodePath(device)+"/settings", s, nil)
-}
-
-// ============================================================================
-// History operations
-// ============================================================================
-
-// ReadHistory returns the rolling history for a device.
-func (c *Client) ReadHistory(device string) (*newtron.HistoryResult, error) {
-	var result newtron.HistoryResult
-	if err := c.doGet(c.nodePath(device)+"/history", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// RollbackHistory reverses the most recent history entry.
-func (c *Client) RollbackHistory(device string, opts newtron.ExecOpts) (*newtron.HistoryRollbackResult, error) {
-	var result newtron.HistoryRollbackResult
-	if err := c.doPost(c.nodePath(device)+"/rollback-history"+execQuery(opts), nil, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// ============================================================================
-// Drift detection
-// ============================================================================
-
-// DetectDrift compares expected vs actual CONFIG_DB for a device.
-func (c *Client) DetectDrift(device string) (*newtron.DriftReport, error) {
-	var result newtron.DriftReport
-	if err := c.doGet(c.nodePath(device)+"/drift", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-// TopologyIntents returns the device's actuated intents projected as topology steps.
-func (c *Client) TopologyIntents(device string) (*newtron.TopologySnapshot, error) {
 	var result newtron.TopologySnapshot
-	if err := c.doGet(c.nodePath(device)+"/topology/intents", &result); err != nil {
+	if err := c.doPost(path, nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// DetectTopologyDrift compares expected CONFIG_DB (from topology steps) against
-// actual CONFIG_DB for a device. Detects operations done outside the topology.
-func (c *Client) DetectTopologyDrift(device string) (*newtron.DriftReport, error) {
-	var result newtron.DriftReport
-	if err := c.doGet(c.nodePath(device)+"/topology/drift", &result); err != nil {
+// IntentReload rebuilds the node from topology.json (topology mode only).
+func (c *Client) IntentReload(device string) (*newtron.TopologySnapshot, error) {
+	path := c.nodePath(device) + "/intent/reload?mode=topology"
+	var result newtron.TopologySnapshot
+	if err := c.doPost(path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// IntentClear creates an empty node with ports only (topology mode only).
+func (c *Client) IntentClear(device string) (*newtron.TopologySnapshot, error) {
+	path := c.nodePath(device) + "/intent/clear?mode=topology"
+	var result newtron.TopologySnapshot
+	if err := c.doPost(path, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// Reconcile delivers the full projection to the device, eliminating drift.
+// Mode selects the source of expected state: "" or "intent" uses device
+// NEWTRON_INTENT records; "topology" uses topology.json steps.
+func (c *Client) Reconcile(device, mode string, opts newtron.ExecOpts) (*newtron.ReconcileResult, error) {
+	q := url.Values{}
+	if !opts.Execute {
+		q.Set("dry_run", "true")
+	}
+	if opts.NoSave {
+		q.Set("no_save", "true")
+	}
+	if mode == "topology" {
+		q.Set("mode", "topology")
+	}
+	path := c.nodePath(device) + "/intent/reconcile"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	var result newtron.ReconcileResult
+	if err := c.doPost(path, nil, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

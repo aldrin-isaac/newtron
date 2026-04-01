@@ -12,7 +12,7 @@ requires: [boot-ssh]
 
 steps:
   - name: provision-switches
-    action: provision
+    action: topology-reconcile
     devices: [switch1, switch2]
 
   # config reload stops all daemons, re-reads config_db.json, restarts them.
@@ -22,6 +22,14 @@ steps:
     devices: [switch1, switch2]
     method: POST
     url: /node/{{device}}/reload-config
+
+  # Wait for config reload to settle before explicit BGP restart.
+  # config reload restarts all daemons — issuing restart-bgp immediately
+  # can collide with the reload-initiated restart ("Job canceled" or
+  # "Start request repeated too quickly").
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
 
   # Explicit BGP restart ensures frrcfgd startup replay processes all
   # BGP entries. Required on sonic-vs because:
@@ -33,6 +41,9 @@ steps:
     method: POST
     url: /node/{{device}}/restart-daemon
     params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
 
   # Wait for FRR to fully restart after BGP service restart.
   - name: wait-bgp-instance

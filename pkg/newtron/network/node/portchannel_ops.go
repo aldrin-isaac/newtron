@@ -78,7 +78,7 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		fields["fast_rate"] = "true"
 	}
 
-	cs.Add("PORTCHANNEL", name, fields)
+	cs.Adds(createPortChannelConfig(name, fields))
 
 	// Add members
 	for _, member := range opts.Members {
@@ -88,19 +88,14 @@ func (n *Node) CreatePortChannel(ctx context.Context, name string, opts PortChan
 		if n.InterfaceIsPortChannelMember(member) {
 			return nil, fmt.Errorf("interface %s is already a PortChannel member", member)
 		}
-		memberKey := fmt.Sprintf("%s|%s", name, member)
-		cs.Add("PORTCHANNEL_MEMBER", memberKey, map[string]string{})
+		cs.Adds(createPortChannelMemberConfig(name, member))
 	}
 
-	n.applyShadow(cs)
+	if err := n.render(cs); err != nil {
+		return nil, err
+	}
 	util.WithDevice(n.name).Infof("Created PortChannel %s with members %v", name, opts.Members)
 	return cs, nil
-}
-
-// destroyPortChannelConfig returns delete entries for a PortChannel.
-// Under the DAG, members are removed as children before the PortChannel can be deleted.
-func (n *Node) destroyPortChannelConfig(name string) []sonic.Entry {
-	return []sonic.Entry{{Table: "PORTCHANNEL", Key: name}}
 }
 
 // DeletePortChannel removes a LAG/PortChannel.
@@ -109,7 +104,7 @@ func (n *Node) DeletePortChannel(ctx context.Context, name string) (*ChangeSet, 
 
 	cs, err := n.op("delete-portchannel", name, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(name) },
-		func() []sonic.Entry { return n.destroyPortChannelConfig(name) })
+		func() []sonic.Entry { return deletePortChannelConfig(name) })
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +132,7 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 				RequireInterfaceExists(member).
 				RequireInterfaceNotPortChannelMember(member)
 		},
-		func() []sonic.Entry {
-			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member), Fields: map[string]string{}}}
-		},
+		func() []sonic.Entry { return createPortChannelMemberConfig(pcName, member) },
 		"device.remove-portchannel-member")
 	if err != nil {
 		return nil, err
@@ -147,7 +140,10 @@ func (n *Node) AddPortChannelMember(ctx context.Context, pcName, member string) 
 	cs.OperationParams = map[string]string{"name": pcName, "member": member}
 
 	if err := n.writeIntent(cs, sonic.OpAddPortChannelMember, "portchannel|"+pcName+"|"+member,
-		map[string]string{sonic.FieldName: member},
+		map[string]string{
+			sonic.FieldName: member,
+			"portchannel":   pcName,
+		},
 		[]string{"portchannel|" + pcName}); err != nil {
 		return nil, err
 	}
@@ -163,9 +159,7 @@ func (n *Node) RemovePortChannelMember(ctx context.Context, pcName, member strin
 
 	cs, err := n.op("remove-portchannel-member", pcName, ChangeDelete,
 		func(pc *PreconditionChecker) { pc.RequirePortChannelExists(pcName) },
-		func() []sonic.Entry {
-			return []sonic.Entry{{Table: "PORTCHANNEL_MEMBER", Key: fmt.Sprintf("%s|%s", pcName, member)}}
-		})
+		func() []sonic.Entry { return deletePortChannelMemberConfig(pcName, member) })
 	if err != nil {
 		return nil, err
 	}
@@ -191,13 +185,8 @@ type PortChannelInfo struct {
 	AdminStatus   string
 }
 
-// PortChannelExists checks if a PortChannel exists.
-// Accepts both short (Po100) and full (PortChannel100) names.
-func (n *Node) PortChannelExists(name string) bool {
-	return n.configDB.HasPortChannel(util.NormalizeInterfaceName(name))
-}
 
-// GetPortChannel retrieves PortChannel information from config_db.
+// GetPortChannel retrieves PortChannel information from the intent DB.
 func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
 	if n.configDB == nil {
 		return nil, util.ErrNotConnected
@@ -206,21 +195,20 @@ func (n *Node) GetPortChannel(name string) (*PortChannelInfo, error) {
 	// Normalize PortChannel name (e.g., Po100 -> PortChannel100)
 	name = util.NormalizeInterfaceName(name)
 
-	pcEntry, ok := n.configDB.PortChannel[name]
-	if !ok {
+	pcIntent := n.GetIntent("portchannel|" + name)
+	if pcIntent == nil {
 		return nil, fmt.Errorf("PortChannel %s not found", name)
 	}
 
 	info := &PortChannelInfo{
 		Name:        name,
-		AdminStatus: pcEntry.AdminStatus,
+		AdminStatus: "up", // PortChannels are always created with admin_status: up
 	}
 
-	// Collect members from PORTCHANNEL_MEMBER
-	for key := range n.configDB.PortChannelMember {
-		parts := splitKey(key)
-		if len(parts) == 2 && parts[0] == name {
-			info.Members = append(info.Members, parts[1])
+	// Collect members from sub-intents: portchannel|{name}|{member}
+	for _, intent := range n.IntentsByPrefix("portchannel|" + name + "|") {
+		if memberName := intent.Params[sonic.FieldName]; memberName != "" {
+			info.Members = append(info.Members, memberName)
 		}
 	}
 
@@ -236,24 +224,28 @@ func (n *Node) ListPortChannels() []string {
 		return nil
 	}
 
-	names := make([]string, 0, len(n.configDB.PortChannel))
-	for name := range n.configDB.PortChannel {
-		names = append(names, name)
+	intents := n.IntentsByPrefix("portchannel|")
+	var names []string
+	for resource := range intents {
+		// Top-level portchannel intents: "portchannel|PortChannel100" (one pipe)
+		// Member intents: "portchannel|PortChannel100|Ethernet0" (two pipes) — skip
+		if strings.Count(resource, "|") == 1 {
+			parts := strings.SplitN(resource, "|", 2)
+			names = append(names, parts[1])
+		}
 	}
 	return names
 }
 
 // InterfaceIsPortChannelMember checks if an interface is a PortChannel member.
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
+// Scans portchannel member intents (resource: "portchannel|PC|MEMBER").
 func (n *Node) InterfaceIsPortChannelMember(name string) bool {
-	if n.configDB == nil {
-		return false
-	}
 	name = util.NormalizeInterfaceName(name)
-	for key := range n.configDB.PortChannelMember {
-		// Key format: PortChannel100|Ethernet0
-		parts := splitKey(key)
-		if len(parts) == 2 && parts[1] == name {
+	for resource := range n.IntentsByPrefix("portchannel|") {
+		// Intent key format: "portchannel|PortChannel100|Ethernet0"
+		parts := strings.SplitN(resource, "|", 3)
+		if len(parts) == 3 && parts[2] == name {
 			return true
 		}
 	}
@@ -262,16 +254,14 @@ func (n *Node) InterfaceIsPortChannelMember(name string) bool {
 
 // GetInterfacePortChannel returns the PortChannel that an interface belongs to (empty if not a member).
 // Accepts both short (Eth0) and full (Ethernet0) interface names.
+// Scans portchannel member intents (resource: "portchannel|PC|MEMBER").
 func (n *Node) GetInterfacePortChannel(name string) string {
-	if n.configDB == nil {
-		return ""
-	}
 	name = util.NormalizeInterfaceName(name)
-	for key := range n.configDB.PortChannelMember {
-		// Key format: PortChannel100|Ethernet0
-		parts := splitKey(key)
-		if len(parts) == 2 && parts[1] == name {
-			return parts[0]
+	for resource := range n.IntentsByPrefix("portchannel|") {
+		// Intent key format: "portchannel|PortChannel100|Ethernet0"
+		parts := strings.SplitN(resource, "|", 3)
+		if len(parts) == 3 && parts[2] == name {
+			return parts[1]
 		}
 	}
 	return ""

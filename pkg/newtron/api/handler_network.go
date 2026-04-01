@@ -1065,31 +1065,6 @@ func (s *Server) handleGetUnsupportedDueTo(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, val)
 }
 
-// ============================================================================
-// Network provision
-// ============================================================================
-
-func (s *Server) handleProvisionDevices(w http.ResponseWriter, r *http.Request) {
-	na := s.requireNetwork(w, r)
-	if na == nil {
-		return
-	}
-	var req newtron.ProvisionRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
-		return
-	}
-	opts := execOpts(r)
-	val, err := na.do(r.Context(), func() (any, error) {
-		return na.net.ProvisionDevices(r.Context(), req, opts)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, val)
-}
-
 func (s *Server) handleInitDevice(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {

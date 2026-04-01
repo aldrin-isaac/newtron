@@ -209,3 +209,54 @@ func TestOwnedTables_ExcludesInternalTables(t *testing.T) {
 		}
 	}
 }
+
+func TestExportRaw_RoundTrip(t *testing.T) {
+	// Build a RawConfigDB with known data across three tables. Field names must
+	// match the json tags on the corresponding typed structs so they survive the
+	// hydrate → structToFields round-trip without loss.
+	want := RawConfigDB{
+		"VLAN": {
+			"Vlan100": {"vlanid": "100", "description": "uplink"},
+			"Vlan200": {"vlanid": "200"},
+		},
+		"VRF": {
+			"CUSTOMER": {"vni": "1001"},
+			"MGMT":     {"vni": "1002"},
+		},
+		"BGP_GLOBALS": {
+			"default": {"local_asn": "65001", "router_id": "10.0.0.1"},
+		},
+	}
+
+	db := NewConfigDB()
+	for table, keys := range want {
+		for key, fields := range keys {
+			db.ApplyEntries([]Entry{{Table: table, Key: key, Fields: fields}})
+		}
+	}
+
+	got := db.ExportRaw()
+
+	// Verify every table/key/field in want appears in got with the same value.
+	for table, keys := range want {
+		for key, wantFields := range keys {
+			gotFields, ok := got[table][key]
+			if !ok {
+				t.Errorf("ExportRaw missing %s|%s", table, key)
+				continue
+			}
+			for field, wantVal := range wantFields {
+				if gotVal := gotFields[field]; gotVal != wantVal {
+					t.Errorf("%s|%s field %q: want %q, got %q", table, key, field, wantVal, gotVal)
+				}
+			}
+		}
+	}
+
+	// Verify no unexpected tables appear that we did not write.
+	for table := range got {
+		if _, ok := want[table]; !ok {
+			t.Errorf("ExportRaw produced unexpected table %q", table)
+		}
+	}
+}

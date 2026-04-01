@@ -4,9 +4,16 @@ description: |
   Tests create-acl, add-acl-rule, bind-acl, unbind-acl, delete-acl-rule,
   and delete-acl primitives with full CONFIG_DB verification.
 topology: 2node-ngdp
-requires: [boot-ssh]
+requires: [setup-device]
 
 steps:
+  # Create interface intent anchor (I4: parent for ACL binding sub-resource)
+  - name: configure-ethernet10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/configure-interface
+
   - name: create-acl-table
     action: newtron
     devices: [switch1]
@@ -124,3 +131,10 @@ steps:
     url: /node/{{device}}/configdb/ACL_TABLE/TEST_ACL/exists
     expect:
       jq: '.exists == false'
+
+  # Cleanup: remove the interface intent
+  - name: unconfigure-ethernet10
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/interface/Ethernet10/unconfigure-interface

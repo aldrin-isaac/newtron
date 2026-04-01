@@ -1,0 +1,78 @@
+name: clear-crud
+description: |
+  Clear + CRUD: build intents from scratch on an empty canvas.
+
+  Architecture §6 (Clear): "Clear + CRUD → build intents from scratch on
+  an empty canvas." After clearing, the node has ports but no intents.
+  CRUD operations should work normally — creating intents on the empty node.
+topology: 1node-vs
+requires: [mode-switch-state]
+
+steps:
+  # Clear the topology node
+  - name: clear-topology
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/clear?mode=topology
+
+  # Verify empty tree (no intents)
+  - name: verify-empty-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | length == 0'
+
+  # Create setup-device on the empty canvas
+  - name: setup-device-from-scratch
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/setup-device?mode=topology
+    params:
+      fields:
+        hostname: switch1
+        bgp_asn: "65001"
+        type: LeafRouter
+
+  # Verify setup-device intent appears in tree
+  - name: verify-setup-device-in-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'
+
+  # Create a VLAN on the rebuilt canvas
+  - name: create-vlan-on-empty
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan?mode=topology
+    params: {id: 850}
+
+  # Verify VLAN in tree
+  - name: verify-vlan-in-tree
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: >-
+        .steps | any(.[]; .url == "/setup-device")
+        and any(.[]; .url == "/create-vlan")
+
+  # Reload to discard the unsaved CRUD and restore from topology.json
+  - name: reload-to-restore
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reload?mode=topology
+
+  # Verify topology.json state restored (setup-device from original topology)
+  - name: verify-restored
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/tree?mode=topology
+    expect:
+      jq: '.steps | any(.[]; .url == "/setup-device")'

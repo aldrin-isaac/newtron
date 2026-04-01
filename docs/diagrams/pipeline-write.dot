@@ -1,0 +1,9 @@
+digraph {
+    rankdir=TB;
+    "\n  Config function  \n  (CreateVLAN, ConfigureBGP,  \n  ApplyService, ...)  \n\n" -> "\n  op()  \n  changeset.go:148  \n\n" [label="  []Entry  "];
+    "\n  op()  \n  changeset.go:148  \n\n" -> "\n  applyShadow(cs)  \n  configDB.hydrateConfigTable  \n\n" [label="  ChangeSet  "];
+    "\n  applyShadow(cs)  \n  configDB.hydrateConfigTable  \n\n" -> "\n  cs.Apply(n)  \n  changeset.go:219  \n\n" [label="  physical  "];
+    "\n  applyShadow(cs)  \n  configDB.hydrateConfigTable  \n\n" -> "\n  (done)  \n  shadow updated  \n\n" [label="  abstract  "];
+    "\n  cs.Apply(n)  \n  changeset.go:219  \n\n" -> "\n  Validate()  \n  schema.go  \n\n";
+    "\n  Validate()  \n  schema.go  \n\n" -> "\n  CONFIG_DB  \n  (Redis DB 4)  \n\n" [label="  HSET / DEL  "];
+}

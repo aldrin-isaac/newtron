@@ -4,7 +4,7 @@ description: |
   Removes SVI, unbinds IP-VPN, deletes VRF, unbinds MAC-VPN, removes VLAN members,
   deletes VLANs, and removes cross-switch IPs.
 topology: 2node-vs
-requires: [evpn-irb]
+requires: [evpn-irb, cross-switch]
 
 steps:
   # 1. Remove SVI from VLAN 300 on both switches

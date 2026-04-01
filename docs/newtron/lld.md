@@ -1,224 +1,265 @@
 # Newtron Low-Level Design (LLD)
 
-This document covers **how** and **what fields** — type definitions, method signatures, CONFIG_DB schemas, HTTP API routes, and CLI command trees. For architecture and design rationale, see the [HLD](hld.md). For device-layer internals (SSH tunneling, Redis clients, write paths), see the [Device LLD](device-lld.md).
+This document covers **how** and **what fields** — type definitions, method signatures, CONFIG_DB schemas, HTTP API routes, and CLI command trees. For architecture and design rationale, see the [HLD](hld.md). For device-layer internals (SSH tunneling, Redis clients, write paths), see the [Device LLD](device-lld.md). For the full pipeline specification with end-to-end traces, see the [Unified Pipeline Architecture](unified-pipeline-architecture.md).
 
 ## 1. Package Structure
 
 ```
-pkg/newtron/                          # Public API — types, wrappers
+pkg/newtron/                          # Public API — all external consumers import this package only
     types.go                          # All public types (WriteResult, ExecOpts, DeviceInfo, etc.)
-    network.go                        # Network wrapper (public)
-    node.go                           # Node wrapper (public)
+    network.go                        # Network wrapper
+    node.go                           # Node wrapper
+    interface.go                      # Interface wrapper
+    spec_ops.go                       # Spec authoring operations
+    platform_ops.go                   # Platform operations
+    profile_ops.go                    # Profile and zone operations
+    audit.go                          # Audit log integration
     settings.go                       # UserSettings load/save
     settings/settings.go              # Settings file I/O
+    audit/                            # Audit log writer, query, rotation
+```
 
-pkg/newtron/api/                      # HTTP server
+```
+pkg/newtron/api/                      # HTTP server — actor model, JSON handlers, middleware
     server.go                         # Server struct, Start/Stop, Register/Unregister
     actors.go                         # NetworkActor, NodeActor, connection caching
     handler.go                        # Route registration (buildMux), JSON helpers
     handler_node.go                   # Node operation handlers
     handler_network.go                # Network/spec operation handlers
     handler_interface.go              # Interface operation handlers
-    handler_composite.go              # Composite generate/deliver/verify handlers
+    middleware.go                     # Recovery, logging, request ID, timeout, mode
+    mode.go                           # Topology vs actuated mode resolution
     types.go                          # HTTP request/response types, error mapping
     api_test.go                       # API completeness test
+```
 
-pkg/newtron/client/                   # HTTP client (used by CLI, newtrun)
+```
+pkg/newtron/client/                   # HTTP client — used by CLI and newtrun
     client.go                         # Client struct, New(), HTTP helpers
     network.go                        # Spec read/write operations
     node.go                           # Node read + write operations
     interface.go                      # Interface-scoped operations
+```
 
-pkg/newtron/network/                  # Network internals
-    network.go                        # Network struct, Connect, spec accessors
-    topology.go                       # Topology provisioner, GenerateDeviceComposite
+```
+pkg/newtron/network/                  # Network internals — spec resolution, topology provisioning
+    network.go                        # Network struct, spec accessors, getSpec[V] generic helper
+    topology.go                       # TopologyProvisioner: BuildAbstractNode, SaveDeviceIntents
     resolved_specs.go                 # ResolvedSpecs (SpecProvider implementation)
+```
 
-pkg/newtron/network/node/             # Node internals
-    node.go                           # Node struct, Lock/Unlock, Execute
-    interface.go                      # Interface struct, accessors
-    changeset.go                      # ChangeSet, Apply, Verify, Preview
-    precondition.go                   # PreconditionChecker
-    composite.go                      # CompositeBuilder, DeliverComposite
-    vlan_ops.go                       # VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
-    vrf_ops.go                        # VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
-    bgp_ops.go                        # BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, etc.
-    evpn_ops.go                       # VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP, etc.
-    acl_ops.go                        # ACL_TABLE, ACL_RULE
-    qos_ops.go                        # PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, etc.
-    interface_ops.go                  # INTERFACE table — SetIP, RemoveIP, SetVRF, BindACL, UnbindACL, Set
-    interface_bgp_ops.go              # Interface-level BGP neighbor management
-    baseline_ops.go                   # LOOPBACK_INTERFACE
-    portchannel_ops.go                # PORTCHANNEL, PORTCHANNEL_MEMBER
-    service_ops.go                    # ApplyService, RemoveService, RefreshService,
-                                      # NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET, etc.
-    service_gen.go                    # Service-to-entries translation
-    cleanup_ops.go                    # Orphan cleanup (ACLs, VRFs, VNI mappings)
-    qos.go                            # QoS policy → CONFIG_DB translation
-    macvpn_ops.go                     # MAC-VPN bind/unbind
-    health_ops.go                     # Health checks
+```
+pkg/newtron/network/node/             # Node internals — all operations live here
 
-pkg/newtron/spec/                     # Spec file I/O
-    types.go                          # All spec types (ServiceSpec, IPVPNSpec, etc.)
-    loader.go                         # Loader, SaveNetwork (atomic temp+rename)
+    # --- Core machinery ---
+    node.go                           # Node struct, ConnectTransport, Lock/Unlock, RebuildProjection
+    interface.go                      # Interface struct, read accessors
+    changeset.go                      # ChangeSet: Add, Delete, Prepend, Merge, Apply, Verify
+    precondition.go                   # PreconditionChecker (fluent builder)
 
-pkg/newtron/device/sonic/             # SONiC device layer
-    device.go                         # Device struct, Connect/Disconnect
-    configdb.go                       # ConfigDB struct, ConfigDBClient, SCAN+parse
-    configdb_parsers.go               # 42-entry table-driven parser registry
-    statedb.go                        # StateDBClient, health checks
-    statedb_parsers.go                # 13-entry table-driven parser registry
-    appldb.go                         # AppDBClient, GetRoute (APP_DB)
-    asicdb.go                         # AsicDBClient, GetRouteASIC (ASIC_DB)
-    pipeline.go                       # Entry, PipelineSet, ReplaceAll
-    platform.go                       # SonicPlatformConfig, PortDefinition
-    types.go                          # RouteEntry, VerificationResult, ConfigChange
+    # --- Intent lifecycle ---
+    intent_ops.go                     # writeIntent, deleteIntent, renderIntent, ValidateIntentDAG
+    reconstruct.go                    # IntentsToSteps, ReplayStep, ReconstructExpected
 
-cmd/newtron/                          # CLI
-    main.go                           # App struct, PersistentPreRunE, cobra setup
-    cmd_service.go                    # service noun
-    cmd_vlan.go                       # vlan noun
-    cmd_vrf.go                        # vrf noun
-    cmd_interface.go                  # interface noun
-    cmd_bgp.go                        # bgp noun
-    cmd_evpn.go                       # evpn noun
-    cmd_lag.go                        # lag noun
-    cmd_acl.go                        # acl noun
-    cmd_qos.go                        # qos noun
-    cmd_filter.go                     # filter noun
-    cmd_provision.go                  # provision noun
-    cmd_health.go                     # health noun
-    cmd_device.go                     # device operations
-    cmd_show.go                       # show noun
-    cmd_platform.go                   # platform noun
-    cmd_settings.go                   # settings noun
-    cmd_audit.go                      # audit noun
+    # --- Operations (intent-wrapping methods that call config generators) ---
+    service_ops.go                    # ApplyService, RemoveService, RefreshService
+    vlan_ops.go                       # CreateVLAN, DeleteVLAN, ConfigureIRB, UnconfigureIRB
+    vrf_ops.go                        # CreateVRF, DeleteVRF, BindIPVPN, UnbindIPVPN, static routes
+    bgp_ops.go                        # ConfigureBGP, AddBGPEVPNPeer, ConfigureRouteReflector
+    evpn_ops.go                       # SetupVXLAN, TeardownVXLAN, BindMACVPN, UnbindMACVPN
+    acl_ops.go                        # CreateACL, DeleteACL, AddACLRule, DeleteACLRule
+    qos_ops.go                        # ApplyQoS, RemoveQoS (on Interface)
+    interface_ops.go                  # ConfigureInterface, UnconfigureInterface, SetProperty, etc.
+    interface_bgp_ops.go              # AddBGPPeer, RemoveBGPPeer (on Interface)
+    baseline_ops.go                   # SetupDevice, ConfigureLoopback, RemoveLoopback
+    portchannel_ops.go                # CreatePortChannel, DeletePortChannel, member management
+    health_ops.go                     # CheckBGPSessions, CheckInterfaceOper
 
-cmd/newtron-server/                   # HTTP server binary
-    main.go                           # Flag parsing, signal handling, graceful shutdown
+    # --- Config generators (pure functions: params → []sonic.Entry) ---
+    service_gen.go                    # generateServiceEntries (spec → CONFIG_DB translation)
+    service_config.go                 # Service-specific config: ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
+    vlan_config.go                    # VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
+    vrf_config.go                     # VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
+    bgp_config.go                     # BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_PEER_GROUP, etc.
+    vxlan_config.go                   # VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP
+    acl_config.go                     # ACL_TABLE, ACL_RULE
+    qos_config.go                     # PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, SCHEDULER, WRED_PROFILE
+    qos_query.go                      # QoS reference counting (isQoSPolicyReferenced)
+    interface_config.go               # INTERFACE table
+    baseline_config.go                # LOOPBACK_INTERFACE, DEVICE_METADATA
+    portchannel_config.go             # PORTCHANNEL, PORTCHANNEL_MEMBER
+```
+
+```
+pkg/newtron/device/sonic/             # SONiC device layer — Redis clients, schema, wire format
+
+    # --- Device and connection ---
+    device.go                         # Device struct, SSH tunnel lifecycle
+    types.go                          # Entry, ConfigChange, DriftEntry, VerificationResult, Intent
+
+    # --- CONFIG_DB (projection + delivery) ---
+    configdb.go                       # ConfigDB typed structs, ApplyEntries, ExportEntries, ExportRaw
+    configdb_parsers.go               # configTableHydrators registry (33 typed + 9 merge parsers)
+    configdb_diff.go                  # DiffConfigDB (projection vs actual comparison)
+    configdb_order.go                 # CONFIG_DB write ordering (dependency-aware)
+    pipeline.go                       # PipelineSet, ReplaceAll (Redis write paths)
+    schema.go                         # YANG-derived schema validation (fail-closed)
+    yang/constraints.md               # YANG source reference for schema constraints
+
+    # --- Other Redis databases (read-only) ---
+    statedb.go                        # StateDB client, health check queries
+    statedb_parsers.go                # StateDB table parsers (13 entries)
+    appldb.go                         # AppDB client (route reads)
+    asicdb.go                         # AsicDB client (SAI object reads)
+```
+
+```
+pkg/newtron/spec/                     # Spec types and file I/O
+    types.go                          # All spec types (ServiceSpec, DeviceProfile, TopologySpecFile, etc.)
+    loader.go                         # Load/save network.json, profiles, platforms, topology
+```
+
+```
+cmd/newtron/                          # CLI — one file per noun, dispatched via commands map
+    main.go                           # App struct, commands map, dispatch
+    cmd_service.go   cmd_vlan.go      cmd_vrf.go       cmd_bgp.go
+    cmd_evpn.go      cmd_acl.go       cmd_qos.go       cmd_interface.go
+    cmd_lag.go       cmd_filter.go    cmd_intent.go     cmd_health.go
+    cmd_show.go      cmd_init.go      cmd_profile.go    cmd_zone.go
+    cmd_platform.go  cmd_settings.go  cmd_preferences.go cmd_audit.go
+    cmd_device.go
 ```
 
 ### CONFIG_DB Table Ownership
 
-Each CONFIG_DB table has exactly one owning file:
+Each CONFIG_DB table has exactly one owning file (see [HLD §4](hld.md) for rationale). Config generators in the owning file are the sole writers; composites (`service_gen.go`, `topology.go`) call these generators and merge ChangeSets.
 
-| File | Tables |
-|------|--------|
-| `vlan_ops.go` | VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL |
-| `vrf_ops.go` | VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT |
-| `bgp_ops.go` | BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA |
-| `evpn_ops.go` | VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP, SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI |
-| `acl_ops.go` | ACL_TABLE, ACL_RULE |
-| `qos_ops.go` | PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE |
-| `interface_ops.go` | INTERFACE |
-| `baseline_ops.go` | LOOPBACK_INTERFACE |
-| `portchannel_ops.go` | PORTCHANNEL, PORTCHANNEL_MEMBER |
-| `service_ops.go` | NEWTRON_INTENT, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET |
+| Owner | Tables |
+|-------|--------|
+| `vlan_config.go` | VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL |
+| `vrf_config.go` | VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT |
+| `bgp_config.go` | BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA, BGP_PEER_GROUP, BGP_PEER_GROUP_AF |
+| `vxlan_config.go` | VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP, SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI |
+| `acl_config.go` | ACL_TABLE, ACL_RULE |
+| `qos_config.go` | PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, WRED_PROFILE |
+| `interface_config.go` | INTERFACE |
+| `baseline_config.go` | LOOPBACK_INTERFACE |
+| `portchannel_config.go` | PORTCHANNEL, PORTCHANNEL_MEMBER |
+| `intent_ops.go` | NEWTRON_INTENT |
+| `service_config.go` | ROUTE_MAP, PREFIX_SET, COMMUNITY_SET |
+
+---
 
 ## 2. Spec File Types
 
-Spec types live in `pkg/newtron/spec/types.go`. They define declarative intent — JSON files under the spec directory.
+Specs are the declarative layer — JSON files under `/etc/newtron/` (or the configured spec directory) that describe what the network should look like. Operations accept spec names and resolve them at runtime; callers never pre-resolve specs. For how specs participate in the hierarchical resolution chain, see [HLD §4.1](hld.md).
 
 ### 2.1 NetworkSpecFile
 
-Top-level spec file (`network.json`).
+Top-level container loaded from `network.json`. Defines network-wide specs, zones, and access control.
 
 ```go
 type NetworkSpecFile struct {
-    Version     string               `json:"version"`
-    SuperUsers  []string             `json:"super_users"`
-    UserGroups  map[string][]string  `json:"user_groups"`
-    Permissions map[string][]string  `json:"permissions"`
-    Zones       map[string]*ZoneSpec `json:"zones"`
-    OverridableSpecs                 // embedded
+    Version     string                    `json:"version"`
+    SuperUsers  []string                  `json:"super_users,omitempty"`
+    UserGroups  map[string][]string       `json:"user_groups,omitempty"`
+    Permissions map[string][]string       `json:"permissions,omitempty"`  // action → allowed groups
+    Zones       map[string]*ZoneSpec      `json:"zones,omitempty"`
+    OverridableSpecs                      // embedded: 7 spec maps
 }
 ```
 
 ### 2.2 OverridableSpecs
 
-Embedded in `NetworkSpecFile`, `ZoneSpec`, and `DeviceProfile`. Three-level inheritance: network → zone → node (lower wins).
+Embedded in `NetworkSpecFile`, `ZoneSpec`, and `DeviceProfile` to enable the three-level hierarchy (network → zone → node). Lower-level wins on name collision.
 
 ```go
 type OverridableSpecs struct {
-    PrefixLists   map[string][]string      `json:"prefix_lists,omitempty"`
-    Filters       map[string]*FilterSpec   `json:"filters,omitempty"`
-    QoSPolicies   map[string]*QoSPolicy    `json:"qos_policies,omitempty"`
-    RoutePolicies map[string]*RoutePolicy  `json:"route_policies,omitempty"`
-    IPVPNs        map[string]*IPVPNSpec    `json:"ipvpns,omitempty"`
-    MACVPNs       map[string]*MACVPNSpec   `json:"macvpns,omitempty"`
-    Services      map[string]*ServiceSpec  `json:"services,omitempty"`
+    PrefixLists   map[string][]string          `json:"prefix_lists,omitempty"`
+    Filters       map[string]*FilterSpec       `json:"filters,omitempty"`
+    QoSPolicies   map[string]*QoSPolicy        `json:"qos_policies,omitempty"`
+    RoutePolicies map[string]*RoutePolicy       `json:"route_policies,omitempty"`
+    IPVPNs        map[string]*IPVPNSpec         `json:"ipvpns,omitempty"`
+    MACVPNs       map[string]*MACVPNSpec        `json:"macvpns,omitempty"`
+    Services      map[string]*ServiceSpec       `json:"services,omitempty"`
 }
 ```
 
 ### 2.3 ServiceSpec
 
-Defines a named service that can be applied to interfaces via `ApplyService`. The `service_type` determines which CONFIG_DB tables are written and what parameters are required at apply time (§3.6 `ApplyServiceOpts`).
+The primary abstraction — bundles VPN, routing, filter, and QoS intent into a reusable template applied to interfaces. Service types span local and overlay use cases (see [HLD §4.2](hld.md) for the six service types and their requirements).
 
 ```go
 type ServiceSpec struct {
-    Description    string              `json:"description"`
-    ServiceType    string              `json:"service_type"`
-    IPVPN          string              `json:"ipvpn,omitempty"`
-    MACVPN         string              `json:"macvpn,omitempty"`
-    VRFType        string              `json:"vrf_type,omitempty"`
-    Routing        *RoutingSpec        `json:"routing,omitempty"`
-    IngressFilter  string              `json:"ingress_filter,omitempty"`
-    EgressFilter   string              `json:"egress_filter,omitempty"`
-    QoSPolicy      string              `json:"qos_policy,omitempty"`
-    Permissions    map[string][]string `json:"permissions,omitempty"`
+    Description   string       `json:"description,omitempty"`
+    ServiceType   string       `json:"service_type"`   // routed|bridged|irb|evpn-routed|evpn-bridged|evpn-irb
+    IPVPN         string       `json:"ipvpn,omitempty"`
+    MACVPN        string       `json:"macvpn,omitempty"`
+    VRFType       string       `json:"vrf_type,omitempty"`       // "interface" (default) or "shared"
+    Routing       *RoutingSpec `json:"routing,omitempty"`
+    IngressFilter string       `json:"ingress_filter,omitempty"` // filter-spec reference
+    EgressFilter  string       `json:"egress_filter,omitempty"`
+    QoSPolicy     string       `json:"qos_policy,omitempty"`     // qos-policy reference
+    Permissions   map[string][]string `json:"permissions,omitempty"` // action → allowed groups
 }
 ```
 
-**Service type constants** (`pkg/newtron/types.go`):
+**Service type → spec requirements:**
 
-| Constant | Value | Requires |
-|----------|-------|----------|
-| `ServiceTypeRouted` | `"routed"` | IP address at apply time |
-| `ServiceTypeBridged` | `"bridged"` | VLAN at apply time |
-| `ServiceTypeIRB` | `"irb"` | VLAN + IP at apply time |
-| `ServiceTypeEVPNRouted` | `"evpn-routed"` | `ipvpn` reference — **abandoned on CiscoVS/Silicon One** (RCA-039: L3VNI DECAP blocked by SAI) |
-| `ServiceTypeEVPNBridged` | `"evpn-bridged"` | `macvpn` reference |
-| `ServiceTypeEVPNIRB` | `"evpn-irb"` | Both `ipvpn` and `macvpn` references |
-
-**VRF type values:** `"interface"` (per-interface VRF), `"shared"` (shared VRF from ipvpn name).
+| Type | IPVPN | MACVPN | VRF | VLAN | Routing | VXLAN |
+|------|-------|--------|-----|------|---------|-------|
+| `routed` | — | — | per-interface | — | optional | — |
+| `bridged` | — | — | — | at apply | — | — |
+| `irb` | — | — | per-interface | at apply | optional | — |
+| `evpn-routed` | required | — | from ipvpn | — | optional | L3VNI |
+| `evpn-bridged` | — | required | — | from macvpn | — | L2VNI |
+| `evpn-irb` | required | required | from ipvpn | from macvpn | optional | L2+L3 VNI |
 
 ### 2.4 RoutingSpec
 
+Defines BGP routing parameters within a service. Used by `service_gen.go` to generate BGP_NEIGHBOR, BGP_PEER_GROUP, ROUTE_MAP, and PREFIX_SET entries.
+
 ```go
 type RoutingSpec struct {
-    Protocol         string `json:"protocol"`           // "bgp", "static", ""
-    PeerAS           string `json:"peer_as,omitempty"`  // number or "request"
-    ImportPolicy     string `json:"import_policy,omitempty"`
+    Protocol         string `json:"protocol"`                    // "bgp"
+    PeerAS           string `json:"peer_as,omitempty"`           // fixed ASN or "request"
+    ImportPolicy     string `json:"import_policy,omitempty"`     // route-policy reference
     ExportPolicy     string `json:"export_policy,omitempty"`
     ImportCommunity  string `json:"import_community,omitempty"`
     ExportCommunity  string `json:"export_community,omitempty"`
     ImportPrefixList string `json:"import_prefix_list,omitempty"`
     ExportPrefixList string `json:"export_prefix_list,omitempty"`
-    Redistribute     *bool  `json:"redistribute,omitempty"`
+    Redistribute     *bool  `json:"redistribute,omitempty"`      // connected route redistribution
 }
 ```
 
+When `PeerAS` is `"request"`, the caller must provide the peer AS at apply time via `ApplyServiceOpts.PeerAS`.
+
 ### 2.5 IPVPNSpec
+
+IP-VPN definition for L3 overlay routing. The VRF name is derived from the IPVPN name at apply time (canonical uppercase).
 
 ```go
 type IPVPNSpec struct {
     Description  string   `json:"description,omitempty"`
-    VRF          string   `json:"vrf"`
-    L3VNI        int      `json:"l3vni"`
-    L3VNIVlan    int      `json:"l3vni_vlan,omitempty"`
-    RouteTargets []string `json:"route_targets"`
+    VRF          string   `json:"vrf,omitempty"`           // explicit VRF name (rare)
+    L3VNI        int      `json:"l3vni"`                   // L3 VNI for VXLAN tunnel
+    L3VNIVlan    int      `json:"l3vni_vlan,omitempty"`    // transit VLAN for L3VNI
+    RouteTargets []string `json:"route_targets,omitempty"` // import/export RTs
 }
 ```
 
 ### 2.6 MACVPNSpec
 
+MAC-VPN definition for L2 overlay bridging. `VlanID` is the local bridge domain; `VNI` is the VXLAN tunnel identifier.
+
 ```go
 type MACVPNSpec struct {
     Description    string   `json:"description,omitempty"`
-    VlanID         int      `json:"vlan_id"`
-    VNI            int      `json:"vni"`
-    AnycastIP      string   `json:"anycast_ip,omitempty"`
-    AnycastMAC     string   `json:"anycast_mac,omitempty"`
+    VlanID         int      `json:"vlan_id"`                 // local bridge domain VLAN
+    VNI            int      `json:"vni"`                     // L2 VNI for VXLAN tunnel
+    AnycastIP      string   `json:"anycast_ip,omitempty"`    // SAG virtual IP
+    AnycastMAC     string   `json:"anycast_mac,omitempty"`   // SAG virtual MAC
     RouteTargets   []string `json:"route_targets,omitempty"`
     ARPSuppression bool     `json:"arp_suppression,omitempty"`
 }
@@ -226,30 +267,33 @@ type MACVPNSpec struct {
 
 ### 2.7 FilterSpec
 
+ACL filter definition. Rules are expanded into ACL_TABLE + ACL_RULE entries at apply time, with content-hashed table names for blue-green migration (see [HLD §4.2](hld.md) on shared policy objects).
+
 ```go
 type FilterSpec struct {
-    Description string        `json:"description"`
-    Type        string        `json:"type"`   // "ipv4" or "ipv6"
-    Rules       []*FilterRule `json:"rules"`
+    Description string        `json:"description,omitempty"`
+    Type        string        `json:"type"`  // "ipv4" or "ipv6" (mapped to L3/L3V6 at CONFIG_DB boundary)
+    Rules       []*FilterRule `json:"rules,omitempty"`
 }
 
 type FilterRule struct {
     Sequence      int    `json:"seq"`
-    Action        string `json:"action"`           // "permit" or "deny"
+    SrcPrefixList string `json:"src_prefix_list,omitempty"` // prefix-list reference (expanded)
+    DstPrefixList string `json:"dst_prefix_list,omitempty"`
     SrcIP         string `json:"src_ip,omitempty"`
     DstIP         string `json:"dst_ip,omitempty"`
-    SrcPrefixList string `json:"src_prefix_list,omitempty"`
-    DstPrefixList string `json:"dst_prefix_list,omitempty"`
     Protocol      string `json:"protocol,omitempty"`
     SrcPort       string `json:"src_port,omitempty"`
     DstPort       string `json:"dst_port,omitempty"`
     DSCP          string `json:"dscp,omitempty"`
+    Action        string `json:"action"`    // "permit" or "deny" (mapped to FORWARD/DROP at CONFIG_DB boundary)
     CoS           string `json:"cos,omitempty"`
-    Log           bool   `json:"log,omitempty"`
 }
 ```
 
 ### 2.8 QoSPolicy
+
+Defines DSCP-to-queue mapping and scheduling. Applied to interfaces via `ApplyQoS`; generates DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, SCHEDULER, QUEUE, and PORT_QOS_MAP entries.
 
 ```go
 type QoSPolicy struct {
@@ -259,25 +303,27 @@ type QoSPolicy struct {
 
 type QoSQueue struct {
     Name   string `json:"name"`
-    Type   string `json:"type"`              // "dwrr" or "strict"
-    Weight int    `json:"weight,omitempty"`  // for DWRR
-    DSCP   []int  `json:"dscp,omitempty"`    // DSCP values mapped to this queue
-    ECN    bool   `json:"ecn,omitempty"`
+    Type   string `json:"type"`             // "dwrr" or "strict" (mapped to SCHEDULER type at CONFIG_DB boundary)
+    Weight int    `json:"weight,omitempty"` // WRR weight
+    DSCP   []int  `json:"dscp,omitempty"`   // DSCP values mapped to this queue
+    ECN    bool   `json:"ecn,omitempty"`    // enable WRED/ECN
 }
 ```
 
 ### 2.9 RoutePolicy
 
+Route policy definition for BGP import/export filtering. Generates ROUTE_MAP and PREFIX_SET entries with content-hashed names.
+
 ```go
 type RoutePolicy struct {
     Description string             `json:"description,omitempty"`
-    Rules       []*RoutePolicyRule `json:"rules"`
+    Rules       []*RoutePolicyRule `json:"rules,omitempty"`
 }
 
 type RoutePolicyRule struct {
     Sequence   int             `json:"seq"`
-    Action     string          `json:"action"`  // "permit" or "deny"
-    PrefixList string          `json:"prefix_list,omitempty"`
+    Action     string          `json:"action"`                // "permit" or "deny"
+    PrefixList string          `json:"prefix_list,omitempty"` // prefix-list reference
     Community  string          `json:"community,omitempty"`
     Set        *RoutePolicySet `json:"set,omitempty"`
 }
@@ -291,32 +337,28 @@ type RoutePolicySet struct {
 
 ### 2.10 DeviceProfile
 
-Per-device profile (`profiles/{device}.json`).
+Per-device configuration that combines identity (IPs, ASN, zone), connectivity (SSH), and EVPN peering into a single file. Lives in `profiles/{device}.json`.
 
 ```go
 type DeviceProfile struct {
-    MgmtIP          string             `json:"mgmt_ip"`
-    LoopbackIP      string             `json:"loopback_ip"`
-    Zone            string             `json:"zone"`
-    Platform        string             `json:"platform,omitempty"`
-    ASNumber        *int               `json:"as_number,omitempty"`
-    MAC             string             `json:"mac,omitempty"`
-    UnderlayASN     int                `json:"underlay_asn,omitempty"`
-    EVPN            *EVPNConfig        `json:"evpn,omitempty"`
-    SSHUser         string             `json:"ssh_user,omitempty"`
-    SSHPass         string             `json:"ssh_pass,omitempty"`
-    SSHPort         int                `json:"ssh_port,omitempty"`
-    VLANPortMapping map[int][]string   `json:"vlan_port_mapping,omitempty"`
-    OverridableSpecs                   // embedded
-    // Virtual host (non-switch device)
-    HostIP          string             `json:"host_ip,omitempty"`
-    HostGateway     string             `json:"host_gateway,omitempty"`
-    // newtlab VM settings (not relevant to newtron operations)
-    ConsolePort     int                `json:"console_port,omitempty"`
-    VMMemory        int                `json:"vm_memory,omitempty"`
-    VMCPUs          int                `json:"vm_cpus,omitempty"`
-    VMImage         string             `json:"vm_image,omitempty"`
-    VMHost          string             `json:"vm_host,omitempty"`
+    MgmtIP      string          `json:"mgmt_ip"`
+    LoopbackIP  string          `json:"loopback_ip"`
+    Zone        string          `json:"zone"`
+    EVPN        *EVPNConfig     `json:"evpn,omitempty"`
+    MAC         string          `json:"mac,omitempty"`
+    Platform    string          `json:"platform"`
+    SSHUser     string          `json:"ssh_user,omitempty"`
+    SSHPass     string          `json:"ssh_pass,omitempty"`
+    SSHPort     int             `json:"ssh_port,omitempty"`
+    ConsolePort int             `json:"console_port,omitempty"`
+    VMMemory    string          `json:"vm_memory,omitempty"`
+    VMCPUs      int             `json:"vm_cpus,omitempty"`
+    VMImage     string          `json:"vm_image,omitempty"`
+    VMHost      string          `json:"vm_host,omitempty"`
+    UnderlayASN int             `json:"underlay_asn"`
+    HostIP      string          `json:"host_ip,omitempty"`
+    HostGateway string          `json:"host_gateway,omitempty"`
+    OverridableSpecs            // embedded: node-level spec overrides
 }
 
 type EVPNConfig struct {
@@ -326,91 +368,111 @@ type EVPNConfig struct {
 }
 ```
 
+At load time, the spec loader resolves profiles into `ResolvedProfile` — a flattened snapshot with derived values (router ID from loopback, VTEP source IP, BGP neighbor ASNs from peer loopback lookups).
+
+```go
+type ResolvedProfile struct {
+    DeviceName      string
+    MgmtIP          string
+    LoopbackIP      string
+    Zone            string
+    Platform        string
+    IsRouteReflector bool
+    ClusterID       string
+    RouterID        string           // derived from LoopbackIP
+    VTEPSourceIP    string           // derived from LoopbackIP
+    BGPNeighbors    []string         // EVPN peer loopback IPs
+    BGPNeighborASNs map[string]int   // peer IP → ASN (from peer profile)
+    MAC             string
+    SSHUser, SSHPass string
+    SSHPort, ConsolePort int
+    UnderlayASN     int
+}
+```
+
 ### 2.11 PlatformSpec
+
+Hardware type definition. Maps HWSKU to port layout, VM parameters, and feature support.
 
 ```go
 type PlatformSpec struct {
-    HWSKU               string         `json:"hwsku"`
-    Description         string         `json:"description,omitempty"`
-    DeviceType          string         `json:"device_type,omitempty"`
-    PortCount           int            `json:"port_count"`
-    DefaultSpeed        string         `json:"default_speed"`
-    Breakouts           []string       `json:"breakouts,omitempty"`
-    Dataplane            string         `json:"dataplane,omitempty"`
-    UnsupportedFeatures  []string       `json:"unsupported_features,omitempty"`
-    // newtlab VM settings
-    VMImage              string         `json:"vm_image,omitempty"`
-    VMMemory             int            `json:"vm_memory,omitempty"`
-    VMCPUs               int            `json:"vm_cpus,omitempty"`
-    VMNICDriver          string         `json:"vm_nic_driver,omitempty"`
-    VMInterfaceMap       string         `json:"vm_interface_map,omitempty"`
-    VMCPUFeatures        string         `json:"vm_cpu_features,omitempty"`
-    VMCredentials        *VMCredentials `json:"vm_credentials,omitempty"`
-    VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
-    VMImageRelease       string         `json:"vm_image_release,omitempty"`
+    HWSKU               string        `json:"hwsku"`
+    Description         string        `json:"description,omitempty"`
+    DeviceType          string        `json:"device_type,omitempty"`
+    PortCount           int           `json:"port_count"`
+    DefaultSpeed        string        `json:"default_speed"`
+    Breakouts           []string      `json:"breakouts,omitempty"`
+    VMImage             string        `json:"vm_image,omitempty"`
+    VMMemory            string        `json:"vm_memory,omitempty"`
+    VMCPUs              int           `json:"vm_cpus,omitempty"`
+    VMNICDriver         string        `json:"vm_nic_driver,omitempty"`
+    VMInterfaceMap      string        `json:"vm_interface_map,omitempty"`
+    VMCPUFeatures       string        `json:"vm_cpu_features,omitempty"`
+    VMCredentials       *VMCredentials `json:"vm_credentials,omitempty"`
+    VMBootTimeout       int           `json:"vm_boot_timeout,omitempty"`
+    VMImageRelease      string        `json:"vm_image_release,omitempty"`
+    Dataplane           string        `json:"dataplane,omitempty"`
+    UnsupportedFeatures []string      `json:"unsupported_features,omitempty"`
 }
 ```
+
+Feature dependency management: `GetAllFeatures()`, `GetFeatureDependencies(feature)`, and `GetUnsupportedDueTo(baseFeature)` provide the feature dependency graph. `PlatformSpec.SupportsFeature(feature)` checks both direct and transitive unsupported features.
 
 ### 2.12 TopologySpecFile
 
+Defines the abstract topology — which devices exist, what ports they have, and what links connect them. Lives in `topologies/{name}/topology.json`.
+
 ```go
 type TopologySpecFile struct {
-    Version     string                      `json:"version"`
-    Platform    string                      `json:"platform,omitempty"`
-    Description string                      `json:"description,omitempty"`
-    Devices     map[string]*TopologyDevice  `json:"devices"`
-    Links       []*TopologyLink             `json:"links,omitempty"`
-    NewtLab     *NewtLabConfig              `json:"newtlab,omitempty"`
+    Version     string                          `json:"version"`
+    Platform    string                          `json:"platform,omitempty"` // default platform
+    Description string                          `json:"description,omitempty"`
+    Devices     map[string]*TopologyDevice      `json:"devices"`
+    Links       []TopologyLink                  `json:"links,omitempty"`
+    NewtLab     *NewtLabConfig                  `json:"newtlab,omitempty"`
 }
 
 type TopologyDevice struct {
-    DeviceConfig *TopologyDeviceConfig           `json:"device_config,omitempty"`
-    Interfaces   map[string]*TopologyInterface   `json:"interfaces"`
-    PortChannels map[string]*TopologyPortChannel `json:"portchannels,omitempty"`
+    Steps []TopologyStep               `json:"steps,omitempty"`
+    Ports map[string]map[string]string  `json:"ports,omitempty"`
 }
 
-type TopologyInterface struct {
-    Link    string            `json:"link,omitempty"`
-    Service string            `json:"service"`
-    IP      string            `json:"ip,omitempty"`
-    VRF     string            `json:"vrf,omitempty"`
-    Params  map[string]string `json:"params,omitempty"`
-}
-
-type TopologyPortChannel struct {
-    Members []string          `json:"members"`          // Physical interface names
-    Service string            `json:"service,omitempty"`
-    IP      string            `json:"ip,omitempty"`
-    Params  map[string]string `json:"params,omitempty"`
+type TopologyStep struct {
+    URL    string         `json:"url"`
+    Params map[string]any `json:"params,omitempty"`
 }
 
 type TopologyLink struct {
-    A string `json:"a"`  // "switch1:Ethernet0"
-    Z string `json:"z"`  // "switch2:Ethernet0"
+    A string `json:"a"`  // "device:port"
+    Z string `json:"z"`
 }
 ```
 
+Steps use the same URL format as the HTTP API (e.g., `/setup-device`, `/interface/Ethernet0/apply-service`). `IntentsToSteps` converts the flat NEWTRON_INTENT map back into this format for persistence.
+
+---
+
 ## 3. Public API Types
 
-All public types live in `pkg/newtron/types.go`. These are the serialization contract between the HTTP server and its clients (CLI, newtrun).
+All public types live in `pkg/newtron/types.go`. External consumers (CLI, newtrun, newtron-server HTTP handlers) import only `pkg/newtron/` — never internal packages. Public types use domain vocabulary; internal types reflect implementation. Boundary conversions strip implementation details.
 
 ### 3.1 Execution and Write Result
 
-Every write endpoint accepts `ExecOpts` (mapped from query parameters: `?dry_run=true` inverts `Execute`, `?no_save=true` sets `NoSave`) and returns a `WriteResult` with the outcome.
+Used as request options and response types for all mutating operations (§4.6–4.8).
 
 ```go
 type ExecOpts struct {
-    Execute bool  // true = apply; false = dry-run preview
-    NoSave  bool  // skip config save after apply
+    Execute bool   // true = apply to Redis; false = dry-run preview
+    NoSave  bool   // skip config save after apply
 }
 
 type WriteResult struct {
-    Preview      string              `json:"preview,omitempty"`
+    Preview      string              `json:"preview,omitempty"`      // dry-run: ChangeSet preview text
     ChangeCount  int                 `json:"change_count"`
     Applied      bool                `json:"applied"`
     Verified     bool                `json:"verified"`
     Saved        bool                `json:"saved"`
-    Verification *VerificationResult `json:"verification,omitempty"`
+    Verification *VerificationResult `json:"verification,omitempty"` // only on verification failure
 }
 
 type VerificationResult struct {
@@ -424,11 +486,13 @@ type VerificationError struct {
     Key      string `json:"key"`
     Field    string `json:"field"`
     Expected string `json:"expected"`
-    Actual   string `json:"actual"`
+    Actual   string `json:"actual"`   // "" if missing
 }
 ```
 
 ### 3.2 Device Info and Interface Views
+
+Returned by node and interface read endpoints (§4.5).
 
 ```go
 type DeviceInfo struct {
@@ -476,7 +540,7 @@ type InterfaceDetail struct {
 
 ### 3.3 Resource Views
 
-Returned by the node read endpoints in §4.5. Each type corresponds to a resource noun's `list` or `show` response.
+Returned by resource-specific read endpoints (§4.5). Each type builds its response from intent records, not from the projection — consistent with the intent-first architecture.
 
 ```go
 type VLANStatusEntry struct {
@@ -490,17 +554,26 @@ type VLANStatusEntry struct {
     MACVPNInfo  *VLANMACVPNDetail `json:"macvpn_detail,omitempty"`
 }
 
-type VLANMACVPNDetail struct {
-    Name           string `json:"name,omitempty"`
-    L2VNI          int    `json:"l2_vni,omitempty"`
-    ARPSuppression bool   `json:"arp_suppression"`
-}
-
 type VRFDetail struct {
     Name         string             `json:"name"`
     L3VNI        int                `json:"l3_vni,omitempty"`
     Interfaces   []string           `json:"interfaces,omitempty"`
     BGPNeighbors []BGPNeighborEntry `json:"bgp_neighbors,omitempty"`
+}
+
+type VRFStatusEntry struct {
+    Name       string `json:"name"`
+    L3VNI      int    `json:"l3_vni,omitempty"`
+    Interfaces int    `json:"interfaces"`
+    State      string `json:"state,omitempty"`
+}
+
+type ACLTableSummary struct {
+    Name       string `json:"name"`
+    Type       string `json:"type"`
+    Stage      string `json:"stage"`
+    Interfaces string `json:"interfaces"`
+    RuleCount  int    `json:"rule_count"`
 }
 
 type ACLTableDetail struct {
@@ -538,42 +611,43 @@ type LAGStatusEntry struct {
     ActiveMembers []string `json:"active_members"`
     MTU           int      `json:"mtu,omitempty"`
 }
-
-type HealthReport struct {
-    Device      string              `json:"device"`
-    Status      string              `json:"status"` // "healthy", "degraded", "unhealthy"
-    ConfigCheck *VerificationResult `json:"config_check,omitempty"`
-    OperChecks  []HealthCheckResult `json:"oper_checks,omitempty"`
-}
 ```
 
-### 3.4 Composite Types
+### 3.4 Health and Drift Types
 
-`CompositeInfo` is an opaque handle with a defined lifecycle: `GenerateComposite` creates it, the caller stores it, then passes it to `DeliverComposite` or `VerifyComposite`. The `internal` field is never serialized — the HTTP server stores the composite data server-side keyed by a handle string.
+Returned by health check (§4.5) and intent drift endpoints (§4.7).
 
 ```go
-type CompositeInfo struct {
-    DeviceName string         `json:"device_name"`
-    EntryCount int            `json:"entry_count"`
-    Tables     map[string]int `json:"tables"`
-    internal   any            // opaque — never serialized
+type HealthReport struct {
+    Device      string              `json:"device"`
+    Status      string              `json:"status"`  // "pass", "warn", "fail"
+    ConfigCheck *ConfigDriftResult  `json:"config_check,omitempty"`
+    OperChecks  []HealthCheckResult `json:"oper_checks,omitempty"`
 }
 
-type CompositeMode string
+type HealthCheckResult struct {
+    Check   string `json:"check"`   // "bgp", "interface-oper"
+    Status  string `json:"status"`  // "pass", "warn", "fail"
+    Message string `json:"message"`
+}
 
-const (
-    CompositeOverwrite CompositeMode = "overwrite"
-    CompositeMerge     CompositeMode = "merge"
-)
+type DriftEntry struct {
+    Table    string            `json:"table"`
+    Key      string            `json:"key"`
+    Type     string            `json:"type"`  // "missing", "extra", "modified"
+    Expected map[string]string `json:"expected,omitempty"`
+    Actual   map[string]string `json:"actual,omitempty"`
+}
 
-type DeliveryResult struct {
-    Applied int `json:"applied"`
-    Skipped int `json:"skipped"`
-    Failed  int `json:"failed"`
+type ReconcileResult struct {
+    Applied int    `json:"applied"`
+    Message string `json:"message,omitempty"`
 }
 ```
 
 ### 3.5 Route Types
+
+Returned by routing observation endpoints (§4.5). These are building blocks — newtron provides the read; the caller decides correctness.
 
 ```go
 type RouteEntry struct {
@@ -581,7 +655,7 @@ type RouteEntry struct {
     VRF      string         `json:"vrf"`
     Protocol string         `json:"protocol"`
     NextHops []RouteNextHop `json:"next_hops,omitempty"`
-    Source   string         `json:"source"` // "APP_DB" or "ASIC_DB"
+    Source   string         `json:"source"`  // "APP_DB" or "ASIC_DB"
 }
 
 type RouteNextHop struct {
@@ -590,25 +664,53 @@ type RouteNextHop struct {
 }
 ```
 
-### 3.6 Config Request Types
+### 3.6 Intent Types
 
-Used as request bodies for the node write endpoints in §4.6 and interface endpoints in §4.8.
+Used by intent tree (§4.7) and the internal intent model. The `Intent` type is the fundamental unit — it binds a desired state to a device resource.
+
+```go
+type IntentTreeNode struct {
+    Resource  string            `json:"resource"`
+    Operation string            `json:"operation"`
+    Params    map[string]string `json:"params,omitempty"`
+    Children  []IntentTreeNode  `json:"children,omitempty"`
+    Leaf      bool              `json:"leaf,omitempty"`
+}
+
+type Intent struct {
+    Resource   string            `json:"resource"`
+    Operation  string            `json:"operation"`
+    Name       string            `json:"name,omitempty"`
+    State      IntentState       `json:"state"`
+    Parents    []string          `json:"parents,omitempty"`
+    Children   []string          `json:"children,omitempty"`
+    Params     map[string]string `json:"params,omitempty"`
+    // ... lifecycle and audit fields
+}
+
+type IntentState string  // "unrealized", "in-flight", "actuated"
+```
+
+### 3.7 Config Request Types
+
+Used as request bodies for node write operations (§4.6). Each type captures exactly the parameters the operation needs — no extra fields, no optional-but-ignored fields.
 
 ```go
 type VLANConfig struct {
     VlanID      int
     Description string
-}
-
-type SVIConfig struct {
-    VlanID     int
-    VRF        string
-    IPAddress  string
-    AnycastMAC string
+    L2VNI       int
 }
 
 type VRFConfig struct {
     Name string
+}
+
+type InterfaceConfig struct {
+    VRF    string  // routed mode
+    IP     string  // IP in CIDR
+    VLAN   int     // bridged mode
+    Tagged bool    // tagged membership
 }
 
 type BGPNeighborConfig struct {
@@ -617,13 +719,20 @@ type BGPNeighborConfig struct {
     RemoteAS    int    `json:"remote_as,omitempty"`
     NeighborIP  string `json:"neighbor_ip,omitempty"`
     Description string `json:"description,omitempty"`
+    Multihop    int    `json:"multihop,omitempty"`
 }
 
 type ApplyServiceOpts struct {
-    IPAddress string
-    VLAN      int
-    PeerAS    int
-    Params    map[string]string
+    IPAddress string            // IP for routed/IRB services
+    VLAN      int               // VLAN ID for local types
+    PeerAS    int               // BGP peer AS (when routing.peer_as="request")
+    Params    map[string]string // topology params (peer_as, route_reflector_client, etc.)
+}
+
+type SetupDeviceOpts struct {
+    Fields   map[string]string   `json:"fields,omitempty"`
+    SourceIP string              `json:"source_ip,omitempty"`
+    RR       *RouteReflectorOpts `json:"route_reflector,omitempty"`
 }
 
 type PortChannelConfig struct {
@@ -636,909 +745,150 @@ type PortChannelConfig struct {
 }
 ```
 
-### 3.7 Spec Authoring Requests
+### 3.8 Spec Authoring Requests
 
-Used as request bodies for the network spec write endpoints in §4.3. These create or modify spec files on disk via the server.
+Used as request bodies for network spec write operations (§4.3).
 
 ```go
 type CreateServiceRequest struct {
-    Name, Type, IPVPN, MACVPN, VRFType string
-    QoSPolicy, IngressFilter, EgressFilter, Description string
+    Name          string                `json:"name"`
+    Type          string                `json:"type"`
+    IPVPN         string                `json:"ipvpn,omitempty"`
+    MACVPN        string                `json:"macvpn,omitempty"`
+    VRFType       string                `json:"vrf_type,omitempty"`
+    QoSPolicy     string                `json:"qos_policy,omitempty"`
+    IngressFilter string                `json:"ingress_filter,omitempty"`
+    EgressFilter  string                `json:"egress_filter,omitempty"`
+    Description   string                `json:"description,omitempty"`
+    Routing       *CreateServiceRouting `json:"routing,omitempty"`
 }
 
 type CreateIPVPNRequest struct {
-    Name         string
-    L3VNI        int
-    VRF          string
-    RouteTargets []string
-    Description  string
+    Name         string   `json:"name"`
+    L3VNI        int      `json:"l3vni"`
+    VRF          string   `json:"vrf,omitempty"`
+    RouteTargets []string `json:"route_targets,omitempty"`
+    Description  string   `json:"description,omitempty"`
 }
 
 type CreateMACVPNRequest struct {
-    Name           string
-    VNI            int
-    VlanID         int
-    AnycastIP      string
-    AnycastMAC     string
-    RouteTargets   []string
-    ARPSuppression bool
-    Description    string
+    Name           string   `json:"name"`
+    VNI            int      `json:"vni"`
+    VlanID         int      `json:"vlan_id,omitempty"`
+    AnycastIP      string   `json:"anycast_ip,omitempty"`
+    AnycastMAC     string   `json:"anycast_mac,omitempty"`
+    RouteTargets   []string `json:"route_targets,omitempty"`
+    ARPSuppression bool     `json:"arp_suppression,omitempty"`
+    Description    string   `json:"description,omitempty"`
 }
 
 type CreateFilterRequest struct {
-    Name, Type, Description string
+    Name        string `json:"name"`
+    Type        string `json:"type"`
+    Description string `json:"description,omitempty"`
 }
 
-type AddFilterRuleRequest struct {
-    Filter   string
-    Sequence int
-    Action   string
-    SrcIP, DstIP, SrcPrefixList, DstPrefixList string
-    Protocol, SrcPort, DstPort, DSCP, CoS string
-    Log bool
+type CreateQoSPolicyRequest struct {
+    Name        string `json:"name"`
+    Description string `json:"description,omitempty"`
+}
+
+type CreateRoutePolicyRequest struct {
+    Name        string `json:"name"`
+    Description string `json:"description,omitempty"`
+}
+
+type CreatePrefixListRequest struct {
+    Name     string   `json:"name"`
+    Prefixes []string `json:"prefixes,omitempty"`
 }
 
 type CreateDeviceProfileRequest struct {
-    Name, MgmtIP, LoopbackIP, Zone string
-    Platform, MAC, SSHUser, SSHPass string
-    UnderlayASN, SSHPort int
-    EVPN *CreateEVPNConfigRequest
-}
-
-type CreateEVPNConfigRequest struct {
-    Peers          []string
-    RouteReflector bool
-    ClusterID      string
-}
-
-type CreateZoneRequest struct {
-    Name string
+    Name        string                  `json:"name"`
+    MgmtIP      string                  `json:"mgmt_ip"`
+    LoopbackIP  string                  `json:"loopback_ip"`
+    Zone        string                  `json:"zone"`
+    Platform    string                  `json:"platform,omitempty"`
+    UnderlayASN int                     `json:"underlay_asn,omitempty"`
+    SSHUser     string                  `json:"ssh_user,omitempty"`
+    SSHPass     string                  `json:"ssh_pass,omitempty"`
+    SSHPort     int                     `json:"ssh_port,omitempty"`
+    EVPN        *CreateEVPNConfigRequest `json:"evpn,omitempty"`
 }
 ```
 
-### 3.8 Settings
+### 3.9 Spec Detail Response Types
+
+Returned by spec read endpoints (§4.2). API views of spec objects — they expose the fields relevant to consumers without leaking internal representation.
+
+```go
+type ServiceDetail struct {
+    Name          string `json:"name"`
+    Description   string `json:"description,omitempty"`
+    ServiceType   string `json:"service_type"`
+    IPVPN         string `json:"ipvpn,omitempty"`
+    MACVPN        string `json:"macvpn,omitempty"`
+    VRFType       string `json:"vrf_type,omitempty"`
+    QoSPolicy     string `json:"qos_policy,omitempty"`
+    IngressFilter string `json:"ingress_filter,omitempty"`
+    EgressFilter  string `json:"egress_filter,omitempty"`
+}
+
+type IPVPNDetail struct {
+    Name         string   `json:"name"`
+    Description  string   `json:"description,omitempty"`
+    VRF          string   `json:"vrf"`
+    L3VNI        int      `json:"l3vni"`
+    RouteTargets []string `json:"route_targets"`
+}
+
+type MACVPNDetail struct {
+    Name           string   `json:"name"`
+    Description    string   `json:"description,omitempty"`
+    AnycastIP      string   `json:"anycast_ip,omitempty"`
+    AnycastMAC     string   `json:"anycast_mac,omitempty"`
+    VNI            int      `json:"vni"`
+    VlanID         int      `json:"vlan_id"`
+    RouteTargets   []string `json:"route_targets,omitempty"`
+    ARPSuppression bool     `json:"arp_suppression,omitempty"`
+}
+
+type PlatformDetail struct {
+    Name                string   `json:"name"`
+    HWSKU               string   `json:"hwsku"`
+    Description         string   `json:"description,omitempty"`
+    DeviceType          string   `json:"device_type,omitempty"`
+    Dataplane           string   `json:"dataplane,omitempty"`
+    DefaultSpeed        string   `json:"default_speed"`
+    PortCount           int      `json:"port_count"`
+    UnsupportedFeatures []string `json:"unsupported_features,omitempty"`
+}
+
+type DeviceProfileDetail struct {
+    Name        string      `json:"name"`
+    MgmtIP      string      `json:"mgmt_ip"`
+    LoopbackIP  string      `json:"loopback_ip"`
+    Zone        string      `json:"zone"`
+    Platform    string      `json:"platform,omitempty"`
+    UnderlayASN int         `json:"underlay_asn,omitempty"`
+    EVPN        *EVPNDetail `json:"evpn,omitempty"`
+}
+```
+
+### 3.10 Settings and Audit Types
 
 ```go
 type UserSettings struct {
     DefaultNetwork  string `json:"default_network,omitempty"`
     SpecDir         string `json:"spec_dir,omitempty"`
-    DefaultSuite    string `json:"default_suite,omitempty"`
-    TopologiesDir   string `json:"topologies_dir,omitempty"`
+    ServerURL       string `json:"server_url,omitempty"`
+    NetworkID       string `json:"network_id,omitempty"`
     AuditLogPath    string `json:"audit_log_path,omitempty"`
     AuditMaxSizeMB  int    `json:"audit_max_size_mb,omitempty"`
     AuditMaxBackups int    `json:"audit_max_backups,omitempty"`
-    ServerURL       string `json:"server_url,omitempty"`
-    NetworkID       string `json:"network_id,omitempty"`
-}
-```
-
-**Defaults:**
-
-| Field | Method | Default |
-|-------|--------|---------|
-| `SpecDir` | `GetSpecDir()` | `/etc/newtron` |
-| `ServerURL` | `GetServerURL()` | `http://localhost:8080` |
-| `NetworkID` | `GetNetworkID()` | `"default"` |
-| `AuditMaxSizeMB` | `GetAuditMaxSizeMB()` | `10` |
-| `AuditMaxBackups` | `GetAuditMaxBackups()` | `10` |
-
-### 3.9 Error Types
-
-```go
-type NotFoundError struct {
-    Resource string
-    Name     string
+    // ... other fields
 }
 
-type ValidationError struct {
-    Field   string
-    Message string
-}
-
-type VerificationFailedError struct {
-    Device  string
-    Passed  int
-    Failed  int
-    Total   int
-    Message string
-}
-```
-
-HTTP status mapping (server-side `httpStatusFromError`):
-
-| Error Type | HTTP Status |
-|------------|------------|
-| `*NotFoundError` | 404 |
-| `*ValidationError` | 400 |
-| `*VerificationFailedError` | 409 |
-| `*notRegisteredError` | 404 |
-| `*alreadyRegisteredError` | 409 |
-| `context.DeadlineExceeded` | 504 |
-| (other) | 500 |
-
-### 3.10 Intent and Recovery Types
-
-```go
-// IntentOperation represents a single pending operation within an intent record.
-type IntentOperation struct {
-    Name      string            `json:"name"`
-    Params    map[string]string `json:"params,omitempty"`
-    ReverseOp string            `json:"reverse_op,omitempty"`
-    Started   *time.Time        `json:"started,omitempty"`
-    Completed *time.Time        `json:"completed,omitempty"`
-    Reversed  *time.Time        `json:"reversed,omitempty"`
-}
-
-// OperationIntent is a crash-recovery record stored in STATE_DB.
-// Written before Commit applies ChangeSets, deleted on success.
-// If the process crashes, the intent remains for the operator to
-// inspect and roll back via 'device zombie'.
-type OperationIntent struct {
-    Holder          string            `json:"holder"`
-    Created         time.Time         `json:"created"`
-    Phase           string            `json:"phase,omitempty"`
-    RollbackHolder  string            `json:"rollback_holder,omitempty"`
-    RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
-    Operations      []IntentOperation `json:"operations"`
-}
-```
-
-These are the public types (in `types.go`). The internal `sonic.OperationIntent` has an identical structure — conversion functions at the API boundary map between them, following the uniform boundary principle (§3).
-
-**Key fields:**
-
-| Field | Description |
-|-------|-------------|
-| `Holder` | Identity of the process that created the intent (`user@hostname`) |
-| `Phase` | Empty during forward apply; `"rolling_back"` during rollback |
-| `RollbackHolder` | Identity of the process performing rollback (may differ from original holder) |
-| `Operations[].ReverseOp` | Name of the domain-level reverse operation (e.g., `DeleteVLAN` for `CreateVLAN`) |
-| `Operations[].Started` | Timestamp when Apply began writing this operation's entries |
-| `Operations[].Completed` | Timestamp when Apply finished writing this operation's entries |
-| `Operations[].Reversed` | Timestamp when rollback reversed this operation (enables idempotent retry) |
-
-## 4. HTTP API Reference
-
-All routes are registered in `pkg/newtron/api/handler.go` via `buildMux()`. Request bodies use config types from §3.6–3.7; response bodies use view types from §3.2–3.5. Write endpoints accept `ExecOpts` (§3.1) via query parameters and return `WriteResult`. Every response uses the `APIResponse` envelope:
-
-```go
-type APIResponse struct {
-    Data  any    `json:"data,omitempty"`
-    Error string `json:"error,omitempty"`
-}
-```
-
-Write operations accept `?dry_run=true` and `?no_save=true` query parameters.
-
-### 4.1 Server Management
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `/network` | `RegisterNetworkRequest` | `NetworkInfo` |
-| `GET` | `/network` | — | `[]NetworkInfo` |
-| `DELETE` | `/network/{netID}` | — | — |
-| `POST` | `/network/{netID}/reload` | — | `{"status":"reloaded"}` |
-
-### 4.2 Network Spec Reads
-
-| Method | Path | Response |
-|--------|------|----------|
-| `GET` | `/network/{netID}/service` | `[]ServiceDetail` |
-| `GET` | `/network/{netID}/service/{name}` | `ServiceDetail` |
-| `GET` | `/network/{netID}/ipvpn` | `[]IPVPNDetail` |
-| `GET` | `/network/{netID}/ipvpn/{name}` | `IPVPNDetail` |
-| `GET` | `/network/{netID}/macvpn` | `[]MACVPNDetail` |
-| `GET` | `/network/{netID}/macvpn/{name}` | `MACVPNDetail` |
-| `GET` | `/network/{netID}/qos-policy` | `[]QoSPolicyDetail` |
-| `GET` | `/network/{netID}/qos-policy/{name}` | `QoSPolicyDetail` |
-| `GET` | `/network/{netID}/filter` | `[]FilterDetail` |
-| `GET` | `/network/{netID}/filter/{name}` | `FilterDetail` |
-| `GET` | `/network/{netID}/platform` | `[]PlatformDetail` |
-| `GET` | `/network/{netID}/platform/{name}` | `PlatformDetail` |
-| `GET` | `/network/{netID}/route-policy` | route policies |
-| `GET` | `/network/{netID}/prefix-list` | prefix lists |
-| `GET` | `/network/{netID}/profile` | `[]string` (profile names) |
-| `GET` | `/network/{netID}/profile/{name}` | `DeviceProfileDetail` |
-| `GET` | `/network/{netID}/zone` | `[]string` (zone names) |
-| `GET` | `/network/{netID}/zone/{name}` | `ZoneDetail` |
-| `GET` | `/network/{netID}/topology/node` | `[]string` (device names) |
-| `GET` | `/network/{netID}/host/{name}` | `HostProfile` |
-| `GET` | `/network/{netID}/feature` | all features |
-| `GET` | `/network/{netID}/feature/{name}/dependency` | feature dependencies |
-| `GET` | `/network/{netID}/feature/{name}/unsupported-due-to` | unsupported reasons |
-| `GET` | `/network/{netID}/platform/{name}/supports/{feature}` | `bool` |
-
-### 4.3 Network Spec Writes
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `/network/{netID}/service` | `CreateServiceRequest` | `ServiceDetail` |
-| `DELETE` | `/network/{netID}/service/{name}` | — | — |
-| `POST` | `/network/{netID}/ipvpn` | `CreateIPVPNRequest` | `IPVPNDetail` |
-| `DELETE` | `/network/{netID}/ipvpn/{name}` | — | — |
-| `POST` | `/network/{netID}/macvpn` | `CreateMACVPNRequest` | `MACVPNDetail` |
-| `DELETE` | `/network/{netID}/macvpn/{name}` | — | — |
-| `POST` | `/network/{netID}/qos-policy` | `CreateQoSPolicyRequest` | `QoSPolicyDetail` |
-| `DELETE` | `/network/{netID}/qos-policy/{name}` | — | — |
-| `POST` | `/network/{netID}/qos-policy/{name}/queue` | `AddQoSQueueRequest` | `QoSPolicyDetail` |
-| `DELETE` | `/network/{netID}/qos-policy/{name}/queue/{id}` | — | — |
-| `POST` | `/network/{netID}/filter` | `CreateFilterRequest` | `FilterDetail` |
-| `DELETE` | `/network/{netID}/filter/{name}` | — | — |
-| `POST` | `/network/{netID}/filter/{name}/rule` | `AddFilterRuleRequest` | `FilterDetail` |
-| `DELETE` | `/network/{netID}/filter/{name}/rule/{seq}` | — | — |
-| `POST` | `/network/{netID}/profile` | `CreateDeviceProfileRequest` | `DeviceProfileDetail` |
-| `DELETE` | `/network/{netID}/profile/{name}` | — | — |
-| `POST` | `/network/{netID}/zone` | `CreateZoneRequest` | `ZoneDetail` |
-| `DELETE` | `/network/{netID}/zone/{name}` | — | — |
-
-### 4.4 Provisioning
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `/network/{netID}/provision` | `ProvisionRequest` | `ProvisionResult` |
-| `POST` | `/network/{netID}/composite/{device}` | — | `CompositeHandleResponse` |
-| `POST` | `/network/{netID}/init/{device}?force=true` | — | `{"status": "initialized"}` or `{"status": "already_initialized"}` |
-
-### 4.5 Node Reads
-
-| Method | Path | Response |
-|--------|------|----------|
-| `GET` | `.../node/{device}/info` | `DeviceInfo` |
-| `GET` | `.../node/{device}/interface` | `[]InterfaceSummary` |
-| `GET` | `.../node/{device}/interface/{name}` | `InterfaceDetail` |
-| `GET` | `.../node/{device}/interface/{name}/binding` | `ServiceBindingDetail` |
-| `GET` | `.../node/{device}/vlan` | `[]VLANStatusEntry` |
-| `GET` | `.../node/{device}/vlan/{id}` | `VLANStatusEntry` |
-| `GET` | `.../node/{device}/vrf` | `[]VRFStatusEntry` |
-| `GET` | `.../node/{device}/vrf/{name}` | `VRFDetail` |
-| `GET` | `.../node/{device}/acl` | `[]ACLTableSummary` |
-| `GET` | `.../node/{device}/acl/{name}` | `ACLTableDetail` |
-| `GET` | `.../node/{device}/bgp/status` | `BGPStatusResult` |
-| `GET` | `.../node/{device}/bgp/check` | BGP session check |
-| `GET` | `.../node/{device}/evpn/status` | `EVPNStatusResult` |
-| `GET` | `.../node/{device}/health` | `HealthReport` |
-| `GET` | `.../node/{device}/lag` | `[]LAGStatusEntry` |
-| `GET` | `.../node/{device}/lag/{name}` | LAG detail |
-| `GET` | `.../node/{device}/neighbor` | `[]NeighEntry` |
-| `GET` | `.../node/{device}/route/{vrf}/{prefix...}` | `RouteEntry` |
-| `GET` | `.../node/{device}/route-asic/{prefix...}` | `RouteEntry` |
-| `GET` | `.../node/{device}/configdb/{table}` | `[]string` (keys) |
-| `GET` | `.../node/{device}/configdb/{table}/{key}` | `map[string]string` |
-| `GET` | `.../node/{device}/configdb/{table}/{key}/exists` | `bool` |
-| `GET` | `.../node/{device}/statedb/{table}/{key}` | `map[string]string` |
-| `GET` | `.../node/{device}/zombie` | `OperationIntent` (or null) |
-
-All node read paths use `prefix: /network/{netID}`.
-
-### 4.6 Node Writes
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `.../node/{device}/vlan` | `VLANCreateRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/vlan/{id}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/vlan/{id}/member` | `VLANMemberRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/vlan/{id}/member/{iface}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/svi` | `SVIConfigureRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/remove-svi` | `RemoveSVIRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/vrf` | `VRFCreateRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/vrf/{name}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/vrf/{name}/interface` | `VRFInterfaceRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/vrf/{name}/interface/{iface}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/vrf/{name}/bind-ipvpn` | `BindIPVPNRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/vrf/{name}/unbind-ipvpn` | — | `WriteResult` |
-| `POST` | `.../node/{device}/vrf/{name}/route` | `StaticRouteRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/vrf/{name}/route/{prefix...}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/acl` | `ACLCreateRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/acl/{name}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/acl/{name}/rule` | `ACLRuleAddRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/acl/{name}/rule/{rule}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/portchannel` | `PortChannelCreateRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/portchannel/{name}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/portchannel/{name}/member` | `PortChannelMemberRequest` | `WriteResult` |
-| `DELETE` | `.../node/{device}/portchannel/{name}/member/{iface}` | — | `WriteResult` |
-| `POST` | `.../node/{device}/configure-bgp` | — | `WriteResult` |
-| `POST` | `.../node/{device}/setup-evpn` | `SetupEVPNRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/teardown-evpn` | — | `WriteResult` |
-| `POST` | `.../node/{device}/configure-loopback` | — | `WriteResult` |
-| `POST` | `.../node/{device}/remove-loopback` | — | `WriteResult` |
-| `POST` | `.../node/{device}/add-bgp-neighbor` | `BGPNeighborConfig` | `WriteResult` |
-| `POST` | `.../node/{device}/remove-bgp-neighbor` | `{ip}` | `WriteResult` |
-| `POST` | `.../node/{device}/remove-bgp-globals` | — | `WriteResult` |
-| `POST` | `.../node/{device}/apply-frr-defaults` | — | `WriteResult` |
-| `POST` | `.../node/{device}/restart-service` | `RestartServiceRequest` | — |
-| `POST` | `.../node/{device}/set-metadata` | `SetDeviceMetadataRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/refresh` | — | — |
-| `POST` | `.../node/{device}/apply-qos` | `NodeApplyQoSRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/remove-qos` | `NodeRemoveQoSRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/verify-committed` | — | `VerificationResult` |
-| `POST` | `.../node/{device}/config-reload` | — | — |
-| `POST` | `.../node/{device}/save-config` | — | — |
-| `POST` | `.../node/{device}/cleanup` | `CleanupRequest` | `CleanupSummary` |
-| `POST` | `.../node/{device}/ssh-command` | `SSHCommandRequest` | `SSHCommandResponse` |
-| `POST` | `.../node/{device}/execute` | `ExecuteRequest` | `WriteResult` |
-| `POST` | `.../node/{device}/zombie/rollback` | — | `WriteResult` |
-| `POST` | `.../node/{device}/zombie/clear` | — | — |
-
-### 4.7 Node Composite Operations
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `.../node/{device}/composite/generate` | — | `CompositeHandleResponse` |
-| `POST` | `.../node/{device}/composite/deliver` | `CompositeHandleRequest` | `DeliveryResult` |
-| `POST` | `.../node/{device}/composite/verify` | `CompositeHandleRequest` | `VerificationResult` |
-
-### 4.8 Interface Operations
-
-| Method | Path | Body | Response |
-|--------|------|------|----------|
-| `POST` | `.../interface/{name}/apply-service` | `ApplyServiceRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/remove-service` | — | `WriteResult` |
-| `POST` | `.../interface/{name}/refresh-service` | — | `WriteResult` |
-| `POST` | `.../interface/{name}/set-ip` | `SetIPRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/remove-ip` | `RemoveIPRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/set-vrf` | `SetVRFRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/bind-acl` | `BindACLRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/unbind-acl` | `UnbindACLRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/bind-macvpn` | `BindMACVPNRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/unbind-macvpn` | — | `WriteResult` |
-| `POST` | `.../interface/{name}/add-bgp-neighbor` | `BGPNeighborConfig` | `WriteResult` |
-| `POST` | `.../interface/{name}/remove-bgp-neighbor` | `{ip}` | `WriteResult` |
-| `POST` | `.../interface/{name}/set` | `InterfaceSetRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/apply-qos` | `ApplyQoSRequest` | `WriteResult` |
-| `POST` | `.../interface/{name}/remove-qos` | — | `WriteResult` |
-
-Interface paths are prefixed with `.../node/{device}/`.
-
-## 5. CONFIG_DB Table Reference
-
-Every table newtron reads or writes, with key format and fields.
-
-### 5.1 Core Tables
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `DEVICE_METADATA` | `localhost` | Hostname, platform, ASN, unified config mode | `hostname`, `platform`, `hwsku`, `bgp_asn`, `docker_routing_config_mode`, `frr_mgmt_framework_config` |
-| `PORT` | `Ethernet0` | Physical port | `admin_status`, `mtu`, `speed`, `lanes`, `alias`, `description`, `index`, `fec`, `autoneg` |
-| `PORTCHANNEL` | `PortChannel100` | LAG | `admin_status`, `mtu`, `min_links`, `fallback`, `fast_rate`, `lacp_key`, `description` |
-| `PORTCHANNEL_MEMBER` | `PortChannel100\|Ethernet0` | LAG membership | NULL:NULL sentinel |
-| `VLAN` | `Vlan100` | VLAN | `vlanid`, `description`, `admin_status`, `mtu`, `dhcp_servers` |
-| `VLAN_MEMBER` | `Vlan100\|Ethernet0` | VLAN membership | `tagging_mode` (`tagged`, `untagged`) |
-| `VLAN_INTERFACE` | `Vlan100` or `Vlan100\|10.1.1.1/24` | SVI and IPs | Base: `vrf_name`. IP sub: NULL:NULL sentinel |
-| `INTERFACE` | `Ethernet0` or `Ethernet0\|10.1.1.1/30` | Interface and IPs | Base: `vrf_name`, `proxy_arp`. IP sub: NULL:NULL sentinel |
-| `LOOPBACK_INTERFACE` | `Loopback0` or `Loopback0\|10.0.0.1/32` | Loopback and IPs | NULL:NULL sentinel |
-| `VRF` | `Vrf_CUST1` | VRF | `vni` (L3VNI, optional) |
-| `STATIC_ROUTE` | `Vrf_CUST1\|10.0.0.0/24` | Static routes | `nexthop`, `ifname`, `distance` |
-
-### 5.2 VXLAN/EVPN Tables
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `VXLAN_TUNNEL` | `vtep1` | VTEP source | `src_ip` |
-| `VXLAN_TUNNEL_MAP` | `vtep1\|VNI{vni}_{target}` | VNI mapping | `vni`, `vlan` (L2VNI) or `vrf` (L3VNI) |
-| `VXLAN_EVPN_NVO` | `nvo1` | EVPN NVO | `source_vtep` |
-| `SUPPRESS_VLAN_NEIGH` | `Vlan100` | ARP suppression | `suppress` (`on`) |
-
-### 5.3 BGP Tables
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `BGP_GLOBALS` | `default` or VRF name | Global BGP settings | `router_id`, `local_asn`, `load_balance_mp_relax`, `ebgp_requires_policy`, `default_ipv4_unicast`, `log_neighbor_changes`, `suppress_fib_pending` |
-| `BGP_GLOBALS_AF` | `{vrf}\|{af}` | BGP address family | `advertise-all-vni`, `advertise_ipv4_unicast`, `max_ebgp_paths`, `route_target_import_evpn`, `route_target_export_evpn` |
-| `BGP_NEIGHBOR` | `{vrf}\|{ip}` | BGP neighbor | `asn`, `local_addr`, `name`, `admin_status`, `holdtime`, `keepalive`, `peer_group`, `ebgp_multihop` |
-| `BGP_NEIGHBOR_AF` | `{vrf}\|{ip}\|{af}` | Per-neighbor AF | `activate`, `next_hop_self`, `soft_reconfiguration`, `route_map_in`, `route_map_out`, `allowas_in`, `default_originate` |
-| `BGP_EVPN_VNI` | `{vrf}\|{vni}` | Per-VNI EVPN | `rd`, `route_target_import`, `route_target_export` |
-| `BGP_PEER_GROUP` | `SPINE_PEERS` | Peer group template | `asn`, `local_addr`, `admin_status`, `holdtime` |
-| `BGP_PEER_GROUP_AF` | `SPINE_PEERS\|ipv4_unicast` | Per-AF peer group | `activate`, `route_map_in`, `route_map_out`, `next_hop_self` |
-| `ROUTE_REDISTRIBUTE` | `{vrf}\|{src}\|{dst}\|{af}` | Redistribution | `route_map` |
-| `ROUTE_MAP` | `{name}\|{seq}` | Route-map rule | `route_operation`, `match_prefix_set`, `set_local_pref`, `set_community`, `set_med` |
-| `PREFIX_SET` | `{name}\|{seq}` | Prefix list entry | `ip_prefix`, `action`, `masklength_range` |
-| `COMMUNITY_SET` | `{name}` | Community list | `set_type`, `match_action`, `community_member` |
-
-**Address family values:** `ipv4_unicast`, `ipv6_unicast`, `l2vpn_evpn`.
-
-### 5.4 ACL Tables
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `ACL_TABLE` | `customer-l3-in` | ACL table | `type` (`L3`, `L3V6`), `stage` (`ingress`, `egress`), `ports`, `policy_desc` |
-| `ACL_RULE` | `customer-l3-in\|RULE_10` | ACL rule | `PRIORITY`, `PACKET_ACTION` (`FORWARD`, `DROP`), `SRC_IP`, `DST_IP`, `IP_PROTOCOL`, `L4_SRC_PORT`, `L4_DST_PORT`, `DSCP` |
-
-### 5.5 QoS Tables
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `PORT_QOS_MAP` | `Ethernet0` | Port QoS binding | `dscp_to_tc_map`, `tc_to_queue_map` |
-| `QUEUE` | `Ethernet0\|0` | Queue binding | `scheduler`, `wred_profile` |
-| `SCHEDULER` | `scheduler.0` | Scheduler | `type` (`DWRR`, `STRICT`), `weight` |
-| `WRED_PROFILE` | `WRED_GREEN` | WRED profile | `green_min_threshold`, `green_max_threshold`, `green_drop_probability`, `ecn` |
-| `DSCP_TO_TC_MAP` | `DSCP_TO_TC` | DSCP → TC map | `{dscp_val}` → `{tc_val}` |
-| `TC_TO_QUEUE_MAP` | `TC_TO_QUEUE` | TC → queue map | `{tc_val}` → `{queue_id}` |
-
-### 5.6 Anycast Gateway
-
-| Table | Key Format | Purpose | Fields |
-|-------|-----------|---------|--------|
-| `SAG` | `Vlan100\|IPv4` | Per-interface SAG | `gwip` |
-| `SAG_GLOBAL` | `IPv4` | Global SAG MAC | `gwmac` |
-
-### 5.7 Custom Table
-
-| Table | Key Format | Purpose |
-|-------|-----------|---------|
-| `NEWTRON_INTENT` | `kind\|identity` (e.g., `vlan\|100`, `interface\|Ethernet0`, `device`) | Unified intent records — service bindings, infrastructure state, crash recovery |
-
-Every intent key starts with its kind — the first segment before the first `|`.
-`strings.SplitN(key, "|", 2)` extracts `[kind, rest]` uniformly for all resource
-types. See Design Principle §44 for rationale.
-
-Example keys:
-
-```
-device                          kind=device  (singleton)
-vlan|100                        kind=vlan    identity=100
-interface|Ethernet0             kind=interface  identity=Ethernet0
-interface|Ethernet0|qos         kind=interface  identity=Ethernet0|qos
-acl|EDGE_IN|RULE_10             kind=acl     identity=EDGE_IN|RULE_10
-```
-
-**Intent record fields** (identity + DAG links + resolved parameters in a flat hash):
-
-| Field | Purpose |
-|-------|---------|
-| `state` | Lifecycle: `unrealized`, `in-flight`, `actuated` |
-| `operation` | What created this intent: `apply-service`, `setup-evpn`, `configure-bgp` |
-| `name` | Spec reference (e.g., `transit`), empty if none |
-| `holder`, `created` | Who created and when |
-| `applied_at`, `applied_by` | Audit metadata |
-| `_parents` | Comma-separated parent resource keys this record depends on |
-| `_children` | Comma-separated child resource keys that depend on this record |
-| `service_name` | Applied service name (param) |
-| `service_type` | Service type for teardown path (param) |
-| `ip_address` | Applied IP (param) |
-| `vrf_name` | Applied VRF (param) |
-| `vrf_type` | `"interface"` or `"shared"` (param) |
-| `ipvpn`, `macvpn` | VPN references (params) |
-| `l3vni`, `l3vni_vlan` | L3VNI values for VRF teardown (params) |
-| `l2vni` | L2VNI for VXLAN_TUNNEL_MAP cleanup (param) |
-| `ingress_acl`, `egress_acl` | ACL names (params) |
-| `bgp_neighbor`, `bgp_peer_as` | BGP peer for RefreshService (params) |
-| `qos_policy` | QoS policy name (param) |
-| `anycast_ip`, `anycast_mac` | Anycast values for SVI/SAG cleanup (params) |
-| `arp_suppression` | ARP suppression flag (param) |
-| `redistribute_vrf` | VRF where redistribution was overridden (param) |
-
-The intent record is self-sufficient for reverse operations and drift reconstruction — every value needed for teardown is stored in the record's params, never re-resolved from specs. Constructed via `IntentFromFields()`, serialized via `Intent.ToFields()`.
-
-## 6. Internal Implementation
-
-Every write operation follows this path through the system:
-
-```
-┌──────────────┐     ┌─────────────────────┐     ┌───────────────┐              ┌────────────────────┐     ┌──────────────────────┐     ┌─────────────────────┐
-│              │     │                     │     │               │              │                    │     │                      │     │                     │
-│              │     │     middleware      │     │    handler    │              │                    │     │     Node.Execute     │     │        fn()         │
-│ HTTP request │     │  recovery / logger  │     │ params, body, │              │     NodeActor      │     │ Lock > fn() > Commit │     │  op() > config fn   │
-│              │     │ requestID / timeout │     │   ExecOpts    │              │ .connectAndExecute │     │   > Save > Unlock    │     │     > ChangeSet     │
-│              │     │                     │     │               │  serialize   │                    │     │                      │     │ > CONFIG_DB entries │
-│              │ ──▶ │                     │ ──▶ │               │ ───────────▶ │                    │ ──▶ │                      │ ──▶ │                     │
-└──────────────┘     └─────────────────────┘     └───────────────┘              └────────────────────┘     └──────────────────────┘     └─────────────────────┘
-```
-
-Read operations follow the same path but use `connectAndRead`, which calls `Refresh()` (reload CONFIG_DB from Redis) instead of Lock/Execute. §6.3 includes a worked example tracing `CreateVLAN` through every layer.
-
-### 6.1 ChangeSet
-
-Operations compute changes without writing. The caller previews, then the server applies.
-
-```go
-type ChangeSet struct {
-    Device       string
-    Operation    string
-    Timestamp    time.Time
-    Changes      []Change
-    AppliedCount int
-    Verification *VerificationResult
-}
-
-func NewChangeSet(device, operation string) *ChangeSet
-func (cs *ChangeSet) Add(table, key string, fields map[string]string)
-func (cs *ChangeSet) Update(table, key string, fields map[string]string)
-func (cs *ChangeSet) Delete(table, key string)
-func (cs *ChangeSet) Adds(entries []sonic.Entry)      // batch
-func (cs *ChangeSet) Deletes(entries []sonic.Entry)    // batch
-func (cs *ChangeSet) Merge(other *ChangeSet)
-func (cs *ChangeSet) IsEmpty() bool
-func (cs *ChangeSet) Preview() string
-func (cs *ChangeSet) Apply(n *Node) error
-func (cs *ChangeSet) Verify(n *Node) error
-```
-
-**Preview format:** `+ TABLE|key field=value` (add), `- TABLE|key` (delete), `~ TABLE|key field: old→new` (modify).
-
-**Apply:** Writes each change individually to CONFIG_DB via `ConfigDBClient.Set/Delete`. On failure at index N, `AppliedCount = N`. Already-written changes are NOT rolled back.
-
-**Verify:** Opens a fresh Redis connection, re-reads every entry in the ChangeSet, diffs field-by-field. For keys with multiple operations (e.g., RefreshService: delete then add), only the final state is verified.
-
-### 6.2 Entry
-
-The unified CONFIG_DB entry type used by config functions and pipeline delivery:
-
-```go
-type Entry struct {
-    Table  string
-    Key    string
-    Fields map[string]string  // nil = delete, empty = NULL:NULL sentinel
-}
-```
-
-### 6.3 Config Function Pattern
-
-Operations follow a three-layer pattern:
-
-**Layer 1 — Config functions.** Pure functions in `*_ops.go` files that return `[]sonic.Entry`. No side effects, no preconditions, no Node access. Each function owns specific CONFIG_DB tables (§1 ownership map). Example: `createVlanConfig(vlanID int, opts VLANConfig) []sonic.Entry`.
-
-**Layer 2 — `op()` helper.** Wraps the precondition → generate → ChangeSet pattern:
-
-```go
-func (n *Node) op(name, resource string, changeType sonic.ChangeType,
-    checks func(*PreconditionChecker), gen func() []sonic.Entry) (*ChangeSet, error)
-```
-
-Runs preconditions (connected + locked + caller-supplied checks), calls the generator, wraps entries in a ChangeSet. In offline mode (abstract Node), also updates the shadow ConfigDB and accumulates entries for composite export.
-
-**Layer 3 — Direct construction.** Complex operations (ApplyService, RemoveService, SetupEVPN) build ChangeSets directly, calling config functions from multiple owning files and merging results.
-
-#### Worked Example: CreateVLAN
-
-Trace of `POST /network/default/node/switch1/vlan {"id":100,"description":"Customer"}`:
-
-```
-handleCreateVLAN (handler_node.go)
-  decodeJSON → VLANCreateRequest{ID:100, Description:"Customer"}
-  execOpts(r) → ExecOpts{Execute:true}   (?dry_run absent → Execute=true)
-  nodeActor.connectAndExecute(ctx, opts, fn)
-    │
-    │ [actor goroutine — serialized, one-at-a-time]
-    │
-    getNode(ctx) → cached *Node (or new SSH connection)
-    node.Execute(ctx, opts, fn):
-      Lock()
-        Redis SETNX newtron:lock:switch1 (distributed lock)
-        CONFIG_DB refresh → rebuild Interface map
-      fn(ctx):
-        n.CreateVLAN(ctx, 100, VLANConfig{Description:"Customer"})
-          n.op("create-vlan", "Vlan100", ChangeAdd, checks, gen)
-            checks(pc):
-              vlanID ∈ [1,4094] ✓
-              RequireVLANNotExists(100) ✓  (reads in-memory ConfigDB cache)
-            gen():
-              createVlanConfig(100, opts)
-              → [{Table:"VLAN", Key:"Vlan100",
-                  Fields:{"vlanid":"100", "description":"Customer"}}]
-            buildChangeSet(entries, ChangeAdd)
-          n.appendPending(cs)
-      Commit():
-        Apply:  redis-cli -n 4 HSET "VLAN|Vlan100" vlanid 100 description Customer
-        Verify: fresh connection → HGETALL "VLAN|Vlan100" → fields match ✓
-      Save(): SSH sudo config save -y
-      Unlock(): release distributed lock
-      → WriteResult{ChangeCount:1, Applied:true, Verified:true, Saved:true}
-  writeJSON(w, 201, result)
-    → {"data":{"change_count":1,"applied":true,"verified":true,"saved":true}}
-```
-
-The same `createVlanConfig` function runs in both online mode (through `op()` → ChangeSet → Redis) and offline mode (abstract Node building a composite). In offline mode, `op()` applies entries to the shadow ConfigDB so subsequent operations see prior state — same code path, different initialization.
-
-### 6.4 PreconditionChecker
-
-```go
-type PreconditionChecker struct {
-    node      *Node
-    operation string
-    resource  string
-    errors    []error
-}
-
-func (p *PreconditionChecker) RequireConnected() *PreconditionChecker
-func (p *PreconditionChecker) RequireLocked() *PreconditionChecker
-func (p *PreconditionChecker) RequireVLANExists(id int) *PreconditionChecker
-func (p *PreconditionChecker) RequireVLANNotExists(id int) *PreconditionChecker
-func (p *PreconditionChecker) RequireVRFExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequireVRFNotExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequirePortChannelExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequirePortChannelNotExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequireVTEPConfigured() *PreconditionChecker
-func (p *PreconditionChecker) RequireACLTableExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequireInterfaceExists(name string) *PreconditionChecker
-func (p *PreconditionChecker) RequireInterfaceNotPortChannelMember(name string) *PreconditionChecker
-func (p *PreconditionChecker) Check(condition bool, precondition, details string) *PreconditionChecker
-func (p *PreconditionChecker) Result() error
-```
-
-All checks read from the in-memory ConfigDB cache — no Redis round-trips. Multiple errors are collected and returned as `ValidationErrors`.
-
-When `offline=true` (abstract Node), `RequireConnected` and `RequireLocked` are skipped.
-
-### 6.5 Intent DAG Operations
-
-`intent_ops.go` owns the DAG-aware intent lifecycle. All managed resources call
-these methods — not `NEWTRON_INTENT` directly.
-
-```go
-// writeIntent writes an intent record for resource and registers it with each
-// parent's _children field. Fails (I4) if any declared parent does not exist.
-// Parents are kind-prefixed resource keys (e.g., "vlan|100", "interface|Ethernet0").
-func (n *Node) writeIntent(cs *ChangeSet, op, resource string, params map[string]string, parents []string) error
-
-// deleteIntent removes the intent record for resource and deregisters it from
-// each parent's _children field. Fails (I5) if _children is non-empty.
-func (n *Node) deleteIntent(cs *ChangeSet, resource string) error
-
-// cascadeDeleteChildren deletes a resource and all its descendants in
-// bottom-up order (leaves first). Used by destroy operations (e.g., DestroyVRF)
-// that must remove all children before removing the parent.
-func (n *Node) cascadeDeleteChildren(cs *ChangeSet, resource string) error
-
-// applyIntentToShadow updates the shadow ConfigDB with an intent entry so that
-// subsequent writeIntent calls in abstract mode see prior parents correctly.
-// Called by op() in offline mode after each writeIntent.
-func (n *Node) applyIntentToShadow(entry sonic.Entry)
-
-// ValidateIntentDAG checks bidirectional consistency of all NEWTRON_INTENT
-// records: every _parents entry must have the resource in its _children, and
-// every _children entry must have the resource in its _parents. Returns a
-// slice of DAGViolation describing any inconsistencies found.
-func ValidateIntentDAG(configDB *sonic.ConfigDB) []DAGViolation
-```
-
-**DAG invariants enforced by writeIntent / deleteIntent:**
-
-| ID | Invariant |
-|----|-----------|
-| I4 | `writeIntent` fails if a declared parent key does not exist in `NEWTRON_INTENT` |
-| I5 | `deleteIntent` fails if the record's `_children` field is non-empty |
-
-**Cascade deletes do not exist.** `deleteIntent` on a parent with children fails.
-The caller must remove children explicitly using each child's own reverse method.
-
-### 6.6 DependencyChecker
-
-Used by `RemoveService` to safely clean up shared resources. Scans CONFIG_DB for remaining consumers:
-
-```go
-type DependencyChecker struct {
-    node             *Node
-    excludeInterface string  // interface being removed
-}
-
-func (dc *DependencyChecker) IsLastACLUser(aclName string) bool
-func (dc *DependencyChecker) GetACLRemainingInterfaces(aclName string) string
-func (dc *DependencyChecker) IsLastVLANMember(vlanID int) bool
-func (dc *DependencyChecker) IsLastServiceUser(serviceName string) bool
-func (dc *DependencyChecker) IsLastIPVPNUser(ipvpnName string) bool
-```
-
-### 6.7 Node Execute Lifecycle
-
-The public API method `Node.Execute()` wraps the full write lifecycle:
-
-```
-Lock
-│  Acquires distributed Redis lock (SETNX with TTL)
-│  Refreshes CONFIG_DB cache from Redis
-│  Rebuilds Interface map from refreshed CONFIG_DB
-│  Checks for zombie intent (NEWTRON_INTENT exists in STATE_DB)
-│  If zombie found: Execute returns ErrDeviceZombieIntent
-│
-├─ fn(ctx)
-│    Caller's operations run here. Each op (CreateVLAN, ApplyService, etc.)
-│    calls op() or builds a ChangeSet directly. ChangeSets append to n.pending.
-│    No Redis writes yet — operations only compute changes.
-│
-├─ [dry-run: opts.Execute == false]
-│    Returns WriteResult{Preview: cs.Preview(), ChangeCount: N}
-│    Rollback() discards pending ChangeSets. No Commit, no Save.
-│
-├─ Commit
-│    WriteIntent: writes NEWTRON_INTENT to STATE_DB with all pending
-│                 operations and their reverse mappings. Fatal on failure —
-│                 if the manifest cannot be written, no CONFIG_DB writes occur.
-│    Apply: for each pending ChangeSet:
-│           - Update intent: mark operation started
-│           - Write entries to CONFIG_DB via Set/Delete
-│           - Update intent: mark operation completed
-│           On failure at index N, AppliedCount = N. Intent REMAINS
-│           with started/completed timestamps showing exactly what was written.
-│    Verify: fresh Redis connection, re-reads every entry, diffs field-by-field.
-│            Keys with multiple ops (delete+add) — only final state verified.
-│    DeleteIntent: removes NEWTRON_INTENT on success.
-│                  On verify failure, intent REMAINS as a crash marker.
-│
-├─ Save (unless opts.NoSave)
-│    SSH: sudo config save -y
-│
-└─ Unlock
-     Releases distributed Redis lock
-```
-
-On `fn()` error or Commit failure, `Rollback()` clears pending ChangeSets but does NOT undo already-applied Redis writes — partial writes are possible. The actor's `connectAndExecute` also calls `Rollback()` on error but keeps the cached connection alive for future requests.
-
-**Zombie detection:** When `Lock()` acquires the distributed lock and finds an existing `NEWTRON_INTENT` record, it stores the intent as `n.zombie`. Subsequent calls to `Execute()` check for this and return `ErrDeviceZombieIntent` before running any operations. The operator must resolve the zombie (inspect, rollback, or clear) before the device accepts new writes. `RollbackZombie` and `ClearZombie` bypass this check via `SetBypassZombieCheck`.
-
-### 6.8 Value Derivation
-
-All values below are derived at `ApplyService` time and stored in `NEWTRON_INTENT` as intent record params for teardown. Composite generation (abstract mode) derives identical values through the same code path. Auto-derived values from interface context:
-
-| Value | Derivation |
-|-------|-----------|
-| VRF name (interface type) | `{service}-{shortenedInterface}` (e.g., `customer-l3-Eth0`) |
-| VRF name (shared type) | ipvpn spec's VRF name |
-| ACL table name | `{service}-{direction}` (e.g., `customer-l3-in`) |
-| Neighbor IP (/31) | XOR last bit of local IP |
-| Neighbor IP (/30) | XOR host bits (1→2, 2→1) |
-| Router ID | Loopback IP from profile |
-| VTEP source IP | Loopback IP from profile |
-
-**Interface name normalization:**
-
-| Short | Full (SONiC) |
-|-------|-------------|
-| `Eth0` | `Ethernet0` |
-| `Po100` | `PortChannel100` |
-| `Vl100` | `Vlan100` |
-| `Lo0` | `Loopback0` |
-
-### 6.9 Spec Resolution
-
-Hierarchical resolution: profile > zone > global. `ResolvedSpecs` implements `node.SpecProvider`:
-
-```go
-type SpecProvider interface {
-    GetService(name string) (*spec.ServiceSpec, error)
-    GetIPVPN(name string) (*spec.IPVPNSpec, error)
-    GetMACVPN(name string) (*spec.MACVPNSpec, error)
-    GetFilter(name string) (*spec.FilterSpec, error)
-    GetQoSPolicy(name string) (*spec.QoSPolicy, error)
-    GetRoutePolicy(name string) (*spec.RoutePolicy, error)
-    GetPrefixList(name string) ([]string, error)
-}
-```
-
-Resolution is union with lower-level wins: if `"customer-l3"` exists at network and device levels, the device-level definition wins.
-
-### 6.10 Composite Delivery
-
-```go
-type CompositeBuilder struct {
-    tables   map[string]map[string]map[string]string
-    metadata CompositeMetadata
-}
-
-func NewCompositeBuilder(deviceName string, mode CompositeMode) *CompositeBuilder
-func (cb *CompositeBuilder) AddEntries(entries []sonic.Entry) *CompositeBuilder
-func (cb *CompositeBuilder) AddEntry(table, key string, fields map[string]string) *CompositeBuilder
-func (cb *CompositeBuilder) Build() *CompositeConfig
-```
-
-**Overwrite mode:** `ReplaceAll` — collects tables from composite, finds stale keys in CONFIG_DB, deletes stale keys, writes all composite entries via pipeline. Platform-managed tables (PORT) are merge-only.
-
-**Merge mode:** Diffs each composite entry against current CONFIG_DB. Same key + same values = skip. Same key + different values = conflict error. New key = apply.
-
-### 6.11 Middleware Chain
-
-Registered in `handler.go`, applied outermost to innermost:
-
-| Layer | Implementation | Purpose |
-|-------|---------------|---------|
-| `withRecovery` | `defer/recover` | Catches panics; logs stack trace, returns HTTP 500 |
-| `withLogger` | `statusWriter` wrapper | Captures status code; logs `METHOD /path STATUS duration` |
-| `withRequestID` | Atomic counter | Sets `X-Request-ID` header + request context value |
-| `withTimeout` | `context.WithTimeout` | 5-minute request deadline on context |
-| `ServeMux` | Go 1.22 pattern router | Method+path matching (`GET /network/{netID}/...`) |
-
-Handlers extract path params via `r.PathValue("device")`, decode JSON bodies via `decodeJSON(r, &req)`, and read write options via `execOpts(r)` which maps `?dry_run=true` → `Execute: false` and `?no_save=true` → `NoSave: true`. Responses go through `writeJSON(w, status, data)` which wraps the result in `APIResponse{Data: data}`, or `writeError(w, err)` which maps Go errors to HTTP status codes (§3.9).
-
-### 6.12 Actor Serialization
-
-Each device gets a `NodeActor` — a single goroutine that serializes all operations to that device. The cached `*Node` (SSH connection) is only accessed from this goroutine, eliminating mutex contention:
-
-```
-┌──────────────────┐             ┌─────────────────┐                  ┌─────────────────┐           ┌──────────────────┐
-│                  │             │                 │                  │                 │           │                  │
-│ NodeActor.do(fn) │             │ request channel │                  │ actor goroutine │           │ response channel │
-│                  │  sends fn   │                 │  one at a time   │  (executes fn)  │  result   │                  │
-│                  │ ──────────▶ │                 │ ───────────────▶ │                 │ ────────▶ │                  │
-└──────────────────┘             └─────────────────┘                  └─────────────────┘           └──────────────────┘
-```
-
-**Connection caching:** `getNode()` returns the cached `*Node` or creates a new SSH tunnel. After each operation completes, a 5-minute idle timer (`DefaultIdleTimeout`) resets. On timeout, the connection closes. On SSH failure mid-operation, the connection is dropped and the next request reconnects.
-
-**Three access patterns:**
-
-| Method | Use Case | Flow |
-|--------|----------|------|
-| `connectAndRead` | All GET handlers | `getNode → Refresh → fn(node)` — drops connection on Refresh failure |
-| `connectAndExecute` | All write handlers | `getNode → node.Execute(opts, fn)` — calls Rollback on error, keeps connection |
-| `connectAndLocked` | Composite deliver | `getNode → Lock → fn(node) → Unlock` — direct Redis writes outside ChangeSet model |
-
-`connectAndRead` calls `Refresh()` to reload CONFIG_DB from Redis before reading, ensuring reads always reflect the latest device state. `connectAndExecute` delegates the full Lock/Commit/Save/Unlock lifecycle to `Node.Execute()` (§6.6). `connectAndLocked` is used for operations like `DeliverComposite` that write directly to Redis via pipeline without the ChangeSet model.
-
-### 6.13 Shared Policy Objects
-
-When services reference filters, route policies, or prefix lists, newtron
-creates CONFIG_DB objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET)
-that may be shared across multiple interfaces using the same service.
-
-**Content-hashed naming.** Shared policy object keys include an 8-character
-SHA256 hash of their generated CONFIG_DB fields:
-
-```
-ACL_TABLE|PROTECT_RE_IN_1ED5F2C7
-ROUTE_MAP|CUSTOMER_IMPORT_A3B7C1D4|10
-PREFIX_SET|RFC1918_E9F2A1B3
-```
-
-The hash is computed by `util.ContentHash()` from the entry's field values.
-Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes are computed
-first, then ROUTE_MAP entries reference real PREFIX_SET names (including hashes),
-so a content change cascades through the hash chain.
-
-**Lifecycle:** Created on first reference (first `ApplyService` using the
-spec), deleted when the last consumer is removed (`RemoveService` scans
-CONFIG_DB for remaining consumers). On spec change → hash change → blue-green
-migration: new object created alongside old, interface migrated, old object
-deleted if no remaining consumers.
-
-**BGP peer groups.** Services with BGP routing create a `BGP_PEER_GROUP` named
-after the service (not content-hashed — the group identity is the service name,
-not its content). Peer group created on first apply, deleted when last consumer
-removed.
-
-**Ownership:** `service_ops.go` owns ROUTE_MAP, PREFIX_SET, COMMUNITY_SET.
-`acl_ops.go` owns ACL_TABLE, ACL_RULE. `bgp_ops.go` owns BGP_PEER_GROUP,
-BGP_PEER_GROUP_AF.
-
-## 7. Permission System
-
-Permission types are defined for future enforcement. Read operations are always allowed.
-
-```go
-type Permission string
-
-const (
-    PermServiceApply    Permission = "service.apply"
-    PermServiceRemove   Permission = "service.remove"
-    PermInterfaceModify Permission = "interface.modify"
-    PermLAGCreate       Permission = "lag.create"
-    PermLAGModify       Permission = "lag.modify"
-    PermLAGDelete       Permission = "lag.delete"
-    PermVLANCreate      Permission = "vlan.create"
-    PermVLANModify      Permission = "vlan.modify"
-    PermVLANDelete      Permission = "vlan.delete"
-    PermACLModify       Permission = "acl.modify"
-    PermEVPNModify      Permission = "evpn.modify"
-    PermQoSCreate       Permission = "qos.create"
-    PermQoSModify       Permission = "qos.modify"
-    PermQoSDelete       Permission = "qos.delete"
-    PermVRFCreate       Permission = "vrf.create"
-    PermVRFModify       Permission = "vrf.modify"
-    PermVRFDelete       Permission = "vrf.delete"
-    PermDeviceCleanup   Permission = "device.cleanup"
-    PermSpecAuthor      Permission = "spec.author"
-    PermFilterCreate    Permission = "filter.create"
-    PermFilterDelete    Permission = "filter.delete"
-)
-```
-
-**Current status:** Permission types and spec-level definitions exist (`network.json` `permissions`, `ServiceSpec.Permissions`) but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN). Domain-level preconditions (connected, locked, VLAN exists, interface not already bound) are enforced via `PreconditionChecker` (§6.4). User-level authorization is planned for a future iteration.
-
-**Intended resolution order:** superuser bypass → service-specific permissions → global permissions.
-
-## 8. Audit Logging
-
-Every write operation (execute mode, not dry-run) emits an `AuditEvent` to the audit log. The server writes events; the CLI's `audit list` command reads them.
-
-```go
 type AuditEvent struct {
     ID          string        `json:"id"`
     Timestamp   string        `json:"timestamp"`
@@ -1553,139 +903,865 @@ type AuditEvent struct {
     ExecuteMode bool          `json:"execute_mode"`
     DryRun      bool          `json:"dry_run"`
     Duration    string        `json:"duration"`
-    ClientIP    string        `json:"client_ip,omitempty"`
-    SessionID   string        `json:"session_id,omitempty"`
-}
-
-type AuditChange struct {
-    Table  string            `json:"table"`
-    Key    string            `json:"key"`
-    Type   string            `json:"type"`
-    Fields map[string]string `json:"fields,omitempty"`
 }
 ```
 
-Stored as JSON lines in the audit log file. Max size and rotation controlled by `UserSettings.AuditMaxSizeMB` and `AuditMaxBackups`.
+### 3.11 Error Types
+
+Returned by handlers when operations fail. The middleware maps these to HTTP status codes (see §4).
+
+```go
+type NotFoundError struct {
+    Resource string
+    Name     string
+}  // → 404
+
+type ValidationError struct {
+    Field   string
+    Message string
+}  // → 400
+
+type VerificationFailedError struct {
+    Device  string
+    Passed  int
+    Failed  int
+    Total   int
+    Message string
+}  // → 409 Conflict
+```
+
+**HTTP status mapping** (`httpStatusFromError` in `api/types.go`):
+
+| Error Type | HTTP Status |
+|-----------|-------------|
+| `NotFoundError` | 404 Not Found |
+| `ValidationError` | 400 Bad Request |
+| `VerificationFailedError` | 409 Conflict |
+| `notRegisteredError` | 404 Not Found |
+| `alreadyRegisteredError` | 409 Conflict |
+| `context.DeadlineExceeded` | 504 Gateway Timeout |
+| all others | 500 Internal Server Error |
+
+---
+
+## 4. HTTP API Reference
+
+All routes follow the pattern `/network/{netID}/...` for spec operations and `/network/{netID}/node/{device}/...` for device operations. The `?mode=topology` query parameter selects topology mode (offline abstract node); default is actuated mode (online device). Write operations use `?execute=true` to apply (default is dry-run preview).
+
+Middleware chain (outer → inner): `withRecovery` → `withLogger` → `withRequestID` → `withTimeout(5min)` → `withMode` → mux.
+
+### 4.1 Server Management
+
+| Method | Path | Handler | Purpose |
+|--------|------|---------|---------|
+| POST | `/network` | `handleRegisterNetwork` | Register a network (loads spec dir) |
+| GET | `/network` | `handleListNetworks` | List registered networks |
+| POST | `/network/{netID}/unregister` | `handleUnregisterNetwork` | Unregister a network |
+| POST | `/network/{netID}/reload` | `handleReloadNetwork` | Reload network specs from disk |
+
+### 4.2 Network Spec Reads
+
+List/show pairs for all spec types. Response types from §3.9.
+
+| Method | Path | Response Type |
+|--------|------|---------------|
+| GET | `/network/{netID}/service` | `[]ServiceDetail` |
+| GET | `/network/{netID}/service/{name}` | `ServiceDetail` |
+| GET | `/network/{netID}/ipvpn` | `[]IPVPNDetail` |
+| GET | `/network/{netID}/ipvpn/{name}` | `IPVPNDetail` |
+| GET | `/network/{netID}/macvpn` | `[]MACVPNDetail` |
+| GET | `/network/{netID}/macvpn/{name}` | `MACVPNDetail` |
+| GET | `/network/{netID}/qos-policy` | `[]QoSPolicyDetail` |
+| GET | `/network/{netID}/qos-policy/{name}` | `QoSPolicyDetail` |
+| GET | `/network/{netID}/filter` | `[]FilterDetail` |
+| GET | `/network/{netID}/filter/{name}` | `FilterDetail` |
+| GET | `/network/{netID}/route-policy` | `[]RoutePolicyDetail` |
+| GET | `/network/{netID}/route-policy/{name}` | `RoutePolicyDetail` |
+| GET | `/network/{netID}/prefix-list` | `[]PrefixListDetail` |
+| GET | `/network/{netID}/prefix-list/{name}` | `PrefixListDetail` |
+| GET | `/network/{netID}/platform` | `[]PlatformDetail` |
+| GET | `/network/{netID}/platform/{name}` | `PlatformDetail` |
+| GET | `/network/{netID}/profile` | `[]DeviceProfileDetail` |
+| GET | `/network/{netID}/profile/{name}` | `DeviceProfileDetail` |
+| GET | `/network/{netID}/zone` | `[]ZoneDetail` |
+| GET | `/network/{netID}/zone/{name}` | `ZoneDetail` |
+| GET | `/network/{netID}/host/{name}` | `HostProfile` |
+| GET | `/network/{netID}/topology/node` | `[]string` (device names) |
+| GET | `/network/{netID}/feature` | Feature list |
+| GET | `/network/{netID}/feature/{name}/dependency` | Feature dependencies |
+| GET | `/network/{netID}/feature/{name}/unsupported-due-to` | Transitive unsupported |
+| GET | `/network/{netID}/platform/{name}/supports/{feature}` | `bool` |
+
+### 4.3 Network Spec Writes
+
+RPC-style POST endpoints. Each creates or deletes a spec object and persists to disk. Request types from §3.8.
+
+| Method | Path | Request Type |
+|--------|------|-------------|
+| POST | `.../create-service` | `CreateServiceRequest` |
+| POST | `.../delete-service` | `{name}` |
+| POST | `.../create-ipvpn` | `CreateIPVPNRequest` |
+| POST | `.../delete-ipvpn` | `{name}` |
+| POST | `.../create-macvpn` | `CreateMACVPNRequest` |
+| POST | `.../delete-macvpn` | `{name}` |
+| POST | `.../create-qos-policy` | `CreateQoSPolicyRequest` |
+| POST | `.../delete-qos-policy` | `{name}` |
+| POST | `.../add-qos-queue` | `AddQoSQueueRequest` |
+| POST | `.../remove-qos-queue` | `{policy, queue_id}` |
+| POST | `.../create-filter` | `CreateFilterRequest` |
+| POST | `.../delete-filter` | `{name}` |
+| POST | `.../add-filter-rule` | `AddFilterRuleRequest` |
+| POST | `.../remove-filter-rule` | `{filter, seq}` |
+| POST | `.../create-prefix-list` | `CreatePrefixListRequest` |
+| POST | `.../delete-prefix-list` | `{name}` |
+| POST | `.../add-prefix-list-entry` | `AddPrefixListEntryRequest` |
+| POST | `.../remove-prefix-list-entry` | `{prefix_list, prefix}` |
+| POST | `.../create-route-policy` | `CreateRoutePolicyRequest` |
+| POST | `.../delete-route-policy` | `{name}` |
+| POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
+| POST | `.../remove-route-policy-rule` | `{policy, seq}` |
+| POST | `.../create-profile` | `CreateDeviceProfileRequest` |
+| POST | `.../delete-profile` | `{name}` |
+| POST | `.../create-zone` | `CreateZoneRequest` |
+| POST | `.../delete-zone` | `{name}` |
+
+All paths above are prefixed with `/network/{netID}`.
+
+### 4.4 Device Init
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `.../node/{device}/init-device` | Initialize device (write DEVICE_METADATA, restart bgp, config save) |
+
+### 4.5 Node Reads
+
+Response types from §3.2–3.5. These dispatch via `connectAndRead` — the actor calls `RebuildProjection` → Ping → fn.
+
+| Method | Path | Response Type |
+|--------|------|---------------|
+| GET | `.../node/{device}/info` | `DeviceInfo` |
+| GET | `.../node/{device}/interface` | `[]InterfaceSummary` |
+| GET | `.../node/{device}/interface/{name}` | `InterfaceDetail` |
+| GET | `.../node/{device}/interface/{name}/binding` | `ServiceBindingDetail` |
+| GET | `.../node/{device}/vlan` | `[]VLANStatusEntry` |
+| GET | `.../node/{device}/vlan/{id}` | `VLANStatusEntry` |
+| GET | `.../node/{device}/vrf` | `[]VRFStatusEntry` |
+| GET | `.../node/{device}/vrf/{name}` | `VRFDetail` |
+| GET | `.../node/{device}/acl` | `[]ACLTableSummary` |
+| GET | `.../node/{device}/acl/{name}` | `ACLTableDetail` |
+| GET | `.../node/{device}/bgp/status` | `BGPStatusResult` |
+| GET | `.../node/{device}/bgp/check` | `[]HealthCheckResult` |
+| GET | `.../node/{device}/evpn/status` | `EVPNStatusResult` |
+| GET | `.../node/{device}/health` | `HealthReport` |
+| GET | `.../node/{device}/lag` | `[]LAGStatusEntry` |
+| GET | `.../node/{device}/lag/{name}` | `LAGStatusEntry` |
+| GET | `.../node/{device}/neighbor` | `[]NeighEntry` |
+| GET | `.../node/{device}/route/{vrf}/{prefix...}` | `RouteEntry` |
+| GET | `.../node/{device}/route-asic/{prefix...}` | `RouteEntry` |
+| GET | `.../node/{device}/configdb/{table}` | `[]string` (keys) |
+| GET | `.../node/{device}/configdb/{table}/{key}` | `map[string]string` |
+| GET | `.../node/{device}/configdb/{table}/{key}/exists` | `{exists: bool}` |
+| GET | `.../node/{device}/statedb/{table}/{key}` | `map[string]string` |
+
+All paths prefixed with `/network/{netID}`.
+
+### 4.6 Node Writes
+
+Dispatch via `connectAndExecute` — the actor calls `RebuildProjection` → `Execute(Lock → fn → Commit/Restore → Unlock)`. Response: `WriteResult`. Request types from §3.7.
+
+| Method | Path | Operation |
+|--------|------|-----------|
+| POST | `.../node/{device}/setup-device` | `SetupDevice` — metadata + loopback + BGP + VTEP |
+| POST | `.../node/{device}/create-vlan` | `CreateVLAN` |
+| POST | `.../node/{device}/delete-vlan` | `DeleteVLAN` |
+| POST | `.../node/{device}/configure-irb` | `ConfigureIRB` |
+| POST | `.../node/{device}/unconfigure-irb` | `UnconfigureIRB` |
+| POST | `.../node/{device}/create-vrf` | `CreateVRF` |
+| POST | `.../node/{device}/delete-vrf` | `DeleteVRF` (cascading destroy) |
+| POST | `.../node/{device}/bind-ipvpn` | `BindIPVPN` |
+| POST | `.../node/{device}/unbind-ipvpn` | `UnbindIPVPN` |
+| POST | `.../node/{device}/add-static-route` | `AddStaticRoute` |
+| POST | `.../node/{device}/remove-static-route` | `RemoveStaticRoute` |
+| POST | `.../node/{device}/create-acl` | `CreateACL` |
+| POST | `.../node/{device}/delete-acl` | `DeleteACL` |
+| POST | `.../node/{device}/add-acl-rule` | `AddACLRule` |
+| POST | `.../node/{device}/remove-acl-rule` | `DeleteACLRule` |
+| POST | `.../node/{device}/create-portchannel` | `CreatePortChannel` |
+| POST | `.../node/{device}/delete-portchannel` | `DeletePortChannel` |
+| POST | `.../node/{device}/add-portchannel-member` | `AddPortChannelMember` |
+| POST | `.../node/{device}/remove-portchannel-member` | `RemovePortChannelMember` |
+| POST | `.../node/{device}/bind-macvpn` | `BindMACVPN` |
+| POST | `.../node/{device}/unbind-macvpn` | `UnbindMACVPN` |
+| POST | `.../node/{device}/add-bgp-evpn-peer` | `AddBGPEVPNPeer` |
+| POST | `.../node/{device}/remove-bgp-evpn-peer` | `RemoveBGPEVPNPeer` |
+| POST | `.../node/{device}/reload-config` | `ConfigReload` (SONiC config reload) |
+| POST | `.../node/{device}/save-config` | `SaveConfig` (SONiC config save) |
+| POST | `.../node/{device}/restart-daemon` | `RestartService` |
+| POST | `.../node/{device}/ssh-command` | SSH command execution |
+
+### 4.7 Intent Operations
+
+Operations on the expected state. These operate on the abstract node's intent DB and projection (see [HLD §3.4](hld.md)).
+
+| Method | Path | Response | Purpose |
+|--------|------|----------|---------|
+| GET | `.../node/{device}/intent/tree` | `IntentTreeNode` | Read intent DAG |
+| GET | `.../node/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device |
+| POST | `.../node/{device}/intent/reconcile` | `ReconcileResult` | Push full projection to device |
+| POST | `.../node/{device}/intent/save` | — | Persist intents to topology.json |
+| POST | `.../node/{device}/intent/reload` | — | Reload from topology.json (topology only) |
+| POST | `.../node/{device}/intent/clear` | — | Clear all intents (topology only) |
+
+### 4.8 Interface Operations
+
+Scoped to a specific interface. Dispatch via `connectAndExecute`. Response: `WriteResult`.
+
+| Method | Path | Operation |
+|--------|------|-----------|
+| POST | `.../interface/{name}/apply-service` | `ApplyService` |
+| POST | `.../interface/{name}/remove-service` | `RemoveService` |
+| POST | `.../interface/{name}/refresh-service` | `RefreshService` |
+| POST | `.../interface/{name}/configure-interface` | `ConfigureInterface` |
+| POST | `.../interface/{name}/unconfigure-interface` | `UnconfigureInterface` |
+| POST | `.../interface/{name}/set-property` | `SetProperty` |
+| POST | `.../interface/{name}/clear-property` | `ClearProperty` |
+| POST | `.../interface/{name}/bind-acl` | `BindACL` |
+| POST | `.../interface/{name}/unbind-acl` | `UnbindACL` |
+| POST | `.../interface/{name}/add-bgp-peer` | `AddBGPPeer` |
+| POST | `.../interface/{name}/remove-bgp-peer` | `RemoveBGPPeer` |
+| POST | `.../interface/{name}/apply-qos` | `ApplyQoS` |
+| POST | `.../interface/{name}/remove-qos` | `RemoveQoS` |
+
+All paths prefixed with `/network/{netID}/node/{device}`.
+
+---
+
+## 5. CONFIG_DB Table Reference
+
+All CONFIG_DB writes go through `ChangeSet.Validate()` before reaching Redis, enforced by `render(cs)` at the point entries enter the projection. The schema is defined in `schema.go` with constraints derived from SONiC YANG models. Unknown tables and unknown fields are validation errors (fail-closed).
+
+### 5.1 Core Tables
+
+| Table | Key Format | Fields | Owner |
+|-------|-----------|--------|-------|
+| `PORT` | `Ethernet{N}` | admin_status, speed, mtu, fec, description, alias, lanes, index | RegisterPort |
+| `VLAN` | `Vlan{N}` | vlanid, description | `vlan_config.go` |
+| `VLAN_MEMBER` | `Vlan{N}\|{intf}` | tagging_mode | `vlan_config.go` |
+| `VLAN_INTERFACE` | `Vlan{N}` / `Vlan{N}\|{ip/mask}` | vrf_name, (empty for IP) | `vlan_config.go` |
+| `VRF` | `{name}` | vni | `vrf_config.go` |
+| `INTERFACE` | `{intf}` / `{intf}\|{ip/mask}` | vrf_name, (empty for IP) | `interface_config.go` |
+| `LOOPBACK_INTERFACE` | `Loopback0` / `Loopback0\|{ip/32}` | (empty for IP) | `baseline_config.go` |
+| `PORTCHANNEL` | `PortChannel{N}` | admin_status, mtu, min_links, fast_rate, fallback | `portchannel_config.go` |
+| `PORTCHANNEL_MEMBER` | `PortChannel{N}\|{intf}` | NULL:NULL | `portchannel_config.go` |
+| `STATIC_ROUTE` | `{vrf}\|{prefix}` | nexthop, ifname, distance | `vrf_config.go` |
+| `DEVICE_METADATA` | `localhost` | hostname, bgp_asn, type, hwsku, mac, docker_routing_config_mode, frr_mgmt_framework_config | `baseline_config.go`, `bgp_config.go` |
+
+Note: DEVICE_METADATA uses field-level merge in `applyEntry` — both `SetDeviceMetadata` and `ConfigureBGP` write to the same key without stomping each other's fields.
+
+### 5.2 VXLAN/EVPN Tables
+
+| Table | Key Format | Fields | Owner |
+|-------|-----------|--------|-------|
+| `VXLAN_TUNNEL` | `vtep` | src_ip | `vxlan_config.go` |
+| `VXLAN_EVPN_NVO` | `nvo` | source_vtep | `vxlan_config.go` |
+| `VXLAN_TUNNEL_MAP` | `vtep\|map_{VNI}_{resource}` | vni, vlan | `vxlan_config.go` |
+| `SUPPRESS_VLAN_NEIGH` | `Vlan{N}` | suppress | `vxlan_config.go` |
+| `BGP_EVPN_VNI` | `{vrf}\|{l3vni}` | (empty) | `vxlan_config.go` |
+
+### 5.3 BGP Tables
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `BGP_GLOBALS` | `{vrf\|default}` | local_asn, router_id, ebgp_requires_policy, always_compare_med, graceful_restart_enable, load_balance_mp_relax, holdtime, keepalive, rr_clnt_to_clnt_reflection, coalesce_time, route_map_process_delay |
+| `BGP_GLOBALS_AF` | `{vrf\|default}\|{afi_safi}` | max_ebgp_paths, max_ibgp_paths, ebgp_route_import_policy, ibgp_route_import_policy, advertise_all_vni, route_map_in, route_map_out, soft_reconfiguration_in, route_reflector_allow_outbound_policy, maximum_paths, maximum_paths_ibgp |
+| `BGP_NEIGHBOR` | `{vrf\|default}\|{ip}` | local_asn, asn, local_addr, name, admin_status, peer_group_name, ebgp_multihop |
+| `BGP_NEIGHBOR_AF` | `{vrf\|default}\|{ip}\|{afi_safi}` | admin_status, soft_reconfiguration_in, route_map_in, route_map_out, allow_own_as, rrclient, unchanged_nexthop |
+| `BGP_PEER_GROUP` | `{vrf\|default}\|{name}` | local_asn, asn, local_addr, name, admin_status, ebgp_multihop |
+| `BGP_PEER_GROUP_AF` | `{vrf\|default}\|{name}\|{afi_safi}` | admin_status, soft_reconfiguration_in, route_map_in, route_map_out, allow_own_as, unchanged_nexthop, rrclient |
+| `ROUTE_REDISTRIBUTE` | `{vrf\|default}\|{afi}\|connected` | (empty) |
+| `BGP_GLOBALS_EVPN_RT` | `{vrf}\|route_target\|{rt}` | (empty) |
+
+### 5.4 ACL Tables
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `ACL_TABLE` | `{name}` | policy_desc, type, stage, ports |
+| `ACL_RULE` | `{table}\|{rule}` | PRIORITY, PACKET_ACTION, SRC_IP, DST_IP, IP_PROTOCOL, L4_SRC_PORT, L4_DST_PORT, ETHER_TYPE, DSCP |
+
+### 5.5 QoS Tables
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `DSCP_TO_TC_MAP` | `{name}\|{dscp}` | tc |
+| `TC_TO_QUEUE_MAP` | `{name}\|{tc}` | queue |
+| `SCHEDULER` | `{name}` | type, weight |
+| `QUEUE` | `{intf}\|{q}` | scheduler |
+| `PORT_QOS_MAP` | `{intf}` | dscp_to_tc_map, tc_to_queue_map |
+| `WRED_PROFILE` | `{name}` | ecn, green_min_threshold, green_max_threshold, green_drop_probability, yellow_min_threshold, yellow_max_threshold, yellow_drop_probability, red_min_threshold, red_max_threshold, red_drop_probability |
+
+### 5.6 Policy Tables
+
+Content-hashed names enable blue-green migration when specs change. See [HLD §4.2](hld.md) for the content-hashing mechanism.
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `ROUTE_MAP` | `{name}\|{seq}` | route_operation, match_prefix_set, match_community, set_local_pref, set_community, set_med |
+| `PREFIX_SET` | `{name}\|{seq}` | prefix, action, ge, le |
+| `COMMUNITY_SET` | `{name}` | community_member, match_action |
+
+### 5.7 Anycast Gateway
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `SAG_GLOBAL` | `IP` | gateway_mac |
+
+### 5.8 Newtron Custom Table
+
+| Table | Key Format | Fields |
+|-------|-----------|--------|
+| `NEWTRON_INTENT` | `{resource}` | `operation`, `_parents`, `_children`, plus operation-specific params |
+
+NEWTRON_INTENT is newtron's bookkeeping — not a standard SONiC table. The `resource` key identifies the intent target (e.g., `device`, `vlan|100`, `interface|Ethernet0`). `operation` names the operation that created the intent. `_parents` and `_children` encode the intent DAG for dependency tracking. All other fields are operation-specific parameters stored for reconstruction and teardown (see [HLD §3.2](hld.md) on intent round-trip completeness).
+
+**Identity fields** (present on every intent):
+
+| Field | Purpose |
+|-------|---------|
+| `state` | Lifecycle: `unrealized`, `in-flight`, `actuated` |
+| `operation` | What created this intent: `apply-service`, `setup-evpn`, `configure-bgp`, etc. |
+| `name` | Spec reference (e.g., `transit`), empty if none |
+| `holder`, `created` | Who created the intent and when |
+| `applied_at`, `applied_by` | Audit metadata for last actualization |
+
+**Operation-specific param fields** (stored for teardown and reconstruction):
+
+| Field | Purpose |
+|-------|---------|
+| `service_name` | Applied service name |
+| `service_type` | Service type for teardown path selection |
+| `ip_address` | Applied IP address |
+| `vrf_name` | Applied VRF name |
+| `vrf_type` | `"interface"` or `"shared"` |
+| `ipvpn`, `macvpn` | VPN spec references |
+| `l3vni`, `l3vni_vlan` | L3VNI values for VRF teardown |
+| `l2vni` | L2VNI for VXLAN_TUNNEL_MAP cleanup |
+| `ingress_acl`, `egress_acl` | Content-hashed ACL names |
+| `bgp_neighbor`, `bgp_peer_as` | BGP peer for RefreshService |
+| `qos_policy` | QoS policy name |
+| `anycast_ip`, `anycast_mac` | Anycast values for SVI/SAG cleanup |
+| `arp_suppression` | ARP suppression flag |
+| `redistribute_vrf` | VRF where redistribution was overridden |
+
+The intent record is self-sufficient for reverse operations — every value needed for teardown is stored in the record's params, never re-resolved from specs (see [HLD §3.2](hld.md) on intent round-trip completeness).
+
+---
+
+## 6. Internal Implementation
+
+This section covers the mechanisms inside `pkg/newtron/network/node/` — the config method pattern, ChangeSet lifecycle, preconditions, intent DAG operations, and the execute lifecycle. For the pipeline architecture these pieces serve, see [HLD §3](hld.md) and [Unified Pipeline Architecture](unified-pipeline-architecture.md).
+
+### 6.1 ChangeSet
+
+The ChangeSet is the unit of work — a collection of pending CONFIG_DB changes with metadata. Every mutating operation returns a ChangeSet; the caller decides what happens with it.
+
+```go
+type ChangeSet struct {
+    Device          string
+    Operation       string
+    Timestamp       time.Time
+    Changes         []Change              // ordered list of CONFIG_DB mutations
+    AppliedCount    int
+    Verification    *sonic.VerificationResult
+    OperationParams map[string]string
+    ReverseOp       string
+}
+```
+
+**Mutation methods:**
+
+| Method | What it does |
+|--------|-------------|
+| `Add(table, key, fields)` | Append an add entry |
+| `Update(table, key, fields)` | Append a modify entry |
+| `Delete(table, key)` | Append a delete entry |
+| `Adds(entries)` | Append multiple adds from `[]sonic.Entry` |
+| `Prepend(table, key, fields)` | Insert at the front (used by `writeIntent` — intent records first) |
+| `Merge(other)` | Append all changes from another ChangeSet |
+
+**Lifecycle methods:**
+
+| Method | What it does |
+|--------|-------------|
+| `IsEmpty()` | True if no changes |
+| `Preview()` | Human-readable diff text (used for dry-run output) |
+| `Apply(n)` | Write changes to Redis via `PipelineSet`. No-op if `n.conn == nil` |
+| `Verify(n)` | Re-read CONFIG_DB, compare against changes. Stores result in `cs.Verification` |
+
+**Preview format:** `+ TABLE|key field=value` (add), `- TABLE|key` (delete), `~ TABLE|key field: old→new` (modify). Used for dry-run output in `WriteResult.Preview`.
+
+The `validate()` method (internal) runs schema validation via `schema.ValidateChanges(cs.Changes)` — called by `render(cs)` at the point entries enter the projection. `Apply` does not re-validate.
+
+### 6.2 Entry
+
+The wire format — what config generators return and what Redis speaks:
+
+```go
+type Entry struct {
+    Table  string
+    Key    string
+    Fields map[string]string
+}
+```
+
+Field-less entries (empty `Fields` map) are valid — SONiC uses them for IP assignments (`LOOPBACK_INTERFACE|Loopback0|10.0.0.1/32`), portchannel members, route targets, and similar patterns where the key IS the data.
+
+### 6.3 Config Function Pattern
+
+Each `*_ops.go` file follows a three-layer pattern. The config generator is a pure function; intent management and rendering happen in the wrapping method.
+
+**Layer 1 — Config generator** (in `*_config.go`): Pure function, no side effects. Takes parameters, returns `[]sonic.Entry`.
+
+```go
+// vlan_config.go
+func createVlanConfig(vlanID int, description string) []sonic.Entry {
+    return []sonic.Entry{
+        {Table: "VLAN", Key: fmt.Sprintf("Vlan%d", vlanID),
+         Fields: map[string]string{"vlanid": strconv.Itoa(vlanID), ...}},
+    }
+}
+```
+
+**Layer 2 — `op()` wrapper** (in `changeset.go`): Runs preconditions, calls the generator, builds the ChangeSet, calls `render(cs)` to validate and update the projection.
+
+```go
+cs, err := n.op("create-vlan", "vlan|100", sonic.ChangeTypeAdd,
+    func() error {
+        return n.precondition("create-vlan", "vlan|100").
+            RequireVLANNotExists(100).
+            Result()
+    },
+    func() ([]sonic.Entry, error) {
+        return createVlanConfig(100, "servers"), nil
+    },
+)
+```
+
+**Layer 3 — Intent-wrapping method** (in `*_ops.go`): Checks idempotency, calls `op()`, calls `writeIntent()`, returns the ChangeSet.
+
+```go
+func (n *Node) CreateVLAN(ctx context.Context, vlanID int, opts VLANOpts) (*ChangeSet, error) {
+    resource := fmt.Sprintf("vlan|%d", vlanID)
+    if n.GetIntent(resource) != nil {
+        return NewChangeSet(n.Name(), "create-vlan"), nil  // idempotent
+    }
+    cs, err := n.op("create-vlan", resource, sonic.ChangeTypeAdd, checks, gen)
+    if err != nil { return nil, err }
+    if err := writeIntent(cs, "create-vlan", resource, params, []string{"device"}); err != nil {
+        return nil, err
+    }
+    return cs, nil
+}
+```
+
+#### Worked Example: CreateVLAN End-to-End
+
+Tracing `POST /network/default/node/leaf1/create-vlan` with `{"id": 100, "name": "servers"}` and `?execute=true` through every layer:
+
+```
+1. HTTP layer (handler_node.go)
+   handleCreateVLAN parses JSON body → VLANConfig{VlanID: 100, Description: "servers"}
+   Resolves NetworkActor → NodeActor
+   Calls connectAndExecute(fn)
+
+2. Actor layer (actors.go)
+   execute(ctx, fn):
+     ensureActuatedIntent(ctx) → InitFromDeviceIntent if first request
+     RebuildProjection(ctx) → re-read NEWTRON_INTENT from Redis, rebuild projection
+
+   connectAndExecute → node.Execute(ctx, opts, fn):
+     Lock(ctx) → Redis SETNX + drift guard
+     snapshot := SnapshotIntentDB()
+
+3. Node layer (vlan_ops.go)
+   fn(ctx) → CreateVLAN(ctx, 100, opts):
+     GetIntent("vlan|100") → nil (not yet created)
+
+     op("create-vlan", "vlan|100", ChangeTypeAdd, ...):
+       precondition: RequireVLANNotExists(100) → GetIntent("vlan|100") → nil ✓
+       gen: createVlanConfig(100, "servers") → [
+         {VLAN, "Vlan100", {vlanid: "100", description: "servers"}}
+       ]
+       render(cs): schema.Validate() → OK; configDB.VLAN["Vlan100"] updated
+
+     writeIntent(cs, "create-vlan", "vlan|100",
+       {vlan_id: "100", description: "servers"}, ["device"]):
+       cs.Prepend("NEWTRON_INTENT", "vlan|100", {operation: "create-vlan", ...})
+       renderIntent → configDB.NewtronIntent["vlan|100"] updated
+
+4. Execute layer (node.go)
+   opts.Execute = true → Commit(ctx):
+     cs.Apply(n) → PipelineSet to Redis:
+       HSET NEWTRON_INTENT "vlan|100" ...  (first — prepended)
+       HSET VLAN "Vlan100" ...
+     cs.Verify(n) → re-read CONFIG_DB, compare → all match ✓
+
+   SaveConfig(ctx) → SSH "config save -y"
+   Unlock()
+
+5. Response
+   WriteResult{ChangeCount: 2, Applied: true, Verified: true, Saved: true}
+   → JSON → HTTP 200 → CLI prints "Changes applied successfully."
+```
+
+### 6.4 PreconditionChecker
+
+Fluent builder that validates operation prerequisites against the intent DB. Created by `precondition(operation, resource)` — in actuated mode, `RequireConnected` and `RequireLocked` are automatically added.
+
+```go
+n.precondition("create-vlan", "vlan|100").
+    RequireVLANNotExists(100).
+    RequireInterfaceNotPortChannelMember("Ethernet0").
+    Result()
+```
+
+**Available checks** (all check the intent DB via `GetIntent`, not CONFIG_DB):
+
+| Method | Checks |
+|--------|--------|
+| `RequireConnected()` | Transport connection exists |
+| `RequireLocked()` | Device lock held |
+| `RequireInterfaceExists(name)` | Interface registered in node |
+| `RequireInterfaceNotPortChannelMember(name)` | No portchannel intent claims this interface |
+| `RequireVLANExists(id)` / `RequireVLANNotExists(id)` | Intent `vlan\|{id}` exists/absent |
+| `RequireVRFExists(name)` / `RequireVRFNotExists(name)` | Intent `vrf\|{name}` exists/absent |
+| `RequirePortChannelExists(name)` / `RequirePortChannelNotExists(name)` | Intent for portchannel exists/absent |
+| `RequireVTEPConfigured()` | Intent `vtep` exists (VXLAN tunnel set up) |
+| `RequireACLTableExists(name)` / `RequireACLTableNotExists(name)` | Intent for ACL table exists/absent |
+| `Check(condition, precondition, details)` | Arbitrary boolean check |
+
+### 6.5 Intent DAG Operations
+
+Intent records form a directed acyclic graph via `_parents` and `_children` fields. The DAG enforces structural dependencies — a VLAN can't be deleted while services reference it.
+
+**Write path** (`intent_ops.go`, all internal to package):
+
+| Function | What it does |
+|----------|-------------|
+| `writeIntent(cs, op, resource, params, parents)` | Create intent record; verify all parents exist (I4); register as child of each parent; `cs.Prepend` puts intent first in ChangeSet |
+| `deleteIntent(cs, resource)` | Remove intent record; refuse if children exist (I5); deregister from parents' `_children` |
+| `renderIntent(entry)` | Immediately apply intent entry to in-memory configDB so subsequent `writeIntent` calls within the same operation can see parents |
+
+**DAG invariants:**
+
+| Rule | Enforcement |
+|------|------------|
+| I4: Parent must exist before child creation | `writeIntent` checks each parent via `GetIntent` |
+| I5: Children must be deleted before parent | `deleteIntent` checks `_children` field |
+| Bidirectional consistency | `ValidateIntentDAG` checks `_parents` ↔ `_children` bidirectional links |
+
+**Validation** (exported):
+
+```go
+func ValidateIntentDAG(configDB *sonic.ConfigDB) []DAGViolation
+```
+
+Checks bidirectional consistency, referential integrity, and orphan detection (BFS from `"device"` root).
+
+### 6.6 Reconstruct: IntentsToSteps and ReplayStep
+
+These two functions are the bridge between intent records and config methods. They are used by `RebuildProjection` (every operation) and `InitFromDeviceIntent` (first connection in actuated mode).
+
+**`IntentsToSteps(intents) []TopologyStep`** — Converts the flat NEWTRON_INTENT map into an ordered slice of topology steps using Kahn's topological sort on the `_parents`/`_children` DAG. Filters out `interface-init` and `deploy-service` intents (auto-created as side effects). Ties broken alphabetically for determinism.
+
+**`ReplayStep(ctx, n, step) error`** — Dispatches a single topology step to the appropriate Node or Interface method. Parses the step URL:
+
+| URL pattern | Dispatch |
+|-------------|----------|
+| `/setup-device` | `n.SetupDevice(ctx, opts)` |
+| `/create-vlan` | `n.CreateVLAN(ctx, id, opts)` |
+| `/create-vrf` | `n.CreateVRF(ctx, name, opts)` |
+| `/bind-ipvpn` | `n.BindIPVPN(ctx, vrf, ipvpn)` |
+| `/bind-macvpn` | `n.BindMACVPN(ctx, vlan, macvpn)` |
+| `/create-portchannel` | `n.CreatePortChannel(ctx, config)` |
+| `/add-pc-member` | `n.AddPortChannelMember(ctx, pc, member)` |
+| `/create-acl` | `n.CreateACL(ctx, config)` |
+| `/add-acl-rule` | `n.AddACLRule(ctx, config)` |
+| `/configure-irb` | `n.ConfigureIRB(ctx, config)` |
+| `/add-bgp-evpn-peer` | `n.AddBGPEVPNPeer(ctx, peer)` |
+| `/add-static-route` | `n.AddStaticRoute(ctx, vrf, prefix, nexthop)` |
+| `/interface/{name}/apply-service` | `iface.ApplyService(ctx, service, opts)` |
+| `/interface/{name}/configure-interface` | `iface.ConfigureInterface(ctx, config)` |
+| `/interface/{name}/add-bgp-peer` | `iface.AddBGPPeer(ctx, config)` |
+| `/interface/{name}/set-property` | `iface.SetProperty(ctx, prop, value)` |
+| `/interface/{name}/bind-acl` | `iface.BindACL(ctx, acl, direction)` |
+| `/interface/{name}/apply-qos` | `iface.ApplyQoS(ctx, policy, spec)` |
+
+**`ReconstructExpected(ctx, sp, name, profile, resolved, intents, ports) (*Node, error)`** — Creates an abstract Node, registers ports, calls `IntentsToSteps` + `ReplayStep` in order. Returns the node whose projection IS the expected device state. Used by `Drift` and `RebuildProjection`.
+
+**`IntentToStep(resource, fields) TopologyStep`** — Converts a single intent record back to a step. Uses `intentParamsToStepParams` to map flat intent field names back to structured step params (handles special cases: `setup-device` RR params, `apply-service` field renames, `create-portchannel` member list serialization).
+
+### 6.7 Node Execute Lifecycle
+
+All operations flow through `execute()` in the actor layer — the single entry point.
+
+```
+execute(ctx, fn)
+  ├─ Mode dispatch:
+  │    if topology mode: ensureTopologyIntent()
+  │    if actuated mode: ensureActuatedIntent(ctx) → InitFromDeviceIntent on first request
+  │
+  ├─ RebuildProjection(ctx)
+  │    ├─ if connected: fresh intents from Redis NEWTRON_INTENT
+  │    ├─ else: intents from in-memory configDB.NewtronIntent
+  │    ├─ ports := configDB.ExportPorts()
+  │    ├─ configDB = NewConfigDB()          ← fresh projection
+  │    ├─ RegisterPort() for each port
+  │    ├─ configDB.NewtronIntent = intents
+  │    ├─ IntentsToSteps(intents) → topological sort
+  │    └─ ReplayStep() for each → intent DB + projection rebuilt
+  │
+  └─ fn(ctx, node) → operation-specific logic
+```
+
+**Read path** (`connectAndRead`): `fn` calls `Ping` then the read operation (list, show, status, drift).
+
+**Write path** (`connectAndExecute`): `fn` calls `Execute(ctx, opts, writeFn)`:
+
+```
+Execute(ctx, opts, fn)
+  ├─ Lock(ctx)               ← Redis SETNX + drift guard (actuated mode)
+  ├─ snapshot := SnapshotIntentDB()
+  ├─ fn(ctx)                 ← config methods: writeIntent + op() + render
+  │
+  ├─ if error or dry-run:
+  │    RestoreIntentDB(snapshot) → intent DB restored
+  │    (dirty projection cleaned by next RebuildProjection)
+  │
+  ├─ if opts.Execute:
+  │    Commit(ctx):
+  │      cs.Apply(n)  → PipelineSet to Redis (NEWTRON_INTENT first)
+  │      cs.Verify(n) → re-read CONFIG_DB, compare
+  │    SaveConfig(ctx) → SSH "config save -y" (unless NoSave)
+  │
+  └─ Unlock()
+```
+
+### 6.8 Data Representations
+
+Data exists in three forms as it moves through the system:
+
+| Form | Where | Purpose |
+|------|-------|---------|
+| Intent record | `configDB.NewtronIntent` | Primary state — what should be configured |
+| Typed struct | `configDB.VLAN`, `configDB.VRF`, etc. | Projection — rendered from intent replay |
+| `map[string]string` | Redis hashes, `Entry.Fields` | Wire format — what Redis speaks |
+
+Three mechanisms bridge these:
+
+| Mechanism | Direction | Where it runs |
+|-----------|-----------|---------------|
+| `configTableHydrators` | wire → struct | `render` (all paths), `GetAll` (device read) |
+| `structToFields` | struct → wire | `ExportEntries` / `ExportRaw` (Reconcile, Drift) |
+| `schema.Validate` | wire → pass/fail | `render` (all paths, both modes) |
+
+The hydrator registry (`configdb_parsers.go`) is the central bridge — 33 typed parsers for tables with structured fields, 9 merge parsers for tables where the key carries the data (IP assignments, route targets, portchannel members). `ExportEntries` is the reverse path — it reads typed structs and calls `structToFields` (reflection on json tags) to produce `[]Entry` for delivery.
+
+**Hydrator field completeness**: A field that exists in config generator output but is missing from the typed struct or hydrator is silently dropped during hydration — the projection loses it, and `ExportEntries` never exports it. This causes false drift on a correctly-configured device. Every field written by a config generator must exist in three places: `schema.go` (validation), the typed struct in `configdb.go` (representation), and the hydrator in `configdb_parsers.go` (wire → struct).
+
+### 6.9 Spec Resolution
+
+`buildResolvedSpecs()` in `network.go` merges the three-level hierarchy (network → zone → node) into a per-node `ResolvedSpecs` snapshot. This snapshot implements the `SpecProvider` interface that all node operations use for spec lookups:
+
+```go
+type SpecProvider interface {
+    GetService(name string) *spec.ServiceSpec
+    GetIPVPN(name string) *spec.IPVPNSpec
+    GetMACVPN(name string) *spec.MACVPNSpec
+    GetFilter(name string) *spec.FilterSpec
+    GetQoSPolicy(name string) *spec.QoSPolicy
+    GetRoutePolicy(name string) *spec.RoutePolicy
+    GetPrefixList(name string) []string
+}
+```
+
+Lookups fall through: node-level checked first, then zone, then network. Specs added via the API after snapshot time are invisible in the snapshot — all `Get*` methods on `ResolvedSpecs` fall through to `network.Get*` on miss (the live network, not the snapshot).
+
+Names are normalized once at spec load time (uppercase, hyphens → underscores). Operations code never calls `NormalizeName()`.
+
+### 6.10 Value Derivation
+
+All values below are derived at `ApplyService` time and stored in NEWTRON_INTENT params for teardown. Abstract mode (topology provisioning) derives identical values through the same code path.
+
+| Value | Derivation |
+|-------|-----------|
+| VRF name (interface type) | `{SERVICE}_{SHORT_INTF}` (e.g., `TRANSIT_ETH0`) |
+| VRF name (shared type) | IPVPN spec's VRF name directly |
+| ACL table name | `{FILTER}_{DIRECTION}_{HASH}` (e.g., `PROTECT_RE_IN_A1B2C3D4`) |
+| Neighbor IP (/31) | XOR last bit of local IP |
+| Neighbor IP (/30) | XOR host bits (1→2, 2→1) |
+| Router ID | Loopback IP from device profile |
+| VTEP source IP | Loopback IP from device profile |
+
+**Interface name normalization** (short forms used in derived names):
+
+| Short | Full (SONiC) |
+|-------|-------------|
+| `Eth0` | `Ethernet0` |
+| `Po100` | `PortChannel100` |
+| `Vl100` | `Vlan100` |
+| `Lo0` | `Loopback0` |
+
+### 6.11 Shared Policy Objects
+
+CONFIG_DB entries fall into three categories based on lifecycle:
+
+| Category | Identity | Lifecycle |
+|----------|----------|-----------|
+| **Infrastructure** | Per-interface | Created/destroyed with service apply/remove |
+| **Policy** | User-named + content hash | Shared across services, independent lifecycle |
+| **Binding** | Per-interface | Created/destroyed with service apply/remove |
+
+Policy objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) are created on first reference and deleted when the last reference is removed. Content-hashed naming: shared policy objects include an 8-character SHA256 hash of their generated CONFIG_DB fields in the key name. Spec unchanged → hash unchanged → `RefreshService` is a no-op for that object. Spec changed → new hash → new object alongside old, interfaces migrate one by one.
+
+Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes computed first, then ROUTE_MAP entries reference real PREFIX_SET names (including hashes), so a content change cascades through the hash chain automatically.
+
+### 6.12 Middleware Chain
+
+HTTP middleware applied to all routes (outer → inner):
+
+| Middleware | Purpose |
+|-----------|---------|
+| `withRecovery` | Panic recovery → 500 response |
+| `withLogger` | Request/response logging |
+| `withRequestID` | Unique ID per request (X-Request-ID header) |
+| `withTimeout(5min)` | Context deadline |
+| `withMode` | Resolves `?mode=topology` query param into context |
+
+### 6.13 Actor Serialization
+
+Each `NodeActor` serializes access to its cached `*Node` — only one operation runs at a time per device. The actor also manages the SSH connection lifecycle:
+
+- **Idle timeout** (default 5 minutes): Connection closed when no requests arrive within the timeout window, eliminating persistent SSH sessions for inactive devices.
+- **Connection caching**: `ensureActuatedIntent` / `ensureTopologyIntent` run once to construct the node; subsequent requests reuse the cached node.
+- **Graceful disconnect**: `DisconnectTransport()` on timeout, `Disconnect()` on unregister.
+
+---
+
+## 7. Permission System
+
+Permission types are defined covering service operations, resource CRUD, spec authoring, and device cleanup. Read/view operations have no permission requirement.
+
+**Current status:** Permission types exist in code but are not enforced at the HTTP layer. The server has no authentication middleware — it is designed for trusted-network deployment (localhost or VPN). When authentication is added, the defined permission types provide the granularity framework.
+
+---
+
+## 8. Audit Logging
+
+Every mutating operation is logged to a rotating JSON-lines audit log. The `audit/` package provides append-only writing with size-based rotation.
+
+```go
+type AuditEvent struct {
+    ID          string        `json:"id"`
+    Timestamp   string        `json:"timestamp"`
+    User        string        `json:"user"`
+    Device      string        `json:"device"`
+    Operation   string        `json:"operation"`
+    Changes     []AuditChange `json:"changes"`
+    Success     bool          `json:"success"`
+    ExecuteMode bool          `json:"execute_mode"`
+    DryRun      bool          `json:"dry_run"`
+    Duration    string        `json:"duration"`
+}
+```
+
+Audit events capture: who did what, on which device, what CONFIG_DB entries were modified, whether it succeeded, and whether it was a dry-run or execute. Dry-run events are logged for auditability — they show what was previewed even though no changes were applied.
+
+Configuration: `UserSettings.AuditLogPath` (default: `{spec_dir}/audit.log`), `AuditMaxSizeMB` (default: 10), `AuditMaxBackups` (default: 10).
+
+---
 
 ## 9. CLI Command Reference
 
-The CLI is an HTTP client using `pkg/newtron/client/`. All operations route through newtron-server.
+The CLI (`cmd/newtron/`) is an HTTP client — it sends requests to newtron-server and formats responses. All device state manipulation goes through the HTTP API; the CLI never imports internal packages.
 
 ### 9.1 Global Flags
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--device` | `-D` | Target device (also positional first arg) |
-| `--server` | — | Server URL (default `http://localhost:8080`, env `NEWTRON_SERVER`) |
-| `--network-id` | `-N` | Network ID (default `default`, env `NEWTRON_NETWORK_ID`) |
-| `--specs` | `-S` | Spec directory |
-| `--verbose` | `-v` | Verbose output |
-| `--json` | — | JSON output |
-
-**Per noun-group:**
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--execute` | `-x` | Execute changes (default dry-run) |
-| `--no-save` | — | Skip `config save -y` after execute (requires `-x`) |
+| Flag | Purpose | Default |
+|------|---------|---------|
+| `-s, --server` | Server URL | `http://localhost:8080` |
+| `-n, --network` | Network ID | `default` |
+| `-x, --execute` | Apply changes (vs dry-run) | false |
+| `--no-save` | Skip config save after apply | false |
+| `--topology` | Use topology mode (offline abstract node) | false |
 
 ### 9.2 Resource Nouns
 
-| Noun | Write Actions | Read Actions |
-|------|--------------|-------------|
-| `interface` | `set <intf> <prop> <val>` | `list`, `show <intf>` |
-| `vlan` | `create`, `delete`, `add-interface`, `remove-interface`, `configure-svi`, `bind-macvpn`, `unbind-macvpn` | `list`, `show <id>`, `status` |
-| `vrf` | `create`, `delete`, `add-interface`, `remove-interface`, `bind-ipvpn`, `unbind-ipvpn`, `add-neighbor`, `remove-neighbor`, `add-route`, `remove-route` | `list`, `show <name>`, `status` |
-| `lag` | `create`, `delete`, `add-interface`, `remove-interface` | `list`, `show <name>`, `status` |
-| `evpn` | `setup` | `status` |
-| `evpn ipvpn` | `create`, `delete` | `list`, `show <name>` |
-| `evpn macvpn` | `create`, `delete` | `list`, `show <name>` |
-| `bgp` | — | `status` |
-| `qos` | `create`, `delete`, `add-queue`, `remove-queue`, `apply`, `remove` | `list`, `show <name>` |
-| `filter` | `create`, `delete`, `add-rule`, `remove-rule` | `list`, `show <name>` |
-| `service` | `create`, `delete`, `apply`, `remove`, `refresh` | `list`, `show <name>`, `get <intf>` |
-| `acl` | `create`, `delete`, `add-rule`, `delete-rule`, `bind`, `unbind` | `list`, `show <name>` |
+| Noun | Subcommands | Scope |
+|------|-------------|-------|
+| `service` | `list`, `show`, `create`, `delete`, `apply`, `remove`, `refresh` | Network (CRUD), Interface (apply/remove/refresh) |
+| `vlan` | `list`, `show`, `create`, `delete` | Node |
+| `vrf` | `list`, `show`, `create`, `delete`, `add-interface`, `remove-interface`, `add-neighbor`, `remove-neighbor`, `bind-ipvpn`, `unbind-ipvpn`, `add-static-route`, `remove-static-route`, `status` | Node |
+| `bgp` | `status` | Node |
+| `evpn` | `setup`, `status`, `ipvpn` (sub-noun), `macvpn` (sub-noun) | Node (setup/status), Network (ipvpn/macvpn CRUD) |
+| `acl` | `list`, `show`, `create`, `delete`, `add-rule`, `remove-rule`, `bind`, `unbind` | Node |
+| `qos` | `list`, `show`, `create`, `delete`, `add-queue`, `remove-queue`, `apply`, `remove` | Network (CRUD), Interface (apply/remove) |
+| `filter` | `list`, `show`, `create`, `delete`, `add-rule`, `remove-rule` | Network |
+| `interface` | `list`, `show`, `configure`, `unconfigure`, `set`, `clear`, `binding` | Node |
+| `lag` | `list`, `show`, `create`, `delete`, `add-member`, `remove-member` | Node |
+| `intent` | `tree`, `drift`, `reconcile`, `save`, `reload`, `clear` | Node |
+| `health` | (default) | Node |
+| `init` | (default) | Node |
+| `show` | (default — device info) | Node |
+| `platform` | `list`, `show` | Network |
+| `profile` | `list`, `show`, `create`, `delete` | Network |
+| `zone` | `list`, `show`, `create`, `delete` | Network |
+| `settings` | `show`, `set` | Local |
+| `audit` | `list`, `show` | Local |
 
-### 9.3 Device Operations
+### 9.3 VRF Neighbor Auto-Derivation
 
-| Command | Description |
-|---------|-------------|
-| `show` | Device summary (info, interfaces, VLANs, VRFs) |
-| `init [--force]` | Enable unified config mode (frrcfgd) for newtron management |
-| `provision` | Generate + deliver composite from topology |
-| `health` | Device health report |
-| `device config-reload` | Reload CONFIG_DB from disk |
-| `device save-config` | Persist runtime CONFIG_DB to disk |
-| `device cleanup` | Remove orphaned ACLs/VRFs/VNI mappings |
-| `device zombie` | Show zombie operation from a crashed process |
-| `device zombie rollback [-x]` | Preview or execute zombie rollback |
-| `device zombie clear` | Dismiss zombie without rollback |
+When adding a BGP neighbor to a VRF, the CLI auto-derives values from the interface context:
 
-### 9.4 Meta Commands
+- **Peer IP**: Derived from the interface's IP address (flip the last octet for /31 subnets)
+- **Remote AS**: From the service spec's `routing.peer_as` (if `"request"`, the caller provides it)
+- **Local address**: The interface's own IP
+- **Description**: The neighbor IP (default fallback — bgpcfgd requires a non-empty `name` field)
 
-| Command | Description |
-|---------|-------------|
-| `settings list` | Show current settings |
-| `settings set <key> <val>` | Set a setting |
-| `settings get <key>` | Get a setting |
-| `audit list` | Query audit log |
-| `platform list` | List platforms |
-| `platform show <name>` | Show platform details |
+### 9.4 Service Immutability
 
-### 9.5 VRF Neighbor Auto-Derivation
+Services are immutable once created. To change a service definition:
+1. Create a new service with the desired spec
+2. `refresh-service` on each interface to migrate to the new spec
+3. Delete the old service
 
-| Subnet | Behavior |
-|--------|----------|
-| `/30` | Neighbor IP auto-derived (other host address) |
-| `/31` | Neighbor IP auto-derived (RFC 3021) |
-| `/29` or larger | `--neighbor-ip` required |
+`RefreshService` = full remove + reapply cycle. The two ChangeSets merge, preserving intermediate DEL operations (required because Redis HSET merges fields — DEL is needed to remove stale fields before re-HSET).
 
-### 9.6 Service Immutability
-
-Once applied, structural config is immutable. To change VRF, IP, ACLs, EVPN mappings, or QoS — remove and reapply.
-
-Mutable (while service is bound): `admin-status`, `cost-in`, `cost-out`.
-
-### 9.7 Zombie Operations
-
-| Command | Description |
-|---------|-------------|
-| `device zombie` | Show zombie operation from a crashed process |
-| `device zombie rollback` | Preview rollback (dry-run) |
-| `device zombie rollback -x` | Execute rollback (reverse operations) |
-| `device zombie clear` | Dismiss zombie without rollback |
-
-`device zombie` (inspect) uses `connectAndRead` — no lock required. `device zombie rollback` and `device zombie clear` use `connectAndLocked` with `SetBypassZombieCheck(true)` since they are resolving the zombie, not blocked by it.
+---
 
 ## 10. Testing
 
 ### 10.1 API Completeness Test
 
-`TestAPICompleteness` in `pkg/newtron/api/api_test.go` uses `reflect` to enumerate every exported method on `*newtron.Network`, `*newtron.Node`, and `*newtron.Interface`. Each method must appear in either:
-
-- **`coveredMethods`** — has a corresponding HTTP endpoint
-- **`excludedMethods`** — intentionally not exposed (lifecycle/internal: Lock, Unlock, Close, Rollback, Name, IsAbstract, etc.) with a comment explaining why
-
-Any method in neither set fails the test — this prevents new public methods from being added without HTTP endpoints.
+`api_test.go` verifies that every route in `buildMux` has a corresponding client method. This prevents silent API drift — adding a server endpoint without a client method (or vice versa) fails the test.
 
 ### 10.2 Unit Tests
 
-Pure computation tests with no external dependencies:
-
-| Area | Function | Covers |
-|------|----------|--------|
-| IP math | `ComputeNeighborIP` | /30 and /31 neighbor derivation |
-| Name normalization | `NormalizeInterfaceName` | Eth0→Ethernet0, Po100→PortChannel100 |
-| Spec resolution | `buildResolvedSpecs` | Three-level merge: network → zone → node (lower wins) |
-| ACL expansion | `createAclConfig` | Filter rules → ACL_TABLE + ACL_RULE entries |
-| ChangeSet | `Preview` | Format for add/delete/modify operations |
+`go test ./...` covers pure logic: IP derivation, spec parsing, ACL expansion, schema validation, intent DAG consistency, config generator output, ChangeSet merging, and architecture invariants (the architecture test verifies that internal types don't leak through the public API).
 
 ### 10.3 E2E Tests
 
-E2E testing is covered by newtrun test suites (see [newtrun HLD](../newtrun/hld.md)). Validated suites:
+The newtrun framework runs full-stack tests against newtlab VMs with real SONiC. See [newtrun HLD](../newtrun/hld.md) for framework design and [newtrun HOWTO](../newtrun/howto.md) for writing scenarios.
 
-| Suite | Topology | Steps | Covers |
-|-------|----------|-------|--------|
-| `2node-ngdp-primitive` | 2node-ngdp | 20 | All service types, VLANs, VRFs, BGP, ACLs, health checks |
-| `2node-ngdp-service` | 2node-ngdp-service | 6 | Provision → health → dataplane → deprovision → verify-clean |
-| `3node-ngdp-dataplane` | 3node-ngdp | 6 | L3 routing, EVPN L2 IRB, cross-device traffic verification |
+---
+
+## 11. Cross-References
+
+| Topic | Document |
+|-------|----------|
+| Architecture, design rationale, pipeline overview | [HLD](hld.md) |
+| Full pipeline specification with end-to-end traces | [Unified Pipeline Architecture](unified-pipeline-architecture.md) |
+| Device-layer internals (SSH tunneling, Redis clients) | [Device LLD](device-lld.md) |
+| Intent DAG hierarchy and record format | [Intent DAG Architecture](intent-dag-architecture.md) |
+| Architectural principles | [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md) |
+| Operational procedures (CLI usage, provisioning) | [HOWTO](howto.md) |
+| SONiC pitfalls and workarounds | [RCA Index](../rca/) |

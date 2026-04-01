@@ -1,0 +1,17 @@
+name: teardown
+description: |
+  Reset devices to factory state. Config reload restores CONFIG_DB to the
+  saved config_db.json defaults, wiping all newtron-applied config.
+topology: 2node-vs-service
+requires: [verify-unblocked]
+
+steps:
+  - name: reload-config
+    action: newtron
+    devices: [switch1, switch2]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-reload
+    action: wait
+    duration: 30s

@@ -1,0 +1,45 @@
+name: drift-guard-resolution
+description: |
+  Drift guard error message includes resolution guidance ("reconcile").
+
+  Architecture §8 (Drift Guard): "The resolution is explicit: Reconcile()
+  first (pushes the projection to the device, eliminating drift), then
+  retry the write." The error message from the drift guard should guide
+  the operator toward reconcile as the fix.
+topology: 1node-vs
+requires: [drift-detail]
+
+steps:
+  # Inject drift
+  - name: inject-drift
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan666' vlanid 666"}
+
+  # Attempt a write — should fail with drift guard error mentioning reconcile
+  - name: guard-error-mentions-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/create-vlan
+    params: {id: 702}
+    expect_failure: true
+    expect:
+      contains: reconcile
+
+  # Cleanup
+  - name: cleanup-drift
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 DEL 'VLAN|Vlan666'"}
+
+  - name: verify-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

@@ -1,0 +1,70 @@
+name: drift-detail
+description: |
+  Drift entries include field-level detail for modified entries.
+
+  Architecture §6 (Drift): DiffConfigDB compares expected (projection) vs
+  actual (device CONFIG_DB) and returns DriftEntry records. For "modified"
+  entries, the diff should include expected and actual field values so the
+  operator can see exactly what diverged.
+
+  Tests that modified drift entries carry expected/actual field values,
+  not just the table and key.
+topology: 1node-vs
+requires: [actuated-reconcile]
+
+steps:
+  # Inject a known modification: change BGP ASN from 65001 to 55555
+  - name: inject-known-modification
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 55555"}
+
+  # Verify the drift entry for the modified BGP_GLOBALS includes field detail.
+  # A useful drift entry for a "modified" type should contain:
+  # - table: BGP_GLOBALS
+  # - key: default
+  # - type: modified
+  # - expected and actual field information showing the ASN difference
+  - name: drift-has-field-detail
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: >-
+        [.[] | select(.type == "modified" and .table == "BGP_GLOBALS")]
+        | length >= 1
+        and (.[0] | has("expected") or has("fields") or has("diff"))
+
+  # Verify the extra entry also has table + key + type
+  - name: inject-extra-for-detail
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan777' vlanid 777"}
+
+  - name: drift-extra-has-identity
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: >-
+        [.[] | select(.type == "extra" and .table == "VLAN" and .key == "Vlan777")]
+        | length == 1
+
+  # Cleanup
+  - name: cleanup-modifications
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'BGP_GLOBALS|default' local_asn 65001; sudo redis-cli -n 4 DEL 'VLAN|Vlan777'"}
+
+  - name: verify-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

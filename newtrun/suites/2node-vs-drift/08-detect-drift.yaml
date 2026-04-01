@@ -1,33 +1,34 @@
 name: detect-drift
 description: |
-  After injecting CONFIG_DB changes on switch1, verify that drift detection
-  correctly identifies the specific drifted state.
+  After injecting CONFIG_DB changes on switch1, verify that topology drift
+  detection correctly identifies the specific drifted entries.
 
   Key assertions:
-    - switch1: drifted with exactly 1 missing, 1 extra, 1 modified
-    - switch2: still clean (drift is per-device, no cross-contamination)
+    - switch1: 3 drift entries (1 missing, 1 extra, 1 modified)
+    - switch2: zero drift entries (per-device, no cross-contamination)
+
+  Uses ?mode=topology so the projection is built from topology.json.
+  The injected CONFIG_DB changes diverge from what the topology declares.
 topology: 2node-vs-service
 requires: [inject-drift]
 
 steps:
-  # Observe drift on switch1 (informational — always passes)
-  - name: detect-drift-sw1
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/drift
-
-  # Assert: switch1 has exactly 3 drifts (1 per category)
+  # Assert: switch1 has exactly 3 drift entries (1 per category)
   - name: verify-drift-sw1
     action: newtron
     devices: [switch1]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "drifted" and (.missing | length) == 1 and (.extra | length) == 1 and (.modified | length) == 1'
+      jq: >-
+        length == 3
+        and ([.[] | select(.type == "missing")] | length) == 1
+        and ([.[] | select(.type == "extra")] | length) == 1
+        and ([.[] | select(.type == "modified")] | length) == 1
 
   # Assert: switch2 is still clean — per-device isolation
   - name: verify-drift-sw2-still-clean
     action: newtron
     devices: [switch2]
-    url: /node/{{device}}/drift
+    url: /node/{{device}}/intent/drift?mode=topology
     expect:
-      jq: '.status == "clean" and (.missing | length) == 0 and (.extra | length) == 0 and (.modified | length) == 0'
+      jq: 'length == 0'

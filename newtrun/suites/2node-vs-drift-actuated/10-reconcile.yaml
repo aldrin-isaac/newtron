@@ -1,0 +1,77 @@
+name: reconcile
+description: |
+  Reconcile switch1 in actuated mode to fix the drift. Reconcile delivers
+  the full projection (built from device NEWTRON_INTENT) to CONFIG_DB via
+  ReplaceAll, removing any entries not in the projection.
+
+  Reconcile bypasses the drift guard (its purpose IS to fix drift).
+
+  After reconcile:
+    - Rogue VLAN 999 must be removed (not in any intent)
+    - Provisioned state must be intact
+    - Drift detection must report zero entries
+    - Writes must succeed again (drift guard passes)
+topology: 2node-vs-service
+requires: [verify-guard]
+
+steps:
+  # Reconcile in actuated mode (no ?mode=topology).
+  # Rebuilds projection from device intents, delivers via ReplaceAll.
+  - name: reconcile-sw1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+
+  - name: wait-bgp-instance
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  - name: verify-bgp
+    action: newtron
+    devices: [switch1, switch2]
+    url: /node/{{device}}/bgp/check
+    poll:
+      timeout: 120s
+      interval: 5s
+    expect:
+      jq: 'length > 0 and all(.[]; .status == "pass")'
+
+  # Rogue VLAN must be gone — not in any intent, so not in projection
+  - name: verify-rogue-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan999/exists
+    expect:
+      jq: '.exists == false'
+
+  # Provisioned VLAN 100 (from topology) must still exist
+  - name: verify-provisioned-intact
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan100
+    expect:
+      jq: '.vlanid == "100"'
+
+  # Drift must be clean
+  - name: verify-drift-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

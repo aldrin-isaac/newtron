@@ -1,0 +1,80 @@
+name: nonowned-survive
+description: |
+  Non-owned tables survive reconcile — factory entries persist.
+
+  Architecture §6 (Reconcile): "Factory fields (mac, platform, hwsku)
+  survive because: ConfigReload restores them from /etc/sonic/config_db.json;
+  ReplaceAll only DELs keys for tables the Node manages."
+
+  ReplaceAll operates on owned tables only. Tables like DEVICE_METADATA
+  (which stores mac, platform, hwsku) are partially managed — newtron writes
+  specific fields but doesn't DEL the key. Non-owned tables and non-managed
+  fields should survive reconcile.
+
+  Tests that after reconcile, factory DEVICE_METADATA fields (mac, platform,
+  hwsku) still exist on the device.
+topology: 1node-vs
+requires: [rebuild-external]
+
+steps:
+  # Read factory DEVICE_METADATA before reconcile — capture the mac address.
+  # SONiC sets platform, hwsku, and mac at boot time.
+  - name: verify-factory-metadata-before
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/DEVICE_METADATA/localhost
+    expect:
+      jq: 'has("hwsku") and has("platform")'
+
+  # Reconcile from topology (atomic ReplaceAll of owned tables)
+  - name: reconcile
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: reload-config
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/reload-config
+
+  - name: wait-after-reload
+    action: wait
+    duration: 15s
+
+  - name: restart-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/restart-daemon
+    params: {daemon: bgp}
+    poll:
+      timeout: 30s
+      interval: 5s
+
+  - name: wait-bgp
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo vtysh -c 'show running-config'"}
+    poll:
+      timeout: 30s
+      interval: 3s
+    expect:
+      jq: '.output | contains("router bgp")'
+
+  # Verify factory DEVICE_METADATA fields survived reconcile
+  - name: verify-factory-metadata-after
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/DEVICE_METADATA/localhost
+    expect:
+      jq: 'has("hwsku") and has("platform")'
+
+  # Verify zero drift
+  - name: verify-clean
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

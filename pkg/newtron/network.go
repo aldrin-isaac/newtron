@@ -8,6 +8,7 @@ import (
 	"github.com/newtron-network/newtron/pkg/newtron/auth"
 	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
 	"github.com/newtron-network/newtron/pkg/newtron/network"
+	"github.com/newtron-network/newtron/pkg/newtron/spec"
 )
 
 // Network is the top-level API entry point.
@@ -28,15 +29,6 @@ func LoadNetwork(specDir string) (*Network, error) {
 // SetAuth installs a permission checker. If nil, all permission checks are skipped.
 func (net *Network) SetAuth(checker *auth.Checker) {
 	net.auth = checker
-}
-
-// Connect loads the named device and establishes a connection to its Redis databases.
-func (net *Network) Connect(ctx context.Context, device string) (*Node, error) {
-	dev, err := net.internal.ConnectNode(ctx, device)
-	if err != nil {
-		return nil, fmt.Errorf("connecting to %s: %w", device, err)
-	}
-	return &Node{net: net, internal: dev}, nil
 }
 
 // InitDevice prepares a device for newtron management. This is a one-time
@@ -173,94 +165,82 @@ func (net *Network) GetHostProfile(name string) (*HostProfile, error) {
 	}, nil
 }
 
-// DetectDrift reconstructs expected CONFIG_DB from the device's NEWTRON_INTENT
-// records and diffs against actual CONFIG_DB. Returns drift entries for owned tables.
+// InitFromDeviceIntent creates a node whose projection is built from the device's
+// own NEWTRON_INTENT records. The device's raw CONFIG_DB is never assigned to the
+// node — the projection is derived entirely from intent replay.
 //
-// Intent-based: the device's own intent records define expected state. Any CONFIG_DB
-// edit (manual or otherwise) that diverges from intent is reported as drift.
-// Requires the device to be connected.
-func (net *Network) DetectDrift(ctx context.Context, device string) (*DriftReport, error) {
-	dev, err := net.internal.GetNode(device)
+// Architecture §3: actuated mode construction.
+func (net *Network) InitFromDeviceIntent(ctx context.Context, device string) (*Node, error) {
+	dev, err := net.internal.InitFromDeviceIntent(ctx, device)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("initializing from device intents on %s: %w", device, err)
 	}
-
-	diffs, err := dev.DetectDrift(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	pub := &DriftReport{
-		Device: device,
-		Status: "clean",
-	}
-	for _, d := range diffs {
-		switch d.Type {
-		case "missing":
-			pub.Missing = append(pub.Missing, DriftEntry{
-				Table: d.Table, Key: d.Key, Type: d.Type,
-				Expected: d.Expected,
-			})
-		case "extra":
-			pub.Extra = append(pub.Extra, DriftEntry{
-				Table: d.Table, Key: d.Key, Type: d.Type,
-				Actual: d.Actual,
-			})
-		case "modified":
-			pub.Modified = append(pub.Modified, DriftEntry{
-				Table: d.Table, Key: d.Key, Type: d.Type,
-				Expected: d.Expected, Actual: d.Actual,
-			})
-		}
-	}
-	if len(pub.Missing) > 0 || len(pub.Extra) > 0 || len(pub.Modified) > 0 {
-		pub.Status = "drifted"
-	}
-	return pub, nil
+	return &Node{net: net, internal: dev}, nil
 }
 
-// DetectTopologyDrift compares expected CONFIG_DB (from topology steps) against
-// actual CONFIG_DB on the device. Unlike DetectDrift (intent-based), this detects
-// operations done outside the topology — e.g., manual apply-service calls.
-// Requires a topology to be loaded and the device to be connected.
-func (net *Network) DetectTopologyDrift(ctx context.Context, device string) (*DriftReport, error) {
+// BuildTopologyNode creates a node whose projection is built from topology.json
+// steps. The node is fully replayed but has no device connection. Used for
+// topology-mode operations (tree, drift, reconcile, save, CRUD).
+//
+// Architecture §3: topology mode construction.
+func (net *Network) BuildTopologyNode(device string) (*Node, error) {
 	if !net.HasTopology() {
-		return nil, &ValidationError{Message: "no topology loaded — topology drift detection requires a topology"}
+		return nil, &ValidationError{Message: "no topology loaded — topology mode requires a topology"}
 	}
 	tp, err := network.NewTopologyProvisioner(net.internal)
 	if err != nil {
 		return nil, err
 	}
-	report, err := tp.DetectTopologyDrift(ctx, device)
+	// Check if device has steps. After clear+save, topology.json may have
+	// zero steps — build an empty node (ports only) instead of erroring.
+	// Architecture §6 (Reload): "Destroys the current node and rebuilds
+	// from topology.json." An empty topology.json entry is a valid state.
+	topoDev, err := net.internal.GetTopologyDevice(device)
 	if err != nil {
 		return nil, err
 	}
-	pub := &DriftReport{
-		Device: report.Device,
-		Status: report.Status,
+	if len(topoDev.Steps) == 0 {
+		return net.BuildEmptyTopologyNode(device)
 	}
-	for _, d := range report.Missing {
-		pub.Missing = append(pub.Missing, DriftEntry{
-			Table: d.Table, Key: d.Key, Type: d.Type,
-			Expected: d.Expected,
-		})
+	dev, err := tp.BuildAbstractNode(device)
+	if err != nil {
+		return nil, err
 	}
-	for _, d := range report.Extra {
-		pub.Extra = append(pub.Extra, DriftEntry{
-			Table: d.Table, Key: d.Key, Type: d.Type,
-			Actual: d.Actual,
-		})
+	return &Node{net: net, internal: dev}, nil
+}
+
+// BuildEmptyTopologyNode creates a node with ports registered from topology.json
+// but no intents replayed. Used for intent clear (empty canvas).
+//
+// Architecture §6 Clear.
+func (net *Network) BuildEmptyTopologyNode(device string) (*Node, error) {
+	if !net.HasTopology() {
+		return nil, &ValidationError{Message: "no topology loaded — topology mode requires a topology"}
 	}
-	for _, d := range report.Modified {
-		pub.Modified = append(pub.Modified, DriftEntry{
-			Table: d.Table, Key: d.Key, Type: d.Type,
-			Expected: d.Expected, Actual: d.Actual,
-		})
+	tp, err := network.NewTopologyProvisioner(net.internal)
+	if err != nil {
+		return nil, err
 	}
-	if len(pub.Missing) > 0 || len(pub.Extra) > 0 || len(pub.Modified) > 0 {
-		pub.Status = "drifted"
+	dev, err := tp.BuildEmptyAbstractNode(device)
+	if err != nil {
+		return nil, err
 	}
-	return pub, nil
+	return &Node{net: net, internal: dev}, nil
+}
+
+// SaveDeviceIntents persists the device's intent steps to topology.json.
+// Called after Tree() to convert the node's intent DB into topology steps.
+//
+// Architecture §6 Save: "Update topology.json + persist."
+func (net *Network) SaveDeviceIntents(device string, steps []spec.TopologyStep) error {
+	if !net.HasTopology() {
+		return &ValidationError{Message: "no topology loaded — save requires a topology"}
+	}
+	tp, err := network.NewTopologyProvisioner(net.internal)
+	if err != nil {
+		return err
+	}
+	return tp.SaveDeviceIntents(device, steps)
 }
 
 func (net *Network) checkPermission(perm auth.Permission, authCtx *auth.Context) error {

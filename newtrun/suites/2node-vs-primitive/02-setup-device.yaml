@@ -3,12 +3,35 @@ description: |
   Baseline device setup using setup-device (intent-producing composite).
   Creates: DEVICE_METADATA, LOOPBACK_INTERFACE, BGP_GLOBALS, BGP_GLOBALS_AF,
   ROUTE_REDISTRIBUTE, VXLAN_TUNNEL, VXLAN_EVPN_NVO, and NEWTRON_INTENT/device.
-  Replaces the former configure-loopback primitive — setup-device covers all
-  baseline infrastructure in a single intent-producing call.
+  Reconcile after setup ensures the device matches the projection — clears
+  any stale CONFIG_DB entries from previous test runs.
 topology: 2node-vs
 requires: [boot-ssh]
 
 steps:
+  # Reconcile before setup to align device CONFIG_DB with any existing intents.
+  # Clears stale entries from previous test runs so the drift guard doesn't
+  # block the subsequent setup-device writes.
+  - name: reconcile-switch1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+    params:
+      execute: true
+
+  - name: reconcile-switch2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+    params:
+      execute: true
+
+  - name: wait-for-reconcile
+    action: wait
+    duration: 3s
+
   - name: setup-device-switch1
     action: newtron
     devices: [switch1]
@@ -38,6 +61,29 @@ steps:
         docker_routing_config_mode: unified
         frr_mgmt_framework_config: "true"
       source_ip: "10.0.0.2"
+
+  # Second reconcile after setup to deliver the new projection (with device
+  # intent infrastructure) to the device. This ensures subsequent tests see
+  # a clean CONFIG_DB matching the full projection.
+  - name: reconcile-after-setup-switch1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+    params:
+      execute: true
+
+  - name: reconcile-after-setup-switch2
+    action: newtron
+    devices: [switch2]
+    method: POST
+    url: /node/{{device}}/intent/reconcile
+    params:
+      execute: true
+
+  - name: wait-for-reconcile-after-setup
+    action: wait
+    duration: 3s
 
   # Verify baseline infrastructure created by setup-device
   - name: verify-loopback-sw1
