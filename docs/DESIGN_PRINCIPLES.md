@@ -1543,7 +1543,7 @@ depending on the hardware platform, the ASIC, and the SONiC release.
 
 These latencies matter in two contexts:
 
-1. **Post-provisioning convergence.** After composite delivery writes
+1. **Post-provisioning convergence.** After `Reconcile()` delivers
    the full config, daemons need time to process everything. Test suites
    handle this with polling-based health checks (`pollUntil` with
    configurable timeout and interval), not hardcoded sleeps.
