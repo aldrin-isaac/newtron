@@ -2,7 +2,7 @@
 
 The device connection layer handles SSH tunnels, Redis client connections, and state access for SONiC devices. This document covers `pkg/newtron/device/sonic/` — the low-level plumbing that connects newtron to a SONiC switch's Redis databases.
 
-For the architectural principles behind newtron, see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md). For network-level operations (service apply, topology provisioning, composites), see [newtron LLD](lld.md). For the HTTP API, see [API Reference](api.md).
+For the architectural principles behind newtron, see [Design Principles](../DESIGN_PRINCIPLES_NEWTRON.md). For network-level operations (service apply, topology provisioning, intent management), see [newtron LLD](lld.md). For the HTTP API, see [API Reference](api.md).
 
 **Scope:** This document describes the `sonic` package only — types, clients, connection management. Operations that *use* these primitives (ChangeSet apply, config save, health checks, route verification) live at the `node` layer (`pkg/newtron/network/node/`) and are documented in the [newtron LLD](lld.md).
 
@@ -124,8 +124,8 @@ func (d *Device) Tunnel() *SSHTunnel            // SSH tunnel, nil if direct con
 ```
 
 The `node.Node` layer uses these accessors to perform operations:
-- `d.Client().PipelineSet(entries)` for atomic writes (composite delivery)
-- `d.Client().ReplaceAll(entries)` for composite overwrite
+- `d.Client().PipelineSet(entries)` for atomic writes (ChangeSet delivery)
+- `d.Client().ReplaceAll(entries, ownedTables)` for reconcile delivery
 - `d.Client().Set(table, key, fields)` for individual writes
 - `d.Client().GetAll()` for CONFIG_DB refresh
 - `d.AppDBClient().GetRoute(vrf, prefix)` for route observation
@@ -235,6 +235,7 @@ type ConfigDB struct {
 
     // Routing
     RouteTable        map[string]StaticRouteEntry    // ROUTE_TABLE (static routes in CONFIG_DB)
+    StaticRoute       map[string]map[string]string   // STATIC_ROUTE
     RouteRedistribute map[string]RouteRedistributeEntry // ROUTE_REDISTRIBUTE
     RouteMap          map[string]RouteMapEntry       // ROUTE_MAP
 
@@ -261,7 +262,7 @@ type ConfigDB struct {
 }
 
 // NewConfigDB returns a ConfigDB with all map fields initialized (no nil maps).
-// Used by abstract Node (offline mode) to start with an empty shadow CONFIG_DB.
+// Used by abstract Node (offline mode) to start with an empty projection.
 func NewConfigDB() *ConfigDB
 ```
 
@@ -282,14 +283,14 @@ func (db *ConfigDB) BGPConfigured() bool               // checks BGP_NEIGHBOR or
 
 `HasInterface` checks three tables: PORT (physical ports), PORTCHANNEL (LAGs), and VLAN (SVIs like `Vlan100`). This covers all interface types that can be targets of service operations.
 
-### 3.3 Shadow ConfigDB Updates
+### 3.3 Projection Updates
 
-The abstract Node (offline mode) uses `ApplyEntries` to keep its shadow ConfigDB in sync as operations generate entries. This allows subsequent operations to pass precondition checks (e.g., `HasVTEP()` returns true after `SetupEVPN` generates VXLAN_TUNNEL entries).
+The abstract Node uses `ApplyEntries` to keep its projection (in-memory ConfigDB) in sync as operations generate entries. This allows subsequent operations to pass precondition checks (e.g., `HasVTEP()` returns true after `SetupEVPN` generates VXLAN_TUNNEL entries).
 
 ```go
 // ApplyEntries updates the ConfigDB's typed maps from a slice of entries.
 // Only tables needed for precondition checks are handled — unrecognized tables
-// are silently skipped (entries still accumulate for composite export).
+// are silently skipped (entries still accumulate for projection export).
 func (db *ConfigDB) ApplyEntries(entries []Entry)
 ```
 
@@ -317,7 +318,7 @@ func (c *ConfigDBClient) Exists(table, key string) (bool, error)           // Ke
 func (c *ConfigDBClient) Set(table, key string, fields map[string]string) error // Single entry write
 func (c *ConfigDBClient) Delete(table, key string) error                        // Single entry delete
 func (c *ConfigDBClient) PipelineSet(changes []Entry) error                     // Atomic batch write (§3.7)
-func (c *ConfigDBClient) ReplaceAll(changes []Entry) error                      // Composite overwrite (§3.7)
+func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error // Reconcile delivery (§3.7)
 ```
 
 **`Set` behavior:** Writes all fields in a single `HSET` command to fire exactly one keyspace notification. Writing fields individually fires N notifications, causing SONiC daemons (e.g., bgpcfgd) to process partial state. If `fields` is empty, writes the `NULL:NULL` sentinel (SONiC convention for field-less entries like `PORTCHANNEL_MEMBER` or `INTERFACE` IP keys).
@@ -330,7 +331,7 @@ Two types represent configuration data at the device layer. Used by `configdb.go
 
 ```go
 // Entry is a single CONFIG_DB entry: table + key + fields.
-// Used by config generators, composite builders, and pipeline delivery.
+// Used by config generators, intent projection export, and pipeline delivery.
 // A nil Fields map means "delete this entry" (in PipelineSet).
 type Entry struct {
     Table  string
@@ -361,7 +362,8 @@ const (
 CONFIG_DB entries are parsed from Redis hashes into typed Go structs via a registry in `configdb_parsers.go`. This avoids a giant switch statement and makes adding new tables mechanical.
 
 **39 registered parsers:**
-- **29 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, STATIC_ROUTE, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
+- **28 typed struct parsers**: PORT, VLAN, VLAN_MEMBER, INTERFACE, PORTCHANNEL, VRF, VXLAN_TUNNEL, VXLAN_TUNNEL_MAP, VXLAN_EVPN_NVO, BGP_NEIGHBOR, BGP_NEIGHBOR_AF, BGP_GLOBALS, BGP_GLOBALS_AF, BGP_EVPN_VNI, BGP_GLOBALS_EVPN_RT, ROUTE_TABLE, ACL_TABLE, ACL_RULE, SCHEDULER, QUEUE, WRED_PROFILE, PORT_QOS_MAP, ROUTE_REDISTRIBUTE, ROUTE_MAP, BGP_PEER_GROUP, BGP_PEER_GROUP_AF, PREFIX_SET, COMMUNITY_SET
+- **1 copy parser**: STATIC_ROUTE (copies into `map[string]map[string]string`)
 - **10 hash-merge parsers**: DEVICE_METADATA, VLAN_INTERFACE, LOOPBACK_INTERFACE, PORTCHANNEL_MEMBER, SUPPRESS_VLAN_NEIGH, SAG, SAG_GLOBAL, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP, NEWTRON_INTENT
 
 Hash-merge hydrators (`mergeHydrator`) copy all key-value pairs into `map[string]map[string]string` for tables with variable or unknown field names.
@@ -387,27 +389,100 @@ func (c *ConfigDBClient) PipelineSet(changes []Entry) error
 
 Used by `node.Node` for ChangeSet application — the accumulated config changes from an operation are written in a single atomic transaction.
 
-**`ReplaceAll` — composite overwrite:**
+**`ReplaceAll` — reconcile delivery:**
 
 ```go
-// ReplaceAll merges composite entries on top of existing CONFIG_DB.
-// 1. Identifies all tables present in the composite (excluding platform-managed tables)
-// 2. Deletes stale keys: exist in DB but NOT in the composite
-// 3. Writes all composite entries via PipelineSet (HSET merges fields)
+// ReplaceAll merges projection entries on top of existing CONFIG_DB.
+// 1. Starts from the union of ownedTables and tables present in changes
+//    (excluding platform-managed tables)
+// 2. Deletes stale keys: exist in DB but NOT in the projection
+// 3. Writes all projection entries via PipelineSet (HSET merges fields)
 //
 // Platform-managed tables (PORT) are merge-only — their keys are never deleted,
 // since port config comes from port_config.ini / portsyncd.
-func (c *ConfigDBClient) ReplaceAll(changes []Entry) error
+//
+// ownedTables lists all tables the node manages. Tables in ownedTables that have
+// zero entries in the delivery set are fully cleaned (all keys DELeted). This
+// ensures Clear + Reconcile wipes all owned tables — even those with no entries
+// in the empty projection.
+func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error
 ```
 
-Used by composite delivery (`DeliverComposite` at the node layer) to replace the device's entire configuration. Factory defaults (DEVICE_METADATA `mac`, `platform`, `hwsku`) are preserved because `ReplaceAll` only deletes keys from tables present in the composite — factory-only tables are untouched.
+Used by `Reconcile()` at the node layer to deliver the full projection to the device, eliminating drift. Factory defaults (DEVICE_METADATA `mac`, `platform`, `hwsku`) are preserved because `ReplaceAll` only deletes keys from owned tables — factory-only tables are untouched.
 
 **Why MULTI/EXEC pipelines:**
 - **Atomicity**: Either all changes apply or none. Prevents partial config states.
-- **Performance**: Single round-trip vs one per entry. A composite with 200 entries takes 1 round-trip.
+- **Performance**: Single round-trip vs one per entry. A projection with 200 entries takes 1 round-trip.
 - **Notification batching**: SONiC daemons see the complete change set at once via keyspace notifications.
 
-### 3.8 Schema Validation (`pkg/newtron/device/sonic/schema.go`)
+### 3.8 Projection Export (`pkg/newtron/device/sonic/configdb.go`)
+
+The ConfigDB struct serves as both the in-memory mirror of a device's CONFIG_DB and the projection (expected CONFIG_DB state) for abstract nodes. Two export methods extract data from the projection for delivery and drift detection.
+
+```go
+// ExportEntries returns all entries from all tables in the ConfigDB as a flat
+// slice of Entry values. This is the inverse of ApplyEntries — it serializes
+// the typed struct maps back to table/key/fields triples.
+//
+// Used by Reconcile() to extract the projection for delivery via ReplaceAll.
+// Even entries with empty fields are exported — SONiC uses field-less entries
+// for IP assignments (INTERFACE|Eth0|10.0.0.1/31), portchannel members, etc.
+func (db *ConfigDB) ExportEntries() []Entry
+
+// ExportRaw converts the ConfigDB to a RawConfigDB (table → key → fields map)
+// for drift detection. Built from ExportEntries — same data, different shape.
+//
+// Used by drift detection: the projection's ExportRaw() output is compared
+// against the device's actual CONFIG_DB via DiffConfigDB().
+func (db *ConfigDB) ExportRaw() RawConfigDB
+```
+
+### 3.9 Drift Detection (`pkg/newtron/device/sonic/configdb_diff.go`)
+
+Drift detection compares the expected CONFIG_DB state (projection) against the actual CONFIG_DB state (device). Only tables in newtron's ownership map are compared.
+
+```go
+// RawConfigDB is a raw representation of CONFIG_DB: table → key → field → value.
+type RawConfigDB map[string]map[string]map[string]string
+
+// DriftEntry describes a single difference between expected and actual CONFIG_DB.
+type DriftEntry struct {
+    Table    string            `json:"table"`
+    Key      string            `json:"key"`
+    Type     string            `json:"type"` // "missing", "extra", "modified"
+    Expected map[string]string `json:"expected,omitempty"`
+    Actual   map[string]string `json:"actual,omitempty"`
+}
+
+// DiffConfigDB compares expected vs actual CONFIG_DB, returning differences.
+// Only tables present in ownedTables are compared. Tables in excludedFromDrift
+// (NEWTRON_INTENT, NEWTRON_HISTORY, NEWTRON_SETTINGS, PORT, DEVICE_METADATA)
+// are always skipped.
+//
+// Returns three categories:
+//   - Missing: expected entry absent from actual
+//   - Extra: actual entry not in expected
+//   - Modified: entry exists in both but fields differ
+func DiffConfigDB(expected, actual RawConfigDB, ownedTables []string) []DriftEntry
+
+// OwnedTables returns the list of CONFIG_DB tables that newtron owns,
+// derived from the schema registry. Excludes drift-excluded tables.
+func OwnedTables() []string
+
+// GetRawOwnedTables reads all newtron-owned tables from CONFIG_DB as raw data.
+// Used by drift detection to get the actual device state.
+func (c *ConfigDBClient) GetRawOwnedTables(ctx context.Context) (RawConfigDB, error)
+```
+
+**Drift detection pipeline:** `intent drift` works by:
+1. Replaying all NEWTRON_INTENT records to rebuild the projection
+2. Calling `projection.ExportRaw()` to get expected state
+3. Calling `client.GetRawOwnedTables()` to get actual state
+4. Calling `DiffConfigDB(expected, actual, ownedTables)` to produce the diff
+
+**Field matching is subset-based:** `fieldsMatch` checks that every field in expected is present in actual with the same value. Extra fields in actual are ignored — the device may have fields from factory config or `config reload` that the projection doesn't manage.
+
+### 3.10 Schema Validation (`pkg/newtron/device/sonic/schema.go`)
 
 Every CONFIG_DB write passes through `ChangeSet.Validate()` before reaching
 Redis. The schema is a static Go data structure encoding per-table, per-field
@@ -540,38 +615,41 @@ type BGPNeighborEntry struct {        // Key: "vrf|ip" (e.g., "default|10.0.0.2"
     HoldTime      string `json:"holdtime,omitempty"`
     KeepaliveTime string `json:"keepalive,omitempty"`
     AdminStatus   string `json:"admin_status,omitempty"`
-    PeerGroup     string `json:"peer_group,omitempty"`
+    PeerGroup     string `json:"peer_group_name,omitempty"`
     EBGPMultihop  string `json:"ebgp_multihop,omitempty"`
     Password      string `json:"password,omitempty"`
 }
 
 type BGPNeighborAFEntry struct {      // Key: "neighbor_ip|address_family"
-    Activate             string `json:"activate,omitempty"`
-    RouteReflectorClient string `json:"route_reflector_client,omitempty"`
-    NextHopSelf          string `json:"next_hop_self,omitempty"`
-    SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
-    AllowASIn            string `json:"allowas_in,omitempty"`
-    RouteMapIn           string `json:"route_map_in,omitempty"`
-    RouteMapOut          string `json:"route_map_out,omitempty"`
-    PrefixListIn         string `json:"prefix_list_in,omitempty"`
-    PrefixListOut        string `json:"prefix_list_out,omitempty"`
-    DefaultOriginate     string `json:"default_originate,omitempty"`
-    AddpathTxAll         string `json:"addpath_tx_all_paths,omitempty"`
+    AdminStatus         string `json:"admin_status,omitempty"`
+    RRClient            string `json:"rrclient,omitempty"`
+    NHSelf              string `json:"nhself,omitempty"`
+    NextHopUnchanged    string `json:"nexthop_unchanged,omitempty"`
+    SoftReconfiguration string `json:"soft_reconfiguration,omitempty"`
+    AllowASIn           string `json:"allowas_in,omitempty"`
+    RouteMapIn          string `json:"route_map_in,omitempty"`
+    RouteMapOut         string `json:"route_map_out,omitempty"`
+    PrefixListIn        string `json:"prefix_list_in,omitempty"`
+    PrefixListOut       string `json:"prefix_list_out,omitempty"`
+    DefaultOriginate    string `json:"default_originate,omitempty"`
+    AddpathTxAll        string `json:"addpath_tx_all_paths,omitempty"`
 }
 
 type BGPGlobalsAFEntry struct {       // Key: "vrf_name|address_family"
-    AdvertiseAllVNI    string `json:"advertise-all-vni,omitempty"`
-    AdvertiseDefaultGW string `json:"advertise-default-gw,omitempty"`
-    AdvertiseSVIIP     string `json:"advertise-svi-ip,omitempty"`
-    AdvertiseIPv4      string `json:"advertise_ipv4_unicast,omitempty"`
-    AdvertiseIPv6      string `json:"advertise_ipv6_unicast,omitempty"`
-    RD                 string `json:"rd,omitempty"`
-    RTImport           string `json:"rt_import,omitempty"`
-    RTExport           string `json:"rt_export,omitempty"`
-    RTImportEVPN       string `json:"route_target_import_evpn,omitempty"`
-    RTExportEVPN       string `json:"route_target_export_evpn,omitempty"`
-    MaxEBGPPaths       string `json:"max_ebgp_paths,omitempty"`
-    MaxIBGPPaths       string `json:"max_ibgp_paths,omitempty"`
+    AdvertiseAllVNI       string `json:"advertise-all-vni,omitempty"`
+    AdvertiseDefaultGW    string `json:"advertise-default-gw,omitempty"`
+    AdvertiseSVIIP        string `json:"advertise-svi-ip,omitempty"`
+    AdvertiseIPv4         string `json:"advertise_ipv4_unicast,omitempty"`
+    AdvertiseIPv6         string `json:"advertise_ipv6_unicast,omitempty"`
+    RD                    string `json:"rd,omitempty"`
+    RTImport              string `json:"rt_import,omitempty"`
+    RTExport              string `json:"rt_export,omitempty"`
+    RTImportEVPN          string `json:"route_target_import_evpn,omitempty"`
+    RTExportEVPN          string `json:"route_target_export_evpn,omitempty"`
+    MaxEBGPPaths          string `json:"max_ebgp_paths,omitempty"`
+    MaxIBGPPaths          string `json:"max_ibgp_paths,omitempty"`
+    RedistributeConnected string `json:"redistribute_connected,omitempty"`
+    RedistributeStatic    string `json:"redistribute_static,omitempty"`
 }
 
 type BGPEVPNVNIEntry struct {         // Key: "vrf_name|vni"
@@ -607,21 +685,23 @@ type RouteMapEntry struct {           // Key: "map_name|seq"
 }
 
 type BGPPeerGroupEntry struct {       // Key: peer_group_name
-    ASN         string `json:"asn,omitempty"`
-    LocalAddr   string `json:"local_addr,omitempty"`
-    AdminStatus string `json:"admin_status,omitempty"`
-    HoldTime    string `json:"holdtime,omitempty"`
-    Keepalive   string `json:"keepalive,omitempty"`
-    Password    string `json:"password,omitempty"`
+    ASN          string `json:"asn,omitempty"`
+    LocalAddr    string `json:"local_addr,omitempty"`
+    AdminStatus  string `json:"admin_status,omitempty"`
+    HoldTime     string `json:"holdtime,omitempty"`
+    Keepalive    string `json:"keepalive,omitempty"`
+    Password     string `json:"password,omitempty"`
+    EBGPMultihop string `json:"ebgp_multihop,omitempty"`
 }
 
 type BGPPeerGroupAFEntry struct {     // Key: "peer_group_name|address_family"
-    Activate             string `json:"activate,omitempty"`
-    RouteReflectorClient string `json:"route_reflector_client,omitempty"`
-    NextHopSelf          string `json:"next_hop_self,omitempty"`
-    RouteMapIn           string `json:"route_map_in,omitempty"`
-    RouteMapOut          string `json:"route_map_out,omitempty"`
-    SoftReconfiguration  string `json:"soft_reconfiguration,omitempty"`
+    AdminStatus         string `json:"admin_status,omitempty"`
+    RRClient            string `json:"rrclient,omitempty"`
+    NHSelf              string `json:"nhself,omitempty"`
+    NextHopUnchanged    string `json:"nexthop_unchanged,omitempty"`
+    RouteMapIn          string `json:"route_map_in,omitempty"`
+    RouteMapOut         string `json:"route_map_out,omitempty"`
+    SoftReconfiguration string `json:"soft_reconfiguration,omitempty"`
 }
 
 type PrefixSetEntry struct {          // Key: "set_name|seq"
@@ -725,7 +805,7 @@ internal domain model constructed via `NewIntent` / serialized via
 // Intent is the internal domain model for a desired-state record bound to
 // a device resource. See DESIGN_PRINCIPLES_NEWTRON §39 for the full model.
 //
-// Key format: resource name (e.g., "Ethernet0", "bgp", "evpn", "loopback")
+// Key format: kind-prefixed resource (e.g., "interface|Ethernet0", "vlan|100", "device")
 // Stored in NEWTRON_INTENT — a custom table, not standard SONiC.
 //
 // The intent record is self-sufficient for reverse operations and drift
@@ -734,9 +814,13 @@ internal domain model constructed via `NewIntent` / serialized via
 // remove).
 type Intent struct {
     // Identity
-    Resource  string      // binding point: "Ethernet0", "bgp", "evpn", "loopback"
-    Operation string      // composite op: "apply-service", "setup-evpn", "configure-bgp"
+    Resource  string      // binding point: "interface|Ethernet0", "vlan|100", "device"
+    Operation string      // composite op: "apply-service", "create-vlan", "setup-device"
     Name      string      // spec reference: "transit", "" if none
+
+    // DAG — structural dependencies between intent records
+    Parents  []string     // resource keys this intent depends on (_parents CSV)
+    Children []string     // resource keys that depend on this intent (_children CSV)
 
     // Lifecycle
     State     IntentState // "unrealized", "in-flight", "actuated"
@@ -766,9 +850,9 @@ func (i *Intent) ToFields() map[string]string
 
 The CONFIG_DB representation is a flat `map[string]string` hash. Identity
 fields (`state`, `operation`, `name`, `holder`, `created`, `applied_at`,
-`applied_by`) live alongside resolved parameters (`service_name`,
-`ip_address`, `vrf_name`, etc.) in the same hash. `NewIntent`
-separates them; `ToFields` merges them back.
+`applied_by`, `_parents`, `_children`) live alongside resolved parameters
+(`service_name`, `ip_address`, `vrf_name`, etc.) in the same hash.
+`NewIntent` separates them; `ToFields` merges them back.
 
 ---
 
@@ -816,7 +900,6 @@ type StateDB struct {
 | `TRANSCEIVER_INFO` | `TRANSCEIVER_INFO\|<port>` | `TRANSCEIVER_INFO\|Ethernet0` |
 | `TRANSCEIVER_STATUS` | `TRANSCEIVER_STATUS\|<port>` | `TRANSCEIVER_STATUS\|Ethernet0` |
 | `NEWTRON_LOCK` | `NEWTRON_LOCK\|<device>` | `NEWTRON_LOCK\|spine1` |
-| `NEWTRON_INTENT` | `NEWTRON_INTENT\|<device>` | `NEWTRON_INTENT\|leaf1` |
 
 ### 5.2 State Entry Types
 
@@ -939,11 +1022,9 @@ func (c *StateDBClient) GetNeighbor(iface, ip string) (*NeighEntry, error)
 func (c *StateDBClient) AcquireLock(device, holder string, ttlSeconds int) error
 func (c *StateDBClient) ReleaseLock(device, holder string) error
 
-// Intent record operations (crash recovery)
-func (c *StateDBClient) WriteIntent(device string, intent *OperationIntent) error
-func (c *StateDBClient) ReadIntent(device string) (*OperationIntent, error)
-func (c *StateDBClient) UpdateIntentOps(device string, intent *OperationIntent) error
-func (c *StateDBClient) DeleteIntent(device string) error
+// Legacy intent migration (one-time, intents now live in CONFIG_DB)
+func (c *StateDBClient) ReadIntentFromStateDB(device string) (*OperationIntent, error)
+func (c *StateDBClient) DeleteIntentFromStateDB(device string) error
 ```
 
 **`GetEntry`** reads a single STATE_DB entry as raw `map[string]string`. Returns `(nil, nil)` if the entry does not exist. Used by newtrun's `verifyStateDBExecutor` for generic table/key/field assertions.
@@ -1019,62 +1100,25 @@ return 1
 
 `Lock()` (refresh) → `fn()` (precondition reads from cache) → `Apply()` (writes to Redis, no reload) → `Unlock()` (episode ends). No post-Apply refresh — the next episode will refresh itself.
 
-### 5.5 Intent Records
+### 5.5 Legacy Intent Migration
 
-Intent records are write-ahead manifests stored in STATE_DB that enable crash recovery for multi-entry CONFIG_DB writes. If the process dies between the first and last Redis write, the in-memory ChangeSet is lost and CONFIG_DB has orphaned partial state. The intent record survives the crash and tells the next operator exactly what was in progress.
+STATE_DB previously held `NEWTRON_INTENT|<device>` entries as write-ahead manifests for crash recovery. This model has been replaced by the unified intent model in CONFIG_DB (§4.8).
 
-**NEWTRON_INTENT entry format** (Redis hash in STATE_DB):
+Intent records now live in CONFIG_DB as per-resource `NEWTRON_INTENT|<resource>` entries (e.g., `NEWTRON_INTENT|interface|Ethernet0`, `NEWTRON_INTENT|device`). Each record is an `Intent` struct (§4.8) that captures the operation, resolved parameters, and DAG relationships. The projection (expected CONFIG_DB state) is derived by replaying all intents — no separate crash-recovery mechanism is needed.
 
-```
-NEWTRON_INTENT|leaf1
-  holder:           "aldrin@workstation1"
-  created:          "2026-03-10T14:30:00Z"
-  phase:            ""
-  rollback_holder:  ""
-  rollback_started: ""
-  operations:       "[{\"name\":\"CreateVLAN\",\"params\":{\"id\":\"100\"},\"reverse_op\":\"DeleteVLAN\",\"started\":\"...\",\"completed\":\"...\"}]"
-```
+Two legacy migration methods remain on `StateDBClient`:
 
-The `operations` field is a JSON array stored as a single Redis hash value. Each element tracks one pending operation with its name, parameters, reverse operation name, and lifecycle timestamps (`started`, `completed`, `reversed`).
-
-**Intent types** (internal, in `statedb.go`):
-
-```go
-type IntentOperation struct {
-    Name      string            `json:"name"`
-    Params    map[string]string `json:"params"`
-    ReverseOp string            `json:"reverse_op,omitempty"`
-    Started   *time.Time        `json:"started,omitempty"`
-    Completed *time.Time        `json:"completed,omitempty"`
-    Reversed  *time.Time        `json:"reversed,omitempty"`
-}
-
-type OperationIntent struct {
-    Holder          string            `json:"holder"`
-    Created         time.Time         `json:"created"`
-    Phase           string            `json:"phase,omitempty"`
-    RollbackHolder  string            `json:"rollback_holder,omitempty"`
-    RollbackStarted *time.Time        `json:"rollback_started,omitempty"`
-    Operations      []IntentOperation `json:"operations"`
-}
-```
-
-**Phase transitions:** The `Phase` field starts empty (applying). During rollback, it transitions to `"rolling_back"`. Each operation gets a `Reversed` timestamp as its reverse completes, so a crashed rollback can resume where it left off.
-
-**No Redis EXPIRE.** The distributed lock (§5.4) has a 1-hour EXPIRE — if the holder crashes, the lock auto-deletes and becomes available. The intent record intentionally has no EXPIRE. It must outlive the lock so the next operator can discover and resolve the partial state. Detection is structural: if you acquire the lock and an intent already exists, the previous holder crashed between `WriteIntent` and `DeleteIntent`. The lock acquisition proves the previous holder is gone — no staleness timer needed.
-
-**Why plain HSET (no Lua).** The distributed lock guarantees a single writer per device. While the lock is held, no concurrent access is possible, so the intent record's reads and writes do not need atomic Lua scripts. This is the same guarantee that makes CONFIG_DB writes safe without transactions.
+- `ReadIntentFromStateDB(device)` — reads the old `NEWTRON_INTENT|<device>` entry from STATE_DB. Used during `Lock()` for one-time migration: if a STATE_DB intent is found, it is migrated to CONFIG_DB and the STATE_DB entry is deleted.
+- `DeleteIntentFromStateDB(device)` — deletes the old STATE_DB entry after migration.
 
 **Interaction with locking:**
 
-| Record | DB | EXPIRE | Survives crash? | Purpose |
-|--------|-----|--------|-----------------|---------|
+| Record | DB | EXPIRE | Survives reboot? | Purpose |
+|--------|-----|--------|------------------|---------|
 | `NEWTRON_LOCK` | STATE_DB | 1 hour | No (auto-deletes) | Mutual exclusion |
-| `NEWTRON_INTENT` | STATE_DB | None | Yes (persists) | Crash recovery manifest |
+| `NEWTRON_INTENT` | CONFIG_DB | None | Yes (`config save`) | Desired-state DAG |
 
-The lock controls *access*; the intent records *what was being done*. Together they enable structural crash detection: lock available + intent present = previous holder crashed.
-
-For the full design rationale, see [Intent Records](intent-records.md).
+The lock controls *access*; intents record *what should exist*. Crash recovery is structural: NEWTRON_INTENT records in CONFIG_DB are the persistent state. The drift guard detects when projection differs from actual CONFIG_DB. `Reconcile` fixes it by delivering the full projection.
 
 ---
 
@@ -1279,7 +1323,7 @@ To persist configuration across reboots, the SONiC command `config save -y` must
 
 **Config reload:** `config reload -y` re-reads `/etc/sonic/config_db.json` and replaces the running CONFIG_DB. The node layer uses `ExecCommandContext` with retry logic — on fresh CiscoVS boot, SwSS may not be ready, so the reload is retried every 5 seconds for up to 90 seconds.
 
-**Provisioning flow:** The node layer's `ProvisionDevice()` performs `config reload -y` before composite delivery to restore CONFIG_DB to the saved baseline (clean slate for merge-based `ReplaceAll`). After delivery, `config save -y` persists the provisioned config so subsequent reloads re-read the provisioned state rather than factory defaults.
+**Reconcile flow:** The node layer's `Reconcile()` calls `ExportEntries()` to extract the full projection, then `ReplaceAll(entries, ownedTables)` to deliver it to the device. Before reconcile, `config reload -y` restores CONFIG_DB to the saved baseline (clean slate for merge-based `ReplaceAll`). After delivery, `config save -y` persists the reconciled config so subsequent reloads re-read the reconciled state rather than factory defaults.
 
 **Implications for testing:**
 
