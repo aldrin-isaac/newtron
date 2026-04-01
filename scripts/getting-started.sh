@@ -12,7 +12,7 @@ IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node-vs/specs"
 SERVER_PID=""
-TOTAL_STEPS=11
+TOTAL_STEPS=12
 
 # ── Colors and formatting ────────────────────────────────────────────────────
 
@@ -381,9 +381,29 @@ echo "  + your parameters to compute the exact CONFIG_DB entries needed."
 
 pause
 
-# ─── Step 7: Dry-run a service operation ──────────────────────────────────────
+# ─── Step 7: Set up the device ────────────────────────────────────────────────
 
-header 7 "Preview -- see what ${BLUE_BOLD}newtron${RESET}${BOLD}${WHITE} would write"
+header 7 "Set up the device"
+
+echo -e "  ${BLUE_BOLD}newtron init${RESET} enabled frrcfgd. Now ${BLUE_BOLD}newtron device setup${RESET} creates the"
+echo "  baseline infrastructure: device metadata, loopback, and BGP."
+echo ""
+echo "  This creates the 'device' root intent -- the anchor of the intent DAG."
+echo "  All subsequent operations (service apply, VRF create, EVPN setup) attach"
+echo "  their intents as children of this root. Without it, service operations"
+echo "  would fail because the parent intent doesn't exist."
+echo ""
+echo "  Values come from the device profile (ASN, loopback IP) and flags."
+echo ""
+
+run_cmd bin/newtron switch1 device setup \
+    --bgp-asn 65001 --type LeafRouter --hwsku Force10-S6000 -x
+
+pause
+
+# ─── Step 8: Dry-run a service operation ──────────────────────────────────────
+
+header 8 "Preview -- see what ${BLUE_BOLD}newtron${RESET}${BOLD}${WHITE} would write"
 
 echo -e "  Let's apply a transit service to Ethernet0. Without -x, ${BLUE_BOLD}newtron${RESET}"
 echo "  computes the CONFIG_DB entries but doesn't write them -- a dry run."
@@ -396,22 +416,18 @@ echo ""
 echo -e "  Read the output top to bottom -- ${BLUE_BOLD}newtron${RESET} is telling you exactly what"
 echo "  it will write to CONFIG_DB:"
 echo ""
-echo -e "    ${GRAY}DEVICE_METADATA|localhost${RESET}         Set BGP ASN and device type"
-echo -e "    ${GRAY}BGP_GLOBALS|default${RESET}               Create the BGP instance (AS 65001)"
-echo -e "    ${GRAY}BGP_GLOBALS_AF|...|ipv4_unicast${RESET}   Enable IPv4 address family"
-echo -e "    ${GRAY}ROUTE_REDISTRIBUTE|...${RESET}            Redistribute connected routes"
 echo -e "    ${GRAY}INTERFACE|Ethernet0${RESET}               Enable IP routing on this port"
 echo -e "    ${GRAY}INTERFACE|Ethernet0|10.1.0.0/31${RESET}   Assign the /31 address"
 echo -e "    ${GRAY}BGP_PEER_GROUP|default|TRANSIT${RESET}    Create a peer group for the service"
 echo -e "    ${GRAY}BGP_NEIGHBOR|default|10.1.0.1${RESET}     Create a BGP peer at 10.1.0.1"
 echo "                                      (the other end of the /31)"
 echo -e "    ${GRAY}BGP_NEIGHBOR_AF|...|ipv4_unicast${RESET}  Enable IPv4 unicast for the peer"
-echo -e "    ${GRAY}NEWTRON_INTENT|Ethernet0${RESET}            Record what was applied (so"
+echo -e "    ${GRAY}NEWTRON_INTENT|service|TRANSIT${RESET}    Record what was applied (so"
 echo "                                      'remove' knows what to clean up)"
 echo ""
-echo "  The first four entries appear because the device has no BGP instance"
-echo -e "  yet -- ${BLUE_BOLD}newtron${RESET} auto-creates one from the profile's ASN and loopback."
-echo "  On a provisioned device, only the service entries would appear."
+echo "  Device-level entries (metadata, loopback, BGP globals) don't appear"
+echo -e "  here -- ${BLUE_BOLD}device setup${RESET} already created those. Only the service-specific"
+echo "  entries are shown: the interface IP, the BGP peer, and the intent record."
 echo ""
 echo "  These are the same entries you'd create manually with 'config interface'"
 echo "  and 'vtysh' commands -- but computed from the spec, validated against"
@@ -419,9 +435,9 @@ echo "  SONiC's YANG schema, and applied atomically."
 
 pause
 
-# ─── Step 8: Execute ──────────────────────────────────────────────────────────
+# ─── Step 9: Execute ──────────────────────────────────────────────────────────
 
-header 8 "Apply -- write to the switch"
+header 9 "Apply -- write to the switch"
 
 echo -e "  Add ${BOLD}-x${RESET} to execute. ${BLUE_BOLD}newtron${RESET} will:"
 echo -e "    ${WHITE}1.${RESET} Validate all entries against SONiC YANG constraints"
@@ -473,9 +489,9 @@ echo "  service spec changes between apply and remove."
 
 pause
 
-# ─── Step 9: Remove — clean teardown ─────────────────────────────────────────
+# ─── Step 10: Remove — clean teardown ────────────────────────────────────────
 
-header 9 "Remove -- operational symmetry"
+header 10 "Remove -- operational symmetry"
 
 echo "  Every apply has an equal and opposite remove. This is critical for"
 echo "  network operations -- orphaned config (stale BGP peers, leftover IPs,"
@@ -505,17 +521,18 @@ echo "  back to its pre-service state."
 
 pause
 
-# ─── Step 10: Run the test suite ──────────────────────────────────────────────
+# ─── Step 11: Run the test suite ──────────────────────────────────────────────
 
-header 10 "Automated testing with ${BLUE_BOLD}newtrun${RESET}"
+header 11 "Automated testing with ${BLUE_BOLD}newtrun${RESET}"
 
 echo -e "  ${BLUE_BOLD}newtrun${RESET} executes YAML test scenarios that exercise the full stack."
-echo "  The 1node-vs-basic suite runs 4 scenarios with 25 steps:"
+echo "  The 1node-vs-basic suite runs 5 scenarios:"
 echo ""
 echo -e "    ${WHITE}1.${RESET} ${BOLD}boot-ssh${RESET}           Verify the switch is reachable"
-echo -e "    ${WHITE}2.${RESET} ${BOLD}service-lifecycle${RESET}  Apply transit --> verify --> remove --> verify clean"
-echo -e "    ${WHITE}3.${RESET} ${BOLD}vlan-vrf${RESET}           Create VLAN 100, add member, create VRF, tear down"
-echo -e "    ${WHITE}4.${RESET} ${BOLD}verify-clean${RESET}       Assert zero leftover entries from any test"
+echo -e "    ${WHITE}2.${RESET} ${BOLD}setup-device${RESET}       Create device root intent (metadata, loopback, BGP)"
+echo -e "    ${WHITE}3.${RESET} ${BOLD}service-lifecycle${RESET}  Apply transit --> verify --> remove --> verify clean"
+echo -e "    ${WHITE}4.${RESET} ${BOLD}vlan-vrf${RESET}           Create VLAN 100, add member, create VRF, tear down"
+echo -e "    ${WHITE}5.${RESET} ${BOLD}verify-clean${RESET}       Assert zero leftover entries from any test"
 echo ""
 echo -e "  Each step calls ${BLUE_BOLD}newtron-server${RESET} via HTTP (same API the CLI uses)."
 echo "  The verify steps read CONFIG_DB entries and assert expected values."
@@ -532,9 +549,9 @@ run_cmd bin/newtrun status --suite 1node-vs-basic
 
 pause
 
-# ─── Step 11: Tear down ──────────────────────────────────────────────────────
+# ─── Step 12: Tear down ──────────────────────────────────────────────────────
 
-header 11 "Tear down"
+header 12 "Tear down"
 
 echo "  Stop the server and destroy the VM."
 echo ""
