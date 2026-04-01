@@ -640,8 +640,12 @@ type DriftEntry struct {
 }
 
 type ReconcileResult struct {
-    Applied int    `json:"applied"`
-    Message string `json:"message,omitempty"`
+    Mode     string `json:"mode"`               // "full" or "delta"
+    Applied  int    `json:"applied"`             // total entries touched
+    Missing  int    `json:"missing,omitempty"`   // entries added (delta only)
+    Extra    int    `json:"extra,omitempty"`      // entries removed (delta only)
+    Modified int    `json:"modified,omitempty"`  // entries corrected (delta only)
+    Message  string `json:"message,omitempty"`
 }
 ```
 
@@ -1107,7 +1111,7 @@ Operations on the expected state. These operate on the abstract node's intent DB
 |--------|------|----------|---------|
 | GET | `.../node/{device}/intent/tree` | `IntentTreeNode` | Read intent DAG |
 | GET | `.../node/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device |
-| POST | `.../node/{device}/intent/reconcile` | `ReconcileResult` | Push full projection to device |
+| POST | `.../node/{device}/intent/reconcile` | `ReconcileResult` | Push projection to device. Query params: `mode=topology` (intent source), `reconcile=full\|delta` (delivery mechanism, default: topology→full, actuated→delta), `dry_run=true`, `no_save=true` |
 | POST | `.../node/{device}/intent/save` | — | Persist intents to topology.json |
 | POST | `.../node/{device}/intent/reload` | — | Reload from topology.json (topology only) |
 | POST | `.../node/{device}/intent/clear` | — | Clear all intents (topology only) |

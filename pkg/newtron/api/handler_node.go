@@ -1072,9 +1072,21 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 	if nodeActor == nil {
 		return
 	}
+
+	// Parse reconcile mode: ?reconcile=full|delta
+	// Default depends on intent source: topology → full, actuated → delta.
+	reconcileMode := r.URL.Query().Get("reconcile")
+	if reconcileMode == "" {
+		if r.URL.Query().Get("mode") == "topology" {
+			reconcileMode = "full"
+		} else {
+			reconcileMode = "delta"
+		}
+	}
+
 	opts := execOpts(r)
 	if !opts.Execute {
-		// Dry-run: return drift as preview.
+		// Dry-run: return drift as preview (same regardless of mode).
 		val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
 			return n.Drift(r.Context())
 		})
@@ -1085,8 +1097,9 @@ func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, val)
 		return
 	}
+	reconcileOpts := newtron.ReconcileOpts{Mode: reconcileMode}
 	val, err := nodeActor.execute(r.Context(), func() (any, error) {
-		return nodeActor.node.Reconcile(r.Context())
+		return nodeActor.node.Reconcile(r.Context(), reconcileOpts)
 	})
 	if err != nil {
 		writeError(w, err)

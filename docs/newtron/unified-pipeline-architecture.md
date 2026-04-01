@@ -40,7 +40,7 @@ single pipeline described here.
   │                             ╎                               ╎  │
   │                             └−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┘  │
   │                                 │                              │
-  │                                 │ Reconcile (full)             │
+  │                                 │ Reconcile (full/delta)       │
   │                                 │ Apply (incremental)          │ Drift (compare)
   │                                 ▼                              │
   │                             ┌−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−−┐  │
@@ -76,6 +76,7 @@ is no direct path between the Abstract Topology and the Physical Device.
 
 **Write paths out of the Abstract Node (delivery):**
 - **Reconcile** (full) — export entire projection, ReplaceAll to device
+- **Reconcile** (delta) — compute drift via DiffConfigDB, apply only drifted entries via ApplyDrift
 - **Apply** (incremental) — write a single ChangeSet to Redis
 
 **Read paths:**
@@ -485,6 +486,28 @@ Factory fields (mac, platform, hwsku) survive because:
 - ConfigReload restores them from `/etc/sonic/config_db.json`
 - `ReplaceAll` only DELs keys for tables the Node manages
 
+### Delta Reconcile
+
+Patch only drifted entries — no config reload, no full rewrite.
+
+```go
+func (n *Node) Reconcile(ctx context.Context, ReconcileOpts{Mode: "delta"}) (*ReconcileResult, error)
+```
+
+1. If not connected: `ConnectTransport(ctx)`
+2. Lock (bypass drift guard)
+3. Deliver intent records: `ExportIntentEntries()` → `ReplaceAll(intentEntries, ["NEWTRON_INTENT"])`
+4. Compute drift: `ExportRaw()` vs `GetRawOwnedTables()` → `DiffConfigDB()`
+5. `ApplyDrift(diffs)` — atomic TxPipeline: DEL extras, DEL+HSET missing/modified
+6. SaveConfig → persist to `/etc/sonic/config_db.json`
+7. `EnsureUnifiedConfigMode` → restart bgp if switching to frrcfgd
+8. Unlock
+
+Delta reconcile avoids the config reload and full table replacement. It is
+appropriate when drift is small and a service disruption from config reload
+is unacceptable. Full reconcile remains the authoritative path for initial
+provisioning, RMA recovery, and resolving deep inconsistencies.
+
 ### Save
 
 Persist the device's current intent DB back to the Abstract Topology.
@@ -893,6 +916,11 @@ NodeActor.execute(ctx, fn)
 
 ### Topology Reconcile: `newtron switch1 --topology intent reconcile -x`
 
+Topology mode defaults to **full** reconcile (config reload + ReplaceAll). Pass
+`?reconcile=delta` (or the equivalent CLI flag) to use delta reconcile instead
+(DiffConfigDB → ApplyDrift, no reload) — useful when re-applying intents to a
+running device without disrupting traffic.
+
 ```
 CLI parses command
   │
@@ -1050,7 +1078,7 @@ state, the drift guard detects inconsistency, Reconcile fixes it.
 | **Render** | Update the projection from a ChangeSet (validate + apply entries) |
 | **Replay** | Execute a config function for an intent, producing entries that get rendered |
 | **Drift** | Difference between projection (expected) and device (actual) |
-| **Reconcile** | Deliver the full projection to the device, eliminating drift |
+| **Reconcile** | Eliminate drift between projection and device. Two modes: **full** (config reload + ExportEntries → ReplaceAll) and **delta** (DiffConfigDB → ApplyDrift, no reload). |
 | **Save** | Persist the device's current intent DB back to `topology.json` — durable intent storage |
 | **Reload** | Discard unsaved topology changes, rebuild from `topology.json` — analogous to SONiC `config reload` |
 | **Clear** | Delete all intents, produce an empty node with ports only — topology mode only |

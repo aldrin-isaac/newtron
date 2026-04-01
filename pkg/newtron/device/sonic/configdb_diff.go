@@ -135,6 +135,73 @@ func copyMap(m map[string]string) map[string]string {
 	return cp
 }
 
+// tablePriority assigns a numeric priority to each owned CONFIG_DB table based
+// on YANG leafref dependency chains. Lower number = parent (created first,
+// deleted last). Used by ApplyDrift to order operations correctly.
+//
+// Dependency chains (from CLAUDE.md):
+//   VLAN → VLAN_MEMBER, VLAN_INTERFACE
+//   VRF → INTERFACE (vrf_name), BGP_GLOBALS → BGP_NEIGHBOR → BGP_NEIGHBOR_AF
+//   VXLAN_TUNNEL → VXLAN_EVPN_NVO → VXLAN_TUNNEL_MAP
+//   ACL_TABLE → ACL_RULE
+//   DSCP_TO_TC_MAP, SCHEDULER → PORT_QOS_MAP, QUEUE
+//   BGP_PEER_GROUP → BGP_PEER_GROUP_AF
+//   BGP_GLOBALS → BGP_GLOBALS_AF, BGP_GLOBALS_EVPN_RT, ROUTE_REDISTRIBUTE
+var tablePriority = map[string]int{
+	// Tier 0 — no parents (root tables)
+	"DEVICE_METADATA":    0,
+	"PORT":               0,
+	"PORTCHANNEL":        0,
+	"LOOPBACK_INTERFACE": 0,
+	"VRF":                0,
+	"VLAN":               0,
+	"VXLAN_TUNNEL":       0,
+	"ACL_TABLE":          0,
+	"DSCP_TO_TC_MAP":     0,
+	"TC_TO_QUEUE_MAP":    0,
+	"SCHEDULER":          0,
+	"WRED_PROFILE":       0,
+	"SAG_GLOBAL":         0,
+	"SUPPRESS_VLAN_NEIGH": 0,
+	"STATIC_ROUTE":       0,
+	"PREFIX_SET":         0,
+	"COMMUNITY_SET":      0,
+	"NEWTRON_SETTINGS":   0,
+	"NEWTRON_INTENT":     0,
+	"NEWTRON_HISTORY":    0,
+
+	// Tier 1 — depends on tier 0
+	"PORTCHANNEL_MEMBER": 1, // → PORTCHANNEL
+	"VLAN_MEMBER":        1, // → VLAN
+	"VLAN_INTERFACE":     1, // → VLAN
+	"INTERFACE":          1, // → VRF (vrf_name)
+	"BGP_GLOBALS":        1, // → VRF (vrf_name)
+	"VXLAN_EVPN_NVO":     1, // → VXLAN_TUNNEL
+	"ACL_RULE":           1, // → ACL_TABLE
+	"PORT_QOS_MAP":       1, // → DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP
+	"QUEUE":              1, // → SCHEDULER
+	"BGP_PEER_GROUP":     1, // → BGP_GLOBALS (implicit)
+	"ROUTE_MAP":          1, // → PREFIX_SET, COMMUNITY_SET
+
+	// Tier 2 — depends on tier 1
+	"BGP_NEIGHBOR":       2, // → BGP_GLOBALS
+	"BGP_GLOBALS_AF":     2, // → BGP_GLOBALS
+	"BGP_GLOBALS_EVPN_RT": 2, // → BGP_GLOBALS
+	"ROUTE_REDISTRIBUTE": 2, // → BGP_GLOBALS
+	"BGP_PEER_GROUP_AF":  2, // → BGP_PEER_GROUP
+	"VXLAN_TUNNEL_MAP":   2, // → VXLAN_EVPN_NVO
+	"BGP_EVPN_VNI":       2, // → VXLAN_TUNNEL_MAP (implicit)
+
+	// Tier 3 — depends on tier 2
+	"BGP_NEIGHBOR_AF": 3, // → BGP_NEIGHBOR
+}
+
+// TablePriority returns the priority for a table (lower = parent). Returns 0
+// for unknown tables (safe default — treated as root).
+func TablePriority(table string) int {
+	return tablePriority[table]
+}
+
 // OwnedTables returns the list of CONFIG_DB tables that newtron owns,
 // derived from the schema registry. Excludes drift-excluded tables.
 func OwnedTables() []string {

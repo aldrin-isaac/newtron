@@ -904,6 +904,17 @@ func (db *ConfigDB) ExportPorts() map[string]map[string]string {
 	return result
 }
 
+// ExportIntentEntries returns only the NEWTRON_INTENT entries from the ConfigDB.
+// Used by delta Reconcile to deliver intent records separately (intents are
+// excluded from DiffConfigDB and thus from ApplyDrift).
+func (db *ConfigDB) ExportIntentEntries() []Entry {
+	var entries []Entry
+	for k, v := range db.NewtronIntent {
+		entries = append(entries, Entry{Table: "NEWTRON_INTENT", Key: k, Fields: v})
+	}
+	return entries
+}
+
 // ExportRaw converts the ConfigDB to a RawConfigDB for drift detection.
 // Equivalent to the former CompositeConfig.Tables — same data, built from ExportEntries.
 func (db *ConfigDB) ExportRaw() RawConfigDB {

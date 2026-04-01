@@ -1,0 +1,59 @@
+name: delta-reconcile-topology
+description: |
+  Delta reconcile in topology mode: patches only drifted entries using
+  the topology.json projection as the expected state.
+
+  Uses ?mode=topology&reconcile=delta to override the topology default (full).
+topology: 1node-vs
+requires: [delta-reconcile-actuated]
+
+steps:
+  # Inject drift: extra VLAN
+  - name: inject-extra
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "sudo redis-cli -n 4 HSET 'VLAN|Vlan777' vlanid 777"}
+
+  # Verify drift in topology mode
+  - name: verify-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'any(.[]; .type == "extra" and .key == "Vlan777")'
+
+  # Topology delta reconcile
+  - name: topology-delta-reconcile
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/reconcile?mode=topology&reconcile=delta
+    expect:
+      jq: '.mode == "delta" and .applied >= 1'
+
+  - name: verify-containers-healthy
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
+  # Verify extra VLAN removed
+  - name: verify-vlan-removed
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/configdb/VLAN/Vlan777/exists
+    expect:
+      jq: '.exists == false'
+
+  # Verify zero drift after
+  - name: verify-zero-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift?mode=topology
+    expect:
+      jq: 'length == 0'

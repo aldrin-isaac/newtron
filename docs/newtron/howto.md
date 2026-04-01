@@ -2480,7 +2480,7 @@ tree, err := c.IntentTree("leaf1", "", "", false)
 entries, err := c.IntentDrift("leaf1", "")
 
 // Reconcile (topology mode)
-result, err := c.Reconcile("leaf1", "topology", newtron.ExecOpts{Execute: true})
+result, err := c.Reconcile("leaf1", "topology", "", newtron.ExecOpts{Execute: true})
 fmt.Printf("Reconciled: %d entries applied\n", result.Applied)
 
 // Save intents to topology.json

@@ -213,7 +213,7 @@ func (e *provisionExecutor) Execute(ctx context.Context, r *Runner, step *Step) 
 	output := r.executeForDevices(step, func(name string) (string, error) {
 		// Reconcile: deliver full topology projection to the device.
 		// Reconcile handles ConfigReload, wait, lock, ReplaceAll, and SaveConfig internally.
-		result, err := r.Client.Reconcile(name, "topology", newtron.ExecOpts{Execute: true})
+		result, err := r.Client.Reconcile(name, "topology", "", newtron.ExecOpts{Execute: true})
 		if err != nil {
 			return "", fmt.Errorf("reconcile: %s", err)
 		}

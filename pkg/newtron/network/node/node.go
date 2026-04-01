@@ -97,7 +97,7 @@ func New(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *sp
 //	n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 //	iface, _ := n.GetInterface("Ethernet0")
 //	iface.ApplyService(ctx, "transit", node.ApplyServiceOpts{...})
-//	n.Drift(ctx) // or n.Reconcile(ctx)
+//	n.Drift(ctx) // or n.Reconcile(ctx, ReconcileOpts{Mode: "full"})
 func NewAbstract(sp SpecProvider, name string, profile *spec.DeviceProfile, resolved *spec.ResolvedProfile) *Node {
 	return &Node{
 		SpecProvider: sp,
@@ -354,24 +354,44 @@ func (n *Node) Drift(ctx context.Context) ([]sonic.DriftEntry, error) {
 	return sonic.DiffConfigDB(expected, actual, sonic.OwnedTables()), nil
 }
 
-// ReconcileResult reports the outcome of a Reconcile operation.
-type ReconcileResult struct {
-	Applied int
+// ReconcileOpts controls the Reconcile delivery mechanism.
+type ReconcileOpts struct {
+	Mode string // "full" or "delta"
 }
 
-// Reconcile delivers the full projection to the device, eliminating drift.
-// Auto-connects transport if needed. Performs config reload, waits for Redis,
-// then atomically replaces all owned tables with the projection.
+// ReconcileResult reports the outcome of a Reconcile operation.
+type ReconcileResult struct {
+	Mode     string // "full" or "delta"
+	Applied  int
+	Missing  int // entries added (delta only)
+	Extra    int // entries removed (delta only)
+	Modified int // entries corrected (delta only)
+}
+
+// Reconcile delivers the projection to the device, eliminating drift.
+// Auto-connects transport if needed.
+//
+// Two modes:
+//   - "full": config reload → ExportEntries → ReplaceAll (rewrites everything)
+//   - "delta": Drift → ApplyDrift (patches only drifted entries, no reload)
 //
 // Reconcile acquires the Redis lock directly (bypassing the drift guard in
 // Lock) — its purpose IS to fix drift.
-func (n *Node) Reconcile(ctx context.Context) (*ReconcileResult, error) {
+func (n *Node) Reconcile(ctx context.Context, opts ReconcileOpts) (*ReconcileResult, error) {
 	if n.conn == nil {
 		if err := n.ConnectTransport(ctx); err != nil {
 			return nil, fmt.Errorf("connecting transport for reconcile: %w", err)
 		}
 	}
 
+	if opts.Mode == "full" {
+		return n.reconcileFull(ctx)
+	}
+	return n.reconcileDelta(ctx)
+}
+
+// reconcileFull is the original Reconcile path: config reload → ReplaceAll.
+func (n *Node) reconcileFull(ctx context.Context) (*ReconcileResult, error) {
 	// Config reload — reset device to factory baseline (best-effort).
 	if err := n.ConfigReload(ctx); err != nil {
 		util.WithDevice(n.name).Warnf("config reload failed (continuing): %v", err)
@@ -418,7 +438,72 @@ func (n *Node) Reconcile(ctx context.Context) (*ReconcileResult, error) {
 	n.conn.Unlock()
 	n.locked = false
 
-	return &ReconcileResult{Applied: len(entries)}, nil
+	return &ReconcileResult{Mode: "full", Applied: len(entries)}, nil
+}
+
+// reconcileDelta patches only drifted entries: no config reload, no full rewrite.
+func (n *Node) reconcileDelta(ctx context.Context) (*ReconcileResult, error) {
+	// Acquire lock directly — bypass Node-level Lock() to avoid drift guard.
+	holder := BuildLockHolder()
+	if err := n.conn.Lock(holder, defaultLockTTL); err != nil {
+		return nil, fmt.Errorf("acquiring lock for reconcile: %w", err)
+	}
+	n.locked = true
+
+	// Deliver intent records first (excluded from DiffConfigDB).
+	// ReplaceAll on NEWTRON_INTENT alone — lightweight, ensures intent records
+	// are authoritative before config corrections.
+	intentEntries := n.configDB.ExportIntentEntries()
+	if err := n.conn.Client().ReplaceAll(intentEntries, []string{"NEWTRON_INTENT"}); err != nil {
+		n.conn.Unlock()
+		n.locked = false
+		return nil, fmt.Errorf("delivering intent records: %w", err)
+	}
+
+	// Compute drift: projection vs actual device CONFIG_DB.
+	expected := n.configDB.ExportRaw()
+	actual, err := n.conn.Client().GetRawOwnedTables(ctx)
+	if err != nil {
+		n.conn.Unlock()
+		n.locked = false
+		return nil, fmt.Errorf("reading actual CONFIG_DB for delta: %w", err)
+	}
+	diffs := sonic.DiffConfigDB(expected, actual, sonic.OwnedTables())
+
+	// Apply only the drifted entries.
+	if err := n.conn.Client().ApplyDrift(diffs); err != nil {
+		n.conn.Unlock()
+		n.locked = false
+		return nil, fmt.Errorf("applying drift: %w", err)
+	}
+
+	// Persist to config_db.json.
+	if err := n.SaveConfig(ctx); err != nil {
+		util.WithDevice(n.name).Warnf("config save after reconcile failed: %v", err)
+	}
+
+	// Ensure unified config mode (restart bgp if needed).
+	if err := n.EnsureUnifiedConfigMode(ctx); err != nil {
+		util.WithDevice(n.name).Warnf("ensure unified config mode failed: %v", err)
+	}
+
+	n.conn.Unlock()
+	n.locked = false
+
+	// Build result with breakdown.
+	result := &ReconcileResult{Mode: "delta"}
+	for _, d := range diffs {
+		switch d.Type {
+		case "missing":
+			result.Missing++
+		case "extra":
+			result.Extra++
+		case "modified":
+			result.Modified++
+		}
+	}
+	result.Applied = result.Missing + result.Extra + result.Modified
+	return result, nil
 }
 
 // RegisterPort creates a PORT entry in the projection.

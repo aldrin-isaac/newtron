@@ -974,10 +974,19 @@ func (us *UserSettings) GetNetworkID() string {
 // Intent Operation Result Types
 // ============================================================================
 
-// ReconcileResult reports the outcome of delivering the full projection to a device.
+// ReconcileOpts controls the Reconcile delivery mechanism.
+type ReconcileOpts struct {
+	Mode string `json:"mode"` // "full" or "delta"
+}
+
+// ReconcileResult reports the outcome of delivering the projection to a device.
 type ReconcileResult struct {
-	Applied int    `json:"applied"` // Number of entries written
-	Message string `json:"message,omitempty"`
+	Mode     string `json:"mode"`               // "full" or "delta"
+	Applied  int    `json:"applied"`             // total entries touched
+	Missing  int    `json:"missing,omitempty"`   // entries added (delta only)
+	Extra    int    `json:"extra,omitempty"`      // entries removed (delta only)
+	Modified int    `json:"modified,omitempty"`  // entries corrected (delta only)
+	Message  string `json:"message,omitempty"`
 }
 
 // ============================================================================

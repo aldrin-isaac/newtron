@@ -54,6 +54,15 @@ steps:
     expect:
       jq: '.output | contains("router bgp")'
 
+  - name: verify-containers-after-reconcile-1
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
+
   # Zero drift after first reconcile
   - name: drift-after-reconcile-1
     action: newtron
@@ -98,6 +107,15 @@ steps:
       interval: 3s
     expect:
       jq: '.output | contains("router bgp")'
+
+  - name: verify-containers-after-reconcile-2
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/ssh-command
+    params: {command: "docker ps --format '{{.Names}}' | grep -cE '^(swss|syncd|bgp)$'"}
+    expect:
+      jq: '.output | contains("3")'
 
   # Zero drift after second reconcile — idempotent
   - name: drift-after-reconcile-2
