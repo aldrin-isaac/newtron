@@ -41,10 +41,11 @@ separation is itself the source of the divergence it tries to detect.
 newtron's central insight is that intent and reality are the same object
 viewed from different starting points. The Node is that object. An
 offline Node initialized from specs and profiles IS the expected
-state — intent before actualization. A connected Node loaded from a live
-device's CONFIG_DB IS the actual state — reality as it exists. Same
-type, same methods, same preconditions, same validation. From this
-single design decision — one object, two modes — delivery guarantees,
+state — intent before actualization. An actuated Node whose projection
+is rebuilt from NEWTRON_INTENT records IS the expected state verified
+against reality. Same type, same methods, same preconditions, same
+validation. From this single design decision — one object, three
+states — delivery guarantees,
 offline provisioning, drift detection, and crash recovery all follow
 as structural consequences rather than independent features.
 
@@ -89,18 +90,25 @@ forever. The Node — a software object that represents a device, not the
 device itself — eliminates the duality at the root. It does not bridge
 intent and reality — it *is* both, depending on how it is initialized.
 
-The Node operates in two modes:
+The Node operates in three states — same code path, different
+initialization:
 
-- **Connected mode**: ConfigDB loaded from Redis, kept current before
-  every write. The Node *is* the device — its ConfigDB is the device's
-  CONFIG_DB, read and written through an SSH-tunneled Redis connection.
+- **Offline**: The projection starts empty. The same operations that
+  would write to Redis instead update the projection — building
+  desired state entry by entry until the full configuration is ready
+  for export. The Node *is* the intent — its projection is what the
+  device should look like once delivered.
 
-- **Offline mode**: Shadow ConfigDB starts empty. The same ChangeSets
-  that would apply to Redis instead update the shadow — building
-  desired state entry by entry until the full composite is ready for
-  export. The Node *is* the intent — its ConfigDB is what the device
-  should look like once delivered. Intent is inherently offline;
-  delivery is what brings it to life — connecting it to its device.
+- **Connected**: The Node is connected to a device but not yet
+  actuated. The projection is still built from intent replay, not
+  loaded from Redis. Operations write intents and render them into
+  the projection. Used to apply operations and deliver them.
+
+- **Actuated**: The Node is connected and actuated — intents loaded
+  from the device's own NEWTRON_INTENT records. The projection is
+  rebuilt by replaying those intents via the same code path. The
+  drift guard is active: it refuses writes when device CONFIG_DB
+  diverges from the projection.
 
 Same type, same methods, same preconditions. The topology provisioner
 creates an offline Node and calls the same methods the newtron CLI uses
@@ -112,34 +120,34 @@ n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
 n.SetupDevice(ctx, setupOpts)              // metadata + loopback + BGP + VTEP
 iface, _ := n.GetInterface("Ethernet0")
 iface.ApplyService(ctx, "transit", opts)   // VTEP precondition passes ✓
-composite := n.BuildComposite()            // export configDB as composite
+entries := n.configDB.ExportEntries()       // projection IS the accumulated state
 ```
 
-The shadow ConfigDB is not a mock — it is what makes the code path
+The projection is not a mock — it is what makes the code path
 genuinely identical. Without it, preconditions would have nothing to
 check in offline mode. Applying a service needs to verify the VTEP
 exists. Binding an interface to a VRF needs to verify the VRF was
-created. The options without a shadow are to skip the checks — breaking
-the one-code-path guarantee — or to maintain a separate tracking
-mechanism, which creates the second representation this design
-eliminates. The shadow simulates the state transitions a real device
+created. The options without a projection are to skip the checks —
+breaking the one-code-path guarantee — or to maintain a separate
+tracking mechanism, which creates the second representation this design
+eliminates. The projection simulates the state transitions a real device
 would undergo, so preconditions in offline mode are real preconditions
 — not stubs.
 
-After every operation, the shadow is updated, making each operation's
-output visible to subsequent preconditions:
+After every operation, the projection is updated, making each
+operation's output visible to subsequent preconditions:
 
-- Create the VRF "CUSTOMER" — shadow now has `VRF|CUSTOMER`
+- Create the VRF "CUSTOMER" — projection now has `VRF|CUSTOMER`
 - Bind an interface to "CUSTOMER" — precondition `VRFExists` passes
-- Configure the VXLAN tunnel endpoint — shadow now has `VXLAN_TUNNEL`
+- Configure the VXLAN tunnel endpoint — projection now has `VXLAN_TUNNEL`
 - Apply a service on the interface — precondition `VTEPConfigured` passes
 
 An offline Node with all intents actuated IS a connected Node's expected
-state. A connected Node's loaded CONFIG_DB IS what an offline Node would
-produce if initialized from the same specs and profile. The two modes
-are not analogous — they are literally the same computation, differing
-only in where the initial state comes from and where the final state
-goes.
+state. An actuated Node's projection — rebuilt from NEWTRON_INTENT
+records — IS what an offline Node would produce from the same specs and
+profile. The three states are not analogous — they are literally the
+same computation, differing only in where the intents come from and
+where the projection goes.
 
 This is the thesis. Delivery guarantees, offline provisioning, drift
 detection, intent recording — all follow from a system where intent and
@@ -147,7 +155,7 @@ reality share a type, a code path, and a set of invariants.
 
 ### Provisioning vs operations
 
-Two modes of the same object yield two modes of use — not as separate
+Three states of the same object yield two modes of use — not as separate
 systems, but as different initializations of the same computation.
 Day-0 — deploying hardware, imaging the OS, wiring the topology — is
 outside newtron's scope (newtlab handles it). newtron's world begins
@@ -158,26 +166,25 @@ where intent replaces reality entirely. An offline Node builds the
 complete desired state — every VLAN, every VRF,
 every BGP session, every service binding — by running the same methods
 in the same order that an operator would run interactively. The
-configDB state is then exported and delivered as a single composite,
-overwriting whatever the device had before. This is the only path where
-newtron asserts authority over device state.
+projection is exported via `ExportEntries()` and delivered via
+`Reconcile()` — overwriting whatever the device had before. This is
+the only path where newtron asserts authority over device state.
 
 **Operations** — Day-2 in industry parlance — are mutations against
-existing reality. A connected Node loads the device's current CONFIG_DB,
-checks preconditions against what actually exists, computes a delta,
-and applies it. The device's state before the operation is the starting
-point — not a spec file, not a template, not a desired-state store.
-Out-of-band edits to CONFIG_DB are not prevented — they become reality,
-visible to the next operation's preconditions (§35). Operations proceed
-from whatever they find — they do not auto-check whether reality still
-matches intent. Drift detection (§21) answers that question when asked;
-provisioning reconciles back to intent when directed.
+the projection. Before every operation, `RebuildProjection()` re-derives
+the projection from the latest intents — ensuring each operation sees
+fresh, authoritative state. Preconditions check the projection, not raw
+device CONFIG_DB. In actuated mode, the drift guard also fires: if
+device CONFIG_DB diverges from the projection, the operation is refused
+until the operator reconciles. Drift detection (§21) answers the
+divergence question when asked; `Reconcile()` delivers the projection
+to fix it.
 
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
-output differ: offline Nodes start empty and build up configDB state for
-later export; connected Nodes start from Redis and apply changes
-directly. This is not a convenience — it is the guarantee. A feature
+output differ: offline Nodes start empty and build up the projection for
+later export; actuated Nodes replay NEWTRON_INTENT records to rebuild
+the projection and apply changes through it. This is not a convenience — it is the guarantee. A feature
 added to one mode is immediately available in the other, because there
 is no other. A bug fixed in one mode is fixed in both, because there
 is only one code path to fix.
@@ -212,8 +219,8 @@ what it does look like normally requires a separate "expected state"
 representation — a desired-state store, a state file, a journal of
 applied operations. In newtron, the expected state IS an offline Node
 initialized from the device's specs, profile, and intent records.
-Reconstruct the offline Node, load the connected Node from Redis,
-compare the two ConfigDBs, and the diff is the drift. No journal, no
+Rebuild the projection via intent replay, read the actual device
+CONFIG_DB, compare the two, and the diff is the drift. No journal, no
 state file, no reconciliation engine — the expected state is computed
 from the same code path that would produce it on a real device. If the
 code path is correct for deployment, it is correct for drift detection,
@@ -230,7 +237,7 @@ a daemon that rewrote a table.
 
 A system that maintained these as independent features would need three
 implementations kept in sync. A system where they are consequences of a
-single design decision — one code path, two modes — gets them for free
+single design decision — one code path, three states — gets them for free
 and cannot lose one without losing the architecture.
 
 ---
@@ -254,10 +261,10 @@ per-feature reliability doesn't scale.
 The only way out is to make reliability a property of the *pipeline*,
 not of each feature that passes through it. The Node's operation method
 is where the pipeline lives — preconditions, schema validation,
-ChangeSet production, shadow update, intent recording. Every mutating
+ChangeSet production, projection update, intent recording. Every mutating
 operation flows through this pipeline. The one-code-path design (§1) is
-what makes this possible: because offline and connected modes share the
-same pipeline, a guarantee proven in one mode holds in both. The
+what makes this possible: because all three states share the same pipeline, a guarantee proven
+in one state holds in all. The
 pipeline is not an aspiration documented above the code — it is the
 code.
 
@@ -335,20 +342,20 @@ doesn't yet). There is no third category.
 
 ---
 
-## 5. Specs Are Intent; The Device Is Reality
+## 5. Specs Are Intent; The Intent DB Is Authority
 
 Terraform owns its state file. Kubernetes owns its etcd. They can be
 reconcilers because they are the sole writer — if state drifts, it
 drifted from *their* truth, and they can push it back. The sanest
 architecture for any system that writes device state is a single owner.
 
-newtron would prefer to be that owner. But it does not assume it is.
-Admins edit CONFIG_DB directly. SONiC daemons write to it. Factory
-images leave artifacts in it. Other tools modify it. The architecture
-must not break when this happens — not because multi-writer is the
-goal, but because the real world is not always the ideal case. newtron
-is designed to do no harm: it tracks what it wrote, cleans up what it
-created, and leaves everything else untouched.
+newtron IS that owner. It writes NEWTRON_INTENT records to CONFIG_DB
+alongside the entries those intents describe. The intent DB is the
+primary state — the projection (expected CONFIG_DB) is derived from it.
+External CONFIG_DB edits are drift, detected by the drift guard and
+refused until the operator reconciles. newtron does not support
+brownfield — two opinionated architectures cannot converge on the
+same device.
 
 The paired framing that follows from this governs every operation:
 
@@ -386,30 +393,30 @@ This separation enables two properties that matter:
 
 2. **The same spec applied twice to the same device produces identical
    config** — because the translation is deterministic. This is what
-   makes reprovisioning idempotent.
+   makes reconciliation idempotent.
 
-### After application, the device is the authority
+### After application, the intent DB is the authority
 
-Once configuration is applied, the device CONFIG_DB is ground reality.
-If an admin edits CONFIG_DB directly — via the SONiC CLI, Redis, or
-another tool — that edit is the new reality. newtron does not fight it.
-There is no background process watching for drift. There is no
-reconciliation loop. There is the device, and there is the change you
-are asking for.
+Once intents are written, the intent DB (NEWTRON_INTENT records on the
+device) is the primary state. The projection — the expected CONFIG_DB
+— is derived by replaying those intents. External CONFIG_DB edits are
+drift from what the device's own intents declare, not a new "reality"
+that newtron accepts. The drift guard detects the divergence and
+refuses writes until the operator reconciles.
 
-Parts of the device's CONFIG_DB may have been written by newtron. Other
-parts may have been written by an admin, by another tool, or left over
-from a factory image. newtron operates on what it finds, not on what it
-expects to find.
+There is no background reconciliation loop — but newtron is not
+passive either. Every operation begins with `RebuildProjection()`,
+which re-derives expected state from the latest intents. If the
+projection and device CONFIG_DB disagree, the drift guard fires. The
+operator must either reconcile (overwrite the device to match intent)
+or clear intents and start fresh.
 
-Different operation types interact with this reality differently:
+Different operation types interact with this model differently:
 
-- **Provisioning** is the one exception where intent replaces reality.
-  It computes a complete device configuration from specs and profile,
-  then writes it to CONFIG_DB as a single atomic operation — removing
-  stale keys while preserving factory defaults (MAC, platform metadata,
-  port config). This is the initial act of establishing reality from
-  intent.
+- **Provisioning** is the initial act of establishing device state from
+  intent. An offline Node builds the complete projection, then
+  `Reconcile()` delivers it to CONFIG_DB — removing stale keys while
+  preserving factory defaults (MAC, platform metadata, port config).
 
 - **Basic operations** (CreateVLAN, ConfigureBGP) read CONFIG_DB to check
   preconditions — "does this VLAN already exist?" — but generate entries
@@ -451,7 +458,7 @@ state to diff the device against.
 newtron does not run a reconciliation loop — but it has every
 capability a reconciler has. Reconstruction (§21) produces expected
 state from specs and intent records. Drift detection (§2) diffs
-expected against actual. Reprovision (§21) delivers the fix through
+expected against actual. `Reconcile()` (§21) delivers the fix through
 the same pipeline that created the state. This is Terraform's
 `plan` + `apply` cycle, using the same code path that provisions
 and operates the device.
@@ -466,9 +473,10 @@ What newtron adds beyond a reconciler:
 
 - **Crash recovery.** Terraform's state file can diverge from reality
   after a crash — `terraform import` and manual state surgery are the
-  recovery paths. newtron's intent lives on the device, detected
-  automatically on `Lock()`, with mechanical rollback via
-  `dispatchReverse()` (§19).
+  recovery paths. newtron's intent records live on the device. The
+  drift guard detects incomplete operations (projection ≠ device
+  CONFIG_DB). `Reconcile()` is the recovery path — no external state
+  surgery needed.
 
 - **On-device state.** Terraform stores state in a file or remote
   backend, separate from the target. newtron's intent records live on
@@ -476,22 +484,22 @@ What newtron adds beyond a reconciler:
 
 - **Same code path connected and offline.** Terraform's plan runs against
   provider APIs. newtron's offline Node runs the same methods
-  that run on connected Nodes — the composite IS the plan, generated by
+  that run on connected Nodes — the projection IS the plan, generated by
   the same code that executes incremental operations.
 
-For incremental operations, no single canonical desired state exists.
-The "desired state" is the device's current state plus the requested
-change, and the current state can only be read from the device itself.
-This is why newtron does not run a reconciliation loop — but it is not
-why newtron lacks reconciliation capabilities. It has them. It uses
-them on demand (drift detection, reprovision), not continuously.
+For incremental operations, the desired state is the projection —
+derived from intent replay and updated by each operation. newtron does
+not run a continuous reconciliation loop, but it has full
+reconciliation capabilities. It uses them on demand (drift detection,
+`Reconcile()`), not continuously.
 
 Two opinionated architectures cannot converge on the same device.
 newtron's device-reality checks minimize harm — they don't accommodate
 existing config from a different architectural model.
 
-**The device is the reality; specs are the intent; operations transform
-reality using intent. Reconciliation is available; it is not the
+**The intent DB is the primary state; the projection is its CONFIG_DB
+expression; the device is where the projection is delivered.
+Reconciliation is available; continuous reconciliation is not the
 operating mode.**
 
 ### Baseline prerequisites are non-negotiable
@@ -942,7 +950,7 @@ memory and deliver it later as a single atomic operation. Offline
 provisioning is not a second code path bolted on later; it falls out
 of the same constraint that makes dry-run work. The offline Node
 (§1) exists because of this forced separation — computation that never
-touches Redis can run against a shadow ConfigDB just as well as a real
+touches Redis can run against the projection just as well as a real
 one. The constraint that makes preview possible is the same constraint
 that makes offline mode possible.
 
@@ -1135,10 +1143,10 @@ CONFIG_DB state created by newtron should require a human with
 (`setup-device`) writes loopback, BGP globals, VTEP, device metadata,
 and optionally route-reflector configuration. These have no individual
 reverse — you never tear down BGP from a fabric switch without
-rebuilding the device. Their collective reverse is reprovision
-(`CompositeOverwrite`), which replaces the entire device configuration
-from current specs and profile. The `setup-*` verb signals this
-lifecycle: no individual reverse exists; remediation is reprovision.
+rebuilding the device. Their collective reverse is `Reconcile()`, which re-derives the
+projection from current intents and delivers it to the device. The
+`setup-*` verb signals this lifecycle: no individual reverse exists;
+remediation is reconcile.
 This is not a gap in symmetry — it is a recognition that baseline
 infrastructure is replaced as a unit, not dismantled piecewise. Every
 standalone resource operation (create-vrf, apply-service, bind-acl,
@@ -1178,7 +1186,7 @@ The current operation pairs:
 | `CreateACL` | `DeleteACL` |
 | `AddStaticRoute` | `RemoveStaticRoute` |
 
-Baseline operations (no individual reverse — remediation is reprovision):
+Baseline operations (no individual reverse — remediation is reconcile):
 `SetupDevice`, `SetProperty`
 
 RefreshService is not a pair — it combines removal and reapplication
@@ -1190,7 +1198,7 @@ definition in its place.
 When adding a new operation that creates CONFIG_DB state, the
 corresponding removal operation is not optional — it is part of the
 feature. Ship both or ship neither. Baseline operations (`setup-*`,
-`set-*`) are the sole exception — their reverse is reprovision.
+`set-*`) are the sole exception — their reverse is reconcile.
 
 The symmetry extends down to the config generator layer — the pure
 functions that construct CONFIG_DB entries (see §29):
@@ -1267,17 +1275,17 @@ When detecting whether a previous operation left orphaned state, use
 structural facts — not heuristic thresholds.
 
 The original intent detection used a staleness heuristic: read the
-intent, compare its last activity timestamp against the TTL, declare
-it "zombie" if the TTL expired. This worked most of the time, but
-introduced questions: What if the TTL is too short? What if the clock
-is skewed? What if the process is just slow?
+intent, compare its last activity timestamp against a TTL, declare it
+stale if the TTL expired. This worked most of the time, but introduced
+questions: What if the TTL is too short? What if the clock is skewed?
+What if the process is just slow?
 
-The structural proof is simpler: **if you hold the lock and an intent
-exists, the previous holder is dead.** The intent lifecycle is
-WriteIntent → Apply → DeleteIntent → Unlock. If the intent still
-exists when a new process acquires the lock, the previous process
-crashed between WriteIntent and DeleteIntent. Lock acquisition is the
-proof. No timer, no threshold, no edge cases.
+The structural proof is simpler: **the projection derived from intent
+replay either matches the device or it doesn't.** If a process crashes
+mid-apply, the drift guard on the next connect detects that the
+projection (from NEWTRON_INTENT records) diverges from actual
+CONFIG_DB. `Reconcile()` re-delivers the projection. No timer, no
+threshold, no edge cases.
 
 This pattern applies beyond intent records. Anywhere a heuristic
 (timeout, polling interval, retry count) is used to detect a condition,
@@ -1298,8 +1306,8 @@ what happens if one doesn't exist — without consulting documentation.
 
 | Verb | Lifecycle | Reverse | Examples |
 |------|-----------|---------|----------|
-| `setup-*` | Device-lifetime. Done once at provisioning. | reprovision | `setup-device` |
-| `set-*` | Field assignment. Per-resource. | reprovision | `set-property` |
+| `setup-*` | Device-lifetime. Done once at provisioning. | reconcile | `setup-device` |
+| `set-*` | Field assignment. Per-resource. | reconcile | `set-property` |
 | `create-*` | Named resource with independent lifecycle. | `delete-*` | `create-vrf`, `create-vlan` |
 | `add-*` | Instance in a collection. | `remove-*` | `add-bgp-peer`, `add-static-route` |
 | `bind-*` | Relationship between resources. | `unbind-*` | `bind-ipvpn`, `bind-acl` |
@@ -1308,7 +1316,7 @@ what happens if one doesn't exist — without consulting documentation.
 
 Two rules follow:
 - `setup-*` and `set-*` = no individual reverse. Remediation is
-  reprovision. A developer adding a `setup-*` operation knows they need
+  reconcile. A developer adding a `setup-*` operation knows they need
   no reverse implementation.
 - Every other verb has a specific reverse verb. A developer adding a
   `create-*` operation knows they must also implement `delete-*` in the
@@ -1343,10 +1351,10 @@ intent record, one ChangeSet, one API call, and one reverse operation.
 
 - Loses independent lifecycle management. A VRF created inside a giant
   "provision-everything" operation can't be added later without
-  reprovisioning. A service applied inside the same operation can't be
+  reconciling. A service applied inside the same operation can't be
   removed independently.
 - Makes the reverse operation all-or-nothing. If everything is one
-  operation, the only reverse is reprovision.
+  operation, the only reverse is reconcile.
 - Prevents the incremental operations that operators use daily.
 
 **The test**: if this operation completes but nothing else runs afterward,
@@ -1458,7 +1466,7 @@ depending on the hardware platform, the ASIC, and the SONiC release.
 
 These latencies matter in two contexts:
 
-1. **Post-provisioning convergence.** After `DeliverComposite` writes
+1. **Post-provisioning convergence.** After `Reconcile()` delivers
    the full config, daemons need time to process everything. Test suites
    handle this with polling-based health checks (`pollUntil` with
    configurable timeout and interval), not hardcoded sleeps.
@@ -1509,15 +1517,14 @@ composite was applied. Name references the spec that was consumed, if any.
 Params carry the resolved values that were actually written — the ground
 reality for teardown and reconstruction.
 
-Intent records move through three states. *Unrealized* means declared but
+Intent records move through two states. *Unrealized* means declared but
 not yet applied — the intent exists as a record of what should happen, but
-no CONFIG_DB entries have been written for it. *In-flight* means actuation
-is in progress — the record has been persisted, the ChangeSet is being
-applied, but the operation has not completed. If the process crashes
-during this state, the intent becomes a zombie: the record survives but
-the operation is incomplete, and the next operator can detect and recover
-from it. *Actuated* means the operation completed successfully — the
-CONFIG_DB entries exist and match what the intent record describes.
+no CONFIG_DB entries have been written for it. *Actuated* means the
+operation completed successfully — the CONFIG_DB entries exist and match
+what the intent record describes. If a process crashes mid-apply, the
+drift guard on the next connect detects the mismatch between projection
+and device CONFIG_DB. `Reconcile()` re-delivers the full projection — no
+zombie detection or heuristic recovery needed.
 
 There is no type discriminator field that says "this is a service intent"
 or "this is a VRF intent." The Operation field (e.g., `apply-service`,
@@ -1529,10 +1536,10 @@ new Operation value and the corresponding forward/reverse implementations.
 The Node intermediates all intent. On connect, the node loads existing
 intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
 the node's intent collection as part of the operation. In offline mode,
-intent records are written to the shadow ConfigDB and exported alongside
-all other entries via `ExportEntries()`. This makes the node the single point
-of intent truth for its device — whether connected or offline, whether
-reading reality or computing it.
+intent records accumulate alongside projection entries. In actuated mode,
+the Node replays intents from the device's NEWTRON_INTENT records to
+reconstruct the projection. This makes the Node the single point of
+intent truth for its device — whether offline, connected, or actuated.
 
 Rollback operates at the intent level, not the ChangeSet level. To roll
 back an operation, the orchestrator calls the domain-level reverse for that
@@ -1564,13 +1571,14 @@ exactly what CONFIG_DB entries should exist. No external history, no
 journal replay, no off-device state needed.
 
 This closes the gap between provisioning (topology-defined baseline)
-and the evolved device (post-provision operations). The topology gives
-you the baseline — `GenerateDeviceComposite()` with current specs
-produces the expected CONFIG_DB after provisioning. The intent records give
-you everything that happened since — each one carries enough
-information to replay the operation on an offline Node and produce
-the incremental CONFIG_DB entries. Together, they reconstruct the full
-expected state at any point in the device's lifetime.
+and the evolved device (post-provision operations). The topology
+provisioner calls the same methods on an offline Node (`SetupDevice`,
+`ApplyService`, etc.); `ExportEntries()` yields the expected CONFIG_DB
+after provisioning. The intent records give you everything that happened
+since — each one carries enough information to replay via
+`IntentsToSteps` + `ReplayStep` and produce the incremental CONFIG_DB
+entries. Together, they reconstruct the full expected state at any
+point in the device's lifetime.
 
 The existing principle "intent records must be self-sufficient for reverse
 operations" (§15) extends here: **intent records must be self-sufficient for
@@ -1609,7 +1617,7 @@ running the same code paths that provisioning and operations use (§1)
 chronological journal and replaying it. Reconstruction works because
 the offline Node IS the expected state: the same operations that
 produced the real CONFIG_DB entries produce identical entries when run
-against a shadow ConfigDB.
+against the projection.
 
 A journal is a second copy of information that already exists in a more
 authoritative form. Specs change; the journal doesn't know. Profiles
@@ -1623,15 +1631,15 @@ after each operation — by reconstructing expected state and diffing
 against actual CONFIG_DB.
 
 CONFIG_DB contains intent — what the device should look like — not
-history. The in-flight intent record (§19) is intent: "I am currently
-doing X." Completed operation history is not intent. It belongs in
+history. The unrealized intent record (§19) is intent: "this should be
+applied." Completed operation history is not intent. It belongs in
 structured logging or an external store, not in the device's
 configuration database.
 
 **Derive expected state from authoritative sources; don't maintain a
 parallel record of it.**
 
-### Remediation is reprovision
+### Remediation is reconcile
 
 Drift detection produces a precise diff — missing entries, extra entries,
 modified fields. The natural question is: why not apply a surgical fix?
@@ -1644,12 +1652,12 @@ checks, without intent recording. It would bypass the one-code-path
 thesis to fix a problem that the one-code-path thesis detected. The
 cure would undermine the diagnostic.
 
-Drift remediation is reprovision: reconstruct expected state from specs
-and profile (§1), deliver it as a `CompositeOverwrite` (§10), verify
-it landed (§14). The same code path that detected the drift produces
-the fix. No second system.
+Drift remediation is reconcile: rebuild the projection from intent
+replay (§1), deliver it via `Reconcile()` (§10), verify it landed
+(§14). The same code path that detected the drift produces the fix.
+No second system.
 
-Reprovision is disruptive on SONiC. `CompositeOverwrite` performs
+Reconcile is disruptive on SONiC. `Reconcile()` (via `ReplaceAll()`) performs
 `DEL` + `HSET` for every owned entry, and SONiC's keyspace notification
 model fires on every write — even when the value is unchanged. Every
 subscribing daemon tears down and rebuilds internal state for every
@@ -1661,12 +1669,12 @@ proportional to the platform's inability to distinguish "unchanged
 write" from "mutation," not to the tool's architecture.
 
 The architecture already produces the artifact that non-disruptive
-reconciliation needs: a complete expected-state composite, generated
+reconciliation needs: a complete expected-state projection, generated
 by the same code path that would provision the device from scratch. If
 SONiC supported diff-aware commit — writing desired state and notifying
 daemons only on actual changes, as JunOS does with `commit` — the same
-`CompositeOverwrite` path would become non-disruptive without code
-changes. The code path is ready. The platform is not yet.
+`Reconcile()` path would become non-disruptive without code changes.
+The code path is ready. The platform is not yet.
 
 ---
 
@@ -1905,7 +1913,7 @@ normal lifecycle.
 
 `RefreshService` solves this with a post-merge scan: after the
 remove+apply cycle, it reads existing route policy objects from CONFIG_DB
-(Redis in connected mode, shadow in offline mode), compares against the set
+(Redis in connected mode, projection in offline mode), compares against the set
 of objects just created by the apply phase, and deletes the difference.
 This is safe because all interfaces sharing a service use the same spec
 → the same hashes, and the shared peer group AF was already updated to
@@ -2166,7 +2174,7 @@ Five rules:
 1. **Orchestrators are API consumers, not insiders.** Extend the API;
    don't bypass it.
 2. **Operations accept names; the API resolves specs internally.**
-3. **Verification tokens are opaque.** `CompositeInfo` flows as a
+3. **Verification tokens are opaque.** `WriteResult` flows as a
    handle. Callers never inspect internal state.
 4. **Write results report outcomes, not internals.**
 5. **Public types are domain types, not wrappers.**
@@ -2199,7 +2207,7 @@ no logic.**
 
 ---
 
-## 35. Import Direction, Interface State, and Episodic Caching
+## 35. Import Direction, Interface State, and Projection Rebuild
 
 Three structural rules that each prevent a class of silent bug.
 
@@ -2220,16 +2228,13 @@ snapshot. A previous design cached 15 fields — fifteen opportunities
 per operation for a mutation to leave stale state behind. The
 on-demand design has zero.
 
-### Episodic caching — fresh snapshot per unit of work
+### Projection rebuild — fresh state per unit of work
 
-The Node (§1) caches CONFIG_DB to batch precondition checks. The
-freshness rule: every self-contained unit of work — an **episode** —
-begins with a fresh snapshot. No episode relies on cache from a prior
-episode.
-
-- **Write episodes**: `Lock()` refreshes the cache.
-- **Read-only episodes**: `Refresh()` at the start.
-- **Composite episodes**: `Refresh()` after delivery.
+Before every operation, `execute()` calls `RebuildProjection()` which
+re-derives the projection from the latest intents. This ensures each
+operation sees fresh, authoritative state — not stale cache from a
+prior operation. In actuated mode, the drift guard also fires at this
+point, comparing the projection against actual device CONFIG_DB.
 
 This is not transactional isolation. The distributed lock coordinates
 newtron instances but cannot prevent external writes. Precondition
@@ -2441,12 +2446,11 @@ using each child's own reverse method. Cascade deletes would require the
 parent to know how to tear down each child type, violating single
 responsibility and creating a second code path for every teardown operation.
 
-**CompositeOverwrite bypasses the DAG.** Reprovision replaces the entire
-CONFIG_DB atomically — including all intent records. It does not call
-`deleteIntent` or check `_children`. The abstract Node that builds the
-composite runs operations in order, accumulating fresh intent records with
-correct DAG links. This is consistent with §5: provisioning is the one
-operation where intent replaces reality.
+**`Reconcile()` bypasses the DAG.** Reconcile replaces the entire
+CONFIG_DB atomically (via `ReplaceAll()`) — including all intent records.
+It does not call `deleteIntent` or check `_children`. The abstract Node
+that builds the projection runs operations in order, accumulating fresh
+intent records with correct DAG links.
 
 ---
 
@@ -2521,13 +2525,13 @@ boundary with another will misapply it. These tensions are worth naming.
 
 ### Intent vs reality and provisioning
 
-§5 establishes that the device is the authority after application. But
-provisioning (CompositeOverwrite) is the one operation where intent
-replaces reality wholesale. The resolution: provisioning is the initial
-act of establishing reality from intent — explicitly bounded as the one
-exception. After that moment, all operations mutate the established
-reality. The exception proves the rule by being limited to a single,
-well-defined operation.
+§5 establishes that the intent DB is the authority after application.
+`Reconcile()` is the operation where the full projection replaces device
+CONFIG_DB wholesale. The resolution: `Reconcile()` is first-class — not
+an exception, but newtron's native recovery mechanism. Provisioning is
+the initial reconcile. Post-provision reconcile fixes drift. Both use
+the same code path: rebuild projection from intents, deliver via
+`ReplaceAll()`.
 
 ### Fail-closed schema and extensibility
 
@@ -2561,7 +2565,7 @@ sharing context. Conflating them would be unsafe.
 
 ### Coexistence and baseline prerequisites
 
-§5 says newtron accommodates other writers. It also says baseline
+§5 says newtron owns the device's CONFIG_DB. It also says baseline
 prerequisites are non-negotiable. The resolution: the baseline is a
 precondition, not an ongoing constraint. `newtron init` establishes it
 once. After that, other writers can modify CONFIG_DB freely within the
@@ -2569,17 +2573,16 @@ established baseline. newtron accommodates their writes. It does not
 accommodate a writer that disables unified mode or changes the baseline
 itself.
 
-### Reconstruction and device reality
+### Reconstruction and device state
 
-§21 reconstructs expected state from current specs. §5 says the device
-is reality — not specs. The resolution: reconstruction answers a
-different question. §5 says "what exists on the device is ground truth
-for operations." §21 says "what *should* exist on the device is
-derivable from specs + bindings." The first governs how operations
-behave (read CONFIG_DB, act on what's there). The second enables drift
-detection (compare what's there against what should be there). Neither
-overrides the other — they answer different questions about the same
-device.
+§21 reconstructs expected state from current specs. §5 says the intent
+DB is the authority. The resolution: these are the same thing viewed
+from different angles. §5 says "the projection (from intent replay) is
+the expected CONFIG_DB state." §21 says "the projection is derivable
+from specs + intent records." The first governs how operations behave
+(check preconditions against the projection). The second enables drift
+detection (compare the projection against actual device CONFIG_DB). They
+reinforce each other.
 
 An honest edge case: if specs change after provisioning — a new VLAN
 range, a different route policy, an updated QoS profile —
@@ -2635,7 +2638,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 2 | Three properties of one code path | Delivery, offline provisioning, and drift detection are structural consequences, not independent features | C |
 | 3 | The enforcement contract | Per-feature reliability doesn't scale; make reliability a property of the pipeline | C |
 | 4 | SONiC is a database | Every layer of indirection between tool and system is a layer where information is lost | C |
-| 5 | Specs are intent; device is reality | The device is the authority after application; newtron accommodates other writers but requires its baseline | C |
+| 5 | Specs are intent; intent DB is authority | The intent DB is the primary state after application; the projection (from intent replay) is the expected CONFIG_DB; newtron requires its baseline | C |
 | 6 | Interface is the point of service | What you bind services to becomes your unit of lifecycle, state, and failure | C |
 | 7 | Network-scoped definition, device-scoped execution | Define once at the broadest scope; the two lifecycles must not be coupled | C |
 | 8 | Scope boundaries | The system operates per-device; mixing abstraction levels entangles failure domains | C |
@@ -2665,7 +2668,7 @@ Legend: **C** = conviction (specific to this project) · **P** = established pra
 | 32 | Verb-first, domain-intent naming | Systems absorb infrastructure vocabulary; name things after the domain, not the database | S |
 | 33 | Public API boundary | Every internal refactor broke the orchestrator — until the type boundary separated intent from implementation; a boundary justified by one type applies uniformly to all | P |
 | 34 | Transparent transport | Optimize where the bottleneck is; everything else should be as thin as possible | S |
-| 35 | Import direction, interface state, episodic caching | Three principles that each prevent a specific class of silent bug | P |
+| 35 | Import direction, interface state, projection rebuild | Three principles that each prevent a specific class of silent bug | P |
 | 36 | Normalize at the boundary | Normalize once at system boundaries; trust canonical form inside | P |
 | 37 | Platform patching | Patch what's broken using the same signals and actions; don't build parallel infrastructure | C |
 | 38 | Observe behavior, don't trust schemas | Schema tells you what's valid; behavior tells you what works; only observation reveals both | C |
