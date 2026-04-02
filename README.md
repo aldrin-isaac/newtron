@@ -249,7 +249,9 @@ curl localhost:8080/network/default/topology/node              # List devices
 ## Testing Infrastructure
 
 Proving the primitives work requires running them against real SONiC
-software.
+software. Beyond testing newtron itself, this infrastructure helps
+discover SONiC issues before they show up on a real network —
+though platform-dependent behavior still requires real devices.
 
 **newtlab** deploys QEMU virtual machines and wires them into topologies
 using userspace networking — no root, no Linux bridges, no Docker. Every
