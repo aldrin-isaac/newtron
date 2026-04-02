@@ -1,12 +1,12 @@
 # Documentation Editing Guidelines
 
-Principles for writing and editing newtron project documentation, captured from the HLD, LLD, HOWTO, API reference, and DESIGN_PRINCIPLES rewrites (March 2026).
+Principles for writing and editing newtron project documentation, captured from the HLD, LLD, HOWTO, API reference, DESIGN_PRINCIPLES, and GUIDE rewrites (March–April 2026).
 
 **Scope key:** Each guideline is tagged with the document types it applies to.
 
 | Tag | Applies to |
 |-----|-----------|
-| ALL | DESIGN_PRINCIPLES, HLD, LLD, Device LLD, HOWTO, README, API |
+| ALL | DESIGN_PRINCIPLES, HLD, LLD, Device LLD, HOWTO, README, API, GUIDE |
 | DESIGN | DESIGN_PRINCIPLES_NEWTRON.md specifically |
 | HLD | High-Level Design |
 | LLD | Low-Level Design, Device LLD |
@@ -15,6 +15,7 @@ Principles for writing and editing newtron project documentation, captured from 
 | HOWTO | Operational guides (howto.md) |
 | README | Project and package READMEs |
 | API | HTTP API reference (api.md) |
+| GUIDE | Onboarding/kickstart guides (using-claude-with-newtron.md) |
 
 ### Quality tiers
 
@@ -26,6 +27,7 @@ universal; the quality bar is tiered.
 | DESIGN_PRINCIPLES | Highest | "The heart of newtron." Every sentence earns its place. |
 | HLDs | High | Explain the shape of the system; motivate every structural choice. |
 | RCAs | High | The reader needs to understand *why* the failure happened, not just *what*. |
+| GUIDEs | High | Orient both readers (human and AI); every sentence either orients or points to an authoritative doc. |
 | LLDs | Standard | Precision over eloquence; method signatures matter more than prose. |
 | HOWTOs | Standard | Clarity and correctness; step-by-step accuracy over narrative arc. |
 | README | Standard | Concise orientation; don't over-explain. |
@@ -89,7 +91,7 @@ The HLD should let a reader understand the system's architecture without ever me
 
 **HOWTO** covers neither what/why nor how/what-fields — it covers **when and in what order**. Operational procedures, step sequences, troubleshooting flows.
 
-**README** covers **what this is and how to get started** — installation, first run, pointer to further docs.
+**README** covers **what this is and how to get started** — what the project does, why it exists (including the goal of lowering the barrier to SONiC adoption), installation, first run, pointer to further docs.
 
 ## 6. End-to-End Walkthrough Ties It Together — HLD+LLD
 
@@ -710,3 +712,63 @@ names in different contexts because the reader is asking a different question.
   understand the Node is *connected* to Redis
 - Renaming function names or API symbols to match thesis vocabulary (symbols are
   stable interfaces, not prose)
+
+## 43. Derivative Documents Reference, Never Restate — ALL
+
+Any document that summarizes or references content from another document is a
+derivative. Derivatives must cite their source, not reproduce it. This applies
+to guides, to CLAUDE.md, and to any document that describes content whose
+canonical home is elsewhere.
+
+**Why:** Restated content drifts from its source. When the source changes,
+the derivative becomes a stale secondary source that contradicts the authority.
+Citations cannot drift — either the target doc exists and is current, or it
+doesn't. Reproductions also waste space in documents that are loaded
+automatically (like CLAUDE.md), consuming budget that could be used for
+original content.
+
+**Rules:**
+- Never reproduce a concept that has a canonical home in another doc. State the
+  concept's name, summarize it in one or two sentences, and cite the source by
+  document and section number.
+- Full text belongs in the authoritative source. Derivatives carry brief summaries
+  and pointers.
+- Original content — procedures, collaboration patterns, tracking lists, mechanical
+  checks that extend a principle — belongs in the derivative if it has no canonical
+  home elsewhere.
+
+**Test:** For every paragraph, ask: "does this content have a canonical home in
+another document?" If yes, it should be a brief summary with a citation, not a
+reproduction. If no, it belongs here.
+
+## 44. Dual-Audience Structure — GUIDE
+
+When a guide serves two distinct readers (e.g., a human operator and an AI
+assistant), structure the document with clearly separated parts — not interleaved
+advice. Each reader should be able to read their part end-to-end without
+filtering out content meant for the other.
+
+**Rules:**
+- Separate parts with clear headings that name the audience ("For the Human,"
+  "For Claude Code").
+- Both parts should cover the same categories of work so the human knows what
+  Claude was told, and Claude knows what the human was told.
+- Cross-references between parts are encouraged ("the human section covers
+  what to watch for; the AI section covers the mechanical checks").
+- Shared context (doc hierarchy, project structure) goes in an introduction
+  before the split, not duplicated in both parts.
+
+## 45. Anti-Patterns Are Earned, Not Hypothetical — GUIDE
+
+When documenting anti-patterns or "what to watch for," every item must come
+from actual experience — a real mistake that was made and corrected. Do not
+invent hypothetical failure modes to fill out a list.
+
+**Rules:**
+- Each anti-pattern should be traceable to a real incident (even if the
+  incident isn't described in detail).
+- Prefer concrete description over abstract warning: "Claude asserted a
+  function calls X without having read it" over "Claude may make unverified
+  claims about code."
+- If the list of real anti-patterns is short, that's fine — a short list of
+  real problems is more valuable than a long list of imagined ones.

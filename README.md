@@ -10,7 +10,8 @@
 </p>
 
 **newtron** explores network automation for SONiC through opinionated
-configuration primitives.
+configuration primitives. **newtron** also wants to bring more people to
+SONiC, by lowering the barrier to get started.
 
 Every piece of SONiC configuration — a VLAN, a BGP session, a service
 binding, an ACL — can be configured many ways. **newtron** offers one
