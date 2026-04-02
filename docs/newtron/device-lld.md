@@ -315,10 +315,11 @@ func (c *ConfigDBClient) TableKeys(table string) ([]string, error)         // Al
 func (c *ConfigDBClient) Exists(table, key string) (bool, error)           // Key existence check
 
 // Write operations
-func (c *ConfigDBClient) Set(table, key string, fields map[string]string) error // Single entry write
-func (c *ConfigDBClient) Delete(table, key string) error                        // Single entry delete
-func (c *ConfigDBClient) PipelineSet(changes []Entry) error                     // Atomic batch write (§3.7)
-func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error // Reconcile delivery (§3.7)
+func (c *ConfigDBClient) Set(table, key string, fields map[string]string) error  // Single entry write
+func (c *ConfigDBClient) Delete(table, key string) error                         // Single entry delete
+func (c *ConfigDBClient) PipelineSet(changes []Entry) error                      // Atomic batch write (§3.7)
+func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error // Full reconcile delivery (§3.7)
+func (c *ConfigDBClient) ApplyDrift(diffs []DriftEntry) error                    // Delta reconcile delivery (§3.7, §3.9)
 ```
 
 **`Set` behavior:** Writes all fields in a single `HSET` command to fire exactly one keyspace notification. Writing fields individually fires N notifications, causing SONiC daemons (e.g., bgpcfgd) to process partial state. If `fields` is empty, writes the `NULL:NULL` sentinel (SONiC convention for field-less entries like `PORTCHANNEL_MEMBER` or `INTERFACE` IP keys).
@@ -408,7 +409,25 @@ Used by `node.Node` for ChangeSet application — the accumulated config changes
 func (c *ConfigDBClient) ReplaceAll(changes []Entry, ownedTables []string) error
 ```
 
-Used by `Reconcile()` at the node layer to deliver the full projection to the device, eliminating drift. Factory defaults (DEVICE_METADATA `mac`, `platform`, `hwsku`) are preserved because `ReplaceAll` only deletes keys from owned tables — factory-only tables are untouched.
+Used by full-mode `Reconcile()` at the node layer to deliver the full projection to the device, eliminating drift. Factory defaults (DEVICE_METADATA `mac`, `platform`, `hwsku`) are preserved because `ReplaceAll` only deletes keys from owned tables — factory-only tables are untouched.
+
+**`ApplyDrift` — delta reconcile delivery:**
+
+```go
+// ApplyDrift applies only the drifted entries to CONFIG_DB using a single
+// atomic TxPipeline. Entries are ordered by table dependency (tablePriority
+// from configdb_diff.go): deletes run children-first (descending priority),
+// creates/modifies run parents-first (ascending priority). This matches YANG
+// leafref ordering so dependent entries are never written before their parents.
+//
+// Actions per drift type:
+//   - "extra":    DEL (entry should not exist)
+//   - "missing":  DEL + HSET (clean replace per CONFIG_DB Replace Semantics)
+//   - "modified": DEL + HSET (clean replace per CONFIG_DB Replace Semantics)
+func (c *ConfigDBClient) ApplyDrift(diffs []DriftEntry) error
+```
+
+Used by delta-mode `Reconcile()` at the node layer. Delta reconcile calls `DiffConfigDB` (§3.9) to identify drifted entries, then passes the diff directly to `ApplyDrift` — no config reload, no full projection delivery. NEWTRON_INTENT entries are excluded from drift detection and delivered separately via `PipelineSet` after `ApplyDrift`. See §3.9 for the full delta reconcile pipeline.
 
 **Why MULTI/EXEC pipelines:**
 - **Atomicity**: Either all changes apply or none. Prevents partial config states.
@@ -435,6 +454,12 @@ func (db *ConfigDB) ExportEntries() []Entry
 // Used by drift detection: the projection's ExportRaw() output is compared
 // against the device's actual CONFIG_DB via DiffConfigDB().
 func (db *ConfigDB) ExportRaw() RawConfigDB
+
+// ExportIntentEntries returns only the NEWTRON_INTENT entries from the ConfigDB.
+// Used by delta Reconcile: NEWTRON_INTENT is excluded from DiffConfigDB and
+// thus from ApplyDrift, so intents are delivered separately via PipelineSet
+// after the drift patch is applied.
+func (db *ConfigDB) ExportIntentEntries() []Entry
 ```
 
 ### 3.9 Drift Detection (`pkg/newtron/device/sonic/configdb_diff.go`)
@@ -479,6 +504,17 @@ func (c *ConfigDBClient) GetRawOwnedTables(ctx context.Context) (RawConfigDB, er
 2. Calling `projection.ExportRaw()` to get expected state
 3. Calling `client.GetRawOwnedTables()` to get actual state
 4. Calling `DiffConfigDB(expected, actual, ownedTables)` to produce the diff
+
+**Delta reconcile pipeline:** delta-mode `Reconcile()` extends drift detection with apply:
+1. Steps 1–4 above to produce the `[]DriftEntry` diff
+2. Calling `client.ApplyDrift(diffs)` to patch only the drifted entries (§3.7)
+3. Calling `client.PipelineSet(intentEntries)` to deliver NEWTRON_INTENT separately
+   (intents are excluded from `DiffConfigDB` via `excludedFromDrift`)
+4. Calling `config save -y` to persist the patched state
+
+No config reload is performed in delta mode — only drifted keys are touched. Full-mode `Reconcile()` still uses config reload + `ReplaceAll` (§3.7) for a clean-slate delivery.
+
+**Table ordering in `ApplyDrift`:** entries are sorted by `tablePriority`, a 4-tier map in `configdb_diff.go` derived from YANG leafref dependency chains covering 38 CONFIG_DB tables. Tier 0 = root tables (no parents); Tier 3 = deepest children. Deletes run in descending tier order (children first); creates/modifies run in ascending tier order (parents first).
 
 **Field matching is subset-based:** `fieldsMatch` checks that every field in expected is present in actual with the same value. Extra fields in actual are ignored — the device may have fields from factory config or `config reload` that the projection doesn't manage.
 
@@ -1323,7 +1359,11 @@ To persist configuration across reboots, the SONiC command `config save -y` must
 
 **Config reload:** `config reload -y` re-reads `/etc/sonic/config_db.json` and replaces the running CONFIG_DB. The node layer uses `ExecCommandContext` with retry logic — on fresh CiscoVS boot, SwSS may not be ready, so the reload is retried every 5 seconds for up to 90 seconds.
 
-**Reconcile flow:** The node layer's `Reconcile()` calls `ExportEntries()` to extract the full projection, then `ReplaceAll(entries, ownedTables)` to deliver it to the device. Before reconcile, `config reload -y` restores CONFIG_DB to the saved baseline (clean slate for merge-based `ReplaceAll`). After delivery, `config save -y` persists the reconciled config so subsequent reloads re-read the reconciled state rather than factory defaults.
+**Reconcile flow — two modes:**
+
+- **Full mode** (default): `Reconcile()` runs `config reload -y` to restore CONFIG_DB to the saved baseline, then calls `ExportEntries()` to extract the full projection and `ReplaceAll(entries, ownedTables)` (§3.7) to deliver it. After delivery, `config save -y` persists the reconciled state so subsequent reloads re-read the reconciled config rather than factory defaults.
+
+- **Delta mode**: `Reconcile()` skips config reload. It rebuilds the projection from intents, calls `DiffConfigDB` (§3.9) to identify drifted entries, then calls `ApplyDrift(diffs)` (§3.7) to patch only those entries. NEWTRON_INTENT records are delivered separately via `PipelineSet(ExportIntentEntries())` because they are excluded from drift detection. `config save -y` is called after to persist the patched state. Delta mode is faster and less disruptive — no daemon churn from a full config reload.
 
 **Implications for testing:**
 

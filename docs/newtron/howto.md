@@ -1975,11 +1975,17 @@ Deliver the expected CONFIG_DB to the device, eliminating all drift:
 # Preview what would change (dry-run)
 newtron leaf1 intent reconcile
 
-# Execute — replaces device CONFIG_DB with projection
+# Execute — delta mode (default for actuated)
 newtron leaf1 intent reconcile -x
 
-# Topology mode — reconcile from topology.json
+# Execute — full mode (config reload + ReplaceAll)
+newtron leaf1 intent reconcile --full -x
+
+# Topology mode — reconcile from topology.json (full mode by default)
 newtron leaf1 --topology intent reconcile -x
+
+# Topology mode — delta mode explicitly
+newtron leaf1 --topology intent reconcile --delta -x
 ```
 
 Reconcile reconstructs the projection from intents, computes the diff against the device, and applies it. This is the primary mechanism for:
@@ -1987,6 +1993,17 @@ Reconcile reconstructs the projection from intents, computes the diff against th
 - **Fixing drift** — external edits are overwritten to match the projection
 - **Re-provisioning** — after a config reload, reconcile restores all newtron-managed state
 - **Topology provisioning** — with `--topology`, delivers the full topology-defined state (see [§17](#17-topology-provisioning))
+
+**Reconcile modes:**
+
+| Flag | What it does | Default for |
+|------|-------------|-------------|
+| `--delta` | Patch only drifted entries — no config reload | Actuated mode |
+| `--full` | Config reload + full `ReplaceAll` — overwrites everything | Topology mode |
+
+The default mode depends on how intents are sourced: actuated mode (device NEWTRON_INTENT records) defaults to `--delta` because the device is already consistent and only changed entries need to be patched. Topology mode defaults to `--full` because it is delivering a complete desired state to a device that may have no prior newtron state. Use `--full` explicitly in actuated mode after a config reload or factory reset. Use `--delta` explicitly in topology mode when you want surgical patching instead of a full reload.
+
+**`--full` and `--delta` are mutually exclusive.**
 
 **What reconcile does NOT do:** It does not add new intents or change the intent DAG. It delivers the existing projection. To change what's configured, use the normal write operations (service apply, VRF create, etc.), then reconcile if the device has drifted.
 
@@ -2711,6 +2728,7 @@ Spec-Level (no device needed)
 Device-Scoped (requires device name)
 ├── show
 ├── init
+├── device     setup [--hostname] [--bgp-asn] [--type] [--hwsku] [--vtep-source]
 ├── interface  list | show | get | set | list-acls | list-members
 ├── service    apply | remove | refresh | get
 ├── vlan       list | show | status | create | delete

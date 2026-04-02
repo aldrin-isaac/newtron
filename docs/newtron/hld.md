@@ -226,12 +226,12 @@ State transitions:
 |-----------|-------------|-----------------|
 | **Tree** | Read the intent DB → return intent DAG | No |
 | **Drift** | Compare projection vs actual CONFIG_DB → return differences | Yes (auto-connects) |
-| **Reconcile** | Deliver the full projection to the device (config reload + `ExportEntries` + `ReplaceAll`) | Yes (auto-connects) |
+| **Reconcile** | Deliver the projection to the device. Two modes: **full** (config reload + `ExportEntries` + `ReplaceAll`); **delta** (`DiffConfigDB` + `ApplyDrift`, patches only drifted entries). Default: full for topology nodes, delta for actuated nodes. | Yes (auto-connects) |
 | **Save** | `Tree()` → `SaveDeviceIntents()` — persist intent DB to `topology.json` | No |
 | **Reload** | Discard unsaved changes, rebuild from `topology.json` (topology mode only) | No |
 | **Clear** | Delete all intents, produce empty node with ports only (topology mode only) | No |
 
-Reconcile is the delivery mechanism for both initial provisioning and drift repair. It reloads CONFIG_DB from disk (factory baseline), then delivers the full projection via `ReplaceAll()`. Factory fields (mac, platform, hwsku) survive because `ReplaceAll` only DELs keys for tables the Node manages.
+Reconcile is the delivery mechanism for both initial provisioning and drift repair. Two modes serve different contexts: **full** reloads CONFIG_DB from disk (factory baseline) then delivers the complete projection via `ReplaceAll()` — factory fields (mac, platform, hwsku) survive because `ReplaceAll` only DELs keys for tables the Node manages; **delta** computes the diff between projection and actual device CONFIG_DB via `DiffConfigDB` then patches only the drifted entries via `ApplyDrift`, leaving the rest untouched. The default is full for topology nodes (day-1 delivery) and delta for actuated nodes (drift repair). Both modes can be overridden via `--full`/`--delta` CLI flags or `?reconcile=full|delta` query parameter.
 
 ### 3.5 Topology Provisioning
 
@@ -535,7 +535,7 @@ E2E testing uses the newtrun framework (see [newtrun HLD](../newtrun/hld.md) and
 | **Replay** | Execute a config function for an intent, producing entries that get rendered into the projection. |
 | **Drift** | Difference between projection (expected) and device (actual). Detected by comparing `ExportRaw()` against transient Redis read. |
 | **Drift guard** | In actuated mode, Lock computes drift before allowing writes. Non-empty drift → Lock refuses. Resolution: `Reconcile()` first. |
-| **Reconcile** | Deliver the full projection to the device: config reload → `ExportEntries()` → `ReplaceAll()`. Fixes drift and provisions devices. |
+| **Reconcile** | Deliver the projection to the device. Full mode: config reload → `ExportEntries()` → `ReplaceAll()`. Delta mode: `DiffConfigDB()` → `ApplyDrift()` (patches only drifted entries). Default: full for topology nodes, delta for actuated nodes. |
 | **RebuildProjection** | Re-read intents (from device when connected, from memory when offline), create fresh configDB, replay all intents. Called in `execute()` before every operation. |
 | **Execute** | Public write entry point: Lock → snapshot → fn → commit-or-restore → Unlock. Supports dry-run via intent snapshot/restore. |
 | **Transport** | SSH + Redis connection layered on top of expected state. `ConnectTransport()` adds the wire without disturbing intent DB or projection. |

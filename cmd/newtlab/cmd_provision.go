@@ -15,11 +15,12 @@ func newProvisionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "provision [topology]",
 		Short: "Provision devices via newtron",
-		Long: `Run newtron provisioning on deployed VMs.
+		Long: `Run topology reconcile on deployed VMs.
 
-This invokes 'newtron provision -x' on each device in the topology,
-delivering the CONFIG_DB derived from spec files. Equivalent to the
---provision flag on 'newtlab deploy'.
+This invokes 'newtron <name> --topology intent reconcile -x' on each device
+in the topology, replaying topology.json steps and delivering the resulting
+CONFIG_DB projection to the device. Equivalent to the --provision flag on
+'newtlab deploy'.
 
   newtlab provision 2node-ngdp
   newtlab provision 2node-ngdp --device leaf1    # single device

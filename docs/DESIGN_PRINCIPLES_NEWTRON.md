@@ -1645,36 +1645,29 @@ Drift detection produces a precise diff — missing entries, extra entries,
 modified fields. The natural question is: why not apply a surgical fix?
 Add the missing entry. Delete the extra one. Correct the modified field.
 
-Because a surgical reconciler is a second write path. It would construct
-CONFIG_DB entries outside the Node's operation pipeline — without
-ChangeSet tracking, without schema validation, without precondition
-checks, without intent recording. It would bypass the one-code-path
-thesis to fix a problem that the one-code-path thesis detected. The
-cure would undermine the diagnostic.
+The answer depends on where the surgical fix lives. A surgical remediator
+outside `Reconcile()` is a second write path. It would construct CONFIG_DB
+entries outside the Node's operation pipeline — without ChangeSet tracking,
+without schema validation, without precondition checks, without intent
+recording. It would bypass the one-code-path thesis to fix a problem that
+the one-code-path thesis detected. The cure would undermine the diagnostic.
 
 Drift remediation is reconcile: rebuild the projection from intent
 replay (§1), deliver it via `Reconcile()` (§10), verify it landed
 (§14). The same code path that detected the drift produces the fix.
 No second system.
 
-Reconcile is disruptive on SONiC. `Reconcile()` (via `ReplaceAll()`) performs
-`DEL` + `HSET` for every owned entry, and SONiC's keyspace notification
-model fires on every write — even when the value is unchanged. Every
-subscribing daemon tears down and rebuilds internal state for every
-entry it watches. A clean device that isn't drifted still reconverges
-fully. This is not newtron's limitation — it is SONiC's notification
-model. Any tool that writes to CONFIG_DB faces the same constraint:
-Terraform, Ansible, a raw `redis-cli` script. The disruption is
-proportional to the platform's inability to distinguish "unchanged
-write" from "mutation," not to the tool's architecture.
-
-The architecture already produces the artifact that non-disruptive
-reconciliation needs: a complete expected-state projection, generated
-by the same code path that would provision the device from scratch. If
-SONiC supported diff-aware commit — writing desired state and notifying
-daemons only on actual changes, as JunOS does with `commit` — the same
-`Reconcile()` path would become non-disruptive without code changes.
-The code path is ready. The platform is not yet.
+`Reconcile()` supports two modes. Full mode performs `config reload` +
+`ReplaceAll()` — a complete overwrite of the device's CONFIG_DB from the
+projection. Every subscribing daemon tears down and rebuilds internal state
+for every entry it watches, whether drifted or not. Delta mode performs
+`DiffConfigDB` + `ApplyDrift()` — it patches only the drifted entries
+identified by drift detection, without a config reload. Delta mode is the
+surgical fix: it applies targeted writes, but through the same
+`Reconcile()` pipeline, with the same ChangeSet tracking and schema
+validation. Both modes are methods on the same `Node.Reconcile()` call;
+the mode is a parameter, not a code path. The anti-pattern is a remediator
+that bypasses `Reconcile()` entirely — not one that writes fewer entries.
 
 ---
 

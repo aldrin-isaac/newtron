@@ -29,7 +29,7 @@ newtron/
 │       ├── scenario.go           # Scenario, Step, StepAction constants, ExpectBlock, PollBlock, BatchCall
 │       ├── parser.go             # ParseScenario, stepValidations table, ValidateDependencyGraph
 │       ├── runner.go             # Runner (with Client, ServerURL, NetworkID), RunOptions, Run
-│       ├── steps.go              # stepExecutor interface, StepOutput, multi-device helpers, provision/wait/verify-provisioning executors
+│       ├── steps.go              # stepExecutor interface, StepOutput, multi-device helpers, topology-reconcile/wait/verify-topology executors
 │       ├── steps_newtron.go      # newtronExecutor: URL expansion, jq evaluation, one-shot/polling/batch modes
 │       ├── steps_host.go         # hostExecExecutor, shellQuote, runSSHCommand
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
@@ -130,9 +130,9 @@ parse time via the declarative `stepValidations` table (see §3.2).
 type StepAction string
 
 const (
-    ActionProvision          StepAction = "provision"
+    ActionProvision          StepAction = "topology-reconcile"
     ActionWait               StepAction = "wait"
-    ActionVerifyProvisioning StepAction = "verify-provisioning"
+    ActionVerifyProvisioning StepAction = "verify-topology"
     ActionHostExec           StepAction = "host-exec"
     ActionNewtron            StepAction = "newtron"
 )
@@ -258,9 +258,9 @@ Currently it contains a single mapping: `"command"` → `s.Command`.
 
 | Action | Rule | Details |
 |--------|------|---------|
-| `provision` | `needsDevices: true` | |
+| `topology-reconcile` | `needsDevices: true` | |
 | `wait` | custom | `duration` must be non-zero |
-| `verify-provisioning` | `needsDevices: true` | |
+| `verify-topology` | `needsDevices: true` | |
 | `host-exec` | `singleDevice: true`, `fields: ["command"]` | Exactly one device; `command` field required |
 | `newtron` | custom | Either `url` or `batch` must be non-empty |
 
@@ -278,7 +278,6 @@ type Runner struct {
     NetworkID     string              // network identifier for server operations
     Client        *client.Client      // HTTP client for all SONiC operations
     Lab           *newtlab.Lab
-    Composites    map[string]string   // device name → composite handle UUID
     HostConns     map[string]*ssh.Client // host device name → SSH client
     Progress      ProgressReporter
 
@@ -296,7 +295,6 @@ type Runner struct {
 | `NetworkID` | Network identifier passed to all server requests. Resolved from: `--network-id` flag → `NEWTRON_NETWORK_ID` env → settings → `newtron.DefaultNetworkID`. |
 | `Client` | HTTP client (`pkg/newtron/client.Client`) created during `connectDevices`. All SONiC operations — provisioning, service lifecycle, CONFIG_DB queries, health checks, verification — go through this client. |
 | `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
-| `Composites` | Last composite handle UUID per device name, accumulated from executor `StepOutput`. Last-write-wins: if multiple steps produce composite handles for the same device, only the latest is retained. Read by `verify-provisioning`. |
 | `HostConns` | SSH client connections keyed by host device name. Used by `host-exec` executor to run commands inside host network namespaces. |
 | `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
 | `discoveredPlatform` | Platform name discovered from the first non-host device profile after connection. Used as fallback for `hasDataplane()` and `checkPlatformFeatures()`. |
@@ -484,7 +482,7 @@ type ScenarioState struct {
 ```
 
 `CurrentStepAction` enables the `status --detail` view to show which action type
-is currently executing (e.g., "provision", "newtron"), not just the step name.
+is currently executing (e.g., "topology-reconcile", "newtron"), not just the step name.
 
 ### 5.4 StepState
 
@@ -615,15 +613,13 @@ type stepExecutor interface {
 }
 
 type StepOutput struct {
-    Result     *StepResult
-    Composites map[string]string  // device name → composite handle UUID
+    Result *StepResult
 }
 ```
 
 All executors are stateless — mutable state lives in the Runner. Executors
-read from Runner (e.g., `r.Client`, `r.Composites`, `r.HostConns`) and return
-`StepOutput` rather than writing directly. The Runner merges Composites after
-each step.
+read from Runner (e.g., `r.Client`, `r.HostConns`) and return
+`StepOutput` rather than writing directly.
 
 ### 7.2 Executor Dispatch
 
@@ -661,13 +657,13 @@ only the device `name` string. The callback body uses `r.Client` to perform
 all operations against the server:
 
 - **executeForDevices**: for mutating actions and one-shot newtron calls. Calls `fn` for each device in parallel.
-- **checkForDevices**: for single-shot verification (verify-provisioning). Returns per-device status.
+- **checkForDevices**: for single-shot verification (verify-topology). Returns per-device status.
 - **pollForDevices**: for polling verification (newtron polling mode). Polls until `step.Expect.Timeout` using `step.Expect.PollInterval`.
 
 | Helper | Used By |
 |--------|---------|
-| `executeForDevices` | `provision`, `newtron` (one-shot mode, batch mode) |
-| `checkForDevices` | `verify-provisioning` |
+| `executeForDevices` | `topology-reconcile`, `newtron` (one-shot mode, batch mode) |
+| `checkForDevices` | `verify-topology` |
 | `pollForDevices` | `newtron` (polling mode) |
 
 **Host-skip behavior:** all three helpers check `r.HostConns[name]` before invoking the callback. If the device is a host, it is skipped with status `SKIP` and message "host device (SONiC operation/verification not applicable)". This means `devices: all` in a mixed switch+host topology automatically restricts SONiC operations to switches only. The only executor that targets hosts is `hostExecExecutor`, which uses `r.HostConns` directly.
@@ -685,24 +681,23 @@ until `fn` returns `done=true`, timeout expires, or `ctx` is cancelled.
 
 | # | Executor | Action | File | Client Call |
 |---|----------|--------|------|-------------|
-| 1 | `provisionExecutor` | `provision` | `steps.go` | `GenerateComposite` → `ConfigReload` → `RefreshWithRetry` → `DeliverComposite` → `Refresh` → `SaveConfig` |
+| 1 | `provisionExecutor` | `topology-reconcile` | `steps.go` | `Reconcile(name, "topology", "", ExecOpts{Execute: true})` |
 | 2 | `waitExecutor` | `wait` | `steps.go` | — (context-aware `time.After`) |
-| 3 | `verifyProvisioningExecutor` | `verify-provisioning` | `steps.go` | `VerifyComposite(name, handle)` |
+| 3 | `verifyProvisioningExecutor` | `verify-topology` | `steps.go` | `IntentDrift(name, "topology")` → check `len == 0` |
 | 4 | `hostExecExecutor` | `host-exec` | `steps_host.go` | — (direct SSH via `r.HostConns`) |
 | 5 | `newtronExecutor` | `newtron` | `steps_newtron.go` | `RawRequest(method, path, body)` |
 
 ### 7.6 Provision Executor Detail
 
-The `provisionExecutor` performs a multi-step sequence entirely via `r.Client`:
+The `provisionExecutor` makes a single API call per device:
 
-1. `r.Client.GenerateComposite(name)` → returns handle with UUID
-2. `r.Client.ConfigReload(name)` — best-effort baseline restore (failure is non-fatal)
-3. `r.Client.RefreshWithRetry(name, 60s)` — wait for SwSS readiness after reload
-4. `r.Client.DeliverComposite(name, handle, "overwrite")` — server handles lock → deliver → unlock
-5. `r.Client.Refresh(name)` — refresh cached CONFIG_DB and interface list
-6. `r.Client.SaveConfig(name)` — persist to config_db.json for future config-reload steps
+```go
+result, err := r.Client.Reconcile(name, "topology", "", newtron.ExecOpts{Execute: true})
+```
 
-The handle UUID is stored in `StepOutput.Composites[name]` for later use by `verify-provisioning`.
+`Reconcile` handles config reload, locking, full CONFIG_DB replacement (ReplaceAll), and
+SaveConfig internally. On success, the executor reports `"provisioned (N entries applied)"`
+where N is `result.Applied`.
 
 ### 7.7 Host Exec Executor (`steps_host.go`)
 
@@ -784,9 +779,9 @@ func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params m
 
 | Action | Step Fields | Expect Fields | Notes |
 |--------|-------------|---------------|-------|
-| `provision` | — | — | Multi-step sequence (see §7.6); populates `StepOutput.Composites` |
+| `topology-reconcile` | — | — | Single `Reconcile` call (see §7.6); reports applied entry count |
 | `wait` | **duration** | — | Context-aware sleep; no device interaction |
-| `verify-provisioning` | — | — | Reads `r.Composites[device]` (UUID handle from prior `provision` step) |
+| `verify-topology` | — | — | Calls `IntentDrift(name, "topology")`; passes when drift count is zero |
 | `host-exec` | **command** | `success_rate`, `contains` | Direct SSH via `r.HostConns`; wraps in `ip netns exec <device> sh -c` |
 | `newtron` | **url** or **batch**, method, params | `jq` | Generic HTTP action; `poll:` block for polling; `batch:` for sequential calls |
 
@@ -800,7 +795,7 @@ are type-valid and can be copy-pasted into scenario files.
 ```yaml
 steps:
   - name: provision-switches
-    action: provision
+    action: topology-reconcile
     devices: [switch1, switch2]
 
   - name: wait-convergence
@@ -808,7 +803,7 @@ steps:
     duration: 45s
 
   - name: verify-provisioning
-    action: verify-provisioning
+    action: verify-topology
     devices: [switch1, switch2]
 ```
 
@@ -1141,7 +1136,7 @@ type PauseError struct {
 | Type | When | Message Format |
 |------|------|---------------|
 | `InfraError` | Deploy fails, network registration fails, SSH connect fails | `"newtrun: deploy: <err>"` or `"newtrun: connect leaf1: <err>"` |
-| `StepError` | Unknown action, internal executor error | `"newtrun: step provision-all (provision): <err>"` |
+| `StepError` | Unknown action, internal executor error | `"newtrun: step provision-all (topology-reconcile): <err>"` |
 | `PauseError` | Suite paused between scenarios | `"paused after N scenarios"` |
 
 All error types implement `error`. `InfraError` and `StepError` implement

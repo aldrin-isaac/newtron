@@ -135,9 +135,12 @@ state directory tracks everything needed for destroy, stop/start, and status.
   bridge process. Each link gets one worker that bridges Ethernet frames
   between two TCP listeners. The bridge process starts before VMs (workers
   must be listening when QEMU tries to connect at boot).
-- **newtron** is invoked as a sibling binary (`newtron provision`) during
-  the optional provisioning step. newtlab finds it adjacent to its own
-  binary or on PATH.
+- **newtron** is invoked as a sibling binary during the optional
+  provisioning step. newtlab finds it adjacent to its own binary or on
+  PATH. For each switch, newtlab runs
+  `newtron <name> --topology intent reconcile -x` (topology-mode full
+  reconcile), which replays topology.json steps and delivers the
+  resulting CONFIG_DB projection to the device.
 - **State directory** (`~/.newtlab/labs/<name>/`) holds everything needed to
   manage the lab after deployment: PIDs, overlay disks, logs, bridge config,
   and `state.json`.
@@ -803,8 +806,9 @@ the original `mgmt_ip` and removes the runtime fields.
 
 ### Provisioning Shells Out
 
-When `--provision` is passed, newtlab invokes `newtron provision -S <specs>
--D <device> -x` as a subprocess for each switch device. This is intentional:
+When `--provision` is passed, newtlab invokes
+`newtron <name> --topology intent reconcile -x` as a subprocess for each
+switch device. This is intentional:
 
 - **No library coupling.** newtlab depends on spec types for reading
   topology files, but has no dependency on newtron's device operations,
@@ -920,10 +924,11 @@ configuration) begins.
 
 ### Provisioning and the Parallel Race
 
-Because `--provision` was passed, newtlab invokes `newtron provision` for
-each switch as a subprocess. newtron reads the patched profiles, connects
-via SSH tunnel, and writes CONFIG_DB entries for BGP, EVPN, loopback, and
-topology interfaces. Both switches provision in parallel.
+Because `--provision` was passed, newtlab invokes
+`newtron <name> --topology intent reconcile -x` for each switch as a
+subprocess. newtron reads the patched profiles, connects via SSH tunnel,
+replays the topology.json steps to build the expected CONFIG_DB projection,
+and delivers it to the device. Both switches provision in parallel.
 
 **Non-obvious problem:** switch1 finishes provisioning and its BGP daemon
 tries to peer with switch2. But switch2 is still being provisioned — its

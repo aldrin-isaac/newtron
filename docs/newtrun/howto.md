@@ -406,8 +406,8 @@ and action-specific fields. newtrun has exactly 5 actions:
 
 | Action | Purpose |
 |--------|---------|
-| `provision` | Generate and deliver device composite from topology specs |
-| `verify-provisioning` | Verify composite ChangeSet against CONFIG_DB |
+| `topology-reconcile` | Deliver topology projection to device via Reconcile |
+| `verify-topology` | Verify device matches topology projection (zero drift) |
 | `wait` | Context-aware sleep |
 | `host-exec` | Run command in host network namespace via direct SSH |
 | `newtron` | Generic HTTP call to newtron-server (replaces all former dedicated actions) |
@@ -417,7 +417,7 @@ and action-specific fields. newtrun has exactly 5 actions:
 | Field | Type | Used by | Description |
 |-------|------|---------|-------------|
 | `name` | string | all | Step identifier for output |
-| `action` | string | all | Which executor to run (`provision`, `verify-provisioning`, `wait`, `host-exec`, `newtron`) |
+| `action` | string | all | Which executor to run (`topology-reconcile`, `verify-topology`, `wait`, `host-exec`, `newtron`) |
 | `devices` | selector | all except `wait` | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
 | `duration` | duration | `wait` | How long to wait (e.g., `30s`, `2m`) |
 | `command` | string | `host-exec` | Shell command to run inside the host namespace |
@@ -528,11 +528,11 @@ the scenario reports `SKIP` with a reason.
 newtrun actions
 
 # Show detail for a specific action
-newtrun actions provision
+newtrun actions topology-reconcile
 newtrun actions newtron
 ```
 
-newtrun has 5 actions: `provision`, `verify-provisioning`, `wait`,
+newtrun has 5 actions: `topology-reconcile`, `verify-topology`, `wait`,
 `host-exec`, and `newtron`. The `newtron` action is the general-purpose
 action — it makes HTTP calls to newtron-server and covers every
 operation that the old dedicated actions (create-vlan, apply-service,
@@ -542,46 +542,41 @@ verify-bgp, etc.) used to handle individually.
 
 ## 7. Step Action Reference
 
-newtrun has exactly 5 actions. The first three handle the composite
-provisioning lifecycle. `host-exec` runs commands on host VMs via SSH.
-`newtron` is the generic action that covers everything else via HTTP
+newtrun has exactly 5 actions. `topology-reconcile` and `verify-topology`
+handle provisioning and verification. `host-exec` runs commands on host VMs
+via SSH. `newtron` is the generic action that covers everything else via HTTP
 calls to newtron-server.
 
-### 7.1 provision
+### 7.1 topology-reconcile
 
-Generates a device composite from topology specs and delivers it to the
-device. This is the one operation that replaces device reality with
-spec intent.
-
-The executor generates the composite, runs a best-effort config reload
-to establish a clean baseline, delivers the composite in overwrite mode,
-refreshes the server's cached CONFIG_DB, and saves config to
-`config_db.json` for subsequent config reloads.
+Delivers the topology projection to the device by calling
+`Reconcile(name, "topology", "", ExecOpts{Execute: true})`. Reconcile
+handles config reload, locking, full CONFIG_DB replacement, and
+SaveConfig internally — the executor makes a single API call.
 
 ```yaml
 - name: provision-switches
-  action: provision
+  action: topology-reconcile
   devices: [switch1, switch2]
 ```
 
-No additional fields. The composite handle is stored internally and
-used by `verify-provisioning`.
+No additional fields. Reports the number of entries applied on success.
 
-### 7.2 verify-provisioning
+### 7.2 verify-topology
 
-Verifies the most recent composite delivery by checking that all
-CONFIG_DB entries written by `provision` are present with the expected
-field values. Uses the ChangeSet stored from the `provision` step.
+Verifies that the device CONFIG_DB matches the topology projection by
+calling `IntentDrift(name, "topology")`. Zero drift entries means the
+device is in the expected state. Any drift entries cause the step to
+fail with a count of entries that diverge.
 
 ```yaml
 - name: verify-config
-  action: verify-provisioning
+  action: verify-topology
   devices: [switch1, switch2]
 ```
 
-**Precondition:** `provision` must have run on the target devices in an
-earlier step. If no composite handle is found, the step errors with
-"no composite accumulated."
+No precondition on a prior step — drift is computed directly from the
+topology projection on the server.
 
 ### 7.3 wait
 

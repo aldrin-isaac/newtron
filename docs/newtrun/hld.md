@@ -316,7 +316,7 @@ requires: [boot-ssh]
 
 steps:
   - name: provision-switches
-    action: provision
+    action: topology-reconcile
     devices: [switch1, switch2]
 
   - name: wait-convergence
@@ -353,8 +353,8 @@ ordering.
 
 ### 6.2 Step Actions
 
-newtrun has exactly five actions. Four are structural (provision a device,
-wait, verify provisioning, execute on a host). The fifth — `newtron` — is a
+newtrun has exactly five actions. Four are structural (reconcile a device,
+wait, verify topology, execute on a host). The fifth — `newtron` — is a
 generic HTTP action that replaces what was once 60+ dedicated step types.
 
 The insight: newtrun was accumulating a new executor for every newtron-server
@@ -374,9 +374,9 @@ SONiC switches receive newtron operations).
 
 | Action | Description | Key Fields |
 |--------|-------------|------------|
-| `provision` | Generate and deliver device composite (6-step sequence) | `devices` |
+| `topology-reconcile` | Deliver topology projection to device via Reconcile | `devices` |
 | `wait` | Context-aware sleep | `duration` |
-| `verify-provisioning` | Verify CONFIG_DB matches composite ChangeSet | `devices` |
+| `verify-topology` | Verify device matches topology projection (zero drift) | `devices` |
 | `host-exec` | Run command in host network namespace via direct SSH | `devices`, `command`, `expect` |
 | `newtron` | Generic HTTP call to newtron-server | `url`, `method`, `params`, `poll`, `batch`, `expect` |
 
@@ -417,15 +417,7 @@ Examples from real scenarios:
 Most actions follow a uniform pattern: resolve devices, call an operation,
 check the result. A few deserve additional explanation.
 
-**`provision`** executes a 7-step sequence per device:
-
-1. `GenerateComposite` — build CONFIG_DB offline (HTTP POST)
-2. `ConfigReload` — best-effort reload to restore saved defaults
-3. `RefreshWithRetry` — wait for SwSS readiness after reload (60s timeout; skipped if reload failed)
-4. `DeliverComposite` — atomic write to Redis (HTTP POST)
-5. `Refresh` — update server's cached CONFIG_DB and interface list
-6. `SaveConfig` — persist to config_db.json for subsequent reloads
-7. Store returned composite handle in `r.Composites[device]`
+**`topology-reconcile`** calls `Reconcile(name, "topology", "", ExecOpts{Execute: true})` per device. Reconcile handles config reload, locking, full CONFIG_DB replacement, and save internally — the executor makes a single API call and reports the count of applied entries.
 
 **`host-exec`** runs a command inside a network namespace on a host VM. The
 namespace name equals the device name (e.g., `host1`). The command is
@@ -480,7 +472,7 @@ primitives; newtrun orchestrates them across devices and adds data-plane testing
 
 | Tier | What | Owner | Method | Failure Mode |
 |------|------|-------|--------|-------------|
-| **CONFIG_DB** | Redis entries match ChangeSet | **newtron** | via HTTP: composite verify | Hard fail (assertion) |
+| **CONFIG_DB** | Device matches topology projection (zero drift) | **newtron** | via HTTP: intent drift check | Hard fail (assertion) |
 | **APP_DB / ASIC_DB** | Routes installed by FRR / ASIC | **newtron** | via HTTP: route check | Observation (data) |
 | **Operational state** | BGP sessions, interface health | **newtron** | via HTTP: health check | Observation (report) |
 | **Cross-device / data plane** | Route propagation, ping | **newtrun** | Composes newtron primitives | Topology-dependent |
@@ -536,8 +528,8 @@ across multiple devices:
 
 | Helper | Pattern | Used By |
 |--------|---------|---------|
-| `executeForDevices` | Run once per device, collect results | `provision`, `newtron` (one-shot + batch) |
-| `checkForDevices` | Single-shot observation per device | `verify-provisioning` |
+| `executeForDevices` | Run once per device, collect results | `topology-reconcile`, `newtron` (one-shot + batch) |
+| `checkForDevices` | Single-shot observation per device | `verify-topology` |
 | `pollForDevices` | Retry with timeout/interval per device | `newtron` (polling mode) |
 
 All three automatically skip host devices — they check `r.HostConns[name]`
@@ -802,15 +794,10 @@ iterateScenarios → for each of the 6 scenarios in order:
   │     → poll until jq '.output | contains("ok")' passes
   │     → also verifies SwSS readiness (uptime ≥ 120s)
   │
-  │ 12. provision: per device:
-  │     a. r.Client.GenerateComposite("switch1")
-  │        → HTTP POST → server builds composite offline → returns handle UUID
-  │     b. Config reload (best-effort baseline reset)
-  │     c. RefreshWithRetry (wait for SwSS readiness after reload)
-  │     d. r.Client.DeliverComposite("switch1", handle)
-  │        → HTTP POST → server writes to Redis atomically
-  │     e. Refresh + SaveConfig
-  │     f. r.Composites["switch1"] = handle
+  │ 12. topology-reconcile: per device:
+  │     a. r.Client.Reconcile("switch1", "topology", "", ExecOpts{Execute: true})
+  │        → HTTP POST → server runs config reload, ReplaceAll, SaveConfig
+  │        → returns applied entry count
   │
   │ 13. verify-health: newtron action with polling
   │     → GET /node/switch1/health

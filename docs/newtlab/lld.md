@@ -1080,7 +1080,7 @@ subcommand.
 | `console` | `cmd_console.go` | `<node>` | Serial console via socat/telnet |
 | `stop` | `cmd_stop.go` | `<node>` | Stop a single VM |
 | `start` | `cmd_stop.go` | `<node>` | Start a stopped VM |
-| `provision` | `cmd_provision.go` | `[topology]` | Run newtron provisioning, optional `--device`, `--parallel` |
+| `provision` | `cmd_provision.go` | `[topology]` | Run topology reconcile on each device, optional `--device`, `--parallel` |
 | `version` | `main.go` | none | Print version info |
 
 Global flags: `-S <dir>` (spec directory override), `-v` (verbose).
@@ -1182,13 +1182,13 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 
 ### Phase 3 — Provision
 
-`Lab.Provision(ctx, parallel)` runs newtron provisioning with semaphore-bounded
-concurrency. Shells out to `newtron provision -S <specDir> -D <name> -x`
+`Lab.Provision(ctx, parallel)` runs topology reconcile with semaphore-bounded
+concurrency. Shells out to `newtron <name> --topology intent reconcile -x`
 rather than importing `pkg/newtron/network` — this keeps newtlab and newtron
 loosely coupled (newtlab only needs the `newtron` binary on PATH).
 
 - Goroutine per device, bounded by `parallel` semaphore.
-- For each switch (host devices skipped): `exec.CommandContext(ctx, "newtron", "provision", "-S", specDir, "-D", "switch1", "-x")`.
+- For each switch (host devices skipped): `exec.CommandContext(ctx, "newtron", name, "--topology", "intent", "reconcile", "-x")`.
 - Collects errors from all goroutines, returns `errors.Join`.
 - Post-provision: 5s delay → `refreshBGP()` → SSH to each switch → `vtysh -c 'clear bgp * soft'`.
 

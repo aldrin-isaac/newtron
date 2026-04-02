@@ -1712,6 +1712,7 @@ The CLI (`cmd/newtron/`) is an HTTP client — it sends requests to newtron-serv
 | `filter` | `list`, `show`, `create`, `delete`, `add-rule`, `remove-rule` | Network |
 | `interface` | `list`, `show`, `configure`, `unconfigure`, `set`, `clear`, `binding` | Node |
 | `lag` | `list`, `show`, `create`, `delete`, `add-member`, `remove-member` | Node |
+| `device` | `setup` | Node |
 | `intent` | `tree`, `drift`, `reconcile`, `save`, `reload`, `clear` | Node |
 | `health` | (default) | Node |
 | `init` | (default) | Node |
