@@ -47,7 +47,7 @@ intent meets physical infrastructure. It is the unit of lifecycle
 none), and the unit of isolation (services on different interfaces are
 independent).
 
-**All-eBGP routing.** Underlay and overlay both use eBGP — hop-by-hop
+**eBGP everywhere.** Underlay and overlay both use eBGP — hop-by-hop
 between interfaces for the underlay, loopback-to-loopback for EVPN
 peers. ASN assignment is per-profile: every leaf can have a unique ASN,
 or switches in a spine tier can share one. One peering model for all
@@ -218,8 +218,8 @@ specs, and browse:
 make build
 bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
-bin/newtron service list                    # List defined services
-bin/newtron show switch1                    # Show device profile
+bin/newtron service list                     # List defined services
+bin/newtron switch1 show                     # Show device profile
 bin/newtron switch1 --topology intent drift  # Compare topology intent vs device
 ```
 
@@ -261,22 +261,25 @@ newtrun: 6 scenarios, topology: 2node-vs-service, platform: sonic-vs
 newtrun: 6 scenarios: 6 passed  (2m38s)
 ```
 
-### Validated
+### What Has Been Validated
 
-All shipped test suites pass on the free community sonic-vs image:
+Shipped test suites, validated on the free community sonic-vs image:
 
 | Suite | What it tests |
 |-------|---------------|
+| 1node-vs-architecture | Intent DAG, drift detection, reconciliation, dry-run, operational symmetry |
+| 1node-vs-config | CLI lifecycle: apply/remove/refresh services in loopback mode |
 | 2node-vs-primitive | Disaggregated operations: VLAN/VRF lifecycle, service apply/remove, BGP, LAGs, ACLs, QoS, static routing |
 | 2node-vs-service | Full service lifecycle: provision → health → dataplane → deprovision → verify-clean |
+| 2node-vs-drift | Drift detection and delta reconciliation |
+| 2node-vs-drift-actuated | Actuated mode: intent replay, drift guard, full reconciliation |
 
 Every platform bug encountered along the way is documented in
-[`docs/rca/`](docs/rca/) — 40+ root-cause analyses covering frrcfgd,
-orchagent, SAI, and platform quirks.
+[`docs/rca/`](docs/rca/) — root-cause analyses covering frrcfgd,
+orchagent, SAI, and platform quirks. Each RCA is something learned
+by building.
 
 ## System Overview
-
-Five programs, two subsystems:
 
 | Program | What it does |
 |---------|-------------|
@@ -331,7 +334,7 @@ pkg/
   newtron/
     *.go            Public API: Network, Node, Interface, types
     api/            HTTP server: actors, handlers, middleware
-    device/sonic/   SSH tunnels, Redis DB 0/1/4/6, 42 CONFIG_DB parsers, locking
+    device/sonic/   SSH tunnels, Redis DB 0/1/4/6, CONFIG_DB parsers, locking
     network/        Network type, topology graph, spec resolution
       node/         Node + Interface types, all operations, topology provisioning
     settings/       Settings resolution (flag > env > file)

@@ -71,6 +71,16 @@ are established engineering practices that the system subscribes to
 and enforces rigorously. A few are style preferences where reasonable
 alternatives exist. The summary table at the end marks which is which.
 
+One more thing. These principles are not a destination. They are the
+best understanding so far — discovered through building, testing,
+failing, and rebuilding. Some will survive contact with the next
+platform, the next scale boundary, the next operational surprise.
+Others will be replaced by better ideas that could not have been
+reached without first having the wrong ones. The document itself is a
+journal of discovery: each principle exists because a previous approach
+failed in a way that demanded a better answer. If the principles stop
+changing, the project has stopped learning.
+
 ---
 
 # Part 1 — The Architecture

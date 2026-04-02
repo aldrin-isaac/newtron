@@ -71,6 +71,17 @@ newtron subscribes to and enforces rigorously. A few are style
 preferences where reasonable alternatives exist. The summary table at
 the end marks which is which.
 
+One more thing. newtron is a research project, and these principles
+are not the destination — they are the current position on a journey
+of discovery. The architecture, the code, and this document itself
+have been rewritten multiple times. Each rewrite was not a failure of
+the previous version but a consequence of learning something that
+could not have been learned without building the previous version
+first. Some principles below have survived since the first commit.
+Others replaced principles that seemed right until a SONiC daemon, a
+test failure, or a three-hour debugging session proved otherwise. If
+this document stops changing, the project has stopped learning.
+
 Read this before the HLDs and LLDs. It explains *why* things are the
 way they are.
 
