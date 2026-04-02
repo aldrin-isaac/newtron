@@ -64,11 +64,11 @@ The primitives define what gets configured. These principles govern
 how.
 
 **Intent-first configuration with drift detection.** Every write
-operation records an intent. The expected CONFIG_DB state — the
-projection — is derived by replaying all intents. `intent drift`
-compares the projection against the actual device, reporting missing,
-extra, and modified entries. `intent reconcile` delivers the projection
-to the device, eliminating drift. External CONFIG_DB edits (Ansible,
+operation records what it did — and why — as an intent on the device.
+From those records, **newtron** derives what CONFIG_DB *should* look
+like. `intent drift` compares that expected state against the actual
+device, reporting missing, extra, and modified entries. `intent
+reconcile` closes the gap. External CONFIG_DB edits (Ansible,
 `redis-cli`, SONiC CLI) are detected as drift — not silently accepted.
 
 **Network-scoped specs, device-scoped execution.** Service specs, VPN
@@ -98,13 +98,27 @@ service was applied. Without this, CONFIG_DB entries accumulate with no
 way to clean them up.
 
 **Content-hashed policies.** Shared resources like ACL tables, route
-maps, and prefix sets are named with an 8-character hash of their
-content. Spec unchanged means hash unchanged means refresh is a no-op.
-Spec changed means new name — both versions coexist while interfaces
-migrate one by one. No coordinated switchover, no gap where an interface
-loses its policy mid-migration.
+maps, and prefix sets are named by their content. If the spec hasn't
+changed, the name hasn't changed, and a refresh is a no-op. If the
+spec changes, the resource gets a new name — both versions coexist
+while interfaces migrate one by one. No coordinated switchover, no gap
+where an interface loses its policy mid-migration.
 
-## Engineering
+## Architecture
+
+**One object, three states.** Most automation systems maintain two
+representations of a device — one for intent, one for reality — and
+synchronize them by hope. **newtron** uses one: the Node, a software
+object that represents a device. Initialized from specs, it is the
+desired state. Connected to a live device, it is the desired state
+verified against reality. Rebuilt from intent records stored on the
+device itself, it recovers after a crash. Same type, same methods,
+same code path.
+
+**Intent lives on the device.** Every operation records what it did
+on the device itself — not in an external store. After a crash, a
+reboot, or a lost connection, the device's own records are sufficient
+to reconstruct the expected state.
 
 **Redis-first.** All device interaction goes through SONiC's Redis
 databases. CONFIG_DB writes use a native Go Redis client over SSH-
