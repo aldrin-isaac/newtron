@@ -1762,8 +1762,9 @@ for every entry it watches, whether drifted or not. Delta mode performs
 `DiffConfigDB` + `ApplyDrift()` — it patches only the drifted entries
 identified by drift detection, without a config reload. Delta mode is the
 surgical fix: it applies targeted writes, but through the same
-`Reconcile()` pipeline, with the same ChangeSet tracking and schema
-validation. Both modes are methods on the same `Node.Reconcile()` call;
+`Reconcile()` method. The entries it writes were already validated when
+originally rendered into the projection. Both modes live inside the same
+`Node.Reconcile()` call;
 the mode is a parameter, not a code path. The anti-pattern is a remediator
 that bypasses `Reconcile()` entirely — not one that writes fewer entries.
 

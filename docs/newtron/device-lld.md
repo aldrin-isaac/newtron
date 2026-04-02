@@ -508,13 +508,13 @@ func (c *ConfigDBClient) GetRawOwnedTables(ctx context.Context) (RawConfigDB, er
 **Delta reconcile pipeline:** delta-mode `Reconcile()` extends drift detection with apply:
 1. Steps 1–4 above to produce the `[]DriftEntry` diff
 2. Calling `client.ApplyDrift(diffs)` to patch only the drifted entries (§3.7)
-3. Calling `client.PipelineSet(intentEntries)` to deliver NEWTRON_INTENT separately
+3. Calling `client.ReplaceAll(intentEntries, []string{"NEWTRON_INTENT"})` to deliver NEWTRON_INTENT separately
    (intents are excluded from `DiffConfigDB` via `excludedFromDrift`)
 4. Calling `config save -y` to persist the patched state
 
 No config reload is performed in delta mode — only drifted keys are touched. Full-mode `Reconcile()` still uses config reload + `ReplaceAll` (§3.7) for a clean-slate delivery.
 
-**Table ordering in `ApplyDrift`:** entries are sorted by `tablePriority`, a 4-tier map in `configdb_diff.go` derived from YANG leafref dependency chains covering 38 CONFIG_DB tables. Tier 0 = root tables (no parents); Tier 3 = deepest children. Deletes run in descending tier order (children first); creates/modifies run in ascending tier order (parents first).
+**Table ordering in `ApplyDrift`:** entries are sorted by `tablePriority`, a 4-tier map in `configdb_diff.go` derived from YANG leafref dependency chains covering 39 CONFIG_DB tables. Tier 0 = root tables (no parents); Tier 3 = deepest children. Deletes run in descending tier order (children first); creates/modifies run in ascending tier order (parents first).
 
 **Field matching is subset-based:** `fieldsMatch` checks that every field in expected is present in actual with the same value. Extra fields in actual are ignored — the device may have fields from factory config or `config reload` that the projection doesn't manage.
 
@@ -1361,9 +1361,9 @@ To persist configuration across reboots, the SONiC command `config save -y` must
 
 **Reconcile flow — two modes:**
 
-- **Full mode** (default): `Reconcile()` runs `config reload -y` to restore CONFIG_DB to the saved baseline, then calls `ExportEntries()` to extract the full projection and `ReplaceAll(entries, ownedTables)` (§3.7) to deliver it. After delivery, `config save -y` persists the reconciled state so subsequent reloads re-read the reconciled config rather than factory defaults.
+- **Full mode** (default for topology nodes): `Reconcile()` runs `config reload -y` to restore CONFIG_DB to the saved baseline, then calls `ExportEntries()` to extract the full projection and `ReplaceAll(entries, ownedTables)` (§3.7) to deliver it. After delivery, `config save -y` persists the reconciled state so subsequent reloads re-read the reconciled config rather than factory defaults.
 
-- **Delta mode**: `Reconcile()` skips config reload. It rebuilds the projection from intents, calls `DiffConfigDB` (§3.9) to identify drifted entries, then calls `ApplyDrift(diffs)` (§3.7) to patch only those entries. NEWTRON_INTENT records are delivered separately via `PipelineSet(ExportIntentEntries())` because they are excluded from drift detection. `config save -y` is called after to persist the patched state. Delta mode is faster and less disruptive — no daemon churn from a full config reload.
+- **Delta mode** (default for actuated nodes): `Reconcile()` skips config reload. It rebuilds the projection from intents, calls `DiffConfigDB` (§3.9) to identify drifted entries, then calls `ApplyDrift(diffs)` (§3.7) to patch only those entries. NEWTRON_INTENT records are delivered separately via `ReplaceAll(ExportIntentEntries(), []string{"NEWTRON_INTENT"})` because they are excluded from drift detection. `config save -y` is called after to persist the patched state. Delta mode is faster and less disruptive — no daemon churn from a full config reload.
 
 **Implications for testing:**
 
