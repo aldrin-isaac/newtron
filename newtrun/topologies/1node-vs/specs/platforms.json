@@ -14,7 +14,7 @@
       "vm_credentials": {"user": "admin", "pass": "YourPaSsWoRd"},
       "vm_boot_timeout": 300,
       "dataplane": "sonic-vs",
-      "unsupported_features": ["evpn-vxlan"]
+      "unsupported_features": []
     }
   }
 }

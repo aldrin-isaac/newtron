@@ -29,6 +29,7 @@ type RunState struct {
 	Suite     string          `json:"suite"`
 	SuiteDir  string          `json:"suite_dir"`
 	Topology  string          `json:"topology"`
+	SpecDir   string          `json:"spec_dir,omitempty"` // spec directory from server (for newtlab destroy)
 	Platform  string          `json:"platform"`
 	Target    string          `json:"target,omitempty"` // --target scenario (empty = all)
 	PID       int             `json:"pid"`

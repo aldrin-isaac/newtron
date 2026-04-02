@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -160,8 +161,20 @@ func (s *Server) listNetworks() []NetworkInfo {
 			ID:          id,
 			SpecDir:     entry.specDir,
 			HasTopology: entry.actor.net.HasTopology(),
+			Topology:    topologyName(entry.specDir),
 			Nodes:       entry.actor.net.ListNodes(),
 		})
 	}
 	return result
+}
+
+// topologyName derives the topology name from a spec directory path.
+// Convention: specDir ends with "/specs", topology name is the parent directory.
+// e.g. "newtrun/topologies/1node-vs/specs" → "1node-vs"
+func topologyName(specDir string) string {
+	dir := filepath.Base(filepath.Dir(filepath.Clean(specDir)))
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir
 }

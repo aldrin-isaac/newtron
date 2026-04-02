@@ -1,0 +1,53 @@
+name: vrf-ipvpn-binding
+description: |
+  VRF IP-VPN bind/unbind lifecycle.
+  Requires IP-VPN spec + VRF to exist.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Setup: IP-VPN spec + VRF ---
+  - name: create-ipvpn
+    action: newtron-cli
+    command: "evpn ipvpn create BIND_TEST --l3vni 10099 --loopback"
+
+  - name: create-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf create Vrf_BIND --loopback"
+
+  # --- Bind IP-VPN ---
+  - name: bind-ipvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf bind-ipvpn Vrf_BIND BIND_TEST --loopback"
+
+  - name: verify-ipvpn-intent
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT ipvpn|Vrf_BIND --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Unbind IP-VPN ---
+  - name: unbind-ipvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf unbind-ipvpn Vrf_BIND --loopback"
+
+  - name: verify-ipvpn-unbound
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT ipvpn|Vrf_BIND --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Cleanup ---
+  - name: delete-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf delete Vrf_BIND --loopback"
+
+  - name: delete-ipvpn
+    action: newtron-cli
+    command: "evpn ipvpn delete BIND_TEST --loopback"

@@ -21,6 +21,7 @@ import (
 type Client struct {
 	baseURL    string
 	networkID  string
+	Mode       api.Mode // if set, appended as ?mode= to all requests
 	httpClient *http.Client
 }
 
@@ -119,9 +120,21 @@ func execQuery(opts newtron.ExecOpts) string {
 	return "?" + strings.Join(parts, "&")
 }
 
+// withMode appends ?mode= to a path if the client has a Mode set.
+// Handles paths that already have query parameters.
+func (c *Client) withMode(path string) string {
+	if c.Mode == "" || c.Mode == api.ModeIntent {
+		return path
+	}
+	if strings.Contains(path, "?") {
+		return path + "&mode=" + string(c.Mode)
+	}
+	return path + "?mode=" + string(c.Mode)
+}
+
 // doGet performs a GET request and decodes the response data into result.
 func (c *Client) doGet(path string, result any) error {
-	resp, err := c.httpClient.Get(c.baseURL + path)
+	resp, err := c.httpClient.Get(c.baseURL + c.withMode(path))
 	if err != nil {
 		return fmt.Errorf("GET %s: %w", path, err)
 	}
@@ -139,7 +152,7 @@ func (c *Client) doPost(path string, body any, result any) error {
 		}
 		bodyReader = bytes.NewReader(data)
 	}
-	resp, err := c.httpClient.Post(c.baseURL+path, "application/json", bodyReader)
+	resp, err := c.httpClient.Post(c.baseURL+c.withMode(path), "application/json", bodyReader)
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", path, err)
 	}
@@ -161,7 +174,7 @@ func (c *Client) RawRequest(method, path string, body any) (json.RawMessage, err
 		bodyReader = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, c.baseURL+path, bodyReader)
+	req, err := http.NewRequest(method, c.baseURL+c.withMode(path), bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}

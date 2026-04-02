@@ -31,6 +31,7 @@ newtron/
 │       ├── runner.go             # Runner (with Client, ServerURL, NetworkID), RunOptions, Run
 │       ├── steps.go              # stepExecutor interface, StepOutput, multi-device helpers, topology-reconcile/wait/verify-topology executors
 │       ├── steps_newtron.go      # newtronExecutor: URL expansion, jq evaluation, one-shot/polling/batch modes
+│       ├── steps_cli.go          # newtronCLIExecutor: runs newtron CLI as subprocess, --json auto-append, jq assertions
 │       ├── steps_host.go         # hostExecExecutor, shellQuote, runSSHCommand
 │       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
 │       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
@@ -50,12 +51,14 @@ newtron/
     │   └── 4node-ngdp/specs/          # 4-node topology
     ├── suites/
     │   ├── 1node-vs-basic/            # Single-switch basics (4 scenarios)
+    │   ├── 1node-vs-config/           # CLI lifecycle via newtron-cli in loopback mode (13 scenarios)
+    │   ├── 1node-vs-architecture/     # Intent architecture validation (32 scenarios)
     │   ├── 2node-ngdp-primitive/      # Disaggregated operation tests (21 scenarios)
     │   ├── 2node-ngdp-service/        # Service lifecycle tests (6 scenarios)
     │   ├── 2node-vs-primitive/        # Disaggregated operation tests, sonic-vs (21 scenarios)
     │   ├── 2node-vs-service/          # Service lifecycle tests, sonic-vs (6 scenarios)
     │   ├── 2node-vs-drift/            # Config drift detection tests (7 scenarios)
-    │   ├── 2node-vs-zombie/           # Zombie intent detection tests (8 scenarios)
+    │   ├── 2node-vs-drift-actuated/   # Actuated-mode drift tests (8 scenarios)
     │   ├── 3node-ngdp-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
     │   └── simple-vrf-host/           # Simple VRF with host verification (4 scenarios)
     └── .generated/               # Runtime output (gitignored)
@@ -135,10 +138,11 @@ const (
     ActionVerifyProvisioning StepAction = "verify-topology"
     ActionHostExec           StepAction = "host-exec"
     ActionNewtron            StepAction = "newtron"
+    ActionNewtronCLI         StepAction = "newtron-cli"
 )
 ```
 
-Five action types. The `validActions` set is derived from the `executors` map
+Six action types. The `validActions` set is derived from the `executors` map
 at init time, ensuring the two stay synchronized without manual maintenance.
 
 ### 2.4 deviceSelector
@@ -630,6 +634,7 @@ var executors = map[StepAction]stepExecutor{
     ActionVerifyProvisioning: &verifyProvisioningExecutor{},
     ActionHostExec:           &hostExecExecutor{},
     ActionNewtron:            &newtronExecutor{},
+    ActionNewtronCLI:         &newtronCLIExecutor{},
 }
 
 func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
@@ -686,6 +691,7 @@ until `fn` returns `done=true`, timeout expires, or `ctx` is cancelled.
 | 3 | `verifyProvisioningExecutor` | `verify-topology` | `steps.go` | `IntentDrift(name, "topology")` → check `len == 0` |
 | 4 | `hostExecExecutor` | `host-exec` | `steps_host.go` | — (direct SSH via `r.HostConns`) |
 | 5 | `newtronExecutor` | `newtron` | `steps_newtron.go` | `RawRequest(method, path, body)` |
+| 6 | `newtronCLIExecutor` | `newtron-cli` | `steps_cli.go` | — (runs `newtron` binary as subprocess via `exec.CommandContext`) |
 
 ### 7.6 Provision Executor Detail
 
@@ -978,6 +984,31 @@ Returns `StepOutput{Result: &StepResult{Status: PASS, Details: [...]}}`.
 
 **9. Runner** — `executeStep` sets `result.Duration` and `result.Name`. Reports
 progress via `r.Progress.StepEnd(...)`. The Runner advances to the next step.
+
+### 7.12 newtronCLIExecutor Detail (`steps_cli.go`)
+
+Runs the `newtron` CLI binary as a subprocess via `exec.CommandContext`.
+Designed for testing CLI commands directly, particularly in loopback mode.
+
+**Execution flow:**
+
+1. Resolve `newtron` binary from `$PATH`
+2. Build args: `[device, ...command_fields, --server, url]`
+3. If `expect.jq` is set, append `--json` for machine-parseable output
+4. Run via `exec.CommandContext` with separate stdout/stderr buffers
+5. If `expect.jq` is set, parse stdout as JSON and evaluate jq assertion
+6. Return pass/fail based on exit code and jq result
+
+**Device routing:** If `step.Devices` is set (or `{{device}}` appears in
+the command template), the executor runs per-device via `executeForDevices`.
+The device name is prepended as the first positional argument — the same
+pattern as normal CLI usage (`newtron <device> <command>`). Network-scoped
+commands (no `devices:` field) run once without a device prefix.
+
+**Key differences from `newtronExecutor`:** No HTTP calls — the CLI
+binary handles server communication internally. The `--server` URL is
+injected from `r.ServerURL`. Stdout/stderr are captured separately to
+prevent log messages from corrupting JSON output.
 
 ---
 

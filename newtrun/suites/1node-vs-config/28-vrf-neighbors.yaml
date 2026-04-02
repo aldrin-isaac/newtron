@@ -1,0 +1,56 @@
+name: vrf-neighbors
+description: |
+  VRF BGP neighbor add/remove lifecycle.
+  Requires VRF + interface to exist first.
+  Intent DAG: device → vrf|Vrf_PEER → interface|Ethernet24 → bgp-peer|Ethernet24.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Setup: VRF + interface ---
+  - name: create-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf create Vrf_PEER --loopback"
+
+  - name: add-interface
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf add-interface Vrf_PEER Ethernet24 --ip 10.2.0.1/30 --loopback"
+
+  # --- Add BGP neighbor ---
+  - name: add-neighbor
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf add-neighbor Vrf_PEER Ethernet24 65099 --loopback"
+
+  - name: verify-neighbor
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists BGP_NEIGHBOR Vrf_PEER|10.2.0.2 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Remove BGP neighbor ---
+  - name: remove-neighbor
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf remove-neighbor Vrf_PEER Ethernet24 --loopback"
+
+  - name: verify-neighbor-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists BGP_NEIGHBOR Vrf_PEER|10.2.0.2 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Cleanup ---
+  - name: remove-interface
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf remove-interface Vrf_PEER Ethernet24 --loopback"
+
+  - name: delete-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf delete Vrf_PEER --loopback"

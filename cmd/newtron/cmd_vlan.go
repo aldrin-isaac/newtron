@@ -336,6 +336,31 @@ func parseVLANID(s string) (int, error) {
 	return id, nil
 }
 
+var vlanUnconfigureIRBCmd = &cobra.Command{
+	Use:   "unconfigure-irb <vlan-id>",
+	Short: "Remove IRB (Integrated Routing and Bridging) interface",
+	Long: `Remove the IRB interface configuration from a VLAN.
+
+Removes VLAN_INTERFACE entries (VRF binding, IP address, SAG) that were
+created by 'vlan configure-irb'. The VLAN itself is not deleted.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 vlan unconfigure-irb 100 -x`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		vlanID, err := parseVLANID(args[0])
+		if err != nil {
+			return err
+		}
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.UnconfigureIRB(app.deviceName, vlanID, execOpts()))
+	},
+}
+
 func init() {
 	vlanCreateCmd.Flags().StringVar(&vlanDescription, "description", "", "VLAN description")
 
@@ -349,6 +374,7 @@ func init() {
 	vlanCmd.AddCommand(vlanCreateCmd)
 	vlanCmd.AddCommand(vlanDeleteCmd)
 	vlanCmd.AddCommand(vlanConfigureIRBCmd)
+	vlanCmd.AddCommand(vlanUnconfigureIRBCmd)
 	vlanCmd.AddCommand(vlanBindMacvpnCmd)
 	vlanCmd.AddCommand(vlanUnbindMacvpnCmd)
 }

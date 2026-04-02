@@ -38,6 +38,7 @@ import (
 
 	"github.com/newtron-network/newtron/pkg/cli"
 	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/newtron-network/newtron/pkg/newtron/api"
 	"github.com/newtron-network/newtron/pkg/newtron/client"
 	"github.com/newtron-network/newtron/pkg/util"
 	"github.com/newtron-network/newtron/pkg/version"
@@ -58,6 +59,7 @@ type App struct {
 	verbose     bool
 	jsonOutput  bool
 	topology    bool   // --topology flag: use topology mode (?mode=topology)
+	loopback    bool   // --loopback flag: offline config testing (?mode=loopback)
 
 	// Initialized state (set in PersistentPreRunE)
 	settings *newtron.UserSettings
@@ -188,6 +190,12 @@ Examples:
 
 		// Create HTTP client and register network
 		app.client = client.New(app.serverURL, app.networkID)
+		if app.loopback {
+			app.client.Mode = api.ModeLoopback
+			app.executeMode = true // loopback is always execute — no device to protect
+		} else if app.topology {
+			app.client.Mode = api.ModeTopology
+		}
 		if err := app.client.RegisterNetwork(app.specDir); err != nil {
 			return fmt.Errorf("registering network with server: %w", err)
 		}
@@ -212,12 +220,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&app.networkID, "network-id", "N", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	rootCmd.PersistentFlags().BoolVarP(&app.verbose, "verbose", "v", false, "Verbose output")
 	rootCmd.PersistentFlags().BoolVar(&app.topology, "topology", false, "Use topology mode (?mode=topology)")
+	rootCmd.PersistentFlags().BoolVar(&app.loopback, "loopback", false, "Offline config testing mode — no device connection (?mode=loopback)")
 
 	// Write flags (-x/-s) and output flags (--json) on noun-group parents
 	// (PersistentFlags so subcommands inherit)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, qosCmd, filterCmd, deviceCmd,
+		vrfCmd, serviceCmd, qosCmd, filterCmd, prefixListCmd, routePolicyCmd, deviceCmd,
 	} {
 		addWriteFlags(cmd)
 		addOutputFlags(cmd)
@@ -225,6 +234,10 @@ func init() {
 	for _, cmd := range []*cobra.Command{healthCmd, intentCmd} {
 		addOutputFlags(cmd)
 	}
+	for _, cmd := range []*cobra.Command{networkCmd, configdbCmd, statedbCmd, routeCmd} {
+		addOutputFlags(cmd)
+	}
+	addOutputFlags(sshCmd)
 
 	// Top-level commands that need their own flags
 	addOutputFlags(showCmd)
@@ -242,7 +255,7 @@ func init() {
 	// Resource Commands (noun-groups)
 	for _, cmd := range []*cobra.Command{
 		interfaceCmd, vlanCmd, lagCmd, aclCmd, evpnCmd, bgpCmd,
-		vrfCmd, serviceCmd, qosCmd, filterCmd,
+		vrfCmd, serviceCmd, qosCmd, filterCmd, prefixListCmd, routePolicyCmd,
 	} {
 		cmd.GroupID = "resource"
 		rootCmd.AddCommand(cmd)
@@ -251,13 +264,15 @@ func init() {
 	// Device Operations
 	for _, cmd := range []*cobra.Command{
 		showCmd, healthCmd, initCmd, deviceCmd, intentCmd,
+		configdbCmd, statedbCmd, routeCmd,
+		sshCmd, reloadConfigCmd, saveConfigCmd, restartDaemonCmd,
 	} {
 		cmd.GroupID = "device"
 		rootCmd.AddCommand(cmd)
 	}
 
 	// Configuration & Meta
-	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, profileCmd, zoneCmd, versionCmd} {
+	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, profileCmd, zoneCmd, versionCmd, networkCmd} {
 		cmd.GroupID = "meta"
 		rootCmd.AddCommand(cmd)
 	}

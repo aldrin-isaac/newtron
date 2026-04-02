@@ -265,6 +265,30 @@ func (na *NodeActor) ensureTopologyIntent() error {
 	return nil
 }
 
+// ensureLoopbackIntent ensures the cached node exists for loopback mode.
+// On first access, builds from topology.json (same as topology mode). On
+// subsequent accesses, reuses the existing node — never rebuilds. This lets
+// CLI mutations accumulate in memory for offline config testing.
+//
+// The node has conn=nil and actuatedIntent=false. All operations run against
+// the projection: Lock/Apply/Verify/Save are no-ops, intents accumulate in
+// memory, RebuildProjection replays from in-memory intents.
+func (na *NodeActor) ensureLoopbackIntent() error {
+	if na.node != nil {
+		// Always reuse — mutations accumulate across requests.
+		na.node.DisconnectTransport()
+		return nil
+	}
+	// First access: build from topology.json.
+	node, err := na.net.BuildTopologyNode(na.device)
+	if err != nil {
+		return err
+	}
+	na.node = node
+	log.Printf("newtron-server: built %s in loopback mode (offline config testing)", na.device)
+	return nil
+}
+
 // execute is the unified entry point for all operations. It reads mode from
 // the request context (injected by withMode middleware), ensures the node is
 // in the correct state, then rebuilds the projection from fresh intents.
@@ -281,11 +305,16 @@ func (na *NodeActor) ensureTopologyIntent() error {
 func (na *NodeActor) execute(ctx context.Context, fn func() (any, error)) (any, error) {
 	return na.do(ctx, func() (any, error) {
 		mode := modeFromCtx(ctx)
-		if mode == ModeTopology {
+		switch mode {
+		case ModeTopology:
 			if err := na.ensureTopologyIntent(); err != nil {
 				return nil, err
 			}
-		} else {
+		case ModeLoopback:
+			if err := na.ensureLoopbackIntent(); err != nil {
+				return nil, err
+			}
+		default:
 			if err := na.ensureActuatedIntent(ctx); err != nil {
 				return nil, err
 			}

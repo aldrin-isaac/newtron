@@ -671,28 +671,6 @@ func TestHasRequires(t *testing.T) {
 	}
 }
 
-func TestSharedTopology(t *testing.T) {
-	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node-ngdp"},
-		{Name: "b", Topology: "2node-ngdp"},
-	}, ""); got != "2node-ngdp" {
-		t.Errorf("sharedTopology() = %q, want '2node-ngdp'", got)
-	}
-
-	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node-ngdp"},
-		{Name: "b", Topology: "4node-ngdp"},
-	}, ""); got != "" {
-		t.Errorf("sharedTopology() = %q, want ''", got)
-	}
-
-	if got := sharedTopology([]*Scenario{
-		{Name: "a", Topology: "2node-ngdp"},
-		{Name: "b", Topology: "4node-ngdp"},
-	}, "override"); got != "override" {
-		t.Errorf("sharedTopology() = %q, want 'override'", got)
-	}
-}
 
 // ============================================================================
 // Report with SkipReason Tests
@@ -897,7 +875,7 @@ func TestAllActionsHaveExecutors(t *testing.T) {
 func TestExecutorCountMatchesActionConstants(t *testing.T) {
 	allActions := []StepAction{
 		ActionProvision, ActionWait, ActionVerifyProvisioning,
-		ActionHostExec, ActionNewtron,
+		ActionHostExec, ActionNewtron, ActionNewtronCLI,
 	}
 	// Verify the constant values match the expected action names
 	if ActionProvision != "topology-reconcile" {
@@ -1221,10 +1199,10 @@ func TestIterateScenarios_Normal(t *testing.T) {
 		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp"},
 	}
 
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
 		return &ScenarioResult{
 			Name:     sc.Name,
-			Topology: topology,
+			Topology: r.Topology,
 			Platform: platform,
 			Status:   StepStatusPassed,
 		}, nil
@@ -1243,30 +1221,8 @@ func TestIterateScenarios_Normal(t *testing.T) {
 	if results[0].Name != "sc1" || results[1].Name != "sc2" {
 		t.Errorf("names = [%q, %q], want [sc1, sc2]", results[0].Name, results[1].Name)
 	}
-	if results[0].Topology != "2node-ngdp" || results[0].Platform != "sonic-vpp" {
-		t.Errorf("result[0] topology=%q platform=%q, want 2node-ngdp/sonic-vpp",
-			results[0].Topology, results[0].Platform)
-	}
 }
 
-func TestIterateScenarios_TopologyOverride(t *testing.T) {
-	r := &Runner{}
-	scenarios := []*Scenario{
-		{Name: "sc1", Topology: "2node-ngdp", Platform: "sonic-vpp"},
-	}
-
-	var gotTopology string
-	_, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{Topology: "4node-ngdp"}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
-		gotTopology = topology
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
-	})
-	if err != nil {
-		t.Fatalf("iterateScenarios error: %v", err)
-	}
-	if gotTopology != "4node-ngdp" {
-		t.Errorf("callback received topology=%q, want %q", gotTopology, "4node-ngdp")
-	}
-}
 
 func TestIterateScenarios_Resume(t *testing.T) {
 	r := &Runner{}
@@ -1279,9 +1235,9 @@ func TestIterateScenarios_Resume(t *testing.T) {
 	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{
 		Resume:    true,
 		Completed: map[string]StepStatus{"sc1": StepStatusPassed},
-	}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
+	}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
 		callbackCalls++
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusPassed}, nil
+		return &ScenarioResult{Name: sc.Name, Platform: platform, Status: StepStatusPassed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
@@ -1311,8 +1267,8 @@ func TestIterateScenarios_RequiresSkip(t *testing.T) {
 		{Name: "sc2", Topology: "2node-ngdp", Platform: "sonic-vpp", Requires: []string{"sc1"}},
 	}
 
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
-		return &ScenarioResult{Name: sc.Name, Topology: topology, Platform: platform, Status: StepStatusFailed}, nil
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
+		return &ScenarioResult{Name: sc.Name, Platform: platform, Status: StepStatusFailed}, nil
 	})
 	if err != nil {
 		t.Fatalf("iterateScenarios error: %v", err)
@@ -1337,7 +1293,7 @@ func TestIterateScenarios_CallbackError(t *testing.T) {
 	}
 
 	sentinel := fmt.Errorf("deploy failed")
-	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, _, _ string) (*ScenarioResult, error) {
+	results, err := r.iterateScenarios(context.Background(), scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, _ string) (*ScenarioResult, error) {
 		if sc.Name == "sc1" {
 			return nil, sentinel
 		}
@@ -1454,24 +1410,13 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 // ============================================================================
 
 func TestRun_NoFlags(t *testing.T) {
-	r := NewRunner(t.TempDir(), t.TempDir())
+	r := NewRunner(t.TempDir())
 	_, err := r.Run(RunOptions{})
 	if err == nil {
 		t.Fatal("expected error for no flags, got nil")
 	}
 	if !strings.Contains(err.Error(), "--scenario") || !strings.Contains(err.Error(), "--all") {
 		t.Errorf("expected error about --scenario/--all, got: %s", err)
-	}
-}
-
-func TestRun_TopologyNotFound(t *testing.T) {
-	r := NewRunner(t.TempDir(), t.TempDir())
-	_, err := r.Run(RunOptions{Scenario: "x", Topology: "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for nonexistent topology, got nil")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' in error, got: %s", err)
 	}
 }
 

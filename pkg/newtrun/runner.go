@@ -17,15 +17,19 @@ import (
 
 // Runner is the top-level newtrun orchestrator.
 type Runner struct {
-	ScenariosDir  string
-	TopologiesDir string
-	ServerURL     string         // newtron-server HTTP address
-	NetworkID     string         // network identifier for server operations
-	Client             *client.Client // HTTP client for all SONiC operations
-	Lab                *newtlab.Lab
-	HostConns          map[string]*ssh.Client // host device name → SSH client
-	Progress           ProgressReporter
-	discoveredPlatform string                 // platform discovered from connected devices
+	ScenariosDir string
+	ServerURL    string         // newtron-server HTTP address
+	NetworkID    string         // network identifier for server operations
+	Client       *client.Client // HTTP client for all SONiC operations
+	Lab          *newtlab.Lab
+	HostConns    map[string]*ssh.Client // host device name → SSH client
+	Progress     ProgressReporter
+
+	// Populated by connectToServer from the server's registered network.
+	Topology string // topology name (from server)
+	SpecDir  string // spec directory (from server)
+
+	discoveredPlatform string // platform discovered from connected devices
 
 	opts     RunOptions
 	scenario *Scenario
@@ -36,7 +40,6 @@ type RunOptions struct {
 	Scenario  string
 	Target    string // run minimal dependency chain to reach this scenario
 	All       bool
-	Topology  string
 	Platform  string
 	Keep      bool
 	NoDeploy  bool
@@ -44,34 +47,24 @@ type RunOptions struct {
 	JUnitPath string
 
 	// Lifecycle fields (set by `start` command, not by `run`)
-	Suite     string            // suite name for state tracking; empty disables lifecycle
-	Resume    bool              // true when resuming a paused run
-	Completed map[string]StepStatus // scenario → status from previous run (resume)
+	Suite     string                 // suite name for state tracking; empty disables lifecycle
+	Resume    bool                   // true when resuming a paused run
+	Completed map[string]StepStatus  // scenario → status from previous run (resume)
 }
 
 // NewRunner creates a new test runner.
-func NewRunner(scenariosDir, topologiesDir string) *Runner {
+func NewRunner(scenariosDir string) *Runner {
 	return &Runner{
-		ScenariosDir:  scenariosDir,
-		TopologiesDir: topologiesDir,
+		ScenariosDir: scenariosDir,
 	}
 }
 
 // Run executes one or all scenarios and returns results.
-// When running multiple scenarios with a shared topology, it deploys once and
-// shares connections. Scenarios with `requires` are sorted by dependency order
-// and skipped if a blocker fails.
+// The server determines the topology — scenarios declare compatible topologies
+// as guards; mismatches fail immediately.
 func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	if opts.Scenario == "" && opts.Target == "" && !opts.All {
 		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
-	}
-
-	// Validate --topology override exists
-	if opts.Topology != "" {
-		topoDir := filepath.Join(r.TopologiesDir, opts.Topology, "specs")
-		if _, err := os.Stat(topoDir); os.IsNotExist(err) {
-			return nil, fmt.Errorf("topology %q not found: %s does not exist", opts.Topology, topoDir)
-		}
 	}
 
 	var scenarios []*Scenario
@@ -115,27 +108,101 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 		scenarios = chain
 	}
 
-	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
+	// Connect to server to learn topology
+	fmt.Fprintf(os.Stderr, "newtrun: connecting to server %s...\n", r.ServerURL)
+	if err := r.connectToServer(); err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "newtrun: server has topology %q (%d nodes)\n", r.Topology, len(r.allDeviceNames()))
 
+	// Guard: all scenarios must be compatible with the server's topology
+	for _, sc := range scenarios {
+		if sc.Topology != "" && sc.Topology != r.Topology {
+			return nil, fmt.Errorf("scenario %q requires topology %q but server has %q loaded",
+				sc.Name, sc.Topology, r.Topology)
+		}
+	}
+
+	r.progress(func(p ProgressReporter) { p.SuiteStart(scenarios) })
 	suiteStart := time.Now()
 
-	var results []*ScenarioResult
-	var err error
-
-	// If all scenarios share the same topology, deploy once and share connections
-	if len(scenarios) > 1 {
-		if topology := sharedTopology(scenarios, opts.Topology); topology != "" {
-			results, err = r.runShared(context.Background(), scenarios, topology, opts)
-			if err != nil {
-				return results, err
+	// Deploy topology (unless --no-deploy)
+	if !opts.NoDeploy {
+		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Topology)
+		cleanup, err := r.deployTopology(context.Background(), r.SpecDir, opts)
+		if err != nil {
+			var results []*ScenarioResult
+			for _, sc := range scenarios {
+				results = append(results, &ScenarioResult{
+					Name:        sc.Name,
+					Topology:    r.Topology,
+					Platform:    sc.Platform,
+					Status:      StepStatusError,
+					DeployError: &InfraError{Op: "deploy", Err: err},
+				})
 			}
-			r.progress(func(p ProgressReporter) { p.SuiteEnd(results, time.Since(suiteStart)) })
+			return results, nil
+		}
+		fmt.Fprintf(os.Stderr, "newtrun: topology ready\n")
+		if cleanup != nil {
+			defer cleanup()
+		}
+	}
+
+	// SIGINT handling
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	// Connect host devices (skip in no-deploy mode — no physical devices to connect to).
+	if opts.NoDeploy {
+		r.HostConns = make(map[string]*ssh.Client)
+		fmt.Fprintf(os.Stderr, "newtrun: no-deploy mode — skipping device connections\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "newtrun: connecting to devices...\n")
+		if err := r.connectDevices(); err != nil {
+			var results []*ScenarioResult
+			for _, sc := range scenarios {
+				results = append(results, &ScenarioResult{
+					Name:        sc.Name,
+					Topology:    r.Topology,
+					Platform:    sc.Platform,
+					Status:      StepStatusError,
+					DeployError: err,
+				})
+			}
 			return results, nil
 		}
 	}
 
-	// Independent mode: different topologies or single scenario
-	results, err = r.runIndependent(context.Background(), scenarios, opts)
+	// Resolve platform for capability checks
+	deployedPlatform := opts.Platform
+	if deployedPlatform == "" && len(scenarios) > 0 {
+		deployedPlatform = scenarios[0].Platform
+	}
+	if deployedPlatform == "" {
+		deployedPlatform = r.discoveredPlatform
+	}
+
+	// Run all scenarios
+	results, err := r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, platform string) (*ScenarioResult, error) {
+		r.opts = RunOptions{
+			Platform: platform,
+			NoDeploy: true,
+			Keep:     true,
+			Verbose:  opts.Verbose,
+		}
+		r.scenario = sc
+
+		result := &ScenarioResult{
+			Name:     sc.Name,
+			Topology: r.Topology,
+			Platform: platform,
+		}
+		start := time.Now()
+		r.runScenarioSteps(ctx, sc, r.opts, result)
+		result.Duration = time.Since(start)
+		return result, nil
+	})
 	if err != nil {
 		return results, err
 	}
@@ -147,14 +214,12 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 }
 
 // scenarioRunner is a callback that executes a single scenario within the
-// iteration loop. It receives the resolved topology and platform names.
-type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error)
+// iteration loop. It receives the resolved platform name.
+type scenarioRunner func(ctx context.Context, sc *Scenario, platform string) (*ScenarioResult, error)
 
-// iterateScenarios encapsulates the common scenario iteration loop used by both
-// runShared and runIndependent. It handles resume, pause, requires checks, and
-// progress reporting. The run callback performs the actual per-scenario execution.
-// The deployedPlatform parameter specifies the actual platform used for deployment
-// (for capability checks in shared mode); empty string means use per-scenario platform.
+// iterateScenarios encapsulates the scenario iteration loop. It handles resume,
+// pause, requires checks, and progress reporting. The run callback performs the
+// actual per-scenario execution.
 func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, deployedPlatform string, run scenarioRunner) ([]*ScenarioResult, error) {
 	scenarioStatus := make(map[string]StepStatus)
 	var results []*ScenarioResult
@@ -165,10 +230,6 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 	}
 
 	for i, sc := range scenarios {
-		topology := opts.Topology
-		if topology == "" {
-			topology = sc.Topology
-		}
 		platform := opts.Platform
 		if platform == "" {
 			platform = sc.Platform
@@ -179,7 +240,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 			if prev, ok := opts.Completed[sc.Name]; ok && prev == StepStatusPassed {
 				result := &ScenarioResult{
 					Name:       sc.Name,
-					Topology:   topology,
+					Topology:   r.Topology,
 					Platform:   platform,
 					Status:     StepStatusSkipped,
 					SkipReason: "already passed (resumed)",
@@ -198,7 +259,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		if reason := checkRequires(sc, scenarioStatus); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Topology:   topology,
+				Topology:   r.Topology,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -210,11 +271,10 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 		}
 
 		// Feature requirements check: skip if platform doesn't support required features
-		// In shared mode (deployedPlatform != ""), use that; otherwise use per-scenario platform
 		if reason := r.checkPlatformFeatures(sc, deployedPlatform, platform); reason != "" {
 			result := &ScenarioResult{
 				Name:       sc.Name,
-				Topology:   topology,
+				Topology:   r.Topology,
 				Platform:   platform,
 				Status:     StepStatusSkipped,
 				SkipReason: reason,
@@ -227,7 +287,7 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 
 		r.progress(func(p ProgressReporter) { p.ScenarioStart(sc.Name, i, len(scenarios)) })
 
-		result, err := run(ctx, sc, topology, platform)
+		result, err := run(ctx, sc, platform)
 		if err != nil {
 			return results, err
 		}
@@ -263,159 +323,63 @@ func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOpt
 	return nil, nil
 }
 
-// runShared deploys once, connects once, and runs all scenarios with a shared
-// Runner. Skip propagation is applied based on requires.
-func (r *Runner) runShared(ctx context.Context, scenarios []*Scenario, topology string, opts RunOptions) ([]*ScenarioResult, error) {
-	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
+// connectToServer queries the server for the registered network's info.
+// Populates r.Topology, r.SpecDir, and creates the HTTP client.
+func (r *Runner) connectToServer() error {
+	r.Client = client.New(r.ServerURL, r.NetworkID)
 
-	// Determine the deployed platform (used for all scenarios in shared mode).
-	// Will be enriched with discovered platform after connectDevices.
-	deployedPlatform := opts.Platform
-	if deployedPlatform == "" && len(scenarios) > 0 {
-		deployedPlatform = scenarios[0].Platform
+	info, err := r.Client.GetNetworkInfo()
+	if err != nil {
+		return &InfraError{Op: "connect", Err: fmt.Errorf("querying server: %w (is the network registered?)", err)}
 	}
 
-	// Deploy topology (unless --no-deploy)
-	if !opts.NoDeploy {
-		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", topology)
-		cleanup, err := r.deployTopology(ctx, specDir, opts)
+	r.SpecDir = info.SpecDir
+	r.Topology = info.Topology
+
+	if r.Topology == "" {
+		r.Topology = "(unknown)"
+	}
+
+	return nil
+}
+
+// connectDevices connects host devices via SSH and discovers the platform.
+// SONiC devices are not pre-connected; the server connects on demand per-request.
+func (r *Runner) connectDevices() error {
+	r.HostConns = make(map[string]*ssh.Client)
+
+	deviceNames, err := r.Client.TopologyDeviceNames()
+	if err != nil || deviceNames == nil {
+		return &InfraError{Op: "connect", Err: fmt.Errorf("no topology.json found")}
+	}
+
+	for _, name := range deviceNames {
+		isHost, err := r.Client.IsHostDevice(name)
 		if err != nil {
-			var results []*ScenarioResult
-			for _, sc := range scenarios {
-				results = append(results, &ScenarioResult{
-					Name:        sc.Name,
-					Topology:    topology,
-					Platform:    sc.Platform,
-					Status:      StepStatusError,
-					DeployError: &InfraError{Op: "deploy", Err: err},
-				})
+			return &InfraError{Op: "connect", Device: name, Err: err}
+		}
+		if isHost {
+			sshClient, err := connectHostSSH(r.Client, name)
+			if err != nil {
+				return &InfraError{Op: "connect", Device: name, Err: err}
 			}
-			return results, nil
-		}
-		fmt.Fprintf(os.Stderr, "newtrun: topology ready\n")
-		if cleanup != nil {
-			defer cleanup()
+			r.HostConns[name] = sshClient
 		}
 	}
 
-	// SIGINT handling
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
-
-	// Connect devices once
-	fmt.Fprintf(os.Stderr, "newtrun: connecting to devices...\n")
-	if err := r.connectDevices(ctx, specDir); err != nil {
-		connectErr := err
-		if opts.NoDeploy {
-			connectErr = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
+	// Discover platform from the first non-host device's profile.
+	for _, name := range deviceNames {
+		if _, isHost := r.HostConns[name]; isHost {
+			continue
 		}
-		var results []*ScenarioResult
-		for _, sc := range scenarios {
-			results = append(results, &ScenarioResult{
-				Name:        sc.Name,
-				Topology:    topology,
-				Platform:    sc.Platform,
-				Status:      StepStatusError,
-				DeployError: connectErr,
-			})
-		}
-		return results, nil
-	}
-
-	// Enrich with discovered platform if no explicit platform was set
-	if deployedPlatform == "" {
-		deployedPlatform = r.discoveredPlatform
-	}
-
-	// In shared mode, all capability checks use the deployed platform
-	return r.iterateScenarios(ctx, scenarios, opts, deployedPlatform, func(ctx context.Context, sc *Scenario, _ string, platform string) (*ScenarioResult, error) {
-		r.opts = RunOptions{
-			Topology: topology,
-			Platform: platform,
-			NoDeploy: true,
-			Keep:     true,
-			Verbose:  opts.Verbose,
-		}
-		r.scenario = sc
-
-		result := &ScenarioResult{
-			Name:     sc.Name,
-			Topology: topology,
-			Platform: platform,
-		}
-		start := time.Now()
-		r.runScenarioSteps(ctx, sc, r.opts, result)
-		result.Duration = time.Since(start)
-		return result, nil
-	})
-}
-
-// runIndependent runs each scenario with its own deploy/connect cycle.
-// Skip propagation is still applied based on requires.
-func (r *Runner) runIndependent(ctx context.Context, scenarios []*Scenario, opts RunOptions) ([]*ScenarioResult, error) {
-	// Independent mode: each scenario uses its own platform
-	return r.iterateScenarios(ctx, scenarios, opts, "", func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error) {
-		return r.runScenario(ctx, sc, opts)
-	})
-}
-
-// runScenario executes a single scenario end-to-end.
-func (r *Runner) runScenario(ctx context.Context, scenario *Scenario, opts RunOptions) (*ScenarioResult, error) {
-	r.opts = opts
-	r.scenario = scenario
-
-	result := &ScenarioResult{
-		Name:     scenario.Name,
-		Topology: scenario.Topology,
-		Platform: scenario.Platform,
-	}
-	start := time.Now()
-
-	// Resolve topology spec dir
-	topology := opts.Topology
-	if topology == "" {
-		topology = scenario.Topology
-	}
-	specDir := filepath.Join(r.TopologiesDir, topology, "specs")
-
-	// Deploy topology (unless --no-deploy)
-	if !opts.NoDeploy {
-		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", topology)
-		cleanup, err := r.deployTopology(ctx, specDir, opts)
-		if err != nil {
-			result.DeployError = &InfraError{Op: "deploy", Err: err}
-			result.Status = StepStatusError
-			result.Duration = time.Since(start)
-			return result, nil
-		}
-		fmt.Fprintf(os.Stderr, "newtrun: topology ready\n")
-		if cleanup != nil {
-			defer cleanup()
+		info, err := r.Client.DeviceInfo(name)
+		if err == nil && info.Platform != "" {
+			r.discoveredPlatform = info.Platform
+			break
 		}
 	}
 
-	// SIGINT handling
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
-
-	// Connect to all devices
-	fmt.Fprintf(os.Stderr, "newtrun: connecting to devices...\n")
-	if err := r.connectDevices(ctx, specDir); err != nil {
-		if opts.NoDeploy {
-			result.DeployError = fmt.Errorf("%w\nhint: no running lab; deploy first with: newtlab deploy -S <specDir>", err)
-		} else {
-			result.DeployError = err
-		}
-		result.Status = StepStatusError
-		result.Duration = time.Since(start)
-		return result, nil
-	}
-
-	// Execute steps sequentially
-	r.runScenarioSteps(ctx, scenario, opts, result)
-	result.Duration = time.Since(start)
-
-	return result, nil
+	return nil
 }
 
 // runScenarioSteps executes the steps of a scenario, appending results to result.
@@ -461,55 +425,6 @@ func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts 
 	}
 
 	result.Status = computeOverallStatus(result.Steps)
-}
-
-// connectDevices registers the network with the server and connects host devices.
-// SONiC devices are not pre-connected; the server connects on demand per-request.
-func (r *Runner) connectDevices(ctx context.Context, specDir string) error {
-	r.Client = client.New(r.ServerURL, r.NetworkID)
-	// Unregister first to ensure fresh specs — different suites use different
-	// topology spec dirs with the same network ID.
-	_ = r.Client.UnregisterNetwork()
-	if err := r.Client.RegisterNetwork(specDir); err != nil {
-		return &InfraError{Op: "connect", Err: fmt.Errorf("registering network: %w", err)}
-	}
-	r.HostConns = make(map[string]*ssh.Client)
-
-	deviceNames, err := r.Client.TopologyDeviceNames()
-	if err != nil || deviceNames == nil {
-		return &InfraError{Op: "connect", Err: fmt.Errorf("no topology.json found")}
-	}
-
-	for _, name := range deviceNames {
-		isHost, err := r.Client.IsHostDevice(name)
-		if err != nil {
-			return &InfraError{Op: "connect", Device: name, Err: err}
-		}
-		if isHost {
-			sshClient, err := connectHostSSH(r.Client, name)
-			if err != nil {
-				return &InfraError{Op: "connect", Device: name, Err: err}
-			}
-			r.HostConns[name] = sshClient
-		}
-		// No pre-connection for SONiC devices — server connects on demand
-	}
-
-	// Discover platform from the first non-host device's profile.
-	// This provides the fallback for hasDataplane() and checkPlatformFeatures()
-	// when no explicit platform is declared in the scenario YAML.
-	for _, name := range deviceNames {
-		if _, isHost := r.HostConns[name]; isHost {
-			continue
-		}
-		info, err := r.Client.DeviceInfo(name)
-		if err == nil && info.Platform != "" {
-			r.discoveredPlatform = info.Platform
-			break
-		}
-	}
-
-	return nil
 }
 
 // connectHostSSH establishes a plain SSH connection to a host device.
@@ -692,24 +607,6 @@ func HasRequires(scenarios []*Scenario) bool {
 	return false
 }
 
-// sharedTopology returns the common topology if all scenarios use the same one,
-// or the override if set. Returns "" if topologies are mixed.
-func sharedTopology(scenarios []*Scenario, override string) string {
-	if override != "" {
-		return override
-	}
-	if len(scenarios) == 0 {
-		return ""
-	}
-	topo := scenarios[0].Topology
-	for _, s := range scenarios[1:] {
-		if s.Topology != topo {
-			return ""
-		}
-	}
-	return topo
-}
-
 // checkRequires returns a skip reason if any required scenario did not pass,
 // or "" if all requirements are satisfied. A required scenario that has not
 // been run yet is treated as not passed.
@@ -728,7 +625,6 @@ func checkRequires(sc *Scenario, status map[string]StepStatus) string {
 
 // checkPlatformFeatures checks if the platform supports all required features.
 // Returns a skip reason if any required feature is unsupported, empty string otherwise.
-// If deployedPlatform is non-empty (shared mode), it is used instead of scenarioPlatform.
 func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioPlatform string) string {
 	if len(sc.RequiresFeatures) == 0 {
 		return "" // No feature requirements
@@ -738,7 +634,7 @@ func (r *Runner) checkPlatformFeatures(sc *Scenario, deployedPlatform, scenarioP
 		return "" // Cannot check features without server connection (proceed and let operations fail)
 	}
 
-	// Use deployed platform (shared mode), then per-scenario, then discovered
+	// Use deployed platform, then per-scenario, then discovered
 	platformName := deployedPlatform
 	if platformName == "" {
 		platformName = scenarioPlatform

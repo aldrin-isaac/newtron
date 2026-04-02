@@ -504,6 +504,70 @@ Examples:
 	},
 }
 
+// ============================================================================
+// evpn add-peer / remove-peer — overlay BGP EVPN peer management
+// ============================================================================
+
+var (
+	evpnPeerNeighbor    string
+	evpnPeerRemoteAS    int
+	evpnPeerMultihop    int
+	evpnPeerDescription string
+)
+
+var evpnAddPeerCmd = &cobra.Command{
+	Use:   "add-peer",
+	Short: "Add a BGP EVPN overlay peer",
+	Long: `Add a BGP EVPN overlay peer (loopback-to-loopback eBGP).
+
+Overlay peers exchange L2VPN EVPN routes for VXLAN. These are typically
+loopback-sourced multihop sessions between leaf switches.
+
+The --neighbor and --remote-as flags are required.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 evpn add-peer --neighbor 10.0.0.2 --remote-as 65002 --multihop 2 -x
+  newtron leaf1 evpn add-peer --neighbor 10.0.0.3 --remote-as 65003 --description "leaf3 overlay" -x`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		if evpnPeerNeighbor == "" {
+			return fmt.Errorf("--neighbor is required")
+		}
+		if evpnPeerRemoteAS <= 0 {
+			return fmt.Errorf("--remote-as is required")
+		}
+
+		return displayWriteResult(app.client.AddBGPEVPNPeer(app.deviceName, newtron.BGPNeighborConfig{
+			NeighborIP:  evpnPeerNeighbor,
+			RemoteAS:    evpnPeerRemoteAS,
+			Multihop:    evpnPeerMultihop,
+			Description: evpnPeerDescription,
+		}, execOpts()))
+	},
+}
+
+var evpnRemovePeerCmd = &cobra.Command{
+	Use:   "remove-peer <ip>",
+	Short: "Remove a BGP EVPN overlay peer",
+	Long: `Remove a BGP EVPN overlay peer by IP address.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 evpn remove-peer 10.0.0.2 -x`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.RemoveBGPEVPNPeer(app.deviceName, args[0], execOpts()))
+	},
+}
+
 func init() {
 	// ipvpn create flags
 	evpnIpvpnCreateCmd.Flags().IntVar(&ipvpnL3VNI, "l3vni", 0, "L3VNI for the IP-VPN (required)")
@@ -532,8 +596,16 @@ func init() {
 	evpnMacvpnCmd.AddCommand(evpnMacvpnCreateCmd)
 	evpnMacvpnCmd.AddCommand(evpnMacvpnDeleteCmd)
 
+	// evpn peer management flags
+	evpnAddPeerCmd.Flags().StringVar(&evpnPeerNeighbor, "neighbor", "", "Neighbor IP address (required)")
+	evpnAddPeerCmd.Flags().IntVar(&evpnPeerRemoteAS, "remote-as", 0, "Remote AS number (required)")
+	evpnAddPeerCmd.Flags().IntVar(&evpnPeerMultihop, "multihop", 0, "eBGP multihop TTL")
+	evpnAddPeerCmd.Flags().StringVar(&evpnPeerDescription, "description", "", "Peer description")
+
 	// evpn subcommands
 	evpnCmd.AddCommand(evpnStatusCmd)
 	evpnCmd.AddCommand(evpnIpvpnCmd)
 	evpnCmd.AddCommand(evpnMacvpnCmd)
+	evpnCmd.AddCommand(evpnAddPeerCmd)
+	evpnCmd.AddCommand(evpnRemovePeerCmd)
 }

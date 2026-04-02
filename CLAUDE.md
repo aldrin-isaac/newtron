@@ -707,6 +707,10 @@ Tracking what was working (update this as test suites are validated):
 - `routed`, `irb`, `bridged`: WORKS — 2node-ngdp-primitive
 - `evpn-irb`: WORKS — 3node-ngdp-dataplane evpn-l2-irb (L2 + L3 inter-subnet via asymmetric IRB)
 - `evpn-routed`: ABANDONED on CiscoVS/Silicon One (RCA-039, L3VNI DECAP blocked)
+- `CLI lifecycle (1node-vs-config)`: WORKS — 13/13 scenarios (loopback mode, Apr 2026)
+- `1node-vs-architecture`: 12/32 pass, 1 infra failure (SSH drop during restart-bgp, not code bug)
+- `2node-vs-primitive`: VALIDATED — 21/21 PASS (Apr 2026)
+- `2node-vs-service`: VALIDATED — 6/6 PASS (Apr 2026)
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
 

@@ -19,12 +19,12 @@ func newStartCmd() *cobra.Command {
 		dir       string
 		scenario  string
 		target    string
-		topology  string
 		platform  string
 		junitPath string
 		serverURL string
 		networkID string
 		monitor   bool
+		noDeploy  bool
 	)
 
 	cmd := &cobra.Command{
@@ -40,6 +40,9 @@ or --target to run the minimal dependency chain to reach a scenario.
   newtrun start 2node-ngdp-primitive --scenario boot-ssh    # run one (no deps)
   newtrun start 2node-ngdp-primitive --target cross-switch  # run deps + target
   newtrun start 2node-ngdp-primitive --monitor              # live status dashboard
+
+The topology is determined by the connected newtron-server — scenarios declare
+compatible topologies as guards, and mismatches fail immediately.
 
 If a previous run was paused, start resumes from where it left off.
 Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
@@ -62,7 +65,6 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				return fmt.Errorf("resolve dir: %w", err)
 			}
 
-			topologiesDir := resolveTopologiesDir()
 			suite := newtrun.SuiteName(absDir)
 
 			fmt.Fprintf(os.Stderr, "newtrun: suite %s (%s)\n", suite, absDir)
@@ -79,13 +81,12 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				Scenario:  scenario,
 				Target:    target,
 				All:       scenario == "" && target == "",
-				Topology:  topology,
 				Platform:  platform,
 				Verbose:   verboseFlag,
 				JUnitPath: junitPath,
 				Suite:     suite,
 				Keep:      true,    // lifecycle mode: always keep
-				NoDeploy:  false,   // EnsureTopology handles reuse
+				NoDeploy:  noDeploy,
 			}
 
 			existing, err := newtrun.LoadRunState(suite)
@@ -104,11 +105,10 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				opts.Completed = completedMap
 			}
 
-			// Build run state
+			// Build run state (Topology and SpecDir populated after server connect)
 			state := &newtrun.RunState{
 				Suite:    suite,
 				SuiteDir: absDir,
-				Topology: topology,
 				Platform: platform,
 				Target:   target,
 				Status:   newtrun.SuiteStatusRunning,
@@ -132,7 +132,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				State: state,
 			}
 
-			runner := newtrun.NewRunner(absDir, topologiesDir)
+			runner := newtrun.NewRunner(absDir)
 			runner.Progress = reporter
 
 			// Resolve server URL: flag > env > settings > default
@@ -169,11 +169,19 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				results []*newtrun.ScenarioResult
 				err     error
 			}
+			// enrichState copies server-derived fields from the runner to the
+			// persisted run state so that stop/status commands can use them.
+			enrichState := func() {
+				state.Topology = runner.Topology
+				state.SpecDir = runner.SpecDir
+			}
+
 			var resultCh chan runResult
 			if monitor {
 				resultCh = make(chan runResult, 1)
 				go func() {
 					r, e := runner.Run(opts)
+					enrichState()
 					// Update state status BEFORE sending result so the
 					// monitor sees the terminal status and exits.
 					finalizeRunState(state, r, e)
@@ -190,6 +198,7 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 				results, runErr = res.results, res.err
 			} else {
 				results, runErr = runner.Run(opts)
+				enrichState()
 			}
 
 			// Handle pause
@@ -257,12 +266,12 @@ Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
 	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
 	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario (default: all)")
 	cmd.Flags().StringVar(&target, "target", "", "run minimal dependency chain to reach scenario")
-	cmd.Flags().StringVar(&topology, "topology", "", "override topology")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
 	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
 	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (default: http://localhost:8080, env: NEWTRON_SERVER)")
 	cmd.Flags().StringVar(&networkID, "network-id", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
 	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
+	cmd.Flags().BoolVar(&noDeploy, "no-deploy", false, "skip topology deployment (for loopback/offline mode)")
 
 	return cmd
 }

@@ -21,18 +21,27 @@ func (c *Client) ListNetworks() ([]api.NetworkInfo, error) {
 	return result, nil
 }
 
-// HasTopology returns whether the registered network has a topology.
-func (c *Client) HasTopology() (bool, error) {
-	var result []api.NetworkInfo
-	if err := c.doGet("/network", &result); err != nil {
-		return false, err
+// GetNetworkInfo returns the server's info for this client's network.
+func (c *Client) GetNetworkInfo() (*api.NetworkInfo, error) {
+	networks, err := c.ListNetworks()
+	if err != nil {
+		return nil, err
 	}
-	for _, n := range result {
+	for _, n := range networks {
 		if n.ID == c.networkID {
-			return n.HasTopology, nil
+			return &n, nil
 		}
 	}
-	return false, fmt.Errorf("network %q not found", c.networkID)
+	return nil, fmt.Errorf("network %q not registered on server", c.networkID)
+}
+
+// HasTopology returns whether the registered network has a topology.
+func (c *Client) HasTopology() (bool, error) {
+	info, err := c.GetNetworkInfo()
+	if err != nil {
+		return false, err
+	}
+	return info.HasTopology, nil
 }
 
 // TopologyDeviceNames returns the sorted device names from the topology.

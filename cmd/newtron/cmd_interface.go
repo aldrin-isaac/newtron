@@ -352,11 +352,84 @@ Examples:
 	},
 }
 
+var interfaceClearCmd = &cobra.Command{
+	Use:   "clear <interface> <property>",
+	Short: "Clear a property from an interface",
+	Long: `Clear (remove) a property from an interface.
+
+This is the reverse of 'interface set'. It removes the specified property,
+restoring the default or removing the configuration entirely.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 interface clear Ethernet0 vrf -x
+  newtron leaf1 interface clear Ethernet0 ip -x
+  newtron leaf1 interface clear Ethernet0 description -x`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		intfName := args[0]
+		property := args[1]
+		if err := requireDevice(); err != nil {
+			return err
+		}
+		return displayWriteResult(app.client.ClearProperty(app.deviceName, intfName, property, execOpts()))
+	},
+}
+
+var interfaceBindingCmd = &cobra.Command{
+	Use:   "binding <interface>",
+	Short: "Show the service binding on an interface",
+	Long: `Show the service binding details for an interface.
+
+Returns the service name, IP addresses, and VRF associated with the
+interface's current service binding. Returns empty if no service is bound.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 interface binding Ethernet0
+  newtron leaf1 interface binding Ethernet0 --json`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		intfName := args[0]
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		binding, err := app.client.ShowServiceBinding(app.deviceName, intfName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(binding)
+		}
+
+		if binding.Service == "" {
+			fmt.Println("(no service bound)")
+			return nil
+		}
+
+		fmt.Printf("Service: %s\n", bold(binding.Service))
+		if len(binding.IPAddresses) > 0 {
+			fmt.Printf("IP Addresses: %s\n", strings.Join(binding.IPAddresses, ", "))
+		}
+		if binding.VRF != "" {
+			fmt.Printf("VRF: %s\n", binding.VRF)
+		}
+
+		return nil
+	},
+}
+
 func init() {
 	interfaceCmd.AddCommand(interfaceListCmd)
 	interfaceCmd.AddCommand(interfaceShowCmd)
 	interfaceCmd.AddCommand(interfaceGetCmd)
 	interfaceCmd.AddCommand(interfaceSetCmd)
+	interfaceCmd.AddCommand(interfaceClearCmd)
+	interfaceCmd.AddCommand(interfaceBindingCmd)
 	interfaceCmd.AddCommand(interfaceListAclsCmd)
 	interfaceCmd.AddCommand(interfaceListMembersCmd)
 }

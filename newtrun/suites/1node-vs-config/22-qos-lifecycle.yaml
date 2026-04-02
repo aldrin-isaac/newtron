@@ -1,0 +1,70 @@
+name: qos-lifecycle
+description: |
+  QoS policy spec authoring + device apply/remove.
+  Spec ops are network-scoped; apply/remove are device-scoped.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # ====================================================================
+  # QoS policy spec authoring (network-scoped)
+  # ====================================================================
+  - name: create-qos-policy
+    action: newtron-cli
+    command: "qos create TEST_QOS --description test-policy --loopback"
+
+  - name: verify-qos-policy
+    action: newtron-cli
+    command: "qos show TEST_QOS --loopback"
+    expect:
+      jq: '.name == "TEST_QOS"'
+
+  - name: add-queue-0
+    action: newtron-cli
+    command: "qos add-queue TEST_QOS 0 --type strict --dscp 46 --name voice --loopback"
+
+  - name: add-queue-1
+    action: newtron-cli
+    command: "qos add-queue TEST_QOS 1 --type dwrr --weight 80 --dscp 0 --name best-effort --loopback"
+
+  # ====================================================================
+  # QoS device apply/remove
+  # ====================================================================
+  - name: apply-qos
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos apply Ethernet20 TEST_QOS --loopback"
+
+  - name: verify-qos-applied
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORT_QOS_MAP Ethernet20 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: remove-qos
+    action: newtron-cli
+    devices: [switch1]
+    command: "qos remove Ethernet20 --loopback"
+
+  - name: verify-qos-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORT_QOS_MAP Ethernet20 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # ====================================================================
+  # QoS policy cleanup
+  # ====================================================================
+  - name: remove-queue-1
+    action: newtron-cli
+    command: "qos remove-queue TEST_QOS 1 --loopback"
+
+  - name: remove-queue-0
+    action: newtron-cli
+    command: "qos remove-queue TEST_QOS 0 --loopback"
+
+  - name: delete-qos-policy
+    action: newtron-cli
+    command: "qos delete TEST_QOS --loopback"

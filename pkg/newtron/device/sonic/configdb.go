@@ -1049,6 +1049,47 @@ func (c *ConfigDBClient) Exists(table, key string) (bool, error) {
 
 
 // ============================================================================
+// Projection query methods — used by loopback mode to read from the in-memory
+// projection instead of Redis. Same interface as ConfigDBClient.Get/Exists/TableKeys.
+// ============================================================================
+
+// Get returns the fields for a table|key entry from the projection.
+// Returns an empty map (not error) if the entry does not exist.
+func (db *ConfigDB) Get(table, key string) map[string]string {
+	raw := db.ExportRaw()
+	if t, ok := raw[table]; ok {
+		if fields, ok := t[key]; ok {
+			return fields
+		}
+	}
+	return map[string]string{}
+}
+
+// Exists returns true if a table|key entry exists in the projection.
+func (db *ConfigDB) Exists(table, key string) bool {
+	raw := db.ExportRaw()
+	if t, ok := raw[table]; ok {
+		_, ok := t[key]
+		return ok
+	}
+	return false
+}
+
+// TableKeys returns all keys in a table from the projection.
+func (db *ConfigDB) TableKeys(table string) []string {
+	raw := db.ExportRaw()
+	t, ok := raw[table]
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(t))
+	for k := range t {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// ============================================================================
 // Nil-safe query methods — called by network.Device to avoid nil-check boilerplate
 // ============================================================================
 

@@ -174,6 +174,111 @@ Examples:
 	},
 }
 
+var bgpCheckCmd = &cobra.Command{
+	Use:   "check",
+	Short: "Check BGP session health",
+	Long: `Run BGP session health checks on the device.
+
+Returns the status of all configured BGP sessions — whether they are
+established, down, or misconfigured. Useful for quick health validation
+after provisioning or as a monitoring probe.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 bgp check
+  newtron leaf1 bgp check --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		results, err := app.client.CheckBGPSessions(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(results)
+		}
+
+		if len(results) == 0 {
+			fmt.Println("No BGP session checks returned")
+			return nil
+		}
+
+		t := cli.NewTable("CHECK", "STATUS", "MESSAGE")
+		for _, r := range results {
+			status := r.Status
+			switch status {
+			case "pass":
+				status = green(status)
+			case "fail":
+				status = red(status)
+			case "warn":
+				status = yellow(status)
+			}
+			t.Row(r.Check, status, r.Message)
+		}
+		t.Flush()
+
+		return nil
+	},
+}
+
+var bgpNeighborCmd = &cobra.Command{
+	Use:   "neighbor",
+	Short: "List BGP neighbors",
+	Long: `List all BGP neighbors on the device with their health check status.
+
+This returns health check results for each configured neighbor, showing
+whether each session is established.
+
+Requires -D (device) flag.
+
+Examples:
+  newtron leaf1 bgp neighbor
+  newtron leaf1 bgp neighbor --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		results, err := app.client.ListNeighbors(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(results)
+		}
+
+		if len(results) == 0 {
+			fmt.Println("No neighbors configured")
+			return nil
+		}
+
+		t := cli.NewTable("CHECK", "STATUS", "MESSAGE")
+		for _, r := range results {
+			status := r.Status
+			switch status {
+			case "pass":
+				status = green(status)
+			case "fail":
+				status = red(status)
+			case "warn":
+				status = yellow(status)
+			}
+			t.Row(r.Check, status, r.Message)
+		}
+		t.Flush()
+
+		return nil
+	},
+}
+
 func init() {
 	bgpCmd.AddCommand(bgpStatusCmd)
+	bgpCmd.AddCommand(bgpCheckCmd)
+	bgpCmd.AddCommand(bgpNeighborCmd)
 }

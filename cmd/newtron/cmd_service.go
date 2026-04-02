@@ -218,8 +218,10 @@ var serviceShowCmd = &cobra.Command{
 }
 
 var (
-	applyIP string
-	peerAS  int
+	applyIP     string
+	applyVLAN   int
+	applyParams string
+	peerAS      int
 )
 
 var serviceApplyCmd = &cobra.Command{
@@ -237,9 +239,16 @@ Use -x to actually apply the changes.
 
 Requires -D (device) flag.
 
+Options:
+  --ip <addr/prefix>        IP address for routed/IRB services
+  --vlan <id>               VLAN ID for local bridged/IRB services
+  --peer-as <asn>           BGP peer AS number (for services with routing.peer_as="request")
+  --params <key=val,...>    Topology params (peer_as, route_reflector_client, next_hop_self)
+
 Examples:
-  newtron -D leaf1-ny service apply Ethernet0 customer-l3 --ip 10.1.1.1/30
-  newtron -D leaf1-ny service apply PortChannel100 transit --ip 192.168.1.1/31 -x`,
+  newtron leaf1 service apply Ethernet0 customer-l3 --ip 10.1.1.1/30 -x
+  newtron leaf1 service apply Ethernet0 server-l2 --vlan 100 -x
+  newtron leaf1 service apply Ethernet0 transit --ip 192.168.1.1/31 --params peer_as=65002 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		intfName := args[0]
@@ -272,10 +281,22 @@ Examples:
 		}
 		fmt.Println()
 
-		return displayWriteResult(app.client.ApplyService(app.deviceName, intfName, serviceName, newtron.ApplyServiceOpts{
+		opts := newtron.ApplyServiceOpts{
 			IPAddress: applyIP,
+			VLAN:      applyVLAN,
 			PeerAS:    peerAS,
-		}, execOpts()))
+		}
+		if applyParams != "" {
+			opts.Params = make(map[string]string)
+			for _, kv := range strings.Split(applyParams, ",") {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) == 2 {
+					opts.Params[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+				}
+			}
+		}
+
+		return displayWriteResult(app.client.ApplyService(app.deviceName, intfName, serviceName, opts, execOpts()))
 	},
 }
 
@@ -483,7 +504,9 @@ Examples:
 
 func init() {
 	serviceApplyCmd.Flags().StringVar(&applyIP, "ip", "", "IP address for L3 service (CIDR notation)")
+	serviceApplyCmd.Flags().IntVar(&applyVLAN, "vlan", 0, "VLAN ID for local bridged/IRB services")
 	serviceApplyCmd.Flags().IntVar(&peerAS, "peer-as", 0, "BGP peer AS number")
+	serviceApplyCmd.Flags().StringVar(&applyParams, "params", "", "Topology params as key=value pairs (comma-separated)")
 
 	serviceCreateCmd.Flags().StringVar(&svcCreateType, "type", "", "Service type (evpn-irb, evpn-bridged, evpn-routed, irb, bridged, routed)")
 	serviceCreateCmd.Flags().StringVar(&svcCreateIPVPN, "ipvpn", "", "IP-VPN reference name")

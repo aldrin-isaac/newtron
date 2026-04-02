@@ -29,6 +29,7 @@ type NetworkInfo struct {
 	ID          string   `json:"id"`
 	SpecDir     string   `json:"spec_dir"`
 	HasTopology bool     `json:"has_topology"`
+	Topology    string   `json:"topology,omitempty"` // topology name derived from specDir
 	Nodes       []string `json:"nodes"`
 }
 

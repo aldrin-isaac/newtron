@@ -1,0 +1,26 @@
+name: interface-props
+description: |
+  Interface property set/clear lifecycle.
+  Intent DAG: device → interface|Ethernet16 → interface|Ethernet16|mtu.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Set property ---
+  - name: set-mtu
+    action: newtron-cli
+    devices: [switch1]
+    command: "interface set Ethernet16 mtu 9000 --loopback"
+
+  - name: verify-mtu
+    action: newtron-cli
+    devices: [switch1]
+    command: "interface get Ethernet16 mtu --loopback"
+    expect:
+      contains: "9000"
+
+  # --- Clear property ---
+  - name: clear-mtu
+    action: newtron-cli
+    devices: [switch1]
+    command: "interface clear Ethernet16 mtu --loopback"

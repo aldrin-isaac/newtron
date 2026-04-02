@@ -130,12 +130,14 @@ in `profiles/`.
 | Suite | Topology | Scenarios | Description |
 |-------|----------|-----------|-------------|
 | `1node-vs-basic` | 1node-vs | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
+| `1node-vs-config` | 1node-vs | 13 | CLI lifecycle via `newtron-cli` action in loopback mode: VLAN, VRF, PortChannel, ACL, interface, QoS, service, EVPN spec, BGP peer, neighbor, IPVPN binding. |
+| `1node-vs-architecture` | 1node-vs | 32 | Intent architecture validation: topology reconcile, drift detection, drift guard, reconcile idempotency, intent save/reload/clear, mode switching, delta reconcile, dry-run. |
 | `2node-ngdp-primitive` | 2node-ngdp | 21 | Incremental CiscoVS: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
 | `2node-ngdp-service` | 2node-ngdp-service | 6 | Service lifecycle on CiscoVS: provision, health, data plane, deprovision, verify clean. |
 | `2node-vs-primitive` | 2node-vs | 21 | Incremental sonic-vs: same coverage as 2node-ngdp-primitive on community SONiC. |
-| `2node-vs-service` | 2node-vs-service | 6 | Service lifecycle on sonic-vs: provision, health, data plane, deprovision, verify clean. |
-| `2node-vs-drift` | 2node-vs-service | 7 | Drift detection: inject CONFIG_DB changes, detect drift (missing/extra/modified), reprovision to fix. |
-| `2node-vs-zombie` | 2node-vs-service | 8 | Zombie intent: inject zombie state, verify write operations are blocked, resolve zombie, verify unblocked. |
+| `2node-vs-service` | 2node-vs | 6 | Service lifecycle on sonic-vs: provision, health, data plane, deprovision, verify clean. |
+| `2node-vs-drift` | 2node-vs | 7 | Drift detection: inject CONFIG_DB changes, detect drift (missing/extra/modified), reprovision to fix. |
+| `2node-vs-drift-actuated` | 2node-vs | 8 | Actuated-mode drift: intent persistence, drift guard enforcement, reconcile resolution in actuated mode. |
 | `3node-ngdp-dataplane` | 3node-ngdp | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
 | `simple-vrf-host` | 2node-ngdp | 4 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
 
@@ -402,7 +404,7 @@ steps:
 ### 6.2 Step Structure
 
 Each step has an action (what to do), a device selector (where to do it),
-and action-specific fields. newtrun has exactly 5 actions:
+and action-specific fields. newtrun has 6 actions:
 
 | Action | Purpose |
 |--------|---------|
@@ -411,22 +413,23 @@ and action-specific fields. newtrun has exactly 5 actions:
 | `wait` | Context-aware sleep |
 | `host-exec` | Run command in host network namespace via direct SSH |
 | `newtron` | Generic HTTP call to newtron-server (replaces all former dedicated actions) |
+| `newtron-cli` | Run newtron CLI as subprocess; device name prepended as first arg, supports jq assertions |
 
 **Step fields:**
 
 | Field | Type | Used by | Description |
 |-------|------|---------|-------------|
 | `name` | string | all | Step identifier for output |
-| `action` | string | all | Which executor to run (`topology-reconcile`, `verify-topology`, `wait`, `host-exec`, `newtron`) |
+| `action` | string | all | Which executor to run (`topology-reconcile`, `verify-topology`, `wait`, `host-exec`, `newtron`, `newtron-cli`) |
 | `devices` | selector | all except `wait` | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
 | `duration` | duration | `wait` | How long to wait (e.g., `30s`, `2m`) |
-| `command` | string | `host-exec` | Shell command to run inside the host namespace |
+| `command` | string | `host-exec`, `newtron-cli` | Shell command (host-exec) or newtron CLI command (newtron-cli) |
 | `params` | map | `newtron` | Request body for POST/PUT/DELETE requests |
 | `method` | string | `newtron` | HTTP method: `GET` (default), `POST`, `PUT`, `DELETE` |
 | `url` | string | `newtron` | URL template with `{{device}}` placeholder |
 | `poll` | object | `newtron` | Polling config: `{timeout: 120s, interval: 5s}` |
 | `batch` | list | `newtron` | Sequential list of HTTP calls |
-| `expect` | object | `host-exec`, `newtron` | Assertion block (see below) |
+| `expect` | object | `host-exec`, `newtron`, `newtron-cli` | Assertion block (see below) |
 | `expect_failure` | bool | all | Expect the step to fail — inverts pass/fail (applied by the runner after execution) |
 
 ### 6.3 Expect Block
@@ -542,10 +545,11 @@ verify-bgp, etc.) used to handle individually.
 
 ## 7. Step Action Reference
 
-newtrun has exactly 5 actions. `topology-reconcile` and `verify-topology`
+newtrun has 6 actions. `topology-reconcile` and `verify-topology`
 handle provisioning and verification. `host-exec` runs commands on host VMs
 via SSH. `newtron` is the generic action that covers everything else via HTTP
-calls to newtron-server.
+calls to newtron-server. `newtron-cli` runs the newtron CLI as a subprocess
+for testing CLI commands directly (used in loopback mode suites).
 
 ### 7.1 topology-reconcile
 
@@ -1003,6 +1007,45 @@ Here are representative examples organized by domain:
   url: /node/{{device}}/drift
   expect:
     jq: '.status == "clean"'
+```
+
+### 7.6 newtron-cli — CLI Subprocess Action
+
+Runs the `newtron` CLI binary as a subprocess. The device name is
+prepended as the first positional argument (like the normal CLI pattern
+`newtron <device> <command>`). When `expect.jq` is set, `--json` is
+appended automatically so the output is machine-parseable.
+
+This action is designed for testing CLI commands directly, particularly
+in `--loopback` mode where no device connection is needed. The CLI
+binary must be in `$PATH`.
+
+```yaml
+# Device-scoped command (device prepended as first arg)
+- name: create-vlan
+  action: newtron-cli
+  devices: [switch1]
+  command: "vlan create 100 --name Servers --loopback"
+
+# Verify with jq assertion (--json auto-appended)
+- name: verify-vlan
+  action: newtron-cli
+  devices: [switch1]
+  command: "vlan show 100 --loopback"
+  expect:
+    jq: '.name == "Servers"'
+
+# Network-scoped command (no device)
+- name: list-services
+  action: newtron-cli
+  command: "service list"
+```
+
+Use `--no-deploy` with `newtrun start` to skip topology deployment
+when running loopback CLI suites:
+
+```
+newtrun start 1node-vs-config --server http://localhost:9800 --no-deploy
 ```
 
 ---

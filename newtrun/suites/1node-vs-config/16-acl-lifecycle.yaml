@@ -1,0 +1,107 @@
+name: acl-lifecycle
+description: |
+  ACL create, add-rule, bind to interface, unbind, delete-rule, delete.
+  Intent DAG: device → acl|TEST_ACL → acl|TEST_ACL|RULE_10.
+  Binding: interface|Ethernet12 → interface|Ethernet12|acl|ingress.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Create ACL table ---
+  - name: create-acl
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl create TEST_ACL --type L3 --stage ingress --loopback"
+
+  - name: verify-acl
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists ACL_TABLE TEST_ACL --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Add rules ---
+  - name: add-rule-10
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl add-rule TEST_ACL RULE_10 --action permit --priority 10 --src-ip 10.0.0.0/8 --loopback"
+
+  - name: verify-rule-10
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query ACL_RULE TEST_ACL|RULE_10 --loopback"
+    expect:
+      jq: '.PACKET_ACTION == "FORWARD" and .PRIORITY == "10"'
+
+  - name: add-rule-20
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl add-rule TEST_ACL RULE_20 --action deny --priority 20 --dst-ip 192.168.0.0/16 --loopback"
+
+  - name: verify-rule-20
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query ACL_RULE TEST_ACL|RULE_20 --loopback"
+    expect:
+      jq: '.PACKET_ACTION == "DROP"'
+
+  # --- Bind ACL to interface (needs interface intent first) ---
+  - name: configure-ethernet12
+    action: newtron-cli
+    devices: [switch1]
+    command: "interface set Ethernet12 mtu 9100 --loopback"
+
+  - name: bind-acl
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl bind TEST_ACL Ethernet12 --direction ingress --loopback"
+
+  - name: verify-acl-bound
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query ACL_TABLE TEST_ACL --loopback"
+    expect:
+      jq: '.ports | contains("Ethernet12")'
+
+  # --- Unbind ACL ---
+  - name: unbind-acl
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl unbind TEST_ACL Ethernet12 --loopback"
+
+  # --- Delete rules ---
+  - name: delete-rule-20
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl delete-rule TEST_ACL RULE_20 --loopback"
+
+  - name: verify-rule-20-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists ACL_RULE TEST_ACL|RULE_20 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  - name: delete-rule-10
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl delete-rule TEST_ACL RULE_10 --loopback"
+
+  # --- Delete ACL ---
+  - name: delete-acl
+    action: newtron-cli
+    devices: [switch1]
+    command: "acl delete TEST_ACL --loopback"
+
+  - name: verify-acl-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists ACL_TABLE TEST_ACL --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Cleanup interface ---
+  - name: clear-ethernet12-mtu
+    action: newtron-cli
+    devices: [switch1]
+    command: "interface clear Ethernet12 mtu --loopback"

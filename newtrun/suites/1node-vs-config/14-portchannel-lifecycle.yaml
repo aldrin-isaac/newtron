@@ -1,0 +1,73 @@
+name: portchannel-lifecycle
+description: |
+  PortChannel create, add-interface, remove-interface, delete.
+  Intent DAG: device → portchannel|PortChannel1 → portchannel|PortChannel1|Ethernet8.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Create PortChannel ---
+  - name: create-lag
+    action: newtron-cli
+    devices: [switch1]
+    command: "lag create PortChannel1 --members Ethernet8 --loopback"
+
+  - name: verify-lag
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORTCHANNEL PortChannel1 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-intent-lag
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT portchannel|PortChannel1 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-member
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORTCHANNEL_MEMBER PortChannel1|Ethernet8 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Add another member ---
+  - name: add-member
+    action: newtron-cli
+    devices: [switch1]
+    command: "lag add-interface PortChannel1 Ethernet12 --loopback"
+
+  - name: verify-second-member
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORTCHANNEL_MEMBER PortChannel1|Ethernet12 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Remove member ---
+  - name: remove-member
+    action: newtron-cli
+    devices: [switch1]
+    command: "lag remove-interface PortChannel1 Ethernet12 --loopback"
+
+  - name: verify-member-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORTCHANNEL_MEMBER PortChannel1|Ethernet12 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Delete PortChannel ---
+  - name: delete-lag
+    action: newtron-cli
+    devices: [switch1]
+    command: "lag delete PortChannel1 --loopback"
+
+  - name: verify-lag-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists PORTCHANNEL PortChannel1 --loopback"
+    expect:
+      jq: '.exists == false'

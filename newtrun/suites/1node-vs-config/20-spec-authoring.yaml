@@ -1,0 +1,100 @@
+name: spec-authoring
+description: |
+  Network-scoped spec CRUD: prefix-list, route-policy, filter, service.
+  These are spec operations (no device needed), so no devices field.
+  --loopback is still needed for the server mode.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # ====================================================================
+  # Prefix list lifecycle
+  # ====================================================================
+  - name: create-prefix-list
+    action: newtron-cli
+    command: "prefix-list create TEST_PL --prefixes 10.0.0.0/8,172.16.0.0/12 --loopback"
+
+  - name: verify-prefix-list
+    action: newtron-cli
+    command: "prefix-list show TEST_PL --loopback"
+    expect:
+      jq: '.name == "TEST_PL"'
+
+  - name: add-prefix-entry
+    action: newtron-cli
+    command: "prefix-list add-entry TEST_PL 192.168.0.0/16 --loopback"
+
+  - name: remove-prefix-entry
+    action: newtron-cli
+    command: "prefix-list remove-entry TEST_PL 172.16.0.0/12 --loopback"
+
+  - name: delete-prefix-list
+    action: newtron-cli
+    command: "prefix-list delete TEST_PL --loopback"
+
+  # ====================================================================
+  # Route policy lifecycle
+  # ====================================================================
+  - name: create-route-policy
+    action: newtron-cli
+    command: "route-policy create TEST_RP --description test-policy --loopback"
+
+  - name: verify-route-policy
+    action: newtron-cli
+    command: "route-policy show TEST_RP --loopback"
+    expect:
+      jq: '.name == "TEST_RP"'
+
+  - name: add-route-policy-rule
+    action: newtron-cli
+    command: "route-policy add-rule TEST_RP --seq 10 --action permit --set-local-pref 200 --loopback"
+
+  - name: remove-route-policy-rule
+    action: newtron-cli
+    command: "route-policy remove-rule TEST_RP 10 --loopback"
+
+  - name: delete-route-policy
+    action: newtron-cli
+    command: "route-policy delete TEST_RP --loopback"
+
+  # ====================================================================
+  # Filter lifecycle
+  # ====================================================================
+  - name: create-filter
+    action: newtron-cli
+    command: "filter create TEST_FILTER --type ipv4 --loopback"
+
+  - name: verify-filter
+    action: newtron-cli
+    command: "filter show TEST_FILTER --loopback"
+    expect:
+      jq: '.name == "TEST_FILTER"'
+
+  - name: add-filter-rule
+    action: newtron-cli
+    command: "filter add-rule TEST_FILTER --priority 10 --action permit --src-ip 10.0.0.0/8 --loopback"
+
+  - name: remove-filter-rule
+    action: newtron-cli
+    command: "filter remove-rule TEST_FILTER 10 --loopback"
+
+  - name: delete-filter
+    action: newtron-cli
+    command: "filter delete TEST_FILTER --loopback"
+
+  # ====================================================================
+  # Service spec lifecycle (network.json already has "transit")
+  # ====================================================================
+  - name: create-service-spec
+    action: newtron-cli
+    command: "service create test-bridged --type bridged --loopback"
+
+  - name: verify-service-spec
+    action: newtron-cli
+    command: "service show test-bridged --loopback"
+    expect:
+      jq: '.service_type == "bridged"'
+
+  - name: delete-service-spec
+    action: newtron-cli
+    command: "service delete test-bridged --loopback"

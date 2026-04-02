@@ -75,6 +75,7 @@ func (i *Interface) AddBGPPeer(ctx context.Context, cfg DirectBGPPeerConfig) (*C
 	localIPOnly, _ := util.SplitIPMask(localIP)
 
 	config := CreateBGPNeighborConfig(neighborIP, cfg.RemoteAS, localIPOnly, BGPNeighborOpts{
+		VRF:          i.VRF(),
 		Description:  cfg.Description,
 		EBGPMultihop: cfg.Multihop > 0,
 		MultihopTTL:  fmt.Sprintf("%d", cfg.Multihop),
@@ -128,8 +129,11 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 		return nil, fmt.Errorf("intent for %s has no neighbor IP", i.name)
 	}
 
-	cs, err := n.RemoveBGPEVPNPeer(ctx, neighborIP)
-	if err != nil {
+	// Use the interface's VRF for the BGP_NEIGHBOR key (matches the add path).
+	vrf := i.VRF()
+	config := DeleteBGPNeighborConfig(vrf, neighborIP)
+	cs := buildChangeSet(n.Name(), "interface.remove-bgp-peer", config, ChangeDelete)
+	if err := n.render(cs); err != nil {
 		return nil, err
 	}
 	// Delete the bgp-peer sub-resource intent. The parent interface|<name>
@@ -137,6 +141,7 @@ func (i *Interface) RemoveBGPPeer(ctx context.Context) (*ChangeSet, error) {
 	if err := n.deleteIntent(cs, intentKey); err != nil {
 		return nil, err
 	}
+	util.WithDevice(n.Name()).Infof("Removing direct BGP peer %s from interface %s", neighborIP, i.name)
 	return cs, nil
 }
 

@@ -559,6 +559,8 @@ Device-scoped commands require a device name. Spec-level commands do not.
 | `--server` | | Server URL (default: settings or `http://localhost:8080`) |
 | `--network-id` | `-N` | Network identifier (default: settings or `default`) |
 | `--verbose` | `-v` | Verbose output |
+| `--topology` | | Topology mode — source intents from topology.json |
+| `--loopback` | | Offline config testing — no device connection, projection only |
 
 ### 4.4 Write and Output Flags
 
@@ -2716,37 +2718,47 @@ Spec-Level (no device needed)
 ├── evpn
 │   ├── ipvpn    list | show | create | delete
 │   └── macvpn   list | show | create | delete
-├── filter     list | show | create | delete | add-rule | remove-rule
-├── qos        list | show | create | delete | add-queue | remove-queue
-├── profile    list | show | create | delete
-├── zone       list | create | delete
-├── platform   list | show
-├── settings   show | set | get | clear | path
-├── audit      list
+├── filter       list | show | create | delete | add-rule | remove-rule
+├── prefix-list  list | show | create | delete | add-entry | remove-entry
+├── route-policy list | show | create | delete | add-rule | remove-rule
+├── qos          list | show | create | delete | add-queue | remove-queue
+├── profile      list | show | create | delete
+├── zone         list | create | delete
+├── platform     list | show
+├── network      list | reload | unregister | topology | host <name>
+├── settings     show | set | get | clear | path
+├── audit        list
 └── version
 
 Device-Scoped (requires device name)
 ├── show
 ├── init
 ├── device     setup [--hostname] [--bgp-asn] [--type] [--hwsku] [--vtep-source]
-├── interface  list | show | get | set | list-acls | list-members
-├── service    apply | remove | refresh | get
-├── vlan       list | show | status | create | delete
-│              add-interface | remove-interface | configure-svi
+├── interface  list | show | binding | set | clear
+├── service    apply | remove | refresh
+├── vlan       list | show | create | delete
+│              configure-irb | unconfigure-irb
 │              bind-macvpn | unbind-macvpn
-├── vrf        list | show | status | create | delete
+├── vrf        list | show | create | delete
 │              add-interface | remove-interface
 │              bind-ipvpn | unbind-ipvpn
 │              add-neighbor | remove-neighbor
 │              add-route | remove-route
-├── evpn       setup | status
-├── lag        list | show | status | create | delete
+├── evpn       setup | status | add-peer | remove-peer
+├── lag        list | show | create | delete
 │              add-interface | remove-interface
 ├── acl        list | show | create | delete
 │              add-rule | delete-rule | bind | unbind
-├── bgp        status
+├── bgp        status | check | neighbor
 ├── qos        apply | remove
 ├── health     check
+├── configdb   keys | query | exists
+├── statedb    query
+├── route      get | get-asic
+├── ssh        <command>
+├── reload-config
+├── save-config
+├── restart-daemon <name>
 └── intent     tree | drift | reconcile | save | reload | clear
 ```
 

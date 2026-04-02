@@ -149,28 +149,32 @@ func (n *Node) HasConfigDB() bool { return n.internal.ConfigDB() != nil }
 
 // QueryConfigDB reads a CONFIG_DB entry by table and key.
 // Returns an empty map (not error) if the entry does not exist.
+// Falls through to the projection when no device connection exists (loopback mode).
 func (n *Node) QueryConfigDB(table, key string) (map[string]string, error) {
 	client := n.internal.ConfigDBClient()
 	if client == nil {
-		return nil, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+		// Loopback: read from projection
+		return n.internal.ConfigDB().Get(table, key), nil
 	}
 	return client.Get(table, key)
 }
 
 // ConfigDBTableKeys returns all keys in a CONFIG_DB table.
+// Falls through to the projection when no device connection exists (loopback mode).
 func (n *Node) ConfigDBTableKeys(table string) ([]string, error) {
 	client := n.internal.ConfigDBClient()
 	if client == nil {
-		return nil, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+		return n.internal.ConfigDB().TableKeys(table), nil
 	}
 	return client.TableKeys(table)
 }
 
 // ConfigDBEntryExists returns true if a CONFIG_DB entry exists.
+// Falls through to the projection when no device connection exists (loopback mode).
 func (n *Node) ConfigDBEntryExists(table, key string) (bool, error) {
 	client := n.internal.ConfigDBClient()
 	if client == nil {
-		return false, fmt.Errorf("no CONFIG_DB client for device %s", n.internal.Name())
+		return n.internal.ConfigDB().Exists(table, key), nil
 	}
 	return client.Exists(table, key)
 }

@@ -1,0 +1,73 @@
+name: vlan-lifecycle
+description: |
+  VLAN create/configure-irb/unconfigure-irb/delete lifecycle.
+  Intent DAG: device → vlan|100 → interface|Vlan100 (IRB).
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Create ---
+  - name: create-vlan-100
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan create 100 --loopback"
+
+  - name: verify-vlan-100
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VLAN Vlan100 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-intent-vlan
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT vlan|100 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Configure IRB (SVI) ---
+  - name: configure-irb
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan configure-irb 100 --ip 10.100.0.1/24 --loopback"
+
+  - name: verify-svi
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VLAN_INTERFACE Vlan100 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Unconfigure IRB ---
+  - name: unconfigure-irb
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan unconfigure-irb 100 --loopback"
+
+  - name: verify-svi-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VLAN_INTERFACE Vlan100 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Delete ---
+  - name: delete-vlan-100
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan delete 100 --loopback"
+
+  - name: verify-vlan-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VLAN Vlan100 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-intent-vlan-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT vlan|100 --loopback"
+    expect:
+      jq: '.exists == false'

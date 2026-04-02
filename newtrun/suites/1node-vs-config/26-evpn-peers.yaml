@@ -1,0 +1,38 @@
+name: evpn-peers
+description: |
+  EVPN BGP overlay peer add/remove.
+  Intent DAG: device → evpn-peer|10.0.0.2.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: add-evpn-peer
+    action: newtron-cli
+    devices: [switch1]
+    command: "evpn add-peer --neighbor 10.0.0.2 --remote-as 65002 --multihop 2 --loopback"
+
+  - name: verify-evpn-peer
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists BGP_NEIGHBOR default|10.0.0.2 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-evpn-peer-intent
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT evpn-peer|10.0.0.2 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: remove-evpn-peer
+    action: newtron-cli
+    devices: [switch1]
+    command: "evpn remove-peer 10.0.0.2 --loopback"
+
+  - name: verify-evpn-peer-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists BGP_NEIGHBOR default|10.0.0.2 --loopback"
+    expect:
+      jq: '.exists == false'

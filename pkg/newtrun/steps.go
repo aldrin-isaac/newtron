@@ -29,6 +29,7 @@ var executors = map[StepAction]stepExecutor{
 	ActionVerifyProvisioning: &verifyProvisioningExecutor{},
 	ActionHostExec:           &hostExecExecutor{},
 	ActionNewtron:            &newtronExecutor{},
+	ActionNewtronCLI:         &newtronCLIExecutor{},
 }
 
 // executeForDevices runs an operation on all target devices in parallel and collects results.

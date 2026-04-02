@@ -57,6 +57,7 @@ const (
 	ActionVerifyProvisioning StepAction = "verify-topology"
 	ActionHostExec           StepAction = "host-exec"
 	ActionNewtron            StepAction = "newtron"
+	ActionNewtronCLI         StepAction = "newtron-cli"
 )
 
 // validActions is the set of all recognized step actions, derived from the

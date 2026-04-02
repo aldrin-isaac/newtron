@@ -211,15 +211,28 @@ Examples:
 	},
 }
 
+var (
+	vrfIntfIP     string
+	vrfIntfVLAN   int
+	vrfIntfTagged bool
+)
+
 var vrfAddInterfaceCmd = &cobra.Command{
 	Use:   "add-interface <vrf-name> <interface>",
 	Short: "Add an interface to a VRF",
-	Long: `Bind an interface to a VRF.
+	Long: `Bind an interface to a VRF, optionally assigning an IP address or
+configuring VLAN membership.
+
+Options:
+  --ip <addr/prefix>    IP address in CIDR notation (routed mode)
+  --vlan <id>           VLAN ID (bridged mode, mutually exclusive with --ip)
+  --tagged              Use tagged VLAN membership (default: untagged)
 
 Requires -D (device) flag.
 
 Examples:
   newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet4 -x
+  newtron leaf1 vrf add-interface Vrf_CUST1 Ethernet4 --ip 10.10.1.1/31 -x
   newtron leaf1 vrf add-interface Vrf_CUST1 Vlan100 -x`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -228,7 +241,12 @@ Examples:
 		if err := requireDevice(); err != nil {
 			return err
 		}
-		return displayWriteResult(app.client.ConfigureInterface(app.deviceName, intfName, api.ConfigureInterfaceRequest{VRF: vrfName}, execOpts()))
+		return displayWriteResult(app.client.ConfigureInterface(app.deviceName, intfName, api.ConfigureInterfaceRequest{
+			VRF:    vrfName,
+			IP:     vrfIntfIP,
+			VLAN:   vrfIntfVLAN,
+			Tagged: vrfIntfTagged,
+		}, execOpts()))
 	},
 }
 
@@ -430,6 +448,10 @@ Examples:
 }
 
 func init() {
+	vrfAddInterfaceCmd.Flags().StringVar(&vrfIntfIP, "ip", "", "IP address in CIDR notation (routed mode)")
+	vrfAddInterfaceCmd.Flags().IntVar(&vrfIntfVLAN, "vlan", 0, "VLAN ID (bridged mode)")
+	vrfAddInterfaceCmd.Flags().BoolVar(&vrfIntfTagged, "tagged", false, "Tagged VLAN membership (default: untagged)")
+
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborIP, "neighbor", "", "Neighbor IP (auto-derived for /30, /31 if not specified)")
 	vrfAddNeighborCmd.Flags().StringVar(&vrfNeighborDescription, "description", "", "Neighbor description")
 

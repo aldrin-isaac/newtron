@@ -1,0 +1,100 @@
+name: vrf-lifecycle
+description: |
+  VRF create, add-interface, add-route, remove-route, remove-interface, delete.
+  Intent DAG: device → vrf|Vrf_TEST → route|Vrf_TEST|10.0.0.0/8.
+  Interface config: device → interface|Ethernet4 → configure-interface (with VRF).
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # --- Create VRF ---
+  - name: create-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf create Vrf_TEST --loopback"
+
+  - name: verify-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VRF Vrf_TEST --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-intent-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT vrf|Vrf_TEST --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Add interface to VRF ---
+  - name: add-interface
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf add-interface Vrf_TEST Ethernet4 --ip 10.1.0.1/30 --loopback"
+
+  - name: verify-interface-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query INTERFACE Ethernet4 --loopback"
+    expect:
+      jq: '.vrf_name == "Vrf_TEST"'
+
+  # --- Add static route ---
+  - name: add-route
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf add-route Vrf_TEST 10.0.0.0/8 10.1.0.2 --loopback"
+
+  - name: verify-route-intent
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT route|Vrf_TEST|10.0.0.0/8 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  # --- Remove static route ---
+  - name: remove-route
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf remove-route Vrf_TEST 10.0.0.0/8 --loopback"
+
+  - name: verify-route-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT route|Vrf_TEST|10.0.0.0/8 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Remove interface from VRF ---
+  - name: remove-interface
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf remove-interface Vrf_TEST Ethernet4 --loopback"
+
+  - name: verify-interface-unconfigured
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists INTERFACE Ethernet4 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # --- Delete VRF ---
+  - name: delete-vrf
+    action: newtron-cli
+    devices: [switch1]
+    command: "vrf delete Vrf_TEST --loopback"
+
+  - name: verify-vrf-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VRF Vrf_TEST --loopback"
+    expect:
+      jq: '.exists == false'
+
+  - name: verify-intent-vrf-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT vrf|Vrf_TEST --loopback"
+    expect:
+      jq: '.exists == false'

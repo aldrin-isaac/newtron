@@ -1,0 +1,49 @@
+name: setup-device
+description: |
+  Baseline device setup in loopback mode. Creates DEVICE_METADATA,
+  LOOPBACK_INTERFACE, BGP_GLOBALS, BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE,
+  VXLAN infrastructure, and the root "device" intent.
+  No device connection — projection is the output.
+topology: 1node-vs
+
+steps:
+  - name: setup-device
+    action: newtron-cli
+    devices: [switch1]
+    command: "device setup --hostname switch1 --bgp-asn 65001 --type LeafRouter --hwsku Force10-S6000 --vtep-source 10.0.0.1 --loopback"
+
+  # Verify baseline infrastructure in projection.
+  - name: verify-device-metadata
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query DEVICE_METADATA localhost --loopback"
+    expect:
+      jq: '.bgp_asn == "65001"'
+
+  - name: verify-loopback
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists LOOPBACK_INTERFACE Loopback0 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: verify-bgp-globals
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query BGP_GLOBALS default --loopback"
+    expect:
+      jq: '.local_asn == "65001"'
+
+  - name: verify-vxlan-tunnel
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query VXLAN_TUNNEL vtep1 --loopback"
+    expect:
+      jq: '.src_ip == "10.0.0.1"'
+
+  - name: verify-device-intent
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists NEWTRON_INTENT device --loopback"
+    expect:
+      jq: '.exists == true'

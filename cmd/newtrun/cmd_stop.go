@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -38,17 +37,16 @@ Refuses to stop a suite with a running process — use 'newtrun pause' first.`,
 			}
 
 			// Destroy topology if we know the spec dir
-			if state.SuiteDir != "" {
-				topologiesDir := resolveTopologiesDir()
-				topology := resolveTopologyFromState(state)
-				if topology != "" {
-					specDir := filepath.Join(topologiesDir, topology, "specs")
-					lab, err := newtlab.NewLab(specDir)
-					if err == nil {
-						fmt.Printf("destroying topology %s...\n", topology)
-						if err := lab.Destroy(cmd.Context()); err != nil {
-							fmt.Printf("warning: destroy topology: %v\n", err)
-						}
+			if state.SpecDir != "" {
+				lab, err := newtlab.NewLab(state.SpecDir)
+				if err == nil {
+					topology := resolveTopologyFromState(state)
+					if topology == "" {
+						topology = state.SpecDir
+					}
+					fmt.Printf("destroying topology %s...\n", topology)
+					if err := lab.Destroy(cmd.Context()); err != nil {
+						fmt.Printf("warning: destroy topology: %v\n", err)
 					}
 				}
 			}

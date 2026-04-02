@@ -531,7 +531,7 @@ var Schema = map[string]TableSchema{
 				OpCreatePortChannel, OpConfigureIRB, OpAddStaticRoute,
 				OpSetProperty, OpConfigureInterface, OpAddBGPPeer,
 				OpApplyService, OpBindACL, OpApplyQoS,
-				OpAddACLRule, OpAddPortChannelMember, OpDeployService,
+				OpAddACLRule, OpAddPortChannelMember, OpInterfaceInit, OpDeployService,
 			}},
 			// DAG metadata — structural dependencies between intent records
 			"_parents":  {Type: FieldString, AllowEmpty: true},

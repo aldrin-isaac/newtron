@@ -1,0 +1,79 @@
+name: evpn-specs
+description: |
+  EVPN IP-VPN and MAC-VPN spec authoring + VLAN MAC-VPN binding.
+  Spec ops are network-scoped; binding is device-scoped.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  # ====================================================================
+  # IP-VPN spec lifecycle (network-scoped)
+  # ====================================================================
+  - name: create-ipvpn
+    action: newtron-cli
+    command: "evpn ipvpn create TEST_IPVPN --l3vni 10001 --loopback"
+
+  - name: verify-ipvpn
+    action: newtron-cli
+    command: "evpn ipvpn show TEST_IPVPN --loopback"
+    expect:
+      jq: '.l3vni == 10001'
+
+  - name: delete-ipvpn
+    action: newtron-cli
+    command: "evpn ipvpn delete TEST_IPVPN --loopback"
+
+  # ====================================================================
+  # MAC-VPN spec lifecycle (network-scoped)
+  # ====================================================================
+  - name: create-macvpn
+    action: newtron-cli
+    command: "evpn macvpn create TEST_MACVPN --vni 1100 --vlan-id 100 --arp-suppress --loopback"
+
+  - name: verify-macvpn
+    action: newtron-cli
+    command: "evpn macvpn show TEST_MACVPN --loopback"
+    expect:
+      jq: '.vni == 1100'
+
+  # ====================================================================
+  # VLAN + MAC-VPN binding (device-scoped)
+  # ====================================================================
+  - name: create-vlan-for-macvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan create 100 --loopback"
+
+  - name: bind-macvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan bind-macvpn 100 TEST_MACVPN --loopback"
+
+  - name: verify-vxlan-tunnel-map
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VXLAN_TUNNEL_MAP vtep1|VNI1100_Vlan100 --loopback"
+    expect:
+      jq: '.exists == true'
+
+  - name: unbind-macvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan unbind-macvpn 100 --loopback"
+
+  - name: verify-tunnel-map-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb exists VXLAN_TUNNEL_MAP vtep1|VNI1100_Vlan100 --loopback"
+    expect:
+      jq: '.exists == false'
+
+  # Cleanup
+  - name: delete-vlan-for-macvpn
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan delete 100 --loopback"
+
+  - name: delete-macvpn
+    action: newtron-cli
+    command: "evpn macvpn delete TEST_MACVPN --loopback"
