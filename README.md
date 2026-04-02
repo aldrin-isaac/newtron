@@ -47,7 +47,7 @@ intent meets physical infrastructure. It is the unit of lifecycle
 none), and the unit of isolation (services on different interfaces are
 independent).
 
-**All-eBGP routing (current model).** Underlay and overlay both use
+**All-eBGP routing (currently supported).** Underlay and overlay both use
 eBGP — hop-by-hop between interfaces for the underlay,
 loopback-to-loopback for EVPN peers. ASN assignment is per-profile:
 every leaf can have a unique ASN, or switches in a spine tier can
