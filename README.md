@@ -119,7 +119,12 @@ same code path.
 **Intent lives on the device.** Every operation records what it did
 on the device itself — not in an external store. After a crash, a
 reboot, or a lost connection, the device's own records are sufficient
-to reconstruct the expected state.
+to reconstruct the expected state. Those intents can also be persisted
+back to the topology — newtron's offline representation of the desired
+network — so that a device that loses its configuration can be
+recovered from stored intents. The common example is RMA: replace a
+switch, replay its intents, and the new device converges to the same
+state as the old one.
 
 **Redis-first.** All device interaction goes through SONiC's Redis
 databases. CONFIG_DB writes use a native Go Redis client over SSH-
