@@ -28,29 +28,6 @@ failures don't go unnoticed. Each operation records what it did so
 the reverse can undo it cleanly — even if the spec has changed or
 other operations have modified the device since.
 
-## Using Claude Code with newtron
-
-Requires an x86_64 Linux machine with QEMU/KVM (SONiC VM images need it).
-
-[Claude Code](https://claude.com/claude-code) can set up the entire environment
-for you — build, download the SONiC image, deploy a lab, and run your first
-operation — with status updates along the way.
-
-```bash
-# Install Claude Code
-npm install -g @anthropic-ai/claude-code
-
-# Sign in to your Claude account
-claude login
-
-# Clone and start
-git clone https://github.com/aldrin-isaac/newtron.git && cd newtron && claude
-```
-
-Claude Code reads the project configuration on startup, detects a fresh clone,
-and walks through the full setup automatically. When it's done, you have a
-built project, a running SONiC lab, and an oriented AI assistant ready to work.
-
 ## Have 10 Minutes? See It Work
 
 Requires Linux x86_64, Go 1.24+, KVM/QEMU, and ~2 GB disk for the SONiC image.
@@ -124,6 +101,29 @@ Tear down when done:
 ```bash
 bin/newtlab destroy 1node-vs
 ```
+
+## Using Claude Code with newtron
+
+Requires an x86_64 Linux machine with QEMU/KVM (SONiC VM images need it).
+
+[Claude Code](https://claude.com/claude-code) can set up the entire environment
+for you — build, download the SONiC image, deploy a lab, and run your first
+operation — with status updates along the way.
+
+```bash
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Sign in to your Claude account
+claude login
+
+# Clone and start
+git clone https://github.com/aldrin-isaac/newtron.git && cd newtron && claude
+```
+
+Claude Code reads the project configuration on startup, detects a fresh clone,
+and walks through the full setup automatically. When it's done, you have a
+built project, a running SONiC lab, and an oriented AI assistant ready to work.
 
 ## Explore Without VMs
 
