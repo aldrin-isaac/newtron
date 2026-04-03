@@ -18,15 +18,6 @@ Every piece of SONiC configuration — a VLAN, a BGP session, a service
 binding, an ACL — can be configured many ways. **newtron** offers one
 pattern for each. The pattern is the opinion. What you build from those
 patterns — the topology, the overlays, the scale — is your design.
-Consistent primitives compose into a coherent network.
-
-Spec files are the source of intent. Services define what an interface
-does (transit peering, L2 bridging, IRB, EVPN overlay). VPN specs
-define overlay parameters. Route policies and filters control path
-selection. Device profiles identify each switch — AS number, loopback
-IP, platform, EVPN peers. When you apply a service to an interface,
-**newtron** resolves the spec against the device's profile to produce
-device-specific CONFIG_DB entries.
 
 **newtron** doesn't just generate configuration — it delivers each
 primitive safely. Every CONFIG_DB entry is validated against SONiC's
@@ -36,124 +27,6 @@ Every write is verified by re-reading what was written — silent
 failures don't go unnoticed. Each operation records what it did so
 the reverse can undo it cleanly — even if the spec has changed or
 other operations have modified the device since.
-
-## Configuration Primitives
-
-The configuration architecture is embedded in the primitives — one
-pattern per unit of configuration. The topology architecture is yours.
-
-**Service-on-interface.** Every service — transit peering, L2 bridging,
-EVPN overlay — binds to an interface. The interface is where abstract
-intent meets physical infrastructure. It is the unit of lifecycle
-(apply, remove, refresh), the unit of state (one service binding or
-none), and the unit of isolation (services on different interfaces are
-independent).
-
-**All-eBGP routing (currently supported).** Underlay and overlay both use
-eBGP — hop-by-hop between interfaces for the underlay,
-loopback-to-loopback for EVPN peers. ASN assignment is per-profile:
-every leaf can have a unique ASN, or switches in a spine tier can
-share one.
-
-**VLANs, VRFs, ACLs, QoS, LAGs, EVPN overlays, static routes, route
-policies, prefix filters.** Each has one pattern. Each pattern is
-an opinion about how that unit of configuration should look in
-CONFIG_DB.
-
-## Automation Principles
-
-The primitives define what gets configured. These principles govern
-how.
-
-**Intent-first configuration with drift detection.** Every write
-operation records what it did — and why — as an intent on the device.
-From those records, **newtron** derives what CONFIG_DB *should* look
-like. `intent drift` compares that expected state against the actual
-device, reporting missing, extra, and modified entries. `intent
-reconcile` closes the gap. External CONFIG_DB edits (Ansible,
-`redis-cli`, SONiC CLI) are detected as drift — not silently accepted.
-
-**Network-scoped specs, device-scoped execution.** Service specs, VPN
-parameters, route policies, and filters are defined once at the network
-level — they describe what an interface should do, not how any
-particular switch should be configured. When you apply a service,
-**newtron** resolves the spec against the device's profile (AS number,
-loopback IP, EVPN peers) to produce device-specific CONFIG_DB entries.
-The same spec applied to different devices produces different entries.
-The same spec applied twice to the same device produces identical
-entries.
-
-```
-specs/
-├── network.json        # Services, VPNs, filters, routing policy, QoS
-├── platforms.json      # Platform capabilities, VM defaults
-└── profiles/           # Per-device: loopback IP, ASN, zone, EVPN peers
-    ├── spine1.json
-    └── leaf1.json
-```
-
-**Operational symmetry.** Every forward operation has a reverse. Apply
-and remove. Create and delete. Bind and unbind. Service bindings stored
-on the device record exactly what was applied, so removal always
-reconstructs the teardown — even if the spec has changed since the
-service was applied. Without this, CONFIG_DB entries accumulate with no
-way to clean them up.
-
-**Content-hashed policies.** Shared resources like ACL tables, route
-maps, and prefix sets are named by their content. If the spec hasn't
-changed, the name hasn't changed, and a refresh is a no-op. If the
-spec changes, the resource gets a new name — both versions coexist
-while interfaces migrate one by one. No coordinated switchover, no gap
-where an interface loses its policy mid-migration.
-
-## Architecture
-
-**One object, three states.** Most automation systems maintain two
-representations of a device — one for intent, one for reality — and
-synchronize them by hope. **newtron** uses one: the Node, a software
-object that represents a device. Initialized from specs, it is the
-desired state. Connected to a live device, it is the desired state
-verified against reality. Rebuilt from intent records stored on the
-device itself, it recovers after a crash. Same type, same methods,
-same code path.
-
-**Intent lives on the device.** Every operation records what it did
-on the device itself — not in an external store. After a crash, a
-reboot, or a lost connection, the device's own records are sufficient
-to reconstruct the expected state. Those intents can also be persisted
-back to the topology — newtron's offline representation of the desired
-network — so that a device that loses its configuration can be
-recovered from stored intents. The common example is RMA: replace a
-switch, replay its intents, and the new device converges to the same
-state as the old one.
-
-**Redis-first.** All device interaction goes through SONiC's Redis
-databases. CONFIG_DB writes use a native Go Redis client over SSH-
-tunneled connections — not SONiC `config` commands. Route verification
-reads APP_DB. ASIC programming checks traverse ASIC_DB. Health checks
-read STATE_DB. Device shell access is a documented exception, not a
-normalized path.
-
-**One code path.** Online operations against a live device and offline
-topology provisioning run the same code. There is no template engine,
-no separate provisioning pipeline — the operations *are* the
-provisioning.
-
-## Verification
-
-Every mutating operation produces a **ChangeSet** — an ordered list of
-CONFIG_DB mutations. The ChangeSet is the dry-run preview (what will
-change), the execution receipt (what did change), and the verification
-contract (what to check). After execution, **newtron** re-reads every entry it
-wrote and diffs against the ChangeSet. If anything is missing or wrong,
-you know immediately.
-
-Beyond its own writes, **newtron** observes but does not judge. It reads
-APP_DB routes, resolves ASIC_DB SAI chains, and returns structured health
-reports from STATE_DB — but these are data, not verdicts. Cross-device
-assertions (did the route propagate? is the fabric converged?) belong to
-the test orchestrator, not to the device tool. **newtron** gives you the
-observations; you decide what they mean.
 
 ## Have 10 Minutes? See It Work
 
@@ -229,6 +102,27 @@ Tear down when done:
 bin/newtlab destroy 1node-vs
 ```
 
+## Using Claude Code with newtron
+
+[Claude Code](https://claude.com/claude-code) can set up the entire environment
+for you — build, download the SONiC image, deploy a lab, and run your first
+operation — with status updates along the way.
+
+```bash
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Sign in to your Claude account
+claude login
+
+# Clone and start
+git clone https://github.com/aldrin-isaac/newtron.git && cd newtron && claude
+```
+
+Claude Code reads the project configuration on startup, detects a fresh clone,
+and walks through the full setup automatically. When it's done, you have a
+built project, a running SONiC lab, and an oriented AI assistant ready to work.
+
 ## Explore Without VMs
 
 You can explore **newtron**'s specs and dry-run output without deploying
@@ -251,6 +145,102 @@ curl localhost:8080/network/default/service                  # List services
 curl localhost:8080/network/default/node/switch1/interface     # List interfaces
 curl localhost:8080/network/default/topology/node              # List devices
 ```
+
+## How It Works
+
+Spec files describe what the network should look like. Services define
+what an interface does (transit peering, L2 bridging, IRB, EVPN overlay).
+VPN specs define overlay parameters. Route policies and filters control
+path selection. Device profiles identify each switch — AS number, loopback
+IP, platform, EVPN peers. When you apply a service to an interface,
+**newtron** resolves the spec against the device's profile to produce
+device-specific CONFIG_DB entries.
+
+```
+specs/
+├── network.json        # Services, VPNs, filters, routing policy, QoS
+├── platforms.json      # Platform capabilities, VM defaults
+└── profiles/           # Per-device: loopback IP, ASN, zone, EVPN peers
+    ├── spine1.json
+    └── leaf1.json
+```
+
+**What you can configure.** VLANs, VRFs, ACLs, QoS, LAGs, EVPN overlays,
+static routes, route policies, prefix filters. Each has one pattern — one
+opinion about how that unit of configuration should look in CONFIG_DB.
+Routing currently uses all-eBGP — hop-by-hop for the underlay,
+loopback-to-loopback for EVPN peers. ASN assignment is per-profile:
+every leaf can have a unique ASN, or switches in a spine tier can share one.
+
+**Every service binds to an interface.** The interface is where abstract
+intent meets physical infrastructure — the unit of lifecycle (apply, remove,
+refresh), the unit of state (one service binding or none), and the unit of
+isolation (services on different interfaces don't affect each other).
+
+**Every forward operation has a reverse.** Apply and remove. Create and
+delete. Bind and unbind. Service bindings stored on the device record
+exactly what was applied, so removal always reconstructs the teardown —
+even if the spec has changed since. Without this, CONFIG_DB entries
+accumulate with no way to clean them up.
+
+**Every write records an intent.** From those records, **newtron** derives
+what CONFIG_DB *should* look like. `intent drift` compares that expected
+state against the actual device. `intent reconcile` closes the gap.
+External CONFIG_DB edits are detected as drift — not silently accepted.
+
+**Shared resources are named by their content.** ACL tables, route maps,
+and prefix sets get names derived from what they contain. If the spec
+hasn't changed, the name hasn't changed, and a refresh is a no-op. If the
+spec changes, the resource gets a new name — both versions coexist while
+interfaces migrate one by one.
+
+## Architecture
+
+**One object, three states.** Most automation systems maintain two
+representations of a device — one for intent, one for reality — and
+synchronize them by hope. **newtron** uses one: the Node, a software
+object that represents a device. Initialized from specs, it is the
+desired state. Connected to a live device, it is the desired state
+verified against reality. Rebuilt from intent records stored on the
+device itself, it recovers after a crash. Same type, same methods,
+same code path.
+
+**Intent lives on the device.** Every operation records what it did
+on the device itself — not in an external store. After a crash, a
+reboot, or a lost connection, the device's own records are sufficient
+to reconstruct the expected state. Those intents can also be persisted
+back to the topology — newtron's offline representation of the desired
+network — so that a device that loses its configuration can be
+recovered from stored intents. The common example is RMA: replace a
+switch, replay its intents, and the new device converges to the same
+state as the old one.
+
+**Redis-first.** All device interaction goes through SONiC's Redis
+databases. CONFIG_DB writes use a native Go Redis client over SSH-
+tunneled connections — not SONiC `config` commands. Route verification
+reads APP_DB. ASIC programming checks traverse ASIC_DB. Health checks
+read STATE_DB. Device shell access is a documented exception, not a
+normalized path.
+
+**One code path.** Online operations against a live device and offline
+topology provisioning run the same code. There is no template engine,
+no separate provisioning pipeline — the operations *are* the
+provisioning.
+
+## Verification
+
+Every mutating operation produces a **ChangeSet** — an ordered list of
+CONFIG_DB mutations that serves as dry-run preview, execution receipt,
+and verification contract. After execution, **newtron** re-reads every
+entry it wrote and diffs against the ChangeSet. If anything is missing
+or wrong, you know immediately.
+
+Beyond its own writes, **newtron** observes but does not judge. It reads
+APP_DB routes, resolves ASIC_DB SAI chains, and returns structured health
+reports from STATE_DB — but these are data, not verdicts. Cross-device
+assertions (did the route propagate? is the fabric converged?) belong to
+the test orchestrator, not to the device tool. **newtron** gives you the
+observations; you decide what they mean.
 
 ## Testing Infrastructure
 
@@ -399,24 +389,3 @@ make coverage       # Coverage report
 make cross          # Cross-compile: linux/darwin × amd64/arm64
 make install        # Build + install newtlink variants for remote upload
 ```
-
-## Using Claude Code with newtron
-
-[Claude Code](https://claude.com/claude-code) can set up the entire environment
-for you — build, download the SONiC image, deploy a lab, and run your first
-operation — with status updates along the way.
-
-```bash
-# Install Claude Code
-npm install -g @anthropic-ai/claude-code
-
-# Sign in to your Claude account
-claude login
-
-# Clone and start
-git clone https://github.com/aldrin-isaac/newtron.git && cd newtron && claude
-```
-
-Claude Code reads the project configuration on startup, detects a fresh clone,
-and walks through the full setup automatically. When it's done, you have a
-built project, a running SONiC lab, and an oriented AI assistant ready to work.
