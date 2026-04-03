@@ -402,8 +402,6 @@ make install        # Build + install newtlink variants for remote upload
 
 ## Using Claude Code with newtron
 
-Requires an x86_64 Linux machine with QEMU/KVM (SONiC VM images need it).
-
 [Claude Code](https://claude.com/claude-code) can set up the entire environment
 for you — build, download the SONiC image, deploy a lab, and run your first
 operation — with status updates along the way.
