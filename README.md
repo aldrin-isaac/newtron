@@ -9,9 +9,10 @@
   <img src="newt.png" alt="Ron, the Newt — the newtron mascot" width="280"/>
 </p>
 
-**newtron** explores network automation for SONiC through opinionated
-configuration primitives. **newtron** also wants to bring more people to
-SONiC, by lowering the barrier to get started.
+**newtron** explores safe, opinionated network automation for SONiC.
+Every unit of configuration gets one pattern — validated before writing,
+applied atomically, verified after, and reversible by design. **newtron**
+is also about making SONiC accessible to more people.
 
 Every piece of SONiC configuration — a VLAN, a BGP session, a service
 binding, an ACL — can be configured many ways. **newtron** offers one
