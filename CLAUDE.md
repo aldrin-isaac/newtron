@@ -17,11 +17,38 @@ Read these before making design decisions or writing code in unfamiliar areas:
 | newtlab HLD | `docs/newtlab/hld.md` | VM orchestration, QEMU, bridge networking |
 | newtlab LLD | `docs/newtlab/lld.md` | Deploy phases, state persistence, multi-host |
 | newtlab HOWTO | `docs/newtlab/howto.md` | Deploying topologies, troubleshooting |
-| RCA index | `docs/rca/` | 40 root-cause analyses — SONiC pitfalls and workarounds |
-| AI Instructions | `docs/ai-instructions.md` | 21 behavioral directives scoped by activity phase |
+| RCA index | `docs/rca/` | root-cause analyses — SONiC pitfalls and workarounds |
+| AI Instructions | `docs/ai-instructions.md` | Behavioral directives scoped by activity phase |
 | Editing Guidelines | `docs/editing-guidelines.md` | Documentation prose principles scoped by document type |
 
 When encountering a SONiC-specific issue (config reload, frrcfgd, orchagent, VPP), check `docs/rca/` first — there are 40 documented pitfalls with root causes and solutions.
+
+## First-Run Setup
+
+On the first session in a fresh clone, detect that the project has not been set up
+(no `bin/` directory, no SONiC image at `~/.newtlab/images/sonic-vs.qcow2`) and
+automatically run the full setup sequence. Give the user status updates as each
+step progresses.
+
+1. Check prerequisites: Go 1.24+, KVM (`/dev/kvm`), QEMU (`qemu-system-x86_64`)
+2. Build: `make build`
+3. Download the SONiC community image:
+   ```
+   mkdir -p ~/.newtlab/images
+   curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+     | gunzip > ~/.newtlab/images/sonic-vs.qcow2
+   ```
+4. Deploy a single-switch lab: `bin/newtlab deploy 1node-vs --monitor`
+5. Start the server: `bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &`
+6. Run a first operation to prove it works:
+   ```
+   bin/newtron switch1 init
+   bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
+   ```
+7. Read `docs/using-claude-with-newtron.md` to orient for ongoing work
+
+If any prerequisite is missing, tell the user what to install and stop — don't
+attempt partial setup.
 
 **Definitions in this document are specifications, not suggestions.** When a
 section defines a term with precise meaning (e.g., "device is source of
@@ -40,53 +67,28 @@ See `docs/ai-instructions.md` §20 for the full precedence hierarchy.
 
 ## Device Is Source of Reality
 
-The phrase "device is source of reality" has a precise meaning in the intent-first
-architecture: in actuated mode, the device's own NEWTRON_INTENT records ARE the
-authoritative state. The projection (expected CONFIG_DB) is derived by replaying those
-intents. External CONFIG_DB edits are drift from what the device's own intents declare
-— not a new "reality" that newtron accepts.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §1, §5, §19, §20 for the thesis, intent model,
+and reconstruction principle.*
 
-This has concrete design implications:
+In actuated mode, the device's own NEWTRON_INTENT records ARE the authoritative state.
+The projection is derived by replaying intents. External CONFIG_DB edits are drift.
 
-- **Intent DB is primary state and the decision substrate for all operational logic.**
-  The projection (expected CONFIG_DB) is derived from intent replay, not loaded from
-  the device. All operational decisions — preconditions, idempotency, reference counting,
-  membership checks, query methods — read the intent DB. The projection exists solely
-  for device delivery (`ExportEntries` → `ReplaceAll`/`Apply`) and drift detection
-  (`ExportRaw` vs actual). No operational decision reads the projection. This keeps
-  SONiC CONFIG_DB knowledge contained to config generators and schema validation.
-- **A canonical desired state exists**: the projection. Every operation writes an intent
-  and renders it into the projection. The projection IS the desired state for that node.
-- **Drift guard refuses writes** when device CONFIG_DB diverges from the projection
-  (actuated mode). External CONFIG_DB edits are drift — newtron detects them and refuses
-  to operate on an inconsistent foundation.
-- **Reconcile eliminates drift** — two modes: full (config reload + ReplaceAll, overwrites
-  everything) and delta (ApplyDrift, patches only drifted entries). Both restore the device
-  to match the projection.
-- **NEWTRON_INTENT** records live on the device and are the input for actuated mode.
-  On connect, the node replays intents via `IntentsToSteps` + `ReplayStep` to reconstruct
-  the projection. The intent record is the ground reality; the projection is its
-  CONFIG_DB expression.
-- **Intent records must be self-sufficient for reverse operations.** NEWTRON_INTENT
-  must contain every value needed for teardown — never re-resolve specs at removal time.
-  The spec may have changed between apply and remove; the intent record captures what was
-  actually applied. Example: `l3vni` and `l3vni_vlan` are stored in the intent so
-  `RemoveService` can tear down transit VLAN infrastructure without looking up the
-  IP-VPN spec. When adding a new forward operation that creates infrastructure, ask:
-  "can the reverse operation find everything it needs in the intent record alone?"
-- **InitDevice is the one exception.** Before any intents exist, the device CONFIG_DB
-  is the working state. `InitDevice` (pre-intent bootstrap) reads actual CONFIG_DB to
-  establish the starting point. Once intents are written, intent replay takes over.
-- **newtron does not support brownfield.** Two opinionated architectures cannot converge
-  on the same device. newtron owns the full CONFIG_DB for any node it manages.
+Key implications:
+- **Intent DB is the decision substrate** for all operational logic (preconditions,
+  idempotency, queries). The projection exists solely for delivery and drift detection.
+- **Drift guard refuses writes** when device CONFIG_DB diverges from projection.
+- **Reconcile eliminates drift** — full (ReplaceAll) or delta (ApplyDrift).
+- **Intent records must be self-sufficient** for reverse operations — never re-resolve
+  specs at removal time.
+- **InitDevice is the one exception** — reads actual CONFIG_DB before any intents exist.
+- **No brownfield.** newtron owns the full CONFIG_DB for any node it manages.
 
 ## Intent Round-Trip Completeness
 
-Every operation that writes an intent record must satisfy a mechanical three-part rule.
-Violation means reconstruction produces different CONFIG_DB than the original operation
-— which renders as false drift on a correctly-configured device.
+*Principle: `DESIGN_PRINCIPLES_NEWTRON.md` §20 (On-Device Intent Is Sufficient for
+Reconstruction). This section adds the mechanical verification procedure.*
 
-**Rule: every param that affects CONFIG_DB output must complete the full round-trip:**
+Every param that affects CONFIG_DB output must complete the full round-trip:
 
 1. **writeIntent** stores it in the intent record
 2. **intentParamsToStepParams** exports it to the topology step
@@ -95,40 +97,34 @@ Violation means reconstruction produces different CONFIG_DB than the original op
 When adding or modifying a `writeIntent` call:
 
 1. List every argument and option field the method uses in CONFIG_DB writes
-   (cs.Add, cs.Update, or helper functions that return `[]sonic.Entry`)
-2. For each one that comes from caller arguments (not from profile or spec
-   resolution), verify it is stored in the intent params
+2. For each one from caller arguments (not profile/spec resolution), verify it
+   is stored in the intent params
 3. Verify the corresponding `ReplayStep` case reads it and passes it to the method
 4. Verify `intentParamsToStepParams` exports it (or the default pass-through handles it)
 
-Values re-resolved from specs or profiles at replay time (e.g., loopback IP from
-profile, L3VNI from IPVPN spec) do NOT need to be stored for reconstruction — they
-are re-derived. But values from caller arguments (opts, config structs) MUST be stored
-because they are the only source at reconstruction time.
+Values re-resolved from specs or profiles at replay time do NOT need to be stored —
+they are re-derived. But values from caller arguments (opts, config structs) MUST be
+stored because they are the only source at reconstruction time.
 
 **This is not a guideline — it is a mechanical check. If a param affects CONFIG_DB and
 isn't in the intent, that's a bug.**
 
 ## Platform Patching Principle
 
-When a platform (CiscoVS, VPP, etc.) has a bug that prevents a SONiC feature from working:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §37 for the full principle and examples.*
 
-- **You MAY patch code that has a bug** — fix the broken behavior so it works as the community intended.
-- **You may NOT reinvent a feature differently from how the community intended it to work.**
-
-Concretely: if frrcfgd's `vrf_handler` has a bug that prevents it from programming VNI into zebra, you MAY add a polling fallback that reads the **same standard signal** (`VRF` table) and performs the **same intended action** (`vtysh vrf X; vni N`) — this is a valid bug fix. But do NOT invent a custom CONFIG_DB table (like `NEWTRON_VNI`) that replaces the standard signal, or change what CONFIG_DB entries callers write to accommodate the workaround. Invented table schemas interact unpredictably with community code and create maintenance debt.
-
-When a CiscoVS SAI call fails: document it as an RCA, and fix it at the SAI layer if possible. Do not route around it by repurposing unrelated SAI paths (e.g., shadow VLANs to work around broken VNI_TO_VIRTUAL_ROUTER_ID).
+**You MAY patch code that has a bug** — fix the broken behavior so it works as the
+community intended. **You may NOT reinvent a feature** differently from how the
+community intended it to work. The test: does the fix use the same CONFIG_DB signals
+and perform the same intended actions? If it introduces a new table or replaces the
+community mechanism, it's reinvention.
 
 ## Single-Owner Principle for CONFIG_DB Tables (DRY)
 
-Each CONFIG_DB table MUST have exactly one owner — a single file/function responsible
-for writing and deleting entries in that table. Composites (ApplyService, SetupDevice, topology provisioner) MUST call the owning
-primitives and merge their
-ChangeSets rather than constructing entries inline.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §27 for the full principle.*
 
-This applies at every layer: if `vlan_ops.go` owns `VLAN` table writes, then
-`service_gen.go` must call into `vlan_ops.go`, not duplicate the entry construction.
+Each CONFIG_DB table MUST have exactly one owner. Composites call the owning
+primitives and merge their ChangeSets rather than constructing entries inline.
 
 Target ownership map:
 
@@ -154,234 +150,94 @@ When adding new CONFIG_DB writes, always check the ownership map — never add a
 
 ## The Interface Is the Point of Service
 
-The network is, at a fundamental level, services applied on interfaces. The
-interface is where abstract service intent meets physical infrastructure:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §6 for the full principle.*
 
-- **Point of service delivery** — where specs bind to physical ports
-- **Unit of service lifecycle** — apply, remove, refresh happen per-interface
-- **Unit of state** — each interface has exactly one service binding (or none)
-- **Unit of isolation** — services on different interfaces are independent
-
-`ApplyService` lives on Interface, not on Device, because the interface is
-the entity being configured. Interface delegates to Device for infrastructure
-(Redis connections, CONFIG_DB cache, specs) — just as a VLAN interface on a
-real switch delegates to the forwarding ASIC. The delegation does not make
-Interface a forwarding layer; it makes Interface a logical point of attachment
-that the underlying infrastructure services.
+The interface is the point of service delivery, unit of lifecycle (apply/remove/refresh),
+unit of state (one binding or none), and unit of isolation. `ApplyService` lives on
+Interface, not Device. Interface delegates to Device for infrastructure.
 
 ## Respect Abstraction Boundaries
 
-When an abstraction exists (Interface, Node), callers MUST use it — not bypass it
-by calling lower-level functions that expose internal schema or require passing
-identity the object already knows.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §30 for the full principle.*
 
-Rules:
-- **If an operation is scoped to an interface, it is a method on Interface.** The
-  Interface knows its own name — requiring callers to pass it is an abstraction leak.
-  Exception: container membership (VLAN members, PortChannel members) where the
-  container is the subject.
-- **Config methods belong to the object they describe.** `iface.vrfBinding(vrfName)`
-  not `interfaceVRFConfig(intfName, vrfName)`. The object provides its own identity;
-  callers express intent, not identity.
-- **Function names describe domain intent, not implementation structure.** "Sub" and
-  "Entry" are CONFIG_DB concepts. Use domain terms: `vrfBinding`, `ipAddress`,
-  `qosBinding`, `aclBinding`, `serviceConfig`.
-- **Node convenience methods delegate, not duplicate.** `Node.AddVRFInterface`
-  resolves a name string to an Interface and delegates to `Interface.SetVRF`.
-  It never re-implements the operation.
-- **No "absolute blocker" for `i.node` access.** Interface methods that need
-  ConfigDB or SpecProvider use `i.node.ConfigDB()` or `i.node` (SpecProvider).
-  Needing external data is not a reason to avoid being a method.
-
-Abstractions > raw code efficiency.
+When an abstraction exists (Interface, Node), callers MUST use it. Interface-scoped
+operations are methods on Interface. Config methods belong to the object they describe.
+Node convenience methods delegate, not duplicate. Abstractions > raw code efficiency.
 
 ## Pipeline-First Explanations
 
-When explaining how something works — to the user or in documentation — describe
-its position in the pipeline: what feeds it, what it feeds, and which pipeline
-stage it belongs to. Never describe a component in isolation.
-
-The pipeline reference (`docs/newtron/unified-pipeline-architecture.md`) is the
-canonical source for data flow. One pipeline: Intent → Replay → Render → [Deliver].
-Every CONFIG_DB interaction passes through this pipeline. `RebuildProjection` in
-`execute()` ensures every operation sees fresh state by re-deriving the projection
-from the latest intents before the operation runs (architecture doc §8).
+When explaining how something works, describe its position in the pipeline: what
+feeds it, what it feeds, and which stage it belongs to. Never describe a component
+in isolation. The pipeline reference is `docs/newtron/unified-pipeline-architecture.md`.
+One pipeline: Intent → Replay → Render → [Deliver].
 
 ## Domain-Intent Naming
 
-Function and method names describe **what the operation means in the network domain**,
-not how it is implemented. CONFIG_DB concepts like "Entry", "Sub", "Config", "Base"
-are implementation details — they belong in comments, not in names.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §32 for the full principle.*
 
-Examples:
-- `bindVrf` not `interfaceBaseConfig` — binding an interface to a VRF
-- `assignIpAddress` not `interfaceIPSubEntry` — assigning an IP address
-- `generateServiceEntries` not `ServiceConfig` — generating service CONFIG_DB entries
-- `bindQos` / `unbindQos` not `generateQoSInterfaceEntries` / `qosDeleteConfig`
-- `updateAclPorts` not `generateServiceACLEntries`
-- `enableIpRouting` not `interfaceBaseConfig(intfName, nil)` — enabling IP routing on an interface
-
-This applies at all levels: method names, function names, type names, field names.
-When reading code, the name should tell you the domain purpose without needing to
-read the implementation.
+Function names describe **domain intent**, not implementation. CONFIG_DB concepts
+("Entry", "Sub", "Config") belong in comments, not names. Examples: `bindVrf` not
+`interfaceBaseConfig`; `assignIpAddress` not `interfaceIPSubEntry`.
 
 ## Abstract Node — Same Code Path, Three States
 
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §1, §2 for the thesis and properties.
+See `docs/newtron/unified-pipeline-architecture.md` §8 for projection rebuild.*
+
 The Node operates in three states — same code path, different initialization:
 
-- **Topology offline**: Node created from topology.json without a device connection.
-  Projection starts empty; operations write intents and render them into the projection.
-  Used to build the expected state for a topology node before any device exists.
-- **Topology online**: Node connected to a device but not actuated. Projection still
-  built from intent replay. Used to apply operations and deliver them.
-- **Actuated online**: Node connected and actuated — intents loaded from the device's
-  own NEWTRON_INTENT records. Drift guard active: refuses writes when device CONFIG_DB
-  diverges from the projection.
+- **Topology offline**: from topology.json, projection starts empty
+- **Topology online**: connected, projection from intent replay
+- **Actuated online**: intents from device's NEWTRON_INTENT, drift guard active
 
-topology.json represents an abstract topology in which abstract nodes live — the
-abstract Node is the natural object model for it. The topology provisioner creates
-an abstract Node and calls the same methods the CLI uses (`iface.ApplyService`,
-`n.SetupDevice`), eliminating the need for topology.go to construct CONFIG_DB entries
-inline. Operations must be called in the correct order — the projection enforces
-correctness without a physical device:
-
-```
-n := node.NewAbstract(specs, name, profile, resolved)
-n.RegisterPort("Ethernet0", map[string]string{"admin_status": "up"})
-n.SetupDevice(ctx, setupOpts)             // metadata + loopback + BGP + VTEP
-iface, _ := n.GetInterface("Ethernet0")
-iface.ApplyService(ctx, "transit", opts)  // VTEP precondition passes ✓
-entries := n.configDB.ExportEntries()     // projection IS the accumulated state
-```
-
-Key implementation:
-- `NewAbstract()` creates Node with `sonic.NewConfigDB()` (empty projection, no `actuatedIntent`)
-- `InitFromDeviceIntent()` creates Node from device's NEWTRON_INTENT records (actuated mode)
-- `precondition()` skips connected/locked checks when not actuated
-- `op()` and `render(cs)` update the projection so subsequent ops see prior effects
-- `RebuildProjection(ctx)` re-reads intents from device (or memory when offline), rebuilds
-  projection from scratch via full intent replay. Called in `execute()` before every operation
-  — reads and writes alike — to ensure fresh, authoritative state
-- `Execute(ctx, opts, fn)` wraps writes with Lock/Unlock and supports dry-run via intent
-  snapshot/restore. On dry-run, `RestoreIntentDB` puts the intent DB back; the dirty projection
-  is cleaned by the next `execute()`'s `RebuildProjection`
-- `Reconcile()` in full mode calls `configDB.ExportEntries()` + `ReplaceAll()`. In delta mode it calls `Drift()` (via `DiffConfigDB`) + `ApplyDrift()` — same purpose, surgical delivery.
-- `SaveDeviceIntents()` persists the intent DB back to `topology.json`
-
-Crash recovery is structural: NEWTRON_INTENT records ARE the persistent state. The drift guard
-detects when projection ≠ device. `Reconcile` fixes it. No separate crash-recovery breadcrumbs
-(`OperationIntent`, zombie detection) — these are eliminated. See architecture doc §8.
+Key implementation entry points:
+- `NewAbstract()` — empty projection, no actuatedIntent
+- `InitFromDeviceIntent()` — actuated mode from device NEWTRON_INTENT
+- `RebuildProjection(ctx)` — called in `execute()` before every operation
+- `Execute(ctx, opts, fn)` — Lock/Unlock wrapper, dry-run via intent snapshot/restore
+- `Reconcile()` — full (ExportEntries + ReplaceAll) or delta (Drift + ApplyDrift)
 
 ## Separation of Concerns — File-Level Ownership
 
-Code should be organized so that a reader can guess where a feature is implemented
-by looking at file names alone.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §28 for the full principle.*
 
-Rules:
-1. **topology.go** = topology-driven provisioning orchestration. Calls
-   `BuildAbstractNode` / `BuildEmptyAbstractNode` / `SaveDeviceIntents` and config
-   functions from `node/`. Never constructs CONFIG_DB keys inline.
-2. **Each `*_ops.go`** = sole owner of its CONFIG_DB tables' entry construction
-   (as defined in the Single-Owner Principle ownership map).
-3. **service_gen.go** = service-to-entries translation. Calls config functions from
-   owning `*_ops.go` files.
+A reader should guess where a feature is implemented by looking at file names.
+`topology.go` = orchestration (never inline CONFIG_DB keys). Each `*_ops.go` = sole
+table owner. `service_gen.go` = service-to-entries translation via owning `*_ops.go`.
 
 ## Verb-First Naming
 
-Function and method names that describe actions MUST put the verb first:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §32 (includes §16 verb vocabulary).*
 
-- `createVlan(...)` not `vlanCreate(...)` or `vlan(...)`
-- `deleteVlanMember(...)` not `vlanMemberDelete(...)`
-- `destroyVrf(...)` not `vrfDestroy(...)`
-- `enableArpSuppression(...)` not `arpSuppressionEnable(...)`
-- `bindIpvpn(...)` not `ipvpnBind(...)`
-- `assignIpAddress(...)` not `ipAddress(...)`
-
-Verb vocabulary for config generators:
-- **create** — constructs entries for a new entity (VLAN, VRF, ACL table, BGP neighbor)
-- **delete** — removes a single entity's entries
-- **destroy** — cascading teardown of an entity and all its dependents (scans configDB)
-- **enable/disable** — toggles a behavior (ARP suppression)
-- **bind/unbind** — establishes/removes a relationship (VRF binding, IP-VPN binding, ACL binding)
-- **assign/unassign** — attaches/detaches a value (IP address to interface)
-- **update** — modifies fields on an existing entry (DEVICE_METADATA)
-- **generate** — composite entry generation from multiple config functions (service entries)
-
-Noun-only names are reserved for types, constructors, and key helpers — never for
-functions that describe actions.
+Action names MUST put the verb first: `createVlan` not `vlanCreate`. Verb vocabulary:
+create/delete/destroy/enable/disable/bind/unbind/assign/unassign/update/generate.
+Noun-only names are reserved for types, constructors, and key helpers.
 
 ## Operational Symmetry
 
-For every forward action there MUST be an equal and opposite reverse action.
-Failure to enforce this causes config leakage — orphaned CONFIG_DB entries that
-accumulate over time and can never be cleaned up.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §15 for the full principle.*
 
-Required pairs:
-- Every `create*` must have a `delete*` or `destroy*`
-- Every `enable*` must have a `disable*`
-- Every `bind*` must have an `unbind*`
-- Every `assign*` must have an `unassign*` or `remove*`
-- Every `add*` must have a `remove*` or `delete*`
-
-When adding a new forward config generator, you MUST also add its reverse in the
-same commit. When reviewing code, verify that `RemoveService` and other teardown
-paths clean up every entry that the forward path creates.
-
-Reverse operations must be **reference-aware**: shared CONFIG_DB resources (VRFs,
-filters, QoS policies) may be referenced by multiple operations. Reverse operations
-must scan for remaining consumers before deleting shared resources. Mechanical
-ChangeSet reversal is unsafe — only domain-level reverse operations have the context
-to determine whether a shared resource can be safely removed. Rollback is an
-orchestrator concern that uses these domain-level operations, not a newtron concern.
-
-Baseline operations (`setup-*`, `set-*`) are the sole exception to "ship both or
-ship neither." These operations configure device-level infrastructure whose collective
-reverse is Reconcile — redelivering the full projection after removing the relevant
-intents — not individual teardown. `SetupDevice` and `SetProperty` have no individual
-reverse operations.
+Every forward action MUST have a reverse. Forward + reverse added in the same commit.
+Reverse operations must be **reference-aware** — scan for remaining consumers before
+deleting shared resources. Baseline operations (`setup-*`, `set-*`) are the sole
+exception: their collective reverse is Reconcile.
 
 ## Public API Boundary Design
 
-`pkg/newtron/` is the public API; `pkg/newtron/network/`, `pkg/newtron/network/node/`,
-and `pkg/newtron/device/sonic/` are internal. All external consumers (CLI, newtrun,
-newtron-server HTTP server) import only `pkg/newtron/`.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §33 for the full principle.*
 
-Rules:
-
-- **Public types expose caller intent; internal types expose implementation.**
-  Public types use domain vocabulary (`RouteNextHop.Address`, `ReconcileResult.Applied`).
-  Internal types reflect implementation (`NextHop.IP`, projection entries).
-  Boundary conversions strip implementation details and map to domain names.
-
-- **Orchestrators are API consumers, not insiders.** If an orchestrator (newtrun,
-  a provisioner, the HTTP server) needs functionality the API doesn't expose,
-  extend the API — don't bypass it with internal imports.
-
-- **Operations accept names; the API resolves specs.** Callers pass `ipvpnName`,
-  `macvpnName`, `policyName` — string identifiers of intent. The API method resolves
-  the spec from the Node's SpecProvider internally. Callers never pre-resolve specs
-  and pass structs across the boundary.
-
-- **Verification is Drift.** `Drift()` compares the projection (expected CONFIG_DB
-  derived from intents) against actual device CONFIG_DB and returns the diff. Callers
-  receive a structured diff result — the projection and comparison mechanism are
-  entirely hidden.
-
-- **Write results report outcomes, not internals.** `ReconcileResult.Applied` tells
-  callers what happened. Raw ChangeSets, Redis commands, and CONFIG_DB key formats
-  never cross the boundary.
-
-When adding new public API surface:
-1. Define the public type in `types.go` using domain vocabulary
-2. Add the method to the appropriate wrapper (`Network`, `Node`, `Interface`)
-3. Convert internal types at the boundary — never expose `*node.X` or `*sonic.Y`
-4. Accept names/strings for spec references; resolve internally
+`pkg/newtron/` is the public API; `network/`, `network/node/`, `device/sonic/` are
+internal. All external consumers import only `pkg/newtron/`. Public types use domain
+vocabulary; operations accept names (strings), API resolves specs internally. When
+adding new API surface: define public type in `types.go`, add method to the
+appropriate wrapper, convert internal types at the boundary.
 
 ## Redis-First Interaction Principle
 
-newtron is a Redis-centric system. All device interaction MUST go through SONiC Redis databases (CONFIG_DB, APP_DB, ASIC_DB, STATE_DB). See `docs/newtron/hld.md` for the full interaction model.
+*Principle: `DESIGN_PRINCIPLES_NEWTRON.md` §4. This section adds the tagging procedure.*
 
-When Redis does not expose the required data or operation, CLI/SSH commands may be used **only as documented workarounds**. Every such call site MUST be tagged:
+All device interaction MUST go through SONiC Redis databases. When CLI/SSH is
+unavoidable, tag the call site:
 
 ```go
 // CLI-WORKAROUND(id): <what this does>.
@@ -390,14 +246,10 @@ When Redis does not expose the required data or operation, CLI/SSH commands may 
 ```
 
 - **Workaround** — Redis could provide this but doesn't today. Tag with `CLI-WORKAROUND`.
-- **Inherent** — Will always require CLI (e.g., `config save`, `docker restart`, filesystem reads). No tag needed, but add a brief comment explaining why CLI is required.
+- **Inherent** — Will always require CLI (e.g., `config save`, `docker restart`). No tag needed.
 
-Before adding any `session.Run()`, `ExecCommand()`, or shell command construction in `pkg/newtron/device/sonic/` or `pkg/newtron/network/`:
-
-1. Check if the data is available in CONFIG_DB, APP_DB, ASIC_DB, or STATE_DB
-2. If it is, use the Redis path
-3. If it isn't, add the `CLI-WORKAROUND` tag with a resolution path
-4. Never normalize CLI calls — they are exceptions, not the standard interaction model
+Before adding any `session.Run()` or `ExecCommand()`: check Redis first, use the
+Redis path if available, tag the CLI path if not.
 
 ## CONFIG_DB Replace Semantics (DEL+HSET)
 
@@ -423,158 +275,71 @@ This has two consequences:
 
 ## CONFIG_DB Schema Validation (YANG-Derived)
 
-Every CONFIG_DB write goes through `ChangeSet.Validate()` before reaching Redis.
-The schema is defined in `pkg/newtron/device/sonic/schema.go`, with constraints
-derived from SONiC YANG models (`sonic-buildimage/src/sonic-yang-models/yang-models/`).
-The YANG reference is stored in `pkg/newtron/device/sonic/yang/constraints.md`.
+*Principle: `DESIGN_PRINCIPLES_NEWTRON.md` §13. This section adds the YANG workflow
+and hydrator completeness rule.*
 
-Rules:
+Schema is fail-closed — unknown tables/fields are errors. YANG is the authority for
+value constraints. When adding a new CONFIG_DB table or field:
 
-- **Fail closed.** Unknown tables and unknown fields are validation errors. When
-  adding a new CONFIG_DB write in `*_ops.go`, you MUST also add the table/field
-  to `schema.go` — tests will fail until you do.
-- **YANG is the authority for value constraints.** Ranges, enums, and patterns in
-  `schema.go` must match the SONiC YANG model. When they diverge (e.g., newtron
-  writes `"nexthop_unchanged"` but YANG defines `unchanged_nexthop`), document
-  the deviation with a comment explaining why.
-- **Cross-check on upgrade.** When upgrading the SONiC buildimage, re-fetch the
-  YANG files, diff against `yang/constraints.md`, and update `schema.go` for
-  any changes to ranges, enums, or field names.
-- **Validate values AND dependencies.** Field-level validation (type, range, enum)
-  is implemented. Dependency validation (e.g., YANG `must` statements like
-  "max_threshold >= min_threshold") should be added to `schema.go` as the
-  relevant tables are exercised in production.
-- **Tables without YANG models** (NEWTRON_INTENT, SAG_GLOBAL,
-  SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI) derive constraints from newtron usage
-  patterns. Document this in the schema entry comment.
+1. Fetch the YANG model from `sonic-yang-models/yang-models/`
+2. Add to `schema.go` with a `// YANG:` comment citing the source
+3. Update `yang/constraints.md` with the new table/field
+4. Add test cases in `schema_test.go`
 
-When adding a new CONFIG_DB table or field:
-1. Fetch the YANG model: find the `.yang` file in `sonic-yang-models/yang-models/`
-2. Extract the constraint (type, range, enum, pattern, mandatory flag)
-3. Add to `schema.go` with a `// YANG:` comment citing the source
-4. Update `yang/constraints.md` with the new table/field
-5. Add test cases in `schema_test.go`
-
-**Hydrator field completeness.** Schema validation covers the write path — but the
-read path (projection hydration) has its own completeness requirement. Typed
-hydrators in `configdb_parsers.go` reconstitute `map[string]string` wire fields
-into typed structs. `ExportEntries` does the reverse via `structToFields`. A field
-that exists in config generator output but is missing from the typed struct or
-hydrator is silently dropped during hydration — the projection loses it, and
-`ExportEntries` never exports it, causing false drift on a correctly-configured
-device. Every field written by a config generator must exist in three places:
-`schema.go` (validation), the typed struct in `configdb.go` (representation), and
-the hydrator in `configdb_parsers.go` (wire → struct). Missing any one is a bug.
+**Hydrator field completeness.** Every field written by a config generator must exist
+in three places: `schema.go` (validation), the typed struct in `configdb.go`
+(representation), and the hydrator in `configdb_parsers.go` (wire → struct). A field
+missing from the hydrator is silently dropped during projection rebuild, causing false
+drift on a correctly-configured device. Missing any one is a bug.
 
 ## CONFIG_DB Write Ordering and Daemon Settling
 
-YANG `leafref` declarations define a dependency graph between CONFIG_DB tables.
-Config functions must return entries in dependency order (parents before children).
-Reverse operations must delete in the opposite order (children before parents).
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §18 for the full principle, dependency chains,
+and the RCA-037 narrative.*
 
-Key dependency chains:
-- VLAN → VLAN_MEMBER, VLAN_INTERFACE
-- VRF → INTERFACE (vrf_name), BGP_GLOBALS → BGP_NEIGHBOR → BGP_NEIGHBOR_AF
-- VXLAN_TUNNEL → VXLAN_EVPN_NVO → VXLAN_TUNNEL_MAP
-- ACL_TABLE → ACL_RULE
-- DSCP_TO_TC_MAP, SCHEDULER → PORT_QOS_MAP, QUEUE (via bracket-ref)
-
-Rules:
-- **Ordering is structural.** Encode dependency order in the config function's
-  return slice. Never use `time.Sleep` between CONFIG_DB writes.
-- **Daemon settling is verified by polling.** After provisioning, daemons need
-  time to process entries. Use `pollUntil` with configurable timeout/interval
-  in test suites, not hardcoded sleeps.
-- **Document daemon races as RCAs.** When a daemon ignores an entry because a
-  prerequisite wasn't ready, the root cause is a daemon race — document it in
-  `docs/rca/` with workaround and resolution path. See RCA-037, RCA-041, RCA-016.
-- **When adding a new table:** identify its leafref parents, place entries after
-  them in config functions, place deletions before them in reverse functions.
+Config functions return entries in dependency order (parents before children). Reverse
+operations delete in opposite order. Never use `time.Sleep` between writes — ordering
+is structural. Daemon settling is verified by `pollUntil` polling, not sleeps. Daemon
+races are documented as RCAs.
 
 ## Unified Naming Convention for CONFIG_DB Keys
 
-Every CONFIG_DB key name that newtron derives follows a single convention:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §36 for rationale.*
 
-- **ALL UPPERCASE**, single underscore (`_`) as the only separator.
-- **Hyphens converted**: user-provided spec names have hyphens replaced with
-  underscores and uppercased. `protect-re` → `PROTECT_RE`.
-- **Allowed characters**: `[A-Z0-9_]` only.
-- **No redundant kind in key**: the table name carries the object kind.
-  `ACL_TABLE|PROTECT_RE_IN_1ED5F2C7` — not `ACL_TABLE|ACL_PROTECT_RE_IN_1ED5F2C7`.
-- **Numeric IDs concatenated with type prefix**: `VNI1001`, `VLAN100`, `ETH0`, `Q0`
-  (matching SONiC convention: `Vlan100`, `Loopback0`).
-
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §31 for rationale.
+ALL UPPERCASE, `[A-Z0-9_]` only. Hyphens → underscores. No redundant kind in key
+(table name carries it). Numeric IDs concatenated: `VNI1001`, `VLAN100`.
 
 ## Normalize at the Boundary
 
-Names are normalized **once, at spec load time** — not at each point of use.
-The spec loader converts all map keys and name-reference fields to canonical
-form (uppercase, hyphens → underscores) before returning specs to callers.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §36 for rationale.*
 
-After loading, every map key (`Services["TRANSIT"]`), every cross-reference
-(`ServiceSpec.IngressFilter = "PROTECT_RE"`), and every name that flows into
-CONFIG_DB key construction is already canonical. Operations code never calls
-`NormalizeName()`.
-
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §31 for rationale.
+Names normalized **once, at spec load time**. After loading, all map keys, cross-references,
+and CONFIG_DB key names are canonical. Operations code never calls `NormalizeName()`.
 
 ## Definition Is Network-Scoped; Execution Is Device-Scoped
 
-Specs (services, policies, prefix lists) exist at the network level with their
-own lifecycle, independent of any device. Device operations (apply, remove,
-verify) consume specs but don't create them. The two lifecycles must not be
-coupled — a service can be defined before any device connects, and a device can
-consume a service defined after it connected.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §7 for the full principle.*
 
-`ResolvedSpecs` is a per-node snapshot built at connection time. Specs added via
-the API after snapshot time are invisible in the snapshot. All `Get*` methods on
-`ResolvedSpecs` must fall through to `network.Get*` on miss — a merged-map-only
-lookup is a bug.
-
-In newtrun, network-level steps (create-prefix-list, create-route-policy,
-create-service) call `r.Client.*` directly with no `devices:` field. Device-level
-steps use `executeForDevices`.
-
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §7 for rationale.
+Specs exist at the network level, independent of any device. `ResolvedSpecs` is a
+per-node snapshot; `Get*` methods must fall through to `network.Get*` on miss.
+In newtrun, network-level steps call `r.Client.*` directly (no `devices:` field).
 
 ## Policy vs Infrastructure — Shared Object Lifecycles
 
-CONFIG_DB entries fall into three categories:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §24, §25 for the full principle and content-hashed
+naming mechanism.*
 
-| Category | Identity | Lifecycle |
-|----------|----------|-----------|
-| **Infrastructure** | Per-interface | Created/destroyed with service apply/remove |
-| **Policy** | User-named + content hash | Shared across services, independent lifecycle |
-| **Binding** | Per-interface | Created/destroyed with service apply/remove |
-
-Policy objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) are created on
-first reference and deleted when the last reference is removed. They persist
-across individual service removals as long as at least one consumer remains.
-
-Content-hashed naming: shared policy objects include an 8-character SHA256 hash
-of their generated CONFIG_DB fields in the key name. Spec unchanged → hash
-unchanged → `RefreshService` is a no-op for that object. Spec changed → new hash
-→ blue-green migration (new object alongside old, interfaces migrate one by one,
-old object deleted when last consumer migrates).
-
-Dependent objects use bottom-up Merkle hashing: PREFIX_SET hashes computed first,
-then ROUTE_MAP entries reference real PREFIX_SET names (including hashes), so a
-content change cascades through the hash chain automatically.
-
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §15, §18 for rationale.
+Policy objects (ACL_TABLE, ROUTE_MAP, PREFIX_SET, COMMUNITY_SET) are created on first
+reference and deleted when the last consumer is removed. Content-hashed naming: 8-char
+SHA256 of generated fields in the key name. Dependent objects use bottom-up Merkle hashing.
 
 ## BGP Peer Groups — Native Sharing Mechanism
 
-When multiple interfaces use the same service with BGP routing, newtron creates a
-`BGP_PEER_GROUP` named after the service. Neighbors reference the peer group;
-shared attributes (route maps, admin status) live on `BGP_PEER_GROUP_AF`.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §26 for the full principle.*
 
-Peer groups are created on first `ApplyService` for a service with BGP routing,
-and deleted when the last interface using that service is removed. Topology-level
-underlay peers do NOT use peer groups — each has unique attributes.
-
-See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §19 for rationale.
+Service BGP neighbors reference a `BGP_PEER_GROUP` named after the service. Peer groups
+are created on first `ApplyService` and deleted with the last consumer. Topology-level
+underlay peers do NOT use peer groups.
 
 ## Allowed Commands
 
@@ -676,20 +441,11 @@ Dispatch subagents with `model: "sonnet"` for:
 
 ## Greenfield — No Backwards Compatibility
 
-newtron is a greenfield system with no installed base. Backwards compatibility is
-a non-goal. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §35 for the full principle.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §40, §41 for the full principle.*
 
-Rules:
-- **No compatibility shims.** When a format or API changes, change it everywhere in
-  one commit. No dual-format detection, no deprecated aliases, no `_old` renames.
-- **No legacy format handling at runtime.** Factory/community artifacts are cleaned
-  up by `newtron init`. Operations assume a clean, initialized device.
-- **No API versioning.** One version: current. All consumers updated in the same commit.
-- **Delete, don't deprecate.** If something is unused, remove it completely.
-- **Exception: SONiC releases.** newtron must support multiple SONiC releases (202411,
-  202505, etc.) because operators run different versions. This is multi-platform
-  support, not backwards compatibility. Version-aware code paths belong in the device
-  layer, gated on detected SONiC version.
+No compatibility shims, no API versioning, no deprecated aliases. Delete, don't
+deprecate. Exception: multi-SONiC-release support is multi-platform, not backwards
+compatibility (§41).
 
 ## Regression Prevention
 
@@ -714,30 +470,13 @@ Tracking what was working (update this as test suites are validated):
 
 ## Feature Implementation Protocol (SONiC CONFIG_DB)
 
-Before writing any CONFIG_DB entries to implement a SONiC feature:
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §38 for the full principle and rationale.*
 
-1. **CLI-first research**: Find the SONiC CLI command that enables the feature. Read the
-   sonic-utilities / sonic-mgmt-framework source to see exactly what CONFIG_DB tables and
-   fields those commands write, in what order, and what pre/post steps they take.
-
-2. **Empirical verification**: On a freshly deployed (clean) SONiC node, configure the
-   feature using only SONiC CLI commands (NOT newtron). Verify it works end-to-end.
-   Then capture the resulting CONFIG_DB state (`redis-cli -n 4 KEYS '*'` etc.) as the
-   ground truth.
-
-3. **Framework audit**: Read the relevant SONiC daemon source (vrfmgrd, vxlanmgrd,
-   orchagent, frrcfgd) to understand how each CONFIG_DB entry is processed, what
-   APP_DB / ASIC_DB entries it creates, and what ordering constraints exist.
-
-4. **Implement in newtron**: Make newtron write the same CONFIG_DB entries in the same
-   order as the CLI path. Do not invent alternative CONFIG_DB layouts without explicit
-   user authorization.
-
-5. **Targeted test first**: Create a targeted newtrun suite (like `2node-ngdp-service`) that
-   tests only the specific feature. Debug and pass it before integrating into composite
-   suites (like `2node-ngdp-primitive`).
-
-**Never assume a CONFIG_DB path works without first verifying it via CLI on a real device.**
+Before writing CONFIG_DB entries for a SONiC feature: (1) find the SONiC CLI path and
+read its source, (2) configure via CLI on a real device and capture CONFIG_DB ground
+truth, (3) read the daemon source for processing order, (4) implement the same entries
+in the same order, (5) create a targeted newtrun suite before composite integration.
+**Never assume a CONFIG_DB path works without CLI verification on a real device.**
 
 ## Model Escalation
 
@@ -746,15 +485,10 @@ Claude Opus 4.6 (model ID: `claude-opus-4-6`) for architectural decisions and de
 
 ## Testing Protocol
 
-- **Always start tests on a freshly deployed topology.** Destroy and redeploy before running
-  any test suite. Never attempt to reuse a topology that has run previous tests or has
-  manually applied state. This ensures a clean, reproducible baseline.
-- **Polling checks must not pass vacuously.** If a poll finds zero items to verify,
-  return false (keep polling) — not true. Zero results means the daemon hasn't
-  processed entries yet, not that all checks passed. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §37.
-- **Test timeouts must account for CONFIG_DB entry count.** Each new entry type extends
-  the convergence window. When adding entries, verify that existing test timeouts still
-  have margin. See `docs/DESIGN_PRINCIPLES_NEWTRON.md` §37.
+*See `DESIGN_PRINCIPLES_NEWTRON.md` §42 for the full principle.*
+
+Always start on a freshly deployed topology. Polling checks must not pass vacuously
+(zero items = keep polling). Test timeouts must account for CONFIG_DB entry count.
 
 ## Documentation Freshness Protocol
 

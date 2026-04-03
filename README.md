@@ -398,3 +398,24 @@ make coverage       # Coverage report
 make cross          # Cross-compile: linux/darwin × amd64/arm64
 make install        # Build + install newtlink variants for remote upload
 ```
+
+## Using Claude Code with newtron
+
+[Claude Code](https://claude.com/claude-code) can set up the entire environment
+for you — build, download the SONiC image, deploy a lab, and run your first
+operation — with status updates along the way.
+
+```bash
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Sign in to your Claude account
+claude login
+
+# Clone and start
+git clone https://github.com/aldrin-isaac/newtron.git && cd newtron && claude
+```
+
+Claude Code reads the project configuration on startup, detects a fresh clone,
+and walks through the full setup automatically. When it's done, you have a
+built project, a running SONiC lab, and an oriented AI assistant ready to work.
