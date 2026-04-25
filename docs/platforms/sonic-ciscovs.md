@@ -134,7 +134,7 @@ Located in `pkg/newtlab/patches/ciscovs/always/`:
 
 ### SAI Tarball
 
-**Location:** `/home/aldrin/Downloads/ciscovs-202505-palladium2-25.9.1000.2-sai-1.16.1.tar.gz`
+**Location:** `~/Downloads/ciscovs-202505-palladium2-25.9.1000.2-sai-1.16.1.tar.gz`
 
 **Components:**
 - ASIC: Palladium2 (Cisco 8223-x model)
@@ -159,7 +159,7 @@ git checkout cb27941bb222fd953a3de228cc46391e373b43cf
 
 # Build with CiscoVS platform tarball
 ./build.sh -b 202505 \
-  -p /home/aldrin/Downloads/ciscovs-202505-palladium2-25.9.1000.2-sai-1.16.1.tar.gz \
+  -p ~/Downloads/ciscovs-202505-palladium2-25.9.1000.2-sai-1.16.1.tar.gz \
   -j 16
 
 # Output

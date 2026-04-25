@@ -1149,7 +1149,7 @@ deploy path — hosts follow the coalescing path (§3.6, §4.6).
 
 `NewLab("newtrun/topologies/2node-ngdp/specs")`:
 
-1. `absDir` = `/home/aldrin/src/newtron/newtrun/topologies/2node-ngdp/specs`, name = `"2node-ngdp"`.
+1. `absDir` = `~/src/newtron/newtrun/topologies/2node-ngdp/specs`, name = `"2node-ngdp"`.
 2. Load `topology.json` — 8 devices (2 switches, 6 hosts), 9 links derived from `interface.link` fields.
 3. Load `platforms.json` — platform `sonic-ciscovs`: `sequential` interface map, `e1000` NIC driver, 8192 MB memory, 6 CPUs, 600s boot timeout. Platform `alpine-host`: `linux` interface map, `device_type: "host"`.
 4. Load profiles for all 8 devices.

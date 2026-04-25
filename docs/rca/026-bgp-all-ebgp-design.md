@@ -317,10 +317,9 @@ Don't assume standard FRR features are fully supported in SONiC.
 
 ### 2. eBGP Overlay is Legitimate
 
-All-eBGP is not a hack—it's used in production:
-- **Cumulus Linux**: Default EVPN design (unnumbered eBGP)
-- **AWS**: VPC routing uses eBGP throughout
-- **Facebook**: All-eBGP fabric design
+All-eBGP is not a hack — it's a documented industry pattern:
+- **RFC 7938**: "Use of BGP for Routing in Large-Scale Data Centers" — canonical reference for all-eBGP fabric design
+- **Cumulus Linux**: Default EVPN design uses unnumbered eBGP
 
 The "best practice" iBGP overlay is **one pattern**, not the **only pattern**.
 
