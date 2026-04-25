@@ -10,7 +10,8 @@
 > **Provenance & rights.** **newtron** is a personal project by Aldrin
 > Isaac, built on personal time with personal equipment and personal
 > tools. The ideas it explores were accumulated and put to practice long
-> before my current role and are unrelated to my employer's business.
+> before my current role; newtron was conceived, designed, and built
+> independently of any current-employment work.
 > Copyright © 2025-2026 Aldrin Isaac. All rights reserved — no license
 > is granted for use, copy, modification, or redistribution. See
 > [NOTICE](NOTICE) for details.
