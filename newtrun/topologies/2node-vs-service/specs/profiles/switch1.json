@@ -7,11 +7,8 @@
             "switch2"
         ]
     },
-    "mac": "52:54:00:94:f1:59",
     "platform": "sonic-vs",
     "ssh_user": "admin",
     "ssh_pass": "YourPaSsWoRd",
-    "ssh_port": 13008,
-    "console_port": 12008,
     "underlay_asn": 65001
 }
