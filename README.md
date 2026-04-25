@@ -1,11 +1,19 @@
 # newtron
 
-> **Note:** **newtron** is a research project, validated against virtual
-> topologies. It exists to test the architectural ideas in
-> [DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md) by building software that
-> lives by them. It is not trying to be a complete network automation
-> solution — features exist where they exercise the principles. It is not
-> intended for production use.
+> **Note:** **newtron** is a personal project that demonstrates the
+> architectural ideas in [DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md)
+> by building software that lives by them, validated against virtual
+> topologies. It is not trying to be a complete network automation
+> solution — features exist where they exercise the principles. It is
+> not intended for production use.
+>
+> **Provenance & rights.** **newtron** is a personal project by Aldrin
+> Isaac, built on personal time with personal equipment and personal
+> tools. The ideas it explores were accumulated and put to practice long
+> before my current role and are unrelated to my employer's business.
+> Copyright © 2025-2026 Aldrin Isaac. All rights reserved — no license
+> is granted for use, copy, modification, or redistribution. See
+> [NOTICE](NOTICE) for details.
 
 <p align="center">
   <sub>Ron, the Newt</sub>

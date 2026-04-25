@@ -1,5 +1,5 @@
-Newtron
-Copyright 2025-2026 Aldrin Isaac
+newtron — Automation Design Principles for Open Networks
+Copyright (c) 2025-2026 Aldrin Isaac. All rights reserved.
 
 This project includes software and design documentation for
 software-driven networking on SONiC, including:
@@ -10,3 +10,24 @@ software-driven networking on SONiC, including:
   - Design principles for open network automation
 
 Project home: https://github.com/aldrin-isaac/newtron
+
+---
+
+Provenance and Rights
+
+This is a personal project. It was conceived, designed, and built on
+personal time, with personal funds, on personal equipment, using a
+personal Claude Pro subscription. The architectural ideas it explores
+were accumulated and put to practice over many years prior to my
+current employment, and are unrelated to my current employer's business
+or research and development.
+
+This work is not affiliated with, sponsored by, or endorsed by any
+employer past or present. The opinions expressed in DESIGN_PRINCIPLES.md
+and elsewhere in this repository are mine alone.
+
+No license is granted. All rights are reserved. The repository is
+public for reading and discussion. Use, copying, modification, or
+redistribution of any portion of this repository — code, documentation,
+or other content — requires prior written permission from the copyright
+holder.
