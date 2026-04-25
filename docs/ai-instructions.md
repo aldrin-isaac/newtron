@@ -169,6 +169,11 @@ on — **read the actual code**.
 - "This table is used by Y" — did you read the function that writes/reads it?
 - "This depends on Z" — did you trace the dependency in source?
 
+The same applies to document claims. Documents lag behind code (§20). Before
+citing a document as justification — "CLAUDE.md says X", "the architecture doc
+requires Y" — verify the claim against the current code. A document that described
+the system accurately last month may be stale today.
+
 If you haven't verified it in source, say "I don't know, let me check" — never
 state it as fact.
 
@@ -307,27 +312,33 @@ active implementation plan.
 
 ## 20. Authoritative Source Precedence — ALL
 
-Project instruction files (CLAUDE.md), plan files, and memory records are
-derivatives — they summarize or reference authoritative documents (architecture
-docs, design principles, code). When a derivative is automatically loaded into
-context and the authoritative source requires a tool call to read, the
-derivative wins by default. This is a bug, not a feature.
+The hierarchy:
 
-Rules:
-- **Architecture docs > CLAUDE.md summaries.** CLAUDE.md may summarize
-  architectural principles for quick reference. When acting on such a summary,
-  verify it against the authoritative source before proceeding. If they
-  conflict, the authoritative source is correct and CLAUDE.md is stale.
-- **Current code > plan file assumptions.** Plan files capture design decisions
-  at a point in time. Before executing a plan phase, re-read the architecture
-  sections the phase references. If the architecture has changed since the plan
-  was written, update the plan before executing.
-- **Repo documents > memory records.** Memory records are lossy snapshots.
-  Before acting on a memory record that names a file, function, or
-  architectural claim, verify it against the current repo state.
+**running context > code > architecture/design docs > CLAUDE.md > plan files > memory**
 
-The hierarchy: **authoritative repo documents > CLAUDE.md > plan files > memory**.
-When in doubt, read the source.
+Each level explained:
+
+- **Running context is the leading edge.** Directives the user gives in the current
+  conversation — design decisions, corrections, new constraints — are the highest
+  priority. They represent intent that has not yet been persisted to any document or
+  code. When running context conflicts with a document, running context wins — the
+  document is not yet updated. When running context conflicts with code, running
+  context wins — the code is not yet changed.
+- **Code is the source of reality.** Documents describe how the system *should* work;
+  code shows how it *does* work. Documents lag behind code changes structurally — code
+  lands first, documentation follows. When a document says one thing and the code does
+  another, investigate — but default to trusting the code.
+- **Architecture and design docs capture intent.** They are the closest thing to a
+  specification for how the system should evolve. But they too can be stale. Before
+  citing a document as justification, read the code to confirm the document still
+  reflects reality.
+- **CLAUDE.md is a derivative summary** — the most likely to be stale. When acting on
+  a CLAUDE.md claim, verify it against the authoritative source it cites.
+- **Plan files capture decisions at a point in time.** Before executing a plan phase,
+  re-read the architecture sections the phase references. If the architecture has
+  changed since the plan was written, update the plan before executing.
+- **Memory records are lossy snapshots.** Before acting on a memory record that names
+  a file, function, or architectural claim, verify it against the current repo state.
 
 **Freshness trigger:** After updating an architecture doc, verify that CLAUDE.md
 sections summarizing the updated content still match. This is not a deferred TODO
@@ -343,3 +354,20 @@ Every API endpoint and operation must be exercised in at least one E2E test.
 When adding or renaming endpoints, verify coverage exists. If an endpoint isn't
 exercised in E2E, renames and behavioral changes can silently break it. Test
 suites are the only thing standing between a working system and silent regressions.
+
+---
+
+## 22. Source-Trace Before Creating Documents — PLAN
+
+Before creating a new document to house content, trace each section to its source.
+If a section restates content that already has a canonical home in another document,
+it is derivative — and a new document full of derivative content is redundant. It
+creates a maintenance burden (two places to update) and a staleness risk (the copy
+drifts from the original).
+
+The check:
+1. For each section in the proposed document, ask: "does this already exist somewhere?"
+2. If yes, the section belongs as a citation, not a reproduction
+3. If most sections are derivative, the document should not exist — the content is
+   already housed; only the pointers are missing
+4. Create new documents only for genuinely original content that has no canonical home
