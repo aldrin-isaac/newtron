@@ -14,7 +14,9 @@
 > independently of any current-employment work.
 > Copyright © 2025-2026 Aldrin Isaac. All rights reserved — no license
 > is granted for use, copy, modification, or redistribution. See
-> [NOTICE](NOTICE) for details.
+> [NOTICE](NOTICE) for details. See [docs/PROVENANCE.md](docs/PROVENANCE.md)
+> for a curated record of the project's substantive basis and method of
+> production.
 
 ## Origin
 
