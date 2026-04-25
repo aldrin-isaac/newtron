@@ -46,8 +46,8 @@ The central insight is that intent and reality need not be two things.
 They are the same object viewed from different starting points. The
 Node is that object. An offline Node initialized from specs and
 profiles IS the expected state — intent before actualization. A
-actuated Node whose projection is rebuilt from NEWTRON_INTENT records
-IS the expected state verified against reality. Same type, same
+actuated Node whose projection is rebuilt from intent records stored
+on the device IS the expected state verified against reality. Same type, same
 methods, same preconditions, same validation. From this single design
 decision — one object, three states — delivery guarantees, offline
 provisioning, drift
@@ -116,7 +116,7 @@ initialization:
   the projection. Used to apply operations and deliver them.
 
 - **Actuated**: The Node is connected and actuated — intents loaded
-  from the device's own NEWTRON_INTENT records. The projection is
+  from the device's own intent records. The projection is
   rebuilt by replaying those intents via the same code path. The
   drift guard is active: it refuses writes when device CONFIG_DB
   diverges from the projection.
@@ -126,7 +126,7 @@ creates an offline Node and calls the same methods the automation CLI uses
 against a connected Node:
 
 ```
-n = NewAbstract(specs, name, profile, resolved)
+n = NewNode(specs, name, profile, resolved)
 n.RegisterPort("Ethernet0", {"admin_status": "up"})
 n.SetupDevice(setupOpts)              // metadata + loopback + BGP + VTEP
 iface = n.GetInterface("Ethernet0")
@@ -154,7 +154,7 @@ operation's output visible to subsequent preconditions:
 - Apply a service on the interface — precondition `VTEPConfigured` passes
 
 An offline Node with all intents actuated IS a connected Node's expected
-state. An actuated Node's projection — rebuilt from NEWTRON_INTENT
+state. An actuated Node's projection — rebuilt from the device's intent
 records — IS what an offline Node would produce from the same specs and
 profile. The three states are not analogous — they are literally the
 same computation, differing only in where the intents come from and
@@ -195,7 +195,7 @@ to fix it.
 The same methods run in both cases. The same preconditions fire. The
 same schema validation catches invalid entries. Only initialization and
 output differ: offline Nodes start empty and build up the projection for
-later export; actuated Nodes replay NEWTRON_INTENT records to rebuild
+later export; actuated Nodes replay the device's intent records to rebuild
 the projection and apply changes through it. This is not a convenience — it is the guarantee. A feature
 added to one mode is immediately available in the other, because there
 is no other. A bug fixed in one mode is fixed in both, because there
@@ -345,8 +345,8 @@ in CONFIG_DB is the configuration, not a description of it.
 
 When Redis cannot express an operation (persisting config to disk,
 restarting daemons, reading platform files), device shell commands are used as
-documented exceptions — each tagged `CLI-WORKAROUND` with a note on
-what upstream change would eliminate the workaround. The goal is to
+documented exceptions — each tagged in source as a CLI workaround with
+a note on what upstream change would eliminate it. The goal is to
 reduce these over time, not normalize them. Every shell call in the
 codebase is either an inherent exception (the operation requires the
 filesystem) or a temporary workaround (Redis could provide this but
@@ -361,7 +361,7 @@ reconcilers because they are the sole writer — if state drifts, it
 drifted from *their* truth, and they can push it back. The sanest
 architecture for any system that writes device state is a single owner.
 
-The system IS that owner. It writes NEWTRON_INTENT records to CONFIG_DB
+The system IS that owner. It writes intent records to CONFIG_DB
 alongside the entries those intents describe. The intent DB is the
 primary state — the projection (expected CONFIG_DB) is derived from it.
 External CONFIG_DB edits are drift, detected by the drift guard and
@@ -392,8 +392,8 @@ The translation from spec to CONFIG_DB entries uses device context to
 derive concrete values. Each device has a **profile** — its identity in
 the network: AS number, loopback IP, EVPN peers, platform type. When
 a service spec says `"peer_as": "request"`, that means the AS number
-is supplied by the operator at apply time (via `--peer-as` on the automation CLI,
-or from a topology file during provisioning). A filter reference says
+is supplied by the operator at apply time (as a CLI argument, or from
+a topology file during provisioning). A filter reference says
 `"ingress_filter": "customer-in"` — the system expands this into
 numbered ACL rules from the filter definition.
 
@@ -409,8 +409,8 @@ This separation enables two properties that matter:
 
 ### After application, the intent DB is the authority
 
-Once intents are written, the intent DB (NEWTRON_INTENT records on the
-device) is the primary state. The projection — the expected CONFIG_DB
+Once intents are written, the intent DB (intent records stored on the
+device in CONFIG_DB) is the primary state. The projection — the expected CONFIG_DB
 — is derived by replaying those intents. External CONFIG_DB edits are
 drift from what the device's own intents declare, not a new "reality"
 that the system accepts. The drift guard detects the divergence and
@@ -437,12 +437,12 @@ Different operation types interact with this model differently:
 - **Service operations** trust the intent record as ground reality.
   `ApplyService` reads CONFIG_DB for idempotency filtering on shared
   infrastructure (does the VLAN or VRF already exist?). `RemoveService`
-  reads the `NEWTRON_INTENT` record — not CONFIG_DB tables, not
+  reads the intent record — not other CONFIG_DB tables, not
   specs — to determine what to tear down.
 
 ### Intent records are ground reality for teardown
 
-`NEWTRON_INTENT` records live on the device, not in spec files. When an operation is
+Intent records live on the device, not in spec files. When an operation is
 applied to a resource, the system writes an intent record to CONFIG_DB
 that captures exactly what was applied — which VLANs, VRFs, ACLs, and
 VNIs were created for that operation.
@@ -1336,7 +1336,7 @@ What if the process is just slow?
 The structural proof is simpler: **the projection derived from intent
 replay either matches the device or it doesn't.** If a process crashes
 mid-apply, the drift guard on the next connect detects that the
-projection (from NEWTRON_INTENT records) diverges from actual
+projection (from intent records on the device) diverges from actual
 CONFIG_DB. `Reconcile()` re-delivers the projection. No timer, no
 threshold, no edge cases.
 
@@ -1636,7 +1636,7 @@ The Node intermediates all intent. On connect, the node loads existing
 intent records from CONFIG_DB. Mutations (apply, remove, refresh) update
 the node's intent collection as part of the operation. In offline mode, intent records accumulate alongside projection entries.
 In actuated mode, the Node replays intents from the device's
-NEWTRON_INTENT records to reconstruct the projection. This makes the
+intent records to reconstruct the projection. This makes the
 Node the single point of intent truth for its device — whether offline,
 connected, or actuated.
 
@@ -1659,7 +1659,7 @@ infrastructure rather than time.
 ## 20. On-Device Intent Is Sufficient for Reconstruction
 
 The device carries enough intent to reconstruct its expected CONFIG_DB
-state. `NEWTRON_INTENT` records which operations are applied to which
+state. The intent table records which operations are applied to which
 resources, with all parameters needed for both teardown and
 reconstruction. Combined with current specs, the intent record tells you
 exactly what CONFIG_DB entries should exist. No external history, no
@@ -2068,29 +2068,29 @@ table with different field sets — the ChangeSet faithfully records
 whichever construction site ran, and the inconsistency surfaces as a
 daemon failure on a different platform, hours later.
 
-Each CONFIG_DB table has exactly one owner — a single file responsible
+Each CONFIG_DB table has exactly one owner — a single module responsible
 for constructing, writing, and deleting entries in that table.
 Composites call the owning primitives and merge their ChangeSets.
 
 ```
-vlan_ops.go        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
-vrf_ops.go         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
-bgp_ops.go         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
-                      BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
-                      BGP_PEER_GROUP, BGP_PEER_GROUP_AF
-evpn_ops.go        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
-                      SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
-acl_ops.go         → ACL_TABLE, ACL_RULE
-qos_ops.go         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
-                      SCHEDULER, WRED_PROFILE
-interface_ops.go   → INTERFACE
-baseline_ops.go    → LOOPBACK_INTERFACE
-portchannel_ops.go → PORTCHANNEL, PORTCHANNEL_MEMBER
-intent_ops.go      → NEWTRON_INTENT
-service_ops.go     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
+vlan owner        → VLAN, VLAN_MEMBER, VLAN_INTERFACE, SAG_GLOBAL
+vrf owner         → VRF, STATIC_ROUTE, BGP_GLOBALS_EVPN_RT
+bgp owner         → BGP_GLOBALS, BGP_NEIGHBOR, BGP_NEIGHBOR_AF,
+                     BGP_GLOBALS_AF, ROUTE_REDISTRIBUTE, DEVICE_METADATA,
+                     BGP_PEER_GROUP, BGP_PEER_GROUP_AF
+evpn owner        → VXLAN_TUNNEL, VXLAN_EVPN_NVO, VXLAN_TUNNEL_MAP,
+                     SUPPRESS_VLAN_NEIGH, BGP_EVPN_VNI
+acl owner         → ACL_TABLE, ACL_RULE
+qos owner         → PORT_QOS_MAP, QUEUE, DSCP_TO_TC_MAP, TC_TO_QUEUE_MAP,
+                     SCHEDULER, WRED_PROFILE
+interface owner   → INTERFACE
+baseline owner    → LOOPBACK_INTERFACE
+portchannel owner → PORTCHANNEL, PORTCHANNEL_MEMBER
+intent owner      → intent records
+service owner     → ROUTE_MAP, PREFIX_SET, COMMUNITY_SET
 ```
 
-**One file owns each table; everyone else calls the owner.** When the
+**One module owns each table; everyone else calls the owner.** When the
 table format changes, the change propagates through callers, not beside
 them.
 
@@ -2100,21 +2100,21 @@ them.
 
 §27 governs writes. This principle governs the entire feature — reads,
 writes, types, existence checks. All code for a feature belongs in one
-file. `GetVLAN` and `VLANInfo` belong in `vlan_ops.go` just as much as
-`CreateVLAN` does.
+module. `GetVLAN` and `VLANInfo` belong with the VLAN owner just as much
+as `CreateVLAN` does.
 
-Four file roles enforce the boundary:
+Four module roles enforce the boundary:
 
-- **`composite.go`** = delivery mechanics only (§10). No CONFIG_DB
+- **Delivery module** = delivery mechanics only (§10). No CONFIG_DB
   table or key format knowledge.
-- **`topology.go`** = provisioning orchestration (§1). Calls config
-  functions but never constructs CONFIG_DB keys inline.
-- **Each `*_ops.go`** = sole owner of its feature.
-- **`service_gen.go`** = service-to-entries translation. Calls config
-  functions from owning `*_ops.go` files and merges their output.
+- **Provisioning module** = provisioning orchestration (§1). Calls
+  config functions but never constructs CONFIG_DB keys inline.
+- **Each table-owner module** = sole owner of its feature.
+- **Service translation module** = service-to-entries translation.
+  Calls config functions from the table owners and merges their output.
 
-**If you want to understand a feature, read one file. If you want to
-change a table format, change one file.**
+**If you want to understand a feature, read one module. If you want to
+change a table format, change one module.**
 
 ---
 
@@ -2488,12 +2488,12 @@ investigating daemon logs at 2 AM.
 
 ### Single owner and composite operations
 
-§27 says one file owns each table. But composite operations like
+§27 says one module owns each table. But composite operations like
 `ApplyService` touch a dozen tables. Composites don't own tables — they
-*call* the owning functions and merge the results. `service_gen.go`
-calls `createVlanConfig()`, `createVrfConfig()`, `i.bindVrf()`. It
-never constructs a VLAN entry inline. The ownership is preserved through
-composition, not violated by it.
+*call* the owning functions and merge the results. The service
+translation module calls `createVlanConfig()`, `createVrfConfig()`,
+`i.bindVrf()`. It never constructs a VLAN entry inline. The ownership
+is preserved through composition, not violated by it.
 
 ### Mechanical reversal vs domain reversal
 

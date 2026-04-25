@@ -1,7 +1,11 @@
 # newtron
 
 > **Note:** **newtron** is a research project, validated against virtual
-> topologies. It is not intended for production use.
+> topologies. It exists to test the architectural ideas in
+> [DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md) by building software that
+> lives by them. It is not trying to be a complete network automation
+> solution — features exist where they exercise the principles. It is not
+> intended for production use.
 
 <p align="center">
   <sub>Ron, the Newt</sub>
