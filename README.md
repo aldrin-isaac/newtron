@@ -15,6 +15,27 @@
 > is granted for use, copy, modification, or redistribution. See
 > [NOTICE](NOTICE) for details.
 
+## Origin
+
+At the start of 2026, retinal detachment surgery put me on the bench
+— and on my right side, fifty minutes of every hour, on doctor's
+orders. Weeks of no exertion meant I was useless around the house,
+with evenings and weekends to fill. So I started a side project —
+partly to dust off network-automation muscles I hadn't flexed in a
+while, partly to learn what AI-driven development actually feels like
+by building something real.
+
+The output is [DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md) —
+opinionated network automation, distilled from a career of doing this
+work and applied, fresh, to SONiC.
+
+If you've ever wrestled with the gap between what your automation
+thinks the network is and what it actually is, this might resonate.
+There's more than one way to bake a cake — this is my recipe.
+
+A happy side effect: the proof-of-concept code is also a low-friction
+way to kick the tires with SONiC.
+
 <p align="center">
   <sub>Ron, the Newt</sub>
   <br/>
