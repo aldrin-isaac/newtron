@@ -33,8 +33,8 @@ If you've ever wrestled with the gap between what your automation
 thinks the network is and what it actually is, this might resonate.
 There's more than one way to bake a cake — this is my recipe.
 
-A happy side effect: the proof-of-concept code is also a low-friction
-way to kick the tires with SONiC.
+A happy side effect: the proof-of-concept code, newtron, is also a
+low-friction way to kick the tires with SONiC.
 
 <p align="center">
   <sub>Ron, the Newt</sub>
