@@ -777,6 +777,7 @@ func (l *Lab) startNodes(ctx context.Context) error {
 			Image:       node.Image,
 			SSHPort:     node.SSHPort,
 			ConsolePort: node.ConsolePort,
+			SSHUser:     node.SSHUser,
 			Host:        node.Host,
 			HostIP:      remoteIP,
 		}
