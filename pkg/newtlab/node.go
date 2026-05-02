@@ -24,6 +24,9 @@ type NodeConfig struct {
 	ConsoleUser  string // resolved: platform vm_credentials user (image default user)
 	ConsolePass  string // resolved: platform vm_credentials pass (image default password)
 	BootTimeout  int    // resolved: platform > 180
+	SkipBootstrap bool  // resolved: platform vm_skip_bootstrap > false. When true, the image is
+	                    // pre-bootstrapped (mgmt IP + ssh user already configured) and the
+	                    // console-driven network bring-up is skipped entirely.
 	Host         string // from profile vm_host
 	SSHPort      int    // allocated
 	ConsolePort  int    // allocated
@@ -132,6 +135,15 @@ func ResolveNodeConfig(
 		nc.BootTimeout = platform.VMBootTimeout
 	} else {
 		nc.BootTimeout = 180
+	}
+
+	// SkipBootstrap: platform > false. The console-driven Linux-style
+	// bootstrap (sudo ip / dhclient / $-prompt) doesn't apply to images
+	// that come up with mgmt IP + ssh already configured (e.g. Junos
+	// VMs baked with a config commit). When true, bootstrapNodes
+	// skips Phase 1 and goes straight to Phase 2 (WaitForSSH).
+	if platform != nil {
+		nc.SkipBootstrap = platform.VMSkipBootstrap
 	}
 
 	// Host: profile > "" (local)

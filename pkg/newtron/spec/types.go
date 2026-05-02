@@ -249,6 +249,7 @@ type PlatformSpec struct {
 	VMBootTimeout        int            `json:"vm_boot_timeout,omitempty"`
 	Dataplane            string         `json:"dataplane,omitempty"`        // "vpp", "barefoot", "" (none/vs)
 	VMImageRelease       string         `json:"vm_image_release,omitempty"` // e.g. "202405" — selects release-specific boot patches
+	VMSkipBootstrap      bool           `json:"vm_skip_bootstrap,omitempty"` // image is pre-bootstrapped: skip console-driven network bring-up (mgmt IP + ssh user must already be configured in the image)
 	UnsupportedFeatures  []string       `json:"unsupported_features,omitempty"` // features this platform cannot handle (e.g. "acl")
 }
 

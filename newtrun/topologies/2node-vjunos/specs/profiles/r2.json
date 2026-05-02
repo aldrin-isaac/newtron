@@ -1,0 +1,8 @@
+{
+    "mgmt_ip": "127.0.0.1",
+    "loopback_ip": "10.0.0.2",
+    "zone": "lab",
+    "platform": "vjunos-router",
+    "ssh_user": "root",
+    "ssh_pass": "lab123"
+}

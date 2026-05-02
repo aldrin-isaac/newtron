@@ -832,6 +832,12 @@ func (l *Lab) bootstrapNodes(ctx context.Context, pubKey string) error {
 	// Host devices use a simpler bootstrap that only waits for the login prompt.
 	// Switch nodes also receive the lab SSH public key via console injection.
 	err := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
+		// Pre-bootstrapped images (e.g. Junos baked with a config commit)
+		// skip the console-driven Linux-style bring-up entirely. Phase 2
+		// (WaitForSSH) below still runs to confirm reachability.
+		if node.SkipBootstrap {
+			return nil
+		}
 		consoleHost := resolveHostIP(node.Host, l.Config)
 		if node.DeviceType == "host" || node.DeviceType == "host-vm" {
 			return BootstrapHostNetwork(ctx, consoleHost, node.ConsolePort,
@@ -844,10 +850,17 @@ func (l *Lab) bootstrapNodes(ctx context.Context, pubKey string) error {
 	})
 
 	// Phase 2: Wait for SSH readiness (parallel) — only for nodes still running.
+	// Pre-bootstrapped images skip Phase 1, so the VM is still booting from
+	// cold when we get here; use the full BootTimeout. For Phase-1 nodes
+	// (network just came up via console), 60s is plenty.
 	if err2 := l.parallelForNodes(func(name string, node *NodeConfig, ns *NodeState) error {
 		sshHost := resolveHostIP(node.Host, l.Config)
+		sshTimeout := 60 * time.Second
+		if node.SkipBootstrap {
+			sshTimeout = time.Duration(node.BootTimeout) * time.Second
+		}
 		return WaitForSSH(ctx, sshHost, node.SSHPort, node.SSHUser, node.SSHPass,
-			60*time.Second)
+			sshTimeout)
 	}); err == nil {
 		err = err2
 	}

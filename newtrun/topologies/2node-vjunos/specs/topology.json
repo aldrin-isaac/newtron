@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "description": "2-node vJunos-router topology: r1 ↔ r2 across two parallel links (mimics typical aggregate / ECMP test setups)",
+  "devices": {
+    "r1": {},
+    "r2": {}
+  },
+  "links": [
+    {"a": "r1:eth1", "z": "r2:eth1"},
+    {"a": "r1:eth2", "z": "r2:eth2"}
+  ],
+  "newtlab": {
+    "link_port_base":    10000,
+    "console_port_base": 12000,
+    "ssh_port_base":     13000
+  }
+}
