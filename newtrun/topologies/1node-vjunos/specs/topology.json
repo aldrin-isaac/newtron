@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "description": "Single vJunos-router node — used by opennetconf smoke tests via --newtlab",
+  "devices": {
+    "r1": {}
+  },
+  "links": [],
+  "newtlab": {
+    "console_port_base": 12000,
+    "ssh_port_base":     13000
+  }
+}

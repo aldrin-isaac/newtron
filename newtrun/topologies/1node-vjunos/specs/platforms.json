@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "platforms": {
+    "vjunos-router": {
+      "description": "Juniper vJunos-router 25.4R1 (AMD-host-patched flat qcow2)",
+      "device_type": "switch",
+      "port_count": 8,
+      "default_speed": "1G",
+      "vm_image":           "~/vm/images/vJunos-router-25.4R1.12-patched.qcow2",
+      "vm_memory":          5120,
+      "vm_cpus":            4,
+      "vm_nic_driver":      "virtio-net-pci",
+      "vm_interface_map":   "linux",
+      "vm_credentials":     {"user": "root", "pass": "lab123"},
+      "vm_boot_timeout":    600,
+      "vm_skip_bootstrap":  true,
+      "dataplane":          "",
+      "unsupported_features": []
+    }
+  }
+}
