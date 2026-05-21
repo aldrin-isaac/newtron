@@ -9,9 +9,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
-	"github.com/newtron-network/newtron/pkg/newtrun"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 func newStartCmd() *cobra.Command {

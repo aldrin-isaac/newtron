@@ -3,7 +3,7 @@ package node
 import (
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
 // ============================================================================

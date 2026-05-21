@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // Node wraps a *node.Node with pending change management.

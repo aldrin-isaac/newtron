@@ -1,4 +1,4 @@
-module github.com/newtron-network/newtron
+module github.com/aldrin-isaac/newtron
 
 go 1.24.0
 

@@ -59,7 +59,7 @@ For the architectural principles behind this design, see the [HLD](hld.md). For 
 ### 1.1 Build from Source
 
 ```bash
-git clone https://github.com/newtron-network/newtron.git
+git clone https://github.com/aldrin-isaac/newtron.git
 cd newtron
 
 # Build the CLI and server
@@ -2418,8 +2418,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/newtron-network/newtron/pkg/newtron"
-    "github.com/newtron-network/newtron/pkg/newtron/client"
+    "github.com/aldrin-isaac/newtron/pkg/newtron"
+    "github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
 func main() {

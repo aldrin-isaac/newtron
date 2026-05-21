@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtrun"
-	"github.com/newtron-network/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
 func newStopCmd() *cobra.Command {

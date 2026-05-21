@@ -22,11 +22,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtlab"
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
-	"github.com/newtron-network/newtron/pkg/util"
-	"github.com/newtron-network/newtron/pkg/version"
+	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
+	"github.com/aldrin-isaac/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 var (

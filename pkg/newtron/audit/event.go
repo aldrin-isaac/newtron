@@ -4,7 +4,7 @@ package audit
 import (
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 )
 
 // Event represents an auditable configuration change event

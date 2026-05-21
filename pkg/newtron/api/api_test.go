@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
 // TestAPICompleteness ensures every exported method on *newtron.Network,

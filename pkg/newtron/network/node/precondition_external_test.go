@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
 )
 
 // testNode creates a minimal Node for precondition testing.

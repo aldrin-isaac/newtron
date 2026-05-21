@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // Interface is a scoped interface context within a Node.

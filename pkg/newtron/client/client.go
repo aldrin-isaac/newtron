@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
-	"github.com/newtron-network/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
 // Client is an HTTP client for the newtron-server API.

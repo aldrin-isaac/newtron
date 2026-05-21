@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // Device represents a SONiC switch.

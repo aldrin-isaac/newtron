@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // aclPortsFromIntents collects all interface names bound to an ACL by scanning

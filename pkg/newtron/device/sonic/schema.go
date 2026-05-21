@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // FieldType identifies the expected type of a CONFIG_DB field value.

@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // NodeConfig holds the fully resolved VM configuration for a single device.

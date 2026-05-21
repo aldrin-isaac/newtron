@@ -4,8 +4,8 @@ package node
 import (
 	"strings"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // isQoSPolicyReferenced checks if any QoS intent (excluding the given interface)

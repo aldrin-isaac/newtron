@@ -1,7 +1,7 @@
 package newtron
 
 import (
-	"github.com/newtron-network/newtron/pkg/newtron/audit"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/audit"
 )
 
 // InitAuditLogger creates and sets the default audit logger.

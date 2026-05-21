@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // HostVMGroup represents virtual hosts coalesced into one VM.

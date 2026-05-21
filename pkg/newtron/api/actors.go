@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
 // DefaultIdleTimeout is how long a device SSH connection stays cached after

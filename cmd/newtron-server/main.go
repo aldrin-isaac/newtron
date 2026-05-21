@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
 )
 
 func main() {

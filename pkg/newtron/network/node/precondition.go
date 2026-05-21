@@ -3,7 +3,7 @@ package node
 import (
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // PreconditionChecker helps build precondition checks.

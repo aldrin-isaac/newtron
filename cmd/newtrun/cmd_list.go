@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtrun"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 // topoSummary is a lightweight view of topology.json for counting

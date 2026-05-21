@@ -12,10 +12,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtrun"
-	"github.com/newtron-network/newtron/pkg/newtlab"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 func newStatusCmd() *cobra.Command {

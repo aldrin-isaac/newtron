@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // newTestInterface creates an Interface backed by an offline Node for testing

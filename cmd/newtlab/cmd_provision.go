@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
 )
 
 func newProvisionCmd() *cobra.Command {

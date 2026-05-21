@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/newtron-network/newtron/pkg/newtlab"
-	"github.com/newtron-network/newtron/pkg/version"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 func main() {

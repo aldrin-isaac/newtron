@@ -16,8 +16,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/newtron/network/node"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // TopologyProvisioner generates and delivers configuration from topology specs.

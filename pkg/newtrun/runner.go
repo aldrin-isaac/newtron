@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/newtron-network/newtron/pkg/newtlab"
-	"github.com/newtron-network/newtron/pkg/newtron/client"
+	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
 )
 
 // Runner is the top-level newtrun orchestrator.

@@ -11,7 +11,7 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // StateDB mirrors SONiC's state_db structure (Redis DB 6)

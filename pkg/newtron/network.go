@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/newtron-network/newtron/pkg/newtron/auth"
-	"github.com/newtron-network/newtron/pkg/newtron/device/sonic"
-	"github.com/newtron-network/newtron/pkg/newtron/network"
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/auth"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/network"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // Network is the top-level API entry point.

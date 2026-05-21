@@ -1,6 +1,6 @@
 package newtron
 
-import "github.com/newtron-network/newtron/pkg/newtron/spec"
+import "github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 
 // ListPlatforms returns all platform definitions, converted to PlatformDetail.
 func (net *Network) ListPlatforms() map[string]*PlatformDetail {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/version"
+	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 var verboseFlag bool

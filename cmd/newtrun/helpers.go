@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtrun"
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
 )
 
 // resolveDir resolves the suite directory from: positional arg > flag > env > settings > default.

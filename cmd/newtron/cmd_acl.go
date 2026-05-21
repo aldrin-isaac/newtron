@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
 var aclCmd = &cobra.Command{

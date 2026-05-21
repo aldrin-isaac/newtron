@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ProgressReporter receives lifecycle callbacks during test execution.

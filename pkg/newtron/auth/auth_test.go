@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
-	"github.com/newtron-network/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 func TestContext_Chaining(t *testing.T) {

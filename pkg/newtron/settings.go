@@ -1,7 +1,7 @@
 package newtron
 
 import (
-	"github.com/newtron-network/newtron/pkg/newtron/settings"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/settings"
 )
 
 // LoadSettings loads user settings from the default path.

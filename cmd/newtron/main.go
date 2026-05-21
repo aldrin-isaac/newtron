@@ -36,12 +36,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/cli"
-	"github.com/newtron-network/newtron/pkg/newtron"
-	"github.com/newtron-network/newtron/pkg/newtron/api"
-	"github.com/newtron-network/newtron/pkg/newtron/client"
-	"github.com/newtron-network/newtron/pkg/util"
-	"github.com/newtron-network/newtron/pkg/version"
+	"github.com/aldrin-isaac/newtron/pkg/cli"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/client"
+	"github.com/aldrin-isaac/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 // App holds CLI state shared across all commands.

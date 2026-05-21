@@ -3,7 +3,7 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/newtron-network/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron"
 )
 
 var deviceCmd = &cobra.Command{

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/newtron-network/newtron/pkg/version"
+	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
 // homeDir caches the result of os.UserHomeDir() so it is called at most once.

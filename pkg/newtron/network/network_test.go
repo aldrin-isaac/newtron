@@ -3,7 +3,7 @@ package network
 import (
 	"testing"
 
-	"github.com/newtron-network/newtron/pkg/newtron/spec"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
