@@ -22,6 +22,23 @@ exercise in recollection: a structured attempt to write down general
 professional experience in network engineering and network automation
 that had accumulated over a career, before any more of it faded.
 
+The exercise predates newtron. A previous personal attempt was begun
+some years earlier, pursuing the same purpose: to write down the
+architectural patterns and hard-won insights that had accumulated
+through a career of network engineering, before any more of them
+faded. That earlier effort was abandoned a few years back. The
+bottleneck was effort: putting held ideas into running, testable code
+by hand, alone, in evenings, was more labor than the available time
+would absorb. The notes survived. The working system did not.
+
+What changed between then and now was AI-assisted development. The
+unblock was not in the ideas — those were already held — but in the
+execution cost. Conversational AI made it tractable to convert held
+architectural intention into running code at a pace that fit the time
+available. newtron is the continuation of that earlier exercise, with
+the same purpose and the same source material (the author's own held
+knowledge), now within reach.
+
 The substance of the project was sourced exclusively from the author's
 own held knowledge — methodology, design taste, pattern recognition, and
 architectural instincts built over years of practice. No external
