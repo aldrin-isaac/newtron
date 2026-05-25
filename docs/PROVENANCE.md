@@ -498,7 +498,69 @@ summary, not the authority. RCAs are permanent. The design
 principles documents are the target the implementation derives
 from, not a description of where it landed.
 
-## 7. What is and isn't in here
+## 7. Adjacent project: newtcon
+
+newtcon is the operator-facing web console for newtron, bootstrapped on
+2026-05-21 in a separate sibling repository at
+`github.com/aldrin-isaac/newtcon`, on the same personal GitHub account that
+hosts newtron.
+
+It is recorded here because the operating model it formalizes — an agent
+team (Architect, Tech Lead, Implementer pool, mandatory per-PR Critic,
+weekly Drift Auditor) working against a binding ruleset, with no
+agent-to-agent chat and all coordination through durable artifacts — is
+part of the method of production for the broader exercise. newtcon is also
+deliberately a separate repository and a separate Go module: agents working
+on newtcon have no newtron source in their dependency graph, and newtron is
+reached only over HTTP, the same way the `bin/newtron` CLI reaches it.
+
+The seed commit (`b7f456f`) message, verbatim:
+
+> seed: bootstrap newtcon — operator-facing web console for newtron
+>
+> Initial scaffolding for an HTTP-only client of newtron-server, built by
+> an agent team operating against a binding ruleset.
+>
+> Foundational documents (all binding):
+>
+> - README.md — project intro, scope, status.
+> - CLAUDE.md — newtron HTTP-API consumption rule (no Go imports of newtron
+>   anywhere), file ownership map, design principles, gap-handling protocol,
+>   allowed commands.
+> - AGENTS.md — agent team structure: Architect, Tech Lead, Implementer pool,
+>   Critic, Drift Auditor. Coordination via durable artifacts (issues, the
+>   contract, audit reports), not agent-to-agent chat. Mandatory Critic gate
+>   on every PR; weekly Drift Auditor for systemic drift.
+> - API_CONTRACT.md — typed outward HTTP contract for the Service Composer
+>   surface (health, services, instances, candidates, preview, apply).
+>   Upstream newtron HTTP API is consumed, not owned. Stubs for Inbox and
+>   Workbench surfaces.
+> - docs/architecture.md — layering (server → handlers → newtronc → HTTP →
+>   newtron-server), non-goals, surface-to-pipeline traces.
+>
+> Agent-team harness wiring (Claude Code experimental feature):
+>
+> - .claude/settings.json — enables CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+>   scoped to this project.
+> - .claude/agents/{architect,tech-lead,implementer,critic,drift-auditor}.md
+>   — subagent definitions matching AGENTS.md roles. Tools allowlists
+>   enforce some role boundaries at the harness level (e.g., the critic has
+>   no Write/Edit tool, so it physically cannot write code while reviewing).
+>
+> Server skeleton:
+>
+> - cmd/newtcon-server/main.go — minimal HTTP server with /api/health.
+>   Builds clean, runs, responds.
+>
+> newtcon is a separate repo from newtron by design: agents working on
+> newtcon have no newtron source in their dependency graph. newtron is
+> reached over HTTP, the same way the bin/newtron CLI reaches it. The
+> boundary is a network address, not a Go import lint.
+>
+> Gaps in newtron's HTTP API are filed as newtron issues, not patched
+> locally.
+
+## 8. What is and isn't in here
 
 This document is curated rather than exhaustive. The complete
 conversation history that produced the codebase is not reproduced;
