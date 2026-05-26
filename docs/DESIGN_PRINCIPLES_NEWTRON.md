@@ -2518,6 +2518,80 @@ purposes, not containment edges for display purposes.
 
 ---
 
+## 46. HTTP API Boundary — Wire Shape Mirrors Substrate
+
+newtron's HTTP API exposes its canonical in-memory substrate types
+directly: `ChangeSet.Changes` (§11), the typed `Projection` produced
+by `ExportEntries` (§1, §21), `[]DriftEntry` from `DiffConfigDB`,
+`Intent` records, `RouteEntry`. Derived or summary forms — free-text
+previews, counts, opaque handles, table-name-to-count maps — exist
+only as additions *alongside* the canonical form, never as the sole
+representation.
+
+This boundary exists because the same substrate that newtron uses
+internally to drive writes, verify them, and reason about state is
+what API consumers need to render and reason about. When a consumer
+must parse a human-readable preview string to know what newtron is
+about to do, stitch across multiple endpoints to reconstruct what is
+one internal object, or call an endpoint that returns an opaque
+handle whose contents are not readable, the API has thrown away type
+information the implementation already had. The consumer re-derives
+it, fragilely, and the wire becomes the bottleneck instead of the
+carrier.
+
+This principle is the HTTP-layer extension of §11 ("The ChangeSet Is
+the Universal Contract"). §11 binds the implementation to one
+substrate representation; §46 binds the wire to expose that same
+representation. It is the API-boundary extension of §33 ("Public API
+Boundary — Types Express Intent, Not Implementation"). §33 ensures
+public types speak domain vocabulary; §46 ensures the wire faithfully
+serializes the substrate those public types govern. There is no
+tension: §33 governs type *identity* (internal vs public), §46
+governs wire *shape* (canonical vs summary). The public type and the
+wire form are the same JSON; the boundary at §33 maps internal
+field names to public field names, and §46 forbids transforming that
+shape into a summary or handle.
+
+Four rules:
+
+1. **Canonical first, summary second.** If a typed primitive exists
+   internally (ChangeSet, Projection, DriftEntry, Intent, RouteEntry),
+   the HTTP response exposes it directly. Any summary (free-text
+   rendering, a count, a table-name-to-count map) is provided
+   *alongside*, not *instead of*, the canonical form.
+
+2. **No opaque handles.** A handle to internal state must be paired
+   with a `GET` endpoint that returns the handle's typed contents. A
+   handle whose typed contents cannot be read is a black box at the
+   wire — exactly what §11 and §1 reject internally.
+
+3. **One typed diff vocabulary.** `DriftEntry` is the canonical
+   entry-level delta. Every endpoint that returns a diff (drift,
+   preview, projection before-vs-after, service slice) returns
+   `[]DriftEntry`, not a parallel diff type. §11's
+   single-representation rule applies to wire as well as memory.
+
+4. **Wire shape mirrors in-memory shape.** The JSON tags on the public
+   types and the JSON output of HTTP responses are the same. Consumers
+   reason about the substrate newtron itself reasons about — no
+   parsing strings, no stitching across endpoints to reconstruct what
+   is one internal object, no opaque handles.
+
+**The litmus test for any HTTP response:** "Could a consumer
+reconstruct this from a typed primitive newtron has internally?" If
+yes, the endpoint must expose the typed primitive directly. If
+consumers must parse strings, stitch across endpoints, or work with
+opaque handles, the principle is violated and the response shape
+must change.
+
+This principle does not require breaking existing endpoints in one
+batch. Additive evolution is acceptable: expose the canonical type
+alongside an existing summary. The summary remains for CLI rendering
+or low-bandwidth consumers; the canonical form is added. Eventually,
+when no consumer parses the summary, the summary can be retired.
+
+---
+
 # Tensions and Resolutions
 
 A coherent system of principles is not a system without tensions.

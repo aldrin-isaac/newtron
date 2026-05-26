@@ -26,6 +26,36 @@ enough to execute. The implementations must remain consistent with
 wrote newtron's existing code wrote them — same patterns, same
 vocabulary, same boundary discipline.
 
+## Common thread — all five align to §46
+
+The five gaps are not independent design decisions. Each is an
+instance of the same principle: **newtron's HTTP API should expose
+its canonical in-memory substrate types directly, not derivatives,
+summaries, or opaque handles.** This is codified as
+[`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+("HTTP API Boundary — Wire Shape Mirrors Substrate").
+
+Re-reading the five issues through the §46 lens:
+
+| Issue | Today's response | Canonical substrate the principle says to expose |
+|-------|-----------------|--------------------------------------------------|
+| `#11` | `WriteResult.Preview` (string) + `change_count` | `ChangeSet.Changes` (`[]sonic.ConfigChange`) |
+| `#5` | Per-resource summary views, or device CONFIG_DB raw reads | `Projection` (the output of `ExportEntries`) |
+| `#4` | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
+| `#6` | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
+| `#12` | ChangeSet entries without generation provenance | `Source` field (verbose-only, per §33 boundary) |
+
+The unifying citation in each per-issue principle check below is §46,
+with the other principles (§1, §11, §21, §33) cited as supporting
+context.
+
+Auditing the existing newtron HTTP API surface against §46 surfaced
+only one further violation: `WriteResult.Preview` without `Changes`,
+which `#11` already addresses. Every other endpoint already returns
+typed substrate. §46 is largely descriptive of how newtron already
+operates; codifying it locks the discipline in for future API
+additions.
+
 ## Style invariants
 
 These apply to every implementation in this batch:
@@ -85,11 +115,16 @@ technique from `newtron#4` and is last.
 
 ### Principle check
 
-`§11` (ChangeSet is the Universal Contract) is *strengthened* by this
-change. Today's `Preview` string is a derivative human-readable rendering
-of `ChangeSet.Changes`; serializing `Changes` directly gives consumers
-the same single-representation substrate newtron uses internally for
-write and verify. No parallel format invented; no internal type leaked.
+**§46 (load-bearing):** `WriteResult.Preview` is a derivative string
+rendering of `ChangeSet.Changes`. §46 requires the canonical form
+(typed `Changes` array) alongside; this change adds it. The summary
+`Preview` is retained for CLI rendering — exactly the "additive
+evolution" model §46 prescribes.
+
+**§11 supports:** ChangeSet is the Universal Contract; serializing
+`Changes` directly gives consumers the same single-representation
+substrate newtron uses internally for write and verify. No parallel
+format invented; no internal type leaked.
 
 ### Implementation
 
@@ -141,11 +176,17 @@ site, one test.
 
 ### Principle check
 
-`§1` (The Node — Intent and Reality in One Object) and `§21` (the
-projection is derivable from intent replay). Exposing the typed
-projection as a first-class read is exactly the substrate `§1` invites
-operators to reason about. The method reads `n.configDB.ExportEntries()`,
-which is the same primitive already used internally by `reconcileFull`
+**§46 (load-bearing):** the `Projection` is the canonical substrate
+that represents "what newtron believes this device should look like"
+(`§1`). Today it is only exposed via per-resource summary views
+(`/vlan`, `/vrf`, `/interface`) and via CONFIG_DB raw reads (which
+read the device, not the projection). §46 requires the canonical
+typed form to be available directly. This endpoint adds it.
+
+**§1, §21 support:** the projection is rebuilt from intent replay
+(`§21`); exposing it as a typed read is what `§1` invites operators
+to reason about. The method reads `n.configDB.ExportEntries()`, which
+is the same primitive already used internally by `reconcileFull`
 (`node.go:420`) — no new state, no new representation.
 
 ### Implementation
@@ -207,15 +248,21 @@ one test.
 
 ### Principle check
 
-`§1`, `§21`. The diff is computed via existing `sonic.DiffConfigDB`
-which is the canonical diff primitive (`§11`'s single representation).
-`DriftEntry` is reused for the diff shape — the same type already used
-for drift detection. No parallel diff vocabulary invented.
+**§46 (load-bearing):** the existing dry-run path returns a free-text
+preview + entry count. §46 requires the typed diff substrate. This
+endpoint provides `Before` and `After` typed projections plus a
+`[]DriftEntry` diff — three canonical types side-by-side. Rule 3 of
+§46 ("one typed diff vocabulary") is honored by reusing `DriftEntry`
+rather than inventing a parallel diff type.
 
-The snapshot/restore mechanism for in-memory replay uses existing
-`SnapshotIntentDB` / `RestoreIntentDB`. Intent records are not extended;
-the actual intent DB after the call equals the intent DB before, so
-`§20` (intent records are sufficient for reconstruction) is preserved.
+**§1, §21 support:** the projection is the canonical substrate (`§1`)
+derivable from intent replay (`§21`); diffing two projections is the
+canonical "what would change" answer.
+
+**§20 preserved:** the snapshot/restore mechanism uses existing
+`SnapshotIntentDB` / `RestoreIntentDB`. Intent records are not
+extended; the actual intent DB after the call equals the intent DB
+before.
 
 ### Implementation
 
@@ -327,20 +374,28 @@ step-application path.
 
 ### Principle check
 
-Detailed in the issue body. Summary:
+**§46 (load-bearing, with caveat):** `Source` is the canonical
+provenance substrate newtron captures at emission time but does not
+expose. §46 says to expose canonical substrate; this endpoint does so.
+**The caveat** is §33: exposing internal-package method names in HTTP
+responses puts internal Go symbols in the public surface. §46 and §33
+must be reconciled here — they do so via opt-in verbose mode.
 
-- `§1`, `§20`, `§27`, `§13`, `§14`, `§15`: not affected. `Source` is
-  generation-time metadata about the emitting Go method, not a new
-  representation alongside intent and reality, not a CONFIG_DB write,
-  not part of YANG schema, not stored on the device.
-- **The real concern** is the public/internal API boundary: exposing
-  internal-package method names in HTTP responses puts internal Go
-  symbols in the public surface.
-- **Resolution:** opt-in verbose mode. Default responses do NOT include
-  `Source`; verbose responses do. Consistent with principles **if and
-  only if** the verbose-mode opt-in is preserved. A future change that
-  promotes `Source` into default responses would violate the boundary
-  and must be rejected at that time.
+**§33 reconciliation:** the default response shape does NOT include
+`Source` (preserving §33's internal/public boundary). Verbose responses
+do (honoring §46's substrate exposure). The `json:"-"` tag on
+`ConfigChange.Source` is the load-bearing line for the reconciliation;
+the separate `VerboseConfigChange` type is the explicit opt-in surface.
+
+This reconciliation is consistent with both principles **if and only
+if** the verbose-mode opt-in is preserved. A future change that
+promotes `Source` into default responses would re-violate §33 and
+must be rejected at that time.
+
+**§1, §20, §27, §13, §14, §15 unaffected:** `Source` is generation-
+time metadata about the emitting Go method, not a new representation
+alongside intent and reality, not a CONFIG_DB write, not part of YANG
+schema, not stored on the device.
 
 This issue requires explicit operator acceptance of the verbose-mode
 resolution before implementation.
@@ -465,11 +520,20 @@ vs-verbose response shaping touches every handler that returns
 
 ### Principle check
 
-Service-as-primary-vocabulary aligns with `§6` (Interface is the point
-of service). The slice is computed via the replay-diff technique using
-existing `SnapshotIntentDB` / `RestoreIntentDB` / `RebuildProjection` /
-`DiffConfigDB`. `DriftEntry` reused for slice shape. No new primitives,
-no parallel diff vocabulary.
+**§46 (load-bearing):** the per-service projection slice is the
+canonical "service contribution to the network" substrate. Today,
+deriving it requires stitching across N intent-tree calls + N
+projection re-derivations — exactly the cross-endpoint stitching §46
+rejects. This endpoint surfaces the canonical slice directly.
+
+**§6 supports:** Interface is the point of service; service-first
+exposure aligns with `CLAUDE.md` §Design Principles. **§11 supports:**
+slice shape reuses `DriftEntry` per §46 rule 3 (one typed diff
+vocabulary).
+
+The slice is computed via the replay-diff technique using existing
+`SnapshotIntentDB` / `RestoreIntentDB` / `RebuildProjection` /
+`DiffConfigDB`. No new primitives, no parallel diff vocabulary.
 
 ### Implementation strategy
 
@@ -605,7 +669,14 @@ When a PR lands implementing one of these:
 
 ## Cross-references
 
-- newtron principles: `../DESIGN_PRINCIPLES_NEWTRON.md`.
+- newtron principles: `../DESIGN_PRINCIPLES_NEWTRON.md`, especially
+  [`§46`](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
+  (HTTP API Boundary — Wire Shape Mirrors Substrate; the unifying
+  principle for this batch),
+  [`§11`](../DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)
+  (ChangeSet is the Universal Contract),
+  [`§33`](../DESIGN_PRINCIPLES_NEWTRON.md#33-public-api-boundary--types-express-intent-not-implementation)
+  (Public API Boundary — Types Express Intent, Not Implementation).
 - newtron pipeline: `../newtron/unified-pipeline-architecture.md`.
 - newtcon Gap-Handling Protocol (the originating discipline):
   `../../../newtcon/CLAUDE.md` §Gap-Handling Protocol.
