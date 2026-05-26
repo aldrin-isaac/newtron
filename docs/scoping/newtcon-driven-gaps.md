@@ -21,23 +21,23 @@ issue, not newtcon-repo), and newtcon's contract marks the affected
 `manual_equivalent.newtron_http` field as `pending_newtron_gap`
 with a forward link to the newtron issue.
 
-This document scopes nine such gaps, organized into four
+This document scopes eight such gaps, organized into three
 **clusters** by shared underlying primitive. Each cluster has its
 own scoping document with per-issue implementation detail. The
 parent document (this one) covers what is shared across clusters:
 the unifying §46 principle, style invariants, cross-cluster
-phasing, status protocol, and the standalone Cluster D appendix.
+phasing, and status protocol.
 
-## Common thread — all nine align to §46
+## Common thread — all eight align to §46
 
-The nine gaps are not independent design decisions. Each is an
+The eight gaps are not independent design decisions. Each is an
 instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
 [`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
 ("HTTP API Boundary — Wire Shape Mirrors Substrate").
 
-Re-reading the nine issues through the §46 lens, grouped by the
+Re-reading the eight issues through the §46 lens, grouped by the
 substrate cluster they touch:
 
 | Issue | Cluster | Today's response | Canonical substrate the principle says to expose |
@@ -50,7 +50,6 @@ substrate cluster they touch:
 | `#14` | C. Topology spec | `GET /topology/node` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
 | `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyDevice` directly, via typed `create-node`/`delete-node`/`update-node` |
 | `#16` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyLink` directly, via typed `create-link`/`delete-link` |
-| `#13` | D. Cross-target reasoning | No exposure of cross-Node dependency edges | New computed substrate: typed dependency edges derived from service-spec resolution (edges only — classification is newtcon-side policy, not newtron substrate) |
 
 The unifying citation in each per-issue principle check is §46,
 with other principles (§1, §7, §11, §16, §21, §33) cited as
@@ -58,23 +57,35 @@ supporting context per cluster.
 
 ## Clusters
 
-Four clusters, each grouping issues by the load-bearing internal
-primitive they share. Each non-trivial cluster has a dedicated
-scoping document with full per-issue implementation detail.
+Three clusters, each grouping issues by the load-bearing internal
+primitive they share. Each cluster has a dedicated scoping document
+with full per-issue implementation detail.
 
 | Cluster | Issues | Shared load-bearing primitive | Scope doc |
 |---------|--------|-------------------------------|-----------|
 | **A. Projection substrate** | #4, #5, #6 | `ConfigDB.ExportEntries` + `sonic.DiffConfigDB` + `SnapshotIntentDB`/`RestoreIntentDB` | [`projection-substrate.md`](projection-substrate.md) |
 | **B. ChangeSet substrate** | #11, #12 | `sonic.ConfigChange` + all `WriteResult`-construction sites | [`changeset-substrate.md`](changeset-substrate.md) |
 | **C. Topology spec substrate** | #14, #15, #16 | `spec.Loader.SaveTopology` + `spec.TopologySpecFile`/`TopologyDevice`/`TopologyLink` + `validateTopology` | [`topology-spec-substrate.md`](topology-spec-substrate.md) |
-| **D. Cross-target reasoning** | #13 | (net-new: cross-Node dependency edges derived from service-spec resolution) | Appendix at the end of this document — kept here because the cluster contains a single issue |
 
 The original five-issue batch (`#4`, `#5`, `#6`, `#11`, `#12`) is
 §46 applied to the **runtime layer** (ChangeSet, projection, drift).
-The extended four-issue batch (`#13`, `#14`, `#15`, `#16`) extends
-§46 to the **spec layer** (topology.json — `#14`/`#15`/`#16`) and
-to a **net-new substrate type** (cross-Node dependency edges —
-`#13`).
+The extended three-issue batch (`#14`, `#15`, `#16`) extends §46 to
+the **spec layer** (topology.json).
+
+A fourth would-be cluster — cross-target reasoning, originally filed
+as `newtron#13` — was closed as wontfix after operator review
+identified the framing as wrong. The fragility-under-partial-success
+concern is correlation between operator-chosen batched intents, not
+a property of newtron's substrate. Classification lives wholly in
+newtcon, tracked as
+[newtcon#22](https://github.com/aldrin-isaac/newtcon/issues/22). The
+substrates that compose the classification (per-target ChangeSets,
+topology, intent records, service definitions, zone configurations)
+are exposed via existing endpoints and the already-scoped Cluster A,
+B, C gaps. See
+[`newtron#13`'s closing comment](https://github.com/aldrin-isaac/newtron/issues/13)
+for the full reasoning and a suggested shape for a *different*
+follow-up gap (resolution provenance) that may be worth filing.
 
 Auditing the existing newtron HTTP API surface against §46 surfaced
 only one runtime-layer violation in the original five issues:
@@ -141,7 +152,6 @@ unblock-value-per-effort items.
 | **3** | `newtron#4` | A | moderate | Workbench dry-run; pre-commit diff |
 | **4** | `newtron#6` | A | moderate | service-first projection views |
 | **5** | `newtron#12` | B | moderate (pending operator decision) | "Report this is the bug" affordance |
-| **6** | `newtron#13` | D | substantive (net-new substrate) | safe-vs-fragile multi-target classification |
 
 **Phasing rationale:**
 
@@ -164,9 +174,6 @@ unblock-value-per-effort items.
   the operator decision on §33 reconciliation (verbose-mode opt-in)
   in the issue body before implementation; defers naturally to
   after most other work.
-- **Phase 6** — `#13` is the heaviest item: net-new substrate (the
-  cross-Node dependency graph), independent of the other gaps,
-  warrants its own PR with substantial design.
 
 ## Status protocol
 
@@ -177,135 +184,24 @@ Each issue carries a status visible in the GitHub issue queue:
 - **CLOSED** — landed. The cluster doc adds a one-line note ("Landed
   in commit X, PR #N") in the relevant per-issue section.
 
-When all nine issues close, the entire `docs/scoping/` tree is
+When all eight issues close, the entire `docs/scoping/` tree is
 archived: rename to `docs/scoping/archive/2026-05-26-newtcon-gaps/`
 or similar. The closing protocol applies per cluster doc as well
 as to this parent.
 
-## Cluster D appendix — `newtron#13` (cross-target dependency exposure)
+## Closed issues from this batch
 
-Cluster D currently contains a single issue. Rather than splitting
-out a one-entry cluster doc, the per-issue detail lives here. If a
-second cross-target gap arrives, split `cross-target-reasoning.md`
-out of this appendix at that time.
-
-### Principle check
-
-**§46 (load-bearing, applied to net-new substrate):** the cross-
-Node dependency graph is substrate that newtron **can** compute
-internally (it emerges from service-spec resolution — `apply-service`
-on switch1 writes a `BGP_NEIGHBOR` whose `peer_as` is resolved from
-switch2's `bgp_as`) but does not today expose. §46 says when
-substrate is computable internally, expose it directly. The novelty
-here is that the substrate is **derived**, not stored — requiring
-new internal computation. This is in scope for §46: rule 1
-("canonical first") applies whether the substrate is stored or
-derived.
-
-**Operator-philosophy invariant #9** (confidence and limits
-explicit): without this substrate, every multi-target preview is
-either over-cautious ("always fragile") or dishonest ("always
-safe"). Neither teaches the operator the real domain shape.
-
-**Operator-philosophy invariant #1** (no black boxes): a
-categorical safe/fragile/unknown label is exactly the kind of
-summary the philosophy rejects. The dependency edges must be
-exposed.
-
-**Newtron §15** (operational symmetry) motivates: reverse symmetry
-is the recovery primitive for partial success, but the operator
-must know they are *in* a partial-success situation.
-
-### Refined scope — substrate only, not classification
-
-The originally-filed issue body proposed returning
-`classification: "safe | fragile | unknown"` alongside the edges.
-**Operator review (2026-05-26) refined this:** classification is
-operator-facing policy, not newtron substrate. Per §46 rule 1
-("canonical first, summary second"), `classification: "fragile"` is
-a summary of richer substrate (the typed edges with their kinds).
-Putting summary into newtron's response duplicates the §46
-violation pattern.
-
-newtron exposes the typed dependency **edges** with `kind`. newtcon
-(or any consumer) applies the classification rule — typically "any
-edge of kind `bgp_peer_resolution` implies fragility" — at the
-consumer side, where the operator-facing policy lives. The
-classification is therefore newtcon-side concern, tracked under
-newtcon issue #22 ("Preview should distinguish safe-under-partial-
-success from fragile multi-target operations"). newtron's job is to
-provide the substrate that makes honest classification possible.
-
-The issue body needs updating to reflect this refinement; see
-[Open follow-up](#open-follow-up) below.
-
-### Implementation
-
-This is the substantive item in the queue. New internal substrate
-required:
-
-- A **dependency-edge computation** that walks the resolved service-
-  spec graph and identifies cross-Node references (BGP peer
-  resolution, route-policy cross-references, EVPN peer-group
-  consistency requirements).
-- An HTTP endpoint that returns the dependency edges relevant to a
-  proposed multi-target operation, with substrate-level rationale
-  per edge. **No classification field in the response.**
-
-Proposed shape:
-
-```
-POST /network/{netID}/dependency-graph
-Body: {
-  "operation": "apply | refresh | remove",
-  "service": "transit",
-  "targets": [...]
-}
-Response 200: {
-  "edges": [
-    {
-      "from": { "node": "switch1", "binding": "transit on Ethernet0" },
-      "to":   { "node": "switch2", "binding": "transit on Ethernet0" },
-      "kind": "bgp_peer_resolution",
-      "rationale": "switch1's BGP_NEIGHBOR.peer_as resolves to switch2's bgp_as; partial commit creates session-half mismatch"
-    },
-    ...
-  ]
-}
-```
-
-No `classification`, no `classification_rationale`. The consumer
-applies the policy.
-
-The internal computation walks service-spec resolution at preview
-time (no device interaction; pure intent-replay logic). Reusable
-from the `/api/preview`-equivalent surfaces.
-
-**Tests:** synthetic topologies with known dependencies (independent
-service applications → empty edges list; coordinated BGP fabric
-change → edges with `bgp_peer_resolution` kind); rationale string
-contains substrate-level edge names.
-
-**Estimated effort:** substantive. The dependency-edge derivation
-is the bulk; the HTTP surface is straightforward once the
-derivation works. Standalone PR; no shared call sites with the
-other issues.
-
-**Implementation hint:** the existing service-spec resolution code
-(in `service_gen.go` and per-noun ops) already does the field-by-
-field resolution that produces these dependencies. A read-side
-wrapper that re-runs resolution in "trace edges" mode rather than
-"produce ChangeSet" mode would expose the same information without
-duplicating logic.
-
-### Open follow-up
-
-`newtron#13`'s issue body still describes the
-classification-included shape. After this scope-doc revision lands,
-add a comment on `newtron#13` referencing this section and noting
-the scope refinement (substrate-only, classification moves to
-newtcon-side policy). The classifier work is tracked separately as
-[newtcon#22](https://github.com/aldrin-isaac/newtcon/issues/22).
+- **`newtron#13`** — cross-target dependency exposure (closed
+  wontfix 2026-05-26 after operator review identified the framing
+  as wrong). The fragility-under-partial-success concern is
+  correlation between operator-chosen batched intents, not newtron
+  substrate; classification lives wholly in newtcon
+  ([newtcon#22](https://github.com/aldrin-isaac/newtcon/issues/22)).
+  See [the closing comment](https://github.com/aldrin-isaac/newtron/issues/13)
+  for the full reasoning and a suggested shape for a *different*
+  follow-up gap (resolution provenance) that may be worth filing
+  if newtron's intent records do not currently carry attribution to
+  the spec field each resolved value came from.
 
 ## Cross-references
 
@@ -333,7 +229,8 @@ newtcon-side policy). The classifier work is tracked separately as
   - <https://github.com/aldrin-isaac/newtron/issues/11>
   - <https://github.com/aldrin-isaac/newtron/issues/12>
 - Source issues (extended 2026-05-26 batch):
-  - <https://github.com/aldrin-isaac/newtron/issues/13> — cross-target dependency (refined to edges-only)
   - <https://github.com/aldrin-isaac/newtron/issues/14> — full topology read
   - <https://github.com/aldrin-isaac/newtron/issues/15> — topology node CRUD
   - <https://github.com/aldrin-isaac/newtron/issues/16> — topology link CRUD
+- Closed (wontfix) from this batch:
+  - <https://github.com/aldrin-isaac/newtron/issues/13> — cross-target dependency (misframed; classification lives in newtcon#22)
