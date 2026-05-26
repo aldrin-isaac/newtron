@@ -26,33 +26,70 @@ enough to execute. The implementations must remain consistent with
 wrote newtron's existing code wrote them — same patterns, same
 vocabulary, same boundary discipline.
 
-## Common thread — all five align to §46
+## Common thread — all nine align to §46
 
-The five gaps are not independent design decisions. Each is an
+The nine gaps are not independent design decisions. Each is an
 instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
 [`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
 ("HTTP API Boundary — Wire Shape Mirrors Substrate").
 
-Re-reading the five issues through the §46 lens:
+Re-reading the nine issues through the §46 lens, grouped by the
+substrate cluster they touch:
 
-| Issue | Today's response | Canonical substrate the principle says to expose |
-|-------|-----------------|--------------------------------------------------|
-| `#11` | `WriteResult.Preview` (string) + `change_count` | `ChangeSet.Changes` (`[]sonic.ConfigChange`) |
-| `#5` | Per-resource summary views, or device CONFIG_DB raw reads | `Projection` (the output of `ExportEntries`) |
-| `#4` | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
-| `#6` | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
-| `#12` | ChangeSet entries without generation provenance | `Source` field (verbose-only, per §33 boundary) |
+| Issue | Cluster | Today's response | Canonical substrate the principle says to expose |
+|-------|---------|-----------------|--------------------------------------------------|
+| `#11` | B. ChangeSet | `WriteResult.Preview` (string) + `change_count` | `ChangeSet.Changes` (`[]sonic.ConfigChange`) |
+| `#12` | B. ChangeSet | ChangeSet entries without generation provenance | `Source` field on each entry (verbose-only, per §33 boundary) |
+| `#5` | A. Projection | Per-resource summary views, or device CONFIG_DB raw reads | `Projection` (output of `ExportEntries`) |
+| `#4` | A. Projection | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
+| `#6` | A. Projection | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
+| `#14` | C. Topology spec | `GET /topology/node` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
+| `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyDevice` directly, via typed `create-node`/`delete-node`/`update-node` |
+| `#16` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyLink` directly, via typed `create-link`/`delete-link` |
+| `#13` | D. Cross-target reasoning | No exposure of cross-Node dependency graph | New computed substrate: dependency edges derived from service-spec resolution |
 
 The unifying citation in each per-issue principle check below is §46,
-with the other principles (§1, §11, §21, §33) cited as supporting
-context.
+with other principles (§1, §7, §11, §16, §21, §33) cited as
+supporting context per cluster.
+
+**Cluster summary:**
+
+- **Cluster A — Projection substrate (`#4`, `#5`, `#6`):** all share
+  `ConfigDB.ExportEntries` + `sonic.DiffConfigDB` +
+  `SnapshotIntentDB`/`RestoreIntentDB` as the load-bearing primitives.
+  Tight coupling — `#4` and `#6` are replay-diff techniques built
+  on `#5`'s read primitive.
+- **Cluster B — ChangeSet substrate (`#11`, `#12`):** share
+  `sonic.ConfigChange` and the WriteResult-construction call sites.
+  `#12`'s verbose mode attaches to the `Changes` field `#11`
+  introduces.
+- **Cluster C — Topology spec substrate (`#14`, `#15`, `#16`):**
+  share `spec.Loader.SaveTopology` (already exists, atomic
+  temp+rename) + `spec.TopologySpecFile`/`TopologyDevice`/
+  `TopologyLink` + `validateTopology`. `#15` and `#16` share
+  the `SaveTopology` write call site exactly; `#14` is the read
+  side.
+- **Cluster D — Cross-target reasoning (`#13`):** standalone;
+  requires building net-new substrate (the cross-Node dependency
+  graph derived from how service-spec resolution links one Node's
+  `BGP_NEIGHBOR` to another Node's `loopback_ip`, etc.). The
+  heaviest substantive work in the queue.
+
+The 2026-05-26 batch extends the original five-issue scope with
+`#13`, `#14`, `#15`, and `#16`. The original five (`#4`, `#5`, `#6`,
+`#11`, `#12`) are §46 applied to the **runtime layer** (ChangeSet,
+projection, drift). The new four extend §46 to the **spec layer**
+(topology.json — `#14`/`#15`/`#16`) and to a **net-new substrate
+type** (cross-Node dependency graph — `#13`).
 
 Auditing the existing newtron HTTP API surface against §46 surfaced
-only one further violation: `WriteResult.Preview` without `Changes`,
-which `#11` already addresses. Every other endpoint already returns
-typed substrate. §46 is largely descriptive of how newtron already
+only one runtime-layer violation in the original five issues:
+`WriteResult.Preview` without `Changes`, which `#11` addresses. The
+topology-layer gaps (`#14`, `#15`, `#16`) are spec-layer violations:
+the typed substrate exists internally, only HTTP exposure is
+missing. `§46` is largely descriptive of how newtron already
 operates; codifying it locks the discipline in for future API
 additions.
 
@@ -95,19 +132,46 @@ These apply to every implementation in this batch:
 
 ## Implementation order
 
-| Order | Issue | Complexity | Unblocks (newtcon-side) |
-|-------|-------|------------|-------------------------|
-| 1 | `newtron#11` — Structured `ChangeSet` in `WriteResult` | trivial | broad newtcon coverage; per-write granularity |
-| 2 | `newtron#5` — Per-Node projection read endpoint | trivial | Provenance surface; observation-history poller |
-| 3 | `newtron#4` — Projection diff (before-vs-after) | moderate | Workbench dry-run; pre-commit diff |
-| 4 | `newtron#12` — Call-site provenance (verbose mode) | moderate | "Report this is the bug" affordance |
-| 5 | `newtron#6` — Per-service projection slice | moderate | service-first projection views |
+Suggested phased ordering. Each phase is a natural PR boundary;
+within a phase, issues either share a PR (when they share a call
+site) or can be batched into one PR (when each is trivial). The
+phasing minimizes coupling cost and front-loads the highest
+unblock-value-per-effort items.
 
-`newtron#11` and `newtron#5` are foundational and trivial; do them first.
-`newtron#4` builds on the snapshot/restore primitives `newtron#5` makes
-visible. `newtron#12` requires an operator decision (verbose-mode
-resolution) before implementation. `newtron#6` reuses the replay-diff
-technique from `newtron#4` and is last.
+| Phase | Issue | Cluster | Complexity | Unblocks (newtcon-side) |
+|-------|-------|---------|------------|--------------------------|
+| **1** | `newtron#11` — Structured `ChangeSet` in `WriteResult` | B | trivial | broad newtcon coverage; per-write granularity |
+| **1** | `newtron#5` — Per-Node projection read endpoint | A | trivial | Provenance surface; observation-history poller |
+| **1** | `newtron#14` — Full topology read endpoint | C | trivial | graphical topology viz; spec-authoring readback |
+| **2** | `newtron#15` — Topology node CRUD | C | moderate | spec-authoring (topology) — node lifecycle |
+| **2** | `newtron#16` — Topology link CRUD | C | moderate | spec-authoring (topology) — link lifecycle |
+| **3** | `newtron#4` — Projection diff (before-vs-after) | A | moderate | Workbench dry-run; pre-commit diff |
+| **4** | `newtron#6` — Per-service projection slice | A | moderate | service-first projection views |
+| **5** | `newtron#12` — Call-site provenance (verbose mode) | B | moderate (pending operator decision) | "Report this is the bug" affordance |
+| **6** | `newtron#13` — Cross-target dependency exposure | D | substantive (net-new substrate) | safe-vs-fragile multi-target classification |
+
+**Phasing rationale:**
+
+- **Phase 1** — three trivial reads, one PR. Each is ~10–20 lines of
+  new code, all §46-aligned, all unblock substantive newtcon-side
+  work. No coupling between them; batched only for review efficiency.
+- **Phase 2** — `#15` + `#16` in one PR. They share the
+  `Loader.SaveTopology` call site, the same Network method-layer
+  pattern, and the same validation hook. Splitting them across two
+  PRs would create churn in the same files. `#14` (Phase 1)
+  precedes Phase 2 logically — operators read after they mutate —
+  but the implementations don't depend on each other.
+- **Phase 3** — `#4` (projection diff) builds on the snapshot/restore
+  primitives `#5` (Phase 1) makes visible. Single PR.
+- **Phase 4** — `#6` (per-service slice) reuses `#4`'s replay-diff
+  technique with the inverse staging ("remove the service's intents"
+  instead of "stage additions"). Single PR.
+- **Phase 5** — `#12` (verbose-mode call-site provenance) requires
+  the operator decision on §33 reconciliation in the issue body
+  before implementation; defers naturally to after most other work.
+- **Phase 6** — `#13` is the heaviest item: net-new substrate (the
+  cross-Node dependency graph), independent of the other gaps,
+  warrants its own PR with substantial design.
 
 ---
 
@@ -645,15 +709,326 @@ rebuild correctly. Test thoroughly across service types.
 
 ---
 
+## 6. `newtron#14` — Full topology read endpoint
+
+### Principle check
+
+**§46 (load-bearing):** the `TopologySpecFile` is canonical
+substrate that the spec loader already builds in memory. Today's
+`GET /topology/node` returns device names only (`[]string`) — the
+"summary instead of canonical" pattern §46 explicitly rejects.
+Exposing the full typed substrate directly is the resolution.
+
+**§7 supports:** topology is a network-scoped definition newtron
+owns; a typed-read endpoint is the minimum substrate-visibility for
+that definition.
+
+### Implementation
+
+**Node/Network method** — `Network.GetTopology()` already exists
+and returns `*spec.TopologySpecFile`. No new method needed.
+
+**HTTP handler** in `pkg/newtron/api/handler_network.go`, alongside
+the existing `handleTopologyDeviceNames`:
+
+```go
+func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
+    na := s.requireNetwork(w, r)
+    if na == nil {
+        return
+    }
+    val, err := na.do(r.Context(), func() (any, error) {
+        topo := na.net.GetTopology()
+        if topo == nil {
+            return nil, &newtron.NotFoundError{Resource: "topology", Name: ""}
+        }
+        return topo, nil
+    })
+    if err != nil {
+        writeError(w, err)
+        return
+    }
+    writeJSON(w, http.StatusOK, val)
+}
+```
+
+Returns `*spec.TopologySpecFile` with existing JSON tags (devices,
+links, metadata).
+
+**Route** in `pkg/newtron/api/handler.go`, alongside the existing
+`/topology/node` route:
+
+```go
+mux.HandleFunc("GET /network/{netID}/topology", s.handleTopology)
+```
+
+**Tests:** assert round-trip JSON shape matches `TopologySpecFile`;
+404 with `Error.kind="not_found"` when `HasTopology()` is false.
+
+**Estimated effort:** trivial. One handler, one route. Reuses
+existing `GetTopology()`.
+
+---
+
+## 7. `newtron#15` — Topology node CRUD (`create-node`, `delete-node`, `update-node`)
+
+### Principle check
+
+**§46 (load-bearing):** the typed `TopologyDevice` is canonical
+substrate. Today, mutating it requires a YAML hand-edit + `reload`
+— the "no typed verb for an existing substrate" pattern §46
+rejects via rule 1 ("canonical first").
+
+**§7 supports:** topology nodes are network-scoped definitions;
+the existing verb pattern (`create-service`, `delete-profile`)
+extends naturally to topology.
+
+**§16 (verb vocabulary):** `create-node`, `delete-node`,
+`update-node` fit the existing `verb-noun` form newtron uses
+throughout.
+
+### Implementation
+
+**New Network methods** in `pkg/newtron/network/network.go`,
+mirroring the existing `SaveProfile`/`SaveZone`/`SaveService`
+pattern:
+
+```go
+// AddTopologyDevice creates a device entry in the topology spec.
+// Returns ConflictError if a device with this name already exists.
+// Validates against existing validateTopology rules (profile ref).
+// Persists atomically via spec.Loader.SaveTopology.
+func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error
+
+// DeleteTopologyDevice removes a device from the topology spec.
+// Returns NotFoundError if no device with this name exists.
+// Returns ConflictError if any link still references the device
+// (operator must delete the referring links first, or call with
+// force=true to cascade — see open-question note below).
+func (n *Network) DeleteTopologyDevice(name string, force bool) error
+
+// UpdateTopologyDevice replaces a device entry. Same validation
+// as Add; same persistence path.
+func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error
+```
+
+Each calls `loader.SaveTopology(spec)` after mutation; failure
+unwinds the in-memory mutation before returning.
+
+**HTTP handlers** in `pkg/newtron/api/handler_network.go`,
+mirroring the `handleCreateService` / `handleDeleteService` /
+etc. patterns:
+
+```go
+func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
+    // parse netID, decode body { name, device },
+    // call na.net.AddTopologyDevice, return device or error
+}
+func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request) {
+    // parse netID, name, force query param,
+    // call na.net.DeleteTopologyDevice, return {"deleted": name}
+}
+func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request) {
+    // parse netID, name, decode body,
+    // call na.net.UpdateTopologyDevice, return device
+}
+```
+
+**Routes** in `pkg/newtron/api/handler.go`:
+
+```go
+mux.HandleFunc("POST /network/{netID}/topology/create-node", s.handleCreateTopologyNode)
+mux.HandleFunc("DELETE /network/{netID}/topology/node/{name}", s.handleDeleteTopologyNode)
+mux.HandleFunc("PUT /network/{netID}/topology/node/{name}", s.handleUpdateTopologyNode)
+```
+
+**Request types** in `pkg/newtron/api/types.go`:
+
+```go
+type TopologyNodeCreateRequest struct {
+    Name   string                `json:"name"`
+    Device *spec.TopologyDevice  `json:"device"`
+}
+```
+
+`Update` takes a `*spec.TopologyDevice` body directly (the name is
+in the URL path).
+
+**Tests:** round-trip create+read; duplicate-name → 409; deletion
+of name referenced by a link → 409 (unless `?force=true`);
+validation failure (unknown profile reference) → 400 with
+substrate-level rejection reason; in-memory state updated post-CRUD
+without requiring `reload`.
+
+**Estimated effort:** moderate. Persistence (`SaveTopology`) and
+validation (`validateTopology`) already exist. Gap is the
+Network-method layer + handlers. Implement together with `#16`
+(same PR).
+
+**Open question:** `?force=true` on `delete-node` to cascade-delete
+referring links — defer to Architect during implementation; not
+filing a separate gap for it.
+
+---
+
+## 8. `newtron#16` — Topology link CRUD (`create-link`, `delete-link`)
+
+### Principle check
+
+Same as `#15`: §46 (canonical `TopologyLink` substrate exposed
+directly), §7 (network-scoped definition), §16 (verb vocabulary).
+
+### Implementation
+
+**New Network methods**, mirroring `#15`:
+
+```go
+// AddTopologyLink adds a link to the topology spec.
+// Returns ConflictError if an equivalent link (unordered {A,Z})
+// already exists. Validates endpoints (both devices must exist;
+// both interfaces must be declared on their respective devices).
+func (n *Network) AddTopologyLink(link *spec.TopologyLink) error
+
+// DeleteTopologyLink removes a link from the topology spec. Match
+// is unordered: {a:X, z:Y} matches {a:Y, z:X}. Returns
+// NotFoundError if no matching link.
+func (n *Network) DeleteTopologyLink(link *spec.TopologyLink) error
+```
+
+Both invoke `loader.SaveTopology(spec)` after mutation.
+
+**HTTP handlers** in `handler_network.go`:
+
+```go
+func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request) {
+    // decode body as *spec.TopologyLink, call AddTopologyLink, return link
+}
+func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request) {
+    // decode body as *spec.TopologyLink, call DeleteTopologyLink, return {"deleted": link}
+}
+```
+
+**Routes:**
+
+```go
+mux.HandleFunc("POST /network/{netID}/topology/create-link", s.handleCreateTopologyLink)
+mux.HandleFunc("DELETE /network/{netID}/topology/link", s.handleDeleteTopologyLink)
+```
+
+`DELETE` takes the body convention (avoids URL-escaping
+`device:interface` strings). Alternative path-param form is noted
+in the issue body as an open question for the Architect.
+
+**Tests:** create + read; duplicate detection on A/Z swap; deletion
+matches unordered pair; validation failures with substrate-level
+rejection reasons (unknown device, undeclared interface).
+
+**Estimated effort:** moderate. Same effort profile as `#15`; one
+PR for both.
+
+---
+
+## 9. `newtron#13` — Cross-target dependency exposure
+
+### Principle check
+
+**§46 (load-bearing, applied to new substrate):** the cross-Node
+dependency graph is substrate that newtron **can** compute
+internally (it emerges from service-spec resolution — `apply-service`
+on switch1 writes a `BGP_NEIGHBOR` whose `peer_as` is resolved from
+switch2's `bgp_as`) but does not today expose. §46 says when
+substrate is computable internally, expose it directly. The novelty
+here is that the substrate is **derived**, not stored — requiring
+new internal computation. This is in scope for §46: rule 1
+("canonical first") applies whether the substrate is stored or
+derived.
+
+**Operator-philosophy invariant #9** (confidence and limits
+explicit): without this substrate, every multi-target preview is
+either over-cautious ("always fragile") or dishonest ("always
+safe"). Neither teaches the operator the real domain shape.
+
+**Operator-philosophy invariant #1** (no black boxes): a
+categorical safe/fragile/unknown label is exactly the kind of
+summary the philosophy rejects. The dependency edges must be
+exposed.
+
+**Newtron §15** (operational symmetry) motivates: reverse symmetry
+is the recovery primitive for partial success, but the operator
+must know they are *in* a partial-success situation.
+
+### Implementation
+
+This is the substantive item in the queue. New internal substrate
+required:
+
+- A **dependency-graph computation** that walks the resolved
+  service-spec graph and identifies cross-Node references
+  (BGP peer resolution, route-policy cross-references,
+  EVPN peer-group consistency requirements).
+- An HTTP endpoint that returns the dependency edges relevant to a
+  proposed multi-target operation, with substrate-level rationale
+  per edge.
+
+Proposed shape (refined during implementation):
+
+```
+POST /network/{netID}/dependency-graph
+Body: {
+  "operation": "apply | refresh | remove",
+  "service": "transit",
+  "targets": [...]
+}
+Response 200: {
+  "edges": [
+    {
+      "from": { "node": "switch1", "binding": "transit on Ethernet0" },
+      "to":   { "node": "switch2", "binding": "transit on Ethernet0" },
+      "kind": "bgp_peer_resolution",
+      "rationale": "switch1's BGP_NEIGHBOR.peer_as resolves to switch2's bgp_as; partial commit creates session-half mismatch"
+    },
+    ...
+  ],
+  "classification": "safe | fragile | unknown",
+  "classification_rationale": "<substrate-grounded explanation>"
+}
+```
+
+The internal computation walks service-spec resolution at preview
+time (no device interaction; pure intent-replay logic). Reusable
+from the `/api/preview`-equivalent surfaces.
+
+**Tests:** synthetic topologies with known dependencies (independent
+service applications → "safe"; coordinated BGP fabric change →
+"fragile"); rationale string contains substrate-level edge names.
+
+**Estimated effort:** substantive. The dependency-graph derivation
+is the bulk; the HTTP surface is straightforward once the
+derivation works. Standalone PR; no shared call sites with the
+other issues.
+
+**Implementation hint:** the existing service-spec resolution code
+(in `service_gen.go` and per-noun ops) already does the field-by-
+field resolution that produces these dependencies. A
+read-side wrapper that re-runs resolution in "trace edges"
+mode rather than "produce ChangeSet" mode would expose the same
+information without duplicating logic.
+
+---
+
 ## Summary table
 
-| # | Title | Files touched | New types | Principle gates |
-|---|-------|---------------|-----------|-----------------|
-| 11 | Structured `ChangeSet` in `WriteResult` | `pkg/newtron/types.go` + `WriteResult` callers | none (reuses `sonic.ConfigChange`) | §11 strengthened |
-| 5 | Per-Node projection read | `pkg/newtron/network/node/node.go`, `pkg/newtron/api/handler_node.go`, `pkg/newtron/api/handler.go` | none (reuses `sonic.RawConfigDB`) | §1, §21 |
-| 4 | Projection diff (before-vs-after) | `pkg/newtron/network/node/node.go`, `pkg/newtron/api/handler_node.go`, `pkg/newtron/api/handler.go`, `pkg/newtron/api/types.go` | `ProjectionDiff`, `ProjectionDiffRequest` | §1, §21, §11 (reuses `DriftEntry`) |
-| 12 | Call-site provenance (verbose) | `pkg/newtron/network/node/source.go` (new), `pkg/newtron/device/sonic/types.go`, `pkg/newtron/network/node/changeset.go`, `pkg/newtron/types.go`, all `WriteResult.Changes` callers | `VerboseConfigChange` | public/internal boundary — verbose-only resolution required |
-| 6 | Per-service projection slice | `pkg/newtron/network/network.go`, `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go` | `ServiceProjection`, `ServiceProjectionNode`, `ServiceProjectionOpts` | §6, §11 (reuses `DriftEntry`) |
+| # | Cluster | Title | Files touched | New types | Principle gates |
+|---|---------|-------|---------------|-----------|-----------------|
+| 11 | B | Structured `ChangeSet` in `WriteResult` | `pkg/newtron/types.go` + `WriteResult` callers | none (reuses `sonic.ConfigChange`) | §46, §11 strengthened |
+| 5 | A | Per-Node projection read | `pkg/newtron/network/node/node.go`, `pkg/newtron/api/handler_node.go`, `pkg/newtron/api/handler.go` | none (reuses `sonic.RawConfigDB`) | §46, §1, §21 |
+| 14 | C | Full topology read | `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go` | none (reuses `spec.TopologySpecFile`) | §46, §7 |
+| 15 | C | Topology node CRUD | `pkg/newtron/network/network.go`, `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go`, `pkg/newtron/api/types.go` | `TopologyNodeCreateRequest` (reuses `spec.TopologyDevice`) | §46, §7, §16 |
+| 16 | C | Topology link CRUD | `pkg/newtron/network/network.go`, `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go` | none (reuses `spec.TopologyLink`) | §46, §7, §16 |
+| 4 | A | Projection diff (before-vs-after) | `pkg/newtron/network/node/node.go`, `pkg/newtron/api/handler_node.go`, `pkg/newtron/api/handler.go`, `pkg/newtron/api/types.go` | `ProjectionDiff`, `ProjectionDiffRequest` | §46, §1, §21 (reuses `DriftEntry`) |
+| 6 | A | Per-service projection slice | `pkg/newtron/network/network.go`, `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go` | `ServiceProjection`, `ServiceProjectionNode`, `ServiceProjectionOpts` | §46, §6 (reuses `DriftEntry`) |
+| 12 | B | Call-site provenance (verbose) | `pkg/newtron/network/node/source.go` (new), `pkg/newtron/device/sonic/types.go`, `pkg/newtron/network/node/changeset.go`, `pkg/newtron/types.go`, all `WriteResult.Changes` callers | `VerboseConfigChange` | §46, §33 — verbose-only resolution required |
+| 13 | D | Cross-target dependency exposure | new derivation module (TBD location), `pkg/newtron/api/handler_network.go`, `pkg/newtron/api/handler.go`, `pkg/newtron/api/types.go` | `DependencyGraph`, `DependencyEdge`, `DependencyGraphRequest` | §46 applied to derived substrate; ophil #1, #9 |
 
 ## Closing each issue
 
@@ -680,9 +1055,14 @@ When a PR lands implementing one of these:
 - newtron pipeline: `../newtron/unified-pipeline-architecture.md`.
 - newtcon Gap-Handling Protocol (the originating discipline):
   `../../../newtcon/CLAUDE.md` §Gap-Handling Protocol.
-- Source issues:
+- Source issues (original 2026-05-26 batch):
   - <https://github.com/aldrin-isaac/newtron/issues/4>
   - <https://github.com/aldrin-isaac/newtron/issues/5>
   - <https://github.com/aldrin-isaac/newtron/issues/6>
   - <https://github.com/aldrin-isaac/newtron/issues/11>
   - <https://github.com/aldrin-isaac/newtron/issues/12>
+- Source issues (extended 2026-05-26 batch):
+  - <https://github.com/aldrin-isaac/newtron/issues/13> — cross-target dependency
+  - <https://github.com/aldrin-isaac/newtron/issues/14> — full topology read
+  - <https://github.com/aldrin-isaac/newtron/issues/15> — topology node CRUD
+  - <https://github.com/aldrin-isaac/newtron/issues/16> — topology link CRUD
