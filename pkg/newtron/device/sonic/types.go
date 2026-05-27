@@ -80,12 +80,19 @@ type VerificationResult struct {
 }
 
 // VerificationError describes a single verification failure.
+//
+// DeviceResponse carries the verbatim device-side reply observed at the
+// moment the mismatch was detected. For field mismatches it is the full
+// HGETALL content formatted as sorted `key=value` pairs; for missing-key
+// or still-present cases it is the verbatim Redis-level status. Empty
+// when verification ran without device transport (loopback mode).
 type VerificationError struct {
-	Table    string
-	Key      string
-	Field    string
-	Expected string
-	Actual   string // "" if missing
+	Table          string
+	Key            string
+	Field          string
+	Expected       string
+	Actual         string // "" if missing
+	DeviceResponse string
 }
 
 // NeighEntry represents a neighbor (ARP/NDP) entry read from a device.

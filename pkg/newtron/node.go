@@ -85,6 +85,22 @@ func (n *Node) Tree() *TopologySnapshot {
 	return snap
 }
 
+// Projection returns the per-table per-key per-field expected state derived
+// from intent replay — the canonical substrate (`sonic.RawConfigDB`) representing
+// what newtron believes this device should look like. Compare against
+// ConfigDBSnapshot to see drift. §46.
+func (n *Node) Projection() sonic.RawConfigDB {
+	return n.internal.Projection()
+}
+
+// ConfigDBSnapshot returns the device's actual CONFIG_DB state as a single
+// internally-consistent snapshot. ownedOnly=true returns only newtron-owned
+// tables (matching Drift's scope); ownedOnly=false returns every schema-known
+// table on the device. §46.
+func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawConfigDB, error) {
+	return n.internal.ConfigDBSnapshot(ctx, ownedOnly)
+}
+
 // Drift compares the node's projection (expected state) against the device's
 // actual CONFIG_DB. Returns drift entries for owned tables. Auto-connects
 // transport if not already connected.
@@ -229,6 +245,7 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	for _, cs := range n.pending {
 		result.Preview += cs.Preview()
 		result.ChangeCount += len(cs.Changes)
+		result.Changes = append(result.Changes, cs.Changes...)
 	}
 
 	// Apply all pending changesets
@@ -251,11 +268,12 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 			vr.Failed += cs.Verification.Failed
 			for _, e := range cs.Verification.Errors {
 				vr.Errors = append(vr.Errors, VerificationError{
-					Table:    e.Table,
-					Key:      e.Key,
-					Field:    e.Field,
-					Expected: e.Expected,
-					Actual:   e.Actual,
+					Table:          e.Table,
+					Key:            e.Key,
+					Field:          e.Field,
+					Expected:       e.Expected,
+					Actual:         e.Actual,
+					DeviceResponse: e.DeviceResponse,
 				})
 			}
 			if cs.Verification.Failed > 0 {
@@ -309,10 +327,13 @@ func (n *Node) Execute(ctx context.Context, opts ExecOpts, fn func(ctx context.C
 	}
 
 	if !opts.Execute {
-		// Dry-run: capture preview, then restore intent DB.
+		// Dry-run: capture preview, typed changes, then restore intent DB.
 		result := &WriteResult{
 			Preview:     n.PendingPreview(),
 			ChangeCount: n.PendingCount(),
+		}
+		for _, cs := range n.pending {
+			result.Changes = append(result.Changes, cs.Changes...)
 		}
 		n.internal.RestoreIntentDB(snapshot)
 		n.pending = nil

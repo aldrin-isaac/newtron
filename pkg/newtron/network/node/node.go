@@ -337,6 +337,37 @@ func (n *Node) Tree() *spec.TopologyDevice {
 	return dev
 }
 
+// Projection returns the per-table per-key per-field expected state derived
+// from intent replay — the canonical substrate representing "what newtron
+// believes this device should look like". Same `sonic.RawConfigDB` shape Drift
+// uses for its expected side. Compare against ConfigDBSnapshot to see drift.
+//
+// See DESIGN_PRINCIPLES_NEWTRON.md §1, §21, §46.
+func (n *Node) Projection() sonic.RawConfigDB {
+	if n.configDB == nil {
+		return sonic.RawConfigDB{}
+	}
+	return n.configDB.ExportRaw()
+}
+
+// ConfigDBSnapshot reads the device's actual CONFIG_DB state as a single
+// internally-consistent snapshot. When ownedOnly is true the result covers
+// only newtron-owned tables (matching Drift's scope); when false it covers
+// every schema-known table on the device. Auto-connects transport if needed.
+//
+// See DESIGN_PRINCIPLES_NEWTRON.md §1, §46.
+func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawConfigDB, error) {
+	if n.conn == nil {
+		if err := n.ConnectTransport(ctx); err != nil {
+			return nil, fmt.Errorf("connecting transport for configdb snapshot: %w", err)
+		}
+	}
+	if ownedOnly {
+		return n.conn.Client().GetRawOwnedTables(ctx)
+	}
+	return n.conn.Client().GetRawAllTables(ctx)
+}
+
 // Drift compares the projection (expected state from intent replay) against
 // the device's actual CONFIG_DB. Auto-connects transport if needed.
 func (n *Node) Drift(ctx context.Context) ([]sonic.DriftEntry, error) {

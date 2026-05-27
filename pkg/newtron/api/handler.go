@@ -42,6 +42,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /network/{netID}/route-policy/{name}", s.handleShowRoutePolicy)
 	mux.HandleFunc("GET /network/{netID}/prefix-list", s.handleListPrefixLists)
 	mux.HandleFunc("GET /network/{netID}/prefix-list/{name}", s.handleShowPrefixList)
+	mux.HandleFunc("GET /network/{netID}/topology", s.handleTopology)
 	mux.HandleFunc("GET /network/{netID}/topology/node", s.handleTopologyDeviceNames)
 	mux.HandleFunc("GET /network/{netID}/host/{name}", s.handleGetHostProfile)
 	mux.HandleFunc("GET /network/{netID}/feature", s.handleGetAllFeatures)
@@ -139,6 +140,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("POST /network/{netID}/node/{device}/remove-bgp-evpn-peer", s.handleRemoveBGPEVPNPeer)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/restart-daemon", s.handleRestartDaemon)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/setup-device", s.handleSetupDevice)
+	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb", s.handleConfigDBSnapshot)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}", s.handleConfigDBTableKeys)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}", s.handleQueryConfigDB)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/configdb/{table}/{key}/exists", s.handleConfigDBEntryExists)
@@ -149,6 +151,7 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	// Intent operations
 	// ====================================================================
+	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/projection", s.handleProjection)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/tree", s.handleTree)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/drift", s.handleDrift)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/reconcile", s.handleReconcile)

@@ -136,6 +136,13 @@ func (net *Network) HasTopology() bool {
 	return net.internal.HasTopology()
 }
 
+// GetTopology returns the full topology spec, or nil when no topology.json was
+// loaded for this network. §46: canonical `spec.TopologySpecFile` substrate
+// exposed directly, alongside the names-only summary in TopologyDeviceNames.
+func (net *Network) GetTopology() *spec.TopologySpecFile {
+	return net.internal.GetTopology()
+}
+
 // TopologyDeviceNames returns the sorted device names from the topology.
 // Returns nil if no topology is loaded.
 func (net *Network) TopologyDeviceNames() []string {

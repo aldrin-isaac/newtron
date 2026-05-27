@@ -257,3 +257,21 @@ func (c *ConfigDBClient) GetRawOwnedTables(ctx context.Context) (RawConfigDB, er
 	}
 	return raw, nil
 }
+
+// GetRawAllTables reads every schema-known table from CONFIG_DB as raw data.
+// Superset of GetRawOwnedTables — includes tables excluded from drift detection
+// (factory/platform state, daemon-managed tables). Used by the per-Node
+// CONFIG_DB snapshot endpoint when the caller asks for the full picture.
+func (c *ConfigDBClient) GetRawAllTables(ctx context.Context) (RawConfigDB, error) {
+	raw := make(RawConfigDB)
+	for _, table := range KnownTables() {
+		entries, err := c.GetRawTable(table)
+		if err != nil {
+			return nil, err
+		}
+		if len(entries) > 0 {
+			raw[table] = entries
+		}
+	}
+	return raw, nil
+}

@@ -39,13 +39,19 @@ type ExecOpts struct {
 // ============================================================================
 
 // WriteResult wraps the outcome of a configuration write operation.
+//
+// Changes is the typed ChangeSet substrate per §46 — every CONFIG_DB add /
+// modify / delete the operation produced, in the same `sonic.ConfigChange`
+// shape used internally. Preview is the human-readable rendering of the same
+// substrate; Changes is the canonical form on the wire.
 type WriteResult struct {
-	Preview      string              `json:"preview,omitempty"`
-	ChangeCount  int                 `json:"change_count"`
-	Applied      bool                `json:"applied"`
-	Verified     bool                `json:"verified"`
-	Saved        bool                `json:"saved"`
-	Verification *VerificationResult `json:"verification,omitempty"`
+	Preview      string               `json:"preview,omitempty"`
+	Changes      []sonic.ConfigChange `json:"changes,omitempty"`
+	ChangeCount  int                  `json:"change_count"`
+	Applied      bool                 `json:"applied"`
+	Verified     bool                 `json:"verified"`
+	Saved        bool                 `json:"saved"`
+	Verification *VerificationResult  `json:"verification,omitempty"`
 }
 
 // VerificationResult reports ChangeSet verification outcome.
@@ -56,12 +62,19 @@ type VerificationResult struct {
 }
 
 // VerificationError describes a single verification failure.
+//
+// DeviceResponse carries the verbatim device-side reply observed at the
+// moment the mismatch was detected (per §46). For field mismatches it is the
+// full HGETALL content formatted as `key=value` pairs sorted alphabetically;
+// for missing-key or still-present cases it is the verbatim Redis-level
+// status. Absent when verification ran without device transport.
 type VerificationError struct {
-	Table    string `json:"table"`
-	Key      string `json:"key"`
-	Field    string `json:"field"`
-	Expected string `json:"expected"`
-	Actual   string `json:"actual"` // "" if missing
+	Table          string `json:"table"`
+	Key            string `json:"key"`
+	Field          string `json:"field"`
+	Expected       string `json:"expected"`
+	Actual         string `json:"actual"`                     // "" if missing
+	DeviceResponse string `json:"device_response,omitempty"`
 }
 
 // ============================================================================

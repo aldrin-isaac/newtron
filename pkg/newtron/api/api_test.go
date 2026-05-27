@@ -1,11 +1,54 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
+
+// repoRoot walks up from this test file to the newtron repo root so tests
+// can locate the newtrun topology spec dirs without depending on cwd.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	// pkg/newtron/api/ → pkg/newtron/ → pkg/ → repo root (3 levels up).
+	return filepath.Join(filepath.Dir(file), "..", "..", "..")
+}
+
+// newTestServer creates a Server with the 1node-vs topology registered as the
+// default network. Used by every behavioral test that hits a topology-mode
+// endpoint. Stops the server at test cleanup.
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	s := NewServer(nil, 0)
+	if err := s.RegisterNetwork("default", specDir); err != nil {
+		t.Fatalf("RegisterNetwork: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	return s
+}
+
+// httpDo sends an HTTP request to the server's handler and returns the
+// recorder. Drives the request synchronously — no real network.
+func httpDo(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	w := httptest.NewRecorder()
+	s.httpServer.Handler.ServeHTTP(w, req)
+	return w
+}
 
 // TestAPICompleteness ensures every exported method on *newtron.Network,
 // *newtron.Node, and *newtron.Interface is either covered by an HTTP endpoint
@@ -70,6 +113,7 @@ func TestAPICompleteness(t *testing.T) {
 			"DeleteZone":    true,
 			// Topology / Provision
 			"HasTopology":         true,
+			"GetTopology":         true, // #14: GET /network/{netID}/topology
 			"TopologyDeviceNames": true,
 			"IsHostDevice":        true,
 			"GetHostProfile":      true,
@@ -105,6 +149,7 @@ func TestAPICompleteness(t *testing.T) {
 			"QueryConfigDB":       true,
 			"ConfigDBTableKeys":   true,
 			"ConfigDBEntryExists": true,
+			"ConfigDBSnapshot":    true, // #17: GET /network/{netID}/node/{device}/configdb
 			"QueryStateDB":        true,
 			// Write operations
 			"AddBGPEVPNPeer":          true,
@@ -134,9 +179,10 @@ func TestAPICompleteness(t *testing.T) {
 			"RestartService":          true,
 			"ExecCommand":             true,
 			// Intent operations
-			"Tree":      true,
-			"Drift":     true,
-			"Reconcile": true,
+			"Projection": true, // #5: GET /network/{netID}/node/{device}/intent/projection
+			"Tree":       true,
+			"Drift":      true,
+			"Reconcile":  true,
 			},
 		"Interface": {
 			"ApplyService":         true,
@@ -264,4 +310,179 @@ func TestAPICompleteness(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ============================================================================
+// Phase 1 behavioral tests — exercise the new substrate-exposure endpoints
+// against a topology-mode network (no device connection required).
+// ============================================================================
+
+// decodeAPIResponse decodes the body into APIResponse and fails on parse error.
+func decodeAPIResponse(t *testing.T, w *httptest.ResponseRecorder) APIResponse {
+	t.Helper()
+	var resp APIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode APIResponse: %v; body: %s", err, w.Body.String())
+	}
+	return resp
+}
+
+// TestHandleTopology_ReturnsSpecFile — newtron#14 (Cluster C). GET /topology
+// returns the typed `spec.TopologySpecFile` with devices.switch1 present.
+func TestHandleTopology_ReturnsSpecFile(t *testing.T) {
+	s := newTestServer(t)
+
+	w := httpDo(t, s, http.MethodGet, "/network/default/topology")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeAPIResponse(t, w)
+	if resp.Error != "" {
+		t.Fatalf("error = %q, want empty", resp.Error)
+	}
+	raw, _ := json.Marshal(resp.Data)
+	var topo map[string]any
+	if err := json.Unmarshal(raw, &topo); err != nil {
+		t.Fatalf("topology not a JSON object: %v", err)
+	}
+	if topo["version"] == nil {
+		t.Error("topology response missing 'version'")
+	}
+	devices, ok := topo["devices"].(map[string]any)
+	if !ok {
+		t.Fatalf("topology.devices not an object: %v", topo["devices"])
+	}
+	if devices["switch1"] == nil {
+		t.Errorf("topology.devices.switch1 missing; got keys: %v", mapKeys(devices))
+	}
+}
+
+// TestHandleProjection_ReturnsRawConfigDB — newtron#5 (Cluster A). GET
+// /intent/projection in topology mode returns the typed projection
+// (`sonic.RawConfigDB`) built from intent replay. 1node-vs runs setup-device
+// during topology load, so DEVICE_METADATA is the canonical sentinel entry.
+func TestHandleProjection_ReturnsRawConfigDB(t *testing.T) {
+	s := newTestServer(t)
+
+	w := httpDo(t, s, http.MethodGet,
+		"/network/default/node/switch1/intent/projection?mode=topology")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeAPIResponse(t, w)
+	if resp.Error != "" {
+		t.Fatalf("error = %q, want empty", resp.Error)
+	}
+	raw, _ := json.Marshal(resp.Data)
+	var proj map[string]map[string]map[string]string
+	if err := json.Unmarshal(raw, &proj); err != nil {
+		t.Fatalf("projection not RawConfigDB shape: %v", err)
+	}
+	if len(proj) == 0 {
+		t.Fatal("projection empty after topology replay; expected setup-device entries")
+	}
+	if _, ok := proj["DEVICE_METADATA"]; !ok {
+		t.Errorf("DEVICE_METADATA missing from projection; got tables: %v", mapKeys2(proj))
+	}
+}
+
+// TestHandleConfigDBSnapshot_RouteRegistered — newtron#17 (Cluster D).
+// Confirms the configdb snapshot route is registered and returns either a
+// successful snapshot (200 + Data envelope) when a device is reachable on
+// the host, or a clean connection-error envelope (500 + non-empty Error)
+// when transport fails. Both outcomes prove the route is wired; full
+// behavioral coverage of the live-device path lives in the actuated
+// newtrun scenario `1node-vs-basic/05-configdb-snapshot-actuated`.
+func TestHandleConfigDBSnapshot_RouteRegistered(t *testing.T) {
+	s := newTestServer(t)
+
+	w := httpDo(t, s, http.MethodGet, "/network/default/node/switch1/configdb")
+	if w.Code == http.StatusNotFound || w.Code == http.StatusMethodNotAllowed {
+		t.Fatalf("route not registered: status = %d", w.Code)
+	}
+	resp := decodeAPIResponse(t, w)
+	switch w.Code {
+	case http.StatusOK:
+		if resp.Data == nil {
+			t.Error("status 200 but Data envelope missing")
+		}
+	case http.StatusInternalServerError:
+		if resp.Error == "" {
+			t.Error("status 500 but Error envelope empty")
+		}
+		if resp.Data != nil {
+			t.Errorf("status 500 must not carry Data; got %v", resp.Data)
+		}
+	default:
+		t.Errorf("unexpected status %d; want 200 (live device) or 500 (no transport); body: %s",
+			w.Code, w.Body.String())
+	}
+}
+
+// TestWriteResult_ChangesPopulated — newtron#11 (Cluster B). Exercises the
+// real population path: LoadNetwork → BuildTopologyNode → Execute(CreateVLAN)
+// → Commit → result.Changes carries the typed `sonic.ConfigChange` entries.
+// No device connection required; topology mode runs setup-device so VLAN
+// preconditions are satisfied.
+func TestWriteResult_ChangesPopulated(t *testing.T) {
+	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	n, err := net.BuildTopologyNode("switch1")
+	if err != nil {
+		t.Fatalf("BuildTopologyNode: %v", err)
+	}
+
+	ctx := context.Background()
+	result, err := n.Execute(ctx, newtron.ExecOpts{Execute: true, NoSave: true},
+		func(ctx context.Context) error {
+			return n.CreateVLAN(ctx, 100, newtron.VLANConfig{})
+		})
+	if err != nil {
+		t.Fatalf("Execute(CreateVLAN): %v", err)
+	}
+	if len(result.Changes) == 0 {
+		t.Fatal("WriteResult.Changes empty after CreateVLAN")
+	}
+	if len(result.Changes) != result.ChangeCount {
+		t.Errorf("Changes count = %d, ChangeCount = %d; should match",
+			len(result.Changes), result.ChangeCount)
+	}
+	found := false
+	for _, c := range result.Changes {
+		if c.Table == "VLAN" && c.Key == "Vlan100" && c.Type == sonic.ChangeTypeAdd {
+			found = true
+			break
+		}
+	}
+	if !found {
+		var summary []string
+		for _, c := range result.Changes {
+			summary = append(summary, c.Table+"|"+c.Key+":"+string(c.Type))
+		}
+		t.Errorf("expected VLAN|Vlan100 add in Changes; got: %v", summary)
+	}
+}
+
+// mapKeys returns the keys of a map[string]any for error reporting.
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// mapKeys2 returns the keys of a nested RawConfigDB-shape map.
+func mapKeys2(m map[string]map[string]map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

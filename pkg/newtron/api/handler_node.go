@@ -926,6 +926,26 @@ func (s *Server) handleSetupDevice(w http.ResponseWriter, r *http.Request) {
 // Diagnostics — ConfigDB / StateDB queries
 // ============================================================================
 
+// handleConfigDBSnapshot returns the device's actual CONFIG_DB state as a
+// single internally-consistent snapshot (`sonic.RawConfigDB`). Default is
+// newtron-owned tables only; ?owned_only=false expands to every schema-known
+// table. §46: canonical device-reality substrate exposed directly.
+func (s *Server) handleConfigDBSnapshot(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	ownedOnly := r.URL.Query().Get("owned_only") != "false"
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.ConfigDBSnapshot(r.Context(), ownedOnly)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleQueryConfigDB(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {
@@ -1034,8 +1054,26 @@ func (s *Server) handleShowLAGDetail(w http.ResponseWriter, r *http.Request) {
 
 
 // ============================================================================
-// Intent operations — Tree, Drift, Reconcile, Save, Reload, Clear
+// Intent operations — Projection, Tree, Drift, Reconcile, Save, Reload, Clear
 // ============================================================================
+
+// handleProjection returns the per-table per-key per-field expected state
+// derived from intent replay — what newtron believes this device should look
+// like. §46: canonical Projection substrate exposed directly.
+func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	val, err := nodeActor.connectAndRead(r.Context(), func(n *newtron.Node) (any, error) {
+		return n.Projection(), nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
 
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)

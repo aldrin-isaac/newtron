@@ -2,12 +2,40 @@ package node
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
+
+// configDBReader is the minimal read surface verifyWithReader needs.
+// *sonic.ConfigDBClient satisfies it; tests inject a fake.
+type configDBReader interface {
+	Get(table, key string) (map[string]string, error)
+	Exists(table, key string) (bool, error)
+}
+
+// formatRedisHash renders a CONFIG_DB hash as a deterministic single-line
+// string suitable for VerificationError.DeviceResponse. Fields are sorted by
+// name so the output is stable across map iteration order.
+// Example: "asn=65001 enabled=true router_id=10.0.0.1"
+func formatRedisHash(m map[string]string) string {
+	if len(m) == 0 {
+		return "(empty hash)"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+m[k])
+	}
+	return strings.Join(parts, " ")
+}
 
 // ChangeType is an alias for sonic.ChangeType, re-exported for convenience.
 // All new code should prefer sonic.ChangeType directly.
@@ -289,6 +317,13 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 	}
 	defer freshClient.Close()
 
+	return verifyWithReader(freshClient, changes)
+}
+
+// verifyWithReader holds the verification logic against any configDBReader.
+// Separated from verifyConfigChanges so tests can inject a fake reader without
+// a live device connection.
+func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*sonic.VerificationResult, error) {
 	// Build final state per key: last operation wins. This correctly handles
 	// merged ChangeSets where a key is deleted then re-added (RefreshService).
 	type finalOp struct {
@@ -322,18 +357,20 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 	for _, change := range sorted {
 		switch change.Type {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
-			actual, err := freshClient.Get(change.Table, change.Key)
+			actual, err := reader.Get(change.Table, change.Key)
 			if err != nil {
 				return nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)
 			}
 			if len(actual) == 0 {
+				// Site 1: key entirely absent — HGETALL returned no fields.
 				result.Failed++
 				result.Errors = append(result.Errors, sonic.VerificationError{
-					Table:    change.Table,
-					Key:      change.Key,
-					Field:    "(all)",
-					Expected: "present",
-					Actual:   "",
+					Table:          change.Table,
+					Key:            change.Key,
+					Field:          "(all)",
+					Expected:       "present",
+					Actual:         "",
+					DeviceResponse: "(key absent — HGETALL returned no fields)",
 				})
 				continue
 			}
@@ -346,12 +383,16 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 					if ok {
 						actualVal = got
 					}
+					// Site 2: field mismatch — carry the full HGETALL content so
+					// the operator sees the complete key state at verify time,
+					// atomic with the failure detection. Highest substrate value.
 					result.Errors = append(result.Errors, sonic.VerificationError{
-						Table:    change.Table,
-						Key:      change.Key,
-						Field:    field,
-						Expected: expected,
-						Actual:   actualVal,
+						Table:          change.Table,
+						Key:            change.Key,
+						Field:          field,
+						Expected:       expected,
+						Actual:         actualVal,
+						DeviceResponse: formatRedisHash(actual),
 					})
 				}
 			}
@@ -359,18 +400,25 @@ func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.Verific
 				result.Passed++
 			}
 		case sonic.ChangeTypeDelete:
-			exists, err := freshClient.Exists(change.Table, change.Key)
+			exists, err := reader.Exists(change.Table, change.Key)
 			if err != nil {
 				return nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
 			}
 			if exists {
+				// Site 3: key still present after delete. Fetch hash for the
+				// verbatim device response; sentinel if the round-trip errors.
+				deviceResp := "(key present — EXISTS returned 1)"
+				if hash, err := reader.Get(change.Table, change.Key); err == nil && len(hash) > 0 {
+					deviceResp = formatRedisHash(hash)
+				}
 				result.Failed++
 				result.Errors = append(result.Errors, sonic.VerificationError{
-					Table:    change.Table,
-					Key:      change.Key,
-					Field:    "(all)",
-					Expected: "deleted",
-					Actual:   "present",
+					Table:          change.Table,
+					Key:            change.Key,
+					Field:          "(all)",
+					Expected:       "deleted",
+					Actual:         "present",
+					DeviceResponse: deviceResp,
 				})
 			} else {
 				result.Passed++

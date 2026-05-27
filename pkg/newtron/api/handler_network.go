@@ -285,6 +285,28 @@ func (s *Server) handleTopologyDeviceNames(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, val)
 }
 
+// handleTopology returns the full topology spec (devices + links + metadata)
+// as `spec.TopologySpecFile`. §46: canonical substrate exposed directly,
+// alongside the names-only summary at /topology/node.
+func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	val, err := na.do(r.Context(), func() (any, error) {
+		topo := na.net.GetTopology()
+		if topo == nil {
+			return nil, &newtron.NotFoundError{Resource: "topology", Name: ""}
+		}
+		return topo, nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
 	na := s.requireNetwork(w, r)
 	if na == nil {
