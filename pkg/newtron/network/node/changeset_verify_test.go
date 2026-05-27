@@ -45,7 +45,7 @@ func TestVerifyWithReader_Site1_KeyAbsent(t *testing.T) {
 		Fields: map[string]string{"local_asn": "65001"},
 	}}
 
-	result, err := verifyWithReader(reader, changes)
+	result, ops, err := verifyWithReader(reader, changes, 0)
 	if err != nil {
 		t.Fatalf("verifyWithReader: %v", err)
 	}
@@ -56,6 +56,14 @@ func TestVerifyWithReader_Site1_KeyAbsent(t *testing.T) {
 	const want = "(key absent — HGETALL returned no fields)"
 	if got != want {
 		t.Errorf("Site 1 DeviceResponse = %q, want %q", got, want)
+	}
+	// One verify_read op per change with result=rejected.
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 verify_read op, got %d", len(ops))
+	}
+	if ops[0].Kind != sonic.PerWriteKindVerifyRead || ops[0].Result != sonic.PerWriteResultRejected {
+		t.Errorf("Site 1: op Kind=%q Result=%q, want %q/%q",
+			ops[0].Kind, ops[0].Result, sonic.PerWriteKindVerifyRead, sonic.PerWriteResultRejected)
 	}
 }
 
@@ -79,7 +87,7 @@ func TestVerifyWithReader_Site2_FieldMismatch(t *testing.T) {
 		Fields: map[string]string{"local_asn": "65001", "router_id": "10.0.0.1"},
 	}}
 
-	result, err := verifyWithReader(reader, changes)
+	result, ops, err := verifyWithReader(reader, changes, 0)
 	if err != nil {
 		t.Fatalf("verifyWithReader: %v", err)
 	}
@@ -99,6 +107,13 @@ func TestVerifyWithReader_Site2_FieldMismatch(t *testing.T) {
 			t.Errorf("Site 2: DeviceResponse %q missing %q", e.DeviceResponse, sub)
 		}
 	}
+	// verify_read op carries the same full-hash device_response.
+	if len(ops) != 1 || ops[0].Result != sonic.PerWriteResultRejected {
+		t.Fatalf("expected 1 rejected verify_read op, got %d ops", len(ops))
+	}
+	if !strings.Contains(ops[0].DeviceResponse, "local_asn=65002") {
+		t.Errorf("Site 2 op DeviceResponse %q missing %q", ops[0].DeviceResponse, "local_asn=65002")
+	}
 }
 
 // TestVerifyWithReader_Site3_DeleteStillPresent — Delete change where the key
@@ -115,7 +130,7 @@ func TestVerifyWithReader_Site3_DeleteStillPresent(t *testing.T) {
 		Type:  sonic.ChangeTypeDelete,
 	}}
 
-	result, err := verifyWithReader(reader, changes)
+	result, ops, err := verifyWithReader(reader, changes, 0)
 	if err != nil {
 		t.Fatalf("verifyWithReader: %v", err)
 	}
@@ -125,6 +140,9 @@ func TestVerifyWithReader_Site3_DeleteStillPresent(t *testing.T) {
 	e := result.Errors[0]
 	if !strings.Contains(e.DeviceResponse, "vni=10001") {
 		t.Errorf("Site 3: DeviceResponse %q missing %q", e.DeviceResponse, "vni=10001")
+	}
+	if len(ops) != 1 || ops[0].Result != sonic.PerWriteResultRejected {
+		t.Fatalf("expected 1 rejected verify_read op, got %d ops", len(ops))
 	}
 }
 
@@ -141,13 +159,18 @@ func TestVerifyWithReader_AllPassed(t *testing.T) {
 		Fields: map[string]string{"vlanid": "100"},
 	}}
 
-	result, err := verifyWithReader(reader, changes)
+	result, ops, err := verifyWithReader(reader, changes, 0)
 	if err != nil {
 		t.Fatalf("verifyWithReader: %v", err)
 	}
 	if result.Failed != 0 || result.Passed != 1 || len(result.Errors) != 0 {
 		t.Errorf("expected Passed=1 Failed=0 Errors=0, got Passed=%d Failed=%d Errors=%d",
 			result.Passed, result.Failed, len(result.Errors))
+	}
+	// One applied verify_read op with the full hash content.
+	if len(ops) != 1 || ops[0].Kind != sonic.PerWriteKindVerifyRead || ops[0].Result != sonic.PerWriteResultApplied {
+		t.Fatalf("expected 1 applied verify_read op, got %d ops with first Kind=%q Result=%q",
+			len(ops), ops[0].Kind, ops[0].Result)
 	}
 }
 

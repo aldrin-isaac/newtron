@@ -61,6 +61,12 @@ type ChangeSet struct {
 	AppliedCount int                        `json:"applied_count"`            // number of changes successfully written by Apply(); 0 before Apply()
 	Verification *sonic.VerificationResult `json:"verification,omitempty"`   // populated after apply+verify in execute mode
 
+	// PerWrite records the outcome of each Device I/O Operation the ChangeSet
+	// performed — one entry per Redis HSET/DEL during Apply, plus one
+	// verify_read entry per Change during Verify. Surfaced on WriteResult.
+	// See sonic.PerSubstrateOp and DESIGN_PRINCIPLES_NEWTRON §11, §46.
+	PerWrite []sonic.PerSubstrateOp `json:"per_write,omitempty"`
+
 	// OperationParams captures parameters for the intent record.
 	// Populated by the operation that creates the ChangeSet (e.g., CreateVLAN
 	// sets {"vlan_id": "100"}). Used by Commit() to build the operation list.
@@ -243,6 +249,13 @@ func (cs *ChangeSet) validate() error {
 }
 
 // Apply writes the changes to the device's config_db via Redis.
+//
+// Each change becomes one Device I/O Operation (HSET or DEL) and one
+// corresponding PerSubstrateOp record on cs.PerWrite — substrate-grade
+// per-operation outcome captured at the moment of execution (§46). On
+// failure, the failing op is recorded with result="rejected" and the
+// verbatim error in DeviceResponse, then Apply returns the wrapped error
+// without attempting subsequent writes.
 func (cs *ChangeSet) Apply(n *Node) error {
 	// Transport guard — entries were already rendered into the projection
 	// by render(cs) in op(). Without transport, skip Redis delivery.
@@ -263,17 +276,37 @@ func (cs *ChangeSet) Apply(n *Node) error {
 		return fmt.Errorf("CONFIG_DB client not connected")
 	}
 
+	seq := len(cs.PerWrite)
 	for _, change := range cs.Changes {
 		var err error
+		var kind string
+		var reply int64
 		switch change.Type {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
-			err = client.Set(change.Table, change.Key, change.Fields)
+			kind = sonic.PerWriteKindRedisWrite
+			reply, err = client.SetWithReply(change.Table, change.Key, change.Fields)
 		case sonic.ChangeTypeDelete:
-			err = client.Delete(change.Table, change.Key)
+			kind = sonic.PerWriteKindRedisDelete
+			reply, err = client.DeleteWithReply(change.Table, change.Key)
+		}
+		op := sonic.PerSubstrateOp{
+			Seq:    seq,
+			Kind:   kind,
+			Table:  change.Table,
+			Key:    change.Key,
+			Fields: change.Fields,
+			At:     time.Now().UTC(),
 		}
 		if err != nil {
+			op.Result = sonic.PerWriteResultRejected
+			op.DeviceResponse = err.Error()
+			cs.PerWrite = append(cs.PerWrite, op)
 			return fmt.Errorf("applying change to %s|%s: %w", change.Table, change.Key, err)
 		}
+		op.Result = sonic.PerWriteResultApplied
+		op.DeviceResponse = fmt.Sprintf("(integer) %d", reply)
+		cs.PerWrite = append(cs.PerWrite, op)
+		seq++
 	}
 
 	cs.AppliedCount = len(cs.Changes)
@@ -282,7 +315,8 @@ func (cs *ChangeSet) Apply(n *Node) error {
 
 // Verify re-reads CONFIG_DB via a fresh connection and compares against the
 // ChangeSet to confirm that writes were persisted. Stores the result in
-// cs.Verification.
+// cs.Verification and appends one verify_read PerSubstrateOp per change to
+// cs.PerWrite — substrate-grade observability over the verify pass.
 func (cs *ChangeSet) Verify(n *Node) error {
 	// Transport guard — without a device connection, there is nothing to
 	// verify against Redis. Same pattern as Apply (architecture §8).
@@ -290,11 +324,12 @@ func (cs *ChangeSet) Verify(n *Node) error {
 		return nil
 	}
 
-	result, err := n.verifyConfigChanges(cs.Changes)
+	result, ops, err := n.verifyConfigChanges(cs.Changes, len(cs.PerWrite))
 	if err != nil {
 		return err
 	}
 	cs.Verification = result
+	cs.PerWrite = append(cs.PerWrite, ops...)
 	return nil
 }
 
@@ -304,26 +339,35 @@ func (cs *ChangeSet) Verify(n *Node) error {
 // When a key appears in multiple changes (e.g., RefreshService does delete+add
 // on the same key), only the final operation per key is verified. This replaces
 // the former DeduplicateRefresh band-aid with correct final-state semantics.
-func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange) (*sonic.VerificationResult, error) {
+//
+// Returns the typed VerificationResult plus a []PerSubstrateOp recording one
+// verify_read entry per change (substrate observability over the verify pass).
+// seqStart is the starting seq for the emitted verify_read ops so the caller
+// can continue the cs.PerWrite sequence from where Apply left off.
+func (n *Node) verifyConfigChanges(changes []sonic.ConfigChange, seqStart int) (*sonic.VerificationResult, []sonic.PerSubstrateOp, error) {
 	if n.conn == nil {
-		return nil, util.ErrNotConnected
+		return nil, nil, util.ErrNotConnected
 	}
 
 	addr := n.conn.ConnAddr()
 
 	freshClient := sonic.NewConfigDBClient(addr)
 	if err := freshClient.Connect(); err != nil {
-		return nil, fmt.Errorf("fresh config_db connection: %w", err)
+		return nil, nil, fmt.Errorf("fresh config_db connection: %w", err)
 	}
 	defer freshClient.Close()
 
-	return verifyWithReader(freshClient, changes)
+	return verifyWithReader(freshClient, changes, seqStart)
 }
 
 // verifyWithReader holds the verification logic against any configDBReader.
 // Separated from verifyConfigChanges so tests can inject a fake reader without
 // a live device connection.
-func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*sonic.VerificationResult, error) {
+//
+// Returns the typed VerificationResult plus a []PerSubstrateOp containing one
+// verify_read entry per change. seqStart sets the starting Seq for the
+// returned ops so callers can continue an existing PerSubstrateOp sequence.
+func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange, seqStart int) (*sonic.VerificationResult, []sonic.PerSubstrateOp, error) {
 	// Build final state per key: last operation wins. This correctly handles
 	// merged ChangeSets where a key is deleted then re-added (RefreshService).
 	type finalOp struct {
@@ -353,13 +397,40 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*son
 	}
 
 	result := &sonic.VerificationResult{}
+	ops := make([]sonic.PerSubstrateOp, 0, len(sorted))
+	seq := seqStart
+
+	// emitVerifyRead records one verify_read PerSubstrateOp per change.
+	// Result is "applied" when re-read matched the ChangeSet, "rejected"
+	// when any expected field/state did not match.
+	emitVerifyRead := func(change sonic.ConfigChange, applied bool, deviceResponse string) {
+		op := sonic.PerSubstrateOp{
+			Seq:            seq,
+			Kind:           sonic.PerWriteKindVerifyRead,
+			Table:          change.Table,
+			Key:            change.Key,
+			Result:         sonic.PerWriteResultApplied,
+			DeviceResponse: deviceResponse,
+			At:             time.Now().UTC(),
+		}
+		if !applied {
+			op.Result = sonic.PerWriteResultRejected
+		}
+		// For verify_read of an add/modify, the substrate "Fields" we expected
+		// to see is the change's Fields. For a delete, Fields stays nil.
+		if change.Type != sonic.ChangeTypeDelete {
+			op.Fields = change.Fields
+		}
+		ops = append(ops, op)
+		seq++
+	}
 
 	for _, change := range sorted {
 		switch change.Type {
 		case sonic.ChangeTypeAdd, sonic.ChangeTypeModify:
 			actual, err := reader.Get(change.Table, change.Key)
 			if err != nil {
-				return nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)
+				return nil, nil, fmt.Errorf("reading %s|%s: %w", change.Table, change.Key, err)
 			}
 			if len(actual) == 0 {
 				// Site 1: key entirely absent — HGETALL returned no fields.
@@ -372,6 +443,7 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*son
 					Actual:         "",
 					DeviceResponse: "(key absent — HGETALL returned no fields)",
 				})
+				emitVerifyRead(change, false, "(key absent — HGETALL returned no fields)")
 				continue
 			}
 			allMatch := true
@@ -399,10 +471,14 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*son
 			if allMatch {
 				result.Passed++
 			}
+			// One verify_read op per change — DeviceResponse carries the full
+			// HGETALL content in both pass and fail cases (operator sees what
+			// the device actually had at verify time).
+			emitVerifyRead(change, allMatch, formatRedisHash(actual))
 		case sonic.ChangeTypeDelete:
 			exists, err := reader.Exists(change.Table, change.Key)
 			if err != nil {
-				return nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
+				return nil, nil, fmt.Errorf("checking %s|%s: %w", change.Table, change.Key, err)
 			}
 			if exists {
 				// Site 3: key still present after delete. Fetch hash for the
@@ -420,12 +496,14 @@ func verifyWithReader(reader configDBReader, changes []sonic.ConfigChange) (*son
 					Actual:         "present",
 					DeviceResponse: deviceResp,
 				})
+				emitVerifyRead(change, false, deviceResp)
 			} else {
 				result.Passed++
+				emitVerifyRead(change, true, "(key absent — EXISTS returned 0)")
 			}
 		}
 	}
 
-	return result, nil
+	return result, ops, nil
 }
 

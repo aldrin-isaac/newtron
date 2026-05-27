@@ -248,9 +248,12 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 		result.Changes = append(result.Changes, cs.Changes...)
 	}
 
-	// Apply all pending changesets
+	// Apply all pending changesets. PerWrite entries accumulated by each
+	// cs.Apply / cs.Verify are aggregated onto the public WriteResult so
+	// callers see the full per-substrate-op timeline for the whole bundle.
 	for _, cs := range n.pending {
 		if err := cs.Apply(n.internal); err != nil {
+			result.PerWrite = append(result.PerWrite, cs.PerWrite...)
 			return result, fmt.Errorf("apply failed: %w", err)
 		}
 	}
@@ -261,6 +264,7 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 	var vr VerificationResult
 	for _, cs := range n.pending {
 		if err := cs.Verify(n.internal); err != nil {
+			result.PerWrite = append(result.PerWrite, cs.PerWrite...)
 			return result, fmt.Errorf("verify failed: %w", err)
 		}
 		if cs.Verification != nil {
@@ -280,6 +284,7 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 				allPassed = false
 			}
 		}
+		result.PerWrite = append(result.PerWrite, cs.PerWrite...)
 	}
 	result.Verification = &vr
 	if !allPassed {
@@ -288,6 +293,8 @@ func (n *Node) Commit(ctx context.Context) (*WriteResult, error) {
 			Device: n.internal.Name(),
 			Passed: vr.Passed,
 			Failed: vr.Failed,
+			Total:  vr.Passed + vr.Failed,
+			Result: result,
 		}
 	}
 	result.Verified = true

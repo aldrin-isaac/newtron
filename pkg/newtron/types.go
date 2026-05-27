@@ -44,9 +44,17 @@ type ExecOpts struct {
 // modify / delete the operation produced, in the same `sonic.ConfigChange`
 // shape used internally. Preview is the human-readable rendering of the same
 // substrate; Changes is the canonical form on the wire.
+//
+// PerWrite records the per-substrate-operation outcomes — one entry per
+// Redis HSET/DEL during Apply, one verify_read entry per Change during
+// Verify. This is the substrate that operator-philosophy invariant #1
+// (no black boxes) operationalizes through the Concrete success vision:
+// the operator sees exactly which Redis command landed, what the device
+// returned verbatim, and which was rejected. §11 + §46.
 type WriteResult struct {
 	Preview      string               `json:"preview,omitempty"`
 	Changes      []sonic.ConfigChange `json:"changes,omitempty"`
+	PerWrite     []sonic.PerSubstrateOp `json:"per_write,omitempty"`
 	ChangeCount  int                  `json:"change_count"`
 	Applied      bool                 `json:"applied"`
 	Verified     bool                 `json:"verified"`
@@ -105,12 +113,22 @@ func (e *ValidationError) Error() string {
 }
 
 // VerificationFailedError indicates post-apply verification failed.
+//
+// Result carries the typed WriteResult — including PerWrite, Verification.Errors
+// (with DeviceResponse), Changes — so the wire envelope on 409 responses surfaces
+// the full substrate that newtron computed during verify, not just a stringified
+// summary. This honors §46 (HTTP API Boundary — Wire Shape Mirrors Substrate)
+// on the failure path: the typed substrate survives to the consumer.
+//
+// Set by Node.Commit when verification fails. Always non-nil when this error is
+// returned; callers can read Result.Verification, Result.PerWrite directly.
 type VerificationFailedError struct {
 	Device  string
 	Passed  int
 	Failed  int
 	Total   int
 	Message string
+	Result  *WriteResult
 }
 
 func (e *VerificationFailedError) Error() string {

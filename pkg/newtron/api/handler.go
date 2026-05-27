@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -199,11 +200,21 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 // writeError writes a JSON error response.
+//
+// For VerificationFailedError, the typed WriteResult (Verification, PerWrite,
+// Changes) is propagated as the Data field of the envelope so consumers see
+// the full substrate that newtron computed — §46 (HTTP API Boundary) on the
+// failure path. Other error kinds emit Error only.
 func writeError(w http.ResponseWriter, err error) {
 	status := httpStatusFromError(err)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
+	envelope := APIResponse{Error: err.Error()}
+	var verFailed *newtron.VerificationFailedError
+	if errors.As(err, &verFailed) && verFailed.Result != nil {
+		envelope.Data = verFailed.Result
+	}
+	json.NewEncoder(w).Encode(envelope)
 }
 
 // decodeJSON decodes a JSON request body into v.

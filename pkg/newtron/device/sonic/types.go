@@ -79,6 +79,75 @@ type VerificationResult struct {
 	Errors []VerificationError // details of each failure
 }
 
+// PerSubstrateOp records the outcome of one Device I/O Operation newtron
+// performed against a device — one Redis HSET, one Redis DEL, one daemon-
+// settle wait, or one post-deliver verify re-read. These are the operations
+// defined by docs/newtron/unified-pipeline-architecture.md §7 (Device I/O).
+//
+// PerSubstrateOp is distinct from ChangeSet entries (which represent
+// *planned* writes) and from DriftEntry (which represents
+// *expected-vs-actual* deltas). It records what *happened* — the operational
+// outcome of one substrate operation, captured at the moment the operation
+// executed.
+//
+// Per DESIGN_PRINCIPLES_NEWTRON §11 (ChangeSet Universal Contract) and §46
+// (HTTP API Boundary), PerSubstrateOp is the canonical per-substrate-op
+// primitive surfaced on WriteResult.PerWrite — the wire shape that lets
+// consumers see exactly which Redis command landed, what the device
+// returned verbatim, and which was rejected. The vocabulary matches the
+// newtcon contract verbatim.
+//
+// Per-Node atomicity (§13, §18): within a single Redis TxPipeline bundle,
+// every redis_write and redis_delete entry MUST carry the same Result —
+// either all applied or all rejected — because EXEC is atomic. Mixed
+// applied/rejected for redis_write/redis_delete within one bundle is a
+// contract violation. daemon_wait and verify_read are post-EXEC operations
+// and MAY have mixed results.
+type PerSubstrateOp struct {
+	// Seq is the zero-based ordinal of this op within the per-target apply
+	// sequence. Strictly monotonically increasing.
+	Seq int `json:"seq"`
+
+	// Kind names which Device I/O Operation produced this entry.
+	// Bounded enum: PerWriteKind* constants.
+	Kind string `json:"kind"`
+
+	// Table, Key, Fields locate the substrate the op acted on. Fields is
+	// the intended write content for redis_write; nil for redis_delete and
+	// daemon_wait; the re-read content for verify_read.
+	Table  string            `json:"table,omitempty"`
+	Key    string            `json:"key,omitempty"`
+	Fields map[string]string `json:"fields,omitempty"`
+
+	// Result is the outcome. Bounded enum: PerWriteResult* constants.
+	Result string `json:"result"`
+
+	// DeviceResponse is the verbatim device/Redis-level reply observed at
+	// the moment the op executed. Empty when no device transport was used
+	// or when nothing meaningful was captured.
+	DeviceResponse string `json:"device_response,omitempty"`
+
+	// At is the wall-clock timestamp the op completed at.
+	At time.Time `json:"at"`
+}
+
+// PerWriteKind constants — the bounded enum for PerSubstrateOp.Kind.
+// Vocabulary matches the newtcon contract verbatim.
+const (
+	PerWriteKindRedisWrite  = "redis_write"
+	PerWriteKindRedisDelete = "redis_delete"
+	PerWriteKindDaemonWait  = "daemon_wait"
+	PerWriteKindVerifyRead  = "verify_read"
+)
+
+// PerWriteResult constants — the bounded enum for PerSubstrateOp.Result.
+// Vocabulary matches the newtcon contract verbatim.
+const (
+	PerWriteResultApplied  = "applied"
+	PerWriteResultRejected = "rejected"
+	PerWriteResultSkipped  = "skipped"
+)
+
 // VerificationError describes a single verification failure.
 //
 // DeviceResponse carries the verbatim device-side reply observed at the

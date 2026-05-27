@@ -469,6 +469,77 @@ func TestWriteResult_ChangesPopulated(t *testing.T) {
 	}
 }
 
+// TestWriteError_VerificationFailedEnvelope — newtron#21 (Cluster B envelope
+// fix companion to #19). Confirms that writeError emits a 409 response whose
+// body envelope carries the typed *WriteResult (Verification.Errors[] with
+// DeviceResponse + PerWrite) as Data, per §46. Exercises the wire-format path
+// directly without needing a live verify-failure.
+func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
+	// Build a representative WriteResult that mirrors what a real verify-
+	// failure path would produce: Verification.Errors with substrate fields
+	// + PerWrite entries (verify_read kind, rejected result).
+	wr := &newtron.WriteResult{
+		Applied:     true,
+		ChangeCount: 1,
+		Verification: &newtron.VerificationResult{
+			Passed: 0,
+			Failed: 1,
+			Errors: []newtron.VerificationError{{
+				Table: "BGP_GLOBALS", Key: "default", Field: "local_asn",
+				Expected: "65001", Actual: "99999",
+				DeviceResponse: "local_asn=99999 router_id=10.0.0.1",
+			}},
+		},
+		PerWrite: []sonic.PerSubstrateOp{{
+			Seq: 0, Kind: sonic.PerWriteKindVerifyRead,
+			Table: "BGP_GLOBALS", Key: "default",
+			Result: sonic.PerWriteResultRejected,
+			DeviceResponse: "local_asn=99999 router_id=10.0.0.1",
+		}},
+	}
+	verErr := &newtron.VerificationFailedError{
+		Device: "switch1", Passed: 0, Failed: 1, Total: 1, Result: wr,
+	}
+
+	w := httptest.NewRecorder()
+	writeError(w, verErr)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 (Conflict) for VerificationFailedError", w.Code)
+	}
+
+	var resp APIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, w.Body.String())
+	}
+	if resp.Error == "" {
+		t.Error("Error field empty; expected verify-failure message")
+	}
+	if resp.Data == nil {
+		t.Fatal("Data field empty; envelope must carry the typed WriteResult per §46")
+	}
+
+	// The envelope's Data must round-trip back into a WriteResult with the
+	// substrate intact — Verification.Errors[].DeviceResponse + PerWrite.
+	raw, err := json.Marshal(resp.Data)
+	if err != nil {
+		t.Fatalf("marshal Data: %v", err)
+	}
+	var got newtron.WriteResult
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode WriteResult from Data: %v", err)
+	}
+	if got.Verification == nil || len(got.Verification.Errors) != 1 {
+		t.Fatalf("Verification.Errors lost; got %+v", got.Verification)
+	}
+	if got.Verification.Errors[0].DeviceResponse != "local_asn=99999 router_id=10.0.0.1" {
+		t.Errorf("DeviceResponse lost or mangled; got %q", got.Verification.Errors[0].DeviceResponse)
+	}
+	if len(got.PerWrite) != 1 || got.PerWrite[0].Kind != sonic.PerWriteKindVerifyRead {
+		t.Errorf("PerWrite lost or mangled; got %+v", got.PerWrite)
+	}
+}
+
 // mapKeys returns the keys of a map[string]any for error reporting.
 func mapKeys(m map[string]any) []string {
 	out := make([]string, 0, len(m))

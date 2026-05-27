@@ -1026,6 +1026,30 @@ func (c *ConfigDBClient) Delete(table, key string) error {
 	return c.client.Del(c.ctx, redisKey).Err()
 }
 
+// SetWithReply writes a CONFIG_DB entry and returns the Redis-protocol reply
+// (number of new fields added by HSET) alongside any error. Used by
+// ChangeSet.Apply to populate PerSubstrateOp.DeviceResponse with the verbatim
+// device-side reply per §46.
+func (c *ConfigDBClient) SetWithReply(table, key string, fields map[string]string) (int64, error) {
+	redisKey := fmt.Sprintf("%s|%s", table, key)
+	if len(fields) == 0 {
+		return c.client.HSet(c.ctx, redisKey, "NULL", "NULL").Result()
+	}
+	args := make([]interface{}, 0, len(fields)*2)
+	for k, v := range fields {
+		args = append(args, k, v)
+	}
+	return c.client.HSet(c.ctx, redisKey, args...).Result()
+}
+
+// DeleteWithReply removes a CONFIG_DB entry and returns the Redis-protocol
+// reply (number of keys removed by DEL — 0 if absent, 1 if present) alongside
+// any error. Used by ChangeSet.Apply to populate PerSubstrateOp.DeviceResponse.
+func (c *ConfigDBClient) DeleteWithReply(table, key string) (int64, error) {
+	redisKey := fmt.Sprintf("%s|%s", table, key)
+	return c.client.Del(c.ctx, redisKey).Result()
+}
+
 
 // Get reads a table entry
 func (c *ConfigDBClient) Get(table, key string) (map[string]string, error) {
