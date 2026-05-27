@@ -151,6 +151,7 @@ unblock-value-per-effort items.
 | Phase | Issue | Cluster | Complexity | Unblocks (newtcon-side) |
 |-------|-------|---------|------------|--------------------------|
 | **1** | `newtron#11` | B | trivial | broad newtcon coverage; per-write granularity |
+| **1** | `newtron#19` (narrowed) | B | small | per-write verbatim device response; folds into #11's PR |
 | **1** | `newtron#5` | A | trivial | Provenance surface; observation-history poller |
 | **1** | `newtron#14` | C | trivial | graphical topology viz; spec-authoring readback |
 | **1** | `newtron#17` | D | trivial | observation-history poller (full snapshot read) |
@@ -158,8 +159,8 @@ unblock-value-per-effort items.
 | **2** | `newtron#16` | C | moderate | spec-authoring (topology) — link lifecycle |
 | **3** | `newtron#4` | A | moderate | Workbench dry-run; pre-commit diff |
 | **4** | `newtron#6` | A | moderate | service-first projection views |
-| **5** | `newtron#12` | B | moderate (pending operator decision) | "Report this is the bug" affordance |
-| **6** | `newtron#19` | B | moderate-to-substantive (Option A then Option B) | real-time substrate-op streaming (newtcon#40); per-write granularity (newtcon#41) |
+| — | `newtron#12` | B | (deferred indefinitely; 2026-05-26 deep-dive) | not load-bearing for any newtcon surface |
+| — | `newtron#19` SSE variant | B | (deferred indefinitely; 2026-05-26 deep-dive) | UX-only; newtcon polls |
 
 **Phasing rationale:**
 
@@ -181,21 +182,28 @@ unblock-value-per-effort items.
 - **Phase 4** — `#6` (per-service slice) reuses `#4`'s replay-diff
   technique with the inverse staging ("remove the service's
   intents" instead of "stage additions"). Single PR.
-- **Phase 5** — `#12` (verbose-mode call-site provenance) requires
-  the operator decision on §33 reconciliation (verbose-mode opt-in)
-  in the issue body before implementation; defers naturally to
-  after most other work.
-- **Phase 6** — `#19` is the heaviest item in the queue. Option A
-  (`per_write[]` field) is moderate — touches `ChangeSet.Apply`,
-  `Verify`, the pipeline wrappers, and every `WriteResult`
-  construction site. Option B (SSE streaming variant) is
-  substantive — adds streaming-response infrastructure newtron's
-  HTTP layer doesn't currently have. Recommended: Option A first
-  (unblocks newtcon#41 per-write granularity), Option B as a second
-  PR (unblocks newtcon#40 real-time streaming). The per-Node
-  atomicity discipline in `per_write[]` (within one bundle,
-  CONFIG_DB writes all `"applied"` or all `"rejected"`) is binding
-  per §11 and §13 — the Architecture Reviewer must verify.
+- **Cluster B post-deep-dive (2026-05-26).** The Phase 5 (`#12`) and
+  Phase 6 (`#19`) entries from the original phasing were
+  re-evaluated and dropped or trimmed:
+  - **`#12` deferred indefinitely** — not load-bearing for any
+    newtcon surface; enriches the Report Bug pattern but doesn't
+    enable it; §33 reconciliation tax not justified by marginal
+    value. Tracked, not scheduled.
+  - **`#19` narrowed to a small field addition** — `per_write[]` is
+    ~60% redundant with #11 + Verification.Errors given per-Node
+    atomicity. Reduced to `VerificationError.DeviceResponse string`
+    on existing `VerificationResult.Errors[]`. Folds into #11's PR
+    (now Phase 1). The original `per_write[]` array design is not
+    implemented.
+  - **`#19` SSE variant deferred indefinitely** — streaming is
+    operational timing, not substrate per §46; UX-only benefit;
+    polling against the existing/scoped endpoint is functional.
+    Substantial newtron infrastructure expansion not justified.
+  - See the [Cluster B deep-dive outcome at the top of
+    `changeset-substrate.md`](changeset-substrate.md) and the
+    in-issue deferral/narrowing comments on
+    [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12#issuecomment-4551056191)
+    and [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19#issuecomment-4551057150).
 
 ## Status protocol
 

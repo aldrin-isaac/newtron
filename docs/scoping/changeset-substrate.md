@@ -5,6 +5,33 @@
 doc for the unifying §46 principle, style invariants, and
 cross-cluster phasing.
 
+**Deep-dive outcome (2026-05-26):** The cluster's three issues were
+re-evaluated against the three tests (§46 substrate / newtcon-
+derivability / cost-value). Net effect:
+
+- **`newtron#11`** — keep as scoped. The §46 paradigm case; trivial
+  newtron-side addition; newtcon cannot derive without parsing
+  free-text or reimplementing render.
+- **`newtron#12`** — **DEFERRED INDEFINITELY.** Not load-bearing for
+  any newtcon surface (enriches Report Bug but doesn't enable it);
+  §33 reconciliation discipline is non-trivial ongoing tax for
+  marginal enrichment. Status: OPEN as tracked consideration.
+  Re-evaluate if operators struggle to identify methods from
+  substrate alone after the Report Bug surface goes live. See
+  the [deferral comment on newtron#12](https://github.com/aldrin-isaac/newtron/issues/12#issuecomment-4551056191).
+- **`newtron#19`** — **NARROWED.** Option A (`per_write[]`) trimmed to
+  a single field — `VerificationError.DeviceResponse string` — on
+  existing `VerificationResult.Errors[]`. The full `per_write[]`
+  array is ~60% redundant with #11 + existing Verification given
+  per-Node atomicity. Option B (SSE streaming) **deferred
+  indefinitely** — not substrate per §46, UX-only benefit, polling
+  on Option A's data is functional. See the
+  [narrowing comment on newtron#19](https://github.com/aldrin-isaac/newtron/issues/19#issuecomment-4551057150).
+
+The per-issue sections below retain the original full design for the
+audit trail; the deferred/narrowed status is recorded at the top of
+each affected section.
+
 ## Scope
 
 Three issues, all instances of §46 applied to newtron's **ChangeSet
@@ -44,23 +71,20 @@ streaming):
   this same set of sites. Implementing them sequentially in one
   PR pair minimizes call-site churn.
 
-## Implementation order (within this cluster)
+## Implementation order (within this cluster, post deep-dive)
 
-1. **#11 first** — trivial, additive. Adds `Changes []sonic.ConfigChange`
+1. **#11** — trivial, additive. Adds `Changes []sonic.ConfigChange`
    field to `WriteResult`. Populated from `cs.Changes` at every
-   construction site. Sub-cluster B1.
-2. **#12 second** — moderate. Builds on #11 (verbose response shape
-   is *Changes with Source*; default is Changes alone). Requires the
-   operator decision on §33 reconciliation (verbose-mode opt-in) to
-   be accepted before implementation. Sub-cluster B1.
-3. **#19 last** — moderate-to-substantive. Adds `per_write[]` to
-   `WriteResult` (Option A; can land first) and optionally an SSE
-   streaming variant on the same endpoints (Option B). Builds on
-   #11 (`per_write[]` is per-substrate-operation detail beyond
-   the aggregate `Changes` array #11 introduces). The verbose-mode
-   resolution from #12 composes additively — each `per_write[]`
-   entry gains an optional `source` field per #12's verbose flag
-   when both land. Sub-cluster B2.
+   construction site. Sub-cluster B1. **(Phase 1.)**
+2. **#19 (narrowed)** — small. Add `VerificationError.DeviceResponse
+   string` field to `VerificationResult.Errors[]`. Could fold into
+   #11's PR. **(Phase 1, with #11.)**
+3. **#12** — **deferred indefinitely.** Not implemented now.
+4. **#19 SSE variant** — **deferred indefinitely.** Not implemented now.
+
+The original three-step phasing (#11 → #12 → #19) collapses to a
+single small PR pair: #11 plus the #19-narrowed `DeviceResponse`
+field. #12 and the #19 SSE variant remain tracked but unscheduled.
 
 ---
 
@@ -126,6 +150,20 @@ construction site, one test.
 ---
 
 ## 2. `newtron#12` — Call-site provenance on ChangeSet entries (verbose mode)
+
+> **Status (2026-05-26): DEFERRED INDEFINITELY.** The §46 substrate
+> test passes (`Source` is canonical metadata captured at emission),
+> but the operator-value test does not — no newtcon surface
+> absolutely requires `Source`. The Report Bug surface (newtcon#42)
+> is enriched by it but functions without it; operators can identify
+> methods by reading diffs. The §33 reconciliation discipline
+> (verbose-mode opt-in must be guarded against future drift) is
+> non-trivial ongoing tax for marginal enrichment. Issue remains
+> OPEN as tracked consideration; re-evaluate if the Report Bug
+> surface, once live, shows operators consistently struggling to
+> identify methods from substrate alone. See the [deferral comment
+> on newtron#12](https://github.com/aldrin-isaac/newtron/issues/12#issuecomment-4551056191).
+> The full design below is preserved for the audit trail.
 
 ### Principle check
 
@@ -276,6 +314,30 @@ returns `WriteResult.Changes` (the same set updated by #11).
 ---
 
 ## 3. `newtron#19` — Per-substrate-operation surfacing on write endpoints (`per_write[]` + SSE streaming variant)
+
+> **Status (2026-05-26): NARROWED + SSE DEFERRED.**
+>
+> - **Option A (`per_write[]`)** — trimmed to a single field. After
+>   newtron#11 lands, `Changes` + `Applied` + `Verification.Errors[]`
+>   provide ≈60% of what `per_write[]` would carry. Per-Node
+>   atomicity means `per_write[*].result` is uniform for CONFIG_DB
+>   writes within one bundle (all `applied` or all `rejected`),
+>   fully captured by `Applied`. The only piece of new substrate not
+>   derivable from existing fields is the **verbatim device response
+>   per failed write** — added as a new
+>   **`VerificationError.DeviceResponse string`** field on existing
+>   `VerificationResult.Errors[]` entries. Do not add a full
+>   `per_write[]` array.
+> - **Option B (SSE streaming)** — deferred indefinitely. Streaming
+>   is operational timing, not substrate per §46. UX-only benefit;
+>   polling against the existing/scoped endpoint is functional.
+>   newtcon's streaming surface (contracted in newtcon PR #50)
+>   gracefully degrades to polling.
+>
+> See the [narrowing comment on newtron#19](https://github.com/aldrin-isaac/newtron/issues/19#issuecomment-4551057150).
+> The full Option A and Option B design below is preserved for the
+> audit trail; the narrowed implementation reduces to a single field
+> addition.
 
 ### Principle check
 
