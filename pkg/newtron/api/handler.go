@@ -29,6 +29,7 @@ func (s *Server) buildMux() http.Handler {
 	// ====================================================================
 	mux.HandleFunc("GET /network/{netID}/service", s.handleListServices)
 	mux.HandleFunc("GET /network/{netID}/service/{name}", s.handleShowService)
+	mux.HandleFunc("GET /network/{netID}/service/{name}/projection", s.handleServiceProjection)
 	mux.HandleFunc("GET /network/{netID}/ipvpn", s.handleListIPVPNs)
 	mux.HandleFunc("GET /network/{netID}/ipvpn/{name}", s.handleShowIPVPN)
 	mux.HandleFunc("GET /network/{netID}/macvpn", s.handleListMACVPNs)

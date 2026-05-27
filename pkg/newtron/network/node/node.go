@@ -165,7 +165,20 @@ func (n *Node) RebuildProjection(ctx context.Context) error {
 			intents = fresh
 		}
 	}
+	return n.RebuildProjectionFromIntents(ctx, intents)
+}
 
+// RebuildProjectionFromIntents rebuilds the projection from the given intent
+// map without re-reading from the device. Used by operations that need to
+// build a projection from a hypothetical or trimmed intent set — e.g., the
+// per-service projection slice (Node.ServiceProjection) snapshots the intent
+// DB, removes a service's intents, then calls this method to derive the
+// projection that would exist without that service.
+//
+// The same replay machinery as RebuildProjection — port re-registration,
+// actuated-intent guard, IntentsToSteps → ReplayStep. The only difference
+// is the intents come from the caller, not from the device.
+func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[string]map[string]string) error {
 	// Save port entries — ports come from init, not from intents.
 	ports := n.configDB.ExportPorts()
 
@@ -211,6 +224,78 @@ func (n *Node) RebuildProjection(ctx context.Context) error {
 	n.actuatedIntent = wasActuated
 	n.unsavedIntents = wasUnsaved
 	return nil
+}
+
+// BindsService returns true if this Node has at least one actuated
+// apply-service intent for the named service. Cheap pre-check before doing
+// the full snapshot/replay/diff cycle in ServiceProjection.
+func (n *Node) BindsService(serviceName string) bool {
+	for _, intent := range n.ServiceIntents() {
+		if intent.Params["service_name"] == serviceName {
+			return true
+		}
+	}
+	return false
+}
+
+// ServiceProjection returns the projection entries this Node carries because
+// the named service is bound on it. Computed via the replay-diff technique
+// (DESIGN_PRINCIPLES_NEWTRON §11, §46):
+//
+//  1. Snapshot the intent DB.
+//  2. Trim every intent whose IsService() is true and whose Params["service_name"]
+//     matches the named service.
+//  3. Rebuild the projection from the trimmed intent set (RebuildProjectionFromIntents).
+//  4. Diff the original projection against the trimmed projection via
+//     sonic.DiffConfigDB over OwnedTables(). Entries present in the original
+//     but missing or modified in the trimmed projection are the service's
+//     contribution.
+//  5. Restore the intent DB and rebuild the projection from it so the Node's
+//     observable state is unchanged when this method returns.
+//
+// Returns []DriftEntry — the canonical entry-delta vocabulary per §11. The
+// "missing" entries are exclusively the service's; "modified" entries are
+// fields the service overlaid on top of another intent's contribution.
+//
+// In actuated mode the snapshot/restore is in-memory only; no device writes.
+func (n *Node) ServiceProjection(ctx context.Context, serviceName string) ([]sonic.DriftEntry, error) {
+	if n.configDB == nil {
+		return nil, nil
+	}
+	originalProj := n.configDB.ExportRaw()
+	snapshot := n.SnapshotIntentDB()
+
+	// Build trimmed intent set: drop intents that ARE this service.
+	trimmed := make(map[string]map[string]string, len(snapshot))
+	for resource, fields := range snapshot {
+		intent := sonic.NewIntent(resource, fields)
+		if intent.IsService() && intent.Params["service_name"] == serviceName {
+			continue
+		}
+		trimmed[resource] = fields
+	}
+
+	// Rebuild from trimmed; capture the resulting projection.
+	if err := n.RebuildProjectionFromIntents(ctx, trimmed); err != nil {
+		// Restore even on error.
+		n.RestoreIntentDB(snapshot)
+		_ = n.RebuildProjectionFromIntents(ctx, snapshot)
+		return nil, fmt.Errorf("rebuilding trimmed projection: %w", err)
+	}
+	trimmedProj := n.configDB.ExportRaw()
+
+	// Restore original intents + projection. Loss of the rebuilt configDB is
+	// recovered by re-replaying from the snapshot — a second full rebuild,
+	// acceptable for a diagnostic operation.
+	n.RestoreIntentDB(snapshot)
+	if err := n.RebuildProjectionFromIntents(ctx, snapshot); err != nil {
+		return nil, fmt.Errorf("restoring original projection: %w", err)
+	}
+
+	// Diff: original (expected) vs trimmed (actual). "missing" entries in the
+	// diff are present in original but absent from trimmed → service-only
+	// contribution. "modified" → service overlaid fields on a shared key.
+	return sonic.DiffConfigDB(originalProj, trimmedProj, sonic.OwnedTables()), nil
 }
 
 // DisconnectTransport closes the SSH tunnel + Redis connection without

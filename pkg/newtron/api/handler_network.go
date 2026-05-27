@@ -2,9 +2,12 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
 // ============================================================================
@@ -83,6 +86,68 @@ func (s *Server) handleShowService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, val)
+}
+
+// handleServiceProjection returns the per-Node projection slices the named
+// service contributes. Iterates over every NodeActor with a currently-built
+// abstract node, asks each whose Node BindsService(name), and computes the
+// per-Node slice via Node.ServiceProjection (replay-diff technique).
+//
+// §11 + §46: each per-Node slice is the canonical []sonic.DriftEntry
+// vocabulary. Aggregated into *newtron.ServiceProjectionResult.
+func (s *Server) handleServiceProjection(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	serviceName := r.PathValue("name")
+	result := &newtron.ServiceProjectionResult{Service: serviceName}
+
+	// Snapshot the NodeActor map so iteration doesn't race with new actors
+	// being created mid-iteration.
+	na.mu.Lock()
+	actors := make(map[string]*NodeActor, len(na.nodeActors))
+	for name, a := range na.nodeActors {
+		actors[name] = a
+	}
+	na.mu.Unlock()
+
+	deviceNames := make([]string, 0, len(actors))
+	for name := range actors {
+		deviceNames = append(deviceNames, name)
+	}
+	sort.Strings(deviceNames)
+
+	for _, device := range deviceNames {
+		actor := actors[device]
+		val, err := actor.do(r.Context(), func() (any, error) {
+			if actor.node == nil {
+				return nil, nil // not currently built — skip
+			}
+			if !actor.node.BindsService(serviceName) {
+				return nil, nil
+			}
+			return actor.node.ServiceProjection(r.Context(), serviceName)
+		})
+		if err != nil {
+			writeError(w, fmt.Errorf("computing service projection for %s: %w", device, err))
+			return
+		}
+		if val == nil {
+			continue
+		}
+		diff, ok := val.([]sonic.DriftEntry)
+		if !ok {
+			writeError(w, fmt.Errorf("unexpected type from ServiceProjection: %T", val))
+			return
+		}
+		result.Nodes = append(result.Nodes, newtron.ServiceProjectionNode{
+			Node: device,
+			Diff: diff,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleListIPVPNs(w http.ResponseWriter, r *http.Request) {

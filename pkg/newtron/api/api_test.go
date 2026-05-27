@@ -211,6 +211,8 @@ func TestAPICompleteness(t *testing.T) {
 			"SaveDeviceIntents":      "intent save — invoked by handleSave via nodeActor.execute",
 		},
 		"Node": {
+			"BindsService":         "internal helper for /service/{name}/projection — pre-check before ServiceProjection",
+			"ServiceProjection":    "internal helper used by /service/{name}/projection handler per-actor; no separate per-Node endpoint",
 			"SetDeviceMetadata":    "used internally by InitDevice; no direct HTTP endpoint",
 			"Name":                 "identity is known from the URL path",
 			"Interface":            "interface access is via URL path, not a method call",

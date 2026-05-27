@@ -252,6 +252,14 @@ step-application path.
 
 ## 3. `newtron#6` — Per-service projection slice endpoint
 
+_Landed on branch `impl/phase-3-service-projection` (Phase 3 batch).
+Implemented via the replay-diff technique on each Node: snapshot intent DB,
+trim the service's apply-service intents, rebuild projection from the trimmed
+set, diff against the full projection. Handler iterates over NodeActors (the
+api-layer cache of built nodes) since `net.devices` is only populated by
+explicit GetNode calls. Operationalizes operator-philosophy invariant #5
+(why-mode at service scope) per the §11 diff vocabulary._
+
 ### Principle check
 
 **§46 (load-bearing):** the per-service projection slice is the

@@ -698,6 +698,7 @@ func (n *Network) ListNodes() []string {
 	return names
 }
 
+
 // isHostDeviceLocked checks host status without acquiring the mutex (caller must hold lock).
 func (n *Network) isHostDeviceLocked(name string) bool {
 	profile, err := n.loader.LoadProfile(name)

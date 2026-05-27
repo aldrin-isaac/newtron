@@ -210,6 +210,26 @@ type PortChannelConfig struct {
 	MTU      int
 }
 
+// ServiceProjectionNode reports the projection-slice contribution of a service
+// on a single Node. Diff is the canonical sonic.DriftEntry vocabulary per §11:
+// "missing" entries are exclusively the service's contribution; "modified"
+// entries are fields the service overlays on top of other intents.
+type ServiceProjectionNode struct {
+	Node string             `json:"node"`
+	Diff []sonic.DriftEntry `json:"diff"`
+}
+
+// ServiceProjectionResult aggregates per-Node service slices for the named
+// service across every Node newtron currently has built. Nodes that do not
+// bind the service are omitted; per-Node ordering is alphabetical by name.
+// §11 + §46 — the canonical wire shape for the /service/{name}/projection
+// endpoint that operationalizes operator-philosophy invariant #5 (why-mode)
+// at the service scope.
+type ServiceProjectionResult struct {
+	Service string                  `json:"service"`
+	Nodes   []ServiceProjectionNode `json:"nodes"`
+}
+
 // ApplyServiceOpts contains options for applying a service to an interface.
 type ApplyServiceOpts struct {
 	IPAddress string            // IP address for routed/IRB services (e.g., "10.1.1.1/30")

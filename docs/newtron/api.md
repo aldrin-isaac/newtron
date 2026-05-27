@@ -50,6 +50,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | POST | `/network/{n}/reload` | Reload specs from disk |
 | GET | `/network/{n}/service` | List services (also: `/ipvpn`, `/macvpn`, `/qos-policy`, `/filter`, `/platform`, `/route-policy`, `/prefix-list`) |
 | GET | `/network/{n}/service/{name}` | Show service (also: ipvpn, macvpn, qos-policy, filter, platform, route-policy, prefix-list) |
+| GET | `/network/{n}/service/{name}/projection` | Per-Node projection slices the service contributes (replay-diff) |
 | GET | `/network/{n}/profile` | List device profile names |
 | GET | `/network/{n}/profile/{name}` | Show device profile |
 | GET | `/network/{n}/zone` | List zone names |
@@ -571,6 +572,55 @@ GET /network/default/service          -> {"data": [ ... array of ServiceDetail .
 GET /network/default/service/transit  -> {"data": { ... single ServiceDetail ... }}
 GET /network/default/service/missing  -> {"error": "not found: service 'missing'"}
 ```
+
+#### GET /network/{netID}/service/{name}/projection
+
+Returns the per-Node projection slices the named service contributes. For each
+loaded Node that binds the service via an actuated `apply-service` intent, the
+server runs the replay-diff technique (snapshot intent DB → trim the service's
+intents → rebuild projection from trimmed set → diff against the full
+projection) and returns the resulting `[]sonic.DriftEntry` per Node.
+
+**Response (200):** `ServiceProjectionResult` with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `service` | string | The service name queried |
+| `nodes` | ServiceProjectionNode[] | Per-Node slices, alphabetical by Node name. Empty when no loaded Node binds the service. |
+
+`ServiceProjectionNode` carries:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `node` | string | The Node name |
+| `diff` | sonic.DriftEntry[] | Entries present in the Node's full projection but missing or modified in the trimmed projection. "missing" entries are exclusively the service's contribution; "modified" entries are fields the service overlays on top of other intents' contributions. |
+
+**Example:**
+
+```
+GET /network/default/service/TRANSIT/projection
+{
+  "data": {
+    "service": "TRANSIT",
+    "nodes": [
+      {
+        "node": "switch1",
+        "diff": [
+          { "table": "INTERFACE", "key": "Ethernet0|10.1.0.0/31", "type": "missing", "expected": {} },
+          { "table": "BGP_NEIGHBOR", "key": "default|10.1.0.1", "type": "missing", "expected": {...} }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Operationalizes operator-philosophy invariant #5 (why-mode is always available)
+at the service scope — Provenance answers "what does this service contribute on
+each Node?" with substrate-grade per-entry detail rather than a summary. §11 +
+§46.
+
+_Lands newtron#6 (Phase 3 — Cluster A.6 / per-service projection slice)._
 
 ### Topology
 

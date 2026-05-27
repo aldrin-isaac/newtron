@@ -1,0 +1,53 @@
+name: service-projection-actuated
+description: |
+  newtron#6 (Phase 3): the per-service projection slice endpoint
+  exposes, for each Node binding the named service, the projection
+  entries that exist because of that binding. Computed via the
+  replay-diff technique on each Node (snapshot intent DB → trim the
+  service's intents → rebuild projection from trimmed set → diff
+  against the full projection).
+
+  Operator-philosophy invariant #5 (why-mode is always available):
+  Provenance needs this surface to answer "what does this service
+  contribute on this Node?" at the canonical-substrate level. The
+  diff vocabulary is sonic.DriftEntry per §11 — "missing" entries
+  are exclusively the service's; "modified" entries are fields the
+  service overlays on top of other intents.
+
+  Provisions switch1, applies TRANSIT service to Ethernet0 with a
+  representative IP + peer-AS, then queries
+  /network/{n}/service/TRANSIT/projection and asserts:
+    - response carries one Nodes entry for switch1.
+    - the diff includes an INTERFACE entry for Ethernet0|10.1.0.0/31.
+    - the diff includes a BGP_NEIGHBOR entry for the peer (10.1.0.1).
+  Cleans up by removing the service.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: provision-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: apply-transit-on-ethernet0
+    action: newtron-cli
+    devices: [switch1]
+    command: "service apply Ethernet0 TRANSIT --ip 10.1.0.0/31 --peer-as 65002 -x"
+
+  - name: query-service-projection
+    action: newtron
+    method: GET
+    url: /service/TRANSIT/projection
+    expect:
+      jq: >-
+        .service == "TRANSIT"
+        and (.nodes | length) == 1
+        and .nodes[0].node == "switch1"
+        and (.nodes[0].diff | length) > 0
+        and any(.nodes[0].diff[]; .table == "INTERFACE" and (.key | contains("Ethernet0")))
+        and any(.nodes[0].diff[]; .table == "BGP_NEIGHBOR")
+
+  - name: remove-transit-cleanup
+    action: newtron-cli
+    devices: [switch1]
+    command: "service remove Ethernet0 -x"

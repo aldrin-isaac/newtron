@@ -101,6 +101,28 @@ func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawC
 	return n.internal.ConfigDBSnapshot(ctx, ownedOnly)
 }
 
+// BindsService reports whether this Node has at least one actuated
+// apply-service intent for the named service. Used by Network.ServiceProjection
+// (and api handlers iterating over nodes) to skip non-binders cheaply before
+// the full replay-diff computation.
+func (n *Node) BindsService(serviceName string) bool {
+	return n.internal.BindsService(serviceName)
+}
+
+// ServiceProjection returns the projection entries this Node carries because
+// the named service is bound on it — the canonical entry-level slice via the
+// replay-diff technique. Returns []sonic.DriftEntry per §11.
+//
+// Exposed for callers that need per-Node service slices (typically the api
+// layer's handleServiceProjection, which iterates over NodeActors and calls
+// this method on each Node that BindsService). Newtcon and other HTTP
+// consumers read this substrate via the network-scoped endpoint
+// GET /network/{n}/service/{name}/projection (returns *ServiceProjection),
+// not directly per-Node.
+func (n *Node) ServiceProjection(ctx context.Context, serviceName string) ([]sonic.DriftEntry, error) {
+	return n.internal.ServiceProjection(ctx, serviceName)
+}
+
 // Drift compares the node's projection (expected state) against the device's
 // actual CONFIG_DB. Returns drift entries for owned tables. Auto-connects
 // transport if not already connected.
