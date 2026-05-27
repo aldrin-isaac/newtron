@@ -638,6 +638,86 @@ empty).
 
 _Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 
+#### POST /network/{netID}/topology/create-node
+
+Adds a device entry to `topology.json`. The matching profile file
+(`profiles/{name}.json`) must already exist; if absent, the call returns 400
+with the resolution path included.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | yes | Topology device name; must match a profile filename. |
+| `device` | TopologyDevice | yes | Typed entry: `ports` (interface declarations) and optional `steps[]` (intent operations to replay when the node is built). May be empty for a bare declaration; subsequent operations + `intent save --topology` populate `steps[]`. |
+
+**Response (201):** the persisted `TopologyDevice`.
+
+**Errors:** 409 with `*ConflictError` if a device with this name already
+exists; 400 if the profile file is missing or the body is invalid.
+
+#### DELETE /network/{netID}/topology/node/{name}
+
+Removes a device entry from `topology.json`. Default behavior **refuses**
+when any link still references the device — operator must delete those
+links first, or pass `?force=true` to cascade-delete the referring links
+along with the device (DESIGN_PRINCIPLES §15: cascade is explicit, never
+implicit). Closes any api-layer NodeActor cache for this name.
+
+**Path params:** `name` (the topology device name).
+
+**Query params:** `force` (`true` to cascade through referring links).
+
+**Response (200):** `{"deleted": "<name>"}`.
+
+**Errors:** 404 when the name doesn't exist; 409 with `*ConflictError` (and
+`References` listing the referring links) when `force` is absent and links
+remain wired to the device.
+
+#### PUT /network/{netID}/topology/node/{name}
+
+Replaces the device entry at `name` with the body (full-replacement
+semantics — no partial patch). Closes the api-layer NodeActor cache so the
+next request rebuilds from the new spec.
+
+**Path params:** `name`.
+
+**Request body:** `TopologyDevice` (the full new entry).
+
+**Response (200):** the new `TopologyDevice`.
+
+**Errors:** 404 when the name doesn't exist; 400 if profile missing or body
+invalid.
+
+#### POST /network/{netID}/topology/create-link
+
+Adds a link to `topology.json`. Refuses when either endpoint is already
+wired to another link (a port participates in at most one link). Validates
+that both endpoint devices exist in topology AND that each interface is
+declared on its device's `Ports` map.
+
+**Request body:** `TopologyLink` (`{a: "device:interface", z: "device:interface"}`).
+
+**Response (201):** the persisted `TopologyLink`.
+
+**Errors:** 409 with `*ConflictError` when an endpoint is already wired;
+400 when an endpoint device or interface is unknown.
+
+#### DELETE /network/{netID}/topology/link/{device}/{interface}
+
+Removes the link containing the given `{device, interface}` endpoint.
+Single-endpoint identification: a port participates in at most one link, so
+one endpoint uniquely identifies the link.
+
+**Path params:** `device`, `interface`.
+
+**Response (200):** `{"deleted": "<device>:<interface>"}`.
+
+**Errors:** 404 when no link contains the endpoint.
+
+_All five CRUD endpoints land newtron#15 + #16 (Phase 5 — topology spec
+substrate CRUD). §7 + §15 + §27 + §46._
+
 #### GET /network/{netID}/topology/node
 
 List device names from the topology file.

@@ -11,6 +11,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
@@ -522,9 +523,36 @@ func (n *Network) SaveProfile(name string, profile *spec.DeviceProfile) error {
 	return n.loader.SaveProfile(name, profile)
 }
 
-// DeleteProfile removes a device profile.
-func (n *Network) DeleteProfile(name string) error {
-	// Remove from loader cache and delete the file
+// DeleteProfile removes a device profile. Refuses with *newtron.ConflictError
+// when any topology device references the profile, unless force is true. With
+// force=true, cascade-deletes every referring topology device (which in turn
+// cascade-deletes any links wired to those devices) before removing the
+// profile. Symmetric with DeleteTopologyDevice's cascade pattern — both honor
+// §15 (operational symmetry; cascade is explicit, never implicit).
+func (n *Network) DeleteProfile(name string, force bool) error {
+	// A profile and a topology device share their name 1:1 — the profile
+	// "reference" from topology is the matching name in topology.Devices.
+	n.mu.RLock()
+	topo := n.loader.GetTopology()
+	hasTopoDevice := topo != nil && topo.HasDevice(name)
+	n.mu.RUnlock()
+
+	if hasTopoDevice {
+		if !force {
+			return &util.ConflictError{
+				Resource:   "profile",
+				Name:       name,
+				References: []string{"topology device '" + name + "'"},
+			}
+		}
+		// Cascade: delete the topology device (which itself cascades to any
+		// links wired to that device's endpoints) before removing the
+		// profile file. force=true is propagated.
+		if err := n.DeleteTopologyDevice(name, true); err != nil {
+			return fmt.Errorf("cascade deleting topology device %s: %w", name, err)
+		}
+	}
+
 	return n.loader.DeleteProfile(name)
 }
 
@@ -697,6 +725,334 @@ func (n *Network) ListNodes() []string {
 	}
 	return names
 }
+
+// ============================================================================
+// Topology CRUD — §7 (network-scoped definition), §27 (single owner =
+// spec.Loader.SaveTopology), §28 (file-level ownership: spec-layer mutation
+// lives here, not in handlers), §15 (cascade is explicit via force).
+// ============================================================================
+
+// AddTopologyDevice adds a device entry to topology.json. Returns
+// *util.ConflictError when the name already exists (re-using the conflict
+// vocab for duplicate-as-conflict). Validates that the matching profile file
+// exists. Persists atomically via spec.Loader.SaveTopology.
+func (n *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error {
+	if name == "" {
+		return fmt.Errorf("topology device name required")
+	}
+	if device == nil {
+		return fmt.Errorf("device entry required")
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	topo := n.loader.GetTopology()
+	if topo == nil {
+		topo = &spec.TopologySpecFile{Version: "1.0", Devices: map[string]*spec.TopologyDevice{}}
+	}
+	if _, exists := topo.Devices[name]; exists {
+		return &util.ConflictError{
+			Resource:   "topology-device",
+			Name:       name,
+			References: []string{"already declared in topology.json"},
+		}
+	}
+
+	// Profile file must exist — same invariant validateTopology enforces.
+	if _, err := n.loader.LoadProfile(name); err != nil {
+		return fmt.Errorf("profile for topology device %s: %w", name, err)
+	}
+
+	// Stage the mutation on a working copy so persistence failure leaves
+	// the in-memory state untouched.
+	working := cloneTopology(topo)
+	if working.Devices == nil {
+		working.Devices = map[string]*spec.TopologyDevice{}
+	}
+	working.Devices[name] = device
+
+	return n.applyTopology(working)
+}
+
+// DeleteTopologyDevice removes a device entry from topology.json. Refuses
+// with *util.ConflictError when any link still references the device, unless
+// force=true. With force=true, also removes every referring link before
+// removing the device. Persists atomically.
+//
+// Does NOT close any api-layer NodeActor cache that may hold a built node
+// for this name — that's the caller's (handler's) job.
+func (n *Network) DeleteTopologyDevice(name string, force bool) error {
+	if name == "" {
+		return fmt.Errorf("topology device name required")
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	topo := n.loader.GetTopology()
+	if topo == nil || !topo.HasDevice(name) {
+		return &newtronErrors{notFound: true, resource: "topology-device", id: name}
+	}
+
+	// Find referring links (either endpoint is on this device).
+	var referring []*spec.TopologyLink
+	for _, link := range topo.Links {
+		if linkReferencesDevice(link, name) {
+			referring = append(referring, link)
+		}
+	}
+	if len(referring) > 0 && !force {
+		refs := make([]string, 0, len(referring))
+		for _, l := range referring {
+			refs = append(refs, "link "+l.A+" ↔ "+l.Z)
+		}
+		sort.Strings(refs)
+		return &util.ConflictError{
+			Resource:   "topology-device",
+			Name:       name,
+			References: refs,
+		}
+	}
+
+	// Stage on a working copy. Remove referring links first, then the device.
+	working := cloneTopology(topo)
+	if len(referring) > 0 {
+		working.Links = filterLinks(working.Links, func(l *spec.TopologyLink) bool {
+			return !linkReferencesDevice(l, name)
+		})
+	}
+	delete(working.Devices, name)
+
+	if err := n.applyTopology(working); err != nil {
+		return err
+	}
+
+	// Also clear any in-memory loaded Node for this name; the spec entry is gone.
+	delete(n.devices, name)
+	return nil
+}
+
+// UpdateTopologyDevice replaces the device entry at name with the given
+// TopologyDevice (full-replacement semantics; no partial patch). Returns
+// NotFoundError when the name doesn't exist. Validates profile file.
+//
+// Does NOT close any api-layer NodeActor cache — handler's job (the cached
+// abstract node now reflects stale spec until the actor is reset).
+func (n *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error {
+	if name == "" {
+		return fmt.Errorf("topology device name required")
+	}
+	if device == nil {
+		return fmt.Errorf("device entry required")
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	topo := n.loader.GetTopology()
+	if topo == nil || !topo.HasDevice(name) {
+		return &newtronErrors{notFound: true, resource: "topology-device", id: name}
+	}
+
+	if _, err := n.loader.LoadProfile(name); err != nil {
+		return fmt.Errorf("profile for topology device %s: %w", name, err)
+	}
+
+	working := cloneTopology(topo)
+	working.Devices[name] = device
+
+	if err := n.applyTopology(working); err != nil {
+		return err
+	}
+	// In-memory loaded Node (if any) is now stale — drop it so the next
+	// access rebuilds from the new spec.
+	delete(n.devices, name)
+	return nil
+}
+
+// AddTopologyLink adds a link to topology.json. Returns *util.ConflictError
+// when either endpoint is already occupied by another link (a port
+// participates in at most one link). Validates that both endpoint devices
+// exist in the topology AND that the interface is declared on each device's
+// Ports map.
+func (n *Network) AddTopologyLink(link *spec.TopologyLink) error {
+	if link == nil {
+		return fmt.Errorf("link entry required")
+	}
+	if link.A == "" || link.Z == "" {
+		return fmt.Errorf("link endpoints required (a, z)")
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	topo := n.loader.GetTopology()
+	if topo == nil {
+		topo = &spec.TopologySpecFile{Version: "1.0", Devices: map[string]*spec.TopologyDevice{}}
+	}
+
+	// Endpoint format: "device:interface". Validate both ends.
+	for _, ep := range []string{link.A, link.Z} {
+		dev, iface, ok := splitTopologyEndpoint(ep)
+		if !ok {
+			return fmt.Errorf("invalid endpoint '%s' (expected 'device:interface')", ep)
+		}
+		d, exists := topo.Devices[dev]
+		if !exists {
+			return fmt.Errorf("endpoint %s: device '%s' not in topology", ep, dev)
+		}
+		if d.Ports != nil {
+			if _, declared := d.Ports[iface]; !declared {
+				return fmt.Errorf("endpoint %s: interface '%s' not declared on device '%s'",
+					ep, iface, dev)
+			}
+		}
+	}
+
+	// Each port participates in at most one link. Refuse if either endpoint
+	// is already wired.
+	for _, ep := range []string{link.A, link.Z} {
+		for _, existing := range topo.Links {
+			if existing.A == ep || existing.Z == ep {
+				return &util.ConflictError{
+					Resource:   "topology-link",
+					Name:       ep,
+					References: []string{"already wired in link " + existing.A + " ↔ " + existing.Z},
+				}
+			}
+		}
+	}
+
+	working := cloneTopology(topo)
+	working.Links = append(working.Links, link)
+	return n.applyTopology(working)
+}
+
+// DeleteTopologyLink removes the link whose A or Z endpoint matches the
+// given "device:interface" string. Per scope-design Q3: a port participates
+// in at most one link, so a single endpoint uniquely identifies the link.
+// Returns NotFoundError when no link contains the endpoint.
+func (n *Network) DeleteTopologyLink(endpoint string) error {
+	if endpoint == "" {
+		return fmt.Errorf("link endpoint required (device:interface)")
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	topo := n.loader.GetTopology()
+	if topo == nil {
+		return &newtronErrors{notFound: true, resource: "topology-link", id: endpoint}
+	}
+
+	idx := -1
+	for i, l := range topo.Links {
+		if l.A == endpoint || l.Z == endpoint {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return &newtronErrors{notFound: true, resource: "topology-link", id: endpoint}
+	}
+
+	working := cloneTopology(topo)
+	working.Links = append(working.Links[:idx], working.Links[idx+1:]...)
+	return n.applyTopology(working)
+}
+
+// ----------------------------------------------------------------------------
+// topology CRUD helpers
+// ----------------------------------------------------------------------------
+
+// applyTopology persists the given working spec via SaveTopology and updates
+// the cached n.topology pointer in lockstep. Caller must hold n.mu (write
+// lock). Network.topology is a separate cache from the loader's copy; both
+// must move together on every mutation, else GetTopologyDevice/HasTopology
+// readers see stale state.
+func (n *Network) applyTopology(working *spec.TopologySpecFile) error {
+	if err := n.loader.SaveTopology(working); err != nil {
+		return err
+	}
+	n.topology = working
+	return nil
+}
+
+// cloneTopology returns a shallow copy of topo with the Devices map and Links
+// slice copied so mutation of the working copy doesn't bleed into the
+// in-memory loader cache before SaveTopology swaps it in.
+func cloneTopology(topo *spec.TopologySpecFile) *spec.TopologySpecFile {
+	out := &spec.TopologySpecFile{
+		Version:     topo.Version,
+		Description: topo.Description,
+		NewtLab:     topo.NewtLab,
+	}
+	if topo.Devices != nil {
+		out.Devices = make(map[string]*spec.TopologyDevice, len(topo.Devices))
+		for k, v := range topo.Devices {
+			out.Devices[k] = v
+		}
+	}
+	if len(topo.Links) > 0 {
+		out.Links = make([]*spec.TopologyLink, len(topo.Links))
+		copy(out.Links, topo.Links)
+	}
+	return out
+}
+
+func linkReferencesDevice(l *spec.TopologyLink, deviceName string) bool {
+	for _, ep := range []string{l.A, l.Z} {
+		d, _, ok := splitTopologyEndpoint(ep)
+		if ok && d == deviceName {
+			return true
+		}
+	}
+	return false
+}
+
+func filterLinks(in []*spec.TopologyLink, keep func(*spec.TopologyLink) bool) []*spec.TopologyLink {
+	out := in[:0]
+	for _, l := range in {
+		if keep(l) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func splitTopologyEndpoint(ep string) (device, iface string, ok bool) {
+	for i := 0; i < len(ep); i++ {
+		if ep[i] == ':' {
+			return ep[:i], ep[i+1:], true
+		}
+	}
+	return "", "", false
+}
+
+// newtronErrors is the network package's internal error variant for cases
+// where parent newtron's NotFoundError needs to surface. Translated to
+// *newtron.NotFoundError by the parent public wrapper. Stays in this package
+// to avoid a circular import (network is upstream of newtron).
+type newtronErrors struct {
+	notFound bool
+	resource string
+	id       string
+}
+
+func (e *newtronErrors) Error() string {
+	if e.notFound {
+		return fmt.Sprintf("%s '%s' not found", e.resource, e.id)
+	}
+	return "unspecified network error"
+}
+
+// IsNotFound is the helper the public wrapper uses to translate.
+func (e *newtronErrors) IsNotFound() bool { return e.notFound }
+
+func (e *newtronErrors) Resource() string { return e.resource }
+
+func (e *newtronErrors) ID() string { return e.id }
 
 
 // isHostDeviceLocked checks host status without acquiring the mutex (caller must hold lock).

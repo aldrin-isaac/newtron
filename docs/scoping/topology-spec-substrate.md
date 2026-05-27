@@ -139,6 +139,14 @@ existing `GetTopology()`.
 
 ## 2. `newtron#15` — Topology node CRUD
 
+_Landed on branch `impl/phase-5-topology-crud` (Phase 5 batch). Decisions:
+Q1 = Option C (`?force=true` cascade); Q2 = Replace semantics; Q3 =
+single-endpoint URL for delete-link (a port participates in at most one
+link); Q4 = body is the full TopologyDevice; profile-cascade symmetry
+applied alongside (DeleteProfile gets `?force=true` parameter that cascades
+through the matching topology device); NodeActor cache cleared on both
+delete-node and update-node._
+
 ### Principle check
 
 **§46 (load-bearing):** the typed `TopologyDevice` is canonical
@@ -239,6 +247,12 @@ filing a separate gap for it.
 ---
 
 ## 3. `newtron#16` — Topology link CRUD
+
+_Landed on branch `impl/phase-5-topology-crud` (Phase 5 batch, same commit as
+#15). URL shape: `POST /topology/create-link` (body = TopologyLink) +
+`DELETE /topology/link/{device}/{interface}` (single endpoint uniquely
+identifies the link). Add refuses with `*ConflictError` when either
+endpoint is already wired._
 
 ### Principle check
 

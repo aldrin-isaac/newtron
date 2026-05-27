@@ -107,6 +107,15 @@ type ProjectionDiffRequest struct {
 	Operations []spec.TopologyStep `json:"operations"`
 }
 
+// TopologyNodeCreateRequest is the body for POST .../topology/create-node.
+// Name addresses the new entry; Device carries the typed TopologyDevice as
+// stored in topology.json (profile is implicit via name; Ports + Steps may
+// be empty for a bare declaration, or pre-populated for one-shot create).
+type TopologyNodeCreateRequest struct {
+	Name   string               `json:"name"`
+	Device *spec.TopologyDevice `json:"device"`
+}
+
 // NodeUnbindMACVPNRequest is the body for POST .../unbind-macvpn (node-level).
 type NodeUnbindMACVPNRequest struct {
 	VlanID int `json:"vlan_id"`
@@ -228,6 +237,11 @@ func httpStatusFromError(err error) int {
 
 	var verificationFailed *newtron.VerificationFailedError
 	if errors.As(err, &verificationFailed) {
+		return http.StatusConflict
+	}
+
+	var conflict *newtron.ConflictError
+	if errors.As(err, &conflict) {
 		return http.StatusConflict
 	}
 

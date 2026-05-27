@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -113,9 +115,14 @@ func TestAPICompleteness(t *testing.T) {
 			"CreateZone":    true,
 			"DeleteZone":    true,
 			// Topology / Provision
-			"HasTopology":         true,
-			"GetTopology":         true, // #14: GET /network/{netID}/topology
-			"TopologyDeviceNames": true,
+			"HasTopology":           true,
+			"GetTopology":           true, // #14: GET /network/{netID}/topology
+			"AddTopologyDevice":     true, // #15: POST /network/{netID}/topology/create-node
+			"DeleteTopologyDevice":  true, // #15: DELETE /network/{netID}/topology/node/{name}
+			"UpdateTopologyDevice":  true, // #15: PUT /network/{netID}/topology/node/{name}
+			"AddTopologyLink":       true, // #16: POST /network/{netID}/topology/create-link
+			"DeleteTopologyLink":    true, // #16: DELETE /network/{netID}/topology/link/{device}/{interface}
+			"TopologyDeviceNames":   true,
 			"IsHostDevice":        true,
 			"GetHostProfile":      true,
 			"InitDevice":          true,
@@ -622,6 +629,305 @@ func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
 	postProj := n.Projection()
 	if postProj["VLAN"] != nil && postProj["VLAN"]["Vlan100"] != nil {
 		t.Error("Projection not restored — VLAN|Vlan100 still present after ProjectionDiff")
+	}
+}
+
+// copyTestSpecDir copies the 1node-vs spec directory into t.TempDir() so
+// topology CRUD tests can mutate freely without polluting the lab spec.
+// Returns the temp spec path; cleanup is automatic via t.TempDir().
+func copyTestSpecDir(t *testing.T) string {
+	t.Helper()
+	src := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+	dst := filepath.Join(t.TempDir(), "specs")
+	if err := os.MkdirAll(filepath.Join(dst, "profiles"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatalf("readdir src: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			if e.Name() == "profiles" {
+				profs, err := os.ReadDir(filepath.Join(src, "profiles"))
+				if err != nil {
+					t.Fatalf("readdir profiles: %v", err)
+				}
+				for _, p := range profs {
+					data, err := os.ReadFile(filepath.Join(src, "profiles", p.Name()))
+					if err != nil {
+						t.Fatalf("read profile %s: %v", p.Name(), err)
+					}
+					if err := os.WriteFile(filepath.Join(dst, "profiles", p.Name()), data, 0o644); err != nil {
+						t.Fatalf("write profile %s: %v", p.Name(), err)
+					}
+				}
+			}
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+			t.Fatalf("write %s: %v", e.Name(), err)
+		}
+	}
+	return dst
+}
+
+// TestTopologyCRUD_AddDeleteDevice — newtron#15 (Phase 5). Round-trip a new
+// topology device entry: write a profile + a TopologyDevice spec, verify the
+// add lands in topology.json, then delete and verify removal. Cleanup is
+// implicit via t.TempDir().
+func TestTopologyCRUD_AddDeleteDevice(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	// Add a profile for switch2 (matches the 1:1 name convention).
+	if err := os.WriteFile(
+		filepath.Join(specDir, "profiles", "switch2.json"),
+		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	dev := &spec.TopologyDevice{
+		Ports: map[string]map[string]string{
+			"Ethernet0": {"admin_status": "up", "mtu": "9100"},
+		},
+	}
+	if err := net.AddTopologyDevice("switch2", dev); err != nil {
+		t.Fatalf("AddTopologyDevice: %v", err)
+	}
+	topo := net.GetTopology()
+	if topo.Devices["switch2"] == nil {
+		t.Fatal("switch2 missing from topology after Add")
+	}
+
+	if err := net.DeleteTopologyDevice("switch2", false); err != nil {
+		t.Fatalf("DeleteTopologyDevice: %v", err)
+	}
+	topo = net.GetTopology()
+	if topo.Devices["switch2"] != nil {
+		t.Error("switch2 still in topology after Delete")
+	}
+}
+
+// TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink — Q1 (Option C)
+// default behavior: refuse with *ConflictError when a link references the
+// device, listing the referring link in References.
+func TestTopologyCRUD_DeleteDevice_RefusesWithReferringLink(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	if err := os.WriteFile(
+		filepath.Join(specDir, "profiles", "switch2.json"),
+		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	dev := &spec.TopologyDevice{
+		Ports: map[string]map[string]string{
+			"Ethernet0": {"admin_status": "up"},
+		},
+	}
+	if err := net.AddTopologyDevice("switch2", dev); err != nil {
+		t.Fatalf("AddTopologyDevice: %v", err)
+	}
+	if err := net.AddTopologyLink(&spec.TopologyLink{
+		A: "switch1:Ethernet0",
+		Z: "switch2:Ethernet0",
+	}); err != nil {
+		t.Fatalf("AddTopologyLink: %v", err)
+	}
+
+	err = net.DeleteTopologyDevice("switch2", false)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	var conflict *newtron.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected *ConflictError, got %T: %v", err, err)
+	}
+	if len(conflict.References) == 0 {
+		t.Error("ConflictError must list the referring link in References")
+	}
+
+	// force=true cascades.
+	if err := net.DeleteTopologyDevice("switch2", true); err != nil {
+		t.Fatalf("force-delete: %v", err)
+	}
+	topo := net.GetTopology()
+	if topo.Devices["switch2"] != nil {
+		t.Error("switch2 still in topology after force-delete")
+	}
+	if len(topo.Links) != 0 {
+		t.Errorf("links not cascaded; got %d still wired", len(topo.Links))
+	}
+}
+
+// TestTopologyCRUD_AddLink_RejectsAlreadyWired — a port participates in at
+// most one link; AddTopologyLink refuses when an endpoint is already wired.
+func TestTopologyCRUD_AddLink_RejectsAlreadyWired(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	if err := os.WriteFile(
+		filepath.Join(specDir, "profiles", "switch2.json"),
+		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+		Ports: map[string]map[string]string{
+			"Ethernet0": {"admin_status": "up"},
+			"Ethernet4": {"admin_status": "up"},
+		},
+	}); err != nil {
+		t.Fatalf("AddTopologyDevice: %v", err)
+	}
+	if err := net.AddTopologyLink(&spec.TopologyLink{
+		A: "switch1:Ethernet0",
+		Z: "switch2:Ethernet0",
+	}); err != nil {
+		t.Fatalf("AddTopologyLink: %v", err)
+	}
+	// Same endpoint reused — must refuse.
+	err = net.AddTopologyLink(&spec.TopologyLink{
+		A: "switch2:Ethernet0",
+		Z: "switch1:Ethernet4",
+	})
+	if err == nil {
+		t.Fatal("expected conflict on already-wired endpoint, got nil")
+	}
+	var conflict *newtron.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected *ConflictError, got %T", err)
+	}
+}
+
+// TestTopologyCRUD_DeleteLink_BySingleEndpoint — Q3 design: a port
+// participates in at most one link, so passing one endpoint uniquely
+// identifies the link to delete.
+func TestTopologyCRUD_DeleteLink_BySingleEndpoint(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	if err := os.WriteFile(
+		filepath.Join(specDir, "profiles", "switch2.json"),
+		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
+	}); err != nil {
+		t.Fatalf("AddTopologyDevice: %v", err)
+	}
+	if err := net.AddTopologyLink(&spec.TopologyLink{
+		A: "switch1:Ethernet0",
+		Z: "switch2:Ethernet0",
+	}); err != nil {
+		t.Fatalf("AddTopologyLink: %v", err)
+	}
+	// Pass only the A endpoint; the link should be found and removed.
+	if err := net.DeleteTopologyLink("switch1:Ethernet0"); err != nil {
+		t.Fatalf("DeleteTopologyLink by single endpoint: %v", err)
+	}
+	if len(net.GetTopology().Links) != 0 {
+		t.Errorf("link not removed; %d remaining", len(net.GetTopology().Links))
+	}
+
+	// Same call now returns NotFoundError.
+	err = net.DeleteTopologyLink("switch1:Ethernet0")
+	var nf *newtron.NotFoundError
+	if !errors.As(err, &nf) {
+		t.Errorf("expected *NotFoundError after second delete, got %T: %v", err, err)
+	}
+}
+
+// TestTopologyCRUD_UpdateNode_Replace — Q2 default: full replacement of the
+// TopologyDevice entry under the given name.
+func TestTopologyCRUD_UpdateNode_Replace(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	// Replace switch1 with a different Ports map (no steps for simplicity).
+	replacement := &spec.TopologyDevice{
+		Ports: map[string]map[string]string{
+			"Ethernet0":  {"admin_status": "up", "mtu": "1500"},
+			"Ethernet64": {"admin_status": "down"},
+		},
+	}
+	if err := net.UpdateTopologyDevice("switch1", replacement); err != nil {
+		t.Fatalf("UpdateTopologyDevice: %v", err)
+	}
+	topo := net.GetTopology()
+	got := topo.Devices["switch1"]
+	if got.Ports["Ethernet0"]["mtu"] != "1500" {
+		t.Errorf("Update did not replace Ethernet0 fields; got %v", got.Ports["Ethernet0"])
+	}
+	if len(got.Steps) != 0 {
+		t.Error("Update should have replaced Steps with empty (full-replacement semantics)")
+	}
+}
+
+// TestTopologyCRUD_DeleteProfile_CascadeSymmetry — newtron#15 follow-on:
+// DeleteProfile refuses when a topology device shares the name; force=true
+// cascades through DeleteTopologyDevice (which itself cascades to links).
+func TestTopologyCRUD_DeleteProfile_CascadeSymmetry(t *testing.T) {
+	specDir := copyTestSpecDir(t)
+	if err := os.WriteFile(
+		filepath.Join(specDir, "profiles", "switch2.json"),
+		[]byte(`{"mgmt_ip":"127.0.0.1","loopback_ip":"10.0.0.2","zone":"amer","platform":"sonic-vs","ssh_user":"admin","ssh_pass":"x","underlay_asn":65002}`),
+		0o644,
+	); err != nil {
+		t.Fatalf("write profile: %v", err)
+	}
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	if err := net.AddTopologyDevice("switch2", &spec.TopologyDevice{
+		Ports: map[string]map[string]string{"Ethernet0": {"admin_status": "up"}},
+	}); err != nil {
+		t.Fatalf("AddTopologyDevice: %v", err)
+	}
+
+	// Refuses without force.
+	err = net.DeleteProfile("switch2", newtron.ExecOpts{Execute: true}, false)
+	if err == nil {
+		t.Fatal("expected conflict on profile-delete-with-topology-device, got nil")
+	}
+	var conflict *newtron.ConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("expected *ConflictError, got %T: %v", err, err)
+	}
+
+	// Force cascade.
+	if err := net.DeleteProfile("switch2", newtron.ExecOpts{Execute: true}, true); err != nil {
+		t.Fatalf("force-delete profile: %v", err)
+	}
+	topo := net.GetTopology()
+	if topo.Devices["switch2"] != nil {
+		t.Error("switch2 topology device still present after force-delete-profile cascade")
 	}
 }
 

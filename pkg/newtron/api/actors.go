@@ -97,6 +97,22 @@ func (na *NetworkActor) getNodeActor(device string) *NodeActor {
 	return actor
 }
 
+// removeNodeActor closes the NodeActor for device (if any) and drops it from
+// the cache. Called by handlers that mutate or delete a topology device — the
+// cached node is now stale and must be rebuilt from the new spec on next
+// access.
+func (na *NetworkActor) removeNodeActor(device string) {
+	na.mu.Lock()
+	actor, ok := na.nodeActors[device]
+	if ok {
+		delete(na.nodeActors, device)
+	}
+	na.mu.Unlock()
+	if ok {
+		actor.stop()
+	}
+}
+
 // stop shuts down the NetworkActor and all its NodeActors.
 func (na *NetworkActor) stop() {
 	na.mu.Lock()

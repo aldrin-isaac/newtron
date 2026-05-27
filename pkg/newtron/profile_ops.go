@@ -65,8 +65,11 @@ func (net *Network) CreateProfile(req CreateDeviceProfileRequest, opts ExecOpts)
 	return net.internal.SaveProfile(req.Name, profile)
 }
 
-// DeleteProfile removes a device profile.
-func (net *Network) DeleteProfile(name string, opts ExecOpts) error {
+// DeleteProfile removes a device profile. force=true cascade-deletes any
+// topology device that references this profile (which itself cascade-deletes
+// any links wired to that device). Without force, the call returns a
+// *ConflictError listing the referring topology devices.
+func (net *Network) DeleteProfile(name string, opts ExecOpts, force bool) error {
 	if _, err := net.internal.GetProfile(name); err != nil {
 		return err
 	}
@@ -78,7 +81,7 @@ func (net *Network) DeleteProfile(name string, opts ExecOpts) error {
 	if !opts.Execute {
 		return nil
 	}
-	return net.internal.DeleteProfile(name)
+	return net.internal.DeleteProfile(name, force)
 }
 
 // ============================================================================

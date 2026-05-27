@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
 // ============================================================================
@@ -111,6 +112,12 @@ func (e *ValidationError) Error() string {
 	}
 	return fmt.Sprintf("validation error: %s", e.Message)
 }
+
+// ConflictError is re-exported from pkg/util so the parent newtron public
+// API and the internal network/spec layers can share a single type. Used
+// when a requested mutation would violate an invariant due to references
+// from other entities (see DESIGN_PRINCIPLES §15 — cascade is explicit).
+type ConflictError = util.ConflictError
 
 // VerificationFailedError indicates post-apply verification failed.
 //

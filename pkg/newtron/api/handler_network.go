@@ -8,6 +8,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
@@ -370,6 +371,135 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, val)
+}
+
+// ============================================================================
+// Topology CRUD handlers — newtron#15 + #16 (Phase 5)
+// ============================================================================
+
+// handleCreateTopologyNode adds a device entry to topology.json. Body is
+// {name, device: TopologyDevice}. 409 on duplicate name; 400 on missing
+// profile / invalid body.
+func (s *Server) handleCreateTopologyNode(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var req TopologyNodeCreateRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.Name == "" || req.Device == nil {
+		writeError(w, &newtron.ValidationError{Message: "name and device required"})
+		return
+	}
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.AddTopologyDevice(req.Name, req.Device)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, req.Device)
+}
+
+// handleDeleteTopologyNode removes a device entry from topology.json. URL
+// path carries the name. Query param ?force=true cascade-deletes referring
+// links. 409 (ConflictError) when references remain and force is absent.
+// Also closes any api-layer NodeActor cache for this name (handler cleanup
+// per Q4 design).
+func (s *Server) handleDeleteTopologyNode(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	force := r.URL.Query().Get("force") == "true"
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeleteTopologyDevice(name, force)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	na.removeNodeActor(name) // clear stale cache; spec entry is gone
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": name})
+}
+
+// handleUpdateTopologyNode replaces the device entry at name with the body.
+// Full-replacement semantics — body must be a complete TopologyDevice. 404
+// when name doesn't exist. Closes the api-layer NodeActor cache so the next
+// request rebuilds from the new spec.
+func (s *Server) handleUpdateTopologyNode(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	name := r.PathValue("name")
+	var device spec.TopologyDevice
+	if err := decodeJSON(r, &device); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.UpdateTopologyDevice(name, &device)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	na.removeNodeActor(name) // built node now reflects stale spec
+	writeJSON(w, http.StatusOK, &device)
+}
+
+// handleCreateTopologyLink adds a link to topology.json. Body is the typed
+// TopologyLink (a, z endpoint strings). 409 when either endpoint is already
+// wired; 400 on validation failure.
+func (s *Server) handleCreateTopologyLink(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	var link spec.TopologyLink
+	if err := decodeJSON(r, &link); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.AddTopologyLink(&link)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, &link)
+}
+
+// handleDeleteTopologyLink removes the link containing the given endpoint
+// (URL path: /topology/link/{device}/{interface}). A port participates in at
+// most one link, so a single endpoint uniquely identifies it. 404 when no
+// link contains the endpoint.
+func (s *Server) handleDeleteTopologyLink(w http.ResponseWriter, r *http.Request) {
+	na := s.requireNetwork(w, r)
+	if na == nil {
+		return
+	}
+	device := r.PathValue("device")
+	iface := r.PathValue("interface")
+	if device == "" || iface == "" {
+		writeError(w, &newtron.ValidationError{Message: "device and interface required in URL"})
+		return
+	}
+	endpoint := device + ":" + iface
+	_, err := na.do(r.Context(), func() (any, error) {
+		return nil, na.net.DeleteTopologyLink(endpoint)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"deleted": endpoint})
 }
 
 func (s *Server) handleGetHostProfile(w http.ResponseWriter, r *http.Request) {
@@ -1026,8 +1156,9 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	opts := execOpts(r)
+	force := r.URL.Query().Get("force") == "true"
 	_, err := na.do(r.Context(), func() (any, error) {
-		return nil, na.net.DeleteProfile(req.Name, opts)
+		return nil, na.net.DeleteProfile(req.Name, opts, force)
 	})
 	if err != nil {
 		writeError(w, err)

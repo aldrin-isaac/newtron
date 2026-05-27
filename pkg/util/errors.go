@@ -15,7 +15,37 @@ var (
 	ErrValidationFailed      = errors.New("validation failed")
 	ErrDeviceLocked          = errors.New("device is locked by another process")
 	ErrDeviceZombieIntent = errors.New("device has a zombie operation from a crashed process — inspect with 'device zombie', then rollback or clear before proceeding")
+	ErrConflict              = errors.New("conflict: referenced by other entities")
 )
+
+// ConflictError indicates a requested mutation would violate an invariant
+// because of references from other entities. Examples: deleting a topology
+// device that has links still wired to it; deleting a profile that one or
+// more topology devices still reference. Operators resolve by removing the
+// referring entities first, or by passing force=true to cascade-delete them
+// along with the target (per DESIGN_PRINCIPLES §15 operational symmetry:
+// cascade is explicit, never implicit).
+//
+// References names the entities that block the mutation — operator can read
+// them off the error and act on each.
+type ConflictError struct {
+	Resource   string   // resource kind being deleted ("topology-device", "profile")
+	Name       string   // its name
+	References []string // referring entity descriptions, human-readable
+}
+
+func (e *ConflictError) Error() string {
+	if len(e.References) == 1 {
+		return fmt.Sprintf("%s '%s' has 1 reference: %s — pass force=true to cascade",
+			e.Resource, e.Name, e.References[0])
+	}
+	return fmt.Sprintf("%s '%s' has %d references: %s — pass force=true to cascade",
+		e.Resource, e.Name, len(e.References), strings.Join(e.References, ", "))
+}
+
+func (e *ConflictError) Unwrap() error {
+	return ErrConflict
+}
 
 // PreconditionError represents a failed precondition check with context
 type PreconditionError struct {

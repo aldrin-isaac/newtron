@@ -185,7 +185,7 @@ var profileDeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		if err := app.client.DeleteProfile(name, execOpts()); err != nil {
+		if err := app.client.DeleteProfile(name, execOpts(), false); err != nil {
 			return err
 		}
 

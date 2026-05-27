@@ -3,6 +3,7 @@ package client
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
@@ -114,12 +115,23 @@ func (c *Client) CreateProfile(req newtron.CreateDeviceProfileRequest, opts newt
 	return c.doPost(c.networkPath()+"/create-profile"+execQuery(opts), req, nil)
 }
 
-// DeleteProfile deletes a device profile.
-func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts) error {
+// DeleteProfile deletes a device profile. force=true cascade-deletes any
+// topology device that references this profile (which itself cascade-deletes
+// any links wired to that device). Without force, the server returns a
+// *ConflictError listing the referring topology devices.
+func (c *Client) DeleteProfile(name string, opts newtron.ExecOpts, force bool) error {
 	body := struct {
 		Name string `json:"name"`
 	}{Name: name}
-	return c.doPost(c.networkPath()+"/delete-profile"+execQuery(opts), body, nil)
+	path := c.networkPath() + "/delete-profile" + execQuery(opts)
+	if force {
+		if strings.Contains(path, "?") {
+			path += "&force=true"
+		} else {
+			path += "?force=true"
+		}
+	}
+	return c.doPost(path, body, nil)
 }
 
 // ============================================================================

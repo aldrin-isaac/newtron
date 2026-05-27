@@ -1,0 +1,100 @@
+name: topology-crud-roundtrip
+description: |
+  newtron#15 + #16 (Phase 5): topology node + link CRUD round-trip.
+
+  Creates profile + topology entry + link for a fictional switch2, then
+  reverses through delete-link → delete-node → delete-profile via the
+  cascade-refusal pattern (refuse before force=true) to confirm Q1 default
+  works end-to-end. Pure spec mutation — no device interaction.
+
+  Notes on cleanup ordering, matching the cascade-refusal pattern from
+  DESIGN_PRINCIPLES §15:
+    1. Delete the link first (refusing-delete on the node would otherwise
+       block).
+    2. Delete the topology device (now unblocked).
+    3. Delete the profile.
+  Each step in order maps 1:1 with what an operator would do by hand.
+topology: 1node-vs
+
+steps:
+  - name: create-switch2-profile
+    action: newtron
+    method: POST
+    url: /create-profile
+    params:
+      name: switch2
+      mgmt_ip: "127.0.0.1"
+      loopback_ip: "10.0.0.2"
+      zone: amer
+      platform: sonic-vs
+      ssh_user: admin
+      ssh_pass: x
+      ssh_port: 13001
+      underlay_asn: 65002
+
+  - name: create-switch2-topology-entry
+    action: newtron
+    method: POST
+    url: /topology/create-node
+    params:
+      name: switch2
+      device:
+        ports:
+          Ethernet0:
+            admin_status: up
+            mtu: "9100"
+    expect:
+      jq: '.ports.Ethernet0.admin_status == "up"'
+
+  - name: verify-switch2-in-topology-list
+    action: newtron
+    method: GET
+    url: /topology
+    expect:
+      jq: '.devices.switch2 != null and .devices.switch2.ports.Ethernet0.mtu == "9100"'
+
+  - name: create-link-sw1-sw2
+    action: newtron
+    method: POST
+    url: /topology/create-link
+    params:
+      a: "switch1:Ethernet0"
+      z: "switch2:Ethernet0"
+    expect:
+      jq: '.a == "switch1:Ethernet0" and .z == "switch2:Ethernet0"'
+
+  - name: link-prevents-node-delete
+    action: newtron
+    method: DELETE
+    url: /topology/node/switch2
+    expect_failure: true
+    expect:
+      contains: "has 1 reference"
+
+  - name: delete-link-by-single-endpoint
+    action: newtron
+    method: DELETE
+    url: /topology/link/switch1/Ethernet0
+    expect:
+      jq: '.deleted == "switch1:Ethernet0"'
+
+  - name: delete-switch2-now-unblocked
+    action: newtron
+    method: DELETE
+    url: /topology/node/switch2
+    expect:
+      jq: '.deleted == "switch2"'
+
+  - name: verify-switch2-removed
+    action: newtron
+    method: GET
+    url: /topology
+    expect:
+      jq: '(.devices.switch2 // null) == null and (.links // [] | length) == 0'
+
+  - name: delete-switch2-profile
+    action: newtron
+    method: POST
+    url: /delete-profile
+    params:
+      name: switch2

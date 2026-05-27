@@ -143,6 +143,64 @@ func (net *Network) GetTopology() *spec.TopologySpecFile {
 	return net.internal.GetTopology()
 }
 
+// AddTopologyDevice adds a device entry to topology.json. Returns
+// *ConflictError when a device with this name already exists. The matching
+// profile file must already exist. Persists atomically. §7 + §15 + §27 + §46.
+func (net *Network) AddTopologyDevice(name string, device *spec.TopologyDevice) error {
+	return translateInternalError(net.internal.AddTopologyDevice(name, device))
+}
+
+// DeleteTopologyDevice removes a device entry from topology.json. Refuses with
+// *ConflictError when any link still references the device, unless force=true.
+// With force=true, cascade-deletes the referring links before removing the
+// device. Persists atomically. §15 (cascade is explicit).
+func (net *Network) DeleteTopologyDevice(name string, force bool) error {
+	return translateInternalError(net.internal.DeleteTopologyDevice(name, force))
+}
+
+// UpdateTopologyDevice replaces the device entry at name with the given
+// TopologyDevice (full-replacement semantics; no partial patch). Returns
+// *NotFoundError when name doesn't exist.
+func (net *Network) UpdateTopologyDevice(name string, device *spec.TopologyDevice) error {
+	return translateInternalError(net.internal.UpdateTopologyDevice(name, device))
+}
+
+// AddTopologyLink adds a link to topology.json. Returns *ConflictError when
+// either endpoint is already wired to another link (a port participates in
+// at most one link). Validates that both endpoint devices exist in topology
+// AND that each interface is declared on its device's Ports map.
+func (net *Network) AddTopologyLink(link *spec.TopologyLink) error {
+	return translateInternalError(net.internal.AddTopologyLink(link))
+}
+
+// DeleteTopologyLink removes the link whose A or Z endpoint matches the given
+// "device:interface" string. Single-endpoint identification per Q3 design:
+// a port participates in at most one link, so one endpoint uniquely
+// identifies the link. Returns *NotFoundError when no link contains the
+// endpoint.
+func (net *Network) DeleteTopologyLink(endpoint string) error {
+	return translateInternalError(net.internal.DeleteTopologyLink(endpoint))
+}
+
+// translateInternalError converts errors that surface from the internal
+// network package's typed error vocab (which can't import this package to
+// avoid a circular import) into the public newtron error vocab (NotFoundError
+// and friends) callers expect. Pass-through for everything else.
+func translateInternalError(err error) error {
+	if err == nil {
+		return nil
+	}
+	type notFounder interface {
+		IsNotFound() bool
+		Resource() string
+		ID() string
+	}
+	if nf, ok := err.(notFounder); ok && nf.IsNotFound() {
+		return &NotFoundError{Resource: nf.Resource(), Name: nf.ID()}
+	}
+	return err
+}
+
 // TopologyDeviceNames returns the sorted device names from the topology.
 // Returns nil if no topology is loaded.
 func (net *Network) TopologyDeviceNames() []string {
