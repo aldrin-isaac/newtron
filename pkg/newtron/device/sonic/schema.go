@@ -498,19 +498,6 @@ var Schema = map[string]TableSchema{
 	},
 
 	// ========================================================================
-	// Newtron settings (per-device operational tuning)
-	// No YANG model — newtron-owned table
-	// ========================================================================
-
-	"NEWTRON_SETTINGS": {
-		// Key: "global" (singleton per device)
-		KeyPattern: `^global$`,
-		Fields: map[string]FieldConstraint{
-			"max_history": {Type: FieldInt, Range: intRange(0, 100)},
-		},
-	},
-
-	// ========================================================================
 	// Newtron intent table (unified intent model §39)
 	// No YANG model — newtron-owned table
 	// Replaced both NEWTRON_SERVICE_BINDING and per-device crash-recovery intent

@@ -469,36 +469,6 @@ func TestValidateEntry_NEWTRON_HISTORY_UnknownField(t *testing.T) {
 	}
 }
 
-// NEWTRON_SETTINGS table tests
-// ============================================================================
-
-func TestValidateEntry_NEWTRON_SETTINGS_Valid(t *testing.T) {
-	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "global", map[string]string{
-		"max_history": "20",
-	})
-	if err != nil {
-		t.Errorf("valid entry should pass: %v", err)
-	}
-}
-
-func TestValidateEntry_NEWTRON_SETTINGS_InvalidKey(t *testing.T) {
-	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "local", map[string]string{
-		"max_history": "10",
-	})
-	if err == nil {
-		t.Error("non-global key should fail")
-	}
-}
-
-func TestValidateEntry_NEWTRON_SETTINGS_OutOfRange(t *testing.T) {
-	err := Schema["NEWTRON_SETTINGS"].ValidateEntry("NEWTRON_SETTINGS", "global", map[string]string{
-		"max_history": "999",
-	})
-	if err == nil {
-		t.Error("max_history > 100 should fail")
-	}
-}
-
 func TestSchema_AllTablesHaveFields(t *testing.T) {
 	// Tables with empty Fields maps are valid (key-only entries like ROUTE_REDISTRIBUTE)
 	for table, schema := range Schema {

@@ -134,17 +134,14 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 
 | Method | Path suffix | What it does |
 |--------|-------------|--------------|
-| GET | `/intents` | List all intent records |
+| GET | `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
+| `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | GET | `/intent/tree` | Intent DAG tree view |
-| GET | `/zombie` | Read zombie intent |
-| POST | `/rollback-zombie` | Rollback zombie intent |
-| POST | `/clear-zombie` | Clear zombie intent |
-| GET | `/history` | Read operation history |
-| POST | `/rollback-history` | Rollback last operation |
-| GET | `/settings` | Read device settings |
-| PUT | `/settings` | Write device settings |
-| GET | `/drift` | Per-device drift detection |
-| GET | `/network/{n}/drift` | Network-wide drift detection |
+| GET | `/intent/drift` | Drift between projection (expected) and CONFIG_DB (actual) |
+| POST | `/intent/reconcile` | Deliver projection to device, eliminating drift |
+| POST | `/intent/save` | Persist intent DB back to topology.json |
+| POST | `/intent/reload` | Rebuild intent DB from topology.json |
+| POST | `/intent/clear` | Reset node to ports-only state |
 
 **Lifecycle & Diagnostics** (S9-S10) -- all `POST` unless noted
 
@@ -2118,37 +2115,18 @@ Remove a BGP EVPN overlay peer.
 
 **Response (200):** `WriteResult`
 
-### QoS (Node-Level)
+### QoS at the node level (substrate-only annotation)
 
-#### POST /network/{netID}/node/{device}/apply-qos
+Newtron does NOT expose node-level `POST /node/{device}/apply-qos` or
+`POST /node/{device}/remove-qos` endpoints. QoS apply/remove is an
+interface-scoped operation (per `DESIGN_PRINCIPLES_NEWTRON.md` §6: "The
+interface is the point of service delivery, unit of lifecycle"). The
+wired endpoints are:
 
-Apply a QoS policy to a specific interface (node-level convenience that delegates
-to the interface's `ApplyQoS` method).
+- `POST /network/{netID}/node/{device}/interface/{name}/apply-qos`
+- `POST /network/{netID}/node/{device}/interface/{name}/remove-qos`
 
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `interface` | string | yes | Interface name |
-| `policy` | string | yes | QoS policy name from specs |
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/remove-qos
-
-Remove QoS policy from a specific interface.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `interface` | string | yes | Interface name |
-
-**Response (200):** `WriteResult`
+See §QoS Bindings (Interface-Level) below for the canonical interfaces.
 
 ---
 
@@ -2315,21 +2293,32 @@ Get all fields of a STATE_DB entry.
 
 ---
 
-## 11. Intent, History, Settings, and Drift
+## 11. Intent Operations
 
-These endpoints manage intent records, operation history, device settings, and
-drift detection. Intent records track what newtron has applied to a device; history
-tracks the sequence of operations; settings control device-level behavior; drift
-detection compares actual CONFIG_DB state against expected state from intents.
+These endpoints expose newtron's intent DAG — the canonical substrate that
+records every operation newtron applied to a device. Intent records are
+typed `NEWTRON_INTENT` rows in CONFIG_DB (`DESIGN_PRINCIPLES_NEWTRON.md`
+§1 + §11); the projection is rebuilt from intent replay (§21).
 
-### Intents
+### Substrate-only: intent records as a bulk list
 
-#### GET /network/{netID}/node/{device}/intents
+Newtron does NOT expose a bulk `GET /node/{device}/intents` HTTP endpoint
+that returns every `NEWTRON_INTENT` row. The substrate is reachable via two
+typed substrate paths instead:
 
-List all intent records on the device. Returns the full set of NEWTRON_INTENT
-entries from CONFIG_DB.
+- `GET /node/{device}/intent/tree` returns the structured intent DAG with
+  parent/child relationships (the operator-meaningful view).
+- `GET /node/{device}/configdb/NEWTRON_INTENT` returns the raw CONFIG_DB
+  table (the per-key generic substrate read).
 
-**Response (200):** Array of intent records
+The bulk-list endpoint as a separate route would be derivative of these two
+typed primitives and a §46 violation (typed substrate exists and is already
+exposed; a parallel "list everything" endpoint would summarize what's
+already typed). Per `DESIGN_PRINCIPLES_NEWTRON.md` §21 (Reconstruct, Don't
+Record): the intent DB is reconstructed by replay, not preserved as a flat
+list. Consumers needing the flat list use `configdb/NEWTRON_INTENT`.
+
+### Wired intent operations
 
 #### GET /network/{netID}/node/{device}/intent/tree
 
@@ -2404,100 +2393,49 @@ POST /network/default/node/switch1/intent/projection-diff
 
 _Lands newtron#4 (Cluster A — projection diff for Workbench pre-commit, §11 + §46)._
 
-### Zombie Intents
+### Substrate-only: per-operation rollback and operation history
 
-A "zombie" intent is an intent record left behind by a failed operation. The
-forward operation partially succeeded (wrote some CONFIG_DB entries) but failed
-before completing. The zombie record captures what was partially applied so it
-can be rolled back.
+Newtron does NOT expose `GET /history`, `POST /rollback-history`,
+`GET /zombie`, `POST /rollback-zombie`, `POST /clear-zombie`, or
+`GET|PUT /settings`. These endpoints appeared in earlier drafts of this
+document but were never implemented, and the substrate they would expose
+isn't internally tracked either — there is no operation-history buffer,
+no zombie-intent record, and no `NEWTRON_SETTINGS` device-level
+configuration store.
 
-#### GET /network/{netID}/node/{device}/zombie
+The principled basis for not exposing them:
 
-Read the current zombie intent (if any).
+- **Operation history** — Per `DESIGN_PRINCIPLES_NEWTRON.md` §21
+  ("Reconstruct, Don't Record"), newtron does not keep a temporal log
+  of past operations. Intent records ARE the durable trace: the current
+  set of `NEWTRON_INTENT` rows describes everything newtron has applied
+  to the device that still applies. Reverse operations (§15) undo
+  individual changes; there is no "rollback the last N operations" log.
+- **Zombie intents** — Operations that fail mid-flight raise typed
+  errors at the point of failure; partial CONFIG_DB writes are caught
+  by `Verify` and reported via `VerificationFailedError` with the typed
+  envelope (`docs/newtron/api.md` §Verification-failure response
+  envelope; newtron#21). There is no separate zombie-record substrate.
+- **Device settings** — The `NEWTRON_SETTINGS` table and `max_history`
+  field that appeared in earlier `schema.go` drafts were never read by
+  any code path and have been removed (see commit log around this
+  audit). Device-level newtron behavior is derived from intent records
+  + the device's profile, not from a mutable settings store.
 
-**Response (200):** Zombie intent record, or `null` if no zombie exists
+Consumers needing per-operation rollback or partial-failure recovery
+build it from substrate that IS exposed: the typed `per_write[]` on
+write responses (newtron#19 Option A — Phase 2a), the
+`VerificationResult.Errors[]` with `DeviceResponse` field (Phase 1 +
+envelope fix #21), and the reverse-operation half of §15 (every CRUD
+verb has a reverse already; the operator composes them per task).
 
-#### POST /network/{netID}/node/{device}/rollback-zombie
+### Drift detection
 
-Roll back the zombie intent by reversing its partial changes.
-
-**Query parameters:** `dry_run`, `no_save`
-
-When `dry_run=true`, returns a preview of what would be reversed without applying.
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/clear-zombie
-
-Clear the zombie intent without rolling back. Use when you have manually cleaned
-up the partial changes or when rollback is not needed.
-
-**Request body:** none
-
-**Response (200):** `null` data on success
-
-### History
-
-#### GET /network/{netID}/node/{device}/history
-
-Read the operation history for a device.
-
-**Response (200):** Operation history records
-
-#### POST /network/{netID}/node/{device}/rollback-history
-
-Roll back the most recent operation from history.
-
-**Query parameters:** `dry_run`, `no_save`
-
-When `dry_run=true`, returns a preview of what would be reversed.
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
-
-### Device Settings
-
-#### GET /network/{netID}/node/{device}/settings
-
-Read device-level settings.
-
-**Response (200):** `DeviceSettings`
-
-```json
-{"data": {"max_history": 10}}
-```
-
-#### PUT /network/{netID}/node/{device}/settings
-
-Write device-level settings.
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `max_history` | integer | yes | Maximum number of history entries to keep |
-
-**Response (200):** The written settings object
-
-### Drift Detection
-
-#### GET /network/{netID}/node/{device}/drift
-
-Detect configuration drift on a single device. Compares the device's actual
-CONFIG_DB state against the expected state derived from intent records and
-topology provisioning.
-
-**Response (200):** Drift detection result
-
-#### GET /network/{netID}/drift
-
-Detect configuration drift across all devices in the network. Connects to each
-device and checks for drift.
-
-**Response (200):** Network-wide drift detection result
+Per-device drift detection is exposed via `GET /intent/drift` (under
+the Intent operations group above; documented in §11 Wired intent
+operations). There is no network-wide `/network/{n}/drift` endpoint;
+operators iterate over `/network/{n}/topology/node` and call
+`/intent/drift` per node.
 
 ---
 
@@ -2759,31 +2697,18 @@ Unbind an ACL from the interface.
 
 **Response (200):** `WriteResult`
 
-### MAC-VPN Binding
+### MAC-VPN Binding (substrate-only annotation)
 
-#### POST /network/{netID}/node/{device}/interface/{name}/bind-macvpn
+MAC-VPN binding (mapping a VLAN to an L2VNI) is a **node-level** operation,
+not an interface-level one — MAC-VPN entries pin to the device's VLAN
+state rather than to a specific interface. The wired endpoints are:
 
-Bind a MAC-VPN to the interface (creates VLAN, VNI mapping, VXLAN tunnel map).
+- `POST /network/{netID}/node/{device}/bind-macvpn` — see §Node-level
+  Service Composition above.
+- `POST /network/{netID}/node/{device}/unbind-macvpn` — same.
 
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `macvpn` | string | yes | MAC-VPN spec name |
-
-**Response (200):** `WriteResult`
-
-#### POST /network/{netID}/node/{device}/interface/{name}/unbind-macvpn
-
-Unbind the MAC-VPN from the interface.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:** none
-
-**Response (200):** `WriteResult`
+The earlier `/interface/{name}/bind-macvpn` and `/interface/{name}/unbind-macvpn`
+paths in this document were never implemented.
 
 ### BGP Peer
 
@@ -3352,16 +3277,6 @@ Returned by `GET .../host/{name}`.
 | `ssh_user` | string | SSH username |
 | `ssh_pass` | string | SSH password |
 | `ssh_port` | integer | SSH port |
-
-### Device Settings Types
-
-#### DeviceSettings
-
-Returned by `GET .../settings` and accepted by `PUT .../settings`.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `max_history` | integer | Maximum number of history entries to keep |
 
 ### Spec Detail Types
 
