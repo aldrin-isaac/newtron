@@ -226,6 +226,78 @@ func (n *Node) RebuildProjectionFromIntents(ctx context.Context, intents map[str
 	return nil
 }
 
+// ProjectionDiffResult reports the projection delta a hypothetical set of
+// operations would produce. Before and After are the typed projections
+// (sonic.RawConfigDB) bracketing the operations; Diff is the entry-level
+// delta in the canonical sonic.DriftEntry vocabulary (§11) so consumers
+// have one diff vocabulary across drift detection, service slices, and
+// pre-commit previews.
+type ProjectionDiffResult struct {
+	Before sonic.RawConfigDB  `json:"before"`
+	After  sonic.RawConfigDB  `json:"after"`
+	Diff   []sonic.DriftEntry `json:"diff"`
+}
+
+// ProjectionDiff applies the given operations on top of the Node's current
+// intent DB in-memory, captures the resulting projection, and restores the
+// Node's intent DB and projection so the Node's observable state is unchanged
+// when this method returns.
+//
+// Used by Workbench's pre-commit diff (newtcon /api/workbench/{batch}/diff)
+// to render what would change before the operator commits — operationalizes
+// invariant #4 (show before do) at the substrate level. §46.
+//
+// Implementation: snapshot intent DB, replay each op via ReplayStep, capture
+// the post-replay projection, restore intent DB, then rebuild projection
+// from the restored intents (the projection was mutated by ReplayStep; the
+// second rebuild restores observable state to the pre-call snapshot).
+func (n *Node) ProjectionDiff(ctx context.Context, ops []spec.TopologyStep) (*ProjectionDiffResult, error) {
+	if n.configDB == nil {
+		return &ProjectionDiffResult{}, nil
+	}
+	before := n.configDB.ExportRaw()
+	snapshot := n.SnapshotIntentDB()
+
+	// Hypothetical replay is reconstruction (no device write), not a CRUD
+	// mutation. Temporarily clear actuatedIntent so precondition() skips the
+	// Connected+Locked check during replay — same approach RebuildProjection
+	// uses for its own replay loop.
+	wasActuated := n.actuatedIntent
+	wasUnsaved := n.unsavedIntents
+	n.actuatedIntent = false
+
+	for _, op := range ops {
+		if err := ReplayStep(ctx, n, op); err != nil {
+			// Restore before returning so a partial replay doesn't leak
+			// state to the caller.
+			n.actuatedIntent = wasActuated
+			n.RestoreIntentDB(snapshot)
+			_ = n.RebuildProjectionFromIntents(ctx, snapshot)
+			n.unsavedIntents = wasUnsaved
+			return nil, fmt.Errorf("applying %s: %w", op.URL, err)
+		}
+	}
+
+	after := n.configDB.ExportRaw()
+
+	// Restore actuated state, intent DB, and projection.
+	n.actuatedIntent = wasActuated
+	n.RestoreIntentDB(snapshot)
+	if err := n.RebuildProjectionFromIntents(ctx, snapshot); err != nil {
+		return nil, fmt.Errorf("restoring projection: %w", err)
+	}
+	n.unsavedIntents = wasUnsaved
+
+	// Diff: before (expected) vs after (actual). "missing" entries in the
+	// diff are absent from before but present in after → adds; "extra"
+	// entries are absent from after → deletes; "modified" → fields changed.
+	return &ProjectionDiffResult{
+		Before: before,
+		After:  after,
+		Diff:   sonic.DiffConfigDB(before, after, sonic.OwnedTables()),
+	}, nil
+}
+
 // BindsService returns true if this Node has at least one actuated
 // apply-service intent for the named service. Cheap pre-check before doing
 // the full snapshot/replay/diff cycle in ServiceProjection.

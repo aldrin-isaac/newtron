@@ -1,0 +1,53 @@
+name: projection-diff-actuated
+description: |
+  newtron#4 (Phase 4): the projection-diff endpoint returns the typed
+  before/after RawConfigDB pair plus the entry-level Diff that a
+  hypothetical set of operations would produce on top of the Node's
+  current intent DB. Operations are applied in-memory only; the Node's
+  observable state is restored before the response.
+
+  Workbench (newtcon /api/workbench/{batch}/diff) consumes this to render
+  what would change before the operator commits — operationalizes
+  operator-philosophy invariant #4 (show before do) at the substrate level.
+
+  Provisions switch1 actuated, sends a hypothetical create-vlan op via
+  POST .../intent/projection-diff, asserts:
+    - response contains before, after, diff at the top level.
+    - before does NOT carry VLAN.Vlan100 (current state).
+    - after carries VLAN.Vlan100 with vlanid=100 (post-op state).
+    - diff includes VLAN|Vlan100 with type="extra" (hypothetical add).
+  Then issues a follow-up Drift call to confirm the Node's observable
+  state is unchanged — no Vlan100 in the actual projection or device.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: provision-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: hypothetical-create-vlan
+    action: newtron
+    devices: [switch1]
+    method: POST
+    url: /node/{{device}}/intent/projection-diff
+    params:
+      operations:
+        - url: /create-vlan
+          params:
+            vlan_id: 100
+    expect:
+      jq: >-
+        .before != null
+        and .after != null
+        and (.diff | length) > 0
+        and (.before.VLAN.Vlan100 // null) == null
+        and .after.VLAN.Vlan100.vlanid == "100"
+        and any(.diff[]; .table == "VLAN" and .key == "Vlan100" and .type == "extra")
+
+  - name: verify-state-unchanged-no-drift
+    action: newtron
+    devices: [switch1]
+    url: /node/{{device}}/intent/drift
+    expect:
+      jq: 'length == 0'

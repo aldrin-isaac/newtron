@@ -7,6 +7,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/network/node"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 	"github.com/aldrin-isaac/newtron/pkg/util"
 )
 
@@ -107,6 +108,15 @@ func (n *Node) ConfigDBSnapshot(ctx context.Context, ownedOnly bool) (sonic.RawC
 // the full replay-diff computation.
 func (n *Node) BindsService(serviceName string) bool {
 	return n.internal.BindsService(serviceName)
+}
+
+// ProjectionDiff applies the given operations on top of the Node's current
+// intent DB in-memory, captures the resulting projection, and restores both
+// intent DB and projection. Returns the before/after RawConfigDB pair plus
+// the entry-level diff. Workbench uses this for pre-commit previews — the
+// substrate side of operator-philosophy invariant #4 (show before do). §46.
+func (n *Node) ProjectionDiff(ctx context.Context, ops []spec.TopologyStep) (*node.ProjectionDiffResult, error) {
+	return n.internal.ProjectionDiff(ctx, ops)
 }
 
 // ServiceProjection returns the projection entries this Node carries because

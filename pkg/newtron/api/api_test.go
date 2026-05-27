@@ -12,6 +12,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // repoRoot walks up from this test file to the newtron repo root so tests
@@ -179,10 +180,11 @@ func TestAPICompleteness(t *testing.T) {
 			"RestartService":          true,
 			"ExecCommand":             true,
 			// Intent operations
-			"Projection": true, // #5: GET /network/{netID}/node/{device}/intent/projection
-			"Tree":       true,
-			"Drift":      true,
-			"Reconcile":  true,
+			"Projection":     true, // #5: GET /network/{netID}/node/{device}/intent/projection
+			"ProjectionDiff": true, // #4: POST /network/{netID}/node/{device}/intent/projection-diff
+			"Tree":           true,
+			"Drift":          true,
+			"Reconcile":      true,
 			},
 		"Interface": {
 			"ApplyService":         true,
@@ -539,6 +541,87 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 	}
 	if len(got.PerWrite) != 1 || got.PerWrite[0].Kind != sonic.PerWriteKindVerifyRead {
 		t.Errorf("PerWrite lost or mangled; got %+v", got.PerWrite)
+	}
+}
+
+// TestProjectionDiff_HypotheticalCreateVLAN — newtron#4 (Phase 4). Loads the
+// 1node-vs spec, builds switch1 in topology mode (setup-device baseline),
+// then calls Node.ProjectionDiff with a hypothetical create-vlan op. Asserts
+// the response contains the typed before/after RawConfigDB pair plus a diff
+// where the new VLAN appears as an "extra" entry (present in after, absent
+// from before — the add the op would produce). Confirms the snapshot/restore
+// leaves the Node's observable state unchanged.
+func TestProjectionDiff_HypotheticalCreateVLAN(t *testing.T) {
+	specDir := filepath.Join(repoRoot(t), "newtrun", "topologies", "1node-vs", "specs")
+
+	net, err := newtron.LoadNetwork(specDir)
+	if err != nil {
+		t.Fatalf("LoadNetwork: %v", err)
+	}
+	n, err := net.BuildTopologyNode("switch1")
+	if err != nil {
+		t.Fatalf("BuildTopologyNode: %v", err)
+	}
+
+	// Capture the projection before the hypothetical op for the restore check.
+	preProj := n.Projection()
+	hadVLAN100 := preProj["VLAN"] != nil && preProj["VLAN"]["Vlan100"] != nil
+	if hadVLAN100 {
+		t.Fatal("test setup: VLAN Vlan100 already present in projection")
+	}
+
+	ctx := context.Background()
+	ops := []spec.TopologyStep{{
+		URL:    "/create-vlan",
+		Params: map[string]any{"vlan_id": 100},
+	}}
+	result, err := n.ProjectionDiff(ctx, ops)
+	if err != nil {
+		t.Fatalf("ProjectionDiff: %v", err)
+	}
+
+	if result.Before == nil {
+		t.Error("Before is nil")
+	}
+	if result.After == nil {
+		t.Error("After is nil")
+	}
+	if len(result.Diff) == 0 {
+		t.Fatal("Diff empty — hypothetical create-vlan produced no delta")
+	}
+
+	// Before should have no VLAN|Vlan100.
+	if result.Before["VLAN"] != nil && result.Before["VLAN"]["Vlan100"] != nil {
+		t.Error("Before should not contain VLAN|Vlan100 (pre-op state)")
+	}
+
+	// After should have VLAN|Vlan100.
+	if result.After["VLAN"] == nil || result.After["VLAN"]["Vlan100"] == nil {
+		t.Errorf("After should contain VLAN|Vlan100 (post-op state); got tables: %v", mapKeys2(result.After))
+	}
+
+	// Diff should mark VLAN|Vlan100 as "extra" (added by the hypothetical op).
+	var sawVLAN bool
+	for _, e := range result.Diff {
+		if e.Table == "VLAN" && e.Key == "Vlan100" {
+			if e.Type != "extra" {
+				t.Errorf("VLAN|Vlan100 diff Type = %q, want %q (added by op)", e.Type, "extra")
+			}
+			sawVLAN = true
+		}
+	}
+	if !sawVLAN {
+		var summary []string
+		for _, e := range result.Diff {
+			summary = append(summary, e.Table+"|"+e.Key+":"+e.Type)
+		}
+		t.Errorf("expected VLAN|Vlan100 in Diff; got: %v", summary)
+	}
+
+	// Node's observable projection must be restored.
+	postProj := n.Projection()
+	if postProj["VLAN"] != nil && postProj["VLAN"]["Vlan100"] != nil {
+		t.Error("Projection not restored — VLAN|Vlan100 still present after ProjectionDiff")
 	}
 }
 

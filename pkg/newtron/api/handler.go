@@ -154,6 +154,7 @@ func (s *Server) buildMux() http.Handler {
 	// Intent operations
 	// ====================================================================
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/projection", s.handleProjection)
+	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/projection-diff", s.handleProjectionDiff)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/tree", s.handleTree)
 	mux.HandleFunc("GET /network/{netID}/node/{device}/intent/drift", s.handleDrift)
 	mux.HandleFunc("POST /network/{netID}/node/{device}/intent/reconcile", s.handleReconcile)

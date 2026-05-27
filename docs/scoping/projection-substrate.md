@@ -125,6 +125,15 @@ one test.
 
 ## 2. `newtron#4` — Projection diff (before-vs-after) endpoint
 
+_Landed on branch `impl/phase-4-projection-diff` (Phase 4 batch). Implemented
+via Node.ProjectionDiff(ctx, ops): snapshots intent DB, clears actuatedIntent
+to bypass the Lock guard during in-memory replay, runs ReplayStep over the
+hypothetical ops, captures the resulting projection, then restores intent DB
++ projection (re-rebuild from snapshot) so the Node's observable state is
+unchanged. Returns ProjectionDiffResult{before, after, diff} with diff in the
+canonical sonic.DriftEntry vocabulary (§11). Operationalizes operator-
+philosophy invariant #4 (show before do) at the substrate level._
+
 ### Principle check
 
 **§46 (load-bearing):** the existing dry-run path returns a free-text

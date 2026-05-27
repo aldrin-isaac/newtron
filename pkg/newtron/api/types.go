@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // APIResponse is the standard envelope for all API responses.
@@ -95,6 +96,15 @@ type ConfigureInterfaceRequest struct {
 type NodeBindMACVPNRequest struct {
 	VlanID int    `json:"vlan_id"`
 	MACVPN string `json:"macvpn"`
+}
+
+// ProjectionDiffRequest is the body for POST .../intent/projection-diff.
+// Operations are TopologyStep entries in the same shape /execute and
+// /intent/save consume. The server applies them in-memory only, captures the
+// resulting projection, and restores the Node's observable state before
+// responding with ProjectionDiffResult (before / after / diff).
+type ProjectionDiffRequest struct {
+	Operations []spec.TopologyStep `json:"operations"`
 }
 
 // NodeUnbindMACVPNRequest is the body for POST .../unbind-macvpn (node-level).

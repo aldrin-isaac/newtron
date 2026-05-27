@@ -1075,6 +1075,31 @@ func (s *Server) handleProjection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, val)
 }
 
+// handleProjectionDiff returns the projection delta that the supplied
+// operations would produce on top of the Node's current intent DB. Operations
+// are applied in-memory only; the Node's observable state is restored before
+// the handler returns. Workbench's pre-commit diff substrate per §46 and
+// operator-philosophy invariant #4 (show before do).
+func (s *Server) handleProjectionDiff(w http.ResponseWriter, r *http.Request) {
+	_, nodeActor := s.requireNodeActor(w, r)
+	if nodeActor == nil {
+		return
+	}
+	var req ProjectionDiffRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, &newtron.ValidationError{Message: "invalid JSON: " + err.Error()})
+		return
+	}
+	val, err := nodeActor.execute(r.Context(), func() (any, error) {
+		return nodeActor.node.ProjectionDiff(r.Context(), req.Operations)
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, val)
+}
+
 func (s *Server) handleTree(w http.ResponseWriter, r *http.Request) {
 	_, nodeActor := s.requireNodeActor(w, r)
 	if nodeActor == nil {

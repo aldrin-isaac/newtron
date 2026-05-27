@@ -108,6 +108,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/route/{vrf}/{prefix...}` | APP_DB route lookup |
 | `/route-asic/{prefix...}` | ASIC_DB route lookup |
 | `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
+| `POST /intent/projection-diff` | Pre-commit diff for a hypothetical operation set (before/after/diff) |
 | `/intent/tree` | Intent DAG tree view |
 | `/intents` | List all intent records |
 
@@ -2271,6 +2272,57 @@ node.
 fails.
 
 _Lands newtron#5 (Cluster A — projection substrate, §46)._
+
+#### POST /network/{netID}/node/{device}/intent/projection-diff
+
+Returns the projection delta a hypothetical set of operations would produce
+on top of the Node's current intent DB. Operations are applied in-memory
+only; the Node's observable state (intent DB + projection) is restored before
+the response. Workbench (`/api/workbench/{batch}/diff`) consumes this for
+pre-commit previews — operationalizes operator-philosophy invariant #4 (show
+before do) at the substrate level.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operations` | TopologyStep[] | yes | Operations to apply hypothetically. Same shape `/execute` and `/intent/save` consume — `{ url, params }` per step. |
+
+**Response (200):** `ProjectionDiffResult`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `before` | `RawConfigDB` | The projection bracketing the operations on the input side. |
+| `after`  | `RawConfigDB` | The projection that would exist if the operations were applied. |
+| `diff`   | `sonic.DriftEntry[]` | The entry-level delta, in the canonical §11 vocabulary. `extra` entries are adds; `missing` entries are deletes; `modified` entries are field-level changes. |
+
+**Example:**
+
+```
+POST /network/default/node/switch1/intent/projection-diff
+{
+  "operations": [
+    { "url": "/create-vlan", "params": { "vlan_id": 100 } }
+  ]
+}
+```
+
+```json
+{
+  "data": {
+    "before": { ... },
+    "after":  { "VLAN": { "Vlan100": { "vlanid": "100" } }, ... },
+    "diff":   [
+      { "table": "VLAN", "key": "Vlan100", "type": "extra",
+        "actual": { "vlanid": "100" } }
+    ]
+  }
+}
+```
+
+**Errors:** 400 invalid JSON or unknown step URL; 500 if rebuild fails.
+
+_Lands newtron#4 (Cluster A — projection diff for Workbench pre-commit, §11 + §46)._
 
 ### Zombie Intents
 
