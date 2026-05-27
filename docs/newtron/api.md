@@ -54,6 +54,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | GET | `/network/{n}/profile/{name}` | Show device profile |
 | GET | `/network/{n}/zone` | List zone names |
 | GET | `/network/{n}/zone/{name}` | Show zone |
+| GET | `/network/{n}/topology` | Full topology spec (devices, links, metadata) |
 | GET | `/network/{n}/topology/node` | List topology device names |
 | GET | `/network/{n}/host/{name}` | Get host profile |
 | GET | `/network/{n}/feature` | List features (also: `/{name}/dependency`, `/{name}/unsupported-due-to`) |
@@ -105,6 +106,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/neighbor` | BGP sessions (alias for `/bgp/check`) |
 | `/route/{vrf}/{prefix...}` | APP_DB route lookup |
 | `/route-asic/{prefix...}` | ASIC_DB route lookup |
+| `/intent/projection` | Per-Node projection (RawConfigDB) from intent replay |
 | `/intent/tree` | Intent DAG tree view |
 | `/intents` | List all intent records |
 
@@ -152,6 +154,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/restart-daemon` | Restart a SONiC daemon |
 | `/ssh-command` | Execute SSH command |
 | `/verify-committed` | Verify last ChangeSet |
+| `GET /configdb` | Full CONFIG_DB snapshot (RawConfigDB); `?owned_only=false` for all tables |
 | `GET /configdb/{table}` | List CONFIG_DB keys |
 | `GET /configdb/{table}/{key}` | Read CONFIG_DB entry |
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
@@ -570,6 +573,19 @@ GET /network/default/service/missing  -> {"error": "not found: service 'missing'
 ```
 
 ### Topology
+
+#### GET /network/{netID}/topology
+
+Returns the full topology spec as `TopologySpecFile` — the canonical typed
+substrate newtron uses internally (devices, links, newtlab metadata).
+
+**Response (200):** `TopologySpecFile` with `version`, `description`,
+`devices` (map of name → `TopologyDevice`), and `links` (array; omitted when
+empty).
+
+**Errors:** 404 when no `topology.json` was loaded for the network.
+
+_Lands newtron#14 (Cluster C — topology spec substrate, §46)._
 
 #### GET /network/{netID}/topology/node
 
@@ -2106,6 +2122,24 @@ the stored committed changes.
 These endpoints provide direct access to SONiC Redis databases for debugging and
 inspection. They use `connectAndRead` -- no `dry_run`/`no_save`.
 
+### GET /network/{netID}/node/{device}/configdb
+
+Returns the device's actual CONFIG_DB state as a single internally-consistent
+snapshot (`sonic.RawConfigDB` — `map[table]map[key]map[field]string`). One
+round-trip per table, so consumers needing a full picture do not stitch
+hundreds of per-key requests and lose internal consistency mid-read.
+
+**Query parameters:**
+- `owned_only` — `true` (default): return only newtron-owned tables; `false`:
+  return every schema-known table on the device (superset, includes factory
+  state and daemon-managed tables).
+
+**Response (200):** `RawConfigDB` map. Tables with zero entries are omitted.
+
+**Errors:** 500 when the device transport cannot connect.
+
+_Lands newtron#17 (Cluster D — device-reality substrate, §46)._
+
 ### GET /network/{netID}/node/{device}/configdb/{table}
 
 List all keys in a CONFIG_DB table.
@@ -2169,6 +2203,24 @@ entries from CONFIG_DB.
 #### GET /network/{netID}/node/{device}/intent/tree
 
 Get a tree view of the intent DAG. See [S7 Intent Tree](#intent-tree) for query parameters.
+
+#### GET /network/{netID}/node/{device}/intent/projection
+
+Returns the per-table per-key per-field expected state derived from intent
+replay (`sonic.RawConfigDB`). This is the typed projection representing
+"what newtron believes this device should look like" — compare against
+`/configdb` (device reality) to see drift.
+
+**Query parameters:** `mode` (`topology`, `loopback`, or default `intent` /
+actuated).
+
+**Response (200):** `RawConfigDB` map. Empty when no intents exist on the
+node.
+
+**Errors:** 500 when actuated mode is requested and transport connection
+fails.
+
+_Lands newtron#5 (Cluster A — projection substrate, §46)._
 
 ### Zombie Intents
 
@@ -2731,6 +2783,7 @@ These types are returned by all device write operations (S8, S13).
 | Field | Type | Description |
 |-------|------|-------------|
 | `preview` | string (optional) | Human-readable diff preview. Present only on dry-run; absent (not empty string) otherwise. |
+| `changes` | ConfigChange[] (optional) | Typed ChangeSet entries — every CONFIG_DB add/modify/delete in this operation, in the same `sonic.ConfigChange` shape newtron uses internally. §46 canonical substrate. Absent when `change_count` is 0. |
 | `change_count` | integer | Number of CONFIG_DB changes |
 | `applied` | boolean | Whether changes were committed to Redis |
 | `verified` | boolean | Whether post-apply verification passed |
@@ -2757,6 +2810,7 @@ and embedded in `DeliveryResult` from composite deliver.
 | `field` | string | Field name |
 | `expected` | string | Expected value |
 | `actual` | string | Actual value (empty string if missing) |
+| `device_response` | string (optional) | Verbatim device-side reply observed when the mismatch was detected. For field mismatches, the full HGETALL content as sorted `key=value` pairs; for missing-key or still-present cases, the Redis-level status. §46. |
 
 ### Device Info Types
 

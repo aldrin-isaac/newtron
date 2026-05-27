@@ -1,0 +1,34 @@
+name: topology-show
+description: |
+  newtron#14 (Cluster C): topology endpoint exposes the canonical
+  TopologySpecFile substrate (devices, links, metadata).
+
+  Calls 'newtron topology show' (no device required) and asserts the
+  response is the full TopologySpecFile for the 1node-vs topology:
+  version present, devices map containing switch1.
+
+  Reads topology.json loaded by the server; no device interaction.
+topology: 1node-vs
+
+steps:
+  - name: read-topology
+    action: newtron-cli
+    command: "topology show"
+    expect:
+      jq: >-
+        .devices != null
+        and (.devices | keys | length) > 0
+
+  - name: verify-switch1-in-topology
+    action: newtron-cli
+    command: "topology show"
+    expect:
+      jq: >-
+        .devices.switch1 != null
+
+  - name: verify-version
+    action: newtron-cli
+    command: "topology show"
+    expect:
+      jq: >-
+        .version != null and .version != ""

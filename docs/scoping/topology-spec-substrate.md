@@ -76,6 +76,8 @@ this change" guidance to the operator).
 
 ## 1. `newtron#14` — Full topology read endpoint
 
+_Landed on branch `impl/phase-1-newtron-substrate-gaps` (Phase 1 batch)._
+
 ### Principle check
 
 **§46 (load-bearing):** the `TopologySpecFile` is canonical

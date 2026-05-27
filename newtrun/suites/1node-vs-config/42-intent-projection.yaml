@@ -1,0 +1,42 @@
+name: intent-projection
+description: |
+  newtron#5 (Cluster A): intent projection endpoint exposes the canonical
+  per-Node Projection substrate.
+
+  Calls 'newtron switch1 intent projection --loopback' and asserts the
+  response is a non-empty RawConfigDB (table → key → fields) containing
+  DEVICE_METADATA and BGP_GLOBALS — both written unconditionally by
+  setup-device on a 1node-vs lab.
+
+  No device connection — loopback projection is the output.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: read-projection
+    action: newtron-cli
+    devices: [switch1]
+    command: "intent projection --loopback"
+    expect:
+      jq: >-
+        . != null
+        and (. | keys | length) > 0
+
+  - name: verify-device-metadata-in-projection
+    action: newtron-cli
+    devices: [switch1]
+    command: "intent projection --loopback"
+    expect:
+      jq: >-
+        .DEVICE_METADATA != null
+        and (.DEVICE_METADATA | keys | length) > 0
+
+  - name: verify-bgp-globals-in-projection
+    action: newtron-cli
+    devices: [switch1]
+    command: "intent projection --loopback"
+    expect:
+      jq: >-
+        .BGP_GLOBALS != null
+        and .BGP_GLOBALS.default != null
+        and .BGP_GLOBALS.default.local_asn == "65001"

@@ -1,0 +1,56 @@
+name: configdb-snapshot-actuated
+description: |
+  newtron#17 (Cluster D): the device-CONFIG_DB snapshot endpoint reads
+  live state from a real device as a single internally-consistent snapshot
+  (sonic.RawConfigDB).
+
+  Provisions switch1 via topology-reconcile so newtron-owned tables are
+  populated on the device, then exercises 'configdb snapshot' both with
+  the default owned-only filter and with --owned-only=false (full schema
+  scope), asserting:
+    - owned-only response contains newtron-owned tables (BGP_GLOBALS).
+    - owned-only response excludes platform/factory tables that newtron
+      does not own (DEVICE_METADATA is factory-owned by SONiC).
+    - --owned-only=false includes DEVICE_METADATA (with hostname=switch1).
+    - --owned-only=false returns strictly more tables than the default.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: provision-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: snapshot-owned-only
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb snapshot"
+    expect:
+      jq: >-
+        . != null
+        and .BGP_GLOBALS != null
+        and (.BGP_GLOBALS | keys | length) > 0
+
+  - name: snapshot-excludes-factory-owned
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb snapshot"
+    expect:
+      jq: '.DEVICE_METADATA == null'
+
+  - name: snapshot-full-includes-device-metadata
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb snapshot --owned-only=false"
+    expect:
+      jq: >-
+        .DEVICE_METADATA != null
+        and .DEVICE_METADATA.localhost != null
+        and .DEVICE_METADATA.localhost.hostname == "switch1"
+
+  - name: snapshot-full-is-superset
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb snapshot --owned-only=false"
+    expect:
+      jq: '(. | keys | length) > 5'

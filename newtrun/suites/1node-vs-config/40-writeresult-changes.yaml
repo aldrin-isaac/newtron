@@ -1,0 +1,31 @@
+name: writeresult-changes
+description: |
+  newtron#11 (Cluster B): WriteResult.changes carries typed ChangeSet substrate.
+
+  Creates VLAN 200 in loopback+execute mode and asserts the JSON response
+  includes a non-empty .changes array consistent with .change_count, with
+  canonical .table / .key / .type fields, and that the VLAN table appears
+  as an add change.
+
+  No device connection — loopback projection is the output.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: create-vlan-with-changes
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan create 200 --loopback -x"
+    expect:
+      jq: >-
+        (.changes | length) > 0
+        and (.changes | length) == .change_count
+        and (.changes[0].table != null)
+        and (.changes[0].key != null)
+        and (.changes[0].type != null)
+        and any(.changes[]; .table == "VLAN" and .type == "add")
+
+  - name: delete-vlan-cleanup
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan delete 200 --loopback -x"

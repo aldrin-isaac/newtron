@@ -49,6 +49,8 @@ present in newtron, never re-derived:
 
 ## 1. `newtron#5` — Per-Node projection read endpoint
 
+_Landed on branch `impl/phase-1-newtron-substrate-gaps` (Phase 1 batch)._
+
 ### Principle check
 
 **§46 (load-bearing):** the `Projection` is canonical substrate

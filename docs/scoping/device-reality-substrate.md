@@ -56,6 +56,8 @@ Phase 1 in the parent's cross-cluster ordering (batched with #11,
 
 ## 1. `newtron#17` — Per-Node raw CONFIG_DB snapshot read
 
+_Landed on branch `impl/phase-1-newtron-substrate-gaps` (Phase 1 batch)._
+
 ### Principle check
 
 **§46 (load-bearing):** the typed `RawConfigDB` is canonical
