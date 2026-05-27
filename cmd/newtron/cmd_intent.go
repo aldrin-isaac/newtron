@@ -419,6 +419,84 @@ func formatIntentParams(params map[string]string) string {
 	return strings.Join(parts, " ")
 }
 
+// ============================================================================
+// intent projection — expected CONFIG_DB from intent replay
+// ============================================================================
+
+var intentProjectionCmd = &cobra.Command{
+	Use:   "projection",
+	Short: "Show the projection (expected CONFIG_DB from intent replay)",
+	Long: `Display the per-Node projection — the per-table per-key per-field
+expected state derived from intent replay. This is the substrate representing
+"what newtron believes this device should look like." Compare against the
+device-reality snapshot ('configdb snapshot') to see drift.
+
+Without --topology / --loopback: reads from device NEWTRON_INTENT replay
+(requires a live device).
+With --topology: builds from topology.json replay (no device).
+With --loopback: reuses the cached topology-built projection for offline
+config testing.
+
+Examples:
+  newtron leaf1 intent projection
+  newtron leaf1 --topology intent projection
+  newtron leaf1 --loopback intent projection --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		raw, err := app.client.IntentProjection(app.deviceName)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(raw)
+		}
+		printRawConfigDB(raw)
+		return nil
+	},
+}
+
+// printRawConfigDB renders a sonic.RawConfigDB as a per-table TABLE / KEY /
+// FIELDS listing in deterministic order. Used by both 'intent projection'
+// and 'configdb snapshot'.
+func printRawConfigDB(raw map[string]map[string]map[string]string) {
+	if len(raw) == 0 {
+		fmt.Println("(empty projection)")
+		return
+	}
+	tables := make([]string, 0, len(raw))
+	for t := range raw {
+		tables = append(tables, t)
+	}
+	sort.Strings(tables)
+
+	for _, table := range tables {
+		entries := raw[table]
+		fmt.Printf("\n%s\n", bold(table))
+		keys := make([]string, 0, len(entries))
+		for k := range entries {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fields := entries[key]
+			fnames := make([]string, 0, len(fields))
+			for f := range fields {
+				fnames = append(fnames, f)
+			}
+			sort.Strings(fnames)
+			parts := make([]string, 0, len(fnames))
+			for _, f := range fnames {
+				parts = append(parts, f+"="+fields[f])
+			}
+			fmt.Printf("  %s: %s\n", key, strings.Join(parts, " "))
+		}
+	}
+}
+
 func init() {
 	// intent tree
 	intentTreeCmd.Flags().BoolVar(&intentAncestors, "ancestors", false, "Show path from resource to root")
@@ -429,6 +507,7 @@ func init() {
 
 	// Register all under intentCmd
 	intentCmd.AddCommand(intentTreeCmd)
+	intentCmd.AddCommand(intentProjectionCmd)
 	intentCmd.AddCommand(intentDriftCmd)
 	intentCmd.AddCommand(intentReconcileCmd)
 	intentCmd.AddCommand(intentSaveCmd)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 )
 
 // ============================================================================
@@ -482,6 +483,33 @@ func (c *Client) SSHCommand(device, command string) (string, error) {
 // ============================================================================
 // Intent operations
 // ============================================================================
+
+// IntentProjection returns the per-Node projection (`sonic.RawConfigDB`) —
+// the canonical expected state derived from intent replay. The client's
+// Mode field selects the source (default intent / topology / loopback) and
+// is appended to the URL automatically by withMode.
+func (c *Client) IntentProjection(device string) (sonic.RawConfigDB, error) {
+	var result sonic.RawConfigDB
+	if err := c.doGet(c.nodePath(device)+"/intent/projection", &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ConfigDBSnapshot returns the device's actual CONFIG_DB as a single
+// internally-consistent snapshot. ownedOnly=true returns only newtron-owned
+// tables; ownedOnly=false returns every schema-known table on the device.
+func (c *Client) ConfigDBSnapshot(device string, ownedOnly bool) (sonic.RawConfigDB, error) {
+	path := c.nodePath(device) + "/configdb"
+	if !ownedOnly {
+		path += "?owned_only=false"
+	}
+	var result sonic.RawConfigDB
+	if err := c.doGet(path, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
 
 // IntentDrift compares the node projection (expected state) against actual
 // CONFIG_DB. Mode selects the source of expected state: "" or "intent" uses

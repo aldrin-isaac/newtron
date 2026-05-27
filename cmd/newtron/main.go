@@ -28,6 +28,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -234,7 +235,7 @@ func init() {
 	for _, cmd := range []*cobra.Command{healthCmd, intentCmd} {
 		addOutputFlags(cmd)
 	}
-	for _, cmd := range []*cobra.Command{networkCmd, configdbCmd, statedbCmd, routeCmd} {
+	for _, cmd := range []*cobra.Command{networkCmd, configdbCmd, statedbCmd, routeCmd, topologyCmd} {
 		addOutputFlags(cmd)
 	}
 	addOutputFlags(sshCmd)
@@ -272,7 +273,7 @@ func init() {
 	}
 
 	// Configuration & Meta
-	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, profileCmd, zoneCmd, versionCmd, networkCmd} {
+	for _, cmd := range []*cobra.Command{settingsCmd, auditCmd, platformCmd, profileCmd, zoneCmd, versionCmd, networkCmd, topologyCmd} {
 		cmd.GroupID = "meta"
 		rootCmd.AddCommand(cmd)
 	}
@@ -324,12 +325,17 @@ func printDryRunNotice() {
 
 // displayWriteResult shows the result of a write operation.
 // It handles preview, applied status, verification, and dry-run notices.
+// When --json is set, marshals the WriteResult directly so consumers can
+// assert on .changes, .verification, and other typed fields (§46).
 func displayWriteResult(result *newtron.WriteResult, err error) error {
 	if err != nil {
 		return err
 	}
 	if result == nil {
 		return nil
+	}
+	if app.jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(result)
 	}
 	if result.Preview != "" {
 		fmt.Print(result.Preview)

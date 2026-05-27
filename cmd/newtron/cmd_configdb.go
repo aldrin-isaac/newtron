@@ -108,6 +108,43 @@ Examples:
 	},
 }
 
+var configdbSnapshotOwnedOnly bool
+
+var configdbSnapshotCmd = &cobra.Command{
+	Use:   "snapshot",
+	Short: "Read the device's full CONFIG_DB as a single snapshot",
+	Long: `Return the device's actual CONFIG_DB state as a single internally-
+consistent snapshot. Unlike 'configdb keys' or 'configdb query', this is one
+atomic read covering all tables — no stitching, no internal inconsistency
+from concurrent device changes mid-read.
+
+By default returns only newtron-owned tables (matching the scope of drift
+detection). Pass --owned-only=false to include every schema-known table on
+the device (factory state, daemon-managed tables, etc.).
+
+Requires -D (device) flag and a live device.
+
+Examples:
+  newtron -D leaf1 configdb snapshot
+  newtron -D leaf1 configdb snapshot --owned-only=false --json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireDevice(); err != nil {
+			return err
+		}
+
+		raw, err := app.client.ConfigDBSnapshot(app.deviceName, configdbSnapshotOwnedOnly)
+		if err != nil {
+			return err
+		}
+
+		if app.jsonOutput {
+			return json.NewEncoder(os.Stdout).Encode(raw)
+		}
+		printRawConfigDB(raw)
+		return nil
+	},
+}
+
 var configdbExistsCmd = &cobra.Command{
 	Use:   "exists <table> <key>",
 	Short: "Check if a CONFIG_DB entry exists",
@@ -148,6 +185,9 @@ Examples:
 }
 
 func init() {
+	configdbSnapshotCmd.Flags().BoolVar(&configdbSnapshotOwnedOnly, "owned-only", true, "Restrict to newtron-owned tables (default: true)")
+
+	configdbCmd.AddCommand(configdbSnapshotCmd)
 	configdbCmd.AddCommand(configdbKeysCmd)
 	configdbCmd.AddCommand(configdbQueryCmd)
 	configdbCmd.AddCommand(configdbExistsCmd)

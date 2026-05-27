@@ -6,6 +6,7 @@ import (
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron"
 	"github.com/aldrin-isaac/newtron/pkg/newtron/api"
+	"github.com/aldrin-isaac/newtron/pkg/newtron/spec"
 )
 
 // ============================================================================
@@ -42,6 +43,17 @@ func (c *Client) HasTopology() (bool, error) {
 		return false, err
 	}
 	return info.HasTopology, nil
+}
+
+// GetTopology returns the full topology spec for the registered network as
+// `spec.TopologySpecFile` — devices, links, metadata. Returns ErrNotFound if
+// no topology.json was loaded.
+func (c *Client) GetTopology() (*spec.TopologySpecFile, error) {
+	var result spec.TopologySpecFile
+	if err := c.doGet(c.networkPath()+"/topology", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // TopologyDeviceNames returns the sorted device names from the topology.
