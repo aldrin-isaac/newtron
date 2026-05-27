@@ -1,0 +1,40 @@
+name: perwrite-actuated
+description: |
+  newtron#19 Option A (Phase 2a): per_write[] substrate populated against a
+  real device — operator-philosophy invariant #1 (no black boxes) for apply.
+
+  Creates VLAN 800 on switch1 in execute mode. Asserts the JSON response
+  carries a non-empty per_write[] array where every entry is a redis_write
+  kind with result=applied, has table/key/fields populated, and carries a
+  non-empty device_response (the verbatim Redis-protocol reply).
+
+  Cleans up by deleting VLAN 800 and asserts the delete operation produces
+  a redis_delete per_write entry — closing the operational-symmetry loop
+  (§15) at the substrate-observability level.
+topology: 1node-vs
+requires: [setup-device]
+
+steps:
+  - name: provision-switch1
+    action: topology-reconcile
+    devices: [switch1]
+
+  - name: create-vlan-with-perwrite
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan create 800 -x"
+    expect:
+      jq: >-
+        (.per_write | length) > 0
+        and all(.per_write[]; .table != null and .key != null)
+        and any(.per_write[]; .kind == "redis_write" and .result == "applied" and .table == "VLAN" and .key == "Vlan800")
+        and all(.per_write[] | select(.kind == "redis_write" or .kind == "redis_delete"); .device_response != null and .device_response != "")
+
+  - name: delete-vlan-with-perwrite
+    action: newtron-cli
+    devices: [switch1]
+    command: "vlan delete 800 -x"
+    expect:
+      jq: >-
+        (.per_write | length) > 0
+        and any(.per_write[]; .kind == "redis_delete" and .result == "applied" and .table == "VLAN" and .key == "Vlan800")

@@ -315,7 +315,25 @@ returns `WriteResult.Changes` (the same set updated by #11).
 
 ## 3. `newtron#19` — Per-substrate-operation surfacing on write endpoints (`per_write[]` + SSE streaming variant)
 
-> **Status (2026-05-26): NARROWED + SSE DEFERRED.**
+_Narrowed scope (`VerificationError.DeviceResponse` field) landed on Phase 1
+batch._
+
+_Option A (`WriteResult.PerWrite []sonic.PerSubstrateOp`) landed on branch
+`impl/phase-2a-per-write-substrate` (Phase 2a). Closes the substrate side
+of #19 — operationalizes operator-philosophy invariant #1 (no black boxes)
+and bullets 1+2 of the Concrete success vision through the JSON variant.
+The earlier "Option A deferred" verdict was revised after re-reading the
+philosophy text + the newtcon contract, which together establish that
+`per_write[]` is the substrate and SSE is one delivery mode for it._
+
+_Option B (SSE wire variant) remains sequentially deferred — see the
+[2026-05-27 reopen comment on newtron#19](https://github.com/aldrin-isaac/newtron/issues/19)
+for the re-evaluation trigger._
+
+_Companion landed: write-handler error envelope fix (newtron#21) — typed
+`*WriteResult` survives 409 responses to `VerificationFailedError`._
+
+> **Status (2026-05-26 historical; superseded by Phase 2a above): NARROWED + SSE DEFERRED.**
 >
 > - **Option A (`per_write[]`)** — trimmed to a single field. After
 >   newtron#11 lands, `Changes` + `Applied` + `Verification.Errors[]`

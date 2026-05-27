@@ -2784,6 +2784,7 @@ These types are returned by all device write operations (S8, S13).
 |-------|------|-------------|
 | `preview` | string (optional) | Human-readable diff preview. Present only on dry-run; absent (not empty string) otherwise. |
 | `changes` | ConfigChange[] (optional) | Typed ChangeSet entries — every CONFIG_DB add/modify/delete in this operation, in the same `sonic.ConfigChange` shape newtron uses internally. §46 canonical substrate. Absent when `change_count` is 0. |
+| `per_write` | PerSubstrateOp[] (optional) | Per-operation outcomes recorded during Apply and Verify — one entry per Redis HSET/DEL and one verify_read entry per change. Operationalizes operator-philosophy invariant #1 (no black boxes) for the apply pipeline. Absent in loopback mode (no device transport). §11 + §46. See PerSubstrateOp below. |
 | `change_count` | integer | Number of CONFIG_DB changes |
 | `applied` | boolean | Whether changes were committed to Redis |
 | `verified` | boolean | Whether post-apply verification passed |
@@ -2811,6 +2812,68 @@ and embedded in `DeliveryResult` from composite deliver.
 | `expected` | string | Expected value |
 | `actual` | string | Actual value (empty string if missing) |
 | `device_response` | string (optional) | Verbatim device-side reply observed when the mismatch was detected. For field mismatches, the full HGETALL content as sorted `key=value` pairs; for missing-key or still-present cases, the Redis-level status. §46. |
+
+#### PerSubstrateOp
+
+One record per Device I/O Operation newtron performed during Apply or Verify
+— one Redis HSET, one Redis DEL, one daemon-settle wait, one verify re-read.
+Per `docs/newtron/unified-pipeline-architecture.md` §7. Surfaced on
+`WriteResult.per_write` (200 path) and inside the typed envelope `data`
+field of 409 responses to `VerificationFailedError`. Vocabulary matches the
+newtcon contract verbatim.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `seq` | integer | Zero-based ordinal within the per-target apply sequence. Monotonically increasing. |
+| `kind` | string | Bounded enum: `redis_write`, `redis_delete`, `daemon_wait`, `verify_read`. |
+| `table` | string (optional) | CONFIG_DB table the op acted on. Omitted for whole-pipeline `daemon_wait`. |
+| `key` | string (optional) | CONFIG_DB entry key. |
+| `fields` | map[string]string (optional) | Intended write content for `redis_write`; nil for `redis_delete` and `daemon_wait`; the expected content for `verify_read`. |
+| `result` | string | Bounded enum: `applied`, `rejected`, `skipped`. |
+| `device_response` | string (optional) | Verbatim device/Redis-level reply observed at execution time. For `applied` `redis_write`/`redis_delete`, the Redis-protocol integer reply (`"(integer) 1"` etc.). For `rejected` ops, the verbatim error. For `verify_read`, the HGETALL content sorted as `key=value` pairs (pass case) or the missing/present sentinel (fail case). |
+| `at` | string (RFC3339 UTC) | Wall-clock timestamp the op completed at. |
+
+**Per-Node atomicity** (DESIGN_PRINCIPLES_NEWTRON.md §13, §18): when
+newtron's pipeline uses a Redis `TxPipeline` (currently `Reconcile`,
+`ApplyDrift`), every `redis_write`/`redis_delete` op within a single
+`EXEC` carries the same `result` — all `applied` or all `rejected`. The
+per-change `ChangeSet.Apply` path (used by primitives and composites)
+applies writes individually, so per-op results may differ when one
+write succeeds and a later one in the same ChangeSet fails. The wire
+shape reflects whichever delivery mechanism produced the op.
+
+### Verification-failure response envelope
+
+Write endpoints that return `*newtron.VerificationFailedError` emit HTTP 409
+Conflict with the standard envelope and the typed `*WriteResult` in `data`:
+
+```json
+{
+  "error": "verification failed on switch1: 1/1 entries did not persist",
+  "data": {
+    "applied": true,
+    "verified": false,
+    "changes": [...],
+    "per_write": [...],
+    "verification": {
+      "passed": 0,
+      "failed": 1,
+      "errors": [
+        { "table": "BGP_GLOBALS", "key": "default", "field": "local_asn",
+          "expected": "65001", "actual": "99999",
+          "device_response": "local_asn=99999 router_id=10.0.0.1" }
+      ]
+    }
+  }
+}
+```
+
+The substrate (`verification.errors[].device_response` + `per_write`)
+survives the error envelope — §46 (HTTP API Boundary) on the failure path.
+Other error kinds emit only the `error` field; only
+`VerificationFailedError` attaches structured `data`.
+
+_Lands newtron#21 (companion to #19 Phase 2a — write-handler error envelope fix)._
 
 ### Device Info Types
 
