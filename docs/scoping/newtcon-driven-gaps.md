@@ -21,35 +21,37 @@ issue, not newtcon-repo), and newtcon's contract marks the affected
 `manual_equivalent.newtron_http` field as `pending_newtron_gap`
 with a forward link to the newtron issue.
 
-This document scopes eight such gaps, organized into three
+This document scopes ten such gaps, organized into four
 **clusters** by shared underlying primitive. Each cluster has its
 own scoping document with per-issue implementation detail. The
 parent document (this one) covers what is shared across clusters:
 the unifying §46 principle, style invariants, cross-cluster
 phasing, and status protocol.
 
-## Common thread — all eight align to §46
+## Common thread — all ten align to §46
 
-The eight gaps are not independent design decisions. Each is an
+The ten gaps are not independent design decisions. Each is an
 instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
 [`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
 ("HTTP API Boundary — Wire Shape Mirrors Substrate").
 
-Re-reading the eight issues through the §46 lens, grouped by the
+Re-reading the ten issues through the §46 lens, grouped by the
 substrate cluster they touch:
 
 | Issue | Cluster | Today's response | Canonical substrate the principle says to expose |
 |-------|---------|-----------------|--------------------------------------------------|
 | `#11` | B. ChangeSet | `WriteResult.Preview` (string) + `change_count` | `ChangeSet.Changes` (`[]sonic.ConfigChange`) |
 | `#12` | B. ChangeSet | ChangeSet entries without generation provenance | `Source` field on each entry (verbose-only, per §33 boundary) |
+| `#19` | B. ChangeSet | Aggregate `WriteResult` only; per-substrate-op data discarded | `per_write[]` of `PerSubstrateOp` + optional SSE streaming variant |
 | `#5` | A. Projection | Per-resource summary views, or device CONFIG_DB raw reads | `Projection` (output of `ExportEntries`) |
 | `#4` | A. Projection | Free-text preview string + entry count for hypothetical mutations | Before-`Projection` + After-`Projection` + `[]DriftEntry` |
 | `#6` | A. Projection | Per-device intent records, or spec definitions, requiring N-call stitching | Per-Node `[]DriftEntry` slice for the service |
 | `#14` | C. Topology spec | `GET /topology/node` returning names only (`[]string`) | Full `TopologySpecFile` (devices + links + metadata) |
 | `#15` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyDevice` directly, via typed `create-node`/`delete-node`/`update-node` |
 | `#16` | C. Topology spec | YAML hand-edit + `/reload`; no CRUD verbs | `TopologyLink` directly, via typed `create-link`/`delete-link` |
+| `#17` | D. Device reality | N×M stitched per-table-per-key reads, no internal-consistency guarantee | Full `RawConfigDB` snapshot from `GetRawOwnedTables` |
 
 The unifying citation in each per-issue principle check is §46,
 with other principles (§1, §7, §11, §16, §21, §33) cited as
@@ -57,32 +59,36 @@ supporting context per cluster.
 
 ## Clusters
 
-Three clusters, each grouping issues by the load-bearing internal
+Four clusters, each grouping issues by the load-bearing internal
 primitive they share. Each cluster has a dedicated scoping document
 with full per-issue implementation detail.
 
 | Cluster | Issues | Shared load-bearing primitive | Scope doc |
 |---------|--------|-------------------------------|-----------|
 | **A. Projection substrate** | #4, #5, #6 | `ConfigDB.ExportEntries` + `sonic.DiffConfigDB` + `SnapshotIntentDB`/`RestoreIntentDB` | [`projection-substrate.md`](projection-substrate.md) |
-| **B. ChangeSet substrate** | #11, #12 | `sonic.ConfigChange` + all `WriteResult`-construction sites | [`changeset-substrate.md`](changeset-substrate.md) |
+| **B. ChangeSet substrate** | #11, #12, #19 | `sonic.ConfigChange` + all `WriteResult`-construction sites; #19 extends with `per_write[]` and optional SSE streaming | [`changeset-substrate.md`](changeset-substrate.md) |
 | **C. Topology spec substrate** | #14, #15, #16 | `spec.Loader.SaveTopology` + `spec.TopologySpecFile`/`TopologyDevice`/`TopologyLink` + `validateTopology` | [`topology-spec-substrate.md`](topology-spec-substrate.md) |
+| **D. Device-reality substrate** | #17 | `ConfigDBClient.GetRawOwnedTables` (already used internally for every drift detection) | [`device-reality-substrate.md`](device-reality-substrate.md) |
 
 The original five-issue batch (`#4`, `#5`, `#6`, `#11`, `#12`) is
 §46 applied to the **runtime layer** (ChangeSet, projection, drift).
-The extended three-issue batch (`#14`, `#15`, `#16`) extends §46 to
-the **spec layer** (topology.json).
+The extended batches (`#14`–`#19`) extend §46 to:
 
-A fourth would-be cluster — cross-target reasoning, originally filed
-as `newtron#13` — was closed as wontfix after operator review
-identified the framing as wrong. The fragility-under-partial-success
-concern is correlation between operator-chosen batched intents, not
-a property of newtron's substrate. Classification lives wholly in
-newtcon, tracked as
+- **The spec layer** (topology.json — `#14`/`#15`/`#16`, Cluster C).
+- **Device-reality reads** (raw CONFIG_DB snapshot — `#17`, new Cluster D).
+- **Apply-time substrate surfacing** (`per_write[]` + SSE — `#19`, extends Cluster B).
+
+A would-be cluster — cross-target reasoning, originally filed as
+`newtron#13` — was closed as wontfix after operator review identified
+the framing as wrong. The fragility-under-partial-success concern is
+correlation between operator-chosen batched intents, not a property
+of newtron's substrate. Classification lives wholly in newtcon,
+tracked as
 [newtcon#22](https://github.com/aldrin-isaac/newtcon/issues/22). The
 substrates that compose the classification (per-target ChangeSets,
 topology, intent records, service definitions, zone configurations)
 are exposed via existing endpoints and the already-scoped Cluster A,
-B, C gaps. See
+B, C, D gaps. See
 [`newtron#13`'s closing comment](https://github.com/aldrin-isaac/newtron/issues/13)
 for the full reasoning and a suggested shape for a *different*
 follow-up gap (resolution provenance) that may be worth filing.
@@ -147,18 +153,23 @@ unblock-value-per-effort items.
 | **1** | `newtron#11` | B | trivial | broad newtcon coverage; per-write granularity |
 | **1** | `newtron#5` | A | trivial | Provenance surface; observation-history poller |
 | **1** | `newtron#14` | C | trivial | graphical topology viz; spec-authoring readback |
+| **1** | `newtron#17` | D | trivial | observation-history poller (full snapshot read) |
 | **2** | `newtron#15` | C | moderate | spec-authoring (topology) — node lifecycle |
 | **2** | `newtron#16` | C | moderate | spec-authoring (topology) — link lifecycle |
 | **3** | `newtron#4` | A | moderate | Workbench dry-run; pre-commit diff |
 | **4** | `newtron#6` | A | moderate | service-first projection views |
 | **5** | `newtron#12` | B | moderate (pending operator decision) | "Report this is the bug" affordance |
+| **6** | `newtron#19` | B | moderate-to-substantive (Option A then Option B) | real-time substrate-op streaming (newtcon#40); per-write granularity (newtcon#41) |
 
 **Phasing rationale:**
 
-- **Phase 1** — three trivial reads, one PR. Each is ~10–20 lines
+- **Phase 1** — four trivial reads, one PR. Each is ~10–20 lines
   of new code, all §46-aligned, all unblock substantive newtcon-
   side work. No coupling between them; batched only for review
-  efficiency.
+  efficiency. `#17` (raw CONFIG_DB snapshot) joins this phase because
+  it's the same trivial-wrap-of-existing-primitive shape — newtron
+  already calls `GetRawOwnedTables` internally during every drift
+  detection; the gap is purely HTTP exposure.
 - **Phase 2** — `#15` + `#16` in one PR. They share the
   `Loader.SaveTopology` call site, the same Network method-layer
   pattern, and the same validation hook. Splitting them across two
@@ -174,6 +185,17 @@ unblock-value-per-effort items.
   the operator decision on §33 reconciliation (verbose-mode opt-in)
   in the issue body before implementation; defers naturally to
   after most other work.
+- **Phase 6** — `#19` is the heaviest item in the queue. Option A
+  (`per_write[]` field) is moderate — touches `ChangeSet.Apply`,
+  `Verify`, the pipeline wrappers, and every `WriteResult`
+  construction site. Option B (SSE streaming variant) is
+  substantive — adds streaming-response infrastructure newtron's
+  HTTP layer doesn't currently have. Recommended: Option A first
+  (unblocks newtcon#41 per-write granularity), Option B as a second
+  PR (unblocks newtcon#40 real-time streaming). The per-Node
+  atomicity discipline in `per_write[]` (within one bundle,
+  CONFIG_DB writes all `"applied"` or all `"rejected"`) is binding
+  per §11 and §13 — the Architecture Reviewer must verify.
 
 ## Status protocol
 
@@ -228,9 +250,14 @@ as to this parent.
   - <https://github.com/aldrin-isaac/newtron/issues/6>
   - <https://github.com/aldrin-isaac/newtron/issues/11>
   - <https://github.com/aldrin-isaac/newtron/issues/12>
-- Source issues (extended 2026-05-26 batch):
+- Source issues (extended 2026-05-26 batch — spec layer):
   - <https://github.com/aldrin-isaac/newtron/issues/14> — full topology read
   - <https://github.com/aldrin-isaac/newtron/issues/15> — topology node CRUD
   - <https://github.com/aldrin-isaac/newtron/issues/16> — topology link CRUD
+- Source issues (extended 2026-05-26 batch — device reality + apply-time surfacing):
+  - <https://github.com/aldrin-isaac/newtron/issues/17> — per-Node raw CONFIG_DB snapshot read (Cluster D, new)
+  - <https://github.com/aldrin-isaac/newtron/issues/19> — per-substrate-operation surfacing on write endpoints (Cluster B, sub-cluster B2)
 - Closed (wontfix) from this batch:
   - <https://github.com/aldrin-isaac/newtron/issues/13> — cross-target dependency (misframed; classification lives in newtcon#22)
+- Expected to close as duplicate when the doc-wide audit lands:
+  - <https://github.com/aldrin-isaac/newtron/issues/18> — per-Node bulk intent records read (route documented but not registered; subsumed by `newtron#20` doc-wide audit)

@@ -7,13 +7,25 @@ cross-cluster phasing.
 
 ## Scope
 
-Two issues, both instances of §46 applied to newtron's **ChangeSet
+Three issues, all instances of §46 applied to newtron's **ChangeSet
 substrate** — the canonical typed delta vocabulary newtron uses
 internally to drive Redis writes and verify them
-(`DESIGN_PRINCIPLES_NEWTRON.md` §11):
+(`DESIGN_PRINCIPLES_NEWTRON.md` §11). Organized into two
+sub-clusters by the moment of substrate surfacing:
+
+**Sub-cluster B1 — Response-time exposure** (ChangeSet entries
+surfaced in the terminal `WriteResult` JSON, after the write
+completes):
 
 - [newtron#11](https://github.com/aldrin-isaac/newtron/issues/11) — Structured `ChangeSet` in `WriteResult`
 - [newtron#12](https://github.com/aldrin-isaac/newtron/issues/12) — Call-site provenance on ChangeSet entries (verbose mode)
+
+**Sub-cluster B2 — Apply-time surfacing** (ChangeSet entries
+surfaced *during* the write, as each substrate operation lands;
+per-substrate-operation granularity + optional Server-Sent Events
+streaming):
+
+- [newtron#19](https://github.com/aldrin-isaac/newtron/issues/19) — Per-substrate-operation surfacing on write endpoints (`per_write[]` + SSE streaming variant)
 
 ## Shared load-bearing primitives
 
@@ -36,11 +48,19 @@ internally to drive Redis writes and verify them
 
 1. **#11 first** — trivial, additive. Adds `Changes []sonic.ConfigChange`
    field to `WriteResult`. Populated from `cs.Changes` at every
-   construction site.
+   construction site. Sub-cluster B1.
 2. **#12 second** — moderate. Builds on #11 (verbose response shape
    is *Changes with Source*; default is Changes alone). Requires the
    operator decision on §33 reconciliation (verbose-mode opt-in) to
-   be accepted before implementation.
+   be accepted before implementation. Sub-cluster B1.
+3. **#19 last** — moderate-to-substantive. Adds `per_write[]` to
+   `WriteResult` (Option A; can land first) and optionally an SSE
+   streaming variant on the same endpoints (Option B). Builds on
+   #11 (`per_write[]` is per-substrate-operation detail beyond
+   the aggregate `Changes` array #11 introduces). The verbose-mode
+   resolution from #12 composes additively — each `per_write[]`
+   entry gains an optional `source` field per #12's verbose flag
+   when both land. Sub-cluster B2.
 
 ---
 
@@ -252,3 +272,196 @@ the emitting `_ops.go` file (e.g.,
 **Estimated effort:** single PR. Capture mechanism is ~30 lines;
 default-vs-verbose response shaping touches every handler that
 returns `WriteResult.Changes` (the same set updated by #11).
+
+---
+
+## 3. `newtron#19` — Per-substrate-operation surfacing on write endpoints (`per_write[]` + SSE streaming variant)
+
+### Principle check
+
+**§46 (load-bearing):** the per-substrate-operation data exists in
+newtron's call stack at three layers (`ChangeSet.Changes`,
+`PipelineSet`'s `[]redis.Cmder` from `Exec`, `verifyConfigChanges`'s
+per-entry results) but is discarded by the time it reaches the wire.
+The wire today returns aggregate `WriteResult.ChangeCount` —
+exactly the "summary instead of canonical" pattern §46 explicitly
+rejects. Surfacing each entry's outcome is the principle in action.
+
+**§11 supports:** ChangeSet is the Universal Contract. The
+`Changes []sonic.ConfigChange` array from `#11` is the
+per-substrate-operation primitive; `per_write[]` extends each entry
+with the *outcome* of that substrate operation
+(`applied`/`rejected`/`skipped`, the verbatim device response, the
+timing).
+
+**§13 supports:** "Prevent Bad Writes, Don't Just Detect Them." A
+per-write rejection's verbatim device response is exactly the
+substrate-grade information §13 demands — what the device or daemon
+said, not a paraphrase.
+
+**§Pipeline §7** (Device I/O: Transient Observation): Apply,
+Verify, Drift, Observe are individual Device I/O Operations. The
+streaming variant (Option B) surfaces them as individual events at
+the granularity the architecture itself models.
+
+### Per-Node atomicity honesty (binding)
+
+Per `DESIGN_PRINCIPLES_NEWTRON.md` §11 and §13, every per-Node
+bundle commits via Redis `TxPipeline` (`MULTI`/`EXEC`); writes all
+land or none do. The `per_write[]` ordering MUST reflect this:
+
+- Within one per-Node bundle, every `redis_write` / `redis_delete`
+  entry carries the same `result` (all `"applied"` or all
+  `"rejected"`).
+- A mix of `"applied"` and `"rejected"` for CONFIG_DB writes within
+  one bundle is a **contract violation** — that would teach a
+  non-atomic model that newtron does not have.
+- `daemon_wait` and `verify_read` entries are post-EXEC Device I/O
+  Operations and MAY have mixed results (one verify may fail while
+  others pass without contradicting per-Node atomicity).
+
+The Architect and Architecture Reviewer must verify this discipline
+in the implementation PR.
+
+### Implementation (Option A — per_write[] in WriteResult)
+
+**Type** in `pkg/newtron/types.go`, near the existing `WriteResult`:
+
+```go
+// PerSubstrateOp represents one Device I/O operation within a per-Node
+// write bundle. Per §Pipeline §7, Apply, Verify, Drift, Observe are
+// individual Device I/O operations; per_write[] surfaces each one with
+// its outcome, the verbatim device response, and the timing.
+type PerSubstrateOp struct {
+    Seq            int               `json:"seq"`
+    Kind           string            `json:"kind"`              // "redis_write" | "redis_delete" | "daemon_wait" | "verify_read"
+    Table          string            `json:"table,omitempty"`
+    Key            string            `json:"key,omitempty"`
+    Fields         map[string]string `json:"fields,omitempty"`
+    Result         string            `json:"result"`            // "applied" | "rejected" | "skipped"
+    DeviceResponse string            `json:"device_response"`   // verbatim from device or daemon log
+    At             time.Time         `json:"at"`
+}
+```
+
+**Field on `WriteResult`** (additive, extends #11's `Changes`):
+
+```go
+type WriteResult struct {
+    Preview      string               `json:"preview,omitempty"`
+    Changes      []sonic.ConfigChange `json:"changes,omitempty"`   // from #11
+    PerWrite     []PerSubstrateOp     `json:"per_write,omitempty"` // NEW from #19
+    ChangeCount  int                  `json:"change_count"`
+    Applied      bool                 `json:"applied"`
+    Verified     bool                 `json:"verified"`
+    Saved        bool                 `json:"saved"`
+    Verification *VerificationResult  `json:"verification,omitempty"`
+}
+```
+
+**Capture sites** in:
+
+- `pkg/newtron/network/node/changeset.go` `(cs *ChangeSet) Apply(n *Node)`
+  (line 218) — the per-entry `client.Set` / `client.Delete` loop.
+  Capture each iteration's table/key/fields/op-kind plus the
+  wire-level error (or nil) from the Redis client into a
+  `[]PerSubstrateOp` slice. On `TxPipeline`-driven apply, the
+  per-Cmder results from `Exec`'s `[]redis.Cmder` populate the
+  per-entry `Result` and `DeviceResponse` fields. Per-Node
+  atomicity: if `Exec` returns a single error for the whole pipeline,
+  every `redis_write` / `redis_delete` entry gets the same `"rejected"`
+  result and the bundle's error as `DeviceResponse`.
+- `pkg/newtron/network/node/changeset.go` `(cs *ChangeSet) Verify(n *Node)`
+  (line 258) — the per-entry verify-read loop. Each entry becomes a
+  `verify_read` `PerSubstrateOp` with its own `Result` and any
+  `DeviceResponse` from a failed read.
+- `pkg/newtron/device/sonic/pipeline.go` `PipelineSet` /
+  `PipelineWriteByDrift` (lines 11, 47) — return the per-Cmder
+  results rather than only the aggregate error. The current
+  signature discards `[]redis.Cmder`; the new signature returns it
+  alongside.
+
+**Construction sites** for `WriteResult`:
+
+Every site that builds a `WriteResult` after running a `ChangeSet`
+populates `PerWrite` from the now-captured per-entry slice. Same
+set of sites updated by #11 — the field is additive at the same
+sites.
+
+### Implementation (Option B — SSE streaming variant)
+
+**Endpoint negotiation:** existing write routes admit
+`Accept: text/event-stream`. When set, the response is an SSE stream
+of `event: substrate_op` events per Device I/O Operation, terminated
+by an `event: write_complete` event carrying the aggregate
+`WriteResult` (with `per_write[]` populated).
+
+**Implementation:** the capture sites from Option A are also the
+emission sites for Option B. The pattern:
+
+```go
+// At each capture site:
+op := PerSubstrateOp{...}
+collected = append(collected, op)            // Option A — accumulate
+if streamWriter != nil {                     // Option B — also emit live
+    writeSSEEvent(streamWriter, "substrate_op", op)
+}
+```
+
+`streamWriter` is non-nil only when the request asked for
+`text/event-stream`; otherwise the SSE path is dormant and Option A
+behavior is unchanged.
+
+**Per-Node atomicity in streaming:** the SSE consumer sees
+`substrate_op` events for `redis_write` and `redis_delete` only
+**after `Exec` returns** — newtron cannot honestly stream them
+in-progress because the `TxPipeline`'s atomicity means no individual
+write has "landed" until the pipeline commits. Pre-`Exec`, the
+events are not emitted; at the post-`Exec` moment, the events are
+emitted in `Seq` order with `Result` determined by the pipeline's
+outcome. `daemon_wait` and `verify_read` events stream as they
+happen (these are not subject to per-Node atomicity).
+
+The architecture's atomicity model is preserved at the wire — the
+stream cannot teach a false partial-success model for the atomic
+phase.
+
+### Tests
+
+- A successful apply produces a `WriteResult` with `per_write[]`
+  populated, every `redis_write` / `redis_delete` carrying
+  `result: "applied"`.
+- A bundle whose pipeline `Exec` fails produces `per_write[]` where
+  every CONFIG_DB write entry carries the same `result: "rejected"`
+  and the same `DeviceResponse` (the pipeline-level error). No
+  mixed-result CONFIG_DB writes within one bundle.
+- A bundle that applies successfully but whose post-`Exec` verify
+  fails on some entries produces mixed `verify_read` results,
+  consistent with the atomicity model.
+- The SSE variant (if implemented) emits each `substrate_op` event
+  with the same payload shape as the corresponding Option A
+  `per_write[]` entry, terminated by `write_complete`.
+
+**Estimated effort:** moderate-to-substantive.
+
+- Option A alone: moderate. Touches `ChangeSet.Apply`, `Verify`, the
+  pipeline wrappers, and every `WriteResult` construction site.
+  Reuses existing primitives; no new pipeline logic.
+- Option B (SSE streaming): substantive. Adds SSE infrastructure
+  (content negotiation, streaming response handling, client-side
+  reconnect semantics) that newtron's HTTP layer doesn't currently
+  have. Worth landing in a second PR after Option A.
+
+### Composes with #12 (verbose-mode call-site provenance)
+
+When #12 lands, each `PerSubstrateOp` gains an optional `source`
+field (verbose-mode opt-in only, per the §33 boundary). Until #12
+lands, the `source` field is absent. The two gaps compose additively;
+neither blocks the other.
+
+### Out of scope
+
+- A `WriteResult` field redesign beyond the additive `per_write[]`.
+- Per-write metrics / instrumentation export (separate concern from
+  operator-facing visibility).
+- Backward-incompatible changes to existing `WriteResult` consumers.

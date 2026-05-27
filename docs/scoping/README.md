@@ -8,10 +8,10 @@ the batch is large enough, a parent doc plus per-cluster docs.
 
 ### newtcon-driven gaps (2026-05-26)
 
-Eight newtron HTTP API gaps filed by newtcon under the Gap-Handling
-Protocol. All eight are instances of `DESIGN_PRINCIPLES_NEWTRON.md`
+Ten newtron HTTP API gaps filed by newtcon under the Gap-Handling
+Protocol. All ten are instances of `DESIGN_PRINCIPLES_NEWTRON.md`
 §46 ("HTTP API Boundary — Wire Shape Mirrors Substrate"); they are
-grouped into three clusters by shared underlying primitive.
+grouped into four clusters by shared underlying primitive.
 
 - **[`newtcon-driven-gaps.md`](newtcon-driven-gaps.md)** — parent:
   unifying §46 principle, style invariants, cross-cluster phasing,
@@ -20,22 +20,37 @@ grouped into three clusters by shared underlying primitive.
   Cluster A: `newtron#4`, `#5`, `#6`. Share
   `ConfigDB.ExportEntries`, `DiffConfigDB`, snapshot/restore.
 - **[`changeset-substrate.md`](changeset-substrate.md)** —
-  Cluster B: `newtron#11`, `#12`. Share `sonic.ConfigChange` and
-  `WriteResult`-construction call sites.
+  Cluster B: `newtron#11`, `#12`, `#19`. Share `sonic.ConfigChange`
+  and `WriteResult`-construction call sites. Organized into two
+  sub-clusters: B1 (response-time exposure — `#11`, `#12`) and B2
+  (apply-time surfacing — `#19`, the per-substrate-operation
+  `per_write[]` + SSE streaming variant).
 - **[`topology-spec-substrate.md`](topology-spec-substrate.md)** —
   Cluster C: `newtron#14`, `#15`, `#16`. Share
   `spec.Loader.SaveTopology`, `TopologySpecFile`,
   `validateTopology`.
+- **[`device-reality-substrate.md`](device-reality-substrate.md)** —
+  Cluster D: `newtron#17`. Wraps the existing internal
+  `ConfigDBClient.GetRawOwnedTables` over HTTP as a typed
+  single-snapshot read. Foundational for newtcon's
+  observation-history poller (newtcon#37).
 
-A would-be fourth cluster — cross-target reasoning (originally
+A would-be fifth cluster — cross-target reasoning (originally
 filed as `newtron#13`) — was closed as wontfix after operator
 review identified the framing as wrong. The substrate that would
 compose the classification (per-target ChangeSets, topology, intent
 records, service definitions, zone configurations) is exposed by
-existing endpoints plus the Cluster A/B/C gaps. Fragility
+existing endpoints plus the Cluster A/B/C/D gaps. Fragility
 classification is a newtcon-side concern tracked as
 [newtcon#22](https://github.com/aldrin-isaac/newtcon/issues/22).
 See the closure record at the end of `newtcon-driven-gaps.md`.
+
+Separately tracked (not in cluster scoping; operator-side cleanup):
+
+- [`newtron#20`](https://github.com/aldrin-isaac/newtron/issues/20) — doc-wide audit of `docs/newtron/api.md` for
+  documented-but-unwired endpoints and config fields. Will close
+  `newtron#18` as duplicate when the audit lands. Not a substrate
+  gap; not in any cluster.
 
 ## Reading order
 
