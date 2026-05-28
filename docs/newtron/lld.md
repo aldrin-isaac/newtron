@@ -458,7 +458,7 @@ All public types live in `pkg/newtron/types.go`. External consumers (CLI, newtru
 
 ### 3.1 Execution and Write Result
 
-Used as request options and response types for all mutating operations (§4.6–4.8).
+Used as request options and response types for all mutating operations (§4.6–4.8). `WriteResult` is the §46 wire-shape mirror of newtron's internal ChangeSet substrate — `Changes` is the canonical typed form (every `sonic.ConfigChange` the operation produced), `Preview` is the human-readable rendering of the same data, and `PerWrite` records the per-substrate-operation outcomes captured during Apply and Verify.
 
 ```go
 type ExecOpts struct {
@@ -467,12 +467,14 @@ type ExecOpts struct {
 }
 
 type WriteResult struct {
-    Preview      string              `json:"preview,omitempty"`      // dry-run: ChangeSet preview text
-    ChangeCount  int                 `json:"change_count"`
-    Applied      bool                `json:"applied"`
-    Verified     bool                `json:"verified"`
-    Saved        bool                `json:"saved"`
-    Verification *VerificationResult `json:"verification,omitempty"` // only on verification failure
+    Preview      string                 `json:"preview,omitempty"`     // dry-run: ChangeSet preview text
+    Changes      []sonic.ConfigChange   `json:"changes,omitempty"`     // §46 canonical substrate — every CONFIG_DB add/modify/delete
+    PerWrite     []sonic.PerSubstrateOp `json:"per_write,omitempty"`   // one entry per Redis HSET/DEL during Apply + one verify_read per Change
+    ChangeCount  int                    `json:"change_count"`
+    Applied      bool                   `json:"applied"`
+    Verified     bool                   `json:"verified"`
+    Saved        bool                   `json:"saved"`
+    Verification *VerificationResult    `json:"verification,omitempty"` // set whenever verify ran (success or failure); absent on dry-run
 }
 
 type VerificationResult struct {
@@ -482,13 +484,17 @@ type VerificationResult struct {
 }
 
 type VerificationError struct {
-    Table    string `json:"table"`
-    Key      string `json:"key"`
-    Field    string `json:"field"`
-    Expected string `json:"expected"`
-    Actual   string `json:"actual"`   // "" if missing
+    Table          string `json:"table"`
+    Key            string `json:"key"`
+    Field          string `json:"field"`
+    Expected       string `json:"expected"`
+    Actual         string `json:"actual"`                     // "" if missing
+    DeviceResponse string `json:"device_response,omitempty"`  // verbatim device-side reply at mismatch detection (§46)
 }
+
 ```
+
+`VerificationFailedError` and `ConflictError` are defined in §3.11 with the rest of the error types.
 
 ### 3.2 Device Info and Interface Views
 
@@ -747,6 +753,15 @@ type PortChannelConfig struct {
     Fallback bool
     MTU      int
 }
+
+// ProjectionDiffRequest is the body for POST .../intent/projection-diff.
+// Operations carry the same TopologyStep shape consumed by intent/save —
+// the diff handler replays them on a snapshot of the projection without
+// touching the device, returning before/after RawConfigDB plus the entry-
+// level delta as `sonic.DriftEntry` (canonical §11 vocab).
+type ProjectionDiffRequest struct {
+    Operations []spec.TopologyStep `json:"operations"`
+}
 ```
 
 ### 3.8 Spec Authoring Requests
@@ -925,13 +940,25 @@ type ValidationError struct {
     Message string
 }  // → 400
 
+// VerificationFailedError is returned by Node.Commit when post-apply verify
+// detected a mismatch. Result is the typed WriteResult — including PerWrite,
+// Verification.Errors (with DeviceResponse), and Changes — so the 409 wire
+// envelope surfaces the full substrate, not just a stringified summary (§46).
 type VerificationFailedError struct {
     Device  string
     Passed  int
     Failed  int
     Total   int
     Message string
-}  // → 409 Conflict
+    Result  *WriteResult
+}  // → 409 Conflict, with Result as the envelope's `data` field
+
+// ConflictError indicates a mutation refused due to references from other
+// entities (e.g., deleting a profile with topology devices still bound to
+// it). Per DESIGN_PRINCIPLES §15, cascade is explicit: callers pass
+// `force=true` to override. Re-exported as a type alias from `pkg/util` so
+// the internal network layer and the public API share one type.
+type ConflictError = util.ConflictError
 ```
 
 **HTTP status mapping** (`httpStatusFromError` in `api/types.go`):
@@ -940,7 +967,8 @@ type VerificationFailedError struct {
 |-----------|-------------|
 | `NotFoundError` | 404 Not Found |
 | `ValidationError` | 400 Bad Request |
-| `VerificationFailedError` | 409 Conflict |
+| `VerificationFailedError` | 409 Conflict (envelope `data` is the typed `WriteResult`) |
+| `ConflictError` | 409 Conflict (e.g., delete refused on remaining references) |
 | `notRegisteredError` | 404 Not Found |
 | `alreadyRegisteredError` | 409 Conflict |
 | `context.DeadlineExceeded` | 504 Gateway Timeout |
@@ -971,6 +999,7 @@ List/show pairs for all spec types. Response types from §3.9.
 |--------|------|---------------|
 | GET | `/network/{netID}/service` | `[]ServiceDetail` |
 | GET | `/network/{netID}/service/{name}` | `ServiceDetail` |
+| GET | `/network/{netID}/service/{name}/projection` | `map[string]RawConfigDB` (per-Node projection slice the service contributes, replay-diff) |
 | GET | `/network/{netID}/ipvpn` | `[]IPVPNDetail` |
 | GET | `/network/{netID}/ipvpn/{name}` | `IPVPNDetail` |
 | GET | `/network/{netID}/macvpn` | `[]MACVPNDetail` |
@@ -990,6 +1019,7 @@ List/show pairs for all spec types. Response types from §3.9.
 | GET | `/network/{netID}/zone` | `[]ZoneDetail` |
 | GET | `/network/{netID}/zone/{name}` | `ZoneDetail` |
 | GET | `/network/{netID}/host/{name}` | `HostProfile` |
+| GET | `/network/{netID}/topology` | `TopologySpecFile` (full topology — devices, links, metadata) |
 | GET | `/network/{netID}/topology/node` | `[]string` (device names) |
 | GET | `/network/{netID}/feature` | Feature list |
 | GET | `/network/{netID}/feature/{name}/dependency` | Feature dependencies |
@@ -1025,9 +1055,14 @@ RPC-style POST endpoints. Each creates or deletes a spec object and persists to 
 | POST | `.../add-route-policy-rule` | `AddRoutePolicyRuleRequest` |
 | POST | `.../remove-route-policy-rule` | `{policy, seq}` |
 | POST | `.../create-profile` | `CreateDeviceProfileRequest` |
-| POST | `.../delete-profile` | `{name}` |
+| POST | `.../delete-profile` | `{name, force}` — `force=true` cascades through topology devices referencing the profile (§15 cascade-refusal pattern); default refuses with 409 `ConflictError` |
 | POST | `.../create-zone` | `CreateZoneRequest` |
 | POST | `.../delete-zone` | `{name}` |
+| POST | `.../topology/create-node` | `TopologyNodeCreateRequest` — creates topology device (auto-creates matching profile by filename) |
+| DELETE | `.../topology/node/{name}` | `?force=true` to cascade-delete the matching profile + remove links wired to this device; default refuses if links remain (409) |
+| PUT | `.../topology/node/{name}` | `TopologyDevice` body — replaces device metadata; profile-update cascade enforces single-source-of-truth |
+| POST | `.../topology/create-link` | `*TopologyLink` body — adds link to topology |
+| DELETE | `.../topology/link/{device}/{interface}` | Removes link by single-endpoint identification (a port participates in at most one link) |
 
 All paths above are prefixed with `/network/{netID}`.
 
@@ -1062,6 +1097,7 @@ Response types from §3.2–3.5. These dispatch via `connectAndRead` — the act
 | GET | `.../node/{device}/neighbor` | `[]NeighEntry` |
 | GET | `.../node/{device}/route/{vrf}/{prefix...}` | `RouteEntry` |
 | GET | `.../node/{device}/route-asic/{prefix...}` | `RouteEntry` |
+| GET | `.../node/{device}/configdb` | `sonic.RawConfigDB` — single internally-consistent CONFIG_DB snapshot (one round-trip per table). `?owned_only=false` returns every schema-known table (§46) |
 | GET | `.../node/{device}/configdb/{table}` | `[]string` (keys) |
 | GET | `.../node/{device}/configdb/{table}/{key}` | `map[string]string` |
 | GET | `.../node/{device}/configdb/{table}/{key}/exists` | `{exists: bool}` |
@@ -1109,8 +1145,10 @@ Operations on the expected state. These operate on the abstract node's intent DB
 
 | Method | Path | Response | Purpose |
 |--------|------|----------|---------|
+| GET | `.../node/{device}/intent/projection` | `sonic.RawConfigDB` | Per-Node projection (from intent replay). The decision substrate for newtron-owned tables |
+| POST | `.../node/{device}/intent/projection-diff` | `{before, after, diff}` | Pre-commit preview: replays a `ProjectionDiffRequest.Operations` set on a snapshot of the projection without touching the device. `diff` is `[]sonic.DriftEntry` (canonical §11 vocab) |
 | GET | `.../node/{device}/intent/tree` | `IntentTreeNode` | Read intent DAG |
-| GET | `.../node/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device |
+| GET | `.../node/{device}/intent/drift` | `[]DriftEntry` | Compare projection vs device CONFIG_DB; empty array ≡ all newtron writes actualized |
 | POST | `.../node/{device}/intent/reconcile` | `ReconcileResult` | Push projection to device. Query params: `mode=topology` (intent source), `reconcile=full\|delta` (delivery mechanism, default: topology→full, actuated→delta), `dry_run=true`, `no_save=true` |
 | POST | `.../node/{device}/intent/save` | — | Persist intents to topology.json |
 | POST | `.../node/{device}/intent/reload` | — | Reload from topology.json (topology only) |
