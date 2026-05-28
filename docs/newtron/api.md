@@ -28,13 +28,11 @@ building tooling, integrating with CI/CD, or extending the CLI.
 8. [Node Write Operations](#8-node-write-operations)
 9. [Node Lifecycle Operations](#9-node-lifecycle-operations)
 10. [Node Diagnostics](#10-node-diagnostics)
-11. [Intent, History, Settings, and Drift](#11-intent-history-settings-and-drift)
-12. [Composite Operations](#12-composite-operations)
-13. [Interface Operations](#13-interface-operations)
-14. [Batch Execution](#14-batch-execution)
-15. [Types Reference](#15-types-reference)
-16. [Error Reference](#16-error-reference)
-17. [Server Configuration](#17-server-configuration)
+11. [Intent Operations](#11-intent-operations)
+12. [Interface Operations](#12-interface-operations)
+13. [Types Reference](#13-types-reference)
+14. [Error Reference](#14-error-reference)
+15. [Server Configuration](#15-server-configuration)
 
 ### Endpoint Quick Reference
 
@@ -75,15 +73,13 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | POST | `/network/{n}/add-route-policy-rule` | Add rule to route policy |
 | POST | `/network/{n}/remove-route-policy-rule` | Remove rule from route policy |
 
-**Provisioning & Composites** (S6, S12)
+**Provisioning** (S6)
 
 | Method | Path | What it does |
 |--------|------|--------------|
-| POST | `/network/{n}/provision` | Provision devices from topology |
 | POST | `/network/{n}/node/{d}/init-device` | Initialize device (clean factory config) |
-| POST | `/network/{n}/node/{d}/generate-composite` | Generate + store composite (returns UUID handle) |
-| POST | `/network/{n}/node/{d}/verify-composite` | Verify composite against device (handle in body) |
-| POST | `/network/{n}/node/{d}/deliver-composite` | Deliver composite to device (handle in body) |
+
+Spec-to-device delivery is via `POST /network/{n}/node/{d}/intent/reconcile?mode=topology` (S11).
 
 **Device Reads** (S7) -- all `GET /network/{n}/node/{d}/...`
 
@@ -130,7 +126,7 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/add-bgp-evpn-peer`, `/remove-bgp-evpn-peer` | Add/remove EVPN overlay peer |
 | `/apply-qos`, `/remove-qos` | Apply/remove QoS (node-level) |
 
-**Intent, History, Settings, Drift** (S11)
+**Intent Operations** (S11)
 
 | Method | Path suffix | What it does |
 |--------|-------------|--------------|
@@ -149,17 +145,15 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 |-------------|--------------|
 | `/reload-config` | Reload CONFIG_DB from disk |
 | `/save-config` | Save CONFIG_DB to disk |
-| `/refresh` | Refresh cached CONFIG_DB (supports `?timeout=`) |
 | `/restart-daemon` | Restart a SONiC daemon |
 | `/ssh-command` | Execute SSH command |
-| `/verify-committed` | Verify last ChangeSet |
 | `GET /configdb` | Full CONFIG_DB snapshot (RawConfigDB); `?owned_only=false` for all tables |
 | `GET /configdb/{table}` | List CONFIG_DB keys |
 | `GET /configdb/{table}/{key}` | Read CONFIG_DB entry |
 | `GET /configdb/{table}/{key}/exists` | Check CONFIG_DB entry exists |
 | `GET /statedb/{table}/{key}` | Read STATE_DB entry |
 
-**Interface Operations** (S13) -- all `POST /network/{n}/node/{d}/interface/{i}/...`
+**Interface Operations** (S12) -- all `POST /network/{n}/node/{d}/interface/{i}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
@@ -170,8 +164,6 @@ All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{d
 | `/add-bgp-peer`, `/remove-bgp-peer` | BGP peer |
 | `/apply-qos`, `/remove-qos` | QoS policy |
 | `/set-property` | Set port property |
-
-**Batch** (S14) -- `POST /network/{n}/node/{d}/execute`
 
 ---
 
@@ -207,7 +199,7 @@ must be valid JSON. Endpoints that take no body accept an empty body or no body.
 | 201 | Created | Resource creation (VLAN, VRF, ACL, service spec, etc.) |
 | 400 | Bad Request | Invalid JSON, missing required fields, invalid parameter values |
 | 404 | Not Found | Network not registered, device/resource not found |
-| 409 | Conflict | Network already registered, composite verification failed |
+| 409 | Conflict | Network already registered, post-Apply verification failed, conflicting reference on delete (cascade-refusal) |
 | 500 | Internal Error | Unexpected server errors, SSH/Redis failures |
 | 504 | Gateway Timeout | Request context deadline exceeded (device unreachable) |
 
@@ -268,7 +260,7 @@ duration return 504 Gateway Timeout.
 The server caches SSH connections to devices between requests. After a configurable
 idle timeout (default 5 minutes), unused connections are automatically closed. Each
 request still refreshes CONFIG_DB from Redis before operating -- only the SSH tunnel
-is reused. See [S17 Server Configuration](#17-server-configuration) for tuning.
+is reused. See [S15 Server Configuration](#15-server-configuration) for tuning.
 
 ### Example Request
 
@@ -331,14 +323,15 @@ See [S3 Server Management](#3-server-management).
 ### 2. Provision devices from the topology
 
 ```bash
-# Provision all devices in the topology
-curl -X POST http://localhost:8080/network/default/provision \
-  -H "Content-Type: application/json" \
-  -d '{"devices": []}'
+# Per-device: clean factory CONFIG_DB, then load topology spec and deliver
+curl -X POST http://localhost:8080/network/default/node/switch1/init-device
+curl -X POST 'http://localhost:8080/network/default/node/switch1/intent/reconcile?mode=topology'
 ```
 
-This generates a complete CONFIG_DB composite for each device (BGP, loopback,
-EVPN, interfaces) and delivers it. See [S6 Provisioning](#6-provisioning).
+This is the canonical "spec → device" path: init-device clears factory entries,
+intent/reconcile in topology mode loads the spec into the projection and writes
+it to the device. The intent/reconcile pipeline IS the provisioning pipeline.
+See [S6 Provisioning](#6-provisioning) and [S11](#11-intent-operations).
 
 ### 3. Verify health after provisioning
 
@@ -363,20 +356,23 @@ curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethern
 
 Services are the primary operational unit. `apply-service` creates all required
 CONFIG_DB infrastructure (VLANs, VRFs, VNI mappings, ACLs, QoS) automatically.
-See [S13 Interface Operations](#13-interface-operations).
+See [S12 Interface Operations](#12-interface-operations).
 
 ### 5. Verify the applied configuration
 
 ```bash
-# Verify that committed changes persisted
-curl -X POST http://localhost:8080/network/default/node/switch1/verify-committed
+# Post-facto: confirm projection (intent replay) matches device CONFIG_DB.
+# Empty drift array ≡ every newtron write is actualized on the device.
+curl http://localhost:8080/network/default/node/switch1/intent/drift
 
 # Check a specific route in the forwarding table
 curl http://localhost:8080/network/default/node/switch1/route/default/10.1.1.0/30
 ```
 
-See [S9 Node Lifecycle Operations](#9-node-lifecycle-operations) and [S7 Node
-Read Operations](#7-node-read-operations).
+Per-write verification (did THIS specific write land?) is reported inline on
+the originating `WriteResult.Verification` field, or surfaced as the 409 Data
+envelope on a `VerificationFailedError`. See [S11](#11-intent-operations)
+and [S7 Node Read Operations](#7-node-read-operations).
 
 ### 6. Day-2 operations
 
@@ -393,29 +389,17 @@ curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethern
 curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethernet0/remove-service
 ```
 
-### When to use batch execution
+### Batching multiple operations
 
-For operations that should be atomic -- all succeed or none take effect -- use
-the batch execute endpoint ([S14](#14-batch-execution)). This is common during
-provisioning-like flows where you need to configure baseline and services
-in a single ChangeSet:
+For atomic delivery of multiple operations — all succeed or none take effect —
+use `intent/projection-diff` for pre-commit preview and `intent/reconcile` for
+delivery. Each individual write endpoint already uses one Lock → operations →
+Commit → Save → Unlock cycle internally; the intent pipeline composes those
+cycles when reconciling a whole projection.
 
-```bash
-curl -X POST http://localhost:8080/network/default/node/switch1/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "execute": true,
-    "operations": [
-      {"action": "create-vlan", "params": {"id": 100}},
-      {"action": "create-vrf", "params": {"name": "CUSTOMER"}},
-      {"action": "apply-service", "interface": "Ethernet0",
-       "params": {"service": "customer-l3", "ip_address": "10.1.1.1/30"}}
-    ]
-  }'
-```
-
-For ad-hoc, individual changes (adding a VLAN, checking status), use the
-dedicated endpoints -- they're simpler and the response is the same `WriteResult`.
+For ad-hoc individual changes (add a VLAN, check status, refresh one service),
+use the dedicated write endpoints — they're simpler and the response is the
+same `WriteResult`.
 
 ---
 
@@ -561,7 +545,7 @@ one by name returns a single object (or 404 if not found):
 | Profiles | `GET /network/{netID}/profile` | `GET .../profile/{name}` | [`DeviceProfileDetail`](#deviceprofiledetail) |
 | Zones | `GET /network/{netID}/zone` | `GET .../zone/{name}` | [`ZoneDetail`](#zonedetail) |
 
-All response types are defined in [S15 Types Reference](#15-types-reference).
+All response types are defined in [S13 Types Reference](#13-types-reference).
 
 **Example:**
 
@@ -735,7 +719,7 @@ Get the host profile for a virtual host device. Returns 404 for switch devices
 (even if they exist in the topology) -- the client uses 200 vs 404 from this
 endpoint to classify devices as hosts vs switches.
 
-**Response (200):** `HostProfile` (see [S15](#hostprofile))
+**Response (200):** `HostProfile` (see [S13](#hostprofile))
 
 **Status codes:** 200 success, 404 not a host device or not found
 
@@ -1363,32 +1347,21 @@ Delete a zone. Returns error if any device profile references this zone.
 
 ## 6. Provisioning
 
-Provisioning generates a complete CONFIG_DB composite from the topology file and
-device profiles, then delivers it to devices. This is the one operation where
-spec intent replaces device reality (CompositeOverwrite mode).
+Provisioning brings a device from clean-factory to fully-configured-per-topology.
+It is decomposed into two operations:
 
-### POST /network/{netID}/provision
+1. **`POST /network/{n}/node/{d}/init-device`** — clean factory CONFIG_DB entries
+   that would conflict with newtron-managed state. Idempotent. See below.
+2. **`POST /network/{n}/node/{d}/intent/reconcile`** with `?mode=topology` — load
+   the topology spec into the projection and deliver it to the device. This is
+   the canonical "spec → device" path. See §11.
 
-Provision one or more devices from the topology.
-
-**Query parameters:** `dry_run`, `no_save`
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `devices` | string[] | no | Device names to provision. Empty = all devices in topology. |
-
-**Response (200):** `ProvisionResult` -- an aggregate of per-device results. See
-[S15 ProvisionResult](#provisionresult) for the structure. On partial failure,
-successful devices are still provisioned; the error is reported per-device.
-
-**Example:**
-
-```
-POST /network/default/provision
-{"devices": ["switch1", "switch2"]}
-```
+There is no separate `/provision` endpoint. The intent/reconcile pipeline IS the
+provisioning pipeline — provisioning and reconciliation are two sides of the same
+coin (substrate-faithful, §46): the only difference is whether the projection
+starts from topology spec (provisioning) or from the device's existing intents
+(maintenance reconcile). For network-wide provisioning, iterate over
+`/network/{n}/topology/node` and call init-device + intent/reconcile per node.
 
 ### POST /network/{netID}/node/{device}/init-device
 
@@ -1435,7 +1408,7 @@ establishes an SSH connection that is cached for subsequent requests.
 
 Get a structured overview of the device.
 
-**Response (200):** `DeviceInfo` (see [S15](#deviceinfo))
+**Response (200):** `DeviceInfo` (see [S13](#deviceinfo))
 
 **Example response:**
 
@@ -1465,7 +1438,7 @@ Get a structured overview of the device.
 
 List all interfaces with summary status.
 
-**Response (200):** Array of `InterfaceSummary` (see [S15](#interfacesummary))
+**Response (200):** Array of `InterfaceSummary` (see [S13](#interfacesummary))
 
 #### GET /network/{netID}/node/{device}/interface/{name}
 
@@ -1473,7 +1446,7 @@ Show detailed properties of a single interface.
 
 **Path parameters:** `name` -- interface name (URL-encode slashes: `Ethernet0%2F1`)
 
-**Response (200):** `InterfaceDetail` (see [S15](#interfacedetail))
+**Response (200):** `InterfaceDetail` (see [S13](#interfacedetail))
 
 **Status codes:** 200 success, 404 interface not found
 
@@ -1483,7 +1456,7 @@ Show the service binding on an interface.
 
 **Path parameters:** `name` -- interface name
 
-**Response (200):** `ServiceBindingDetail` (see [S15](#servicebindingdetail)) or `null` if no binding
+**Response (200):** `ServiceBindingDetail` (see [S13](#servicebindingdetail)) or `null` if no binding
 
 ### VLANs
 
@@ -1491,7 +1464,7 @@ Show the service binding on an interface.
 
 List all VLANs with summary status.
 
-**Response (200):** Array of `VLANStatusEntry` (see [S15](#vlanstatusentry))
+**Response (200):** Array of `VLANStatusEntry` (see [S13](#vlanstatusentry))
 
 #### GET /network/{netID}/node/{device}/vlan/{id}
 
@@ -1509,7 +1482,7 @@ Show a single VLAN with full details.
 
 List all VRFs with operational state.
 
-**Response (200):** Array of `VRFStatusEntry` (see [S15](#vrfstatusentry))
+**Response (200):** Array of `VRFStatusEntry` (see [S13](#vrfstatusentry))
 
 #### GET /network/{netID}/node/{device}/vrf/{name}
 
@@ -1517,7 +1490,7 @@ Show a VRF with its interfaces and BGP neighbors.
 
 **Path parameters:** `name` -- VRF name
 
-**Response (200):** `VRFDetail` (see [S15](#vrfdetail))
+**Response (200):** `VRFDetail` (see [S13](#vrfdetail))
 
 **Status codes:** 200 success, 404 VRF not found
 
@@ -1527,7 +1500,7 @@ Show a VRF with its interfaces and BGP neighbors.
 
 List all ACL tables with summary info.
 
-**Response (200):** Array of `ACLTableSummary` (see [S15](#acltablesummary))
+**Response (200):** Array of `ACLTableSummary` (see [S13](#acltablesummary))
 
 #### GET /network/{netID}/node/{device}/acl/{name}
 
@@ -1535,7 +1508,7 @@ Show an ACL table with all its rules.
 
 **Path parameters:** `name` -- ACL table name
 
-**Response (200):** `ACLTableDetail` (see [S15](#acltabledetail))
+**Response (200):** `ACLTableDetail` (see [S13](#acltabledetail))
 
 **Status codes:** 200 success, 404 ACL not found
 
@@ -1545,7 +1518,7 @@ Show an ACL table with all its rules.
 
 Get BGP status including local AS, router ID, and all neighbors with operational state.
 
-**Response (200):** `BGPStatusResult` (see [S15](#bgpstatusresult))
+**Response (200):** `BGPStatusResult` (see [S13](#bgpstatusresult))
 
 **Example response:**
 
@@ -1586,7 +1559,7 @@ use it to assert that all sessions are established.
 Get EVPN overlay status: VTEP tunnels, NVO configuration, VNI mappings, L3VNI
 VRF bindings, remote VTEPs, and VNI count.
 
-**Response (200):** `EVPNStatusResult` (see [S15](#evpnstatusresult))
+**Response (200):** `EVPNStatusResult` (see [S13](#evpnstatusresult))
 
 ### Health
 
@@ -1596,7 +1569,7 @@ Run a comprehensive health check on the device. Includes CONFIG_DB verification
 (comparing committed config against running config) and operational checks (BGP
 sessions, interface status).
 
-**Response (200):** `HealthReport` (see [S15](#healthreport))
+**Response (200):** `HealthReport` (see [S13](#healthreport))
 
 **Example response:**
 
@@ -1620,7 +1593,7 @@ sessions, interface status).
 
 List all LAGs (PortChannels) with member and operational status.
 
-**Response (200):** Array of `LAGStatusEntry` (see [S15](#lagstatusentry))
+**Response (200):** Array of `LAGStatusEntry` (see [S13](#lagstatusentry))
 
 #### GET /network/{netID}/node/{device}/lag/{name}
 
@@ -1652,7 +1625,7 @@ Look up a route in APP_DB (FRR's routing table as synced by fpmsyncd).
 - `prefix` -- IP prefix with mask (e.g., `10.0.0.0/24`). Uses catch-all pattern;
   no URL encoding needed for the slash.
 
-**Response (200):** `RouteEntry` (see [S15](#routeentry))
+**Response (200):** `RouteEntry` (see [S13](#routeentry))
 
 **Status codes:** 200 success, 404 route not found
 
@@ -1701,7 +1674,7 @@ These endpoints modify device CONFIG_DB. Most use the `connectAndExecute` patter
 connect -> Lock (refresh) -> fn (build ChangeSet) -> Commit -> Save -> Unlock. They
 accept `dry_run` and `no_save` query parameters.
 
-Write operations return `WriteResult` (see [S15](#writeresult)) on success, which
+Write operations return `WriteResult` (see [S13](#writeresult)) on success, which
 reports the change count, whether changes were applied, verified, and saved.
 
 ### Setup Device
@@ -2143,8 +2116,14 @@ Most lifecycle operations return null data on success:
 {"data": null}
 ```
 
-Exceptions: `ssh-command` returns `SSHCommandResponse`, `verify-committed` returns
-`VerificationResult`.
+Exception: `ssh-command` returns `SSHCommandResponse`.
+
+For post-facto re-verification ("is the projection currently actualized on the
+device?"), use `GET /intent/drift` — empty drift ≡ all newtron writes are
+present in CONFIG_DB. Drift is the canonical "intent vs reality" diff
+(`DriftEntry` vocab, §11); per-write verification (`VerificationError` vocab)
+is reported inline on the originating write via `WriteResult.Verification` or
+the 409 envelope of `VerificationFailedError`.
 
 ### POST /network/{netID}/node/{device}/reload-config
 
@@ -2162,27 +2141,6 @@ Save the running CONFIG_DB to `/etc/sonic/config_db.json` (`config save -y`).
 **Request body:** none
 
 **Response (200):** `null` data on success
-
-### POST /network/{netID}/node/{device}/refresh
-
-Refresh the server's cached CONFIG_DB snapshot from the device's Redis. Use after
-external changes (manual CLI, other tools) to ensure the server sees current state.
-
-**Query parameters:**
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `timeout` | string | none | Go duration (e.g., `"30s"`, `"2m"`). When set, retries the refresh until success or timeout. Use when waiting for a device to become reachable after reboot. |
-
-**Request body:** none
-
-**Response (200):** `null` data on success
-
-**Example:**
-
-```
-POST /network/default/node/switch1/refresh?timeout=2m
-```
 
 ### POST /network/{netID}/node/{device}/restart-daemon
 
@@ -2211,18 +2169,6 @@ Execute an arbitrary SSH command on the device and return the output.
 ```json
 {"data": {"output": "SONiC Software Version: SONiC.202505..."}}
 ```
-
-### POST /network/{netID}/node/{device}/verify-committed
-
-Verify that the last committed ChangeSet was persisted correctly in CONFIG_DB. Reads
-back the entries that were written and compares them against expected values.
-
-This uses `connectAndRead` -- it reads current CONFIG_DB state and compares against
-the stored committed changes.
-
-**Request body:** none
-
-**Response (200):** `VerificationResult` (see [S15](#verificationresult))
 
 ---
 
@@ -2355,7 +2301,7 @@ before do) at the substrate level.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `operations` | TopologyStep[] | yes | Operations to apply hypothetically. Same shape `/execute` and `/intent/save` consume — `{ url, params }` per step. |
+| `operations` | TopologyStep[] | yes | Operations to apply hypothetically. Same `TopologyStep` shape `/intent/save` consumes — `{ url, params }` per step. |
 
 **Response (200):** `ProjectionDiffResult`:
 
@@ -2439,90 +2385,7 @@ operators iterate over `/network/{n}/topology/node` and call
 
 ---
 
-## 12. Composite Operations
-
-The composite workflow is a three-phase process for generating, verifying, and
-delivering complete device configurations. It separates intent (generate) from
-validation (verify) from effect (deliver), giving callers control over each step.
-
-The flow:
-
-1. **Generate** -- builds a `CompositeInfo` from the abstract node model and
-   returns a UUID handle. No device connection needed.
-2. **Verify** (optional) -- connects to the device, reads current CONFIG_DB,
-   and compares against the composite. Reports drift.
-3. **Deliver** -- connects to the device, locks CONFIG_DB, writes the composite,
-   and unlocks. The handle is consumed (one-time use).
-
-Composite handles expire after 10 minutes. An expired handle returns 500.
-
-### POST /network/{netID}/node/{device}/generate-composite
-
-Generate a composite CONFIG_DB for the device and store it under a UUID handle.
-
-**Request body:** none
-
-**Response (200):** `CompositeHandleResponse`
-
-```json
-{
-  "data": {
-    "handle": "a1b2c3d4e5f6...",
-    "device_name": "switch1",
-    "entry_count": 42,
-    "tables": {"VLAN": 3, "BGP_GLOBALS": 1, "INTERFACE": 8}
-  }
-}
-```
-
-### POST /network/{netID}/node/{device}/verify-composite
-
-Verify a generated composite against current device state.
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `handle` | string | yes | UUID from generate step |
-
-**Response (200):** `VerificationResult` (see [S15](#verificationresult))
-
-### POST /network/{netID}/node/{device}/deliver-composite
-
-Deliver a generated composite to the device. Overwrites or merges CONFIG_DB
-entries. The handle is removed after successful delivery.
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `handle` | string | yes | UUID from generate step |
-| `mode` | string | no | `"overwrite"` (default) or `"merge"`. Overwrite removes stale keys; merge only adds. |
-
-**Response (200):** `DeliveryResult` (see [S15](#deliveryresult))
-
-**Example:**
-
-```
-POST /network/default/node/switch1/deliver-composite
-{"handle": "a1b2c3d4e5f6...", "mode": "overwrite"}
-```
-
-**Example response:**
-
-```json
-{
-  "data": {
-    "applied": 42,
-    "skipped": 0,
-    "failed": 0
-  }
-}
-```
-
----
-
-## 13. Interface Operations
+## 12. Interface Operations
 
 These endpoints operate on a specific interface within a device. They are the
 primary way to apply and manage services. All use `connectAndExecute` and accept
@@ -2784,98 +2647,7 @@ Set a property on the interface (e.g., `mtu`, `admin_status`, `speed`).
 
 ---
 
-## 14. Batch Execution
-
-The batch execute endpoint runs multiple operations within a single SSH connection
-and ChangeSet. All operations share one Lock -> operations -> Commit -> Save -> Unlock
-cycle, reducing round trips and ensuring atomicity.
-
-### POST /network/{netID}/node/{device}/execute
-
-Execute a batch of operations.
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `operations` | Operation[] | yes | List of operations (see below) |
-| `execute` | boolean | yes | `true` to apply, `false` for dry-run preview |
-| `no_save` | boolean | no | Skip config save after apply |
-
-Note: this endpoint reads `execute` and `no_save` from the request body, not
-from query parameters.
-
-**Operation object:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `action` | string | yes | Action name (see dispatch table below) |
-| `interface` | string | conditional | Required for interface-scoped actions |
-| `params` | object | conditional | Action-specific parameters |
-
-**Response (200):** `WriteResult` (aggregate of all operations)
-
-If any operation fails, execution stops and the error includes the failed action name.
-
-### Action Dispatch Table
-
-**Node actions** (no `interface` field needed):
-
-| Action | Params | Description |
-|--------|--------|-------------|
-| `create-vlan` | `id`, `description`, `vni` | Create a VLAN |
-| `delete-vlan` | `id` | Delete a VLAN |
-| `configure-irb` | `vlan_id`, `vrf`, `ip_address`, `anycast_mac` | Configure an IRB |
-| `create-vrf` | `name` | Create a VRF |
-| `delete-vrf` | `name` | Delete a VRF |
-| `create-acl` | `name`, `type`, `stage`, `ports`, `description` | Create an ACL table |
-| `delete-acl` | `name` | Delete an ACL table |
-| `create-portchannel` | `name`, `members`, `mtu`, `min_links`, `fallback`, `fast_rate` | Create a PortChannel |
-| `delete-portchannel` | `name` | Delete a PortChannel |
-| `node-bind-macvpn` | `vlan_id`, `vni` | Bind MAC-VPN (node-level) |
-| `node-unbind-macvpn` | `vlan_id` | Unbind MAC-VPN (node-level) |
-
-**Interface actions** (`interface` field required):
-
-| Action | Params | Description |
-|--------|--------|-------------|
-| `apply-service` | `service`, `ip_address`, `peer_as`, `vlan_id`, `route_reflector_client`, `next_hop_self` | Apply service to interface |
-| `remove-service` | none | Remove service from interface |
-| `refresh-service` | none | Refresh service on interface |
-| `unconfigure-interface` | none | Unconfigure interface |
-| `configure-interface` | `vrf`, `ip`, `vlan_id`, `tagged` | Configure interface |
-| `bind-acl` | `acl`, `direction` | Bind ACL |
-| `unbind-acl` | `acl` | Unbind ACL |
-| `bind-macvpn` | `macvpn` | Bind MAC-VPN |
-| `unbind-macvpn` | none | Unbind MAC-VPN |
-| `set-property` | `property`, `value` | Set interface property |
-| `apply-qos` | `policy` | Apply QoS policy |
-| `remove-qos` | none | Remove QoS policy |
-| `add-bgp-peer` | `neighbor_ip`, `remote_as`, `description`, `multihop` | Add BGP peer |
-| `remove-bgp-peer` | none | Remove BGP peer |
-
-**Example:**
-
-```json
-POST /network/default/node/switch1/execute
-{
-  "execute": true,
-  "no_save": false,
-  "operations": [
-    {"action": "create-vlan", "params": {"id": 100}},
-    {"action": "create-vrf", "params": {"name": "CUSTOMER"}},
-    {
-      "action": "apply-service",
-      "interface": "Ethernet0",
-      "params": {"service": "customer-l3", "ip_address": "10.1.1.1/30"}
-    }
-  ]
-}
-```
-
----
-
-## 15. Types Reference
+## 13. Types Reference
 
 All request and response types used across the API, grouped by domain. Types are
 defined in `pkg/newtron/types.go` (public API) and `pkg/newtron/api/types.go`
@@ -2900,8 +2672,10 @@ These types are returned by all device write operations (S8, S13).
 
 #### VerificationResult
 
-Also returned standalone by composite verify (`POST .../verify-composite`, S12)
-and embedded in `DeliveryResult` from composite deliver.
+Inline detail of post-Apply verify. Returned on `WriteResult.Verification` when
+verify ran, and as the `data` payload of a 409 envelope when `VerificationFailedError`
+fired. Substrate vocabulary for per-write verify; broader "is intent currently
+actualized?" questions use `DriftEntry` via `GET /intent/drift` (§11).
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -2944,10 +2718,10 @@ newtcon contract verbatim.
 newtron's pipeline uses a Redis `TxPipeline` (currently `Reconcile`,
 `ApplyDrift`), every `redis_write`/`redis_delete` op within a single
 `EXEC` carries the same `result` — all `applied` or all `rejected`. The
-per-change `ChangeSet.Apply` path (used by primitives and composites)
-applies writes individually, so per-op results may differ when one
-write succeeds and a later one in the same ChangeSet fails. The wire
-shape reflects whichever delivery mechanism produced the op.
+per-change `ChangeSet.Apply` path (used by primitive and service
+operations) applies writes individually, so per-op results may differ
+when one write succeeds and a later one in the same ChangeSet fails.
+The wire shape reflects whichever delivery mechanism produced the op.
 
 ### Verification-failure response envelope
 
@@ -3417,68 +3191,6 @@ Returned by `GET .../zone` (array of names) and `GET .../zone/{name}` (single).
 |-------|------|-------------|
 | `name` | string | Zone name |
 
-### Composite Types
-
-#### CompositeHandleResponse
-
-Returned by `POST .../generate-composite`.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `handle` | string | UUID for subsequent verify/deliver calls |
-| `device_name` | string | Device name |
-| `entry_count` | integer | Total entries |
-| `tables` | object | Table name -> entry count map |
-
-#### DeliveryResult
-
-Returned by `POST .../deliver-composite`.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `applied` | integer | Number of entries written |
-| `skipped` | integer | Number of entries skipped |
-| `failed` | integer | Number of entries that failed |
-
-### Provisioning Types
-
-#### ProvisionResult
-
-Returned by `POST /network/{netID}/provision`. Contains per-device results
-wrapped in a `Results` array.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `Results` | ProvisionDeviceResult[] | Per-device outcomes |
-
-Each `ProvisionDeviceResult` entry:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `Device` | string | Device name |
-| `Applied` | integer | Number of entries applied |
-| `Err` | error | Always `null` in JSON (see note) |
-
-**Example response:**
-
-```json
-{
-  "data": {
-    "Results": [
-      {"Device": "switch1", "Applied": 42, "Err": null},
-      {"Device": "switch2", "Applied": 38, "Err": null}
-    ]
-  }
-}
-```
-
-Note: Both `ProvisionResult` and `ProvisionDeviceResult` lack JSON struct tags,
-so fields serialize with Go-style capitalization (`Results`, `Device`, `Applied`).
-The `Err` field is a Go `error` interface, which always serializes to `null` in
-JSON (Go's `error` interface does not implement `json.Marshaler`). On device-level
-failure, the error details appear in the top-level `error` field of the
-`APIResponse` envelope.
-
 ### SSH Command Types
 
 #### SSHCommandResponse
@@ -3504,7 +3216,7 @@ Returned in array by `GET /network`.
 
 ---
 
-## 16. Error Reference
+## 14. Error Reference
 
 ### Error Response Format
 
@@ -3556,7 +3268,7 @@ All errors return the `APIResponse` envelope with the `error` field:
 
 ---
 
-## 17. Server Configuration
+## 15. Server Configuration
 
 ### Binary Flags
 
@@ -3595,12 +3307,6 @@ The server uses an actor model to manage device connections:
   from Redis before operating.
 - After `idle-timeout` of inactivity, the SSH connection is automatically closed.
 - The next request to that device transparently re-establishes the connection.
-
-### Composite Handle Expiry
-
-Generated composite handles expire after **10 minutes**. An attempt to verify or
-deliver an expired handle returns 500 with message
-`"composite handle '<uuid>' has expired"`.
 
 ### Graceful Shutdown
 
