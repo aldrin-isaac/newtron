@@ -509,7 +509,7 @@ The most common offender in this project is "CLI":
 | shell | the operator's local shell, a remote SSH session to a device, a container shell | "device shell", "local shell" |
 | config | CONFIG_DB entries, YAML spec files, newtron server configuration | "CONFIG_DB entries", "spec files", "server config" |
 | API | newtron-server HTTP API, SONiC REST API, SAI API | "newtron API", "SONiC REST API", "SAI API" |
-| configDB | Physical mode: cache of CONFIG_DB (stale after unlock). Abstract mode: the reality itself (no Redis behind it) | "configDB cache" (physical), "shadow configDB" (abstract) |
+| configDB | The device's Redis CONFIG_DB (DB 4), newtron's intent-derived typed view rebuilt from intent replay | "device CONFIG_DB" or "Redis CONFIG_DB" (the actual Redis store), "projection" (newtron's typed view) |
 | node | A SONiC device (VM or switch), the `Node` Go struct, a DAG vertex | "device" or "switch" (physical), "`Node`" (Go struct), "DAG node" or "intent node" (graph) |
 | interface | A network port (Ethernet0), the `Interface` Go struct, a Go behavioral contract | "network interface" or "port" (physical), "`Interface`" (Go struct), "Go interface" (contract) |
 | intent | A `NEWTRON_INTENT` CONFIG_DB record, the abstract design goal expressed in specs | "intent record" (CONFIG_DB), "spec intent" or "design intent" (abstract) |
@@ -517,7 +517,7 @@ The most common offender in this project is "CLI":
 | pipeline | The newtron write/read/export/delivery/verification pipeline, a Redis MULTI/EXEC batch | "write pipeline" / "delivery pipeline" (architecture), "Redis pipeline" (wire protocol) |
 | validation | YANG schema validation (rejects invalid entries), precondition checks (rejects invalid state), newtrun step field validation (rejects invalid YAML) | "schema validation", "precondition check", "step validation" |
 | state | STATE_DB (Redis DB 6), newtrun run state (`state.json`), device CONFIG_DB contents | "STATE_DB", "run state" or "suite state", "device state" or "CONFIG_DB state" |
-| composite | A `CompositeConfig` (full-device snapshot), a composite operation (ApplyService, SetupDevice), `CompositeMode` (overwrite/merge) | "composite config" (data), "composite operation" (orchestration), "composite mode" (enum) |
+| composite | A composite operation (an operation composed of primitives — ApplyService, SetupDevice), the projection's atomic-replacement delivery mechanism (`ReplaceAll`, formerly `CompositeOverwrite`) | "composite operation" (orchestration), "full reconcile" or "topology-mode reconcile" (delivery via `ReplaceAll`) |
 | profile | Device identity (`DeviceProfile`), a QoS spec, a WRED CONFIG_DB entry | "device profile", "QoS policy", "WRED profile" |
 | lock | Device distributed lock (Redis SETNX in STATE_DB), newtrun suite lock (PID file) | "device lock", "suite lock" |
 | port | A network interface (Ethernet0), an SSH/TCP management port number | "network port" or "data port", "SSH port" or "management port" |
@@ -528,7 +528,7 @@ The most common offender in this project is "CLI":
 
 This is not pedantry — it is a prerequisite for precision (#2). A sentence like "the CLI reads CONFIG_DB" is factually different depending on whether "CLI" means newtron (which reads via Redis over SSH tunnel) or SONiC (which reads via `sonic-cfggen` or `redis-cli` locally). The reader who assumes the wrong meaning builds the wrong mental model, and no amount of subsequent precision can fix a wrong foundation.
 
-The `configDB` overloading is especially dangerous: in physical mode it's a cache that goes stale after unlock; in abstract mode it IS the reality. "configDB contains the device state" is true in both modes but means fundamentally different things — one is a snapshot, the other is the source of truth. The qualified forms ("configDB cache" vs "shadow configDB") prevent the reader from assuming one when the other is meant.
+The `configDB` overloading is especially dangerous because newtron has two co-existing representations: the device's Redis CONFIG_DB (the actual store on a SONiC device, accessible via the SSH tunnel) and newtron's projection (the typed view rebuilt from intent replay, which serves as the decision substrate for all newtron logic). In online mode, both exist and drift detection compares them. In offline (topology) mode, only the projection exists. "configDB contains the device state" is true in different ways depending on which is meant — one is the wire-protocol Redis hash; the other is newtron's intent-derived view. The qualified forms ("device CONFIG_DB" vs "projection") prevent the reader from assuming one when the other is meant.
 
 ## 35. Lead with Universal Truths, Not Feature Descriptions — HLD
 

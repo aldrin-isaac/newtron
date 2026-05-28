@@ -25,15 +25,14 @@ type DriftEntry struct {
 }
 
 // excludedFromDrift lists tables that should not be compared for drift.
-//   - NEWTRON_INTENT, NEWTRON_HISTORY, NEWTRON_SETTINGS: ephemeral/rolling
+//   - NEWTRON_INTENT, NEWTRON_HISTORY: ephemeral/rolling
 //   - PORT: factory-managed (all HWSKU ports exist in config_db.json)
 //   - DEVICE_METADATA: partially factory, partially newtron — too noisy
 var excludedFromDrift = map[string]bool{
-	"NEWTRON_INTENT":   true,
-	"NEWTRON_HISTORY":  true,
-	"NEWTRON_SETTINGS": true,
-	"PORT":             true,
-	"DEVICE_METADATA":  true,
+	"NEWTRON_INTENT":  true,
+	"NEWTRON_HISTORY": true,
+	"PORT":            true,
+	"DEVICE_METADATA": true,
 }
 
 // DiffConfigDB compares expected vs actual CONFIG_DB, returning differences.
@@ -166,7 +165,6 @@ var tablePriority = map[string]int{
 	"STATIC_ROUTE":       0,
 	"PREFIX_SET":         0,
 	"COMMUNITY_SET":      0,
-	"NEWTRON_SETTINGS":   0,
 	"NEWTRON_INTENT":     0,
 	"NEWTRON_HISTORY":    0,
 

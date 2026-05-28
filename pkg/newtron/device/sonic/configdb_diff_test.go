@@ -199,9 +199,8 @@ func TestOwnedTables_ContainsCriticalTables(t *testing.T) {
 func TestOwnedTables_ExcludesInternalTables(t *testing.T) {
 	tables := OwnedTables()
 	excluded := map[string]bool{
-		"NEWTRON_INTENT":   true,
-		"NEWTRON_HISTORY":  true,
-		"NEWTRON_SETTINGS": true,
+		"NEWTRON_INTENT":  true,
+		"NEWTRON_HISTORY": true,
 	}
 	for _, table := range tables {
 		if excluded[table] {
