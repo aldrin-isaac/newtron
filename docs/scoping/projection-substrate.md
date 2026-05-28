@@ -198,16 +198,16 @@ func (n *Node) ProjectionDiff(ctx context.Context, ops []spec.TopologyStep) (*Pr
 ```
 
 **Note on `applyStep`:** newtron's internal step-application function
-used by `/execute` and `handleSave`. Locate the exact name during
-implementation — `handleSave` (`handler_node.go:1111`) builds
-`[]spec.TopologyStep` from `n.Tree().Steps`, so the apply path
+used by `handleSave` and the intent/reconcile path. Locate the exact
+name during implementation — `handleSave` (`handler_node.go:1111`)
+builds `[]spec.TopologyStep` from `n.Tree().Steps`, so the apply path
 consumes that shape.
 
 **Request type** in `pkg/newtron/api/types.go`:
 
 ```go
 // ProjectionDiffRequest is the body for POST .../intent/projection-diff.
-// Operations are in the same shape as POST .../execute consumes.
+// Operations carry the same TopologyStep shape consumed by intent/save.
 type ProjectionDiffRequest struct {
     Operations []spec.TopologyStep `json:"operations"`
 }

@@ -508,29 +508,33 @@ direct or transitive child of `device`. This provides two guarantees:
 
 SetupDevice writes the `device` intent as a root (no parents). Baseline
 sub-operations (loopback, BGP globals, VTEP) do not write individual intent
-records — their collective reverse is reprovision (CompositeOverwrite), not
+records — their collective reverse is full reconcile (topology mode), not
 individual teardown.
 
 SetupDevice cannot be "redone" incrementally. To change baseline
-configuration, reprovision the device.
+configuration, reconcile the device in full mode.
 
-### 9.4 CompositeOverwrite Bypasses the DAG
+### 9.4 Full Reconcile Bypasses the DAG
 
-CompositeOverwrite (reprovision) replaces the entire CONFIG_DB atomically —
-it DELs every key and HSETs the new state, including all NEWTRON_INTENT
-records. This is the one operation that bypasses DAG enforcement:
+Full reconcile (`POST /intent/reconcile`, default mode, delivered via
+`ConfigDBClient.ReplaceAll`) replaces every newtron-owned key atomically — it
+DELs every key in each owned table and HSETs the new state, including all
+NEWTRON_INTENT records. This is the one operation that bypasses DAG
+enforcement:
 
 - It does not call `deleteIntent` for existing records
 - It does not check `_children` emptiness
 - It does not deregister from parents
 
-Instead, the abstract Node that builds the composite runs SetupDevice,
+Instead, the abstract Node that builds the projection runs SetupDevice,
 CreateVLAN, ApplyService etc. in order, accumulating fresh intent records
-with correct DAG links. The composite delivery replaces everything —
-including the DAG — atomically.
+with correct DAG links. `ReplaceAll` delivers the resulting projection —
+including the entire intent DAG — atomically.
 
-This is consistent with CLAUDE.md: "Provisioning (CompositeOverwrite) is
-the one operation where intent replaces reality."
+This is consistent with the broader principle that provisioning is the one
+operation where intent replaces reality. Topology-mode reconcile is the
+substrate implementation of Day-1 provisioning; delta reconcile (drift
+repair) operates within the DAG by patching individual entries.
 
 ## 10. Complete Intent Record Catalog
 
@@ -555,7 +559,7 @@ Universal root. Every other intent is a direct or transitive descendant.
 | Create | setup-device | `SetupDevice` | baseline_ops.go |
 
 **Parents**: `[]` (root — no parents)
-**Reverse**: reprovision (CompositeOverwrite). No individual reverse operation.
+**Reverse**: full reconcile (topology mode). No individual reverse operation.
 `deleteIntent("device")` refuses if any children exist.
 
 ---
@@ -737,7 +741,7 @@ child is already in the parent's `_children`). If a `writeIntent` call
 targets an existing key with *different* parents, it is an error — the caller
 must delete and recreate. `SetProperty` always uses the same parent
 (`interface|INTF`), so the idempotent path applies. These are persistent
-leaves that remain until reprovision.
+leaves that remain until full reconcile.
 
 ### 10.10.1 Interface Intent as Anchor
 
@@ -882,7 +886,7 @@ All 17 intent resource keys at a glance:
 
 | # | Resource Key | Parents | Create | Delete |
 |---|---|---|---|---|
-| 1 | `device` | `[]` | SetupDevice | (reprovision) |
+| 1 | `device` | `[]` | SetupDevice | (full reconcile) |
 | 2 | `vlan\|ID` | `[device]` | CreateVLAN | DeleteVLAN |
 | 3 | `vrf\|NAME` | `[device]` | CreateVRF | DeleteVRF |
 | 4 | `acl\|NAME` | `[device]` | CreateACL, ApplyService | DeleteACL, removeSharedACL |
@@ -1304,7 +1308,7 @@ concurrent-write conflicts arise.
 | Destroy functions | Delete own entry only; refuse if children exist (I5) |
 | Sub-resource tracking | Own intent record per sub-resource |
 | Baseline teardown | `deleteIntent("device")` refuses if any children exist |
-| Reprovision | CompositeOverwrite bypasses DAG, rebuilds it atomically |
+| Full reconcile | `ReplaceAll` bypasses DAG, rebuilds it atomically |
 | Discoverability | Walk from `device` — reachable = valid, unreachable = orphan |
 | `writeIntent` on existing key | Idempotent update if same parents; error if different parents |
 | `deleteIntent` behavior | Refuse if `_children` non-empty; deregister from parents |
@@ -1436,12 +1440,12 @@ would require the parent to know how to tear down each child type, violating
 single responsibility and creating a second code path for every teardown
 operation.
 
-**CompositeOverwrite bypasses the DAG.** Reprovision replaces the entire
-CONFIG_DB atomically — including all intent records. It does not call
-`deleteIntent` or check `_children`. The abstract Node that builds the
-composite runs operations in order, accumulating fresh intent records with
-correct DAG links. This is consistent with CLAUDE.md: provisioning is the
-one operation where intent replaces reality.
+**Full reconcile bypasses the DAG.** `ReplaceAll` replaces every
+newtron-owned key atomically — including all intent records. It does not
+call `deleteIntent` or check `_children`. The abstract Node that builds the
+projection runs operations in order, accumulating fresh intent records with
+correct DAG links. Topology-mode reconcile is the substrate implementation
+of Day-1 provisioning — the one operation where intent replaces reality.
 
 ### 18.2 Kind-Prefixed Intent Keys
 

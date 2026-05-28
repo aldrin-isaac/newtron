@@ -2023,7 +2023,7 @@ newtron leaf1 intent save
 newtron leaf1 --topology intent save
 ```
 
-Use this after manually configuring a device (service apply, VRF create, etc.) to capture its intent state for later reprovisioning or topology-based drift detection. The saved steps can be delivered to a fresh device via `intent reload` + `intent reconcile --topology`.
+Use this after manually configuring a device (service apply, VRF create, etc.) to capture its intent state for later full-reconcile (topology mode) delivery or topology-based drift detection. The saved steps can be delivered to a fresh device via `intent reload` + `intent reconcile --topology`.
 
 #### 16.1.5 Intent Reload (Topology Mode Only)
 

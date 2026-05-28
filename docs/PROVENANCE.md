@@ -239,8 +239,9 @@ internal.
 **Decision:** The `pkg/newtron/` boundary was established (commit
 `ddddc56`, 2026-02-14). Public types use domain language; operations
 take names (strings) and the package resolves specs internally.
-Verification artifacts (`CompositeInfo`, ChangeCount, etc.) are opaque
-handles or summary counts — never internal data structures.
+Verification artifacts (`VerificationResult`, `WriteResult.ChangeCount`,
+etc.) are typed substrate or summary counts — never internal data
+structures leaking through the boundary.
 
 ### 5.10 Single-owner CONFIG_DB tables
 

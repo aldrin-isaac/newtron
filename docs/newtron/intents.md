@@ -357,7 +357,7 @@ The singleton root of the DAG. All other intents descend from it.
 | **Resource key** | `device` |
 | **Operation** | `OpSetupDevice` (`"setup-device"`) |
 | **Created by** | `SetupDevice()` in `baseline_ops.go` |
-| **Deleted by** | Never (reprovision overwrites) |
+| **Deleted by** | Never (full reconcile overwrites) |
 | **Reconstruct** | `replayNodeStep` → `n.SetupDevice(ctx, opts)` |
 | **skipInReconstruct** | No |
 
