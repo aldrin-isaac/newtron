@@ -54,7 +54,7 @@ Without --dir or --suite, shows all suites with state.
 			}
 
 			// All suites (optionally filtered).
-			suites, err := newtrun.ListSuiteStates()
+			suites, err := listSuiteNamesViaClient()
 			if err != nil {
 				return err
 			}
@@ -86,7 +86,7 @@ Without --dir or --suite, shows all suites with state.
 			if jsonOutput {
 				var states []*newtrun.RunState
 				for _, suite := range suites {
-					state, err := newtrun.LoadRunState(suite)
+					state, err := fetchRunStateViaClient(suite)
 					if err != nil || state == nil {
 						continue
 					}
@@ -126,7 +126,7 @@ Without --dir or --suite, shows all suites with state.
 }
 
 func printSuiteStatus(suite string, jsonMode, detail bool) error {
-	state, err := newtrun.LoadRunState(suite)
+	state, err := fetchRunStateViaClient(suite)
 	if err != nil {
 		return err
 	}
@@ -321,7 +321,7 @@ func monitorSuite(suite string, detail bool) error {
 		}
 
 		// Exit if suite is no longer active.
-		state, _ := newtrun.LoadRunState(suite)
+		state, _ := fetchRunStateViaClient(suite)
 		if state == nil || (state.Status != newtrun.SuiteStatusRunning && state.Status != newtrun.SuiteStatusPausing) {
 			break
 		}
@@ -333,7 +333,7 @@ func monitorSuite(suite string, detail bool) error {
 // findRunningSuite returns the first running suite from the list, or "" if none.
 func findRunningSuite(suites []string) string {
 	for _, s := range suites {
-		state, err := newtrun.LoadRunState(s)
+		state, err := fetchRunStateViaClient(s)
 		if err != nil || state == nil {
 			continue
 		}

@@ -17,13 +17,22 @@ import (
 type Config struct {
 	// SuitesBase is the directory under which suite directories live. Defaults
 	// to "newtrun/suites" relative to the working directory. The server reads
-	// it on GET /api/suites and uses it to validate file-backed suite names
-	// in PR 2's run-suite endpoint.
+	// it on GET /api/suites and validates file-backed suite names against it
+	// when handling POST /api/runs.
 	SuitesBase string
 
 	// TopologiesBase is the directory under which topology directories live.
 	// Defaults to "newtrun/topologies". Returned by GET /api/topologies.
 	TopologiesBase string
+
+	// NewtronServer is the newtron-server URL the server-side runners
+	// connect to for topology discovery. Per-run NewtronServer in the
+	// StartRunRequest overrides this. Defaults to http://127.0.0.1:8080.
+	NewtronServer string
+
+	// NetworkID is the network identifier server-side runners pass to
+	// newtron-server. Defaults to "default".
+	NetworkID string
 
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
@@ -35,6 +44,7 @@ type Server struct {
 	logger     *log.Logger
 	httpServer *http.Server
 	broker     *EventBroker
+	registry   *RunRegistry
 }
 
 // NewServer constructs a server with the given config. The HTTP listener is
@@ -49,10 +59,17 @@ func NewServer(cfg Config) *Server {
 	if cfg.TopologiesBase == "" {
 		cfg.TopologiesBase = "newtrun/topologies"
 	}
+	if cfg.NewtronServer == "" {
+		cfg.NewtronServer = "http://127.0.0.1:8080"
+	}
+	if cfg.NetworkID == "" {
+		cfg.NetworkID = "default"
+	}
 	s := &Server{
-		cfg:    cfg,
-		logger: cfg.Logger,
-		broker: NewEventBroker(),
+		cfg:      cfg,
+		logger:   cfg.Logger,
+		broker:   NewEventBroker(),
+		registry: NewRunRegistry(),
 	}
 	s.httpServer = &http.Server{
 		Handler: s.buildHandler(),
@@ -81,9 +98,18 @@ func (s *Server) Start(addr string) error {
 	return s.httpServer.ListenAndServe()
 }
 
-// Stop gracefully shuts down the server.
+// Stop gracefully shuts down the server. Cancels every in-flight run,
+// waits up to 5 seconds for them to drain, then shuts down the HTTP
+// listener.
 func (s *Server) Stop(ctx context.Context) error {
+	s.registry.CancelAll(5 * time.Second)
 	return s.httpServer.Shutdown(ctx)
+}
+
+// Registry exposes the run registry. Tests use this to inspect in-flight
+// state; PR 3's inline-runs handler will use it directly.
+func (s *Server) Registry() *RunRegistry {
+	return s.registry
 }
 
 // buildHandler wires the mux with middleware.
@@ -91,7 +117,11 @@ func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
+	mux.HandleFunc("POST /api/runs", s.handleStartRun)
 	mux.HandleFunc("GET /api/runs/{suite}", s.handleGetRun)
+	mux.HandleFunc("DELETE /api/runs/{suite}", s.handleDeleteRun)
+	mux.HandleFunc("POST /api/runs/{suite}/pause", s.handlePauseRun)
+	mux.HandleFunc("POST /api/runs/{suite}/stop", s.handleStopRun)
 	mux.HandleFunc("GET /api/runs/{suite}/events", s.handleRunEvents)
 	mux.HandleFunc("GET /api/topologies", s.handleListTopologies)
 	mux.HandleFunc("GET /api/suites", s.handleListSuites)

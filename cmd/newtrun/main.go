@@ -10,7 +10,10 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/version"
 )
 
-var verboseFlag bool
+var (
+	verboseFlag bool
+	serverFlag  string
+)
 
 // Sentinel errors for exit code mapping. RunE handlers return these instead
 // of calling os.Exit directly, so deferred cleanup (like lock release) runs.
@@ -46,6 +49,7 @@ Discovery:
 	}
 
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Verbose output")
+	rootCmd.PersistentFlags().StringVar(&serverFlag, "server", "", "newtrun-server URL (env: NEWTRUN_SERVER; default: http://127.0.0.1:8081)")
 
 	startCmd := newStartCmd()
 

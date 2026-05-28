@@ -62,7 +62,13 @@ func NewRunner(scenariosDir string) *Runner {
 // Run executes one or all scenarios and returns results.
 // The server determines the topology — scenarios declare compatible topologies
 // as guards; mismatches fail immediately.
-func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
+//
+// The supplied context cancels the run between scenario boundaries. SIGINT
+// handling is layered on top so an interactive CLI run still responds to
+// Ctrl-C even when the caller supplied context.Background(). Server-side
+// runs use this to cancel in-flight runners when the server shuts down or
+// when an operator POSTs to the stop endpoint.
+func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, error) {
 	if opts.Scenario == "" && opts.Target == "" && !opts.All {
 		return nil, fmt.Errorf("specify --scenario <name>, --target <name>, or --all")
 	}
@@ -129,7 +135,7 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 	// Deploy topology (unless --no-deploy)
 	if !opts.NoDeploy {
 		fmt.Fprintf(os.Stderr, "newtrun: deploying topology %s...\n", r.Topology)
-		cleanup, err := r.deployTopology(context.Background(), r.SpecDir, opts)
+		cleanup, err := r.deployTopology(ctx, r.SpecDir, opts)
 		if err != nil {
 			var results []*ScenarioResult
 			for _, sc := range scenarios {
@@ -149,8 +155,8 @@ func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error) {
 		}
 	}
 
-	// SIGINT handling
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGINT handling layered on top of the caller's context.
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
 	// Connect host devices (skip in no-deploy mode — no physical devices to connect to).

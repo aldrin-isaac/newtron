@@ -1411,7 +1411,7 @@ func TestRunScenarioSteps_RepeatFailsOnIteration(t *testing.T) {
 
 func TestRun_NoFlags(t *testing.T) {
 	r := NewRunner(t.TempDir())
-	_, err := r.Run(RunOptions{})
+	_, err := r.Run(context.Background(), RunOptions{})
 	if err == nil {
 		t.Fatal("expected error for no flags, got nil")
 	}

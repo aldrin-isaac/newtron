@@ -1,311 +1,167 @@
 package main
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtron"
-	"github.com/aldrin-isaac/newtron/pkg/newtrun"
-	"github.com/aldrin-isaac/newtron/pkg/util"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun/api"
 )
 
 func newStartCmd() *cobra.Command {
 	var (
-		dir       string
-		scenario  string
-		target    string
-		platform  string
-		junitPath string
-		serverURL string
-		networkID string
-		monitor   bool
-		noDeploy  bool
+		scenario string
+		target   string
+		platform string
+		noDeploy bool
+		newtronServer string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "start [suite]",
-		Short: "Start or resume a test suite",
-		Long: `Deploy topology (if needed), run scenarios, and leave topology up.
-
-The suite can be a name (resolved under newtrun/suites/) or a path.
-All scenarios run by default. Use --scenario to run a single one,
-or --target to run the minimal dependency chain to reach a scenario.
+		Use:   "start <suite>",
+		Short: "Start a suite run on newtrun-server and stream results",
+		Long: `Submit a run of the named file-backed suite to newtrun-server, then
+stream scenario and step events back to the terminal as they arrive.
 
   newtrun start 2node-ngdp-primitive                        # run all scenarios
-  newtrun start 2node-ngdp-primitive --scenario boot-ssh    # run one (no deps)
-  newtrun start 2node-ngdp-primitive --target cross-switch  # run deps + target
-  newtrun start 2node-ngdp-primitive --monitor              # live status dashboard
+  newtrun start 2node-ngdp-primitive --scenario boot-ssh    # run one
+  newtrun start 2node-ngdp-primitive --target cross-switch  # run dependency chain
 
-The topology is determined by the connected newtron-server — scenarios declare
-compatible topologies as guards, and mismatches fail immediately.
+The topology and per-Node atomicity model are determined by newtron-server.
+Pause with 'newtrun pause <suite>'; tear down with 'newtrun stop <suite>'.
 
-If a previous run was paused, start resumes from where it left off.
-Use 'newtrun pause' to gracefully interrupt, 'newtrun stop' to tear down.`,
-		Args: cobra.MaximumNArgs(1),
+Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if verboseFlag {
-				util.SetLogLevel("debug")
-			} else {
-				util.SetLogLevel("warn")
+			suite := args[0]
+			c := newClient()
+			ctx, cancel := context.WithCancel(cmd.Context())
+			defer cancel()
+
+			if err := requireServer(ctx, c); err != nil {
+				return err
 			}
 
-			// Positional arg overrides --dir
-			var positional string
-			if len(args) > 0 {
-				positional = args[0]
+			req := api.StartRunRequest{
+				Suite:         suite,
+				Scenario:      scenario,
+				Target:        target,
+				Platform:      platform,
+				NoDeploy:      noDeploy,
+				Verbose:       verboseFlag,
+				NewtronServer: newtronServer,
 			}
-			dir = resolveDir(cmd, dir, positional)
-			absDir, err := filepath.Abs(dir)
-			if err != nil {
-				return fmt.Errorf("resolve dir: %w", err)
-			}
-
-			suite := newtrun.SuiteName(absDir)
-
-			fmt.Fprintf(os.Stderr, "newtrun: suite %s (%s)\n", suite, absDir)
-			if target != "" {
-				fmt.Fprintf(os.Stderr, "newtrun: target: %s\n", target)
-			}
-
-			// Check for paused state → resume
-			if scenario != "" && target != "" {
-				return fmt.Errorf("--scenario and --target are mutually exclusive")
-			}
-
-			opts := newtrun.RunOptions{
-				Scenario:  scenario,
-				Target:    target,
-				All:       scenario == "" && target == "",
-				Platform:  platform,
-				Verbose:   verboseFlag,
-				JUnitPath: junitPath,
-				Suite:     suite,
-				Keep:      true,    // lifecycle mode: always keep
-				NoDeploy:  noDeploy,
-			}
-
-			existing, err := newtrun.LoadRunState(suite)
+			started, err := c.StartRun(ctx, req)
 			if err != nil {
 				return err
 			}
-			if existing != nil && existing.Status == newtrun.SuiteStatusPaused {
-				fmt.Fprintf(os.Stderr, "resuming paused suite %s\n", suite)
-				opts.Resume = true
-				completedMap := make(map[string]newtrun.StepStatus)
-				for _, sc := range existing.Scenarios {
-					if sc.Status != "" {
-						completedMap[sc.Name] = newtrun.StepStatus(sc.Status)
-					}
+			fmt.Fprintf(os.Stderr, "newtrun: started suite %s at %s\n",
+				started.Suite, started.Started.Format(time.RFC3339))
+
+			// Subscribe to events; render them; cancel the stream when
+			// SuiteEnd arrives. Cancellation makes the stream return
+			// context.Canceled which we treat as the normal terminal
+			// condition.
+			var hasFailure, hasError atomic.Bool
+
+			streamErr := c.StreamEvents(ctx, suite, func(ev api.Event) {
+				renderEvent(ev, &hasFailure, &hasError)
+				if ev.Type == api.EventSuiteEnd {
+					cancel()
 				}
-				opts.Completed = completedMap
+			})
+			if streamErr != nil && ctx.Err() == nil {
+				return streamErr
 			}
 
-			// Build run state (Topology and SpecDir populated after server connect)
-			state := &newtrun.RunState{
-				Suite:    suite,
-				SuiteDir: absDir,
-				Platform: platform,
-				Target:   target,
-				Status:   newtrun.SuiteStatusRunning,
-				Started:  time.Now(),
-			}
-
-			if err := newtrun.AcquireLock(state); err != nil {
-				return err
-			}
-			defer func() { _ = newtrun.ReleaseLock(state) }()
-
-			// Set up progress reporter with state tracking.
-			// In monitor mode, suppress console output (Inner=nil) — the
-			// monitor dashboard reads from the persisted state file instead.
-			var inner newtrun.ProgressReporter
-			if !monitor {
-				inner = newtrun.NewConsoleProgress(verboseFlag)
-			}
-			reporter := &newtrun.StateReporter{
-				Inner: inner,
-				State: state,
-			}
-
-			runner := newtrun.NewRunner(absDir)
-			runner.Progress = reporter
-
-			// Resolve server URL: flag > env > settings > default
-			if serverURL == "" {
-				serverURL = os.Getenv("NEWTRON_SERVER")
-			}
-			if serverURL == "" {
-				if s, err := newtron.LoadSettings(); err == nil {
-					serverURL = s.GetServerURL()
-				}
-			}
-			if serverURL == "" {
-				serverURL = newtron.DefaultServerURL
-			}
-			runner.ServerURL = serverURL
-
-			// Resolve network ID: flag > env > settings > default
-			if networkID == "" {
-				networkID = os.Getenv("NEWTRON_NETWORK_ID")
-			}
-			if networkID == "" {
-				if s, err := newtron.LoadSettings(); err == nil {
-					networkID = s.GetNetworkID()
-				}
-			}
-			if networkID == "" {
-				networkID = newtron.DefaultNetworkID
-			}
-			runner.NetworkID = networkID
-
-			// In monitor mode, run the suite in a goroutine and show the
-			// live status dashboard (equivalent to newtrun status --detail --monitor).
-			type runResult struct {
-				results []*newtrun.ScenarioResult
-				err     error
-			}
-			// enrichState copies server-derived fields from the runner to the
-			// persisted run state so that stop/status commands can use them.
-			enrichState := func() {
-				state.Topology = runner.Topology
-				state.SpecDir = runner.SpecDir
-			}
-
-			var resultCh chan runResult
-			if monitor {
-				resultCh = make(chan runResult, 1)
-				go func() {
-					r, e := runner.Run(opts)
-					enrichState()
-					// Update state status BEFORE sending result so the
-					// monitor sees the terminal status and exits.
-					finalizeRunState(state, r, e)
-					resultCh <- runResult{r, e}
-				}()
-				time.Sleep(2 * time.Second)
-				_ = monitorSuite(suite, true)
-			}
-
-			var results []*newtrun.ScenarioResult
-			var runErr error
-			if monitor {
-				res := <-resultCh
-				results, runErr = res.results, res.err
-			} else {
-				results, runErr = runner.Run(opts)
-				enrichState()
-			}
-
-			// Handle pause
-			var pauseErr *newtrun.PauseError
-			if errors.As(runErr, &pauseErr) {
-				if !monitor {
-					state.Status = newtrun.SuiteStatusPaused
-					if err := newtrun.SaveRunState(state); err != nil {
-						util.Logger.Warnf("failed to save run state: %v", err)
-					}
-				}
-				suiteName := filepath.Base(dir)
-				fmt.Fprintf(os.Stderr, "\n%s; resume with: newtrun start %s\n", pauseErr, suiteName)
-				return nil
-			}
-
-			if runErr != nil {
-				if !monitor {
-					state.Status = newtrun.SuiteStatusFailed
-					state.Finished = time.Now()
-					if err := newtrun.SaveRunState(state); err != nil {
-						util.Logger.Warnf("failed to save run state: %v", err)
-					}
-				}
-				return runErr
-			}
-
-			// Finalize state (already done in monitor mode goroutine).
-			if !monitor {
-				finalizeRunState(state, results, runErr)
-			}
-
-			hasFailure, hasError := false, false
-			for _, r := range results {
-				if r.Status == newtrun.StepStatusFailed {
-					hasFailure = true
-				}
-				if r.Status == newtrun.StepStatusError || r.DeployError != nil {
-					hasError = true
-				}
-			}
-
-			// Write reports
-			gen := &newtrun.ReportGenerator{Results: results}
-			if err := gen.WriteMarkdown("newtrun/.generated/report.md"); err != nil {
-				util.Logger.Warnf("failed to write markdown report: %v", err)
-			}
-			if junitPath != "" {
-				if err := gen.WriteJUnit(junitPath); err != nil {
-					util.Logger.Warnf("failed to write JUnit report: %v", err)
-				}
-			}
-
-			// Exit code via sentinel errors (deferred cleanup runs first)
-			if hasError {
+			if hasError.Load() {
 				return errInfraError
 			}
-			if hasFailure {
+			if hasFailure.Load() {
 				return errTestFailure
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "directory containing scenario YAML files")
-	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario (default: all)")
+	cmd.Flags().StringVar(&scenario, "scenario", "", "run specific scenario")
 	cmd.Flags().StringVar(&target, "target", "", "run minimal dependency chain to reach scenario")
 	cmd.Flags().StringVar(&platform, "platform", "", "override platform")
-	cmd.Flags().StringVar(&junitPath, "junit", "", "JUnit XML output path")
-	cmd.Flags().StringVar(&serverURL, "server", "", "newtron-server URL (default: http://localhost:8080, env: NEWTRON_SERVER)")
-	cmd.Flags().StringVar(&networkID, "network-id", "", "Network identifier (env: NEWTRON_NETWORK_ID)")
-	cmd.Flags().BoolVarP(&monitor, "monitor", "m", false, "show live status dashboard during run")
+	cmd.Flags().StringVar(&newtronServer, "newtron-server", "", "newtron-server URL (server-side runner uses this for topology discovery)")
 	cmd.Flags().BoolVar(&noDeploy, "no-deploy", false, "skip topology deployment (for loopback/offline mode)")
-
 	return cmd
 }
 
-// finalizeRunState sets the terminal status on the run state and persists it.
-// Called from the runner goroutine in monitor mode (so the monitor sees the
-// status change and exits), or from the main goroutine in normal mode.
-func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
-	if runErr != nil {
-		state.Status = newtrun.SuiteStatusFailed
-		state.Finished = time.Now()
-		if err := newtrun.SaveRunState(state); err != nil {
-			util.Logger.Warnf("failed to save run state: %v", err)
-		}
+// renderEvent prints a one-line summary of each event in a form similar
+// to the existing consoleProgress (--verbose) output. Status tracking
+// for the exit code is done via atomic flags so concurrent renders are
+// safe.
+func renderEvent(ev api.Event, hasFailure, hasError *atomic.Bool) {
+	// The event payload was decoded as map[string]any by the client.
+	// Re-marshal to inspect typed fields.
+	payload, err := json.Marshal(ev.Payload)
+	if err != nil {
 		return
 	}
-
-	hasFailure, hasError := false, false
-	for _, r := range results {
-		if r.Status == newtrun.StepStatusFailed {
-			hasFailure = true
+	switch ev.Type {
+	case api.EventSuiteStart:
+		var p api.SuiteStartPayload
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return
 		}
-		if r.Status == newtrun.StepStatusError || r.DeployError != nil {
-			hasError = true
+		fmt.Fprintf(os.Stderr, "newtrun: %d scenarios\n\n", len(p.Scenarios))
+		for i, s := range p.Scenarios {
+			fmt.Fprintf(os.Stderr, "  %d  %s  (%d steps)\n", i+1, s.Name, s.StepCount)
 		}
-	}
+		fmt.Fprintln(os.Stderr)
 
-	if hasFailure || hasError {
-		state.Status = newtrun.SuiteStatusFailed
-	} else {
-		state.Status = newtrun.SuiteStatusComplete
-	}
-	state.Finished = time.Now()
-	if err := newtrun.SaveRunState(state); err != nil {
-		util.Logger.Warnf("failed to save run state: %v", err)
+	case api.EventScenarioStart:
+		var p api.ScenarioStartPayload
+		_ = json.Unmarshal(payload, &p)
+		fmt.Fprintf(os.Stderr, "  [%d/%d] %s\n", p.Index+1, p.Total, p.Name)
+
+	case api.EventStepEnd:
+		var p api.StepEndPayload
+		_ = json.Unmarshal(payload, &p)
+		if verboseFlag {
+			fmt.Fprintf(os.Stderr, "          [%d/%d] %s %s (%s)\n",
+				p.Index+1, p.Total, p.Result.Name, p.Result.Status, p.Result.Duration)
+		}
+
+	case api.EventScenarioEnd:
+		var p api.ScenarioEndPayload
+		_ = json.Unmarshal(payload, &p)
+		fmt.Fprintf(os.Stderr, "          %s (%s)\n\n", p.Status, p.Duration)
+		switch string(p.Status) {
+		case "FAIL":
+			hasFailure.Store(true)
+		case "ERROR":
+			hasError.Store(true)
+		}
+
+	case api.EventSuiteEnd:
+		var p api.SuiteEndPayload
+		_ = json.Unmarshal(payload, &p)
+		passed, failed, skipped, errored := 0, 0, 0, 0
+		for _, r := range p.Results {
+			switch string(r.Status) {
+			case "PASS":
+				passed++
+			case "FAIL":
+				failed++
+			case "SKIP":
+				skipped++
+			case "ERROR":
+				errored++
+			}
+		}
+		fmt.Fprintf(os.Stderr, "---\n")
+		fmt.Fprintf(os.Stderr, "newtrun: %d scenarios — %d passed, %d failed, %d errored, %d skipped (%s)\n",
+			len(p.Results), passed, failed, errored, skipped, p.Duration)
 	}
 }

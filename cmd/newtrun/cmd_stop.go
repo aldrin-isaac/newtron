@@ -1,29 +1,33 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
-	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 	"github.com/aldrin-isaac/newtron/pkg/newtlab"
+	"github.com/aldrin-isaac/newtron/pkg/newtrun/client"
 )
 
 func newStopCmd() *cobra.Command {
-	var dir string
-
-	cmd := &cobra.Command{
-		Use:   "stop",
-		Short: "Destroy topology and clean up suite state",
-		Long: `Tears down the deployed topology and removes suite state.
-Refuses to stop a suite with a running process — use 'newtrun pause' first.`,
+	return &cobra.Command{
+		Use:   "stop <suite>",
+		Short: "Cancel a running suite, destroy its topology, and remove state",
+		Long: `Cancel the named suite's run (if active), tear down the deployed topology,
+and remove the suite's state directory. The topology destroy step uses the
+spec directory recorded in state, so it requires the state to be readable.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			suite, err := resolveSuite(cmd, dir, nil)
-			if err != nil {
+			suite := args[0]
+			c := newClient()
+			ctx := cmd.Context()
+			if err := requireServer(ctx, c); err != nil {
 				return err
 			}
 
-			state, err := newtrun.LoadRunState(suite)
+			// Fetch state before stopping so we still know the spec dir.
+			state, err := c.GetRun(ctx, suite)
 			if err != nil {
 				return err
 			}
@@ -31,37 +35,34 @@ Refuses to stop a suite with a running process — use 'newtrun pause' first.`,
 				return fmt.Errorf("no state found for suite %s", suite)
 			}
 
-			// Refuse if runner is alive
-			if state.PID != 0 && newtrun.IsProcessAlive(state.PID) {
-				return fmt.Errorf("suite %s is running (pid %d); use 'newtrun pause' first", suite, state.PID)
+			// Cancel the active run. 404 is fine — no active run means
+			// the state is already in a terminal state.
+			if err := c.StopRun(ctx, suite); err != nil {
+				var se *client.ServerError
+				if !errors.As(err, &se) || se.StatusCode != 404 {
+					return err
+				}
 			}
 
-			// Destroy topology if we know the spec dir
+			// Destroy the topology if the spec dir is on disk.
 			if state.SpecDir != "" {
-				lab, err := newtlab.NewLab(state.SpecDir)
-				if err == nil {
-					topology := resolveTopologyFromState(state)
-					if topology == "" {
-						topology = state.SpecDir
-					}
-					fmt.Printf("destroying topology %s...\n", topology)
-					if err := lab.Destroy(cmd.Context()); err != nil {
+				if lab, err := newtlab.NewLab(state.SpecDir); err == nil {
+					fmt.Printf("destroying topology %s...\n", resolveTopologyFromState(state))
+					if err := lab.Destroy(ctx); err != nil {
 						fmt.Printf("warning: destroy topology: %v\n", err)
 					}
 				}
 			}
 
-			// Clean up state
-			if err := newtrun.RemoveRunState(suite); err != nil {
-				return fmt.Errorf("remove state: %w", err)
+			// Remove the state directory via the server.
+			if err := c.DeleteRun(ctx, suite); err != nil {
+				var se *client.ServerError
+				if !errors.As(err, &se) || se.StatusCode != 404 {
+					return err
+				}
 			}
-
 			fmt.Printf("suite %s stopped and cleaned up\n", suite)
 			return nil
 		},
 	}
-
-	cmd.Flags().StringVar(&dir, "dir", "", "suite directory (auto-detected if omitted)")
-
-	return cmd
 }

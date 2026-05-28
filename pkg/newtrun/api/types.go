@@ -237,3 +237,46 @@ type HealthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
 }
+
+// StartRunRequest is the body for POST /api/runs. Names the suite to run
+// and optional run-shaping options that mirror the existing CLI flags.
+type StartRunRequest struct {
+	// Suite is the file-backed suite name under the server's SuitesBase.
+	// Required.
+	Suite string `json:"suite"`
+
+	// Scenario, if set, runs a single scenario from the suite. Mutually
+	// exclusive with Target and All.
+	Scenario string `json:"scenario,omitempty"`
+
+	// Target, if set, runs the minimal dependency chain to reach the named
+	// scenario. Mutually exclusive with Scenario and All.
+	Target string `json:"target,omitempty"`
+
+	// All requests every scenario in the suite. Default when Scenario and
+	// Target are both unset.
+	All bool `json:"all,omitempty"`
+
+	// Platform overrides the per-scenario platform.
+	Platform string `json:"platform,omitempty"`
+
+	// NoDeploy skips topology deployment. Used by tests that already have
+	// the topology up.
+	NoDeploy bool `json:"no_deploy,omitempty"`
+
+	// Verbose controls per-step output in the console reporter chained
+	// after the server-side reporters. The browser frontend uses the
+	// HTTPReporter stream regardless of this flag.
+	Verbose bool `json:"verbose,omitempty"`
+
+	// NewtronServer is the newtron-server URL the runner should connect to
+	// for topology discovery. If empty, the server uses its configured
+	// default (Config.NewtronServer).
+	NewtronServer string `json:"newtron_server,omitempty"`
+}
+
+// StartRunResponse is the body returned by POST /api/runs.
+type StartRunResponse struct {
+	Suite   string    `json:"suite"`
+	Started time.Time `json:"started"`
+}
