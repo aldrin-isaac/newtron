@@ -1,0 +1,239 @@
+// Package api implements the newtrun HTTP server.
+//
+// The server exposes newtrun's existing substrate (RunState, ScenarioResult,
+// StepResult, etc. from pkg/newtrun) over HTTP so consumers like the newtcon
+// browser frontend can drive newtrun without filesystem access.
+//
+// Per DESIGN_PRINCIPLES_NEWTRON.md §46 (Wire Shape Mirrors Substrate), the
+// HTTP responses serialize the canonical in-memory types directly. The wire
+// types in this file are JSON-friendly mirrors of the existing report.go and
+// scenario.go types — same fields, same meaning, JSON tags added (the
+// existing types only have YAML tags because they were authored before the
+// HTTP boundary existed).
+package api
+
+import (
+	"time"
+
+	"github.com/aldrin-isaac/newtron/pkg/newtrun"
+)
+
+// APIResponse is the standard envelope for all newtrun-server JSON responses.
+// Mirrors the newtron-server convention.
+type APIResponse struct {
+	Data  any    `json:"data,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// EventType identifies the SSE event kind. Mirrors the ProgressReporter
+// callback names directly.
+type EventType string
+
+const (
+	EventSuiteStart    EventType = "suite_start"
+	EventScenarioStart EventType = "scenario_start"
+	EventScenarioEnd   EventType = "scenario_end"
+	EventStepStart     EventType = "step_start"
+	EventStepEnd       EventType = "step_end"
+	EventSuiteEnd      EventType = "suite_end"
+)
+
+// Event is one SSE event the server emits on GET /api/runs/{runKey}/events.
+// Type discriminates the Payload's concrete shape.
+type Event struct {
+	Type    EventType `json:"type"`
+	Payload any       `json:"payload"`
+}
+
+// SuiteStartPayload mirrors ProgressReporter.SuiteStart([]*Scenario).
+// Scenarios are summarized to name + step count rather than serialized in
+// full — the full Scenario objects include action-specific fields that
+// browser consumers don't need at suite-start time. Per-step detail is
+// surfaced incrementally via step_start / step_end events.
+type SuiteStartPayload struct {
+	Scenarios []ScenarioSummary `json:"scenarios"`
+}
+
+// ScenarioSummary is the suite-start summary of one scenario.
+type ScenarioSummary struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Topology    string `json:"topology"`
+	Platform    string `json:"platform,omitempty"`
+	StepCount   int    `json:"step_count"`
+}
+
+// ScenarioStartPayload mirrors ProgressReporter.ScenarioStart(name, index, total).
+type ScenarioStartPayload struct {
+	Name  string `json:"name"`
+	Index int    `json:"index"`
+	Total int    `json:"total"`
+}
+
+// ScenarioEndPayload mirrors ProgressReporter.ScenarioEnd(*ScenarioResult, ...).
+type ScenarioEndPayload struct {
+	Name        string                    `json:"name"`
+	Topology    string                    `json:"topology,omitempty"`
+	Platform    string                    `json:"platform,omitempty"`
+	Status      newtrun.StepStatus        `json:"status"`
+	Duration    string                    `json:"duration"`
+	Steps       []StepResultPayload       `json:"steps,omitempty"`
+	DeployError string                    `json:"deploy_error,omitempty"`
+	SkipReason  string                    `json:"skip_reason,omitempty"`
+	Index       int                       `json:"index"`
+	Total       int                       `json:"total"`
+}
+
+// StepStartPayload mirrors ProgressReporter.StepStart(scenario, *Step, index, total).
+type StepStartPayload struct {
+	Scenario string             `json:"scenario"`
+	Name     string             `json:"name"`
+	Action   newtrun.StepAction `json:"action"`
+	Index    int                `json:"index"`
+	Total    int                `json:"total"`
+}
+
+// StepEndPayload mirrors ProgressReporter.StepEnd(scenario, *StepResult, index, total).
+type StepEndPayload struct {
+	Scenario string             `json:"scenario"`
+	Result   StepResultPayload  `json:"result"`
+	Index    int                `json:"index"`
+	Total    int                `json:"total"`
+}
+
+// SuiteEndPayload mirrors ProgressReporter.SuiteEnd([]*ScenarioResult, duration).
+type SuiteEndPayload struct {
+	Results  []ScenarioEndPayload `json:"results"`
+	Duration string               `json:"duration"`
+}
+
+// StepResultPayload mirrors newtrun.StepResult with JSON tags and a string
+// duration (Go's time.Duration serializes as nanoseconds by default, which
+// is awkward for browser consumers).
+type StepResultPayload struct {
+	Name      string                 `json:"name"`
+	Action    newtrun.StepAction     `json:"action"`
+	Status    newtrun.StepStatus     `json:"status"`
+	Duration  string                 `json:"duration"`
+	Message   string                 `json:"message,omitempty"`
+	Details   []DeviceResultPayload  `json:"details,omitempty"`
+	Iteration int                    `json:"iteration,omitempty"`
+}
+
+// DeviceResultPayload mirrors newtrun.DeviceResult.
+type DeviceResultPayload struct {
+	Device  string             `json:"device"`
+	Status  newtrun.StepStatus `json:"status"`
+	Message string             `json:"message,omitempty"`
+}
+
+// scenarioSummaryFrom converts a *newtrun.Scenario to its summary form.
+func scenarioSummaryFrom(s *newtrun.Scenario) ScenarioSummary {
+	return ScenarioSummary{
+		Name:        s.Name,
+		Description: s.Description,
+		Topology:    s.Topology,
+		Platform:    s.Platform,
+		StepCount:   len(s.Steps),
+	}
+}
+
+// scenarioEndFrom converts a *newtrun.ScenarioResult plus index/total into a
+// JSON-friendly payload.
+func scenarioEndFrom(r *newtrun.ScenarioResult, index, total int) ScenarioEndPayload {
+	steps := make([]StepResultPayload, 0, len(r.Steps))
+	for i := range r.Steps {
+		steps = append(steps, stepResultFrom(&r.Steps[i]))
+	}
+	deployErr := ""
+	if r.DeployError != nil {
+		deployErr = r.DeployError.Error()
+	}
+	return ScenarioEndPayload{
+		Name:        r.Name,
+		Topology:    r.Topology,
+		Platform:    r.Platform,
+		Status:      r.Status,
+		Duration:    durationString(r.Duration),
+		Steps:       steps,
+		DeployError: deployErr,
+		SkipReason:  r.SkipReason,
+		Index:       index,
+		Total:       total,
+	}
+}
+
+// stepResultFrom converts a *newtrun.StepResult into a JSON-friendly payload.
+func stepResultFrom(r *newtrun.StepResult) StepResultPayload {
+	details := make([]DeviceResultPayload, 0, len(r.Details))
+	for _, d := range r.Details {
+		details = append(details, DeviceResultPayload{
+			Device:  d.Device,
+			Status:  d.Status,
+			Message: d.Message,
+		})
+	}
+	return StepResultPayload{
+		Name:      r.Name,
+		Action:    r.Action,
+		Status:    r.Status,
+		Duration:  durationString(r.Duration),
+		Message:   r.Message,
+		Details:   details,
+		Iteration: r.Iteration,
+	}
+}
+
+// durationString renders a time.Duration in the same compact form newtrun's
+// console reporter uses ("<1s", "5s", "2m30s").
+func durationString(d time.Duration) string {
+	if d < time.Second {
+		return "<1s"
+	}
+	d = d.Round(time.Second)
+	if d < time.Minute {
+		return d.String()
+	}
+	return d.String()
+}
+
+// RunInfo is the response shape for GET /api/runs (list).
+type RunInfo struct {
+	Suite    string             `json:"suite"`
+	Topology string             `json:"topology,omitempty"`
+	Status   newtrun.SuiteStatus `json:"status"`
+	Started  time.Time          `json:"started,omitempty"`
+	Updated  time.Time          `json:"updated,omitempty"`
+	Finished time.Time          `json:"finished,omitempty"`
+}
+
+// runInfoFrom summarizes a *newtrun.RunState to its list-view form.
+func runInfoFrom(s *newtrun.RunState) RunInfo {
+	return RunInfo{
+		Suite:    s.Suite,
+		Topology: s.Topology,
+		Status:   s.Status,
+		Started:  s.Started,
+		Updated:  s.Updated,
+		Finished: s.Finished,
+	}
+}
+
+// TopologiesResponse is the response shape for GET /api/topologies. Returns
+// the topology names discoverable under the configured topologies base
+// directory.
+type TopologiesResponse struct {
+	Topologies []string `json:"topologies"`
+}
+
+// SuitesResponse is the response shape for GET /api/suites. Returns the suite
+// names discoverable under the configured suites base directory.
+type SuitesResponse struct {
+	Suites []string `json:"suites"`
+}
+
+// HealthResponse is the response shape for GET /api/health.
+type HealthResponse struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+}
