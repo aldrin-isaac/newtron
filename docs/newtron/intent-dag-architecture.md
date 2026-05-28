@@ -169,12 +169,12 @@ The `parents` parameter may be nil or empty for root resources.
    - If P does not exist → return error (I4 violated)
    - Append `resource` to P's `_children` CSV
    - Add updated P intent record to ChangeSet (via `cs.Add`)
-   - Apply P update to shadow configDB immediately (both modes — so
+   - Apply P update to the projection immediately (both modes — so
      subsequent `writeIntent` calls within the same operation see it)
 3. Build intent fields with `_parents` = CSV of `parents`,
    `_children` = existing children (idempotent update) or "" (new)
 4. Add intent record to ChangeSet (via `cs.Prepend`)
-5. Apply to shadow configDB (both modes)
+5. Apply to the projection (both modes)
 
 **Post-conditions:**
 - Intent record exists at `resource` with `_parents` set
@@ -205,9 +205,9 @@ func (n *Node) deleteIntent(cs *ChangeSet, resource string) error
    - Read P's intent record from configDB
    - Remove `resource` from P's `_children` CSV
    - Add updated P intent record to ChangeSet
-   - Apply P update to shadow configDB immediately (both modes)
+   - Apply P update to the projection immediately (both modes)
 4. Add delete entry for own intent to ChangeSet (via `cs.Delete`)
-5. Delete from shadow configDB (both modes)
+5. Delete from the projection (both modes)
 
 **Post-conditions:**
 - No intent record at `resource`
@@ -473,15 +473,15 @@ When a composite operation creates a parent and child in the same ChangeSet,
 the parent must be visible in configDB before the child's `writeIntent` runs
 (I4). Two approaches:
 
-**Approach A — Sequential shadow updates.** After writing the parent intent
-entry to the ChangeSet, apply it to the shadow immediately (offline mode
-already does this in `writeIntent`). The child's subsequent `writeIntent`
-sees the parent in configDB.
+**Approach A — Sequential projection updates.** After writing the parent
+intent entry to the ChangeSet, apply it to the projection immediately
+(both modes do this inline via `op()` → `render()`). The child's
+subsequent `writeIntent` sees the parent in the projection.
 
 This works when the composite calls primitive methods sequentially:
 ```go
-csVLAN, _ := n.CreateVLAN(ctx, 100, ...)  // writes vlan|100 intent, applyShadow
-csSvc, _  := iface.ApplyService(ctx, ...)  // writeIntent sees vlan|100 in shadow
+csVLAN, _ := n.CreateVLAN(ctx, 100, ...)  // writes vlan|100 intent, renders into projection
+csSvc, _  := iface.ApplyService(ctx, ...)  // writeIntent sees vlan|100 in projection
 cs.Merge(csVLAN, csSvc)
 ```
 
@@ -1231,7 +1231,7 @@ Returns the same tree structure as JSON for programmatic access:
 4. Replay against abstract Node
 
 Each replayed operation calls `writeIntent` with appropriate parents, which
-re-establishes the DAG in the abstract Node's shadow configDB.
+re-establishes the DAG in the abstract Node's projection.
 
 ### 13.2 `_parents` and `_children` in Topology Steps
 
@@ -1271,9 +1271,10 @@ entry comment.
 
 `writeIntent` and `deleteIntent` add multiple entries to a single ChangeSet:
 the child's own intent entry plus updates to each parent's `_children`. In
-physical mode, the ChangeSet is applied to Redis as a pipeline — all entries
-are sent together. In abstract mode, entries are applied to the shadow
-sequentially.
+both modes, `op()` renders each entry into the projection sequentially as it
+is added to the ChangeSet (so subsequent operations in the same composite
+see the effect). In online mode, the assembled ChangeSet is later applied to
+Redis as a pipeline at Commit time — all entries sent together.
 
 ### 15.2 Partial Pipeline Delivery
 
@@ -1321,18 +1322,21 @@ same code path serves both physical (online) and abstract (offline) modes.
 
 ### 17.1 Same Code Path, Different Initialization
 
-`op()` and `applyShadow()` are unified across both modes. In physical mode,
-`op()` applies the ChangeSet to Redis; in abstract mode, it updates the
-shadow configDB. The DAG operations (`writeIntent`, `deleteIntent`) work
-identically in both modes — they read parents from configDB (real or shadow),
-update `_children`, and write the intent record.
+`op()` is the unified entry point in both modes. It runs preconditions,
+generates entries, builds a ChangeSet, and calls `render()` to apply the
+entries to the projection — always, before returning. Whether the ChangeSet
+is later applied to Redis (online mode at Commit) or held as the device's
+authoritative state (offline mode) is a delivery-stage concern, not an
+`op()` concern. The DAG operations (`writeIntent`, `deleteIntent`) work
+identically in both modes — they read parents from the projection, update
+`_children`, and write the intent record.
 
 ### 17.2 ExportEntries Replaces Accumulated
 
-`ExportEntries()` replaces the former `accumulated` slice. The shadow configDB
-IS the state — `ExportEntries()` reads the final configDB state and exports
-it for composite delivery. Intent records (including DAG metadata) are part
-of this export.
+`ExportEntries()` replaces the former `accumulated` slice. The projection
+IS the state — `ExportEntries()` reads the final projection and exports
+it for delivery. Intent records (including DAG metadata) are part of this
+export.
 
 ### 17.3 Intent-Idempotent Primitives
 

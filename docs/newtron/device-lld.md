@@ -481,8 +481,7 @@ type DriftEntry struct {
 
 // DiffConfigDB compares expected vs actual CONFIG_DB, returning differences.
 // Only tables present in ownedTables are compared. Tables in excludedFromDrift
-// (NEWTRON_INTENT, NEWTRON_HISTORY, NEWTRON_SETTINGS, PORT, DEVICE_METADATA)
-// are always skipped.
+// (NEWTRON_INTENT, NEWTRON_HISTORY, PORT, DEVICE_METADATA) are always skipped.
 //
 // Returns three categories:
 //   - Missing: expected entry absent from actual
