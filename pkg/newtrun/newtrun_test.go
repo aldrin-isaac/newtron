@@ -2,6 +2,7 @@ package newtrun
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1417,6 +1418,67 @@ func TestRun_NoFlags(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--scenario") || !strings.Contains(err.Error(), "--all") {
 		t.Errorf("expected error about --scenario/--all, got: %s", err)
+	}
+}
+
+// ============================================================================
+// Shutdown honesty (iterateScenarios ctx-cancel + SuiteStatusFromOutcome)
+// ============================================================================
+
+// TestIterateScenarios_CancelStopsIteration verifies that a canceled
+// context interrupts the per-scenario loop before the remaining
+// scenarios run. Without this, server-shutdown cancellation produces a
+// stream of phantom FAIL events for every remaining scenario; the
+// canceled-ctx check is what surfaces "aborted" honestly.
+func TestIterateScenarios_CancelStopsIteration(t *testing.T) {
+	r := &Runner{}
+	scenarios := []*Scenario{
+		{Name: "sc1"},
+		{Name: "sc2"},
+		{Name: "sc3"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	results, err := r.iterateScenarios(ctx, scenarios, RunOptions{}, "", func(_ context.Context, sc *Scenario, _ string) (*ScenarioResult, error) {
+		calls++
+		if sc.Name == "sc1" {
+			cancel()
+		}
+		return &ScenarioResult{Name: sc.Name, Status: StepStatusPassed}, nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if calls != 1 {
+		t.Errorf("scenario callback invoked %d times; want 1 (sc1 only)", calls)
+	}
+	if len(results) != 1 || results[0].Name != "sc1" {
+		t.Errorf("results = %+v; want only sc1 result", results)
+	}
+}
+
+func TestSuiteStatusFromOutcome(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		results []*ScenarioResult
+		want    SuiteStatus
+	}{
+		{"clean complete", nil, []*ScenarioResult{{Status: StepStatusPassed}}, SuiteStatusComplete},
+		{"empty results clean", nil, nil, SuiteStatusComplete},
+		{"any FAIL → failed", nil, []*ScenarioResult{{Status: StepStatusPassed}, {Status: StepStatusFailed}}, SuiteStatusFailed},
+		{"any ERROR → failed", nil, []*ScenarioResult{{Status: StepStatusError}}, SuiteStatusFailed},
+		{"PauseError → paused", &PauseError{Completed: 2}, nil, SuiteStatusPaused},
+		{"context.Canceled → aborted", context.Canceled, nil, SuiteStatusAborted},
+		{"other error → failed", errors.New("boom"), nil, SuiteStatusFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SuiteStatusFromOutcome(tc.err, tc.results)
+			if got != tc.want {
+				t.Errorf("SuiteStatusFromOutcome = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

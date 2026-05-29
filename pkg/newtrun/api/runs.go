@@ -249,30 +249,13 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // finalizeRunState writes the terminal status to state.json after the
-// runner returns. Mirrors the existing CLI's finalizeRunState in
-// cmd/newtrun/cmd_start.go (kept in sync — same logic, different home).
+// runner returns. Delegates the status calculation to
+// newtrun.SuiteStatusFromOutcome so the disk-persisted status is
+// guaranteed to match the SuiteEnd event the Runner emitted on the
+// wire — there is exactly one source of truth for this mapping.
 func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
 	state.Finished = time.Now()
-	switch {
-	case runErr != nil:
-		var pauseErr *newtrun.PauseError
-		if errors.As(runErr, &pauseErr) {
-			state.Status = newtrun.SuiteStatusPaused
-		} else if errors.Is(runErr, context.Canceled) {
-			state.Status = newtrun.SuiteStatusAborted
-		} else {
-			state.Status = newtrun.SuiteStatusFailed
-		}
-	default:
-		// Inspect per-scenario results: any failure → failed; else complete.
-		state.Status = newtrun.SuiteStatusComplete
-		for _, r := range results {
-			if r != nil && (r.Status == newtrun.StepStatusFailed || r.Status == newtrun.StepStatusError) {
-				state.Status = newtrun.SuiteStatusFailed
-				break
-			}
-		}
-	}
+	state.Status = newtrun.SuiteStatusFromOutcome(runErr, results)
 	if err := newtrun.SaveRunState(state); err != nil {
 		// Best-effort: log via the package-level logger if needed.
 		_ = err
@@ -441,24 +424,14 @@ func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario, yaml strin
 // namespace via SaveInlineRunState.
 func finalizeInlineState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
 	state.Finished = time.Now()
-	switch {
-	case runErr != nil:
-		var pauseErr *newtrun.PauseError
-		if errors.As(runErr, &pauseErr) {
-			state.Status = newtrun.SuiteStatusPaused
-		} else if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
-			state.Status = newtrun.SuiteStatusAborted
-		} else {
-			state.Status = newtrun.SuiteStatusFailed
-		}
-	default:
-		state.Status = newtrun.SuiteStatusComplete
-		for _, r := range results {
-			if r != nil && (r.Status == newtrun.StepStatusFailed || r.Status == newtrun.StepStatusError) {
-				state.Status = newtrun.SuiteStatusFailed
-				break
-			}
-		}
+	state.Status = newtrun.SuiteStatusFromOutcome(runErr, results)
+	// Treat deadline exceeded (the inline wall-time budget) the same as
+	// context.Canceled — both mean the run was cut short externally,
+	// which the SuiteStatusFromOutcome helper otherwise classifies as
+	// "failed". Override here so the inline timeout surface stays
+	// distinct from a real test failure.
+	if state.Status == newtrun.SuiteStatusFailed && errors.Is(runErr, context.DeadlineExceeded) {
+		state.Status = newtrun.SuiteStatusAborted
 	}
 	_ = newtrun.SaveInlineRunState(state)
 }

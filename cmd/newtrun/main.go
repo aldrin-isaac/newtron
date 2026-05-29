@@ -76,10 +76,14 @@ Discovery:
 	)
 
 	if err := rootCmd.Execute(); err != nil {
+		// Print the error message in both paths — the previous code only
+		// printed it for exit 1, so infra-error exits (server connection
+		// lost, run aborted) left the operator with a bare exit 2 and no
+		// hint about which failure mode it was.
+		fmt.Fprintln(os.Stderr, err)
 		if errors.Is(err, errInfraError) {
 			os.Exit(2)
 		}
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
