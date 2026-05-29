@@ -1,15 +1,16 @@
 // Package api implements the newtrun HTTP server.
 //
-// The server exposes newtrun's existing substrate (RunState, ScenarioResult,
-// StepResult, etc. from pkg/newtrun) over HTTP so consumers like the newtcon
-// browser frontend can drive newtrun without filesystem access.
+// The server exposes newtrun's existing canonical types (RunState,
+// ScenarioResult, StepResult, etc. from pkg/newtrun) over HTTP so
+// consumers like the newtcon browser frontend can drive newtrun without
+// filesystem access.
 //
-// Per DESIGN_PRINCIPLES_NEWTRON.md §46 (Wire Shape Mirrors Substrate), the
-// HTTP responses serialize the canonical in-memory types directly. The wire
-// types in this file are JSON-friendly mirrors of the existing report.go and
-// scenario.go types — same fields, same meaning, JSON tags added (the
-// existing types only have YAML tags because they were authored before the
-// HTTP boundary existed).
+// Per DESIGN_PRINCIPLES_NEWTRON.md §46 (Wire Shape Mirrors Canonical
+// Types), the HTTP responses serialize the canonical in-memory types
+// directly. The wire types in this file are JSON-friendly mirrors of
+// the existing report.go and scenario.go types — same fields, same
+// meaning, JSON tags added (the existing types only have YAML tags
+// because they were authored before the HTTP boundary existed).
 package api
 
 import (
@@ -104,13 +105,13 @@ type StepEndPayload struct {
 }
 
 // StepProgressPayload mirrors ProgressReporter.StepProgress(scenario,
-// *Step, *sonic.DeviceOp, index). Op is the canonical
-// DeviceOp shape — no wrapper type — per §46 (Wire Shape Mirrors
-// Substrate) and ai-instructions §13 (Same Concept = Same Name).
+// *Step, *sonic.DeviceOp, index). Op is the canonical DeviceOp shape —
+// no wrapper type — per §46 (Wire Shape Mirrors Canonical Types) and
+// ai-instructions §13 (Same Concept = Same Name).
 //
-// One event per substrate operation. The browser frontend's "watch
-// substrate writes land in real time" UX renders one of these per
-// rendered row in the per-write timeline.
+// One event per device operation. The browser frontend's "watch device
+// writes land in real time" UX renders one of these per row in the
+// per-device-op timeline.
 type StepProgressPayload struct {
 	Scenario string                 `json:"scenario"`
 	Step     string                 `json:"step"`

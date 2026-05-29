@@ -2456,7 +2456,7 @@ from a different angle.
 
 ---
 
-## 41. HTTP API Boundary — Wire Shape Mirrors Substrate
+## 41. HTTP API Boundary — Wire Shape Mirrors Canonical Types
 
 The boundary between an HTTP API and its consumers is a typing
 surface. Every choice about that boundary's shape is a choice about

@@ -35,7 +35,7 @@ instance of the same principle: **newtron's HTTP API should expose
 its canonical in-memory substrate types directly, not derivatives,
 summaries, or opaque handles.** This is codified as
 [`DESIGN_PRINCIPLES_NEWTRON.md` §46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
-("HTTP API Boundary — Wire Shape Mirrors Substrate").
+("HTTP API Boundary — Wire Shape Mirrors Canonical Types").
 
 Re-reading the ten issues through the §46 lens, grouped by the
 substrate cluster they touch:
@@ -237,7 +237,7 @@ as to this parent.
 
 - newtron principles: [`../DESIGN_PRINCIPLES_NEWTRON.md`](../DESIGN_PRINCIPLES_NEWTRON.md), especially
   [§46](../DESIGN_PRINCIPLES_NEWTRON.md#46-http-api-boundary--wire-shape-mirrors-substrate)
-  (HTTP API Boundary — Wire Shape Mirrors Substrate; the unifying
+  (HTTP API Boundary — Wire Shape Mirrors Canonical Types; the unifying
   principle for this batch),
   [§11](../DESIGN_PRINCIPLES_NEWTRON.md#11-the-changeset-is-the-universal-contract)
   (ChangeSet is the Universal Contract),

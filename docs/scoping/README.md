@@ -10,7 +10,7 @@ the batch is large enough, a parent doc plus per-cluster docs.
 
 Ten newtron HTTP API gaps filed by newtcon under the Gap-Handling
 Protocol. All ten are instances of `DESIGN_PRINCIPLES_NEWTRON.md`
-§46 ("HTTP API Boundary — Wire Shape Mirrors Substrate"); they are
+§46 ("HTTP API Boundary — Wire Shape Mirrors Canonical Types"); they are
 grouped into four clusters by shared underlying primitive.
 
 - **[`newtcon-driven-gaps.md`](newtcon-driven-gaps.md)** — parent:

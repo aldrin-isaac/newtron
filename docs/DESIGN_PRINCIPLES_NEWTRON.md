@@ -2518,7 +2518,7 @@ purposes, not containment edges for display purposes.
 
 ---
 
-## 46. HTTP API Boundary — Wire Shape Mirrors Substrate
+## 46. HTTP API Boundary — Wire Shape Mirrors Canonical Types
 
 The boundary between an HTTP API and its consumers is a typing
 surface. Every choice about that boundary's shape is a choice about
@@ -2532,9 +2532,9 @@ already did internally is paid for a second time at the consumer,
 fragilely, against a representation that is one revision behind the
 type the implementation actually uses.
 
-newtron's HTTP API exposes its canonical in-memory substrate types
-directly. `ChangeSet.Changes` (§11), the typed `Projection` produced
-by `ExportEntries` (§1, §21), `[]DriftEntry` from `DiffConfigDB`,
+newtron's HTTP API exposes its canonical in-memory types directly.
+`ChangeSet.Changes` (§11), the typed `Projection` produced by
+`ExportEntries` (§1, §21), `[]DriftEntry` from `DiffConfigDB`,
 `Intent` records, `RouteEntry` — each is serialized to the wire in
 the same shape it has in memory. Derived or summary forms — free-text
 previews, counts, table-name-to-count maps — exist as additions
@@ -2542,11 +2542,11 @@ previews, counts, table-name-to-count maps — exist as additions
 
 This principle is the HTTP-layer extension of §11 ("The ChangeSet Is
 the Universal Contract"). §11 binds the implementation to one
-substrate representation; §46 binds the wire to expose that same
+canonical representation; §46 binds the wire to expose that same
 representation. It is the API-boundary extension of §33 ("Public API
 Boundary — Types Express Intent, Not Implementation"). §33 ensures
 public types speak domain vocabulary; §46 ensures the wire faithfully
-serializes the substrate those public types govern. There is no
+serializes the canonical types those public types govern. There is no
 tension: §33 governs type *identity* (internal vs public), §46
 governs wire *shape* (canonical vs summary). The public type and the
 wire form are the same JSON; the boundary at §33 maps internal field
@@ -2574,7 +2574,7 @@ Four rules:
 
 4. **Wire shape mirrors in-memory shape.** The JSON tags on the public
    types and the JSON output of HTTP responses are the same. Consumers
-   reason about the substrate newtron itself reasons about — no
+   reason about the canonical types newtron itself reasons about — no
    parsing strings, no stitching across endpoints to reconstruct what
    is one internal object, no opaque handles.
 

@@ -124,7 +124,7 @@ type ConflictError = util.ConflictError
 // Result carries the typed WriteResult — including DeviceOps, Verification.Errors
 // (with DeviceResponse), Changes — so the wire envelope on 409 responses surfaces
 // the full substrate that newtron computed during verify, not just a stringified
-// summary. This honors §46 (HTTP API Boundary — Wire Shape Mirrors Substrate)
+// summary. This honors §46 (HTTP API Boundary — Wire Shape Mirrors Canonical Types)
 // on the failure path: the typed substrate survives to the consumer.
 //
 // Set by Node.Commit when verification fails. Always non-nil when this error is
