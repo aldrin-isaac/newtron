@@ -34,7 +34,7 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
-		writeError(w, statusForFSError(err), err)
+		writeError(w, mapFSErrorToStatus(err), err)
 		return
 	}
 	body, err := os.ReadFile(path)
@@ -68,7 +68,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := os.Stat(filepath.Join(s.cfg.SuitesBase, suite)); err != nil {
-		writeError(w, statusForFSError(err), fmt.Errorf("suite %q not found", suite))
+		writeError(w, mapFSErrorToStatus(err), fmt.Errorf("suite %q not found", suite))
 		return
 	}
 
@@ -119,7 +119,7 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	}
 	path, err := resolveScenarioPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
-		writeError(w, statusForFSError(err), err)
+		writeError(w, mapFSErrorToStatus(err), err)
 		return
 	}
 	if err := os.Remove(path); err != nil {
@@ -223,9 +223,12 @@ func atomicWriteFile(dest string, body []byte) error {
 	return nil
 }
 
-// statusForFSError maps a filesystem-level error to its HTTP status.
-// Used by GET/DELETE so a missing file produces 404, not 500.
-func statusForFSError(err error) int {
+// mapFSErrorToStatus translates a filesystem-level error into the
+// HTTP status the handler should write. Used by GET/DELETE so a
+// missing file produces 404, not 500. Verb-first ("map") rather than
+// the descriptor "statusFor…" per §32 — the helper performs a
+// translation, not a property lookup.
+func mapFSErrorToStatus(err error) int {
 	if errors.Is(err, os.ErrNotExist) {
 		return http.StatusNotFound
 	}

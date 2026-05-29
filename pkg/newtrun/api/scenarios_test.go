@@ -336,3 +336,27 @@ func TestSuite_RejectsBadName(t *testing.T) {
 		}
 	}
 }
+
+// TestScenario_RejectsBadName covers the scenario-level name guard.
+// requireScenarioParams runs the same nameRE on both the suite and
+// the scenario path segments; this asserts the scenario segment is
+// actually checked (TestSuite_RejectsBadName only proves the suite
+// segment is). Exercises GET, PUT, and DELETE so the guard fires on
+// every path that takes a name.
+func TestScenario_RejectsBadName(t *testing.T) {
+	ts, _ := newScenarioTestServer(t)
+	for _, bad := range []string{"..", "with/slash", "dot.name", "-leading-dash"} {
+		path := "/api/suites/demo/scenarios/" + bad
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			resp, _ := doRequest(t, ts, method, path, nil)
+			// "..", "with/slash" may fail at path routing (404)
+			// because http.ServeMux interprets them as path
+			// segments; the others reach the handler and get 400.
+			// Both are acceptable rejections — what we're proving
+			// is that none of them produce a 2xx success.
+			if resp.StatusCode < 400 {
+				t.Errorf("%s %q: got %d, want 4xx", method, bad, resp.StatusCode)
+			}
+		}
+	}
+}
