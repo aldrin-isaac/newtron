@@ -38,10 +38,10 @@ func buildCLI(t *testing.T) string {
 	return binPath
 }
 
-// e2eServer wires the real api.Server into an httptest.Server and
+// newE2EServer wires the real api.Server into an httptest.Server and
 // returns both the URL and the suites base directory so tests can
 // inspect the on-disk side effects.
-func e2eServer(t *testing.T) (url, suitesBase string) {
+func newE2EServer(t *testing.T) (url, suitesBase string) {
 	t.Helper()
 	suitesBase = filepath.Join(t.TempDir(), "suites")
 	if err := os.MkdirAll(suitesBase, 0755); err != nil {
@@ -87,7 +87,7 @@ func runCLI(t *testing.T, binPath, serverURL string, stdin []byte, args ...strin
 // or the client's URL construction surfaces here.
 func TestE2E_ScenarioLifecycle(t *testing.T) {
 	binPath := buildCLI(t)
-	url, suitesBase := e2eServer(t)
+	url, suitesBase := newE2EServer(t)
 
 	const suite = "e2edemo"
 	const scenario = "smoke"
@@ -162,7 +162,7 @@ steps:
 // readScenarioBody's flag handling can't ship undetected.
 func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
-	url, suitesBase := e2eServer(t)
+	url, suitesBase := newE2EServer(t)
 	const suite = "filedemo"
 	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", suite); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
@@ -200,7 +200,7 @@ steps:
 // the error in the CLI layer would go unnoticed.
 func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
-	url, _ := e2eServer(t)
+	url, _ := newE2EServer(t)
 	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", "badyaml"); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
