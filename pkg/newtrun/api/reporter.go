@@ -3,6 +3,7 @@ package api
 import (
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -85,6 +86,25 @@ func (r *HTTPReporter) StepStart(scenario string, step *newtrun.Step, index, tot
 	})
 	if r.Inner != nil {
 		r.Inner.StepStart(scenario, step, index, total)
+	}
+}
+
+func (r *HTTPReporter) StepProgress(scenario string, step *newtrun.Step, op *sonic.PerSubstrateOp, index int) {
+	if op == nil {
+		return
+	}
+	r.Broker.Publish(r.RunKey, Event{
+		Type: EventStepProgress,
+		Payload: StepProgressPayload{
+			Scenario: scenario,
+			Step:     step.Name,
+			Action:   step.Action,
+			Index:    index,
+			Op:       *op,
+		},
+	})
+	if r.Inner != nil {
+		r.Inner.StepProgress(scenario, step, op, index)
 	}
 }
 

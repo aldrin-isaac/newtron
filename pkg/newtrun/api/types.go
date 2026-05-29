@@ -15,6 +15,7 @@ package api
 import (
 	"time"
 
+	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
@@ -34,6 +35,7 @@ const (
 	EventScenarioStart EventType = "scenario_start"
 	EventScenarioEnd   EventType = "scenario_end"
 	EventStepStart     EventType = "step_start"
+	EventStepProgress  EventType = "step_progress"
 	EventStepEnd       EventType = "step_end"
 	EventSuiteEnd      EventType = "suite_end"
 )
@@ -99,6 +101,22 @@ type StepEndPayload struct {
 	Result   StepResultPayload  `json:"result"`
 	Index    int                `json:"index"`
 	Total    int                `json:"total"`
+}
+
+// StepProgressPayload mirrors ProgressReporter.StepProgress(scenario,
+// *Step, *sonic.PerSubstrateOp, index). Op is the canonical
+// PerSubstrateOp shape — no wrapper type — per §46 (Wire Shape Mirrors
+// Substrate) and ai-instructions §13 (Same Concept = Same Name).
+//
+// One event per substrate operation. The browser frontend's "watch
+// substrate writes land in real time" UX renders one of these per
+// rendered row in the per-write timeline.
+type StepProgressPayload struct {
+	Scenario string                 `json:"scenario"`
+	Step     string                 `json:"step"`
+	Action   newtrun.StepAction     `json:"action"`
+	Index    int                    `json:"index"`
+	Op       sonic.PerSubstrateOp   `json:"op"`
 }
 
 // SuiteEndPayload mirrors ProgressReporter.SuiteEnd([]*ScenarioResult, duration).
