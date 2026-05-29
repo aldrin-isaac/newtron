@@ -564,6 +564,12 @@ Every command except `actions` and `version` requires newtrun-server to be runni
 | `newtrun status [suite]` | `GET /api/runs` + `GET /api/runs/{suite}` | All suites or one; `--monitor` auto-refreshes |
 | `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
 | `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
+| `newtrun suite create <name>` | `POST /api/suites` | Creates an empty suite directory on the server |
+| `newtrun suite delete <name>` | `DELETE /api/suites/{suite}` | Deletes an empty suite directory; 409 if scenarios remain |
+| `newtrun scenario list <suite>` | `GET /api/suites/{suite}/scenarios` | Same data as `list <suite>` |
+| `newtrun scenario get <suite> <name>` | `GET /api/suites/{suite}/scenarios/{name}` | Prints raw scenario YAML to stdout |
+| `newtrun scenario put <suite> <name>` | `PUT /api/suites/{suite}/scenarios/{name}` | Creates or updates a scenario from `--file` or stdin; validated via ParseScenarioBytes |
+| `newtrun scenario delete <suite> <name>` | `DELETE /api/suites/{suite}/scenarios/{name}` | Deletes a scenario file |
 | `newtrun topologies` | `GET /api/topologies` | Lists topology directories under the server's topologies base |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |

@@ -60,6 +60,8 @@ Discovery:
 		newStatusCmd(),
 		newListCmd(),
 		newSuitesCmd(),
+		newSuiteCmd(),
+		newScenarioCmd(),
 		newTopologiesCmd(),
 		newActionsCmd(),
 		&cobra.Command{
