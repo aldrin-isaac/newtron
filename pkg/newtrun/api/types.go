@@ -280,3 +280,35 @@ type StartRunResponse struct {
 	Suite   string    `json:"suite"`
 	Started time.Time `json:"started"`
 }
+
+// InlineRunRequest is the body for POST /api/runs/inline. Per §46 the
+// request shape mirrors the substrate: ScenarioYAML carries the same
+// YAML grammar the file-based parser consumes, NOT a derived shape.
+// The browser frontend's compose layer renders operator clicks into
+// the same Scenario YAML a test engineer would write into a suite
+// directory.
+type InlineRunRequest struct {
+	// ScenarioYAML is the inline scenario body. Parsed via the same
+	// ParseScenarioBytes the rest of the framework uses.
+	ScenarioYAML string `json:"scenario_yaml"`
+
+	// NewtronServer overrides the server's default newtron-server URL
+	// for this run only. Empty = use the server's configured default.
+	NewtronServer string `json:"newtron_server,omitempty"`
+
+	// TimeoutSeconds overrides the safety policy's wall-time budget for
+	// this run only. 0 = use the policy's default (60 seconds).
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+
+	// AllowReconcile opts into permitting the topology-reconcile
+	// action for this scenario. Default false (the high-impact gate).
+	AllowReconcile bool `json:"allow_reconcile,omitempty"`
+}
+
+// InlineRunResponse is the body returned by POST /api/runs/inline.
+// RunID is the UUID the server allocated for this run; subsequent
+// GET / POST / DELETE calls use it as the path parameter.
+type InlineRunResponse struct {
+	RunID   string    `json:"run_id"`
+	Started time.Time `json:"started"`
+}

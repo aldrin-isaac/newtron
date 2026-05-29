@@ -80,25 +80,11 @@ func SuiteName(dir string) string {
 
 // SaveRunState writes run state to state.json in the suite state directory.
 func SaveRunState(state *RunState) error {
-	state.Updated = time.Now()
 	dir, err := StateDir(state.Suite)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("newtrun: create state dir: %w", err)
-	}
-
-	data, err := json.MarshalIndent(state, "", "    ")
-	if err != nil {
-		return fmt.Errorf("newtrun: marshal state: %w", err)
-	}
-
-	path := filepath.Join(dir, "state.json")
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("newtrun: write state: %w", err)
-	}
-	return nil
+	return saveStateAt(dir, state)
 }
 
 // LoadRunState reads run state from state.json. Returns nil, nil if not found.
@@ -107,20 +93,7 @@ func LoadRunState(suite string) (*RunState, error) {
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "state.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("newtrun: read state: %w", err)
-	}
-
-	var state RunState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("newtrun: parse state.json: %w", err)
-	}
-	return &state, nil
+	return loadStateAt(dir)
 }
 
 // RemoveRunState deletes the entire suite state directory.
@@ -130,6 +103,45 @@ func RemoveRunState(suite string) error {
 		return err
 	}
 	return os.RemoveAll(dir)
+}
+
+// saveStateAt persists state to <dir>/state.json. Shared by SaveRunState
+// (suite namespace) and SaveInlineRunState (inline namespace) — per
+// DESIGN_PRINCIPLES_NEWTRON §28 (File-Level Feature Cohesion / DRY), the
+// only meaningful axis of variation is where the directory comes from;
+// the marshal-and-write body is identical.
+func saveStateAt(dir string, state *RunState) error {
+	state.Updated = time.Now()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("newtrun: create state dir: %w", err)
+	}
+	data, err := json.MarshalIndent(state, "", "    ")
+	if err != nil {
+		return fmt.Errorf("newtrun: marshal state: %w", err)
+	}
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("newtrun: write state: %w", err)
+	}
+	return nil
+}
+
+// loadStateAt reads state from <dir>/state.json. Returns nil, nil when
+// the file is absent. Shared by LoadRunState and LoadInlineRunState.
+func loadStateAt(dir string) (*RunState, error) {
+	path := filepath.Join(dir, "state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("newtrun: read state: %w", err)
+	}
+	var state RunState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("newtrun: parse state.json: %w", err)
+	}
+	return &state, nil
 }
 
 // ListSuiteStates returns names of all suites with state directories.
@@ -207,4 +219,69 @@ func IsProcessAlive(pid int) bool {
 	}
 	err := syscall.Kill(pid, 0)
 	return err == nil
+}
+
+// InlineStateDir returns the state directory path for an inline run.
+// Inline runs are namespaced under ~/.newtron/newtrun/_inline/<id>/ so
+// the suite-name namespace cannot be polluted by ad-hoc compose-and-run
+// submissions from the browser frontend (per the issue spec for #23).
+func InlineStateDir(id string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("newtrun: user home dir: %w", err)
+	}
+	return filepath.Join(home, ".newtron", "newtrun", "_inline", id), nil
+}
+
+// SaveInlineRunState writes inline-run state to its namespaced location.
+// Shares the marshal-and-write body with SaveRunState via saveStateAt.
+func SaveInlineRunState(state *RunState) error {
+	dir, err := InlineStateDir(state.Suite)
+	if err != nil {
+		return err
+	}
+	return saveStateAt(dir, state)
+}
+
+// LoadInlineRunState reads inline-run state from its namespaced location.
+// Returns nil, nil when no state file is present.
+func LoadInlineRunState(id string) (*RunState, error) {
+	dir, err := InlineStateDir(id)
+	if err != nil {
+		return nil, err
+	}
+	return loadStateAt(dir)
+}
+
+// RemoveInlineRunState deletes the inline-run state directory.
+func RemoveInlineRunState(id string) error {
+	dir, err := InlineStateDir(id)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+// LoadAnyRunState looks for a run state under the inline namespace first,
+// then the suite namespace. Returns whichever is found. Callers use this
+// when they don't know whether the ID is a suite name or an inline UUID
+// — typically the unified handlers for stop / pause / events / delete.
+func LoadAnyRunState(id string) (*RunState, error) {
+	if state, err := LoadInlineRunState(id); err != nil {
+		return nil, err
+	} else if state != nil {
+		return state, nil
+	}
+	return LoadRunState(id)
+}
+
+// RemoveAnyRunState removes whichever namespace holds the run state.
+// Mirrors LoadAnyRunState.
+func RemoveAnyRunState(id string) error {
+	if dir, err := InlineStateDir(id); err == nil {
+		if _, statErr := os.Stat(dir); statErr == nil {
+			return os.RemoveAll(dir)
+		}
+	}
+	return RemoveRunState(id)
 }

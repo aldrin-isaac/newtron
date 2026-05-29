@@ -15,20 +15,28 @@ func ParseScenario(path string) (*Scenario, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading scenario %s: %w", path, err)
 	}
+	s, err := ParseScenarioBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return s, nil
+}
 
+// ParseScenarioBytes parses a YAML scenario from a byte buffer and returns
+// a validated Scenario. Used by the inline compose-and-run HTTP endpoint
+// (PR 3) where the scenario is delivered in the request body rather than
+// read from disk.
+func ParseScenarioBytes(data []byte) (*Scenario, error) {
 	var s Scenario
 	if err := yaml.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("parsing scenario %s: %w", path, err)
+		return nil, fmt.Errorf("parsing scenario: %w", err)
 	}
-
 	applyDefaults(&s)
-
 	for i, step := range s.Steps {
 		if err := validateStepFields(s.Name, i, &step); err != nil {
-			return nil, fmt.Errorf("validating %s: %w", path, err)
+			return nil, fmt.Errorf("validating scenario: %w", err)
 		}
 	}
-
 	return &s, nil
 }
 

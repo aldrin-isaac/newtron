@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,48 +127,62 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePauseRun signals a graceful pause for the given suite. Returns 200
+// handlePauseRun signals a graceful pause for the given run. Returns 200
 // immediately; the runner picks up the pause signal at the next scenario
-// boundary via newtrun.CheckPausing.
+// boundary via newtrun.CheckPausing. Works uniformly for suite-keyed runs
+// and inline UUID-keyed runs via the unified LoadAnyRunState helper.
 func (s *Server) handlePauseRun(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+	id := r.PathValue("suite")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
-	if s.registry.Get(suite) == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no active run for suite %q", suite))
+	if s.registry.Get(id) == nil {
+		writeError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
 		return
 	}
-	state, err := newtrun.LoadRunState(suite)
+	state, err := newtrun.LoadAnyRunState(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if state == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no state file for suite %q", suite))
+		writeError(w, http.StatusNotFound, fmt.Errorf("no state file for run %q", id))
 		return
 	}
 	state.Status = newtrun.SuiteStatusPausing
-	if err := newtrun.SaveRunState(state); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+	// Persist back to whichever namespace it came from.
+	saveErr := persistAnyRunState(id, state)
+	if saveErr != nil {
+		writeError(w, http.StatusInternalServerError, saveErr)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "pausing"})
 }
 
+// persistAnyRunState saves state back to whichever namespace the id
+// belongs to (inline if state lives under _inline/<id>/, else suite).
+func persistAnyRunState(id string, state *newtrun.RunState) error {
+	if dir, err := newtrun.InlineStateDir(id); err == nil {
+		if _, statErr := os.Stat(dir); statErr == nil {
+			return newtrun.SaveInlineRunState(state)
+		}
+	}
+	return newtrun.SaveRunState(state)
+}
+
 // handleStopRun cancels the runner's context, terminating the run more
-// aggressively than pause. The active scenario's in-flight HTTP calls
-// see the cancellation; subsequent scenarios are skipped.
+// aggressively than pause. Works uniformly for suite and inline runs;
+// the path parameter is treated as an opaque run identifier.
 func (s *Server) handleStopRun(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+	id := r.PathValue("suite")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
-	entry := s.registry.Get(suite)
+	entry := s.registry.Get(id)
 	if entry == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no active run for suite %q", suite))
+		writeError(w, http.StatusNotFound, fmt.Errorf("no active run %q", id))
 		return
 	}
 	if entry.Cancel != nil {
@@ -175,20 +191,21 @@ func (s *Server) handleStopRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopping"})
 }
 
-// handleDeleteRun removes the persistent state for a suite. The run must
+// handleDeleteRun removes the persistent state for a run. The run must
 // be in a terminal state (not active in the registry). Live runs are
-// rejected with 409 — clients must stop first.
+// rejected with 409 — clients must stop first. Works uniformly across
+// the suite and inline namespaces via RemoveAnyRunState.
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+	id := r.PathValue("suite")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
-	if s.registry.Get(suite) != nil {
-		writeError(w, http.StatusConflict, fmt.Errorf("run for suite %q is active; stop it first", suite))
+	if s.registry.Get(id) != nil {
+		writeError(w, http.StatusConflict, fmt.Errorf("run %q is active; stop it first", id))
 		return
 	}
-	if err := newtrun.RemoveRunState(suite); err != nil {
+	if err := newtrun.RemoveAnyRunState(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -230,4 +247,199 @@ func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult
 func directoryExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// handleStartInlineRun accepts a scenario YAML in the request body, validates
+// it against the inline safety policy, and spawns a server-side run keyed by
+// a freshly-allocated UUID. The UUID is namespaced separately from the suite
+// directory so ad-hoc operator-driven submissions cannot pollute the canonical
+// test suite tree (per the inline-runs spec's namespace-separation
+// requirement).
+//
+// Safety guardrails per DESIGN_PRINCIPLES_NEWTRON §13 (Prevent Bad Writes —
+// validate before any device-facing operation runs). The policy is built from
+// server defaults plus opt-ins on the request: ?allow_reconcile=true permits
+// topology-reconcile; ?timeout=<seconds> overrides the wall-time budget.
+func (s *Server) handleStartInlineRun(w http.ResponseWriter, r *http.Request) {
+	var req InlineRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+	if req.ScenarioYAML == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml is required"))
+		return
+	}
+
+	// Parse the YAML through the same parser file-backed scenarios use.
+	// Structural problems (unknown action, missing fields) reject here
+	// before the safety policy sees anything.
+	scenario, err := newtrun.ParseScenarioBytes([]byte(req.ScenarioYAML))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("scenario_yaml parse: %w", err))
+		return
+	}
+
+	// Build the per-request safety policy.
+	policy := DefaultInlineSafetyPolicy()
+	if s.cfg.InlineURLPrefix != "" {
+		policy.AllowedURLPrefixes = []string{s.cfg.InlineURLPrefix}
+	}
+	if req.AllowReconcile {
+		policy.AllowReconcile = true
+	}
+	if req.TimeoutSeconds > 0 {
+		policy.WallTimeBudget = time.Duration(req.TimeoutSeconds) * time.Second
+	}
+
+	if violation := policy.Validate(scenario); violation != nil {
+		writeError(w, http.StatusBadRequest, violation)
+		return
+	}
+
+	// Allocate a UUID-shaped identifier and reserve the registry key.
+	runID := newRunID()
+	entry, err := s.registry.Acquire(runID)
+	if err != nil {
+		// Collision on UUID is astronomically unlikely but handle defensively.
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("allocating run id: %w", err))
+		return
+	}
+
+	// Inline-namespaced initial state.
+	state := &newtrun.RunState{
+		Suite:    runID,
+		Topology: scenario.Topology,
+		Status:   newtrun.SuiteStatusRunning,
+		Started:  entry.Started,
+	}
+	if err := newtrun.SaveInlineRunState(state); err != nil {
+		s.registry.Release(runID, &RunResult{Err: err})
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
+		return
+	}
+
+	// Resolve newtron-server URL.
+	newtronURL := req.NewtronServer
+	if newtronURL == "" {
+		newtronURL = s.cfg.NewtronServer
+	}
+
+	// Reporter chain: HTTPReporter → StateReporter (inline-namespaced via
+	// the Save field), no console output (browser frontends consume the SSE
+	// stream).
+	stateReporter := &newtrun.StateReporter{
+		State: state,
+		Save:  newtrun.SaveInlineRunState,
+	}
+	httpReporter := NewHTTPReporter(s.broker, runID, stateReporter)
+
+	// Wall-time-bounded context. Cancellation falls through to Server.Stop
+	// + stop endpoint paths because the entry's Cancel function delegates
+	// to the cancelTimeout produced here.
+	runCtx, cancelTimeout := context.WithTimeout(context.Background(), policy.WallTimeBudget)
+	entry.Cancel = cancelTimeout
+
+	// Build a synthetic scenarios directory holding only this scenario,
+	// then point the Runner at it. The Runner's existing
+	// ParseAllScenarios path then finds exactly one scenario to run with
+	// the rest of its lifecycle (deploy / connect / iterate / report)
+	// intact. Per §3 of ai-instructions: this reuses the existing Runner
+	// machinery rather than introducing a parallel single-scenario
+	// execution path.
+	scenariosDir, err := writeInlineScenarioDir(runID, scenario, req.ScenarioYAML)
+	if err != nil {
+		cancelTimeout()
+		s.registry.Release(runID, &RunResult{Err: err})
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("staging scenario: %w", err))
+		return
+	}
+
+	runner := newtrun.NewRunner(scenariosDir)
+	runner.ServerURL = newtronURL
+	runner.NetworkID = s.cfg.NetworkID
+	runner.Progress = httpReporter
+
+	opts := newtrun.RunOptions{
+		All:      true,
+		Suite:    runID,
+		Keep:     true,
+		NoDeploy: true, // inline runs operate on already-deployed topology
+	}
+
+	go func() {
+		defer cancelTimeout()
+		results, runErr := runner.Run(runCtx, opts)
+		finalizeInlineState(state, results, runErr)
+		// Clean up the synthetic scenarios directory.
+		_ = os.RemoveAll(scenariosDir)
+		s.registry.Release(runID, &RunResult{Scenarios: results, Err: runErr})
+	}()
+
+	writeJSON(w, http.StatusAccepted, InlineRunResponse{
+		RunID:   runID,
+		Started: entry.Started,
+	})
+}
+
+// writeInlineScenarioDir stages the inline scenario YAML on disk in a
+// dedicated directory so the existing Runner.ScenariosDir machinery loads
+// exactly this scenario. The directory is removed when the run finishes.
+func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario, yaml string) (string, error) {
+	inlineDir, err := newtrun.InlineStateDir(runID)
+	if err != nil {
+		return "", err
+	}
+	scenariosDir := filepath.Join(inlineDir, "scenarios")
+	if err := os.MkdirAll(scenariosDir, 0755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(scenariosDir, "inline.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		return "", err
+	}
+	return scenariosDir, nil
+}
+
+// finalizeInlineState mirrors finalizeRunState but persists to the inline
+// namespace via SaveInlineRunState.
+func finalizeInlineState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
+	state.Finished = time.Now()
+	switch {
+	case runErr != nil:
+		var pauseErr *newtrun.PauseError
+		if errors.As(runErr, &pauseErr) {
+			state.Status = newtrun.SuiteStatusPaused
+		} else if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+			state.Status = newtrun.SuiteStatusAborted
+		} else {
+			state.Status = newtrun.SuiteStatusFailed
+		}
+	default:
+		state.Status = newtrun.SuiteStatusComplete
+		for _, r := range results {
+			if r != nil && (r.Status == newtrun.StepStatusFailed || r.Status == newtrun.StepStatusError) {
+				state.Status = newtrun.SuiteStatusFailed
+				break
+			}
+		}
+	}
+	_ = newtrun.SaveInlineRunState(state)
+}
+
+// newRunID returns a fresh run identifier. UUIDv4-shaped (8-4-4-4-12 hex).
+// Using crypto/rand directly avoids pulling in a UUID library; the
+// substantive property we need is collision-resistance + opacity.
+func newRunID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is astronomical; if it does fail we'd rather
+		// crash than emit a predictable ID.
+		panic("crypto/rand failed: " + err.Error())
+	}
+	// Set version (4) and variant (RFC 4122).
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	hexStr := hex.EncodeToString(b[:])
+	return hexStr[0:8] + "-" + hexStr[8:12] + "-" + hexStr[12:16] + "-" + hexStr[16:20] + "-" + hexStr[20:32]
 }

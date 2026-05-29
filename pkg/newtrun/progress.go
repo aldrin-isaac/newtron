@@ -264,11 +264,27 @@ func formatDurationCompact(d time.Duration) string {
 
 // StateReporter wraps a ProgressReporter and persists run state after each
 // scenario completes. This enables the status command and resume on pause.
+//
+// Save lets the caller pick which namespace the state file lives in.
+// Defaults to SaveRunState (suite namespace under ~/.newtron/newtrun/<suite>/).
+// The inline-runs handler injects SaveInlineRunState so the state lives under
+// ~/.newtron/newtrun/_inline/<id>/ — keeping the suite directory undisturbed
+// per the namespace-separation requirement in the inline-runs spec.
 type StateReporter struct {
 	Inner ProgressReporter
 	State *RunState
+	Save  func(*RunState) error
 
 	scenarioIndex int // tracks current scenario index for StepStart
+}
+
+// save invokes the configured save function, falling back to SaveRunState
+// when none is set. Centralizing this avoids a nil-check at every callback.
+func (r *StateReporter) save() error {
+	if r.Save != nil {
+		return r.Save(r.State)
+	}
+	return SaveRunState(r.State)
 }
 
 func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
@@ -282,7 +298,7 @@ func (r *StateReporter) SuiteStart(scenarios []*Scenario) {
 			Requires:    s.Requires,
 		}
 	}
-	if err := SaveRunState(r.State); err != nil {
+	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
@@ -295,7 +311,7 @@ func (r *StateReporter) ScenarioStart(name string, index, total int) {
 	if index < len(r.State.Scenarios) {
 		r.State.Scenarios[index].Status = "running"
 	}
-	if err := SaveRunState(r.State); err != nil {
+	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
@@ -312,7 +328,7 @@ func (r *StateReporter) ScenarioEnd(result *ScenarioResult, index, total int) {
 		r.State.Scenarios[index].CurrentStepIndex = 0
 		r.State.Scenarios[index].SkipReason = result.SkipReason
 	}
-	if err := SaveRunState(r.State); err != nil {
+	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
@@ -326,7 +342,7 @@ func (r *StateReporter) StepStart(scenario string, step *Step, index, total int)
 		r.State.Scenarios[r.scenarioIndex].CurrentStepAction = string(step.Action)
 		r.State.Scenarios[r.scenarioIndex].CurrentStepIndex = index
 	}
-	if err := SaveRunState(r.State); err != nil {
+	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
@@ -348,7 +364,7 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 				Message:  result.Message,
 			},
 		)
-		if err := SaveRunState(r.State); err != nil {
+		if err := r.save(); err != nil {
 			util.Logger.Warnf("save run state: %v", err)
 		}
 	}
@@ -358,7 +374,7 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 }
 
 func (r *StateReporter) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
-	if err := SaveRunState(r.State); err != nil {
+	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {

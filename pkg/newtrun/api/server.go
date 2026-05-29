@@ -34,6 +34,13 @@ type Config struct {
 	// newtron-server. Defaults to "default".
 	NetworkID string
 
+	// InlineURLPrefix restricts the URLs that the `newtron` action in an
+	// inline-submitted scenario may call. Defaults to NewtronServer's
+	// base URL — inline scenarios can only call the configured
+	// newtron-server. Empty string disables URL restriction (used in
+	// tests). The inline-runs safety spec mandates this guardrail.
+	InlineURLPrefix string
+
 	// Logger is the logger the server uses. Defaults to log.Default().
 	Logger *log.Logger
 }
@@ -118,6 +125,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/runs", s.handleListRuns)
 	mux.HandleFunc("POST /api/runs", s.handleStartRun)
+	mux.HandleFunc("POST /api/runs/inline", s.handleStartInlineRun)
 	mux.HandleFunc("GET /api/runs/{suite}", s.handleGetRun)
 	mux.HandleFunc("DELETE /api/runs/{suite}", s.handleDeleteRun)
 	mux.HandleFunc("POST /api/runs/{suite}/pause", s.handlePauseRun)
@@ -167,20 +175,21 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, infos)
 }
 
-// handleGetRun returns the full RunState for one suite.
+// handleGetRun returns the full RunState for one run. Accepts either a
+// suite name or an inline UUID; LoadAnyRunState resolves both.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+	id := r.PathValue("suite")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
 		return
 	}
-	state, err := newtrun.LoadRunState(suite)
+	state, err := newtrun.LoadAnyRunState(id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if state == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no state for suite %q", suite))
+		writeError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
 		return
 	}
 	// Per §46 the wire shape mirrors the substrate: RunState has JSON tags
