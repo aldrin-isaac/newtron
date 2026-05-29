@@ -119,6 +119,14 @@ func (s *Server) Registry() *RunRegistry {
 	return s.registry
 }
 
+// Handler returns the fully-wired http.Handler (mux + middleware). Used
+// by external CLI E2E tests to mount the real server into an
+// httptest.Server without needing to spawn a subprocess — the binary
+// being tested points its client at the httptest URL via NEWTRUN_SERVER.
+func (s *Server) Handler() http.Handler {
+	return s.buildHandler()
+}
+
 // buildHandler wires the mux with middleware.
 func (s *Server) buildHandler() http.Handler {
 	mux := http.NewServeMux()
@@ -289,59 +297,6 @@ func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, TopologiesResponse{Topologies: names})
-}
-
-// handleListSuites returns the suite names discoverable under SuitesBase.
-func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
-	names, err := listSubdirs(s.cfg.SuitesBase)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, SuitesResponse{Suites: names})
-}
-
-// handleListSuiteScenarios returns the scenarios in the named suite as
-// summaries (name, topology, step count, requires). The browser suite
-// picker and `newtrun list <suite>` both use this. Scenario authoring
-// (full CRUD via PUT/DELETE) is tracked separately in issue #33.
-func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
-		return
-	}
-	dir := filepath.Join(s.cfg.SuitesBase, suite)
-	scenarios, err := newtrun.ParseAllScenarios(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if newtrun.HasRequires(scenarios) {
-		if sorted, sortErr := newtrun.ValidateDependencyGraph(scenarios); sortErr == nil {
-			scenarios = sorted
-		}
-	}
-	resp := SuiteScenariosResponse{Suite: suite}
-	if len(scenarios) > 0 {
-		resp.Topology = scenarios[0].Topology
-	}
-	resp.Scenarios = make([]ScenarioSummary, len(scenarios))
-	for i, sc := range scenarios {
-		resp.Scenarios[i] = ScenarioSummary{
-			Name:        sc.Name,
-			Description: sc.Description,
-			Topology:    sc.Topology,
-			Platform:    sc.Platform,
-			StepCount:   len(sc.Steps),
-			Requires:    sc.Requires,
-		}
-	}
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // listSubdirs returns the names of immediate subdirectories. Missing base

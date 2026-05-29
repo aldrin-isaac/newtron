@@ -100,17 +100,19 @@ newtrun's code lives in three places: CLI client (`cmd/newtrun/`), server entry 
 newtron/
 ├── cmd/
 │   ├── newtrun/                  # CLI client (thin HTTP-client surface)
-│   │   ├── main.go               # Root command, --server flag, --verbose
+│   │   ├── main.go               # Root command, --newtrun-server flag, --verbose
 │   │   ├── clientutil.go         # newClient factory, requireServer probe
 │   │   ├── helpers.go            # resolveSuite, resolveTopologyFromState
 │   │   ├── cmd_start.go          # POST /api/runs + SSE event renderer
 │   │   ├── cmd_pause.go          # POST /api/runs/{suite}/pause
 │   │   ├── cmd_stop.go           # multi-step orchestration: stop + destroy + delete
-│   │   ├── cmd_status.go         # GET-based status display
+│   │   ├── cmd_status.go         # GET /api/runs + /api/runs/{suite} display
 │   │   ├── cmd_list.go           # list suites and scenarios via GET /api/suites/...
 │   │   ├── cmd_suites.go         # GET /api/suites
+│   │   ├── cmd_scenario.go       # scenario CRUD + suite create/delete subcommands
 │   │   ├── cmd_topologies.go     # GET /api/topologies
-│   │   └── cmd_actions.go        # static action vocabulary help
+│   │   ├── cmd_actions.go        # static action vocabulary help
+│   │   └── scenario_e2e_test.go  # CLI→server E2E: scenario lifecycle, bad-YAML rejection
 │   └── newtrun-server/           # Server entry point
 │       └── main.go               # --listen, --suites-base, --topologies-base
 │
@@ -130,9 +132,11 @@ newtron/
 │   └── report.go                 # ScenarioResult, StepResult, ReportGenerator
 │
 ├── pkg/newtrun/api/              # HTTP server package
-│   ├── server.go                 # Server, Config, route registration, read endpoints
+│   ├── server.go                 # Server, Config, route registration, handleHealth, handleListTopologies
 │   ├── middleware.go             # withRequestID, withLogger, withRecovery
 │   ├── runs.go                   # write endpoints + lifecycle (start, inline, pause, stop, delete)
+│   ├── suites.go                 # GET/POST/DELETE /api/suites + list scenarios + nameRE validation
+│   ├── scenarios.go              # GET/PUT/DELETE per-scenario; ParseScenarioBytes gate + atomic write
 │   ├── registry.go               # RunRegistry, RegistryEntry, AlreadyRunningError
 │   ├── safety.go                 # InlineSafetyPolicy, SafetyViolation
 │   ├── reporter.go               # HTTPReporter (implements ProgressReporter)

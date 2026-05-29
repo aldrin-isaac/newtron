@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,25 +66,11 @@ func doRequest(t *testing.T, ts *httptest.Server, method, path string, body []by
 		t.Fatalf("do %s %s: %v", method, path, err)
 	}
 	defer resp.Body.Close()
-	respBody, _ := readAll(resp)
-	return resp, respBody
-}
-
-func readAll(r *http.Response) ([]byte, error) {
-	buf := make([]byte, 0, 1024)
-	tmp := make([]byte, 512)
-	for {
-		n, err := r.Body.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			if err.Error() == "EOF" {
-				return buf, nil
-			}
-			return buf, err
-		}
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
 	}
+	return resp, respBody
 }
 
 // TestScenario_PutCreatesFile covers the create path: PUT to a name
@@ -130,6 +117,32 @@ func TestScenario_PutUpdatesExisting(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(suiteDir, "hello.yaml")); err == nil {
 		t.Errorf("update incorrectly created a second file at hello.yaml")
+	}
+}
+
+// TestScenario_PutIsIdempotent covers the second-write contract: two
+// identical PUTs against the same name both succeed. The first creates
+// (201); the second updates (200) with the same body. Final on-disk
+// content matches exactly. Catches a regression where the create path
+// might inadvertently refuse re-application.
+func TestScenario_PutIsIdempotent(t *testing.T) {
+	ts, suiteDir := newScenarioTestServer(t)
+	body := validScenarioYAML("idempotent")
+
+	resp1, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/idempotent", body)
+	if resp1.StatusCode != http.StatusCreated {
+		t.Fatalf("first PUT status: got %d, want 201", resp1.StatusCode)
+	}
+	resp2, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/idempotent", body)
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("second PUT status: got %d, want 200", resp2.StatusCode)
+	}
+	got, err := os.ReadFile(filepath.Join(suiteDir, "idempotent.yaml"))
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("file content drifted after repeated identical PUT")
 	}
 }
 

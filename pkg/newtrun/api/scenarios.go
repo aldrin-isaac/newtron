@@ -12,87 +12,16 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
-
-// nameRE constrains suite and scenario identifiers to a safe subset.
-// Allowed: alphanumeric, hyphen, underscore. No path separators, no
-// dots (which would let a caller traverse with "."/"..") — operators
-// who want lexical ordering use a "NN-" prefix that fits this charset.
-var nameRE = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
-
-// CreateSuiteRequest is the body for POST /api/suites.
-type CreateSuiteRequest struct {
-	Name string `json:"name"`
-}
-
-// handleCreateSuite creates an empty suite directory. Used by newtcon
-// to bootstrap a new test suite before populating it with scenarios.
-// Returns 201 on create, 409 if the suite already exists, 400 on
-// invalid name.
-func (s *Server) handleCreateSuite(w http.ResponseWriter, r *http.Request) {
-	var req CreateSuiteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
-		return
-	}
-	if !nameRE.MatchString(req.Name) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q: must match %s", req.Name, nameRE))
-		return
-	}
-	dir := filepath.Join(s.cfg.SuitesBase, req.Name)
-	if _, err := os.Stat(dir); err == nil {
-		writeError(w, http.StatusConflict, fmt.Errorf("suite %q already exists", req.Name))
-		return
-	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("create suite dir: %w", err))
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]string{"name": req.Name})
-}
-
-// handleDeleteSuite removes an empty suite directory. Refuses to
-// delete a suite that still contains scenario files — newtcon's
-// browser UX is expected to delete scenarios individually first so
-// the destructive action is explicit at the scenario level rather
-// than masked behind a directory rmdir.
-func (s *Server) handleDeleteSuite(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if !nameRE.MatchString(suite) {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid suite name %q", suite))
-		return
-	}
-	dir := filepath.Join(s.cfg.SuitesBase, suite)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if len(entries) > 0 {
-		writeError(w, http.StatusConflict, fmt.Errorf("suite %q is not empty (%d entries); delete scenarios first", suite, len(entries)))
-		return
-	}
-	if err := os.Remove(dir); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("remove suite dir: %w", err))
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
 
 // handleGetScenario returns one scenario's raw YAML body. Resolves
 // the on-disk file by either exact <name>.yaml or *-<name>.yaml,
