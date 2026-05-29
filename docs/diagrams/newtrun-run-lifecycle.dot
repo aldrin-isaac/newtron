@@ -1,0 +1,26 @@
+digraph runlifecycle {
+  rankdir=TB;
+  node [shape=box, fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=9];
+
+  client [label="\n  CLI / browser frontend  \n\n"];
+  api    [label="\n  POST /api/runs  \n  or /api/runs/inline  \n\n"];
+  reg    [label="\n  RunRegistry.Acquire(key)  \n\n"];
+  state  [label="\n  SaveRunState  \n  (suite or _inline)  \n\n"];
+  go     [label="\n  spawn goroutine:  \n  Runner.Run(ctx, opts)  \n\n"];
+  rep    [label="\n  ProgressReporter chain  \n  StateReporter + HTTPReporter  \n\n"];
+  brk    [label="\n  EventBroker  \n\n"];
+  sse    [label="\n  GET /api/runs/{id}/events  \n  (SSE subscribers)  \n\n"];
+  done   [label="\n  finalizeRunState  \n  Release  \n\n"];
+
+  client -> api;
+  api -> reg;
+  reg -> state [label="initial"];
+  state -> go;
+  go -> rep [label="callbacks"];
+  rep -> brk [label="publish"];
+  brk -> sse [label="multiplex"];
+  sse -> client [label="event stream"];
+  go -> done [label="terminal"];
+  done -> state [label="final"];
+}
