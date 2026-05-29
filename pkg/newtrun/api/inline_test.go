@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -271,6 +272,40 @@ func TestInlineGetRunResolvesInlineID(t *testing.T) {
 	}
 	if state["suite"] != runID {
 		t.Errorf("state.Suite: got %v, want %v", state["suite"], runID)
+	}
+}
+
+// TestFinalizeInlineState_DeadlineExceededPersistsAborted is the
+// integration guard for the §7 consolidation: the unit test on
+// SuiteStatusFromOutcome proves the helper returns aborted, but a
+// future refactor could still bypass it for inline runs. This test
+// drives the real finalizeInlineState → SaveInlineRunState chain
+// with a DeadlineExceeded error and reads the persisted state.json
+// back to assert it actually landed as aborted on disk. If the
+// finalizer ever post-processes the helper's return again (or stops
+// using it altogether), this test catches it before merge.
+func TestFinalizeInlineState_DeadlineExceededPersistsAborted(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const runID = "deadline-exceeded-test-uuid"
+	state := &newtrun.RunState{
+		Suite:   runID,
+		Status:  newtrun.SuiteStatusRunning,
+		Started: time.Now().Add(-time.Second),
+	}
+	finalizeInlineState(state, nil, context.DeadlineExceeded)
+
+	if state.Status != newtrun.SuiteStatusAborted {
+		t.Errorf("in-memory state.Status = %v, want SuiteStatusAborted", state.Status)
+	}
+	loaded, err := newtrun.LoadInlineRunState(runID)
+	if err != nil {
+		t.Fatalf("LoadInlineRunState: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("no persisted state for finalized inline run")
+	}
+	if loaded.Status != newtrun.SuiteStatusAborted {
+		t.Errorf("persisted state.Status = %v, want SuiteStatusAborted", loaded.Status)
 	}
 }
 

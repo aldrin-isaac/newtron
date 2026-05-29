@@ -156,6 +156,43 @@ steps:
 	}
 }
 
+// TestE2E_ScenarioPutFromFile exercises the --file flag path of
+// `newtrun scenario put`. TestE2E_ScenarioLifecycle covers the stdin
+// path; this test covers the file path so a regression in
+// readScenarioBody's flag handling can't ship undetected.
+func TestE2E_ScenarioPutFromFile(t *testing.T) {
+	binPath := buildCLI(t)
+	url, suitesBase := e2eServer(t)
+	const suite = "filedemo"
+	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", suite); rc != 0 {
+		t.Fatalf("suite create exit=%d", rc)
+	}
+	body := []byte(`name: from-file
+description: e2e test for --file path
+topology: synthetic
+platform: sonic-vs
+steps:
+  - name: wait
+    action: wait
+    duration: 1s
+`)
+	bodyPath := filepath.Join(t.TempDir(), "scenario.yaml")
+	if err := os.WriteFile(bodyPath, body, 0644); err != nil {
+		t.Fatalf("write body: %v", err)
+	}
+	if _, _, rc := runCLI(t, binPath, url, nil,
+		"scenario", "put", suite, "from-file", "--file", bodyPath); rc != 0 {
+		t.Fatalf("scenario put --file exit=%d", rc)
+	}
+	got, err := os.ReadFile(filepath.Join(suitesBase, suite, "from-file.yaml"))
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Errorf("on-disk body differs from --file body")
+	}
+}
+
 // TestE2E_ScenarioPutRejectsBadYAML verifies that the validation
 // gate surfaces all the way to the operator's exit code: bad YAML
 // from the CLI side produces non-zero exit and a server error
