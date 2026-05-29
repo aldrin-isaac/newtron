@@ -61,9 +61,9 @@ func TestVerifyWithReader_Site1_KeyAbsent(t *testing.T) {
 	if len(ops) != 1 {
 		t.Fatalf("expected 1 verify_read op, got %d", len(ops))
 	}
-	if ops[0].Kind != sonic.PerWriteKindVerifyRead || ops[0].Result != sonic.PerWriteResultRejected {
+	if ops[0].Kind != sonic.DeviceOpsKindVerifyRead || ops[0].Result != sonic.DeviceOpsResultRejected {
 		t.Errorf("Site 1: op Kind=%q Result=%q, want %q/%q",
-			ops[0].Kind, ops[0].Result, sonic.PerWriteKindVerifyRead, sonic.PerWriteResultRejected)
+			ops[0].Kind, ops[0].Result, sonic.DeviceOpsKindVerifyRead, sonic.DeviceOpsResultRejected)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestVerifyWithReader_Site2_FieldMismatch(t *testing.T) {
 		}
 	}
 	// verify_read op carries the same full-hash device_response.
-	if len(ops) != 1 || ops[0].Result != sonic.PerWriteResultRejected {
+	if len(ops) != 1 || ops[0].Result != sonic.DeviceOpsResultRejected {
 		t.Fatalf("expected 1 rejected verify_read op, got %d ops", len(ops))
 	}
 	if !strings.Contains(ops[0].DeviceResponse, "local_asn=65002") {
@@ -141,7 +141,7 @@ func TestVerifyWithReader_Site3_DeleteStillPresent(t *testing.T) {
 	if !strings.Contains(e.DeviceResponse, "vni=10001") {
 		t.Errorf("Site 3: DeviceResponse %q missing %q", e.DeviceResponse, "vni=10001")
 	}
-	if len(ops) != 1 || ops[0].Result != sonic.PerWriteResultRejected {
+	if len(ops) != 1 || ops[0].Result != sonic.DeviceOpsResultRejected {
 		t.Fatalf("expected 1 rejected verify_read op, got %d ops", len(ops))
 	}
 }
@@ -168,7 +168,7 @@ func TestVerifyWithReader_AllPassed(t *testing.T) {
 			result.Passed, result.Failed, len(result.Errors))
 	}
 	// One applied verify_read op with the full hash content.
-	if len(ops) != 1 || ops[0].Kind != sonic.PerWriteKindVerifyRead || ops[0].Result != sonic.PerWriteResultApplied {
+	if len(ops) != 1 || ops[0].Kind != sonic.DeviceOpsKindVerifyRead || ops[0].Result != sonic.DeviceOpsResultApplied {
 		t.Fatalf("expected 1 applied verify_read op, got %d ops with first Kind=%q Result=%q",
 			len(ops), ops[0].Kind, ops[0].Result)
 	}

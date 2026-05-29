@@ -104,8 +104,8 @@ type StepEndPayload struct {
 }
 
 // StepProgressPayload mirrors ProgressReporter.StepProgress(scenario,
-// *Step, *sonic.PerSubstrateOp, index). Op is the canonical
-// PerSubstrateOp shape — no wrapper type — per §46 (Wire Shape Mirrors
+// *Step, *sonic.DeviceOp, index). Op is the canonical
+// DeviceOp shape — no wrapper type — per §46 (Wire Shape Mirrors
 // Substrate) and ai-instructions §13 (Same Concept = Same Name).
 //
 // One event per substrate operation. The browser frontend's "watch
@@ -116,7 +116,7 @@ type StepProgressPayload struct {
 	Step     string                 `json:"step"`
 	Action   newtrun.StepAction     `json:"action"`
 	Index    int                    `json:"index"`
-	Op       sonic.PerSubstrateOp   `json:"op"`
+	Op       sonic.DeviceOp   `json:"op"`
 }
 
 // SuiteEndPayload mirrors ProgressReporter.SuiteEnd([]*ScenarioResult, duration).

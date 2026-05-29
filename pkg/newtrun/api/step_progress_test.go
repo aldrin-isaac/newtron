@@ -8,9 +8,9 @@ import (
 	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
-// stubOp returns a representative PerSubstrateOp for tests.
-func stubOp(seq int, kind, result string) *sonic.PerSubstrateOp {
-	return &sonic.PerSubstrateOp{
+// stubOp returns a representative DeviceOp for tests.
+func stubOp(seq int, kind, result string) *sonic.DeviceOp {
+	return &sonic.DeviceOp{
 		Seq:    seq,
 		Kind:   kind,
 		Table:  "VLAN",
@@ -109,14 +109,14 @@ func TestStateReporterStepProgressBuffersUntilStepEnd(t *testing.T) {
 		t.Fatalf("scenario steps: got %d, want 1", got)
 	}
 	step0 := state.Scenarios[0].Steps[0]
-	if got := len(step0.Substrate); got != 2 {
-		t.Fatalf("Substrate: got %d events, want 2", got)
+	if got := len(step0.DeviceOps); got != 2 {
+		t.Fatalf("DeviceOps: got %d events, want 2", got)
 	}
-	if step0.Substrate[0].Kind != "redis_write" {
-		t.Errorf("Substrate[0].Kind: got %q, want redis_write", step0.Substrate[0].Kind)
+	if step0.DeviceOps[0].Kind != "redis_write" {
+		t.Errorf("DeviceOps[0].Kind: got %q, want redis_write", step0.DeviceOps[0].Kind)
 	}
-	if step0.Substrate[1].Kind != "verify_read" {
-		t.Errorf("Substrate[1].Kind: got %q, want verify_read", step0.Substrate[1].Kind)
+	if step0.DeviceOps[1].Kind != "verify_read" {
+		t.Errorf("DeviceOps[1].Kind: got %q, want verify_read", step0.DeviceOps[1].Kind)
 	}
 }
 
@@ -144,11 +144,11 @@ func TestStateReporterStepProgressClearedBetweenSteps(t *testing.T) {
 	if got := len(state.Scenarios[0].Steps); got != 2 {
 		t.Fatalf("scenario steps: got %d, want 2", got)
 	}
-	if got := len(state.Scenarios[0].Steps[0].Substrate); got != 1 {
-		t.Errorf("step1 Substrate: got %d, want 1", got)
+	if got := len(state.Scenarios[0].Steps[0].DeviceOps); got != 1 {
+		t.Errorf("step1 DeviceOps: got %d, want 1", got)
 	}
-	if got := len(state.Scenarios[0].Steps[1].Substrate); got != 0 {
-		t.Errorf("step2 Substrate should be empty (no events sent); got %d", got)
+	if got := len(state.Scenarios[0].Steps[1].DeviceOps); got != 0 {
+		t.Errorf("step2 DeviceOps should be empty (no events sent); got %d", got)
 	}
 }
 

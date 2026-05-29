@@ -13,7 +13,7 @@ func TestConsoleProgressStepProgressVerboseRenders(t *testing.T) {
 	var buf bytes.Buffer
 	p := &consoleProgress{W: &buf, Verbose: true}
 	step := &Step{Name: "apply", Action: ActionNewtron}
-	op := &sonic.PerSubstrateOp{
+	op := &sonic.DeviceOp{
 		Seq:    0,
 		Kind:   "redis_write",
 		Table:  "VLAN",
@@ -40,7 +40,7 @@ func TestConsoleProgressStepProgressNonVerboseSilent(t *testing.T) {
 	var buf bytes.Buffer
 	p := &consoleProgress{W: &buf, Verbose: false}
 	step := &Step{Name: "apply", Action: ActionNewtron}
-	op := &sonic.PerSubstrateOp{Seq: 0, Kind: "redis_write", Result: "applied"}
+	op := &sonic.DeviceOp{Seq: 0, Kind: "redis_write", Result: "applied"}
 
 	p.StepProgress("scen-a", step, op, 0)
 
@@ -53,7 +53,7 @@ func TestConsoleProgressStepProgressRejectedHighlighted(t *testing.T) {
 	var buf bytes.Buffer
 	p := &consoleProgress{W: &buf, Verbose: true}
 	step := &Step{Name: "apply", Action: ActionNewtron}
-	op := &sonic.PerSubstrateOp{
+	op := &sonic.DeviceOp{
 		Seq:    0,
 		Kind:   "redis_write",
 		Table:  "VLAN",

@@ -458,7 +458,7 @@ All public types live in `pkg/newtron/types.go`. External consumers (CLI, newtru
 
 ### 3.1 Execution and Write Result
 
-Used as request options and response types for all mutating operations (§4.6–4.8). `WriteResult` is the §46 wire-shape mirror of newtron's internal ChangeSet substrate — `Changes` is the canonical typed form (every `sonic.ConfigChange` the operation produced), `Preview` is the human-readable rendering of the same data, and `PerWrite` records the per-substrate-operation outcomes captured during Apply and Verify.
+Used as request options and response types for all mutating operations (§4.6–4.8). `WriteResult` is the §46 wire-shape mirror of newtron's internal ChangeSet substrate — `Changes` is the canonical typed form (every `sonic.ConfigChange` the operation produced), `Preview` is the human-readable rendering of the same data, and `DeviceOps` records the per-device-operation outcomes captured during Apply and Verify.
 
 ```go
 type ExecOpts struct {
@@ -469,7 +469,7 @@ type ExecOpts struct {
 type WriteResult struct {
     Preview      string                 `json:"preview,omitempty"`     // dry-run: ChangeSet preview text
     Changes      []sonic.ConfigChange   `json:"changes,omitempty"`     // §46 canonical substrate — every CONFIG_DB add/modify/delete
-    PerWrite     []sonic.PerSubstrateOp `json:"per_write,omitempty"`   // one entry per Redis HSET/DEL during Apply + one verify_read per Change
+    DeviceOps    []sonic.DeviceOp `json:"device_ops,omitempty"`   // one entry per Redis HSET/DEL during Apply + one verify_read per Change
     ChangeCount  int                    `json:"change_count"`
     Applied      bool                   `json:"applied"`
     Verified     bool                   `json:"verified"`
@@ -941,7 +941,7 @@ type ValidationError struct {
 }  // → 400
 
 // VerificationFailedError is returned by Node.Commit when post-apply verify
-// detected a mismatch. Result is the typed WriteResult — including PerWrite,
+// detected a mismatch. Result is the typed WriteResult — including DeviceOps,
 // Verification.Errors (with DeviceResponse), and Changes — so the 409 wire
 // envelope surfaces the full substrate, not just a stringified summary (§46).
 type VerificationFailedError struct {

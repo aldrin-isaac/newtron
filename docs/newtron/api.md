@@ -2369,7 +2369,7 @@ The principled basis for not exposing them:
   + the device's profile, not from a mutable settings store.
 
 Consumers needing per-operation rollback or partial-failure recovery
-build it from substrate that IS exposed: the typed `per_write[]` on
+build it from substrate that IS exposed: the typed `device_ops[]` on
 write responses (newtron#19 Option A — Phase 2a), the
 `VerificationResult.Errors[]` with `DeviceResponse` field (Phase 1 +
 envelope fix #21), and the reverse-operation half of §15 (every CRUD
@@ -2663,7 +2663,7 @@ These types are returned by all device write operations (S8, S13).
 |-------|------|-------------|
 | `preview` | string (optional) | Human-readable diff preview. Present only on dry-run; absent (not empty string) otherwise. |
 | `changes` | ConfigChange[] (optional) | Typed ChangeSet entries — every CONFIG_DB add/modify/delete in this operation, in the same `sonic.ConfigChange` shape newtron uses internally. §46 canonical substrate. Absent when `change_count` is 0. |
-| `per_write` | PerSubstrateOp[] (optional) | Per-operation outcomes recorded during Apply and Verify — one entry per Redis HSET/DEL and one verify_read entry per change. Operationalizes operator-philosophy invariant #1 (no black boxes) for the apply pipeline. Absent in loopback mode (no device transport). §11 + §46. See PerSubstrateOp below. |
+| `device_ops` | DeviceOp[] (optional) | Per-operation outcomes recorded during Apply and Verify — one entry per Redis HSET/DEL and one verify_read entry per change. Operationalizes operator-philosophy invariant #1 (no black boxes) for the apply pipeline. Absent in loopback mode (no device transport). §11 + §46. See DeviceOp below. |
 | `change_count` | integer | Number of CONFIG_DB changes |
 | `applied` | boolean | Whether changes were committed to Redis |
 | `verified` | boolean | Whether post-apply verification passed |
@@ -2694,12 +2694,12 @@ actualized?" questions use `DriftEntry` via `GET /intent/drift` (§11).
 | `actual` | string | Actual value (empty string if missing) |
 | `device_response` | string (optional) | Verbatim device-side reply observed when the mismatch was detected. For field mismatches, the full HGETALL content as sorted `key=value` pairs; for missing-key or still-present cases, the Redis-level status. §46. |
 
-#### PerSubstrateOp
+#### DeviceOp
 
 One record per Device I/O Operation newtron performed during Apply or Verify
 — one Redis HSET, one Redis DEL, one daemon-settle wait, one verify re-read.
 Per `docs/newtron/unified-pipeline-architecture.md` §7. Surfaced on
-`WriteResult.per_write` (200 path) and inside the typed envelope `data`
+`WriteResult.device_ops` (200 path) and inside the typed envelope `data`
 field of 409 responses to `VerificationFailedError`. Vocabulary matches the
 newtcon contract verbatim.
 
@@ -2735,7 +2735,7 @@ Conflict with the standard envelope and the typed `*WriteResult` in `data`:
     "applied": true,
     "verified": false,
     "changes": [...],
-    "per_write": [...],
+    "device_ops": [...],
     "verification": {
       "passed": 0,
       "failed": 1,
@@ -2749,7 +2749,7 @@ Conflict with the standard envelope and the typed `*WriteResult` in `data`:
 }
 ```
 
-The substrate (`verification.errors[].device_response` + `per_write`)
+The substrate (`verification.errors[].device_response` + `device_ops`)
 survives the error envelope — §46 (HTTP API Boundary) on the failure path.
 Other error kinds emit only the `error` field; only
 `VerificationFailedError` attaches structured `data`.

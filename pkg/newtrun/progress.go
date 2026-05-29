@@ -14,26 +14,26 @@ import (
 
 // ProgressReporter receives lifecycle callbacks during test execution.
 //
-// StepProgress is a per-substrate-operation event delivered between
+// StepProgress is a per-device-operation event delivered between
 // StepStart and StepEnd. Producers (currently: none in this repo; the
 // newtron-action SSE consumer is the planned producer once newtron Phase
-// 2b lands upstream) call StepProgress as each substrate operation
-// completes. The payload type sonic.PerSubstrateOp is reused directly
-// from newtron — per ai-instructions §13 (Same Concept = Same Name) and
-// DESIGN_PRINCIPLES_NEWTRON §46 (Wire Shape Mirrors Substrate), the same
-// type that newtron's WriteResult.PerWrite uses is the type the test
-// framework forwards. No parallel SubstrateOp type.
+// 2b lands upstream) call StepProgress as each device operation
+// completes. The payload type sonic.DeviceOp is reused directly from
+// newtron — per ai-instructions §13 (Same Concept = Same Name) and
+// DESIGN_PRINCIPLES_NEWTRON §46 (Wire Shape Mirrors Canonical Types),
+// the same type that newtron's WriteResult.DeviceOps uses is the type
+// the test framework forwards. No parallel device-op type.
 //
-// Sinks that cannot meaningfully render per-substrate-operation events
-// (e.g., non-verbose consoleProgress) implement StepProgress as a no-op.
-// Sinks that can (HTTPReporter for SSE; StateReporter for state.json)
-// surface the events at the appropriate granularity.
+// Sinks that cannot meaningfully render per-device-op events (e.g.,
+// non-verbose consoleProgress) implement StepProgress as a no-op. Sinks
+// that can (HTTPReporter for SSE; StateReporter for state.json) surface
+// the events at the appropriate granularity.
 type ProgressReporter interface {
 	SuiteStart(scenarios []*Scenario)
 	ScenarioStart(name string, index, total int)
 	ScenarioEnd(result *ScenarioResult, index, total int)
 	StepStart(scenario string, step *Step, index, total int)
-	StepProgress(scenario string, step *Step, op *sonic.PerSubstrateOp, index int)
+	StepProgress(scenario string, step *Step, op *sonic.DeviceOp, index int)
 	StepEnd(scenario string, result *StepResult, index, total int)
 	SuiteEnd(results []*ScenarioResult, duration time.Duration)
 }
@@ -132,19 +132,19 @@ func (p *consoleProgress) StepStart(scenario string, step *Step, index, total in
 	// Only show in verbose mode
 }
 
-func (p *consoleProgress) StepProgress(scenario string, step *Step, op *sonic.PerSubstrateOp, index int) {
+func (p *consoleProgress) StepProgress(scenario string, step *Step, op *sonic.DeviceOp, index int) {
 	if !p.Verbose || op == nil {
 		return
 	}
-	// One terse line per substrate operation: enough for an operator
+	// One terse line per device operation: enough for an operator
 	// watching the terminal to see writes land; not so chatty that the
 	// scrollback becomes unreadable. The HTTPReporter is the
-	// substrate-grade sink; this is the human-grade glance.
+	// canonical-substrate sink; this is the human-grade glance.
 	fmt.Fprintf(p.W, "               %s %s %s%s\n",
 		op.Kind, op.Table, op.Key, p.opResultSuffix(op.Result))
 }
 
-// opResultSuffix renders the substrate-op result as a colored suffix when
+// opResultSuffix renders the device-op result as a colored suffix when
 // it's not "applied" (the happy path). Keeps applied events visually quiet
 // and surfaces the noteworthy ones (rejected, skipped).
 func (p *consoleProgress) opResultSuffix(result string) string {
@@ -320,11 +320,11 @@ type StateReporter struct {
 
 	scenarioIndex int // tracks current scenario index for StepStart
 
-	// currentStepSubstrate buffers PerSubstrateOp events received via
+	// currentStepDeviceOps buffers DeviceOp events received via
 	// StepProgress between StepStart and StepEnd. Flushed onto the
-	// StepState's Substrate slice when StepEnd creates the persistent
+	// StepState's DeviceOps slice when StepEnd creates the persistent
 	// record. Cleared at every StepStart.
-	currentStepSubstrate []sonic.PerSubstrateOp
+	currentStepDeviceOps []sonic.DeviceOp
 }
 
 // save invokes the configured save function, falling back to SaveRunState
@@ -394,18 +394,18 @@ func (r *StateReporter) StepStart(scenario string, step *Step, index, total int)
 	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
-	// Track current step's intended Substrate slice. We can't append here
+	// Track current step's intended DeviceOps slice. We can't append here
 	// directly because the StepEnd handler creates the StepState entry;
 	// instead, we buffer events on the reporter and flush them at StepEnd.
-	r.currentStepSubstrate = nil
+	r.currentStepDeviceOps = nil
 	if r.Inner != nil {
 		r.Inner.StepStart(scenario, step, index, total)
 	}
 }
 
-func (r *StateReporter) StepProgress(scenario string, step *Step, op *sonic.PerSubstrateOp, index int) {
+func (r *StateReporter) StepProgress(scenario string, step *Step, op *sonic.DeviceOp, index int) {
 	if op != nil {
-		r.currentStepSubstrate = append(r.currentStepSubstrate, *op)
+		r.currentStepDeviceOps = append(r.currentStepDeviceOps, *op)
 	}
 	if r.Inner != nil {
 		r.Inner.StepProgress(scenario, step, op, index)
@@ -424,10 +424,10 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 				Status:    string(result.Status),
 				Duration:  formatDurationCompact(result.Duration),
 				Message:   result.Message,
-				Substrate: r.currentStepSubstrate,
+				DeviceOps: r.currentStepDeviceOps,
 			},
 		)
-		r.currentStepSubstrate = nil
+		r.currentStepDeviceOps = nil
 		if err := r.save(); err != nil {
 			util.Logger.Warnf("save run state: %v", err)
 		}

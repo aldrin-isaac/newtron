@@ -89,7 +89,7 @@ func (r *HTTPReporter) StepStart(scenario string, step *newtrun.Step, index, tot
 	}
 }
 
-func (r *HTTPReporter) StepProgress(scenario string, step *newtrun.Step, op *sonic.PerSubstrateOp, index int) {
+func (r *HTTPReporter) StepProgress(scenario string, step *newtrun.Step, op *sonic.DeviceOp, index int) {
 	if op == nil {
 		return
 	}

@@ -59,19 +59,20 @@ type ScenarioState struct {
 
 // StepState tracks the outcome of a single step within a scenario.
 //
-// Substrate captures per-substrate-operation events newtron emits during
-// the step's execution (per newtron#19's PerSubstrateOp shape). For PR 4
-// the field is populated when external producers call StepProgress on the
-// reporter chain; the per-step-streaming forwarding from newtron-server
-// SSE is gated on newtron Phase 2b which is upstream-deferred. The slice
-// is empty when no producer fed events.
+// DeviceOps captures per-device-operation events newtron emits during the
+// step's execution (per newtron#19's DeviceOp shape — one Redis HSET,
+// HDEL, daemon wait, or verify re-read). The field is populated when
+// external producers call StepProgress on the reporter chain; the per-
+// step-streaming forwarding from newtron-server SSE is gated on newtron
+// Phase 2b which is upstream-deferred. The slice is empty when no
+// producer fed events.
 type StepState struct {
-	Name      string                `json:"name"`
-	Action    string                `json:"action"`
-	Status    string                `json:"status"`   // "PASS","FAIL","SKIP","ERROR"
-	Duration  string                `json:"duration"` // e.g. "2s", "<1s"
-	Message   string                `json:"message,omitempty"`
-	Substrate []sonic.PerSubstrateOp `json:"substrate,omitempty"`
+	Name      string           `json:"name"`
+	Action    string           `json:"action"`
+	Status    string           `json:"status"`   // "PASS","FAIL","SKIP","ERROR"
+	Duration  string           `json:"duration"` // e.g. "2s", "<1s"
+	Message   string           `json:"message,omitempty"`
+	DeviceOps []sonic.DeviceOp `json:"device_ops,omitempty"`
 }
 
 // StateDir returns the state directory path for a suite name.

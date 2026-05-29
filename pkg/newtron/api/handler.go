@@ -208,7 +208,7 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 // writeError writes a JSON error response.
 //
-// For VerificationFailedError, the typed WriteResult (Verification, PerWrite,
+// For VerificationFailedError, the typed WriteResult (Verification, DeviceOps,
 // Changes) is propagated as the Data field of the envelope so consumers see
 // the full substrate that newtron computed — §46 (HTTP API Boundary) on the
 // failure path. Other error kinds emit Error only.

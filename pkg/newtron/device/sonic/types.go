@@ -79,20 +79,20 @@ type VerificationResult struct {
 	Errors []VerificationError // details of each failure
 }
 
-// PerSubstrateOp records the outcome of one Device I/O Operation newtron
+// DeviceOp records the outcome of one Device I/O Operation newtron
 // performed against a device — one Redis HSET, one Redis DEL, one daemon-
 // settle wait, or one post-deliver verify re-read. These are the operations
 // defined by docs/newtron/unified-pipeline-architecture.md §7 (Device I/O).
 //
-// PerSubstrateOp is distinct from ChangeSet entries (which represent
+// DeviceOp is distinct from ChangeSet entries (which represent
 // *planned* writes) and from DriftEntry (which represents
 // *expected-vs-actual* deltas). It records what *happened* — the operational
 // outcome of one substrate operation, captured at the moment the operation
 // executed.
 //
 // Per DESIGN_PRINCIPLES_NEWTRON §11 (ChangeSet Universal Contract) and §46
-// (HTTP API Boundary), PerSubstrateOp is the canonical per-substrate-op
-// primitive surfaced on WriteResult.PerWrite — the wire shape that lets
+// (HTTP API Boundary), DeviceOp is the canonical per-substrate-op
+// primitive surfaced on WriteResult.DeviceOps — the wire shape that lets
 // consumers see exactly which Redis command landed, what the device
 // returned verbatim, and which was rejected. The vocabulary matches the
 // newtcon contract verbatim.
@@ -103,13 +103,13 @@ type VerificationResult struct {
 // applied/rejected for redis_write/redis_delete within one bundle is a
 // contract violation. daemon_wait and verify_read are post-EXEC operations
 // and MAY have mixed results.
-type PerSubstrateOp struct {
+type DeviceOp struct {
 	// Seq is the zero-based ordinal of this op within the per-target apply
 	// sequence. Strictly monotonically increasing.
 	Seq int `json:"seq"`
 
 	// Kind names which Device I/O Operation produced this entry.
-	// Bounded enum: PerWriteKind* constants.
+	// Bounded enum: DeviceOpsKind* constants.
 	Kind string `json:"kind"`
 
 	// Table, Key, Fields locate the substrate the op acted on. Fields is
@@ -119,7 +119,7 @@ type PerSubstrateOp struct {
 	Key    string            `json:"key,omitempty"`
 	Fields map[string]string `json:"fields,omitempty"`
 
-	// Result is the outcome. Bounded enum: PerWriteResult* constants.
+	// Result is the outcome. Bounded enum: DeviceOpsResult* constants.
 	Result string `json:"result"`
 
 	// DeviceResponse is the verbatim device/Redis-level reply observed at
@@ -131,21 +131,21 @@ type PerSubstrateOp struct {
 	At time.Time `json:"at"`
 }
 
-// PerWriteKind constants — the bounded enum for PerSubstrateOp.Kind.
+// DeviceOpsKind constants — the bounded enum for DeviceOp.Kind.
 // Vocabulary matches the newtcon contract verbatim.
 const (
-	PerWriteKindRedisWrite  = "redis_write"
-	PerWriteKindRedisDelete = "redis_delete"
-	PerWriteKindDaemonWait  = "daemon_wait"
-	PerWriteKindVerifyRead  = "verify_read"
+	DeviceOpsKindRedisWrite  = "redis_write"
+	DeviceOpsKindRedisDelete = "redis_delete"
+	DeviceOpsKindDaemonWait  = "daemon_wait"
+	DeviceOpsKindVerifyRead  = "verify_read"
 )
 
-// PerWriteResult constants — the bounded enum for PerSubstrateOp.Result.
+// DeviceOpsResult constants — the bounded enum for DeviceOp.Result.
 // Vocabulary matches the newtcon contract verbatim.
 const (
-	PerWriteResultApplied  = "applied"
-	PerWriteResultRejected = "rejected"
-	PerWriteResultSkipped  = "skipped"
+	DeviceOpsResultApplied  = "applied"
+	DeviceOpsResultRejected = "rejected"
+	DeviceOpsResultSkipped  = "skipped"
 )
 
 // VerificationError describes a single verification failure.

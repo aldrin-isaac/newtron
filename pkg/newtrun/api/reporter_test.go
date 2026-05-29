@@ -138,7 +138,7 @@ func (c *capturingReporter) ScenarioEnd(result *newtrun.ScenarioResult, index, t
 func (c *capturingReporter) StepStart(scenario string, step *newtrun.Step, index, total int) {
 	c.stepStarts++
 }
-func (c *capturingReporter) StepProgress(scenario string, step *newtrun.Step, op *sonic.PerSubstrateOp, index int) {
+func (c *capturingReporter) StepProgress(scenario string, step *newtrun.Step, op *sonic.DeviceOp, index int) {
 	c.stepProgress++
 }
 func (c *capturingReporter) StepEnd(scenario string, result *newtrun.StepResult, index, total int) {

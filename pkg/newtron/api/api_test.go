@@ -483,12 +483,12 @@ func TestWriteResult_ChangesPopulated(t *testing.T) {
 // TestWriteError_VerificationFailedEnvelope — newtron#21 (Cluster B envelope
 // fix companion to #19). Confirms that writeError emits a 409 response whose
 // body envelope carries the typed *WriteResult (Verification.Errors[] with
-// DeviceResponse + PerWrite) as Data, per §46. Exercises the wire-format path
+// DeviceResponse + DeviceOps) as Data, per §46. Exercises the wire-format path
 // directly without needing a live verify-failure.
 func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 	// Build a representative WriteResult that mirrors what a real verify-
 	// failure path would produce: Verification.Errors with substrate fields
-	// + PerWrite entries (verify_read kind, rejected result).
+	// + DeviceOps entries (verify_read kind, rejected result).
 	wr := &newtron.WriteResult{
 		Applied:     true,
 		ChangeCount: 1,
@@ -501,10 +501,10 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 				DeviceResponse: "local_asn=99999 router_id=10.0.0.1",
 			}},
 		},
-		PerWrite: []sonic.PerSubstrateOp{{
-			Seq: 0, Kind: sonic.PerWriteKindVerifyRead,
+		DeviceOps: []sonic.DeviceOp{{
+			Seq: 0, Kind: sonic.DeviceOpsKindVerifyRead,
 			Table: "BGP_GLOBALS", Key: "default",
-			Result: sonic.PerWriteResultRejected,
+			Result: sonic.DeviceOpsResultRejected,
 			DeviceResponse: "local_asn=99999 router_id=10.0.0.1",
 		}},
 	}
@@ -531,7 +531,7 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 	}
 
 	// The envelope's Data must round-trip back into a WriteResult with the
-	// substrate intact — Verification.Errors[].DeviceResponse + PerWrite.
+	// substrate intact — Verification.Errors[].DeviceResponse + DeviceOps.
 	raw, err := json.Marshal(resp.Data)
 	if err != nil {
 		t.Fatalf("marshal Data: %v", err)
@@ -546,8 +546,8 @@ func TestWriteError_VerificationFailedEnvelope(t *testing.T) {
 	if got.Verification.Errors[0].DeviceResponse != "local_asn=99999 router_id=10.0.0.1" {
 		t.Errorf("DeviceResponse lost or mangled; got %q", got.Verification.Errors[0].DeviceResponse)
 	}
-	if len(got.PerWrite) != 1 || got.PerWrite[0].Kind != sonic.PerWriteKindVerifyRead {
-		t.Errorf("PerWrite lost or mangled; got %+v", got.PerWrite)
+	if len(got.DeviceOps) != 1 || got.DeviceOps[0].Kind != sonic.DeviceOpsKindVerifyRead {
+		t.Errorf("DeviceOps lost or mangled; got %+v", got.DeviceOps)
 	}
 }
 
