@@ -421,18 +421,13 @@ func writeInlineScenarioDir(runID string, scenario *newtrun.Scenario, yaml strin
 }
 
 // finalizeInlineState mirrors finalizeRunState but persists to the inline
-// namespace via SaveInlineRunState.
+// namespace via SaveInlineRunState. The status mapping (including the
+// inline-budget DeadlineExceeded → aborted case) lives in
+// newtrun.SuiteStatusFromOutcome so suite and inline runs share one
+// source of truth.
 func finalizeInlineState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error) {
 	state.Finished = time.Now()
 	state.Status = newtrun.SuiteStatusFromOutcome(runErr, results)
-	// Treat deadline exceeded (the inline wall-time budget) the same as
-	// context.Canceled — both mean the run was cut short externally,
-	// which the SuiteStatusFromOutcome helper otherwise classifies as
-	// "failed". Override here so the inline timeout surface stays
-	// distinct from a real test failure.
-	if state.Status == newtrun.SuiteStatusFailed && errors.Is(runErr, context.DeadlineExceeded) {
-		state.Status = newtrun.SuiteStatusAborted
-	}
 	_ = newtrun.SaveInlineRunState(state)
 }
 
