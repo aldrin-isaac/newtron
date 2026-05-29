@@ -37,7 +37,7 @@ func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
 	r.StepStart("s1", step, 0, 1)
 	r.StepEnd("s1", stepResult, 0, 1)
 	r.ScenarioEnd(scenarioResult, 0, 1)
-	r.SuiteEnd([]*newtrun.ScenarioResult{scenarioResult}, 3*time.Second)
+	r.SuiteEnd([]*newtrun.ScenarioResult{scenarioResult}, newtrun.SuiteStatusComplete, 3*time.Second)
 
 	want := []EventType{
 		EventSuiteStart,
@@ -59,13 +59,47 @@ func TestReporterCallbacksProduceCorrectEventTypes(t *testing.T) {
 	}
 }
 
+// TestReporterSuiteEndCarriesStatus is the wire-side guard for the
+// shutdown-honesty fix: an aborted run must serialize as status=aborted
+// in the SSE SuiteEnd payload so the CLI can distinguish it from a
+// real test failure.
+func TestReporterSuiteEndCarriesStatus(t *testing.T) {
+	cases := []newtrun.SuiteStatus{
+		newtrun.SuiteStatusComplete,
+		newtrun.SuiteStatusFailed,
+		newtrun.SuiteStatusAborted,
+		newtrun.SuiteStatusPaused,
+	}
+	for _, status := range cases {
+		t.Run(string(status), func(t *testing.T) {
+			b := NewEventBroker()
+			events, unsub := b.Subscribe("test-suite")
+			defer unsub()
+			r := NewHTTPReporter(b, "test-suite", nil)
+			r.SuiteEnd(nil, status, time.Second)
+			select {
+			case ev := <-events:
+				p, ok := ev.Payload.(SuiteEndPayload)
+				if !ok {
+					t.Fatalf("payload type: got %T, want SuiteEndPayload", ev.Payload)
+				}
+				if p.Status != status {
+					t.Errorf("payload.Status: got %v, want %v", p.Status, status)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timeout waiting for SuiteEnd")
+			}
+		})
+	}
+}
+
 func TestReporterChainsToInner(t *testing.T) {
 	b := NewEventBroker()
 	inner := &capturingReporter{}
 	r := NewHTTPReporter(b, "test-suite", inner)
 
 	r.ScenarioStart("s1", 0, 1)
-	r.SuiteEnd(nil, time.Second)
+	r.SuiteEnd(nil, newtrun.SuiteStatusComplete, time.Second)
 
 	if inner.scenarioStarts != 1 {
 		t.Errorf("inner.scenarioStarts: got %d, want 1", inner.scenarioStarts)
@@ -144,6 +178,7 @@ func (c *capturingReporter) StepProgress(scenario string, step *newtrun.Step, op
 func (c *capturingReporter) StepEnd(scenario string, result *newtrun.StepResult, index, total int) {
 	c.stepEnds++
 }
-func (c *capturingReporter) SuiteEnd(results []*newtrun.ScenarioResult, duration time.Duration) {
+func (c *capturingReporter) SuiteEnd(results []*newtrun.ScenarioResult, status newtrun.SuiteStatus, duration time.Duration) {
+	_ = status
 	c.suiteEnds++
 }

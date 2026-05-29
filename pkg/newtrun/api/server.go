@@ -171,6 +171,13 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		if state == nil {
 			continue
 		}
+		// Same server-restart-honesty reconciliation as handleGetRun:
+		// a state file that says running but isn't in the live registry
+		// belongs to a previous server instance that died unfinalized.
+		if (state.Status == newtrun.SuiteStatusRunning || state.Status == newtrun.SuiteStatusPausing) &&
+			s.registry.Get(suite) == nil {
+			state.Status = newtrun.SuiteStatusAborted
+		}
 		infos = append(infos, runInfoFrom(state))
 	}
 	writeJSON(w, http.StatusOK, infos)
@@ -178,6 +185,14 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 
 // handleGetRun returns the full RunState for one run. Accepts either a
 // suite name or an inline UUID; LoadAnyRunState resolves both.
+//
+// Server-restart honesty: if state.json claims the run is running but
+// the registry has no entry for it, the previous server instance
+// crashed or was killed before it could finalize the state. Reconcile
+// on the fly to "aborted" rather than returning a stale running
+// signal — the registry is the live source of truth, and an
+// unreconciled running state would mislead the CLI's status display
+// indefinitely.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("suite")
 	if id == "" {
@@ -192,6 +207,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	if state == nil {
 		writeError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
 		return
+	}
+	if (state.Status == newtrun.SuiteStatusRunning || state.Status == newtrun.SuiteStatusPausing) &&
+		s.registry.Get(id) == nil {
+		state.Status = newtrun.SuiteStatusAborted
 	}
 	// Per §46 the wire shape mirrors the substrate: RunState has JSON tags
 	// already; serialize it directly without a wrapper type.

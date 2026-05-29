@@ -209,14 +209,19 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) ([]*ScenarioResult, e
 		result.Duration = time.Since(start)
 		return result, nil
 	})
-	if err != nil {
-		return results, err
-	}
 
-	if len(scenarios) > 1 {
-		r.progress(func(p ProgressReporter) { p.SuiteEnd(results, time.Since(suiteStart)) })
+	// Always emit SuiteEnd before returning so reporters (the SSE wire,
+	// state.json) carry the terminal status. The status is computed from
+	// (err, results) via the shared helper — the same logic the server
+	// finalizer uses for state.json, so the SSE event and the persisted
+	// state can never disagree. Even single-scenario runs emit SuiteEnd
+	// now: the CLI's exit-code path keys off it, and skipping it for
+	// len==1 left ad-hoc runs without a terminal event.
+	if len(scenarios) > 0 {
+		status := SuiteStatusFromOutcome(err, results)
+		r.progress(func(p ProgressReporter) { p.SuiteEnd(results, status, time.Since(suiteStart)) })
 	}
-	return results, nil
+	return results, err
 }
 
 // scenarioRunner is a callback that executes a single scenario within the
@@ -236,6 +241,20 @@ func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, op
 	}
 
 	for i, sc := range scenarios {
+		// Server-shutdown / external cancellation check. When the
+		// run's context is canceled (server SIGTERM cancelling the
+		// registry, or an admin call into the future), stop iterating
+		// instead of running the remainder as guaranteed failures.
+		// Without this, every remaining scenario emits a FAIL event
+		// (its subprocess fails because ctx is dead), the SSE wire
+		// fills with phantom failures, and the operator sees
+		// "N failed" that looks indistinguishable from a real bad
+		// suite. Returning ctx.Err() here routes through
+		// SuiteStatusFromOutcome to the aborted status.
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
+
 		platform := opts.Platform
 		if platform == "" {
 			platform = sc.Platform

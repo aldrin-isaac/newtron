@@ -120,9 +120,31 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 			// (auto-refresh dashboard reading state.json directly). The
 			// terminal exit code still derives from the same atomic
 			// flags so behavior matches the non-monitor case.
-			var hasFailure, hasError atomic.Bool
+			var hasFailure, hasError, suiteEndSeen, suiteAborted atomic.Bool
 			scenarioResults := make([]*newtrun.ScenarioResult, 0)
 			var resultsMu sync.Mutex
+
+			// markSuiteEnd is called from the SSE handler whenever a
+			// SuiteEnd arrives. The status field on the wire payload
+			// distinguishes "the run completed normally with N failures"
+			// (the suite was actually buggy) from "aborted" (the server
+			// shut down mid-run) — exit-code mapping below uses that
+			// distinction to avoid blaming tests for an infrastructure
+			// outage.
+			markSuiteEnd := func(ev api.Event) {
+				if ev.Type != api.EventSuiteEnd {
+					return
+				}
+				suiteEndSeen.Store(true)
+				if payload, err := json.Marshal(ev.Payload); err == nil {
+					var p api.SuiteEndPayload
+					if err := json.Unmarshal(payload, &p); err == nil {
+						if p.Status == newtrun.SuiteStatusAborted {
+							suiteAborted.Store(true)
+						}
+					}
+				}
+			}
 
 			var streamDone chan struct{}
 			if monitor {
@@ -132,6 +154,7 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 					_ = c.StreamEvents(ctx, started.Suite, func(ev api.Event) {
 						trackStatus(ev, &hasFailure, &hasError)
 						collectResult(ev, &scenarioResults, &resultsMu)
+						markSuiteEnd(ev)
 						if ev.Type == api.EventSuiteEnd {
 							cancel()
 						}
@@ -146,13 +169,34 @@ Exit code: 0 on success; 1 on test failure; 2 on infrastructure error.`,
 				streamErr := c.StreamEvents(ctx, started.Suite, func(ev api.Event) {
 					renderEvent(ev, &hasFailure, &hasError)
 					collectResult(ev, &scenarioResults, &resultsMu)
+					markSuiteEnd(ev)
 					if ev.Type == api.EventSuiteEnd {
 						cancel()
 					}
 				})
 				if streamErr != nil && ctx.Err() == nil {
-					return streamErr
+					// The SSE stream broke before we asked it to. This
+					// is almost always the server going away mid-run
+					// (SIGKILL with no drain; network blip). Report it
+					// as infrastructure error with a clearer message
+					// than the raw transport error, so an operator
+					// doesn't mistake it for a tool bug.
+					return fmt.Errorf("%w: newtrun-server connection lost mid-run; check state.json for the last persisted status",
+						errInfraError)
 				}
+			}
+
+			// If the stream ended cleanly but we never saw SuiteEnd, the
+			// server-side run was reaped (server shut down between events)
+			// — surface it the same way as the broken-stream case.
+			if !suiteEndSeen.Load() {
+				return fmt.Errorf("%w: stream ended without SuiteEnd; the server may have been shut down mid-run",
+					errInfraError)
+			}
+			// Aborted suites are infrastructure errors, not test failures —
+			// don't blame the suite for the server's shutdown.
+			if suiteAborted.Load() {
+				return fmt.Errorf("%w: run was aborted (server shut down)", errInfraError)
 			}
 
 			// Write reports (markdown always; JUnit if --junit set). Mirrors

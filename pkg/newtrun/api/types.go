@@ -126,9 +126,14 @@ type StepProgressPayload struct {
 	Op       sonic.DeviceOp   `json:"op"`
 }
 
-// SuiteEndPayload mirrors ProgressReporter.SuiteEnd([]*ScenarioResult, duration).
+// SuiteEndPayload mirrors ProgressReporter.SuiteEnd. The Status field
+// carries the terminal SuiteStatus (complete, failed, aborted, paused)
+// so wire consumers can distinguish "the suite ran and N scenarios
+// failed" from "the run was aborted mid-stream" — the two look
+// identical if you only count results.
 type SuiteEndPayload struct {
 	Results  []ScenarioEndPayload `json:"results"`
+	Status   newtrun.SuiteStatus  `json:"status"`
 	Duration string               `json:"duration"`
 }
 

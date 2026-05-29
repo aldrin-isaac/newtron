@@ -1,7 +1,9 @@
 package newtrun
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +27,35 @@ const (
 	SuiteStatusAborted  SuiteStatus = "aborted"
 	SuiteStatusFailed   SuiteStatus = "failed"
 )
+
+// SuiteStatusFromOutcome derives the terminal suite status from a
+// run-level error and the per-scenario results. It is the single source
+// of truth shared by the Runner (which emits the wire-side SuiteEnd
+// event) and the server-side finalizer (which writes state.json after
+// the goroutine returns). Both must agree on the status; pulling the
+// logic into one helper prevents them from drifting.
+//
+// Precedence: PauseError → paused, context.Canceled → aborted, any other
+// non-nil error → failed, else inspect per-scenario results for FAIL or
+// ERROR.
+func SuiteStatusFromOutcome(runErr error, results []*ScenarioResult) SuiteStatus {
+	if runErr != nil {
+		var pauseErr *PauseError
+		if errors.As(runErr, &pauseErr) {
+			return SuiteStatusPaused
+		}
+		if errors.Is(runErr, context.Canceled) {
+			return SuiteStatusAborted
+		}
+		return SuiteStatusFailed
+	}
+	for _, r := range results {
+		if r != nil && (r.Status == StepStatusFailed || r.Status == StepStatusError) {
+			return SuiteStatusFailed
+		}
+	}
+	return SuiteStatusComplete
+}
 
 // RunState is persisted to ~/.newtron/newtrun/<suite>/state.json.
 type RunState struct {

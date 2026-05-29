@@ -35,7 +35,7 @@ type ProgressReporter interface {
 	StepStart(scenario string, step *Step, index, total int)
 	StepProgress(scenario string, step *Step, op *sonic.DeviceOp, index int)
 	StepEnd(scenario string, result *StepResult, index, total int)
-	SuiteEnd(results []*ScenarioResult, duration time.Duration)
+	SuiteEnd(results []*ScenarioResult, status SuiteStatus, duration time.Duration)
 }
 
 // consoleProgress is an append-only terminal progress reporter.
@@ -180,7 +180,7 @@ func (p *consoleProgress) StepEnd(scenario string, result *StepResult, index, to
 	}
 }
 
-func (p *consoleProgress) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
+func (p *consoleProgress) SuiteEnd(results []*ScenarioResult, status SuiteStatus, duration time.Duration) {
 	passed, failed, skipped, errored := 0, 0, 0, 0
 	for _, r := range results {
 		switch r.Status {
@@ -437,11 +437,11 @@ func (r *StateReporter) StepEnd(scenario string, result *StepResult, index, tota
 	}
 }
 
-func (r *StateReporter) SuiteEnd(results []*ScenarioResult, duration time.Duration) {
+func (r *StateReporter) SuiteEnd(results []*ScenarioResult, status SuiteStatus, duration time.Duration) {
 	if err := r.save(); err != nil {
 		util.Logger.Warnf("save run state: %v", err)
 	}
 	if r.Inner != nil {
-		r.Inner.SuiteEnd(results, duration)
+		r.Inner.SuiteEnd(results, status, duration)
 	}
 }

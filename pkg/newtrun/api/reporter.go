@@ -123,7 +123,7 @@ func (r *HTTPReporter) StepEnd(scenario string, result *newtrun.StepResult, inde
 	}
 }
 
-func (r *HTTPReporter) SuiteEnd(results []*newtrun.ScenarioResult, duration time.Duration) {
+func (r *HTTPReporter) SuiteEnd(results []*newtrun.ScenarioResult, status newtrun.SuiteStatus, duration time.Duration) {
 	payloads := make([]ScenarioEndPayload, 0, len(results))
 	for i, res := range results {
 		payloads = append(payloads, scenarioEndFrom(res, i, len(results)))
@@ -132,10 +132,11 @@ func (r *HTTPReporter) SuiteEnd(results []*newtrun.ScenarioResult, duration time
 		Type: EventSuiteEnd,
 		Payload: SuiteEndPayload{
 			Results:  payloads,
+			Status:   status,
 			Duration: durationString(duration),
 		},
 	})
 	if r.Inner != nil {
-		r.Inner.SuiteEnd(results, duration)
+		r.Inner.SuiteEnd(results, status, duration)
 	}
 }
