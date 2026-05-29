@@ -52,7 +52,7 @@ newtrun is split into two binaries: a thin HTTP client (`bin/newtrun`) and a lon
 
 ### 3.1 Two binaries, two roles
 
-**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. Every state-changing command (`start`, `pause`, `stop`) sends an HTTP request and returns. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result. The CLI requires the server to be running.
+**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newtrun-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
 **`bin/newtrun-server` — the engine.** A long-lived process. Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP server that exposes all of it. Each `POST /api/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
@@ -107,7 +107,7 @@ newtron/
 │   │   ├── cmd_pause.go          # POST /api/runs/{suite}/pause
 │   │   ├── cmd_stop.go           # multi-step orchestration: stop + destroy + delete
 │   │   ├── cmd_status.go         # GET-based status display
-│   │   ├── cmd_list.go           # list suites and scenarios (filesystem-direct)
+│   │   ├── cmd_list.go           # list suites and scenarios via GET /api/suites/...
 │   │   ├── cmd_suites.go         # GET /api/suites
 │   │   ├── cmd_topologies.go     # GET /api/topologies
 │   │   └── cmd_actions.go        # static action vocabulary help
@@ -487,9 +487,11 @@ The server is the source of truth for run state. Multiple consumers can read the
 
 `~/.newtron/newtrun/<key>/state.json` (suite namespace) or `~/.newtron/newtrun/_inline/<uuid>/state.json` (inline namespace) is updated after every callback. The file is a complete `RunState` snapshot — operators can `cat` it directly or fetch it via `GET /api/runs/{id}`. Mid-flight, the file reflects the current step's status; after termination, it reflects the final result.
 
-### 11.3 Console output (post-completion)
+### 11.3 Reports and live monitor
 
-After a CLI-driven run finishes, the terminal has the rendered event stream. There is no separate markdown report at the present moment; the previous `--junit` and `--monitor` modes were dropped during the client/server split and are tracked as follow-on items.
+After a CLI-driven `start` run finishes, the CLI writes a markdown report to `newtrun/.generated/report.md` summarizing scenario status, duration, and per-step results. The `--junit <path>` flag additionally writes a JUnit XML report at the named path, suitable for CI consumption. Both reports are built from the SSE event stream the CLI already subscribed to — they are not separate API calls.
+
+`newtrun start --monitor` replaces the per-event terminal renderer with an auto-refreshing dashboard backed by `~/.newtron/newtrun/<suite>/state.json`. The SSE subscription still runs in the background so the run's pass/fail/error status can be reflected in the CLI's exit code, but the operator's view is the dashboard rather than the event log. `newtrun status --monitor` opens the same dashboard against an already-running suite without starting one.
 
 ## 12. End-to-End Walkthrough
 
@@ -552,21 +554,35 @@ A run that the operator paused with `bin/newtrun pause` follows the same flow bu
 
 ## 13. CLI Reference
 
-Every state-changing CLI command translates to one or more HTTP calls. The CLI requires `newtrun-server` to be running.
+Every command except `actions` and `version` requires newtrun-server to be running. The CLI never reads run state, suite YAMLs, or topology specs from disk on its own — it asks the server. When the server is unreachable, the CLI exits non-zero with `newtrun-server is not running` and the start hint.
 
 | Command | Endpoint(s) | Notes |
 |---------|-------------|-------|
-| `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd |
+| `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
 | `newtrun pause <suite>` | `POST /api/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
 | `newtrun stop <suite>` | `GET` + `POST /stop` + newtlab.Destroy + `DELETE` | Multi-step: cancel runner, destroy topology, clean state |
-| `newtrun status [suite]` | `GET /api/runs` and `GET /api/runs/{suite}` | All suites or one |
-| `newtrun list` | filesystem-direct | Lists available suites and scenarios |
-| `newtrun suites` | `GET /api/suites` | Server's view of available suites |
-| `newtrun topologies` | `GET /api/topologies` | Server's view of available topologies |
+| `newtrun status [suite]` | `GET /api/runs` + `GET /api/runs/{suite}` | All suites or one; `--monitor` auto-refreshes |
+| `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
+| `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
+| `newtrun topologies` | `GET /api/topologies` | Lists topology directories under the server's topologies base |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 
-Global flags: `--server <url>` (overrides `NEWTRUN_SERVER` env var), `-v / --verbose` (more terminal output).
+`newtrun start` flags:
+
+| Flag | Meaning |
+|------|---------|
+| `--dir <path>` | Run the suite at the given directory (replaces the positional name) |
+| `--scenario <name>` | Run a single scenario by name |
+| `--target <name>` | Run the minimum dependency chain that reaches the named scenario |
+| `--platform <name>` | Override the platform from the scenario YAML |
+| `--no-deploy` | Skip topology deployment (loopback / offline mode) |
+| `--monitor`, `-m` | Render an auto-refreshing dashboard instead of the per-event log |
+| `--junit <path>` | Write a JUnit XML report to the named path |
+| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`) — passed to the server-side Runner |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`) |
+
+Global flags: `--newtrun-server <url>` (newtrun-server URL; env: `NEWTRUN_SERVER`), `-v / --verbose` (more terminal output).
 
 Exit codes:
 

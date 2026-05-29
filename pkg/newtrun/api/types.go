@@ -57,13 +57,19 @@ type SuiteStartPayload struct {
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
-// ScenarioSummary is the suite-start summary of one scenario.
+// ScenarioSummary is the per-scenario view returned by SuiteStart events
+// and by GET /api/suites/{suite}/scenarios. The browser suite picker and
+// `newtrun list <suite>` both render from this shape, so it carries the
+// fields a chooser needs (name, topology, step count) plus dependency
+// info (requires) so dependency-ordered lists can be rendered without a
+// second call. Full scenario CRUD over HTTP is tracked in issue #33.
 type ScenarioSummary struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Topology    string `json:"topology"`
-	Platform    string `json:"platform,omitempty"`
-	StepCount   int    `json:"step_count"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Topology    string   `json:"topology"`
+	Platform    string   `json:"platform,omitempty"`
+	StepCount   int      `json:"step_count"`
+	Requires    []string `json:"requires,omitempty"`
 }
 
 // ScenarioStartPayload mirrors ProgressReporter.ScenarioStart(name, index, total).
@@ -257,12 +263,31 @@ type HealthResponse struct {
 	Version string `json:"version"`
 }
 
+// SuiteScenariosResponse is the response shape for GET
+// /api/suites/{suite}/scenarios.
+type SuiteScenariosResponse struct {
+	Suite     string            `json:"suite"`
+	Topology  string            `json:"topology,omitempty"`
+	Scenarios []ScenarioSummary `json:"scenarios"`
+}
+
 // StartRunRequest is the body for POST /api/runs. Names the suite to run
 // and optional run-shaping options that mirror the existing CLI flags.
+//
+// Suite (named) and SuiteDir (path) are alternatives — exactly one must
+// be set. Suite resolves under the server's SuitesBase; SuiteDir is an
+// absolute filesystem path the server reads directly. The path mode
+// matches the original CLI's --dir flag and honors the server's
+// filesystem permissions; security posture is bounded by deployment-
+// time trust controls (loopback default, reverse proxy for non-loopback).
 type StartRunRequest struct {
 	// Suite is the file-backed suite name under the server's SuitesBase.
-	// Required.
-	Suite string `json:"suite"`
+	// Mutually exclusive with SuiteDir.
+	Suite string `json:"suite,omitempty"`
+
+	// SuiteDir is an absolute path to a suite directory the server reads
+	// directly. Mutually exclusive with Suite.
+	SuiteDir string `json:"suite_dir,omitempty"`
 
 	// Scenario, if set, runs a single scenario from the suite. Mutually
 	// exclusive with Target and All.
@@ -292,6 +317,16 @@ type StartRunRequest struct {
 	// for topology discovery. If empty, the server uses its configured
 	// default (Config.NewtronServer).
 	NewtronServer string `json:"newtron_server,omitempty"`
+
+	// NetworkID overrides the newtron network identifier for this run. If
+	// empty, the server uses its configured default (Config.NetworkID).
+	NetworkID string `json:"network_id,omitempty"`
+
+	// JUnitPath, when non-empty, instructs the run to remember a JUnit
+	// XML output path. The server does not write the file — it's a hint
+	// the CLI uses to coordinate report generation client-side. Present
+	// here for CLI compatibility with the original --junit flag.
+	JUnitPath string `json:"junit_path,omitempty"`
 }
 
 // StartRunResponse is the body returned by POST /api/runs.

@@ -44,6 +44,14 @@ Without --dir or --suite, shows all suites with state.
 				detail = true
 			}
 
+			// Strict Option A: every read goes through newtrun-server,
+			// so probe the server first. If it's down, the error
+			// message tells the operator how to bring it back up rather
+			// than printing stale state from disk.
+			if err := requireServer(cmd.Context(), newClient()); err != nil {
+				return err
+			}
+
 			// Specific suite by directory path.
 			if cmd.Flags().Changed("dir") {
 				suite := newtrun.SuiteName(dir)

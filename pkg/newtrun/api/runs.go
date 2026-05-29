@@ -26,8 +26,12 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	if req.Suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite is required"))
+	if req.Suite == "" && req.SuiteDir == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("suite or suite_dir is required"))
+		return
+	}
+	if req.Suite != "" && req.SuiteDir != "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("suite and suite_dir are mutually exclusive"))
 		return
 	}
 	// Default: All=true when neither Scenario nor Target is set, matching
@@ -36,8 +40,26 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		req.All = true
 	}
 
+	// Resolve the suite directory and the run key. When suite_dir is
+	// supplied, the run key is the basename of that path (mirrors the
+	// original CLI's newtrun.SuiteName behavior). When suite is supplied,
+	// the run key is the suite name and the directory is resolved under
+	// SuitesBase.
+	var suiteDir, suiteKey string
+	if req.SuiteDir != "" {
+		suiteDir = req.SuiteDir
+		suiteKey = filepath.Base(filepath.Clean(req.SuiteDir))
+	} else {
+		suiteDir = filepath.Join(s.cfg.SuitesBase, req.Suite)
+		suiteKey = req.Suite
+	}
+	if !directoryExists(suiteDir) {
+		writeError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
+		return
+	}
+
 	// Reserve the suite key. Same-suite re-run rejected as 409.
-	entry, err := s.registry.Acquire(req.Suite)
+	entry, err := s.registry.Acquire(suiteKey)
 	if err != nil {
 		var already *AlreadyRunningError
 		if errors.As(err, &already) {
@@ -45,14 +67,6 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	// Resolve suite directory under the configured base.
-	suiteDir := filepath.Join(s.cfg.SuitesBase, req.Suite)
-	if !directoryExists(suiteDir) {
-		s.registry.Release(req.Suite, &RunResult{Err: fmt.Errorf("suite directory not found: %s", suiteDir)})
-		writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found at %s", req.Suite, suiteDir))
 		return
 	}
 
@@ -66,13 +80,30 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		Platform:  req.Platform,
 		NoDeploy:  req.NoDeploy,
 		Verbose:   req.Verbose,
-		Suite:     req.Suite,
+		JUnitPath: req.JUnitPath,
+		Suite:     suiteKey,
 		Keep:      true,
+	}
+
+	// Resume from paused state: if a previous run was paused, populate
+	// opts.Resume and opts.Completed so the runner skips already-passed
+	// scenarios. Mirrors the original CLI behavior — the source of truth
+	// is the on-disk state.json, which survives server restarts.
+	if existing, err := newtrun.LoadRunState(suiteKey); err == nil && existing != nil {
+		if existing.Status == newtrun.SuiteStatusPaused {
+			opts.Resume = true
+			opts.Completed = make(map[string]newtrun.StepStatus, len(existing.Scenarios))
+			for _, sc := range existing.Scenarios {
+				if sc.Status != "" {
+					opts.Completed[sc.Name] = newtrun.StepStatus(sc.Status)
+				}
+			}
+		}
 	}
 
 	// Construct the persistent state record.
 	state := &newtrun.RunState{
-		Suite:    req.Suite,
+		Suite:    suiteKey,
 		SuiteDir: suiteDir,
 		Platform: req.Platform,
 		Target:   req.Target,
@@ -80,7 +111,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		Started:  entry.Started,
 	}
 	if err := newtrun.SaveRunState(state); err != nil {
-		s.registry.Release(req.Suite, &RunResult{Err: err})
+		s.registry.Release(suiteKey, &RunResult{Err: err})
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persisting initial state: %w", err))
 		return
 	}
@@ -89,6 +120,11 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	newtronURL := req.NewtronServer
 	if newtronURL == "" {
 		newtronURL = s.cfg.NewtronServer
+	}
+	// Resolve network ID: request body wins, else server default.
+	networkID := req.NetworkID
+	if networkID == "" {
+		networkID = s.cfg.NetworkID
 	}
 
 	// Set up the reporter chain. HTTPReporter publishes to the broker
@@ -100,12 +136,12 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		Inner: nil,
 		State: state,
 	}
-	httpReporter := NewHTTPReporter(s.broker, req.Suite, stateReporter)
+	httpReporter := NewHTTPReporter(s.broker, suiteKey, stateReporter)
 
 	// Construct the runner.
 	runner := newtrun.NewRunner(suiteDir)
 	runner.ServerURL = newtronURL
-	runner.NetworkID = s.cfg.NetworkID
+	runner.NetworkID = networkID
 	runner.Progress = httpReporter
 
 	// Cancellable context for the run. Stop endpoints call entry.Cancel.
@@ -118,11 +154,11 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		results, runErr := runner.Run(runCtx, opts)
 		finalizeRunState(state, results, runErr)
-		s.registry.Release(req.Suite, &RunResult{Scenarios: results, Err: runErr})
+		s.registry.Release(suiteKey, &RunResult{Scenarios: results, Err: runErr})
 	}()
 
 	writeJSON(w, http.StatusAccepted, StartRunResponse{
-		Suite:   req.Suite,
+		Suite:   suiteKey,
 		Started: entry.Started,
 	})
 }

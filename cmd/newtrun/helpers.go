@@ -70,12 +70,16 @@ func resolveTopologiesDir() string {
 // resolveSuite resolves a suite name from --dir flag or auto-detection.
 // The filter function controls which suites are considered: return true for
 // suites that should be included. Pass nil to accept any suite with state.
+//
+// Server-mediated per the strict Option A directive — the CLI never
+// reads ~/.newtron/newtrun/ directly. Callers must have already
+// gated on requireServer; this helper assumes the server is reachable.
 func resolveSuite(cmd *cobra.Command, dir string, filter func(newtrun.SuiteStatus) bool) (string, error) {
 	if cmd.Flags().Changed("dir") {
 		return newtrun.SuiteName(dir), nil
 	}
 
-	suites, err := newtrun.ListSuiteStates()
+	suites, err := listSuiteNamesViaClient()
 	if err != nil {
 		return "", err
 	}
@@ -95,7 +99,7 @@ func resolveSuite(cmd *cobra.Command, dir string, filter func(newtrun.SuiteStatu
 	// Apply filter (e.g. pause command wants only running/pausing/paused)
 	var matched []string
 	for _, s := range suites {
-		state, err := newtrun.LoadRunState(s)
+		state, err := fetchRunStateViaClient(s)
 		if err != nil || state == nil {
 			continue
 		}
@@ -113,17 +117,12 @@ func resolveSuite(cmd *cobra.Command, dir string, filter func(newtrun.SuiteStatu
 	return matched[0], nil
 }
 
-// resolveTopologyFromState infers the topology name from suite state.
-// Falls back to parsing scenario files if state.Topology is empty.
+// resolveTopologyFromState returns the topology name carried by the
+// suite's run state. The server already populates this field when it
+// starts a run, so the CLI no longer needs a filesystem fallback. An
+// empty return value means the run state itself doesn't know — caller
+// should display "unknown" rather than silently fall back to on-disk
+// reads of scenario YAMLs.
 func resolveTopologyFromState(state *newtrun.RunState) string {
-	if state.Topology != "" {
-		return state.Topology
-	}
-	if state.SuiteDir != "" {
-		scenarios, _ := newtrun.ParseAllScenarios(state.SuiteDir)
-		if len(scenarios) > 0 {
-			return scenarios[0].Topology
-		}
-	}
-	return ""
+	return state.Topology
 }

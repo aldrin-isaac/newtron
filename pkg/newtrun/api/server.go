@@ -133,6 +133,7 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("GET /api/runs/{suite}/events", s.handleRunEvents)
 	mux.HandleFunc("GET /api/topologies", s.handleListTopologies)
 	mux.HandleFunc("GET /api/suites", s.handleListSuites)
+	mux.HandleFunc("GET /api/suites/{suite}/scenarios", s.handleListSuiteScenarios)
 
 	var handler http.Handler = mux
 	handler = withLogger(s.logger)(handler)
@@ -274,6 +275,49 @@ func (s *Server) handleListSuites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SuitesResponse{Suites: names})
+}
+
+// handleListSuiteScenarios returns the scenarios in the named suite as
+// summaries (name, topology, step count, requires). The browser suite
+// picker and `newtrun list <suite>` both use this. Scenario authoring
+// (full CRUD via PUT/DELETE) is tracked separately in issue #33.
+func (s *Server) handleListSuiteScenarios(w http.ResponseWriter, r *http.Request) {
+	suite := r.PathValue("suite")
+	if suite == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
+		return
+	}
+	dir := filepath.Join(s.cfg.SuitesBase, suite)
+	scenarios, err := newtrun.ParseAllScenarios(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeError(w, http.StatusNotFound, fmt.Errorf("suite %q not found", suite))
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if newtrun.HasRequires(scenarios) {
+		if sorted, sortErr := newtrun.ValidateDependencyGraph(scenarios); sortErr == nil {
+			scenarios = sorted
+		}
+	}
+	resp := SuiteScenariosResponse{Suite: suite}
+	if len(scenarios) > 0 {
+		resp.Topology = scenarios[0].Topology
+	}
+	resp.Scenarios = make([]ScenarioSummary, len(scenarios))
+	for i, sc := range scenarios {
+		resp.Scenarios[i] = ScenarioSummary{
+			Name:        sc.Name,
+			Description: sc.Description,
+			Topology:    sc.Topology,
+			Platform:    sc.Platform,
+			StepCount:   len(sc.Steps),
+			Requires:    sc.Requires,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // listSubdirs returns the names of immediate subdirectories. Missing base
