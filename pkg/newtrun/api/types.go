@@ -57,13 +57,19 @@ type SuiteStartPayload struct {
 	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
-// ScenarioSummary is the suite-start summary of one scenario.
+// ScenarioSummary is the per-scenario view returned by SuiteStart events
+// and by GET /api/suites/{suite}/scenarios. The browser suite picker and
+// `newtrun list <suite>` both render from this shape, so it carries the
+// fields a chooser needs (name, topology, step count) plus dependency
+// info (requires) so dependency-ordered lists can be rendered without a
+// second call. Full scenario CRUD over HTTP is tracked in issue #33.
 type ScenarioSummary struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Topology    string `json:"topology"`
-	Platform    string `json:"platform,omitempty"`
-	StepCount   int    `json:"step_count"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Topology    string   `json:"topology"`
+	Platform    string   `json:"platform,omitempty"`
+	StepCount   int      `json:"step_count"`
+	Requires    []string `json:"requires,omitempty"`
 }
 
 // ScenarioStartPayload mirrors ProgressReporter.ScenarioStart(name, index, total).
@@ -255,6 +261,14 @@ type SuitesResponse struct {
 type HealthResponse struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
+}
+
+// SuiteScenariosResponse is the response shape for GET
+// /api/suites/{suite}/scenarios.
+type SuiteScenariosResponse struct {
+	Suite     string            `json:"suite"`
+	Topology  string            `json:"topology,omitempty"`
+	Scenarios []ScenarioSummary `json:"scenarios"`
 }
 
 // StartRunRequest is the body for POST /api/runs. Names the suite to run

@@ -125,6 +125,17 @@ func (c *Client) ListSuites(ctx context.Context) ([]string, error) {
 	return resp.Suites, nil
 }
 
+// ListSuiteScenarios returns the scenarios in the named suite as
+// summaries (name, topology, step count, dependency edges). 404 means
+// the suite directory doesn't exist on the server.
+func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.SuiteScenariosResponse, error) {
+	var resp api.SuiteScenariosResponse
+	if err := c.get(ctx, "/api/suites/"+suite+"/scenarios", &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListTopologies returns the topology names discoverable under the
 // server's TopologiesBase.
 func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {

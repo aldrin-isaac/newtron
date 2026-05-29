@@ -52,7 +52,7 @@ newtrun is split into two binaries: a thin HTTP client (`bin/newtrun`) and a lon
 
 ### 3.1 Two binaries, two roles
 
-**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. State-changing commands (`start`, `pause`, `stop`) send an HTTP request and require the server to be running. Read commands (`status`, `list`, `suites`, `topologies`) work filesystem-direct against the local state and spec directories — they need no server. The split is deliberate: an operator who just wants to inspect a finished run or list available suites should not be blocked by a stopped server, but mutating state must go through the single owner of the run registry. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
+**`bin/newtrun` — CLI client.** Parses flags, builds HTTP requests, talks to newtrun-server. Every command — state-changing or read-only — goes through the server. The CLI never reads `~/.newtron/newtrun/` or `newtrun/suites/` directly. The server is the single source of truth: in-memory run registry plus the freshest persisted state.json plus the on-disk suite YAMLs all sit behind one HTTP surface, and the CLI cannot inadvertently surface a stale snapshot the server hasn't blessed. If the server isn't reachable, every command exits with `newtrun-server is not running` and a hint to start it. For `start`, the CLI subscribes to the server's Server-Sent Events stream and renders scenario / step events as they arrive, then exits with a code reflecting the terminal SuiteEnd result.
 
 **`bin/newtrun-server` — the engine.** A long-lived process. Owns the `Runner` instances that execute scenarios, the in-memory registry that tracks active runs, the persistent state files under `~/.newtron/newtrun/`, and the HTTP server that exposes all of it. Each `POST /api/runs` request constructs a Runner in a goroutine and returns immediately with the run's identity; subsequent reads and event subscriptions see the run's state as it progresses.
 
@@ -107,7 +107,7 @@ newtron/
 │   │   ├── cmd_pause.go          # POST /api/runs/{suite}/pause
 │   │   ├── cmd_stop.go           # multi-step orchestration: stop + destroy + delete
 │   │   ├── cmd_status.go         # GET-based status display
-│   │   ├── cmd_list.go           # list suites and scenarios (filesystem-direct)
+│   │   ├── cmd_list.go           # list suites and scenarios via GET /api/suites/...
 │   │   ├── cmd_suites.go         # GET /api/suites
 │   │   ├── cmd_topologies.go     # GET /api/topologies
 │   │   └── cmd_actions.go        # static action vocabulary help
@@ -554,17 +554,17 @@ A run that the operator paused with `bin/newtrun pause` follows the same flow bu
 
 ## 13. CLI Reference
 
-State-changing commands translate to HTTP calls and require `newtrun-server` to be running. Read commands work filesystem-direct against the local state and spec directories.
+Every command except `actions` and `version` requires newtrun-server to be running. The CLI never reads run state, suite YAMLs, or topology specs from disk on its own — it asks the server. When the server is unreachable, the CLI exits non-zero with `newtrun-server is not running` and the start hint.
 
-| Command | Transport | Notes |
-|---------|-----------|-------|
+| Command | Endpoint(s) | Notes |
+|---------|-------------|-------|
 | `newtrun start <suite>` | `POST /api/runs` + SSE | Streams events; exits on terminal SuiteEnd. Resumes if the suite is paused. |
 | `newtrun pause <suite>` | `POST /api/runs/{suite}/pause` | Returns when the pause signal lands; Runner exits between scenarios |
 | `newtrun stop <suite>` | `GET` + `POST /stop` + newtlab.Destroy + `DELETE` | Multi-step: cancel runner, destroy topology, clean state |
-| `newtrun status [suite]` | filesystem-direct | Reads `~/.newtron/newtrun/<suite>/state.json`; `--monitor` auto-refreshes |
-| `newtrun list` | filesystem-direct | Lists available suites and scenarios |
-| `newtrun suites` | filesystem-direct | Lists suite directories under the suites base |
-| `newtrun topologies` | filesystem-direct | Lists topology directories under the topologies base |
+| `newtrun status [suite]` | `GET /api/runs` + `GET /api/runs/{suite}` | All suites or one; `--monitor` auto-refreshes |
+| `newtrun list [suite]` | `GET /api/suites` + `GET /api/suites/{suite}/scenarios` | Lists suites; with a suite name lists its scenarios |
+| `newtrun suites` | `GET /api/suites` | Lists suite directories under the server's suites base |
+| `newtrun topologies` | `GET /api/topologies` | Lists topology directories under the server's topologies base |
 | `newtrun actions` | static | Help text describing the action vocabulary |
 | `newtrun version` | static | Build version |
 
