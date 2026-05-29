@@ -35,16 +35,18 @@ const (
 // the goroutine returns). Both must agree on the status; pulling the
 // logic into one helper prevents them from drifting.
 //
-// Precedence: PauseError → paused, context.Canceled → aborted, any other
-// non-nil error → failed, else inspect per-scenario results for FAIL or
-// ERROR.
+// Precedence: PauseError → paused; context.Canceled or
+// context.DeadlineExceeded → aborted (the inline-runs wall-time budget
+// surfaces as DeadlineExceeded and is semantically the same "the run
+// was cut short externally" event as Canceled); any other non-nil
+// error → failed; else inspect per-scenario results for FAIL or ERROR.
 func SuiteStatusFromOutcome(runErr error, results []*ScenarioResult) SuiteStatus {
 	if runErr != nil {
 		var pauseErr *PauseError
 		if errors.As(runErr, &pauseErr) {
 			return SuiteStatusPaused
 		}
-		if errors.Is(runErr, context.Canceled) {
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 			return SuiteStatusAborted
 		}
 		return SuiteStatusFailed

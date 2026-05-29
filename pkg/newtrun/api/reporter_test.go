@@ -178,7 +178,6 @@ func (c *capturingReporter) StepProgress(scenario string, step *newtrun.Step, op
 func (c *capturingReporter) StepEnd(scenario string, result *newtrun.StepResult, index, total int) {
 	c.stepEnds++
 }
-func (c *capturingReporter) SuiteEnd(results []*newtrun.ScenarioResult, status newtrun.SuiteStatus, duration time.Duration) {
-	_ = status
+func (c *capturingReporter) SuiteEnd(results []*newtrun.ScenarioResult, _ newtrun.SuiteStatus, duration time.Duration) {
 	c.suiteEnds++
 }

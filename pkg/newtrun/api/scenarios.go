@@ -28,7 +28,7 @@ import (
 // matching the convention `newtrun list` already uses for files
 // written outside the API.
 func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
-	suite, name, ok := scenarioPathParams(w, r)
+	suite, name, ok := requireScenarioParams(w, r)
 	if !ok {
 		return
 	}
@@ -63,12 +63,11 @@ func (s *Server) handleGetScenario(w http.ResponseWriter, r *http.Request) {
 // "NN-" lexical prefix authored outside the API), since the URL
 // already addresses the canonical scenario name regardless.
 func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
-	suite, name, ok := scenarioPathParams(w, r)
+	suite, name, ok := requireScenarioParams(w, r)
 	if !ok {
 		return
 	}
-	suiteDir := filepath.Join(s.cfg.SuitesBase, suite)
-	if _, err := os.Stat(suiteDir); err != nil {
+	if _, err := os.Stat(filepath.Join(s.cfg.SuitesBase, suite)); err != nil {
 		writeError(w, statusForFSError(err), fmt.Errorf("suite %q not found", suite))
 		return
 	}
@@ -92,7 +91,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 	// Pick the destination filename: existing file's basename if
 	// any (preserves operator-authored lexical prefix), else
 	// <name>.yaml for a fresh scenario.
-	destPath, status, err := resolveDestPath(suiteDir, name)
+	destPath, status, err := resolveDestPath(s.cfg.SuitesBase, suite, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -114,7 +113,7 @@ func (s *Server) handlePutScenario(w http.ResponseWriter, r *http.Request) {
 // GET so on-disk files with a "NN-" prefix can be deleted by their
 // canonical name.
 func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
-	suite, name, ok := scenarioPathParams(w, r)
+	suite, name, ok := requireScenarioParams(w, r)
 	if !ok {
 		return
 	}
@@ -130,10 +129,12 @@ func (s *Server) handleDeleteScenario(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// scenarioPathParams pulls and validates the suite and name path
-// parameters. Writes the appropriate error response and returns
-// ok=false if either is invalid.
-func scenarioPathParams(w http.ResponseWriter, r *http.Request) (suite, name string, ok bool) {
+// requireScenarioParams asserts that the URL's suite and name path
+// parameters are well-formed (per nameRE). On failure, writes a 400
+// response and returns ok=false so the caller bails. Verb is "require"
+// — the function GUARDS rather than just parses; the side-effect
+// response writing is part of its job.
+func requireScenarioParams(w http.ResponseWriter, r *http.Request) (suite, name string, ok bool) {
 	suite = r.PathValue("suite")
 	name = r.PathValue("name")
 	if !nameRE.MatchString(suite) {
@@ -172,13 +173,17 @@ func resolveScenarioPath(suitesBase, suite, name string) (string, error) {
 // existing file's path (for in-place update, preserving any "NN-"
 // prefix) or the fresh-create path <name>.yaml. The status return
 // distinguishes 200 (update) from 201 (create) for the response.
-func resolveDestPath(suiteDir, name string) (string, int, error) {
-	path, err := resolveScenarioPath(filepath.Dir(suiteDir), filepath.Base(suiteDir), name)
+//
+// Signature mirrors resolveScenarioPath — both take (suitesBase,
+// suite, name) so the caller never has to compose a joined path that
+// the helper then has to split.
+func resolveDestPath(suitesBase, suite, name string) (string, int, error) {
+	path, err := resolveScenarioPath(suitesBase, suite, name)
 	switch {
 	case err == nil:
 		return path, http.StatusOK, nil
 	case errors.Is(err, os.ErrNotExist):
-		return filepath.Join(suiteDir, name+".yaml"), http.StatusCreated, nil
+		return filepath.Join(suitesBase, suite, name+".yaml"), http.StatusCreated, nil
 	default:
 		return "", 0, err
 	}

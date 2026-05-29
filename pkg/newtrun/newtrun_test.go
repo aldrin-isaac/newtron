@@ -1470,6 +1470,7 @@ func TestSuiteStatusFromOutcome(t *testing.T) {
 		{"any ERROR → failed", nil, []*ScenarioResult{{Status: StepStatusError}}, SuiteStatusFailed},
 		{"PauseError → paused", &PauseError{Completed: 2}, nil, SuiteStatusPaused},
 		{"context.Canceled → aborted", context.Canceled, nil, SuiteStatusAborted},
+		{"context.DeadlineExceeded → aborted (inline wall-time budget)", context.DeadlineExceeded, nil, SuiteStatusAborted},
 		{"other error → failed", errors.New("boom"), nil, SuiteStatusFailed},
 	}
 	for _, tc := range cases {
