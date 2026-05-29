@@ -133,7 +133,12 @@ func (s *Server) buildHandler() http.Handler {
 	mux.HandleFunc("GET /api/runs/{suite}/events", s.handleRunEvents)
 	mux.HandleFunc("GET /api/topologies", s.handleListTopologies)
 	mux.HandleFunc("GET /api/suites", s.handleListSuites)
+	mux.HandleFunc("POST /api/suites", s.handleCreateSuite)
+	mux.HandleFunc("DELETE /api/suites/{suite}", s.handleDeleteSuite)
 	mux.HandleFunc("GET /api/suites/{suite}/scenarios", s.handleListSuiteScenarios)
+	mux.HandleFunc("GET /api/suites/{suite}/scenarios/{name}", s.handleGetScenario)
+	mux.HandleFunc("PUT /api/suites/{suite}/scenarios/{name}", s.handlePutScenario)
+	mux.HandleFunc("DELETE /api/suites/{suite}/scenarios/{name}", s.handleDeleteScenario)
 
 	var handler http.Handler = mux
 	handler = withLogger(s.logger)(handler)

@@ -136,6 +136,36 @@ func (c *Client) ListSuiteScenarios(ctx context.Context, suite string) (*api.Sui
 	return &resp, nil
 }
 
+// CreateSuite creates an empty suite directory on the server. 409 if
+// the suite already exists.
+func (c *Client) CreateSuite(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodPost, "/api/suites", api.CreateSuiteRequest{Name: name}, nil)
+}
+
+// DeleteSuite removes an empty suite directory. Returns 409 if the
+// suite still contains scenarios.
+func (c *Client) DeleteSuite(ctx context.Context, name string) error {
+	return c.do(ctx, http.MethodDelete, "/api/suites/"+name, nil, nil)
+}
+
+// GetScenario returns the raw scenario YAML body. 404 if no file
+// matches <name>.yaml or *-<name>.yaml in the suite directory.
+func (c *Client) GetScenario(ctx context.Context, suite, name string) ([]byte, error) {
+	return c.getRaw(ctx, "/api/suites/"+suite+"/scenarios/"+name)
+}
+
+// PutScenario creates or updates a scenario. The body must be raw YAML
+// whose name: field matches the URL name; ParseScenarioBytes on the
+// server is the validation gate.
+func (c *Client) PutScenario(ctx context.Context, suite, name string, body []byte) error {
+	return c.putRaw(ctx, "/api/suites/"+suite+"/scenarios/"+name, body)
+}
+
+// DeleteScenario removes a scenario file.
+func (c *Client) DeleteScenario(ctx context.Context, suite, name string) error {
+	return c.do(ctx, http.MethodDelete, "/api/suites/"+suite+"/scenarios/"+name, nil, nil)
+}
+
 // ListTopologies returns the topology names discoverable under the
 // server's TopologiesBase.
 func (c *Client) ListTopologies(ctx context.Context) ([]string, error) {
@@ -202,6 +232,44 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
 	return c.do(ctx, http.MethodPost, path, in, out)
+}
+
+// getRaw fetches a non-JSON body (e.g., scenario YAML). Surfaces 4xx/5xx
+// as ServerError just like do(); successful responses are returned as the
+// raw byte slice with no envelope unwrapping.
+func (c *Client) getRaw(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("contacting newtrun-server at %s: %w (is newtrun-server running?)", c.baseURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, readServerError(resp)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// putRaw sends a non-JSON body (e.g., scenario YAML for ParseScenarioBytes
+// validation). 2xx responses are discarded; 4xx/5xx surface as ServerError.
+func (c *Client) putRaw(ctx context.Context, path string, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/yaml")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("contacting newtrun-server at %s: %w (is newtrun-server running?)", c.baseURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return readServerError(resp)
+	}
+	return nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {
