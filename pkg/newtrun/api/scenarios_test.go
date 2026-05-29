@@ -13,11 +13,11 @@ import (
 	"testing"
 )
 
-// validScenarioYAML is the minimum body ParseScenarioBytes accepts for
+// buildValidScenarioYAML is the minimum body ParseScenarioBytes accepts for
 // the named scenario. Every test that needs a writable body builds on
 // top of this. Keeping it as a single source of truth avoids per-test
 // drift if the parser ever gets more strict.
-func validScenarioYAML(name string) []byte {
+func buildValidScenarioYAML(name string) []byte {
 	return []byte(fmt.Sprintf(`name: %s
 description: synthetic scenario for tests
 topology: synthetic
@@ -78,7 +78,7 @@ func doRequest(t *testing.T, ts *httptest.Server, method, path string, body []by
 // <suite>/<name>.yaml.
 func TestScenario_PutCreatesFile(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
-	body := validScenarioYAML("hello")
+	body := buildValidScenarioYAML("hello")
 	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello", body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("PUT status: got %d, want 201", resp.StatusCode)
@@ -100,10 +100,10 @@ func TestScenario_PutUpdatesExisting(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
 	// Seed a pre-existing file with the lexical-prefix convention.
 	prefixed := filepath.Join(suiteDir, "10-hello.yaml")
-	if err := os.WriteFile(prefixed, validScenarioYAML("hello"), 0644); err != nil {
+	if err := os.WriteFile(prefixed, buildValidScenarioYAML("hello"), 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	updated := append(validScenarioYAML("hello"), []byte("# updated\n")...)
+	updated := append(buildValidScenarioYAML("hello"), []byte("# updated\n")...)
 	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello", updated)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT status: got %d, want 200", resp.StatusCode)
@@ -127,7 +127,7 @@ func TestScenario_PutUpdatesExisting(t *testing.T) {
 // might inadvertently refuse re-application.
 func TestScenario_PutIsIdempotent(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
-	body := validScenarioYAML("idempotent")
+	body := buildValidScenarioYAML("idempotent")
 
 	resp1, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/idempotent", body)
 	if resp1.StatusCode != http.StatusCreated {
@@ -171,7 +171,7 @@ func TestScenario_PutRejectsBadYAML(t *testing.T) {
 func TestScenario_PutRejectsNameMismatch(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
 	resp, _ := doRequest(t, ts, http.MethodPut, "/api/suites/demo/scenarios/hello",
-		validScenarioYAML("goodbye"))
+		buildValidScenarioYAML("goodbye"))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("name-mismatch PUT status: got %d, want 400", resp.StatusCode)
 	}
@@ -182,7 +182,7 @@ func TestScenario_PutRejectsNameMismatch(t *testing.T) {
 // browser-side consumers don't need to guess.
 func TestScenario_GetReturnsRawYAML(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
-	body := validScenarioYAML("readback")
+	body := buildValidScenarioYAML("readback")
 	if err := os.WriteFile(filepath.Join(suiteDir, "readback.yaml"), body, 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestScenario_GetMissing(t *testing.T) {
 func TestScenario_Delete(t *testing.T) {
 	ts, suiteDir := newScenarioTestServer(t)
 	path := filepath.Join(suiteDir, "doomed.yaml")
-	if err := os.WriteFile(path, validScenarioYAML("doomed"), 0644); err != nil {
+	if err := os.WriteFile(path, buildValidScenarioYAML("doomed"), 0644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	resp, _ := doRequest(t, ts, http.MethodDelete, "/api/suites/demo/scenarios/doomed", nil)
@@ -307,7 +307,7 @@ func TestSuite_CreateAndDelete(t *testing.T) {
 
 	// Put a scenario, try to delete, expect 409.
 	doRequest(t, ts, http.MethodPut, "/api/suites/fresh/scenarios/blocker",
-		validScenarioYAML("blocker"))
+		buildValidScenarioYAML("blocker"))
 	resp, _ = doRequest(t, ts, http.MethodDelete, "/api/suites/fresh", nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("non-empty suite DELETE: got %d, want 409", resp.StatusCode)
@@ -343,19 +343,32 @@ func TestSuite_RejectsBadName(t *testing.T) {
 // actually checked (TestSuite_RejectsBadName only proves the suite
 // segment is). Exercises GET, PUT, and DELETE so the guard fires on
 // every path that takes a name.
+//
+// Each input is tested against its specific expected status code
+// (not "any 4xx is OK"), distinguishing routing-layer rejection from
+// handler-layer rejection. If a future change shifts the layer
+// that catches a particular input — e.g., the handler starts
+// accepting "dot.name" because nameRE drifted — the assertion fails
+// even though the request would still be rejected somewhere else.
 func TestScenario_RejectsBadName(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
-	for _, bad := range []string{"..", "with/slash", "dot.name", "-leading-dash"} {
-		path := "/api/suites/demo/scenarios/" + bad
+	cases := []struct {
+		input string
+		want  int
+		why   string
+	}{
+		{"..", http.StatusMethodNotAllowed, "path cleaned to /scenarios; list route is GET-only on all paths"},
+		{"with/slash", http.StatusNotFound, "ServeMux {name} segment cannot contain a slash; path doesn't match any route"},
+		{"dot.name", http.StatusBadRequest, "reaches handler; nameRE rejects dot"},
+		{"-leading-dash", http.StatusBadRequest, "reaches handler; nameRE requires alphanumeric first char"},
+	}
+	for _, tc := range cases {
+		path := "/api/suites/demo/scenarios/" + tc.input
 		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
 			resp, _ := doRequest(t, ts, method, path, nil)
-			// "..", "with/slash" may fail at path routing (404)
-			// because http.ServeMux interprets them as path
-			// segments; the others reach the handler and get 400.
-			// Both are acceptable rejections — what we're proving
-			// is that none of them produce a 2xx success.
-			if resp.StatusCode < 400 {
-				t.Errorf("%s %q: got %d, want 4xx", method, bad, resp.StatusCode)
+			if resp.StatusCode != tc.want {
+				t.Errorf("%s %q (%s): got %d, want %d",
+					method, tc.input, tc.why, resp.StatusCode, tc.want)
 			}
 		}
 	}

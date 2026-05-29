@@ -53,7 +53,7 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		suiteDir = filepath.Join(s.cfg.SuitesBase, req.Suite)
 		suiteKey = req.Suite
 	}
-	if !directoryExists(suiteDir) {
+	if !isDirectory(suiteDir) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("suite directory not found: %s", suiteDir))
 		return
 	}
@@ -262,8 +262,8 @@ func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult
 	}
 }
 
-// directoryExists returns true if the path is a directory.
-func directoryExists(path string) bool {
+// isDirectory returns true if the path is a directory.
+func isDirectory(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }

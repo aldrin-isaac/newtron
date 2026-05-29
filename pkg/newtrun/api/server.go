@@ -155,6 +155,32 @@ func (s *Server) buildHandler() http.Handler {
 	return handler
 }
 
+// reconcileStaleStatus is the server-restart-honesty rule (HLD §9.3):
+// if the on-disk state claims a run is still running or pausing but
+// the live registry has no entry for it, the previous server instance
+// crashed or was killed before finalizing — relabel the in-memory
+// copy as aborted so the wire never carries a stale running signal.
+// The state file itself is not rewritten; the next pass through the
+// finalizer will persist whatever final status applies, and the wire
+// only ever shows honest data.
+//
+// Single helper called from both handleGetRun and handleListRuns per
+// §7 — the rule must not be duplicated, because a future refinement
+// (e.g., adding pausing→paused detection) would otherwise need to
+// land in two places at risk of drift.
+func (s *Server) reconcileStaleStatus(state *newtrun.RunState, runKey string) {
+	if state == nil {
+		return
+	}
+	if state.Status != newtrun.SuiteStatusRunning && state.Status != newtrun.SuiteStatusPausing {
+		return
+	}
+	if s.registry.Get(runKey) != nil {
+		return
+	}
+	state.Status = newtrun.SuiteStatusAborted
+}
+
 // ----- handlers -----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -184,13 +210,7 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		if state == nil {
 			continue
 		}
-		// Same server-restart-honesty reconciliation as handleGetRun:
-		// a state file that says running but isn't in the live registry
-		// belongs to a previous server instance that died unfinalized.
-		if (state.Status == newtrun.SuiteStatusRunning || state.Status == newtrun.SuiteStatusPausing) &&
-			s.registry.Get(suite) == nil {
-			state.Status = newtrun.SuiteStatusAborted
-		}
+		s.reconcileStaleStatus(state, suite)
 		infos = append(infos, runInfoFrom(state))
 	}
 	writeJSON(w, http.StatusOK, infos)
@@ -221,10 +241,7 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
 		return
 	}
-	if (state.Status == newtrun.SuiteStatusRunning || state.Status == newtrun.SuiteStatusPausing) &&
-		s.registry.Get(id) == nil {
-		state.Status = newtrun.SuiteStatusAborted
-	}
+	s.reconcileStaleStatus(state, id)
 	// Per §46 the wire shape mirrors the substrate: RunState has JSON tags
 	// already; serialize it directly without a wrapper type.
 	writeJSON(w, http.StatusOK, state)
