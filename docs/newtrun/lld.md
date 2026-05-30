@@ -1,68 +1,87 @@
-# newtrun Low-Level Design (LLD)
+# newtrun Low-Level Design
 
-newtrun is an E2E test orchestrator for newtron and SONiC. It parses YAML scenario files, deploys VM topologies via newtlab, orchestrates device operations via an HTTP client that talks to newtron-server, and runs multi-step verification sequences. This document covers `pkg/newtrun/` and `cmd/newtrun/`.
+This document specifies newtrun's type definitions, package structure, and code mechanics — the *how* and *what fields*. For the architectural *what* and *why* (run lifecycle, server-shutdown semantics, SSE design, strict Option A), see the [HLD](hld.md). For HTTP-client authoring (endpoints, payloads, status codes), see the [API reference](api.md). For CLI operation, see the [HOWTO](howto.md).
 
-For the high-level architecture, see [newtrun HLD](hld.md). For the device connection layer, see [Device Layer LLD](../newtron/device-lld.md). For the newtron-server HTTP API, see [newtron API](../newtron/api.md).
+**Audience:** Engineers reading or modifying newtrun's source code. Field-by-field type tables, package boundaries, the data flow through each handler.
 
-**Architectural note**: newtrun is a pure HTTP client. It does not import `pkg/newtron/network/`, `pkg/newtron/network/node/`, or `pkg/newtron/device/sonic/`. All SONiC device operations go through `r.Client` (`pkg/newtron/client.Client`), which talks to newtron-server over HTTP. The server handles device connections, CONFIG_DB access, spec resolution, and ChangeSet application.
+**Mental model:** newtrun is split into a thin CLI client (`bin/newtrun`) and a long-lived server (`bin/newtrun-server`). The CLI is a stateless HTTP client. The server owns the run registry, executes scenarios in goroutines, and streams progress over Server-Sent Events. Everything below is organized around that split.
+
+---
+
+## Table of Contents
+
+1. [Package Structure](#1-package-structure)
+2. [Core Types](#2-core-types-scenariogo)
+3. [Parser](#3-parser-parsergo)
+4. [State Persistence](#4-state-persistence-statego)
+5. [Runner Internals](#5-runner-internals-runnergo)
+6. [Progress Reporting](#6-progress-reporting-progressgo)
+7. [HTTP Server Package](#7-http-server-package-pkgnewtrunapi)
+8. [HTTP Client Package](#8-http-client-package-pkgnewtrunclient)
+9. [Step Executors](#9-step-executors)
+10. [newtlab Integration](#10-newtlab-integration-deploygo)
+11. [Results & Reporting](#11-results--reporting-reportgo)
+12. [Error Handling](#12-error-handling-errorsgo)
+13. [CLI Binary](#13-cli-binary-cmdnewtrun)
+14. [Server Binary](#14-server-binary-cmdnewtrun-server)
 
 ---
 
 ## 1. Package Structure
 
+Three Go packages compose newtrun, one each for engine / server / client. The CLI binary and the server binary each have a `cmd/` package that wires the pieces together.
+
 ```
-newtron/
-├── cmd/
-│   └── newtrun/
-│       ├── main.go               # Entry point, root command, exit code mapping
-│       ├── helpers.go            # resolveDir, resolveSuite, suitesBaseDir, resolveTopologiesDir
-│       ├── cmd_start.go          # start subcommand (+ deprecated run alias)
-│       ├── cmd_pause.go          # pause subcommand
-│       ├── cmd_stop.go           # stop subcommand
-│       ├── cmd_status.go         # status subcommand
-│       ├── cmd_list.go           # list subcommand (suites + scenarios)
-│       ├── cmd_suites.go         # suites subcommand (hidden alias for list)
-│       ├── cmd_topologies.go     # topologies subcommand
-│       └── cmd_actions.go        # actions subcommand (action metadata + detail view)
-├── pkg/
-│   └── newtrun/
-│       ├── scenario.go           # Scenario, Step, StepAction constants, ExpectBlock, PollBlock, BatchCall
-│       ├── parser.go             # ParseScenario, stepValidations table, ValidateDependencyGraph
-│       ├── runner.go             # Runner (with Client, ServerURL, NetworkID), RunOptions, Run
-│       ├── steps.go              # stepExecutor interface, StepOutput, multi-device helpers, topology-reconcile/wait/verify-topology executors
-│       ├── steps_newtron.go      # newtronExecutor: URL expansion, jq evaluation, one-shot/polling/batch modes
-│       ├── steps_cli.go          # newtronCLIExecutor: runs newtron CLI as subprocess, --json auto-append, jq assertions
-│       ├── steps_host.go         # hostExecExecutor, shellQuote, runSSHCommand
-│       ├── deploy.go             # DeployTopology, EnsureTopology, DestroyTopology
-│       ├── state.go              # RunState, ScenarioState, SuiteStatus, persistence
-│       ├── state_test.go         # Unit tests for state functions
-│       ├── progress.go           # ProgressReporter, consoleProgress, StateReporter
-│       ├── errors.go             # InfraError, StepError, PauseError
-│       ├── report.go             # ScenarioResult, StepResult, StepStatus, ReportGenerator
-│       └── newtrun_test.go       # Unit tests
-└── newtrun/                      # E2E test assets
-    ├── topologies/
-    │   ├── 1node-vs/specs/            # Single-switch topology
-    │   ├── 2node-ngdp/specs/          # 2-switch + 6-host topology
-    │   ├── 2node-ngdp-service/specs/  # 2-switch + 8-host topology (service testing)
-    │   ├── 2node-vs/specs/            # 2-switch + 6-host topology (sonic-vs)
-    │   ├── 2node-vs-service/specs/    # 2-switch + 8-host topology (sonic-vs service testing)
-    │   ├── 3node-ngdp/specs/          # 1-spine + 2-leaf + 2-host topology (EVPN dataplane)
-    │   └── 4node-ngdp/specs/          # 4-node topology
-    ├── suites/
-    │   ├── 1node-vs-basic/            # Single-switch basics (4 scenarios)
-    │   ├── 1node-vs-config/           # CLI lifecycle via newtron-cli in loopback mode (13 scenarios)
-    │   ├── 1node-vs-architecture/     # Intent architecture validation (32 scenarios)
-    │   ├── 2node-ngdp-primitive/      # Disaggregated operation tests (21 scenarios)
-    │   ├── 2node-ngdp-service/        # Service lifecycle tests (6 scenarios)
-    │   ├── 2node-vs-primitive/        # Disaggregated operation tests, sonic-vs (21 scenarios)
-    │   ├── 2node-vs-service/          # Service lifecycle tests, sonic-vs (6 scenarios)
-    │   ├── 2node-vs-drift/            # Config drift detection tests (7 scenarios)
-    │   ├── 2node-vs-drift-actuated/   # Actuated-mode drift tests (8 scenarios)
-    │   ├── 3node-ngdp-dataplane/      # EVPN L2/L3 dataplane tests (8 scenarios)
-    │   └── simple-vrf-host/           # Simple VRF with host verification (4 scenarios)
-    └── .generated/               # Runtime output (gitignored)
+pkg/newtrun/                  # Engine (HTTP-agnostic orchestration core)
+  scenario.go                 # Scenario, Step, StepAction, ExpectBlock, BatchCall
+  parser.go                   # ParseScenario, ParseScenarioBytes, ValidateDependencyGraph
+  runner.go                   # Runner, RunOptions, Run(ctx, opts), iterateScenarios
+  steps.go                    # stepExecutor interface, multi-device helpers
+  steps_newtron.go            # ActionNewtron: URL expansion, jq, polling, batch
+  steps_cli.go                # ActionNewtronCLI: subprocess execution
+  steps_host.go               # ActionHostExec: SSH command execution
+  deploy.go                   # Deploy/Ensure/Destroy via newtlab
+  state.go                    # RunState, ScenarioState, StepState; SuiteStatusFromOutcome
+  progress.go                 # ProgressReporter (7 callbacks), consoleProgress, StateReporter
+  errors.go                   # InfraError, StepError, PauseError
+  report.go                   # ScenarioResult, StepResult, ReportGenerator (markdown + JUnit)
+
+pkg/newtrun/api/              # HTTP server package
+  server.go                   # Server, Config, route registration, handleHealth, listSubdirs
+  middleware.go               # withRequestID, withLogger, withRecovery
+  runs.go                     # All run handlers + reconcileStaleStatus + finalizers + newRunID
+  suites.go                   # /api/suites endpoints + list-scenarios + nameRE
+  scenarios.go                # GET/PUT/DELETE per-scenario + atomic write + path resolution
+  topologies.go               # GET /api/topologies
+  registry.go                 # RunRegistry, RegistryEntry, AlreadyRunningError
+  safety.go                   # InlineSafetyPolicy, SafetyViolation
+  reporter.go                 # HTTPReporter (implements ProgressReporter, publishes to broker)
+  broker.go                   # EventBroker (SSE multiplexer, drop-on-full)
+  types.go                    # APIResponse, EventType, payload types, request shapes
+
+pkg/newtrun/client/           # HTTP client (used by CLI and future browser-side adapter)
+  client.go                   # Client struct, all endpoint methods, StreamEvents SSE parser
+
+cmd/newtrun/                  # CLI binary (thin HTTP-client surface)
+  main.go                     # Root command, --newtrun-server flag, --verbose
+  clientutil.go               # newClient factory, requireServer probe
+  helpers.go                  # resolveSuite, resolveTopologyFromState
+  cmd_start.go                # POST /api/runs + SSE event renderer
+  cmd_pause.go                # POST /api/runs/{suite}/pause
+  cmd_stop.go                 # multi-step orchestration: stop + destroy + delete
+  cmd_status.go               # GET-based status display, --monitor auto-refresh
+  cmd_list.go                 # list suites and scenarios via GET /api/suites/...
+  cmd_suites.go               # GET /api/suites
+  cmd_scenario.go             # scenario CRUD subcommands + suite create/delete
+  cmd_topologies.go           # GET /api/topologies
+  cmd_actions.go              # static action vocabulary help
+  scenario_e2e_test.go        # CLI→server E2E tests
+
+cmd/newtrun-server/           # Server binary entry point
+  main.go                     # --listen, --suites-base, --topologies-base
 ```
+
+The split enforces one-way import direction: `cmd/newtrun → pkg/newtrun/client → pkg/newtrun/api → pkg/newtrun`. `pkg/newtrun/` is HTTP-agnostic — it knows nothing about the server. `pkg/newtrun/api/` adapts the engine to HTTP. `pkg/newtrun/client/` consumes the HTTP surface.
 
 ---
 
@@ -86,130 +105,116 @@ type Scenario struct {
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Unique scenario identifier (matches filename without `.yaml`) |
-| `description` | yes | Human-readable description shown in `newtrun list` |
-| `topology` | yes | Topology directory name under `newtrun/topologies/` |
-| `platform` | yes | Platform name from `platforms.json` in the topology spec dir |
-| `requires` | no | List of scenario names that must pass before this one runs (suite mode). A required scenario that fails or is skipped causes this scenario to be skipped. |
-| `after` | no | List of scenario names that must run before this one (ordering only, no pass/fail gate). Both `requires` and `after` contribute to dependency ordering via topological sort. |
-| `requires_features` | no | Platform features required (e.g., `["acl", "macvpn"]`). Scenarios are skipped if the deployed platform does not support a listed feature. |
-| `repeat` | no | Run all steps N times; 0 or omitted means once. Fail-fast per iteration. |
-| `steps` | yes | Ordered list of test steps |
+| `name` | yes | Unique scenario identifier; matches filename without `.yaml` and matches the URL `{name}` segment of scenario CRUD endpoints. |
+| `description` | no | Human-readable description shown in `newtrun list` and on the SuiteStart event. |
+| `topology` | no | Topology name; the Runner aborts if the server's loaded topology doesn't match. |
+| `platform` | no | Platform name (e.g., `sonic-vs`); used by capability checks. |
+| `requires` | no | Names of scenarios that must pass before this one runs. Hard dependency — failure of a required scenario marks this one SKIP. |
+| `after` | no | Soft ordering — this scenario runs after the listed ones regardless of their status. Used for cleanup scenarios. |
+| `requires_features` | no | Platform feature flags (e.g., `evpn-vxlan`). The Runner skips the scenario if the platform doesn't declare them. |
+| `repeat` | no | Run the steps N times in sequence. Used for soak/stability tests. |
+| `steps` | yes | The ordered list of [Step](#22-step) records. |
 
 ### 2.2 Step
 
 ```go
 type Step struct {
-    Name    string         `yaml:"name"`
-    Action  StepAction     `yaml:"action"`
-    Devices deviceSelector `yaml:"devices,omitempty"`
-
-    // wait
-    Duration time.Duration `yaml:"duration,omitempty"`
-
-    // host-exec, newtron (shared)
-    Command string         `yaml:"command,omitempty"`
-    Params  map[string]any `yaml:"params,omitempty"`
-
-    // newtron (generic server action)
-    Method string      `yaml:"method,omitempty"` // HTTP method: GET, POST, DELETE
-    URL    string      `yaml:"url,omitempty"`    // URL template (e.g., /node/{{device}}/vlan)
-    Poll   *PollBlock  `yaml:"poll,omitempty"`   // polling configuration
-    Batch  []BatchCall `yaml:"batch,omitempty"`  // sequential batch of calls
-
-    // All actions
-    Expect        *ExpectBlock `yaml:"expect,omitempty"`
-    ExpectFailure bool         `yaml:"expect_failure,omitempty"`
+    Name      string             `yaml:"name"`
+    Action    StepAction         `yaml:"action"`
+    Devices   deviceSelector     `yaml:"devices,omitempty"`
+    Command   string             `yaml:"command,omitempty"`
+    URL       string             `yaml:"url,omitempty"`
+    Method    string             `yaml:"method,omitempty"`
+    Body      any                `yaml:"body,omitempty"`
+    Duration  time.Duration      `yaml:"duration,omitempty"`
+    Expect    *ExpectBlock       `yaml:"expect,omitempty"`
+    Poll      *PollSpec          `yaml:"poll,omitempty"`
+    Batch     []BatchCall        `yaml:"batch,omitempty"`
+    OnFailure string             `yaml:"on_failure,omitempty"`
 }
 ```
 
-Step is intentionally a flat union — all action-specific fields live on one
-struct. Validation of which fields are required for which action happens at
-parse time via the declarative `stepValidations` table (see §3.2).
+| Field | Used by | Description |
+|-------|---------|-------------|
+| `name` | all | Step identifier for logs and reports. |
+| `action` | all | Discriminator — `newtron`, `newtron-cli`, `host-exec`, `wait`, `topology-reconcile`. |
+| `devices` | newtron, newtron-cli, host-exec | YAML accepts `all` or a list of device names. See [§2.3](#23-deviceselector). |
+| `command` | newtron-cli, host-exec | Subprocess command line. `{{device}}` is replaced per device. |
+| `url` | newtron | HTTP path on newtron-server. `{device}` is replaced per device. |
+| `method` | newtron | HTTP method; defaults to GET. |
+| `body` | newtron | Request body (any JSON-serializable value). |
+| `duration` | wait | Sleep duration. |
+| `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§2.4](#24-expectblock). |
+| `poll` | newtron | Polling spec. See [§2.5](#25-pollspec). |
+| `batch` | newtron | Multiple calls grouped per device. See [§2.6](#26-batchcall). |
+| `on_failure` | all | One of `fail` (default), `continue`, `skip-rest`. |
 
-### 2.3 StepAction Constants
+### 2.3 deviceSelector
 
-```go
-type StepAction string
+A YAML-flexible type that accepts either the literal string `"all"` or a list of device names:
 
-const (
-    ActionProvision          StepAction = "topology-reconcile"
-    ActionWait               StepAction = "wait"
-    ActionVerifyProvisioning StepAction = "verify-topology"
-    ActionHostExec           StepAction = "host-exec"
-    ActionNewtron            StepAction = "newtron"
-    ActionNewtronCLI         StepAction = "newtron-cli"
-)
+```yaml
+devices: all
+# or
+devices: [switch1, switch2]
 ```
 
-Six action types. The `validActions` set is derived from the `executors` map
-at init time, ensuring the two stay synchronized without manual maintenance.
+The selector resolves to a sorted device list at run time via `Resolve(allDeviceNames []string) []string`. `All=true` returns the sorted copy of all device names; explicit lists are returned as-is.
 
-### 2.4 deviceSelector
+### 2.4 ExpectBlock
 
 ```go
-type deviceSelector struct {
-    All     bool
-    Devices []string
+type ExpectBlock struct {
+    Status      int     `yaml:"status,omitempty"`
+    JQ          string  `yaml:"jq,omitempty"`
+    Contains    string  `yaml:"contains,omitempty"`
+    ExitCode    int     `yaml:"exit_code,omitempty"`
+    Stdout      string  `yaml:"stdout,omitempty"`
+    Stderr      string  `yaml:"stderr,omitempty"`
+    SuccessRate float64 `yaml:"success_rate,omitempty"`
 }
-
-func (ds *deviceSelector) UnmarshalYAML(unmarshal func(any) error) error
-func (ds *deviceSelector) Resolve(allDevices []string) []string
 ```
 
-Handles two YAML forms: `devices: all` sets `All: true`; `devices: [leaf1, leaf2]`
-populates `Devices`. `Resolve` returns the concrete device list — if `All` is true,
-returns all devices sorted by name for deterministic ordering.
+| Action | Honors |
+|--------|--------|
+| `newtron` | `status`, `jq`, `contains` |
+| `newtron-cli` | `exit_code`, `stdout`, `stderr`, `jq` (parses stdout as JSON when `--json` is in the command) |
+| `host-exec` | `exit_code`, `stdout`, `stderr`, `success_rate` (for ping output) |
 
-### 2.5 PollBlock
+A non-matching `expect` block fails the step with the assertion's message.
+
+### 2.5 PollSpec
 
 ```go
-type PollBlock struct {
-    Timeout  time.Duration `yaml:"timeout"`
+type PollSpec struct {
     Interval time.Duration `yaml:"interval"`
+    Timeout  time.Duration `yaml:"timeout"`
 }
 ```
 
-Configures polling for the `newtron` action. The executor polls the URL at
-`Interval` until the jq assertion passes or `Timeout` expires.
+A step with `poll` repeats its action+expect every `Interval` until the expect succeeds or `Timeout` elapses. Used for convergence checks (BGP sessions, route propagation).
 
 ### 2.6 BatchCall
 
 ```go
 type BatchCall struct {
-    Method string         `yaml:"method"`
-    URL    string         `yaml:"url"`
-    Params map[string]any `yaml:"params,omitempty"`
+    URL    string `yaml:"url"`
+    Method string `yaml:"method,omitempty"`
+    Body   any    `yaml:"body,omitempty"`
 }
 ```
 
-A single HTTP call within a batch sequence. Batch calls execute sequentially
-within a step, failing on the first error.
+The `newtron` action with `batch` runs N calls per device in sequence, collecting results before the expect assertion. Used when one operation needs multiple HTTP calls to set up its preconditions.
 
-### 2.7 ExpectBlock
+### 2.7 StepAction enumeration
 
-```go
-type ExpectBlock struct {
-    // Polling (used internally by newtronExecutor.executePoll to bridge poll: config to pollForDevices)
-    Timeout      time.Duration `yaml:"timeout,omitempty"`
-    PollInterval time.Duration `yaml:"poll_interval,omitempty"`
-
-    // host-exec
-    SuccessRate *float64 `yaml:"success_rate,omitempty"`
-    Contains    string   `yaml:"contains,omitempty"`
-
-    // newtron (generic server action) — jq expression evaluated against response body
-    JQ string `yaml:"jq,omitempty"`
-}
-```
-
-| Field | Used By | Description |
-|-------|---------|-------------|
-| `timeout` | `newtron` (internal) | Polling timeout; set by `newtronExecutor.executePoll` to bridge `step.Poll.Timeout` into `pollForDevices` |
-| `poll_interval` | `newtron` (internal) | Polling interval; set by `newtronExecutor.executePoll` to bridge `step.Poll.Interval` into `pollForDevices` |
-| `success_rate` | `host-exec` | Required ping success rate (0.0–1.0) |
-| `contains` | `host-exec` | Substring match against command output |
-| `jq` | `newtron` | jq expression evaluated against the JSON response body; must produce boolean `true` to pass |
+| Constant | YAML value | Behavior |
+|----------|------------|----------|
+| `ActionNewtron` | `newtron` | HTTP call to newtron-server (the most common action). |
+| `ActionNewtronCLI` | `newtron-cli` | Subprocess call to `bin/newtron`. Used for loopback testing. |
+| `ActionHostExec` | `host-exec` | SSH command on a host VM. Used for ping, traffic generation. |
+| `ActionWait` | `wait` | Sleep for `Duration`. |
+| `ActionProvision` | `topology-reconcile` | Composite call: deploy + reconcile + verify. High-impact; inline-runs require explicit opt-in. |
 
 ---
 
@@ -219,221 +224,80 @@ type ExpectBlock struct {
 
 ```go
 func ParseScenario(path string) (*Scenario, error)
+```
+
+Reads the YAML file at `path`, unmarshals into a `Scenario`, validates required fields, and validates each step against its action's field requirements. Returns the parsed scenario or a wrapped error.
+
+### 3.2 ParseScenarioBytes
+
+```go
+func ParseScenarioBytes(data []byte) (*Scenario, error)
+```
+
+The bytes-in variant. Used by `PUT /api/suites/{suite}/scenarios/{name}` to validate the request body before any disk write — the server is the single point that knows the accept set.
+
+### 3.3 ParseAllScenarios
+
+```go
 func ParseAllScenarios(dir string) ([]*Scenario, error)
-func ValidateDependencyGraph(scenarios []*Scenario) ([]*Scenario, error)
 ```
 
-**ParseScenario flow:**
+Reads every `*.yaml` file in `dir`, parses each, and returns the list. Used by `GET /api/suites/{suite}/scenarios` and by the Runner at startup.
 
-1. Read file at `path`
-2. `yaml.Unmarshal` into `Scenario`
-3. `applyDefaults` — currently a no-op (empty function body). The five remaining actions require no default injection.
-4. `validateStepFields` — declarative validation per step (see §3.2)
-5. Return `*Scenario`
+### 3.4 Validation rules
 
-**ParseAllScenarios**: reads all `.yaml` files in `dir`, returns parsed scenarios.
-Used when running all scenarios in a suite.
+Per-action requirements enforced by `validateStepFields`:
 
-**ValidateDependencyGraph**: validates all `requires` and `after` references exist
-and there are no cycles. Returns scenarios in topological order (Kahn's algorithm)
-on success. Both `requires` and `after` contribute edges to the dependency graph;
-`after` differs from `requires` only in that it does not gate on pass/fail.
+| Action | Required step fields |
+|--------|----------------------|
+| `newtron` | `url` (with optional `method`, `body`) OR `batch` (mutually exclusive with `url`) |
+| `newtron-cli` | `command`, `devices` |
+| `host-exec` | `command`, `devices` |
+| `wait` | `duration` |
+| `topology-reconcile` | `devices` |
 
-### 3.2 validateStepFields
+Cross-step rules in `ValidateDependencyGraph`:
+- Names in `requires` and `after` must reference scenarios that exist in the suite.
+- No cycles.
+- Returns the scenarios in topological order.
 
-Declarative validation via the `stepValidations` table. Each action maps to a
-`stepValidation` struct that declares device requirements, required step-level
-fields, required params keys, and optional custom validation functions:
-
-```go
-type stepValidation struct {
-    needsDevices  bool     // must have a device selector
-    singleDevice  bool     // exactly one device required (implies needsDevices)
-    fields        []string // required step-level fields: "command"
-    params        []string // required params map keys
-    custom        func(prefix string, step *Step) error
-}
-```
-
-The `stepFieldGetter` table maps field names to accessor functions on `*Step`.
-Currently it contains a single mapping: `"command"` → `s.Command`.
-
-**Validation rules per action:**
-
-| Action | Rule | Details |
-|--------|------|---------|
-| `topology-reconcile` | `needsDevices: true` | |
-| `wait` | custom | `duration` must be non-zero |
-| `verify-topology` | `needsDevices: true` | |
-| `host-exec` | `singleDevice: true`, `fields: ["command"]` | Exactly one device; `command` field required |
-| `newtron` | custom | Either `url` or `batch` must be non-empty |
-
----
-
-## 4. Runner (`runner.go`)
-
-### 4.1 Runner
+### 3.5 HasRequires + ComputeTargetChain
 
 ```go
-type Runner struct {
-    ScenariosDir  string
-    TopologiesDir string
-    ServerURL     string              // newtron-server HTTP address
-    NetworkID     string              // network identifier for server operations
-    Client        *client.Client      // HTTP client for all SONiC operations
-    Lab           *newtlab.Lab
-    HostConns     map[string]*ssh.Client // host device name → SSH client
-    Progress      ProgressReporter
-
-    opts               RunOptions
-    scenario           *Scenario
-    discoveredPlatform string          // platform discovered from connected devices
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `ScenariosDir` | Path to suite directory (e.g., `newtrun/suites/2node-ngdp-primitive`) |
-| `TopologiesDir` | Path to `newtrun/topologies/` |
-| `ServerURL` | newtron-server HTTP address (e.g., `http://localhost:8080`). Resolved from: `--server` flag → `NEWTRON_SERVER` env → settings → `newtron.DefaultServerURL`. |
-| `NetworkID` | Network identifier passed to all server requests. Resolved from: `--network-id` flag → `NEWTRON_NETWORK_ID` env → settings → `newtron.DefaultNetworkID`. |
-| `Client` | HTTP client (`pkg/newtron/client.Client`) created during `connectDevices`. All SONiC operations — provisioning, service lifecycle, CONFIG_DB queries, health checks, verification — go through this client. |
-| `Lab` | newtlab Lab instance from deploy (nil when `--no-deploy`) |
-| `HostConns` | SSH client connections keyed by host device name. Used by `host-exec` executor to run commands inside host network namespaces. |
-| `Progress` | Progress reporter for lifecycle callbacks. When set, receives events for suite/scenario/step start and end. |
-| `discoveredPlatform` | Platform name discovered from the first non-host device profile after connection. Used as fallback for `hasDataplane()` and `checkPlatformFeatures()`. |
-
-### 4.2 RunOptions
-
-```go
-type RunOptions struct {
-    Scenario  string
-    All       bool
-    Topology  string
-    Platform  string
-    Keep      bool
-    NoDeploy  bool
-    Verbose   bool
-    JUnitPath string
-
-    // Lifecycle fields (set by `start` command, not by `run`)
-    Suite     string                // suite name for state tracking; empty disables lifecycle
-    Resume    bool                  // true when resuming a paused run
-    Completed map[string]StepStatus // scenario → status from previous run (resume)
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `Suite` | Suite name for state tracking. When non-empty, enables lifecycle mode: `EnsureTopology` for deploy, `CheckPausing` for pause, state persistence. |
-| `Resume` | True when resuming a paused suite. Already-passed scenarios are skipped. |
-| `Completed` | Status map from the previous run's state. Seeds `scenarioStatus` in `iterateScenarios` so resume knows which scenarios already passed. |
-| `Keep` | Implicitly true in lifecycle mode (`start`). When true, topology is not destroyed after completion. |
-| `NoDeploy` | Skip deploy/destroy. Used with `--no-deploy` flag. |
-
-### 4.3 Run
-
-```go
-func NewRunner(scenariosDir, topologiesDir string) *Runner
-func (r *Runner) Run(opts RunOptions) ([]*ScenarioResult, error)
-```
-
-**Run** determines execution mode based on options:
-
-1. **Single scenario** (`opts.Scenario` set): parse one scenario, run via `runIndependent`
-2. **All scenarios** (`opts.All` set): parse all from `ScenariosDir`, validate dependency graph if any scenario has `Requires` or `After`, then:
-   - If all scenarios share the same topology → `runShared` (deploy once)
-   - Otherwise → `runIndependent` (per-scenario deploy)
-
-### 4.4 iterateScenarios
-
-```go
-type scenarioRunner func(ctx context.Context, sc *Scenario, topology, platform string) (*ScenarioResult, error)
-
-func (r *Runner) iterateScenarios(ctx context.Context, scenarios []*Scenario, opts RunOptions, deployedPlatform string, run scenarioRunner) ([]*ScenarioResult, error)
-```
-
-Encapsulates the common scenario iteration loop used by both `runShared` and
-`runIndependent`. For each scenario:
-
-1. **Resume**: skip already-passed scenarios from `opts.Completed`
-2. **Pause check**: if `CheckPausing(opts.Suite)` returns true, return `PauseError`
-3. **Requires check**: if any dependency failed/skipped → mark as `SKIP` with reason
-4. **Feature check**: if platform doesn't support required features → mark as `SKIP`
-5. **Execute**: call the `run` callback
-6. **Report**: emit progress events via `r.Progress`
-
-### 4.5 Shared vs Independent Mode
-
-**runShared**: deploys once via `deployTopology`, connects once via `connectDevices`,
-then iterates all scenarios. Each scenario reuses the same `Runner.Client` and
-`Runner.Lab`. The `deployedPlatform` parameter is passed to feature checks so
-all scenarios are evaluated against the actually deployed platform.
-
-**runIndependent**: iterates scenarios, calling `runScenario` for each. Each
-scenario gets its own deploy/connect cycle.
-
-### 4.6 deployTopology
-
-```go
-func (r *Runner) deployTopology(ctx context.Context, specDir string, opts RunOptions) (cleanup func(), err error)
-```
-
-Dual behavior:
-- **Lifecycle mode** (`opts.Suite != ""`): calls `EnsureTopology` — reuses running topology or deploys fresh. Returns nil cleanup (topology stays up; `stop` command handles teardown).
-- **Legacy mode** (`opts.Suite == ""`): calls `DeployTopology` — always deploys fresh. Returns a deferred `DestroyTopology` cleanup unless `opts.Keep` is true.
-
-### 4.7 runScenarioSteps
-
-```go
-func (r *Runner) runScenarioSteps(ctx context.Context, scenario *Scenario, opts RunOptions, result *ScenarioResult)
-```
-
-Executes steps within a scenario. When `scenario.Repeat > 1`, all steps execute
-in a loop for N iterations. Each iteration is fail-fast. The
-`ScenarioResult.FailedIteration` field records which iteration failed (1-based).
-
-### 4.8 Device Connection
-
-```go
-func (r *Runner) connectDevices(ctx context.Context, specDir string) error
-```
-
-Creates the HTTP client and registers the network with newtron-server:
-
-1. Create `client.Client` from `r.ServerURL` and `r.NetworkID`
-2. Unregister first (`r.Client.UnregisterNetwork()`) to ensure fresh specs — different suites may use the same network ID with different spec dirs
-3. Call `r.Client.RegisterNetwork(specDir)` — the server loads specs, topology, and platform definitions from the spec directory
-4. Query `r.Client.TopologyDeviceNames()` to discover all devices in the topology
-5. For each device, check `r.Client.IsHostDevice(name)`:
-   - **Host devices**: establish a direct SSH connection via `connectHostSSH` and store in `r.HostConns`
-   - **SONiC devices**: no pre-connection — the server connects on demand when an operation targets the device
-6. Discover platform from the first non-host device's profile via `r.Client.DeviceInfo(name)` → store in `r.discoveredPlatform`
-
-`connectHostSSH` resolves the host's SSH credentials (user, password, port, management IP) from the device profile via `r.Client.GetHostProfile(name)`, then dials SSH directly.
-
-### 4.9 Runner Helpers
-
-```go
-func (r *Runner) allDeviceNames() []string
-func (r *Runner) resolveDevices(step *Step) []string
-func (r *Runner) hasDataplane() bool
-func (r *Runner) resolvePlatform() string
 func HasRequires(scenarios []*Scenario) bool
+func ComputeTargetChain(scenarios []*Scenario, target string) ([]*Scenario, error)
 ```
 
-`allDeviceNames` queries `r.Client.TopologyDeviceNames()` for the current device list.
+`HasRequires` is a quick probe: do any scenarios in the suite declare `requires` or `after`? The Runner topologically sorts only when at least one does.
 
-`hasDataplane` calls `r.Client.ShowPlatform(platformName)` and checks if
-`PlatformSpec.Dataplane` is non-empty.
-
-`resolvePlatform` returns the platform name from CLI override → scenario YAML → device discovery (in that priority order).
+`ComputeTargetChain` returns the minimum dependency chain reaching `target` — used by `newtrun start --target <name>` to skip everything not on the path.
 
 ---
 
-## 5. Lifecycle (`state.go`)
+## 4. State Persistence (`state.go`)
 
-### 5.1 SuiteStatus
+### 4.1 RunState
+
+```go
+type RunState struct {
+    Suite     string          `json:"suite"`
+    SuiteDir  string          `json:"suite_dir"`
+    Topology  string          `json:"topology"`
+    SpecDir   string          `json:"spec_dir,omitempty"`
+    Platform  string          `json:"platform"`
+    Target    string          `json:"target,omitempty"`
+    PID       int             `json:"pid"`
+    Status    SuiteStatus     `json:"status"`
+    Started   time.Time       `json:"started"`
+    Updated   time.Time       `json:"updated"`
+    Finished  time.Time       `json:"finished,omitempty"`
+    Scenarios []ScenarioState `json:"scenarios"`
+}
+```
+
+Persisted to `~/.newtron/newtrun/<key>/state.json` after every progress event. `<key>` is the suite name for file-backed runs or a UUID for inline runs (separate `_inline/<uuid>/` subdirectory keeps the namespaces clean).
+
+### 4.2 SuiteStatus
 
 ```go
 type SuiteStatus string
@@ -448,105 +312,204 @@ const (
 )
 ```
 
-### 5.2 RunState
+| Status | Set by | Means |
+|--------|--------|-------|
+| `running` | `handleStartRun` (initial) | Runner goroutine is in flight. |
+| `pausing` | `handlePauseRun` | Pause requested; Runner will exit at next scenario boundary. |
+| `paused` | finalizer when Runner returns `PauseError` | A subsequent `start` resumes. |
+| `complete` | finalizer when no errors and no scenario failed | Happy path. |
+| `aborted` | finalizer when Runner returned `context.Canceled` or `context.DeadlineExceeded` | Server shut down, inline timeout, or stop endpoint. |
+| `failed` | finalizer when any scenario was FAIL/ERROR or run returned a non-Pause/non-Canceled error | Genuine test failure. |
+
+### 4.3 SuiteStatusFromOutcome
 
 ```go
-type RunState struct {
-    Suite     string          `json:"suite"`
-    SuiteDir  string          `json:"suite_dir"`
-    Topology  string          `json:"topology"`
-    Platform  string          `json:"platform"`
-    PID       int             `json:"pid"`
-    Status    SuiteStatus     `json:"status"`
-    Started   time.Time       `json:"started"`
-    Updated   time.Time       `json:"updated"`
-    Finished  time.Time       `json:"finished,omitempty"`
-    Scenarios []ScenarioState `json:"scenarios"`
-}
+func SuiteStatusFromOutcome(runErr error, results []*ScenarioResult) SuiteStatus
 ```
 
-Persisted to `~/.newtron/newtrun/<suite>/state.json` via `SaveRunState`.
+The single source of truth for terminal status. Used by both the Runner (which emits the wire `SuiteEnd` event) and the server-side finalizer (which writes `state.json`). Same input → same output so the SSE event and the persisted file never disagree.
 
-### 5.3 ScenarioState
+Precedence:
+1. `PauseError` → `paused`
+2. `context.Canceled` or `context.DeadlineExceeded` → `aborted`
+3. Any other non-nil error → `failed`
+4. Otherwise inspect `results` for any FAIL/ERROR → `failed`
+5. Else → `complete`
+
+### 4.4 ScenarioState and StepState
 
 ```go
 type ScenarioState struct {
     Name              string      `json:"name"`
     Description       string      `json:"description,omitempty"`
-    Status            string      `json:"status"`                        // "PASS","FAIL","SKIP","ERROR","running","" (pending)
+    Status            string      `json:"status"`
     Duration          string      `json:"duration"`
-    CurrentStep       string      `json:"current_step,omitempty"`        // step name while in-progress
-    CurrentStepAction string      `json:"current_step_action,omitempty"` // step action while in-progress
-    CurrentStepIndex  int         `json:"current_step_index,omitempty"`  // 0-based step index
+    CurrentStep       string      `json:"current_step,omitempty"`
+    CurrentStepAction string      `json:"current_step_action,omitempty"`
+    CurrentStepIndex  int         `json:"current_step_index,omitempty"`
     TotalSteps        int         `json:"total_steps,omitempty"`
     Requires          []string    `json:"requires,omitempty"`
     SkipReason        string      `json:"skip_reason,omitempty"`
     Steps             []StepState `json:"steps,omitempty"`
 }
-```
 
-`CurrentStepAction` enables the `status --detail` view to show which action type
-is currently executing (e.g., "topology-reconcile", "newtron"), not just the step name.
-
-### 5.4 StepState
-
-```go
 type StepState struct {
-    Name     string `json:"name"`
-    Action   string `json:"action"`
-    Status   string `json:"status"`   // "PASS","FAIL","SKIP","ERROR"
-    Duration string `json:"duration"` // e.g. "2s", "<1s"
-    Message  string `json:"message,omitempty"`
+    Name      string           `json:"name"`
+    Action    string           `json:"action"`
+    Status    string           `json:"status"`
+    Duration  string           `json:"duration"`
+    Message   string           `json:"message,omitempty"`
+    DeviceOps []sonic.DeviceOp `json:"device_ops,omitempty"`
 }
 ```
 
-### 5.5 State Functions
+`StepState.DeviceOps` captures per-device-operation events newtron emits during the step's execution. Empty when no producer fed events; populated by `StepProgress` callers (current: none in this repo; planned: the per-device-op SSE consumer in `steps_newtron.go`, gated on newtron Phase 2b).
+
+### 4.5 State directory helpers
 
 ```go
-func StateDir(suite string) (string, error)
-func SuiteName(dir string) string
-func SaveRunState(state *RunState) error
+func StateDir(suite string) (string, error)        // ~/.newtron/newtrun/<suite>
+func InlineStateDir(id string) (string, error)     // ~/.newtron/newtrun/_inline/<id>
+func SaveRunState(state *RunState) error           // suite namespace
+func SaveInlineRunState(state *RunState) error     // inline namespace
 func LoadRunState(suite string) (*RunState, error)
-func RemoveRunState(suite string) error
+func LoadInlineRunState(id string) (*RunState, error)
+func LoadAnyRunState(id string) (*RunState, error) // tries both; used by handleGetRun
 func ListSuiteStates() ([]string, error)
-func AcquireLock(state *RunState) error
-func ReleaseLock(state *RunState) error
-func CheckPausing(suite string) bool
-func IsProcessAlive(pid int) bool
 ```
 
-| Function | Description |
-|----------|-------------|
-| `StateDir` | Returns `~/.newtron/newtrun/<suite>/` |
-| `SuiteName` | Extracts suite name from directory path via `filepath.Base` |
-| `SaveRunState` | Writes state to `state.json`, updating `Updated` timestamp |
-| `LoadRunState` | Reads state from `state.json`. Returns `nil, nil` if not found. |
-| `RemoveRunState` | Deletes the entire suite state directory |
-| `ListSuiteStates` | Returns names of all suites with state directories. Only returns suites that have actual suite directories in the suites base directory. |
-| `AcquireLock` | Checks for live PID in existing state; sets `state.PID = os.Getpid()` |
-| `ReleaseLock` | Clears PID and saves state |
-| `CheckPausing` | Returns true if the suite's status is `"pausing"` |
-| `IsProcessAlive` | Checks if PID exists via `syscall.Kill(pid, 0)` |
+`saveStateAt` is the shared marshal-and-write body — `SaveRunState` and `SaveInlineRunState` differ only in which directory they target.
 
-### 5.6 Pause Flow
+### 4.6 CheckPausing
 
-1. User runs `newtrun pause` → reads state, sets `Status = SuiteStatusPausing`, saves
-2. Running `iterateScenarios` checks `CheckPausing(suite)` before each scenario
-3. When pausing detected, returns `PauseError{Completed: len(results)}`
-4. `cmd_start.go` catches `PauseError`, sets `Status = SuiteStatusPaused`, saves
+```go
+func CheckPausing(suite string) bool
+```
 
-### 5.7 Resume Flow
+Reads `state.json` and returns true when `state.Status == SuiteStatusPausing`. The Runner calls this at each scenario boundary in `iterateScenarios` — that's how the pause signal propagates from `handlePauseRun` (which only writes the file) to the running goroutine.
 
-1. User runs `newtrun start <suite>` → `LoadRunState` finds paused state
-2. CLI builds `RunOptions{Resume: true, Completed: map[name]status}` from saved state
-3. `iterateScenarios` skips scenarios that already passed in `opts.Completed`
-4. Execution continues from first non-passed scenario
+---
+
+## 5. Runner Internals (`runner.go`)
+
+### 5.1 Runner
+
+```go
+type Runner struct {
+    ScenariosDir string
+    ServerURL    string         // newtron-server HTTP address
+    NetworkID    string         // network identifier for server operations
+    Client       *client.Client // HTTP client for all SONiC operations
+    Lab          *newtlab.Lab
+    HostConns    map[string]*ssh.Client
+    Progress     ProgressReporter
+    Topology     string         // topology name (from server)
+    SpecDir      string         // spec directory (from server)
+
+    discoveredPlatform string
+    opts               RunOptions
+    scenario           *Scenario
+}
+```
+
+| Field | Set by | Used by |
+|-------|--------|---------|
+| `ScenariosDir` | `NewRunner(dir)` or `handleStartRun` | Parser to enumerate scenarios. |
+| `ServerURL` | `handleStartRun` from `req.NewtronServer` or server default | `client.Client` constructor + steps_cli passes to subprocess via `--server`. |
+| `NetworkID` | `handleStartRun` from `req.NetworkID` or server default | Network identifier in HTTP calls. |
+| `Client` | `connectToServer` | Every `newtron` action HTTP call. |
+| `Lab` | `deployTopology` (when `!opts.NoDeploy`) | Deploy + destroy. |
+| `HostConns` | `connectDevices` | `host-exec` SSH calls. |
+| `Progress` | `handleStartRun` (HTTPReporter → StateReporter chain) | Every lifecycle event. |
+| `Topology` | `connectToServer` from `GET /network` | Verified against each scenario's declared topology. |
+| `SpecDir` | `connectToServer` | Used by `Reconcile` action and by `cmd_stop` when destroying. |
+
+### 5.2 RunOptions
+
+```go
+type RunOptions struct {
+    Scenario  string
+    Target    string
+    All       bool
+    Platform  string
+    Keep      bool
+    NoDeploy  bool
+    Verbose   bool
+    JUnitPath string
+
+    Suite     string                 // lifecycle key; empty disables state tracking
+    Resume    bool                   // true when resuming a paused run
+    Completed map[string]StepStatus  // scenario → status from previous run
+}
+```
+
+`Suite` is set when the run is being driven via lifecycle endpoints (start/pause/stop); empty when called from `Run()` directly. The `CheckPausing` probe in `iterateScenarios` is conditional on `Suite != ""` — direct `Run()` calls bypass it.
+
+### 5.3 Run(ctx, opts)
+
+The top-level entry. Resolves scenarios from `opts.All` / `opts.Target` / `opts.Scenario`, validates the dependency graph, connects to newtron-server, deploys the topology if needed, connects to host devices, then enters `iterateScenarios`. Always emits `SuiteEnd` before returning (even on error) so reporters carry a terminal event.
+
+The terminal status passed to `SuiteEnd` is computed via `SuiteStatusFromOutcome(err, results)` — the wire and the persisted state get the same value.
+
+### 5.4 iterateScenarios
+
+```go
+func (r *Runner) iterateScenarios(
+    ctx context.Context,
+    scenarios []*Scenario,
+    opts RunOptions,
+    deployedPlatform string,
+    run scenarioRunner,
+) ([]*ScenarioResult, error)
+```
+
+Per-iteration sequence:
+
+1. **ctx-cancel check.** If the context is canceled, return early with `ctx.Err()`. This is what makes graceful server shutdown produce `status=aborted` instead of a flood of synthetic FAIL events ([HLD §9.3](hld.md)).
+2. **Resume skip.** If `opts.Resume` and `opts.Completed[sc.Name] == StepStatusPassed`, emit `ScenarioEnd` with `status=SKIPPED` and `SkipReason="already passed (resumed)"`.
+3. **Pause check.** If `opts.Suite != ""` and `CheckPausing(opts.Suite)`, return `PauseError{Completed: len(results)}`.
+4. **`requires` check.** If any prerequisite scenario failed, mark this scenario SKIPPED.
+5. **Feature-flag check.** If the platform doesn't support a scenario's `requires_features`, mark SKIPPED.
+6. **Run.** Emit `ScenarioStart`, call the scenarioRunner callback, emit `ScenarioEnd`.
+
+### 5.5 runScenarioSteps
+
+```go
+func (r *Runner) runScenarioSteps(
+    ctx context.Context, sc *Scenario, opts RunOptions, result *ScenarioResult,
+)
+```
+
+Executes the steps of a scenario, recording per-step results into `result.Steps`. Honors `sc.Repeat` (run the step list N times). On a step's `on_failure`, decides whether to stop the scenario, continue with subsequent steps, or skip the rest.
+
+### 5.6 Dispatcher
+
+A package-local map dispatches `step.Action` to a `stepExecutor`:
+
+| Action | Executor |
+|--------|----------|
+| `ActionNewtron` | `newtronExecutor` ([§9.1](#91-newtronexecutor)) |
+| `ActionNewtronCLI` | `newtronCLIExecutor` ([§9.2](#92-newtroncliexecutor)) |
+| `ActionHostExec` | `hostExecExecutor` ([§9.3](#93-hostexecexecutor)) |
+| `ActionWait` | `waitExecutor` (sleep) |
+| `ActionProvision` | `provisionExecutor` ([§9.4](#94-provisionexecutor)) |
+
+### 5.7 connectToServer / connectDevices
+
+```go
+func (r *Runner) connectToServer() error
+func (r *Runner) connectDevices() error
+```
+
+`connectToServer` constructs the newtron HTTP client (`client.New(r.ServerURL, r.NetworkID)`) and reads the server's loaded network spec to populate `r.Topology` and `r.SpecDir`. Fails fast if the server has no network registered.
+
+`connectDevices` walks the topology's device list, identifies hosts via `Client.IsHostDevice(name)`, opens an SSH connection to each, and stores them in `r.HostConns`. Skipped when `opts.NoDeploy == true`.
 
 ---
 
 ## 6. Progress Reporting (`progress.go`)
 
-### 6.1 ProgressReporter Interface
+### 6.1 ProgressReporter
 
 ```go
 type ProgressReporter interface {
@@ -554,553 +517,312 @@ type ProgressReporter interface {
     ScenarioStart(name string, index, total int)
     ScenarioEnd(result *ScenarioResult, index, total int)
     StepStart(scenario string, step *Step, index, total int)
+    StepProgress(scenario string, step *Step, op *sonic.DeviceOp, index int)
     StepEnd(scenario string, result *StepResult, index, total int)
-    SuiteEnd(results []*ScenarioResult, duration time.Duration)
+    SuiteEnd(results []*ScenarioResult, status SuiteStatus, duration time.Duration)
 }
 ```
 
-The Runner calls these via `r.progress(func(p) { p.Method(...) })`, which
-no-ops if `r.Progress` is nil.
+Seven callbacks invoked by the Runner. Implementations:
 
-### 6.2 consoleProgress
+| Implementation | Purpose |
+|----------------|---------|
+| `consoleProgress` | Terminal output for direct `Run()` invocations (no server). |
+| `StateReporter` | Persists `RunState` to disk after every callback; chainable. |
+| `HTTPReporter` ([§7.3](#73-httpreporter)) | Publishes events to the `EventBroker`; chainable. |
 
-```go
-type consoleProgress struct {
-    W       io.Writer
-    Verbose bool
-    suiteName string
-    dotWidth  int
-}
-
-func NewConsoleProgress(verbose bool) ProgressReporter
-```
-
-Append-only terminal progress reporter. Never uses ANSI cursor rewriting,
-so output is safe for pipes, CI, and scrollback buffers.
-
-- **SuiteStart**: prints scenario roster table (index, name, step count)
-- **ScenarioEnd**: one dot-padded line per scenario with PASS/FAIL/SKIP/ERROR
-- **StepEnd**: only shown in verbose mode; includes per-device failure details
-- **SuiteEnd**: summary line with pass/fail/skip/error counts and total duration
-
-### 6.3 StateReporter
+### 6.2 StateReporter
 
 ```go
 type StateReporter struct {
-    Inner ProgressReporter
     State *RunState
-    scenarioIndex int
+    Save  func(*RunState) error  // SaveRunState or SaveInlineRunState
+    Inner ProgressReporter       // chain (e.g., HTTPReporter)
 }
 ```
 
-Wraps a `ProgressReporter` and persists `RunState` after each lifecycle event:
+Mutates `r.State` on every callback and saves to disk. `Save` is injected so the same reporter logic works for both the suite and inline namespaces. `Inner` lets a downstream reporter (typically `HTTPReporter`) receive the same events.
 
-- **SuiteStart**: initializes `ScenarioState` entries with metadata (name, description, total steps, requires)
-- **ScenarioStart**: sets scenario status to `"running"`
-- **ScenarioEnd**: records final status, duration, skip reason; clears `CurrentStep`/`CurrentStepAction`
-- **StepStart**: records current step name, action, and index (enables progress display in `status --detail`)
-- **StepEnd**: appends `StepState` with result to the current scenario (enables incremental detail view)
-- **SuiteEnd**: final state save
+### 6.3 StepProgress
 
-All callbacks delegate to `Inner` after saving state. Save failures are logged
-as warnings but do not abort execution.
+The one callback with no current producer in the Runner. Reserved for the per-device-op streaming consumer in `steps_newtron.go` (gated on newtron Phase 2b — when the newtron-server's `WriteResult` stream lands, `steps_newtron.go` will forward each device op via `StepProgress`).
+
+### 6.4 SuiteEnd carries status
+
+The interface added a `SuiteStatus` parameter in PR #35 so the wire event distinguishes "the suite ran and N scenarios failed" from "the server died mid-run". All implementations honor it; the `SuiteEndPayload` JSON field carries the same value.
 
 ---
 
-## 7. Step Executors (`steps.go`, `steps_newtron.go`, `steps_host.go`)
+## 7. HTTP Server Package (`pkg/newtrun/api/`)
 
-### 7.1 Executor Interface
+### 7.1 Server
 
 ```go
-type stepExecutor interface {
-    Execute(ctx context.Context, r *Runner, step *Step) *StepOutput
-}
-
-type StepOutput struct {
-    Result *StepResult
+type Server struct {
+    cfg        Config
+    logger     *log.Logger
+    httpServer *http.Server
+    broker     *EventBroker
+    registry   *RunRegistry
 }
 ```
 
-All executors are stateless — mutable state lives in the Runner. Executors
-read from Runner (e.g., `r.Client`, `r.HostConns`) and return
-`StepOutput` rather than writing directly.
-
-### 7.2 Executor Dispatch
-
-```go
-var executors = map[StepAction]stepExecutor{
-    ActionProvision:          &provisionExecutor{},
-    ActionWait:               &waitExecutor{},
-    ActionVerifyProvisioning: &verifyProvisioningExecutor{},
-    ActionHostExec:           &hostExecExecutor{},
-    ActionNewtron:            &newtronExecutor{},
-    ActionNewtronCLI:         &newtronCLIExecutor{},
-}
-
-func (r *Runner) executeStep(ctx context.Context, step *Step, index, total int, opts RunOptions) *StepOutput
-```
-
-`executeStep` looks up the executor, calls `Execute`, sets duration and name
-on the result, and aggregates per-device error details into the `Message` field
-when executors only set `Details`.
-
-When `step.ExpectFailure` is true, `applyExpectFailure` inverts the result:
-FAIL/ERROR becomes PASS (expected failure), PASS becomes FAIL (unexpected
-success). If `expect.contains` is set, the error message must contain that
-substring for the inversion to apply.
-
-### 7.3 Multi-Device Helpers
-
-```go
-func (r *Runner) executeForDevices(step *Step, fn func(name string) (string, error)) *StepOutput
-func (r *Runner) checkForDevices(step *Step, fn func(name string) (StepStatus, string)) *StepOutput
-func (r *Runner) pollForDevices(ctx context.Context, step *Step, fn func(name string) (done bool, msg string, err error)) *StepOutput
-```
-
-Three patterns used by executors. Note the callback signatures — they receive
-only the device `name` string. The callback body uses `r.Client` to perform
-all operations against the server:
-
-- **executeForDevices**: for mutating actions and one-shot newtron calls. Calls `fn` for each device in parallel.
-- **checkForDevices**: for single-shot verification (verify-topology). Returns per-device status.
-- **pollForDevices**: for polling verification (newtron polling mode). Polls until `step.Expect.Timeout` using `step.Expect.PollInterval`.
-
-| Helper | Used By |
+| Method | Purpose |
 |--------|---------|
-| `executeForDevices` | `topology-reconcile`, `newtron` (one-shot mode, batch mode) |
-| `checkForDevices` | `verify-topology` |
-| `pollForDevices` | `newtron` (polling mode) |
+| `NewServer(cfg) *Server` | Constructor; applies Config defaults (port, base dirs, newtron-server URL). |
+| `(*Server).Start(addr) error` | Blocks listening on `addr`. |
+| `(*Server).Stop(ctx) error` | Cancels every in-flight run, waits up to 5s, shuts down the HTTP listener. |
+| `(*Server).Handler() http.Handler` | Exported handler for testing — external packages mount the real server into `httptest.Server`. |
+| `(*Server).Broker() *EventBroker` | Accessor (no-arg getter per §32 exception). |
+| `(*Server).Registry() *RunRegistry` | Accessor. |
 
-**Host-skip behavior:** all three helpers check `r.HostConns[name]` before invoking the callback. If the device is a host, it is skipped with status `SKIP` and message "host device (SONiC operation/verification not applicable)". This means `devices: all` in a mixed switch+host topology automatically restricts SONiC operations to switches only. The only executor that targets hosts is `hostExecExecutor`, which uses `r.HostConns` directly.
+### 7.2 Config defaults
 
-### 7.4 pollUntil
+`NewServer` fills empty fields:
 
-```go
-func pollUntil(ctx context.Context, timeout, interval time.Duration, fn func() (done bool, err error)) error
-```
+| Field | Default |
+|-------|---------|
+| `SuitesBase` | `newtrun/suites` |
+| `TopologiesBase` | `newtrun/topologies` |
+| `NewtronServer` | `http://127.0.0.1:8080` |
+| `NetworkID` | `default` |
+| `InlineURLPrefix` | `NewtronServer` (inline scenarios can only call the configured server) |
+| `Logger` | `log.Default()` |
 
-Low-level polling primitive used by `pollForDevices`. Calls `fn` at `interval`
-until `fn` returns `done=true`, timeout expires, or `ctx` is cancelled.
-
-### 7.5 Executor Summary
-
-| # | Executor | Action | File | Client Call |
-|---|----------|--------|------|-------------|
-| 1 | `provisionExecutor` | `topology-reconcile` | `steps.go` | `Reconcile(name, "topology", "", ExecOpts{Execute: true})` |
-| 2 | `waitExecutor` | `wait` | `steps.go` | — (context-aware `time.After`) |
-| 3 | `verifyProvisioningExecutor` | `verify-topology` | `steps.go` | `IntentDrift(name, "topology")` → check `len == 0` |
-| 4 | `hostExecExecutor` | `host-exec` | `steps_host.go` | — (direct SSH via `r.HostConns`) |
-| 5 | `newtronExecutor` | `newtron` | `steps_newtron.go` | `RawRequest(method, path, body)` |
-| 6 | `newtronCLIExecutor` | `newtron-cli` | `steps_cli.go` | — (runs `newtron` binary as subprocess via `exec.CommandContext`) |
-
-### 7.6 Provision Executor Detail
-
-The `provisionExecutor` makes a single API call per device:
+### 7.3 HTTPReporter
 
 ```go
-result, err := r.Client.Reconcile(name, "topology", "", newtron.ExecOpts{Execute: true})
+type HTTPReporter struct {
+    Broker *EventBroker
+    RunKey string
+    Inner  newtrun.ProgressReporter
+}
 ```
 
-`Reconcile` handles config reload, locking, full CONFIG_DB replacement (ReplaceAll), and
-SaveConfig internally. On success, the executor reports `"provisioned (N entries applied)"`
-where N is `result.Applied`.
+Implements `ProgressReporter`. Each callback constructs an `Event` and publishes it via `Broker.Publish(RunKey, ev)`. `Inner` is typically a `StateReporter`, so disk-persistence and SSE-publication happen on the same event.
 
-### 7.7 Host Exec Executor (`steps_host.go`)
-
-The `hostExecExecutor` is unique — it does not use `r.Client` at all. It runs
-commands directly via the SSH connection stored in `r.HostConns`:
-
-1. Resolve single device name from step
-2. Look up `*ssh.Client` in `r.HostConns`
-3. Wrap command in `ip netns exec <device> sh -c <quoted-cmd>` — the namespace
-   name matches the device name, and `sh -c` ensures compound commands (pipes,
-   semicolons) execute entirely inside the namespace
-4. Execute via `runSSHCommand` (creates SSH session, runs `CombinedOutput`)
-5. Check `expect.SuccessRate` (ping) or `expect.Contains` (string match) or bare exit code
-
-`shellQuote` wraps strings in single quotes, escaping embedded single quotes.
-
-### 7.8 newtronExecutor Detail (`steps_newtron.go`)
-
-The `newtronExecutor` implements the generic `newtron` action — a single step type
-that makes arbitrary HTTP calls to newtron-server. It replaces the 60+ dedicated
-executors from the previous design with URL templates, jq-based assertions, and
-three execution modes.
-
-**URL template expansion** (`expandURL`):
+### 7.4 EventBroker
 
 ```go
-func expandURL(urlTemplate, networkID, device string) string
+type EventBroker struct {
+    mu          sync.RWMutex
+    subscribers map[string]map[chan Event]struct{}
+}
 ```
 
-Two substitutions:
-1. `{{device}}` → `url.PathEscape(device)` — per-device expansion
-2. Implicit `/network/<networkID>` prefix — URLs in YAML are relative to the
-   network (e.g., `/node/{{device}}/vlan` expands to
-   `/network/mynet/node/switch1/vlan`)
+SSE multiplexer. The handler `handleRunEvents` calls `Subscribe(runKey)` which returns a buffered `chan Event` (capacity 64) and an unsubscribe func.
 
-**Three execution modes:**
+`Publish(runKey, ev)` fans out to every subscriber of that key. **Drop-on-full:** if a subscriber's buffer is full, the event is dropped for that subscriber only — other subscribers still receive it. SSE is best-effort.
 
-1. **One-shot mode** (no `poll`, no `batch`):
-   - If URL contains `{{device}}`: `executeForDevices` runs the call in parallel per device
-   - If URL has no `{{device}}`: single network-scoped call (no device parallelism)
-
-2. **Polling mode** (`poll:` block present):
-   - If URL contains `{{device}}`: `pollForDevices` polls each device in parallel
-   - If no `{{device}}`: `pollUntil` polls a network-scoped endpoint
-   - Polls until the jq assertion passes or timeout expires
-   - Errors during polling mean "not ready yet" — the poll continues
-
-3. **Batch mode** (`batch:` list present):
-   - Executes a sequence of HTTP calls within a single step
-   - If any batch URL contains `{{device}}`: `executeForDevices` runs the full
-     batch sequence per device (each device runs all calls in order)
-   - If no `{{device}}`: batch runs once with no device scoping
-   - Fails on the first error within the batch
-
-**jq evaluation** (`evalJQ`):
+### 7.5 RunRegistry
 
 ```go
-func evalJQ(expr string, data json.RawMessage, method, path string) (string, error)
+type RunRegistry struct {
+    mu      sync.Mutex
+    entries map[string]*RegistryEntry
+}
+
+type RegistryEntry struct {
+    Key     string
+    Started time.Time
+    Cancel  context.CancelFunc
+    Done    chan struct{}
+    Result  *RunResult
+}
 ```
 
-Uses the `gojq` library to compile and run a jq expression against the JSON
-response body. The expression must produce a single boolean `true` to pass.
-Any other value (including `false`, `null`, a non-boolean) is a failure. When
-no jq assertion is specified, a non-error HTTP response is sufficient to pass.
+| Method | Purpose |
+|--------|---------|
+| `Acquire(key) (*RegistryEntry, error)` | Reserve the key. Returns `AlreadyRunningError` if held. |
+| `Get(key) *RegistryEntry` | Lookup; nil if no entry. |
+| `Release(key, *RunResult)` | Closes `Done`, removes the entry, stores the result. |
+| `CancelAll(timeout)` | Server shutdown: cancel every entry's context, wait for `Done`. |
 
-**doCall flow:**
+Same-suite re-runs collide on the key and return 409. Inline runs allocate UUIDs that never collide. Different suites run concurrently.
+
+### 7.6 reconcileStaleStatus
 
 ```go
-func (e *newtronExecutor) doCall(r *Runner, method, urlTemplate string, params map[string]any, device string, expect *ExpectBlock) (string, error)
+func (s *Server) reconcileStaleStatus(state *newtrun.RunState, runKey string)
 ```
 
-1. `expandURL(urlTemplate, r.Client.NetworkID(), device)` — substitute `{{device}}` and prepend network prefix
-2. Build request body from `params` for POST/PUT/DELETE methods
-3. `r.Client.RawRequest(method, path, body)` — HTTP call to newtron-server
-4. If `expect.JQ` is set: `evalJQ(expr, data, method, path)` — evaluate jq assertion
-5. If no jq: return success message (`"GET /network/.../node/switch1/vlan: ok"`)
+The server-restart-honesty rule ([HLD §9.3](hld.md)). When `handleGetRun` or `handleListRuns` loads a `state.json` that claims `running` or `pausing` but the registry has no live entry, the in-memory copy is relabeled to `aborted` before serialization. The disk file is not rewritten — the next finalizer write applies the canonical status.
 
-### 7.9 Executor Parameter Reference
+Called from both `handleGetRun` and `handleListRuns` via this helper (per §7 of the design principles — second instance of the same rule must consolidate).
 
-| Action | Step Fields | Expect Fields | Notes |
-|--------|-------------|---------------|-------|
-| `topology-reconcile` | — | — | Single `Reconcile` call (see §7.6); reports applied entry count |
-| `wait` | **duration** | — | Context-aware sleep; no device interaction |
-| `verify-topology` | — | — | Calls `IntentDrift(name, "topology")`; passes when drift count is zero |
-| `host-exec` | **command** | `success_rate`, `contains` | Direct SSH via `r.HostConns`; wraps in `ip netns exec <device> sh -c` |
-| `newtron` | **url** or **batch**, method, params | `jq` | Generic HTTP action; `poll:` block for polling; `batch:` for sequential calls |
-
-### 7.10 YAML Examples
-
-Representative YAML patterns covering the major test categories. All examples
-are type-valid and can be copy-pasted into scenario files.
-
-**Provisioning + verification** — the most common suite preamble:
-
-```yaml
-steps:
-  - name: provision-switches
-    action: topology-reconcile
-    devices: [switch1, switch2]
-
-  - name: wait-convergence
-    action: wait
-    duration: 45s
-
-  - name: verify-provisioning
-    action: verify-topology
-    devices: [switch1, switch2]
-```
-
-**SSH reachability check with polling** — verify device is SSH-reachable:
-
-```yaml
-steps:
-  - name: ssh-echo-switch1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/ssh-command
-    params: {command: "echo ok"}
-    poll:
-      timeout: 120s
-      interval: 5s
-    expect:
-      jq: '.output | contains("ok")'
-```
-
-**VLAN creation and verification** — create L2 domain, verify in CONFIG_DB:
-
-```yaml
-steps:
-  - name: create-vlan100
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/vlan
-    params: {id: 100}
-
-  - name: add-member-untagged
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/vlan/100/member
-    params: {interface: Ethernet4, tagged: false}
-
-  - name: verify-vlan100-exists
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN/Vlan100/exists
-    expect:
-      jq: '.exists == true'
-
-  - name: verify-member-untagged
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet4
-    expect:
-      jq: '.tagging_mode == "untagged"'
-```
-
-**Service apply via newtron action** — apply service to an interface:
-
-```yaml
-steps:
-  - name: apply-transit
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/interface/Ethernet2/apply-service
-    params:
-      service: transit
-      ip_address: "10.10.1.1/31"
-```
-
-**BGP verification with polling** — poll until sessions are established:
-
-```yaml
-steps:
-  - name: verify-bgp
-    action: newtron
-    devices: [switch1, switch2]
-    url: /node/{{device}}/bgp/sessions
-    poll:
-      timeout: 120s
-      interval: 5s
-    expect:
-      jq: '[.[] | select(.state != "Established")] | length == 0'
-```
-
-**Host dataplane verification** — configure host IP, ping gateway via `host-exec`:
-
-```yaml
-steps:
-  - name: configure-host-ip
-    action: host-exec
-    devices: [host1]
-    command: "ip addr add 192.168.1.10/24 dev eth0"
-
-  - name: wait-arp
-    action: wait
-    duration: 3s
-
-  - name: ping-gateway
-    action: host-exec
-    devices: [host1]
-    command: "ping -c 5 -W 2 192.168.1.1"
-    expect:
-      success_rate: 0.80
-```
-
-**Expected failure** — verify that an operation fails with zombie intent:
-
-```yaml
-steps:
-  - name: create-vlan-blocked-by-zombie
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/vlan
-    params: {id: 999}
-    expect_failure: true
-```
-
-### 7.11 Worked Example: create-vlan via newtron
-
-Tracing a single `newtron` step from YAML through every layer.
-
-**1. YAML definition**
-
-```yaml
-- name: create-vlan100
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/vlan
-  params: {id: 100}
-```
-
-**2. Parser — `applyDefaults`** (`parser.go`). No-op — the `newtron` action
-has no defaults to inject.
-
-**3. Parser — `validateStepFields`** (`parser.go`). Looks up
-`stepValidations[ActionNewtron]`:
+### 7.7 InlineSafetyPolicy
 
 ```go
-ActionNewtron: {custom: func(prefix string, step *Step) error {
-    if step.URL == "" && len(step.Batch) == 0 {
-        return fmt.Errorf("%s: newtron requires url or batch", prefix)
-    }
-    return nil
-}}
+type InlineSafetyPolicy struct {
+    AllowedActions     map[newtrun.StepAction]bool
+    AllowedURLPrefixes []string
+    AllowReconcile     bool
+    WallTimeBudget     time.Duration
+}
 ```
 
-`step.URL` is `"/node/{{device}}/vlan"` (non-empty) → validation passes. No
-device or field validation is enforced by the parser — the `newtron` action
-delegates device handling to the executor.
+| Field | Default | Override |
+|-------|---------|----------|
+| `AllowedActions` | `{newtron, wait}` | Per-policy, not per-request. |
+| `AllowedURLPrefixes` | `[server's newtron-server URL]` | Per-policy. |
+| `AllowReconcile` | `false` | Request body `allow_reconcile: true`. |
+| `WallTimeBudget` | `60s` | Request body `timeout_seconds: N`. |
 
-**4. Runner — `executeStep`** (`runner.go`). Looks up
-`executors[ActionNewtron]` → `&newtronExecutor{}`. Calls
-`executor.Execute(ctx, r, step)`.
+`Validate(scenario)` returns a `SafetyViolation` describing what tripped the policy. 400 Bad Request from `handleStartInlineRun` carries the violation as the error message.
 
-**5. Executor — `newtronExecutor.Execute`** (`steps_newtron.go`). No `batch`,
-no `poll`. `method` defaults to `"POST"` (from YAML). URL contains `{{device}}`
-→ enters one-shot per-device mode: calls `r.executeForDevices(step, fn)`.
+### 7.8 finalizeRunState + finalizeInlineState
 
-**6. Per-device callback — `doCall`**. For device `"switch1"`:
+```go
+func finalizeRunState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error)
+func finalizeInlineState(state *newtrun.RunState, results []*newtrun.ScenarioResult, runErr error)
+```
 
-1. `expandURL("/node/{{device}}/vlan", "mynet", "switch1")` → `"/network/mynet/node/switch1/vlan"`
-2. `params` is `{"id": 100}`, method is `POST` → `body = {"id": 100}`
-3. `r.Client.RawRequest("POST", "/network/mynet/node/switch1/vlan", body)` → HTTP POST to newtron-server
-4. No `expect.JQ` set → returns `"POST /network/mynet/node/switch1/vlan: ok"`
+Run after the Runner goroutine returns. Both delegate to `SuiteStatusFromOutcome` for the status; they differ only in which persistence function they call (`SaveRunState` vs `SaveInlineRunState`).
 
-**7. Server** (`api/handler_node.go`). The handler resolves the node, calls
-`n.CreateVLAN(ctx, 100)`. Returns JSON response.
+### 7.9 Route registration
 
-**8. Result** — `executeForDevices` collects the per-device message into
-`DeviceResult{Device: "switch1", Status: PASS, Message: "POST .../vlan: ok"}`.
-Returns `StepOutput{Result: &StepResult{Status: PASS, Details: [...]}}`.
-
-**9. Runner** — `executeStep` sets `result.Duration` and `result.Name`. Reports
-progress via `r.Progress.StepEnd(...)`. The Runner advances to the next step.
-
-### 7.12 newtronCLIExecutor Detail (`steps_cli.go`)
-
-Runs the `newtron` CLI binary as a subprocess via `exec.CommandContext`.
-Designed for testing CLI commands directly, particularly in loopback mode.
-
-**Execution flow:**
-
-1. Resolve `newtron` binary from `$PATH`
-2. Build args: `[device, ...command_fields, --server, url]`
-3. If `expect.jq` is set, append `--json` for machine-parseable output
-4. Run via `exec.CommandContext` with separate stdout/stderr buffers
-5. If `expect.jq` is set, parse stdout as JSON and evaluate jq assertion
-6. Return pass/fail based on exit code and jq result
-
-**Device routing:** If `step.Devices` is set (or `{{device}}` appears in
-the command template), the executor runs per-device via `executeForDevices`.
-The device name is prepended as the first positional argument — the same
-pattern as normal CLI usage (`newtron <device> <command>`). Network-scoped
-commands (no `devices:` field) run once without a device prefix.
-
-**Key differences from `newtronExecutor`:** No HTTP calls — the CLI
-binary handles server communication internally. The `--server` URL is
-injected from `r.ServerURL`. Stdout/stderr are captured separately to
-prevent log messages from corrupting JSON output.
+`buildHandler()` (in `server.go`) registers 17 routes against `http.ServeMux`. See [api.md](api.md) for the canonical list; the handler functions are spread across `runs.go` / `suites.go` / `scenarios.go` / `topologies.go` per §28 (file-level feature cohesion).
 
 ---
 
-## 8. newtlab Integration (`deploy.go`)
+## 8. HTTP Client Package (`pkg/newtrun/client/`)
 
-### 8.1 DeployTopology
+### 8.1 Client
 
 ```go
-func DeployTopology(ctx context.Context, specDir string) (*newtlab.Lab, error)
+type Client struct {
+    baseURL      string
+    httpClient   *http.Client  // for short request/response calls
+    streamClient *http.Client  // for SSE (no timeout)
+}
 ```
 
-Creates a `newtlab.Lab` from the spec directory, sets `lab.Force = true`,
-calls `lab.Deploy(ctx)`, and returns the lab. After deploy, all VMs are
-running and SSH-reachable with patched profiles.
+| Method | Endpoint |
+|--------|----------|
+| `Health(ctx)` | GET /api/health |
+| `ListRuns(ctx)` | GET /api/runs |
+| `GetRun(ctx, suite)` | GET /api/runs/{suite} |
+| `StartRun(ctx, req)` | POST /api/runs |
+| `PauseRun(ctx, suite)` | POST /api/runs/{suite}/pause |
+| `StopRun(ctx, suite)` | POST /api/runs/{suite}/stop |
+| `DeleteRun(ctx, suite)` | DELETE /api/runs/{suite} |
+| `StreamEvents(ctx, suite, handle)` | GET /api/runs/{suite}/events (SSE) |
+| `ListSuites(ctx)` | GET /api/suites |
+| `ListSuiteScenarios(ctx, suite)` | GET /api/suites/{suite}/scenarios |
+| `CreateSuite(ctx, name)` | POST /api/suites |
+| `DeleteSuite(ctx, name)` | DELETE /api/suites/{suite} |
+| `GetScenario(ctx, suite, name)` | GET /api/suites/{suite}/scenarios/{name} |
+| `PutScenario(ctx, suite, name, body)` | PUT /api/suites/{suite}/scenarios/{name} |
+| `DeleteScenario(ctx, suite, name)` | DELETE /api/suites/{suite}/scenarios/{name} |
+| `ListTopologies(ctx)` | GET /api/topologies |
 
-### 8.2 EnsureTopology
+### 8.2 Transport helpers
 
 ```go
+func (c *Client) get(ctx, path, out)  error              // JSON envelope read
+func (c *Client) post(ctx, path, in, out) error          // JSON envelope write
+func (c *Client) do(ctx, method, path, in, out) error    // shared body of get/post
+func (c *Client) getRaw(ctx, path) ([]byte, error)       // non-envelope (YAML scenario body)
+func (c *Client) putRaw(ctx, path, body) error           // non-envelope (YAML scenario PUT)
+```
+
+`do` is the shared body — marshal `in` to JSON, dispatch, parse envelope, unmarshal `data` into `out`. `getRaw`/`putRaw` exist because scenario YAML is not JSON-enveloped.
+
+### 8.3 StreamEvents
+
+```go
+func (c *Client) StreamEvents(
+    ctx context.Context, suite string, handle func(Event),
+) error
+```
+
+Opens a long-running GET to `/api/runs/{suite}/events`, parses the SSE frame stream line-by-line, decodes each `data:` line as an `Event`, and calls `handle(ev)`. Returns when the context is canceled or the connection closes.
+
+SSE comment lines (those starting with `:`) are silently skipped — they're heartbeats and subscription confirmations.
+
+### 8.4 ServerError
+
+```go
+type ServerError struct {
+    StatusCode int
+    Body       string
+}
+func (e *ServerError) Error() string
+```
+
+Any 4xx/5xx response from a do/getRaw/putRaw call wraps the body in a `ServerError`. `errors.As` recovers the status code; the CLI's `notFoundIsNil` uses this to treat 404 as "absent" rather than failure.
+
+---
+
+## 9. Step Executors
+
+Source files: `steps.go`, `steps_newtron.go`, `steps_cli.go`, `steps_host.go`.
+
+### 9.1 newtronExecutor
+
+Action: `newtron`. Dispatches one HTTP call per device (or one global call for non-device-scoped URLs). Per-device URL expansion replaces `{device}` in `step.URL`. Response is matched against `step.Expect` and optionally polled via `step.Poll`.
+
+`batch`-mode runs N URLs per device in sequence before the expect; useful for setting up preconditions.
+
+### 9.2 newtronCLIExecutor
+
+Action: `newtron-cli`. Spawns `bin/newtron <device> <command...>` as a subprocess. Passes `--server <runner.ServerURL>` so the subprocess targets the same newtron-server the in-process client uses. Honors `step.Expect` against the subprocess exit code, stdout, and stderr.
+
+If the command includes `--json` and `step.Expect.JQ` is set, the executor parses stdout as JSON and evaluates the jq expression.
+
+### 9.3 hostExecExecutor
+
+Action: `host-exec`. Runs `step.Command` over SSH on the named host devices. Per-device parallelism (each device's SSH call runs in its own goroutine; results collected and merged).
+
+Honors `step.Expect.SuccessRate` for ping commands: parses the "N% packet loss" line and asserts the success rate is at least the configured threshold.
+
+### 9.4 provisionExecutor
+
+Action: `topology-reconcile`. Calls `POST /network/{id}/topology/reconcile` on newtron-server. This is the high-impact action — it can replace an entire device's intent state. Inline runs require explicit opt-in (`allow_reconcile: true` in the request body).
+
+### 9.5 Multi-device helpers
+
+```go
+func resolveDevices(r *Runner, sc *Scenario, step *Step) ([]string, error)
+func runPerDevice(ctx, r, devices, fn) (DeviceResult, error)
+```
+
+`resolveDevices` resolves `step.Devices` against the topology's device list (filtered by host-or-switch when the executor cares). `runPerDevice` runs `fn` concurrently across devices and collects results.
+
+---
+
+## 10. newtlab Integration (`deploy.go`)
+
+```go
+func DeployTopology(ctx context.Context, specDir string, force bool) (*newtlab.Lab, error)
 func EnsureTopology(ctx context.Context, specDir string) (*newtlab.Lab, error)
-```
-
-Reuses an existing lab if all nodes are running, otherwise deploys fresh.
-
-**Flow:**
-1. Create `newtlab.Lab` from spec dir
-2. Check `lab.Status()` — if all nodes are `"running"`, return the existing lab
-3. Otherwise, set `lab.Force = true`, call `lab.Deploy(ctx)`, and return the lab
-
-Used by `start` command via `deployTopology()` when `opts.Suite` is set.
-
-### 8.3 DestroyTopology
-
-```go
 func DestroyTopology(ctx context.Context, lab *newtlab.Lab) error
 ```
 
-Calls `lab.Destroy(ctx)`. Returns nil if `lab` is nil. Used by the `stop`
-command and by deferred cleanup in legacy (`run`) mode.
+`EnsureTopology` reuses an existing lab if all nodes report `running`, otherwise deploys fresh. Used between iterations of the same suite (`newtrun start` → fail → fix → `newtrun start`) to avoid a full redeploy when the lab is healthy.
+
+`DeployTopology` forces a fresh deployment. The Runner uses `EnsureTopology` unless `opts.Keep` is false.
+
+`DestroyTopology` is called from `cmd_stop` (CLI side) and from defer cleanups when the Runner's deploy step succeeded.
 
 ---
 
-## 9. Results & Reporting (`report.go`)
+## 11. Results & Reporting (`report.go`)
 
-### 9.1 StepStatus
-
-```go
-type StepStatus string
-
-const (
-    StepStatusPassed  StepStatus = "PASS"
-    StepStatusFailed  StepStatus = "FAIL"
-    StepStatusSkipped StepStatus = "SKIP"
-    StepStatusError   StepStatus = "ERROR"
-)
-```
-
-| Status | Meaning |
-|--------|---------|
-| `PASS` | Assertion matched |
-| `FAIL` | Assertion failed (expected value mismatch, timeout) |
-| `SKIP` | Skipped (platform lacks data plane, dependency failed, feature unsupported) |
-| `ERROR` | Infrastructure error (SSH failure, HTTP error, Redis timeout) |
-
-`FAIL` vs `ERROR`: `FAIL` means the test ran but the assertion didn't hold.
-`ERROR` means the test could not run. At the scenario level, `FAIL` takes
-priority over `ERROR`.
-
-### 9.2 ScenarioResult
+### 11.1 ScenarioResult and StepResult
 
 ```go
 type ScenarioResult struct {
-    Name            string
-    Topology        string
-    Platform        string
-    Status          StepStatus
-    Duration        time.Duration
-    Steps           []StepResult
-    DeployError     error
-    SkipReason      string
-    Repeat          int  // total iterations requested (0 = no repeat)
-    FailedIteration int  // which iteration failed (0 = none; 1-based when Repeat > 1)
+    Name        string
+    Topology    string
+    Platform    string
+    Status      StepStatus
+    Duration    time.Duration
+    Steps       []StepResult
+    DeployError error
+    SkipReason  string
 }
-```
 
-**Overall status** via `computeOverallStatus`:
-- Any step `FAIL` → scenario `FAIL`
-- Any step `ERROR` (no `FAIL`) → scenario `ERROR`
-- All `PASS`/`SKIP` → scenario `PASS`
-
-### 9.3 StepResult
-
-```go
 type StepResult struct {
     Name      string
     Action    StepAction
@@ -1108,20 +830,13 @@ type StepResult struct {
     Duration  time.Duration
     Message   string
     Details   []DeviceResult
-    Iteration int  // 1-based iteration number (0 = no repeat)
-}
-
-type DeviceResult struct {
-    Device  string
-    Status  StepStatus
-    Message string
+    Iteration int
 }
 ```
 
-Multi-device steps populate `Details` with per-device results. The Runner
-aggregates error details into `Message` when executors only set `Details`.
+`StepStatus` values: `PASS`, `FAIL`, `SKIP`, `ERROR`.
 
-### 9.4 ReportGenerator
+### 11.2 ReportGenerator
 
 ```go
 type ReportGenerator struct {
@@ -1132,31 +847,29 @@ func (g *ReportGenerator) WriteMarkdown(path string) error
 func (g *ReportGenerator) WriteJUnit(path string) error
 ```
 
-**WriteMarkdown**: summary table with scenario/topology/platform/result/duration/note
-columns, followed by a failures section with per-step details.
+Produces the post-run summary report. The CLI calls `WriteMarkdown` unconditionally (to `newtrun/.generated/report.md`) and `WriteJUnit` when `--junit <path>` is set. Both consume `Results` reconstructed from `ScenarioEnd` SSE event payloads on the CLI side.
 
-**WriteJUnit**: JUnit XML. Each `ScenarioResult` → `<testsuite>`, each
-`StepResult` → `<testcase>`. Iteration number is prepended to step names for
-repeated scenarios. Skipped scenarios with a skip reason produce a single
-`<testcase>` with a `<skipped>` element.
+### 11.3 Output formats
+
+| Format | Used by |
+|--------|---------|
+| Markdown table | Quick scrollback for ad-hoc runs. |
+| JUnit XML | CI consumption (Jenkins, GitHub Actions, GitLab). |
 
 ---
 
-## 10. Error Handling (`errors.go`)
-
-### 10.1 Error Types
+## 12. Error Handling (`errors.go`)
 
 ```go
 type InfraError struct {
-    Op     string // "deploy", "connect", "ssh"
-    Device string // device name (or "" for topology-level)
+    Op     string
+    Device string
     Err    error
 }
 
 type StepError struct {
-    Step   string
-    Action StepAction
-    Err    error
+    Step    *Step
+    Message string
 }
 
 type PauseError struct {
@@ -1164,186 +877,106 @@ type PauseError struct {
 }
 ```
 
-| Type | When | Message Format |
-|------|------|---------------|
-| `InfraError` | Deploy fails, network registration fails, SSH connect fails | `"newtrun: deploy: <err>"` or `"newtrun: connect leaf1: <err>"` |
-| `StepError` | Unknown action, internal executor error | `"newtrun: step provision-all (topology-reconcile): <err>"` |
-| `PauseError` | Suite paused between scenarios | `"paused after N scenarios"` |
+| Type | Returned by | Mapped to exit code |
+|------|-------------|---------------------|
+| `InfraError` | `connectToServer`, `connectDevices`, `deployTopology` | CLI exit 2 (infrastructure). |
+| `StepError` | step executors when an assertion fails | CLI exit 1 (test failure) via `SuiteStatusFromOutcome → failed`. |
+| `PauseError` | `iterateScenarios` when `CheckPausing` returns true | Not a CLI error — terminal status is `paused`, exit 0. |
 
-All error types implement `error`. `InfraError` and `StepError` implement
-`Unwrap() error` for `errors.Is`/`errors.As` compatibility.
-
-### 10.2 Exit Codes
-
-| Code | Trigger | Sentinel |
-|------|---------|----------|
-| 0 | All passed | `nil` |
-| 1 | Test failure or unknown error | `errTestFailure` |
-| 2 | Infrastructure error | `errInfraError` |
-
-The `start` command's `RunE` returns sentinel errors (`errTestFailure`,
-`errInfraError`) which `main()` maps to exit codes. Deferred cleanup
-(lock release) runs before exit.
+The CLI also has two sentinel errors in `cmd/newtrun/main.go`: `errInfraError` and `errTestFailure`. The exit-code path maps `errInfraError → 2`, `errTestFailure → 1`, everything else → 1.
 
 ---
 
-## 11. CLI (`cmd/newtrun/`)
+## 13. CLI Binary (`cmd/newtrun/`)
 
-### 11.1 Command Tree
+### 13.1 main.go
 
-```
-newtrun
-├── start [suite]          # deploy topology, run all scenarios
-├── pause                  # stop after current scenario
-├── stop                   # tear down topology and clean state
-├── status                 # check progress
-├── list [suite]           # show available suites / scenarios in a suite
-├── suites                 # hidden alias for list
-├── topologies             # show available topologies
-├── actions [action]       # list all actions or show action details
-├── run [suite]            # hidden, deprecated alias for start
-└── version                # print version information
-```
+Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERVER`, default: `http://127.0.0.1:8081`). Subcommands:
 
-Global flag: `--verbose` / `-v` (all commands).
+| Command | Endpoint | Notes |
+|---------|----------|-------|
+| `start <suite>` | POST /api/runs + SSE | Streams events; exits on terminal SuiteEnd. |
+| `pause <suite>` | POST /api/runs/{suite}/pause | Returns when pause signal lands. |
+| `stop <suite>` | GET + POST /stop + newtlab.Destroy + DELETE | Multi-step orchestration. |
+| `status [suite]` | GET /api/runs + /api/runs/{suite} | All suites or one; `--monitor` auto-refresh. |
+| `list [suite]` | GET /api/suites + /api/suites/{suite}/scenarios | Lists suites; with a suite name lists its scenarios. |
+| `suites` | GET /api/suites | Hidden alias of `list`. |
+| `suite create/delete <name>` | POST/DELETE /api/suites | Per [§7](#7-http-server-package-pkgnewtrunapi). |
+| `scenario list/get/put/delete` | /api/suites/{suite}/scenarios* | Per [§7](#7-http-server-package-pkgnewtrunapi). |
+| `topologies` | GET /api/topologies | List server-visible topologies. |
+| `actions` | static | Help text describing the action vocabulary. |
+| `version` | static | Build info. |
 
-### 11.2 start Command
+Exit codes:
 
-```
-newtrun start [suite]
-```
+| Code | Meaning |
+|------|---------|
+| 0 | All scenarios passed |
+| 1 | At least one scenario failed |
+| 2 | Infrastructure error (deploy / connection / server lost mid-run / run aborted) |
 
-**Flags:** `--dir`, `--scenario`, `--topology`, `--platform`, `--junit`, `--server`, `--network-id`
-
-**Server URL resolution chain:** `--server` flag → `NEWTRON_SERVER` env → `settings.GetServerURL()` → `newtron.DefaultServerURL`
-
-**Network ID resolution chain:** `--network-id` flag → `NEWTRON_NETWORK_ID` env → `settings.GetNetworkID()` → `newtron.DefaultNetworkID`
-
-**Flow:**
-1. Resolve suite directory from positional arg or `--dir` (via `resolveDir`)
-2. Check for paused state → set `Resume: true` and populate `Completed` map
-3. Build `RunState`, `AcquireLock`
-4. Create `StateReporter` wrapping `ConsoleProgress`
-5. Resolve server URL and network ID via resolution chains
-6. Set `runner.ServerURL` and `runner.NetworkID`
-7. Call `runner.Run(opts)`
-8. Handle `PauseError` → save paused state
-9. Determine final status (complete/failed), save state
-10. Write markdown report and JUnit (if requested)
-11. Return sentinel error for exit code mapping
-
-**Lifecycle integration:**
-- Always sets `Keep: true` (topology stays up)
-- Always sets `NoDeploy: false` (EnsureTopology handles reuse)
-- State is persisted at every lifecycle boundary
-
-### 11.3 pause Command
-
-```
-newtrun pause
-```
-
-**Flags:** `--dir`
-
-Sets `state.Status = SuiteStatusPausing` and saves. The running `iterateScenarios`
-loop detects this via `CheckPausing` and stops after the current scenario.
-
-Validates: suite must exist, must be `running`, runner PID must be alive.
-
-### 11.4 stop Command
-
-```
-newtrun stop
-```
-
-**Flags:** `--dir`
-
-1. Load state, refuse if runner PID is alive (use `pause` first)
-2. Resolve topology from state, destroy via `lab.Destroy(ctx)`
-3. Remove state directory via `RemoveRunState`
-
-### 11.5 status Command
-
-```
-newtrun status
-```
-
-**Flags:** `--dir`, `--json`, `--suite`/`-s`, `--detail`/`-d`, `--monitor`/`-m`
-
-| Flag | Description |
-|------|-------------|
-| `--suite`/`-s` | Filter suites by substring match (case-insensitive) |
-| `--detail`/`-d` | Show per-step timing and status for each scenario |
-| `--monitor`/`-m` | Auto-refresh every 2s until suite finishes (implies `--detail`) |
-| `--json` | Machine-readable JSON output |
-| `--dir` | Specific suite by directory path |
-
-Without `--dir`: lists all suites from `ListSuiteStates()`, optionally filtered by `--suite`. With `--dir`: shows detailed status for one suite including topology liveness check, per-scenario table with progress/step info, and summary counts.
-
-**Detail view** (`--detail`): expands each scenario to show per-step results with action, status, duration, and truncated message. Running scenarios show the currently executing step (name + action) at the bottom.
-
-**Monitor mode** (`--monitor`): clears screen and reprints status every 2 seconds until the suite is no longer `running` or `pausing`.
-
-JSON mode outputs `RunState` (single suite) or `[]RunState` (all suites).
-
-### 11.6 list Command
-
-```
-newtrun list [suite]
-```
-
-**Flags:** `--dir`
-
-- No args: `listSuites()` — table with suite name, scenario count, topology, devices, links
-- With suite name: `listScenarios(dir)` — table with index, scenario name, steps, topology, requires
-
-### 11.7 topologies Command
-
-Lists directories under `newtrun/topologies/`.
-
-### 11.8 actions Command
-
-```
-newtrun actions [action]
-```
-
-- No args: lists all actions grouped by category (Provisioning, Verification, VLAN, VRF, EVPN, Service, QoS, BGP, ACL, PortChannel, Interface, Routing, Host, Utility)
-- With action name: shows detailed information including category, description, prerequisites, required/optional parameters, devices requirement, and YAML example
-
-The `ActionMetadata` struct and `getActionMetadata()` function provide structured
-metadata for each action, manually maintained in sync with `stepValidations` in
-`parser.go`.
-
-**Note:** The `actions` command still lists all metadata entries from
-`getActionMetadata()` in `cmd_actions.go`, which includes entries for the
-former dedicated actions (create-vlan, verify-bgp, etc.) as reference
-documentation. These metadata entries describe the server API endpoints that
-the `newtron` action calls — the same operations are still available, just
-accessed via URL templates rather than dedicated step actions.
-
-### 11.9 version Command
-
-Prints version and git commit from `pkg/version/`.
-
-### 11.10 Helpers (`helpers.go`)
+### 13.2 clientutil.go
 
 ```go
-func resolveDir(cmd *cobra.Command, flagVal string, args ...string) string
-func resolveSuiteName(name string) string
-func suitesBaseDir() string
-func resolveTopologiesDir() string
-func resolveSuite(cmd *cobra.Command, dir string, filter func(SuiteStatus) bool) (string, error)
-func resolveTopologyFromState(state *RunState) string
+func newClient() *client.Client        // builds Client from --newtrun-server / env
+func requireServer(ctx, c) error       // probes GET /api/health; clean error on connection refused
+func notFoundIsNil(err) bool           // ServerError 404 → nil for absent-state reads
+func fetchRunStateViaClient(suite) (*newtrun.RunState, error)
+func listSuiteNamesViaClient() ([]string, error)
 ```
 
-**Suite directory resolution** (`resolveDir`): positional arg → `--dir` flag → `NEWTRUN_SUITE` env → `settings.DefaultSuite` → `"newtrun/suites/2node-ngdp-standalone"`. Bare names (no `/`) are resolved under `suitesBaseDir()`.
+Every state-changing CLI command calls `requireServer` before its real work. Strict Option A: read commands also call `requireServer` — the CLI never reads `~/.newtron/newtrun/` directly.
 
-**Suites base directory** (`suitesBaseDir`): `NEWTRUN_SUITES_BASE` env → `"newtrun/suites"`.
+### 13.3 cmd_start.go highlights
 
-**Topologies directory** (`resolveTopologiesDir`): `NEWTRUN_TOPOLOGIES` env → `settings.TopologiesDir` → `"newtrun/topologies"`.
+`cmd_start` is the most complex command — it subscribes to SSE, renders events to the terminal, tracks the terminal status, and exits with the right code:
 
-`resolveSuite` auto-detects the active suite when `--dir` is omitted by
-scanning `ListSuiteStates()` and filtering by status.
+| Behavior | Field tracked |
+|----------|---------------|
+| Any scenario FAIL → exit 1 | `hasFailure atomic.Bool` |
+| Any scenario ERROR → exit 1 | `hasError atomic.Bool` |
+| SuiteEnd ever arrived? | `suiteEndSeen atomic.Bool` |
+| SuiteEnd.Status == aborted? | `suiteAborted atomic.Bool` |
 
-`resolveTopologyFromState` infers the topology name from suite state, falling
-back to parsing scenario files if `state.Topology` is empty.
+Post-run logic:
+- If stream ended without SuiteEnd → `errInfraError("connection lost mid-run")` → exit 2.
+- If SuiteEnd.Status == aborted → `errInfraError("run was aborted")` → exit 2.
+- Else if `hasFailure || hasError` → `errTestFailure` → exit 1.
+- Else → nil → exit 0.
+
+Markdown report is written to `newtrun/.generated/report.md` after every run; JUnit XML only when `--junit <path>` is set.
+
+### 13.4 cmd_scenario.go
+
+Per-scenario CRUD subcommands:
+
+```
+newtrun suite create <name>
+newtrun suite delete <name>
+newtrun scenario list <suite>
+newtrun scenario get <suite> <name>
+newtrun scenario put <suite> <name> [--file <path>]
+newtrun scenario delete <suite> <name>
+```
+
+`put` defaults to stdin if `--file` is not given; the body is sent raw to `PUT /api/suites/{suite}/scenarios/{name}` and validated server-side.
+
+---
+
+## 14. Server Binary (`cmd/newtrun-server/`)
+
+Three flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--listen` | `127.0.0.1:8081` | Bind address. Non-loopback values trigger a startup warning that there is no built-in authentication. |
+| `--suites-base` | `newtrun/suites` | Directory containing suite subdirectories. |
+| `--topologies-base` | `newtrun/topologies` | Directory containing topology subdirectories. |
+
+The binary respects two environment variables that the Config struct doesn't expose flags for: `NEWTRON_SERVER` (default for `cfg.NewtronServer`) and `NEWTRON_NETWORK_ID` (default for `cfg.NetworkID`). Operators who need to point all server-side runs at a non-default newtron-server set these in the systemd unit (or the launching shell).
+
+The server installs a SIGTERM handler that calls `Stop(ctx)` — cancels every in-flight run, waits up to 5 seconds for them to drain, then shuts down the HTTP listener. The Runner's ctx-cancel check ([§5.4](#54-iteratescenarios)) is what makes the drain produce honest status (`aborted`) instead of synthetic FAIL events.
+
+---
+
+*Source-traced against `pkg/newtrun/`, `pkg/newtrun/api/`, `pkg/newtrun/client/`, `cmd/newtrun/`, and `cmd/newtrun-server/`. Type definitions are exact; method signatures are exact. If you find a discrepancy, the code is the authority — please open an issue or PR.*
