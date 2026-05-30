@@ -290,24 +290,33 @@ using userspace networking — no root, no Linux bridges, no Docker. Every
 packet between VMs passes through **newtlink**, a Go bridge that handles
 Ethernet frames in userspace. Topologies can span multiple servers.
 
-**newtrun** executes YAML test scenarios against **newtron-server** — each
-scenario is a sequence of HTTP calls to **newtron-server** (provision a device,
-check BGP sessions, verify CONFIG_DB entries) and host commands (ping across
-VMs, run traffic generators) that exercise the primitives end-to-end.
+**newtrun** executes YAML test scenarios end-to-end. The CLI is a thin
+client over **newtrun-server**, which owns the run registry and calls
+**newtron-server** for every device operation. Each scenario is a
+sequence of HTTP calls (provision a device, check BGP sessions, verify
+CONFIG_DB entries) and host commands (ping across VMs, run traffic
+generators) that exercise the primitives in concert.
 
 ```
-$ newtrun start --dir newtrun/suites/2node-vs-service
+$ newtrun start 2node-vs-service --server http://localhost:8080
+newtrun: started suite 2node-vs-service at 2026-05-29T19:59:14-07:00
+newtrun: 6 scenarios
 
-newtrun: 6 scenarios, topology: 2node-vs-service, platform: sonic-vs
+  [1/6] boot-ssh
+          PASS (1m31s)
+  [2/6] provision
+          PASS (3m23s)
+  [3/6] verify-health
+          PASS (15s)
+  [4/6] dataplane
+          PASS (54s)
+  [5/6] deprovision
+          PASS (4s)
+  [6/6] verify-clean
+          PASS (0s)
 
-  [1/6]  boot-ssh ...............  PASS  (3s)
-  [2/6]  provision ..............  PASS  (1m47s)
-  [3/6]  verify-health ..........  PASS  (12s)
-  [4/6]  dataplane ..............  PASS  (45s)
-  [5/6]  deprovision ............  PASS  (18s)
-  [6/6]  verify-clean ...........  PASS  (8s)
-
-newtrun: 6 scenarios: 6 passed  (2m38s)
+---
+newtrun: 6 scenarios — 6 passed, 0 failed, 0 errored, 0 skipped (6m07s)
 ```
 
 ### What Has Been Validated
@@ -336,7 +345,8 @@ by building.
 | **newtron** | CLI client. Human interface to newtron-server — every command is an HTTP call. |
 | **newtlab** | VM orchestrator. Deploys QEMU virtual machines and wires them into topologies. |
 | **newtlink** | Userspace bridge agent. Bridges Ethernet frames between VMs over TCP sockets. Deployed by newtlab. |
-| **newtrun** | E2E test runner. Executes YAML test scenarios against newtron-server. |
+| **newtrun-server** | Test orchestration HTTP server. Owns the run registry, executes scenarios in goroutines, streams progress over SSE. Started before `newtrun` CLI usage. |
+| **newtrun** | CLI client to newtrun-server. Every command (`start`, `status`, `pause`, `stop`, `scenario`, `suite`) is an HTTP call; the server runs the actual scenario engine. |
 
 ```
                             ┌────────────────┐         ┌────────────┐
@@ -376,7 +386,8 @@ cmd/
   newtron/          Device provisioning and verification CLI
   newtron-server/   HTTP API server (transport layer over pkg/newtron)
   newtlab/          VM orchestration CLI
-  newtrun/          E2E test runner CLI
+  newtrun/          E2E test runner CLI (client to newtrun-server)
+  newtrun-server/   Test orchestration HTTP server (transport layer over pkg/newtrun)
   newtlink/         Bridge traffic agent (deployed to remote hosts by newtlab)
 
 pkg/
