@@ -559,7 +559,7 @@ A run that the operator paused with `bin/newtrun pause` follows the same flow bu
 
 ## 13. CLI Reference
 
-Every command except `actions` and `version` requires newtrun-server to be running. The CLI never reads run state, suite YAMLs, or topology specs from disk on its own — it asks the server. When the server is unreachable, the CLI exits non-zero with `newtrun-server is not running` and the start hint.
+Every command except `actions` and `version` requires newtrun-server to be running. The CLI never reads run state, suite YAMLs, or topology specs from disk on its own — it asks the server. When the server is unreachable, the CLI exits non-zero with `newtrun-server is not running` and the start hint. The endpoints each command calls are documented in [api.md](api.md).
 
 | Command | Endpoint(s) | Notes |
 |---------|-------------|-------|
