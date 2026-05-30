@@ -283,7 +283,7 @@ newtrun: 2node-vs-primitive
   suite:     newtrun/suites/2node-vs-primitive
   topology:  2node-vs (deployed, 9 nodes running)
   platform:  default
-  status:    running (pid 0)
+  status:    running
   started:   2026-05-30 10:00:00 (5m ago)
   scenarios: 21 (375 steps total)
 

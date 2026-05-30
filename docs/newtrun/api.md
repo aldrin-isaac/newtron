@@ -193,12 +193,18 @@ Returns one `RunInfo` per suite that has a `state.json` on disk under `~/.newtro
       "updated":  "2026-05-29T19:55:03-07:00",
       "finished": "2026-05-29T19:55:03-07:00"
     },
-    { "suite": "1node-vs-basic", "status": "aborted", "...": "..." }
+    {
+      "suite": "1node-vs-basic",
+      "topology": "1node-vs",
+      "status": "aborted",
+      "started":  "2026-05-28T15:57:23-07:00",
+      "updated":  "2026-05-28T16:02:11-07:00"
+    }
   ]
 }
 ```
 
-Empty array when nothing has been run.
+`finished` is omitted when the run was aborted mid-flight (no clean terminal write). Empty array when nothing has been run.
 
 ### `GET /api/runs/{suite}` — read one run
 
