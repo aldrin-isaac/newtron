@@ -159,7 +159,7 @@ The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts st
 |-------------------|-----------|--------|
 | All scenarios PASS | 0 | summary line |
 | Any FAIL or ERROR | 1 | summary line |
-| newtrun-server connection lost mid-run | 2 | `infrastructure error: newtrun-server connection lost mid-run` |
+| newtrun-server connection lost mid-run | 2 | `infrastructure error: newtrun-server connection lost mid-run; check state.json for the last persisted status` |
 | SuiteEnd carried `status: aborted` (server SIGTERMed) | 2 | `infrastructure error: run was aborted (server shut down)` |
 
 ### 4.2 Suite selection
@@ -281,7 +281,7 @@ Example output for one suite:
 ```
 newtrun: 2node-vs-primitive
   suite:     newtrun/suites/2node-vs-primitive
-  topology:  2node-vs (deployed, 9 nodes running)
+  topology:  2node-vs (deployed, 8 nodes running)
   platform:  default
   status:    running
   started:   2026-05-30 10:00:00 (5m ago)
@@ -381,11 +381,8 @@ If the suite isn't currently active (no Registry entry, but state exists from a 
 
 ```
 $ bin/newtrun stop 2node-vs-primitive
-newtrun: stopping suite 2node-vs-primitive
-newtrun: runner cancelled
-newtrun: destroying topology 2node-vs
-✓ Lab 2node-vs destroyed
-newtrun: cleared state directory
+destroying topology 2node-vs...
+suite 2node-vs-primitive stopped and cleaned up
 ```
 
 The CLI exits 0 when every step succeeded. If any step fails (e.g., newtlab can't destroy because a VM never reached running state), the CLI reports which step failed and exits non-zero — the other cleanups still happen.
@@ -575,25 +572,21 @@ steps:
 | `command` | newtron-cli, host-exec | Subprocess command line. `{{device}}` is replaced per device. |
 | `url` | newtron | HTTP path on newtron-server. `{{device}}` is replaced per device. |
 | `method` | newtron | HTTP method; defaults to GET. |
-| `body` / `params` | newtron | Request body. |
+| `params` | newtron, batch | Request body (a YAML/JSON map). |
 | `duration` | wait | Sleep duration (e.g., `30s`, `2m`). |
 | `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§10.3](#103-expect-assertions). |
 | `poll` | newtron | Polling — retry until expect passes or timeout expires. |
 | `batch` | newtron | Multiple HTTP calls grouped per device. |
 | `expect_failure` | newtron | Invert pass/fail — assert the call fails. |
-| `on_failure` | all | One of `fail` (default), `continue`, `skip-rest`. |
 
 ### 10.3 expect assertions
 
 | Field | Honored by | Meaning |
 |-------|-----------|---------|
-| `status` | newtron | HTTP status code must equal this value. |
-| `jq` | newtron, newtron-cli | jq expression must evaluate to `true` against the response (newtron) or stdout JSON (newtron-cli with `--json`). |
-| `contains` | newtron, host-exec | Substring match on text response or combined stdout+stderr. |
-| `exit_code` | newtron-cli, host-exec | Subprocess exit code must equal this value. |
-| `stdout` | newtron-cli, host-exec | Substring match on stdout. |
-| `stderr` | newtron-cli, host-exec | Substring match on stderr. |
+| `jq` | newtron, newtron-cli | jq expression must evaluate to `true` against the response body (newtron) or stdout parsed as JSON (newtron-cli with `--json`). |
+| `contains` | host-exec | Substring match on combined stdout+stderr. |
 | `success_rate` | host-exec | For ping output: parse "N% packet loss" and assert success rate ≥ this value (0.0–1.0). |
+| `timeout` / `poll_interval` | (internal) | Used by the polling path; set via the YAML `poll:` block, not via `expect:`. |
 
 When a jq assertion fails, the error message includes the expression and the actual value — useful for debugging without rerunning.
 
@@ -636,7 +629,7 @@ steps:
 
 ## 11. Step Action Reference
 
-newtrun has five actions. `topology-reconcile` handles provisioning. `host-exec` runs commands on host VMs via SSH. `newtron` is the generic action that covers every newtron-server operation via HTTP. `newtron-cli` runs the newtron CLI as a subprocess (for loopback testing).
+newtrun has six actions. `topology-reconcile` and `verify-topology` handle provisioning and its post-condition check. `host-exec` runs commands on host VMs via SSH. `newtron` is the generic action that covers every newtron-server operation via HTTP. `newtron-cli` runs the newtron CLI as a subprocess (for loopback testing). `wait` is a context-aware sleep.
 
 ### 11.1 topology-reconcile
 
@@ -650,7 +643,19 @@ Delivers the topology projection to the device by calling `Reconcile(name, "topo
 
 No additional fields. Reports the number of entries applied on success. Inline runs require explicit opt-in (`allow_reconcile: true` in the POST body) because reconcile can replace an entire device's intent state.
 
-### 11.2 wait
+### 11.2 verify-topology
+
+Computes drift between the device's CONFIG_DB and the topology projection by calling `IntentDrift(name, "topology")` on newtron-server. Zero drift entries means the device matches the expected state; any drift causes the step to fail with a count of entries that diverge.
+
+```yaml
+- name: verify-config
+  action: verify-topology
+  devices: [switch1, switch2]
+```
+
+No additional fields. Useful as the post-condition check after a `topology-reconcile` step — confirms the projection actually landed without surprise mutations from out-of-band tools.
+
+### 11.3 wait
 
 Context-aware sleep. Respects cancellation — if the suite is paused or stopped during a wait, the executor exits cleanly without consuming the full duration.
 
@@ -662,7 +667,7 @@ Context-aware sleep. Respects cancellation — if the suite is paused or stopped
 
 The only required field is `duration`. No `devices` field needed.
 
-### 11.3 host-exec
+### 11.4 host-exec
 
 Runs a command inside a host device's network namespace via direct SSH. The namespace name matches the device name (e.g., `host1`, `host2`); newtlab creates the namespaces at deploy time.
 
@@ -686,7 +691,7 @@ Runs a command inside a host device's network namespace via direct SSH. The name
 
 Without `expect`, the step passes when the exit code is 0.
 
-### 11.4 newtron — generic HTTP action
+### 11.5 newtron — generic HTTP action
 
 Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (create-vlan, apply-service, verify-bgp, etc.) with a single mechanism. Three modes: one-shot, polling, batch.
 
@@ -825,7 +830,7 @@ Inverts pass/fail. Use to assert that an operation correctly refuses:
 
 If the HTTP call fails (as expected), the step passes. If it succeeds unexpectedly, the step fails.
 
-### 11.5 newtron-cli — CLI subprocess action
+### 11.6 newtron-cli — CLI subprocess action
 
 Runs the `newtron` CLI binary as a subprocess. The device name is prepended as the first positional argument (matching the normal `newtron <device> <command>` pattern). When `expect.jq` is set, `--json` is appended automatically so the output is machine-parseable.
 
@@ -1177,7 +1182,8 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | `--junit <path>` | JUnit XML report path. |
 | `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`; default: `http://localhost:8080`). |
 | `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
-| `-v` / `--verbose` | Per-step output. |
+
+`-v` / `--verbose` is a global flag (see §15.6) — it affects `start` (per-step output during a run) and `status` (more detail in the dashboard).
 
 ### 15.6 Global flags
 

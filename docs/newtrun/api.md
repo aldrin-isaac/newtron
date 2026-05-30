@@ -277,7 +277,7 @@ data: {"name":"setup-device","status":"PASS","duration":"1s","steps":[...],"inde
 
 Submits a single scenario as inline YAML — no suite directory, no state-persistence in the suite namespace. The server allocates a fresh UUID, runs the scenario in a goroutine, and persists state under `~/.newtron/newtrun/_inline/<uuid>/`. Used by the browser frontend's compose-and-run flow and by automation that doesn't want to write to the suites tree.
 
-**Safety policy:** inline runs go through `InlineSafetyPolicy`. The defaults block `topology-reconcile` (requires `?allow_reconcile=true`), restrict `newtron` URL prefixes to `/network/`, and impose a 60-second wall-time budget (`?timeout=<seconds>` overrides up to 600).
+**Safety policy:** inline runs go through `InlineSafetyPolicy`. The defaults block `topology-reconcile` (override via the `allow_reconcile: true` body field) and impose a 60-second wall-time budget (override via `timeout_seconds: N`). The `AllowedURLPrefixes` field exists for restricting `newtron` action URLs, but is **not populated by default** — operators who want URL restriction must build a wrapper that sets `cfg.InlineURLPrefix` before constructing the Server. As shipped, inline scenarios may call any newtron-server URL the server is configured to reach.
 
 **Request:** `application/json`, body is an `InlineRunRequest`:
 
@@ -483,7 +483,15 @@ Sent between `step_start` and `step_end` per device operation. Currently no prod
   "step": "create-vlan-with-changes",
   "action": "newtron-cli",
   "index": 0,
-  "op": { "kind": "redis_write", "table": "VLAN", "key": "Vlan100", "result": "applied" }
+  "op": {
+    "seq": 0,
+    "kind": "redis_write",
+    "table": "VLAN",
+    "key": "Vlan100",
+    "fields": { "vlanid": "100" },
+    "result": "applied",
+    "at": "2026-05-30T10:00:00-07:00"
+  }
 }
 ```
 
@@ -524,7 +532,7 @@ Sent at the end of each scenario with the full per-step result list.
 
 ### `suite_end`
 
-Sent exactly once at the end of the run. The `status` field distinguishes terminal modes; see [§7 (Server Shutdown Legibility)](hld.md).
+Sent exactly once at the end of the run. The `status` field distinguishes terminal modes; see [HLD §9.3 (server-restart honesty)](hld.md#93-server-restart-honesty).
 
 ```json
 {

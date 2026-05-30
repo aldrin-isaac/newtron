@@ -88,7 +88,7 @@ When `newtrun-server` shuts down, the registry cancels every in-flight runner's 
 
 ### 3.4 URL resolution
 
-The CLI resolves the newtrun-server URL through a three-tier cascade: `--server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:8081`). The server resolves the newtron-server URL it talks to similarly: per-request `newtron_server` field → server's `--newtron-server` flag → built-in default (`http://127.0.0.1:8080`).
+The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:8081`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /api/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:8080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
 
 Both servers default to loopback binding. Non-loopback exposure requires an explicit `--listen <addr>` value and emits a startup warning that there is no built-in authentication. Operators who need TLS or authentication wrap the server with a reverse proxy.
 
