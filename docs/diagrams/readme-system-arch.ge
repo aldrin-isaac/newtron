@@ -1,0 +1,20 @@
+graph { flow: south; }
+
+# README architecture — runtime data path.
+#
+# Three CLIs and their servers. newtron CLI talks to newtron-server
+# directly; newtrun CLI talks to newtrun-server, which calls
+# newtron-server in turn. Every device write lands through the same
+# newtron-server SSH+Redis tunnel into the SONiC VM.
+#
+# Lab orchestration (newtlab → SONiC VM) and spec loading
+# (specs → newtron-server) are side-channel concerns covered in a
+# separate diagram in the README.
+
+[ newtron CLI ] { rank: same; }
+[ newtrun CLI ] { rank: same; }
+
+[ newtron CLI ] --> { label: HTTP; } [ newtron-server ]
+[ newtrun CLI ] --> { label: HTTP; } [ newtrun-server ]
+[ newtrun-server ] --> { label: HTTP; } [ newtron-server ]
+[ newtron-server ] --> { label: SSH + Redis; } [ SONiC VM ]

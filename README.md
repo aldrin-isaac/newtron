@@ -348,36 +348,54 @@ by building.
 | **newtrun-server** | Test orchestration HTTP server. Owns the run registry, executes scenarios in goroutines, streams progress over SSE. Started before `newtrun` CLI usage. |
 | **newtrun** | CLI client to newtrun-server. Every command (`start`, `status`, `pause`, `stop`, `scenario`, `suite`) is an HTTP call; the server runs the actual scenario engine. |
 
+**Runtime data path.** Operator commands flow from CLI through HTTP into the device:
+
 ```
-                            ┌────────────────┐         ┌────────────┐
-                            │                │         │            │
-                            │    newtron     │         │ test suite │
-                            │    (client)    │         │            │
-                            │                │         │            │
-                            └────────────────┘         └────────────┘
-                              │                          │
-                              │ HTTP                     │
-                              ∨                          ∨
-┌─────────┐                 ┌────────────────┐         ┌────────────┐
-│         │                 │                │         │            │
-│  specs  │                 │ newtron-server │  HTTP   │  newtrun   │
-│         │ ──────────────> │                │ <────── │            │
-└─────────┘                 └────────────────┘         └────────────┘
-  │                           │
-  │                           │ SSH+Redis
-  ∨                           ∨
-┌─────────┐                 ┌────────────────┐
-│         │                 │                │
-│ newtlab │  deploy, wire   │    SONiC VM    │
-│         │ ──────────────> │                │
-└─────────┘                 └────────────────┘
+┌────────────────┐         ┌────────────────┐
+│  newtron CLI   │         │  newtrun CLI   │
+└────────────────┘         └────────────────┘
+  │                          │
+  │ HTTP                     │ HTTP
+  ∨                          ∨
+┌────────────────┐  HTTP   ┌────────────────┐
+│ newtron-server │ <────── │ newtrun-server │
+└────────────────┘         └────────────────┘
+  │
+  │ SSH + Redis
+  ∨
+┌────────────────┐
+│    SONiC VM    │
+└────────────────┘
 ```
 
-Both paths converge on the same SONiC devices. **newtlab** creates QEMU VMs
-running SONiC and wires them with **newtlink**; **newtron-server** connects to
-those same VMs via SSH-tunneled Redis. You can also point **newtron-server** at
-hardware switches or third-party labs — **newtlab** is only needed for local
-virtual topologies.
+*Diagram source: [`docs/diagrams/readme-system-arch.ge`](docs/diagrams/readme-system-arch.ge).*
+
+**Deployment side-channel.** Lab orchestration and spec loading happen out of the operational data path:
+
+```
+┌────────────────┐
+│  newtlab CLI   │
+└────────────────┘
+  │
+  │ deploy, wire
+  ∨
+┌────────────────┐
+│    SONiC VM    │
+└────────────────┘
+┌────────────────┐
+│     specs      │
+└────────────────┘
+  │
+  │
+  ∨
+┌────────────────┐
+│ newtron-server │
+└────────────────┘
+```
+
+*Diagram source: [`docs/diagrams/readme-deploy-sidechannel.ge`](docs/diagrams/readme-deploy-sidechannel.ge).*
+
+Both paths converge on the same SONiC devices. **newtlab** creates QEMU VMs running SONiC and wires them with **newtlink**; **newtron-server** connects to those same VMs via SSH-tunneled Redis. You can also point **newtron-server** at hardware switches or third-party labs — **newtlab** is only needed for local virtual topologies.
 
 ## Repository Layout
 
