@@ -1,34 +1,10 @@
 # newtrun — HOWTO Guide
 
-newtrun is an E2E testing orchestrator for SONiC network devices. It deploys
-VM topologies via newtlab, runs test scenarios against a newtron-server, and
-reports results — all driven by declarative YAML.
+newtrun is an E2E testing orchestrator for SONiC network devices. It deploys VM topologies via newtlab, runs declarative YAML scenarios against newtron-managed switches, and reports results.
 
-All device operations go through newtron-server over HTTP. newtrun never
-connects to devices directly — it sends requests to the server, which manages
-SSH tunnels and Redis connections to the SONiC switches. Host operations
-(ping, iperf) use direct SSH to the host VMs.
+**Architecture in one paragraph.** `bin/newtrun` is a thin CLI client. The actual work — parsing scenarios, deploying topologies, executing steps, streaming progress — happens server-side in `bin/newtrun-server`. The server, in turn, talks to `bin/newtron-server` for every device operation. Every CLI command requires the newtrun-server to be running; if it isn't, the CLI prints `newtrun-server is not running` and exits non-zero. See the [HLD](hld.md) for the architecture rationale, the [API reference](api.md) for endpoint shapes, and the [LLD](lld.md) for type definitions.
 
-```
-┌────────────────┐     ┌──────────────┐     ┌─────────────┐     ┌────────────┐
-│                │     │              │     │             │     │            │
-│    newtrun     │     │   host VMs   │     │   network   │     │ data plane │
-│                │     │ (direct SSH) │     │  namespace  │     │            │
-│                │ ──▶ │              │ ──▶ │             │ ──▶ │            │
-└────────────────┘     └──────────────┘     └─────────────┘     └────────────┘
-  │
-  │ HTTP
-  ▼
-┌────────────────┐     ┌──────────────┐     ┌─────────────┐
-│                │     │              │     │             │
-│ newtron-server │     │  SSH tunnel  │     │ SONiC Redis │
-│  (HTTP :8080)  │     │              │     │  CONFIG_DB  │
-│                │ ──▶ │              │ ──▶ │             │
-└────────────────┘     └──────────────┘     └─────────────┘
-```
-
-For architecture and design, see the [HLD](hld.md). For type definitions
-and internals, see the [LLD](lld.md).
+This guide is organized by how often you'll use each thing. Running an existing suite comes first (most common); writing your own scenarios from scratch comes later (less common); troubleshooting and command reference are at the end.
 
 ---
 
@@ -36,527 +12,635 @@ and internals, see the [LLD](lld.md).
 
 1. [Prerequisites & Build](#1-prerequisites--build)
 2. [Quick Start](#2-quick-start)
-3. [Topologies & Suites](#3-topologies--suites)
-4. [Running Tests](#4-running-tests)
-5. [Suite Lifecycle](#5-suite-lifecycle)
-6. [Writing Scenarios](#6-writing-scenarios)
-7. [Step Action Reference](#7-step-action-reference)
-8. [Data Plane Tests](#8-data-plane-tests)
-9. [CI/CD Integration](#9-cicd-integration)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Command Reference](#11-command-reference)
+3. [End-to-End Workflow](#3-end-to-end-workflow)
+4. [Running an Existing Suite](#4-running-an-existing-suite)
+5. [Monitoring a Run](#5-monitoring-a-run)
+6. [Pausing and Resuming](#6-pausing-and-resuming)
+7. [Stopping a Run](#7-stopping-a-run)
+8. [Browsing Suites and Scenarios](#8-browsing-suites-and-scenarios)
+9. [Authoring Scenarios](#9-authoring-scenarios)
+10. [Writing Scenarios from Scratch](#10-writing-scenarios-from-scratch)
+11. [Step Action Reference](#11-step-action-reference)
+12. [Data Plane Tests](#12-data-plane-tests)
+13. [CI/CD Integration](#13-cicd-integration)
+14. [Troubleshooting](#14-troubleshooting)
+15. [Command Reference](#15-command-reference)
 
 ---
 
 ## 1. Prerequisites & Build
 
+You'll need:
+
+- **Linux x86_64** with KVM (`/dev/kvm` readable by your user)
+- **Go 1.24+** (`go version`)
+- **QEMU** (`qemu-system-x86_64`)
+- A **SONiC VM image** at `~/.newtlab/images/sonic-vs.qcow2`
+
+Build the binaries:
+
 ```bash
-# Build all three binaries
-go build -o bin/newtron-server ./cmd/newtron-server
-go build -o bin/newtlab ./cmd/newtlab
-go build -o bin/newtrun ./cmd/newtrun
+make build
 ```
 
-newtrun depends on newtlab for VM management and newtron-server for device
-operations. Ensure both are set up:
+This produces `bin/newtron`, `bin/newtron-server`, `bin/newtlab`, `bin/newtlink`, `bin/newtrun`, and `bin/newtrun-server`.
+
+Download a SONiC community image (one-time):
 
 ```bash
-# QEMU installed
-qemu-system-x86_64 --version
-
-# KVM available (recommended)
-ls /dev/kvm
-
-# VM images in place
-ls ~/.newtlab/images/
+mkdir -p ~/.newtlab/images
+curl -fSL "https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchName=master&platform=vs&target=target/sonic-vs.img.gz" \
+  | gunzip > ~/.newtlab/images/sonic-vs.qcow2
 ```
 
-See `docs/newtlab/howto.md` for newtlab setup details.
+The [getting-started.sh](../../scripts/getting-started.sh) script automates all of the above plus a single-switch deploy and a first-suite walkthrough. Read on if you want to do it by hand.
 
 ---
 
 ## 2. Quick Start
 
-This is the minimum path from zero to a passing test suite.
+Deploy a one-switch lab, start both servers, run the loopback suite:
 
 ```bash
-# 1. Start newtron-server (must be running before newtrun)
+# 1. Deploy a single-switch lab
+bin/newtlab deploy 1node-vs --monitor
+
+# 2. Start newtron-server (port 8080)
+bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
+
+# 3. Start newtrun-server (port 8081)
+bin/newtrun-server &
+
+# 4. Run a suite
+bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:8080
+```
+
+Expected output:
+
+```
+newtrun: started suite 1node-vs-config at 2026-05-30T10:00:00-07:00
+newtrun: 17 scenarios
+
+  [1/17] setup-device
+          PASS (<1s)
+  [2/17] topology-show
+          PASS (<1s)
+  ...
+  [17/17] intent-projection
+          PASS (<1s)
+
+---
+newtrun: 17 scenarios — 17 passed, 0 failed, 0 errored, 0 skipped (1s)
+```
+
+Exit code 0. Markdown report at `newtrun/.generated/report.md`.
+
+**Why two servers?**
+
+| Server | Port | Owns | Why separate |
+|--------|------|------|--------------|
+| newtron-server | 8080 | SSH connections to SONiC, spec validation, CONFIG_DB writes | Single-device automation. Long-lived; expensive to restart. |
+| newtrun-server | 8081 | Run registry, scenario execution, SSE event stream | Test orchestration. Independent failure domain. |
+
+The CLI talks to **newtrun-server** (`--newtrun-server`, env `NEWTRUN_SERVER`). The scenarios it runs talk to **newtron-server** (`--server`, env `NEWTRON_SERVER`) for the actual device work.
+
+---
+
+## 3. End-to-End Workflow
+
+The full lifecycle of a real test, derived from the 2node-vs-primitive suite (21 scenarios, ~7m on a fresh lab).
+
+**Topology:** 2node-vs — two SONiC switches connected by a fabric link, six host VMs attached for data-plane testing. See `newtrun/topologies/2node-vs/specs/topology.json` for the exact wiring.
+
+```bash
+# 1. Deploy the lab (8 nodes; ~1 minute on first boot)
+bin/newtlab deploy 2node-vs --monitor
+
+# 2. Start newtron-server pointing at this topology's specs
 bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 
-# 2. List available suites
-bin/newtrun list
+# 3. Start newtrun-server
+bin/newtrun-server &
 
-# 3. Run the 2node-vs-primitive suite (deploys topology automatically)
-bin/newtrun start 2node-vs-primitive
+# 4. Run the suite (deploys hosts via SSH; ~7 minutes)
+bin/newtrun start 2node-vs-primitive --server http://localhost:8080
+```
 
-# 4. Check progress from another terminal
+While the suite runs, monitor in another terminal:
+
+```bash
+bin/newtrun status --suite 2node-vs-primitive --monitor
+```
+
+The dashboard refreshes every 2 seconds with per-scenario progress and per-step status. Press Ctrl-C to detach (the suite keeps running).
+
+When the suite finishes, exit code is 0 (all PASS). State persists at `~/.newtron/newtrun/2node-vs-primitive/state.json`; the markdown report is at `newtrun/.generated/report.md`.
+
+Tear down:
+
+```bash
+bin/newtrun stop 2node-vs-primitive   # cancel + destroy topology + clear state
+kill %1 %2                            # stop newtron-server + newtrun-server
+```
+
+---
+
+## 4. Running an Existing Suite
+
+### 4.1 Basic invocation
+
+```bash
+bin/newtrun start <suite-name> --server http://localhost:8080
+```
+
+The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts streaming SSE events back to the CLI. The CLI renders each event as it arrives and exits when the run terminates.
+
+| Termination cause | Exit code | Stderr |
+|-------------------|-----------|--------|
+| All scenarios PASS | 0 | summary line |
+| Any FAIL or ERROR | 1 | summary line |
+| newtrun-server connection lost mid-run | 2 | `infrastructure error: newtrun-server connection lost mid-run` |
+| SuiteEnd carried `status: aborted` (server SIGTERMed) | 2 | `infrastructure error: run was aborted (server shut down)` |
+
+### 4.2 Suite selection
+
+| Form | Behavior |
+|------|----------|
+| `newtrun start <name>` | Resolves under newtrun-server's `--suites-base` (default `newtrun/suites/<name>`). |
+| `newtrun start --dir /path/to/suite` | Absolute path to a suite directory; mutually exclusive with the positional name. |
+
+### 4.3 Scenario selection
+
+By default, `newtrun start` runs every scenario in the suite. Three flags narrow that:
+
+| Flag | Effect |
+|------|--------|
+| `--scenario <name>` | Run only the named scenario. |
+| `--target <name>` | Run the minimum dependency chain (per `requires:`) reaching the named scenario. |
+| (no flag) | All scenarios, topologically sorted by `requires` + `after`. |
+
+```bash
+# One scenario
+bin/newtrun start 2node-vs-primitive --scenario boot-ssh --server http://localhost:8080
+
+# Dependency chain up to a target
+bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:8080
+```
+
+### 4.4 Other flags
+
+| Flag | Meaning |
+|------|---------|
+| `--no-deploy` | Skip topology deployment and host SSH connections. Use for loopback suites (e.g., `1node-vs-config`) or when the lab is already up. |
+| `--platform <name>` | Override the platform declared in scenario YAML. |
+| `--junit <path>` | Write a JUnit XML report at `<path>` after the run finishes. |
+| `--monitor` / `-m` | Replace the per-event terminal output with an auto-refreshing dashboard backed by `state.json`. |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
+| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`). Passed to every server-side scenario step. |
+
+### 4.5 Preconditions
+
+| Precondition | How to check | How to fix |
+|--------------|-------------|------------|
+| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:8081/api/health` | Start with `bin/newtrun-server &` |
+| newtron-server up on `--server` URL | `curl http://localhost:8080/health` | Start with `bin/newtron-server --spec-dir <path> &` |
+| Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
+| Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
+| No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
+
+If any precondition fails, the CLI exits with a clear message naming the missing piece.
+
+### 4.6 Worked example: rerun a single scenario
+
+You changed `evpn-bridged.yaml` and want to verify just that scenario:
+
+```bash
+bin/newtrun start 2node-vs-primitive \
+    --scenario evpn-bridged \
+    --server http://localhost:8080
+```
+
+If `evpn-bridged` has `requires: [evpn-verify]`, the dependency-graph validator allows running it solo (it doesn't auto-run dependencies). To get the dependency chain, use `--target` instead:
+
+```bash
+bin/newtrun start 2node-vs-primitive \
+    --target evpn-bridged \
+    --server http://localhost:8080
+```
+
+Now boot-ssh → setup-device → ... → evpn-verify → evpn-bridged run in order.
+
+---
+
+## 5. Monitoring a Run
+
+### 5.1 Per-event streaming (default)
+
+`newtrun start` subscribes to the SSE event stream and renders each event:
+
+```
+  [3/17] vlan-lifecycle
+          PASS (1s)
+  [4/17] vrf-lifecycle
+          PASS (1s)
+```
+
+`-v` adds per-step output:
+
+```
+  [3/17] vlan-lifecycle
+          [1/10] create-vlan PASS (<1s)
+          [2/10] verify-vlan PASS (<1s)
+          ...
+          PASS (1s)
+```
+
+### 5.2 Status dashboard
+
+`newtrun status` reads the run state via HTTP:
+
+```bash
+# All suites
 bin/newtrun status
 
-# 5. When done, tear down
-bin/newtrun stop
+# One suite by name
+bin/newtrun status --suite 2node-vs-primitive
+
+# Filter by name substring
+bin/newtrun status --suite ngdp
+
+# Auto-refresh every 2s (implies --detail)
+bin/newtrun status --suite 2node-vs-primitive --monitor
+
+# JSON for scripting
+bin/newtrun status --json
 ```
 
-The suite deploys a 2-switch topology (`switch1`, `switch2`) running
-`sonic-vs`, provisions them through newtron-server, then runs 21
-scenarios covering BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, and
-PortChannels — all with full teardown and clean-state verification.
-
----
-
-## 3. Topologies & Suites
-
-newtrun ships with pre-defined topologies in `newtrun/topologies/` and
-test suites in `newtrun/suites/`. Use `newtrun topologies` and
-`newtrun list` to see what's available.
-
-### Topologies
-
-| Topology | Devices | Description |
-|----------|---------|-------------|
-| `1node-vs` | 1 switch | Single switch (sonic-vs). Minimal topology for basic operations. |
-| `2node-ngdp` | 2 switches + 6 hosts | General-purpose CiscoVS: BGP, VLANs, VRFs, services, ACLs, QoS, PortChannels. |
-| `2node-ngdp-service` | 2 switches + 8 hosts | Service-focused CiscoVS: end-to-end service provisioning with data plane verification across more host endpoints. |
-| `2node-vs` | 2 switches + 6 hosts | General-purpose sonic-vs: same test coverage as 2node-ngdp on community SONiC. |
-| `2node-vs-service` | 2 switches + 8 hosts | Service-focused sonic-vs: service provisioning, drift detection, zombie intent testing. |
-| `3node-ngdp` | 1 spine + 2 leaves + 2 hosts | EVPN/VXLAN and multi-hop: L2 bridging across a fabric, L3 inter-subnet routing via asymmetric IRB. |
-| `4node-ngdp` | 2 spines + 2 leaves | Full fabric: ECMP, eBGP overlay, route reflection, shared VRFs. |
-
-Each topology lives at `newtrun/topologies/<name>/specs/` containing
-`topology.json`, `network.json`, `platforms.json`, and per-device profiles
-in `profiles/`.
-
-### Test Suites
-
-| Suite | Topology | Scenarios | Description |
-|-------|----------|-----------|-------------|
-| `1node-vs-basic` | 1node-vs | 4 | Single-switch basics: service apply/remove, VLAN/VRF lifecycle, clean-state verification. |
-| `1node-vs-config` | 1node-vs | 13 | CLI lifecycle via `newtron-cli` action in loopback mode: VLAN, VRF, PortChannel, ACL, interface, QoS, service, EVPN spec, BGP peer, neighbor, IPVPN binding. |
-| `1node-vs-architecture` | 1node-vs | 32 | Intent architecture validation: topology reconcile, drift detection, drift guard, reconcile idempotency, intent save/reload/clear, mode switching, delta reconcile, dry-run. |
-| `2node-ngdp-primitive` | 2node-ngdp | 21 | Incremental CiscoVS: BGP, EVPN, VLANs, VRFs, services, ACLs, QoS, PortChannels — full teardown and clean-state verification. |
-| `2node-ngdp-service` | 2node-ngdp-service | 6 | Service lifecycle on CiscoVS: provision, health, data plane, deprovision, verify clean. |
-| `2node-vs-primitive` | 2node-vs | 21 | Incremental sonic-vs: same coverage as 2node-ngdp-primitive on community SONiC. |
-| `2node-vs-service` | 2node-vs | 6 | Service lifecycle on sonic-vs: provision, health, data plane, deprovision, verify clean. |
-| `2node-vs-drift` | 2node-vs | 7 | Drift detection: inject CONFIG_DB changes, detect drift (missing/extra/modified), reprovision to fix. |
-| `2node-vs-drift-actuated` | 2node-vs | 8 | Actuated-mode drift: intent persistence, drift guard enforcement, reconcile resolution in actuated mode. |
-| `3node-ngdp-dataplane` | 3node-ngdp | 8 | Data plane: L3 routing + EVPN L2 bridged + IRB across a 2-leaf fabric with host verification. |
-| `simple-vrf-host` | 2node-ngdp | 4 | VRF basics: create VRF, bind interface, set IP, verify host reachability. |
-
-Suites use dependency ordering (`requires`/`after`) — scenarios run in
-the declared order and skip if prerequisites failed.
-
----
-
-## 4. Running Tests
-
-Running tests is the most common newtrun operation. newtrun resolves the
-suite name to a directory under `newtrun/suites/`, deploys the topology
-via newtlab, then runs scenarios in dependency order against newtron-server.
-
-### Run All Scenarios in a Suite
-
-```bash
-newtrun start 2node-vs-primitive
-```
-
-This deploys the topology (or reuses an existing one), runs all scenarios
-in dependency order, and leaves the topology running. The suite name
-resolves to `newtrun/suites/2node-vs-primitive/`. You can also pass a full
-path with `--dir`:
-
-```bash
-newtrun start --dir newtrun/suites/2node-vs-primitive
-```
-
-### Run a Single Scenario
-
-```bash
-newtrun start 2node-vs-primitive --scenario boot-ssh
-```
-
-### Override Platform
-
-```bash
-newtrun start 2node-ngdp-primitive --platform sonic-ciscovs
-```
-
-### Override Topology
-
-```bash
-newtrun start 2node-ngdp-service --topology 2node-ngdp
-```
-
-### Server URL
-
-newtrun resolves the server URL in this order: `--server` flag >
-`NEWTRON_SERVER` environment variable > settings file > default
-(`http://localhost:8080`).
-
-```bash
-# Explicit server
-newtrun start 2node-vs-primitive --server http://10.1.0.5:8080
-
-# Or via environment
-export NEWTRON_SERVER=http://10.1.0.5:8080
-newtrun start 2node-vs-primitive
-```
-
-### Network ID
-
-The network identifier tells newtron-server which spec set to use.
-Resolution order: `--network-id` flag > `NEWTRON_NETWORK_ID` environment
-variable > settings file > default.
-
-```bash
-newtrun start 2node-vs-primitive --network-id lab1
-```
-
-### Verbose Output
-
-```bash
-newtrun start 2node-vs-primitive -v
-```
-
-Shows per-step results with timing, failure details, and device-level
-messages.
-
-### JUnit Output
-
-```bash
-newtrun start 2node-vs-primitive --junit results.xml
-```
-
----
-
-## 5. Suite Lifecycle
-
-Suites are stateful — newtrun persists progress at
-`~/.newtron/newtrun/<suite>/state.json` so you can pause, resume, and
-monitor across terminal sessions.
-
-### Start a Suite
-
-```bash
-newtrun start 2node-vs-primitive
-```
-
-This:
-1. Acquires a lock (prevents concurrent runs of the same suite)
-2. Deploys the topology via `EnsureTopology` (reuses if all nodes running)
-3. Runs scenarios in dependency order
-4. Persists state after each scenario completes
-5. Reports results
-
-### Check Progress
-
-From another terminal:
-
-```bash
-newtrun status
-```
-
-Output:
+Example output for one suite:
 
 ```
 newtrun: 2node-vs-primitive
-  topology:  2node-vs (deployed, 2 nodes running)
-  platform:  sonic-vs
-  status:    running (pid 12345)
-  started:   2026-03-14 10:30:00 (5m ago)
+  suite:     newtrun/suites/2node-vs-primitive
+  topology:  2node-vs (deployed, 9 nodes running)
+  platform:  default
+  status:    running (pid 0)
+  started:   2026-05-30 10:00:00 (5m ago)
+  scenarios: 21 (375 steps total)
 
-  #  SCENARIO              STEPS  STATUS   REQUIRES             DURATION
-  1  boot-ssh              2      PASS     —                    3s
-  2  loopback              3      PASS     boot-ssh             5s
-  3  bridged               15     running  boot-ssh             step 2/15: add-vlan-member
-  4  irb                   5      —        bridged              —
-  5  routed                8      —        boot-ssh             —
+  #   SCENARIO           STEPS  STATUS  REQUIRES                      DURATION
+  --  -----------------  -----  ------  ----------------------------  ---------------------------
+  1   boot-ssh           3      PASS    —                             1m31s
+  2   setup-device       19     PASS    boot-ssh                      9s
+  3   bridged            15     PASS    boot-ssh                      51s
+  4   routed             11     PASS    boot-ssh                      6s
+  5   bgp-underlay       14     PASS    setup-device                  34s
+  6   interface-props    12     PASS    setup-device                  3s
+  ...
+  18  teardown-overlay   26     —       evpn-irb, cross-switch
+  19  service-lifecycle  33     running setup-device                  step 16/33: wait-after-prime
+  20  teardown-infra     10     —       service-lifecycle
+  21  verify-clean       52     —       teardown-infra
 
-  progress: 2/21 passed
+  progress: 18/21 passed, 1 running, 2 pending
 ```
 
-Use `--detail` to see per-step status within each scenario:
+`--detail` (`-d`) expands each completed scenario to show per-step results below the table.
+
+### 5.3 Streaming events directly
+
+The CLI uses Server-Sent Events under the hood; you can subscribe yourself with curl for debugging:
 
 ```bash
-newtrun status --detail
+curl -N http://localhost:8081/api/runs/2node-vs-primitive/events
 ```
 
-Use `--monitor` for auto-refreshing display (every 2 seconds, implies
-`--detail`):
-
-```bash
-newtrun status --monitor
-```
-
-Filter by suite name with `--suite`:
-
-```bash
-newtrun status --suite 2node-vs
-```
-
-### Pause a Running Suite
-
-```bash
-newtrun pause
-```
-
-The runner finishes the current scenario, then stops. The topology stays
-deployed. State is saved as `paused`.
-
-### Resume a Paused Suite
-
-```bash
-newtrun start 2node-vs-primitive
-```
-
-newtrun detects the paused state and resumes from where it left off.
-Already completed scenarios are not re-run.
-
-### Stop and Tear Down
-
-```bash
-newtrun stop
-```
-
-This destroys the topology and removes all state. The suite must be
-paused or completed first — `stop` refuses to kill a running process.
-
-### Full Lifecycle Example
-
-```bash
-# Terminal 1: start the suite
-newtrun start 2node-vs-primitive
-
-# Terminal 2: check progress
-newtrun status --monitor
-
-# Terminal 2: pause after current scenario
-newtrun pause
-
-# Terminal 1: runner finishes current scenario and exits
-# "paused after 3 scenarios; resume with: newtrun start 2node-vs-primitive"
-
-# Later: resume
-newtrun start 2node-vs-primitive
-
-# When done: tear down
-newtrun stop
-```
+Each frame has an `event: <type>` and `data: <json>` line. See the [API reference §5](api.md#5-run-events-sse) and [§10 SSE Event Reference](api.md#10-sse-event-reference) for the payload schemas.
 
 ---
 
-## 6. Writing Scenarios
+## 6. Pausing and Resuming
 
-This is the framework — the YAML schema and step machinery are the same
-whether you're testing a 2-node lab or a 100-node production fabric. The
-shipped suites are examples of this framework, not the framework itself.
-
-### 6.1 Scenario Format
-
-A scenario is a YAML file containing metadata and an ordered list of
-steps. Here is a real scenario from the 2node-ngdp-primitive suite:
-
-```yaml
-# newtrun/suites/2node-ngdp-primitive/00-boot-ssh.yaml
-name: boot-ssh
-description: Verify SSH reachability on both switches
-topology: 2node-ngdp
-requires: []
-
-steps:
-  - name: ssh-echo-switch1
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/ssh-command
-    params: {command: "echo ok"}
-    poll:
-      timeout: 120s
-      interval: 5s
-    expect:
-      jq: '.output | contains("ok")'
-
-  - name: ssh-echo-switch2
-    action: newtron
-    devices: [switch2]
-    method: POST
-    url: /node/{{device}}/ssh-command
-    params: {command: "echo ok"}
-    poll:
-      timeout: 120s
-      interval: 5s
-    expect:
-      jq: '.output | contains("ok")'
-```
-
-**Scenario fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Scenario identifier (used for `--scenario` filter and `requires` references) |
-| `description` | string | Human-readable purpose |
-| `topology` | string | Which topology to deploy (from `newtrun/topologies/`) |
-| `platform` | string | Optional. Overridden by `--platform` flag |
-| `requires` | list | Hard dependencies — scenario is skipped if any prerequisite failed |
-| `after` | list | Soft ordering — run after these scenarios, but don't skip if they failed |
-| `requires_features` | list | Platform feature gate — scenario skipped if platform lists feature in `unsupported_features` |
-| `repeat` | int | Run all steps N times (stress testing) |
-| `steps` | list | Ordered list of Step objects |
-
-### 6.2 Step Structure
-
-Each step has an action (what to do), a device selector (where to do it),
-and action-specific fields. newtrun has 6 actions:
-
-| Action | Purpose |
-|--------|---------|
-| `topology-reconcile` | Deliver topology projection to device via Reconcile |
-| `verify-topology` | Verify device matches topology projection (zero drift) |
-| `wait` | Context-aware sleep |
-| `host-exec` | Run command in host network namespace via direct SSH |
-| `newtron` | Generic HTTP call to newtron-server (replaces all former dedicated actions) |
-| `newtron-cli` | Run newtron CLI as subprocess; device name prepended as first arg, supports jq assertions |
-
-**Step fields:**
-
-| Field | Type | Used by | Description |
-|-------|------|---------|-------------|
-| `name` | string | all | Step identifier for output |
-| `action` | string | all | Which executor to run (`topology-reconcile`, `verify-topology`, `wait`, `host-exec`, `newtron`, `newtron-cli`) |
-| `devices` | selector | all except `wait` | Device selector: `all`, `[switch1]`, `[switch1, switch2]` |
-| `duration` | duration | `wait` | How long to wait (e.g., `30s`, `2m`) |
-| `command` | string | `host-exec`, `newtron-cli` | Shell command (host-exec) or newtron CLI command (newtron-cli) |
-| `params` | map | `newtron` | Request body for POST/PUT/DELETE requests |
-| `method` | string | `newtron` | HTTP method: `GET` (default), `POST`, `PUT`, `DELETE` |
-| `url` | string | `newtron` | URL template with `{{device}}` placeholder |
-| `poll` | object | `newtron` | Polling config: `{timeout: 120s, interval: 5s}` |
-| `batch` | list | `newtron` | Sequential list of HTTP calls |
-| `expect` | object | `host-exec`, `newtron`, `newtron-cli` | Assertion block (see below) |
-| `expect_failure` | bool | all | Expect the step to fail — inverts pass/fail (applied by the runner after execution) |
-
-### 6.3 Expect Block
-
-The `expect` block defines assertions. Available fields depend on the
-action:
-
-**For `newtron` action:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `jq` | string | jq expression evaluated against the HTTP response body. Must return boolean `true` to pass. |
-
-**For `host-exec` action:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `success_rate` | float | Fraction of successful pings (e.g., `0.8` = 80%). Parses ping output for packet loss. |
-| `contains` | string | String match on combined stdout+stderr |
-
-Without `expect`, `host-exec` checks the exit code only. The `newtron`
-action checks that the HTTP response is non-error.
-
-### 6.4 Dependency Ordering
-
-Scenarios declare dependencies with `requires` (hard) and `after` (soft):
-
-```yaml
-# Hard dependency: skip this scenario if "provision" failed
-name: verify-health
-requires: [provision]
-
-# Soft ordering: run after verify-health, but don't skip if it failed
-name: dataplane
-requires: [provision]
-after: [verify-health]
-```
-
-`requires: []` (empty list) means no dependencies — the scenario runs
-first in the suite. newtrun topologically sorts scenarios by their
-dependency graph.
-
-### 6.5 Stress Testing with Repeat
-
-The `repeat` field runs all steps N times — useful for churn tests that
-exercise apply/remove cycles to detect resource leaks or state corruption:
-
-```yaml
-name: service-churn
-description: Stress test service apply/remove cycles
-topology: 2node-vs-service
-requires: [provision]
-repeat: 10
-
-steps:
-  - name: apply-svc
-    action: newtron
-    devices: [switch1]
-    method: POST
-    url: /node/{{device}}/interface/Ethernet3/service
-    params: {service: l2-extend}
-
-  - name: remove-svc
-    action: newtron
-    devices: [switch1]
-    method: DELETE
-    url: /node/{{device}}/interface/Ethernet3/service
-
-  - name: verify-clean
-    action: newtron
-    devices: [switch1]
-    url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
-    expect:
-      jq: '.exists == false'
-```
-
-Each iteration runs all three steps. If any step fails, the scenario
-stops — the repeat count is a maximum, not a guarantee.
-
-### 6.6 Feature Gates
-
-The `requires_features` field lets scenarios self-skip on platforms that
-don't support certain features:
-
-```yaml
-# Only runs if platform supports evpn-vxlan and macvpn
-name: evpn-l2-irb
-requires_features: [evpn-vxlan, macvpn]
-```
-
-The platform's `unsupported_features` list in `platforms.json` controls
-which features are unavailable. If any required feature is unsupported,
-the scenario reports `SKIP` with a reason.
-
-### 6.7 Discovering Actions
+Long suites can be paused at scenario boundaries. The Runner finishes the current scenario, then exits gracefully:
 
 ```bash
-# List all actions
-newtrun actions
-
-# Show detail for a specific action
-newtrun actions topology-reconcile
-newtrun actions newtron
+bin/newtrun pause 2node-vs-primitive
 ```
 
-newtrun has 5 actions: `topology-reconcile`, `verify-topology`, `wait`,
-`host-exec`, and `newtron`. The `newtron` action is the general-purpose
-action — it makes HTTP calls to newtron-server and covers every
-operation that the old dedicated actions (create-vlan, apply-service,
-verify-bgp, etc.) used to handle individually.
+Output: `pausing suite 2node-vs-primitive; will stop after current scenario`.
+
+The pause signal propagates via `state.json` — the server writes `status: pausing`, the Runner picks it up at the next iteration boundary. When the Runner exits, `status: paused` is the persisted state.
+
+### 6.1 Resume from pause
+
+A subsequent `newtrun start` for the same suite resumes from where pause left off:
+
+```bash
+bin/newtrun start 2node-vs-primitive --server http://localhost:8080
+```
+
+Scenarios that already passed are reported as SKIP with reason `already passed (resumed)`:
+
+```
+  [1/21] boot-ssh
+          SKIP (<1s)
+  [2/21] setup-device
+          SKIP (<1s)
+  ...
+  [10/21] irb
+          PASS (20s)
+```
+
+The Runner reads `state.json`, builds `opts.Completed[name] = PASS` for each previously-passed scenario, and sets `opts.Resume = true`. The pause boundary is scenario-level, not step-level — a scenario that was mid-execution restarts from scratch.
+
+### 6.2 Pause vs stop
+
+| Operation | What happens | When to use |
+|-----------|--------------|-------------|
+| `pause` | Runner exits at next scenario boundary; topology stays deployed; state persists. | You want to inspect intermediate state, debug, then continue. |
+| `stop` | Runner's context is canceled (next ctx-check exits immediately); topology destroyed; state removed. | You want to abandon the run entirely. |
 
 ---
 
-## 7. Step Action Reference
+## 7. Stopping a Run
 
-newtrun has 6 actions. `topology-reconcile` and `verify-topology`
-handle provisioning and verification. `host-exec` runs commands on host VMs
-via SSH. `newtron` is the generic action that covers everything else via HTTP
-calls to newtron-server. `newtron-cli` runs the newtron CLI as a subprocess
-for testing CLI commands directly (used in loopback mode suites).
+`newtrun stop` is a multi-step orchestration that ensures clean tear-down:
 
-### 7.1 topology-reconcile
+```bash
+bin/newtrun stop 2node-vs-primitive
+```
 
-Delivers the topology projection to the device by calling
-`Reconcile(name, "topology", "", ExecOpts{Execute: true})`. Reconcile
-handles config reload, locking, full CONFIG_DB replacement, and
-SaveConfig internally — the executor makes a single API call.
+The CLI:
+
+1. Reads the suite's state via HTTP to recover the topology + spec-dir.
+2. POSTs to `/api/runs/{suite}/stop` — cancels the Runner's context.
+3. Waits for the Runner goroutine to exit.
+4. Calls `bin/newtlab destroy <topology>` to tear down VMs.
+5. Sends `DELETE /api/runs/{suite}` to clear the state file.
+
+If the suite isn't currently active (no Registry entry, but state exists from a previous run), steps 2 and 3 are skipped — only the topology destroy and state cleanup run.
+
+```
+$ bin/newtrun stop 2node-vs-primitive
+newtrun: stopping suite 2node-vs-primitive
+newtrun: runner cancelled
+newtrun: destroying topology 2node-vs
+✓ Lab 2node-vs destroyed
+newtrun: cleared state directory
+```
+
+The CLI exits 0 when every step succeeded. If any step fails (e.g., newtlab can't destroy because a VM never reached running state), the CLI reports which step failed and exits non-zero — the other cleanups still happen.
+
+---
+
+## 8. Browsing Suites and Scenarios
+
+Every read goes through newtrun-server (strict Option A). The CLI has dedicated subcommands; the same data is available via the API reference.
+
+```bash
+# List suites visible to the server
+bin/newtrun list
+
+# List scenarios in a suite (dependency-ordered)
+bin/newtrun list 2node-vs-primitive
+
+# Hidden alias matching the API endpoint name
+bin/newtrun suites
+
+# List server-known topologies
+bin/newtrun topologies
+```
+
+Example `newtrun list 2node-vs-primitive`:
+
+```
+Suite: 2node-vs-primitive (21 scenarios)
+
+  #   SCENARIO           STEPS  TOPOLOGY  REQUIRES
+  1   boot-ssh           3      2node-vs  -
+  2   setup-device       19     2node-vs  boot-ssh
+  3   bridged            15     2node-vs  boot-ssh
+  4   routed             11     2node-vs  boot-ssh
+  5   bgp-underlay       14     2node-vs  setup-device
+  ...
+  21  verify-clean       52     2node-vs  teardown-infra
+```
+
+To read a scenario's YAML body:
+
+```bash
+bin/newtrun scenario get 2node-vs-primitive bridged
+```
+
+Returns the raw YAML to stdout — pipe to `less`, `pbcopy`, or a file as needed.
+
+---
+
+## 9. Authoring Scenarios
+
+The new CRUD endpoints (PR #36) let you author scenarios over HTTP — no filesystem access to newtrun-server's host required. The CLI exposes them under `newtrun suite` (for suite-level lifecycle) and `newtrun scenario` (for per-scenario operations).
+
+### 9.1 Create a suite directory
+
+```bash
+bin/newtrun suite create my-experiment
+```
+
+Creates `<suites-base>/my-experiment/`. The name must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` — no path separators, no dots. Returns 409 if the suite already exists.
+
+### 9.2 Add a scenario
+
+Two ways:
+
+```bash
+# From stdin
+cat <<'EOF' | bin/newtrun scenario put my-experiment hello
+name: hello
+description: smoke test
+topology: 1node-vs
+platform: sonic-vs
+steps:
+  - name: wait-one
+    action: wait
+    duration: 1s
+EOF
+
+# From a file
+bin/newtrun scenario put my-experiment hello --file hello.yaml
+```
+
+The server validates with `ParseScenarioBytes` AND asserts the body's `name:` field matches the URL `{name}`. If either fails, the file is **never touched** — the existing scenario (if any) is preserved.
+
+The on-disk file is written atomically via tempfile + rename. Concurrent readers (`newtrun list`, another `newtrun scenario get`) never see a partial write.
+
+### 9.3 Update a scenario
+
+`scenario put` is idempotent. Sending the same body twice produces the same on-disk state. A second PUT to an existing scenario returns 200 (vs 201 on create) and writes to the existing file in-place — preserving any operator-authored `NN-` lexical prefix in the filename.
+
+### 9.4 Read a scenario
+
+```bash
+bin/newtrun scenario get my-experiment hello
+```
+
+Returns the raw YAML body. Resolution rule: tries `hello.yaml` first, falls back to `*-hello.yaml` (the lexical-prefix convention).
+
+### 9.5 Delete a scenario
+
+```bash
+bin/newtrun scenario delete my-experiment hello
+```
+
+Removes the file. Same lookup rule as `get`.
+
+### 9.6 Delete an empty suite
+
+```bash
+bin/newtrun suite delete my-experiment
+```
+
+**Refuses (409) if any files remain.** Delete the scenarios first — explicit destructive action at the scenario level rather than masked behind a directory rmdir.
+
+### 9.7 Common scenarios
+
+**Iterate on a single scenario.** Edit YAML locally, push to the server, rerun:
+
+```bash
+vim my-experiment/hello.yaml
+bin/newtrun scenario put my-experiment hello --file my-experiment/hello.yaml
+bin/newtrun start my-experiment --scenario hello --server http://localhost:8080
+```
+
+**Browser frontend (newtcon) author flow.** Same endpoints, different client. The frontend's YAML editor calls PUT after every save; validation feedback comes from the server's 400 response body when `ParseScenarioBytes` rejects the input.
+
+---
+
+## 10. Writing Scenarios from Scratch
+
+A scenario is a YAML file with `name`, `description`, `topology`, and a list of `steps`:
+
+```yaml
+name: my-first-scenario
+description: |
+  Apply a transit service on Ethernet0 and verify it sticks.
+topology: 1node-vs
+platform: sonic-vs
+
+steps:
+  - name: apply-transit
+    action: newtron-cli
+    devices: [switch1]
+    command: "service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 --loopback"
+
+  - name: verify-binding
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query NEWTRON_SERVICE_BINDING --loopback"
+    expect:
+      jq: '.["Ethernet0"].service == "transit"'
+
+  - name: remove-transit
+    action: newtron-cli
+    devices: [switch1]
+    command: "service remove Ethernet0 --loopback"
+
+  - name: verify-binding-removed
+    action: newtron-cli
+    devices: [switch1]
+    command: "configdb query NEWTRON_SERVICE_BINDING --loopback"
+    expect:
+      jq: '.["Ethernet0"] == null'
+```
+
+### 10.1 Scenario fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique scenario identifier; must match `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$` and the URL `{name}` segment of CRUD endpoints. |
+| `description` | no | Human-readable description shown in `newtrun list` and on the SuiteStart event. |
+| `topology` | no | Topology name. The Runner aborts if the server has a different one loaded. |
+| `platform` | no | Platform name (e.g., `sonic-vs`); the Runner uses this for capability checks. |
+| `requires` | no | Names of scenarios that must pass first. Hard dependency — a missing prerequisite means this scenario is SKIPPED. |
+| `after` | no | Soft ordering — run after these, regardless of their status. Used for cleanup scenarios that always run last. |
+| `requires_features` | no | Platform feature flags. Scenario is SKIPPED if the platform doesn't declare them (e.g., `evpn-vxlan` on a platform without overlay support). |
+| `repeat` | no | Run the step list N times in sequence. Used for soak/stability tests. |
+| `steps` | yes | Ordered list of [Step](#step-fields) records. |
+
+### 10.2 Step fields
+
+| Field | Used by | Description |
+|-------|---------|-------------|
+| `name` | all actions | Step identifier for logs and reports. |
+| `action` | all | Discriminator — see [§11 Step Action Reference](#11-step-action-reference). |
+| `devices` | newtron, newtron-cli, host-exec | YAML accepts `all` or a list. |
+| `command` | newtron-cli, host-exec | Subprocess command line. `{{device}}` is replaced per device. |
+| `url` | newtron | HTTP path on newtron-server. `{{device}}` is replaced per device. |
+| `method` | newtron | HTTP method; defaults to GET. |
+| `body` / `params` | newtron | Request body. |
+| `duration` | wait | Sleep duration (e.g., `30s`, `2m`). |
+| `expect` | newtron, newtron-cli, host-exec | Response assertions. See [§10.3](#103-expect-assertions). |
+| `poll` | newtron | Polling — retry until expect passes or timeout expires. |
+| `batch` | newtron | Multiple HTTP calls grouped per device. |
+| `expect_failure` | newtron | Invert pass/fail — assert the call fails. |
+| `on_failure` | all | One of `fail` (default), `continue`, `skip-rest`. |
+
+### 10.3 expect assertions
+
+| Field | Honored by | Meaning |
+|-------|-----------|---------|
+| `status` | newtron | HTTP status code must equal this value. |
+| `jq` | newtron, newtron-cli | jq expression must evaluate to `true` against the response (newtron) or stdout JSON (newtron-cli with `--json`). |
+| `contains` | newtron, host-exec | Substring match on text response or combined stdout+stderr. |
+| `exit_code` | newtron-cli, host-exec | Subprocess exit code must equal this value. |
+| `stdout` | newtron-cli, host-exec | Substring match on stdout. |
+| `stderr` | newtron-cli, host-exec | Substring match on stderr. |
+| `success_rate` | host-exec | For ping output: parse "N% packet loss" and assert success rate ≥ this value (0.0–1.0). |
+
+When a jq assertion fails, the error message includes the expression and the actual value — useful for debugging without rerunning.
+
+### 10.4 Dependency graph
+
+Use `requires` to express hard ordering (the scenario can't run until prerequisites pass) and `after` to express soft ordering (the scenario runs after, regardless of prerequisite status):
+
+```yaml
+# Cleanup scenario: always run last, even if earlier scenarios failed
+name: verify-clean
+after: [setup-device, vlan-vrf, service-lifecycle]
+```
+
+The Runner topologically sorts scenarios at suite load time. Cycles fail at load time with a clear error.
+
+### 10.5 Iteration with `repeat`
+
+A scenario with `repeat: N` runs its step list N times in sequence:
+
+```yaml
+name: stability-soak
+repeat: 50
+steps:
+  - name: apply-service
+    action: newtron-cli
+    command: "service apply Ethernet0 transit --loopback"
+  - name: verify
+    action: newtron-cli
+    command: "interface show Ethernet0 --loopback"
+    expect:
+      jq: '.service == "transit"'
+  - name: remove
+    action: newtron-cli
+    command: "service remove Ethernet0 --loopback"
+```
+
+`StepResult.Iteration` distinguishes results from each iteration; the first FAIL stops the scenario and reports the iteration number.
+
+---
+
+## 11. Step Action Reference
+
+newtrun has five actions. `topology-reconcile` handles provisioning. `host-exec` runs commands on host VMs via SSH. `newtron` is the generic action that covers every newtron-server operation via HTTP. `newtron-cli` runs the newtron CLI as a subprocess (for loopback testing).
+
+### 11.1 topology-reconcile
+
+Delivers the topology projection to the device by calling `Reconcile(name, "topology", "", ExecOpts{Execute: true})` on newtron-server. Reconcile handles config reload, locking, full CONFIG_DB replacement, and SaveConfig internally — the executor makes a single API call.
 
 ```yaml
 - name: provision-switches
@@ -564,28 +648,11 @@ SaveConfig internally — the executor makes a single API call.
   devices: [switch1, switch2]
 ```
 
-No additional fields. Reports the number of entries applied on success.
+No additional fields. Reports the number of entries applied on success. Inline runs require explicit opt-in (`allow_reconcile: true` in the POST body) because reconcile can replace an entire device's intent state.
 
-### 7.2 verify-topology
+### 11.2 wait
 
-Verifies that the device CONFIG_DB matches the topology projection by
-calling `IntentDrift(name, "topology")`. Zero drift entries means the
-device is in the expected state. Any drift entries cause the step to
-fail with a count of entries that diverge.
-
-```yaml
-- name: verify-config
-  action: verify-topology
-  devices: [switch1, switch2]
-```
-
-No precondition on a prior step — drift is computed directly from the
-topology projection on the server.
-
-### 7.3 wait
-
-Context-aware sleep. Respects cancellation — if the suite is paused
-during a wait, it exits cleanly.
+Context-aware sleep. Respects cancellation — if the suite is paused or stopped during a wait, the executor exits cleanly without consuming the full duration.
 
 ```yaml
 - name: wait-convergence
@@ -595,11 +662,9 @@ during a wait, it exits cleanly.
 
 The only required field is `duration`. No `devices` field needed.
 
-### 7.4 host-exec
+### 11.3 host-exec
 
-Runs a command inside a host device's network namespace via direct SSH.
-The namespace name matches the device name (e.g., `host1`, `host2`).
-newtlab creates these namespaces at deploy time.
+Runs a command inside a host device's network namespace via direct SSH. The namespace name matches the device name (e.g., `host1`, `host2`); newtlab creates the namespaces at deploy time.
 
 ```yaml
 - name: ping-host3
@@ -614,88 +679,44 @@ newtlab creates these namespaces at deploy time.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `command` | yes | Shell command to run. Compound commands (semicolons, pipes) work — the executor wraps in `sh -c`. |
-| `expect.success_rate` | no | Parse ping output for packet loss. `0.8` means 80% of pings must succeed. |
+| `command` | yes | Shell command. Compound commands (semicolons, pipes) work — the executor wraps in `sh -c`. |
+| `expect.success_rate` | no | Parse ping output for packet loss. `0.8` = 80% of pings must succeed. |
 | `expect.contains` | no | String match on combined stdout+stderr. |
+| `expect.exit_code` | no | Subprocess exit code must equal this value. |
 
-Without `expect`, the step checks the exit code only.
+Without `expect`, the step passes when the exit code is 0.
 
-**Examples:**
+### 11.4 newtron — generic HTTP action
 
-```yaml
-# Ping with success rate threshold
-- name: ping-test
-  action: host-exec
-  devices: [host1]
-  command: "ping -c 5 -W 2 10.100.0.3"
-  expect:
-    success_rate: 1.0
+Makes HTTP calls to newtron-server. Replaces all the former dedicated actions (create-vlan, apply-service, verify-bgp, etc.) with a single mechanism. Three modes: one-shot, polling, batch.
 
-# String match on output
-- name: check-interface
-  action: host-exec
-  devices: [host1]
-  command: "ip addr show eth0"
-  expect:
-    contains: "10.100.0.1"
+#### URL templates
 
-# Compound command
-- name: configure-host
-  action: host-exec
-  devices: [host1]
-  command: "ip addr add 10.100.0.1/24 dev eth0 2>/dev/null || true"
-```
-
-### 7.5 newtron — Generic HTTP Action
-
-The `newtron` action makes HTTP calls to newtron-server. It replaces all
-the former dedicated actions (create-vlan, apply-service, verify-bgp,
-verify-config-db, setup-evpn, etc.) with a single generic mechanism.
-
-The action has three modes: one-shot, polling, and batch.
-
-#### URL Templates
-
-URLs start from the path after the network segment. The `/network/<id>`
-prefix is added automatically. Use `{{device}}` as a placeholder for
-per-device expansion:
+URLs start from the path after the network segment. The `/network/<id>` prefix is added automatically. Use `{{device}}` for per-device expansion:
 
 ```yaml
-url: /node/{{device}}/vlan           # expands to /network/<id>/node/switch1/vlan
-url: /node/{{device}}/health         # expands to /network/<id>/node/switch1/health
-url: /node/{{device}}/bgp/check      # expands to /network/<id>/node/switch1/bgp/check
+url: /node/{{device}}/vlan           # → /network/<id>/node/switch1/vlan
+url: /node/{{device}}/health         # → /network/<id>/node/switch1/health
+url: /node/{{device}}/bgp/check      # → /network/<id>/node/switch1/bgp/check
 ```
 
-If the URL contains `{{device}}`, the call runs in parallel across all
-target devices. If not, it runs once with no device scoping (for
-network-level operations like creating specs).
+If the URL contains `{{device}}`, the call runs in parallel across target devices. If not, it runs once with no device scoping (network-level operations like creating specs).
 
-#### URL Encoding
+#### URL encoding
 
-CONFIG_DB keys use `|` as the table-key separator. In URLs, encode
-special characters:
+CONFIG_DB keys use `|` as the table-key separator. In URLs, encode special characters:
 
 | Character | Encoding | Example |
 |-----------|----------|---------|
 | `\|` | `%7C` | `VLAN_MEMBER/Vlan100%7CEthernet1` |
 | `/` in key | `%2F` | `LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32` |
 
-```yaml
-# Verify a VLAN_MEMBER entry (pipe in key)
-- name: verify-member
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/configdb/VLAN_MEMBER/Vlan100%7CEthernet1
-  expect:
-    jq: '.tagging_mode == "untagged"'
-```
+#### One-shot mode
 
-#### One-Shot Mode
-
-The default mode. Makes a single HTTP call per device.
+Default. Makes a single HTTP call per device.
 
 ```yaml
-# GET request (method defaults to GET)
+# GET (method defaults to GET)
 - name: check-health
   action: newtron
   devices: [switch1]
@@ -709,7 +730,7 @@ The default mode. Makes a single HTTP call per device.
   url: /node/{{device}}/vlan
   params: {id: 100}
 
-# DELETE request
+# DELETE
 - name: remove-service
   action: newtron
   devices: [switch1]
@@ -717,12 +738,9 @@ The default mode. Makes a single HTTP call per device.
   url: /node/{{device}}/interface/Ethernet3/service
 ```
 
-#### Polling Mode
+#### Polling mode
 
-When `poll` is set, the call repeats at the given interval until the
-`expect.jq` expression returns `true` or the timeout expires. Use
-polling for operations that depend on daemon convergence (BGP sessions,
-ASIC programming, health checks).
+When `poll` is set, the call repeats at the given interval until `expect.jq` returns `true` or the timeout expires. Use polling for daemon-convergence checks:
 
 ```yaml
 - name: verify-bgp
@@ -736,42 +754,11 @@ ASIC programming, health checks).
     jq: 'length > 0 and all(.[]; .status == "pass")'
 ```
 
-During polling, HTTP errors are treated as "not ready yet" — the action
-keeps polling rather than failing immediately. This handles the common
-case where the device is still booting or a daemon hasn't started
-processing entries.
+During polling, HTTP errors are treated as "not ready yet" — the action keeps polling rather than failing immediately. This handles the common case where the device is still booting.
 
-```yaml
-# Poll SSH reachability during boot
-- name: ssh-echo
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/ssh-command
-  params: {command: "echo ok"}
-  poll:
-    timeout: 120s
-    interval: 5s
-  expect:
-    jq: '.output | contains("ok")'
+#### Batch mode
 
-# Poll health checks with pass/warn tolerance
-- name: verify-health
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/health
-  poll:
-    timeout: 60s
-    interval: 5s
-  expect:
-    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
-```
-
-#### Batch Mode
-
-The `batch` field runs a sequence of HTTP calls as a single step. The
-batch fails on the first error. If any batch call URL contains
-`{{device}}`, the entire sequence runs per-device in parallel.
+`batch` runs a sequence of HTTP calls as a single step. Fails on the first error. If any URL contains `{{device}}`, the sequence runs per-device in parallel:
 
 ```yaml
 - name: setup-vlan-with-members
@@ -789,15 +776,11 @@ batch fails on the first error. If any batch call URL contains
       params: {interface: Ethernet3, tagged: false}
 ```
 
-Batch calls do not support individual `expect` blocks — the batch
-succeeds if all calls return non-error responses.
+Batch calls do not support individual `expect` blocks — the batch succeeds if all calls return non-error responses.
 
-#### jq Expressions
+#### jq expressions
 
-The `expect.jq` field is a jq expression evaluated against the HTTP
-response body (parsed as JSON). The expression must produce a single
-boolean `true` to pass. Any other value (including `false`, `null`, a
-string, or a number) is a failure.
+`expect.jq` is a jq expression evaluated against the HTTP response body (parsed as JSON). The expression must produce `true`; any other value is a failure.
 
 Common patterns:
 
@@ -811,7 +794,7 @@ jq: '.tagging_mode == "untagged"'
 # Array length check
 jq: 'length > 0'
 
-# All-pass check (every element satisfies a condition)
+# All-pass check
 jq: 'all(.[]; .status == "pass")'
 
 # Combined checks
@@ -822,19 +805,13 @@ jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
 
 # String containment
 jq: '.output | contains("ok")'
-
-# Drift detection
-jq: '.status == "drifted" and (.missing | length) == 1 and (.extra | length) == 1'
 ```
 
-When a jq assertion fails, the error message includes the expression and
-the actual value — useful for debugging without re-running the scenario.
+When a jq assertion fails, the error message includes both the expression and the actual value.
 
 #### expect_failure
 
-The `expect_failure` flag inverts pass/fail. Use it to assert that an
-operation fails — for example, verifying that a zombie intent blocks
-write operations:
+Inverts pass/fail. Use to assert that an operation correctly refuses:
 
 ```yaml
 - name: create-vlan-blocked-by-zombie
@@ -846,182 +823,16 @@ write operations:
   expect_failure: true
 ```
 
-If the HTTP call fails (as expected), the step passes. If it succeeds
-unexpectedly, the step fails.
+If the HTTP call fails (as expected), the step passes. If it succeeds unexpectedly, the step fails.
 
-#### Common Operations
+### 11.5 newtron-cli — CLI subprocess action
 
-The `newtron` action covers every operation exposed by newtron-server.
-Here are representative examples organized by domain:
+Runs the `newtron` CLI binary as a subprocess. The device name is prepended as the first positional argument (matching the normal `newtron <device> <command>` pattern). When `expect.jq` is set, `--json` is appended automatically so the output is machine-parseable.
 
-**SSH commands:**
+Use this for testing CLI commands directly, particularly in `--loopback` mode where no device connection is needed. The CLI binary must be in `$PATH`.
 
 ```yaml
-- name: check-frr
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/ssh-command
-  params: {command: "vtysh -c 'show ip bgp summary'"}
-  expect:
-    jq: '.output | contains("Established")'
-```
-
-**CONFIG_DB verification:**
-
-```yaml
-# Check key existence
-- name: check-loopback
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/configdb/LOOPBACK_INTERFACE/Loopback0/exists
-  expect:
-    jq: '.exists == true'
-
-# Read and check field values
-- name: check-bgp-globals
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/configdb/BGP_GLOBALS/default
-  expect:
-    jq: '.local_asn == "65001" and .router_id == "10.0.0.1"'
-
-# Verify key does NOT exist (after removal)
-- name: check-removed
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/configdb/NEWTRON_INTENT/Ethernet3/exists
-  expect:
-    jq: '.exists == false'
-```
-
-**VLAN operations:**
-
-```yaml
-# Create VLAN
-- name: create-vlan100
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/vlan
-  params: {id: 100}
-
-# Add untagged member
-- name: add-member
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/vlan/100/member
-  params: {interface: Ethernet1, tagged: false}
-
-# Delete VLAN
-- name: delete-vlan100
-  action: newtron
-  devices: [switch1]
-  method: DELETE
-  url: /node/{{device}}/vlan/100
-```
-
-**VRF operations:**
-
-```yaml
-# Create VRF
-- name: create-vrf
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/vrf
-  params: {name: Vrf_local}
-
-# Delete VRF
-- name: delete-vrf
-  action: newtron
-  devices: [switch1]
-  method: DELETE
-  url: /node/{{device}}/vrf/Vrf_local
-```
-
-**Service lifecycle:**
-
-```yaml
-# Apply service to interface
-- name: apply-service
-  action: newtron
-  devices: [switch1]
-  method: POST
-  url: /node/{{device}}/interface/Ethernet3/service
-  params: {service: l2-extend}
-
-# Remove service from interface
-- name: remove-service
-  action: newtron
-  devices: [switch1]
-  method: DELETE
-  url: /node/{{device}}/interface/Ethernet3/service
-```
-
-**BGP verification:**
-
-```yaml
-- name: verify-bgp
-  action: newtron
-  devices: all
-  url: /node/{{device}}/bgp/check
-  poll:
-    timeout: 120s
-    interval: 5s
-  expect:
-    jq: 'length > 0 and all(.[]; .status == "pass")'
-```
-
-**Health checks:**
-
-```yaml
-- name: verify-health
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/health
-  poll:
-    timeout: 60s
-    interval: 5s
-  expect:
-    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
-```
-
-**Config reload:**
-
-```yaml
-- name: config-reload
-  action: newtron
-  devices: [switch1, switch2]
-  method: POST
-  url: /node/{{device}}/config-reload
-```
-
-**Drift detection:**
-
-```yaml
-- name: check-drift
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/drift
-  expect:
-    jq: '.status == "clean"'
-```
-
-### 7.6 newtron-cli — CLI Subprocess Action
-
-Runs the `newtron` CLI binary as a subprocess. The device name is
-prepended as the first positional argument (like the normal CLI pattern
-`newtron <device> <command>`). When `expect.jq` is set, `--json` is
-appended automatically so the output is machine-parseable.
-
-This action is designed for testing CLI commands directly, particularly
-in `--loopback` mode where no device connection is needed. The CLI
-binary must be in `$PATH`.
-
-```yaml
-# Device-scoped command (device prepended as first arg)
+# Device-scoped command
 - name: create-vlan
   action: newtron-cli
   devices: [switch1]
@@ -1038,40 +849,30 @@ binary must be in `$PATH`.
 # Network-scoped command (no device)
 - name: list-services
   action: newtron-cli
-  command: "service list"
+  command: "service list --loopback"
 ```
 
-Use `--no-deploy` with `newtrun start` to skip topology deployment
-when running loopback CLI suites:
+Use `--no-deploy` with `newtrun start` when running loopback suites — no topology deployment needed:
 
-```
-newtrun start 1node-vs-config --server http://localhost:9800 --no-deploy
+```bash
+bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:8080
 ```
 
 ---
 
-## 8. Data Plane Tests
+## 12. Data Plane Tests
 
-Data plane tests verify that packets actually traverse the fabric — not
-just that CONFIG_DB was written correctly. They require host endpoints
-that can generate and receive traffic.
+Data plane tests verify that packets actually traverse the fabric — not just that CONFIG_DB was written correctly. They require host endpoints that can generate and receive traffic.
 
-### Host Devices
+### 12.1 Host devices
 
-Host devices are first-class topology devices deployed by newtlab. Each
-host runs in its own network namespace on a shared QEMU VM (VM
-coalescing). newtlab creates the namespaces at deploy time — test
-scenarios don't need to manage namespace lifecycle.
+Host devices are first-class topology devices deployed by newtlab. Each host runs in its own network namespace on a shared QEMU VM (VM coalescing for efficiency). newtlab creates the namespaces at deploy time — test scenarios don't manage namespace lifecycle.
 
-Multiple hosts may share a single QEMU VM. For example, the 2node-ngdp
-topology coalesces host1-host6 across two host VMs (the 2node-ngdp-service
-topology has host1-host8). Each host's network namespace provides
-isolation.
+Multiple hosts may share a single QEMU VM. For example, the 2node-vs topology coalesces 6 hosts into one VM; 2node-vs-service coalesces 8.
 
-### host-exec for Data Plane
+### 12.2 host-exec for data plane
 
-`host-exec` runs commands inside a host's network namespace via direct
-SSH. The namespace is automatically set to match the device name:
+`host-exec` runs commands inside a host's network namespace via direct SSH. The namespace is automatically set to match the device name:
 
 ```yaml
 - name: ping-across-fabric
@@ -1082,42 +883,14 @@ SSH. The namespace is automatically set to match the device name:
     success_rate: 0.8
 ```
 
-Compound commands (semicolons, pipes) work correctly — the executor
-wraps the command in `sh -c` to ensure the entire pipeline runs inside
-the namespace.
+Compound commands work — the executor wraps in `sh -c` so pipelines run inside the namespace.
 
-The `expect` block supports two modes:
-- `success_rate`: parses ping output for packet loss (e.g., `0.8` means
-  80% of pings must succeed)
-- `contains`: string match on combined stdout+stderr
+### 12.3 Worked example: L2 bridging test
 
-Without `expect`, the step checks the exit code only.
-
-### Platform Requirements
-
-Data plane tests require a platform with a non-empty `dataplane` field
-in `platforms.json`:
-
-```json
-{
-  "sonic-ciscovs": {
-    "dataplane": "ciscovs",
-    ...
-  }
-}
-```
-
-If `dataplane` is empty, host-related actions automatically report
-`SKIP` instead of failing. This lets the same suite run on platforms
-with and without data plane support.
-
-### Example: L2 Bridging Test
-
-From the 2node-ngdp-primitive suite — creates a VLAN, adds untagged members
-on a single switch, and verifies L2 connectivity between two hosts:
+From the 2node-vs-primitive suite. Creates a VLAN, adds untagged members on a single switch, verifies L2 connectivity between two hosts:
 
 ```yaml
-# Create VLAN and add untagged members
+# Create VLAN
 - name: create-vlan100
   action: newtron
   devices: [switch1]
@@ -1125,6 +898,7 @@ on a single switch, and verifies L2 connectivity between two hosts:
   url: /node/{{device}}/vlan
   params: {id: 100}
 
+# Add members
 - name: add-host1-port
   action: newtron
   devices: [switch1]
@@ -1164,74 +938,74 @@ on a single switch, and verifies L2 connectivity between two hosts:
     success_rate: 0.8
 ```
 
+### 12.4 Platform requirements
+
+Data plane tests require a platform with a non-empty `dataplane` field in `platforms.json`. If `dataplane` is empty, host-related actions report SKIP instead of failing — the same suite can run against multiple platforms with varying dataplane support.
+
 ---
 
-## 9. CI/CD Integration
+## 13. CI/CD Integration
 
-### Exit Codes
+### 13.1 Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | All scenarios passed |
-| 1 | One or more scenarios failed |
-| 2 | Infrastructure error (VM boot failure, SSH unreachable, etc.) |
+| 1 | One or more scenarios failed (test failure) |
+| 2 | Infrastructure error — connection lost mid-run, run aborted (server SIGTERM), or pre-flight check failed (newtrun-server unreachable, lab not deployed, etc.) |
 
-### Console Output
+The split between 1 and 2 matters for CI: code 1 means "the tests caught something — investigate"; code 2 means "the infrastructure broke — retry might pass". A CI script that retries on transient failures should only retry exit code 2.
 
-Normal mode shows scenario-level results:
+### 13.2 JUnit XML
 
-```
-newtrun: 21 scenarios, topology: 2node-vs, platform: sonic-vs
-
-  [1/21]  boot-ssh .................. PASS  (3s)
-  [2/21]  loopback .................. PASS  (5s)
-  [3/21]  bridged ................... PASS  (18s)
-  ...
-  [21/21] verify-clean .............. PASS  (12s)
-
----
-newtrun: 21 scenarios: 21 passed  (3m45s)
-```
-
-Verbose mode (`-v`) shows per-step results within each scenario:
-
-```
-  [3/21]  bridged
-          [1/15] create-vlan100 ......... PASS  (1s)
-          [2/15] add-host1-port ......... PASS  (<1s)
-          ...
-          [15/15] host3-ping-host1 ...... PASS  (3s)
-          PASS  (18s)
-```
-
-### Markdown Report
-
-After a suite completes, newtrun writes a report to
-`newtrun/.generated/report.md` with a summary table and failure/skip
-details.
-
-### JUnit XML
+Pass `--junit <path>` to write a JUnit XML report after the run finishes:
 
 ```bash
-newtrun start 2node-vs-primitive --junit results.xml
+bin/newtrun start 2node-vs-primitive \
+    --junit results.xml \
+    --server http://localhost:8080
 ```
 
-### GitHub Actions Example
+The XML has one `<testsuite>` per scenario, with `<testcase>` children for each step. Failed steps include `<failure>` elements with the assertion message.
+
+### 13.3 Markdown report
+
+Every `newtrun start` writes `newtrun/.generated/report.md` after the run finishes. The format is a single table:
+
+```markdown
+# newtrun Report — 2026-05-30 10:07:11
+
+| Scenario | Topology | Platform | Result | Duration | Note |
+|----------|----------|----------|--------|----------|------|
+| boot-ssh | 2node-vs | sonic-vs | PASS | 1m31s |  |
+| setup-device | 2node-vs | sonic-vs | PASS | 9s |  |
+...
+```
+
+### 13.4 GitHub Actions example
 
 ```yaml
-- name: Run newtrun
+- name: Start servers
   run: |
-    bin/newtrun start 2node-vs-primitive --junit results.xml
+    bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
+    bin/newtrun-server &
+    sleep 2
+
+- name: Run suite
+  run: |
+    bin/newtrun start 2node-vs-primitive \
+        --junit results.xml \
+        --server http://localhost:8080
   timeout-minutes: 30
 
-- name: Upload JUnit results
+- name: Upload JUnit
   if: always()
   uses: actions/upload-artifact@v4
   with:
-    name: newtrun-results
+    name: newtrun-junit
     path: results.xml
 
-- name: Upload report
+- name: Upload markdown report
   if: always()
   uses: actions/upload-artifact@v4
   with:
@@ -1239,61 +1013,72 @@ newtrun start 2node-vs-primitive --junit results.xml
     path: newtrun/.generated/report.md
 ```
 
+The `if: always()` ensures the reports upload even when the suite fails. The test failures show up in the JUnit XML; the markdown report is for human review.
+
 ---
 
-## 10. Troubleshooting
+## 14. Troubleshooting
 
-### Scenario Fails at Deploy
+### 14.1 `newtrun-server is not running`
 
-newtlab couldn't start VMs. Check:
-
-```bash
-# Is the image available?
-ls ~/.newtlab/images/
-
-# Are ports free?
-ss -tlnp | grep 40000
-
-# Any leftover VMs?
-newtlab status
-newtlab destroy --force
-```
-
-### newtron-server Not Reachable
-
-If steps fail with connection errors, the server may not be running or
-the URL is wrong:
+The CLI's `requireServer` probe (`GET /api/health`) returned a connection error. Either the server isn't running, or you're pointing at the wrong URL.
 
 ```bash
-# Is the server running?
-pgrep -f newtron-server
+# Is it running?
+pgrep -f "bin/newtrun-server"
 
 # Is the URL correct?
-curl http://localhost:8080/health
-
-# Start it manually
-bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
+curl http://localhost:8081/api/health
 
 # Override the URL
-newtrun start 2node-vs-primitive --server http://localhost:8080
+bin/newtrun start <suite> --newtrun-server http://other-host:8081
+# or
+NEWTRUN_SERVER=http://other-host:8081 bin/newtrun start <suite>
 ```
 
-### Provisioning Fails
-
-newtron-server couldn't configure a device. Check:
+Start the server if it isn't running:
 
 ```bash
-# Is the VM reachable through the server?
-curl http://localhost:8080/api/v1/nodes/switch1/health
-
-# SSH to the device directly for debugging
-newtlab ssh switch1
+bin/newtrun-server &
 ```
 
-### BGP Verification Times Out
+### 14.2 `infrastructure error: run was aborted (server shut down)`
 
-BGP sessions may take time to establish after provisioning. Increase
-the poll timeout in your scenario:
+The Runner's SuiteEnd payload carried `status: aborted`. This happens when newtrun-server is SIGTERMed mid-run — the Runner's context is canceled, `iterateScenarios` exits at the next ctx-check, and the finalizer writes `status: aborted` to state.json. The CLI maps this to exit code 2 so CI scripts don't mistake it for a test failure.
+
+To investigate: read `~/.newtron/newtrun/<suite>/state.json` — `scenarios[].status` shows which scenarios completed before the cancel.
+
+### 14.3 `infrastructure error: newtrun-server connection lost mid-run`
+
+The SSE stream from newtrun-server died before SuiteEnd arrived. Usually a SIGKILL (no graceful drain) — the TCP connection drops. The on-disk state may be incomplete; check what got persisted before the kill.
+
+### 14.4 `topology node has unsaved intents`
+
+newtron-server's running-state for a switch has uncommitted intent changes from a previous session. Reload to discard, or save to commit:
+
+```bash
+# Discard (most common — old session left orphaned state)
+bin/newtron switch1 intent reload --topology --server http://localhost:8080
+
+# Commit (only if you want to keep the changes)
+bin/newtron switch1 intent save --topology --server http://localhost:8080
+```
+
+This typically happens after killed test runs.
+
+### 14.5 Scenario fails with `policy already exists`
+
+Earlier runs created specs (route policies, QoS policies) that newtron-server persisted to `network.json` and never cleaned up. Check `git status newtrun/topologies/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
+
+```bash
+git checkout HEAD -- newtrun/topologies/<name>/specs/network.json
+pkill -KILL -f "bin/newtron-server" && sleep 1
+bin/newtron-server --spec-dir newtrun/topologies/<name>/specs &
+```
+
+### 14.6 BGP verification times out
+
+BGP sessions take time to establish after provisioning. Increase the poll timeout in the scenario:
 
 ```yaml
 - name: verify-bgp
@@ -1301,206 +1086,106 @@ the poll timeout in your scenario:
   devices: all
   url: /node/{{device}}/bgp/check
   poll:
-    timeout: 180s
+    timeout: 180s    # was 120s
     interval: 5s
   expect:
     jq: 'length > 0 and all(.[]; .status == "pass")'
 ```
 
-Or SSH in and check manually:
+If the timeout is hit repeatedly, the underlying BGP peering is misconfigured — check `bin/newtron switch1 bgp show` for what newtron-server sees and `vtysh -c 'show ip bgp summary'` on the device for what FRR sees.
+
+### 14.7 No SSH connection for host device `host1`
+
+The Runner skipped device connection setup because `--no-deploy` was set. host-exec steps need the SSH connections; remove `--no-deploy`:
 
 ```bash
-newtlab ssh switch1
-vtysh -c "show ip bgp summary"
+bin/newtrun start <suite> --server http://localhost:8080
+# instead of
+bin/newtrun start <suite> --no-deploy --server http://localhost:8080
 ```
 
-### Health Checks Fail
+`--no-deploy` is for loopback suites and offline testing. Suites that touch hosts need the runner to connect.
 
-Health checks verify interfaces, BGP, EVPN, LAG, and VXLAN. Use
-polling so the check retries during daemon convergence rather than
-failing on the first attempt:
+### 14.8 Suite fails immediately with `409 Conflict`
 
-```yaml
-- name: verify-health
-  action: newtron
-  devices: [switch1]
-  url: /node/{{device}}/health
-  poll:
-    timeout: 60s
-    interval: 5s
-  expect:
-    jq: '.oper_checks | all(.[]; .status == "pass" or .status == "warn")'
-```
-
-If a check still fails, SSH in and inspect:
+Another run for the same suite is already active in the registry:
 
 ```bash
-newtlab ssh switch1
-show interfaces status
-vtysh -c "show ip bgp summary"
+bin/newtrun status --suite <name>
 ```
 
-### Data Plane Tests Fail
-
-Only platforms with `dataplane` set in `platforms.json` support actual
-packet forwarding. Check:
+If status shows `running` but the process is dead, the registry is stale (rare — usually a bug). Force-clear:
 
 ```bash
-# Verify the platform has dataplane support
-cat newtrun/topologies/2node-ngdp/specs/platforms.json | grep dataplane
-```
-
-Host-related actions auto-skip on platforms without data plane support,
-so failures indicate a real connectivity problem. SSH to the host to
-debug:
-
-```bash
-newtlab ssh host1
-ip addr show
-ping -c 1 <target-ip>
-```
-
-### Wrong Interface Names
-
-If CONFIG_DB verification fails on interface entries, check that the
-platform's `vm_interface_map` in `platforms.json` matches the SONiC
-image:
-- `sonic-ciscovs`: `sequential` (Ethernet0, Ethernet1, Ethernet2, ...)
-
-The topology spec's interface names must match the mapping.
-
-### Suite Already Running
-
-If you see `suite X already running (pid Y)` but no runner is active:
-
-```bash
-# Check if the process is actually alive
-ps -p <pid>
-
-# If not, the state is stale — stop and retry
-newtrun stop
-newtrun start <suite>
+bin/newtrun stop <name>
+# or
+curl -X DELETE http://localhost:8081/api/runs/<name>
 ```
 
 ---
 
-## 11. Command Reference
+## 15. Command Reference
 
-### `newtrun start [suite]`
+State-changing and read-only commands; all require newtrun-server. See [api.md](api.md) for endpoint-level reference.
 
-Deploy topology (if needed), run scenarios, leave topology running.
+### 15.1 Lifecycle
 
-```
-newtrun start 2node-vs-primitive                        # all scenarios
-newtrun start 2node-vs-primitive --scenario boot-ssh    # single scenario
-newtrun start --dir path/to/suite                       # explicit path
-```
+| Command | Purpose |
+|---------|---------|
+| `newtrun start <suite> [--scenario \| --target \| --all]` | Start (or resume) a run. |
+| `newtrun pause <suite>` | Request graceful pause at next scenario boundary. |
+| `newtrun stop <suite>` | Cancel runner, destroy topology, clear state. |
+| `newtrun status [--suite <pattern>] [--monitor] [--detail] [--json]` | Read run state. |
 
-If a previous run was paused, `start` resumes from where it left off.
+### 15.2 Suite management
 
-| Flag | Description |
-|------|-------------|
-| `--dir <path>` | Suite directory (alternative to positional arg) |
-| `--scenario <name>` | Run a single scenario (default: all) |
-| `--topology <name>` | Override topology |
-| `--platform <name>` | Override platform |
-| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`) |
-| `--network-id <id>` | Network identifier (env: `NEWTRON_NETWORK_ID`) |
-| `--junit <path>` | Write JUnit XML results |
-| `-v, --verbose` | Verbose output |
+| Command | Purpose |
+|---------|---------|
+| `newtrun list` | List suite directories. |
+| `newtrun list <suite>` | List scenarios in a suite (dependency-ordered). |
+| `newtrun suites` | Hidden alias of `list`. |
+| `newtrun suite create <name>` | Create an empty suite directory. |
+| `newtrun suite delete <name>` | Delete an empty suite directory (refuses if scenarios remain). |
 
-### `newtrun pause`
+### 15.3 Scenario management
 
-Signal the running suite to stop after the current scenario completes.
-The topology stays deployed and state is saved as `paused`.
+| Command | Purpose |
+|---------|---------|
+| `newtrun scenario list <suite>` | Same data as `newtrun list <suite>`. |
+| `newtrun scenario get <suite> <name>` | Print scenario YAML to stdout. |
+| `newtrun scenario put <suite> <name> [--file <path>]` | Create or update from file or stdin. |
+| `newtrun scenario delete <suite> <name>` | Delete a scenario file. |
 
-```
-newtrun pause
-newtrun pause --dir <path>
-```
+### 15.4 Discovery
 
-| Flag | Description |
-|------|-------------|
-| `--dir <path>` | Suite directory (auto-detected if omitted) |
+| Command | Purpose |
+|---------|---------|
+| `newtrun topologies` | List topology directories visible to the server. |
+| `newtrun actions` | List available step actions (help text). |
+| `newtrun version` | Print build version. |
 
-### `newtrun stop`
+### 15.5 Flags on `start`
 
-Destroy the topology and remove suite state. Refuses if the suite has a
-running process — use `newtrun pause` first.
+| Flag | Meaning |
+|------|---------|
+| `--scenario <name>` | Run a single scenario. |
+| `--target <name>` | Run the minimum dependency chain reaching this scenario. |
+| `--dir <path>` | Suite directory path (alternative to positional name). |
+| `--platform <name>` | Override platform from scenario YAML. |
+| `--no-deploy` | Skip topology deployment + host SSH (loopback or pre-deployed lab). |
+| `--monitor`, `-m` | Auto-refreshing dashboard instead of per-event log. |
+| `--junit <path>` | JUnit XML report path. |
+| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`; default: `http://localhost:8080`). |
+| `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
+| `-v` / `--verbose` | Per-step output. |
 
-```
-newtrun stop
-newtrun stop --dir <path>
-```
+### 15.6 Global flags
 
-| Flag | Description |
-|------|-------------|
-| `--dir <path>` | Suite directory (auto-detected if omitted) |
+| Flag | Meaning |
+|------|---------|
+| `--newtrun-server <url>` | newtrun-server URL (env: `NEWTRUN_SERVER`; default: `http://127.0.0.1:8081`). |
+| `-v` / `--verbose` | Verbose output (where applicable). |
 
-### `newtrun status`
+---
 
-Show suite run status. Without flags, shows all suites with state.
-
-```
-newtrun status                    # all suites
-newtrun status --dir <path>       # specific suite
-newtrun status --suite 2node-vs   # filter by name
-newtrun status --detail           # per-step status
-newtrun status --monitor          # auto-refresh (every 2s, implies --detail)
-newtrun status --json             # machine-readable output
-```
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--dir <path>` | | Suite directory |
-| `--suite <name>` | `-s` | Filter suites by name (substring, case-insensitive) |
-| `--detail` | `-d` | Show per-step timing and status |
-| `--monitor` | `-m` | Auto-refresh every 2s (implies `--detail`) |
-| `--json` | | JSON output |
-
-### `newtrun list [suite]`
-
-Without arguments, lists all available test suites. With a suite name,
-lists the scenarios in that suite with dependency order.
-
-```
-newtrun list                       # show all suites
-newtrun list 2node-vs-primitive    # show scenarios in suite
-newtrun list --dir path/to/suite   # explicit path
-```
-
-| Flag | Description |
-|------|-------------|
-| `--dir <path>` | Suite directory (alternative to positional arg) |
-
-### `newtrun topologies`
-
-List available topologies with device and link counts.
-
-```
-newtrun topologies
-```
-
-No flags.
-
-### `newtrun actions [action]`
-
-List all step actions. With an action name, shows detailed parameter
-info and example YAML.
-
-```
-newtrun actions                    # list all 5 actions
-newtrun actions newtron            # show detail for the generic action
-```
-
-No flags.
-
-### `newtrun version`
-
-Print version information.
-
-```
-newtrun version
-```
-
-No flags.
+*Source-traced against `cmd/newtrun/` and the `bin/newtrun --help` output. CLI command names, flag names, and exit-code mappings are exact. YAML examples are runnable against the suites in `newtrun/suites/`. If you find a discrepancy, the code is the authority — please open an issue or PR.*
