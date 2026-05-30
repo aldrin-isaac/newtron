@@ -8,8 +8,8 @@
 newtrun/.generated/
 newtrun/**/audit.log
 
-# Claude Code local settings
-.claude/settings.local.json
+# Claude Code local state (settings, scheduled-task locks, etc.)
+.claude/
 
 # IDE / editor
 .vscode/

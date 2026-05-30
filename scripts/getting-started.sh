@@ -11,7 +11,8 @@ SONIC_VS_URL="https://sonic-build.azurewebsites.net/api/sonic/artifacts?branchNa
 IMAGE_DIR="$HOME/.newtlab/images"
 IMAGE_PATH="$IMAGE_DIR/sonic-vs.qcow2"
 SPEC_DIR="newtrun/topologies/1node-vs/specs"
-SERVER_PID=""
+SERVER_PID=""        # newtron-server PID
+NEWTRUN_PID=""       # newtrun-server PID
 TOTAL_STEPS=12
 
 # ── Colors and formatting ────────────────────────────────────────────────────
@@ -41,6 +42,10 @@ H='─'  # horizontal
 TL='╭' TR='╮' BL='╰' BR='╯' V='│'
 
 cleanup() {
+    if [ -n "$NEWTRUN_PID" ] && kill -0 "$NEWTRUN_PID" 2>/dev/null; then
+        kill "$NEWTRUN_PID" 2>/dev/null || true
+        wait "$NEWTRUN_PID" 2>/dev/null || true
+    fi
     if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
         kill "$SERVER_PID" 2>/dev/null || true
         wait "$SERVER_PID" 2>/dev/null || true
@@ -131,8 +136,11 @@ if [ ! -f "Makefile" ] || [ ! -d "cmd/newtron" ]; then
     exit 1
 fi
 
-# Clean up any leftover state from a previous run
-bin/newtrun stop --dir newtrun/suites/1node-vs-basic &>/dev/null || true
+# Clean up any leftover state from a previous run. Both servers must be up
+# for `newtrun stop` to reach the runner registry; if either is missing,
+# fall through to newtlab destroy which doesn't depend on either server.
+pgrep -f "bin/newtrun-server" >/dev/null 2>&1 && \
+    bin/newtrun stop 1node-vs-basic &>/dev/null || true
 bin/newtlab destroy 1node-vs &>/dev/null || true
 
 # ── Title card ───────────────────────────────────────────────────────────────
@@ -538,9 +546,34 @@ echo -e "  Each step calls ${BLUE_BOLD}newtron-server${RESET} via HTTP (same API
 echo "  The verify steps read CONFIG_DB entries and assert expected values."
 echo "  The final scenario confirms no test left orphaned config behind."
 echo ""
+echo -e "  ${BLUE_BOLD}newtrun-server${RESET} owns the run registry — every ${BLUE_BOLD}newtrun${RESET} CLI"
+echo "  command goes through it. Start it before the suite runs."
+echo ""
 echo -e "  The ${BOLD}--monitor${RESET} flag shows a live dashboard as steps execute."
 
 pause
+
+# Start newtrun-server on its loopback default (127.0.0.1:8081). Port and
+# spec/topology bases come from the binary's built-in defaults so the
+# command line stays short.
+if ss -tlnH 'sport = :8081' 2>/dev/null | grep -q 8081; then
+    echo ""
+    echo "  Error: port 8081 is already in use." >&2
+    echo "  newtrun-server needs port 8081. Stop whatever is using it and re-run." >&2
+    exit 1
+fi
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun-server &${RESET}"
+echo ""
+bin/newtrun-server > /tmp/newtrun-server.log 2>&1 &
+NEWTRUN_PID=$!
+sleep 2
+if ! kill -0 "$NEWTRUN_PID" 2>/dev/null; then
+    echo "  Error: newtrun-server failed to start. See /tmp/newtrun-server.log" >&2
+    NEWTRUN_PID=""
+    exit 1
+fi
+echo -e "  ${GREEN}newtrun-server started${RESET} (PID $NEWTRUN_PID)"
+echo ""
 
 run_cmd bin/newtrun start 1node-vs-basic --server http://localhost:8080 --monitor
 
@@ -553,10 +586,25 @@ pause
 
 header 12 "Tear down"
 
-echo "  Stop the server and destroy the VM."
+echo "  Stop the servers and destroy the VM."
 echo ""
 
-# Stop server first
+# `newtrun stop <suite>` cancels the runner (if any), destroys the
+# topology, and clears suite state. It needs both servers up: the CLI
+# talks to newtrun-server, which calls newtlab and (via state) the
+# spec-dir that newtron-server was loaded with.
+echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun stop 1node-vs-basic${RESET}"
+echo ""
+bin/newtrun stop 1node-vs-basic 2>/dev/null || true
+
+# Now stop the servers — newtrun-server first (it has no SSH state to
+# drain), then newtron-server.
+if [ -n "$NEWTRUN_PID" ] && kill -0 "$NEWTRUN_PID" 2>/dev/null; then
+    echo -e "  ${GRAY}Stopping newtrun-server...${RESET}"
+    kill "$NEWTRUN_PID" 2>/dev/null || true
+    wait "$NEWTRUN_PID" 2>/dev/null || true
+    NEWTRUN_PID=""
+fi
 if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     echo -e "  ${GRAY}Stopping newtron-server...${RESET}"
     kill "$SERVER_PID" 2>/dev/null || true
@@ -564,15 +612,12 @@ if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     SERVER_PID=""
 fi
 
-# newtrun stop destroys the topology and removes suite state,
-# so newtrun status / newtlab status show nothing afterward.
-echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun stop --dir newtrun/suites/1node-vs-basic${RESET}"
-echo ""
-bin/newtrun stop --dir newtrun/suites/1node-vs-basic 2>/dev/null
-
 echo ""
 echo "  Verify everything is cleaned up:"
 echo ""
+# newtrun status now goes through newtrun-server, which is down. The
+# CLI prints the "newtrun-server is not running" hint, which is the
+# correct end state — both servers stopped, no suite active.
 run_cmd bin/newtrun status --suite 1node-vs-basic || true
 run_cmd bin/newtlab status 1node-vs || true
 
