@@ -2146,6 +2146,26 @@ Domain-intent naming makes the symmetry legible:
 `assign`/`unassign` for values, `generate` for composite production.
 Noun-only names are reserved for types and constructors.
 
+**Exceptions.** Three categories of identifier may stay noun-form
+without a verb prefix:
+
+1. **Types and constructors.** `RunRegistry`, `EventBroker`,
+   `NewServer` (where "new" is the Go-idiomatic constructor verb
+   but the type name is the substantive content).
+2. **Predicates returning bool.** Idiomatically named with `is` /
+   `has` / `can` prefix per Go convention: `isDirectory`,
+   `HasRequires`. Go stdlib follows the same rule (`os.IsNotExist`,
+   `bytes.Equal`).
+3. **No-arg accessor methods (getters).** Methods that return a
+   field or computed property with no side effects keep the
+   property name without a `Get` prefix per Go convention —
+   `(*Server).Broker()`, `(*Server).Registry()`,
+   `(*Server).Handler()`. Adding `Get` prefixes to fit the
+   verb-first rule would fight Go style throughout the codebase.
+
+Action functions — anything that mutates state, performs I/O, or
+makes a decision — get verbs always, no exceptions.
+
 **Names describe domain intent.** `i.bindVrf(vrfName)` — a network
 engineer understands it without knowing CONFIG_DB table names.
 `interfaceBaseConfig(intfName, map[string]string{"vrf_name": vrfName})`

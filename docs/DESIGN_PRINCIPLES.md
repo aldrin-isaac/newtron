@@ -2240,6 +2240,24 @@ Domain-intent naming makes the symmetry legible:
 `assign`/`unassign` for values, `generate` for composite production.
 Noun-only names are reserved for types and constructors.
 
+**Exceptions.** Three categories of identifier may stay noun-form
+without a verb prefix:
+
+1. **Types and constructors.** A type name is the substantive content;
+   constructors take the form `NewT` per the language's idiom for the
+   verb-prefix slot.
+2. **Predicates returning bool.** Idiomatically named with `is` / `has`
+   / `can` prefix per the language's convention. Standard libraries
+   follow the same rule.
+3. **No-arg accessor methods (getters).** Methods that return a field
+   or computed property with no side effects keep the property name
+   without a `Get` prefix per the language's convention. Adding `Get`
+   prefixes to fit the verb-first rule would fight idiomatic style
+   throughout the codebase.
+
+Action functions — anything that mutates state, performs I/O, or
+makes a decision — get verbs always, no exceptions.
+
 **Names describe domain intent.** `i.bindVrf(vrfName)` — a network
 engineer understands it without knowing CONFIG_DB table names.
 `interfaceBaseConfig(intfName, map{"vrf_name": vrfName})`
