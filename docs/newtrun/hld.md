@@ -132,11 +132,12 @@ newtron/
 │   └── report.go                 # ScenarioResult, StepResult, ReportGenerator
 │
 ├── pkg/newtrun/api/              # HTTP server package
-│   ├── server.go                 # Server, Config, route registration, handleHealth, handleListTopologies
+│   ├── server.go                 # Server, Config, route registration, handleHealth, shared response helpers
 │   ├── middleware.go             # withRequestID, withLogger, withRecovery
-│   ├── runs.go                   # write endpoints + lifecycle (start, inline, pause, stop, delete)
+│   ├── runs.go                   # ALL run endpoints (start/inline/pause/stop/delete/list/get/events) + reconcileStaleStatus
 │   ├── suites.go                 # GET/POST/DELETE /api/suites + list scenarios + nameRE validation
 │   ├── scenarios.go              # GET/PUT/DELETE per-scenario; ParseScenarioBytes gate + atomic write
+│   ├── topologies.go             # GET /api/topologies
 │   ├── registry.go               # RunRegistry, RegistryEntry, AlreadyRunningError
 │   ├── safety.go                 # InlineSafetyPolicy, SafetyViolation
 │   ├── reporter.go               # HTTPReporter (implements ProgressReporter)

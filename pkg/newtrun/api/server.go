@@ -9,8 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/aldrin-isaac/newtron/pkg/newtrun"
 )
 
 // Config is the construction-time configuration for the newtrun server.
@@ -155,32 +153,6 @@ func (s *Server) buildHandler() http.Handler {
 	return handler
 }
 
-// reconcileStaleStatus is the server-restart-honesty rule (HLD §9.3):
-// if the on-disk state claims a run is still running or pausing but
-// the live registry has no entry for it, the previous server instance
-// crashed or was killed before finalizing — relabel the in-memory
-// copy as aborted so the wire never carries a stale running signal.
-// The state file itself is not rewritten; the next pass through the
-// finalizer will persist whatever final status applies, and the wire
-// only ever shows honest data.
-//
-// Single helper called from both handleGetRun and handleListRuns per
-// §7 — the rule must not be duplicated, because a future refinement
-// (e.g., adding pausing→paused detection) would otherwise need to
-// land in two places at risk of drift.
-func (s *Server) reconcileStaleStatus(state *newtrun.RunState, runKey string) {
-	if state == nil {
-		return
-	}
-	if state.Status != newtrun.SuiteStatusRunning && state.Status != newtrun.SuiteStatusPausing {
-		return
-	}
-	if s.registry.Get(runKey) != nil {
-		return
-	}
-	state.Status = newtrun.SuiteStatusAborted
-}
-
 // ----- handlers -----
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -188,132 +160,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Status:  "ok",
 		Version: "0.1.0-dev",
 	})
-}
-
-// handleListRuns returns a summary of every suite-run discoverable on the
-// filesystem under ~/.newtron/newtrun/<suite>/state.json.
-func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
-	suites, err := newtrun.ListSuiteStates()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	infos := make([]RunInfo, 0, len(suites))
-	for _, suite := range suites {
-		state, err := newtrun.LoadRunState(suite)
-		if err != nil {
-			// One bad state file shouldn't sink the whole list. Log it and
-			// skip — operators expect partial results to be readable.
-			s.logger.Printf("list-runs: skipping %s: %v", suite, err)
-			continue
-		}
-		if state == nil {
-			continue
-		}
-		s.reconcileStaleStatus(state, suite)
-		infos = append(infos, runInfoFrom(state))
-	}
-	writeJSON(w, http.StatusOK, infos)
-}
-
-// handleGetRun returns the full RunState for one run. Accepts either a
-// suite name or an inline UUID; LoadAnyRunState resolves both.
-//
-// Server-restart honesty: if state.json claims the run is running but
-// the registry has no entry for it, the previous server instance
-// crashed or was killed before it could finalize the state. Reconcile
-// on the fly to "aborted" rather than returning a stale running
-// signal — the registry is the live source of truth, and an
-// unreconciled running state would mislead the CLI's status display
-// indefinitely.
-func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("suite")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("run id path parameter required"))
-		return
-	}
-	state, err := newtrun.LoadAnyRunState(id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if state == nil {
-		writeError(w, http.StatusNotFound, fmt.Errorf("no state for run %q", id))
-		return
-	}
-	s.reconcileStaleStatus(state, id)
-	// Per §46 the wire shape mirrors the substrate: RunState has JSON tags
-	// already; serialize it directly without a wrapper type.
-	writeJSON(w, http.StatusOK, state)
-}
-
-// handleRunEvents opens a Server-Sent Events stream for the given suite. The
-// connection stays open until the client disconnects or the server shuts
-// down. In PR 1 no events are published (no server-side runs exist yet);
-// the connection is held open and clients receive nothing until PR 2 wires
-// up server-side execution.
-func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
-	suite := r.PathValue("suite")
-	if suite == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("suite path parameter required"))
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-	// Send an initial comment line so the client knows the connection is open
-	// even when no events arrive. SSE comment lines start with ":".
-	fmt.Fprintf(w, ": subscribed to %s\n\n", suite)
-	flusher.Flush()
-
-	events, unsub := s.broker.Subscribe(suite)
-	defer unsub()
-
-	// Heartbeat every 30s so intermediaries (proxies, browsers) don't time
-	// out the connection during quiet periods.
-	heartbeat := time.NewTicker(30 * time.Second)
-	defer heartbeat.Stop()
-
-	ctx := r.Context()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-heartbeat.C:
-			fmt.Fprintf(w, ": heartbeat\n\n")
-			flusher.Flush()
-		case ev, ok := <-events:
-			if !ok {
-				return
-			}
-			payload, err := json.Marshal(ev.Payload)
-			if err != nil {
-				s.logger.Printf("sse marshal: %v", err)
-				continue
-			}
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, payload)
-			flusher.Flush()
-		}
-	}
-}
-
-// handleListTopologies returns the topology names discoverable under
-// TopologiesBase. v0 implementation: list immediate subdirectories.
-func (s *Server) handleListTopologies(w http.ResponseWriter, r *http.Request) {
-	names, err := listSubdirs(s.cfg.TopologiesBase)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, TopologiesResponse{Topologies: names})
 }
 
 // listSubdirs returns the names of immediate subdirectories. Missing base

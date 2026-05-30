@@ -350,6 +350,14 @@ func TestSuite_RejectsBadName(t *testing.T) {
 // that catches a particular input — e.g., the handler starts
 // accepting "dot.name" because nameRE drifted — the assertion fails
 // even though the request would still be rejected somewhere else.
+//
+// Note: the 405 for ".." and 404 for "with/slash" come from Go
+// stdlib net/http.ServeMux (Go 1.22+ method-aware routing + path
+// cleaning). If a future Go release changes either rule, these
+// expectations may shift even though our security boundary is
+// unchanged. The "dot.name" and "-leading-dash" cases assert the
+// handler-layer guard directly and are independent of stdlib
+// changes.
 func TestScenario_RejectsBadName(t *testing.T) {
 	ts, _ := newScenarioTestServer(t)
 	cases := []struct {

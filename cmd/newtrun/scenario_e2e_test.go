@@ -39,9 +39,15 @@ func buildCLI(t *testing.T) string {
 }
 
 // newE2EServer wires the real api.Server into an httptest.Server and
-// returns both the URL and the suites base directory so tests can
-// inspect the on-disk side effects.
-func newE2EServer(t *testing.T) (url, suitesBase string) {
+// returns the httptest.Server and the suites base directory.
+//
+// Return shape matches newScenarioTestServer in pkg/newtrun/api per
+// §13 (Same Concept = Same Name): both helpers do the same thing
+// (build a test server backed by a temp suites directory), so they
+// expose the same return tuple. Callers access ts.URL when sending
+// the URL to a subprocess and ts directly when sharing the server
+// across goroutines.
+func newE2EServer(t *testing.T) (ts *httptest.Server, suitesBase string) {
 	t.Helper()
 	suitesBase = filepath.Join(t.TempDir(), "suites")
 	if err := os.MkdirAll(suitesBase, 0755); err != nil {
@@ -52,9 +58,9 @@ func newE2EServer(t *testing.T) (url, suitesBase string) {
 		TopologiesBase: filepath.Join(t.TempDir(), "topologies"),
 		Logger:         log.New(io.Discard, "", 0),
 	})
-	ts := httptest.NewServer(srv.Handler())
+	ts = httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts.URL, suitesBase
+	return ts, suitesBase
 }
 
 // runCLI invokes the test binary with stdin/stdout/stderr captured.
@@ -87,7 +93,7 @@ func runCLI(t *testing.T, binPath, serverURL string, stdin []byte, args ...strin
 // or the client's URL construction surfaces here.
 func TestE2E_ScenarioLifecycle(t *testing.T) {
 	binPath := buildCLI(t)
-	url, suitesBase := newE2EServer(t)
+	ts, suitesBase := newE2EServer(t)
 
 	const suite = "e2edemo"
 	const scenario = "smoke"
@@ -102,7 +108,7 @@ steps:
 `)
 
 	// suite create
-	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", suite); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	if _, err := os.Stat(filepath.Join(suitesBase, suite)); err != nil {
@@ -110,7 +116,7 @@ steps:
 	}
 
 	// scenario put (stdin)
-	if _, _, rc := runCLI(t, binPath, url, body, "scenario", "put", suite, scenario); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, body, "scenario", "put", suite, scenario); rc != 0 {
 		t.Fatalf("scenario put exit=%d", rc)
 	}
 	got, err := os.ReadFile(filepath.Join(suitesBase, suite, scenario+".yaml"))
@@ -122,7 +128,7 @@ steps:
 	}
 
 	// scenario list
-	stdout, _, rc := runCLI(t, binPath, url, nil, "scenario", "list", suite)
+	stdout, _, rc := runCLI(t, binPath, ts.URL, nil, "scenario", "list", suite)
 	if rc != 0 {
 		t.Fatalf("scenario list exit=%d", rc)
 	}
@@ -131,7 +137,7 @@ steps:
 	}
 
 	// scenario get
-	stdout, _, rc = runCLI(t, binPath, url, nil, "scenario", "get", suite, scenario)
+	stdout, _, rc = runCLI(t, binPath, ts.URL, nil, "scenario", "get", suite, scenario)
 	if rc != 0 {
 		t.Fatalf("scenario get exit=%d", rc)
 	}
@@ -140,7 +146,7 @@ steps:
 	}
 
 	// scenario delete
-	if _, _, rc := runCLI(t, binPath, url, nil, "scenario", "delete", suite, scenario); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "scenario", "delete", suite, scenario); rc != 0 {
 		t.Fatalf("scenario delete exit=%d", rc)
 	}
 	if _, err := os.Stat(filepath.Join(suitesBase, suite, scenario+".yaml")); !os.IsNotExist(err) {
@@ -148,7 +154,7 @@ steps:
 	}
 
 	// suite delete
-	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "delete", suite); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "delete", suite); rc != 0 {
 		t.Fatalf("suite delete exit=%d", rc)
 	}
 	if _, err := os.Stat(filepath.Join(suitesBase, suite)); !os.IsNotExist(err) {
@@ -162,9 +168,9 @@ steps:
 // readScenarioBody's flag handling can't ship undetected.
 func TestE2E_ScenarioPutFromFile(t *testing.T) {
 	binPath := buildCLI(t)
-	url, suitesBase := newE2EServer(t)
+	ts, suitesBase := newE2EServer(t)
 	const suite = "filedemo"
-	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", suite); rc != 0 {
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", suite); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
 	body := []byte(`name: from-file
@@ -180,7 +186,7 @@ steps:
 	if err := os.WriteFile(bodyPath, body, 0644); err != nil {
 		t.Fatalf("write body: %v", err)
 	}
-	if _, _, rc := runCLI(t, binPath, url, nil,
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil,
 		"scenario", "put", suite, "from-file", "--file", bodyPath); rc != 0 {
 		t.Fatalf("scenario put --file exit=%d", rc)
 	}
@@ -200,11 +206,11 @@ steps:
 // the error in the CLI layer would go unnoticed.
 func TestE2E_ScenarioPutRejectsBadYAML(t *testing.T) {
 	binPath := buildCLI(t)
-	url, _ := newE2EServer(t)
-	if _, _, rc := runCLI(t, binPath, url, nil, "suite", "create", "badyaml"); rc != 0 {
+	ts, _ := newE2EServer(t)
+	if _, _, rc := runCLI(t, binPath, ts.URL, nil, "suite", "create", "badyaml"); rc != 0 {
 		t.Fatalf("suite create exit=%d", rc)
 	}
-	stdout, stderr, rc := runCLI(t, binPath, url,
+	stdout, stderr, rc := runCLI(t, binPath, ts.URL,
 		[]byte("not: valid yaml: : : :"),
 		"scenario", "put", "badyaml", "anything")
 	if rc == 0 {

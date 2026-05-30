@@ -274,6 +274,57 @@ func TestServerStopCancelsInFlightRuns(t *testing.T) {
 	}
 }
 
+// TestReconcileStaleStatus drives the helper through every input
+// branch directly, so a regression in the rule (flipped condition,
+// wrong registry key, missing nil-guard) surfaces here rather than
+// only through the integration paths in handleGetRun / handleListRuns.
+// Per §16 (Write Honest Tests): assert the specific status that
+// should result, not just "something changed."
+func TestReconcileStaleStatus(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cases := []struct {
+		name           string
+		startStatus    newtrun.SuiteStatus
+		acquireFirst   bool // populate the registry with the runKey
+		wantStatusAfter newtrun.SuiteStatus
+	}{
+		{"running + not in registry → aborted", newtrun.SuiteStatusRunning, false, newtrun.SuiteStatusAborted},
+		{"pausing + not in registry → aborted", newtrun.SuiteStatusPausing, false, newtrun.SuiteStatusAborted},
+		{"running + in registry → no change", newtrun.SuiteStatusRunning, true, newtrun.SuiteStatusRunning},
+		{"pausing + in registry → no change", newtrun.SuiteStatusPausing, true, newtrun.SuiteStatusPausing},
+		{"complete + not in registry → no change", newtrun.SuiteStatusComplete, false, newtrun.SuiteStatusComplete},
+		{"failed + not in registry → no change", newtrun.SuiteStatusFailed, false, newtrun.SuiteStatusFailed},
+		{"paused + not in registry → no change", newtrun.SuiteStatusPaused, false, newtrun.SuiteStatusPaused},
+		{"aborted + not in registry → no change", newtrun.SuiteStatusAborted, false, newtrun.SuiteStatusAborted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runKey := "reconcile-test-" + string(tc.startStatus)
+			if tc.acquireFirst {
+				entry, err := srv.registry.Acquire(runKey)
+				if err != nil {
+					t.Fatalf("registry.Acquire: %v", err)
+				}
+				defer srv.registry.Release(runKey, &RunResult{})
+				_ = entry
+			}
+			state := &newtrun.RunState{Suite: runKey, Status: tc.startStatus}
+			srv.reconcileStaleStatus(state, runKey)
+			if state.Status != tc.wantStatusAfter {
+				t.Errorf("Status: got %v, want %v", state.Status, tc.wantStatusAfter)
+			}
+		})
+	}
+}
+
+// TestReconcileStaleStatus_NilState exercises the nil-guard so a future
+// caller that hands in a nil state (e.g., after a not-found LoadAnyRunState
+// returns) cannot panic the handler.
+func TestReconcileStaleStatus_NilState(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.reconcileStaleStatus(nil, "anything") // must not panic
+}
+
 // scenarioYAMLBody is a minimal scenario that requires no newtron-server
 // to load (its `topology` field matches the test topology, and `wait`
 // action is a pure sleep).
