@@ -2243,17 +2243,19 @@ Noun-only names are reserved for types and constructors.
 **Exceptions.** Three categories of identifier may stay noun-form
 without a verb prefix:
 
-1. **Types and constructors.** A type name is the substantive content;
-   constructors take the form `NewT` per the language's idiom for the
-   verb-prefix slot.
+1. **Types and constructors.** Type names are the substantive content;
+   constructors take the form `NewT` per Go's idiom (`NewServer`,
+   `NewReader`). The type name carries the meaning; the `New` prefix
+   is the verb-prefix slot.
 2. **Predicates returning bool.** Idiomatically named with `is` / `has`
-   / `can` prefix per the language's convention. Standard libraries
-   follow the same rule.
+   / `can` prefix per Go convention: `os.IsNotExist`, `bytes.Equal`,
+   `errors.Is`. The standard library follows this rule; project code
+   should match it for predicates of its own.
 3. **No-arg accessor methods (getters).** Methods that return a field
    or computed property with no side effects keep the property name
-   without a `Get` prefix per the language's convention. Adding `Get`
-   prefixes to fit the verb-first rule would fight idiomatic style
-   throughout the codebase.
+   without a `Get` prefix per Go convention: `(*os.File).Name()`,
+   `(*time.Time).Year()`. Adding `Get` prefixes to fit the verb-first
+   rule would fight idiomatic style throughout the codebase.
 
 Action functions — anything that mutates state, performs I/O, or
 makes a decision — get verbs always, no exceptions.
