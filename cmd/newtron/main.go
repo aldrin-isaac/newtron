@@ -201,10 +201,15 @@ Examples:
 			return fmt.Errorf("registering network with server: %w", err)
 		}
 
-		// Initialize audit logger (path and rotation from settings)
+		// Initialize audit logger (path and rotation from settings).
+		// Failure on the default path (e.g., $HOME not writable in CI)
+		// is silent — only warn when the operator set an explicit path
+		// and it didn't work.
 		auditPath := app.settings.GetAuditLogPath(app.specDir)
 		if err := newtron.InitAuditLogger(auditPath, app.settings.GetAuditMaxSizeMB(), app.settings.GetAuditMaxBackups()); err != nil {
-			util.Logger.Warnf("Could not initialize audit logging: %v", err)
+			if app.settings.IsAuditLogPathExplicit() {
+				util.Logger.Warnf("Could not initialize audit logging at %s: %v", auditPath, err)
+			}
 		}
 
 		return nil

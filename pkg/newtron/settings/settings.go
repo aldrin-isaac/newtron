@@ -113,16 +113,25 @@ func (s *Settings) GetSpecDir() string {
 }
 
 // GetAuditLogPath returns the audit log path with a fallback default.
-// The default depends on specDir: if non-empty, uses specDir/audit.log;
-// otherwise uses /var/log/newtron/audit.log.
+// The default is the user's per-account directory (~/.newtron/audit.log)
+// so out-of-the-box operation does not require root or pre-created
+// /var/log paths. Operators who want a shared/system log can set
+// audit_log_path explicitly via `newtron settings set audit_log_path
+// /var/log/newtron/audit.log`.
 func (s *Settings) GetAuditLogPath(specDir string) string {
 	if s.AuditLogPath != "" {
 		return s.AuditLogPath
 	}
-	if specDir != "" {
-		return specDir + "/audit.log"
+	if home, err := os.UserHomeDir(); err == nil {
+		return home + "/.newtron/audit.log"
 	}
 	return "/var/log/newtron/audit.log"
+}
+
+// IsAuditLogPathExplicit reports whether the user set audit_log_path
+// (vs. relying on the default).
+func (s *Settings) IsAuditLogPathExplicit() bool {
+	return s.AuditLogPath != ""
 }
 
 // GetAuditMaxSizeMB returns the audit max size in MB with a default of 10.

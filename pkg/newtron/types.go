@@ -6,6 +6,7 @@ package newtron
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/aldrin-isaac/newtron/pkg/newtron/device/sonic"
@@ -980,14 +981,26 @@ func (us *UserSettings) GetSpecDir() string {
 }
 
 // GetAuditLogPath returns the audit log path with a fallback default.
+// The default is the user's per-account directory (~/.newtron/audit.log)
+// so out-of-the-box operation does not require root or pre-created
+// /var/log paths. Operators who want a shared/system log can set
+// audit_log_path explicitly via `newtron settings set audit_log_path
+// /var/log/newtron/audit.log`.
 func (us *UserSettings) GetAuditLogPath(specDir string) string {
 	if us.AuditLogPath != "" {
 		return us.AuditLogPath
 	}
-	if specDir != "" {
-		return specDir + "/audit.log"
+	if home, err := os.UserHomeDir(); err == nil {
+		return home + "/.newtron/audit.log"
 	}
 	return "/var/log/newtron/audit.log"
+}
+
+// IsAuditLogPathExplicit reports whether the user set audit_log_path
+// (vs. relying on the default). Callers use this to decide whether
+// failure to initialize the logger should warn or stay silent.
+func (us *UserSettings) IsAuditLogPathExplicit() bool {
+	return us.AuditLogPath != ""
 }
 
 // GetAuditMaxSizeMB returns the audit max size in MB with a default of 10.
