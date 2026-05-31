@@ -59,21 +59,20 @@ The [getting-started.sh](../../scripts/getting-started.sh) script automates all 
 
 ## 2. Quick Start
 
-Deploy a one-switch lab, start both servers, run the loopback suite:
+The fastest path exercises the CLI's `--loopback` mode against an in-memory abstract node — no QEMU VMs required. Start both servers and run the loopback suite:
 
 ```bash
-# 1. Deploy a single-switch lab
-bin/newtlab deploy 1node-vs --monitor
-
-# 2. Start newtron-server (port 8080)
+# 1. Start newtron-server (port 8080)
 bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
 
-# 3. Start newtrun-server (port 8081)
+# 2. Start newtrun-server (port 8081)
 bin/newtrun-server &
 
-# 4. Run a suite
+# 3. Run the loopback suite (--no-deploy skips lab deployment)
 bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:8080
 ```
+
+For suites that need real VMs (e.g., `2node-vs-primitive`, `2node-vs-service`), deploy the lab first with `bin/newtlab deploy <topology> --monitor` and drop `--no-deploy`.
 
 Expected output:
 
@@ -303,7 +302,7 @@ newtrun: 2node-vs-primitive
   20  teardown-infra     10     —       service-lifecycle
   21  verify-clean       52     —       teardown-infra
 
-  progress: 18/21 passed, 1 running, 2 pending
+  progress: 18/21 passed, 2 pending
 ```
 
 `--detail` (`-d`) expands each completed scenario to show per-step results below the table.
@@ -376,7 +375,7 @@ The CLI:
 1. Reads the suite's state via HTTP to recover the topology + spec-dir.
 2. POSTs to `/api/runs/{suite}/stop` — cancels the Runner's context.
 3. Waits for the Runner goroutine to exit.
-4. Calls `bin/newtlab destroy <topology>` to tear down VMs.
+4. Calls the `newtlab.Lab.Destroy` Go API in-process to tear down VMs (no `bin/newtlab` subprocess; `cmd/newtrun/cmd_stop.go:51`).
 5. Sends `DELETE /api/runs/{suite}` to clear the state file.
 
 If the suite isn't currently active (no Registry entry, but state exists from a previous run), steps 2 and 3 are skipped — only the topology destroy and state cleanup run.
@@ -436,7 +435,7 @@ Returns the raw YAML to stdout — pipe to `less`, `pbcopy`, or a file as needed
 
 ## 9. Authoring Scenarios
 
-The new CRUD endpoints (PR #36) let you author scenarios over HTTP — no filesystem access to newtrun-server's host required. The CLI exposes them under `newtrun suite` (for suite-level lifecycle) and `newtrun scenario` (for per-scenario operations).
+Scenario CRUD is exposed over HTTP — you can author, edit, and delete suites and scenarios without filesystem access to newtrun-server's host. The CLI exposes the same endpoints under `newtrun suite` (suite-level lifecycle) and `newtrun scenario` (per-scenario operations).
 
 ### 9.1 Create a suite directory
 
@@ -535,7 +534,7 @@ steps:
     devices: [switch1]
     command: "configdb query NEWTRON_INTENT interface|Ethernet0 --loopback"
     expect:
-      jq: '.op == "apply-service"'
+      jq: '.operation == "apply-service"'
 
   - name: remove-transit
     action: newtron-cli
@@ -588,7 +587,7 @@ The intent record at `NEWTRON_INTENT/interface|<port>` is the authoritative serv
 | Field | Honored by | Meaning |
 |-------|-----------|---------|
 | `jq` | newtron, newtron-cli | jq expression must evaluate to `true` against the response body (newtron) or stdout parsed as JSON (newtron-cli with `--json`). |
-| `contains` | host-exec | Substring match on combined stdout+stderr. |
+| `contains` | newtron-cli, host-exec | Substring match on combined stdout+stderr (host-exec) or subprocess output (newtron-cli, when no `jq` is set). |
 | `success_rate` | host-exec | For ping output: parse "N% packet loss" and assert success rate ≥ this value (0.0–1.0). |
 | `timeout` / `poll_interval` | (internal) | Used by the polling path; set via the YAML `poll:` block, not via `expect:`. |
 
@@ -718,7 +717,7 @@ CONFIG_DB keys use `|` as the table-key separator. In URLs, encode special chara
 
 | Character | Encoding | Example |
 |-----------|----------|---------|
-| `\|` | `%7C` | `VLAN_MEMBER/Vlan100%7CEthernet1` |
+| `\|` | `%7C` | `VLAN_MEMBER/Vlan100%7CEthernet4` |
 | `/` in key | `%2F` | `LOOPBACK_INTERFACE/Loopback0%7C10.0.0.1%2F32` |
 
 #### One-shot mode
@@ -1053,7 +1052,7 @@ Compound commands work — the executor wraps in `sh -c` so pipelines run inside
 
 ### 12.3 Worked example: L2 bridging test
 
-From the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10-bridged.yaml`). The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
+Adapted from the 2node-vs-primitive suite (`newtrun/suites/2node-vs-primitive/10-bridged.yaml`) — the real scenario adds a third tagged member and polls ASIC_DB before the host setup; the example below trims those for readability and focuses on the L2-bridging path itself. The 2node-vs topology wires host1→`switch1:Ethernet4` and host3→`switch1:Ethernet12` (Force10-S6000 stride-4 port naming). The scenario creates VLAN 100, adds the two host-facing ports as untagged members, and verifies L2 connectivity between the hosts:
 
 ```yaml
 # Create VLAN
@@ -1150,12 +1149,15 @@ Every `newtrun start` writes `newtrun/.generated/report.md` after the run finish
 
 ### 13.4 GitHub Actions example
 
+The 2node-vs-primitive suite uses host-exec steps, so the runner host needs KVM/QEMU and the lab must be deployed before the suite starts. Self-hosted runners with `/dev/kvm` access are required — `ubuntu-latest` hosted runners cannot deploy.
+
 ```yaml
-- name: Start servers
+- name: Start servers + deploy lab
   run: |
     bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
     bin/newtrun-server &
     sleep 2
+    bin/newtlab deploy 2node-vs --monitor
 
 - name: Run suite
   run: |
@@ -1216,25 +1218,25 @@ To investigate: read `~/.newtron/newtrun/<suite>/state.json` — `scenarios[].st
 
 ### 14.3 `infrastructure error: newtrun-server connection lost mid-run`
 
-The SSE stream from newtrun-server died before SuiteEnd arrived. Usually a SIGKILL (no graceful drain) — the TCP connection drops. The on-disk state may be incomplete; check what got persisted before the kill.
+The SSE stream from newtrun-server died before SuiteEnd arrived. The TCP connection closed without flushing the terminal event — caused by SIGKILL, network loss, or the server process exiting abnormally. The on-disk state may be incomplete; check what got persisted before the kill.
 
 ### 14.4 `topology node has unsaved intents`
 
 newtron-server's running-state for a switch has uncommitted intent changes from a previous session. Reload to discard, or save to commit:
 
 ```bash
-# Discard (most common — old session left orphaned state)
-bin/newtron switch1 intent reload --topology --server http://localhost:8080
+# Discard (old session left orphaned state)
+bin/newtron switch1 intent reload --server http://localhost:8080   # implicitly --topology
 
 # Commit (only if you want to keep the changes)
 bin/newtron switch1 intent save --topology --server http://localhost:8080
 ```
 
-This typically happens after killed test runs.
+Triggers: a previous `newtrun start` that was killed before its terminal save, an interactive `bin/newtron` session that exited without saving, or a crash during apply.
 
-### 14.5 Scenario fails with `policy already exists`
+### 14.5 Scenario fails with `<kind> '<name>' already exists`
 
-Earlier runs created specs (route policies, QoS policies) that newtron-server persisted to `network.json` and never cleaned up. Check `git status newtrun/topologies/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
+Real error forms include `service 'SVC_X' already exists`, `route policy 'RP_FOO' already exists`, `QoS policy 'Q_BAR' already exists`, `filter 'F_BAZ' already exists`, `prefix list 'PL_X' already exists` (`pkg/newtron/spec_ops.go`). Earlier runs created specs that newtron-server persisted to `network.json` and never cleaned up. Check `git status newtrun/topologies/<name>/specs/network.json` — if it shows changes you didn't make, revert and restart newtron-server:
 
 ```bash
 git checkout HEAD -- newtrun/topologies/<name>/specs/network.json
@@ -1260,7 +1262,7 @@ BGP sessions take time to establish after provisioning. Increase the poll timeou
 
 If the timeout is hit repeatedly, the underlying BGP peering is misconfigured — check `bin/newtron switch1 bgp show` for what newtron-server sees and `vtysh -c 'show ip bgp summary'` on the device for what FRR sees.
 
-### 14.7 No SSH connection for host device `host1`
+### 14.7 `no SSH connection for host device "host1"`
 
 The Runner skipped device connection setup because `--no-deploy` was set. host-exec steps need the SSH connections; remove `--no-deploy`:
 
@@ -1280,7 +1282,7 @@ Another run for the same suite is already active in the registry:
 bin/newtrun status --suite <name>
 ```
 
-If status shows `running` but the process is dead, the registry is stale (rare — usually a bug). Force-clear:
+If status shows `running` but no Runner goroutine is live in the server, `reconcileStaleStatus` (`pkg/newtrun/api/runs.go`) rewrites the response to `aborted` on read — but the on-disk state file still says `running`. Force-clear:
 
 ```bash
 bin/newtrun stop <name>
@@ -1296,12 +1298,12 @@ The Runner's `deployTopology` call failed before any scenario could run — `Sui
 # Is the platform image present?
 ls ~/.newtlab/images/
 
-# Are the QEMU ports free?
-ss -tlnp | grep 4000
+# Are the QEMU ports free? (shipped topologies use port_base 10000/12000/13000)
+ss -tlnp | grep -E ':1[023]00[0-9]'
 
 # Any leftover VMs?
 bin/newtlab status
-bin/newtlab destroy --force <topology>
+bin/newtlab destroy <topology>     # tears down VMs, removes overlay disks, cleans state
 ```
 
 Once the lab is reusable, retry. If the image is missing, see [§1 Prerequisites & Build](#1-prerequisites--build) for the SONiC image download.
@@ -1396,7 +1398,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | Command | Purpose |
 |---------|---------|
 | `newtrun topologies` | List topology directories visible to the server. |
-| `newtrun actions` | List available step actions (help text). |
+| `newtrun actions` | Print action help text. The metadata is stale (it predates the unified-action consolidation) and lists many entries that no longer parse — treat [§11 Step Action Reference](#11-step-action-reference) as authoritative for the six current actions. |
 | `newtrun version` | Print build version. |
 
 ### 15.5 Flags on `start`
