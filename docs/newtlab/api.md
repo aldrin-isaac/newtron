@@ -18,7 +18,7 @@
 
 ### Base URL
 
-Default: `http://127.0.0.1:18080`. Override with `--listen <addr>` on the server. Non-loopback binds emit a startup warning — there is no built-in authentication.
+`http://127.0.0.1:18080` is the standard URL — `bin/newt-server` hosts the newtlab engine on that port alongside newtron and newtrun. For dev iteration, `bin/newtlab-server` listens on `127.0.0.1:19082` directly. Non-loopback binds require an explicit `--listen` value on the chosen server and emit a startup warning — there is no built-in authentication.
 
 ### Envelope
 

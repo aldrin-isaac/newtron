@@ -1299,7 +1299,7 @@ A `topology-reconcile` or `setup-device` step on one device returned an error bu
 
 ```bash
 # Is the device reachable through newtron-server?
-curl http://localhost:18080/network/<id>/node/switch1/health
+curl http://localhost:18080/newtron/v1/network/<id>/node/switch1/health
 
 # SSH in for a closer look
 bin/newtlab ssh switch1

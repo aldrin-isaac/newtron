@@ -36,7 +36,7 @@ building tooling, integrating with CI/CD, or extending the CLI.
 
 ### Endpoint Quick Reference
 
-All paths are relative to `http://<host>:<port>`. `{n}` = `{netID}`, `{d}` = `{device}`, `{i}` = `{name}` (interface).
+All paths are relative to `http://<host>:<port>/newtron/v1/`. Path-suffix tables below omit the version prefix; full URLs include it. `{n}` = `{netID}`, `{d}` = `{device}`, `{i}` = `{name}` (interface).
 
 **Server & Specs** (S3-S5)
 
@@ -108,7 +108,7 @@ Spec-to-device delivery is via `POST /newtron/v1/network/{n}/node/{d}/intent/rec
 | `/intent/tree` | Intent DAG tree view |
 | `/intents` | List all intent records |
 
-**Device Writes** (S8) -- `POST` under `/network/{n}/node/{d}/...`
+**Device Writes** (S8) -- `POST` under `/newtron/v1/network/{n}/node/{d}/...`
 
 | Path suffix | What it does |
 |-------------|--------------|
@@ -267,7 +267,7 @@ is reused. See [S15 Server Configuration](#15-server-configuration) for tuning.
 A complete curl example showing the request/response cycle:
 
 ```bash
-curl -s -X POST http://localhost:18080/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{"id": 100, "description": "Customer VLAN"}' | jq .
 ```
@@ -287,7 +287,7 @@ curl -s -X POST http://localhost:18080/network/default/node/switch1/create-vlan 
 On error:
 
 ```bash
-curl -s -X POST http://localhost:18080/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{}' | jq .
 ```
@@ -324,8 +324,8 @@ See [S3 Server Management](#3-server-management).
 
 ```bash
 # Per-device: clean factory CONFIG_DB, then load topology spec and deliver
-curl -X POST http://localhost:18080/network/default/node/switch1/init-device
-curl -X POST 'http://localhost:18080/network/default/node/switch1/intent/reconcile?mode=topology'
+curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/init-device
+curl -X POST 'http://localhost:18080/newtron/v1/network/default/node/switch1/intent/reconcile?mode=topology'
 ```
 
 This is the canonical "spec → device" path: init-device clears factory entries,
@@ -337,10 +337,10 @@ See [S6 Provisioning](#6-provisioning) and [S11](#11-intent-operations).
 
 ```bash
 # Check that BGP sessions came up
-curl http://localhost:18080/network/default/node/switch1/bgp/check
+curl http://localhost:18080/newtron/v1/network/default/node/switch1/bgp/check
 
 # Run full health check
-curl http://localhost:18080/network/default/node/switch1/health
+curl http://localhost:18080/newtron/v1/network/default/node/switch1/health
 ```
 
 See [S7 Node Read Operations](#7-node-read-operations).
@@ -349,7 +349,7 @@ See [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Apply a service to an interface
-curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/apply-service \
+curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/apply-service \
   -H "Content-Type: application/json" \
   -d '{"service": "customer-l3", "ip_address": "10.1.1.1/30"}'
 ```
@@ -363,10 +363,10 @@ See [S12 Interface Operations](#12-interface-operations).
 ```bash
 # Post-facto: confirm projection (intent replay) matches device CONFIG_DB.
 # Empty drift array ≡ every newtron write is actualized on the device.
-curl http://localhost:18080/network/default/node/switch1/intent/drift
+curl http://localhost:18080/newtron/v1/network/default/node/switch1/intent/drift
 
 # Check a specific route in the forwarding table
-curl http://localhost:18080/network/default/node/switch1/route/default/10.1.1.0/30
+curl http://localhost:18080/newtron/v1/network/default/node/switch1/route/default/10.1.1.0/30
 ```
 
 Per-write verification (did THIS specific write land?) is reported inline on
@@ -378,15 +378,15 @@ and [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Preview a change without applying (dry-run)
-curl -X POST 'http://localhost:18080/network/default/node/switch1/create-vlan?dry_run=true' \
+curl -X POST 'http://localhost:18080/newtron/v1/network/default/node/switch1/create-vlan?dry_run=true' \
   -H "Content-Type: application/json" \
   -d '{"id": 200, "description": "New VLAN"}'
 
 # Refresh a service after spec changes
-curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/refresh-service
+curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/refresh-service
 
 # Remove a service
-curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/remove-service
+curl -X POST http://localhost:18080/newtron/v1/network/default/node/switch1/interface/Ethernet0/remove-service
 ```
 
 ### Batching multiple operations

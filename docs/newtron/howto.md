@@ -178,7 +178,7 @@ If you modify spec files on disk (manually or via another tool) while the server
 To pick up changes without restarting the server:
 
 ```bash
-curl -X POST http://localhost:18080/network/default/reload
+curl -X POST http://localhost:18080/newtron/v1/network/default/reload
 ```
 
 Or via the Go client:
@@ -2292,7 +2292,7 @@ This is the same reconcile mechanism described in [§16.1.3](#1613-reconcile), b
 
 **"server not reachable"** — the CLI can't reach `newtron-server`.
 
-1. Verify the server is running: `curl http://localhost:18080/health`
+1. Verify the server is running: `curl http://localhost:18080/newt-server/v1/health`
 2. Check the `--server` flag or `NEWTRON_SERVER` environment variable
 3. If remote: check firewall allows the server port
 
