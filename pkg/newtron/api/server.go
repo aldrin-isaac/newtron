@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"time"
@@ -61,6 +62,14 @@ func NewServer(logger *log.Logger, idleTimeout time.Duration) *Server {
 		}),
 	)
 	return s
+}
+
+// Handler returns the fully-wired http.Handler. Used by newt-server
+// to mount newtron under /newtron/v1/ in the aggregated process and
+// by tests that mount the server into httptest.Server without
+// binding a real port.
+func (s *Server) Handler() http.Handler {
+	return s.HTTPServer().Handler
 }
 
 // RegisterNetwork loads a Network from specDir and registers it under the given ID.

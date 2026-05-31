@@ -2358,24 +2358,55 @@ Two exceptions, narrowly scoped:
    releases — this is multi-platform support (§41), not backwards
    compatibility.
 
-2. **External HTTP API contracts.** Each HTTP server (newtron-server,
-   newtrun-server, newtlab-server) carries a `/<service>/v1/` version
-   segment on its routes. The version is *the* breaking-change
-   escape hatch for external consumers: when the wire shape changes
-   incompatibly, `/<service>/v2/` ships alongside `/<service>/v1/` so a
-   browser frontend (newtcon) or operator script does not break in
-   lockstep with a server upgrade. Each server is at its own
-   independent version — newtron-server `v1` and newtrun-server `v2`
-   can coexist.
+2. **External HTTP API contracts.** Each engine's HTTP surface
+   carries a `/<service>/v1/` version segment on its routes
+   (`/newtron/v1/...`, `/newtrun/v1/...`, `/newtlab/v1/...`). The
+   version is *the* breaking-change escape hatch for external
+   consumers: when the wire shape changes incompatibly,
+   `/<service>/v2/` ships alongside `/<service>/v1/` so a browser
+   frontend (newtcon) or operator script does not break in lockstep
+   with a server upgrade. Each engine is at its own independent
+   version — newtron `v1` and newtrun `v2` can coexist.
 
    Inside the binary, this is still §40: one current version, no
    compatibility shims, no aliases. The `/<service>/v1/` segment is the
    *only* concession. Internal callers (the Go client packages in
-   this repo) update in the same commit as the server.
+   this repo) update in the same commit as the engine.
 
    Internal HTTP APIs (server-to-server within one process, or RPC
    between binaries that ship as a coordinated set) do not need the
    version segment — §40's "change it everywhere" rule applies.
+
+## 40.1 Prefer composition over service registration at single-process scale
+
+The project runs multiple HTTP-serving engines (newtron, newtrun,
+newtlab). In production they live in one process — `bin/newt-server`
+imports each engine's `pkg/<name>/api/` package and mounts its handler
+on a shared mux. No registry, no reverse proxy between engines, no
+HTTP hop between newt-server and an engine running in the same
+process.
+
+The temptation to build a service mesh (registry + heartbeats +
+reverse proxy + retry) is real. It buys flexibility — language
+independence, cross-host scaling, runtime registration. None of those
+flexibility points apply at the project's current scale:
+
+- Engines are Go packages in this repo. They are not third-party
+  services to be discovered at runtime.
+- Single-machine deployment is the norm. Cross-host is not on the
+  roadmap.
+- Restarts happen in the same commit. Independent upgrade has no
+  caller demand today.
+
+Composition gets compile-time checked dispatch (the mux knows every
+route at build time), zero IPC overhead (one process, one call
+stack), and ~50 lines of binary code instead of ~700 lines of mesh
+infrastructure that mostly catches problems composition doesn't have.
+
+If the project later deploys engines on separate hosts, the right
+move is NATS or gRPC or a real service mesh — *not* the half-built
+HTTP registry that's tempting to write first. Compose now; mesh
+when the deployment shape actually demands it.
 
 ---
 

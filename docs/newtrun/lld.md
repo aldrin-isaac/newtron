@@ -897,7 +897,7 @@ The CLI also has two sentinel errors in `cmd/newtrun/main.go`: `errInfraError` a
 
 ### 13.1 main.go
 
-Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERVER`, default: `http://127.0.0.1:18080` (newtser front)). Subcommands:
+Root cobra command. Persistent flag `--newtrun-server <url>` (env: `NEWTRUN_SERVER`, default: `http://127.0.0.1:18080` (newt-server front)). Subcommands:
 
 | Command | Endpoint | Notes |
 |---------|----------|-------|

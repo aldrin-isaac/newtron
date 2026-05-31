@@ -90,9 +90,9 @@ When `newtrun-server` shuts down, the registry cancels every in-flight runner's 
 
 The CLI resolves the newtrun-server URL through a three-tier cascade: `--newtrun-server` flag → `NEWTRUN_SERVER` environment variable → built-in default (`http://127.0.0.1:18080`). The server resolves the newtron-server URL it talks to per-request: the `newtron_server` field on the `POST /newtrun/v1/runs` body wins, otherwise the server's built-in default (`http://127.0.0.1:18080`) applies. The server binary currently has no CLI flag or env var for overriding that default — operators who need a non-default newtron-server set it per request, or build a wrapper.
 
-The standard local-dev stack puts all four servers behind newtser, the front-door reverse proxy. `newtser` listens on `127.0.0.1:18080`; `newtron-server`, `newtrun-server`, and `newtlab-server` listen on loopback `:19080`, `:19081`, `:19082` respectively and register with newtser via `--newtser http://127.0.0.1:18080`. Consumers (including this CLI) target newtser; newtser dispatches by the first path segment (`/newtrun/v1/...` → newtrun-server). Standalone backend operation without newtser still works — pass `--newtrun-server http://127.0.0.1:19081` to bypass.
+The standard local-dev stack puts all four servers behind newt-server, the front-door reverse proxy. `newt-server` listens on `127.0.0.1:18080`; `newtron-server`, `newtrun-server`, and `newtlab-server` listen on loopback `:19080`, `:19081`, `:19082` respectively and register with newt-server via `--newt-server http://127.0.0.1:18080`. Consumers (including this CLI) target newt-server; newt-server dispatches by the first path segment (`/newtrun/v1/...` → newtrun-server). Standalone backend operation without newt-server still works — pass `--newtrun-server http://127.0.0.1:19081` to bypass.
 
-Non-loopback exposure (any binding other than `127.0.0.1`) on any server emits a startup warning since there is no built-in authentication. Operators who need TLS or auth wrap newtser with a reverse proxy — one bind point, one termination point.
+Non-loopback exposure (any binding other than `127.0.0.1`) on any server emits a startup warning since there is no built-in authentication. Operators who need TLS or auth wrap newt-server with a reverse proxy — one bind point, one termination point.
 
 ## 4. Directory Structure
 

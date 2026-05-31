@@ -2425,11 +2425,11 @@ Two exceptions, narrowly scoped:
 2. **External HTTP API contracts.** When the project's HTTP API has
    external consumers (a browser frontend, operator scripts, third-
    party tools) whose release cadence is independent of the server's,
-   routes carry a `/api/v<n>/` version segment. The version is *the*
-   breaking-change escape hatch: when the wire shape changes
-   incompatibly, `/api/v(n+1)/` ships alongside `/api/v<n>/` so
-   consumers do not break in lockstep with a server upgrade. Each
-   independently-deployed HTTP server runs at its own version.
+   routes carry a `/<service>/v<n>/` version segment. The version is
+   *the* breaking-change escape hatch: when the wire shape changes
+   incompatibly, `/<service>/v(n+1)/` ships alongside `/<service>/v<n>/`
+   so consumers do not break in lockstep with a server upgrade. Each
+   service is at its own independent version.
 
    Inside the binary, this is still greenfield: one current version,
    no compatibility shims, no aliases. The version segment is the
@@ -2437,6 +2437,29 @@ Two exceptions, narrowly scoped:
    the server. Internal RPC between binaries that ship as a
    coordinated set does not need the segment — the "change it
    everywhere" rule applies.
+
+## 38.1 Prefer composition over service registration at single-process scale
+
+When a project's HTTP surface is several services that all ship from
+one repository onto one machine, compose them in one process: each
+service's `pkg/<name>/api/` exports an `http.Handler`; the aggregator
+binary mounts each on a shared mux. Dispatch is compile-time checked
+through Go's type system; the call from the aggregator to a service
+handler is a function call, not an HTTP request.
+
+The temptation to build a service mesh (registry, reverse proxy,
+heartbeat, retry, eviction) is real. It buys flexibility — language
+independence, cross-host scaling, runtime registration — for
+problems the project does not have at this scale. The cost is
+hundreds of lines of infrastructure that mostly catches failure
+modes composition does not produce (registration races, eviction
+TTL tuning, proxy-upstream connection pool tuning, dead-backend
+detection).
+
+If the deployment shape later demands engines on separate hosts, the
+right move is a real service mesh (NATS, gRPC, a sidecar proxy) —
+not a half-built HTTP registry that mimics it on loopback. Compose
+now; mesh when the deployment shape actually demands it.
 
 ---
 
