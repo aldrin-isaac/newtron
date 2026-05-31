@@ -96,24 +96,26 @@ bin/newtron switch1 init
 bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002
 ```
 
-By default, **newtron** shows what it _would_ write to CONFIG_DB — every table, key, and field:
+By default, **newtron** shows what it _would_ write to CONFIG_DB — every table, key, and field. Long values are truncated below with `…`; real output prints them in full:
 
 ```
+Applying service 'transit' to interface Ethernet0...
+
+Derived configuration:
+  Neighbor IP: 10.1.0.1
+
 Operation: interface.apply-service
 Device: switch1
 Changes to CONFIG_DB:
-  [MOD] DEVICE_METADATA|localhost                              → map[bgp_asn:65001 type:LeafRouter]
-  [ADD] BGP_GLOBALS|default                                    → map[local_asn:65001 router_id:10.0.0.1 ...]
-  [ADD] BGP_GLOBALS_AF|default|ipv4_unicast                    → map[]
-  [ADD] ROUTE_REDISTRIBUTE|default|connected|bgp|ipv4          → map[]
-  [ADD] INTERFACE|Ethernet0                                    → map[NULL:NULL]
-  [ADD] INTERFACE|Ethernet0|10.1.0.0/31                        → map[NULL:NULL]
-  [ADD] BGP_PEER_GROUP|default|TRANSIT                         → map[admin_status:true]
-  [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast         → map[]
-  [ADD] BGP_NEIGHBOR|default|10.1.0.1                          → map[asn:65002 local_addr:10.1.0.0 admin_status:up peer_group_name:TRANSIT]
-  [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast          → map[admin_status:true]
-  [ADD] NEWTRON_INTENT|service|TRANSIT                         → map[operation:deploy-service ...]
-  [ADD] NEWTRON_INTENT|interface|Ethernet0                     → map[operation:apply-service service_name:TRANSIT ...]
+  [ADD] NEWTRON_INTENT|interface|Ethernet0 → map[bgp_neighbor:10.1.0.1 bgp_peer_as:65002 ip_address:10.1.0.0/31 operation:apply-service peer_group:TRANSIT service_name:TRANSIT service_type:routed state:actuated …]
+  [ADD] NEWTRON_INTENT|service|TRANSIT → map[operation:deploy-service service_name:TRANSIT state:actuated …]
+  [ADD] BGP_PEER_GROUP|default|TRANSIT → map[admin_status:up]
+  [ADD] BGP_PEER_GROUP_AF|default|TRANSIT|ipv4_unicast → map[admin_status:true]
+  [ADD] NEWTRON_INTENT|device → map[bgp_asn:65001 hostname:switch1 hwsku:Force10-S6000 operation:setup-device type:LeafRouter …]
+  [ADD] INTERFACE|Ethernet0
+  [ADD] INTERFACE|Ethernet0|10.1.0.0/31
+  [ADD] BGP_NEIGHBOR|default|10.1.0.1 → map[admin_status:up asn:65002 local_addr:10.1.0.0 peer_group_name:TRANSIT]
+  [ADD] BGP_NEIGHBOR_AF|default|10.1.0.1|ipv4_unicast → map[admin_status:true]
 
 DRY-RUN: No changes applied. Use -x to execute.
 ```
@@ -123,14 +125,14 @@ its operations against the device's profile — AS 65001, loopback 10.0.0.1,
 the transit service spec, and the /31 address you provided. The same code
 path runs online against a live device or offline for topology provisioning.
 
-Add `-x` to execute. **newtron** writes atomically, re-reads to verify, then persists:
+Add `-x` to execute. **newtron** writes atomically, re-reads to verify each
+key landed:
 
 ```
 $ bin/newtron switch1 service apply Ethernet0 transit --ip 10.1.0.0/31 --peer-as 65002 -x
-
+...
 Changes applied successfully.
-Verifying... OK (all entries verified)
-Config saved.
+Verifying... OK (9/9 entries verified)
 ```
 
 Tear down when done:
