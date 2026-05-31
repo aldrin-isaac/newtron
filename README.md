@@ -182,9 +182,9 @@ bin/newtron switch1 --topology intent drift  # Compare topology intent vs device
 The same operations are available as HTTP endpoints:
 
 ```bash
-curl localhost:8080/network/default/service                  # List services
-curl localhost:8080/network/default/node/switch1/interface     # List interfaces
-curl localhost:8080/network/default/topology/node              # List devices
+curl localhost:18080/network/default/service                  # List services
+curl localhost:18080/network/default/node/switch1/interface     # List interfaces
+curl localhost:18080/network/default/topology/node              # List devices
 ```
 
 ## How It Works
@@ -305,7 +305,7 @@ generators) that exercise the primitives in concert.
 A full 2node-vs-service run looks like this. Prereqs: both servers running (`bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &` and `bin/newtrun-server &`); the lab will be deployed automatically by the runner unless `--no-deploy` is set.
 
 ```
-$ bin/newtrun start 2node-vs-service --server http://localhost:8080
+$ bin/newtrun start 2node-vs-service --server http://localhost:18080
 newtrun: started suite 2node-vs-service at 2026-05-29T19:59:14-07:00
 newtrun: 6 scenarios
 

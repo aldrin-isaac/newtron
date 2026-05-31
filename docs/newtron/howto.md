@@ -8,7 +8,7 @@ All interaction goes through an HTTP API server (`newtron-server`). The CLI and 
 ┌─────────────┐     ┌────────────────┐     ┌────────────┐     ┌──────────────────┐
 │             │     │                │     │            │     │                  │
 │ newtron CLI │     │ newtron-server │     │ SSH tunnel │     │   SONiC Redis    │
-│             │     │  (HTTP :8080)  │     │            │     │ DB 4 (CONFIG_DB) │
+│             │     │ (HTTP :18080)  │     │            │     │ DB 4 (CONFIG_DB) │
 │             │ ──▶ │                │ ──▶ │            │ ──▶ │                  │
 └─────────────┘     └────────────────┘     └────────────┘     └──────────────────┘
                       ▲
@@ -100,7 +100,7 @@ newtron-server -spec-dir /etc/newtron -idle-timeout -1s
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-addr` | `:8080` | Listen address |
+| `-addr` | `:18080` | Listen address |
 | `-spec-dir` | (none) | Spec directory to auto-register as a network |
 | `-net-id` | `default` | Network ID for the auto-registered spec directory |
 | `-idle-timeout` | `0` (5 min) | SSH idle timeout. `0` = default 5m. Negative = no caching. |
@@ -147,7 +147,7 @@ The CLI resolves the server URL from (highest priority first):
 1. `--server` flag
 2. `NEWTRON_SERVER` environment variable
 3. `settings server` value
-4. Default: `http://localhost:8080`
+4. Default: `http://localhost:18080`
 
 The network ID follows the same pattern:
 
@@ -158,14 +158,14 @@ The network ID follows the same pattern:
 
 ```bash
 # Explicit server on each command
-newtron --server http://10.0.0.1:8080 leaf1 show
+newtron --server http://10.0.0.1:18080 leaf1 show
 
 # Set once in settings
-newtron settings set server http://10.0.0.1:8080
+newtron settings set server http://10.0.0.1:18080
 newtron settings set network_id production
 
 # Or via environment
-export NEWTRON_SERVER=http://10.0.0.1:8080
+export NEWTRON_SERVER=http://10.0.0.1:18080
 export NEWTRON_NETWORK_ID=production
 ```
 
@@ -178,13 +178,13 @@ If you modify spec files on disk (manually or via another tool) while the server
 To pick up changes without restarting the server:
 
 ```bash
-curl -X POST http://localhost:8080/network/default/reload
+curl -X POST http://localhost:18080/network/default/reload
 ```
 
 Or via the Go client:
 
 ```go
-c := client.New("http://localhost:8080", "default")
+c := client.New("http://localhost:18080", "default")
 c.ReloadNetwork()
 ```
 
@@ -556,7 +556,7 @@ Device-scoped commands require a device name. Spec-level commands do not.
 |------|-------|-------------|
 | `--device` | `-D` | Device name |
 | `--specs` | `-S` | Spec directory (default: from settings or `/etc/newtron`) |
-| `--server` | | Server URL (default: settings or `http://localhost:8080`) |
+| `--server` | | Server URL (default: settings or `http://localhost:18080`) |
 | `--network-id` | `-N` | Network identifier (default: settings or `default`) |
 | `--verbose` | `-v` | Verbose output |
 | `--topology` | | Topology mode — source intents from topology.json |
@@ -617,7 +617,7 @@ Store defaults to avoid repeating flags:
 
 ```bash
 newtron settings set specs /etc/newtron
-newtron settings set server http://10.0.0.1:8080
+newtron settings set server http://10.0.0.1:18080
 newtron settings set network_id production
 
 newtron settings show           # view all
@@ -2292,7 +2292,7 @@ This is the same reconcile mechanism described in [§16.1.3](#1613-reconcile), b
 
 **"server not reachable"** — the CLI can't reach `newtron-server`.
 
-1. Verify the server is running: `curl http://localhost:8080/health`
+1. Verify the server is running: `curl http://localhost:18080/health`
 2. Check the `--server` flag or `NEWTRON_SERVER` environment variable
 3. If remote: check firewall allows the server port
 
@@ -2423,7 +2423,7 @@ import (
 )
 
 func main() {
-    c := client.New("http://localhost:8080", "default")
+    c := client.New("http://localhost:18080", "default")
     if err := c.RegisterNetwork("/etc/newtron"); err != nil {
         log.Fatal(err)
     }

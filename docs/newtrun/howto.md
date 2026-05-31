@@ -62,14 +62,14 @@ The [getting-started.sh](../../scripts/getting-started.sh) script automates all 
 The fastest path exercises the CLI's `--loopback` mode against an in-memory abstract node — no QEMU VMs required. Start both servers and run the loopback suite:
 
 ```bash
-# 1. Start newtron-server (port 8080)
+# 1. Start newtron-server (port 18080)
 bin/newtron-server --spec-dir newtrun/topologies/1node-vs/specs &
 
-# 2. Start newtrun-server (port 8081)
+# 2. Start newtrun-server (port 18081)
 bin/newtrun-server &
 
 # 3. Run the loopback suite (--no-deploy skips lab deployment)
-bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:8080
+bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:18080
 ```
 
 For suites that need real VMs (e.g., `2node-vs-primitive`, `2node-vs-service`), deploy the lab first with `bin/newtlab deploy <topology> --monitor` and drop `--no-deploy`.
@@ -98,8 +98,8 @@ Exit code 0. Markdown report at `newtrun/.generated/report.md`.
 
 | Server | Port | Owns | Why separate |
 |--------|------|------|--------------|
-| newtron-server | 8080 | SSH connections to SONiC, spec validation, CONFIG_DB writes | Single-device automation. Long-lived; expensive to restart. |
-| newtrun-server | 8081 | Run registry, scenario execution, SSE event stream | Test orchestration. Independent failure domain. |
+| newtron-server | 18080 | SSH connections to SONiC, spec validation, CONFIG_DB writes | Single-device automation. Long-lived; expensive to restart. |
+| newtrun-server | 18081 | Run registry, scenario execution, SSE event stream | Test orchestration. Independent failure domain. |
 
 The CLI talks to **newtrun-server** (`--newtrun-server`, env `NEWTRUN_SERVER`). The scenarios it runs talk to **newtron-server** (`--server`, env `NEWTRON_SERVER`) for the actual device work.
 
@@ -122,7 +122,7 @@ bin/newtron-server --spec-dir newtrun/topologies/2node-vs/specs &
 bin/newtrun-server &
 
 # 4. Run the suite (deploys hosts via SSH; ~7 minutes)
-bin/newtrun start 2node-vs-primitive --server http://localhost:8080
+bin/newtrun start 2node-vs-primitive --server http://localhost:18080
 ```
 
 While the suite runs, monitor in another terminal:
@@ -150,7 +150,7 @@ pkill -f "bin/newtrun-server"                  # stop newtrun-server
 ### 4.1 Basic invocation
 
 ```bash
-bin/newtrun start <suite-name> --server http://localhost:8080
+bin/newtrun start <suite-name> --server http://localhost:18080
 ```
 
 The CLI POSTs to `newtrun-server`, which spawns a Runner goroutine and starts streaming SSE events back to the CLI. The CLI renders each event as it arrives and exits when the run terminates.
@@ -182,10 +182,10 @@ By default, `newtrun start` runs every scenario in the suite. Three flags narrow
 
 ```bash
 # One scenario
-bin/newtrun start 2node-vs-primitive --scenario boot-ssh --server http://localhost:8080
+bin/newtrun start 2node-vs-primitive --scenario boot-ssh --server http://localhost:18080
 
 # Dependency chain up to a target
-bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:8080
+bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:18080
 ```
 
 ### 4.4 Other flags
@@ -203,8 +203,8 @@ bin/newtrun start 2node-vs-primitive --target bridged --server http://localhost:
 
 | Precondition | How to check | How to fix |
 |--------------|-------------|------------|
-| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:8081/api/health` | Start with `bin/newtrun-server &` |
-| newtron-server up on `--server` URL | `curl http://localhost:8080/network` (lists registered networks; any 2xx confirms the server is up — newtron-server has no dedicated health endpoint) | Start with `bin/newtron-server --spec-dir <path> &` |
+| newtrun-server up on `--newtrun-server` URL | `curl http://localhost:18081/api/health` | Start with `bin/newtrun-server &` |
+| newtron-server up on `--server` URL | `curl http://localhost:18080/network` (lists registered networks; any 2xx confirms the server is up — newtron-server has no dedicated health endpoint) | Start with `bin/newtron-server --spec-dir <path> &` |
 | Topology deployed (unless `--no-deploy`) | `bin/newtlab list` | `bin/newtlab deploy <topology> --monitor` |
 | Suite name matches a directory under `--suites-base` | `bin/newtrun list` | Use the exact name or `--dir <path>` |
 | No active run for the same suite | `bin/newtrun status --suite <name>` | Wait, pause, or `bin/newtrun stop <name>` |
@@ -218,7 +218,7 @@ You changed `evpn-bridged.yaml` and want to verify just that scenario:
 ```bash
 bin/newtrun start 2node-vs-primitive \
     --scenario evpn-bridged \
-    --server http://localhost:8080
+    --server http://localhost:18080
 ```
 
 If `evpn-bridged` has `requires: [evpn-verify]`, the dependency-graph validator allows running it solo (it doesn't auto-run dependencies). To get the dependency chain, use `--target` instead:
@@ -226,7 +226,7 @@ If `evpn-bridged` has `requires: [evpn-verify]`, the dependency-graph validator 
 ```bash
 bin/newtrun start 2node-vs-primitive \
     --target evpn-bridged \
-    --server http://localhost:8080
+    --server http://localhost:18080
 ```
 
 Now boot-ssh → setup-device → ... → evpn-verify → evpn-bridged run in order.
@@ -312,7 +312,7 @@ newtrun: 2node-vs-primitive
 The CLI uses Server-Sent Events under the hood; you can subscribe yourself with curl for debugging:
 
 ```bash
-curl -N http://localhost:8081/api/runs/2node-vs-primitive/events
+curl -N http://localhost:18081/api/runs/2node-vs-primitive/events
 ```
 
 Each frame has an `event: <type>` and `data: <json>` line. See the [API reference §5](api.md#5-run-events-sse) and [§10 SSE Event Reference](api.md#10-sse-event-reference) for the payload schemas.
@@ -336,7 +336,7 @@ The pause signal propagates via `state.json` — the server writes `status: paus
 A subsequent `newtrun start` for the same suite resumes from where pause left off:
 
 ```bash
-bin/newtrun start 2node-vs-primitive --server http://localhost:8080
+bin/newtrun start 2node-vs-primitive --server http://localhost:18080
 ```
 
 Scenarios that already passed are reported as SKIP with reason `already passed (resumed)`:
@@ -505,7 +505,7 @@ bin/newtrun suite delete my-experiment
 ```bash
 vim my-experiment/hello.yaml
 bin/newtrun scenario put my-experiment hello --file my-experiment/hello.yaml
-bin/newtrun start my-experiment --scenario hello --server http://localhost:8080
+bin/newtrun start my-experiment --scenario hello --server http://localhost:18080
 ```
 
 **Browser frontend (newtcon) author flow.** Same endpoints, different client. The frontend's YAML editor calls PUT after every save; validation feedback comes from the server's 400 response body when `ParseScenarioBytes` rejects the input.
@@ -864,7 +864,7 @@ Use this for testing CLI commands directly, particularly in `--loopback` mode wh
 Use `--no-deploy` with `newtrun start` when running loopback suites — no topology deployment needed:
 
 ```bash
-bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:8080
+bin/newtrun start 1node-vs-config --no-deploy --server http://localhost:18080
 ```
 
 ### 11.7 Common operations
@@ -1128,7 +1128,7 @@ Pass `--junit <path>` to write a JUnit XML report after the run finishes:
 ```bash
 bin/newtrun start 2node-vs-primitive \
     --junit results.xml \
-    --server http://localhost:8080
+    --server http://localhost:18080
 ```
 
 The XML has one `<testsuite>` per scenario, with `<testcase>` children for each step. Failed steps include `<failure>` elements with the assertion message.
@@ -1163,7 +1163,7 @@ The 2node-vs-primitive suite uses host-exec steps, so the runner host needs KVM/
   run: |
     bin/newtrun start 2node-vs-primitive \
         --junit results.xml \
-        --server http://localhost:8080
+        --server http://localhost:18080
   timeout-minutes: 30
 
 - name: Upload JUnit
@@ -1196,12 +1196,12 @@ The CLI's `requireServer` probe (`GET /api/health`) returned a connection error.
 pgrep -f "bin/newtrun-server"
 
 # Is the URL correct?
-curl http://localhost:8081/api/health
+curl http://localhost:18081/api/health
 
 # Override the URL
-bin/newtrun start <suite> --newtrun-server http://other-host:8081
+bin/newtrun start <suite> --newtrun-server http://other-host:18081
 # or
-NEWTRUN_SERVER=http://other-host:8081 bin/newtrun start <suite>
+NEWTRUN_SERVER=http://other-host:18081 bin/newtrun start <suite>
 ```
 
 Start the server if it isn't running:
@@ -1226,10 +1226,10 @@ newtron-server's running-state for a switch has uncommitted intent changes from 
 
 ```bash
 # Discard (old session left orphaned state)
-bin/newtron switch1 intent reload --server http://localhost:8080   # implicitly --topology
+bin/newtron switch1 intent reload --server http://localhost:18080   # implicitly --topology
 
 # Commit (only if you want to keep the changes)
-bin/newtron switch1 intent save --topology --server http://localhost:8080
+bin/newtron switch1 intent save --topology --server http://localhost:18080
 ```
 
 Triggers: a previous `newtrun start` that was killed before its terminal save, an interactive `bin/newtron` session that exited without saving, or a crash during apply.
@@ -1267,9 +1267,9 @@ If the timeout is hit repeatedly, the underlying BGP peering is misconfigured �
 The Runner skipped device connection setup because `--no-deploy` was set. host-exec steps need the SSH connections; remove `--no-deploy`:
 
 ```bash
-bin/newtrun start <suite> --server http://localhost:8080
+bin/newtrun start <suite> --server http://localhost:18080
 # instead of
-bin/newtrun start <suite> --no-deploy --server http://localhost:8080
+bin/newtrun start <suite> --no-deploy --server http://localhost:18080
 ```
 
 `--no-deploy` is for loopback suites and offline testing. Suites that touch hosts need the runner to connect.
@@ -1287,7 +1287,7 @@ If status shows `running` but no Runner goroutine is live in the server, `reconc
 ```bash
 bin/newtrun stop <name>
 # or
-curl -X DELETE http://localhost:8081/api/runs/<name>
+curl -X DELETE http://localhost:18081/api/runs/<name>
 ```
 
 ### 14.9 Scenario fails at deploy (newtlab couldn't bring up VMs)
@@ -1314,7 +1314,7 @@ A `topology-reconcile` or `setup-device` step on one device returned an error bu
 
 ```bash
 # Is the device reachable through newtron-server?
-curl http://localhost:8080/network/<id>/node/switch1/health
+curl http://localhost:18080/network/<id>/node/switch1/health
 
 # SSH in for a closer look
 bin/newtlab ssh switch1
@@ -1412,7 +1412,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 | `--no-deploy` | Skip topology deployment + host SSH (loopback or pre-deployed lab). |
 | `--monitor`, `-m` | Auto-refreshing dashboard instead of per-event log. |
 | `--junit <path>` | JUnit XML report path. |
-| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`; default: `http://localhost:8080`). |
+| `--server <url>` | newtron-server URL (env: `NEWTRON_SERVER`; default: `http://localhost:18080`). |
 | `--network-id <id>` | newtron network identifier (env: `NEWTRON_NETWORK_ID`). |
 
 `-v` / `--verbose` is a global flag (see §15.6) — it affects `start` (per-step output during a run) and `status` (more detail in the dashboard).
@@ -1421,7 +1421,7 @@ State-changing and read-only commands; all require newtrun-server. See [api.md](
 
 | Flag | Meaning |
 |------|---------|
-| `--newtrun-server <url>` | newtrun-server URL (env: `NEWTRUN_SERVER`; default: `http://127.0.0.1:8081`). |
+| `--newtrun-server <url>` | newtrun-server URL (env: `NEWTRUN_SERVER`; default: `http://127.0.0.1:18081`). |
 | `-v` / `--verbose` | Verbose output (where applicable). |
 
 ---

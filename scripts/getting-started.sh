@@ -308,11 +308,11 @@ if [ -n "$existing_pid" ]; then
     sleep 1
 fi
 
-# Check that port 8080 is free
-if ss -tlnH 'sport = :8080' 2>/dev/null | grep -q 8080; then
+# Check that port 18080 is free
+if ss -tlnH 'sport = :18080' 2>/dev/null | grep -q 8080; then
     echo ""
-    echo "  Error: port 8080 is already in use." >&2
-    echo "  newtron-server needs port 8080. Stop whatever is using it and re-run." >&2
+    echo "  Error: port 18080 is already in use." >&2
+    echo "  newtron-server needs port 18080. Stop whatever is using it and re-run." >&2
     exit 1
 fi
 
@@ -553,13 +553,13 @@ echo -e "  The ${BOLD}--monitor${RESET} flag shows a live dashboard as steps exe
 
 pause
 
-# Start newtrun-server on its loopback default (127.0.0.1:8081). Port and
+# Start newtrun-server on its loopback default (127.0.0.1:18081). Port and
 # spec/topology bases come from the binary's built-in defaults so the
 # command line stays short.
-if ss -tlnH 'sport = :8081' 2>/dev/null | grep -q 8081; then
+if ss -tlnH 'sport = :18081' 2>/dev/null | grep -q 8081; then
     echo ""
-    echo "  Error: port 8081 is already in use." >&2
-    echo "  newtrun-server needs port 8081. Stop whatever is using it and re-run." >&2
+    echo "  Error: port 18081 is already in use." >&2
+    echo "  newtrun-server needs port 18081. Stop whatever is using it and re-run." >&2
     exit 1
 fi
 echo -e "  ${GRAY}\$${RESET} ${CYAN}bin/newtrun-server &${RESET}"
@@ -575,7 +575,7 @@ fi
 echo -e "  ${GREEN}newtrun-server started${RESET} (PID $NEWTRUN_PID)"
 echo ""
 
-run_cmd bin/newtrun start 1node-vs-basic --server http://localhost:8080 --monitor
+run_cmd bin/newtrun start 1node-vs-basic --server http://localhost:18080 --monitor
 
 echo ""
 run_cmd bin/newtrun status --suite 1node-vs-basic
@@ -648,12 +648,12 @@ echo -e "  ${BOLD}Next steps${RESET}"
 echo ""
 echo -e "  ${WHITE}Multi-switch fabric:${RESET}"
 echo -e "    ${CYAN}bin/newtlab deploy 2node-ngdp${RESET}"
-echo -e "    ${CYAN}bin/newtrun start 2node-ngdp-primitive --server http://localhost:8080${RESET}"
+echo -e "    ${CYAN}bin/newtrun start 2node-ngdp-primitive --server http://localhost:18080${RESET}"
 echo -e "    ${GRAY}(21 scenarios: BGP, EVPN, VLANs, VRFs, ACLs, QoS, PortChannels)${RESET}"
 echo ""
 echo -e "  ${WHITE}EVPN dataplane (requires Cisco Silicon One image):${RESET}"
 echo -e "    ${CYAN}bin/newtlab deploy 3node-ngdp${RESET}"
-echo -e "    ${CYAN}bin/newtrun start 3node-ngdp-dataplane --server http://localhost:8080${RESET}"
+echo -e "    ${CYAN}bin/newtrun start 3node-ngdp-dataplane --server http://localhost:18080${RESET}"
 echo -e "    ${GRAY}(L3 routing + EVPN L2 bridged + IRB with host-to-host ping)${RESET}"
 echo ""
 echo -e "  ${WHITE}Documentation:${RESET}"

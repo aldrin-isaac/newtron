@@ -267,7 +267,7 @@ is reused. See [S15 Server Configuration](#15-server-configuration) for tuning.
 A complete curl example showing the request/response cycle:
 
 ```bash
-curl -s -X POST http://localhost:8080/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{"id": 100, "description": "Customer VLAN"}' | jq .
 ```
@@ -287,7 +287,7 @@ curl -s -X POST http://localhost:8080/network/default/node/switch1/create-vlan \
 On error:
 
 ```bash
-curl -s -X POST http://localhost:8080/network/default/node/switch1/create-vlan \
+curl -s -X POST http://localhost:18080/network/default/node/switch1/create-vlan \
   -H "Content-Type: application/json" \
   -d '{}' | jq .
 ```
@@ -313,7 +313,7 @@ the detailed endpoint documentation in later sections.
 newtron-server -spec-dir /etc/newtron -net-id default
 
 # Or register dynamically via the API
-curl -X POST http://localhost:8080/network \
+curl -X POST http://localhost:18080/network \
   -H "Content-Type: application/json" \
   -d '{"id": "default", "spec_dir": "/etc/newtron"}'
 ```
@@ -324,8 +324,8 @@ See [S3 Server Management](#3-server-management).
 
 ```bash
 # Per-device: clean factory CONFIG_DB, then load topology spec and deliver
-curl -X POST http://localhost:8080/network/default/node/switch1/init-device
-curl -X POST 'http://localhost:8080/network/default/node/switch1/intent/reconcile?mode=topology'
+curl -X POST http://localhost:18080/network/default/node/switch1/init-device
+curl -X POST 'http://localhost:18080/network/default/node/switch1/intent/reconcile?mode=topology'
 ```
 
 This is the canonical "spec → device" path: init-device clears factory entries,
@@ -337,10 +337,10 @@ See [S6 Provisioning](#6-provisioning) and [S11](#11-intent-operations).
 
 ```bash
 # Check that BGP sessions came up
-curl http://localhost:8080/network/default/node/switch1/bgp/check
+curl http://localhost:18080/network/default/node/switch1/bgp/check
 
 # Run full health check
-curl http://localhost:8080/network/default/node/switch1/health
+curl http://localhost:18080/network/default/node/switch1/health
 ```
 
 See [S7 Node Read Operations](#7-node-read-operations).
@@ -349,7 +349,7 @@ See [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Apply a service to an interface
-curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethernet0/apply-service \
+curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/apply-service \
   -H "Content-Type: application/json" \
   -d '{"service": "customer-l3", "ip_address": "10.1.1.1/30"}'
 ```
@@ -363,10 +363,10 @@ See [S12 Interface Operations](#12-interface-operations).
 ```bash
 # Post-facto: confirm projection (intent replay) matches device CONFIG_DB.
 # Empty drift array ≡ every newtron write is actualized on the device.
-curl http://localhost:8080/network/default/node/switch1/intent/drift
+curl http://localhost:18080/network/default/node/switch1/intent/drift
 
 # Check a specific route in the forwarding table
-curl http://localhost:8080/network/default/node/switch1/route/default/10.1.1.0/30
+curl http://localhost:18080/network/default/node/switch1/route/default/10.1.1.0/30
 ```
 
 Per-write verification (did THIS specific write land?) is reported inline on
@@ -378,15 +378,15 @@ and [S7 Node Read Operations](#7-node-read-operations).
 
 ```bash
 # Preview a change without applying (dry-run)
-curl -X POST 'http://localhost:8080/network/default/node/switch1/create-vlan?dry_run=true' \
+curl -X POST 'http://localhost:18080/network/default/node/switch1/create-vlan?dry_run=true' \
   -H "Content-Type: application/json" \
   -d '{"id": 200, "description": "New VLAN"}'
 
 # Refresh a service after spec changes
-curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethernet0/refresh-service
+curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/refresh-service
 
 # Remove a service
-curl -X POST http://localhost:8080/network/default/node/switch1/interface/Ethernet0/remove-service
+curl -X POST http://localhost:18080/network/default/node/switch1/interface/Ethernet0/remove-service
 ```
 
 ### Batching multiple operations
@@ -3276,7 +3276,7 @@ The `newtron-server` binary accepts these flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-addr` | `:8080` | Listen address (host:port) |
+| `-addr` | `:18080` | Listen address (host:port) |
 | `-spec-dir` | `""` | Spec directory to auto-register as a network at startup |
 | `-net-id` | `"default"` | Network ID for the auto-registered spec directory |
 | `-idle-timeout` | `0` (5m default) | SSH connection idle timeout. `0` = default (5 minutes). Negative = disable caching (connect per request). |

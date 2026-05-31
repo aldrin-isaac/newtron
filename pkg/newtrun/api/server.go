@@ -25,7 +25,7 @@ type Config struct {
 
 	// NewtronServer is the newtron-server URL the server-side runners
 	// connect to for topology discovery. Per-run NewtronServer in the
-	// StartRunRequest overrides this. Defaults to http://127.0.0.1:8080.
+	// StartRunRequest overrides this. Defaults to http://127.0.0.1:18080.
 	NewtronServer string
 
 	// NetworkID is the network identifier server-side runners pass to
@@ -65,7 +65,7 @@ func NewServer(cfg Config) *Server {
 		cfg.TopologiesBase = "newtrun/topologies"
 	}
 	if cfg.NewtronServer == "" {
-		cfg.NewtronServer = "http://127.0.0.1:8080"
+		cfg.NewtronServer = "http://127.0.0.1:18080"
 	}
 	if cfg.NetworkID == "" {
 		cfg.NetworkID = "default"
